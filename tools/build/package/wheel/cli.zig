@@ -47,22 +47,55 @@ pub const Args = struct {
 };
 
 pub const common_flags = [_][]const u8{
-    "--name",          "--summary",           "--readme",       "--requires-python", "--requires-dist",
-    "--classifier",    "--project-url",       "--license-expression", "--license-file", "--file",
-    "--exec-file",     "--tag",               "--max-glibcxx",  "--max-cxxabi",       "--external-needed",
-    "--stamp",         "--commit",            "--timestamp-ms",
+    "--name",
+    "--summary",
+    "--readme",
+    "--requires-python",
+    "--requires-dist",
+    "--classifier",
+    "--project-url",
+    "--license-expression",
+    "--license-file",
+    "--file",
+    "--exec-file",
+    "--tag",
+    "--max-glibcxx",
+    "--max-cxxabi",
+    "--external-needed",
+    "--stamp",
+    "--commit",
+    "--timestamp-ms",
 };
 
 /// `argv` (after the command) as pairs, every flag in `common_flags` or
 /// `extra`.
+/// The commands of `komira_wheel`, by their first argument.
+pub const Command = enum { write, check, libs };
+
+/// The command `name` names; any other name, an empty one among them, is
+/// refused with the usage line.
+pub fn subcommand(alloc: Alloc, d: *Diag, name: []const u8) Refused!Command {
+    return std.meta.stringToEnum(Command, name) orelse refuse(d, alloc, "usage: komira_wheel write|check|libs --flag value ...", .{});
+}
+
 pub fn parse(alloc: Alloc, d: *Diag, argv: []const []const u8, extra: []const []const u8) Refused!Args {
+    return pairsOf(alloc, d, argv, &common_flags, extra);
+}
+
+/// `argv` as pairs, every flag in `flags`: a command that takes none of the
+/// wheel's flags (`libs`).
+pub fn parseOnly(alloc: Alloc, d: *Diag, argv: []const []const u8, flags: []const []const u8) Refused!Args {
+    return pairsOf(alloc, d, argv, &.{}, flags);
+}
+
+fn pairsOf(alloc: Alloc, d: *Diag, argv: []const []const u8, base: []const []const u8, extra: []const []const u8) Refused!Args {
     if (argv.len % 2 != 0) return refuse(d, alloc, "{s} needs a value", .{argv[argv.len - 1]});
     var pairs = std.ArrayList([2][]const u8).empty;
     var i: usize = 0;
     while (i < argv.len) : (i += 2) {
         const k = argv[i];
         var known = false;
-        for (common_flags) |f| known = known or std.mem.eql(u8, f, k);
+        for (base) |f| known = known or std.mem.eql(u8, f, k);
         for (extra) |f| known = known or std.mem.eql(u8, f, k);
         if (!known) return refuse(d, alloc, "unknown argument {s}", .{k});
         try pairs.append(alloc, .{ k, argv[i + 1] });

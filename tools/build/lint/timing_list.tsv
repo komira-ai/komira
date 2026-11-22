@@ -8,6 +8,8 @@
 # until it is killed, or a value used as a nonce.
 # Scope: Zig files only. Mojo fixtures under tools/ that hold or sleep (tools/build/tests/functional/mem_cap,
 # mojo_aws_client) are outside this lint; they are positive-direction holds or fixtures that block until killed.
+use	python/smoke/src/index.zig	Thread.sleep	1	production: the pause between verify attempts while the index catches up with an upload (tests pass a delay of 0)
+use	python/smoke/src/install.zig	Thread.sleep	1	production: the pause between attempts of the komira install while the index catches up with an upload (tests pass a delay of 0)
 use	release/ci/main_red/gh.zig	Thread.sleep	1	production: the backoff between a gh command's attempts
 use	tools/build/bisect/main.zig	milliTimestamp	1	production: the bisect tool's default rerun nonce
 use	tools/build/bisect/probe.zig	milliTimestamp	6	production: the bisect tool's probe has a time limit of its own, and measures its seconds

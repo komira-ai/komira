@@ -20,7 +20,7 @@
 #     the producer collected, a third segment sees the second's, and a published
 #     output nobody reads is returned.
 #   * Sources, operators and sinks the builder does not serve are refused by
-#     name, a resident batch the builder does not hold is refused, and a
+#     name, a concatenation of no segment is refused, a resident batch the builder does not hold is refused, and a
 #     predicate the evaluator cannot scope fails the query with the refusal.
 
 from std.testing import (
@@ -362,11 +362,18 @@ def test_what_the_builder_does_not_serve_is_refused_by_name() raises:
     var handle = builder.add_resident(sample_batch(0, 12))
     var dispatch = InlineDispatch()
 
+    var unknown = SegmentDescPod(
+        0, UInt8(7), SourceSpecPod(), Slab[MorselOp](), SINK_COLLECT, KEY_DTYPE_NONE,
+        SINK_ORIENT_COLUMNAR, -1, 0, List[Int](), List[UInt8](),
+    )
+    with assert_raises(contains="source kind 7 of segment 0 is not served"):
+        _ = run_plan(_one(unknown^), builder, dispatch, 1, CancellationToken.new())
+
     var concat = SegmentDescPod(
         0, SOURCE_CONCAT, SourceSpecPod(), Slab[MorselOp](), SINK_COLLECT, KEY_DTYPE_NONE,
         SINK_ORIENT_COLUMNAR, -1, 0, List[Int](), List[UInt8](),
     )
-    with assert_raises(contains="source kind 3 of segment 0 is not served"):
+    with assert_raises(contains="segment 0 concatenates the outputs of no segment"):
         _ = run_plan(_one(concat^), builder, dispatch, 1, CancellationToken.new())
 
     # Every operator tag of the IR is served; a tag outside it is not.

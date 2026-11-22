@@ -37,6 +37,8 @@ from morsel.morsel import Morsel
 from morsel.morsel_sink import MorselSinkImpl
 from morsel.pipeline_execution import PipelineExecution
 
+from .position_order import position_order
+
 
 struct _Chunk(Movable):
     """One dense batch and the position the source gave it."""
@@ -61,56 +63,6 @@ struct _WorkerSlot(Movable):
 
     def __init__(out self):
         self.chunks = List[_Chunk]()
-
-
-def _before(
-    a_part: Int, a_hint: Int, b_part: Int, b_hint: Int
-) -> Bool:
-    """True when position a sorts strictly before position b."""
-    if a_part != b_part:
-        return a_part < b_part
-    return a_hint < b_hint
-
-
-def _stable_order(parts: List[Int], hints: List[Int]) -> List[Int]:
-    """The indices 0..n-1 sorted by (part, hint), equal positions in index
-    order (a bottom-up merge sort)."""
-    var n = len(parts)
-    var order = List[Int](capacity=n)
-    for i in range(n):
-        order.append(i)
-    var scratch = List[Int](length=n, fill=0)
-    var width = 1
-    while width < n:
-        var lo = 0
-        while lo < n:
-            var mid = min(lo + width, n)
-            var hi = min(lo + 2 * width, n)
-            var l = lo
-            var r = mid
-            var k = lo
-            while l < mid and r < hi:
-                var a = order[l]
-                var b = order[r]
-                if _before(parts[b], hints[b], parts[a], hints[a]):
-                    scratch[k] = b
-                    r += 1
-                else:
-                    scratch[k] = a
-                    l += 1
-                k += 1
-            while l < mid:
-                scratch[k] = order[l]
-                l += 1
-                k += 1
-            while r < hi:
-                scratch[k] = order[r]
-                r += 1
-                k += 1
-            lo += 2 * width
-        swap(order, scratch)
-        width *= 2
-    return order^
 
 
 struct CollectSink(MorselSinkImpl):
@@ -163,7 +115,7 @@ struct CollectSink(MorselSinkImpl):
                 hints.append(slot.chunks[i].origin_hint)
                 at_worker.append(w)
                 at_index.append(i)
-        var order = _stable_order(parts, hints)
+        var order = position_order(parts, hints)
         for k in range(len(order)):
             ref slot = self._slots[at_worker[order[k]]][]
             var chunk = _Chunk(RecordBatch(), 0, 0)

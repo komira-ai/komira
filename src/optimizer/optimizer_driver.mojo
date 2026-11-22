@@ -43,6 +43,8 @@
 #   later pass that can create a node kind (a Filter) that later gates read.
 #   Steps 18 and 19 scan the current plan instead.
 #
+#   0  every branch of a UNION ALL gets this whole order (see below), then
+#      the steps below run on the plan with each union as it now stands
 #   1  partition_prune_scans, attach_hive_predicate        (scans, first)
 #   2  scalar_subquery_decorrelate                          (before 3)
 #   3  resolve_scalar_subqueries_rewrite(deps)              (before 4)
@@ -72,6 +74,15 @@
 #   19 fuse_partition_topn          [PartitionBy in the current plan]
 #
 # Each call below says what its position does.
+#
+# UNION ALL BRANCHES (step 0). No pass below reaches into a Union: each one
+# treats it as a leaf. So before step 1 the driver walks down through the
+# single-child nodes (Filter, Project, Aggregate, Sort, Limit, Distinct, TopN,
+# PartitionBy, PartitionTopN) and both sides of a Join, and at every Union
+# replaces each branch with the result of this same pass order on that branch.
+# A Union nested in a branch is reached by the recursion. A branch keeps its
+# output schema, so the Union's schema and branch count do not change, and a
+# plan with no Union is not rewritten by this step (it pays one walk).
 #
 # WHAT THE TESTS PIN. `tests/test_optimizer_driver_passes.mojo` (steps 1-10)
 # and `tests/test_optimizer_driver_passes_late.mojo` (steps 10-19) show each
@@ -124,14 +135,23 @@
 # bits).
 # =============================================================================
 
+from std.builtin.swap import swap
+
+from arrow.schema import Schema
 from plan_ir.logical_plan import (
     LogicalPlan,
+    PLAN_SCAN,
     PLAN_FILTER,
     PLAN_PROJECT,
     PLAN_AGGREGATE,
     PLAN_JOIN,
+    PLAN_SORT,
     PLAN_LIMIT,
+    PLAN_DISTINCT,
+    PLAN_TOPN,
     PLAN_PARTITION_BY,
+    PLAN_PARTITION_TOPN,
+    PLAN_UNION,
 )
 from plan_ir.plan_helpers import (
     _plan_has_tag,
@@ -220,6 +240,19 @@ def _run_pass_order(
     """The pass order, shared by `optimize` and `optimize_portable`: one list,
     so the two entries cannot run different passes or a different order.
     """
+    # 0. Union branches get the whole order first, so the passes below see
+    # each branch as the plan of a lone query.
+    _optimize_union_branches(plan, config, deps)
+    return _run_passes(plan^, config, deps)
+
+
+def _run_passes(
+    var plan: LogicalPlan,
+    config: OptimizerConfig,
+    mut deps: ScalarDepTable,
+) raises -> LogicalPlan:
+    """Steps 1 to 19 of the pass order, on a plan whose union branches step 0
+    already optimized."""
     # 1. Scans. Partition pruning first: it reads a Filter directly over a
     # partitioned scan (the shape before pushdown rewrites it), and a smaller
     # path list means less work for everything after. `attach_hive_predicate`
@@ -407,6 +440,53 @@ def _run_pass_order(
         plan = fuse_partition_topn(plan^)
 
     return plan^
+
+
+def _optimize_union_branches(
+    mut plan: LogicalPlan,
+    config: OptimizerConfig,
+    mut deps: ScalarDepTable,
+) raises:
+    """Replace every branch of every Union reachable from `plan` with that
+    branch run through the whole pass order, in place.
+
+    Descends the single-child nodes and both Join sides, and nothing else (the
+    set `_plan_has_tag` walks). The branch is swapped out of the Union for a
+    schema-only placeholder, its own Unions are optimized first (this walk on
+    the branch), then steps 1 to 19 run on it, and it is written back at its
+    position. The walk calls itself and `_run_passes`, never
+    `_run_pass_order`, so the two functions do not recurse into each other.
+    """
+    if plan.tag == PLAN_UNION:
+        var n = len(plan._union.value()[].children)
+        for i in range(n):
+            var taken = LogicalPlan(PLAN_SCAN, Schema())
+            swap(taken, plan._union.value()[].children[i][])
+            _optimize_union_branches(taken, config, deps)
+            plan._union.value()[].children[i][] = _run_passes(
+                taken^, config, deps
+            )
+    elif plan.tag == PLAN_FILTER:
+        _optimize_union_branches(plan._filter.value()[].child[], config, deps)
+    elif plan.tag == PLAN_PROJECT:
+        _optimize_union_branches(plan._project.value()[].child[], config, deps)
+    elif plan.tag == PLAN_AGGREGATE:
+        _optimize_union_branches(plan._aggregate.value()[].child[], config, deps)
+    elif plan.tag == PLAN_SORT:
+        _optimize_union_branches(plan._sort.value()[].child[], config, deps)
+    elif plan.tag == PLAN_LIMIT:
+        _optimize_union_branches(plan._limit.value()[].child[], config, deps)
+    elif plan.tag == PLAN_DISTINCT:
+        _optimize_union_branches(plan._distinct.value()[].child[], config, deps)
+    elif plan.tag == PLAN_TOPN:
+        _optimize_union_branches(plan._topn.value()[].child[], config, deps)
+    elif plan.tag == PLAN_PARTITION_BY:
+        _optimize_union_branches(plan._partition_by.value()[].child[], config, deps)
+    elif plan.tag == PLAN_PARTITION_TOPN:
+        _optimize_union_branches(plan._partition_topn.value()[].child[], config, deps)
+    elif plan.tag == PLAN_JOIN:
+        _optimize_union_branches(plan._join.value()[].left[], config, deps)
+        _optimize_union_branches(plan._join.value()[].right[], config, deps)
 
 
 def optimize_status(

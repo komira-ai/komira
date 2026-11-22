@@ -1,0 +1,580 @@
+# The publish of komira's Python package, the wheel `komira` (docs/ci.md, "pypi.yml: publishing the
+# Python package"; the package is python/, docs/design/python_package.md), the Linux x86_64 wheel. Two
+# halves in one file:
+#
+#   EVERY PUSH TO MAIN THAT CHANGES CODE (`push`, the TestPyPI half): builds the wheel on the farm,
+#   installs the wheel file on fresh runners on every supported Python, uploads it to TestPyPI,
+#   installs it from TestPyPI on fresh runners on every supported Python and runs the quickstart, and,
+#   when every one of those passed, saves the record of the version (below). It never touches PyPI.
+#   ONCE A DAY (`schedule`) AND ON A MANUAL RUN (`workflow_dispatch`), the promotion: takes the newest
+#   record of a version whose TestPyPI smoke passed, downloads that version's file from TestPyPI,
+#   checks its sha256 and size against what the build recorded, uploads those same bytes to PyPI and
+#   smokes PyPI the same way. It builds nothing and never touches TestPyPI's files.
+#
+# HOW A RUN KNOWS ITS HALF: `github.event_name`. Every job of the TestPyPI half is gated on
+# `github.event_name == 'push'` and every job of the promotion on `github.event_name != 'push'`, so a
+# run is exactly one half and the other half's jobs are skipped (a skipped job is not a failure).
+#
+# The version is 0.1.<N>, N the build number of `release_json stamp`, so each code commit is a new
+# version; the Linux wheel is komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl. The wheel carries the
+# Mojo runtime libraries and requires no other distribution.
+#
+# THE RECORD. The build writes `built.txt` (the wheel's file name, sha256 and size, `pypi_smoke dist
+# --record`) beside the driver, the quickstart, its expected output, its data, the ABI table and the
+# list of the supported Pythons; that directory is the smoke artifact. When every TestPyPI smoke job
+# of the version passed, `testpypi-passed` saves it in the Actions cache of main under the key
+# `pypi-passed-linux-x86_64-<version>` (a cache key is written once; a run on a pull request cannot
+# write main's cache). The promotion restores the most recently created entry of that prefix (the newest
+# version that passed, unless a re-run of an older run passed later: docs/ci.md, "The record of a
+# version that passed"): so "passed" is the push
+# run's own verdict, recorded only when it passed, and the promotion smokes PyPI with the driver,
+# quickstart and Pythons of the version it promotes, not of today's main.
+#
+# THE JOBS of the Linux wheel (a job that fails stops every job that needs it):
+#   push:
+#   `build`           on the farm: the stamped wheel (//python:komira_wheel), its install test
+#                     (//python:wheel_install_test), the driver (//python/smoke:pypi_smoke) and the list of
+#                     the supported Pythons (//python:supported_pythons[linux-x86_64]); the dist directory
+#                     and the record as two artifacts; the job matrix (output `matrix`). No upload step.
+#   `wheel-user-test` one job per supported Python, on a fresh runner with no checkout: `pip install`s the
+#                     wheel file from the dist directory alone and runs the quickstart. A wheel that fails it
+#                     is never uploaded, so it never takes a file name or space on TestPyPI.
+#   `testpypi`        prints the project's size on both indexes, asks TestPyPI which state the version is in
+#                     (below) and, for `absent`, uploads the dist directory with trusted publishing.
+#   `testpypi-smoke`  (not for `differs`) one job per supported Python: `verify`s that TestPyPI serves the
+#                     wheel as built, then `install`s it from TestPyPI into an empty environment and runs the
+#                     quickstart.
+#   `testpypi-passed` after every TestPyPI smoke job passed: saves the record in the cache.
+#   `result-testpypi` the verdict of the push run.
+#   schedule and manual run:
+#   `promote`         restores the newest record, prints the project's size on both indexes, and
+#                     `pypi_smoke promote`: names every newer version TestPyPI holds with no record (its
+#                     smoke failed, or its run has not ended) and skips it, refuses a record older than PyPI's
+#                     newest version, downloads the recorded file from TestPyPI and refuses it unless its
+#                     sha256 and size are the record's. The dist directory and the record as two artifacts.
+#   `pypi`            asks PyPI which state the version is in and, for `absent`, uploads the downloaded file.
+#   `pypi-smoke`      (not for `differs`) the same as `testpypi-smoke` against PyPI.
+#   `result-pypi`     the verdict of the promotion.
+#
+# THE MACOS ARM64 WHEEL of the same version (komira-0.1.<N>-py3-none-macosx_11_0_arm64.whl) is not
+# published here: it is the workflow pypi-macos-arm64.yml, with the same triggers and the same two
+# halves, so each platform's verdict is a run of its own. A red macOS chain never makes this workflow's
+# run red, and a red Linux chain is red here whatever the macOS one does. No job of this file names
+# macOS; the two workflows share no job, artifact, record or concurrency group.
+#
+# THE THREE STATES of the version on an index, asked before any upload (`pypi_smoke state`): `absent`
+# (no file of that name: upload, then the smoke), `same` (the file is there with the same sha256: no
+# upload, the smoke runs: a re-run, a push that changed only what the stamp ignores, or a day with no new
+# version, whose promotion is the PyPI smoke and the notice `already published`) and `differs` (the file
+# is there with other bytes: on TestPyPI, a commit the stamp ignores that changed the wheel's description;
+# nothing is uploaded, there is no index smoke, a notice; on PyPI it is an error, since the promotion
+# sends TestPyPI's own bytes). A file is never deleted or overwritten by this workflow; a bad release is
+# yanked by the PyPI owner (docs/ci.md).
+#
+# STORAGE. An index holds a project to a size limit (10 GiB unless raised) and takes a file name once.
+# `pypi_smoke storage` sums the sizes the JSON API lists for every file of the project, writes the total
+# of each index to the job summary, and its output `over` is `true` above 80 percent of the limit; the
+# result job then ends the run red, so the lead prunes old TestPyPI versions or asks for a higher limit
+# before uploads fail (docs/ci.md, "Storage on the indexes").
+#
+# ITS OWN FILE: trusted publishing binds an index's publisher to the workflow file name and the
+# environment, so this file uploads the Linux wheel and pypi-macos-arm64.yml the macOS one, each trusted
+# by its own publisher on each index, and release.yml holds no publishing credential. `id-token: write`
+# is held by `build` (for farm-connect alone, in the environment `build`, which no index trusts; no
+# upload step) and by `testpypi` and `pypi` (for the upload alone, each in the environment of its index;
+# no farm, no build). Every other job holds no permission. No secret and no API token: nothing is stored.
+#
+# TRIGGERS AND CONCURRENCY. A push to main that changes more than documentation (`paths-ignore`, the
+# list release.yml has), one run a day at a fixed time (`schedule`, one cron entry) and a manual run
+# (`workflow_dispatch`, no input); never a pull request. Every job runs on main only. A push run is in
+# the group `pypi-testpypi`, a promotion in `pypi-promote`, each with cancel-in-progress false: a running
+# run is never cancelled, and GitHub keeps one pending run per group, the newest, replacing a pending one.
+# So when merges land faster than a run, only the newest waiting commit gets a TestPyPI version (it
+# carries the replaced commits' changes; their version numbers are skipped), and a push never replaces a
+# waiting promotion. To stop the promotion: disable the workflow (Actions > pypi > Disable workflow), or
+# delete the `schedule:` entry in a pull request (docs/ci.md, "The promotion").
+#
+# WHAT THE SMOKE PROVES: the index serves the bytes that were built, with the METADATA that was built,
+# and `pip install komira==<version>` into an empty environment (the dependencies from the real PyPI,
+# komira from the index under test, nothing else) gives a package that imports, reports its version and
+# the engine's ABI version, and registers a Parquet file in a session and closes it: on Linux x86_64,
+# on every supported CPython (python/pythons.bzl holds the exact versions). WHAT IT DOES NOT PROVE: any
+# query result, another platform (the macOS arm64 wheel is pypi-macos-arm64.yml's), or a patch release
+# of a supported Python other than the one its job installs.
+name: pypi
+
+# The push filter is release.yml's: a push of documentation alone starts no run (the stamp does not
+# count it either).
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pypi-${{ github.event_name == 'push' && 'testpypi' || 'promote' }}
+  cancel-in-progress: false
+
+jobs:
+  # ---- the Linux wheel, push: build, upload to TestPyPI, smoke, record ----
+
+  # Builds on the farm and keeps the bytes that the push run uploads and checks, and the record. The
+  # job holds `contents: read` and the `id-token: write` that the farm connection exchanges for the
+  # tailnet, nothing else, in the environment `build`. It has no upload step.
+  build:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    outputs:
+      version: ${{ steps.dist.outputs.version }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      # The commit the run started on, with the full history: the stamp is
+      # derived from git and refuses a shallow clone.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # The farm connection: tailnet join, refusal unless the farm answers, and
+      # the machine buckconfig, from repository variables (docs/ci.md).
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # the publish queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      # A guard on the file farm-connect wrote: without the linux property set
+      # a build would run on this runner.
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      # The tool the buck2-farm action runs over each step's output; its path
+      # is the step's output.
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      - name: build the release tool
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //release/ci:release_json --out ${{ runner.temp }}/pypi/release_json
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The stamp the wheel carries: the build number, the commit it counts and its commit time,
+      # from git.
+      - name: the stamp
+        id: stamp
+        run: '"$RUNNER_TEMP/pypi/release_json" stamp --revision "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"'
+      # The wheel, stamped: its version is 0.1.<build number>.
+      - name: build the wheel
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:komira_wheel[release] --out ${{ runner.temp }}/pypi/built/komira.whl
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The install test of the same wheel (built from the same stamp, so the same bytes):
+      # installs it into an empty environment and loads the library, on the farm, before anything is
+      # uploaded.
+      - name: the install test on the wheel
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:wheel_install_test
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The driver every later job runs: the state of the version, the storage, the verify, the
+      # install smoke and, in the promotion, the promote.
+      - name: build the smoke driver
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python/smoke:pypi_smoke --out ${{ runner.temp }}/pypi/smoke/pypi_smoke
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The supported Pythons: the exact versions python/pythons.bzl gives for Linux x86_64, as a
+      # JSON list beside the driver (the record keeps it for the PyPI smoke of this version).
+      - name: build the list of the supported Pythons
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //python:supported_pythons[linux-x86_64] --out ${{ runner.temp }}/pypi/smoke/pythons.json
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The directory the upload sends: the wheel under its file name, read from the wheel itself, and
+      # the record of its file name, sha256 and size beside the driver.
+      - name: the dist directory and the record
+        id: dist
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" dist --wheel "$RUNNER_TEMP/pypi/built/komira.whl" --out "$RUNNER_TEMP/pypi/dist" --record "$RUNNER_TEMP/pypi/smoke/built.txt" --github-output "$GITHUB_OUTPUT"'
+      # What the user test and the smoke jobs run and hold the output to, beside the driver: those jobs
+      # have no checkout, and the promotion of this version runs the same files.
+      - name: the quickstart, its expected output, its data and the ABI table
+        run: cp python/examples/quickstart.py python/examples/quickstart.expected python/examples/readings.parquet src/so/abi/komira.tsv "$RUNNER_TEMP/pypi/smoke/"
+      # One entry of `wheel-user-test` and of the TestPyPI smoke per supported Python.
+      - name: the Pythons of the user test and the smoke
+        id: matrix
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" matrix --pythons "$RUNNER_TEMP/pypi/smoke/pythons.json" --platform linux-x86_64 --github-output "$GITHUB_OUTPUT"'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pypi-${{ steps.dist.outputs.version }}-dist
+          path: ${{ runner.temp }}/pypi/dist
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pypi-${{ steps.dist.outputs.version }}-smoke
+          path: ${{ runner.temp }}/pypi/smoke
+          if-no-files-found: error
+          retention-days: 14
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
+  # The user test of the wheel file, before any upload, on the bytes this run built and will upload.
+  # One job per supported Python (build's output `matrix`, from python/pythons.bzl), each on a fresh
+  # hosted runner with no checkout: pip installs the wheel from the dist directory alone into an empty
+  # environment, and the quickstart must print what python/examples/quickstart.expected says.
+  # `testpypi` needs it, so a wheel that failed it is never uploaded. No identity, no permission.
+  wheel-user-test:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.build.outputs.matrix) }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-dist
+          path: ${{ runner.temp }}/wheel/dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-smoke
+          path: ${{ runner.temp }}/wheel/smoke
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/wheel/smoke/pypi_smoke"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        id: python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: pip installs the wheel file into an empty environment and the quickstart prints what it should
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: '"$RUNNER_TEMP/wheel/smoke/pypi_smoke" install --index dist --dist "$RUNNER_TEMP/wheel/dist" --python "$PYTHON" --example "$RUNNER_TEMP/wheel/smoke/quickstart.py" --expect "$RUNNER_TEMP/wheel/smoke/quickstart.expected" --data "$RUNNER_TEMP/wheel/smoke/readings.parquet" --abi-table "$RUNNER_TEMP/wheel/smoke/komira.tsv" --work "$RUNNER_TEMP/wheel/install"'
+
+  # TestPyPI: prints the size of the project on both indexes, asks which state the version is in and
+  # uploads for `absent`. The job holds the `id-token: write` that TestPyPI exchanges for an upload
+  # (trusted publishing, the environment `testpypi`), and nothing else: no checkout, no farm, no build.
+  # The upload action keeps its defaults (no skipping of an existing file, attestations on). The dist
+  # directory is downloaded into the workspace, `dist`, holding the wheel alone: the action runs in a
+  # container that sees the workspace and not the runner's temporary directory, and it uploads every
+  # file of its packages directory.
+  testpypi:
+    needs: [build, wheel-user-test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    environment: testpypi
+    timeout-minutes: 30
+    permissions:
+      # trusted publishing: the token TestPyPI exchanges for an upload
+      id-token: write
+    outputs:
+      state: ${{ steps.state.outputs.state }}
+      testpypi_storage: ${{ steps.testpypi_storage.outputs.over }}
+      pypi_storage: ${{ steps.pypi_storage.outputs.over }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-dist
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-smoke
+          path: ${{ runner.temp }}/pypi/smoke
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/pypi/smoke/pypi_smoke"
+      # before the upload, so the numbers are in the summary when an upload is refused for size
+      - name: the size of the project on TestPyPI
+        id: testpypi_storage
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" storage --index testpypi --project komira --limit-gib 10 --over-percent 80 --summary "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT"'
+      - name: the size of the project on PyPI
+        id: pypi_storage
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" storage --index pypi --project komira --limit-gib 10 --over-percent 80 --summary "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT"'
+      # absent, same or differs: asked of the index, before any upload
+      - name: the wheel on TestPyPI
+        id: state
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" state --index testpypi --dist dist --github-output "$GITHUB_OUTPUT"'
+      - name: upload to TestPyPI
+        if: steps.state.outputs.state == 'absent'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist
+
+  # The smoke on TestPyPI, on a fresh runner with the Python a user has, one job per supported Python.
+  # The quickstart, its data and the ABI table are the record's (the smoke artifact); the wheel it
+  # installs comes from the index, never from the artifact. No checkout, no identity, no permission.
+  testpypi-smoke:
+    needs: [build, testpypi]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.testpypi.outputs.state != 'differs'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # one job per supported Python; each runs to the end whatever the others do
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.build.outputs.matrix) }}
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-dist
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-smoke
+          path: ${{ runner.temp }}/pypi/smoke
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/pypi/smoke/pypi_smoke"
+      - name: TestPyPI serves the wheel as built
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" verify --index testpypi --dist dist --attempts 5 --delay 30'
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        id: python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: pip installs komira from TestPyPI and the quickstart prints what it should
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" install --index testpypi --dist dist --python "$PYTHON" --example "$RUNNER_TEMP/pypi/smoke/quickstart.py" --expect "$RUNNER_TEMP/pypi/smoke/quickstart.expected" --data "$RUNNER_TEMP/pypi/smoke/readings.parquet" --abi-table "$RUNNER_TEMP/pypi/smoke/komira.tsv" --work "$RUNNER_TEMP/pypi/install" --attempts 5 --delay 30'
+
+  # The record that this version passed: it runs only when every TestPyPI smoke job succeeded (a
+  # matrix job succeeds when each of its entries did), and saves the smoke artifact, which holds
+  # built.txt, under the key the promotion restores the newest of. No identity, no permission.
+  testpypi-passed:
+    needs: [build, testpypi-smoke]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.build.outputs.version }}-smoke
+          path: ${{ runner.temp }}/pypi/passed
+      - name: the record of the version that passed
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pypi/passed
+          key: pypi-passed-linux-x86_64-${{ needs.build.outputs.version }}
+
+  # The push run's verdict. A job that was skipped because one before it failed would otherwise leave
+  # the run looking finished: this job fails the run, naming the stage that did not succeed, and holds
+  # no permission. The job results reach the steps through `env:`, never inside a `run:`.
+  result-testpypi:
+    needs: [build, wheel-user-test, testpypi, testpypi-smoke, testpypi-passed]
+    if: always() && github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: the build, the user test of the wheel and the TestPyPI upload succeeded
+        if: needs.build.result != 'success' || needs.wheel-user-test.result != 'success' || needs.testpypi.result != 'success'
+        env:
+          BUILD: ${{ needs.build.result }}
+          USER_TEST: ${{ needs.wheel-user-test.result }}
+          TESTPYPI: ${{ needs.testpypi.result }}
+        run: 'echo "::error title=pypi::the build, the user test of the wheel or the TestPyPI upload job did not succeed (build $BUILD, wheel-user-test $USER_TEST, testpypi $TESTPYPI)" && exit 1'
+      - name: the bytes differ at the same version
+        if: needs.testpypi.outputs.state == 'differs'
+        run: 'echo "::notice title=pypi::bytes differ at the same version: a commit that changed only what the stamp ignores changed the wheel; a code commit raises the version"'
+      - name: the TestPyPI smoke and the record succeeded
+        if: needs.testpypi.outputs.state != 'differs' && (needs.testpypi-smoke.result != 'success' || needs.testpypi-passed.result != 'success')
+        env:
+          TESTPYPI_SMOKE: ${{ needs.testpypi-smoke.result }}
+          PASSED: ${{ needs.testpypi-passed.result }}
+        run: 'echo "::error title=pypi::the TestPyPI smoke or the record job did not succeed (testpypi-smoke $TESTPYPI_SMOKE, testpypi-passed $PASSED): this version is never promoted to PyPI" && exit 1'
+      - name: the indexes are under 80 percent of their size limit
+        if: needs.testpypi.outputs.testpypi_storage == 'true' || needs.testpypi.outputs.pypi_storage == 'true'
+        run: 'echo "::error title=pypi::an index holds over 80 percent of the size limit of komira (the summary of the job testpypi says which): prune old versions on TestPyPI or ask for a higher limit, docs/ci.md, Storage on the indexes" && exit 1'
+      # Last, so it prints only when no step above failed: a re-run, or a push the stamp ignores.
+      - name: the version is on TestPyPI already
+        if: needs.testpypi.outputs.state == 'same'
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: 'echo "::notice title=pypi::already on TestPyPI: komira $VERSION is on TestPyPI with the bytes built; nothing was uploaded, and the smoke passed"'
+
+  # ---- the Linux wheel, schedule and manual run: the promotion to PyPI ----
+
+  # Finds what to promote and fetches it, with no farm, no build and no identity: restores the newest
+  # record of a version that passed (the cache entries main's push runs saved), prints the size of the
+  # project on both indexes, and `pypi_smoke promote` downloads the recorded file from TestPyPI into the
+  # dist directory, refusing it unless its sha256 and size are the record's. A cache that holds no
+  # record fails the job (`fail-on-cache-miss`), so nothing is published and the run is red.
+  promote:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions: {}
+    outputs:
+      version: ${{ steps.promote.outputs.version }}
+      skipped: ${{ steps.promote.outputs.skipped }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      testpypi_storage: ${{ steps.testpypi_storage.outputs.over }}
+      pypi_storage: ${{ steps.pypi_storage.outputs.over }}
+    steps:
+      - name: the newest record of a version whose TestPyPI smoke passed
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pypi/passed
+          key: pypi-passed-linux-x86_64-
+          restore-keys: pypi-passed-linux-x86_64-
+          fail-on-cache-miss: true
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/pypi/passed/pypi_smoke"
+      - name: the size of the project on TestPyPI
+        id: testpypi_storage
+        run: '"$RUNNER_TEMP/pypi/passed/pypi_smoke" storage --index testpypi --project komira --limit-gib 10 --over-percent 80 --summary "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT"'
+      - name: the size of the project on PyPI
+        id: pypi_storage
+        run: '"$RUNNER_TEMP/pypi/passed/pypi_smoke" storage --index pypi --project komira --limit-gib 10 --over-percent 80 --summary "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT"'
+      # the newest passed version, its newer versions on TestPyPI named and skipped, its file from TestPyPI
+      - name: the version to promote, downloaded from TestPyPI and held to the record
+        id: promote
+        run: '"$RUNNER_TEMP/pypi/passed/pypi_smoke" promote --record "$RUNNER_TEMP/pypi/passed/built.txt" --out "$RUNNER_TEMP/pypi/dist" --github-output "$GITHUB_OUTPUT"'
+      # the Pythons that version's push run smoked, from its record
+      - name: the Pythons of the PyPI smoke
+        id: matrix
+        run: '"$RUNNER_TEMP/pypi/passed/pypi_smoke" matrix --pythons "$RUNNER_TEMP/pypi/passed/pythons.json" --platform linux-x86_64 --github-output "$GITHUB_OUTPUT"'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pypi-${{ steps.promote.outputs.version }}-dist
+          path: ${{ runner.temp }}/pypi/dist
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pypi-${{ steps.promote.outputs.version }}-smoke
+          path: ${{ runner.temp }}/pypi/passed
+          if-no-files-found: error
+          retention-days: 14
+
+  # PyPI: the same as testpypi without the storage steps, for the real index (the environment `pypi`),
+  # on the bytes `promote` downloaded from TestPyPI. The upload action's default repository is PyPI, so
+  # no repository-url. A version already on PyPI (`same`) is not uploaded again.
+  pypi:
+    needs: promote
+    if: github.ref == 'refs/heads/main' && github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    environment: pypi
+    timeout-minutes: 30
+    permissions:
+      # trusted publishing: the token PyPI exchanges for an upload
+      id-token: write
+    outputs:
+      state: ${{ steps.state.outputs.state }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.promote.outputs.version }}-dist
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.promote.outputs.version }}-smoke
+          path: ${{ runner.temp }}/pypi/smoke
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/pypi/smoke/pypi_smoke"
+      # absent, same or differs: asked of the index, before any upload
+      - name: the wheel on PyPI
+        id: state
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" state --index pypi --dist dist --github-output "$GITHUB_OUTPUT"'
+      - name: upload to PyPI
+        if: steps.state.outputs.state == 'absent'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist
+
+  # The smoke on PyPI: the same as testpypi-smoke, against the real index, with the record's quickstart
+  # and Pythons. It is the last proof that a user's `pip install komira` works.
+  pypi-smoke:
+    needs: [promote, pypi]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'push' && needs.pypi.outputs.state != 'differs'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # one job per supported Python; each runs to the end whatever the others do
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.promote.outputs.matrix) }}
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.promote.outputs.version }}-dist
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-${{ needs.promote.outputs.version }}-smoke
+          path: ${{ runner.temp }}/pypi/smoke
+      - name: the driver is executable
+        run: chmod +x "$RUNNER_TEMP/pypi/smoke/pypi_smoke"
+      - name: PyPI serves the wheel as built
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" verify --index pypi --dist dist --attempts 5 --delay 30'
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        id: python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: pip installs komira from PyPI and the quickstart prints what it should
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" install --index pypi --dist dist --python "$PYTHON" --example "$RUNNER_TEMP/pypi/smoke/quickstart.py" --expect "$RUNNER_TEMP/pypi/smoke/quickstart.expected" --data "$RUNNER_TEMP/pypi/smoke/readings.parquet" --abi-table "$RUNNER_TEMP/pypi/smoke/komira.tsv" --work "$RUNNER_TEMP/pypi/install" --attempts 5 --delay 30'
+
+  # The promotion's verdict, as result-testpypi is the push run's. The notices come first, the
+  # failures after them, and the notice `already published` last, so it prints only when nothing failed.
+  result-pypi:
+    needs: [promote, pypi, pypi-smoke]
+    if: always() && github.ref == 'refs/heads/main' && github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: the newer versions on TestPyPI that were not promoted
+        if: needs.promote.outputs.skipped != ''
+        env:
+          SKIPPED: ${{ needs.promote.outputs.skipped }}
+          VERSION: ${{ needs.promote.outputs.version }}
+        run: 'echo "::notice title=pypi::not promoted: komira $SKIPPED on TestPyPI has no record that its TestPyPI smoke passed (the smoke failed, or its run had not ended); komira $VERSION is the newest version that passed"'
+      - name: the promotion found a version that passed and fetched it from TestPyPI
+        if: needs.promote.result != 'success'
+        env:
+          PROMOTE: ${{ needs.promote.result }}
+        run: 'echo "::error title=pypi::the promote job did not succeed (promote $PROMOTE): nothing was published to PyPI; its log says why" && exit 1'
+      - name: the PyPI upload succeeded
+        if: needs.pypi.result != 'success'
+        env:
+          PYPI: ${{ needs.pypi.result }}
+        run: 'echo "::error title=pypi::the PyPI upload job did not succeed (pypi $PYPI)" && exit 1'
+      - name: PyPI holds the version with the bytes TestPyPI served
+        if: needs.pypi.outputs.state == 'differs'
+        env:
+          VERSION: ${{ needs.promote.outputs.version }}
+        run: 'echo "::error title=pypi::PyPI holds komira $VERSION with other bytes than TestPyPI serves: nothing was uploaded and PyPI was not smoked" && exit 1'
+      - name: the PyPI smoke succeeded
+        if: needs.pypi-smoke.result != 'success'
+        env:
+          PYPI_SMOKE: ${{ needs.pypi-smoke.result }}
+        run: 'echo "::error title=pypi::the PyPI smoke job did not succeed (pypi-smoke $PYPI_SMOKE)" && exit 1'
+      - name: the indexes are under 80 percent of their size limit
+        if: needs.promote.outputs.testpypi_storage == 'true' || needs.promote.outputs.pypi_storage == 'true'
+        run: 'echo "::error title=pypi::an index holds over 80 percent of the size limit of komira (the summary of the job promote says which): prune old versions on TestPyPI or ask for a higher limit, docs/ci.md, Storage on the indexes" && exit 1'
+      # Last, so it prints only when no step above failed: a day with no new version that passed.
+      - name: the version is on PyPI already
+        if: needs.pypi.outputs.state == 'same'
+        env:
+          VERSION: ${{ needs.promote.outputs.version }}
+        run: 'echo "::notice title=pypi::already published: komira $VERSION is on PyPI with the bytes TestPyPI served; nothing was uploaded, and the PyPI smoke passed"'

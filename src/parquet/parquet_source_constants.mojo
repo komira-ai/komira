@@ -248,24 +248,35 @@ def _constant_varlen_column(
 def _parse_signed_int(
     value: String, col_name: String, file_path: String, arrow_type: ArrowType
 ) raises -> Int:
-    """Signed decimal digits (an optional sign, then 1 to 18 digits)."""
+    """Signed decimal digits (an optional sign, then 1 to 19 digits) that fit
+    an Int64."""
     var bs = value.as_bytes()
     var neg = False
     var start = 0
     if len(bs) > 0 and (bs[0] == UInt8(ord("-")) or bs[0] == UInt8(ord("+"))):
         neg = bs[0] == UInt8(ord("-"))
         start = 1
-    # 18 digits always fit an Int64; a longer value is refused rather than
-    # wrapped.
-    if start >= len(bs) or len(bs) - start > 18:
+    # 19 digits always fit a UInt64, so the magnitude is summed there and
+    # checked against the Int64 range afterwards; a longer value is refused
+    # rather than wrapped.
+    if start >= len(bs) or len(bs) - start > 19:
         raise _partition_cast_error(col_name, value, file_path, arrow_type)
-    var acc = 0
+    var acc = UInt64(0)
     for i in range(start, len(bs)):
         var b = bs[i]
         if b < UInt8(ord("0")) or b > UInt8(ord("9")):
             raise _partition_cast_error(col_name, value, file_path, arrow_type)
-        acc = acc * 10 + (Int(b) - ord("0"))
-    return -acc if neg else acc
+        acc = acc * UInt64(10) + UInt64(Int(b) - ord("0"))
+    var limit = UInt64(9223372036854775807)
+    if neg:
+        limit += UInt64(1)
+    if acc > limit:
+        raise _partition_cast_error(col_name, value, file_path, arrow_type)
+    if neg:
+        if acc == UInt64(0):
+            return 0
+        return -Int(acc - UInt64(1)) - 1
+    return Int(acc)
 
 
 def _parse_float(value: String, col_name: String, file_path: String) raises -> Float64:
