@@ -114,6 +114,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 on 1 to 7 workers and every dealing; chunks of
 #                                 one morsel, two morsels at one position refused,
 #                                 no row, the pool charged per position.
+# test_sink_composite_group_agg   the COMPOSITE row: keys of mixed types (INT32,
+#                                 STRING, DATE32; DECIMAL128, BOOL, FLOAT64 beside
+#                                 a STRING) against a dict oracle, NULL per column,
+#                                 workers numbering strings differently, a mask,
+#                                 RealBuilder, and the refusals by name.
 # test_sink_group_agg_keys        the grouped sink over DATE32, BOOL and DECIMAL128
 #                                 keys against a dict oracle, empty input, the
 #                                 refusals by name, decimal scale and precision.
@@ -237,6 +242,7 @@ mojo_library(
         "tests/test_sink_agg.mojo",
         "tests/test_sink_agg_partials.mojo",
         "tests/test_sink_collect.mojo",
+        "tests/test_sink_composite_group_agg.mojo",
         "tests/test_sink_count_distinct.mojo",
         "tests/test_sink_count_distinct_grouped.mojo",
         "tests/test_sink_count_distinct_grouped_limits.mojo",

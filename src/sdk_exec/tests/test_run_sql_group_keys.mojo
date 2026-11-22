@@ -40,9 +40,10 @@
 #   * test_an_all_null_key_is_one_group: with every key NULL, each of the four
 #     keys gives one group whose key is NULL and whose count(*) is the row
 #     count.
-#   * test_a_multi_column_key_that_is_not_all_strings_is_refused_by_lowering:
-#     group by d, b is a refusal at step `lower` naming LOWERING_SINK_UNSERVED,
-#     and the context runs the next query.
+#   * test_a_date_and_bool_key_groups_by_the_pair: group by d, b gives one
+#     group per (d, b) pair of the rows, a NULL in either column a value of its
+#     own, each with the oracle's count(*); the key columns stay DATE32 and
+#     BOOL.
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
@@ -65,7 +66,7 @@ from scalar_arithmetic.decimal_arith import I128
 from sdk_exec.engine_catalog import register_parquet
 from sdk_exec.engine_context import EngineContext
 from sdk_exec.engine_options import EngineOptions
-from sdk_exec.engine_sql import SqlOutcome, STEP_LOWER, run_sql
+from sdk_exec.engine_sql import SqlOutcome, run_sql
 
 comptime _ROWS = 203
 comptime _ROWS_PER_GROUP = 37
@@ -485,20 +486,51 @@ def test_an_all_null_key_is_one_group() raises:
     assert_equal(_int(batch, 1, 0), _ROWS)
 
 
-def test_a_multi_column_key_that_is_not_all_strings_is_refused_by_lowering() raises:
+def _db_text(dc: Int, bc: Int) -> String:
+    var d = String("N") if dc < 0 else String(_d_val(dc))
+    var b = String("N") if bc < 0 else String(bc)
+    return d + "|" + b
+
+
+def test_a_date_and_bool_key_groups_by_the_pair() raises:
     var ctx = _new_context()
     _register(ctx, "multi", False)
-    var out = run_sql(ctx, "select d, b, count(*) from t_multi group by d, b")
-    assert_false(out.ok(), "expected a refusal")
-    assert_equal(out.refusal.value().step, String(STEP_LOWER))
-    var reason = out.refusal.value().reason
-    assert_true(
-        reason.find("LOWERING_SINK_UNSERVED") != -1,
-        "reason '" + reason + "' does not name LOWERING_SINK_UNSERVED",
-    )
-    assert_equal(len(out.batches), 0)
-    var next = _run(ctx, "select count(*) from t_multi")
-    assert_equal(_int(next, 0, 0), _ROWS)
+    var batch = _run(ctx, "select d, b, count(*) from t_multi group by d, b")
+    # The oracle: the rows of each (d, b) pair, a NULL in either column a
+    # value of its own.
+    var keys = List[String]()
+    var counts = List[Int]()
+    for n in range(_ROWS):
+        var key = _db_text(_d_class(n), _b_class(n))
+        var at = -1
+        for j in range(len(keys)):
+            if keys[j] == key:
+                at = j
+        if at < 0:
+            keys.append(key)
+            counts.append(0)
+            at = len(keys) - 1
+        counts[at] += 1
+    assert_equal(batch.num_rows(), len(keys))
+    assert_true(batch.schema.field_arrow_type(0) == ArrowType.DATE32)
+    assert_true(batch.schema.field_arrow_type(1) == ArrowType.BOOL)
+    var seen = List[Bool](length=len(keys), fill=False)
+    for r in range(batch.num_rows()):
+        var d = String("N")
+        if not batch.column_at(0).is_null_at(r):
+            d = String(_day(batch, 0, r))
+        var b = String("N")
+        if not batch.column_at(1).is_null_at(r):
+            b = String(1) if batch.column_at(1).as_boolean().get(r) else String(0)
+        var key = d + "|" + b
+        var at = -1
+        for j in range(len(keys)):
+            if keys[j] == key:
+                at = j
+        assert_true(at >= 0, "a group no row holds: " + key)
+        assert_false(seen[at], "group " + key + " twice")
+        seen[at] = True
+        assert_equal(_int(batch, 2, r), counts[at], "count(*) of " + key)
 
 
 def main() raises:
