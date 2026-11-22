@@ -24,6 +24,9 @@ would have built itself:
     StructField  struct_field by name
     Alias        alias
 
+A join residual is encoded by `encode_residual` over the join's two inputs,
+each column reference read from the side it names.
+
 Nothing is rewritten except a CASE's literal results (`promotes`), and nothing
 is reordered. `is_in` and `between` are already comparisons joined by `or` and
 `and`, which is how the SQL binder spells IN and BETWEEN too.
@@ -55,11 +58,11 @@ from komira._ops._expr import (
     When,
 )
 
-from ._field import cast_parts, check_columns, columns_of, field_of, promotes
+from ._field import cast_parts, check_columns, columns_of, field_of, promotes, sided_columns
 from ._scalar import scalar
 from ._wire import member, pb
 
-__all__ = ["encode_expr"]
+__all__ = ["encode_expr", "encode_residual"]
 
 # The argument count of each `StringFnN` op: n exactly, or at least -n
 # (`string_fn_n_arity`, src/plan_expr/expr.mojo). The reader refuses any other
@@ -184,6 +187,20 @@ def encode_expr(node: Node, schema: Iterable[pb.WireField]) -> pb.WireExpr:
     `WireField`). Raises the `KeyError` of `unknown_column` for a column the
     schema lacks, before anything is encoded."""
     columns = columns_of(schema)
+    check_columns(node, columns)
+    out = pb.WireExpr()
+    _encode(out, node, columns)
+    return out
+
+
+def encode_residual(
+    node: Node, left: Iterable[pb.WireField], right: Iterable[pb.WireField]
+) -> pb.WireExpr:
+    """A join residual as a `WireExpr` over the join's two inputs: each column
+    reference names its side and is read from that side's columns
+    (`sided_columns`). Raises the `KeyError` of `unknown_column` for a column
+    its side lacks, before anything is encoded."""
+    columns = sided_columns(left, right)
     check_columns(node, columns)
     out = pb.WireExpr()
     _encode(out, node, columns)

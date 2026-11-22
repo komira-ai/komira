@@ -1,0 +1,755 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 4
+plan {
+  output_schema {
+    fields {
+      name: "o_id"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+      metadata_keys: "unit"
+      metadata_values: "id"
+    }
+    fields {
+      name: "c_id"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "qty"
+      arrow_type_id: 4
+      dtype_code: _DT_INT32
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "price"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "amount"
+      arrow_type_id: 18
+      nullable: true
+      decimal_precision: 12
+      decimal_scale: 2
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "flag"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "u"
+      arrow_type_id: 7
+      dtype_code: _DT_UINT16
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "f32"
+      arrow_type_id: 11
+      dtype_code: _DT_FLOAT32
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "ts"
+      arrow_type_id: 24
+      dtype_code: _DT_INT64
+      nullable: true
+      tz: "UTC"
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "s"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "c_id_right"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "name"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "region"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  join {
+    left {
+      output_schema {
+        fields {
+          name: "o_id"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+          metadata_keys: "unit"
+          metadata_values: "id"
+        }
+        fields {
+          name: "c_id"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "qty"
+          arrow_type_id: 4
+          dtype_code: _DT_INT32
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "price"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "amount"
+          arrow_type_id: 18
+          nullable: true
+          decimal_precision: 12
+          decimal_scale: 2
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "flag"
+          arrow_type_id: 1
+          dtype_code: _DT_BOOL
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "u"
+          arrow_type_id: 7
+          dtype_code: _DT_UINT16
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "f32"
+          arrow_type_id: 11
+          dtype_code: _DT_FLOAT32
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "ts"
+          arrow_type_id: 24
+          dtype_code: _DT_INT64
+          nullable: true
+          tz: "UTC"
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "s"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "c_id_right"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "name"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "region"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      join {
+        left {
+          output_schema {
+            fields {
+              name: "o_id"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              dict_index_type_id: 4
+              metadata_keys: "unit"
+              metadata_values: "id"
+            }
+            fields {
+              name: "c_id"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "qty"
+              arrow_type_id: 4
+              dtype_code: _DT_INT32
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "price"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "amount"
+              arrow_type_id: 18
+              nullable: true
+              decimal_precision: 12
+              decimal_scale: 2
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "flag"
+              arrow_type_id: 1
+              dtype_code: _DT_BOOL
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "u"
+              arrow_type_id: 7
+              dtype_code: _DT_UINT16
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "f32"
+              arrow_type_id: 11
+              dtype_code: _DT_FLOAT32
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "ts"
+              arrow_type_id: 24
+              dtype_code: _DT_INT64
+              nullable: true
+              tz: "UTC"
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "s"
+              arrow_type_id: 13
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "c_id_right"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "name"
+              arrow_type_id: 13
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "region"
+              arrow_type_id: 13
+              nullable: true
+              dict_index_type_id: 4
+            }
+          }
+          join {
+            left {
+              output_schema {
+                fields {
+                  name: "o_id"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  dict_index_type_id: 4
+                  metadata_keys: "unit"
+                  metadata_values: "id"
+                }
+                fields {
+                  name: "c_id"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "qty"
+                  arrow_type_id: 4
+                  dtype_code: _DT_INT32
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "price"
+                  arrow_type_id: 12
+                  dtype_code: _DT_FLOAT64
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "amount"
+                  arrow_type_id: 18
+                  nullable: true
+                  decimal_precision: 12
+                  decimal_scale: 2
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "flag"
+                  arrow_type_id: 1
+                  dtype_code: _DT_BOOL
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "u"
+                  arrow_type_id: 7
+                  dtype_code: _DT_UINT16
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "f32"
+                  arrow_type_id: 11
+                  dtype_code: _DT_FLOAT32
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "ts"
+                  arrow_type_id: 24
+                  dtype_code: _DT_INT64
+                  nullable: true
+                  tz: "UTC"
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "s"
+                  arrow_type_id: 13
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+              }
+              scan {
+                source {
+                  parquet {
+                    paths: "/data/orders.parquet"
+                    schema {
+                      fields {
+                        name: "o_id"
+                        arrow_type_id: 5
+                        dtype_code: _DT_INT64
+                        dict_index_type_id: 4
+                        metadata_keys: "unit"
+                        metadata_values: "id"
+                      }
+                      fields {
+                        name: "c_id"
+                        arrow_type_id: 5
+                        dtype_code: _DT_INT64
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "qty"
+                        arrow_type_id: 4
+                        dtype_code: _DT_INT32
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "price"
+                        arrow_type_id: 12
+                        dtype_code: _DT_FLOAT64
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "amount"
+                        arrow_type_id: 18
+                        nullable: true
+                        decimal_precision: 12
+                        decimal_scale: 2
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "flag"
+                        arrow_type_id: 1
+                        dtype_code: _DT_BOOL
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "u"
+                        arrow_type_id: 7
+                        dtype_code: _DT_UINT16
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "f32"
+                        arrow_type_id: 11
+                        dtype_code: _DT_FLOAT32
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "ts"
+                        arrow_type_id: 24
+                        dtype_code: _DT_INT64
+                        nullable: true
+                        tz: "UTC"
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "s"
+                        arrow_type_id: 13
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                    }
+                    fs_is_local: true
+                  }
+                }
+                has_schema: true
+                schema {
+                  fields {
+                    name: "o_id"
+                    arrow_type_id: 5
+                    dtype_code: _DT_INT64
+                    dict_index_type_id: 4
+                    metadata_keys: "unit"
+                    metadata_values: "id"
+                  }
+                  fields {
+                    name: "c_id"
+                    arrow_type_id: 5
+                    dtype_code: _DT_INT64
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "qty"
+                    arrow_type_id: 4
+                    dtype_code: _DT_INT32
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "price"
+                    arrow_type_id: 12
+                    dtype_code: _DT_FLOAT64
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "amount"
+                    arrow_type_id: 18
+                    nullable: true
+                    decimal_precision: 12
+                    decimal_scale: 2
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "flag"
+                    arrow_type_id: 1
+                    dtype_code: _DT_BOOL
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "u"
+                    arrow_type_id: 7
+                    dtype_code: _DT_UINT16
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "f32"
+                    arrow_type_id: 11
+                    dtype_code: _DT_FLOAT32
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "ts"
+                    arrow_type_id: 24
+                    dtype_code: _DT_INT64
+                    nullable: true
+                    tz: "UTC"
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "s"
+                    arrow_type_id: 13
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                }
+                source_kind: SOURCE_KIND_COLUMNAR
+              }
+            }
+            right {
+              output_schema {
+                fields {
+                  name: "c_id"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "name"
+                  arrow_type_id: 13
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "region"
+                  arrow_type_id: 13
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+              }
+              scan {
+                source {
+                  parquet {
+                    paths: "/data/customers.parquet"
+                    schema {
+                      fields {
+                        name: "c_id"
+                        arrow_type_id: 5
+                        dtype_code: _DT_INT64
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "name"
+                        arrow_type_id: 13
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "region"
+                        arrow_type_id: 13
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                    }
+                    fs_is_local: true
+                  }
+                }
+                has_schema: true
+                schema {
+                  fields {
+                    name: "c_id"
+                    arrow_type_id: 5
+                    dtype_code: _DT_INT64
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "name"
+                    arrow_type_id: 13
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "region"
+                    arrow_type_id: 13
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                }
+                source_kind: SOURCE_KIND_COLUMNAR
+              }
+            }
+            left_on: "c_id"
+            right_on: "c_id"
+            join_type: JOIN_LEFT
+            algo_hint: JOIN_ALGO_AUTO
+          }
+        }
+        right {
+          output_schema {
+            fields {
+              name: "c_id"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "name"
+              arrow_type_id: 13
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "region"
+              arrow_type_id: 13
+              nullable: true
+              dict_index_type_id: 4
+            }
+          }
+          scan {
+            source {
+              parquet {
+                paths: "/data/customers.parquet"
+                schema {
+                  fields {
+                    name: "c_id"
+                    arrow_type_id: 5
+                    dtype_code: _DT_INT64
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "name"
+                    arrow_type_id: 13
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "region"
+                    arrow_type_id: 13
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                }
+                fs_is_local: true
+              }
+            }
+            has_schema: true
+            schema {
+              fields {
+                name: "c_id"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "name"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "region"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+            }
+            source_kind: SOURCE_KIND_COLUMNAR
+          }
+        }
+        left_on: "c_id"
+        right_on: "c_id"
+        join_type: JOIN_SEMI
+        algo_hint: JOIN_ALGO_AUTO
+      }
+    }
+    right {
+      output_schema {
+        fields {
+          name: "c_id"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "name"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "region"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      scan {
+        source {
+          parquet {
+            paths: "/data/customers.parquet"
+            schema {
+              fields {
+                name: "c_id"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "name"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "region"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+            }
+            fs_is_local: true
+          }
+        }
+        has_schema: true
+        schema {
+          fields {
+            name: "c_id"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "name"
+            arrow_type_id: 13
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "region"
+            arrow_type_id: 13
+            nullable: true
+            dict_index_type_id: 4
+          }
+        }
+        source_kind: SOURCE_KIND_COLUMNAR
+      }
+    }
+    left_on: "c_id_right"
+    right_on: "c_id"
+    join_type: JOIN_ANTI
+    algo_hint: JOIN_ALGO_AUTO
+  }
+}

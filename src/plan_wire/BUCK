@@ -30,6 +30,8 @@ mojo_library(
         "tests/test_plan_wire_hostile_bytes.mojo",
         "tests/test_plan_wire_hostile_values.mojo",
         "tests/test_plan_wire_optimizer_decisions.mojo",
+        "tests/test_plan_wire_rel_goldens.mojo",
+        "tests/test_plan_wire_rel_goldens_join.mojo",
         "tests/test_plan_wire_round_trip_ir.mojo",
         "tests/test_plan_wire_scan_variant_tag.mojo",
         "tests/test_plan_wire_udf_tier.mojo",
@@ -59,6 +61,8 @@ mojo_library(
         ) + [
             "tests/fixtures/endpoint/filter_over_parquet.canonical.hex",
         ],
+        "tests/test_plan_wire_rel_goldens.mojo": glob(["tests/fixtures/golden/rel_*.hex"]),
+        "tests/test_plan_wire_rel_goldens_join.mojo": glob(["tests/fixtures/golden/rel_*.hex"]),
         "tests/test_plan_wire_scan_variant_tag.mojo": [
             "tests/fixtures/golden/scan.canonical.hex",
         ],
@@ -101,7 +105,10 @@ _PLAN_PROTO = ["//src/plan_proto:plan_proto_gen"]
 # the `expr_*` goldens (projections of every expression kind the Python plan
 # encoder writes, which python/tests holds that encoder's bytes to) by
 # tests/test_plan_wire_expr_goldens.mojo and
-# tests/test_plan_wire_expr_goldens_fns.mojo; every other golden by
+# tests/test_plan_wire_expr_goldens_fns.mojo; the `rel_*` goldens (plans of
+# every relational node the Python plan encoder writes, which python/tests holds
+# that encoder's bytes to) by tests/test_plan_wire_rel_goldens.mojo and
+# tests/test_plan_wire_rel_goldens_join.mojo; every other golden by
 # tests/test_plan_wire_golden_bytes.mojo.
 _GOLDEN = [
     "aggregate",
@@ -119,6 +126,14 @@ _GOLDEN = [
     "join",
     "limit",
     "project_exprs",
+    "rel_aggregate",
+    "rel_filter_project",
+    "rel_join_inner",
+    "rel_join_kinds",
+    "rel_join_outer",
+    "rel_sort_limit",
+    "rel_union",
+    "rel_window",
     "scan",
     "scan_nested",
     "sort",

@@ -172,6 +172,7 @@ class Zygote:
     def _handle(self, msg):
         """Answer one request; return True when the zygote should exit."""
         w = self.wire
+        reply_fds = []
         try:
             handle, _deadline, _call, body = w.split_request(msg.payload)
             if msg.op == w.OP_HELLO:
@@ -182,7 +183,8 @@ class Zygote:
                 self.registry.pop(handle, None)
                 reply = struct.pack("<I", len(self.registry))
             elif msg.op == w.OP_FORK:
-                reply = self._fork(handle, body, msg.fds)
+                reply, pidfd = self._fork(handle, body, msg.fds)
+                reply_fds.append(pidfd)
             elif msg.op == w.OP_SHUTDOWN:
                 self._stop_workers()
                 w.send_ok(self.ctl, msg.request_id)
@@ -204,7 +206,10 @@ class Zygote:
         finally:
             if msg.op != w.OP_FORK:
                 w._close_all(msg.fds)
-        w.send_ok(self.ctl, msg.request_id, reply)
+        try:
+            w.send_message(self.ctl, w.OP_OK, msg.request_id, reply, fds=reply_fds)
+        finally:
+            w._close_all(reply_fds)
         return False
 
     def _hello(self, body):
@@ -347,7 +352,15 @@ class Zygote:
                 os._exit(1)
         w._close_all(fds)
         self.workers[pid] = context
-        return struct.pack("<I", pid)
+        try:
+            # Opened before the worker can be reaped (this loop reaps), so it names this
+            # process and no later one with its pid: the library signals the worker only
+            # through it.
+            pidfd = os.pidfd_open(pid)
+        except OSError as e:
+            os.kill(pid, signal.SIGKILL)
+            raise _Refusal(w.ERR_INTERNAL, "pidfd_open of the new worker failed: %s" % e) from None
+        return struct.pack("<I", pid), pidfd
 
 
 def main(argv=None):

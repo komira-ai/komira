@@ -12,10 +12,19 @@
  * engine's, and every other descriptor is closed. Its working directory is
  * the cwd directory of a fresh directory made under the `scratch` option.
  *
+ * EXIT reports: the zygote sends one, unasked, for each worker it reaps. They
+ * are read wherever the control channel is read: inside any request, by
+ * udfpy_ctl_drain before a LOAD or a FORK, and by udfpy_await_exit, which a
+ * context whose worker ended uses to learn how it ended. If the zygote's
+ * socket ends first, the generation is dead: the zygote is reaped (its own
+ * pid only; ECHILD, when something else in the process reaped it, leaves its
+ * status unknown) and the generation retired.
+ *
  * Every function here runs with rt->zy_mu held, except udfpy_trace.
  */
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdarg.h>
@@ -94,14 +103,6 @@ static void reap(udfpy_gen* g) {
   }
 }
 
-static void how_text(const udfpy_gen* g, char* out, size_t n) {
-  if (g->exit_how == 1)
-    snprintf(out, n, "signal %d", g->exit_value);
-  else if (g->exit_value >= 0)
-    snprintf(out, n, "exit status %d", g->exit_value);
-  else
-    snprintf(out, n, "exit status unknown");
-}
 
 static const char* op_name(uint32_t op) {
   switch (op) {
@@ -125,10 +126,10 @@ static void record_exit(udfpy_rt* rt, udfpy_gen* g, const udfpy_msg* m) {
   memcpy(&how, m->payload + 12, 4);
   memcpy(&value, m->payload + 16, 4);
   for (int i = 0; i < rt->n_ctxs; i++)
-    if (rt->ctxs[i]->id == ctx) {
-      rt->ctxs[i]->exit_known = 1;
+    if (rt->ctxs[i]->id == ctx && rt->ctxs[i]->gen == g) {
       rt->ctxs[i]->exit_how = how;
       rt->ctxs[i]->exit_value = value;
+      __atomic_store_n(&rt->ctxs[i]->exit_known, 1, __ATOMIC_RELEASE);
     }
   udfpy_trace(rt, "exit gen=%d ctx=%llu pid=%u how=%s value=%d", g->number, (unsigned long long)ctx, pid,
               how == 0 ? "exited" : "signalled", value);
@@ -138,7 +139,7 @@ static void record_exit(udfpy_rt* rt, udfpy_gen* g, const udfpy_msg* m) {
 
 /* The zygote's socket ended or broke: close it, reap, retire. */
 static void mark_dead(udfpy_rt* rt, udfpy_gen* g) {
-  g->dead = 1;
+  __atomic_store_n(&g->dead, 1, __ATOMIC_RELEASE);
   if (g->sock >= 0) close(g->sock);
   g->sock = -1;
   reap(g);
@@ -189,7 +190,7 @@ void udfpy_gen_retire(udfpy_rt* rt, udfpy_gen* g) {
 
 static int32_t ended(udfpy_rt* rt, udfpy_gen* g, uint32_t op, komira_udf_error* err) {
   char how[48];
-  how_text(g, how, sizeof(how));
+  udfpy_how_text(g->exit_how, g->exit_value, how, sizeof(how));
   if (!g->helloed)
     return udfpy_fail(err, KOMIRA_UDF_ERR_LOAD, -1, "the interpreter '%s' ended before HELLO (%s)", rt->opt.interpreter,
                       how);
@@ -233,6 +234,38 @@ int32_t udfpy_ctl_request(udfpy_rt* rt, udfpy_gen* g, uint32_t op, uint32_t flag
     mark_dead(rt, g);
     return udfpy_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "the zygote's reply broke the framing: %s", why);
   }
+}
+
+/* One message read while no request is pending: an EXIT is recorded; the
+ * end of the socket, or anything else, ends the generation. 0 while the
+ * generation lives. */
+static int read_unasked(udfpy_rt* rt, udfpy_gen* g) {
+  udfpy_msg m;
+  const char* why = NULL;
+  int rc = udfpy_recv(g->sock, &m, &why);
+  if (rc == 0 && m.op == UDFPY_OP_EXIT) {
+    record_exit(rt, g, &m);
+    udfpy_msg_free(&m);
+    return 0;
+  }
+  if (rc == 0) udfpy_msg_free(&m);
+  if (rc != -1 && g->pid > 0) kill(g->pid, SIGKILL); /* it broke the framing */
+  mark_dead(rt, g);
+  return -1;
+}
+
+void udfpy_ctl_drain(udfpy_rt* rt, udfpy_gen* g) {
+  while (!g->dead && g->sock >= 0) {
+    struct pollfd p = {g->sock, POLLIN, 0};
+    if (poll(&p, 1, 0) <= 0) return;
+    if (read_unasked(rt, g) != 0) return;
+  }
+}
+
+void udfpy_await_exit(udfpy_rt* rt, komira_udf_context_t* c) {
+  udfpy_gen* g = c->gen;
+  while (!c->exit_known && !g->dead && g->sock >= 0)
+    if (read_unasked(rt, g) != 0) return;
 }
 
 /* ---- spawn -------------------------------------------------------------------------------------- */

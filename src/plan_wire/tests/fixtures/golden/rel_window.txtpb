@@ -1,0 +1,3091 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 4
+plan {
+  output_schema {
+    fields {
+      name: "o_id"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "rn"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "rk"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "drk"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "pr"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "cd"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "nt"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "prev"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "next2"
+      arrow_type_id: 18
+      nullable: true
+      decimal_precision: 12
+      decimal_scale: 2
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "fv"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "lv"
+      arrow_type_id: 24
+      dtype_code: _DT_INT64
+      nullable: true
+      tz: "UTC"
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "nv"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "run_qty"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "tot_price"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "avg_p"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "cnt"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "min_ts"
+      arrow_type_id: 24
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "price"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "total"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  project {
+    exprs {
+      col_ref {
+        name: "o_id"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "rn"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "rk"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "drk"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "pr"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "cd"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "nt"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "prev"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "next2"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "fv"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "lv"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "nv"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "run_qty"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "tot_price"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "avg_p"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "cnt"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      col_ref {
+        name: "min_ts"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      alias {
+        child {
+          col_ref {
+            name: "_w_shadow_17_price"
+            side: COL_SIDE_NONE
+          }
+        }
+        name: "price"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          binary_op {
+            op: BIN_MUL
+            left {
+              col_ref {
+                name: "price"
+                side: COL_SIDE_NONE
+              }
+            }
+            right {
+              col_ref {
+                name: "qty"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "total"
+      }
+    }
+    child {
+      output_schema {
+        fields {
+          name: "o_id"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+          metadata_keys: "unit"
+          metadata_values: "id"
+        }
+        fields {
+          name: "c_id"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "qty"
+          arrow_type_id: 4
+          dtype_code: _DT_INT32
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "price"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "amount"
+          arrow_type_id: 18
+          nullable: true
+          decimal_precision: 12
+          decimal_scale: 2
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "flag"
+          arrow_type_id: 1
+          dtype_code: _DT_BOOL
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "u"
+          arrow_type_id: 7
+          dtype_code: _DT_UINT16
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "f32"
+          arrow_type_id: 11
+          dtype_code: _DT_FLOAT32
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "ts"
+          arrow_type_id: 24
+          dtype_code: _DT_INT64
+          nullable: true
+          tz: "UTC"
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "s"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "rn"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "rk"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "drk"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "pr"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "cd"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "nt"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "prev"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "next2"
+          arrow_type_id: 18
+          nullable: true
+          decimal_precision: 12
+          decimal_scale: 2
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "fv"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "lv"
+          arrow_type_id: 24
+          dtype_code: _DT_INT64
+          nullable: true
+          tz: "UTC"
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "nv"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+          metadata_keys: "unit"
+          metadata_values: "id"
+        }
+        fields {
+          name: "run_qty"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "tot_price"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "avg_p"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "cnt"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "min_ts"
+          arrow_type_id: 24
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "_w_shadow_17_price"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      partition_by {
+        partition_keys: "c_id"
+        partition_exprs {
+          func: PF_MAX
+          column: "price"
+          default_value {
+            kind: SCALAR_KIND_DTYPE
+            time_unit: SCALAR_TIME_UNIT_MICRO
+          }
+          frame {
+            units: FRAME_UNITS_ROWS
+            start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+            end_tag: FRAME_BOUND_UNBOUNDED_FOLLOWING
+          }
+          alias_name: "_w_shadow_17_price"
+        }
+        child {
+          output_schema {
+            fields {
+              name: "o_id"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              dict_index_type_id: 4
+              metadata_keys: "unit"
+              metadata_values: "id"
+            }
+            fields {
+              name: "c_id"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "qty"
+              arrow_type_id: 4
+              dtype_code: _DT_INT32
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "price"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "amount"
+              arrow_type_id: 18
+              nullable: true
+              decimal_precision: 12
+              decimal_scale: 2
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "flag"
+              arrow_type_id: 1
+              dtype_code: _DT_BOOL
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "u"
+              arrow_type_id: 7
+              dtype_code: _DT_UINT16
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "f32"
+              arrow_type_id: 11
+              dtype_code: _DT_FLOAT32
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "ts"
+              arrow_type_id: 24
+              dtype_code: _DT_INT64
+              nullable: true
+              tz: "UTC"
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "s"
+              arrow_type_id: 13
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "rn"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "rk"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "drk"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "pr"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "cd"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "nt"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "prev"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "next2"
+              arrow_type_id: 18
+              nullable: true
+              decimal_precision: 12
+              decimal_scale: 2
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "fv"
+              arrow_type_id: 13
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "lv"
+              arrow_type_id: 24
+              dtype_code: _DT_INT64
+              nullable: true
+              tz: "UTC"
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "nv"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              nullable: true
+              dict_index_type_id: 4
+              metadata_keys: "unit"
+              metadata_values: "id"
+            }
+            fields {
+              name: "run_qty"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "tot_price"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "avg_p"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "cnt"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "min_ts"
+              arrow_type_id: 24
+              dtype_code: _DT_INT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+          }
+          partition_by {
+            partition_keys: "c_id"
+            partition_exprs {
+              func: PF_MIN
+              column: "ts"
+              default_value {
+                kind: SCALAR_KIND_DTYPE
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+              frame {
+                units: FRAME_UNITS_ROWS
+                start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                end_tag: FRAME_BOUND_UNBOUNDED_FOLLOWING
+              }
+              alias_name: "min_ts"
+            }
+            child {
+              output_schema {
+                fields {
+                  name: "o_id"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  dict_index_type_id: 4
+                  metadata_keys: "unit"
+                  metadata_values: "id"
+                }
+                fields {
+                  name: "c_id"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "qty"
+                  arrow_type_id: 4
+                  dtype_code: _DT_INT32
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "price"
+                  arrow_type_id: 12
+                  dtype_code: _DT_FLOAT64
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "amount"
+                  arrow_type_id: 18
+                  nullable: true
+                  decimal_precision: 12
+                  decimal_scale: 2
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "flag"
+                  arrow_type_id: 1
+                  dtype_code: _DT_BOOL
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "u"
+                  arrow_type_id: 7
+                  dtype_code: _DT_UINT16
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "f32"
+                  arrow_type_id: 11
+                  dtype_code: _DT_FLOAT32
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "ts"
+                  arrow_type_id: 24
+                  dtype_code: _DT_INT64
+                  nullable: true
+                  tz: "UTC"
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "s"
+                  arrow_type_id: 13
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "rn"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "rk"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "drk"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "pr"
+                  arrow_type_id: 12
+                  dtype_code: _DT_FLOAT64
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "cd"
+                  arrow_type_id: 12
+                  dtype_code: _DT_FLOAT64
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "nt"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "prev"
+                  arrow_type_id: 12
+                  dtype_code: _DT_FLOAT64
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "next2"
+                  arrow_type_id: 18
+                  nullable: true
+                  decimal_precision: 12
+                  decimal_scale: 2
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "fv"
+                  arrow_type_id: 13
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "lv"
+                  arrow_type_id: 24
+                  dtype_code: _DT_INT64
+                  nullable: true
+                  tz: "UTC"
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "nv"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  nullable: true
+                  dict_index_type_id: 4
+                  metadata_keys: "unit"
+                  metadata_values: "id"
+                }
+                fields {
+                  name: "run_qty"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "tot_price"
+                  arrow_type_id: 12
+                  dtype_code: _DT_FLOAT64
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "avg_p"
+                  arrow_type_id: 12
+                  dtype_code: _DT_FLOAT64
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "cnt"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  dict_index_type_id: 4
+                }
+              }
+              partition_by {
+                partition_keys: "c_id"
+                partition_exprs {
+                  func: PF_COUNT
+                  column: "s"
+                  default_value {
+                    kind: SCALAR_KIND_DTYPE
+                    time_unit: SCALAR_TIME_UNIT_MICRO
+                  }
+                  frame {
+                    units: FRAME_UNITS_ROWS
+                    start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                    end_tag: FRAME_BOUND_UNBOUNDED_FOLLOWING
+                  }
+                  alias_name: "cnt"
+                }
+                child {
+                  output_schema {
+                    fields {
+                      name: "o_id"
+                      arrow_type_id: 5
+                      dtype_code: _DT_INT64
+                      dict_index_type_id: 4
+                      metadata_keys: "unit"
+                      metadata_values: "id"
+                    }
+                    fields {
+                      name: "c_id"
+                      arrow_type_id: 5
+                      dtype_code: _DT_INT64
+                      nullable: true
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "qty"
+                      arrow_type_id: 4
+                      dtype_code: _DT_INT32
+                      nullable: true
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "price"
+                      arrow_type_id: 12
+                      dtype_code: _DT_FLOAT64
+                      nullable: true
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "amount"
+                      arrow_type_id: 18
+                      nullable: true
+                      decimal_precision: 12
+                      decimal_scale: 2
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "flag"
+                      arrow_type_id: 1
+                      dtype_code: _DT_BOOL
+                      nullable: true
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "u"
+                      arrow_type_id: 7
+                      dtype_code: _DT_UINT16
+                      nullable: true
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "f32"
+                      arrow_type_id: 11
+                      dtype_code: _DT_FLOAT32
+                      nullable: true
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "ts"
+                      arrow_type_id: 24
+                      dtype_code: _DT_INT64
+                      nullable: true
+                      tz: "UTC"
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "s"
+                      arrow_type_id: 13
+                      nullable: true
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "rn"
+                      arrow_type_id: 5
+                      dtype_code: _DT_INT64
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "rk"
+                      arrow_type_id: 5
+                      dtype_code: _DT_INT64
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "drk"
+                      arrow_type_id: 5
+                      dtype_code: _DT_INT64
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "pr"
+                      arrow_type_id: 12
+                      dtype_code: _DT_FLOAT64
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "cd"
+                      arrow_type_id: 12
+                      dtype_code: _DT_FLOAT64
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "nt"
+                      arrow_type_id: 5
+                      dtype_code: _DT_INT64
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "prev"
+                      arrow_type_id: 12
+                      dtype_code: _DT_FLOAT64
+                      nullable: true
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "next2"
+                      arrow_type_id: 18
+                      nullable: true
+                      decimal_precision: 12
+                      decimal_scale: 2
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "fv"
+                      arrow_type_id: 13
+                      nullable: true
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "lv"
+                      arrow_type_id: 24
+                      dtype_code: _DT_INT64
+                      nullable: true
+                      tz: "UTC"
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "nv"
+                      arrow_type_id: 5
+                      dtype_code: _DT_INT64
+                      nullable: true
+                      dict_index_type_id: 4
+                      metadata_keys: "unit"
+                      metadata_values: "id"
+                    }
+                    fields {
+                      name: "run_qty"
+                      arrow_type_id: 5
+                      dtype_code: _DT_INT64
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "tot_price"
+                      arrow_type_id: 12
+                      dtype_code: _DT_FLOAT64
+                      dict_index_type_id: 4
+                    }
+                    fields {
+                      name: "avg_p"
+                      arrow_type_id: 12
+                      dtype_code: _DT_FLOAT64
+                      dict_index_type_id: 4
+                    }
+                  }
+                  partition_by {
+                    partition_keys: "c_id"
+                    order_keys: "o_id"
+                    descending: false
+                    partition_exprs {
+                      func: PF_AVG
+                      column: "price"
+                      default_value {
+                        kind: SCALAR_KIND_DTYPE
+                        time_unit: SCALAR_TIME_UNIT_MICRO
+                      }
+                      frame {
+                        units: FRAME_UNITS_RANGE
+                        start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                        end_tag: FRAME_BOUND_CURRENT_ROW
+                      }
+                      alias_name: "avg_p"
+                    }
+                    child {
+                      output_schema {
+                        fields {
+                          name: "o_id"
+                          arrow_type_id: 5
+                          dtype_code: _DT_INT64
+                          dict_index_type_id: 4
+                          metadata_keys: "unit"
+                          metadata_values: "id"
+                        }
+                        fields {
+                          name: "c_id"
+                          arrow_type_id: 5
+                          dtype_code: _DT_INT64
+                          nullable: true
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "qty"
+                          arrow_type_id: 4
+                          dtype_code: _DT_INT32
+                          nullable: true
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "price"
+                          arrow_type_id: 12
+                          dtype_code: _DT_FLOAT64
+                          nullable: true
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "amount"
+                          arrow_type_id: 18
+                          nullable: true
+                          decimal_precision: 12
+                          decimal_scale: 2
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "flag"
+                          arrow_type_id: 1
+                          dtype_code: _DT_BOOL
+                          nullable: true
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "u"
+                          arrow_type_id: 7
+                          dtype_code: _DT_UINT16
+                          nullable: true
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "f32"
+                          arrow_type_id: 11
+                          dtype_code: _DT_FLOAT32
+                          nullable: true
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "ts"
+                          arrow_type_id: 24
+                          dtype_code: _DT_INT64
+                          nullable: true
+                          tz: "UTC"
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "s"
+                          arrow_type_id: 13
+                          nullable: true
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "rn"
+                          arrow_type_id: 5
+                          dtype_code: _DT_INT64
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "rk"
+                          arrow_type_id: 5
+                          dtype_code: _DT_INT64
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "drk"
+                          arrow_type_id: 5
+                          dtype_code: _DT_INT64
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "pr"
+                          arrow_type_id: 12
+                          dtype_code: _DT_FLOAT64
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "cd"
+                          arrow_type_id: 12
+                          dtype_code: _DT_FLOAT64
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "nt"
+                          arrow_type_id: 5
+                          dtype_code: _DT_INT64
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "prev"
+                          arrow_type_id: 12
+                          dtype_code: _DT_FLOAT64
+                          nullable: true
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "next2"
+                          arrow_type_id: 18
+                          nullable: true
+                          decimal_precision: 12
+                          decimal_scale: 2
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "fv"
+                          arrow_type_id: 13
+                          nullable: true
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "lv"
+                          arrow_type_id: 24
+                          dtype_code: _DT_INT64
+                          nullable: true
+                          tz: "UTC"
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "nv"
+                          arrow_type_id: 5
+                          dtype_code: _DT_INT64
+                          nullable: true
+                          dict_index_type_id: 4
+                          metadata_keys: "unit"
+                          metadata_values: "id"
+                        }
+                        fields {
+                          name: "run_qty"
+                          arrow_type_id: 5
+                          dtype_code: _DT_INT64
+                          dict_index_type_id: 4
+                        }
+                        fields {
+                          name: "tot_price"
+                          arrow_type_id: 12
+                          dtype_code: _DT_FLOAT64
+                          dict_index_type_id: 4
+                        }
+                      }
+                      partition_by {
+                        partition_keys: "c_id"
+                        partition_exprs {
+                          func: PF_SUM
+                          column: "price"
+                          default_value {
+                            kind: SCALAR_KIND_DTYPE
+                            time_unit: SCALAR_TIME_UNIT_MICRO
+                          }
+                          frame {
+                            units: FRAME_UNITS_ROWS
+                            start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                            end_tag: FRAME_BOUND_UNBOUNDED_FOLLOWING
+                          }
+                          alias_name: "tot_price"
+                        }
+                        child {
+                          output_schema {
+                            fields {
+                              name: "o_id"
+                              arrow_type_id: 5
+                              dtype_code: _DT_INT64
+                              dict_index_type_id: 4
+                              metadata_keys: "unit"
+                              metadata_values: "id"
+                            }
+                            fields {
+                              name: "c_id"
+                              arrow_type_id: 5
+                              dtype_code: _DT_INT64
+                              nullable: true
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "qty"
+                              arrow_type_id: 4
+                              dtype_code: _DT_INT32
+                              nullable: true
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "price"
+                              arrow_type_id: 12
+                              dtype_code: _DT_FLOAT64
+                              nullable: true
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "amount"
+                              arrow_type_id: 18
+                              nullable: true
+                              decimal_precision: 12
+                              decimal_scale: 2
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "flag"
+                              arrow_type_id: 1
+                              dtype_code: _DT_BOOL
+                              nullable: true
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "u"
+                              arrow_type_id: 7
+                              dtype_code: _DT_UINT16
+                              nullable: true
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "f32"
+                              arrow_type_id: 11
+                              dtype_code: _DT_FLOAT32
+                              nullable: true
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "ts"
+                              arrow_type_id: 24
+                              dtype_code: _DT_INT64
+                              nullable: true
+                              tz: "UTC"
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "s"
+                              arrow_type_id: 13
+                              nullable: true
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "rn"
+                              arrow_type_id: 5
+                              dtype_code: _DT_INT64
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "rk"
+                              arrow_type_id: 5
+                              dtype_code: _DT_INT64
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "drk"
+                              arrow_type_id: 5
+                              dtype_code: _DT_INT64
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "pr"
+                              arrow_type_id: 12
+                              dtype_code: _DT_FLOAT64
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "cd"
+                              arrow_type_id: 12
+                              dtype_code: _DT_FLOAT64
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "nt"
+                              arrow_type_id: 5
+                              dtype_code: _DT_INT64
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "prev"
+                              arrow_type_id: 12
+                              dtype_code: _DT_FLOAT64
+                              nullable: true
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "next2"
+                              arrow_type_id: 18
+                              nullable: true
+                              decimal_precision: 12
+                              decimal_scale: 2
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "fv"
+                              arrow_type_id: 13
+                              nullable: true
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "lv"
+                              arrow_type_id: 24
+                              dtype_code: _DT_INT64
+                              nullable: true
+                              tz: "UTC"
+                              dict_index_type_id: 4
+                            }
+                            fields {
+                              name: "nv"
+                              arrow_type_id: 5
+                              dtype_code: _DT_INT64
+                              nullable: true
+                              dict_index_type_id: 4
+                              metadata_keys: "unit"
+                              metadata_values: "id"
+                            }
+                            fields {
+                              name: "run_qty"
+                              arrow_type_id: 5
+                              dtype_code: _DT_INT64
+                              dict_index_type_id: 4
+                            }
+                          }
+                          partition_by {
+                            partition_keys: "c_id"
+                            order_keys: "o_id"
+                            descending: false
+                            partition_exprs {
+                              func: PF_SUM
+                              column: "qty"
+                              default_value {
+                                kind: SCALAR_KIND_DTYPE
+                                time_unit: SCALAR_TIME_UNIT_MICRO
+                              }
+                              frame {
+                                units: FRAME_UNITS_ROWS
+                                start_tag: FRAME_BOUND_PRECEDING
+                                start_offset: 2
+                                end_tag: FRAME_BOUND_CURRENT_ROW
+                              }
+                              alias_name: "run_qty"
+                            }
+                            child {
+                              output_schema {
+                                fields {
+                                  name: "o_id"
+                                  arrow_type_id: 5
+                                  dtype_code: _DT_INT64
+                                  dict_index_type_id: 4
+                                  metadata_keys: "unit"
+                                  metadata_values: "id"
+                                }
+                                fields {
+                                  name: "c_id"
+                                  arrow_type_id: 5
+                                  dtype_code: _DT_INT64
+                                  nullable: true
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "qty"
+                                  arrow_type_id: 4
+                                  dtype_code: _DT_INT32
+                                  nullable: true
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "price"
+                                  arrow_type_id: 12
+                                  dtype_code: _DT_FLOAT64
+                                  nullable: true
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "amount"
+                                  arrow_type_id: 18
+                                  nullable: true
+                                  decimal_precision: 12
+                                  decimal_scale: 2
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "flag"
+                                  arrow_type_id: 1
+                                  dtype_code: _DT_BOOL
+                                  nullable: true
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "u"
+                                  arrow_type_id: 7
+                                  dtype_code: _DT_UINT16
+                                  nullable: true
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "f32"
+                                  arrow_type_id: 11
+                                  dtype_code: _DT_FLOAT32
+                                  nullable: true
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "ts"
+                                  arrow_type_id: 24
+                                  dtype_code: _DT_INT64
+                                  nullable: true
+                                  tz: "UTC"
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "s"
+                                  arrow_type_id: 13
+                                  nullable: true
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "rn"
+                                  arrow_type_id: 5
+                                  dtype_code: _DT_INT64
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "rk"
+                                  arrow_type_id: 5
+                                  dtype_code: _DT_INT64
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "drk"
+                                  arrow_type_id: 5
+                                  dtype_code: _DT_INT64
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "pr"
+                                  arrow_type_id: 12
+                                  dtype_code: _DT_FLOAT64
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "cd"
+                                  arrow_type_id: 12
+                                  dtype_code: _DT_FLOAT64
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "nt"
+                                  arrow_type_id: 5
+                                  dtype_code: _DT_INT64
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "prev"
+                                  arrow_type_id: 12
+                                  dtype_code: _DT_FLOAT64
+                                  nullable: true
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "next2"
+                                  arrow_type_id: 18
+                                  nullable: true
+                                  decimal_precision: 12
+                                  decimal_scale: 2
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "fv"
+                                  arrow_type_id: 13
+                                  nullable: true
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "lv"
+                                  arrow_type_id: 24
+                                  dtype_code: _DT_INT64
+                                  nullable: true
+                                  tz: "UTC"
+                                  dict_index_type_id: 4
+                                }
+                                fields {
+                                  name: "nv"
+                                  arrow_type_id: 5
+                                  dtype_code: _DT_INT64
+                                  nullable: true
+                                  dict_index_type_id: 4
+                                  metadata_keys: "unit"
+                                  metadata_values: "id"
+                                }
+                              }
+                              partition_by {
+                                order_keys: "o_id"
+                                descending: false
+                                partition_exprs {
+                                  func: PF_NTH_VALUE
+                                  column: "o_id"
+                                  offset: 2
+                                  default_value {
+                                    kind: SCALAR_KIND_DTYPE
+                                    time_unit: SCALAR_TIME_UNIT_MICRO
+                                  }
+                                  frame {
+                                    units: FRAME_UNITS_ROWS
+                                    start_tag: FRAME_BOUND_PRECEDING
+                                    start_offset: 1
+                                    end_tag: FRAME_BOUND_FOLLOWING
+                                    end_offset: 1
+                                  }
+                                  alias_name: "nv"
+                                }
+                                child {
+                                  output_schema {
+                                    fields {
+                                      name: "o_id"
+                                      arrow_type_id: 5
+                                      dtype_code: _DT_INT64
+                                      dict_index_type_id: 4
+                                      metadata_keys: "unit"
+                                      metadata_values: "id"
+                                    }
+                                    fields {
+                                      name: "c_id"
+                                      arrow_type_id: 5
+                                      dtype_code: _DT_INT64
+                                      nullable: true
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "qty"
+                                      arrow_type_id: 4
+                                      dtype_code: _DT_INT32
+                                      nullable: true
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "price"
+                                      arrow_type_id: 12
+                                      dtype_code: _DT_FLOAT64
+                                      nullable: true
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "amount"
+                                      arrow_type_id: 18
+                                      nullable: true
+                                      decimal_precision: 12
+                                      decimal_scale: 2
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "flag"
+                                      arrow_type_id: 1
+                                      dtype_code: _DT_BOOL
+                                      nullable: true
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "u"
+                                      arrow_type_id: 7
+                                      dtype_code: _DT_UINT16
+                                      nullable: true
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "f32"
+                                      arrow_type_id: 11
+                                      dtype_code: _DT_FLOAT32
+                                      nullable: true
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "ts"
+                                      arrow_type_id: 24
+                                      dtype_code: _DT_INT64
+                                      nullable: true
+                                      tz: "UTC"
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "s"
+                                      arrow_type_id: 13
+                                      nullable: true
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "rn"
+                                      arrow_type_id: 5
+                                      dtype_code: _DT_INT64
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "rk"
+                                      arrow_type_id: 5
+                                      dtype_code: _DT_INT64
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "drk"
+                                      arrow_type_id: 5
+                                      dtype_code: _DT_INT64
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "pr"
+                                      arrow_type_id: 12
+                                      dtype_code: _DT_FLOAT64
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "cd"
+                                      arrow_type_id: 12
+                                      dtype_code: _DT_FLOAT64
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "nt"
+                                      arrow_type_id: 5
+                                      dtype_code: _DT_INT64
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "prev"
+                                      arrow_type_id: 12
+                                      dtype_code: _DT_FLOAT64
+                                      nullable: true
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "next2"
+                                      arrow_type_id: 18
+                                      nullable: true
+                                      decimal_precision: 12
+                                      decimal_scale: 2
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "fv"
+                                      arrow_type_id: 13
+                                      nullable: true
+                                      dict_index_type_id: 4
+                                    }
+                                    fields {
+                                      name: "lv"
+                                      arrow_type_id: 24
+                                      dtype_code: _DT_INT64
+                                      nullable: true
+                                      tz: "UTC"
+                                      dict_index_type_id: 4
+                                    }
+                                  }
+                                  partition_by {
+                                    partition_keys: "c_id"
+                                    order_keys: "o_id"
+                                    descending: false
+                                    partition_exprs {
+                                      func: PF_LAST_VALUE
+                                      column: "ts"
+                                      default_value {
+                                        kind: SCALAR_KIND_DTYPE
+                                        time_unit: SCALAR_TIME_UNIT_MICRO
+                                      }
+                                      frame {
+                                        units: FRAME_UNITS_ROWS
+                                        start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                                        end_tag: FRAME_BOUND_UNBOUNDED_FOLLOWING
+                                      }
+                                      alias_name: "lv"
+                                    }
+                                    child {
+                                      output_schema {
+                                        fields {
+                                          name: "o_id"
+                                          arrow_type_id: 5
+                                          dtype_code: _DT_INT64
+                                          dict_index_type_id: 4
+                                          metadata_keys: "unit"
+                                          metadata_values: "id"
+                                        }
+                                        fields {
+                                          name: "c_id"
+                                          arrow_type_id: 5
+                                          dtype_code: _DT_INT64
+                                          nullable: true
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "qty"
+                                          arrow_type_id: 4
+                                          dtype_code: _DT_INT32
+                                          nullable: true
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "price"
+                                          arrow_type_id: 12
+                                          dtype_code: _DT_FLOAT64
+                                          nullable: true
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "amount"
+                                          arrow_type_id: 18
+                                          nullable: true
+                                          decimal_precision: 12
+                                          decimal_scale: 2
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "flag"
+                                          arrow_type_id: 1
+                                          dtype_code: _DT_BOOL
+                                          nullable: true
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "u"
+                                          arrow_type_id: 7
+                                          dtype_code: _DT_UINT16
+                                          nullable: true
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "f32"
+                                          arrow_type_id: 11
+                                          dtype_code: _DT_FLOAT32
+                                          nullable: true
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "ts"
+                                          arrow_type_id: 24
+                                          dtype_code: _DT_INT64
+                                          nullable: true
+                                          tz: "UTC"
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "s"
+                                          arrow_type_id: 13
+                                          nullable: true
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "rn"
+                                          arrow_type_id: 5
+                                          dtype_code: _DT_INT64
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "rk"
+                                          arrow_type_id: 5
+                                          dtype_code: _DT_INT64
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "drk"
+                                          arrow_type_id: 5
+                                          dtype_code: _DT_INT64
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "pr"
+                                          arrow_type_id: 12
+                                          dtype_code: _DT_FLOAT64
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "cd"
+                                          arrow_type_id: 12
+                                          dtype_code: _DT_FLOAT64
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "nt"
+                                          arrow_type_id: 5
+                                          dtype_code: _DT_INT64
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "prev"
+                                          arrow_type_id: 12
+                                          dtype_code: _DT_FLOAT64
+                                          nullable: true
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "next2"
+                                          arrow_type_id: 18
+                                          nullable: true
+                                          decimal_precision: 12
+                                          decimal_scale: 2
+                                          dict_index_type_id: 4
+                                        }
+                                        fields {
+                                          name: "fv"
+                                          arrow_type_id: 13
+                                          nullable: true
+                                          dict_index_type_id: 4
+                                        }
+                                      }
+                                      partition_by {
+                                        partition_keys: "c_id"
+                                        order_keys: "o_id"
+                                        descending: false
+                                        partition_exprs {
+                                          func: PF_FIRST_VALUE
+                                          column: "s"
+                                          default_value {
+                                            kind: SCALAR_KIND_DTYPE
+                                            time_unit: SCALAR_TIME_UNIT_MICRO
+                                          }
+                                          frame {
+                                            units: FRAME_UNITS_RANGE
+                                            start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                                            end_tag: FRAME_BOUND_CURRENT_ROW
+                                          }
+                                          alias_name: "fv"
+                                        }
+                                        child {
+                                          output_schema {
+                                            fields {
+                                              name: "o_id"
+                                              arrow_type_id: 5
+                                              dtype_code: _DT_INT64
+                                              dict_index_type_id: 4
+                                              metadata_keys: "unit"
+                                              metadata_values: "id"
+                                            }
+                                            fields {
+                                              name: "c_id"
+                                              arrow_type_id: 5
+                                              dtype_code: _DT_INT64
+                                              nullable: true
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "qty"
+                                              arrow_type_id: 4
+                                              dtype_code: _DT_INT32
+                                              nullable: true
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "price"
+                                              arrow_type_id: 12
+                                              dtype_code: _DT_FLOAT64
+                                              nullable: true
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "amount"
+                                              arrow_type_id: 18
+                                              nullable: true
+                                              decimal_precision: 12
+                                              decimal_scale: 2
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "flag"
+                                              arrow_type_id: 1
+                                              dtype_code: _DT_BOOL
+                                              nullable: true
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "u"
+                                              arrow_type_id: 7
+                                              dtype_code: _DT_UINT16
+                                              nullable: true
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "f32"
+                                              arrow_type_id: 11
+                                              dtype_code: _DT_FLOAT32
+                                              nullable: true
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "ts"
+                                              arrow_type_id: 24
+                                              dtype_code: _DT_INT64
+                                              nullable: true
+                                              tz: "UTC"
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "s"
+                                              arrow_type_id: 13
+                                              nullable: true
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "rn"
+                                              arrow_type_id: 5
+                                              dtype_code: _DT_INT64
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "rk"
+                                              arrow_type_id: 5
+                                              dtype_code: _DT_INT64
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "drk"
+                                              arrow_type_id: 5
+                                              dtype_code: _DT_INT64
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "pr"
+                                              arrow_type_id: 12
+                                              dtype_code: _DT_FLOAT64
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "cd"
+                                              arrow_type_id: 12
+                                              dtype_code: _DT_FLOAT64
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "nt"
+                                              arrow_type_id: 5
+                                              dtype_code: _DT_INT64
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "prev"
+                                              arrow_type_id: 12
+                                              dtype_code: _DT_FLOAT64
+                                              nullable: true
+                                              dict_index_type_id: 4
+                                            }
+                                            fields {
+                                              name: "next2"
+                                              arrow_type_id: 18
+                                              nullable: true
+                                              decimal_precision: 12
+                                              decimal_scale: 2
+                                              dict_index_type_id: 4
+                                            }
+                                          }
+                                          partition_by {
+                                            order_keys: "o_id"
+                                            descending: false
+                                            partition_exprs {
+                                              func: PF_LEAD
+                                              column: "amount"
+                                              offset: 2
+                                              default_value {
+                                                kind: SCALAR_KIND_DTYPE
+                                                time_unit: SCALAR_TIME_UNIT_MICRO
+                                              }
+                                              frame {
+                                                units: FRAME_UNITS_RANGE
+                                                start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                                                end_tag: FRAME_BOUND_CURRENT_ROW
+                                              }
+                                              alias_name: "next2"
+                                            }
+                                            child {
+                                              output_schema {
+                                                fields {
+                                                  name: "o_id"
+                                                  arrow_type_id: 5
+                                                  dtype_code: _DT_INT64
+                                                  dict_index_type_id: 4
+                                                  metadata_keys: "unit"
+                                                  metadata_values: "id"
+                                                }
+                                                fields {
+                                                  name: "c_id"
+                                                  arrow_type_id: 5
+                                                  dtype_code: _DT_INT64
+                                                  nullable: true
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "qty"
+                                                  arrow_type_id: 4
+                                                  dtype_code: _DT_INT32
+                                                  nullable: true
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "price"
+                                                  arrow_type_id: 12
+                                                  dtype_code: _DT_FLOAT64
+                                                  nullable: true
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "amount"
+                                                  arrow_type_id: 18
+                                                  nullable: true
+                                                  decimal_precision: 12
+                                                  decimal_scale: 2
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "flag"
+                                                  arrow_type_id: 1
+                                                  dtype_code: _DT_BOOL
+                                                  nullable: true
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "u"
+                                                  arrow_type_id: 7
+                                                  dtype_code: _DT_UINT16
+                                                  nullable: true
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "f32"
+                                                  arrow_type_id: 11
+                                                  dtype_code: _DT_FLOAT32
+                                                  nullable: true
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "ts"
+                                                  arrow_type_id: 24
+                                                  dtype_code: _DT_INT64
+                                                  nullable: true
+                                                  tz: "UTC"
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "s"
+                                                  arrow_type_id: 13
+                                                  nullable: true
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "rn"
+                                                  arrow_type_id: 5
+                                                  dtype_code: _DT_INT64
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "rk"
+                                                  arrow_type_id: 5
+                                                  dtype_code: _DT_INT64
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "drk"
+                                                  arrow_type_id: 5
+                                                  dtype_code: _DT_INT64
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "pr"
+                                                  arrow_type_id: 12
+                                                  dtype_code: _DT_FLOAT64
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "cd"
+                                                  arrow_type_id: 12
+                                                  dtype_code: _DT_FLOAT64
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "nt"
+                                                  arrow_type_id: 5
+                                                  dtype_code: _DT_INT64
+                                                  dict_index_type_id: 4
+                                                }
+                                                fields {
+                                                  name: "prev"
+                                                  arrow_type_id: 12
+                                                  dtype_code: _DT_FLOAT64
+                                                  nullable: true
+                                                  dict_index_type_id: 4
+                                                }
+                                              }
+                                              partition_by {
+                                                partition_keys: "c_id"
+                                                order_keys: "o_id"
+                                                descending: false
+                                                partition_exprs {
+                                                  func: PF_LAG
+                                                  column: "price"
+                                                  offset: 1
+                                                  default_value {
+                                                    kind: SCALAR_KIND_DTYPE
+                                                    time_unit: SCALAR_TIME_UNIT_MICRO
+                                                  }
+                                                  frame {
+                                                    units: FRAME_UNITS_RANGE
+                                                    start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                                                    end_tag: FRAME_BOUND_CURRENT_ROW
+                                                  }
+                                                  alias_name: "prev"
+                                                }
+                                                child {
+                                                  output_schema {
+                                                    fields {
+                                                      name: "o_id"
+                                                      arrow_type_id: 5
+                                                      dtype_code: _DT_INT64
+                                                      dict_index_type_id: 4
+                                                      metadata_keys: "unit"
+                                                      metadata_values: "id"
+                                                    }
+                                                    fields {
+                                                      name: "c_id"
+                                                      arrow_type_id: 5
+                                                      dtype_code: _DT_INT64
+                                                      nullable: true
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "qty"
+                                                      arrow_type_id: 4
+                                                      dtype_code: _DT_INT32
+                                                      nullable: true
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "price"
+                                                      arrow_type_id: 12
+                                                      dtype_code: _DT_FLOAT64
+                                                      nullable: true
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "amount"
+                                                      arrow_type_id: 18
+                                                      nullable: true
+                                                      decimal_precision: 12
+                                                      decimal_scale: 2
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "flag"
+                                                      arrow_type_id: 1
+                                                      dtype_code: _DT_BOOL
+                                                      nullable: true
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "u"
+                                                      arrow_type_id: 7
+                                                      dtype_code: _DT_UINT16
+                                                      nullable: true
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "f32"
+                                                      arrow_type_id: 11
+                                                      dtype_code: _DT_FLOAT32
+                                                      nullable: true
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "ts"
+                                                      arrow_type_id: 24
+                                                      dtype_code: _DT_INT64
+                                                      nullable: true
+                                                      tz: "UTC"
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "s"
+                                                      arrow_type_id: 13
+                                                      nullable: true
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "rn"
+                                                      arrow_type_id: 5
+                                                      dtype_code: _DT_INT64
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "rk"
+                                                      arrow_type_id: 5
+                                                      dtype_code: _DT_INT64
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "drk"
+                                                      arrow_type_id: 5
+                                                      dtype_code: _DT_INT64
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "pr"
+                                                      arrow_type_id: 12
+                                                      dtype_code: _DT_FLOAT64
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "cd"
+                                                      arrow_type_id: 12
+                                                      dtype_code: _DT_FLOAT64
+                                                      dict_index_type_id: 4
+                                                    }
+                                                    fields {
+                                                      name: "nt"
+                                                      arrow_type_id: 5
+                                                      dtype_code: _DT_INT64
+                                                      dict_index_type_id: 4
+                                                    }
+                                                  }
+                                                  partition_by {
+                                                    order_keys: "o_id"
+                                                    descending: false
+                                                    partition_exprs {
+                                                      func: PF_NTILE
+                                                      offset: 4
+                                                      default_value {
+                                                        kind: SCALAR_KIND_DTYPE
+                                                        time_unit: SCALAR_TIME_UNIT_MICRO
+                                                      }
+                                                      frame {
+                                                        units: FRAME_UNITS_RANGE
+                                                        start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                                                        end_tag: FRAME_BOUND_CURRENT_ROW
+                                                      }
+                                                      alias_name: "nt"
+                                                    }
+                                                    child {
+                                                      output_schema {
+                                                        fields {
+                                                          name: "o_id"
+                                                          arrow_type_id: 5
+                                                          dtype_code: _DT_INT64
+                                                          dict_index_type_id: 4
+                                                          metadata_keys: "unit"
+                                                          metadata_values: "id"
+                                                        }
+                                                        fields {
+                                                          name: "c_id"
+                                                          arrow_type_id: 5
+                                                          dtype_code: _DT_INT64
+                                                          nullable: true
+                                                          dict_index_type_id: 4
+                                                        }
+                                                        fields {
+                                                          name: "qty"
+                                                          arrow_type_id: 4
+                                                          dtype_code: _DT_INT32
+                                                          nullable: true
+                                                          dict_index_type_id: 4
+                                                        }
+                                                        fields {
+                                                          name: "price"
+                                                          arrow_type_id: 12
+                                                          dtype_code: _DT_FLOAT64
+                                                          nullable: true
+                                                          dict_index_type_id: 4
+                                                        }
+                                                        fields {
+                                                          name: "amount"
+                                                          arrow_type_id: 18
+                                                          nullable: true
+                                                          decimal_precision: 12
+                                                          decimal_scale: 2
+                                                          dict_index_type_id: 4
+                                                        }
+                                                        fields {
+                                                          name: "flag"
+                                                          arrow_type_id: 1
+                                                          dtype_code: _DT_BOOL
+                                                          nullable: true
+                                                          dict_index_type_id: 4
+                                                        }
+                                                        fields {
+                                                          name: "u"
+                                                          arrow_type_id: 7
+                                                          dtype_code: _DT_UINT16
+                                                          nullable: true
+                                                          dict_index_type_id: 4
+                                                        }
+                                                        fields {
+                                                          name: "f32"
+                                                          arrow_type_id: 11
+                                                          dtype_code: _DT_FLOAT32
+                                                          nullable: true
+                                                          dict_index_type_id: 4
+                                                        }
+                                                        fields {
+                                                          name: "ts"
+                                                          arrow_type_id: 24
+                                                          dtype_code: _DT_INT64
+                                                          nullable: true
+                                                          tz: "UTC"
+                                                          dict_index_type_id: 4
+                                                        }
+                                                        fields {
+                                                          name: "s"
+                                                          arrow_type_id: 13
+                                                          nullable: true
+                                                          dict_index_type_id: 4
+                                                        }
+                                                        fields {
+                                                          name: "rn"
+                                                          arrow_type_id: 5
+                                                          dtype_code: _DT_INT64
+                                                          dict_index_type_id: 4
+                                                        }
+                                                        fields {
+                                                          name: "rk"
+                                                          arrow_type_id: 5
+                                                          dtype_code: _DT_INT64
+                                                          dict_index_type_id: 4
+                                                        }
+                                                        fields {
+                                                          name: "drk"
+                                                          arrow_type_id: 5
+                                                          dtype_code: _DT_INT64
+                                                          dict_index_type_id: 4
+                                                        }
+                                                        fields {
+                                                          name: "pr"
+                                                          arrow_type_id: 12
+                                                          dtype_code: _DT_FLOAT64
+                                                          dict_index_type_id: 4
+                                                        }
+                                                        fields {
+                                                          name: "cd"
+                                                          arrow_type_id: 12
+                                                          dtype_code: _DT_FLOAT64
+                                                          dict_index_type_id: 4
+                                                        }
+                                                      }
+                                                      partition_by {
+                                                        order_keys: "o_id"
+                                                        descending: false
+                                                        partition_exprs {
+                                                          func: PF_CUME_DIST
+                                                          default_value {
+                                                            kind: SCALAR_KIND_DTYPE
+                                                            time_unit: SCALAR_TIME_UNIT_MICRO
+                                                          }
+                                                          frame {
+                                                            units: FRAME_UNITS_RANGE
+                                                            start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                                                            end_tag: FRAME_BOUND_CURRENT_ROW
+                                                          }
+                                                          alias_name: "cd"
+                                                        }
+                                                        child {
+                                                          output_schema {
+                                                            fields {
+                                                              name: "o_id"
+                                                              arrow_type_id: 5
+                                                              dtype_code: _DT_INT64
+                                                              dict_index_type_id: 4
+                                                              metadata_keys: "unit"
+                                                              metadata_values: "id"
+                                                            }
+                                                            fields {
+                                                              name: "c_id"
+                                                              arrow_type_id: 5
+                                                              dtype_code: _DT_INT64
+                                                              nullable: true
+                                                              dict_index_type_id: 4
+                                                            }
+                                                            fields {
+                                                              name: "qty"
+                                                              arrow_type_id: 4
+                                                              dtype_code: _DT_INT32
+                                                              nullable: true
+                                                              dict_index_type_id: 4
+                                                            }
+                                                            fields {
+                                                              name: "price"
+                                                              arrow_type_id: 12
+                                                              dtype_code: _DT_FLOAT64
+                                                              nullable: true
+                                                              dict_index_type_id: 4
+                                                            }
+                                                            fields {
+                                                              name: "amount"
+                                                              arrow_type_id: 18
+                                                              nullable: true
+                                                              decimal_precision: 12
+                                                              decimal_scale: 2
+                                                              dict_index_type_id: 4
+                                                            }
+                                                            fields {
+                                                              name: "flag"
+                                                              arrow_type_id: 1
+                                                              dtype_code: _DT_BOOL
+                                                              nullable: true
+                                                              dict_index_type_id: 4
+                                                            }
+                                                            fields {
+                                                              name: "u"
+                                                              arrow_type_id: 7
+                                                              dtype_code: _DT_UINT16
+                                                              nullable: true
+                                                              dict_index_type_id: 4
+                                                            }
+                                                            fields {
+                                                              name: "f32"
+                                                              arrow_type_id: 11
+                                                              dtype_code: _DT_FLOAT32
+                                                              nullable: true
+                                                              dict_index_type_id: 4
+                                                            }
+                                                            fields {
+                                                              name: "ts"
+                                                              arrow_type_id: 24
+                                                              dtype_code: _DT_INT64
+                                                              nullable: true
+                                                              tz: "UTC"
+                                                              dict_index_type_id: 4
+                                                            }
+                                                            fields {
+                                                              name: "s"
+                                                              arrow_type_id: 13
+                                                              nullable: true
+                                                              dict_index_type_id: 4
+                                                            }
+                                                            fields {
+                                                              name: "rn"
+                                                              arrow_type_id: 5
+                                                              dtype_code: _DT_INT64
+                                                              dict_index_type_id: 4
+                                                            }
+                                                            fields {
+                                                              name: "rk"
+                                                              arrow_type_id: 5
+                                                              dtype_code: _DT_INT64
+                                                              dict_index_type_id: 4
+                                                            }
+                                                            fields {
+                                                              name: "drk"
+                                                              arrow_type_id: 5
+                                                              dtype_code: _DT_INT64
+                                                              dict_index_type_id: 4
+                                                            }
+                                                            fields {
+                                                              name: "pr"
+                                                              arrow_type_id: 12
+                                                              dtype_code: _DT_FLOAT64
+                                                              dict_index_type_id: 4
+                                                            }
+                                                          }
+                                                          partition_by {
+                                                            order_keys: "o_id"
+                                                            descending: false
+                                                            partition_exprs {
+                                                              func: PF_PERCENT_RANK
+                                                              default_value {
+                                                                kind: SCALAR_KIND_DTYPE
+                                                                time_unit: SCALAR_TIME_UNIT_MICRO
+                                                              }
+                                                              frame {
+                                                                units: FRAME_UNITS_RANGE
+                                                                start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                                                                end_tag: FRAME_BOUND_CURRENT_ROW
+                                                              }
+                                                              alias_name: "pr"
+                                                            }
+                                                            child {
+                                                              output_schema {
+                                                                fields {
+                                                                  name: "o_id"
+                                                                  arrow_type_id: 5
+                                                                  dtype_code: _DT_INT64
+                                                                  dict_index_type_id: 4
+                                                                  metadata_keys: "unit"
+                                                                  metadata_values: "id"
+                                                                }
+                                                                fields {
+                                                                  name: "c_id"
+                                                                  arrow_type_id: 5
+                                                                  dtype_code: _DT_INT64
+                                                                  nullable: true
+                                                                  dict_index_type_id: 4
+                                                                }
+                                                                fields {
+                                                                  name: "qty"
+                                                                  arrow_type_id: 4
+                                                                  dtype_code: _DT_INT32
+                                                                  nullable: true
+                                                                  dict_index_type_id: 4
+                                                                }
+                                                                fields {
+                                                                  name: "price"
+                                                                  arrow_type_id: 12
+                                                                  dtype_code: _DT_FLOAT64
+                                                                  nullable: true
+                                                                  dict_index_type_id: 4
+                                                                }
+                                                                fields {
+                                                                  name: "amount"
+                                                                  arrow_type_id: 18
+                                                                  nullable: true
+                                                                  decimal_precision: 12
+                                                                  decimal_scale: 2
+                                                                  dict_index_type_id: 4
+                                                                }
+                                                                fields {
+                                                                  name: "flag"
+                                                                  arrow_type_id: 1
+                                                                  dtype_code: _DT_BOOL
+                                                                  nullable: true
+                                                                  dict_index_type_id: 4
+                                                                }
+                                                                fields {
+                                                                  name: "u"
+                                                                  arrow_type_id: 7
+                                                                  dtype_code: _DT_UINT16
+                                                                  nullable: true
+                                                                  dict_index_type_id: 4
+                                                                }
+                                                                fields {
+                                                                  name: "f32"
+                                                                  arrow_type_id: 11
+                                                                  dtype_code: _DT_FLOAT32
+                                                                  nullable: true
+                                                                  dict_index_type_id: 4
+                                                                }
+                                                                fields {
+                                                                  name: "ts"
+                                                                  arrow_type_id: 24
+                                                                  dtype_code: _DT_INT64
+                                                                  nullable: true
+                                                                  tz: "UTC"
+                                                                  dict_index_type_id: 4
+                                                                }
+                                                                fields {
+                                                                  name: "s"
+                                                                  arrow_type_id: 13
+                                                                  nullable: true
+                                                                  dict_index_type_id: 4
+                                                                }
+                                                                fields {
+                                                                  name: "rn"
+                                                                  arrow_type_id: 5
+                                                                  dtype_code: _DT_INT64
+                                                                  dict_index_type_id: 4
+                                                                }
+                                                                fields {
+                                                                  name: "rk"
+                                                                  arrow_type_id: 5
+                                                                  dtype_code: _DT_INT64
+                                                                  dict_index_type_id: 4
+                                                                }
+                                                                fields {
+                                                                  name: "drk"
+                                                                  arrow_type_id: 5
+                                                                  dtype_code: _DT_INT64
+                                                                  dict_index_type_id: 4
+                                                                }
+                                                              }
+                                                              partition_by {
+                                                                partition_keys: "c_id"
+                                                                order_keys: "qty"
+                                                                descending: false
+                                                                partition_exprs {
+                                                                  func: PF_DENSE_RANK
+                                                                  default_value {
+                                                                    kind: SCALAR_KIND_DTYPE
+                                                                    time_unit: SCALAR_TIME_UNIT_MICRO
+                                                                  }
+                                                                  frame {
+                                                                    units: FRAME_UNITS_RANGE
+                                                                    start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                                                                    end_tag: FRAME_BOUND_CURRENT_ROW
+                                                                  }
+                                                                  alias_name: "drk"
+                                                                }
+                                                                child {
+                                                                  output_schema {
+                                                                    fields {
+                                                                      name: "o_id"
+                                                                      arrow_type_id: 5
+                                                                      dtype_code: _DT_INT64
+                                                                      dict_index_type_id: 4
+                                                                      metadata_keys: "unit"
+                                                                      metadata_values: "id"
+                                                                    }
+                                                                    fields {
+                                                                      name: "c_id"
+                                                                      arrow_type_id: 5
+                                                                      dtype_code: _DT_INT64
+                                                                      nullable: true
+                                                                      dict_index_type_id: 4
+                                                                    }
+                                                                    fields {
+                                                                      name: "qty"
+                                                                      arrow_type_id: 4
+                                                                      dtype_code: _DT_INT32
+                                                                      nullable: true
+                                                                      dict_index_type_id: 4
+                                                                    }
+                                                                    fields {
+                                                                      name: "price"
+                                                                      arrow_type_id: 12
+                                                                      dtype_code: _DT_FLOAT64
+                                                                      nullable: true
+                                                                      dict_index_type_id: 4
+                                                                    }
+                                                                    fields {
+                                                                      name: "amount"
+                                                                      arrow_type_id: 18
+                                                                      nullable: true
+                                                                      decimal_precision: 12
+                                                                      decimal_scale: 2
+                                                                      dict_index_type_id: 4
+                                                                    }
+                                                                    fields {
+                                                                      name: "flag"
+                                                                      arrow_type_id: 1
+                                                                      dtype_code: _DT_BOOL
+                                                                      nullable: true
+                                                                      dict_index_type_id: 4
+                                                                    }
+                                                                    fields {
+                                                                      name: "u"
+                                                                      arrow_type_id: 7
+                                                                      dtype_code: _DT_UINT16
+                                                                      nullable: true
+                                                                      dict_index_type_id: 4
+                                                                    }
+                                                                    fields {
+                                                                      name: "f32"
+                                                                      arrow_type_id: 11
+                                                                      dtype_code: _DT_FLOAT32
+                                                                      nullable: true
+                                                                      dict_index_type_id: 4
+                                                                    }
+                                                                    fields {
+                                                                      name: "ts"
+                                                                      arrow_type_id: 24
+                                                                      dtype_code: _DT_INT64
+                                                                      nullable: true
+                                                                      tz: "UTC"
+                                                                      dict_index_type_id: 4
+                                                                    }
+                                                                    fields {
+                                                                      name: "s"
+                                                                      arrow_type_id: 13
+                                                                      nullable: true
+                                                                      dict_index_type_id: 4
+                                                                    }
+                                                                    fields {
+                                                                      name: "rn"
+                                                                      arrow_type_id: 5
+                                                                      dtype_code: _DT_INT64
+                                                                      dict_index_type_id: 4
+                                                                    }
+                                                                    fields {
+                                                                      name: "rk"
+                                                                      arrow_type_id: 5
+                                                                      dtype_code: _DT_INT64
+                                                                      dict_index_type_id: 4
+                                                                    }
+                                                                  }
+                                                                  partition_by {
+                                                                    order_keys: "price"
+                                                                    descending: true
+                                                                    partition_exprs {
+                                                                      func: PF_RANK
+                                                                      default_value {
+                                                                        kind: SCALAR_KIND_DTYPE
+                                                                        time_unit: SCALAR_TIME_UNIT_MICRO
+                                                                      }
+                                                                      frame {
+                                                                        units: FRAME_UNITS_RANGE
+                                                                        start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                                                                        end_tag: FRAME_BOUND_CURRENT_ROW
+                                                                      }
+                                                                      alias_name: "rk"
+                                                                    }
+                                                                    child {
+                                                                      output_schema {
+                                                                        fields {
+                                                                          name: "o_id"
+                                                                          arrow_type_id: 5
+                                                                          dtype_code: _DT_INT64
+                                                                          dict_index_type_id: 4
+                                                                          metadata_keys: "unit"
+                                                                          metadata_values: "id"
+                                                                        }
+                                                                        fields {
+                                                                          name: "c_id"
+                                                                          arrow_type_id: 5
+                                                                          dtype_code: _DT_INT64
+                                                                          nullable: true
+                                                                          dict_index_type_id: 4
+                                                                        }
+                                                                        fields {
+                                                                          name: "qty"
+                                                                          arrow_type_id: 4
+                                                                          dtype_code: _DT_INT32
+                                                                          nullable: true
+                                                                          dict_index_type_id: 4
+                                                                        }
+                                                                        fields {
+                                                                          name: "price"
+                                                                          arrow_type_id: 12
+                                                                          dtype_code: _DT_FLOAT64
+                                                                          nullable: true
+                                                                          dict_index_type_id: 4
+                                                                        }
+                                                                        fields {
+                                                                          name: "amount"
+                                                                          arrow_type_id: 18
+                                                                          nullable: true
+                                                                          decimal_precision: 12
+                                                                          decimal_scale: 2
+                                                                          dict_index_type_id: 4
+                                                                        }
+                                                                        fields {
+                                                                          name: "flag"
+                                                                          arrow_type_id: 1
+                                                                          dtype_code: _DT_BOOL
+                                                                          nullable: true
+                                                                          dict_index_type_id: 4
+                                                                        }
+                                                                        fields {
+                                                                          name: "u"
+                                                                          arrow_type_id: 7
+                                                                          dtype_code: _DT_UINT16
+                                                                          nullable: true
+                                                                          dict_index_type_id: 4
+                                                                        }
+                                                                        fields {
+                                                                          name: "f32"
+                                                                          arrow_type_id: 11
+                                                                          dtype_code: _DT_FLOAT32
+                                                                          nullable: true
+                                                                          dict_index_type_id: 4
+                                                                        }
+                                                                        fields {
+                                                                          name: "ts"
+                                                                          arrow_type_id: 24
+                                                                          dtype_code: _DT_INT64
+                                                                          nullable: true
+                                                                          tz: "UTC"
+                                                                          dict_index_type_id: 4
+                                                                        }
+                                                                        fields {
+                                                                          name: "s"
+                                                                          arrow_type_id: 13
+                                                                          nullable: true
+                                                                          dict_index_type_id: 4
+                                                                        }
+                                                                        fields {
+                                                                          name: "rn"
+                                                                          arrow_type_id: 5
+                                                                          dtype_code: _DT_INT64
+                                                                          dict_index_type_id: 4
+                                                                        }
+                                                                      }
+                                                                      partition_by {
+                                                                        partition_keys: "c_id"
+                                                                        order_keys: "o_id"
+                                                                        descending: false
+                                                                        partition_exprs {
+                                                                          func: PF_ROW_NUMBER
+                                                                          default_value {
+                                                                            kind: SCALAR_KIND_DTYPE
+                                                                            time_unit: SCALAR_TIME_UNIT_MICRO
+                                                                          }
+                                                                          frame {
+                                                                            units: FRAME_UNITS_RANGE
+                                                                            start_tag: FRAME_BOUND_UNBOUNDED_PRECEDING
+                                                                            end_tag: FRAME_BOUND_CURRENT_ROW
+                                                                          }
+                                                                          alias_name: "rn"
+                                                                        }
+                                                                        child {
+                                                                          output_schema {
+                                                                            fields {
+                                                                              name: "o_id"
+                                                                              arrow_type_id: 5
+                                                                              dtype_code: _DT_INT64
+                                                                              dict_index_type_id: 4
+                                                                              metadata_keys: "unit"
+                                                                              metadata_values: "id"
+                                                                            }
+                                                                            fields {
+                                                                              name: "c_id"
+                                                                              arrow_type_id: 5
+                                                                              dtype_code: _DT_INT64
+                                                                              nullable: true
+                                                                              dict_index_type_id: 4
+                                                                            }
+                                                                            fields {
+                                                                              name: "qty"
+                                                                              arrow_type_id: 4
+                                                                              dtype_code: _DT_INT32
+                                                                              nullable: true
+                                                                              dict_index_type_id: 4
+                                                                            }
+                                                                            fields {
+                                                                              name: "price"
+                                                                              arrow_type_id: 12
+                                                                              dtype_code: _DT_FLOAT64
+                                                                              nullable: true
+                                                                              dict_index_type_id: 4
+                                                                            }
+                                                                            fields {
+                                                                              name: "amount"
+                                                                              arrow_type_id: 18
+                                                                              nullable: true
+                                                                              decimal_precision: 12
+                                                                              decimal_scale: 2
+                                                                              dict_index_type_id: 4
+                                                                            }
+                                                                            fields {
+                                                                              name: "flag"
+                                                                              arrow_type_id: 1
+                                                                              dtype_code: _DT_BOOL
+                                                                              nullable: true
+                                                                              dict_index_type_id: 4
+                                                                            }
+                                                                            fields {
+                                                                              name: "u"
+                                                                              arrow_type_id: 7
+                                                                              dtype_code: _DT_UINT16
+                                                                              nullable: true
+                                                                              dict_index_type_id: 4
+                                                                            }
+                                                                            fields {
+                                                                              name: "f32"
+                                                                              arrow_type_id: 11
+                                                                              dtype_code: _DT_FLOAT32
+                                                                              nullable: true
+                                                                              dict_index_type_id: 4
+                                                                            }
+                                                                            fields {
+                                                                              name: "ts"
+                                                                              arrow_type_id: 24
+                                                                              dtype_code: _DT_INT64
+                                                                              nullable: true
+                                                                              tz: "UTC"
+                                                                              dict_index_type_id: 4
+                                                                            }
+                                                                            fields {
+                                                                              name: "s"
+                                                                              arrow_type_id: 13
+                                                                              nullable: true
+                                                                              dict_index_type_id: 4
+                                                                            }
+                                                                          }
+                                                                          scan {
+                                                                            source {
+                                                                              parquet {
+                                                                                paths: "/data/orders.parquet"
+                                                                                schema {
+                                                                                  fields {
+                                                                                    name: "o_id"
+                                                                                    arrow_type_id: 5
+                                                                                    dtype_code: _DT_INT64
+                                                                                    dict_index_type_id: 4
+                                                                                    metadata_keys: "unit"
+                                                                                    metadata_values: "id"
+                                                                                  }
+                                                                                  fields {
+                                                                                    name: "c_id"
+                                                                                    arrow_type_id: 5
+                                                                                    dtype_code: _DT_INT64
+                                                                                    nullable: true
+                                                                                    dict_index_type_id: 4
+                                                                                  }
+                                                                                  fields {
+                                                                                    name: "qty"
+                                                                                    arrow_type_id: 4
+                                                                                    dtype_code: _DT_INT32
+                                                                                    nullable: true
+                                                                                    dict_index_type_id: 4
+                                                                                  }
+                                                                                  fields {
+                                                                                    name: "price"
+                                                                                    arrow_type_id: 12
+                                                                                    dtype_code: _DT_FLOAT64
+                                                                                    nullable: true
+                                                                                    dict_index_type_id: 4
+                                                                                  }
+                                                                                  fields {
+                                                                                    name: "amount"
+                                                                                    arrow_type_id: 18
+                                                                                    nullable: true
+                                                                                    decimal_precision: 12
+                                                                                    decimal_scale: 2
+                                                                                    dict_index_type_id: 4
+                                                                                  }
+                                                                                  fields {
+                                                                                    name: "flag"
+                                                                                    arrow_type_id: 1
+                                                                                    dtype_code: _DT_BOOL
+                                                                                    nullable: true
+                                                                                    dict_index_type_id: 4
+                                                                                  }
+                                                                                  fields {
+                                                                                    name: "u"
+                                                                                    arrow_type_id: 7
+                                                                                    dtype_code: _DT_UINT16
+                                                                                    nullable: true
+                                                                                    dict_index_type_id: 4
+                                                                                  }
+                                                                                  fields {
+                                                                                    name: "f32"
+                                                                                    arrow_type_id: 11
+                                                                                    dtype_code: _DT_FLOAT32
+                                                                                    nullable: true
+                                                                                    dict_index_type_id: 4
+                                                                                  }
+                                                                                  fields {
+                                                                                    name: "ts"
+                                                                                    arrow_type_id: 24
+                                                                                    dtype_code: _DT_INT64
+                                                                                    nullable: true
+                                                                                    tz: "UTC"
+                                                                                    dict_index_type_id: 4
+                                                                                  }
+                                                                                  fields {
+                                                                                    name: "s"
+                                                                                    arrow_type_id: 13
+                                                                                    nullable: true
+                                                                                    dict_index_type_id: 4
+                                                                                  }
+                                                                                }
+                                                                                fs_is_local: true
+                                                                              }
+                                                                            }
+                                                                            has_schema: true
+                                                                            schema {
+                                                                              fields {
+                                                                                name: "o_id"
+                                                                                arrow_type_id: 5
+                                                                                dtype_code: _DT_INT64
+                                                                                dict_index_type_id: 4
+                                                                                metadata_keys: "unit"
+                                                                                metadata_values: "id"
+                                                                              }
+                                                                              fields {
+                                                                                name: "c_id"
+                                                                                arrow_type_id: 5
+                                                                                dtype_code: _DT_INT64
+                                                                                nullable: true
+                                                                                dict_index_type_id: 4
+                                                                              }
+                                                                              fields {
+                                                                                name: "qty"
+                                                                                arrow_type_id: 4
+                                                                                dtype_code: _DT_INT32
+                                                                                nullable: true
+                                                                                dict_index_type_id: 4
+                                                                              }
+                                                                              fields {
+                                                                                name: "price"
+                                                                                arrow_type_id: 12
+                                                                                dtype_code: _DT_FLOAT64
+                                                                                nullable: true
+                                                                                dict_index_type_id: 4
+                                                                              }
+                                                                              fields {
+                                                                                name: "amount"
+                                                                                arrow_type_id: 18
+                                                                                nullable: true
+                                                                                decimal_precision: 12
+                                                                                decimal_scale: 2
+                                                                                dict_index_type_id: 4
+                                                                              }
+                                                                              fields {
+                                                                                name: "flag"
+                                                                                arrow_type_id: 1
+                                                                                dtype_code: _DT_BOOL
+                                                                                nullable: true
+                                                                                dict_index_type_id: 4
+                                                                              }
+                                                                              fields {
+                                                                                name: "u"
+                                                                                arrow_type_id: 7
+                                                                                dtype_code: _DT_UINT16
+                                                                                nullable: true
+                                                                                dict_index_type_id: 4
+                                                                              }
+                                                                              fields {
+                                                                                name: "f32"
+                                                                                arrow_type_id: 11
+                                                                                dtype_code: _DT_FLOAT32
+                                                                                nullable: true
+                                                                                dict_index_type_id: 4
+                                                                              }
+                                                                              fields {
+                                                                                name: "ts"
+                                                                                arrow_type_id: 24
+                                                                                dtype_code: _DT_INT64
+                                                                                nullable: true
+                                                                                tz: "UTC"
+                                                                                dict_index_type_id: 4
+                                                                              }
+                                                                              fields {
+                                                                                name: "s"
+                                                                                arrow_type_id: 13
+                                                                                nullable: true
+                                                                                dict_index_type_id: 4
+                                                                              }
+                                                                            }
+                                                                            source_kind: SOURCE_KIND_COLUMNAR
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

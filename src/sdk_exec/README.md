@@ -70,14 +70,13 @@ differ (`PARQUET_FILES_SCHEMA_MISMATCH`), and the Hive shapes the footer
 package lists (`HIVE_PARTITION_*`).
 
 **Refused here, by name.** A statement that is not a query
-(`STATEMENT_NOT_A_QUERY`, step `bind`); a scalar subquery (the optimizer keeps
-it in the plan as a CROSS join, which lowering refuses with
-`LOWERING_JOIN_UNSERVED`; the
-door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
+(`STATEMENT_NOT_A_QUERY`, step `bind`); the door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
 asks for a scalar to be executed first, a guard no query tested here reaches); a sink denied its memory by the
 budget (unless it spills, see Spill below), a sum outside its declared type and a pool not whole after a run (step
-`execute`); and whatever lowering, the binder or the parser refuses (an INNER
-equi-join is served; any other join is `LOWERING_JOIN_UNSERVED` at `lower`).
+`execute`); and whatever lowering, the binder or the parser refuses (INNER, LEFT, RIGHT, FULL, SEMI, ANTI and CROSS joins are served, a scalar
+subquery being a CROSS join against its one-row aggregate; a join with a
+residual predicate, a SEMI or ANTI join that builds its left side and a join
+on keys the probe does not compare are `LOWERING_JOIN_UNSERVED` at `lower`).
 Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
 `lowering_inputs` descends only scan, filter, project, limit, aggregate,
@@ -123,10 +122,11 @@ The tests run when the package is built.
   ACCESS_DENIED at step `execute`; `run_sql` refuses the S3 scan with
   `SCAN_FS_UNSERVED`; a `gs://` table is refused at step `lower`.
 - `test_run_sql_q6`: TPC-H Q6's text from `bench_corpus` over a lineitem-shaped
-  Parquet file gives the integer oracle's DECIMAL(38,4); a join of a kind lowering does not serve, a syntax error,
-  an unknown table, a missing file, CREATE TABLE AS and a replaced file are named
-  refusals, as are a tiny memory budget, an INT64 sum out of range, a scalar
-  subquery (refused by lowering); the context runs on after a refusal; the
+  Parquet file gives the integer oracle's DECIMAL(38,4); a LEFT self-join counts the matched pairs and the unmatched rows of the
+  oracle and a scalar subquery gives the oracle's count; a LEFT JOIN with a
+  residual over both sides, a syntax error, an unknown table, a missing file,
+  CREATE TABLE AS and a replaced file are named refusals, as are a tiny memory
+  budget and an INT64 sum out of range; the context runs on after a refusal; the
   footer cache reads each file once per query and shares it between bind and
   lower; a file replaced between queries is read again; options are validated;
   contexts are created and dropped repeatedly, the segment pool whole after
@@ -153,6 +153,15 @@ The tests run when the package is built.
   and an INTEGER, a BOOLEAN, a DECIMAL and a VARCHAR; under a WHERE and a
   HAVING; count(DISTINCT) per mixed key; SELECT DISTINCT over three columns;
   an all-NULL key; no row.
+- `test_run_sql_join_kinds`: over small Parquet tables the pinned DuckDB writes
+  (`:join_kinds_oracle`, several row groups, NULL, duplicate and unmatched
+  keys, an empty table), each query of `tests/join_kinds/cases.sql` answers what
+  DuckDB answers, on one and on three workers: LEFT, RIGHT and FULL joins on
+  INT64, STRING, INT32 = INT64 and two-column keys, against an empty table on
+  either side; SEMI and ANTI joins as EXISTS, NOT EXISTS, IN, NOT IN (NULL-aware)
+  and the SEMI JOIN and ANTI JOIN keywords; CROSS joins, a comma join, and
+  uncorrelated scalar subqueries. A LEFT JOIN with a residual over both sides is
+  still refused at `lower`.
 - `test_run_sql_int_sum`: an integer `sum()` over INT64 and INT32 columns is
   DECIMAL(38, 0) and exact past the INT64 range; an empty or all-NULL sum is
   NULL; expressions, CASE and HAVING over the sum run.

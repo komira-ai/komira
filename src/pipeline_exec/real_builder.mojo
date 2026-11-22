@@ -74,6 +74,15 @@
 # be among the segment's dependencies) and indexes them once, before any
 # worker starts (`op_hash_probe.HashProbeShared`).
 #
+# `op_tail` gives a RIGHT or FULL join probe's tail: the build rows its
+# workers marked as matched by no probe row, in batches of the segment's
+# morsel size (the default morsel size when the descriptor records none). The
+# probe columns of those rows are NULL at the types the rows reaching the
+# probe have: the source's schema as each projection and probe before it in
+# the chain reshapes it (`_schema_at`, the same walk that names the output of
+# a segment no row reaches), so the tail is typed even when no probe row
+# arrived.
+#
 # The builder borrows the footer cache and the expression pool the Parquet
 # source reads from; they belong to the caller and outlive every segment run.
 # One footer cache serves the local and the remote sources of a run: each file
@@ -655,30 +664,61 @@ struct RealBuilder[
             " (SINK_HASH_BUILD, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
         )
 
+    def op_tail(
+        mut self,
+        ref desc: SegmentDescPod,
+        op_index: Int,
+        ref source_schema: Schema,
+    ) raises -> List[RecordBatch]:
+        """The unmatched build rows of a RIGHT or FULL join probe, in batches
+        of the segment's morsel size, with the probe columns NULL at the types
+        the chain gives them before the probe; no rows for any other
+        operator."""
+        if desc.ops[op_index].tag != OP_JOIN_PROBE:
+            return List[RecordBatch]()
+        var at = self._parts_index(desc, op_index)
+        if not self._parts[at].probe.value().has_tail():
+            return List[RecordBatch]()
+        var probe_schema = self._schema_at(desc, source_schema, op_index)
+        var rows = DEFAULT_MORSEL_ROWS
+        if desc.morsel_rows > 0:
+            rows = desc.morsel_rows
+        return self._parts[at].probe.value().unmatched_build_rows(
+            probe_schema, rows
+        )
+
+    def _schema_at(
+        mut self, ref desc: SegmentDescPod, ref source_schema: Schema, upto: Int
+    ) raises -> Schema:
+        """The schema of the rows that reach operator `upto` of the chain (the
+        segment's output for `upto` = the operator count): the source's, as
+        each projection and join probe before it reshapes it. A projection is
+        asked by running it over a batch of no rows; a probe gives its output
+        schema."""
+        var schema = source_schema.copy()
+        for i in range(upto):
+            if desc.ops[i].tag == OP_JOIN_PROBE:
+                var at = self._parts_index(desc, i)
+                schema = self._parts[at].probe.value().output_schema(schema)
+                continue
+            if desc.ops[i].tag != OP_PROJECT:
+                continue
+            var at = self._parts_index(desc, i)
+            var probe = self._parts[at].project.value().make()
+            var m = Morsel(empty_batch_like_schema(schema), 0, 0)
+            _ = probe.execute(m)
+            schema = m.batch.schema.copy()
+        return schema^
+
     def _result_schema(
         mut self, ref desc: SegmentDescPod, ref source_schema: Schema
     ) -> Optional[Schema]:
-        """The schema the segment's rows have: the source's, as each
-        projection and join probe of the chain reshapes it. A projection is
-        asked by running it over a batch of no rows; a probe appends the build
-        side's columns. None when that fails."""
+        """The schema the segment's rows have (`_schema_at` past the last
+        operator), or None when that fails."""
         try:
-            var schema = source_schema.copy()
-            for i in range(desc.num_ops()):
-                if desc.ops[i].tag == OP_JOIN_PROBE:
-                    var at = self._parts_index(desc, i)
-                    schema = self._parts[at].probe.value().output_schema(
-                        schema
-                    )
-                    continue
-                if desc.ops[i].tag != OP_PROJECT:
-                    continue
-                var at = self._parts_index(desc, i)
-                var probe = self._parts[at].project.value().make()
-                var m = Morsel(empty_batch_like_schema(schema), 0, 0)
-                _ = probe.execute(m)
-                schema = m.batch.schema.copy()
-            return Optional(schema^)
+            return Optional(
+                self._schema_at(desc, source_schema, desc.num_ops())
+            )
         except:
             return None
 
