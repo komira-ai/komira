@@ -2,7 +2,7 @@
 # cut_walk -- the cutter: a bound plan to segments, edges and a ParamTable
 # =============================================================================
 #
-# One walk of the plan, bottom up. Every node is one of three roles:
+# One walk of the plan, bottom up. Every node has one of these roles:
 #
 #   source    PLAN_SCAN: opens a pipeline (SOURCE_PARQUET, or SOURCE_BATCH for
 #             an in-memory scan);
@@ -15,12 +15,18 @@
 #             pipeline opens whose source is the concatenation of their
 #             outputs in branch order (SOURCE_CONCAT), joined by an E3 edge to
 #             each.
+#   shared    PLAN_CSE_REF, a reference to a shared subplan, and the canonical
+#             subtree it names: a subtree with a breaker or a limit is cut
+#             once into a segment every reference reads over an E3 edge, and
+#             one of scans, filters, projections and unions is cut again at
+#             each reference (`cut_shared`).
 #
-# This module is only the dispatch on the node's tag. Each arm is its own
+# This module is the dispatch on the node's tag (`_walk_node`) and, around it,
+# the resolution of shared subplans (`_walk`, `_resolve`). Each arm is its own
 # module: `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
-# `cut_aggregate`, `cut_distinct`, `cut_sort` and `cut_union`; what they share
-# (the open pipeline, the cutter's state and the close and reopen of a
-# breaker) is `cut_state`. The filter, project, limit, aggregate and distinct
+# `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union` and `cut_shared`;
+# what they share (the open pipeline, the cutter's state and the close and
+# reopen of a breaker) is `cut_state`. The filter, project, limit, aggregate and distinct
 # arms have two halves: the first holds every check that refuses the node
 # itself and runs before the child is walked; the second fuses onto, or
 # closes, the child's pipeline. The sort arm has only the second. The union
@@ -30,9 +36,10 @@
 # The root is a SINK_COLLECT segment, unless the plan's top node is a breaker:
 # then that breaker's segment is the result and nothing is appended.
 #
-# Any other node is refused with LOWERING_UNCUTTABLE_NODE naming its tag. The
-# cutter never replaces a node it cannot cut by a resident batch or a generic
-# collect.
+# Any other node is refused with LOWERING_UNCUTTABLE_NODE naming its tag; a
+# view reference (PLAN_VIEW_REF) names a view registry lowering does not see,
+# and the refusal says it is resolved before lowering. The cutter never
+# replaces a node it cannot cut by a resident batch or a generic collect.
 # =============================================================================
 
 from lowering.cut_aggregate import _aggregate_exprs, _close_aggregate
@@ -41,6 +48,14 @@ from lowering.cut_filter import _filter_op, _fuse_filter
 from lowering.cut_limit import _limit_op, _fuse_limit
 from lowering.cut_project import _project_op, _fuse_project
 from lowering.cut_scan import _open_scan
+from lowering.cut_shared import (
+    _check_reference,
+    _end_canonical,
+    _expanded,
+    _names,
+    _read_shared,
+    _referenced_hashes,
+)
 from lowering.cut_sort import _close_sort
 from lowering.cut_state import CutResult, _Cutter, _Pipe, _uncuttable
 from lowering.cut_union import _check_union, _end_branch, _open_concat
@@ -55,6 +70,8 @@ from plan_ir.logical_plan import (
     PLAN_SORT,
     PLAN_LIMIT,
     PLAN_UNION,
+    PLAN_CSE_REF,
+    PLAN_VIEW_REF,
 )
 from physical_plan.physical_plan import (
     SINK_COLLECT,
@@ -66,6 +83,49 @@ from physical_plan.physical_plan import (
 def _walk(
     mut cutter: _Cutter, node: LogicalPlan, inputs: LoweringInputs
 ) raises -> _Pipe:
+    """Cut `node`: a shared-subplan reference, a canonical subtree a reference
+    names, or any other node by its arm (`cut_shared`)."""
+    if node.tag == PLAN_CSE_REF:
+        var target = _check_reference(cutter, node)
+        return _resolve(cutter, target, node, inputs)
+    if len(cutter.referenced) == 0:
+        return _walk_node(cutter, node, inputs)
+    var first_scan = cutter.scans_seen
+    var pipe = _walk_node(cutter, node, inputs)
+    # The node as its producer saw it, before it folded the repeats inside it
+    # into references: hashed after its children are cut, so every reference
+    # inside it names a subtree cut already and expands.
+    var expanded = _expanded(cutter, node)
+    var h = expanded.structural_hash()
+    # A named hash cut before is cut as itself: a streaming subtree inside the
+    # recut of another, or a subtree of the same hash the producer left whole
+    # (`cut_shared`).
+    if _names(cutter.referenced, h) and cutter._shared_at(h) < 0:
+        return _end_canonical(
+            cutter, node, expanded^, h, first_scan, pipe^, inputs
+        )
+    return pipe^
+
+
+def _resolve(
+    mut cutter: _Cutter, at: Int, node: LogicalPlan, inputs: LoweringInputs
+) raises -> _Pipe:
+    """The pipeline of reference `node` to shared subtree `at`: a reader of
+    its segment, or the streaming subtree cut again over its own scans."""
+    if cutter.shared_segs[at] >= 0:
+        return _read_shared(cutter, at, node)
+    var copy = cutter.shared_recuts[at].copy()
+    var resume = cutter.scans_seen
+    cutter.scans_seen = cutter.shared_first_scan[at]
+    var pipe = _walk_node(cutter, copy, inputs)
+    cutter.scans_seen = resume
+    return pipe^
+
+
+def _walk_node(
+    mut cutter: _Cutter, node: LogicalPlan, inputs: LoweringInputs
+) raises -> _Pipe:
+    """The dispatch on `node`'s tag."""
     var tag = node.tag
     if tag == PLAN_SCAN:
         return _open_scan(cutter, node, inputs)
@@ -103,6 +163,10 @@ def _walk(
             var branch = _walk(cutter, ud.children[i][], inputs)
             producers.append(_end_branch(cutter, branch^, inputs))
         return _open_concat(node, producers)
+    if tag == PLAN_VIEW_REF:
+        raise _uncuttable(
+            node, "a view reference; views are resolved before lowering"
+        )
     raise _uncuttable(node, "no cutter arm for this node")
 
 
@@ -111,6 +175,7 @@ def cut_plan(plan: LogicalPlan, inputs: LoweringInputs) raises -> CutResult:
     cut, a sink no row serves, a scan the Parquet arm cannot carry, or an
     `inputs` whose scan count is not the plan's."""
     var cutter = _Cutter()
+    _referenced_hashes(plan, cutter.referenced)
     var pipe = _walk(cutter, plan, inputs)
     if cutter.scans_seen != len(inputs.scans):
         raise Error(

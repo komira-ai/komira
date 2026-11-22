@@ -652,7 +652,9 @@ asserts this by comparing the decisions of the uncut plan with the union of the 
 reorders a join, and one that flips a build side, must each go red.
 
 **Cutter limit.** A `cse_ref` whose shared subplan feeds more than one segment is refused
-(`OPTIMIZED_SEGMENT_CSE_CROSSES_CUT`) until the cutter can materialize a shared subplan as its own segment.
+(`OPTIMIZED_SEGMENT_CSE_CROSSES_CUT`) until the cutter can materialize a shared subplan as its own segment. Lowering's
+cutter does this for a plan it cuts whole, with the canonical occurrence inline (`src/lowering/README.md`,
+`cut_shared`); the coordinator's cut of a segmented plan does not exist yet.
 
 ### 8.3 Adaptive execution
 

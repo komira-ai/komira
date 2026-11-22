@@ -38,6 +38,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        each; operators and breakers above it; nested unions;
 #                        and the refusal of a branch of another layout, of a
 #                        union with no branch and of a refused node in a branch.
+# test_lower_shared      a shared subplan (a PLAN_CSE_REF and its canonical
+#                        subtree): one with a breaker or a limit cut once and
+#                        read by every reference over E3 edges, a sort's
+#                        readers sorted, a canonical subtree holding a
+#                        reference found by its hash before folding, one of scans, filters, projections
+#                        and unions cut again over the same scan facts, and
+#                        the refusal of a reference with no canonical subtree,
+#                        before it or of another layout, and of a view
+#                        reference.
 # test_lower_sum_fuse    SUM(CAST(<signed integer> AS DECIMAL(38, 0))), the SQL
 #                        integer sum, is lowered to SUM(<integer>) with its
 #                        declared DECIMAL(38, 0) output kept; every other shape
@@ -80,6 +89,7 @@ mojo_library(
         "tests/test_lower_names.mojo",
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",
+        "tests/test_lower_shared.mojo",
         "tests/test_lower_sum_fuse.mojo",
         "tests/test_lower_union.mojo",
         "tests/test_sink_capability.mojo",

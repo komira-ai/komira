@@ -10,7 +10,9 @@
 # the table's files after partition pruning); any other Parquet scan reads the
 # facts of each of its files (`add_parquet_files_scan`). A node the cutter does
 # not cut is not descended into: the cutter refuses it by name before it asks
-# for any scan below, so no facts are read for a plan that cannot lower.
+# for any scan below, so no facts are read for a plan that cannot lower. A
+# shared-subplan reference (PLAN_CSE_REF) is a leaf with no scan: the cutter
+# reads the scans of the subplan it names where the canonical subtree stands.
 
 from host_profile.host_profile import HostProfile
 from lowering.lower import lower
