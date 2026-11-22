@@ -38,9 +38,10 @@ and no environment variable and touches no global, so equal arguments give a
   build segment. The root is a `SINK_COLLECT`
   segment unless the top node is a breaker, which is then the result.
   `cut_walk` is the dispatch on the node's tag and the resolution of shared
-  subplans around it (below); each arm is its own module (`cut_scan`
-  and its JSON arm `cut_scan_jsonl`, `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_distinct`,
-  `cut_sort`, `cut_union`, `cut_join`, `cut_shared`), and `cut_state` holds
+  subplans around it (below); each arm is its own module (`cut_scan` and
+  its JSON arm `cut_scan_jsonl`, `cut_filter`, `cut_project`, `cut_limit`,
+  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union`, `cut_join`,
+  `cut_shared`), and `cut_state` holds
   what they share: the open pipeline, the cutter's segments and ParamTable,
   the shared subplans cut so far, and the close and reopen of a breaker. A new
   node kind is a new arm module and one branch in `cut_walk`.
