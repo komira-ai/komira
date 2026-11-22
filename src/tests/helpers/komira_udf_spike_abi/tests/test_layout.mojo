@@ -139,6 +139,13 @@ def _udf_rows(mut r: Rows):
     r.add("offsetof komira_udf_host.mem_release", Int(UnsafePointer(to=h[].mem_release)) - hb)
     r.add("offsetof komira_udf_host.now_ns", Int(UnsafePointer(to=h[].now_ns)) - hb)
     r.add("offsetof komira_udf_host.log", Int(UnsafePointer(to=h[].log)) - hb)
+    # SAFETY: `h` is the live zeroed allocation of one CUdfHost made above and
+    # freed only by the free_zeroed below; each pointer is to a field of that
+    # allocation (origin: `h[]`), is turned into an address at once and never
+    # read, written or kept, so none outlives the allocation.
+    r.add("offsetof komira_udf_host.n_options", Int(UnsafePointer(to=h[].n_options)) - hb)
+    # SAFETY: as above: a field of the live allocation `h[]`, used only as an address.
+    r.add("offsetof komira_udf_host.options", Int(UnsafePointer(to=h[].options)) - hb)
     free_zeroed(h.bitcast[NoneType]())
     var c = zeroed(size_of[CUdfCapabilities]()).bitcast[CUdfCapabilities]()
     var cb = Int(c)

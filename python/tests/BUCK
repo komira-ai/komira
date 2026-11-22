@@ -365,3 +365,27 @@ _CASES = [
     "fixtures/scan_plan.hex",
     "fixtures/previous_release_only.txt",
 ]]
+
+# The komira/python UDF runtime (src/udf_python) behind a ctypes host of its C
+# ABI (udf_host.py), on the two minors that have a pinned pyarrow: CPython 3.13
+# and 3.14. The library is staged as `libkomira_udf_python.so` in --lib-dir.
+_UDF_PYARROW = {
+    "": "komira//third_party/python:pyarrow",
+    "_py314": "komira//third_party/python:pyarrow-cp314",
+}
+
+[python_binding_test(
+    name = test[5:] + "_test" + p["suffix"],
+    src = test + ".py",
+    srcs = ["udf_host.py"],
+    data = {"libkomira_udf_python.so": "komira//src/udf_python:komira_udf_python"},
+    deps = ["//python:komira", _UDF_PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for test in [
+    "test_udf_contract",
+    "test_udf_process",
+    "test_udf_calls",
+    "test_udf_lifecycle",
+    "test_udf_cancel",
+    "test_udf_generations",
+] for p in PYTHONS if p["suffix"] in _UDF_PYARROW]

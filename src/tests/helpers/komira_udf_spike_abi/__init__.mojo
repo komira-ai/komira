@@ -1,8 +1,8 @@
 """komira_udf_spike_abi: the UDF runtime contract of
 docs/design/udf_runtime_interface.md, test-only.
 
-- komira_udf_runtime.h, komira_udf_wire.h: the C ABI and the worker message
-  header (native/layout_probe.c reports their layout to tests/test_layout).
+- komira_udf_runtime.h (in src/udf_abi/), komira_udf_wire.h: the C ABI and the
+  worker message header (native/layout_probe.c reports their layout to tests/test_layout).
 - contract: the header's numbers and the host's error table.
 - values: the column, batch and type values the binding takes and returns.
 - runtime: UdfRuntime, which opens a runtime library and drives its table
