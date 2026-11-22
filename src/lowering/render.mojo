@@ -98,7 +98,12 @@ def _op_line(op: MorselOp) -> String:
     if op.tag == OP_LIMIT:
         return "LIMIT " + String(op.limit_count)
     if op.tag == OP_JOIN_PROBE:
-        return "JOIN_PROBE build_seg=" + String(op.probe_build_seg)
+        var text = "JOIN_PROBE build_seg=" + String(op.probe_build_seg) + " on=["
+        for k in range(len(op.probe_left_keys)):
+            if k > 0:
+                text += ", "
+            text += op.probe_left_keys[k] + "=" + op.probe_right_keys[k]
+        return text + "]"
     return "OP_" + String(Int(op.tag))
 
 

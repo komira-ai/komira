@@ -16,16 +16,21 @@
 #             outputs in branch order (SOURCE_CONCAT), joined by an E3 edge to
 #             each.
 #
+# A PLAN_JOIN is both: its build child's pipeline ends in a SINK_HASH_BUILD
+# segment, and its probe child's pipeline stays open with an OP_JOIN_PROBE
+# fused onto it and an E3 edge to the build segment (`cut_join`).
+#
 # This module is only the dispatch on the node's tag. Each arm is its own
 # module: `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
-# `cut_aggregate`, `cut_distinct`, `cut_sort` and `cut_union`; what they share
-# (the open pipeline, the cutter's state and the close and reopen of a
-# breaker) is `cut_state`. The filter, project, limit, aggregate and distinct
-# arms have two halves: the first holds every check that refuses the node
-# itself and runs before the child is walked; the second fuses onto, or
-# closes, the child's pipeline. The sort arm has only the second. The union
-# arm checks its branches' schemas before it walks them, walks them in order,
-# ends each in a segment and opens the concatenation.
+# `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union` and `cut_join`;
+# what they share (the open pipeline, the cutter's state and the close and
+# reopen of a breaker) is `cut_state`. The filter, project, limit, aggregate,
+# distinct and join arms have two halves: the first holds every check that
+# refuses the node itself and runs before the child (or the children) is
+# walked; the second fuses onto, or closes, the child's pipeline. The sort arm
+# has only the second. The union arm checks its branches' schemas before it
+# walks them, walks them in order, ends each in a segment and opens the
+# concatenation.
 #
 # The root is a SINK_COLLECT segment, unless the plan's top node is a breaker:
 # then that breaker's segment is the result and nothing is appended.
@@ -38,6 +43,7 @@
 from lowering.cut_aggregate import _aggregate_exprs, _close_aggregate
 from lowering.cut_distinct import _distinct_keys, _close_distinct
 from lowering.cut_filter import _filter_op, _fuse_filter
+from lowering.cut_join import join_shape, _close_join
 from lowering.cut_limit import _limit_op, _fuse_limit
 from lowering.cut_project import _project_op, _fuse_project
 from lowering.cut_scan import _open_scan
@@ -54,6 +60,7 @@ from plan_ir.logical_plan import (
     PLAN_DISTINCT,
     PLAN_SORT,
     PLAN_LIMIT,
+    PLAN_JOIN,
     PLAN_UNION,
 )
 from physical_plan.physical_plan import (
@@ -95,6 +102,12 @@ def _walk(
     if tag == PLAN_SORT:
         var pipe = _walk(cutter, node.sort_data_ref().child[], inputs)
         return _close_sort(cutter, node, pipe^, inputs)
+    if tag == PLAN_JOIN:
+        var shape = join_shape(node)
+        ref jd = node.join_data_ref()
+        var left = _walk(cutter, jd.left[], inputs)
+        var right = _walk(cutter, jd.right[], inputs)
+        return _close_join(cutter, node, shape^, left^, right^, inputs)
     if tag == PLAN_UNION:
         _check_union(node)
         ref ud = node.union_data_ref()

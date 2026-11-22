@@ -35,6 +35,11 @@
 #                             payload); `inf`, `-inf`
 #   decimal128(p,s)           `<unscaled>e<-s>`, the cell's digits without
 #                             the point, at most p of them
+#   date32                    the day number from 1970-01-01, as canon spells
+#                             a date32, read from `YYYY-MM-DD` (a year of four
+#                             or more digits, a month and a day that exist in
+#                             the proleptic Gregorian calendar); a date
+#                             DuckDB writes with ` (BC)` is refused
 #   string, large_string      the cell's text, escaped as canon escapes it
 #
 # NULL is `\N` in any column whose schema entry ends in `?`, and refused in
@@ -285,6 +290,43 @@ def _decimal_cell(cell: String, p: Int, s: Int) raises -> String:
     return res + "e" + String(-s)
 
 
+def _days_in_month(y: Int, m: Int) -> Int:
+    if m == 2:
+        var leap = (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
+        return 29 if leap else 28
+    if m == 4 or m == 6 or m == 9 or m == 11:
+        return 30
+    return 31
+
+
+def _date_cell(cell: String) raises -> String:
+    """The day number of `YYYY-MM-DD` from 1970-01-01, as decimal text."""
+    var bs = cell.as_bytes()
+    var n = len(bs)
+    if (
+        n < 10
+        or bs[n - 3] != 45
+        or bs[n - 6] != 45
+        or not _is_digits(bs, 0, n - 6)
+        or not _is_digits(bs, n - 5, n - 3)
+        or not _is_digits(bs, n - 2, n)
+    ):
+        raise Error("'" + cell + "' is not a date YYYY-MM-DD")
+    var y = atol(String(cell[byte = 0 : n - 6]))
+    var m = atol(String(cell[byte = n - 5 : n - 3]))
+    var d = atol(String(cell[byte = n - 2 : n]))
+    if m < 1 or m > 12 or d < 1 or d > _days_in_month(y, m):
+        raise Error("'" + cell + "' is not a day of the calendar")
+    # Days from civil (proleptic Gregorian), the year starting in March.
+    var yy = y - 1 if m <= 2 else y
+    var era = yy // 400
+    var yoe = yy - era * 400
+    var mp = m - 3 if m > 2 else m + 9
+    var doy = (153 * mp + 2) // 5 + d - 1
+    var doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
+    return String(era * 146097 + doe - 719468)
+
+
 def _float_width(t: String) -> Int:
     if t == "float16":
         return 16
@@ -410,6 +452,8 @@ def duckdb_tsv_canon(tsv: DuckdbTsv, like: CanonText) raises -> CanonText:
                     row.append(_decimal_cell(cell, ps[0], ps[1]))
                 elif t == "string" or t == "large_string":
                     row.append(escape_string(cell, False))
+                elif t == "date32":
+                    row.append(_date_cell(cell))
                 else:
                     raise Error("this reader does not read type " + t)
             except e:

@@ -206,7 +206,7 @@ def test_render_names_every_source_edge_order_and_operator() raises:
     expected += "  source: SOURCE_BATCH batch=7\n"
     expected += "  op 0: PROJECT x := " + String(_col("a")) + ", y := " + String(_col("b")) + "\n"
     expected += "  op 1: LIMIT 5\n"
-    expected += "  op 2: JOIN_PROBE build_seg=3\n"
+    expected += "  op 2: JOIN_PROBE build_seg=3 on=[]\n"
     expected += "  sink: (SINK_COLLECT, NONE, COLUMNAR) param=-1 state=0\n"
     expected += "  deps: none\n"
     expected += "  order: ORDER_NONE partitions=1\n"
@@ -281,8 +281,8 @@ def test_every_sink_kind_has_its_name() raises:
 
 def test_an_unknown_sink_key_and_orientation_print_their_numbers() raises:
     assert_equal(
-        triple_name(UInt8(200), UInt8(9), UInt8(7)),
-        "(SINK_200, KEY_9, ORIENT_7)",
+        triple_name(UInt8(200), UInt8(99), UInt8(7)),
+        "(SINK_200, KEY_99, ORIENT_7)",
     )
     var message = String()
     try:
@@ -293,7 +293,7 @@ def test_an_unknown_sink_key_and_orientation_print_their_numbers() raises:
                 SourceSpecPod.from_sink_output(0),
                 Slab[MorselOp](),
                 UInt8(200),
-                UInt8(9),
+                UInt8(99),
                 UInt8(7),
                 List[Int](),
                 List[UInt8](),
@@ -304,7 +304,7 @@ def test_an_unknown_sink_key_and_orientation_print_their_numbers() raises:
     assert_equal(
         message,
         String(LOWERING_SINK_UNSERVED)
-        + ": segment 3 ends in (SINK_200, KEY_9, ORIENT_7), which no row of"
+        + ": segment 3 ends in (SINK_200, KEY_99, ORIENT_7), which no row of"
         " the sink capability table serves",
     )
 

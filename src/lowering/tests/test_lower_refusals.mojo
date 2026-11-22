@@ -8,10 +8,10 @@
 # detail lowers. A refused plan never produces a LoweredPlan.
 #
 # Tests, and the behaviour each asserts:
-#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a join,
+#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a
 #     top-n, view reference, shared-subplan reference and cast to string are
 #     each refused by their tag name.
-#   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a join under an
+#   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a top-n under an
 #     aggregate refuses the plan; the aggregate over a scan lowers.
 #   test_a_distinct_over_a_column_list_is_refused_and_one_over_the_row_is_cut:
 #     a distinct that names columns is refused with the exact text; the same
@@ -19,15 +19,21 @@
 #   test_a_distinct_over_two_columns_of_one_name_is_refused_and_distinct_names_are_cut:
 #     a distinct whose child repeats a column name is refused with the exact
 #     text, also when the repeat is not adjacent; two differently named integer
-#     columns are not this refusal but the unserved-sink one.
+#     columns are not refused.
 #   test_a_distinct_over_no_column_is_refused_and_one_column_is_cut: a distinct
 #     over a zero-column schema is refused with the exact text; one column
 #     lowers.
 #   test_a_distinct_over_columns_no_sink_row_serves_is_refused: a distinct over
-#     a 16-bit integer, a binary, two integers, an integer and a string, or two
-#     strings of which one is not dictionary encoded is refused as an unserved
-#     sink with the exact text; an integer, a date and a bool column, and two
-#     dictionary encoded strings, lower.
+#     a 16-bit integer or a binary, alone or after served columns, is refused as
+#     an unserved sink with the exact text naming the type; an integer, a date
+#     and a bool column, two integers, an integer and a string, two strings of
+#     which one is not dictionary encoded, and two dictionary encoded strings,
+#     lower.
+#   test_a_group_key_no_sink_row_serves_is_refused: a 16-bit integer or binary
+#     key is refused, also as the last column of a key of two or three columns
+#     whose other columns are served; keys of several columns of mixed types
+#     (date and bool, two integers, a string and an integer, a dictionary and a
+#     plain string) lower.
 # The remaining tests are named for the refusal they hold.
 # =============================================================================
 
@@ -44,6 +50,7 @@ from lowering.lowered_plan import (
     LOWERING_SINK_UNSERVED,
     LOWERING_SCAN_NOT_TOTAL,
     LOWERING_INPUTS_SCAN_COUNT,
+    LOWERING_JOIN_UNSERVED,
 )
 from plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_UDF
 from plan_expr.partition_expr import PartitionExpr
@@ -66,8 +73,6 @@ from plan_ir.logical_plan import (
     SOURCE_CSV,
     SOURCE_NDJSON,
     SOURCE_KIND_UNSET,
-    JOIN_INNER,
-    PLAN_JOIN,
     PLAN_DISTINCT,
     PLAN_TOPN,
     PLAN_VIEW_REF,
@@ -152,10 +157,6 @@ def _refused_with(message: String, token: String, why: String) raises:
 
 
 def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
-    var join = LogicalPlan.join(_scan(), _scan(), _names("k"), _names("k"), JOIN_INNER)
-    _refused_with(_message(join, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_JOIN))
-
-
     var topn = LogicalPlan.topn(_names("k"), _bools(False), 5, _scan())
     _refused_with(_message(topn, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_TOPN))
 
@@ -170,9 +171,9 @@ def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
 
 
 def test_a_refused_node_below_a_breaker_refuses_the_whole_plan() raises:
-    var join = LogicalPlan.join(_scan(), _scan(), _names("k"), _names("k"), JOIN_INNER)
-    var plan = _count_by(join^, List[String]())
-    _refused_with(_message(plan, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_JOIN))
+    var topn = LogicalPlan.topn(_names("k"), _bools(False), 5, _scan())
+    var plan = _count_by(topn^, List[String]())
+    _refused_with(_message(plan, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_TOPN))
     # The same aggregate over a scan lowers.
     assert_equal(_message(_count_by(_scan(), List[String]()), _inputs()), "")
 
@@ -257,16 +258,25 @@ def test_a_group_key_no_sink_row_serves_is_refused() raises:
     _refused_with(_message(_count_by(_scan(), _names("i16")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
     _refused_with(_message(_count_by(_scan(), _names("bin")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
     _refused_with(_message(_count_by(_scan(), _names("k", "i16")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
-    # Several columns that are not all dictionary strings stay unserved, even
-    # when each column alone has a row.
-    _refused_with(_message(_count_by(_scan(), _names("d", "b")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
-    _refused_with(_message(_count_by(_scan(), _names("k", "v")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
-    # Two strings are served only when both are dictionary encoded.
+    # A column no row keys refuses a key of several columns wherever it
+    # stands, naming its type, though the others are served.
+    var three = List[String]()
+    three.append("s")
+    three.append("d")
+    three.append("bin")
+    assert_equal(
+        _message(_count_by(_scan(), three^), _inputs()),
+        _unserved_text("a group key column of type " + String(ArrowType.BINARY) + " has no sink row"),
+    )
+    # Several columns of mixed types, or strings not all dictionary encoded,
+    # lower (the COMPOSITE row; test_lower_plans states the triple).
+    assert_equal(_message(_count_by(_scan(), _names("d", "b")), _inputs()), "")
+    assert_equal(_message(_count_by(_scan(), _names("k", "v")), _inputs()), "")
+    assert_equal(_message(_count_by(_scan(), _names("s", "k")), _inputs()), "")
     var one_dictionary = LoweringInputs()
     one_dictionary.add_scan(None, _names("s"))
     var strings = _two_string_scan()
-    _refused_with(_message(_count_by(strings^, _names("s", "t")), one_dictionary), LOWERING_SINK_UNSERVED, "dictionary")
-    _refused_with(_message(_count_by(_scan(), _names("s", "k")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
+    assert_equal(_message(_count_by(strings^, _names("s", "t")), one_dictionary), "")
     # An integer, a date and a bool key each lower.
     assert_equal(_message(_count_by(_scan(), _names("k")), _inputs()), "")
     assert_equal(_message(_count_by(_scan(), _names("d")), _inputs()), "")
@@ -323,13 +333,8 @@ def test_a_distinct_over_two_columns_of_one_name_is_refused_and_distinct_names_a
     named.append(Expr.alias(Expr.col_ref("k"), "x"))
     named.append(Expr.alias(Expr.col_ref("v"), "y"))
     var other = LogicalPlan.distinct(None, LogicalPlan.project(named^, _scan()))
-    # Two differently named integer columns are the unserved-sink refusal, not this one.
-    assert_equal(
-        _message(other, _inputs()),
-        _unserved_text(
-            "a group key of 2 columns is served only when every column is a dictionary encoded string"
-        ),
-    )
+    # Two differently named integer columns lower.
+    assert_equal(_message(other, _inputs()), "")
 
 
 def test_a_distinct_over_no_column_is_refused_and_one_column_is_cut() raises:
@@ -352,18 +357,17 @@ def test_a_distinct_over_columns_no_sink_row_serves_is_refused() raises:
         _message(LogicalPlan.distinct(None, _only("bin")), _inputs()),
         _unserved_text("a group key column of type " + String(ArrowType.BINARY) + no_row),
     )
-    var two_columns = _unserved_text(
-        "a group key of 2 columns is served only when every column is a dictionary encoded string"
+    assert_equal(
+        _message(LogicalPlan.distinct(None, _pair("k", "i16")), _inputs()),
+        _unserved_text("a group key column of type " + String(ArrowType.INT16) + no_row),
     )
-    assert_equal(_message(LogicalPlan.distinct(None, _pair("k", "v")), _inputs()), two_columns)
-    assert_equal(_message(LogicalPlan.distinct(None, _pair("s", "k")), _inputs()), two_columns)
-    # Two strings are served only when both are dictionary encoded.
+    # Two integers, a string and an integer, and two strings of which one is
+    # not dictionary encoded lower (the COMPOSITE row).
+    assert_equal(_message(LogicalPlan.distinct(None, _pair("k", "v")), _inputs()), "")
+    assert_equal(_message(LogicalPlan.distinct(None, _pair("s", "k")), _inputs()), "")
     var one_dictionary = LoweringInputs()
     one_dictionary.add_scan(None, _names("s"))
-    assert_equal(
-        _message(LogicalPlan.distinct(None, _two_string_scan()), one_dictionary),
-        two_columns,
-    )
+    assert_equal(_message(LogicalPlan.distinct(None, _two_string_scan()), one_dictionary), "")
     # An integer, a date and a bool column, and two dictionary encoded
     # strings, lower.
     assert_equal(_message(LogicalPlan.distinct(None, _only("k")), _inputs()), "")
@@ -496,12 +500,13 @@ def test_inputs_must_hold_one_entry_per_scan() raises:
     assert_equal(_message(_scan(), _inputs(1)), "")
 
 
-def test_the_refusal_tokens_are_four_distinct_names() raises:
+def test_the_refusal_tokens_are_five_distinct_names() raises:
     var tokens = List[String]()
     tokens.append(String(LOWERING_UNCUTTABLE_NODE))
     tokens.append(String(LOWERING_SINK_UNSERVED))
     tokens.append(String(LOWERING_SCAN_NOT_TOTAL))
     tokens.append(String(LOWERING_INPUTS_SCAN_COUNT))
+    tokens.append(String(LOWERING_JOIN_UNSERVED))
     for i in range(len(tokens)):
         for j in range(i + 1, len(tokens)):
             assert_true(tokens[i] != tokens[j])
