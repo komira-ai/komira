@@ -264,6 +264,13 @@ _JOIN_KINDS_TEST_DATA.update({c + ".tsv": ":join_kinds_oracle[" + c + ".tsv]" fo
 #   INT64 range (MAX and MIN rows, partials that each pass INT64, {MAX, MAX, MIN,
 #   MIN} = -2, per-group totals), an empty or all-NULL sum is NULL, and
 #   expressions, CASE and HAVING over the sum run.
+# - test_run_sql_spill: a GROUP BY of 60,001 groups over a memory budget its
+#   tables outgrow, with a spill directory, answers an oracle computed in the
+#   test (count, exact sum, min, max, NULLs, the NULL key) on one and two
+#   workers, as the same query with no budget does, and leaves the directory
+#   empty; the same budget without one is refused at execute; a query that
+#   fits creates nothing; an empty spill directory option and one that cannot
+#   be created are named refusals.
 # - test_run_sql_multifile: run_sql over a table of several Parquet files: a
 #   directory (files at any depth; a dot-name and a non-Parquet file skipped), a
 #   glob, a brace glob, read_parquet('<glob>') and FROM '<glob>' in SQL text; a
@@ -319,6 +326,7 @@ mojo_library(
         "//src/batch_eval:batch_eval",
         "//src/byte_buffer:byte_buffer",
         "//src/clock:clock",
+        "//src/column_format:column_format",
         "//src/containers:containers",
         "//src/column_kernels:column_kernels",
         "//src/compression:compression",
@@ -349,7 +357,10 @@ mojo_library(
         "//src/name_registry:name_registry",
         "//src/objectstore:objectstore",
         "//src/op_agg_state:op_agg_state",
+        "//src/op_join_probe:op_join_probe",
+        "//src/op_sort:op_sort",
         "//src/op_sources:op_sources",
+        "//src/op_spill_rows:op_spill_rows",
         "//src/operator_api:operator_api",
         "//src/optimizer:optimizer",
         "//src/parquet:parquet",
@@ -402,6 +413,7 @@ mojo_library(
         "tests/test_run_sql_multifile.mojo",
         "tests/test_run_sql_no_from.mojo",
         "tests/test_run_sql_q6.mojo",
+        "tests/test_run_sql_spill.mojo",
         "tests/test_run_sql_timers_off.mojo",
         "tests/test_run_sql_union_all.mojo",
         "tests/test_secret_capability_reveal.mojo",

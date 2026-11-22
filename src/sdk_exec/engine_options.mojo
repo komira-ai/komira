@@ -19,11 +19,19 @@ struct EngineOptions(Copyable, Movable):
     var memory_budget_bytes: Optional[Int]
     """The bytes the sinks of a query may reserve in total, which is the size
     of the segment pool. Present values must be at least 1."""
+    var spill_directory: Optional[String]
+    """A directory a grouped aggregation may write its group tables under
+    when the memory budget would refuse them (absent: no spill, the query is
+    refused instead). Created on the first spill if missing; each spill
+    writes and deletes a sub-directory of its own. Present values must not be
+    empty."""
 
     def __init__(
         out self,
         worker_count: Optional[Int] = None,
         memory_budget_bytes: Optional[Int] = None,
+        spill_directory: Optional[String] = None,
     ):
         self.worker_count = worker_count
         self.memory_budget_bytes = memory_budget_bytes
+        self.spill_directory = spill_directory

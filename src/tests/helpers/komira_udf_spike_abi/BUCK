@@ -8,7 +8,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 # the reference runtimes the suite is proven on. Spike code: nothing outside
 # src/tests may depend on it.
 #
-#   komira_udf_runtime.h  the C ABI (section 4.3), Arrow structs embedded
+#   komira_udf_runtime.h  the C ABI (section 4.3), Arrow structs embedded; the
+#                         file is src/udf_abi/komira_udf_runtime.h, taken
+#                         from //src/udf_abi
 #   komira_udf_wire.h     the worker message header and ops (section 5.2)
 #   komira_udf_spike_descriptor.h
 #                         the spike runtimes' descriptor, version 1 (section 3.1)
@@ -121,7 +123,6 @@ filegroup(
 staged_files(
     name = "c_files",
     srcs = [
-        "komira_udf_runtime.h",
         "komira_udf_spike_descriptor.h",
         "komira_udf_wire.h",
         "native/bench_loop.c",
@@ -152,7 +153,7 @@ cxx_library(
         ":c_files[native/spike_descriptor.c]",
     ],
     exported_headers = {
-        "komira_udf_runtime.h": ":c_files[komira_udf_runtime.h]",
+        "komira_udf_runtime.h": "//src/udf_abi:komira_udf_runtime.h",
         "komira_udf_spike_descriptor.h": ":c_files[komira_udf_spike_descriptor.h]",
         "komira_udf_wire.h": ":c_files[komira_udf_wire.h]",
     },

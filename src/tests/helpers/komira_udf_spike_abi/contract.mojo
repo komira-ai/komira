@@ -30,7 +30,8 @@ comptime ERR_WORKER_CRASHED: Int32 = 17
 comptime ERR_HOST_CONTRACT: Int32 = 18
 comptime ERR_KILLED: Int32 = 19
 comptime ERR_READ_SET_MISMATCH: Int32 = 20
-comptime STATUS_COUNT = 21
+comptime ERR_BAD_OPTION: Int32 = 21
+comptime STATUS_COUNT = 22
 """The statuses ABI 1.0 defines: 0 to STATUS_COUNT - 1."""
 
 # capabilities.shapes / spec.shape
@@ -109,6 +110,8 @@ def status_name(code: Int32) -> String:
         return "ERR_KILLED"
     if code == ERR_READ_SET_MISMATCH:
         return "ERR_READ_SET_MISMATCH"
+    if code == ERR_BAD_OPTION:
+        return "ERR_BAD_OPTION"
     return "UNKNOWN(" + String(code) + ")"
 
 

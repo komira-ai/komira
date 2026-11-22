@@ -139,6 +139,8 @@ struct CUdfHost:
     var mem_release: MemReleaseFn
     var now_ns: NowNsFn
     var log: LogFn
+    var n_options: Int
+    var options: Void
 
 
 struct CUdfCapabilities:
