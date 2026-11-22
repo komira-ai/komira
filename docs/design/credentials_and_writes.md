@@ -596,8 +596,9 @@ bytes whichever party runs it.
   - The location of a staged table is known only from the stage-create response. So for a staged
     create, the coordinator fills `data_access` after that response and before it cuts the segments
     for the hosts.
-  - **When no scope covers that location, a staged create on several hosts is refused at bind**,
-    before any file is written (`ICEBERG_STAGED_CREATE_NO_SCOPE`, the Iceberg design's code). The
+  - **When no scope covers that location, a staged create on several hosts is refused by the
+    coordinator**, after the stage-create response and before it cuts the segments, so before any file
+    is written (`ICEBERG_STAGED_CREATE_NO_SCOPE`, the Iceberg design's code). The
     message says to bind a scope over the table's location.
     - The staged create's vended credentials stay with the party that ran the stage-create, for its
       own writes. No other party receives them.
