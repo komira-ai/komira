@@ -69,8 +69,11 @@ The public names of each module:
 
 | module | names it adds |
 |---|---|
-| `komira` | `DataFrame`, `Series`, `GroupBy`, `col` (pandas 3's `pd.col`), `concat`, `merge_asof`, `from_arrow`, `bind`; the readers `read_parquet`, `read_csv`, `read_json`, `read_feather`, `read_orc`, `read_avro` |
+| `komira` | `DataFrame`, `Series`, `GroupBy`, `col` (pandas 3's `pd.col`), `concat`, `merge_asof`, `from_arrow`, `add_sql_binding`; the readers `read_parquet`, `read_csv`, `read_json`, `read_feather`, `read_orc`, `read_avro` |
 | `komira.pl` | `LazyFrame`, `LazyGroupBy`, `Expr`, `col`, `lit`, `when`, `len`, `concat`, `concat_str`, `from_arrow`; the readers `scan_parquet`, `scan_csv`, `scan_ndjson`, `scan_ipc`, `scan_orc`, `scan_avro` |
+
+The names `files`, `iceberg`, the credential classes, `AMBIENT`, `ANONYMOUS` and `read_table`'s catalog
+argument belong to [credentials_and_writes.md](credentials_and_writes.md), and are reserved here.
 
 - `komira.__all__` gains the names of the first row, and `komira.pl.__all__` holds the second. Every
   other module of the package stays private.
@@ -169,16 +172,17 @@ The frames are immutable, except for one pandas idiom:
   process's default session when `session` is `None`, as `km.sql` does. `Session` gains no reader
   methods, so there is one way to read a file.
 - **Frames of two sessions never meet.** A verb that combines them (`merge`, `join`, `concat`, `isin`)
-  raises `UnsupportedOperation`. So does binding a frame (`bind`, or a keyword of `sql`) on a session that is not the frame's own.
+  raises `UnsupportedOperation`. So does adding a frame with `add_sql_binding` on a session that is not the frame's own.
 - **`from_arrow(data, *, session=None)`** makes a frame of any object that exports the Arrow C stream
   (`__arrow_c_stream__`): a `pyarrow.Table`, a polars `DataFrame`, or a pandas `DataFrame`. The stream
   is read once, when `from_arrow` is called, and registered with the session. This needs the engine's
   in-memory table, which plan bytes do not carry. Until that lands, the scan raises at the terminal.
-- **A frame is a source.** `Session.bind(name, frame)`, or `s.sql(query, name=frame)` for one
-  statement, names a frame's plan so that the SQL reads it as a view (the `view` capability).
-  `km.bind(name, frame)` does the same on the default session. This is the one binding of every kind of
-  source ([credentials_and_writes.md decision 2](credentials_and_writes.md#2-binding-a-name-per-call-or-once-on-the-session)),
-  and it replaces the `register_view` of earlier drafts.
+- **A frame is a source for SQL.** `Session.add_sql_binding(name, frame)` names a frame's plan so that
+  the SQL reads it as a view (the `view` capability). `km.add_sql_binding(name, frame)` does the same on
+  the default session. This is the one SQL binding of every kind of source
+  ([credentials_and_writes.md decision 2](credentials_and_writes.md#2-binding-a-sql-name-add_sql_binding-on-the-session)),
+  and it replaces the `register_view` of earlier drafts. The readers take objects or paths directly and
+  read no SQL binding.
 
 ### 5. Attributes never fall through
 
@@ -530,7 +534,7 @@ package design). D4 to D18 are this design's own.
 | D14 | engine limits | some were checked in Python (NULL placement, `head(0)`) | refused by the engine at the terminal, with its step and code (section 6) | the Python checks went stale when the engine moved |
 | D15 | `len(df)` and `bool(df)` | ran the query | raise `UnsupportedOperation` naming the terminal (section 2) | no dunder runs a query |
 | D16 | ties chosen by row order | `drop_duplicates(subset=...)` was refused | the library's default is accepted and returns any tied row; an explicit order-dependent choice is refused (section 7) | the default asks a question the plan can answer, with a listed departure |
-| D17 | verbs the earlier SDK lacked | absent: `with_columns`/`assign` over the Mojo builder's rules, `rename`, `dropna`/`drop_nulls`, `concat`, `fillna`, `astype`/`cast`, `value_counts`, `nlargest`/`top_k`, `tail`, `merge_asof`/`join_asof`, `from_arrow`, binding a frame by name (`bind`) | carried from the Mojo builders where one exists (section 9), with rulings 14 and 15 | the Python skins lacked the verbs the Mojo surface has |
+| D17 | verbs the earlier SDK lacked | absent: `with_columns`/`assign` over the Mojo builder's rules, `rename`, `dropna`/`drop_nulls`, `concat`, `fillna`, `astype`/`cast`, `value_counts`, `nlargest`/`top_k`, `tail`, `merge_asof`/`join_asof`, `from_arrow`, binding a frame by name (`add_sql_binding`) | carried from the Mojo builders where one exists (section 9), with rulings 14 and 15 | the Python skins lacked the verbs the Mojo surface has |
 | D18 | where the matrix tests live | no matrix | `src/tests/e2e/pandas_e2e` and `polars_e2e` (section 10) | the matrix lint's package rule |
 
 ## What must always hold?

@@ -5,58 +5,61 @@ deduced rather than read are marked *(inferred)*.
 
 ## What a user types
 
+Every table name a statement reads is bound once, on the session, with `add_sql_binding`. Then `sql`
+takes the query alone. URLs and local paths written in the SQL need no name.
+
 A bucket with keys:
 
 ```python
 import komira
 
-orders = komira.files(
+s = komira.Session()
+s.add_sql_binding("raw_orders", komira.files(
     "s3://raw-events/orders/*.parquet",
     credential=komira.AwsKeys("raw-etl", key_id=key_id, secret=secret),
     region="eu-west-1",
-)
-s = komira.Session()
-s.sql("SELECT region, sum(amount) FROM orders GROUP BY region", orders=orders)
+))
+s.sql("SELECT region, sum(amount) FROM raw_orders GROUP BY region")
 ```
 
-A catalog:
+A catalog, which holds many tables. SQL names a table in it as `catalog.namespace.table`:
 
 ```python
-lake = komira.iceberg(
+sales_catalog = komira.iceberg(
     "https://catalog.example.com/api/catalog",
-    warehouse="analytics",
-    credential=komira.OAuth2ClientCredentials("lake-etl", client_id="etl", client_secret=client_secret),
+    warehouse="prod",
+    credential=komira.OAuth2ClientCredentials("catalog-etl", client_id="etl", client_secret=client_secret),
 )
-s.sql("SELECT * FROM lake.sales.orders LIMIT 10", lake=lake)
+s.add_sql_binding("sales_catalog", sales_catalog)
+s.sql("SELECT * FROM sales_catalog.sales.orders LIMIT 10")
 ```
 
-One source given before the query, the owner's form, read as `self`:
+One table of that catalog, bound under a name of its own, so SQL says just the name:
 
 ```python
-out = s.sql(orders, "SELECT region, sum(amount) FROM self GROUP BY region")
+s.add_sql_binding("orders_table", sales_catalog.table("sales.orders"))
+s.sql("SELECT count(*) FROM orders_table")
 ```
 
-Both in one statement, with the catalog bound once on the session:
+A statement over two bindings, a file source and the catalog:
 
 ```python
-s.bind("lake", lake)
-s.sql("INSERT INTO lake.sales.orders SELECT * FROM orders", orders=orders)
+s.sql("INSERT INTO sales_catalog.sales.orders SELECT * FROM raw_orders")
 ```
 
-- For the positional form, these alternatives were rejected:
-  - naming the source after the caller's variable, which Python cannot see reliably;
-  - a `sql` method on every source, a second door for the same thing;
-  - another name than `self` (`this`, `t`, `_`), where polars' choice is the one users have met
-    *(inferred)*.
-
-  The reasons are in [Options considered](#options-considered).
-- The SQL text is DuckDB's. Only the Python call is komira's: the names a statement reads come from
-  keyword arguments of `sql`, or from `bind` on the session.
-- A source is an object the user holds. A credential is an object with a name.
-- The plan the library builds carries each source's location and its credential's name
-  (`raw-etl`, `lake-etl`). It never carries a credential's value, and never the session-local names
-  `orders` or `lake`. The one exception is a presigned URL's query string, which the user wrote into
-  the location. A plan that leaves the process refuses it (decision 4).
+- **`komira.iceberg(...)` is a catalog of many tables.** It is not one table, and not a lake of files.
+  `catalog.table("ns.table")` picks one table out of it. The table uses the catalog's credential
+  under the same name, `catalog-etl`.
+- **The SQL text is DuckDB's.** Only the Python call is komira's: one method on the session binds a
+  name, and every `sql` call reads the session's bindings.
+- **What the plan carries.** A source is an object the user holds, and a credential is an object with
+  a name. The plan the library builds carries only the sources the statement uses, each with its
+  location and its credential's name (`raw-etl`, `catalog-etl`).
+  - It never carries a credential's value.
+  - It never carries the session-local names `raw_orders`, `sales_catalog` or `orders_table`.
+  - It never carries bindings the statement does not use.
+  - The one value it may carry is a presigned URL's query string, which the user wrote into a
+    location. A plan that leaves the process refuses that (decision 4).
 
 ## Questions for the owner
 
@@ -68,7 +71,7 @@ The rest of the document assumes the recommendation.
 | plaintext `http://` URLs in a query | reads them | refuses them by name (`STORAGE_URL_REFUSED`); plaintext only through a bound source's `endpoint=` | refuse: a URL in a query should not be able to turn off transport security |
 | an S3 source with no region from any setting | assumes `us-east-1` | refuses by name (`STORAGE_REGION_UNKNOWN`) | refuse: a guessed region turns a missing setting into a redirect error from the wrong place |
 | `COPY ... TO` with no `FORMAT` and an extension it cannot read | writes CSV | refuses by name (`COPY_FORMAT_NOT_INFERRED`) | refuse: guessing writes a file the statement may not have meant |
-| a URL under no bound scope, on the default session or any other | sends the request with no credential unless a secret was created; the provider chain is opt-in (`CREATE SECRET (TYPE s3, PROVIDER credential_chain)`) *(to confirm against the pinned DuckDB)* | every session starts with `s3://` and `gs://` scopes bound to `komira.AMBIENT`, the process's own identity through the provider chains (decision 3) | keep the ambient default: it is what boto3, pyarrow and polars do beside komira *(inferred from their default credential chains)*, and `s.bind(..., komira.files("s3://", credential=komira.ANONYMOUS))` turns it off. The third default scope, `https://`, is `komira.ANONYMOUS`. An `az://` URL has no default scope and is refused with `CREDENTIALS_NOT_FOUND` until a scope is bound |
+| a URL under no bound scope, on the default session or any other | sends the request with no credential unless a secret was created; the provider chain is opt-in (`CREATE SECRET (TYPE s3, PROVIDER credential_chain)`) *(to confirm against the pinned DuckDB)* | every session starts with `s3://` and `gs://` scopes bound to `komira.AMBIENT`, the process's own identity through the provider chains (decision 3) | keep the ambient default: it is what boto3, pyarrow and polars do beside komira *(inferred from their default credential chains)*, and `s.add_sql_binding("public", komira.files("s3://", credential=komira.ANONYMOUS, region="us-east-1"))` turns it off for SQL. The third default scope, `https://`, is `komira.ANONYMOUS`. An `az://` URL has no default scope and is refused with `CREDENTIALS_NOT_FOUND` until a scope is bound |
 | the environment variables below, which `komira.AMBIENT` reads | its credential chain reads the same providers' variables | reads exactly the list below, inside the library, only for `komira.AMBIENT`, and `AwsProfile` reads only the file locators | allow the whole list as rule S2's provider-standard credentials, including the names outside `AWS_*` and `GOOGLE_*`: they are how the providers find credentials, and nothing else in komira reads the environment |
 
 ### The environment komira reads
@@ -97,12 +100,12 @@ is configuration (rule S2), and it comes from a source's `endpoint=`.
 
 People want komira to read files in object stores and tables in their Iceberg catalogs, and to write
 results. The SQL binder turns a statement into a logical plan. It cannot work out what a name like
-`orders` or `lake` refers to, or who is allowed to read it. Someone has to say that, and the plan has
+`raw_orders` or `sales_catalog` refers to, or who is allowed to read it. Someone has to say that, and the plan has
 to record it in a form that runs the same way in a local session and on a job manager.
 
 This design fixes that model for every kind of source and every SDK. It covers:
 
-- how a user declares a source, binds a name to it, and gives it a credential;
+- how a user declares a source, binds a SQL name to it on the session, and gives it a credential;
 - what the binder takes as input;
 - what the plan carries;
 - who turns a credential's name into a value, locally and on a job manager;
@@ -110,8 +113,7 @@ This design fixes that model for every kind of source and every SDK. It covers:
 - the C ABI under the SDKs;
 - `https://` reads, writes, and the error codes of all of these.
 
-It replaces three spellings that earlier drafts proposed for the same thing:
-- this document's own `Session(storage=[...])`;
+It replaces the spellings that earlier drafts proposed for the same thing:
 - the Iceberg design's `attach_iceberg`;
 - the DataFrame design's `register_view`.
 
@@ -147,7 +149,7 @@ Fixed before this design and not reopened:
   the name. So registering a name a second time keeps the first file. The Python package's
   `register_parquet` says a second registration replaces the first
   ([python/komira/_session.py](../../python/komira/_session.py)). Decision 2 makes replacement the
-  rule, and the pull request that adds `bind` fixes this with a test that fails today.
+  rule, and the pull request that adds `add_sql_binding` fixes this with a test that fails today.
 - **EXISTS, no credential anywhere in the plan.**
   - `WireParquetSource` (`paths` = 1 to `fs_is_local` = 10, [src/plan_proto/plan.proto](../../src/plan_proto/plan.proto))
     carries verbatim paths, and the codec refuses a non-local file system.
@@ -205,11 +207,16 @@ Every Python name in this decision is **PROPOSED**. `komira.Session` itself **EX
 
 **A source** says where data is. It is a value the user builds and holds, and building one does no
 I/O. There is one kind of object per kind of source, and they all bind the same way (decision 2).
+`catalog.table(...)` builds a table source from a catalog object and a table name. It reads nothing
+until a statement uses it. `komira.iceberg(...)` is the Iceberg REST catalog object that the plan
+design's `km.catalog("lake")` stood for. `km.catalog(name)`, a name the deployment maps, is not added,
+because a session-local name never reaches the wire (decision 4).
 
 | kind | Python | what it holds |
 |---|---|---|
 | files | `komira.files(location, *, credential=komira.AMBIENT, endpoint=None, region=None, url_style=None, hive_partitioning=False)` | a local path, a glob, or a URL (`s3://`, `gs://`, `az://`, `abfss://`, `https://`); how to reach its store; the credential |
-| a catalog | `komira.iceberg(uri, *, warehouse=None, credential=komira.AMBIENT, signing=None, access_delegation="vended-credentials")` | an Iceberg REST catalog's location and the credential for it. The tables inside are named in SQL. `access_delegation` is `"vended-credentials"` or `"none"`. Any other value, `"remote-signing"` among them, is refused by name; remote signing is a later, additive value |
+| a catalog | `komira.iceberg(uri, *, warehouse=None, credential=komira.AMBIENT, signing=None, access_delegation="vended-credentials")` | an Iceberg REST catalog of many tables: its location and the credential for it. Bound under a name, its tables are named in SQL as `name.namespace.table`. `access_delegation` is `"vended-credentials"` or `"none"`. Any other value, `"remote-signing"` among them, is refused by name; remote signing is a later, additive value |
+| one table of a catalog | `catalog.table(name)`, a method of the catalog object; `name` is `"namespace.table"`, or a tuple of namespace levels and the table name | that catalog, and one table in it. Bound under a name, SQL reads it by that name alone. It uses the catalog's credential, so the plan names the same credential |
 | a frame or a view | a komira `DataFrame` or `LazyFrame`, passed as it is | its plan, which the binder reads as a view |
 | later: a database | for example a `komira.postgres(host, database, *, credential=...)` | a connection's location and the credential for it. This design does not design it ([Fits later](#a-source-that-fits-later-a-customer-database)) |
 
@@ -254,102 +261,87 @@ I/O. There is one kind of object per kind of source, and they all bind the same 
   - A secret is a Python `str` until the library copies it. The package cannot wipe interpreter
     memory and does not claim to.
 
-### 2. Binding a name: per call, or once on the session
+### 2. Binding a SQL name: `add_sql_binding`, on the session
 
-There is one operation: bind a name to a source. It has two spellings, which differ only in how long
-the binding lasts. `bind` and `sql` are **PROPOSED**. `Session.register_parquet` **EXISTS**.
+There is one way to bind a name: `s.add_sql_binding(name, source)` (**PROPOSED**). The binding lasts
+until the session closes, or until the name is bound again. Then `s.sql(query)` (**PROPOSED**) takes
+the query alone.
 
-| spelling | lasts | example |
-|---|---|---|
-| `s.sql(query, /, **sources)` | this statement | `s.sql("SELECT * FROM a JOIN b USING (k)", a=src_a, b=src_b)` |
-| `s.sql(source, query, /, **sources)` | this statement | `out = s.sql(orders, "SELECT region, sum(amount) FROM self GROUP BY region")` |
-| `s.bind(name, source)` | until the session closes, or until the name is bound again | `s.bind("lake", lake)` |
-
-- **One unnamed source per call, as `self`.** The owner's form `s.sql(t, "COMMAND")` is served
-  (**PROPOSED**): a source given before the query is bound for that statement under the name `self`.
-  `self` is, by the author's reading of polars' documentation, the name polars' `DataFrame.sql` gives
-  its frame *(to confirm against the pinned polars)*.
-  - Named sources may be added beside it.
-  - A second unnamed source raises `TypeError`, because two sources cannot share one name. A keyword
-    `self=` beside an unnamed source raises `TypeError` too.
-  - A binding named `self` on the session is hidden by the unnamed source for that statement, as any
-    call binding hides a session binding.
-  - The unnamed source may be of any kind. A catalog is read as `self.ns.t`.
-- **A session binding always has a name.** `s.bind(source)` without a name raises `TypeError`. An
-  unnamed session binding would make `self` mean whatever was bound last in every later statement,
-  and a second one would replace the first without a word.
-
-- **A call binding hides a session binding of the same name** for that statement. A CTE of the same
-  name hides both, as a CTE hides a table today. Names fold case, as the binder's catalog does.
-- **Binding a name again replaces it.** Nothing appends behind the user's back.
-- **Credential values follow the binding that brought them.**
-  - A value that arrives with a session binding is the session's value of that name.
-    - Binding a new value under an existing name on the session changes it for every binding that
-      uses the name, session and call alike. This is intended: the plan says only the name, so a name
-      has one meaning in a session.
-  - A value that arrives with a call binding is that call's value of the name. It is dropped with
-    the call, and never changes the session's value.
-  - **Every value has a generation**, a number the session draws from one counter for each value it
-    seals, whether on the session or on a call (**PROPOSED**).
-    - A value byte-equal to the one already held under that name keeps its generation.
-    - Any other value gets a new one.
-    - So a user who passes a new token under the same name on each call, with no session binding,
-      gets a new generation on the call that brings it. No cache answers that call from an earlier
-      call's value (decision 6).
-  - Within one statement, one credential name has one value. Two different values under one name
-    are refused at bind with `CREDENTIAL_NAME_CONFLICT`, naming the credential and both binding names.
-    This applies to two call bindings, and to a call binding against a session binding.
-  - **The refusal of a call binding that differs from the session's value is intended.** The plan
-    carries only the name, so one statement with two values for it would mean two identities under one
-    name. No job manager could reproduce that.
-  - A user whose token was rotated does one of three things:
-    - With no session binding of the name, they pass the new value on the next call. It gets a new
-      generation.
-    - With a session binding of the name, they bind the source on the session again with the new
-      value. That changes the name for every binding, at a new generation (decision 5).
-    - They give the new value a new credential name.
-  - So reading one location under two credentials in one statement needs two credential names.
-- **`sql` takes no keyword other than sources, now or later.** Every keyword names a source, so a
-  future option can never collide with a table name. Options belong on `Session`.
-- **Module-level spellings.** `komira.sql(query, /, **sources)`, `komira.sql(source, query, /,
-  **sources)` and `komira.bind(name, source)` act on the default session ([python_package.md decision 5](python_package.md#5-the-default-session)).
+- **The method's name says SQL, because the binding is only for SQL.** The DataFrame door takes
+  objects directly and never reads these bindings: `komira.read_table(catalog, "ns.table")`, and
+  `komira.read_parquet` and the other file readers, given a path or a `komira.files` source.
+- **Re-adding a name replaces its binding.** Nothing appends behind the user's back.
+- **What a binding reads when it is added.** A `komira.files` source of a local path resolves a
+  relative path against the working directory and reads the footer when the binding is added, as
+  `register_parquet` does, and infers the format from the extension. A remote source, a catalog and a
+  catalog table are read when a statement first uses them.
+- **The SDK seals credentials, then adds the binding.** It seals every credential the source names
+  (a catalog's own and its `data_access` credential included), then calls `komira_add_sql_binding`. A
+  refused add leaves the binding table unchanged, and keeps the values it sealed, with their
+  generations.
+- **Names fold case**, as the binder's catalog does. A CTE of the same name hides a binding within its
+  statement, as a CTE hides a table today.
+- **A credential's value is set when a binding, or a DataFrame reader's source, that uses it is
+  added.** A reader given a `komira.files` source with a credential seals that value at the call,
+  into the same session store, by the same rule. The name is shared with the SQL bindings: one name
+  has one value in a session.
+  - Each value the session takes starts a new **generation** of its credential name (**PROPOSED**),
+    unless it is byte-equal to the value the name already holds. So re-adding a binding starts a new
+    generation exactly when its credential's value changed.
+  - Re-adding a binding with a new value under an existing credential name changes it for every
+    binding that uses that name, at the new generation. This is intended: the plan says only the
+    name, so a name has one value in a session at a time. Nothing cached under the old generation is
+    used again (decision 6).
+  - A user whose token was rotated re-adds the binding with the new value, or gives the new value a
+    new credential name.
+  - So reading one location under two credentials needs two credential names.
+- **`sql` has no options and no source arguments.** Options belong on `Session`.
+- **Module-level spellings.** `komira.add_sql_binding(name, source)` and `komira.sql(query)` act on
+  the default session ([python_package.md decision 5](python_package.md#5-the-default-session)).
 
 What happens to each earlier spelling:
 
 | spelling | where it came from | now |
 |---|---|---|
-| `Session.register_parquet(name, path)` and its C row `komira_register_parquet` | the package design; built and released | kept, as a spelling of `bind(name, komira.files(path))` with nothing of its own: the library implements it as a session `komira_bind` of a local file source. It is not deprecated, because it is released and removing it would break a public call. Its docs point at `bind` |
-| `Session(storage=[komira.S3(...), ...])`, `komira.S3`, `GCS`, `Azure`, `HTTPS` | earlier drafts of this document; never built | gone. A storage scope is a `komira.files` source whose location ends in `/`, bound like any other (decision 3) |
-| `Session.attach_iceberg(name, uri=, warehouse=, auth=)` and `Session.catalog(name)` | the Iceberg design, not merged | gone. `komira.iceberg(...)` is the catalog. The user holds it, and binds it per call or with `bind` |
-| `Session.register_view(name, frame)` | the DataFrame design, not built | gone. `s.bind(name, frame)` and `s.sql(..., name=frame)` |
+| `Session.register_parquet(name, path)` and its C row `komira_register_parquet` | the package design; built and released (**EXISTS**) | kept, as a spelling of `add_sql_binding(name, komira.files(path))`: the library implements it as `komira_add_sql_binding` of a local file source. It keeps what it does today: a relative path resolves against the working directory at the call, `~` is expanded in Python, and the footer is read at the call, so a missing file raises there. It is not deprecated, because it is released and removing it would break a public call. Its docs point at `add_sql_binding` |
+| `Session.attach_iceberg(name, uri=, warehouse=, auth=)` and `Session.catalog(name)` | the Iceberg design, not merged | gone. `komira.iceberg(...)` is the catalog. The user holds it, and adds it with `add_sql_binding` |
+| `Session.register_view(name, frame)` | the DataFrame design, not built | gone. `s.add_sql_binding(name, frame)` |
 | `komira.session()` | the Iceberg design's example | not added. The class is `komira.Session`, and the package design has no `session()` accessor |
-| `read_table(catalog, name, as_of=)` and `frame.write_table(catalog, name, mode=)` | the plan design §15.9 and the Iceberg design | kept, as DataFrame-door verbs. They take a held catalog source, bind no name, and emit the plan that the SQL `catalog.ns.t`, `INSERT` and `CREATE [OR REPLACE] TABLE ... AS` emit, with the same source and credential name. `as_of=` has no SQL spelling, because the Iceberg design refuses SQL time travel |
+| `read_table(catalog, name, as_of=)` and `frame.write_table(catalog, name, mode=)` | the plan design §15.9 and the Iceberg design | kept, as the DataFrame door's verbs. They take a held catalog object and read no SQL binding. They emit the plan that the SQL `catalog.ns.t`, `INSERT` and `CREATE [OR REPLACE] TABLE ... AS` emit, with the same source and credential name. `as_of=` has no SQL spelling, because the Iceberg design refuses SQL time travel |
 
 ### 3. The binder: a statement and its bindings
 
-**PROPOSED.** The binder's input becomes `(statement, bindings)`. The bindings are:
-
-- the session's bindings;
-- overlaid by the call's bindings;
-- plus the session's default scopes.
+**PROPOSED.** The interface is this: **every `sql` call gives the SQL-to-plan converter the statement
+and the session's whole binding table**, the names the user added plus the session's default scopes.
+- The converter looks nothing up by itself.
+- What a name means is what the table says at that call.
+- The SDK keeps the library's copy of the table equal to its own by sending each binding when it is
+  added (decision 8). So `komira_sql_stream` runs the statement over the context's whole table, and
+  the SDK sends no list of its own with the statement.
 
 A binding holds a bound source: its kind, its location, its access settings (decision 4) and its
-credential name. It holds no credential value. `SqlCatalog` is that table: the session keeps one, and
-each call overlays its own.
+credential name. It holds no credential value. `SqlCatalog` is that table, one per session.
+
+**The plan carries only what the statement uses.** The binder plugs in the sources the statement names
+or whose scope covers one of its URLs. The plan holds those sources, each with its credential's name
+and access settings, and nothing about the bindings the statement does not use.
 
 How each kind of name in SQL finds its source:
 
 | written in SQL | how it binds |
 |---|---|
-| `orders` (one part) | the binding named `orders`. A file source becomes a scan, and a frame becomes a view of its plan |
-| `lake.sales.orders` (two or more parts) | the first part names a binding, which must be a catalog. The rest is the catalog's to resolve: namespace levels, then the table ([the Iceberg design](#reconciling-with-the-iceberg-design)). A first part bound to something other than a catalog is refused with `BIND_NOT_A_CATALOG` |
-| `main.orders`, `memory.main.orders` | DuckDB's default schema and database. When no binding is named `main` or `memory`, these qualifiers resolve the unqualified name, as DuckDB does, and as the binder does today. Any other qualifier of a non-catalog is `BIND_NOT_A_CATALOG` |
+| `orders` (one part) | the binding named `orders`. A file source becomes a scan, a catalog table (`catalog.table(...)`) becomes that table's scan, and a frame becomes a view of its plan |
+| `sales_catalog.sales.orders` (two or more parts) | the first part names a binding, which must be a catalog. The rest is the catalog's to resolve: namespace levels, then the table ([the Iceberg design](#reconciling-with-the-iceberg-design)). A first part bound to something other than a catalog is refused with `BIND_NOT_A_CATALOG` |
+| `main.orders`, `memory.main.orders` | DuckDB's default schema and database. When no binding is named `main` or `memory`, these qualifiers resolve the unqualified name, as DuckDB does, and as the binder does today |
+| `x.orders` with `x` not bound and not `main` or `memory` | `BIND_NAME_UNBOUND`, naming `x`. A first part bound to something other than a catalog is `BIND_NOT_A_CATALOG` |
 | `'s3://raw-events/orders/a.parquet'`, `read_parquet('gs://...')`, `COPY ... TO 's3://...'` (a URL literal) | the **scope** whose location is the longest prefix of the URL, among the bound file sources whose location ends in `/`, compared after aliases are normalised (`s3a://` to `s3://`, `gcs://` to `gs://`). The scope gives the URL its credential name and access settings |
 | `'data/x.parquet'` (a local path) | the local file system, under the identity of the process. No binding is needed, so DuckDB's `FROM 'x.parquet'` works as it is |
 
 - **A name with no binding is refused by name.** The error is `BIND_NAME_UNBOUND`, and its message lists
   the bound names, sorted:
-  `bind: BIND_NAME_UNBOUND: no source is bound to 'ordrs'; bound names: lake, orders`.
+  `bind: BIND_NAME_UNBOUND: no source is bound to 'ordrs'; bound names: orders_table, raw_orders, sales_catalog;
+  bind the name on the session first`.
+  - The library's text names no SDK method, because each SDK spells it in its own casing.
   - This replaces `unknown table`. It also replaces the Iceberg design's `ICEBERG_CATALOG_NOT_ATTACHED`.
   - The list is cut at 50 names, with the count of the rest.
 - **Every session starts with three scopes**, at the scheme roots (the owner question at the top asks
@@ -360,8 +352,7 @@ How each kind of name in SQL finds its source:
   They have no names.
   - **A scope is keyed by its normalised location**, not by its binding name. Binding a scope at a
     location that already has one replaces it, whatever either is called, for example
-    `s.bind("public", komira.files("s3://", credential=komira.ANONYMOUS, region="us-east-1"))`.
-  - Of two scopes with the same location, a call binding wins over a session binding.
+    `s.add_sql_binding("public", komira.files("s3://", credential=komira.ANONYMOUS, region="us-east-1"))`.
   - `BIND_NAME_UNBOUND` lists names, not scopes.
   - A URL under no scope, an `az://` URL for example, is refused with `CREDENTIALS_NOT_FOUND`, which
     says to bind a scope.
@@ -374,20 +365,24 @@ How each kind of name in SQL finds its source:
     query string or a fragment.
 - **The binder reads footers with the credential's value**, inside the library, through the
   session's secret store. The plan it produces still carries only the name.
-- **DataFrame readers and write terminals take no credential argument.** For a remote URL,
-  `read_parquet` and the other readers, and the write terminals for their destination, resolve the
-  session's scope by the same longest-prefix rule. They do this when the reader or terminal is called,
-  and they write the result into the plan's `access` field. A URL under no scope is refused with
-  `CREDENTIALS_NOT_FOUND`, as in SQL. A source held as an object is read with `read_table` or by
-  binding it.
+- **The DataFrame door reads no SQL binding.** Its readers and write terminals take an object or a
+  path.
+  - Given a `komira.files` source, a reader uses that source's credential and settings.
+  - Given a bare path or URL, it uses the three built-in defaults as constants: `ambient` for
+    `s3://` and `gs://`, `anonymous` for `https://`. It does not use the session's binding table, so
+    re-binding `s3://` for SQL changes nothing for readers. A remote URL with its own credential is
+    passed as a `komira.files` source.
+  - The reader puts the result in the plan's `access` field when it is called.
+  - A catalog table is read with `komira.read_table(catalog, "ns.table")`.
 
 ### 4. The plan: a location and a credential name, never a value
 
 **PROPOSED.** The plan carries a resolved source: where the data is, the settings needed to reach it,
 and the name of the credential.
 - It never carries a credential's value.
-- It never carries the session-local binding name (`orders`, `lake`). Two users' `lake` may be two
-  catalogs, and a job manager must not have to guess which.
+- It never carries the session-local binding name (`orders_table`, `sales_catalog`). Two users' `sales_catalog` may
+  be two catalogs, and a job manager must not have to guess which.
+- It carries only the sources the statement uses (decision 3).
 - The wire is permanent, so each field below says what it may hold.
 
 ```proto
@@ -417,13 +412,14 @@ message WireIcebergCatalog {
                                      // catalog vends none: the scope covering the table's location
 }
 
-// plan.proto, new. The input of komira_bind (decision 8): a source as the user declared it.
+// plan.proto, new. The input of komira_add_sql_binding (decision 8): a source as the user declared it.
 // The binder translates it into the plan's own source messages; it is never part of a plan.
 message WireBoundSource {
   oneof kind {
     WireFileSource     files   = 1;
     WireIcebergCatalog iceberg = 2;
     WirePlanEnvelope   view    = 3;  // a frame's plan; one with a write target or UDFs: BIND_VIEW_NOT_A_QUERY
+    IcebergTableRef    iceberg_table = 4;  // one table of a catalog: catalog.table("ns.t")
   }
 }
 message WireFileSource {
@@ -537,19 +533,17 @@ A plan names credentials. Exactly one party turns each name into a value, and th
 bytes whichever party runs it.
 
 - **In a local session**, the session holds a value per credential name.
-  - The library copies each value into the session's store, or the call's overlay of it, and keeps a
-    handle (decision 8).
+  - The library copies each value into the session's store, and keeps a handle (decision 8).
     - The store is a `SecretStore`, an **EXISTS** trait in `secret_store`.
     - An in-memory conformer, `SharedMemorySecretStore`, **EXISTS** in `secrets`.
-    - The session's use of it, and the call overlay, are **PROPOSED**.
+    - The session's use of it is **PROPOSED**.
   - `ambient` resolves through the provider chains (decision 7), and `anonymous` sends nothing.
-  - Python passes a credential's value each time a source using it is bound, per call or on the
-    session.
-  - **One session value per name.** A session binding whose credential has an existing name but a
-    different value replaces the session's value and starts a new generation of that name. Nothing
-    cached under the old generation is used again (decision 6). That is how a user rotates a
-    short-lived token: `s.bind` again with the new value. A call binding's value lives in the call's
-    overlay and is gone when the call returns (decision 2).
+  - Python seals a credential's value each time a binding, or a DataFrame reader's source, that uses
+    it is added (decision 2).
+  - **One value per name.** A new value under an existing credential name replaces the session's
+    value and starts a new generation of that name, for every binding that uses it. Nothing cached
+    under the old generation is used again (decision 6). That is how a user rotates a short-lived
+    token: re-add the binding with the new value (decision 2).
 - **On a job manager**, the **PROPOSED** interface its design must provide, so the two cannot drift:
   1. **The same names.** The job manager resolves each name in `DeclaredNeeds.credentials` (**PROPOSED**)
      and nothing else. A name maps to the customer's secret catalog row with that `name_handle`, in the run's
@@ -615,8 +609,8 @@ bytes whichever party runs it.
 
 ### 6. Identity and caches
 
-Per-call bindings let one location be read under two credentials: in two statements, or in one
-statement under two credential names (decision 2). A cache must never answer identity B with what it
+One location can be read under two credentials: under two credential names, or under one name
+before and after its value changes (decision 2). A cache must never answer identity B with what it
 read for identity A.
 
 - **The identity of a read** is one tuple: `(location, credential name, credential generation,
@@ -632,8 +626,9 @@ read for identity A.
   - Every key below is this tuple, or this tuple with the location narrowed to its scheme and bucket
     or account.
   - The one exception is the compile cache, which is handled by invalidation instead.
-- **Registrations** are keyed by binding name. A call binding is a per-statement overlay that is
-  dropped when the statement returns.
+- **Bindings** (`SqlCatalog`) are keyed by the folded binding name. No cache is keyed by it. Each
+  credential value has exactly one generation, set when the session takes it, so no value is ever read
+  without one.
 - **Every cache that depends on what a read returned keys on the identity of the read.** That covers
   the binder's footer cache, the scan's metadata cache, object metadata, and later the plan-compile
   cache.
@@ -694,20 +689,16 @@ read for identity A.
 ```text
 komira_credential_add	Int32	Handle,Int32,CStr,UnsafePointer[Int32]	1.x
 komira_credential_set	Int32	Handle,Int32,Int32,ConstBytes,UInt64	1.x
-komira_credential_seal	Int32	Handle,Int32,Int32	1.x
-komira_bind	Int32	Handle,CStr,ConstBytes,UInt64,Int32	1.x
+komira_credential_seal	Int32	Handle,Int32	1.x
+komira_add_sql_binding	Int32	Handle,CStr,ConstBytes,UInt64	1.x
 komira_last_error_code	Int32	Handle,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.x
 komira_last_error_step	Int32	Handle	1.x
 ```
 
 - **A credential is defined in three calls.** `komira_credential_add(ctx, kind, name, &id)` starts a
   definition. `komira_credential_set(ctx, id, field, value, len)` sets one field. Then
-  `komira_credential_seal(ctx, id, scope)` makes it the value of `name`.
-  - With `KOMIRA_BIND_SESSION`, it is the session's value: a new generation if the name held a
-    different value.
-  - With `KOMIRA_BIND_CALL`, it is the next run call's value, dropped when that call returns.
-  - A call value that differs from the session's value of the name is refused when the run starts
-    (`CREDENTIAL_NAME_CONFLICT`), and so are two different call values (decision 2).
+  `komira_credential_seal(ctx, id)` makes it the session's value of `name`: a new generation, unless
+  the name already holds a byte-equal value.
   - Kinds and fields are `constant` rows: `KOMIRA_CRED_AWS_KEYS` 1, `_AWS_PROFILE` 2,
     `_GCP_SERVICE_ACCOUNT` 3, `_GCP_TOKEN` 4, `_AZURE_KEY` 5, `_AZURE_SAS` 6, `_BEARER` 7,
     `_OAUTH2_CLIENT` 8.
@@ -717,17 +708,17 @@ komira_last_error_step	Int32	Handle	1.x
     the session's `SecretStore` before the call returns and never echoes it, so the caller may
     overwrite its buffer at once.
   - `ambient` and `anonymous` need no definition. Defining either is refused.
-- **`komira_bind(ctx, name, source, len, scope)`** binds `name` to a source.
+- **`komira_add_sql_binding(ctx, name, source, len)`** binds the SQL name `name` to a source on the
+  session, replacing any binding of that name.
   - `source` is the bytes of a `komira.plan.v1.WireBoundSource` (decision 4). It is a new message,
     built from the plan's own `WireSourceAccess`, `WireIcebergCatalog` and `WirePlanEnvelope`, which
     every SDK already encodes for the plan door.
   - The binder translates it into the plan's source messages (decision 4).
   - Credentials never travel in these bytes, only their names.
-  - `scope` is `KOMIRA_BIND_SESSION` 1, or `KOMIRA_BIND_CALL` 2. A call binding applies to the next
-    run call on the context (`komira_sql_stream` or `komira_plan_stream`) and is dropped when that
-    call returns, whether it succeeds or fails.
-  - A source whose credential name has no sealed value, on the session or pending for the next run
-    call, is refused at bind with `CREDENTIAL_UNBOUND`. `komira_plan_stream` does the same for a plan that names one.
+  - `komira_sql_stream` runs its statement over the context's whole binding table (decision 3).
+  - The order is: seal every credential the source names, then add the binding (decision 2).
+  - A source whose credential name has no sealed value on the session is refused with
+    `CREDENTIAL_UNBOUND`. `komira_plan_stream` does the same for a plan that names one.
 - **Errors come from two calls, not from parsing the text.**
   - `komira_last_error_code` returns the last error's named code (`BIND_NAME_UNBOUND`,
     `SQL_STATEMENT_UNSUPPORTED`), or the empty string when the refusal has none. It uses the
@@ -780,6 +771,7 @@ catalog, with `write_table`. There is no
 | statement | served when | goes through | returns |
 |---|---|---|---|
 | `COPY <table or (query)> TO '<dest>' (<options>)` | always: `dest` is a local path or a URL under a scope | `komira_sql_stream` | one row, one `BIGINT` column `Count`: the rows written, as DuckDB answers |
+| `INSERT INTO t SELECT ...` or `VALUES ...`, where `t` is bound to one catalog table (`catalog.table(...)`) | always: it is the same append as `INSERT INTO c.ns.t` | `komira_sql_stream` | `Count` |
 | `CREATE TABLE c.ns.t AS ...`, `CREATE OR REPLACE TABLE c.ns.t AS ...`, `CREATE TABLE c.ns.t (columns)`, `INSERT INTO c.ns.t SELECT ...` or `VALUES ...` | `c` is bound to a catalog ([the Iceberg design](#reconciling-with-the-iceberg-design)) | `komira_sql_stream` | what DuckDB returns: `Count`, or no rows for `CREATE TABLE` with a column list |
 | pandas-shaped `to_parquet`, `to_csv`, `to_json(orient="records", lines=True)`; polars-shaped `sink_parquet`, `sink_csv`, `sink_ndjson` ([dataframe_surface_verbs.md](dataframe_surface_verbs.md)) | with the DataFrame surface, to the destinations `COPY` serves | `komira_plan_stream` with `write_target` set | `None`, as pandas and polars return, after the write is complete |
 | `frame.write_table(catalog, name, mode=)` | with the DataFrame surface, into a held catalog source | `komira_plan_stream`, the plan `INSERT` or `CREATE [OR REPLACE] TABLE ... AS` emits | `None` |
@@ -828,8 +820,9 @@ spelling that works.
 
 | statement | why, and what to write instead |
 |---|---|
-| `CREATE TABLE t AS ...`, `INSERT INTO t ...` where `t` is not in a bound catalog | komira keeps no tables of its own. Bind a catalog and write `c.ns.t` |
-| `CREATE VIEW` | bind a frame, or pass it to `sql` |
+| `CREATE TABLE t AS ...`, `INSERT INTO t ...` where `t` is neither in a bound catalog nor bound to one catalog table | komira keeps no tables of its own. Bind a catalog and write `c.ns.t` |
+| `CREATE [OR REPLACE] TABLE t ...` where `t` is bound to one catalog table | a table binding names a table that exists. Create through its catalog, as `c.ns.t` |
+| `CREATE VIEW` | add a frame with `add_sql_binding` |
 | `ATTACH`, `CREATE SECRET`, `DROP SECRET`, `SET s3_*` and the other credential settings | sources and credentials are bound from the SDK, never in SQL, which is logged and carried in plans |
 | `INSTALL`, `LOAD` (`httpfs` among them) | remote reads are built in. Remove the statement |
 | `UPDATE`, `DELETE`, `MERGE INTO`, `ALTER TABLE`, `DROP TABLE`, `CREATE SCHEMA` | not in the first Iceberg slice ([the Iceberg design](#reconciling-with-the-iceberg-design)) |
@@ -852,7 +845,6 @@ Iceberg design's `IcebergError` is a `KomiraError` too.
 | `BIND_SCOPE_NOT_A_TABLE` | a scope (a location ending in `/`) is named as a table | `bind` | `BindError` |
 | `BIND_VIEW_NOT_A_QUERY` | a bound frame's plan carries a write target or a UDF list | `bind` | `BindError` |
 | `CREDENTIAL_UNBOUND` | a source or a plan names a credential the session cannot resolve | `bind` | `CredentialsError` |
-| `CREDENTIAL_NAME_CONFLICT` | one statement carries two different values under one credential name | `bind` | `CredentialsError` |
 | `CREDENTIAL_KIND_MISMATCH` | a credential does not fit its source (an Azure key on `s3://`) | `bind` | `CredentialsError` |
 | `CREDENTIALS_NOT_FOUND` | `ambient` found nothing configured; a URL under no scope | `bind` or `execute` | `CredentialsError` |
 | `CREDENTIALS_INVALID` | a configured chain step is broken; a credentials file is unreadable or malformed; a token the provider rejects at exchange | `bind` or `execute` | `CredentialsError` |
@@ -870,10 +862,16 @@ Iceberg design's `IcebergError` is a `KomiraError` too.
 | `PLAN_URL_QUERY_REFUSED` | a plan exported for a job manager has a URL with a query string | none: the export call is the job manager's milestone | `UnsupportedOperation` |
 | `SQL_STATEMENT_UNSUPPORTED`, `COPY_OPTION_UNSUPPORTED`, `COPY_FORMAT_NOT_INFERRED` | decision 10 | `parse` or `bind` | `UnsupportedOperation` |
 
-- **A job manager's admission refusals are not libkomira errors and carry no step.** They are
-  `CREDENTIAL_UNBOUND`, `CREDENTIAL_KIND_MISMATCH`, `ENDPOINT_NOT_ALLOWED` and
-  `OPTIMIZED_NEEDS_CREDENTIALS_MISMATCH` (decision 5). The job manager's design reports them, under
-  these codes.
+- **Refusals outside libkomira carry no step.**
+  - `ENDPOINT_NOT_ALLOWED` and `OPTIMIZED_NEEDS_CREDENTIALS_MISMATCH` come only from a job manager's
+    admission.
+  - `CREDENTIAL_UNBOUND` and `CREDENTIAL_KIND_MISMATCH` come from both: from libkomira at step
+    `bind`, and from admission.
+  - `ICEBERG_STAGED_CREATE_NO_SCOPE` (from the coordinator) and `ICEBERG_LOCATION_REFUSED` are the
+    Iceberg design's codes.
+  - The job manager's design reports these under these codes.
+- **An `access_delegation` value other than the two accepted ones** raises `ValueError` when the
+  catalog object is built, before the library is called.
 - **`STORAGE_*` from `NOT_FOUND` to `OBJECT_CHANGED` are the store layer's six `StoreError` kinds**,
   one to one ([src/objectstore/types.mojo](../../src/objectstore/types.mojo)). `PRECONDITION` is
   named for what it means on a read.
@@ -896,26 +894,38 @@ Iceberg design's `IcebergError` is a `KomiraError` too.
 
 ### 12. Every SDK builds the same plan
 
-Python, TypeScript and Mojo spell the same two operations, `bind` and `sql` with bindings, over the same
-library calls, so one statement over the same sources gives the same plan bytes in each. Python writes
-`s.sql(text, orders=orders)`. TypeScript, which has no keyword arguments, writes
-`await s.sql(text, { orders, lake })` (an object whose keys are reserved for sources), and Mojo writes
-`session.sql(text, bindings)` with a `Dict[String, Source]`. Each also has `bind(name, source)`, and the
-same source and credential objects (`km.files`, `km.iceberg`, `new km.AwsKeys("raw-etl", {...})` in
-TypeScript). Each SDK encodes a source as `WireBoundSource` and a credential through the field calls,
-the library's one binder does the rest, and the DataFrame plan builders put the same `WireSourceAccess`
-on their scans. The cross-SDK plan corpus ([optimized_plan_sources.md](optimized_plan_sources.md) §15.9)
-gains a bound-source case that asserts byte equality.
+Python, TypeScript and Mojo have the same one method, in each language's own casing:
+`s.add_sql_binding(name, source)` in Python and Mojo, and `s.addSqlBinding(name, source)` in
+TypeScript. Then `sql(query)` takes the query alone in each. They call the same library functions, so
+one statement over the same bindings gives the same plan bytes in each. Each has the same source and
+credential objects: `km.files`, `km.iceberg` and `catalog.table` in TypeScript, with
+`new km.AwsKeys("raw-etl", {...})` for a credential. Each encodes a source as `WireBoundSource` and a
+credential through the field calls, the library's one binder does the rest, and the DataFrame plan
+builders put the same `WireSourceAccess` on their scans. The cross-SDK plan corpus
+([optimized_plan_sources.md](optimized_plan_sources.md) §15.9) gains a bound-source case that asserts
+byte equality.
+
+```ts
+s.addSqlBinding("raw_orders", km.files("s3://raw-events/orders/*.parquet",
+  { credential: new km.AwsKeys("raw-etl", { keyId, secret }), region: "eu-west-1" }));   // Promise<void>, as registerParquet
+await s.sql("SELECT region, sum(amount) FROM raw_orders GROUP BY region");
+```
+
+```mojo
+session.add_sql_binding("sales_catalog", km.iceberg(uri, warehouse="prod",
+    credential=km.OAuth2ClientCredentials("catalog-etl", client_id="etl", client_secret=client_secret)))
+var result = session.sql("SELECT * FROM sales_catalog.sales.orders LIMIT 10")
+```
 
 ### 13. What lands when
 
 | milestone | what |
 |---|---|
 | first release (local only) | `COPY ... TO` a local file, Parquet first: `Count`, the all-or-nothing write, extension inference. `SQL_STATEMENT_UNSUPPORTED` for the refused statements. `komira_last_error_code` and `_step` with the error-mapping pull request. Every remote URL refused with `STORAGE_URL_REFUSED` |
-| bindings | `komira_bind`, `Session.bind`, `sql(query, **sources)`, `komira.files` for local files and frames, `BIND_NAME_UNBOUND`. `register_parquet` becomes `bind` underneath, which fixes its re-registration defect |
+| bindings | `komira_add_sql_binding`, `Session.add_sql_binding`, `komira.files` for local files and frames, `BIND_NAME_UNBOUND`. `register_parquet` becomes `add_sql_binding` underneath, which fixes its re-registration defect |
 | object stores | credentials and their ABI calls; `WireSourceAccess` on the wire; the S3 read arm with `ambient`; `https://` reads; the S3 write arm; GCS and Azure reads |
 | catalogs | `komira.iceberg` and the Iceberg statements ([the Iceberg design](#reconciling-with-the-iceberg-design)) |
-| DataFrame surface | the write terminals and `write_table` through `komira_plan_stream`, lifting `PLAN_WIRE_WRITE_TARGET_DROPPED`; `compression=`; readers resolving scopes for remote URLs |
+| DataFrame surface | the write terminals and `write_table` through `komira_plan_stream`, lifting `PLAN_WIRE_WRITE_TARGET_DROPPED`; `compression=`; readers taking `komira.files` sources |
 | job manager | the resolver interface of decision 5, with its header check, kind check and endpoint allow-list; `DeclaredNeeds.credentials`; `PLAN_URL_QUERY_REFUSED` |
 
 Every step is additive:
@@ -930,12 +940,12 @@ does not design it.
 - **Python.** The database is a source:
   `crm = komira.postgres("db.internal", "crm", credential=komira.Password("crm-reader", ...))`. A
   `Password` credential kind is a constant row added with it.
-- **SQL.** The pipeline is a statement:
-  `s.sql("INSERT INTO lake.crm.accounts SELECT * FROM crm.public.accounts", crm=crm, lake=lake)`.
+- **SQL.** The pipeline is a statement, with `crm` and the catalog `sales_catalog` added as bindings:
+  `s.sql("INSERT INTO sales_catalog.crm.accounts SELECT * FROM crm.public.accounts")`.
 - **Plan.** It carries a `WireScanBinding` of a database kind, whose params hold the host, database and
   table, and whose `access.credential` is `crm-reader`.
 - **Job manager.** It resolves `crm-reader` from the customer's secret store, inside the customer's
-  boundary when the row says so. It also resolves `lake-etl` for the catalog.
+  boundary when the row says so. It also resolves `catalog-etl` for the catalog.
 
 ## Reconciling with the Iceberg design
 
@@ -944,13 +954,14 @@ merged) conforms to this model. The changes it makes:
 
 | Iceberg design today | under this model |
 |---|---|
-| `komira.session()`, `s.attach_iceberg("lake", uri=, warehouse=, auth=, access_delegation=)`, `s.catalog("lake")` | `komira.Session()`; `lake = komira.iceberg(uri, warehouse=, credential=, signing=, access_delegation=)`; bound per call (`lake=lake`) or with `s.bind("lake", lake)`. `read_table(lake, "sales.orders", as_of=)` takes the source object |
+| `komira.session()`, `s.attach_iceberg("lake", uri=, warehouse=, auth=, access_delegation=)`, `s.catalog("lake")` | `komira.Session()`; `sales_catalog = komira.iceberg(uri, warehouse=, credential=, signing=, access_delegation=)`, a catalog of many tables, added with `s.add_sql_binding("sales_catalog", sales_catalog)`. One table is `sales_catalog.table("sales.orders")`, which can be added under a name of its own. `komira.read_table(sales_catalog, "sales.orders", as_of=)` takes the catalog object and reads no SQL binding |
 | `auth=komira.BearerToken(token)`, `OAuth2ClientCredentials(client_id, client_secret, ...)`, `AwsSigV4(region, signing_name)` | the same classes take a name first, and are `credential=`. SigV4 becomes `signing=komira.SigV4(region, service)` with an AWS credential (`AMBIENT` for the chain) |
 | `IcebergTableRef.catalog = 1`: a catalog name the deployment maps to an endpoint and credentials | `WireIcebergCatalog catalog = 1`: the catalog's `uri`, `warehouse` and `access` (credential name, signing). A session-local name never reaches the wire |
 | "the committer hands each host the credentials for its job" | each host resolves the catalog's credential name and loads an existing table's vended credentials itself. A staged `CREATE TABLE ... AS` on several hosts writes with `data_access`, the scope covering the staged location, and is refused with `ICEBERG_STAGED_CREATE_NO_SCOPE` when none does (decision 5). No value reaches a host except through the resolver |
 | `WireWriteTarget { oneof destination { path = 1; iceberg = 10 } format = 2; codec = 3 }` | the same message, plus `WireSourceAccess access = 4` for a path destination, which must be absent with `iceberg` (decision 4) |
 | vended credentials, then "the session's storage options" | vended credentials, then the scope covering the file's location (decision 3). `ICEBERG_LOCATION_REFUSED` stands |
 | `ICEBERG_CATALOG_NOT_ATTACHED` | `BIND_NAME_UNBOUND`, or `BIND_NOT_A_CATALOG` |
+| the plan design's `km.catalog("lake")` | `komira.iceberg(...)`, the catalog object; `km.catalog(name)` is not added |
 | `SQL_STATEMENT_UNSUPPORTED` for `UPDATE`, `ATTACH` and the rest | the same code, now for every refused statement, `STATEMENT_NOT_A_QUERY` included (decision 10) |
 | `komira.IcebergError` | a `KomiraError`, beside `BindError`, `CredentialsError` and `StorageError` |
 
@@ -999,32 +1010,34 @@ The list below names a case for every code of decision 11, and for every rule of
 that changes an answer or a refusal.
 
 - **Binding.**
-  - A call binding hides a session binding, and a CTE hides both.
-  - Binding a name again replaces it. A test that fails today holds this for `register_parquet`.
+  - A CTE hides a binding of the same name.
+  - Re-adding a name replaces its binding. A test that fails today holds this for `register_parquet`.
+  - `sql` receives the whole binding table: a statement naming a binding added after earlier
+    statements reads it, and a plan holds only the sources its statement uses (every string field of
+    the plan is checked for the unused bindings' locations and credential names).
+  - A table bound with `sales_catalog.table("sales.orders")` reads as `orders_table`, and its plan names the
+    catalog's credential.
   - An unbound name gives `BIND_NAME_UNBOUND`, and the message lists the bound names (exact equality).
   - A qualified name over a file source gives `BIND_NOT_A_CATALOG`.
   - A scope named as a table gives `BIND_SCOPE_NOT_A_TABLE`.
   - The longest scope wins, and `s3://b/` does not cover `s3://b-two/`.
   - A URL under no scope gives `CREDENTIALS_NOT_FOUND`.
   - A URL with user information gives `STORAGE_URL_REFUSED`.
-  - Call bindings are gone after the call, both after a success and after a failure.
-  - `main.orders` and `memory.main.orders` read `orders`, and `other.orders` gives `BIND_NOT_A_CATALOG`.
-  - `s.sql(orders, "SELECT count(*) FROM self")` reads `orders`. Two unnamed sources, an unnamed
-    source beside `self=`, and `s.bind(source)` without a name each raise `TypeError`.
+  - `main.orders` and `memory.main.orders` read `orders`. `raw_orders.x`, over a file binding, gives
+    `BIND_NOT_A_CATALOG`.
+  - `sql` with any argument besides the query raises `TypeError`.
   - Binding a frame whose plan has a write target gives `BIND_VIEW_NOT_A_QUERY`.
-  - A scope bound at an existing scope's location replaces it under another name. A call scope wins
-    over a session scope at the same location.
+  - A scope bound at an existing scope's location replaces it under another name.
+  - The DataFrame readers ignore SQL bindings: a scope added for SQL does not change what
+    `komira.read_parquet` of a bare URL reads with.
 - **Credentials.**
   - Each invalid name, and each invalid field combination, raises `ValueError` before the library is
     called.
   - `repr` shows `<set>` and no value, and `pickle.dumps` raises.
   - A source naming an unsealed credential gives `CREDENTIAL_UNBOUND`.
   - Sealing a new value under a name starts a generation: a read after it uses the new value.
-  - Two values under one name in one statement give `CREDENTIAL_NAME_CONFLICT`, for two call bindings
-    and for a call binding against a session binding.
-  - A call binding's value is gone after the call, and the session's value of that name is unchanged.
-  - After `s.bind` with a rotated value, a statement that fails with `CREDENTIAL_NAME_CONFLICT` before
-    the rotation runs.
+  - Re-adding a binding with a new value under an existing credential name changes what every
+    binding using the name reads, at a new generation. A byte-equal value keeps the generation.
   - Starting a new generation drops the cached entries under that name: a read after it re-reads the
     footer under the new value.
   - An `AzureKey` on an `s3://` source gives `ValueError`. Through the ABI it gives
@@ -1032,7 +1045,7 @@ that changes an answer or a refusal.
 - **The plan.**
   - A plan read through `AwsKeys("raw-etl", ...)` carries `raw-etl`, its region and endpoint, and none
     of the key bytes. The test checks every byte of the encoded plan and of `komira_plan_render`.
-  - The binding names `orders` and `lake` appear in no string field of it: every field of the decoded
+  - The binding names `raw_orders`, `sales_catalog` and `orders_table` appear in no string field of it: every field of the decoded
     plan is checked, `WireParquetSource.name` and `WireScanBinding.name` among them.
   - `DeclaredNeeds.credentials` equals the set of names in the body.
   - Two scans of one URL under two names render, hash and digest differently.
@@ -1049,9 +1062,11 @@ that changes an answer or a refusal.
   - A staged `CREATE TABLE ... AS` on two fake hosts reaches each host's files through `data_access`.
     With no covering scope it gives `ICEBERG_STAGED_CREATE_NO_SCOPE` before any file is written, and
     no host is asked for a value.
-  - Two calls passing different tokens under one name, with no session binding, read under two
-    generations: the second is not answered from the first's cached footer.
-  - Re-binding a name on the session changes what a call binding using that name reads.
+  - Two DataFrame reader calls passing different tokens under one name read under two generations:
+    the second is not answered from the first's cached footer.
+  - `INSERT INTO orders_table ...` over a one-table binding appends, and
+    `CREATE TABLE orders_table AS ...` gives `SQL_STATEMENT_UNSUPPORTED`.
+  - `x.orders` with `x` unbound gives `BIND_NAME_UNBOUND`.
   - The fake resolver refuses each of these:
     - a header that omits a name in the body (`OPTIMIZED_NEEDS_CREDENTIALS_MISMATCH`);
     - a row of the wrong kind (`CREDENTIAL_KIND_MISMATCH`);
@@ -1116,7 +1131,7 @@ that changes an answer or a refusal.
 - **`~` in SQL paths.** Whether DuckDB expands `~` in a `COPY` destination or a `read_parquet` path is
   checked against DuckDB by the write pull request. komira does what DuckDB does, or refuses by name.
 - **In-memory data.** A frame over Arrow data the user passed (`from_arrow`) has no wire form, and
-  `komira_bind` has no case for it. It needs the engine's in-memory table call, which is not in this
+  `komira_add_sql_binding` has no case for it. It needs the engine's in-memory table call, which is not in this
   ABI yet ([dataframe_surface.md §4](dataframe_surface.md#4-readers-sessions-and-in-memory-data)).
   Until that lands, its scan raises at the terminal. A plan with one can never go to a job manager,
   and the existing `PLAN_WIRE_UNSUPPORTED_SOURCE_IN_MEMORY` refuses it.
@@ -1131,22 +1146,20 @@ that changes an answer or a refusal.
   - it cannot give one statement two identities for two sources;
   - it does not reach catalogs.
 - **A verb per kind** (`attach_iceberg`, `register_parquet`, `register_view`). Rejected: each new kind
-  would add a verb, and none of them works per statement. `register_parquet` stays only as a spelling of
-  `bind`, because it is released.
-- **The owner's positional form, `s.sql(t, "COMMAND")`.** Served, as `s.sql(source, query)` with the
-  source named `self` (decision 2). The spellings rejected for it:
-  - naming the source after the caller's variable, as DuckDB's Python replacement scans do. It
-    depends on frame inspection, breaks under a rename, and gives no name for an expression;
-  - a `source.sql(query)` method on every source kind, which would be a second door beside `Session.sql`
-    and would not say which session runs it;
-  - another fixed name (`this`, `t`, `_`). `self` is the name polars users have met *(inferred)*, and
-    any fixed name hides a session binding of the same name in the same way.
+  would add a verb. `register_parquet` stays only as a spelling of `add_sql_binding`, because it is
+  released.
+- **Per-call bindings, `s.sql(query, orders=orders)`, from an earlier draft.** Rejected for one way to
+  bind:
+  - two ways to bind a name, a call and a session, would each need a rule against the other;
+  - a credential value that lives for one call needs its own generation rules so that caches stay
+    correct.
 
-  Rejected around it:
-  - a second unnamed source, which would need two names for one word;
-  - an unnamed session binding, which would make `self` silently mean the last thing bound.
+  One session binding avoids both.
+- **A positional source, `s.sql(t, "COMMAND")`, read as `self`, from an earlier draft.** Rejected: it
+  is a second way to bind a name, beside `add_sql_binding`, and it names the source with a word the
+  user never wrote. A source added with `add_sql_binding` is read by the name the user chose.
 - **Session-local names on the wire** (the Iceberg design's catalog name). Rejected: a job manager
-  would have to map one user's `lake` to a catalog, and two users' `lake` may differ. Credential names
+  would have to map one user's `sales_catalog` to a catalog, and two users' `sales_catalog` may differ. Credential names
   are the one name space a deployment shares: its secret store's.
 - **Credential values in the plan, encrypted.** Rejected: a plan is logged, cached and digested, and a
   key to decrypt it would have to travel too.

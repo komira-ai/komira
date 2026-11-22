@@ -314,7 +314,7 @@ session's thread, so it is not offered.
 - **Remote jobs.** These submit an `OptimizedPlan` to a job manager, after its codec exists
   ([optimized_plan.md](optimized_plan.md)).
 - **Also later:** object stores and credentials, bound as in every SDK
-  (`s.sql(text, { orders, lake })` and `s.bind(name, source)`,
+  (`s.addSqlBinding(name, source)`, then `s.sql(query)`,
   [credentials_and_writes.md](credentials_and_writes.md) decision 12); writes; progress; `explain()`
   through `komira_plan_render`.
 

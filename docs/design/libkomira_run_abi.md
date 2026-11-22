@@ -147,7 +147,8 @@ wire bound belongs to the plan format.
 ### What `komira_sql_stream` runs
 
 It runs one SQL statement against the tables registered on the context with
-`komira_register_parquet` (and the later source calls). A registration is visible
+`komira_register_parquet` and `komira_add_sql_binding` ([credentials_and_writes.md](credentials_and_writes.md)
+decision 8): it runs over the context's whole binding table. A registration is visible
 to every later run on the context.
 - **The route.** It is `sdk_exec.run_sql` with the session's `EngineContext`. The
   library converts the SQL text to a logical plan by parsing and binding it.
@@ -329,7 +330,7 @@ additive. Today the README says only that every failure is negative.
   `SqlCatalog` that the 1.1 `Session` keeps itself goes away, so a registered table
   is never in two places.
 - **One engine, built lazily.** The `EngineContext` is built by the first call
-  that needs it: a registration (`komira_register_parquet`, later source calls) or
+  that needs it: a registration (`komira_register_parquet`, `komira_add_sql_binding`) or
   a run.
   - The describe calls (`komira_parquet_schema`, `komira_csv_binding`,
     `komira_json_binding`, `komira_plan_render`) do not build it.

@@ -639,7 +639,7 @@ object. Each verb emits one bound form (§15.8.1), so one program yields one can
 
 ```python
 import komira as km                                   # Python
-cat = km.catalog("lake")                              # a name the deployment maps to a catalog
+cat = km.catalog("lake")                              # superseded: a catalog object, km.iceberg(...) (credentials_and_writes.md)
 tickets = km.read_table(cat, "support.tickets")
 text = tickets.search("refund not received", fields=["subject", "body"], k=20)
 near = tickets.knn("body_vec", km.embed("refund not received", model="m"), k=20, where=km.col("status") == "open")

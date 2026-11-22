@@ -145,7 +145,7 @@ The whole public surface of the first release is these names in `komira.__all__`
 | `Session.register_parquet(name, path)` | registers a local Parquet file as the table `name` (`komira_register_parquet`). `path` is a `str` or `os.PathLike`; a relative path is resolved against the working directory when the call is made, `~` is expanded. Registering a name again replaces it |
 | `Session.sql(query) -> Result` | runs one SQL statement over the session's tables through the SQL entry of the library (`komira_sql_stream`), which parses and binds the text to a logical plan. **This is the official door of the first release**, not an escape hatch |
 | `Result` | the answer of one `sql` call: `to_arrow() -> pyarrow.Table`, `to_reader() -> pyarrow.RecordBatchReader`, `to_pandas()`, `to_polars()`, and `__arrow_c_stream__(requested_schema=None)` (the Arrow PyCapsule interface, so `pyarrow.table(r)`, `polars.from_arrow(r)` and DuckDB take the stream itself; no batch is converted in Python) |
-| `sql(query) -> Result`, `register_parquet(name, path)` | the same two calls on the process's default session (decision 5) |
+| `sql(query) -> Result`, `register_parquet(name, path)` | the same two calls on the process's default session (decision 5). `add_sql_binding(name, source)` joins them with the sources and credentials of [credentials_and_writes.md](credentials_and_writes.md) |
 | `KomiraError` | the base class of every error the package raises on purpose (decision 9) |
 | `UnsupportedOperation` | a `KomiraError`: komira refused a construct by name (an SQL feature the engine does not run yet, an option it does not take) |
 | `LibraryLoadError` | a `KomiraError`: `libkomira` or a library it needs could not be loaded, or its ABI major version is not the one this package was written for. That includes a file missing from the package (the message is the loader's and names the file) and a Mojo runtime of another build already loaded in the process (decision 6) |
@@ -191,7 +191,7 @@ a pandas-shaped and a polars-shaped DataFrame surface. What happens to each part
 | ctypes loader (`_native.py`): load by path, ABI version check, status codes and last error to exceptions | yes, as `_native.py`, against `libkomira`'s ABI | | its lookup by environment variable and the walk up the working directory to a build output: see decision 6 |
 | `Session`: context manager, `close`, one context per session | yes | | the `plan_wire` argument (below) |
 | `Session.sql` | yes, as the official door returning a `Result` | | its status as "escape hatch, goes away with the scaffolding": SQL is now the first release's whole query surface |
-| default session and module-level calls | yes, for `sql` and `register_parquet` | the DataFrame readers | the public `session()` accessor: a second way to reach the same object |
+| default session and module-level calls | yes, for `sql` and `register_parquet` (and `add_sql_binding` when it lands) | the DataFrame readers | the public `session()` accessor: a second way to reach the same object |
 | table registration | `register_parquet(name, path)`, with the name required | CSV and NDJSON registration, from the engine's own schema | automatic names (`t1`, `t2`, ...): SQL needs the name the user wrote |
 | `KomiraError` with the engine's status and message | yes, with the fields of decision 9 | | the `PLAN_ENDPOINT_<NAME>(<code>):` message prefix and its generated code table: libkomira's status codes and error text replace them |
 | `UnsupportedOperation` | yes, now a `KomiraError` (it was a `TypeError`) | | |
@@ -232,7 +232,7 @@ differs from the earlier SDK in these points, each for the reason given:
 
 ### 5. The default session
 
-`komira.sql` and `komira.register_parquet` use one `Session` per process, created with default options on
+`komira.sql` and `komira.register_parquet` (and later `komira.add_sql_binding`) use one `Session` per process, created with default options on
 the first call. The package does not close it; the operating system reclaims it at exit, as it does the
 library, which is never unloaded (decision 6). A user who wants options or a second set of tables
 creates a `Session`. There is one default per process, not per thread: a table registered on it is
@@ -432,7 +432,7 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
 | the wheel tags of linux-arm64 and macos-arm64, the supported CPython range, `Requires-Dist` ranges, sdist, release member, PyPI stages | the wheel and release design |
 | the verbs of the two DataFrame surfaces, the refusal policy for verbs | the DataFrame surface design |
 | Python UDFs in worker processes | [udf_runtime_interface.md](udf_runtime_interface.md) and its Python design |
-| sources, credentials and binding them (`Session.bind`, `sql(query, **sources)`), `https://` reads, `COPY ... TO` and its result | [credentials_and_writes.md](credentials_and_writes.md) |
+| sources, credentials and binding them (`Session.add_sql_binding`, then `sql(query)`), `https://` reads, `COPY ... TO` and its result | [credentials_and_writes.md](credentials_and_writes.md) |
 
 ## What must always hold?
 
