@@ -117,8 +117,8 @@ here. The cutter's output is complete or `lower` raises.
 2. `derive_payload_narrow` over `inputs`, the one host-local rule on `main` (the others of
    [the optimized plan](optimized_plan.md) §5.3 join as they are built). Its output, one `PayloadNarrowSpec` per column,
    is stored in `ParquetSourceData.payload_narrow` of the scan's source spec. The field is advisory and one leaf honours
-   it (the build-side join materializer), so a plan without a join, which is every plan of the MVP, gets an empty list;
-   the rule is wired in the slice that adds joins;
+   it (the build-side join materializer), and lowering does not call the rule yet, so the list stays empty even for a
+   plan with an inner join, whose build segment collects its rows whole;
 3. `record_segment_morsel_rows(host_profile, segment, schema)`, which records the morsel size in each segment;
 4. admission (§2.4 and §4.2): each segment's sink triple must be a row of the sink capability table, or `lower`
    raises.
@@ -211,8 +211,8 @@ policy and never instantiates one code path per edge):
 
 The first slices emit `E1` and `E3`. Q6 as one segment has no edge; the first `E3` of the MVP is the one between Q1's
 aggregation and its sort (§7.1), and the joins of the later steps use `E3` too. Of the five kinds, `E1` and `E3` are
-emitted; `E2` and `E4` are latent (a tag and a policy comment in the IR, lowered to `E3`), and `E5` is emitted when a
-join has independent build sides. The driver raises on a tag it has no policy for, and a test says so (§8), so a cutter
+emitted; `E2` and `E4` are latent (a tag and a policy comment in the IR, lowered to `E3`), and `E5` is not emitted yet (a join's
+build segments are cut with `E3`). The driver raises on a tag it has no policy for, and a test says so (§8), so a cutter
 that starts to emit `E4` cannot be silently serialized.
 
 **Combine order** (`order_key_kind`): `ORDER_NONE` is for exact folds (integer sums, counts, min, max, `DECIMAL`
@@ -225,9 +225,12 @@ first slices set `ORDER_NONE` only; step 9 sets `ORDER_ROW_RANGE` on the ungroup
 asks of the driver is in §3.3 and open point O1, and what step 9 built is after the table of §7.3.
 
 **What the cutter refuses.** An `ASOF` join (`SINK_ASOF_JOIN`), a sort-merge join (`SINK_SMJ_BUILD`), the IR's
-`SINK_JOIN_PROBE` (a second, sink-form probe the cutter does not emit; the probe is `OP_JOIN_PROBE`, §3.6), a view reference, a shared-subplan reference (`PLAN_CSE_REF`) and
+`SINK_JOIN_PROBE` (a second, sink-form probe the cutter does not emit; the probe is `OP_JOIN_PROBE`, §3.6), a view reference and
 a cast to string in a pipeline's spine are not cut yet: the IR has the tags and the cutter does not emit them. A union is cut: each branch ends in a
-segment of its own and the union's pipeline reads their outputs through a `SOURCE_CONCAT` in branch order (src/lowering/README.md). The cutter raises a named refusal
+segment of its own and the union's pipeline reads their outputs through a `SOURCE_CONCAT` in branch order (src/lowering/README.md). A shared-subplan
+reference (`PLAN_CSE_REF`) is cut: a canonical subtree with a breaker or a limit ends in a segment of its own that every reference reads over an `E3`
+edge, the driver handing each reader the same rows, and one of scans, filters, projections and unions is cut again at each reference over the same
+scans (src/lowering/README.md, `cut_shared`). The cutter raises a named refusal
 (`LOWERING_UNCUTTABLE_NODE`, naming the node tag), and does not produce a segment that reads "some batch". A resident
 batch standing in for a subtree discards the subtree's meaning and gives a well-formed plan that computes something
 else; "not yet cut" must stay visible as a refusal. The same holds for a plan with an `EXCHANGE` node when there is one
@@ -253,7 +256,7 @@ bit-reproducible across worker counts; a grouped one is not served yet.
 `LOWERING_SINK_UNSERVED`, naming the triple. The alternative, to turn that segment into a generic collect and
 compute the sink another way, changes what runs without changing what the plan says; the plan's author sees a slow
 or different answer and no refusal. The same applies to the Parquet arm that is not total (§2.2) and to a join the
-probe operator cannot take: `LOWERING_JOIN_UNSERVED`, naming the join type and the strategy.
+probe operator cannot take: `LOWERING_JOIN_UNSERVED`, naming the reason (the join type, the algorithm hint or the key types).
 
 A host that has to re-optimize to lower is a bug in the optimizer, not a thing for lowering to do. If a plan reaches
 `lower` in a form the cutter cannot cut, the fix is a rewrite in `optimizer`, run before `lower`.
@@ -266,7 +269,7 @@ A host that has to re-optimize to lower is a bug in the optimizer, not a thing f
 | `lowered_plan` | `LoweredPlan`, `LoweringInputs`, `ParamTable` and the refusal tokens |
 | `cut_walk` | the three-role walk of §2.3: the dispatch on the node's tag, one branch per arm |
 | `cut_state` | what the arms share: the open pipeline, the cutter's segments and `ParamTable`, the close of a pipeline in a sink and the reopen over an `E3` edge |
-| `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_sort` | one arm each: the checks that refuse the node, run before its child is walked, and the fuse or close onto the child's pipeline |
+| `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_sort`, `cut_join` | one arm each: the checks that refuse the node, run before its child is walked, and the fuse or close onto the child's pipeline |
 | `sink_capability` | the table of sink triples a host serves (§4.2): data, no operator |
 | `render` | the deterministic text render of a `LoweredPlan` the corpus compares |
 
@@ -563,13 +566,15 @@ encodes the keys, commits, and merges per-worker tables at the end.
   the guard that the table lowering admits against is the table the driver can run.
 
 **What the table serves and refuses.** The MVP rows are the four of the list above plus the fixed-width key rows of
-§4.3. Rows that do not exist yet are refused as `LOWERING_SINK_UNSERVED`: a group key mixing types or with more than
-one column of a non-string type (ClickBench `GROUP BY UserID, SearchPhrase`; most h2o `id1, id2` and `id4, id5`
-queries), and a composite key wider than 8 bytes. A single `DATE`, `BOOL` or `DECIMAL` key has its own fixed-width row
+§4.3. A group key of two or more columns is served by the `COMPOSITE` row (`KEY_DTYPE_COMPOSITE`) unless every column is a
+dictionary-encoded string (then the `DICT_ENCODED` string row): any mix of INT64, INT32, FLOAT64, FLOAT32, DATE32, BOOL,
+DECIMAL128 and STRING columns, from two columns up (ClickBench `GROUP BY UserID, SearchPhrase`; h2o `id1, id2` and
+`id4, id5`). A key with any column of another type (INT8, INT16, timestamp, binary, ...) is refused as
+`LOWERING_SINK_UNSERVED` naming the type. A single `DATE`, `BOOL` or `DECIMAL` key has its own fixed-width row
 (`KEY_DTYPE_DATE32`, `KEY_DTYPE_BOOL`, `KEY_DTYPE_DECIMAL128`, the decimal in two 64-bit cells). Which ClickBench and h2o queries
 the board therefore skips is listed in the board plan (§7.4), so "no erased box for every sink the suites need" is
-bounded by that list and not claimed for the suites as a whole. D8 names the row that closes the gap (a composite
-row-layout key); step 8 of §7.3 builds it.
+bounded by that list and not claimed for the suites as a whole. Step 8 of §7.3 built the composite row; D8's partitioned
+row-layout sink is not built.
 
 **Alternatives.** (a) Port the earlier engine's erased state box and thunk table: the box is an `OwnedPointer` home
 plus a destroy function, and the function-pointer aliases need `MutExternalOrigin`, which the pointer rules allow only
@@ -598,6 +603,7 @@ input is NULL and a `COUNT` is zero, with one output row for the ungrouped sink 
 | `(SINK_AGG, F32 or F64, COLUMNAR)` | the key by its bit pattern after canonicalizing `-0.0` and NaN | partitioned (a float key has no dense domain) | below |
 | `(SINK_AGG, STRING, DICT_ENCODED)` | dictionary codes of the key column, mapped to an interned id | partitioned; the partition comes from the content hash carried with each interned entry, never from the id | below; the merge keys on string content (see Dictionary string keys) |
 | `(SINK_AGG, STRING, COLUMNAR)` | the key hashed by value (64-bit hash of the string, compared by bytes on a hit); no dictionary used | partitioned; the partition comes from the 64-bit string hash | below |
+| `(SINK_AGG, COMPOSITE, COLUMNAR)` | two or more key columns of any mix of I64, I32, F64, F32, DATE32, BOOL, DECIMAL128 and STRING: a string column is one interned cell, any other column the cells of its fixed-width row (a decimal two), laid out column by column in one group-table row | per-worker group tables; no dense class, not the partitioned sink (built; see the step 8 paragraph below) | merged serially in worker order, string ids remapped by value |
 
 **Which sink class, and from what.** The class is a function of the row and one footer fact, never of an estimated group
 count. A footer's min and max statistics give an integer key's domain; nothing in a footer gives the distinct count of a
@@ -714,7 +720,7 @@ size at which the sink gets its own package.
 | `SINK_HASH_BUILD` and `OP_JOIN_PROBE` | joins | `op_join_build` with komira#1396 and #1397; probes komira#1427 to #1431, #1459, #1465; semi and anti marking komira#1485; fused kernels komira#1413 | step 3 |
 | `SINK_PARTITION_BY`, `SINK_PARTITION_TOPN` | window functions | komira#1469 to #1472 | step 4 |
 
-Each of these pull requests is open and none is on `main`; some are typed stage operators and some are runtime-spec
+The operator packages these pull requests built (the `op_join_*` packages) are on `main`; some are typed stage operators and some are runtime-spec
 kernels, and which a sink wraps is read from the pull request when its slice starts. The capability table has a `spillable` column per row, false for every row of the MVP, so the arbitrator of step 6 knows
 which sinks it may ask and a denial of a non-spillable row fails the query (§3.4). A sink whose kernels are not
 merged has no row in the capability table, and a plan that needs it is refused at lowering (§2.4), not run slowly.
@@ -904,9 +910,11 @@ split at the line named in its row, not merged into a larger pull request.
 
 **What slice 3 built, against the row above.** The ungrouped sink does not use the `op_agg_state` kernels, `AggLayout` or `AggSpec`: none of them folds a `DECIMAL128` value, or an integer, into an exact 128-bit accumulator with the overflow rule of §4.3 (the accumulators there are 64-bit or float, typed at compile time; `int_sum_overflow` only refuses a 64-bit overflow). The sink therefore folds in its own small module (`pipeline_exec.agg_fold`: one count and one 128-bit integer per aggregate and worker, merged in worker order) and uses `batch_eval` for the argument expressions, through the `MapOp` projection under the selection mask. The grouped sinks of slices 5 and 6 are the ones that need `op_agg_hash`, and they take the table kernels there; whether they take their value folds from `agg_fold` or from the kernels is decided when they start.
 
-**What slice 5 built, against the row above.** `pipeline_exec.sink_group_agg` does not use `op_agg_hash` either: its entries hold Int64 keys with no NULL flag (SQL groups the NULLs of a key as one group) and 64-bit or float accumulators, with no exact 128-bit fold. It keeps its own small table (`group_table`: a 64-bit cell and a NULL flag per key, one `AggCell` per aggregate), folds rows with `agg_fold` per row, and merges the workers' tables serially in worker order with the same overflow rule. Each doubling of a table is charged to the segment pool before it is made. The sink serves composite keys of several columns of one family (all integers, or all floats) with the same table, so those arrive with slice 5 and not with step 8 of §7.3, which remains the mixed-type and string composites. `lowering` (`cut_aggregate._agg_triple`) still refuses a key of more than one column unless every column is a dictionary string, so admitting the same-family composite is a change there that this slice does not make (it touches only `pipeline_exec`). Not built, and the follow-up slice 5b: the dense table for a domain of at most 65,536 keys and the radix-partitioned table with a parallel finalize of D8. Until then the merge is O(workers x groups) on one core, which D8 names as its cost.
+**What slice 5 built, against the row above.** `pipeline_exec.sink_group_agg` does not use `op_agg_hash` either: its entries hold Int64 keys with no NULL flag (SQL groups the NULLs of a key as one group) and 64-bit or float accumulators, with no exact 128-bit fold. It keeps its own small table (`group_table`: a 64-bit cell and a NULL flag per key, one `AggCell` per aggregate), folds rows with `agg_fold` per row, and merges the workers' tables serially in worker order with the same overflow rule. Each doubling of a table is charged to the segment pool before it is made. The sink serves composite keys of several columns of one family (all integers, or all floats) with the same table, so those arrive with slice 5; step 8 of §7.3 later admitted them through lowering, with the mixed-type and string composites. Not built, and the follow-up slice 5b: the dense table for a domain of at most 65,536 keys and the radix-partitioned table with a parallel finalize of D8. Until then the merge is O(workers x groups) on one core, which D8 names as its cost.
 
 **What slice 6 built, against the row above.** `pipeline_exec.sink_string_group_agg` serves `(SINK_AGG, STRING, DICT_ENCODED)` and `(SINK_AGG, STRING, COLUMNAR)` for one or more STRING key columns, over slice 5's group table, folds, merge rule, refusals and pool charging. It follows section 4.3's decision (per-worker intern tables with the content hash carried) with these differences, each because the code found a simpler form: a worker keeps one intern table (`string_keys.InternTable`: the bytes of each distinct key string once in an arena, a start, a length and the 64-bit content hash) shared by all its key columns, and the group table is keyed by the string's id there, one cell per key column; the dictionary is not interned whole but one code at a time, on first use by a selected row, through a per-morsel code-to-id array (the design's `(dictionary identity, code)` table is a per-morsel array, since nothing in a column identifies a dictionary across morsels), so a dictionary entry no selected row used is never interned and the spike's requirement (a) holds by construction as well as by the rule that a group is a row of the group table; a group's hash mixes the content hashes of its strings (the same in every worker) and is used to probe the table, not to route a partition, because the merge is still serial (slice 5b's partitioned merge will route by it). The two rows differ only in how a DICTIONARY column reaches the table: DICT_ENCODED interns by code, COLUMNAR hashes and interns every row; a flat STRING column is interned per row by both, so a chunk that fell back to plain encoding under a DICT_ENCODED sink gives the same answer (the planner picks DICT_ENCODED only when it can prove every row group is dictionary encoded, and that proof buys speed, not correctness). `RealBuilder` asks the Parquet source to keep dictionaries only for the DICT_ENCODED row. `combine` merges by value in worker order: each string of a worker's groups (its carried hash and its bytes) is interned into a merge table, and the merged group table is keyed by the merge ids, so the string that is id 3 in one worker and id 9 in another is one group and nothing is re-hashed. Both intern tables and group tables are charged to the pool as they grow, before they grow, and returned once merged. A fixed-width key beside a string key is not served and is refused by name when the sink is built (`lowering` never asks for one). `tpch_q1` is TPC-H Q1 as a two-segment hand-built plan (scan, filter, project and the string sink; then SINK_SORT by the two keys) over a lineitem-shaped table written to Parquet with dictionary-encoded and with plain flag columns; its tests compare the exact result with a row-at-a-time oracle in both orientations. Not built: the partitioned parallel merge (5b), a hash faster than FNV-1a a byte at a time, and the join-side uses of the intern table.
+
+**What step 8 built, against the row above.** `StringGroupAggSink(..., composite=True)` in `pipeline_exec.sink_string_group_agg` serves `(SINK_AGG, COMPOSITE, COLUMNAR)`, over the per-worker tables and serial merge of slice 5, for any count of key columns from 2 (the same row serves `SELECT DISTINCT` over such columns). A STRING column is interned (one cell, content hash); every other column takes the cells of its fixed-width row; the cells are laid out column by column in one group-table row and compared by cells. The group hash mixes the string content hashes and the fixed cells in column order. The merge remaps string ids by value in worker order. `lowering` (`cut_aggregate._agg_triple`) picks the row when a key of two or more columns is not all dictionary-encoded strings, and `RealBuilder` builds it. Not built: the partitioned sink of D8 (the row has no dense class, and the merge is O(workers x groups) on one core as for slice 5), a 2-to-4 column limit (none is imposed), and a row-layout byte encoding of the key.
 
 The hand-built-plan harness of slice 2b gives a measured number at slice 3 (Q6) and slice 6 (Q1) before the binder
 exists; the end-to-end tests over SQL text come last only because the binder is another lane's open draft.
@@ -927,9 +935,26 @@ Each step adds a sink, an edge or an operator, and none changes the cutter's thr
 | 5. Scalar subqueries | the optimizer's dependency loop in `engine_optimize`, run before lowering | `optimizer` |
 | 6. Spill | the arbitrator over each breaker; a spillable aggregation | komira#1484; the arbitrator in `engine_runtime` |
 | 7. Writes, ASOF | COPY and CREATE TABLE AS; the ASOF cut | komira#1487 |
-| 8. Composite group key | the row that serves what §4.2 refuses: a group key of 2 to 4 mixed-type columns, compared by row, over the partitioned sink of slice 5 (D8); 2.5 to 3.5k lines | slice 5 |
+| 8. Composite group key | the row that serves what §4.2 once refused: a group key of two or more mixed-type columns, compared by cells, over the per-worker tables and serial merge of slice 5 (built; D8's partitioned sink is not) | slice 5 |
 | 9. Reproducible float sinks | 9a: position-derived morsel ids in `parquet_scan` (§3.3), 1.0 to 1.6k lines. 9b: `GrainSourceImpl`, `ORDER_ROW_RANGE`, grain state in the ungrouped and dense sinks and the determinism tests (D7), 2.0 to 3.0k lines | the first float sink; slices 3 and 5 |
 
+**What step 3 built, against the row above (inner joins).** `lowering.cut_join` cuts an INNER equi-join. The build child's
+pipeline ends in a `SINK_HASH_BUILD` segment (key `NONE`, orientation `COLUMNAR`, `sink_param_id` -1, since it indexes no
+`ParamTable` row). The probe child's pipeline stays open and gains `OP_JOIN_PROBE` naming that segment, with an `E3` edge
+to it. The left child is walked first, then the right. The build side is the one the plan records; `UNSET` builds the
+right child, and lowering never chooses or swaps a side. When the left child builds, a fused projection restores the
+node's column order after the probe. After a join the cardinality estimate is 0 and no dictionary key is recognised.
+`lower` refuses with `LOWERING_JOIN_UNSERVED`, before it walks either child: a join type other than INNER, no key or key lists
+of unequal length, more than 8 keys, a residual, the sort-merge hint, an undefined build side, a key that is not a column
+of its side, a key pair the probe does not compare (INT64 and INT32 in any pairing, FLOAT64, STRING), and an output that
+names a column twice. It differs from section 3.6 in one place. The build segment publishes its rows as a batch (a
+`CollectSink`), and the probe segment's builder indexes them once, serially, before its workers start
+(`op_join_probe`'s `MultiKeyHashJoinBuilder`), instead of publishing a built table. `run_segment`, `PublishedOutputs` and
+the morsel sink trait carry only batches, and the index is built once and serially either way. One answer departs
+from DuckDB, by name: the kernel stands for a NULL key by the INT64 value 9221120237041090561, so a non-NULL INT64 key
+holding it is refused (`JOIN_KEY_RESERVED`) instead of matching; a validity bit beside the key slot would lift it. Not built: outer, semi,
+anti and cross joins, a parallel build in the build segment's finalize, runtime filters, build-side memory accounting and
+spill, chunking of a large probe output (a morsel gives one batch), and DATE and DECIMAL keys.
 **What step 9 built, against the row above.** The ungrouped sink, the only one that folds a float argument, is
 reproducible; neither 9a nor `GrainSourceImpl` was built, because the sources already stamp a position on every morsel:
 the Parquet source's partition id is its flat row group times 2^20 plus the morsel's index in that row group (the
@@ -969,8 +994,8 @@ The comparison rules are part of the design, because a board that cannot be trus
   Shortcuts both engines take, such as a `COUNT(*)`, `MIN` or `MAX` answered from the footer, are marked as such, so a
   win is not a shortcut DuckDB also takes.
 - **Refusals.** A query refused at lowering (§4.2) is listed on the board as unserved, with its token, never omitted.
-  Until the composite-key row of D8 exists that list includes ClickBench queries that group by a pair of mixed-type
-  columns and the h2o group-bys over `id1, id2` and `id4, id5`.
+  A group key of two or more columns of the served types is no longer a reason to list a query; a key column of
+  another type (INT8, INT16, timestamp, binary, ...) still is.
 
 ## 8. Testing
 

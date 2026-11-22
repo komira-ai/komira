@@ -34,13 +34,21 @@ Import each module by name; the package root exports nothing.
   `check_plan` refuses ORDER_ROW_RANGE on any sink but the ungrouped
   aggregation sink.
 - `published_outputs`: `PublishedOutputs`, the batch each finished segment left.
+  `run_plan` builds it from the plan, counting as a reader of a segment every
+  SOURCE_SINK_OUTPUT and SOURCE_CONCAT spec that names it (a concatenation
+  that names it twice reads it twice). `take` gives every reader but the last
+  a copy and the last the batch itself, so a segment several others read (a
+  shared subplan) hands each the same rows; what no reader took, the result,
+  is what `run_plan` returns.
 - `segment_builder`: the `SegmentBuilder` trait through which a plan's members
   are constructed from a descriptor. `build_source` is given the worker count
   (a source that sizes per-worker state at construction needs it) and
   `build_sink` the schema of the source's morsels (a sink that must name its
   output when no morsel reaches it needs it).
 - `source_variant`, `op_variant`, `pipeline_sink`: the closed variants. Each
-  holds one of three member types, fixed where the variant is named, and a tag;
+  holds one of its member types, fixed where the variant is named (three for a
+  source and a sink, four for an operator: the fourth slot defaults to
+  `NoOperator` and is read as `fourth()` under `OP_TAG_FOURTH`), and a tag;
   its trait methods test the tag and call the member. `unused_members` fills
   the slots a list leaves empty with members that refuse to run.
 - `source_parquet`, `source_batch`, `source_sink_output`, `source_csv`: the
@@ -178,7 +186,7 @@ Import each module by name; the package root exports nothing.
 - `sink_string_group_agg`, `string_keys`: the grouped aggregation sinks keyed by
   strings, `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED | SINK_ORIENT_COLUMNAR)`,
   over one or more STRING key columns (a fixed-width key beside a string key is
-  refused by name; `lowering` never asks for one). They use slice 5's
+  the COMPOSITE row's and refused by name here). They use slice 5's
   `group_table`, folds (`agg_fold`), merge rule, refusals and charging. A worker
   keeps an `InternTable` (`string_keys`): each distinct key string once, in a byte
   arena, with its 64-bit content hash computed once when the entry is made; the
@@ -191,6 +199,16 @@ Import each module by name; the package root exports nothing.
   to plain encoding gives the answer a dictionary chunk does. `RealBuilder` makes
   the Parquet source keep dictionaries (`preserve_dict`) only for the
   DICT_ENCODED row. NULL is a group of its own and the empty string is another.
+  The same sink built `composite` is `(SINK_AGG, KEY_DTYPE_COMPOSITE,
+  SINK_ORIENT_COLUMNAR)`: a key of several columns of mixed types (GROUP BY an
+  integer, a string and a date). A STRING column is interned as above and
+  takes one cell; any other column takes the cells of the fixed-width row that
+  keys its type (`group_keys.fixed_key_dtype`: a decimal two, every other one),
+  with that row's NULL, float and decimal-scale rules, and must arrive in its
+  declared type. The cells lie column by column in one `group_table` row; a
+  group's hash mixes, in column order, each string's content hash and each
+  fixed-width cell, and the merge remaps the string cells by value and copies
+  the others.
   A group exists when a selected row reached it; the intern table only names
   strings, and a dictionary entry no selected row used is never interned.
   `combine` merges by value, in worker order: each string of a worker's groups
@@ -263,11 +281,16 @@ Import each module by name; the package root exports nothing.
   spec's order into one batch it serves as a `SinkOutputSource`, with each
   column nullable when any producer's is; a concatenation of no segment is
   refused), OP_FILTER,
-  OP_PROJECT, OP_LIMIT and the sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
-  SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
+  OP_PROJECT, OP_LIMIT, OP_JOIN_PROBE (a `HashProbeOp`, whose index
+  `build_source` makes from the rows the build segment published; a build
+  segment that is not among the segment's dependencies is refused) and the
+  sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)`, `(SINK_HASH_BUILD, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)` (a `CollectSink`), `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
   the grouped rows I64, I32, F64, F32, DATE32, BOOL and DECIMAL128,
-  `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED)` and `(SINK_AGG, KEY_DTYPE_STRING,
-  SINK_ORIENT_COLUMNAR)`, and `(SINK_SORT, KEY_DTYPE_NONE,
+  `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED)`, `(SINK_AGG, KEY_DTYPE_STRING,
+  SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR)`
+  and `(SINK_SORT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, and refuses every other kind by name. It keeps the
   resident batches (`add_resident`), the aggregation sink data a descriptor's
   `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`) and the segment pool
@@ -276,6 +299,18 @@ Import each module by name; the package root exports nothing.
   chain's projections over a batch of no rows. Three origins name the borrows of
   the Parquet source (the footer cache, the expression pool, an absent dynamic
   filter).
+- `op_hash_probe`: `HashProbeShared` and `HashProbeOp`, OP_JOIN_PROBE for an
+  INNER equi-join. The probe segment's builder takes the rows the build segment
+  published and makes one composite hash index over the build key columns
+  (`op_join_probe`'s `MultiKeyHashJoinBuilder`), once and on the calling
+  thread before any worker starts. Each worker's `HashProbeOp` reads the index
+  and the build rows and never writes them. A morsel with a selection mask is
+  gathered first; a morsel with no row or no match is FILTERED_EMPTY. The
+  output is the probe columns then the build columns, a build name the probe
+  side uses suffixed `_right`. A NULL key on either side matches nothing; the
+  key types are the kernel's (INT64 and INT32, FLOAT64, STRING). An INT64 key
+  equal to the value the kernel uses for NULL is refused by name
+  (`JOIN_KEY_RESERVED`) rather than silently unmatched.
 - `plan_harness`: segment descriptors for the four sources with an operator
   chain and a collect sink (`with_agg_sink` turns one into an aggregation),
   `project_columns`, and a sample table with readers, for plans written by hand
@@ -337,6 +372,17 @@ the raise fails the query through the first-error slot.
 - **The collect sink holds every chunk until `take_output`.** Chunks stay in the
   worker slots, then in the merged list, and `take_output` concatenates them
   into the output batch, so a segment's peak memory is about twice its output.
+
+- **The join build is serial and unmeasured.** The index over the build rows
+  is made at the start of the probe segment, on one thread, before its workers
+  start. The build rows and the index are not charged to the segment pool, so
+  the memory budget does not see them. There is no runtime filter: the probe
+  side's scan reads every row.
+- **A join morsel gives one output batch.** A probe morsel whose rows each
+  match many build rows yields one batch as large as the fan-out, because the
+  probe does not return HAVE_MORE_OUTPUT to split it.
+- **One INT64 key value is refused.** The kernel stands for NULL by one INT64
+  value; a join key equal to it raises `JOIN_KEY_RESERVED`.
 
 ## Example
 

@@ -8,9 +8,15 @@
 # version of each file. A scan of a file registered on the context is checked
 # against its registered schema (`add_catalog_table_scan`), for the files the scan holds only (a subset of
 # the table's files after partition pruning); any other Parquet scan reads the
-# facts of each of its files (`add_parquet_files_scan`). A node the cutter does
-# not cut is not descended into: the cutter refuses it by name before it asks
-# for any scan below, so no facts are read for a plan that cannot lower.
+# facts of each of its files (`add_parquet_files_scan`). A join is descended
+# into left child first, then right, as the cutter walks it whichever side
+# builds; every join is, the ones the cutter then refuses included, so the
+# facts of a refused join's scans are read before the refusal. Any other node
+# the cutter does not cut is not descended into: the cutter refuses it by name
+# before it asks for any scan below, so no facts are read for a plan that
+# cannot lower. A shared-subplan reference (PLAN_CSE_REF) is a leaf with no
+# scan: the cutter reads the scans of the subplan it names where the canonical
+# subtree stands.
 
 from host_profile.host_profile import HostProfile
 from lowering.lower import lower
@@ -24,6 +30,7 @@ from plan_ir.logical_plan import (
     PLAN_AGGREGATE,
     PLAN_DISTINCT,
     PLAN_FILTER,
+    PLAN_JOIN,
     PLAN_LIMIT,
     PLAN_PROJECT,
     PLAN_SCAN,
@@ -94,6 +101,9 @@ def _collect(
         _collect(inputs, node.distinct_data_ref().child[], ctx)
     elif tag == PLAN_SORT:
         _collect(inputs, node.sort_data_ref().child[], ctx)
+    elif tag == PLAN_JOIN:
+        _collect(inputs, node.join_data_ref().left[], ctx)
+        _collect(inputs, node.join_data_ref().right[], ctx)
     elif tag == PLAN_UNION:
         # Branch order is the cutter's order.
         ref ud = node.union_data_ref()

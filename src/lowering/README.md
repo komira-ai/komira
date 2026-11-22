@@ -12,7 +12,7 @@ and no environment variable and touches no global, so equal arguments give a
   admission against the sink capability table.
 - `lowered_plan`: `LoweringInputs` (one `ScanFacts` per scan in scan
   pre-order: the footers' statistics and the columns every row group stores
-  dictionary encoded), `ParamTable`, `LoweredPlan` and the four refusal tokens.
+  dictionary encoded), `ParamTable`, `LoweredPlan` and the five refusal tokens.
 - `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, whose
   spec lists the files when there are several; `SOURCE_BATCH` for an in-memory
   scan; `SOURCE_CSV` for a CSV scan, whose spec carries the path, the dialect
@@ -28,14 +28,36 @@ and no environment variable and touches no global, so equal arguments give a
   segment, or the branch's aggregation, distinct or sort segment when nothing
   is fused after it) and opens a pipeline whose source is `SOURCE_CONCAT` over
   those segments in branch order, with an `E3` edge to each; what stands above
-  the union fuses onto or closes that pipeline. The root is a `SINK_COLLECT`
+  the union fuses onto or closes that pipeline. An inner equi-join
+  (`cut_join`) ends its build child in a `SINK_HASH_BUILD` segment and fuses an
+  `OP_JOIN_PROBE` into the probe child's pipeline, with an `E3` edge to the
+  build segment. The root is a `SINK_COLLECT`
   segment unless the top node is a breaker, which is then the result.
-  `cut_walk` is only the dispatch on the node's tag; each arm is its own
-  module (`cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
-  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union`), and
-  `cut_state` holds what they share: the open pipeline, the cutter's segments
-  and ParamTable, and the close and reopen of a breaker. A new node kind is a
-  new arm module and one branch in `cut_walk`.
+  `cut_walk` is the dispatch on the node's tag and the resolution of shared
+  subplans around it (below); each arm is its own module (`cut_scan`,
+  `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_distinct`,
+  `cut_sort`, `cut_union`, `cut_join`, `cut_shared`), and `cut_state` holds
+  what they share: the open pipeline, the cutter's segments and ParamTable,
+  the shared subplans cut so far, and the close and reopen of a breaker. A new
+  node kind is a new arm module and one branch in `cut_walk`.
+- `cut_shared`: shared subplans. A plan may hold a subtree once, its canonical
+  occurrence, and every later occurrence as a `PLAN_CSE_REF` leaf carrying the
+  canonical subtree's `structural_hash()` (`optimizer.plan_cse`, which the
+  producer runs: `sdk_exec.engine_sql.optimize_for_run` for `run_sql`). The
+  canonical subtree is the first node of that hash the walk reaches (a node
+  before its children, a union's branches in order, and in a plan that holds
+  a reference a join's right child before its left, the producer's order; the
+  scan count is set for each child of the join, so the scans keep their
+  pre-order indices). One that holds an aggregation, a distinct, a sort, a
+  limit or a join is cut once: it ends in a segment of its own, as a union
+  branch does, and the canonical position and every reference read that
+  segment over an `E3` edge (a union that holds two references names the
+  segment twice in its `SOURCE_CONCAT`); the engine hands each reader the
+  same rows. A reader of a sort's output is a sorted input, as the sort's own
+  reader is. One that is only scans, filters, projections and unions of them
+  is cut again at every reference, over the same scans: the references take
+  no `ScanFacts` of their own, and the recut keeps the scans' statistics,
+  dictionary-encoded keys and parallel read.
 - `sum_fuse`: SUM(CAST(e AS DECIMAL(38, 0))) over a signed integer `e`, the
   SQL integer sum, is put into a sink's data as SUM(e); the node's declared
   output stays DECIMAL(38, 0) and the sink writes its 128-bit total there.
@@ -43,8 +65,14 @@ and no environment variable and touches no global, so equal arguments give a
   host serves, and admission. A group key picks its row from its column type
   (INT64, INT32, FLOAT64, FLOAT32, DATE32, BOOL, DECIMAL128 or STRING);
   a string key is `DICT_ENCODED` only when the scan's footers say every row
-  group stores it dictionary encoded and no projection stands between the scan
-  and the aggregation, and otherwise `COLUMNAR`.
+  group stores it dictionary encoded and no projection or join stands between
+  the scan and the aggregation, and otherwise `COLUMNAR`. A key of several
+  columns is `(STRING, DICT_ENCODED)` when every column is such a dictionary
+  string, and `(COMPOSITE, COLUMNAR)` otherwise: any mix of those types, each
+  column keeping its own (a distinct's columns are its group keys, so a
+  distinct over several columns gets the same row). The last row is
+  `(SINK_HASH_BUILD, NONE, COLUMNAR)`, a join's build segment; it indexes no
+  ParamTable row, so its `sink_param_id` is -1.
 - `render`: the deterministic text of a `LoweredPlan`.
 
 ## Refusals
@@ -52,12 +80,25 @@ and no environment variable and touches no global, so equal arguments give a
 Lowering refuses by name and never replaces what it cannot lower with another
 shape:
 
-- `LOWERING_UNCUTTABLE_NODE`, naming the node: a join, top-n,
-  window, view or shared-subplan reference, cast to string or exchange node
-  (the cutter has no arm for any of them, so an exchange is refused rather
-  than elided on one host); a filter, projection or aggregation that carries a
+- `LOWERING_UNCUTTABLE_NODE`, naming the node: a top-n,
+  window, view reference, cast to string or exchange node (the cutter has no
+  arm for any of them, so an exchange is refused rather than elided on one
+  host; a view reference is resolved before lowering, which has no view
+  registry); a shared-subplan reference reached before its canonical subtree
+  or with none in the plan, or whose schema is not the canonical subtree's
+  (column count, and per column the name, Arrow type, decimal precision and
+  scale and timezone); a filter, projection or aggregation that carries a
   UDF, an aggregate function that is a UDF; a limit with an offset or a
   negative count; a limit above a sort (see Order); a partial or final
+  aggregation; an aggregation with a group top-k; a source other than Parquet
+  or in memory.
+- `LOWERING_JOIN_UNSERVED`, naming the reason, raised before either child of
+  the join is walked: a join type other than INNER, a join with no key or with
+  key lists of different lengths, more than 8 keys, a residual predicate, the
+  sort-merge algorithm hint, a build side the plan does not define, a key that
+  is not a column of its side, a key pair whose types the probe does not
+  compare (INT64 and INT32 in any pairing, FLOAT64 with FLOAT64, STRING with
+  STRING), and a join whose output names one column twice.
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
   than Parquet, in memory or CSV; a CSV scan with `header=false` (the reader
@@ -67,11 +108,10 @@ shape:
   type, decimal precision and scale and timezone; the concatenation reads
   every branch by position in the union's layout, so the producer casts and
   renames the branches first).
-- `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key of a
-  type with no row (an 8- or 16-bit integer, a timestamp, a binary, ...), a
-  key of several columns that are not all dictionary encoded strings (a
-  distinct's columns are its group keys, so a distinct over several columns is
-  served only when they are), or a segment whose triple has no row.
+- `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key with a
+  column of a type with no row (an 8- or 16-bit integer, a timestamp, a
+  binary, ...), alone or beside served columns, or a segment whose triple has
+  no row.
 - `LOWERING_SCAN_NOT_TOTAL`: a Hive partitioned scan that lists its files
   lazily (a directory scan or a partition predicate), a scan on a file system
   other than the local one, or a scan marked unbounded. The segment's Parquet
@@ -85,13 +125,29 @@ shape:
 `morsel_rows` comes from the host profile and the schema that flows into the
 sink. `card_estimate_rows` is the row count of the scan's footers when the host
 supplied statistics, an upper bound on the rows that reach the sink, and 0
-otherwise. `mem_estimate_bytes` is 0, and `AggSinkData.estimated_groups` is 0:
+otherwise and after a join (a join can emit more rows than its probe side
+has). `mem_estimate_bytes` is 0, and `AggSinkData.estimated_groups` is 0:
 no memory decision is recorded, and no statistic a producer recorded in the
 plan is read. Every segment has one partition, and its order key is the one
 the Order section names. Whether an integer key's
 aggregation is dense or partitioned is not a field of the IR and is not
-recorded here. The payload narrowing rule of `lowering_rules` has no
-consumer without a join and is not called.
+recorded here. The payload narrowing rule of `lowering_rules` is not
+called: the build segment of a join collects its rows whole.
+
+## Joins
+
+The build side is the one the plan records (`JoinData.build_side`). Lowering
+never chooses or swaps it: RIGHT builds the right child, LEFT the left child,
+and UNSET builds the right child. The left child is walked first, then the
+right, so scans are met in pre-order whichever side builds; in a plan that
+holds a shared-subplan reference the right child is walked first, as the
+reference's producer visits a join, with the scan count set for each child,
+so the scans keep their pre-order indices and the right child's segments take
+the lower ids. The probe emits
+its own columns and then the build columns. When the left child builds, a
+projection fused after the probe restores the node's column order. Several
+joins on one probe pipeline each add their own build segment. A join, like a
+projection, leaves no dictionary key to an aggregation above it.
 
 ## Order
 

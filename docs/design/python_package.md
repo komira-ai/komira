@@ -51,8 +51,9 @@ range, or the DataFrame surface; each has its own design, named under
 Fixed before this design and not reopened here: the distribution (the name on PyPI, the name `pip install`
 takes) is `komira`, the same as the import package (`komira-ai` is the organisation's name only: the GitHub
 organisation, the PyPI organisation account and the mopm namespace; PyPI has one flat namespace); it is
-published by the top-level workflow
-`.github/workflows/pypi.yml` through the GitHub environments `testpypi` and `pypi`, by trusted
+published by the top-level workflows
+`.github/workflows/pypi.yml` (the Linux wheel) and `.github/workflows/pypi-macos-arm64.yml` (the macOS arm64
+wheel) through the GitHub environments `testpypi` and `pypi`, by trusted
 publishing with no token, and nothing is uploaded or registered by hand. The owner has given the go to release `komira` from that workflow
 before the DataFrame surfaces exist, so the name is registered on PyPI by the first release the workflow
 makes, and no one registers or uploads it any other way; the package lives in `python/` in this repository; it is published as a wheel first; the wheel
@@ -130,7 +131,7 @@ python/
   `komira.pl`, which is the one public submodule the package will have. Both arrive with the DataFrame
   surface (decision 4), not in the first release. Their verbs and refusal policy are the DataFrame
   surface's design. The names that design must keep are the ones the design docs already use
-  at the top level: `read_parquet`, `read_table`, `col`, `catalog` (verb names are the same words in every
+  at the top level: `read_parquet`, `read_table`, `col` (verb names are the same words in every
   language, [optimized_plan_sources.md](optimized_plan_sources.md) §15.9). This design reserves them by
   not using them for anything else.
 
@@ -140,11 +141,11 @@ The whole public surface of the first release is these names in `komira.__all__`
 
 | name | what it is |
 |---|---|
-| `Session(*, threads=None, memory_limit=None)` | one engine context (`komira_ctx_new`) and its registered tables. `threads` is the worker count and `memory_limit` the engine's memory budget in bytes; `None` takes the engine's default. Options are arguments, never environment variables (rule S2). A context manager: `with komira.Session() as s:`; `close()` frees the context and is idempotent |
+| `Session(*, threads=None, memory_limit=None)` | one engine context (`komira_ctx_new`) and its registered tables. `threads` is the worker count and `memory_limit` the engine's memory budget in bytes; `None` takes the engine's default. Options are arguments, never environment variables (rule S2). A later keyword, `ca_file=None`, adds trusted roots for `https://` reads ([credentials_and_writes.md](credentials_and_writes.md) decision 9). A context manager: `with komira.Session() as s:`; `close()` frees the context and is idempotent |
 | `Session.register_parquet(name, path)` | registers a local Parquet file as the table `name` (`komira_register_parquet`). `path` is a `str` or `os.PathLike`; a relative path is resolved against the working directory when the call is made, `~` is expanded. Registering a name again replaces it |
 | `Session.sql(query) -> Result` | runs one SQL statement over the session's tables through the SQL entry of the library (`komira_sql_stream`), which parses and binds the text to a logical plan. **This is the official door of the first release**, not an escape hatch |
 | `Result` | the answer of one `sql` call: `to_arrow() -> pyarrow.Table`, `to_reader() -> pyarrow.RecordBatchReader`, `to_pandas()`, `to_polars()`, and `__arrow_c_stream__(requested_schema=None)` (the Arrow PyCapsule interface, so `pyarrow.table(r)`, `polars.from_arrow(r)` and DuckDB take the stream itself; no batch is converted in Python) |
-| `sql(query) -> Result`, `register_parquet(name, path)` | the same two calls on the process's default session (decision 5) |
+| `sql(query) -> Result`, `register_parquet(name, path)` | the same two calls on the process's default session (decision 5). `add_sql_binding(name, source)` joins them with the sources and credentials of [credentials_and_writes.md](credentials_and_writes.md), which also gives `sql` its later forms `sql(query, /, **sources)` and `sql(source, query, /, **sources)`; the first release takes the query alone |
 | `KomiraError` | the base class of every error the package raises on purpose (decision 9) |
 | `UnsupportedOperation` | a `KomiraError`: komira refused a construct by name (an SQL feature the engine does not run yet, an option it does not take) |
 | `LibraryLoadError` | a `KomiraError`: `libkomira` or a library it needs could not be loaded, or its ABI major version is not the one this package was written for. That includes a file missing from the package (the message is the loader's and names the file) and a Mojo runtime of another build already loaded in the process (decision 6) |
@@ -170,7 +171,8 @@ Behaviour each later pull request implements, fixed here so they agree:
   the session pull request's choice, held by a test of each case it allows.
 - **One session, any thread.** A `Session` may be used from several threads; it holds a lock around each
   call into the library, its `Result`s' batch reads included, so one context never runs two calls at
-  once (a thread reading a large result holds up a `sql` call on the same session between batches, not
+  once. With call bindings ([credentials_and_writes.md](credentials_and_writes.md) decision 8), the
+  lock is held from the first staged call binding through the `komira_sql_stream` that consumes it (a thread reading a large result holds up a `sql` call on the same session between batches, not
   for the whole read). Sessions are independent of one another. The lock goes when the ABI design states
   that a context is safe to share.
 - **Fork.** A child process made by `os.fork` must not use a session of its parent: the package
@@ -190,7 +192,7 @@ a pandas-shaped and a polars-shaped DataFrame surface. What happens to each part
 | ctypes loader (`_native.py`): load by path, ABI version check, status codes and last error to exceptions | yes, as `_native.py`, against `libkomira`'s ABI | | its lookup by environment variable and the walk up the working directory to a build output: see decision 6 |
 | `Session`: context manager, `close`, one context per session | yes | | the `plan_wire` argument (below) |
 | `Session.sql` | yes, as the official door returning a `Result` | | its status as "escape hatch, goes away with the scaffolding": SQL is now the first release's whole query surface |
-| default session and module-level calls | yes, for `sql` and `register_parquet` | the DataFrame readers | the public `session()` accessor: a second way to reach the same object |
+| default session and module-level calls | yes, for `sql` and `register_parquet` (and `add_sql_binding` when it lands) | the DataFrame readers | the public `session()` accessor: a second way to reach the same object |
 | table registration | `register_parquet(name, path)`, with the name required | CSV and NDJSON registration, from the engine's own schema | automatic names (`t1`, `t2`, ...): SQL needs the name the user wrote |
 | `KomiraError` with the engine's status and message | yes, with the fields of decision 9 | | the `PLAN_ENDPOINT_<NAME>(<code>):` message prefix and its generated code table: libkomira's status codes and error text replace them |
 | `UnsupportedOperation` | yes, now a `KomiraError` (it was a `TypeError`) | | |
@@ -231,7 +233,7 @@ differs from the earlier SDK in these points, each for the reason given:
 
 ### 5. The default session
 
-`komira.sql` and `komira.register_parquet` use one `Session` per process, created with default options on
+`komira.sql` and `komira.register_parquet` (and later `komira.add_sql_binding`) use one `Session` per process, created with default options on
 the first call. The package does not close it; the operating system reclaims it at exit, as it does the
 library, which is never unloaded (decision 6). A user who wants options or a second set of tables
 creates a `Session`. There is one default per process, not per thread: a table registered on it is
@@ -241,7 +243,7 @@ visible from every thread, as a module-level name would be.
 
 The macOS arm64 wheel (`//python:komira_wheel_macos_arm64`, macOS 11 or later on Apple silicon, tagged
 `py3-none-macosx_11_0_arm64`) is built from its own `[dist]` directory and its own pinned compiler. It is built
-and tested only by pypi.yml, never in a pull request (`//python:wheel_install_test_macos_arm64`, on
+and tested only by pypi-macos-arm64.yml, never in a pull request (`//python:wheel_install_test_macos_arm64`, on
 the farm's macOS workers), and a run publishes it only from main.
 
 - An installed package loads `komira/_lib/libkomira.so`. The wheel carries
@@ -378,7 +380,7 @@ Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
   repository; no internal host, no private repository, no address. The public-boundary lint reads
   `python/` like every file of the cell.
 - **Only what is true.** The `Operating System` classifiers name the release platforms, each of which
-  gets its wheel only after that wheel's install test passes on that platform (in pypi.yml
+  gets its wheel only after that wheel's install test passes on that platform (in pypi-macos-arm64.yml
   for macOS, never in a pull request's check). The CPython classifiers name the interpreters the
   package's tests run: 3.11, 3.12, 3.13 and 3.14, each pinned in
   [third_party/python](../../third_party/python/README.md) and listed once in
@@ -416,7 +418,10 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
 - A `KomiraError` from the library carries `status` (the ABI's status number), `code` (the engine's
   named code, `ENGINE_OPTIONS_INVALID` for example, or `None`), `step` (the step that refused it:
   `parse`, `bind`, `optimize`, `lower`, `execute`, or `None`) and the library's message as `str(e)`.
-  Which status and code map to which subclass is the error-mapping pull request's table.
+  Which status and code map to which subclass is the error-mapping pull request's table. `code` and
+  `step` come from the library's `komira_last_error_code` and `komira_last_error_step`, never from
+  parsing the message; the rows for credentials, storage and writes are fixed in
+  [credentials_and_writes.md](credentials_and_writes.md#11-error-shapes).
 - The message is the engine's text, unchanged: a refusal names the construct (rule B21: unsupported
   features are refused by name), and the package does not rewrite it.
 
@@ -428,12 +433,15 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
 | the wheel tags of linux-arm64 and macos-arm64, the supported CPython range, `Requires-Dist` ranges, sdist, release member, PyPI stages | the wheel and release design |
 | the verbs of the two DataFrame surfaces, the refusal policy for verbs | the DataFrame surface design |
 | Python UDFs in worker processes | [udf_runtime_interface.md](udf_runtime_interface.md) and its Python design |
+| sources, credentials and binding them (`Session.add_sql_binding`, and `sql(query, **sources)` for one statement), `https://` reads, `COPY ... TO` and its result | [credentials_and_writes.md](credentials_and_writes.md) |
 
 ## What must always hold?
 
 - No `.py` file and no Python target outside `python/` and the other surface entries: `//:python_closure`
   refuses one, and the package adds nothing to its ceiling.
-- No public name of the package is configured by an environment variable.
+- No public name of the package is configured by an environment variable. The package reads none;
+  the variables read are the AWS and Google credential chains', inside the library, when a URL
+  needs them, and libcrypto's default trust-store variables ([credentials_and_writes.md](credentials_and_writes.md#7-the-ambient-credential-and-the-only-environment-komira-reads)).
 - The public names are exactly `komira.__all__`; a private module's name is never in user documentation.
 - The wheel carries `libkomira`, its native owners, the three Mojo runtime libraries of the
   toolchain's pinned `mojo-compiler`, the licence files of both and `py.typed`, and requires no other

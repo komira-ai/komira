@@ -72,8 +72,11 @@ plan may use several runtimes, and every rule below holds for each.
   aggregate after a lost context is rejected for the first release (§10.13).
 - **A read outside the read set.** A `ROW` read outside the read set fails the batch with `UDF_FIELD_NOT_DECLARED`
   (§10.2), whatever the stability; it is not bisected, because the same batch fails the same way. A
-  `MAP_BATCHES_FRAME` with a read set receives batches holding only those columns, so a read of another column fails
-  in the user's own data library and is reported as `UDF_RAISED` (open, §10.2).
+  `MAP_BATCHES_FRAME` receives batches holding only its read set's columns. A runtime that can recognise the lookup
+  (the Python runtime maps its batch formats' column-lookup errors: `KeyError` from pandas and pyarrow, polars'
+  `ColumnNotFoundError`, for a name outside the read set) reports `ERR_FIELD_NOT_DECLARED` naming the column and the
+  read set; otherwise the user's data library raises and it is `ERR_RAISED` with the read set in the message (decided,
+  §10.2).
 - **One nesting is allowed.** Calls on one context are serialized, except that while a frame's `frame_next` waits on
   its input pull, the host may call into the same context to produce that input (for example a scalar UDF of the
   same runtime upstream in the same pipeline); those calls complete before the pull returns
@@ -93,7 +96,7 @@ function that depends on notebook state it did not capture, fails locally first.
 between a laptop and a host, so the local run also runs user code with an empty working directory and only the environment
 variables a host provides, and report by name a function that opens a file outside its bundle or blobs. Two
 differences remain: a UDF that assigns to a global changes the runtime's copy, not the user's; and the network the
-function can reach differs. When the plan sets a read set, the local run passes a `ROW` or frame UDF only its
+function can reach differs. Every `ROW` and frame UDF has a read set, so the local run passes it only its
 columns (§10.2), so a read that a declaration or a scan missed fails on the user's machine first. The local run never
 adds to the read set.
 
@@ -201,6 +204,11 @@ The host runs these again, and then, with the layers in hand:
    cover each shape. Otherwise: `OPTIMIZED_UDF_DESCRIPTOR_INVALID` or `OPTIMIZED_UDF_KIND_UNSUPPORTED`; a `ROW` or
    `MAP_BATCHES_FRAME` whose `arg_types` names differ from the fields its descriptor records (`validate` returns
    `ERR_READ_SET_MISMATCH`) is `OPTIMIZED_UDF_READ_SET_DESCRIPTOR_MISMATCH`, and the user rebuilds.
+   For a `ROW` or `MAP_BATCHES_FRAME` entry every runtime's descriptor always records the field list (`RecordedFields`:
+   the read set's fields, plus `key_fields` for a grouped frame's `group_by` columns where the runtime adds them at
+   capture); an absent list is `ERR_DESCRIPTOR` in every runtime, and `validate` always compares the names. Both kinds
+   carry a required read set; `SCALAR`, `MAP_BATCHES_COLUMN` and `AGGREGATE` carry their columns as `arg_types` and a
+   `STEP` has no input, so every kind that receives rows or a frame carries an explicit list.
 
 **Load check.** At §7.2 step 9 the host calls each runtime's `load` for every UdfRef (for `komira/python` this imports
 every `PACKAGE` and `BUNDLE` module and loads every payload and data blob; for `komira/node` it loads every bundle and
@@ -296,8 +304,9 @@ them needs a contract bump.
 | A closed runtime enum and a `oneof` arm per language code form (an earlier draft; Spark Connect's `CommonInlineUserDefinedFunction`) | Rejected: each language would be a format change forever; SPARK-55278 proposes moving Spark away from it. |
 | Transport (in-process or worker) in the plan, or chosen by the host or the engine | Rejected. Each language has one mode, chosen by its runtime; the C ABI is the only interface between the engine and a runtime, and how a runtime executes user code is its own business (`udf_runtime_interface.md` §1.2, §10). |
 | `MAP_BATCHES` form derived from the arm | Rejected: one UdfRef could be bound with two schemas. |
-| A row-shaped UDF as a `SCALAR` over the whole row, or a host that infers the fields read | Rejected. The whole row keeps every column live; a host cannot re-derive what the producer knew, and two hosts could disagree. `ROW` carries an optional read set (§10.2). |
-| The read set carried only in `arg_types`, with every input column listed when the reads are undetermined (an earlier draft) | Rejected. `arg_types` can say "every input column" only by listing them, which reads the same as a declared read set naming every column, and it gave a frame no read set. An optional `read_set`, unset meaning every column, states the rule; validation keeps `arg_types` in agreement (§10.4). |
+| A row-shaped UDF as a `SCALAR` over the whole row, or a host that infers the fields read | Rejected. The whole row keeps every column live; a host cannot re-derive what the producer knew, and two hosts could disagree. `ROW` carries a required read set (§10.2). |
+| The read set carried only in `arg_types`, with every input column listed when the reads are undetermined (an earlier draft) | Rejected. `arg_types` can say "every input column" only by listing them, which reads the same as a declared read set naming every column, and it gave a frame no read set. A `read_set` states the rule, required on `ROW` and on a frame; validation keeps `arg_types` in agreement (§10.4). |
+| An optional read set on `ROW` or `MAP_BATCHES_FRAME`, unset meaning every input column (an earlier draft) | Rejected for `ROW` and for `MAP_BATCHES_FRAME`. A UDF without a read set keeps every column of a wide input live, so the read set is required on both, and an unset one is refused (§10.2). |
 | `read_set` as a bare `repeated string` | Rejected. A repeated field has no presence in proto3, so "reads every column" and "reads none" would be one encoding. |
 | An empty read set refused | Rejected. A function that reads no column is legitimate, and a batch with no children carries the row count. |
 | A local run (a recording row proxy) as a source of the read set (an earlier draft) | Rejected. A field read only on a branch the local run did not take would be missing, and the scan defect it hides would surface only on a host. |

@@ -357,6 +357,32 @@ def test_each_group_key_type_picks_its_sink_row() raises:
     assert_equal(_sink_of(_count_by(_names("dec")), List[String]()), "(SINK_AGG, DECIMAL128, COLUMNAR)")
 
 
+def test_a_key_of_several_columns_is_composite_unless_all_are_dictionary_strings() raises:
+    var composite = "(SINK_AGG, COMPOSITE, COLUMNAR)"
+    # Mixed types: an integer, a string and a date, in any order.
+    var ism = List[String]()
+    ism.append("i64")
+    ism.append("s")
+    ism.append("d32")
+    assert_equal(_sink_of(_count_by(ism^), List[String]()), composite)
+    var dsi = List[String]()
+    dsi.append("d32")
+    dsi.append("s")
+    dsi.append("i32")
+    assert_equal(_sink_of(_count_by(dsi^), _names("s")), composite)
+    # Two columns of one family, and a decimal beside a bool and a float.
+    assert_equal(_sink_of(_count_by(_names("i64", "i32")), List[String]()), composite)
+    assert_equal(_sink_of(_count_by(_names("dec", "flag")), List[String]()), composite)
+    assert_equal(_sink_of(_count_by(_names("f64", "f32")), List[String]()), composite)
+    # Strings: plain, or one of two dictionary encoded, are composite; a
+    # dictionary string beside an integer is too; two dictionary strings stay
+    # the DICT_ENCODED string row.
+    assert_equal(_sink_of(_count_by(_names("s", "t")), List[String]()), composite)
+    assert_equal(_sink_of(_count_by(_names("s", "t")), _names("s")), composite)
+    assert_equal(_sink_of(_count_by(_names("s", "i64")), _names("s")), composite)
+    assert_equal(_sink_of(_count_by(_names("t", "s")), _names("s", "t")), "(SINK_AGG, STRING, DICT_ENCODED)")
+
+
 def test_a_string_key_is_dictionary_encoded_only_when_the_footers_say_so() raises:
     assert_equal(_sink_of(_count_by(_names("s")), List[String]()), "(SINK_AGG, STRING, COLUMNAR)")
     assert_equal(_sink_of(_count_by(_names("s")), _names("s")), "(SINK_AGG, STRING, DICT_ENCODED)")

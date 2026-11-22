@@ -3,31 +3,29 @@
 #   transport SEAM + the production HTTP transport + the scripted test double.
 # =============================================================================
 #
-# WHAT THIS IS. The narrow HTTP-GET seam the Iceberg REST catalog client
-# resolves through. A `IcebergRestTransport` trait — `get(request) ->
-# IcebergRestResponse` — so the whole REST resolve path is driveable with:
-#   * `HttpIcebergRestTransport[C]` — production: a real GET over the shipped
+# WHAT THIS IS. The narrow HTTP seam the Iceberg REST catalog client talks
+# through. A `IcebergRestTransport` trait — `send(request) ->
+# IcebergRestResponse` — carries a GET (config, loadTable) or a POST with a JSON
+# body (createTable, commitTable), so the whole REST path is driveable with:
+#   * `HttpIcebergRestTransport[C]` — production: one request over the shipped
 #     `komira_http` `HttpClient[C]` (C = TlsConnector in prod; `http` over a
 #     plaintext connector), exactly the synchronous-per-call shape other
 #     komira HTTP transports use.
 #   * `ScriptedIcebergRestTransport` — test: returns SCRIPTED JSON responses in
-#     FIFO call order + records the request path AND the request's
-#     Authorization header of each call — so the loadTable falsifier can assert
-#     BOTH the sequence of GETs (config -> loadTable) AND that the bearer token
-#     was attached. ZERO sockets, ZERO network.
+#     FIFO call order + records the method, path, body and every header of each
+#     call. ZERO sockets, ZERO network.
+#   * `InMemoryIcebergRestCatalog` (iceberg_rest_test_catalog.mojo) — test: a
+#     catalog that applies commits, for the committer's cases.
 #
-# WHY a transport seam. The REST resolve is a MULTI-call sequence (GET /v1/config
-# to learn the prefix, then GET /v1/{prefix}/namespaces/{ns}/tables/{tbl}). A
-# call-level transport seam lets a test queue the exact response for each call in
-# order + assert the path + the Authorization header of each — the cleanest way
-# to prove the resolve contract + the bearer-token attach WITHOUT a socket. The
-# production transport still rides the full `komira_http` spine underneath
-# (NOTHING about transport is reinvented). Same substitution-seam discipline
-# as the other komira transports.
+# WHY a transport seam. A REST write is a MULTI-call sequence (GET /v1/config
+# to learn the prefix, then a load, then a commit POST). A call-level transport
+# seam lets a test answer each call and assert what was sent WITHOUT a socket.
+# The production transport still rides the full `komira_http` spine underneath
+# (NOTHING about transport is reinvented).
 #
 # ENCAPSULATION. ZERO UnsafePointer in any signature; ZERO wildcard
 # origins; ZERO unsafe_from_address. The scripted double holds owned
-# `List[String]` queues. `def`-based, Mojo 1.0.0b2.
+# `List[String]` queues. `def`-based, Mojo 1.0.0.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -35,42 +33,73 @@ from std.memory import ArcPointer
 from async_rt.ops.waker_sink import NoopSink
 from async_rt.runtime.blocking_runtime import BlockingRuntime
 
-from http_client.body import EmptyBody
+from http_client.body import BytesBody
 from http_client.client import HttpClient, build_request_with_body
 from http_client.header_map import HeaderMap
 from http_client.url import Url
-from http_core.codec.types import HTTP_METHOD_GET, HttpMethod
+from http_core.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST, HttpMethod
 from http_core.transport.io_stream import Connector
 
 
 # =============================================================================
-# §0 — IcebergRestRequest — a fully-formed GET (host + port + path + headers).
+# §0 — IcebergRestMethod + IcebergRestRequest — a fully-formed request.
 # =============================================================================
 
 
+struct IcebergRestMethod(ImplicitlyCopyable, Movable):
+    """The HTTP method of an Iceberg REST request: GET (config, loadTable) or
+    POST (createTable, commitTable). The only two the client sends, so a
+    request can never carry a method the transport does not know."""
+
+    var _post: Bool
+
+    def __init__(out self, *, post: Bool):
+        self._post = post
+
+    @staticmethod
+    def get() -> IcebergRestMethod:
+        return IcebergRestMethod(post=False)
+
+    @staticmethod
+    def post() -> IcebergRestMethod:
+        return IcebergRestMethod(post=True)
+
+    def is_post(self) -> Bool:
+        return self._post
+
+    def name(self) -> String:
+        """`GET` or `POST`, as on the request line."""
+        if self._post:
+            return String("POST")
+        return String("GET")
+
+
 struct IcebergRestRequest(Movable, Deinitable):
-    """A ready-to-send Iceberg REST GET: the host, the port, the absolute
-    request path (already percent-encoded), and the outgoing header set (which
-    carries `Authorization: Bearer <token>` when a credential provider yielded
-    one).
+    """A ready-to-send Iceberg REST request: the method, the host, the port,
+    the absolute request path (already percent-encoded, with any query), the
+    outgoing header set, and the JSON body (empty for a GET).
 
     Field layout:
+      var method: IcebergRestMethod     — GET or POST
       var host: String                 — the catalog host (e.g. `catalog.example.com`)
       var port: UInt16                  — the catalog port (443 by default)
       var path: String                  — the absolute request path
-                                          (`/v1/config`, `/v1/{prefix}/namespaces/
-                                          {ns}/tables/{tbl}`)
+                                          (`/v1/config?warehouse=w`,
+                                          `/v1/{prefix}/namespaces/{ns}/tables/{tbl}`)
       var header_names: List[String]    — outgoing header names (parallel to values)
       var header_values: List[String]   — outgoing header values
+      var body: String                  — the JSON body of a POST; "" for a GET
 
     a plain owned-field struct — only `String`/`List[String]` heap fields,
     no pointer, no wildcard origin, lives only as a value."""
 
+    var method: IcebergRestMethod
     var host: String
     var port: UInt16
     var path: String
     var header_names: List[String]
     var header_values: List[String]
+    var body: String
 
     def __init__(
         out self,
@@ -80,11 +109,45 @@ struct IcebergRestRequest(Movable, Deinitable):
         var header_names: List[String],
         var header_values: List[String],
     ):
+        """A GET (no body)."""
+        self.method = IcebergRestMethod.get()
         self.host = host^
         self.port = port
         self.path = path^
         self.header_names = header_names^
         self.header_values = header_values^
+        self.body = String("")
+
+    @staticmethod
+    def post(
+        var host: String,
+        port: UInt16,
+        var path: String,
+        var header_names: List[String],
+        var header_values: List[String],
+        var body: String,
+    ) -> IcebergRestRequest:
+        """A POST carrying `body` (JSON text)."""
+        var r = IcebergRestRequest(
+            host^, port, path^, header_names^, header_values^
+        )
+        r.method = IcebergRestMethod.post()
+        r.body = body^
+        return r^
+
+    def copy(self) -> IcebergRestRequest:
+        """A field-by-field copy: the committer resends a byte-identical
+        request under the same idempotency key."""
+        var r = IcebergRestRequest(
+            String(self.host),
+            self.port,
+            String(self.path),
+            self.header_names.copy(),
+            self.header_values.copy(),
+        )
+        r.method = self.method
+        r.body = String(self.body)
+        return r^
 
     def header_value(self, name: String) -> String:
         """Look up an outgoing header value by (case-sensitive) name; empty
@@ -127,23 +190,25 @@ struct IcebergRestResponse(Copyable, Movable, Deinitable):
 
 
 # =============================================================================
-# §2 — IcebergRestTransport — the narrow GET seam.
+# §2 — IcebergRestTransport — the narrow request seam.
 # =============================================================================
 
 
 trait IcebergRestTransport(Movable, Deinitable):
-    """The transport the Iceberg REST catalog client GETs a request through. One
-    method: `get(request) -> IcebergRestResponse`. Production sends over HTTP;
-    the test double returns scripted JSON. No UnsafePointer crosses the boundary
-    — an `IcebergRestRequest` in, an `IcebergRestResponse` out."""
+    """The transport the Iceberg REST catalog client sends a request through.
+    One method: `send(request) -> IcebergRestResponse`. Production sends over
+    HTTP; the test doubles answer in memory. No UnsafePointer crosses the
+    boundary — an `IcebergRestRequest` in, an `IcebergRestResponse` out."""
 
-    def get(
+    def send(
         mut self, request: IcebergRestRequest
     ) raises -> IcebergRestResponse:
-        """Send the GET; return the HTTP status + JSON body. RAISES on a
-        transport error (a dial failure / a malformed response). A non-200
-        status is NOT a raise here — it is returned as an IcebergRestResponse for
-        the client to map to a typed error (a 404 -> NoSuchTable/Namespace)."""
+        """Send the request; return the HTTP status + JSON body. RAISES on a
+        transport error (a dial failure, a lost connection, a malformed
+        response). A non-200 status is NOT a raise here — it is returned as an
+        IcebergRestResponse for the client to map to a typed error. A raise
+        after the request was written leaves its outcome unknown: the
+        committer treats it so."""
         ...
 
 
@@ -156,10 +221,9 @@ struct ScriptedIcebergRestTransport(
     IcebergRestTransport, Movable, Deinitable
 ):
     """An IcebergRestTransport that returns SCRIPTED responses in FIFO call order
-    + (a) records the request PATH of each call and (b) records the Authorization
-    header of each call — so the loadTable falsifier can assert BOTH the sequence
-    of GETs (config -> loadTable) AND that the bearer token was threaded onto
-    each request. ZERO sockets, ZERO network.
+    and records the method, path, body and headers of each call, so a test can
+    assert the sequence of requests and exactly what each carried. ZERO
+    sockets, ZERO network.
 
     Usage:
       var t = ScriptedIcebergRestTransport()
@@ -177,47 +241,81 @@ struct ScriptedIcebergRestTransport(
     var _resp_status: List[Int]
     var _resp_body: List[String]
     var _cursor: Int
+    var _call_methods: List[String]
     var _call_paths: List[String]
-    var _call_auths: List[String]
+    var _call_bodies: List[String]
+    var _call_header_names: List[List[String]]
+    var _call_header_values: List[List[String]]
 
     def __init__(out self):
         self._resp_status = List[Int]()
         self._resp_body = List[String]()
         self._cursor = 0
+        self._call_methods = List[String]()
         self._call_paths = List[String]()
-        self._call_auths = List[String]()
+        self._call_bodies = List[String]()
+        self._call_header_names = List[List[String]]()
+        self._call_header_values = List[List[String]]()
 
     def queue_response(mut self, status: Int, var body: String):
-        """Queue the next scripted response (FIFO). Each `get` consumes one."""
+        """Queue the next scripted response (FIFO). Each `send` consumes one."""
         self._resp_status.append(status)
         self._resp_body.append(body^)
 
     def call_count(self) -> Int:
-        """How many `get` calls the client made (the op-count proof — e.g.
+        """How many `send` calls the client made (the op-count proof — e.g.
         config is fetched ONCE + cached across loadTable calls)."""
         return len(self._call_paths)
 
+    def call_method(self, i: Int) -> String:
+        """The method (`GET` or `POST`) of the i-th call."""
+        return String(self._call_methods[i])
+
     def call_path(self, i: Int) -> String:
-        """The request path of the i-th `get` call (call-order path assertion)."""
+        """The request path of the i-th call (call-order path assertion)."""
         return String(self._call_paths[i])
 
+    def call_body(self, i: Int) -> String:
+        """The body of the i-th call; "" for a GET."""
+        return String(self._call_bodies[i])
+
+    def call_header(self, i: Int, name: String) -> String:
+        """The value of header `name` (case-sensitive) on the i-th call; ""
+        when the call did not carry it."""
+        ref names = self._call_header_names[i]
+        for j in range(len(names)):
+            if names[j] == name:
+                return String(self._call_header_values[i][j])
+        return String("")
+
+    def call_has_header(self, i: Int, name: String) -> Bool:
+        """True iff the i-th call carried header `name`."""
+        ref names = self._call_header_names[i]
+        for j in range(len(names)):
+            if names[j] == name:
+                return True
+        return False
+
     def call_auth(self, i: Int) -> String:
-        """The Authorization header of the i-th `get` call (assert the bearer
+        """The Authorization header of the i-th call (assert the bearer
         token was attached); empty String if the call had no Authorization
         header (the no-auth path)."""
-        return String(self._call_auths[i])
+        return self.call_header(i, String("Authorization"))
 
-    def get(
+    def send(
         mut self, request: IcebergRestRequest
     ) raises -> IcebergRestResponse:
-        # Record the call (path + Authorization header) for assertion.
+        # Record the call for assertion.
+        self._call_methods.append(request.method.name())
         self._call_paths.append(String(request.path))
-        self._call_auths.append(request.header_value(String("Authorization")))
+        self._call_bodies.append(String(request.body))
+        self._call_header_names.append(request.header_names.copy())
+        self._call_header_values.append(request.header_values.copy())
         if self._cursor >= len(self._resp_status):
             raise Error(
                 String(
-                    "ScriptedIcebergRestTransport.get: no scripted response for"
-                    " call #"
+                    "ScriptedIcebergRestTransport.send: no scripted response"
+                    " for call #"
                 )
                 + String(self._cursor)
                 + String(" (path ")
@@ -250,7 +348,8 @@ struct HttpIcebergRestTransport[C: Connector](
     IcebergRestTransport, Movable, Deinitable
 ):
     """The production IcebergRestTransport: dials a fresh connector + drives ONE
-    synchronous GET per call over the shipped HttpClient. Parametric over the
+    synchronous request (a GET, or a POST with its JSON body) per call over
+    the shipped HttpClient. Parametric over the
     HTTP connector `C` (TLS in prod). Reuses the HTTP spine entirely — reinvents
     nothing.
 
@@ -307,7 +406,7 @@ struct HttpIcebergRestTransport[C: Connector](
         ](mk_connector)
         return t^
 
-    def get(
+    def send(
         mut self, request: IcebergRestRequest
     ) raises -> IcebergRestResponse:
         # Build the outgoing HeaderMap from the request's header set.
@@ -317,7 +416,7 @@ struct HttpIcebergRestTransport[C: Connector](
                 String(request.header_names[i]),
                 String(request.header_values[i]),
             )
-        # Dial a fresh connector + drive one synchronous GET (one
+        # Dial a fresh connector + drive one synchronous request (one
         # connector per call).
         var connector: Self.C
         if self._mk_clocked_connector:
@@ -337,11 +436,14 @@ struct HttpIcebergRestTransport[C: Connector](
             url = Url.http(
                 String(request.host), request.port, String(request.path)
             )
-        var req = build_request_with_body[EmptyBody](
-            HttpMethod(code=HTTP_METHOD_GET),
+        var method = HttpMethod(code=HTTP_METHOD_GET)
+        if request.method.is_post():
+            method = HttpMethod(code=HTTP_METHOD_POST)
+        var req = build_request_with_body[BytesBody](
+            method,
             url^,
             headers^,
-            EmptyBody.new(),
+            BytesBody.from_str(request.body),
         )
         var client = HttpClient[Self.C].with_request_timeout_us(
             connector^, self._request_timeout_us
@@ -350,7 +452,7 @@ struct HttpIcebergRestTransport[C: Connector](
             client.set_test_clock(self._test_clock.value())
         var rt = BlockingRuntime[NoopSink].new(NoopSink(_placeholder=UInt8(0)))
         ref reactor = rt.reactor()
-        var cr = client.send_buffered[BlockingRuntime[NoopSink], EmptyBody](
+        var cr = client.send_buffered[BlockingRuntime[NoopSink], BytesBody](
             req^, reactor
         )
         var status = Int(cr.status)

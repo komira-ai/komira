@@ -36,7 +36,7 @@ do is a free function in a module of its own.
 | `engine_catalog` | `register_parquet(ctx, name, path)`: the table's schema is its file's footer |
 | `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema) and `lower_for_context` |
 | `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
-| `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize`, lower, run. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
+| `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize_for_run`, lower, run. `optimize_for_run(plan)` is `optimize` (refusing a plan that needs a scalar subquery executed first, `OPTIMIZE_UNRESOLVED_SCALAR`) and then `plan_cse_eliminate`, which holds each subtree the plan repeats once (a CTE read twice, two equal UNION ALL branches) so lowering cuts it once and every reference reads it (`lowering.cut_shared`). Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
 | `arrow_result` | `arrow_result(outcome) -> ArrowResult`: the batches of a `SqlOutcome` and their schema, each batch's selection mask applied, checked to cross the Arrow C Stream Interface whole (`arrow_ipc.c_data_stream_check`). Raises with the step and message of a refusal, for an outcome with no batch, and naming a column the export cannot carry |
 
 **The footer cache is pinned to a query.** `parquet_footers.FooterCache`
@@ -73,17 +73,21 @@ package lists (`HIVE_PARTITION_*`).
 
 **Refused here, by name.** A statement that is not a query
 (`STATEMENT_NOT_A_QUERY`, step `bind`); a scalar subquery (the optimizer keeps
-it in the plan and lowering refuses the node, `LOWERING_UNCUTTABLE_NODE`; the
+it in the plan as a CROSS join, which lowering refuses with
+`LOWERING_JOIN_UNSERVED`; the
 door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
 asks for a scalar to be executed first, a guard no query tested here reaches); a sink denied its memory by the
 budget, a sum outside its declared type and a pool not whole after a run (step
-`execute`); and whatever lowering, the binder or the parser refuses (a join is
-`LOWERING_UNCUTTABLE_NODE` at `lower`). Lowering given fewer scan facts than
+`execute`); and whatever lowering, the binder or the parser refuses (an INNER
+equi-join is served; any other join is `LOWERING_JOIN_UNSERVED` at `lower`).
+Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
 `lowering_inputs` descends only scan, filter, project, limit, aggregate,
-distinct, sort and union nodes (a union's branches in order) and gives a facts
-entry per scan it reaches, and the cutter refuses any other node by name
-before it asks for the scans below it. `worker_count` and
+distinct, sort, union and join nodes (a union's branches in order; a join's
+left child, then its right, for every join, so a join the cutter refuses has
+its scans' facts read first) and gives a facts entry per scan it reaches; the
+cutter refuses any other node by name before it asks for the scans below it.
+`worker_count` and
 `memory_budget_bytes` have a lower bound of 1 and no upper bound. A
 cancellation token is local to a call, so cancel is not reachable from
 `run_sql`. After a refusal the context is unchanged and runs the next query.
@@ -159,7 +163,7 @@ The tests run when the package is built.
   file and over a gzip copy; a missing file is refused at bind and
   `header=false` at lowering.
 - `test_run_sql_q6`: TPC-H Q6's text from `bench_corpus` over a lineitem-shaped
-  Parquet file gives the integer oracle's DECIMAL(38,4); a join, a syntax error,
+  Parquet file gives the integer oracle's DECIMAL(38,4); a join of a kind lowering does not serve, a syntax error,
   an unknown table, a missing file, CREATE TABLE AS and a replaced file are named
   refusals, as are a tiny memory budget, an INT64 sum out of range, a scalar
   subquery (refused by lowering); the context runs on after a refusal; the
@@ -180,8 +184,15 @@ The tests run when the package is built.
   sum(v) per group; the key keeps its type, precision and scale; decimal keys
   past INT64 are exact); min and max of dates and the sum of decimals run under
   a BOOL key; a WHERE before the grouping keeps only the passing rows; an
-  all-NULL key is one group; `group by d, b` is refused at `lower` with
-  LOWERING_SINK_UNSERVED.
+  all-NULL key is one group; `group by d, b` groups by the pair.
+- `test_run_sql_group_keys_mixed`: over a Parquet table the pinned DuckDB
+  writes (`:group_keys_mixed_oracle`, five row groups, NULLs in every column,
+  the empty string), each query of `tests/group_keys_mixed/cases.sql` answers
+  what DuckDB answers, on one and on three workers: GROUP BY an INTEGER, a
+  VARCHAR and a DATE (in both orders, with count, sum, min and max), a BIGINT
+  and an INTEGER, a BOOLEAN, a DECIMAL and a VARCHAR; under a WHERE and a
+  HAVING; count(DISTINCT) per mixed key; SELECT DISTINCT over three columns;
+  an all-NULL key; no row.
 - `test_run_sql_int_sum`: an integer `sum()` over INT64 and INT32 columns is
   DECIMAL(38, 0) and exact past the INT64 range; an empty or all-NULL sum is
   NULL; expressions, CASE and HAVING over the sum run.

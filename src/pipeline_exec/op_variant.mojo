@@ -2,36 +2,45 @@
 # OpVariant -- a closed set of operators behind one runtime tag
 # =============================================================================
 #
-# The operator counterpart of `SourceVariant`: one of three operator types,
+# The operator counterpart of `SourceVariant`: one of four operator types,
 # fixed where the variant is named, and a tag saying which. `execute` and
-# `metrics_snapshot` test the tag and call the member.
+# `metrics_snapshot` test the tag and call the member. The fourth slot is
+# `NoOperator` unless the name fills it.
 
 from exec_types.exec_result import ExecResult
 from metrics.metrics_set import MetricsSnapshot
 from morsel.morsel import Morsel
 from morsel.morsel_operator import MorselOperatorImpl
 
+from .unused_members import NoOperator
+
 comptime OP_TAG_FIRST: UInt8 = 0
 comptime OP_TAG_SECOND: UInt8 = 1
 comptime OP_TAG_THIRD: UInt8 = 2
+comptime OP_TAG_FOURTH: UInt8 = 3
 
 
 struct OpVariant[
-    A: MorselOperatorImpl, B: MorselOperatorImpl, C: MorselOperatorImpl
+    A: MorselOperatorImpl,
+    B: MorselOperatorImpl,
+    C: MorselOperatorImpl,
+    D: MorselOperatorImpl = NoOperator,
 ](MorselOperatorImpl):
-    """One operator out of the closed list `A`, `B`, `C`. Fill unused slots
-    with `NoOperator`."""
+    """One operator out of the closed list `A`, `B`, `C`, `D`. Fill unused
+    slots with `NoOperator`."""
 
     var _tag: UInt8
     var _a: Optional[Self.A]
     var _b: Optional[Self.B]
     var _c: Optional[Self.C]
+    var _d: Optional[Self.D]
 
     def __init__(out self, tag: UInt8):
         self._tag = tag
         self._a = Optional[Self.A]()
         self._b = Optional[Self.B]()
         self._c = Optional[Self.C]()
+        self._d = Optional[Self.D]()
 
     @staticmethod
     def first(var member: Self.A) -> Self:
@@ -54,6 +63,13 @@ struct OpVariant[
         v._c = Optional[Self.C](member^)
         return v^
 
+    @staticmethod
+    def fourth(var member: Self.D) -> Self:
+        """A variant holding `member` in the fourth slot."""
+        var v = Self(OP_TAG_FOURTH)
+        v._d = Optional[Self.D](member^)
+        return v^
+
     def tag(self) -> UInt8:
         """Which slot holds the member."""
         return self._tag
@@ -63,11 +79,15 @@ struct OpVariant[
             return self._a.value().execute(morsel)
         if self._tag == OP_TAG_SECOND:
             return self._b.value().execute(morsel)
-        return self._c.value().execute(morsel)
+        if self._tag == OP_TAG_THIRD:
+            return self._c.value().execute(morsel)
+        return self._d.value().execute(morsel)
 
     def metrics_snapshot(self) -> MetricsSnapshot:
         if self._tag == OP_TAG_FIRST:
             return self._a.value().metrics_snapshot()
         if self._tag == OP_TAG_SECOND:
             return self._b.value().metrics_snapshot()
-        return self._c.value().metrics_snapshot()
+        if self._tag == OP_TAG_THIRD:
+            return self._c.value().metrics_snapshot()
+        return self._d.value().metrics_snapshot()
