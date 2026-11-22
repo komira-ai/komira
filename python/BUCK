@@ -634,9 +634,10 @@ _RELEASES = {
 #   refuses it by name;
 # - another version, komira's first: a newer Modular library fails to load,
 #   with the loader's `undefined symbol` (its code needs symbols komira's
-#   older libraries lack), and komira keeps working; an older one loads as a
+#   older libraries lack), and komira keeps working; an older one (inferred
+#   from its `M::` symbols; first run at a 1.1.0 or 1.2.0 toolchain) loads as a
 #   second copy bound to komira's two other libraries (komira's newer ones
-#   define every symbol it needs), and komira keeps working.
+#   define every `M::` symbol it needs), and komira keeps working.
 #
 # The toolchain's version picks both (third_party/modular/pins.bzl), so a
 # toolchain pin moves these tests with it. The other version's

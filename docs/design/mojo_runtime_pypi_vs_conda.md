@@ -223,9 +223,11 @@ The komira wheel holds one runtime, the pinned conda 1.0.0 one, and states no re
 Mojo distribution, so it cannot conflict with an installed `mojo-compiler` at install time. At
 load time the runtime check (above) decides: an installed `mojo-compiler` of the same build is
 shared, another version in the same process is refused or fails to load. PyPI's latest is 1.2.0
-(also `==1.2.0` on its libs wheel; wheels 72.7, 78.6 and 81.8 MB). The 1.2.0 libraries were
-read with `readelf` only, for their build ids and the missing symbols named above, and are
-loaded only by the two 1.2.0 tests.
+(also `==1.2.0` on its libs wheel; wheels 72.7, 78.6 and 81.8 MB). The 1.1.0 and 1.2.0 libraries were
+read with `readelf` and `nm -D` only, for their build ids and the symbols named above, and are
+loaded only by the other-version tests (`//python:beside_other_mojo_loaded_first` and
+`:beside_other_mojo_loaded_after`, at the newest other version of `third_party/modular/pins.bzl`)
+and, once the toolchain is at their version, by the same-version tests.
 
 ## Summary of answers
 
@@ -237,6 +239,6 @@ loaded only by the two 1.2.0 tests.
 | libkomira needs the runtime libraries | yes (`DT_NEEDED libKGENCompilerRTShared`) |
 | libkomira built on the pin loads against the PyPI libraries | linux-x86_64: `//python:beside_modular_loaded_first` and `:beside_modular_loaded_after` (same build ids); linux-arm64 and macos-arm64: not run, inferred yes on Linux from identical code and symbols |
 | The komira wheel carries the runtime | yes, the pinned conda libraries in `komira/_lib/lib/`, and `//python:wheel_install_test` installs it alone |
-| Another Mojo version in the same process | refused by name when loaded first, fails to load when loaded after komira; one process holds one runtime |
+| Another Mojo version in the same process | refused by name when loaded first; loaded after komira, a newer one fails to load and an older one loads as a second KGEN on komira's libraries (INFERRED, above); one process holds one runtime |
 | Licence covering the three binary files as packaged | the Modular Community License Terms, not Apache-2.0 |
 | Runtime-only package on PyPI | none found; the whole compiler is 79 / 76 / 71 MB plus a 3 MB libs wheel, which is why the wheel carries the three libraries (1.96 MB on linux-x86_64) instead |

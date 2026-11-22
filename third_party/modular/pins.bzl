@@ -3,9 +3,9 @@
 Read by this package's BUCK, which declares the downloads of the wheels the
 tests take at the toolchain's Mojo (`USED`), and by python/BUCK, whose
 `beside_modular` install tests take the pair at the toolchain's Mojo and the
-compiler wheel of another version. Each version has
-the compiler wheel (manylinux_2_34 x86_64), whose `modular/lib/` holds the
-three Mojo runtime libraries, and the wheel it requires
+compiler wheel of the newest other version. Each version has the compiler
+wheel (manylinux_2_34 x86_64), whose `modular/lib/` holds the three Mojo
+runtime libraries, and the wheel it requires
 (`mojo-compiler-mojo-libs==<version>`). `sha256` and `size` are what PyPI
 publishes for the file (https://pypi.org/pypi/<name>/<version>/json); the
 target name is the URL's file name.

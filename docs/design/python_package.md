@@ -281,8 +281,9 @@ the farm's macOS workers), and a run publishes it only from main.
   - Another Mojo version imported after libkomira: a newer Modular KGEN fails to load with the loader's
     `undefined symbol` (1.2.0's needs `AsyncRT` and `Globals` symbols the 1.0.0 libraries lack), and
     libkomira keeps working. An older one (1.0.0 or 1.1.0 beside a package built with 1.2.0) finds every
-    symbol it needs in the package's newer libraries, so it loads as a second KGEN bound to them, and
-    libkomira keeps working ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)). Neither
+    `M::` symbol it needs in the package's newer libraries, so it loads as a second KGEN bound to them,
+    and libkomira keeps working (INFERRED from the symbols, not yet run: no target is at a 1.2.0
+    toolchain; [mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)). Neither
     can be made safe: one process holds one Mojo runtime version, so `import max` beside komira works
     only while both were built with the same Mojo version.
   - Why not `RTLD_GLOBAL` for the package's runtime: it would put the package's KGEN in the global scope,

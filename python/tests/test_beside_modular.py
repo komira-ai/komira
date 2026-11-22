@@ -34,7 +34,8 @@ What each case holds (docs/design/python_package.md, decision 6, says why):
 - `older`, komira's first: komira loads and answers; Modular's
   libKGENCompilerRTShared.so loads as a second copy, from <site>/modular/lib,
   bound to komira's two other libraries (komira's newer ones define every
-  symbol it needs: the symbol sets of 1.0.0, 1.1.0 and 1.2.0 only grow), and
+  `M::` symbol it needs, read with `nm -D` for 1.0.0, 1.1.0 and 1.2.0; first
+  run when the toolchain is at a version newer than another table row), and
   komira still answers.
 
 Any failure raises; its last traceback line is what a refusing case names.
