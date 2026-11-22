@@ -649,14 +649,14 @@ hood = g.neighbors(g.entities.search("Acme", fields=["name"], k=5), on="entity_i
 ```
 
 ```ts
-const tickets = km.readTable(km.catalog("lake"), "support.tickets");               // TypeScript
+const tickets = km.readTable(km.catalog("lake"), "support.tickets");               // TypeScript; km.catalog superseded: a catalog object, km.iceberg(...) (credentials_and_writes.md)
 const text = tickets.search("refund not received", { fields: ["subject", "body"], k: 20 });
 const near = tickets.knn("body_vec", km.embed("refund not received", { model: "m" }),
   { k: 20, where: km.col("status").eq("open") });
 ```
 
 ```mojo
-var tickets = km.read_table(km.catalog("lake"), "support.tickets")                 # Mojo
+var tickets = km.read_table(km.catalog("lake"), "support.tickets")                 # Mojo; km.catalog superseded: a catalog object, km.iceberg(...) (credentials_and_writes.md)
 var text = tickets.search("refund not received", fields=["subject", "body"], k=20)
 var near = tickets.knn("body_vec", km.embed("refund not received", model="m"), k=20,
                        where=km.col("status") == "open")

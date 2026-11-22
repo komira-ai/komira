@@ -72,7 +72,8 @@ s.sql("INSERT INTO sales_catalog.sales.orders SELECT * FROM raw_orders")
 
 ## Questions for the owner
 
-Each row is a place where komira would answer differently from DuckDB, or where rule S2 needs a reading.
+Each row is a place where komira would answer differently from DuckDB, where rule S2 needs a reading,
+or a spelling the owner should confirm.
 The rest of the document assumes the recommendation.
 
 | question | DuckDB | this design | recommendation |
@@ -81,6 +82,7 @@ The rest of the document assumes the recommendation.
 | an S3 source with no region from any setting | assumes `us-east-1` | refuses by name (`STORAGE_REGION_UNKNOWN`) | refuse: a guessed region turns a missing setting into a redirect error from the wrong place |
 | `COPY ... TO` with no `FORMAT` and an extension it cannot read | writes CSV | refuses by name (`COPY_FORMAT_NOT_INFERRED`) | refuse: guessing writes a file the statement may not have meant |
 | a URL under no bound scope, on the default session or any other | sends the request with no credential unless a secret was created; the provider chain is opt-in (`CREATE SECRET (TYPE s3, PROVIDER credential_chain)`) *(to confirm against the pinned DuckDB)* | every session starts with `s3://` and `gs://` scopes bound to `komira.AMBIENT`, the process's own identity through the provider chains (decision 3) | keep the ambient default: it is what boto3, pyarrow and polars do beside komira *(inferred from their default credential chains)*, and `s.add_sql_binding("public", komira.files("s3://", credential=komira.ANONYMOUS, region="us-east-1"))` turns it off for SQL. The third default scope, `https://`, is `komira.ANONYMOUS`. An `az://` URL has no default scope and is refused with `CREDENTIALS_NOT_FOUND` until a scope is bound |
+| the positional form `s.sql(table_object, "SELECT ... FROM self")`, binding one unnamed source for one statement under the name `self` | DuckDB's Python API has no such argument: it resolves a Python variable named in the SQL by inspecting the caller's frame; polars' `DataFrame.sql` reads its frame as `self` *(to confirm against the pinned polars)* | served, Python only, beside named call bindings; TypeScript and Mojo write `{ self: source }` | keep it: it is the owner's own spelling, it costs one reserved name, and it never conflicts with a named binding because a call binding wins for its statement |
 | the environment variables below, which `komira.AMBIENT` reads | its credential chain reads the same providers' variables | reads exactly the list below, inside the library, only for `komira.AMBIENT`, and `AwsProfile` reads only the file locators | allow the whole list as rule S2's provider-standard credentials, including the names outside `AWS_*` and `GOOGLE_*`: they are how the providers find credentials, and nothing else in komira reads the environment |
 
 ### The environment komira reads
@@ -332,7 +334,9 @@ one value in a statement. The value is set when a binding, or a DataFrame reader
     one.
   - A call value byte-equal to the session's value takes the session's generation, and is no
     conflict. Any other call value gets a fresh generation, in every call, even if an earlier call
-    passed the same bytes. So no cache entry is shared between calls.
+    passed the same bytes. So no cache entry is shared between two calls' own values. A call value
+    byte-equal to the session's value reads the session's cache entries, by design: it is the same
+    value, at the same generation.
   - The identity of a read includes the generation (decision 6). So no cache answers a call from a
     value other than the one that call carried.
 - **A value brought by `add_sql_binding`** is the session's value of its name.
@@ -599,9 +603,13 @@ message WireWriteTarget {
     the answer silently.
   - Plans without `access` keep their version and stay readable by every release. That pull request
     names its cross-release test.
-- **The one value a plan may hold: a presigned URL's query string.** A presigned `https://` URL
-  carries its signature in its query string. The location includes the query, verbatim, because it is
-  the address the user gave, and a plan that stays in the process keeps it.
+- **The one named exception to "never a value": a presigned URL's query string.** A presigned
+  `https://` URL carries its signature in its query string, so its location carries a credential.
+  komira neither refuses it nor turns it into a named credential.
+  - The location includes the query, verbatim, because it is the address the user wrote, and a plan
+    that stays in the process keeps it to read the file.
+  - The exception's bound is the process: such a plan never leaves it. The bullets below are every
+    place the query could otherwise appear.
   - Error messages and logs print no query, fragment or user information.
   - `komira_plan_render` prints the query as `?<query:` and the first 16 hex digits of its SHA-256,
     never its text. Two scans of one path with different queries therefore render, hash and key
@@ -855,7 +863,8 @@ komira_last_error_step	Int32	Handle	1.x
     cross-origin hop.
 - **Plaintext `http://` URLs are refused** (`STORAGE_URL_REFUSED`; the owner question at the top). The
   only route to plaintext is a source's `endpoint=`.
-- **Trust roots.** `Session(ca_file=None)` (**PROPOSED**) adds a PEM file of trusted roots for every `https://` the
+- **Trust roots.** `Session(ca_file=None)` (**PROPOSED**; `caFile` in TypeScript, a later keyword of
+  the package designs' `Session`) adds a PEM file of trusted roots for every `https://` the
   session reads. Tests of `https://` reads use a loopback TLS server with a test authority given this
   way.
 - **No proxy.** `http_client` has no `CONNECT` support, and komira reads no `HTTPS_PROXY`. A later
