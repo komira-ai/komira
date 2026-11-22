@@ -1,18 +1,34 @@
-//! pypi_smoke: the command line of the PyPI publish workflow (.github/workflows/pypi.yml).
+//! pypi_smoke: the command line of the PyPI publish workflow (.github/workflows/pypi.yml): the TestPyPI half on
+//! every merge that changes more than documentation (the user test of the wheel file, the upload to TestPyPI and the smoke of what it serves) and the
+//! promotion of a file that passed it to PyPI.
 //!
-//!   pypi_smoke dist --wheel <file.whl> --out <dir> --github-output <file>
+//!   pypi_smoke dist --wheel <file.whl> --out <dir> --record <file> --github-output <file>
 //!   pypi_smoke state --index <testpypi|pypi> --dist <dir> --github-output <file>
 //!   pypi_smoke present --index <testpypi|pypi> --name-file <path> --github-output <file>
 //!   pypi_smoke verify --index <testpypi|pypi> --dist <dir> [--attempts <n>] [--delay <seconds>]
-//!   pypi_smoke install --index <testpypi|pypi> --dist <dir> --python <exe> --example <file> --expect <file>
+//!   pypi_smoke install --index <testpypi|pypi|dist> --dist <dir> --python <exe> --example <file> --expect <file>
 //!                      --data <file>... --abi-table <file> --work <dir> [--attempts <n>] [--delay <seconds>]
+//!   pypi_smoke matrix --pythons <file> --platform <name> --github-output <file>
+//!   pypi_smoke storage --index <testpypi|pypi> --project <name> --limit-gib <1..1000> --over-percent <1..100>
+//!                      --summary <file> --github-output <file>
+//!   pypi_smoke promote --record <file> --out <dir> --github-output <file>
 //!
-//! `dist` names the wheel the build made as the index will (meta.zig) and puts it alone in a directory; `state`
+//! `dist` names the wheel the build made as the index will (meta.zig), puts it alone in a directory and writes
+//! `--record`, one line `<file name> <sha256> <size>` of the wheel (the record `promote` holds a download to);
+//! `storage` sums the sizes of every file of every release of a project on an index (storage.zig), appends a
+//! bullet to `--summary` and `over=<true|false>` and `bytes=<total>` to the output file, and prints an error
+//! annotation when the project is over `--over-percent` of `--limit-gib` GiB (the command still exits 0: the
+//! workflow's result job turns the run red from `over`); `promote` holds a record to TestPyPI and PyPI
+//! (promote.zig), downloads the recorded file from TestPyPI into `--out` and appends `version`, `filename` and
+//! `skipped` (the newer TestPyPI versions of the same tag that have no record, oldest first); `state`
 //! says whether an index already holds that file (index.zig `lookup`); `present` says, from a file holding the
 //! one-line name of a wheel (`<name>-<version>-<tag>.whl`) and before anything is built, whether the index's
 //! release lists a file of exactly that name (index.zig `hasFile`) and appends `present=true` or
 //! `present=false`; `verify` and `install` are the smoke
-//! (index.zig `verify`, install.zig). Every step prints `pypi_smoke: ...`; a refusal prints
+//! (index.zig `verify`, install.zig); `install --index dist` installs the wheel of the dist directory itself, with
+//! no index and one attempt (a directory does not lag: `--attempts` and `--delay` are refused with it); `matrix`
+//! reads the list of supported Pythons the build wrote for a platform (`//python:supported_pythons[<platform>]`,
+//! matrix.zig) and appends `matrix=<the job matrix of the platform as JSON>`. Every step prints `pypi_smoke: ...`; a refusal prints
 //! `pypi_smoke: FAILED: <why>` on stderr and `::error title=pypi::<why on one line>` on stdout for the GitHub
 //! log; the exit status is 0 when the step held, 1 when it refused or failed, 2 for a usage error. Outputs for
 //! later steps are appended to the file `--github-output` names. Everything is a flag; no environment is read.
@@ -21,6 +37,9 @@ const common = @import("common.zig");
 const meta = @import("meta.zig");
 const index = @import("index.zig");
 const install = @import("install.zig");
+const matrix = @import("matrix.zig");
+const promote = @import("promote.zig");
+const storage = @import("storage.zig");
 const rbf = @import("release_beta_fetch");
 
 const Allocator = std.mem.Allocator;
@@ -32,12 +51,16 @@ pub const Deps = struct {
 };
 
 pub const usage =
-    \\usage: pypi_smoke dist --wheel <file.whl> --out <dir> --github-output <file>
+    \\usage: pypi_smoke dist --wheel <file.whl> --out <dir> --record <file> --github-output <file>
     \\       pypi_smoke state --index <testpypi|pypi> --dist <dir> --github-output <file>
     \\       pypi_smoke present --index <testpypi|pypi> --name-file <path> --github-output <file>
     \\       pypi_smoke verify --index <testpypi|pypi> --dist <dir> [--attempts <n>] [--delay <seconds>]
-    \\       pypi_smoke install --index <testpypi|pypi> --dist <dir> --python <exe> --example <file> --expect <file>
+    \\       pypi_smoke install --index <testpypi|pypi|dist> --dist <dir> --python <exe> --example <file> --expect <file>
     \\                          --data <file>... --abi-table <file> --work <dir> [--attempts <n>] [--delay <seconds>]
+    \\       pypi_smoke matrix --pythons <file> --platform <name> --github-output <file>
+    \\       pypi_smoke storage --index <testpypi|pypi> --project <name> --limit-gib <1..1000> --over-percent <1..100>
+    \\                          --summary <file> --github-output <file>
+    \\       pypi_smoke promote --record <file> --out <dir> --github-output <file>
     \\
 ;
 
@@ -149,14 +172,17 @@ fn failedText(a: Allocator, out: *std.Io.Writer, err: *std.Io.Writer, comptime f
 }
 
 fn cmdDist(a: Allocator, args: []const []const u8, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
-    const names = [_][]const u8{ "--wheel", "--out", "--github-output" };
-    const p = (try parseFlags(a, args, &names, 3, null, err)) orelse return 2;
+    const names = [_][]const u8{ "--wheel", "--out", "--record", "--github-output" };
+    const p = (try parseFlags(a, args, &names, 4, null, err)) orelse return 2;
     var why: []const u8 = "";
     const wheel = meta.loadWheelFile(a, &why, p.get(0)) catch |e| return failed(a, out, err, e, why);
     meta.writeDist(a, &why, wheel, p.get(1)) catch |e| return failed(a, out, err, e, why);
+    const record = try std.fmt.allocPrint(a, "{s} {s} {d}\n", .{ wheel.file_name, &wheel.sha256, wheel.bytes.len });
+    std.fs.cwd().writeFile(.{ .sub_path = p.get(2), .data = record }) catch |e|
+        return failedText(a, out, err, "cannot write --record {s}: {s}", .{ p.get(2), @errorName(e) });
     const lines = try std.fmt.allocPrint(a, "version={s}\nfilename={s}\nsha256={s}\n", .{ wheel.version, wheel.file_name, &wheel.sha256 });
-    common.appendFile(p.get(2), lines) catch |e|
-        return failedText(a, out, err, "cannot write --github-output {s}: {s}", .{ p.get(2), @errorName(e) });
+    common.appendFile(p.get(3), lines) catch |e|
+        return failedText(a, out, err, "cannot write --github-output {s}: {s}", .{ p.get(3), @errorName(e) });
     try out.print("pypi_smoke: {s} ({d} bytes, sha256 {s}) is version {s} of {s}; written to {s}\n", .{ wheel.file_name, wheel.bytes.len, &wheel.sha256, wheel.version, wheel.name, p.get(1) });
     try out.flush();
     return 0;
@@ -214,12 +240,27 @@ fn cmdVerify(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Wr
 fn cmdInstall(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
     const names = [_][]const u8{ "--index", "--dist", "--python", "--example", "--expect", "--abi-table", "--work", "--attempts", "--delay" };
     const p = (try parseFlags(a, args, &names, 7, "--data", err)) orelse return 2;
-    const idx = (try indexOf(err, p.get(0))) orelse return 2;
-    const pace = (try paceOf(err, p.values[7], p.values[8])) orelse return 2;
+    const from_dist = std.mem.eql(u8, p.get(0), "dist");
+    if (!from_dist and common.indexNamed(p.get(0)) == null) {
+        try err.writeAll("pypi_smoke: --index is testpypi, pypi or dist\n");
+        try err.flush();
+        return 2;
+    }
+    if (from_dist and (p.values[7] != null or p.values[8] != null)) {
+        try err.writeAll("pypi_smoke: --attempts and --delay are for an index; --index dist installs once\n");
+        try err.flush();
+        return 2;
+    }
+    const pace = if (from_dist) Pace{ .attempts = 1, .delay_ms = 0 } else (try paceOf(err, p.values[7], p.values[8])) orelse return 2;
     var why: []const u8 = "";
     const wheel = meta.loadDist(a, &why, p.get(1)) catch |e| return failed(a, out, err, e, why);
+    // pip runs in the work directory, so it is given the dist directory's absolute path
+    const source: install.Source = if (from_dist) .{
+        .dist = std.fs.cwd().realpathAlloc(a, p.get(1)) catch |e|
+            return failedText(a, out, err, "cannot resolve --dist {s}: {s}", .{ p.get(1), @errorName(e) }),
+    } else .{ .index = common.indexNamed(p.get(0)).? };
     const opts = install.Options{
-        .index = idx,
+        .source = source,
         .python = p.get(2),
         .example = p.get(3),
         .expect = p.get(4),
@@ -230,7 +271,83 @@ fn cmdInstall(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.W
         .delay_ms = pace.delay_ms,
     };
     install.run(a, &why, deps.runner, opts, wheel, out) catch |e| return failed(a, out, err, e, why);
-    try out.print("pypi_smoke: pip installed {s}=={s} from {s} into an empty environment and {s} printed what {s} says\n", .{ wheel.name, wheel.version, idx.name, opts.example, opts.expect });
+    const from = switch (source) {
+        .index => |idx| idx.name,
+        .dist => |dir| try std.fmt.allocPrint(a, "the dist directory {s}", .{dir}),
+    };
+    try out.print("pypi_smoke: pip installed {s}=={s} from {s} into an empty environment and {s} printed what {s} says\n", .{ wheel.name, wheel.version, from, opts.example, opts.expect });
+    try out.flush();
+    return 0;
+}
+
+fn cmdMatrix(a: Allocator, args: []const []const u8, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
+    const names = [_][]const u8{ "--pythons", "--platform", "--github-output" };
+    const p = (try parseFlags(a, args, &names, 3, null, err)) orelse return 2;
+    const platform = matrix.platformNamed(p.get(1)) orelse {
+        try err.print("pypi_smoke: --platform is one of {s}\n", .{try matrix.platformNames(a)});
+        try err.flush();
+        return 2;
+    };
+    var why: []const u8 = "";
+    const text = meta.readFile(a, &why, p.get(0), 1 << 20) catch |e| return failed(a, out, err, e, why);
+    const versions = matrix.parse(a, &why, p.get(0), text) catch |e| return failed(a, out, err, e, why);
+    const line = try std.fmt.allocPrint(a, "matrix={s}\n", .{try matrix.json(a, platform, versions)});
+    common.appendFile(p.get(2), line) catch |e|
+        return failedText(a, out, err, "cannot write --github-output {s}: {s}", .{ p.get(2), @errorName(e) });
+    try out.print("pypi_smoke: the jobs of the {s} wheel run on {s} with Python {s}\n", .{ platform.name, platform.runner, try std.mem.join(a, ", ", versions) });
+    try out.flush();
+    return 0;
+}
+
+fn cmdStorage(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
+    const names = [_][]const u8{ "--index", "--project", "--limit-gib", "--over-percent", "--summary", "--github-output" };
+    const p = (try parseFlags(a, args, &names, 6, null, err)) orelse return 2;
+    const idx = (try indexOf(err, p.get(0))) orelse return 2;
+    const project_ok = p.get(1).len != 0 and for (p.get(1)) |c| {
+        if (!std.ascii.isAlphanumeric(c) and std.mem.indexOfScalar(u8, "._-", c) == null) break false;
+    } else true;
+    if (!project_ok) {
+        try err.writeAll("pypi_smoke: --project is a project name: letters, digits, '.', '_' and '-'\n");
+        try err.flush();
+        return 2;
+    }
+    const limit = parseNumber(p.get(2), 1000);
+    if (limit == null or limit.? == 0) {
+        try err.writeAll("pypi_smoke: --limit-gib is a number from 1 to 1000\n");
+        try err.flush();
+        return 2;
+    }
+    const over = parseNumber(p.get(3), 100);
+    if (over == null or over.? == 0) {
+        try err.writeAll("pypi_smoke: --over-percent is a number from 1 to 100\n");
+        try err.flush();
+        return 2;
+    }
+    var why: []const u8 = "";
+    const rep = storage.measure(a, &why, deps.fetcher, .{ .idx = idx, .project = p.get(1), .limit_gib = limit.?, .over_percent = over.? }) catch |e| return failed(a, out, err, e, why);
+    common.appendFile(p.get(4), rep.bullet) catch |e|
+        return failedText(a, out, err, "cannot write --summary {s}: {s}", .{ p.get(4), @errorName(e) });
+    const lines = try std.fmt.allocPrint(a, "over={s}\nbytes={d}\n", .{ if (rep.over) "true" else "false", rep.totals.bytes });
+    common.appendFile(p.get(5), lines) catch |e|
+        return failedText(a, out, err, "cannot write --github-output {s}: {s}", .{ p.get(5), @errorName(e) });
+    try out.writeAll(rep.log);
+    try out.flush();
+    return 0;
+}
+
+fn cmdPromote(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
+    const names = [_][]const u8{ "--record", "--out", "--github-output" };
+    const p = (try parseFlags(a, args, &names, 3, null, err)) orelse return 2;
+    var why: []const u8 = "";
+    const res = promote.check(a, &why, deps.fetcher, p.get(0), p.get(1), out) catch |e| return failed(a, out, err, e, why);
+    const rec = res.record;
+    const lines = try std.fmt.allocPrint(a, "version={s}\nfilename={s}\nskipped={s}\n", .{ rec.parsed.version, rec.file_name, try std.mem.join(a, ", ", res.skipped) });
+    // the output file is tried first, so a file that cannot be written leaves --out empty
+    common.appendFile(p.get(2), lines) catch |e|
+        return failedText(a, out, err, "cannot write --github-output {s}: {s}", .{ p.get(2), @errorName(e) });
+    promote.write(a, &why, res, p.get(1)) catch |e| return failed(a, out, err, e, why);
+    for (res.skipped) |v| try out.print("::notice title=pypi::{s} {s} is on TestPyPI with no record that its TestPyPI smoke passed (the smoke failed, or its run has not ended): not promoted\n", .{ rec.parsed.name, v });
+    try out.print("pypi_smoke: promoting {s} {s}: {s} (sha256 {s}, {d} bytes) downloaded from TestPyPI, as recorded\n", .{ rec.parsed.name, rec.parsed.version, rec.file_name, rec.sha256, rec.size });
     try out.flush();
     return 0;
 }
@@ -244,6 +361,9 @@ pub fn run(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writ
         if (std.mem.eql(u8, args[0], "present")) return cmdPresent(a, rest, deps, out, err);
         if (std.mem.eql(u8, args[0], "verify")) return cmdVerify(a, rest, deps, out, err);
         if (std.mem.eql(u8, args[0], "install")) return cmdInstall(a, rest, deps, out, err);
+        if (std.mem.eql(u8, args[0], "matrix")) return cmdMatrix(a, rest, out, err);
+        if (std.mem.eql(u8, args[0], "storage")) return cmdStorage(a, rest, deps, out, err);
+        if (std.mem.eql(u8, args[0], "promote")) return cmdPromote(a, rest, deps, out, err);
     }
     try err.writeAll(usage);
     try err.flush();

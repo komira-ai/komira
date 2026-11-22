@@ -114,11 +114,7 @@ zig_module(
 #                      each defect is refused by its check's name;
 #   wheel_cli_unit     the command line: flags, <name>=<value>, files and
 #                      directories staged with their modes, a link refused,
-#                      and a readme preface before the README;
-#   wheel_record_unit  the runtime record (`runtime-record`): the GNU build id
-#                      read from a note segment, a library without one or
-#                      that reads outside itself refused, and the record's
-#                      lines in the order given;
+#                      and the README as the description;
 #   wheel_libs_unit    the finished wheel read alone (`komira_wheel libs`):
 #                      komira's layout passes with its libraries in the
 #                      loader's order, and a second or foreign or missing Mojo
@@ -127,10 +123,7 @@ zig_module(
 #                      library nothing loads, a member outside the package, a
 #                      missing runtime licence and a Requires-Dist of the
 #                      runtime are each refused by their exact message, as are
-#                      the command's flags and an expected refusal that differs;
-#                      the external flavour's layout passes, and a runtime
-#                      library in it by name or bytes, a runtime licence and a
-#                      missing or other requirement are refused.
+#                      the command's flags and an expected refusal that differs.
 _WHEEL_SRCS = [
     "wheel/check.zig",
     "wheel/cli.zig",
@@ -139,14 +132,13 @@ _WHEEL_SRCS = [
     "wheel/libs.zig",
     "wheel/macho.zig",
     "wheel/policy.zig",
-    "wheel/record.zig",
     "wheel/stamp.zig",
     "wheel/tag.zig",
     "wheel/wheel.zig",
     "wheel/zip.zig",
 ]
 
-_WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "libs", "macho", "policy", "record", "zip"]
+_WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "libs", "macho", "policy", "zip"]
 
 [
     zig_test(
@@ -188,16 +180,14 @@ zig_exe(
 # The rule on fixtures (wheel/fixtures/): a linux-x86_64 wheel holding a real
 # Mojo shared library (the example `plain`, which needs the Mojo runtime:
 # external_needed) at the test stamp, so building it runs [check] and
-# [release_check], the twin's byte equality among them, written with a
-# readme preface; and wheels of plain files for the
-# linux-arm64 and darwin-arm64 (macOS) rows, whose tags are derived the same
-# way.
+# [release_check], the twin's byte equality among them; and wheels of plain
+# files for the linux-arm64 and darwin-arm64 (macOS) rows, whose tags are
+# derived the same way.
 wheel_file_test_stamped(
     name = "wheel_fixture",
     distribution = "komira-wheel-fixture",
     summary = "The wheel rule's fixture",
     readme = "wheel/fixtures/readme.md",
-    readme_preface = "This is the fixture's preface.",
     requires_python = ">=3.13",
     requires_dist = ["mojo-compiler==1.0.0"],
     classifiers = ["Programming Language :: Python :: 3 :: Only"],
@@ -234,7 +224,7 @@ wheel_file_test_stamped(
 # The `[file_name]` of two fixtures read back (wheel/file_name_test.zig): each is the one line
 # of its distribution, the stamp's version and its row's tag, and agrees with the wheel the same
 # target wrote (its dist-info directory, METADATA's Version, WHEEL's Tag); a name that does not
-# agree is refused. pypi.yml asks the indexes for the macOS wheel's `[file_name]` before building it.
+# agree is refused. pypi-macos-arm64.yml asks TestPyPI for the macOS wheel's `[file_name]` before building it.
 zig_test(
     name = "wheel_file_name_cases",
     exec_compatible_with = LINUX_X86_64,

@@ -270,9 +270,8 @@ Reading it:
   `native_owners` entry the library's gate requires.
 - **glibc floor.** The highest `GLIBC_` version of libkomira and the eight owners is
   2.34 (libkomira and compression), so `manylinux_2_34` is honest for the files the package
-  carries. No `GLIBCXX_` or `CXXABI_` version is needed by them. The Python wheel's bundled
-  flavour also carries the three Mojo runtime libraries (through `[dist]`), and its external
-  flavour loads them, so both are tagged alike; `libAsyncRTRuntimeGlobals.so`
+  carries. No `GLIBCXX_` or `CXXABI_` version is needed by them. The Python wheel also
+  carries the three Mojo runtime libraries (through `[dist]`); `libAsyncRTRuntimeGlobals.so`
   needs `GLIBC_2.35`, one above that floor, and `libKGENCompilerRTShared.so` needs
   `GLIBCXX_3.4.30` and `CXXABI_1.3.11`, so the wheel is tagged `manylinux_2_35` and a host
   needs at least glibc 2.35 (see `docs/design/mojo_runtime_pypi_vs_conda.md`).

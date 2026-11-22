@@ -7,37 +7,52 @@
 # The binder opens no parquet file (a `read_csv`, `read_json` or `read_avro`
 # relation still reads its file through `sql_tvf_bind` while binding). Two of
 # its answers depend on parquet footers: the schema of a
-# `read_parquet('path')` relation, and whether a column of a parquet relation
+# `read_parquet('path')` relation (the files it names and their Hive partition
+# columns, as one `ParquetSource`), and whether a column of a parquet relation
 # holds no NULL (which lets a NOT IN subquery drop its run-time NULL checks).
 # `collect_parquet_facts` walks a parsed statement once, asks the caller's
 # `SqlParquetFooters` for exactly those facts, and returns them as a
-# `ParquetFacts` value the binder reads while it binds.
+# `ParquetFacts` value the binder reads while it binds. The resolved source is
+# kept per (path text, `hive_partitioning` mode), so the same path read under
+# two modes holds two sources.
 #
 # Null counts are asked for only when the statement holds a NOT IN subquery,
-# only for parquet relations, and never for a path holding a glob character
-# (`*`, `?`, `[`): one file's statistics say nothing about the others a glob
-# names. A null count the reader cannot give (it raises, or returns None) is
+# only for parquet relations, and per FILE: each file of a `read_parquet`
+# relation's resolved source, and each path of a catalog table's source. A file
+# path that itself holds a glob character (`*`, `?`, `[`) is skipped. A column
+# is known NULL-free only when every file records a count of 0; a Hive
+# partition column is in no file, so it never has a count and is never known
+# NULL-free. A null count the reader cannot give (it raises, or returns None) is
 # recorded as unknown, which makes the binder keep the run-time NULL checks.
-# A schema the reader cannot give raises, as the binder would have.
+# A relation the reader cannot give raises, as the binder would have.
 
 from arrow.schema import Schema
+from scan_source.parquet_source import ParquetSource
 from scan_source.source_variant import SOURCE_VARIANT_PARQUET
 from sql.sql_ast import (
     SelectStmt, SqlStatement, TVF_AVRO, TVF_CSV, TVF_JSON, SUBQ_NOT_IN,
 )
-from sql.sql_catalog import SqlCatalog
+from sql.sql_catalog import SqlCatalog, catalog_relation_schema
 
 
 trait SqlParquetFooters:
     """The parquet footer reads a binding needs, implemented by the caller."""
 
     def footer_schema(self, path: String) raises -> Schema:
-        """The schema of the parquet relation at `path` (a file or a glob)."""
+        """The schema of the parquet file at `path`."""
         ...
 
     def column_null_count(self, path: String, column: String) raises -> Optional[Int]:
         """The number of NULLs in `column` of the parquet file at `path`, summed
         over every row group; None when some row group records no count."""
+        ...
+
+    def parquet_relation(
+        self, path: String, hive_partitioning: UInt8
+    ) raises -> ParquetSource:
+        """The source a `read_parquet(path)` relation scans: the files `path`
+        names (a file or a glob, listed and sorted) and their Hive partition
+        columns per `hive_partitioning` (a `HIVE_PARTITIONING_*` mode)."""
         ...
 
 
@@ -55,6 +70,14 @@ struct NoParquetFooters(SqlParquetFooters):
     def column_null_count(self, path: String, column: String) raises -> Optional[Int]:
         return None
 
+    def parquet_relation(
+        self, path: String, hive_partitioning: UInt8
+    ) raises -> ParquetSource:
+        raise Error(
+            "SQL bind error: read_parquet('" + path + "') needs a parquet"
+            " footer reader, and this binding was given none"
+        )
+
 
 def path_has_glob(path: String) -> Bool:
     """`path` holds a glob character (`*`, `?` or `[`)."""
@@ -67,44 +90,60 @@ def is_parquet_tvf_kind(kind: UInt8) -> Bool:
     return kind != TVF_CSV and kind != TVF_JSON and kind != TVF_AVRO
 
 
-struct ParquetFacts(Movable):
-    """Footer schemas by path, and null counts by (path, column), as read by
-    `collect_parquet_facts`."""
+def parquet_relation_schema(source: ParquetSource) -> Schema:
+    """The columns a scan of `source` yields: the files' data columns, then the
+    Hive partition columns."""
+    return catalog_relation_schema(source)
 
-    var _schema_paths: List[String]
-    var _schemas: List[Schema]
+
+struct ParquetFacts(Movable):
+    """Resolved relations by (path, mode), and null counts by (file path,
+    column), as read by `collect_parquet_facts`."""
+
+    var _rel_paths: List[String]
+    var _rel_modes: List[UInt8]
+    var _rel_sources: List[ParquetSource]
     var _count_paths: List[String]
     var _count_columns: List[String]
     var _counts: List[Optional[Int]]
 
     def __init__(out self):
-        self._schema_paths = List[String]()
-        self._schemas = List[Schema]()
+        self._rel_paths = List[String]()
+        self._rel_modes = List[UInt8]()
+        self._rel_sources = List[ParquetSource]()
         self._count_paths = List[String]()
         self._count_columns = List[String]()
         self._counts = List[Optional[Int]]()
 
-    def has_schema(self, path: String) -> Bool:
-        for i in range(len(self._schema_paths)):
-            if self._schema_paths[i] == path:
+    def has_relation(self, path: String, mode: UInt8) -> Bool:
+        for i in range(len(self._rel_paths)):
+            if self._rel_paths[i] == path and self._rel_modes[i] == mode:
                 return True
         return False
 
-    def add_schema(mut self, path: String, var schema: Schema):
-        """Record `path`'s schema; a path already recorded keeps its first."""
-        if self.has_schema(path):
+    def add_relation(mut self, path: String, mode: UInt8, var source: ParquetSource):
+        """Record the source of `path` read under `mode`; a pair already
+        recorded keeps its first."""
+        if self.has_relation(path, mode):
             return
-        self._schema_paths.append(path)
-        self._schemas.append(schema^)
+        self._rel_paths.append(path)
+        self._rel_modes.append(mode)
+        self._rel_sources.append(source^)
 
-    def schema_of(self, path: String) raises -> Schema:
-        """A copy of `path`'s recorded schema. Raises when none was recorded."""
-        for i in range(len(self._schema_paths)):
-            if self._schema_paths[i] == path:
-                return self._schemas[i].copy()
+    def source_of(self, path: String, mode: UInt8) raises -> ParquetSource:
+        """A copy of the source recorded for `path` under `mode`. Raises when
+        none was recorded."""
+        for i in range(len(self._rel_paths)):
+            if self._rel_paths[i] == path and self._rel_modes[i] == mode:
+                return self._rel_sources[i].copy()
         raise Error(
             "SQL bind error: no parquet footer was read for '" + path + "'"
         )
+
+    def schema_of(self, path: String, mode: UInt8) raises -> Schema:
+        """The scan schema (`parquet_relation_schema`) of the source recorded
+        for `path` under `mode`. Raises when none was recorded."""
+        return parquet_relation_schema(self.source_of(path, mode))
 
     def has_null_count(self, path: String, column: String) -> Bool:
         for i in range(len(self._count_paths)):
@@ -142,8 +181,9 @@ def _stmt_has_not_in(stmt: SelectStmt) -> Bool:
 def _record_counts[P: SqlParquetFooters](
     mut facts: ParquetFacts, path: String, schema: Schema, footers: P
 ):
-    """Record the null count of every column of `schema` in `path`, unknown
-    where the reader raises. A glob path records nothing."""
+    """Record the null count of every column of `schema` in the file `path`,
+    unknown where the reader raises. A path holding a glob character records
+    nothing."""
     if path_has_glob(path):
         return
     for c in range(schema.num_columns()):
@@ -171,18 +211,26 @@ def _collect_select[P: SqlParquetFooters](
             if not is_parquet_tvf_kind(rel.tvf_kind):
                 continue
             var path = rel.tvf_path.value()
-            if not facts.has_schema(path):
-                facts.add_schema(path, footers.footer_schema(path))
+            var mode = rel.tvf_opts.hive_partitioning
+            if not facts.has_relation(path, mode):
+                facts.add_relation(
+                    path, mode, footers.parquet_relation(path, mode)
+                )
             if want_counts:
-                var schema = facts.schema_of(path)
-                _record_counts(facts, path, schema, footers)
+                var src = facts.source_of(path, mode)
+                var file_schema = src.schema()
+                for p in range(len(src.paths)):
+                    _record_counts(
+                        facts, String(src.paths[p]), file_schema, footers
+                    )
         elif want_counts and catalog.has(rel.name):
             var t = catalog.table_of(rel.name)
             if t.source.tag != SOURCE_VARIANT_PARQUET:
                 continue
             ref ps = t.source._parquet.value()
+            var file_schema = ps.schema()
             for p in range(len(ps.paths)):
-                _record_counts(facts, String(ps.paths[p]), t.schema, footers)
+                _record_counts(facts, String(ps.paths[p]), file_schema, footers)
     for i in range(len(stmt.ctes)):
         _collect_select(stmt.ctes[i].body, catalog, footers, want_counts, facts)
     for i in range(len(stmt.subqueries)):
@@ -194,11 +242,11 @@ def _collect_select[P: SqlParquetFooters](
 def collect_parquet_facts[P: SqlParquetFooters](
     stmt: SqlStatement, catalog: SqlCatalog, footers: P
 ) raises -> ParquetFacts:
-    """Every parquet fact binding `stmt` against `catalog` reads: the footer
-    schema of each `read_parquet` relation, and, when `stmt` holds a NOT IN
-    subquery, each column's null count in every non-glob file of each parquet
-    relation (a `read_parquet` relation or a catalog table whose source is
-    parquet)."""
+    """Every parquet fact binding `stmt` against `catalog` reads: the resolved
+    source of each `read_parquet` relation under its mode, and, when `stmt`
+    holds a NOT IN subquery, each data column's null count in every file of
+    each parquet relation (a `read_parquet` relation's files or a catalog
+    table's paths whose source is parquet)."""
     var facts = ParquetFacts()
     _collect_select(
         stmt.query, catalog, footers, _stmt_has_not_in(stmt.query), facts

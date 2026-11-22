@@ -1,0 +1,24 @@
+[2026-10-25T12:57:03.310+00:00] Build ID: 00000000-0000-0000-0000-000000000000
+[2026-10-25T12:57:03.655+00:00] RE Session: GRPC-SESSION-ID
+[2026-10-25T13:03:11.111+00:00] Waiting on Test test_float32_json_binades --  [re_execute]
+[2026-10-25T13:03:18.211+00:00] Waiting on Test test_float32_json_binades --  [re_execute]
+[2026-10-25T13:04:11.131+00:00] ✗ Fail: komira//src/komira_proto_codec:test_float32_json_binades (9:00.5s)
+[2026-10-25T13:04:11.131+00:00] ---- STDOUT ----
+[2026-10-25T13:04:11.131+00:00]
+[2026-10-25T13:04:11.131+00:00] ---- STDERR ----
+[2026-10-25T13:04:11.131+00:00] ==================================================================
+[2026-10-25T13:04:11.131+00:00] GATED TEST FAILED: komira//src/komira_proto_codec:test_float32_json_binades (exit 137)
+[2026-10-25T13:04:11.131+00:00] The library's package is not produced until this test passes.
+[2026-10-25T13:04:11.131+00:00] ------------------------------------------------------------------ output
+[2026-10-25T13:04:11.131+00:00]   binade 0 : 8388607 values round-trip
+[2026-10-25T13:04:11.131+00:00]   binade 1 : 8388608 values round-trip
+[2026-10-25T13:04:11.131+00:00]   binade 43 : 8388608 values round-trip
+[2026-10-25T13:04:11.131+00:00] ==================================================================
+[2026-10-25T13:04:11.131+00:00] TEST TIME LIMIT: killed komira//src/komira_proto_codec:test_float32_json_binades after 540 s, under the test runner's timeout of 600 s (komira.test_timeout_s)
+[2026-10-25T13:04:11.131+00:00]
+[2026-10-25T13:04:11.135+00:00] Cache hits: 100%
+[2026-10-25T13:04:11.135+00:00] Commands: 1 (cached: 1, remote: 0, local: 0)
+[2026-10-25T13:04:11.135+00:00] Network: up 53KiB  down 57KiB  session GRPC-SESSION-ID
+Tests finished: [38;5;10mPass 31[39m. [38;5;9mFail 1[39m. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0
+1 TESTS FAILED
+  ✗ komira//src/komira_proto_codec:test_float32_json_binades (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)

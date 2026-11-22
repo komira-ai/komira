@@ -186,9 +186,9 @@ The rulings that settled each item once open or departing, the table of parity g
 
 ### 2.10 Floating-point SUM and AVG
 
-- **Rule.** SUM and AVG of FLOAT/DOUBLE add in an unspecified order, so the last bits of the answer may differ between runs, worker counts and batch sizes. A test compares them with a tolerance stated in the case (relative or in units in the last place), never bit for bit. An integer SUM is exact (§8.1).
+- **Rule.** SUM and AVG of FLOAT/DOUBLE add in an order the SQL text does not fix, so the last bits of the answer may differ from DuckDB's and between batch sizes. A test against DuckDB compares them with a tolerance stated in the case (relative or in units in the last place), never bit for bit. This engine's own answer to an ungrouped float SUM or AVG is the same bits on every worker count and run of one plan (current behaviour below), and a test of that compares bits. An integer SUM is exact (§8.1).
 - **DuckDB.** Also order-dependent: its plain `sum` of DOUBLE is not compensated (`fsum`/`kahan_sum` are the compensated forms), and its parallel aggregation combines partial sums in a non-fixed order.
-- **Current behaviour.** The plain float SUM cells are uncompensated (`src/agg/builtin_agg_fns_states.mojo:123-127`). The ungrouped SQL sink (`src/pipeline_exec/agg_fold.mojo`) adds from +0.0 in row order within a worker and the workers' sums in worker order, uncompensated; its tolerance against DuckDB is 1e-9 relative for a well-conditioned sum, stated with its bound in `src/pipeline_exec/README.md`.
+- **Current behaviour.** The plain float SUM cells are uncompensated (`src/agg/builtin_agg_fns_states.mojo:123-127`). The ungrouped SQL sink (`src/pipeline_exec/sink_agg.mojo`, `agg_fold.mojo`) adds each morsel's values from +0.0 in row order and the morsels' sums in source position order, uncompensated (`lowering` cuts an ungrouped float SUM or AVG with `ORDER_ROW_RANGE`), so one lowered plan gives the same bits on every worker count and run; another morsel size, which the host profile sets, can change the last bits. Its tolerance against DuckDB is 1e-9 relative for a well-conditioned sum, stated with its bound in `src/pipeline_exec/README.md`.
 - **Mark.** MATCHES.
 
 ### 2.11 Sample statistics of one row

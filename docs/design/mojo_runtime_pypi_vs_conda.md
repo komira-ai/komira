@@ -118,20 +118,16 @@ linux-arm64 and macos-arm64 it is **NOT RUN**. What the files support (INFERRED)
 - macOS: the same for the file-backed sections; the code signature and the extra load commands are
   unchecked, so this is the weakest of the three.
 - The PyPI libraries sit in `site-packages/modular/lib`, which `libkomira`'s run path does not
-  reach. The bundled komira wheel does not use that directory: it carries its own copy. The external
-  wheel (docs/design/python_package.md, "The two flavours") carries none and opens the three from that
-  directory by path, after holding each to the build id its record names.
+  reach. The komira wheel does not use that directory: it carries its own copy.
 
-The checks of the wheel on linux-x86_64 are `//python:wheel_install_test_bundled` and
-`:wheel_install_test_external` (python/BUCK). The first installs the bundled wheel alone into an empty
+The checks of the wheel on linux-x86_64 are `//python:wheel_install_test` (python/BUCK). It installs the wheel alone into an empty
 virtual environment (no `modular/` directory, no other distribution, no `Requires-Dist`), loads
 libkomira there with no library path, and requires the three runtime libraries to be mapped from
-`<site-packages>/komira/_lib/lib`. The second installs the external wheel with the PyPI wheels
+`<site-packages>/komira/_lib/lib`. The PyPI wheels
 (`mojo_compiler-1.0.0-py3-none-manylinux_2_34_x86_64.whl`,
-`mojo_compiler_mojo_libs-1.0.0-py3-none-any.whl`, pinned in `third_party/modular`) and requires the
-three to be mapped from `<site-packages>/modular/lib`; that the PyPI 1.0.0 libraries carry the build
-ids of the conda pin (below) is what lets it load them. The PyPI wheels are also installed by the
-`beside_*` tests of the bundled wheel. linux-arm64 and macos-arm64 have no such check yet.
+`mojo_compiler_mojo_libs-1.0.0-py3-none-any.whl`, pinned in `third_party/modular`) are installed by the
+`beside_*` tests of the wheel, and that the PyPI 1.0.0 libraries carry the build
+ids of the conda pin (below) is what lets the runtime check accept them. linux-arm64 and macos-arm64 have no such check yet.
 
 ## Two copies in one process
 
@@ -157,8 +153,7 @@ Build ids (MEASURED, GNU build id of each library): the conda 1.0.0 and the PyPI
 share the build id of each of the three libraries (their files differ only in `DT_RPATH`, above).
 The 1.2.0 libraries of PyPI's latest `mojo-compiler` differ from the 1.0.0 ones. The loader
 (`komira/_runtime.py`, `check_loaded_runtime`) compares build ids of any of the three libraries
-already in the process, found with `dlopen(name, RTLD_NOLOAD)`, and accepts equal ones; for the
-external wheel (`load_installed_runtime`) it compares them with the build ids of its record.
+already in the process, found with `dlopen(name, RTLD_NOLOAD)`, and accepts equal ones.
 
 The four orders, each held by a test in `python/tests/test_beside_modular.py`:
 
@@ -227,7 +222,7 @@ loaded only by the two 1.2.0 tests.
 | Bytes equal the pin | `libMSupportGlobals`: yes. The other two: no, on all three platforms; code, symbols and `NEEDED` equal, run path string differs |
 | libkomira needs the runtime libraries | yes (`DT_NEEDED libKGENCompilerRTShared`) |
 | libkomira built on the pin loads against the PyPI libraries | linux-x86_64: `//python:beside_modular_loaded_first` and `:beside_modular_loaded_after` (same build ids); linux-arm64 and macos-arm64: not run, inferred yes on Linux from identical code and symbols |
-| The komira wheel carries the runtime | the bundled flavour: yes, the pinned conda libraries in `komira/_lib/lib/`, and `//python:wheel_install_test_bundled` installs it alone; the external flavour: no, it requires `mojo-compiler==1.0.0` and `//python:wheel_install_test_external` installs it with the PyPI wheels |
+| The komira wheel carries the runtime | yes, the pinned conda libraries in `komira/_lib/lib/`, and `//python:wheel_install_test` installs it alone |
 | Another Mojo version in the same process | refused by name when loaded first, fails to load when loaded after komira; one process holds one runtime |
 | Licence covering the three binary files as packaged | the Modular Community License Terms, not Apache-2.0 |
 | Runtime-only package on PyPI | none found; the whole compiler is 79 / 76 / 71 MB plus a 3 MB libs wheel, which is why the wheel carries the three libraries (1.96 MB on linux-x86_64) instead |

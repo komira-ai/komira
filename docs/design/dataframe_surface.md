@@ -410,8 +410,9 @@ its number).
       input column. That is the rule `select_aggregates.name_unaliased` and `agg_output_naming` apply on
       the Mojo side.
     - Two outputs with one name are refused at the verb.
-13. **Float aggregates are not bit-reproducible** (carried) across runs and worker counts (§2.10). Tests compare
-    float sums and means with a stated tolerance. Neither library promises more for parallel input.
+13. **Float aggregates are not bit-reproducible** (carried) across runs and worker counts (§2.10), except an ungrouped
+    float sum or mean, which the engine folds in source position order. Tests compare float sums and means with a
+    stated tolerance. Neither library promises more for parallel input.
 14. **Types.** New with the verbs that take a dtype (D17).
     - A dtype argument (`astype`, `cast`, `return_dtype`) is a `pyarrow.DataType`, or a name from the
       fixed table in the verbs document. komira adds no dtype classes of its own.
@@ -569,7 +570,7 @@ package design). D4 to D18 are this design's own.
 - `subquery` has no spelling in either library, and `json_extract` has none in pandas. So the
   polars-shaped skin leaves 2 of its 52 cells empty by decision, and the pandas-shaped skin leaves 3
   (counted from the verbs document's table).
-- The early engine refuses at `lower` most of what the skins can build: joins, windows, union, top-n,
+- The early engine refuses at `lower` most of what the skins can build: joins, windows, top-n,
   a distinct over an explicit column list, and sources other than Parquet; a whole-row distinct runs only
   over one fixed-width or string column, or several dictionary-encoded string columns. These plans raise at the terminal with the engine's code
   until the engine runs them.

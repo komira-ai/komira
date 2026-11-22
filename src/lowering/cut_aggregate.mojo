@@ -5,8 +5,9 @@
 # An aggregation ends the open pipeline in a SINK_AGG segment whose AggSinkData
 # is the next row of the ParamTable's `agg`, and opens a pipeline that reads
 # that segment's output. The sink's `(key_dtype, orientation)` comes from the
-# group key: none is KEY_DTYPE_NONE; one INT64, INT32, FLOAT64, FLOAT32 or
-# STRING column picks that key dtype, COLUMNAR, except that a string column of
+# group key: none is KEY_DTYPE_NONE; one INT64, INT32, FLOAT64, FLOAT32,
+# DATE32, BOOL, DECIMAL128 or STRING column picks that key dtype, COLUMNAR,
+# except that a string column of
 # the pipeline's Parquet scan that every row group stores dictionary encoded is
 # DICT_ENCODED; several columns are served only when every one is such a
 # dictionary string. Any other key is LOWERING_SINK_UNSERVED.
@@ -15,9 +16,12 @@
 # with a UDF or a UDF aggregate function, one with a group top-k, and a partial
 # or final aggregation.
 #
-# A float SUM or AVG is cut with ORDER_NONE: its result is
-# not bit-reproducible across worker counts until a segment can carry
-# ORDER_ROW_RANGE.
+# The segment's combine order is ORDER_ROW_RANGE when the aggregation has no
+# group key and a SUM or AVG whose argument is FLOAT32 or FLOAT64 in the
+# child's schema: the sink then folds each source position on its own and adds
+# the positions' sums in position order, so the double sum is the same bits on
+# every worker count and schedule. Every other aggregation is ORDER_NONE: its
+# folds are exact, or a grouped sink that folds no float.
 # =============================================================================
 
 from arrow.arrow_types import ArrowType
@@ -25,12 +29,13 @@ from arrow.schema import Schema
 from lowering.cut_state import _Cutter, _Pipe, _uncuttable
 from lowering.lowered_plan import LoweringInputs, LOWERING_SINK_UNSERVED
 from lowering.sum_fuse import lowered_agg_expr
-from plan_expr.agg_expr import AGG_UDF
+from plan_expr.agg_expr import AGG_MEAN, AGG_SUM, AGG_UDF
 from plan_expr.expr import Expr
 from plan_ir.logical_plan import (
     LogicalPlan,
     AggExprArray,
     ExprArray,
+    _infer_expr_field,
     copy_expr_array,
 )
 from plan_ir.plan_decisions import AGG_MODE_UNSET, AGG_MODE_SINGLE
@@ -46,6 +51,11 @@ from physical_plan.physical_plan import (
     KEY_DTYPE_F64,
     KEY_DTYPE_F32,
     KEY_DTYPE_STRING,
+    ORDER_NONE,
+    ORDER_ROW_RANGE,
+    KEY_DTYPE_DATE32,
+    KEY_DTYPE_BOOL,
+    KEY_DTYPE_DECIMAL128,
 )
 
 
@@ -61,6 +71,12 @@ def _key_dtype_of(arrow_type: ArrowType) -> Int:
         return Int(KEY_DTYPE_F32)
     if arrow_type == ArrowType.STRING:
         return Int(KEY_DTYPE_STRING)
+    if arrow_type == ArrowType.DATE32:
+        return Int(KEY_DTYPE_DATE32)
+    if arrow_type == ArrowType.BOOL:
+        return Int(KEY_DTYPE_BOOL)
+    if arrow_type == ArrowType.DECIMAL128:
+        return Int(KEY_DTYPE_DECIMAL128)
     return -1
 
 
@@ -162,6 +178,25 @@ def _aggregate_exprs(node: LogicalPlan) raises -> AggExprArray:
     return aggs^
 
 
+def _order_key_kind(node: LogicalPlan) raises -> UInt8:
+    """ORDER_ROW_RANGE for an aggregation with no group key and a float SUM
+    or AVG, else ORDER_NONE."""
+    ref ad = node.aggregate_data_ref()
+    if len(ad.group_by) != 0:
+        return ORDER_NONE
+    ref schema = ad.child[].output_schema
+    for i in range(len(ad.agg_exprs)):
+        ref agg = ad.agg_exprs[i]
+        if agg.func != AGG_SUM and agg.func != AGG_MEAN:
+            continue
+        if not agg.child:
+            continue
+        var t = _infer_expr_field(agg.child.value(), schema).arrow_type
+        if t == ArrowType.FLOAT64 or t == ArrowType.FLOAT32:
+            return ORDER_ROW_RANGE
+    return ORDER_NONE
+
+
 def _close_aggregate(
     mut cutter: _Cutter,
     node: LogicalPlan,
@@ -180,6 +215,12 @@ def _close_aggregate(
         )
     )
     var seg = cutter._close(
-        pipe^, SINK_AGG, triple.key_dtype, triple.orientation, pid, inputs
+        pipe^,
+        SINK_AGG,
+        triple.key_dtype,
+        triple.orientation,
+        pid,
+        inputs,
+        _order_key_kind(node),
     )
     return cutter._reopen(seg, node.output_schema)

@@ -20,7 +20,9 @@ this page says about the pins.
 | `:cpython_macos` | CPython 3.13.16, the same release, `aarch64-apple-darwin-install_only_stripped`, for a target configured for macOS ([macOS arm64](#macos-arm64)) |
 | `:native_libs` | `libgcc_s.so.1`, `libstdc++.so.6` (GCC 15.3) and `libz.so.1` (zlib 1.3.1), unpacked from the conda-forge packages the [platform table](../../tools/build/platforms/table.bzl) pins for the toolchains; `py_test` loads them before a script runs |
 | `:<distribution>` | one wheel installed, e.g. `:pyarrow`; its `deps` are the distributions it requires on linux |
-| `:cpython314`, `:cpython314t` | CPython 3.14.8 from the same release, with the GIL (`install_only_stripped`) and free-threaded (`freethreaded-install_only_stripped`, interpreter `bin/python3.14t`), for measurements of Python user-defined functions ([CPython 3.14](#cpython-314)) |
+| `:cpython311`, `:cpython312` | CPython 3.11.17 and 3.12.15 from the same release (`install_only_stripped`), the Python package's oldest supported minors ([CPython 3.10, 3.11 and 3.12](#cpython-310-311-and-312)) |
+| `:cpython310` | CPython 3.10.22 from the same release, the minor below the package's `Requires-Python`, for the one install test that must refuse it |
+| `:cpython314`, `:cpython314t` | CPython 3.14.8 from the same release, with the GIL (`install_only_stripped`) and free-threaded (`freethreaded-install_only_stripped`, interpreter `bin/python3.14t`), for measurements of Python user-defined functions and, with the GIL, the Python package's tests ([CPython 3.14](#cpython-314)) |
 | `:<distribution>-cp314`, `:<distribution>-cp314t` | one wheel of a 3.14 closure installed, e.g. `:numpy-cp314t` |
 
 ## The closure
@@ -91,7 +93,22 @@ and [python/tests](../../python/tests/BUCK) loads them under each edge:
 `PROTOBUF_EDGES` holds the binary wheels (`cp38-abi3`, manylinux x86_64) of
 the two older releases, BSD-3-Clause like 7.36.2. python/tests/BUCK declares
 their downloads and installed targets, so that they are inside the Python
-surface, and only its tests depend on them.
+surface, and only its tests depend on them. It also installs all three for
+each other minor the package supports (3.11, 3.12 and 3.14), as
+`protobuf-<version>_py311` and so on: each wheel is `abi3`, one file for every
+minor.
+
+## CPython 3.10, 3.11 and 3.12
+
+`PYTHON_311` and `PYTHON_312` in [`pins.bzl`](pins.bzl) pin CPython 3.11.17
+and 3.12.15, with the GIL, from the same python-build-standalone release as
+the others, so that the Python package's tests and its wheel's install and
+upgrade tests run on every minor it supports
+([python/pythons.bzl](../../python/pythons.bzl)). `PYTHON_310` pins CPython
+3.10.22, the minor below the package's `Requires-Python`, which one install
+test runs to show that the wheel is refused there. None has a closure here:
+the package's tests install what they need (protobuf, above), and every
+`py_test` takes the pure-Python `:tzdata` of the 3.13 closure.
 
 ## CPython 3.14
 
@@ -162,7 +179,8 @@ new version, is reviewed by hand.
 The hermetic Python is for tests. What keeps it out of every published
 package:
 
-- **Visibility.** `:cpython`, `:cpython314`, `:cpython314t`, `:native_libs`
+- **Visibility.** `:cpython`, `:cpython310`, `:cpython311`, `:cpython312`,
+  `:cpython314`, `:cpython314t`, `:native_libs`
   and every wheel are visible only to the
   packages `_TEST_ONLY` in [`BUCK`](BUCK) lists, all test-only: packages under
   `src/tests` (`//:src_layout` holds that directory to test-only packages),

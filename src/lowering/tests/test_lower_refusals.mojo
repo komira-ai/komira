@@ -8,7 +8,7 @@
 # detail lowers. A refused plan never produces a LoweredPlan.
 #
 # Tests, and the behaviour each asserts:
-#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a join, union,
+#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a join,
 #     top-n, view reference, shared-subplan reference and cast to string are
 #     each refused by their tag name.
 #   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a join under an
@@ -24,10 +24,10 @@
 #     over a zero-column schema is refused with the exact text; one column
 #     lowers.
 #   test_a_distinct_over_columns_no_sink_row_serves_is_refused: a distinct over
-#     a date, a bool, two integers, an integer and a string, or two strings of
-#     which one is not dictionary encoded is refused as an unserved sink with
-#     the exact text; an integer column, and two dictionary encoded strings,
-#     lower.
+#     a 16-bit integer, a binary, two integers, an integer and a string, or two
+#     strings of which one is not dictionary encoded is refused as an unserved
+#     sink with the exact text; an integer, a date and a bool column, and two
+#     dictionary encoded strings, lower.
 # The remaining tests are named for the refusal they hold.
 # =============================================================================
 
@@ -68,7 +68,6 @@ from plan_ir.logical_plan import (
     SOURCE_KIND_UNSET,
     JOIN_INNER,
     PLAN_JOIN,
-    PLAN_UNION,
     PLAN_DISTINCT,
     PLAN_TOPN,
     PLAN_VIEW_REF,
@@ -98,6 +97,8 @@ def _schema() -> Schema:
     sb.add_field(Field("s", ArrowType.STRING, False))
     sb.add_field(Field("d", ArrowType.DATE32, False))
     sb.add_field(Field("b", ArrowType.BOOL, False))
+    sb.add_field(Field("i16", ArrowType.INT16, False))
+    sb.add_field(Field("bin", ArrowType.BINARY, False))
     return sb.build()
 
 
@@ -153,11 +154,6 @@ def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
     var join = LogicalPlan.join(_scan(), _scan(), _names("k"), _names("k"), JOIN_INNER)
     _refused_with(_message(join, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_JOIN))
 
-    var children = List[OwnedPointer[LogicalPlan]]()
-    children.append(OwnedPointer(_scan()))
-    children.append(OwnedPointer(_scan()))
-    var union = LogicalPlan.union(children^, _schema())
-    _refused_with(_message(union, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_UNION))
 
     var topn = LogicalPlan.topn(_names("k"), _bools(False), 5, _scan())
     _refused_with(_message(topn, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_TOPN))
@@ -204,23 +200,6 @@ def _parquet_scan(var source: ParquetSource) raises -> LogicalPlan:
 
 
 def test_a_parquet_scan_the_segment_arm_cannot_carry_is_refused() raises:
-    var two = List[String]()
-    two.append("a.parquet")
-    two.append("b.parquet")
-    var multi = _parquet_scan(
-        ParquetSource.partitioned(two^, _schema(), List[Field](), List[List[String]]())
-    )
-    _refused_with(_message(multi, _inputs()), LOWERING_SCAN_NOT_TOTAL, "2 files")
-
-    var one = List[String]()
-    one.append("a.parquet")
-    var cols = List[Field]()
-    cols.append(Field("dt", ArrowType.STRING, False))
-    var values = List[List[String]]()
-    values.append(_names("2026-10-01"))
-    var hive = _parquet_scan(ParquetSource.partitioned(one^, _schema(), cols^, values^))
-    _refused_with(_message(hive, _inputs()), LOWERING_SCAN_NOT_TOTAL, "Hive")
-
     var remote = _parquet_scan(
         ParquetSource(String("a.parquet"), _schema()).with_fs_descriptor(
             FsDescriptorPod.cloud(FS_SCHEME_S3, String("bucket"), 3)
@@ -232,6 +211,36 @@ def test_a_parquet_scan_the_segment_arm_cannot_carry_is_refused() raises:
     assert_equal(_message(_parquet_scan(ParquetSource(String("a.parquet"), _schema())), _inputs()), "")
 
 
+def test_a_scan_of_several_files_lowers() raises:
+    var two = List[String]()
+    two.append("a.parquet")
+    two.append("b.parquet")
+    var multi = _parquet_scan(
+        ParquetSource.partitioned(two^, _schema(), List[Field](), List[List[String]]())
+    )
+    assert_equal(_message(multi, _inputs()), "")
+
+
+def test_a_hive_partitioned_scan_lowers() raises:
+    var two = List[String]()
+    two.append("dt=2026-10-01/a.parquet")
+    two.append("dt=2026-10-02/b.parquet")
+    var cols = List[Field]()
+    cols.append(Field("dt", ArrowType.STRING, False))
+    var values = List[List[String]]()
+    values.append(_names("2026-10-01"))
+    values.append(_names("2026-10-02"))
+    var hive = _parquet_scan(ParquetSource.partitioned(two^, _schema(), cols^, values^))
+    assert_equal(_message(hive, _inputs()), "")
+
+
+def test_a_hive_directory_scan_is_refused_and_a_plain_scan_lowers() raises:
+    var source = ParquetSource(String("a.parquet"), _schema())
+    source.hive_dir_scan = True
+    _refused_with(_message(_parquet_scan(source^), _inputs()), LOWERING_SCAN_NOT_TOTAL, "lazily")
+    assert_equal(_message(_parquet_scan(ParquetSource(String("a.parquet"), _schema())), _inputs()), "")
+
+
 def _two_string_scan() -> LogicalPlan:
     var sb = SchemaBuilder()
     sb.add_field(Field("s", ArrowType.STRING, False))
@@ -240,8 +249,12 @@ def _two_string_scan() -> LogicalPlan:
 
 
 def test_a_group_key_no_sink_row_serves_is_refused() raises:
-    _refused_with(_message(_count_by(_scan(), _names("d")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
-    _refused_with(_message(_count_by(_scan(), _names("b")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
+    _refused_with(_message(_count_by(_scan(), _names("i16")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
+    _refused_with(_message(_count_by(_scan(), _names("bin")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
+    _refused_with(_message(_count_by(_scan(), _names("k", "i16")), _inputs()), LOWERING_SINK_UNSERVED, "no sink row")
+    # Several columns that are not all dictionary strings stay unserved, even
+    # when each column alone has a row.
+    _refused_with(_message(_count_by(_scan(), _names("d", "b")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
     _refused_with(_message(_count_by(_scan(), _names("k", "v")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
     # Two strings are served only when both are dictionary encoded.
     var one_dictionary = LoweringInputs()
@@ -249,8 +262,10 @@ def test_a_group_key_no_sink_row_serves_is_refused() raises:
     var strings = _two_string_scan()
     _refused_with(_message(_count_by(strings^, _names("s", "t")), one_dictionary), LOWERING_SINK_UNSERVED, "dictionary")
     _refused_with(_message(_count_by(_scan(), _names("s", "k")), _inputs()), LOWERING_SINK_UNSERVED, "2 columns")
-    # An integer key lowers.
+    # An integer, a date and a bool key each lower.
     assert_equal(_message(_count_by(_scan(), _names("k")), _inputs()), "")
+    assert_equal(_message(_count_by(_scan(), _names("d")), _inputs()), "")
+    assert_equal(_message(_count_by(_scan(), _names("b")), _inputs()), "")
 
 
 def _only(name: String) -> LogicalPlan:
@@ -325,12 +340,12 @@ def test_a_distinct_over_no_column_is_refused_and_one_column_is_cut() raises:
 def test_a_distinct_over_columns_no_sink_row_serves_is_refused() raises:
     var no_row = String(" has no sink row")
     assert_equal(
-        _message(LogicalPlan.distinct(None, _only("d")), _inputs()),
-        _unserved_text("a group key column of type " + String(ArrowType.DATE32) + no_row),
+        _message(LogicalPlan.distinct(None, _only("i16")), _inputs()),
+        _unserved_text("a group key column of type " + String(ArrowType.INT16) + no_row),
     )
     assert_equal(
-        _message(LogicalPlan.distinct(None, _only("b")), _inputs()),
-        _unserved_text("a group key column of type " + String(ArrowType.BOOL) + no_row),
+        _message(LogicalPlan.distinct(None, _only("bin")), _inputs()),
+        _unserved_text("a group key column of type " + String(ArrowType.BINARY) + no_row),
     )
     var two_columns = _unserved_text(
         "a group key of 2 columns is served only when every column is a dictionary encoded string"
@@ -344,8 +359,11 @@ def test_a_distinct_over_columns_no_sink_row_serves_is_refused() raises:
         _message(LogicalPlan.distinct(None, _two_string_scan()), one_dictionary),
         two_columns,
     )
-    # An integer column, and two dictionary encoded strings, lower.
+    # An integer, a date and a bool column, and two dictionary encoded
+    # strings, lower.
     assert_equal(_message(LogicalPlan.distinct(None, _only("k")), _inputs()), "")
+    assert_equal(_message(LogicalPlan.distinct(None, _only("d")), _inputs()), "")
+    assert_equal(_message(LogicalPlan.distinct(None, _only("b")), _inputs()), "")
     var both = LoweringInputs()
     both.add_scan(None, _names("s", "t"))
     assert_equal(_message(LogicalPlan.distinct(None, _two_string_scan()), both), "")
@@ -463,7 +481,7 @@ def test_an_unbounded_scan_is_refused_and_a_bounded_one_is_cut() raises:
 def test_a_parquet_scan_with_a_partition_predicate_is_refused() raises:
     var source = ParquetSource(String("a.parquet"), _schema())
     source.hive_predicate = Optional(PartitionPredicatePod.empty())
-    _refused_with(_message(_parquet_scan(source^), _inputs()), LOWERING_SCAN_NOT_TOTAL, "Hive")
+    _refused_with(_message(_parquet_scan(source^), _inputs()), LOWERING_SCAN_NOT_TOTAL, "lazily")
     assert_equal(_message(_parquet_scan(ParquetSource(String("a.parquet"), _schema())), _inputs()), "")
 
 

@@ -9,6 +9,11 @@ and the file utilities every action uses are pinned downloads.
 > arm64 are being added: a Mac will build on its own, with no build service.
 > Until then, on a Mac you can install and run `./buck2` and read the code.
 
+**To use komira from Python:** `pip install komira` (Linux x86_64, CPython
+3.11 to 3.14). It loads the engine and registers Parquet files; it runs no query
+yet. See [installing komira for Python](docs/install.md) and the
+[changelog](python/CHANGELOG.md).
+
 The build tooling (Mojo rules, a hermetic toolchain, execution platforms,
 examples and end-to-end tests) lives in [`tools/build/`](tools/build/).
 
@@ -38,6 +43,7 @@ remote-execution service, and what to do when something goes wrong.
 
 | read | for |
 |---|---|
+| [docs/install.md](docs/install.md) | installing the Python package from PyPI: what it needs, the first program, what does not work yet, troubleshooting |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | developer setup: `./buck2` and the pinned release, local builds and what they guarantee, running the checks, remote execution for those who run a service, the host floor, caching, troubleshooting |
 | [tools/build/README.md](tools/build/README.md) | a map of the build tooling, and how another repository uses komira, as a git external cell or a submodule |
 | [tools/build/mojo/README.md](tools/build/mojo/README.md) | the Mojo rules: `mojo_library`, `mojo_binary`, `mojo_test` |

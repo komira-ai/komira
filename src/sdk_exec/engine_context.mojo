@@ -46,7 +46,8 @@ comptime ENGINE_OPTIONS_INVALID = "ENGINE_OPTIONS_INVALID"
 
 
 struct RegisteredTable(Copyable, Movable):
-    """A Parquet table registered on a context: its name and its file."""
+    """A Parquet table registered on a context: its name and the path it was
+    registered with (a file, a glob or a directory)."""
 
     var name: String
     var path: String

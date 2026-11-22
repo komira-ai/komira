@@ -3,8 +3,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The one Parquet footer cache and the footer reader built on it: `FooterCache`
 # (a locked, shared cache of parsed footers whose errors name the file),
 # `ParquetFooters` (sql's `SqlParquetFooters` over that cache, with table
-# registration and the registered-schema check) and `lowering_facts`
-# (lowering's `LoweringInputs` built from the same cache the binder read).
+# registration and the registered-schema check), `parquet_files` (a file, a
+# glob or a directory as one `ParquetSource`, with Hive partition columns) and
+# `lowering_facts` (lowering's `LoweringInputs` built from the same cache the
+# binder read, folded over every file of a table).
 # It is a package of its own, not part of sdk_exec, because the engine
 # context that will hold the cache is not written yet; the context holds a
 # `FooterCache` handle when it lands (README.md).
@@ -18,7 +20,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   a nested column, a repeated leaf) refused naming the file.
 # - test_bind_and_lower: bind_statement and lower over real footers through one
 #   cache, the statistics in the inputs, a registered schema that disagrees
-#   refused by name, and a missing or text file named at bind.
+#   refused by name, a two-file table checked file by file, and a missing or
+#   text file named at bind.
+# - test_multifile_scan: globs, directories, Hive partitions (detection modes,
+#   key order, value types, refused values), a table registered over a
+#   directory, a disagreeing second file refused by name, and the facts folded
+#   over three files.
 #
 # deps is the full transitive closure: parquet (the footer reader),
 # sql (the binder's trait) and lowering (the inputs) with theirs.
@@ -81,6 +88,7 @@ mojo_library(
         "tests/test_bind_and_lower.mojo",
         "tests/test_footer_cache.mojo",
         "tests/test_footer_refusals.mojo",
+        "tests/test_multifile_scan.mojo",
     ],
     visibility = ["PUBLIC"],
 )
