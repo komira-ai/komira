@@ -139,6 +139,8 @@ def _udf_rows(mut r: Rows):
     r.add("offsetof komira_udf_host.mem_release", Int(UnsafePointer(to=h[].mem_release)) - hb)
     r.add("offsetof komira_udf_host.now_ns", Int(UnsafePointer(to=h[].now_ns)) - hb)
     r.add("offsetof komira_udf_host.log", Int(UnsafePointer(to=h[].log)) - hb)
+    r.add("offsetof komira_udf_host.n_options", Int(UnsafePointer(to=h[].n_options)) - hb)
+    r.add("offsetof komira_udf_host.options", Int(UnsafePointer(to=h[].options)) - hb)
     free_zeroed(h.bitcast[NoneType]())
     var c = zeroed(size_of[CUdfCapabilities]()).bitcast[CUdfCapabilities]()
     var cb = Int(c)
