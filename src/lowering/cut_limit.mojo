@@ -4,9 +4,9 @@
 #
 # A limit is fused onto the open pipeline as an OP_LIMIT of its count.
 # Refused (LOWERING_UNCUTTABLE_NODE): a limit with an offset or a negative
-# count, before its child is walked; and a limit above a sort (with only
-# filters and projections between), after it: a segment records no order, so
-# the rows a limit would keep are not defined.
+# count, before its child is walked; and a limit above a sort or a keyed
+# window (with only filters and projections between), after it: a segment
+# records no order, so the rows a limit would keep are not defined.
 # =============================================================================
 
 from lowering.cut_state import _Pipe, _uncuttable

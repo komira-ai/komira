@@ -31,7 +31,9 @@
 #   test_running_and_whole_partition_aggregates_equal_duckdb
 #                                            a running sum over the default
 #                                            RANGE frame (peers share a value)
-#                                            and over a unique key, sum, count,
+#                                            and over a unique key, running min,
+#                                            max, avg and count over tied keys,
+#                                            sum, count,
 #                                            count(*), avg, min and max over a
 #                                            whole partition, NULL partitions
 #                                            and NULL values included.

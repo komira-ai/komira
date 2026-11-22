@@ -152,7 +152,8 @@ def _is_whole_partition(expr: PartitionExpr) -> Bool:
 
 
 def _bound_sql(tag: UInt8, offset: Int64) -> String:
-    """One frame bound as SQL spells it."""
+    """One frame bound as SQL spells it (the five FRAME_BOUND_* tags; the
+    binder emits no other)."""
     if tag == FRAME_BOUND_UNBOUNDED_PRECEDING:
         return "UNBOUNDED PRECEDING"
     if tag == FRAME_BOUND_PRECEDING:
@@ -161,9 +162,7 @@ def _bound_sql(tag: UInt8, offset: Int64) -> String:
         return "CURRENT ROW"
     if tag == FRAME_BOUND_FOLLOWING:
         return String(offset) + " FOLLOWING"
-    if tag == FRAME_BOUND_UNBOUNDED_FOLLOWING:
-        return "UNBOUNDED FOLLOWING"
-    return "bound " + String(tag)
+    return "UNBOUNDED FOLLOWING"
 
 
 def _frame_sql(f: PartitionFrame) -> String:

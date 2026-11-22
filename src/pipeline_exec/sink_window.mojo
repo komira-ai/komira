@@ -24,8 +24,8 @@
 # they are concatenated into, and what the kernel adds: a sorted copy of the
 # rows, 16 bytes per row for each window expression, and, for a STRING value
 # function (LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE), the bytes of its
-# argument column. Every byte of that is drawn, as it is about to exist, from
-# the segment pool:
+# argument column. That estimate is drawn, before the kernel runs, from the
+# segment pool (the kernel's own scratch lists are not counted):
 #
 #   * a worker draws the buffer bytes of each morsel when it consumes it, so
 #     the consume that takes the collected input past the pool fails;

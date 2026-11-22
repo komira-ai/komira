@@ -210,7 +210,7 @@ _WINDOW_TEST_DATA.update({c + ".tsv": ":window_oracle[" + c + ".tsv]" for c in _
 #   each case of tests/window/cases.sql: row_number, rank, dense_rank,
 #   percent_rank, cume_dist, ntile, lag and lead (offsets, defaults, BIGINT,
 #   DOUBLE and VARCHAR), running sums over the default RANGE frame and over a
-#   unique key, whole-partition sum, count, avg, min and max, first_value,
+#   unique key, running min, max, avg and count over tied keys, whole-partition sum, count, avg, min and max, first_value,
 #   last_value and nth_value, no PARTITION BY, two partition keys, several
 #   windows in one SELECT, a WHERE, an outer ORDER BY and no row, with NULL
 #   keys, tied order keys and the empty string, on one and three workers, each
