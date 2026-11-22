@@ -77,7 +77,10 @@
 # a SOURCE_BATCH spec names), and so is the sink data of the plan
 # (`add_agg_sink` returns the id a descriptor's `sink_param_id` names). The
 # builder also owns the segment pool the sinks draw their memory from
-# (`set_memory_budget`; unbounded until set).
+# (`set_memory_budget`; unbounded until set) and the spill directory it hands
+# the grouped aggregation sinks over fixed-width keys (`set_spill_directory`;
+# none until set, and then those sinks refuse a table the pool cannot grow
+# instead of spilling it).
 
 from std.memory import Pointer
 
@@ -223,6 +226,7 @@ struct RealBuilder[
     var _agg_sinks: List[AggSinkData]
     var _sort_sinks: List[SortSinkData]
     var _segment_pool: SegmentPool
+    var _spill_dir: String
 
     def __init__(
         out self,
@@ -236,6 +240,7 @@ struct RealBuilder[
         self._agg_sinks = List[AggSinkData]()
         self._sort_sinks = List[SortSinkData]()
         self._segment_pool = SegmentPool()
+        self._spill_dir = String("")
 
     def add_agg_sink(mut self, var data: AggSinkData) -> Int:
         """Keep `data` for SINK_AGG segments; returns the id their
@@ -254,6 +259,13 @@ struct RealBuilder[
         bytes (a negative value removes the bound). Replaces the pool, so call
         it between runs."""
         self._segment_pool = SegmentPool(bytes)
+
+    def set_spill_directory(mut self, var dir: String):
+        """Let the grouped aggregation sinks of later segment runs spill
+        their group tables under `dir` instead of refusing a table the pool
+        cannot grow (`sink_group_agg`); the empty string, the default, turns
+        spill off. Call it between runs."""
+        self._spill_dir = dir^
 
     def pool_granted(self) -> Int:
         """The bytes the sinks hold from the pool now; zero between runs."""
@@ -531,6 +543,7 @@ struct RealBuilder[
                                 key,
                                 self._segment_pool.share(),
                                 desc.seg_id,
+                                spill_dir=self._spill_dir,
                             )
                         )
                     )

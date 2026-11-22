@@ -189,7 +189,21 @@ Import each module by name; the package root exports nothing.
   table while it doubles (at most half the bytes charged for that table). A
   table holds at most 2^30 groups (a 32-bit group index) and refuses more by
   name. The merge is serial, and there is no dense table for a
-  small key domain and no partitioned parallel finalize yet. `AnyAggSink` is the
+  small key domain and no partitioned parallel finalize yet.
+  Given a spill directory (`RealBuilder.set_spill_directory`), the fixed-width
+  grouped sink does not refuse a table the pool cannot grow: the worker writes
+  the table to disk (`group_spill`: one chunk per partition of 16, by the top
+  bits of the key hash, through `engine_runtime`'s `LocalDiskSpillStorage`
+  and THSPLC column codec, under a sub-directory made by
+  `op_spill_rows.spill_root`), returns its memory and folds on into a new
+  table. `combine` then merges one partition at a time from the workers'
+  tables and the chunks, keeping each partition's output rows (charged) and
+  freeing its table, and writes the workers' remaining tables to disk when the
+  pool denies a partition's merge. The folds are exact, so the groups and their
+  values are the ones without a spill. The spill files are deleted at the end
+  of `combine` or when the sink is dropped. A sink with COUNT(DISTINCT) does
+  not spill and says so in its refusal; the string-keyed sinks and the sort do
+  not spill. `AnyAggSink` is the
   one slot of the sink variant that holds the grouped or the ungrouped sink.
 - `sink_string_group_agg`, `string_keys`: the grouped aggregation sinks keyed by
   strings, `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED | SINK_ORIENT_COLUMNAR)`,
@@ -302,7 +316,8 @@ Import each module by name; the package root exports nothing.
   SINK_ORIENT_COLUMNAR)`, and refuses every other kind by name. It keeps the
   resident batches (`add_resident`), the aggregation sink data a descriptor's
   `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`) and the segment pool
-  (`set_memory_budget`, unbounded until set), shares one set of operator parts among the
+  (`set_memory_budget`, unbounded until set) and the spill directory of the
+  fixed-width grouped sinks (`set_spill_directory`, none until set), shares one set of operator parts among the
   workers of a segment run, and derives the empty-output schema by running the
   chain's projections over a batch of no rows. Three origins name the borrows of
   the Parquet source (the footer cache, the expression pool, an absent dynamic

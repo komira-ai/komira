@@ -32,6 +32,20 @@ python_proto(
     visibility = ["komira//python/tests:"],
 )
 
+# The import package with the plan modules beside it at `komira/plan/v1/`,
+# where the plan encoder (komira/_plan) imports them from: the site directory
+# of the encoder's tests (tests/BUCK). The wheel does not ship the plan modules
+# yet, and `:komira` stays without them.
+python_source_package(
+    name = "komira_with_plan_modules",
+    srcs = glob(["komira/**/*.py"]) + [
+        "komira/py.typed",
+        ":plan_pb2[plan_pb2]",
+        ":plan_pb2[plan_vocabulary_pb2]",
+    ],
+    visibility = ["komira//python/tests:"],
+)
+
 # ---- The supported Pythons ---------------------------------------------------
 #
 # The exact versions the hosted-runner jobs of the workflows install with
