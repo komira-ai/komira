@@ -466,7 +466,7 @@ dropped by ownership, not by a cleanup the failing path might skip.
 |---|---|
 | A worker raises (a decode error, an overflow, a refused expression) | first error wins; workers stop at the next morsel; the query fails with that error; no partial result |
 | A file disappears or its footer changed since bind | the source refuses at open when the footer's identity differs from the one the plan was bound with (§6.2), naming the file |
-| The memory budget is denied | the MVP has no spill: the sink's `try_grow` (§4.5) fails, the worker records a named error in the first-error slot, and the query fails; never an allocation failure. A later slice lets a sink whose capability row says `spillable` spill instead (step 6 of §7.3); the IR records no spill tier until §2.2 item 6. **The root reservation of the context (§5.1) is the only bound on memory in the MVP**: no per-segment, per-sink or per-operator budget exists (§2.2 item 6), and every sink draws from the root through the segment pool of §4.5 |
+| The memory budget is denied | the MVP has no spill: the sink's `try_grow` (§4.5) fails (built since: the fixed-width grouped aggregation sink, given `EngineOptions.spill_directory`, writes its group tables to disk by hash partition instead, `src/pipeline_exec/sink_group_agg.mojo`; every other sink, and that one without a spill directory, still fails as described here), the worker records a named error in the first-error slot, and the query fails; never an allocation failure. A later slice lets a sink whose capability row says `spillable` spill instead (step 6 of §7.3); the IR records no spill tier until §2.2 item 6. **The root reservation of the context (§5.1) is the only bound on memory in the MVP**: no per-segment, per-sink or per-operator budget exists (§2.2 item 6), and every sink draws from the root through the segment pool of §4.5 |
 | The process crashes | the run is lost; nothing was persisted; the caller reruns the query. Single node, no recovery state, by scope |
 | Cancellation by the caller | the same flag; the query returns a cancelled error and every sink drops its state |
 | Connectivity to remote storage is lost mid-scan | the file-system layer's error surfaces through the first-error slot; the query fails whole. Retrying a read is the file-system layer's, not the driver's, and a morsel is never replayed by the driver |
@@ -752,7 +752,7 @@ ANALYZE, cloud scans) arrives as its own module of functions over the same struc
 
 | Module | Holds |
 |---|---|
-| `engine_options` | `EngineOptions` (§5.2; built: `worker_count`, `memory_budget_bytes`) |
+| `engine_options` | `EngineOptions` (§5.2; built: `worker_count`, `memory_budget_bytes`, `spill_directory`) |
 | `engine_context` | the struct, its constructor and accessors |
 | `engine_catalog` | built: `register_parquet`; planned: an in-memory batch, resolve a name |
 | `engine_footers`, `engine_optimize` | planned modules. Built: the context holds `ParquetFooters` (§6.2) and `engine_sql` calls `optimize` itself; the plan gates are not called |
@@ -786,7 +786,7 @@ and parsed at startup. A field whose absence differs from a value is an `Optiona
 |---|---|
 | `worker_count: Optional[Int]` | workers; absent means the host profile's count |
 | `memory_budget_bytes: Optional[Int]` | the memory cap; absent means the host profile's default |
-| `spill_enabled`, `spill_directory: Optional[String]` | whether and where a breaker may spill (spill tiers go through the host profile) |
+| `spill_enabled`, `spill_directory: Optional[String]` | whether and where a breaker may spill (spill tiers go through the host profile). Built: `spill_directory` alone, absent meaning no spill (so no separate `spill_enabled`), read by the fixed-width grouped aggregation sink and not through the host profile, since it does not change the lowered plan |
 | `morsel_rows: Optional[Int]` | override of the morsel size policy, for tests |
 | `cap_workers: Bool` | the opt-in gate of `capped_worker_count`; default off (§3.2) |
 | `plan_validation: Bool` | arms the plan validation gate (default off, as `plan_validation_enabled(armed)` takes it) |
