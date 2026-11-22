@@ -64,6 +64,7 @@ TARGETS = [
     "komira//src/plan_proto:table",
     "komira//src/pplan_wire:pplan_wire_conda",
     "komira//src/scan_resolver:scan_resolver_conda",
+    "komira//src/sdk_exec:copy_readback",
     "komira//src/sdk_exec:sdk_exec_conda",
     "komira//src/smtp_server:smtp_server_conda",
     "komira//src/tests/conformance/komira_json_conformance:komira_json_conformance",

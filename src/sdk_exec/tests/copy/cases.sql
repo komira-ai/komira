@@ -2,7 +2,7 @@
 -- file; a case's name is its file name without `.parquet`. komira runs every
 -- line through run_sql (the `:copy_komira` build action, with each read_csv
 -- file name and the destination replaced by their paths), and DuckDB runs the
--- same lines in `:copy_readback` before readback.sql reads both files.
+-- same lines in `:copy_readback_oracle` before readback.sql reads both files.
 -- The inputs are the read_csv fixtures of tests/csv (their header says what
 -- each holds).
 COPY (SELECT id, qty, price, day, name, qty > 10 AS big FROM read_csv('typed.csv')) TO 'typed_default.parquet';

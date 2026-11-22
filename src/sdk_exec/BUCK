@@ -40,10 +40,11 @@ _CSV_TEST_DATA.update({f + ".csv": "tests/csv/" + f + ".csv" for f in _CSV_FILES
 _CSV_TEST_DATA.update({c + ".tsv": ":csv_oracle[" + c + ".tsv]" for c in _CSV_CASES})
 
 # DuckDB reading back the Parquet files COPY writes, for
-# test_copy_readback_duckdb. Each line of tests/copy/cases.sql is one case:
-# `:copy_komira` runs every line through run_sql (copy_runner below) and
-# `:copy_readback` runs the same lines in the pinned DuckDB, then
-# tests/copy/readback.sql compares the two files of each case.
+# test_copy_readback_duckdb (the `copy_readback` library at the end of this
+# file). Each line of tests/copy/cases.sql is one case: `:copy_komira` runs
+# every line through run_sql (copy_runner below) and `:copy_readback_oracle`
+# runs the same lines in the pinned DuckDB, then tests/copy/readback.sql
+# compares the two files of each case.
 _COPY_CASES = [
     "typed_default",
     "typed_zstd",
@@ -78,7 +79,7 @@ _COPY_READBACK_INPUTS = dict(_COPY_INPUTS)
 _COPY_READBACK_INPUTS.update({"komira/" + c + ".parquet": ":copy_komira[" + c + ".parquet]" for c in _COPY_CASES})
 
 sql_oracle(
-    name = "copy_readback",
+    name = "copy_readback_oracle",
     srcs = ["tests/copy/cases.sql", "tests/copy/readback.sql"],
     inputs = _COPY_READBACK_INPUTS,
     outputs = [c + ".parquet" for c in _COPY_CASES] + [c + ".check.tsv" for c in _COPY_CASES],
@@ -86,7 +87,7 @@ sql_oracle(
 
 _COPY_TEST_DATA = {"cases.sql": "tests/copy/cases.sql", "counts.tsv": ":copy_komira[counts.tsv]"}
 
-_COPY_TEST_DATA.update({c + ".check.tsv": ":copy_readback[" + c + ".check.tsv]" for c in _COPY_CASES})
+_COPY_TEST_DATA.update({c + ".check.tsv": ":copy_readback_oracle[" + c + ".check.tsv]" for c in _COPY_CASES})
 
 # The engine-execution layer of the SDK: twelve modules (ten leaves plus the
 # plan gate modules) and the engine context with its SQL door (see README.md). Each module's header says what it is for.
@@ -157,11 +158,6 @@ _COPY_TEST_DATA.update({c + ".check.tsv": ":copy_readback[" + c + ".check.tsv]" 
 #   a derived union, an empty branch, the first branch's names, LIMIT, and the
 #   refusals of a union with no common type and of an ORDER BY before UNION ALL;
 #   and an ORDER BY with no union (the sort sinks' data reaches the builder).
-# - test_copy_readback_duckdb: the pinned DuckDB reads every Parquet file
-#   run_sql's COPY wrote for tests/copy/cases.sql (:copy_readback above) and
-#   finds the same rows, column names and types as in the file DuckDB writes
-#   for the same line, and as many rows as the COPY's `Count`; every case of
-#   cases.sql is checked.
 # - test_run_sql_copy_parquet: COPY ... TO a local Parquet file through
 #   run_sql answers one BIGINT row `Count`; the file read back equals the query
 #   (a table, a query, an empty result, 130,000 rows in two row groups, every
@@ -180,7 +176,7 @@ _COPY_TEST_DATA.update({c + ".check.tsv": ":copy_readback[" + c + ".check.tsv]" 
 #   (phase_timers) unregistered and at zero.
 mojo_library(
     name = "sdk_exec",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "copy_runner/**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "copy_runner/**/*.mojo", "copy_readback/**/*.mojo"]),
     # The full transitive closure of the Mojo libraries this package builds on.
     # A later slice that pulls in a new library adds it here in the same change.
     deps = [
@@ -262,7 +258,6 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
-        "tests/test_copy_readback_duckdb.mojo",
         "tests/test_plan_cache_full_sink_hash.mojo",
         "tests/test_plan_validation_gate_direct.mojo",
         "tests/test_plan_validation_routes_ledger.mojo",
@@ -286,8 +281,28 @@ mojo_library(
         "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
     ],
     test_data = {
-        "tests/test_copy_readback_duckdb.mojo": _COPY_TEST_DATA,
         "tests/test_run_sql_csv.mojo": _CSV_TEST_DATA,
     },
+    visibility = ["PUBLIC"],
+)
+
+# Test-only: the pinned DuckDB reading back the files run_sql's COPY writes
+# (copy_readback/__init__.mojo says why this is a library of its own: its
+# test data is built by copy_runner, which depends on sdk_exec, so as test data
+# of sdk_exec it would be a cycle). Nothing depends on it.
+# - test_copy_readback_duckdb: the pinned DuckDB reads every Parquet file
+#   run_sql's COPY wrote for tests/copy/cases.sql (:copy_readback_oracle above)
+#   and finds the same rows, column names and types as in the file DuckDB
+#   writes for the same line, and as many rows as the COPY's `Count`; every
+#   case of cases.sql is checked.
+mojo_library(
+    name = "copy_readback",
+    srcs = glob(["copy_readback/**/*.mojo"]),
+    deps = ["//tools/build/mojo/runtime_paths:runtime_paths"],
+    conda = False,
+    # The package's README is sdk_exec's: its examples run as sdk_exec's.
+    readme = False,
+    test_srcs = ["tests/test_copy_readback_duckdb.mojo"],
+    test_data = {"tests/test_copy_readback_duckdb.mojo": _COPY_TEST_DATA},
     visibility = ["PUBLIC"],
 )
