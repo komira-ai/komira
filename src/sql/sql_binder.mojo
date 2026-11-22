@@ -4,7 +4,6 @@
 #   a `LogicalPlan`.
 # =============================================================================
 
-from arrow.schema import Schema
 from plan_expr.expr import Expr
 from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import (
@@ -13,7 +12,7 @@ from plan_ir.logical_plan import (
 from sql.sql_ast import (
     FROM_LESS_RELATION, JK_ANTI, JK_CROSS, JK_FULL, JK_LEFT, JK_RIGHT, JK_SEMI,
     STMT_COPY, STMT_CREATE_TABLE_AS, STMT_QUERY, SUBQ_DERIVED, SUBQ_NOT_IN, SUBQ_SCALAR,
-    SUBQ_UNION_ALL, SX_COLUMN, SelectStmt, SqlStatement,
+    SUBQ_UNION_ALL, SX_COLUMN, SelectStmt, SqlStatement, _UNION_RESULT_ALIAS,
 )
 from sql.sql_bind_aggregate import (
     _bind_aggregate, _bind_projection,
@@ -33,12 +32,12 @@ from sql.sql_bind_subquery import (
     _bind_scalar_subquery_body, _bind_correlated_subquery_body,
     _corr_outer_of, _not_in_lhs_is_null_free, _in_lhs_output_name,
 )
+from sql.sql_bind_union import _bind_select_with_union
 from sql.sql_bind_window_order import (
     _has_window, _bind_window_projection, _order_key_name, _OK_COLUMN, _OK_OUTPUT,
     _classify_order_keys, _order_output_column, _bind_order,
 )
 from sql.sql_catalog import SqlCatalog
-from std.memory import OwnedPointer
 
 
 struct BoundStatement(Movable):
@@ -173,7 +172,15 @@ def _bind_query(
             # `derived_alias` is the relation key `<alias>#<index>`
             # (`_Parser._parse_derived_table`): unique per derived table and
             # never a CTE or catalog name, so registering it hides nothing.
-            var dplan = _bind_select(sd.body, catalog, cte_scope, prebound)
+            # A union the parser wrapped in `SELECT * FROM (<union>) <wrapper>`
+            # (a trailing ORDER BY / LIMIT) IS the query's result, so its head
+            # takes the result names; any other derived body keeps its own.
+            var wrapped_union = sd.derived_alias.startswith(
+                String(_UNION_RESULT_ALIAS) + "#"
+            )
+            var dplan = _bind_select_with_union(
+                sd.body, stmt, catalog, cte_scope, prebound, wrapped_union
+            )
             # Column-list rename `(SELECT ...) d (c1, c2, ...)` (TPC-H q13 shape):
             # positionally rename the derived body's output columns to the given
             # names via a projection of `col_ref(orig) AS new`. The list length
@@ -226,93 +233,27 @@ def _bind_query(
             )
             prebound.append(pred^)
 
-    var head = _bind_select(stmt, catalog, cte_scope, prebound, result_names)
-    if stmt.union_all_idx < 0:
-        return head^
-    return _bind_union_all_chain(
-        head^, stmt, stmt.union_all_idx, catalog, cte_scope, prebound
+    return _bind_select_with_union(
+        stmt, stmt, catalog, cte_scope, prebound, result_names
     )
 
 
-def _union_branch_schema_check(lhs: Schema, rhs: Schema, branch: Int) raises:
-    """Every UNION ALL branch must advertise the leading branch's schema.
-
-    `LogicalPlan.union` leaves that to its caller (it does not coerce), so
-    this check is the contract. DuckDB v1.5.3 coerces branches to a common
-    type (`SELECT 1 UNION ALL SELECT 1.5` is DOUBLE there); this refuses,
-    because the alternative is two branches of different physical width under
-    one schema. Cast the branches to a common type explicitly.
-    """
-    if lhs.num_columns() != rhs.num_columns():
-        raise Error(
-            "SQL bind error: UNION ALL branch " + String(branch) + " produces "
-            + String(rhs.num_columns()) + " column(s) but the first branch"
-            " produces " + String(lhs.num_columns())
-            + ". Every branch of a UNION ALL must produce the same number of"
-            " columns, in the same order."
-        )
-    for i in range(lhs.num_columns()):
-        if lhs.field_arrow_type(i) != rhs.field_arrow_type(i):
-            raise Error(
-                "SQL not supported: UNION ALL over branches whose column "
-                + String(i + 1) + " differs in TYPE - the first branch has "
-                + String(lhs.field_arrow_type(i)) + " and branch "
-                + String(branch) + " has " + String(rhs.field_arrow_type(i))
-                + ". DuckDB v1.5.3 COERCES the branches to a common type"
-                " here; this engine's PLAN_UNION node does not coerce (it"
-                " concatenates batches that must already share a schema), so"
-                " admitting the query would hand the executor two different"
-                " physical layouts under one advertised schema and return"
-                " reinterpreted bytes rather than an error. CAST both branches"
-                " to the same type explicitly."
-            )
-
-
-def _bind_union_all_chain(
-    var head: LogicalPlan,
+def _bind_select(
     stmt: SelectStmt,
-    first_idx: Int,
     catalog: SqlCatalog,
     cte_scope: CteScope,
     prebound: List[Expr],
+    result_names: Bool = False,
+    int32_result_literals: Bool = False,
 ) raises -> LogicalPlan:
-    """`<select> UNION ALL <select> [UNION ALL ...]` -> one `PLAN_UNION`.
-
-    N branches make one node with N children, not a left-deep tree of
-    two-branch unions.
-
-    Iterative: the branch bodies live in the top-level statement's
-    `subqueries` table, so the chain is a linked list of indices into one
-    table, walked with a loop. Recursing through each branch body would
-    re-enter `_bind_select` from inside itself, a shape the Mojo compiler
-    hangs on.
-
-    The output schema is the first branch's, names included, which is
-    DuckDB's rule: `SELECT a FROM t UNION ALL SELECT b FROM u` is a column
-    called `a`. Every later branch is checked against it by
-    `_union_branch_schema_check`.
-    """
-    var children = List[OwnedPointer[LogicalPlan]]()
-    var out_schema = head.output_schema.copy()
-    children.append(OwnedPointer(head^))
-    var idx = first_idx
-    var branch = 2
-    while idx >= 0:
-        ref sd = stmt.subqueries[idx]
-        var plan = _bind_select(sd.body, catalog, cte_scope, prebound)
-        _union_branch_schema_check(out_schema, plan.output_schema, branch)
-        var next_idx = sd.body.union_all_idx
-        children.append(OwnedPointer(plan^))
-        idx = next_idx
-        branch += 1
-    return LogicalPlan.union(children^, out_schema^)
-
-
-def _bind_select(stmt: SelectStmt, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr], result_names: Bool = False) raises -> LogicalPlan:
     """Bind one SELECT body against `catalog`, the `cte_scope` and the
     top-level `prebound` -> a `LogicalPlan`. Used for every CTE body, the final
     SELECT, every subquery body and every UNION ALL branch (`stmt.ctes` is
-    ignored here: `_bind_query` binds the WITH clause)."""
+    ignored here: `_bind_query` binds the WITH clause).
+
+    `int32_result_literals` binds the bare integer result literals as INT32 (as a
+    lone top-level SELECT does) without the result renames `result_names` adds:
+    every branch of a UNION ALL, whose common type is then folded from them."""
     if len(stmt.from_tables) == 0:
         raise Error("SQL bind error: FROM clause has no tables")
     # A FROM-less SELECT's `*`: the one-row relation has no column a query
@@ -489,13 +430,15 @@ def _bind_select(stmt: SelectStmt, catalog: SqlCatalog, cte_scope: CteScope, pre
     elif has_agg or group_present:
         plan = _bind_aggregate(stmt, schema, scope, plan^, catalog, cte_scope, prebound, order_names, order_carry, order_expr_idx, order_expr_names)
     else:
-        # The result's bare integer literals are INT32 as in DuckDB. Not under
-        # a UNION ALL: its branches bind without `result_names`, and every
-        # branch must have the leading branch's types.
+        # The result's bare integer literals are INT32 as in DuckDB. Every
+        # branch of a UNION ALL binds them INT32 too (`int32_result_literals`),
+        # and the union widens the branches to a common type.
         plan = _bind_projection(
             stmt, schema, scope, plan^, catalog, cte_scope, prebound,
             order_names, order_carry, order_expr_idx, order_expr_names,
-            result_int_literals=result_names and stmt.union_all_idx < 0,
+            result_int_literals=(
+                (result_names and stmt.union_all_idx < 0) or int32_result_literals
+            ),
         )
 
     # 3a. The result's names (top-level query only; see

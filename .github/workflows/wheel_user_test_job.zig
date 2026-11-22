@@ -1,7 +1,7 @@
-//! The job `wheel-user-test`, the user test of the wheel file, as release.yml (on every merge) and pypi.yml
-//! (before its first upload) both hold it: the same steps in both files, only the job it needs, the artifacts'
-//! names and the gate differ. `check` reads the job's lines (comment and blank lines dropped) and says why they
-//! break the contract, or null. What the contract holds:
+//! The job `wheel-user-test`, the user test of the wheel file, as pypi.yml's push run holds it before its first
+//! upload (docs/ci.md, "The user test of the wheel file"); the job it needs, the artifacts' names and the gate are
+//! the Spec's. `check` reads the job's lines (comment and blank lines dropped) and says why they break the
+//! contract, or null. What the contract holds:
 //!  - it needs exactly the job that built the wheel, takes its matrix from that job's output `matrix` with
 //!    `fail-fast: false` (every Python finishes), and runs on the runner of the matrix entry;
 //!  - it holds no permission, no environment and no identity, checks out nothing, joins no farm, runs no buck2,
@@ -10,7 +10,7 @@
 //!    driver made executable, the pinned setup-python with the matrix entry's Python, then one step that runs
 //!    `pypi_smoke install --index dist` on the dist directory with that interpreter and the quickstart, its
 //!    expected output, its data and the ABI table from the smoke artifact (no file of a checkout).
-//! The build job's side (the copy of those files and the matrix step) is in each workflow's own cases.
+//! The build job's side (the copy of those files and the matrix step) is in pypi_workflow_contract.zig.
 
 const std = @import("std");
 

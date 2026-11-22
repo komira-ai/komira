@@ -63,6 +63,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 pushed filter, morsel size, refusals, a spec
 #                                 that lists its files and their partition
 #                                 constants.
+# test_real_concat                SOURCE_CONCAT: the producers' rows in the spec's
+#                                 order, on several workers, producers with no
+#                                 rows, operators on the concatenation, the
+#                                 nullability of any producer kept, and a
+#                                 producer outside the dependencies refused.
 # test_source_csv                 the CSV source built from a spec: typed, quoted
 #                                 and NULL cells, gzip by extension, a dialect,
 #                                 the declared types over inference, a header
@@ -226,6 +231,7 @@ mojo_library(
         "tests/test_op_filter.mojo",
         "tests/test_op_limit_concurrent.mojo",
         "tests/test_op_project_limit.mojo",
+        "tests/test_real_concat.mojo",
         "tests/test_real_plan.mojo",
         "tests/test_real_plan_concurrent.mojo",
         "tests/test_run_plan.mojo",

@@ -79,8 +79,9 @@ budget, a sum outside its declared type and a pool not whole after a run (step
 `LOWERING_UNCUTTABLE_NODE` at `lower`). Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
 `lowering_inputs` descends only scan, filter, project, limit, aggregate,
-distinct and sort nodes and gives a facts entry per scan it reaches, and the cutter refuses any
-other node by name before it asks for the scans below it. `worker_count` and
+distinct, sort and union nodes (a union's branches in order) and gives a facts
+entry per scan it reaches, and the cutter refuses any other node by name
+before it asks for the scans below it. `worker_count` and
 `memory_budget_bytes` have a lower bound of 1 and no upper bound. A
 cancellation token is local to a call, so cancel is not reachable from
 `run_sql`. After a refusal the context is unchanged and runs the next query.
@@ -155,11 +156,20 @@ The tests run when the package is built.
 - `test_run_sql_no_from`: `SELECT 1 AS n` is one row, an INT32 column `n`
   holding 1, DuckDB's answer; a result literal is INT32 from -2147483647 to
   2147483647 and INT64 past either bound and at -2147483648 (as in DuckDB);
-  one past BIGINT is refused at bind; a literal a derived table or a UNION
-  ALL branch holds stays INT64 (`n + 5000000000` over a derived `1 AS n` is
-  the INT64 5000000001); `7 / 2`, `count(*)` and a false WHERE with no FROM;
+  one past BIGINT is refused at bind; a literal a derived table holds stays
+  INT64 (`n + 5000000000` over a derived `1 AS n` is the INT64 5000000001)
+  and `SELECT 1 AS n UNION ALL SELECT 2` binds to INT32, as in DuckDB; `7 / 2`, `count(*)` and a false WHERE with no FROM;
   `SELECT 1 FROM` a Parquet table; an in-memory source of two batches is read
   whole and one of none gives no rows with its schema.
+- `test_run_sql_union_all`: UNION ALL over six small Parquet tables answers
+  what DuckDB answers for the same SQL: INTEGER with BIGINT is BIGINT,
+  INTEGER with FLOAT is FLOAT, BIGINT or FLOAT or a DECIMAL with DOUBLE is
+  DOUBLE, DECIMAL(12,2) with DECIMAL(10,4) is DECIMAL(14,4) and with INTEGER
+  DECIMAL(12,2), values exact and NULLs kept; three branches with a FROM-less
+  one, count(*), sum, GROUP BY and WHERE over `FROM (... UNION ALL ...) u`, an
+  empty branch, the first branch's names, LIMIT, integer literal branches
+  (INTEGER, or BIGINT when one needs it); a VARCHAR with an INTEGER is refused
+  at bind and an ORDER BY before UNION ALL at parse.
 - `test_secret_capability_reveal`: a capability reveals exactly the secret
   bound to its own node id, once and after one store resolve; two capabilities
   over one bindings table each reveal their own value; an unbound node or a
@@ -173,9 +183,10 @@ scans of one local file with a header row (decoded whole before the first
 morsel; `header=false` is refused at lowering, because the reader would name
 the columns `col_0`, `col_1`, ... where DuckDB names them `column0`,
 `column1`, ...), the one-row relation a SELECT with no FROM reads (an integer
-literal of the result's SELECT list is INT32 when it fits, as in DuckDB; an
+literal of the result's SELECT list or of a UNION ALL branch's is INT32 when it fits, as in DuckDB; an
 integer literal anywhere else, `1 + 1` included, is still INT64), filter,
-projection, limit, aggregation, distinct and sort. The post-rewrite gate and
+projection, limit, aggregation, distinct and sort, and UNION ALL, the
+concatenation of its branches. The post-rewrite gate and
 the plan validation gate are not called from `run_sql`.
 
 `post_rewrite_gate` is a free-standing check; its call sites belong to the

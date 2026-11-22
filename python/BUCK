@@ -69,7 +69,7 @@ python_versions(
 # py3-none-macosx_11_0_arm64) is the same package: its `[dist]` is
 # libkomira.dylib and lib/ with the three runtime .dylib, and it holds no
 # native owner library (they are linked into libkomira.dylib). It is built and
-# tested only by the release workflow, on the farm's macOS workers, never in a
+# tested only by pypi.yml, on the farm's macOS workers, never in a
 # pull request (tools/build/ci/rules.bzl, EXCLUDED); its targets name
 # `--target-platforms komira//tools/build/platforms:darwin-arm64`. On macOS the
 # wheel rule refuses a Mach-O member that needs a newer macOS than the tag's.
@@ -206,7 +206,7 @@ wheel_file(
 # minor (pythons.bzl), on its pinned interpreter: `:wheel_install_test` on
 # CPython 3.13, `:wheel_install_test_py311`, `_py312` and `_py314` on the
 # others; 3.11 is the lower edge of Requires-Python, and 3.10, below it, is
-# refused (`refuses_python_outside_requires_python`). The release workflow
+# refused (`refuses_python_outside_requires_python`). pypi.yml's build
 # runs the 3.13 test, `:wheel_install_test`. On macOS there are no native
 # owners to map.
 

@@ -13,6 +13,10 @@
 #            SOURCE_CSV           the CSV file the spec names, decoded at its
 #                                 bound column types and served as a resident
 #                                 batch (`source_csv`)
+#            SOURCE_CONCAT        the outputs of the producers the spec names,
+#                                 moved out of `PublishedOutputs` and
+#                                 concatenated in the spec's order into one
+#                                 batch read like a sink output (a UNION ALL)
 #   op       OP_FILTER            `FilterOp`  (`op_filter`)
 #            OP_PROJECT           `MapOp`     (`op_project`)
 #            OP_LIMIT             `LimitOp`   (`op_limit`)
@@ -35,8 +39,8 @@
 #            SINK_SORT, key NONE  `SortSink` (`sink_sort`), from the `SortSinkData`
 #                                 the descriptor's `sink_param_id` names
 #
-# Anything else (SOURCE_CONCAT, OP_JOIN_PROBE and the other sinks) is refused
-# by name, because no member serves it yet.
+# Anything else (OP_JOIN_PROBE and the other sinks) is refused by name,
+# because no member serves it yet.
 #
 # An ORDER_ROW_RANGE segment is the same bits on every worker count only when
 # its source cuts the same morsels on every worker count. The three sources
@@ -65,7 +69,8 @@
 
 from std.memory import Pointer
 
-from arrow.schema import RecordBatch, Schema
+from arrow.concat import concat_record_batches_nway
+from arrow.schema import RecordBatch, Schema, SchemaBuilder
 from byte_buffer.constants import DEFAULT_MORSEL_ROWS
 from column_kernels.compiler_helpers import (
     copy_batch,
@@ -99,10 +104,12 @@ from physical_plan.physical_plan import (
     SINK_ORIENT_COLUMNAR,
     SINK_ORIENT_DICT_ENCODED,
     SOURCE_BATCH,
+    SOURCE_CONCAT,
     SOURCE_CSV,
     SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
 )
+from containers.slab import Slab
 from plan_expr.expr_pool import ExprPool
 
 from .op_filter import FilterOp, FilterShared
@@ -124,6 +131,33 @@ from .source_csv import build_csv_source
 from .source_parquet import LocalParquetSource, build_parquet_source
 from .source_sink_output import SinkOutputSource
 from .source_variant import SourceVariant
+
+
+def _check_reads_a_dependency(ref desc: SegmentDescPod, producer: Int) raises:
+    """Raise unless `producer` is among the dependencies of `desc`."""
+    for i in range(len(desc.deps)):
+        if desc.deps[i] == producer:
+            return
+    raise Error(
+        "pipeline_exec: segment "
+        + String(desc.seg_id)
+        + " reads the output of segment "
+        + String(producer)
+        + ", which is not among its dependencies"
+    )
+
+
+def _nullable_union(ref batches: Slab[RecordBatch]) raises -> Schema:
+    """The first batch's schema with each column nullable when that column is
+    nullable in any of `batches`."""
+    var builder = SchemaBuilder()
+    for c in range(batches[0].schema.num_columns()):
+        var field = batches[0].schema.field_at(c)
+        for b in range(1, len(batches)):
+            if batches[b].schema.field_nullable(c):
+                field.nullable = True
+        builder.add_field(field^)
+    return builder.build()
 
 
 struct _OpParts(Movable):
@@ -321,21 +355,36 @@ struct RealBuilder[
                     + " segments; a SOURCE_SINK_OUTPUT reads one"
                 )
             var producer = spec.dep_seg_ids[0]
-            var is_dep = False
-            for i in range(len(desc.deps)):
-                if desc.deps[i] == producer:
-                    is_dep = True
-            if not is_dep:
-                raise Error(
-                    "pipeline_exec: segment "
-                    + String(desc.seg_id)
-                    + " reads the output of segment "
-                    + String(producer)
-                    + ", which is not among its dependencies"
-                )
+            _check_reads_a_dependency(desc, producer)
             return Self.Source.third(
                 SinkOutputSource(
                     published.take(producer), producer, morsel_rows
+                )
+            )
+        if desc.source_kind == SOURCE_CONCAT:
+            if len(spec.dep_seg_ids) == 0:
+                raise Error(
+                    "pipeline_exec: segment "
+                    + String(desc.seg_id)
+                    + " concatenates the outputs of no segment"
+                )
+            # Every producer is checked before any output is taken, so a
+            # refused segment leaves every published output in place.
+            for i in range(len(spec.dep_seg_ids)):
+                _check_reads_a_dependency(desc, spec.dep_seg_ids[i])
+            var batches = Slab[RecordBatch]()
+            for i in range(len(spec.dep_seg_ids)):
+                batches.append(published.take(spec.dep_seg_ids[i]))
+            # The concatenation keeps the first producer's schema; a column is
+            # nullable when any producer's is.
+            var merged = _nullable_union(batches)
+            var concatenated = concat_record_batches_nway(batches^)
+            concatenated.schema = merged^
+            return Self.Source.third(
+                SinkOutputSource(
+                    concatenated^,
+                    spec.dep_seg_ids[0],
+                    morsel_rows,
                 )
             )
         raise Error(
@@ -344,7 +393,7 @@ struct RealBuilder[
             + " of segment "
             + String(desc.seg_id)
             + " is not served (SOURCE_PARQUET, SOURCE_BATCH,"
-            " SOURCE_SINK_OUTPUT and SOURCE_CSV are)"
+            " SOURCE_SINK_OUTPUT, SOURCE_CSV and SOURCE_CONCAT are)"
         )
 
     def build_op(

@@ -1,7 +1,8 @@
-//! The reading of pypi.yml's text that its two case files share (pypi_workflow_test.zig, the contract
-//! of each line; pypi_workflow_run.zig, a run played from the text): the jobs and the top-level keys as
-//! lines, the searches over those lines, the workflow's own bytes under KOMIRA_TEST_WORK, and the edits a
-//! case writes into them. Comment lines and blank lines are never returned.
+//! The reading of pypi.yml's text that its case files share (pypi_workflow_contract.zig and
+//! pypi_workflow_test.zig, the contract of each line; pypi_workflow_run.zig, a run played from the text):
+//! the jobs and the top-level keys as lines, the searches over those lines, the workflow's own bytes (and
+//! release.yml's) under KOMIRA_TEST_WORK, and the edits a case writes into them. Comment lines and blank
+//! lines are never returned.
 
 const std = @import("std");
 
@@ -66,7 +67,8 @@ pub fn topLines(ar: std.mem.Allocator, text: []const u8, key: []const u8, count:
     var found = false;
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |line| {
-        if (line.len == 0 or line[0] == '#') continue;
+        const trimmed = std.mem.trim(u8, line, " ");
+        if (trimmed.len == 0 or trimmed[0] == '#') continue;
         if (line[0] != ' ') {
             inside = std.mem.eql(u8, line, key);
             if (inside) {
@@ -113,8 +115,17 @@ pub fn countPrefix(lines: []const []const u8, prefix: []const u8) usize {
 
 /// The bytes of pypi.yml, the zig_test's data under KOMIRA_TEST_WORK/workflows/.
 pub fn readWorkflow(ar: std.mem.Allocator) ![]const u8 {
+    return readData(ar, "pypi.yml");
+}
+
+/// The bytes of release.yml, whose push filter pypi.yml's repeats.
+pub fn readRelease(ar: std.mem.Allocator) ![]const u8 {
+    return readData(ar, "release.yml");
+}
+
+fn readData(ar: std.mem.Allocator, name: []const u8) ![]const u8 {
     const work = try std.process.getEnvVarOwned(ar, "KOMIRA_TEST_WORK");
-    const path = try std.fs.path.join(ar, &.{ work, "workflows", "pypi.yml" });
+    const path = try std.fs.path.join(ar, &.{ work, "workflows", name });
     return std.fs.cwd().readFileAlloc(ar, path, 1 << 20);
 }
 

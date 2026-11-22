@@ -23,11 +23,16 @@ and no environment variable and touches no global, so equal arguments give a
   An aggregation, a distinct or a sort ends it in a sink and opens a pipeline
   that reads that segment's output over an `E3` edge. A distinct is a
   `SINK_AGG` grouped by every column, in order, with no aggregate, so its
-  sink row is the one an aggregation with those group keys gets. The root is a `SINK_COLLECT` segment
-  unless the top node is a breaker, which is then the result. `cut_walk` is
-  only the dispatch on the node's tag; each arm is its own module (`cut_scan`,
-  `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_distinct`,
-  `cut_sort`), and
+  sink row is the one an aggregation with those group keys gets. A union
+  (`UNION ALL`) ends each branch in a segment of its own (a `SINK_COLLECT`
+  segment, or the branch's aggregation, distinct or sort segment when nothing
+  is fused after it) and opens a pipeline whose source is `SOURCE_CONCAT` over
+  those segments in branch order, with an `E3` edge to each; what stands above
+  the union fuses onto or closes that pipeline. The root is a `SINK_COLLECT`
+  segment unless the top node is a breaker, which is then the result.
+  `cut_walk` is only the dispatch on the node's tag; each arm is its own
+  module (`cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
+  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union`), and
   `cut_state` holds what they share: the open pipeline, the cutter's segments
   and ParamTable, and the close and reopen of a breaker. A new node kind is a
   new arm module and one branch in `cut_walk`.
@@ -51,7 +56,7 @@ and no environment variable and touches no global, so equal arguments give a
 Lowering refuses by name and never replaces what it cannot lower with another
 shape:
 
-- `LOWERING_UNCUTTABLE_NODE`, naming the node: a join, union, top-n,
+- `LOWERING_UNCUTTABLE_NODE`, naming the node: a join, top-n,
   window, view or shared-subplan reference, cast to string or exchange node
   (the cutter has no arm for any of them, so an exchange is refused rather
   than elided on one host); a filter, projection or aggregation that carries a
@@ -61,7 +66,11 @@ shape:
   column list, over no column or over two columns of one name; a source other
   than Parquet, in memory or CSV; a CSV scan with `header=false` (the reader
   would name its columns `col_0`, `col_1`, ..., where DuckDB names them
-  `column0`, `column1`, ...).
+  `column0`, `column1`, ...); a union with no branch, or with a branch whose
+  schema is not the union's (column count, and per column the name, Arrow
+  type, decimal precision and scale and timezone; the concatenation reads
+  every branch by position in the union's layout, so the producer casts and
+  renames the branches first).
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key with a
   column of a type with no row (an 8- or 16-bit integer, a timestamp, a
   binary, ...), alone or beside served columns, or a segment whose triple has
