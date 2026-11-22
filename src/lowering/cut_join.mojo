@@ -33,7 +33,11 @@
 # node's order under the node's names.
 #
 # Both children are walked, the left before the right, so the scans are met in
-# pre-order whichever side builds.
+# pre-order whichever side builds. In a plan that holds a shared-subplan
+# reference `cut_walk` walks the right child first, as the reference's
+# producer visits a join, and sets the scan count for each child, so the scans
+# keep their pre-order indices and the right child's segments take the lower
+# ids (`cut_shared`).
 #
 # Refused (LOWERING_JOIN_UNSERVED) before either child is walked: a join type
 # the plan IR does not define, a SEMI or ANTI join that builds its left child

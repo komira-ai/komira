@@ -33,12 +33,31 @@ and no environment variable and touches no global, so equal arguments give a
   child in a `SINK_HASH_BUILD` segment and fuses an `OP_JOIN_PROBE` into the
   probe child's pipeline, with an `E3` edge to the build segment. The root is a `SINK_COLLECT`
   segment unless the top node is a breaker, which is then the result.
-  `cut_walk` is only the dispatch on the node's tag; each arm is its own
-  module (`cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
-  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union`, `cut_join`), and
-  `cut_state` holds what they share: the open pipeline, the cutter's segments
-  and ParamTable, and the close and reopen of a breaker. A new node kind is a
-  new arm module and one branch in `cut_walk`.
+  `cut_walk` is the dispatch on the node's tag and the resolution of shared
+  subplans around it (below); each arm is its own module (`cut_scan`,
+  `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_distinct`,
+  `cut_sort`, `cut_union`, `cut_join`, `cut_shared`), and `cut_state` holds
+  what they share: the open pipeline, the cutter's segments and ParamTable,
+  the shared subplans cut so far, and the close and reopen of a breaker. A new
+  node kind is a new arm module and one branch in `cut_walk`.
+- `cut_shared`: shared subplans. A plan may hold a subtree once, its canonical
+  occurrence, and every later occurrence as a `PLAN_CSE_REF` leaf carrying the
+  canonical subtree's `structural_hash()` (`optimizer.plan_cse`, which the
+  producer runs: `sdk_exec.engine_sql.optimize_for_run` for `run_sql`). The
+  canonical subtree is the first node of that hash the walk reaches (a node
+  before its children, a union's branches in order, and in a plan that holds
+  a reference a join's right child before its left, the producer's order; the
+  scan count is set for each child of the join, so the scans keep their
+  pre-order indices). One that holds an aggregation, a distinct, a sort, a
+  limit or a join is cut once: it ends in a segment of its own, as a union
+  branch does, and the canonical position and every reference read that
+  segment over an `E3` edge (a union that holds two references names the
+  segment twice in its `SOURCE_CONCAT`); the engine hands each reader the
+  same rows. A reader of a sort's output is a sorted input, as the sort's own
+  reader is. One that is only scans, filters, projections and unions of them
+  is cut again at every reference, over the same scans: the references take
+  no `ScanFacts` of their own, and the recut keeps the scans' statistics,
+  dictionary-encoded keys and parallel read.
 - `sum_fuse`: SUM(CAST(e AS DECIMAL(38, 0))) over a signed integer `e`, the
   SQL integer sum, is put into a sink's data as SUM(e); the node's declared
   output stays DECIMAL(38, 0) and the sink writes its 128-bit total there.
@@ -62,9 +81,13 @@ Lowering refuses by name and never replaces what it cannot lower with another
 shape:
 
 - `LOWERING_UNCUTTABLE_NODE`, naming the node: a top-n,
-  window, view or shared-subplan reference, cast to string or exchange node
-  (the cutter has no arm for any of them, so an exchange is refused rather
-  than elided on one host); a filter, projection or aggregation that carries a
+  window, view reference, cast to string or exchange node (the cutter has no
+  arm for any of them, so an exchange is refused rather than elided on one
+  host; a view reference is resolved before lowering, which has no view
+  registry); a shared-subplan reference reached before its canonical subtree
+  or with none in the plan, or whose schema is not the canonical subtree's
+  (column count, and per column the name, Arrow type, decimal precision and
+  scale and timezone); a filter, projection or aggregation that carries a
   UDF, an aggregate function that is a UDF; a limit with an offset or a
   negative count; a limit above a sort (see Order); a partial or final
   aggregation; an aggregation with a group top-k; a distinct over an explicit
@@ -116,7 +139,11 @@ called: the build segment of a join collects its rows whole.
 The build side is the one the plan records (`JoinData.build_side`). Lowering
 never chooses or swaps it: RIGHT builds the right child, LEFT the left child,
 and UNSET builds the right child. The left child is walked first, then the
-right, so scans are met in pre-order whichever side builds. The probe emits
+right, so scans are met in pre-order whichever side builds; in a plan that
+holds a shared-subplan reference the right child is walked first, as the
+reference's producer visits a join, with the scan count set for each child,
+so the scans keep their pre-order indices and the right child's segments take
+the lower ids. The probe emits
 its own columns and then the build columns (a SEMI or ANTI probe, its own
 columns only). The `OP_JOIN_PROBE`'s join type is the probe's view, the probe
 side as its left input: the plan's type when the right child builds; when the

@@ -41,6 +41,12 @@ Import each module by name; the package root exports nothing.
   `check_plan` refuses ORDER_ROW_RANGE on any sink but the ungrouped
   aggregation sink.
 - `published_outputs`: `PublishedOutputs`, the batch each finished segment left.
+  `run_plan` builds it from the plan, counting as a reader of a segment every
+  SOURCE_SINK_OUTPUT and SOURCE_CONCAT spec that names it (a concatenation
+  that names it twice reads it twice). `take` gives every reader but the last
+  a copy and the last the batch itself, so a segment several others read (a
+  shared subplan) hands each the same rows; what no reader took, the result,
+  is what `run_plan` returns.
 - `segment_builder`: the `SegmentBuilder` trait through which a plan's members
   are constructed from a descriptor. `build_source` is given the worker count
   (a source that sizes per-worker state at construction needs it) and
