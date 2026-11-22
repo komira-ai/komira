@@ -42,9 +42,10 @@
 #     that drops the request's headers);
 #   * the Host each request carried is 127.0.0.1:<port> (a client that
 #     sends its host without the non-default port);
-#   * the 404 and 401 errors by exact message, ErrorModel body included (a
-#     transport that swallows an error status, or a client that maps it to
-#     anything but its IcebergRestError).
+#   * the 404 and 401 errors by exact message: the token of the status, the
+#     request, the status, and the ErrorModel type and message from the wire
+#     (a transport that swallows an error status, or a client that maps it to
+#     another token or copies the raw body).
 #
 # `test_tls_connector_factory_accepted` builds the transport over the TLS
 # connector production uses, from a factory that raises (a TlsConfig raises
@@ -284,15 +285,18 @@ def test_production_transport_over_loopback() raises:
 
     assert_equal(
         leg.not_found_error,
-        String("IcebergRestError: table not found (HTTP 404) for")
-        + String(" 'sales.missing' — body: ")
-        + _not_found_body(),
+        String(
+            "ICEBERG_TABLE_NOT_FOUND: loadTable 'sales.missing': HTTP 404:"
+            " NoSuchTableException: The given table does not exist"
+        ),
         "the 404 error",
     )
     assert_equal(
         leg.unauthorized_error,
-        String("IcebergRestError: GET /v1/config returned HTTP 401 — body: ")
-        + _unauthorized_body(),
+        String(
+            "ICEBERG_CATALOG_UNAUTHORIZED: GET /v1/config: HTTP 401:"
+            " NotAuthorizedException: Not authorized to make this request"
+        ),
         "the 401 error",
     )
     print("  test_production_transport_over_loopback PASS")

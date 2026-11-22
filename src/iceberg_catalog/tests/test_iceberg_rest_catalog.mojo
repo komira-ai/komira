@@ -17,7 +17,8 @@
 #       string). FALSIFIER: a loadTable response with no `metadata-location`
 #       must RAISE, not return ResolvedTable("").
 #   (4) A 404 namespace/table -> a CLEAR typed error, not a crash. FALSIFIER: a
-#       404 must map to a "table not found" Error.
+#       404 must map to an ICEBERG_TABLE_NOT_FOUND message carrying the
+#       ErrorModel type and message.
 #   (5) The BEARER TOKEN is attached to each request (assert the Authorization
 #       header on the scripted transport). FALSIFIER: a client that dropped the
 #       credential provider would send NO Authorization header.
@@ -27,6 +28,12 @@
 #   (7) CONFIG IS FETCHED ONCE + CACHED across loadTable calls (the prefix is not
 #       re-fetched per resolve). FALSIFIER: a client that re-fetched config per
 #       resolve would make 2 config GETs for 2 loadTable calls.
+#   (9) CONFIG HANDLING: the `warehouse` query is percent-encoded; `endpoints`
+#       listed without the load endpoint refuses ICEBERG_CATALOG_ENDPOINT_
+#       UNSUPPORTED before any loadTable request, and `endpoints` that is not
+#       an array is ICEBERG_CATALOG_RESPONSE_INVALID and not cached; omitted
+#       `endpoints` allow everything; non-string entries name nothing;
+#       `idempotency-key-lifetime` counts at the top level only.
 #   (8) A PREFIX WITH `/` (`catalogs/<name>`) KEEPS `/` AS A PATH SEPARATOR; each
 #       piece is percent-encoded. FALSIFIER: encoding the whole prefix as one
 #       segment sends `%2F`, which the server does not route.
@@ -45,6 +52,9 @@ from iceberg_catalog.iceberg_rest_transport import (
     ScriptedIcebergRestTransport,
 )
 from iceberg_catalog.iceberg_rest_catalog_client import (
+    ENDPOINT_COMMIT_TABLE,
+    ENDPOINT_CREATE_TABLE,
+    ENDPOINT_LOAD_TABLE,
     IcebergRestCatalog,
     StaticBearerToken,
 )
@@ -191,8 +201,13 @@ def test_missing_metadata_location_raises() raises:
         var _r = client.load_table(String("db"), String("orders"))
     except e:
         raised = True
-        # The error names the missing field (fail loud).
-        assert_true(_contains(String(e), String("metadata-location")))
+        assert_equal(
+            String(e),
+            String(
+                "ICEBERG_CATALOG_RESPONSE_INVALID: loadTable 'db.orders'"
+                " response has no 'metadata-location'"
+            ),
+        )
     assert_true(raised)
 
 
@@ -206,7 +221,13 @@ def test_empty_metadata_location_raises() raises:
         var _r = client.load_table(String("db"), String("orders"))
     except e:
         raised = True
-        assert_true(_contains(String(e), String("EMPTY")))
+        assert_equal(
+            String(e),
+            String(
+                "ICEBERG_CATALOG_RESPONSE_INVALID: loadTable 'db.orders'"
+                " 'metadata-location' is empty"
+            ),
+        )
     assert_true(raised)
 
 
@@ -225,8 +246,13 @@ def test_not_found_raises() raises:
         var _r = client.load_table(String("db"), String("orders"))
     except e:
         raised = True
-        assert_true(_contains(String(e), String("404")))
-        assert_true(_contains(String(e), String("not found")))
+        assert_equal(
+            String(e),
+            String(
+                "ICEBERG_TABLE_NOT_FOUND: loadTable 'db.orders': HTTP 404:"
+                " NoSuchTableException: Table does not exist: db.orders"
+            ),
+        )
     assert_true(raised)
 
 
@@ -315,7 +341,13 @@ def test_storage_based_unregistered_raises() raises:
         var _r = storage.load_table(String("db"), String("missing"))
     except e:
         raised = True
-        assert_true(_contains(String(e), String("db.missing")))
+        assert_equal(
+            String(e),
+            String(
+                "IcebergCatalogError: no table registered for 'db.missing'"
+                " (StorageBasedCatalog)"
+            ),
+        )
     assert_true(raised)
 
 
@@ -404,6 +436,279 @@ def test_unity_style_prefix_path() raises:
 
 
 # =============================================================================
+# config handling: warehouse, endpoints, idempotency-key-lifetime.
+# =============================================================================
+
+
+def _config_with_endpoints(endpoints_json: String) -> String:
+    return (
+        String('{"defaults":{},"overrides":{"prefix":"prod"},"endpoints":')
+        + endpoints_json
+        + String("}")
+    )
+
+
+def _load_error(
+    mut c: IcebergRestCatalog[ScriptedIcebergRestTransport, StaticBearerToken],
+) -> String:
+    """The message load_table raised, or "" when it returned."""
+    try:
+        var _r = c.load_table(String("db"), String("orders"))
+    except e:
+        return String(e)
+    return String("")
+
+
+def _require_error(
+    mut c: IcebergRestCatalog[ScriptedIcebergRestTransport, StaticBearerToken],
+    endpoint: String,
+) -> String:
+    """The message require_endpoint raised, or "" when it returned."""
+    try:
+        c.require_endpoint(endpoint)
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_warehouse_is_a_percent_encoded_config_query() raises:
+    var t = ScriptedIcebergRestTransport()
+    t.queue_response(200, _config_json())
+    t.queue_response(200, _load_table_json())
+    var client = IcebergRestCatalog[
+        ScriptedIcebergRestTransport, StaticBearerToken
+    ](
+        String(_HOST),
+        t^,
+        StaticBearerToken(String(_TOKEN)),
+        warehouse=String("s3://wh/my wh&x=1"),
+    )
+    var _r = client.load_table(String("db"), String("orders"))
+    ref rec = client.transport_ref()
+    assert_equal(
+        rec.call_path(0),
+        String("/v1/config?warehouse=s3%3A%2F%2Fwh%2Fmy%20wh%26x%3D1"),
+    )
+    assert_equal(
+        rec.call_path(1), String("/v1/prod/namespaces/db/tables/orders")
+    )
+
+
+def test_no_warehouse_sends_no_query() raises:
+    var t = ScriptedIcebergRestTransport()
+    t.queue_response(200, _config_json())
+    t.queue_response(200, _load_table_json())
+    var client = _mk_client(t^, String(_TOKEN))
+    var _r = client.load_table(String("db"), String("orders"))
+    ref rec = client.transport_ref()
+    assert_equal(rec.call_path(0), String("/v1/config"))
+
+
+def test_endpoints_without_load_refuse_before_any_load_request() raises:
+    var t = ScriptedIcebergRestTransport()
+    t.queue_response(
+        200,
+        _config_with_endpoints(
+            String(
+                '["POST /v1/{prefix}/namespaces/{namespace}/tables",'
+                + '"POST /v1/{prefix}/namespaces/{namespace}/tables/{table}"]'
+            )
+        ),
+    )
+    var client = _mk_client(t^, String(_TOKEN))
+    var want = String(
+        "ICEBERG_CATALOG_ENDPOINT_UNSUPPORTED: the catalog does not list"
+        " 'GET /v1/{prefix}/namespaces/{namespace}/tables/{table}'"
+    )
+    assert_equal(_load_error(client), want)
+    # The config answered once, and no loadTable request was sent.
+    ref rec = client.transport_ref()
+    assert_equal(rec.call_count(), 1)
+    assert_equal(rec.call_path(0), String("/v1/config"))
+    # The refusal is repeatable from the cached config.
+    assert_equal(_load_error(client), want)
+    assert_equal(rec.call_count(), 1)
+    # load_table_metadata refuses the same way.
+    var metadata_error = String("")
+    try:
+        var _m = client.load_table_metadata(String("db"), String("orders"))
+    except e:
+        metadata_error = String(e)
+    assert_equal(metadata_error, want)
+    assert_equal(rec.call_count(), 1)
+
+
+def test_require_endpoint_checks_each_endpoint_the_client_calls() raises:
+    var t = ScriptedIcebergRestTransport()
+    t.queue_response(
+        200,
+        _config_with_endpoints(
+            String(
+                '["GET /v1/{prefix}/namespaces/{namespace}/tables/{table}"]'
+            )
+        ),
+    )
+    var client = _mk_client(t^, String(_TOKEN))
+    assert_equal(_require_error(client, ENDPOINT_LOAD_TABLE), String(""))
+    assert_equal(
+        _require_error(client, ENDPOINT_CREATE_TABLE),
+        String(
+            "ICEBERG_CATALOG_ENDPOINT_UNSUPPORTED: the catalog does not list"
+            " 'POST /v1/{prefix}/namespaces/{namespace}/tables'"
+        ),
+    )
+    assert_equal(
+        _require_error(client, ENDPOINT_COMMIT_TABLE),
+        String(
+            "ICEBERG_CATALOG_ENDPOINT_UNSUPPORTED: the catalog does not list"
+            " 'POST /v1/{prefix}/namespaces/{namespace}/tables/{table}'"
+        ),
+    )
+
+
+def test_endpoints_listing_load_allow_the_load() raises:
+    var t = ScriptedIcebergRestTransport()
+    t.queue_response(
+        200,
+        _config_with_endpoints(
+            String('["GET /v1/config","')
+            + ENDPOINT_LOAD_TABLE
+            + String('","POST /v1/{prefix}/namespaces/{namespace}/tables"]')
+        ),
+    )
+    t.queue_response(200, _load_table_json())
+    var client = _mk_client(t^, String(_TOKEN))
+    var r = client.load_table(String("db"), String("orders"))
+    assert_equal(
+        r.metadata_location,
+        String("s3://wh/prod/db/orders/metadata/00003-abc.metadata.json"),
+    )
+    ref rec = client.transport_ref()
+    assert_equal(rec.call_count(), 2)
+
+
+def test_endpoints_omitted_allow_every_endpoint() raises:
+    var t = ScriptedIcebergRestTransport()
+    t.queue_response(200, _config_json())
+    t.queue_response(200, _load_table_json())
+    var client = _mk_client(t^, String(_TOKEN))
+    assert_equal(_require_error(client, ENDPOINT_LOAD_TABLE), String(""))
+    assert_equal(_require_error(client, ENDPOINT_CREATE_TABLE), String(""))
+    assert_equal(_require_error(client, ENDPOINT_COMMIT_TABLE), String(""))
+    var _r = client.load_table(String("db"), String("orders"))
+    ref rec = client.transport_ref()
+    assert_equal(rec.call_count(), 2)
+
+
+def test_endpoints_that_is_not_an_array_is_invalid_and_not_cached() raises:
+    var bad = List[String]()
+    bad.append(String('"GET /v1/config"'))
+    bad.append(String("null"))
+    bad.append(String("{}"))
+    bad.append(String("7"))
+    for i in range(len(bad)):
+        var t = ScriptedIcebergRestTransport()
+        t.queue_response(200, _config_with_endpoints(bad[i]))
+        t.queue_response(200, _config_json())
+        t.queue_response(200, _load_table_json())
+        var client = _mk_client(t^, String(_TOKEN))
+        assert_equal(
+            _load_error(client),
+            String(
+                "ICEBERG_CATALOG_RESPONSE_INVALID: /v1/config 'endpoints' is"
+                " not an array"
+            ),
+        )
+        # Not cached: the next request fetches the config again.
+        var r = client.load_table(String("db"), String("orders"))
+        assert_equal(
+            r.metadata_location,
+            String("s3://wh/prod/db/orders/metadata/00003-abc.metadata.json"),
+        )
+        ref rec = client.transport_ref()
+        assert_equal(rec.call_count(), 3)
+        assert_equal(rec.call_path(0), String("/v1/config"))
+        assert_equal(rec.call_path(1), String("/v1/config"))
+
+
+def test_non_string_endpoint_entries_are_ignored() raises:
+    # Entries that are not strings do not name an endpoint, and do not stop
+    # the string entry beside them from counting.
+    var t = ScriptedIcebergRestTransport()
+    t.queue_response(
+        200,
+        _config_with_endpoints(
+            String('[5,null,{"x":1},["a"],true,"')
+            + ENDPOINT_LOAD_TABLE
+            + String('"]')
+        ),
+    )
+    t.queue_response(200, _load_table_json())
+    var client = _mk_client(t^, String(_TOKEN))
+    var _r = client.load_table(String("db"), String("orders"))
+    ref rec = client.transport_ref()
+    assert_equal(rec.call_count(), 2)
+
+
+def test_endpoints_with_no_string_entries_list_nothing() raises:
+    var lists = List[String]()
+    lists.append(String("[]"))
+    lists.append(String("[5,null,{}]"))
+    for i in range(len(lists)):
+        var t = ScriptedIcebergRestTransport()
+        t.queue_response(200, _config_with_endpoints(lists[i]))
+        var client = _mk_client(t^, String(_TOKEN))
+        assert_equal(
+            _load_error(client),
+            String(
+                "ICEBERG_CATALOG_ENDPOINT_UNSUPPORTED: the catalog does not"
+                " list 'GET /v1/{prefix}/namespaces/{namespace}/tables/{table}'"
+            ),
+        )
+        ref rec = client.transport_ref()
+        assert_equal(rec.call_count(), 1)
+
+
+def test_idempotency_key_lifetime_is_read_from_the_top_level() raises:
+    var t = ScriptedIcebergRestTransport()
+    t.queue_response(
+        200,
+        String(
+            '{"defaults":{},"overrides":{"prefix":"prod"},'
+            + '"idempotency-key-lifetime":"PT30M"}'
+        ),
+    )
+    var client = _mk_client(t^, String(_TOKEN))
+    # The first call fetches the config; the second reads the cache.
+    assert_true(client.supports_idempotency())
+    assert_true(client.supports_idempotency())
+    ref rec = client.transport_ref()
+    assert_equal(rec.call_count(), 1)
+
+
+def test_idempotency_key_lifetime_inside_the_maps_does_not_count() raises:
+    var t = ScriptedIcebergRestTransport()
+    t.queue_response(
+        200,
+        String(
+            '{"defaults":{"idempotency-key-lifetime":"PT30M"},'
+            + '"overrides":{"idempotency-key-lifetime":"PT30M"}}'
+        ),
+    )
+    var client = _mk_client(t^, String(_TOKEN))
+    assert_false(client.supports_idempotency())
+
+
+def test_idempotency_absent_is_not_supported() raises:
+    var t = ScriptedIcebergRestTransport()
+    t.queue_response(200, _config_json())
+    var client = _mk_client(t^, String(_TOKEN))
+    assert_false(client.supports_idempotency())
+    ref rec = client.transport_ref()
+    assert_equal(rec.call_count(), 1)
+
+
+# =============================================================================
 # helper — substring containment (no stdlib `in` on String here).
 # =============================================================================
 
@@ -442,4 +747,16 @@ def main() raises:
     test_no_prefix_omits_prefix_segment()
     test_multi_segment_prefix_keeps_slash()
     test_unity_style_prefix_path()
+    test_warehouse_is_a_percent_encoded_config_query()
+    test_no_warehouse_sends_no_query()
+    test_endpoints_without_load_refuse_before_any_load_request()
+    test_require_endpoint_checks_each_endpoint_the_client_calls()
+    test_endpoints_listing_load_allow_the_load()
+    test_endpoints_omitted_allow_every_endpoint()
+    test_endpoints_that_is_not_an_array_is_invalid_and_not_cached()
+    test_non_string_endpoint_entries_are_ignored()
+    test_endpoints_with_no_string_entries_list_nothing()
+    test_idempotency_key_lifetime_is_read_from_the_top_level()
+    test_idempotency_key_lifetime_inside_the_maps_does_not_count()
+    test_idempotency_absent_is_not_supported()
     print("test_iceberg_rest_catalog: ALL PASS")
