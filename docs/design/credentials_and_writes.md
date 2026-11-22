@@ -51,7 +51,8 @@ s.sql("INSERT INTO sales_catalog.sales.orders SELECT * FROM raw_orders")
   `catalog.table("ns.table")` picks one table out of it. The table uses the catalog's credential
   under the same name, `catalog-etl`.
 - **For one statement**, a binding is a keyword of `sql`, and it wins over a session binding of the
-  same name for that statement. The owner's form passes one source before the query, read as `self`:
+  same name for that statement. The unnamed-source form, kept pending the question at the top, passes
+  one source before the query, read as `self`:
 
   ```python
   s.sql("SELECT count(*) FROM returns", returns=komira.files("s3://raw-events/returns/*.parquet",
@@ -82,8 +83,9 @@ The rest of the document assumes the recommendation.
 | an S3 source with no region from any setting | assumes `us-east-1` | refuses by name (`STORAGE_REGION_UNKNOWN`) | refuse: a guessed region turns a missing setting into a redirect error from the wrong place |
 | `COPY ... TO` with no `FORMAT` and an extension it cannot read | writes CSV | refuses by name (`COPY_FORMAT_NOT_INFERRED`) | refuse: guessing writes a file the statement may not have meant |
 | a URL under no bound scope, on the default session or any other | sends the request with no credential unless a secret was created; the provider chain is opt-in (`CREATE SECRET (TYPE s3, PROVIDER credential_chain)`) *(to confirm against the pinned DuckDB)* | every session starts with `s3://` and `gs://` scopes bound to `komira.AMBIENT`, the process's own identity through the provider chains (decision 3) | keep the ambient default: it is what boto3, pyarrow and polars do beside komira *(inferred from their default credential chains)*, and `s.add_sql_binding("public", komira.files("s3://", credential=komira.ANONYMOUS, region="us-east-1"))` turns it off for SQL. The third default scope, `https://`, is `komira.ANONYMOUS`. An `az://` URL has no default scope and is refused with `CREDENTIALS_NOT_FOUND` until a scope is bound |
-| the positional form `s.sql(table_object, "SELECT ... FROM self")`, binding one unnamed source for one statement under the name `self` | DuckDB's Python API has no such argument: it resolves a Python variable named in the SQL by inspecting the caller's frame; polars' `DataFrame.sql` reads its frame as `self` *(to confirm against the pinned polars)* | served, Python only, beside named call bindings; TypeScript and Mojo write `{ self: source }` | keep it: it is the owner's own spelling, it costs one reserved name, and it never conflicts with a named binding because a call binding wins for its statement |
 | the environment variables below, which `komira.AMBIENT` reads | its credential chain reads the same providers' variables | reads exactly the list below, inside the library, only for `komira.AMBIENT`, and `AwsProfile` reads only the file locators | allow the whole list as rule S2's provider-standard credentials, including the names outside `AWS_*` and `GOOGLE_*`: they are how the providers find credentials, and nothing else in komira reads the environment |
+
+**The unnamed-source form, `s.sql(source, query)`, read as `self`.** The ruling keeps two ways to bind a name: `add_sql_binding` on the session, and a keyword of one `sql` call. This third spelling follows the owner's own sketch, `s.sql(t, "COMMAND")`, and is not ruled. Recommendation: keep it. Keeping it costs a third spelling of a call binding, a reserved name `self` that every SDK spells (`{ self: source }` in TypeScript and Mojo), and two `TypeError` rules (a second unnamed source, and `self=` beside one); it changes no plan, because `self` is a session-local name and never reaches the wire. Dropping it costs nothing in the plan or the library; a one-source query is written `s.sql("SELECT count(*) FROM t", t=t)` instead, and the examples that use `self` change.
 
 ### The environment komira reads
 
@@ -299,7 +301,8 @@ A SQL name is bound in one of two ways (**PROPOSED**). Both bind the same source
 
   - A CTE of the same name hides both, as a CTE hides a table today. Names fold case, as the binder's
     catalog does.
-- **One unnamed source per call, as `self`.** This is the owner's form, `s.sql(t, "COMMAND")`. A
+- **One unnamed source per call, as `self`**, kept pending the question at the top. It follows the
+  owner's sketch, `s.sql(t, "COMMAND")`. A
   source given before the query is bound for that statement under the name `self`. `self` is, by the
   author's reading of polars' documentation, the name polars' `DataFrame.sql` gives its frame
   *(to confirm against the pinned polars)*.
