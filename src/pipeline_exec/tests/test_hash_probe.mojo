@@ -8,7 +8,7 @@
 # tests prove:
 #
 #   * The shared part refuses, by exact message, an operator that is not a
-#     join probe, a join type other than INNER, a residual, a late-
+#     join probe, a join type no kind serves (type 9), a residual, a late-
 #     materialization column list, the sort-merge algorithm, no keys, key lists
 #     of unequal length and nine keys.
 #   * An INT64 key equal to the value the kernel keeps for NULL is refused by
@@ -78,7 +78,6 @@ from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import (
     JOIN_ALGO_SORT_MERGE,
     JOIN_INNER,
-    JOIN_LEFT,
 )
 
 comptime RESERVED = 9221120237041090561
@@ -177,14 +176,14 @@ def test_an_operator_that_is_not_a_join_probe_is_refused() raises:
     )
 
 
-def test_a_join_type_other_than_inner_is_refused() raises:
+def test_a_join_type_no_kind_serves_is_refused() raises:
     var spec = MorselOp.join_probe(
-        1, key_names("o_custkey"), key_names("c_custkey"), JOIN_LEFT
+        1, key_names("o_custkey"), key_names("c_custkey"), UInt8(9)
     )
     assert_equal(
         _refusal_of(spec^),
-        "pipeline_exec: OP_JOIN_PROBE refuses join type 1; only INNER is"
-        " served",
+        "pipeline_exec: OP_JOIN_PROBE refuses join type 9; INNER, LEFT, RIGHT,"
+        " FULL, SEMI, ANTI and CROSS are served",
     )
 
 

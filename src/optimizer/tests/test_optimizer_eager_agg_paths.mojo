@@ -404,6 +404,28 @@ def test_rewrite_keeps_join_keys_type_and_hint() raises:
     assert_equal(Int(jd.algo_hint), Int(JOIN_ALGO_HASH))
 
 
+def test_left_join_with_count_star_beside_a_pushable_aggregate_declines() raises:
+    """dim LEFT JOIN fact with COUNT(*) and SUM(measure): the measure anchors
+    the fact (right) side, but COUNT(*) must count an unmatched dim row as 1
+    and its partial would read NULL there, so the pass declines. Catches a
+    count of 0 for every dim row with no fact row. The same aggregates over
+    an INNER join still push."""
+    var aggs = AggExprArray()
+    aggs.append(agg_count().alias("n"))
+    aggs.append(agg_sum(col("measure")).alias("total"))
+    var left = LogicalPlan.aggregate(
+        _gb1("dim_id"), aggs^, _join_df(_dim(_mid()), _fact(_big()), JOIN_LEFT)
+    )
+    assert_equal(_verdict(left), Int(_EAGER_NONE), "LEFT with COUNT(*)")
+    var aggs2 = AggExprArray()
+    aggs2.append(agg_count().alias("n"))
+    aggs2.append(agg_sum(col("measure")).alias("total"))
+    var inner = LogicalPlan.aggregate(
+        _gb1("dim_id"), aggs2^, _join_df(_dim(_mid()), _fact(_big()))
+    )
+    assert_equal(_verdict(inner), Int(_EAGER_RIGHT), "INNER with COUNT(*)")
+
+
 # -----------------------------------------------------------------------------
 # helpers
 # -----------------------------------------------------------------------------

@@ -76,6 +76,16 @@ from arrow.write_target import (
 )
 
 
+comptime INNER_ON_BEFORE_OUTER_REFUSAL = (
+    "SQL not supported: a RIGHT or FULL JOIN after an INNER JOIN ... ON in"
+    " one FROM. The INNER join's ON is applied as a WHERE over the whole FROM,"
+    " which would drop the rows the outer join pads with NULL. Write the"
+    " INNER join as a subquery in FROM, or put the outer join first."
+)
+"""The parser's refusal of an INNER `JOIN ... ON` followed by a RIGHT or
+FULL join in one FROM list."""
+
+
 struct _Parser(Movable):
     var tokens: List[Token]
     var pos: Int
@@ -672,6 +682,9 @@ struct _Parser(Movable):
         # SEMI / ANTI bind to JOIN_SEMI / JOIN_ANTI; ASOF / POSITIONAL are
         # refused BY NAME.
         var where_acc: Optional[SqlExpr] = None
+        # True once an INNER `JOIN ... ON` predicate has been folded into
+        # WHERE: a later RIGHT or FULL join would then be filtered by it.
+        var folded_inner_on = False
         if from_less:
             stmt.from_tables.append(FromRelation.named(String(FROM_LESS_RELATION)))
         else:
@@ -793,11 +806,19 @@ struct _Parser(Movable):
                     # INNER / CROSS / bare JOIN — ON folds into WHERE (as before).
                     if on_pred:
                         where_acc = _and_into(where_acc^, on_pred.take())
+                        folded_inner_on = True
                     stmt.joins.append(JoinClause(JK_CROSS, None))
                 else:
                     # LEFT / RIGHT / FULL — the ON stays on the OUTER-join node.
                     if not on_pred:
                         raise Error("SQL syntax error: OUTER JOIN requires an ON condition")
+                    # ⛔ An INNER ON folded into WHERE is applied above this
+                    # join. Above a LEFT join that is the same answer (the
+                    # rows it pads keep the earlier relations' columns), but
+                    # a RIGHT or FULL join pads the earlier relations with
+                    # NULL, and the folded predicate would drop those rows.
+                    if folded_inner_on and (jkind == JK_RIGHT or jkind == JK_FULL):
+                        raise Error(INNER_ON_BEFORE_OUTER_REFUSAL)
                     stmt.joins.append(JoinClause(jkind, on_pred^))
             else:
                 break
