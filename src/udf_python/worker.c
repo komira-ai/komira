@@ -253,6 +253,7 @@ void udfpy_close_instance(udfpy_inst* in) {
   if (in == NULL) return;
   if (!in->ctx->lost) {
     udfpy_msg r;
+    /* ask() returns OK only for an OK reply; an ERROR reply is freed there. */
     if (ask(in->ctx, UDFPY_OP_CLOSE_INSTANCE, in->id, NULL, NULL, 0, &r, NULL) == KOMIRA_UDF_OK) {
       uint32_t left = 0;
       if (r.len >= 4) { /* the instances the worker still holds */

@@ -85,8 +85,10 @@ def a_cancel_flag_set_during_a_call_stops_it_between_rows_and_not_the_next_call(
     call_id = inst.next_call
     start, finish = fire_during_call(env, work, lambda: setattr(inst.cancel, "value", 1), "cancel", call_id)
     start()
-    r = inst.call([pa_ints(0, 1, 2)])
-    finish()
+    try:
+        r = inst.call([pa_ints(0, 1, 2)])
+    finally:
+        finish()
     assert r.status == h.ERR_CANCELLED, r.err
     assert r.err.message == "cancelled at row 1" and r.err.row == 1, r.err
     assert r.array is None
@@ -104,8 +106,10 @@ def a_deadline_passing_during_a_call_stops_it_between_rows_and_not_the_next_call
     rt.state.now_value = 50
     start, finish = fire_during_call(env, work, lambda: setattr(rt.state, "now_value", 200), "deadline", call_id)
     start()
-    r = inst.call([pa_ints(0, 1, 2)], deadline_ns=100)
-    finish()
+    try:
+        r = inst.call([pa_ints(0, 1, 2)], deadline_ns=100)
+    finally:
+        finish()
     assert r.status == h.ERR_DEADLINE, r.err
     assert r.err.message == "the call passed its deadline at row 1" and r.err.row == 1, r.err
     assert r.array is None

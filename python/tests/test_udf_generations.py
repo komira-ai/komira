@@ -8,7 +8,6 @@ new one, while contexts of the old generation keep their code until they close.
 """
 
 import os
-import select
 import sys
 
 import pyarrow as pa
@@ -91,15 +90,12 @@ def the_old_generation_ends_when_its_last_context_closes(env):
     rt.load_ok(env.bundle_spec({"m.py": ADD_THOUSAND}, "m:f"))
     zygote1 = spawned(env, 1)
 
-    fd = os.pidfd_open(zygote1)
-    try:
-        assert env.trace.events("shutdown") == []
-        assert not select.select([fd], [], [], 0)[0], "generation 1 ended with a context open"
-        inst1.close()
-        ctx1.close()
-        select.select([fd], [], [])  # readable when the zygote has exited
-    finally:
-        os.close(fd)
+    assert env.trace.events("shutdown") == []
+    assert not h.process_gone(zygote1), "generation 1 ended with a context open"
+    inst1.close()
+    # Closing the last context shuts the retired generation down and reaps its
+    # zygote before close() returns, so no wait is needed.
+    ctx1.close()
     (down,) = env.trace.events("shutdown")
     assert down["gen"] == "1" and down["pid"] == str(zygote1), down
     assert h.process_gone(zygote1), "the zygote of generation 1 outlived its last context"

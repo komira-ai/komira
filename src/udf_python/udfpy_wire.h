@@ -12,9 +12,10 @@
  *          u32 0, u32 0, 32 zero bytes
  * A reply (OK or ERROR) carries its request's id; its payload is the body.
  * An ERROR body is i32 code, i64 row, i64 group, str message, str trace,
- * where str is a u32 length and that many UTF-8 bytes. The OK reply of UNLOAD and of
- * CLOSE_INSTANCE is a u32: the UDFs the zygote, or the instances the worker, still holds. EXIT is the one
- * message nobody asked for (request id 0).
+ * where str is a u32 length and that many UTF-8 bytes. The OK reply of
+ * UNLOAD is a u32, the UDFs the zygote still holds; that of CLOSE_INSTANCE is
+ * a u32, the instances the worker still holds. EXIT is the one message
+ * nobody asked for (request id 0).
  */
 #ifndef UDFPY_WIRE_H
 #define UDFPY_WIRE_H
