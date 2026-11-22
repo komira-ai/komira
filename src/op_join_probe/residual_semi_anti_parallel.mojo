@@ -181,12 +181,12 @@ struct _ResidualMarkState(KeepAlive):
         self.next_chain = next_chain^
         self.has_pass = has_pass^
         var raw = alloc[Atomic[Int64]](1)
-        UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
+        raw.unsafe_write(Atomic[Int64](Int64(0)))
         self.morsel_counter = OwnedPointer[Atomic[Int64]](
             unsafe_from_raw_pointer=raw
         )
         var raw2 = alloc[Atomic[Int64]](1)
-        UnsafePointer(to=raw2[].value).unsafe_write(Scalar[DType.int64](0))
+        raw2.unsafe_write(Atomic[Int64](Int64(0)))
         self.workers_active = OwnedPointer[Atomic[Int64]](
             unsafe_from_raw_pointer=raw2
         )

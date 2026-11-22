@@ -129,9 +129,7 @@ struct MultiKeyParallelProbeState[
         self.builder = builder
         self.probe_keys = probe_keys
         var raw = alloc[Atomic[Int64]](1)
-        UnsafePointer(to=raw[].value).unsafe_write(
-            Scalar[DType.int64](0)
-        )
+        raw.unsafe_write(Atomic[Int64](Int64(0)))
         self.morsel_counter = OwnedPointer[Atomic[Int64]](
             unsafe_from_raw_pointer=raw
         )

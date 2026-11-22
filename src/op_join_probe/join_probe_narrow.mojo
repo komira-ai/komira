@@ -53,7 +53,7 @@ comptime NARROW_HEADROOM: Int = JOIN_PS_MIN_HEADROOM
 
 def _init_npn_i64() -> OwnedPointer[Atomic[Int64]]:
     var raw = alloc[Atomic[Int64]](1)
-    UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
+    raw.unsafe_write(Atomic[Int64](Int64(0)))
     return OwnedPointer[Atomic[Int64]](unsafe_from_raw_pointer=raw)
 
 

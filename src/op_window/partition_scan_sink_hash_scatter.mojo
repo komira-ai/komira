@@ -350,11 +350,11 @@ struct _HashScatterPartitionByState(KeepAlive, Movable):
         # OwnedPointer owns the slot and frees it when the state is dropped;
         # no other owner exists.
         var fraw = alloc[Atomic[Int8]](1)
-        UnsafePointer(to=fraw[].value).unsafe_write(Scalar[DType.int8](0))
+        fraw.unsafe_write(Atomic[Int8](Int8(0)))
         self.err_flag = OwnedPointer[Atomic[Int8]](unsafe_from_raw_pointer=fraw)
         self.err_msg = OwnedPointer(String(""))
         var craw = alloc[Atomic[Int64]](1)
-        UnsafePointer(to=craw[].value).unsafe_write(Scalar[DType.int64](0))
+        craw.unsafe_write(Atomic[Int64](Int64(0)))
         self.bucket_counter = OwnedPointer[Atomic[Int64]](
             unsafe_from_raw_pointer=craw
         )
