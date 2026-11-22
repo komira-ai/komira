@@ -282,7 +282,9 @@ every type in IF §6.2's table.
   `async` function is awaited in the worker's own event loop, with at most `max_concurrent_calls` in flight.
 - **`MAP_BATCHES_COLUMN` and `SCALAR` with `ARROW`:** the function receives `pyarrow` arrays and returns one.
 - **`ROW` (P3):** the row proxy over the `args` children only, which records a read outside the read set even when
-  user code catches the exception (IF §4.3 item 7).
+  user code catches the exception (IF §4.3 item 7); who supplies the read set and what fails outside it is §6.1.
+- **`MAP_BATCHES_FRAME` (P3):** the batches hold only the read set's columns; a lookup of another column is mapped to
+  `ERR_FIELD_NOT_DECLARED` as §6.1 says.
 - **Errors:** every exception user code raises, `BaseException` included (`KeyboardInterrupt`, `SystemExit` from
   `sys.exit()`), is caught at the call and answered as `ERR_RAISED`, with the row when the loop knows it and the
   traceback trimmed to the user's frames (`user_trace`, mapped to the user's file and line). A `SystemExit` never ends
@@ -413,7 +415,7 @@ message PythonDescriptor {
   repeated WireField arg_types       = 3;  // the signature captured (empty for ROW and MAP_BATCHES_FRAME)
   WireField          return_type     = 4;
   WireField          state_type      = 5;  // mergeable AGGREGATE only
-  RecordedFields     recorded_fields = 6;  // ROW and MAP_BATCHES_FRAME, when an annotation gave them; set even if empty
+  RecordedFields     recorded_fields = 6;  // ROW and MAP_BATCHES_FRAME: always set (the read set's fields, and key_fields for a grouped frame); absent is refused
   BatchFormat        batch_format    = 7;  // required: UNSPECIFIED is refused
   string             serializer      = 8;  // VALUE only: "cloudpickle/<version>"
   string             python_abi      = 9;  // VALUE only: the tag the payload needs, "cp313"
@@ -429,22 +431,51 @@ nothing (IF §4.3 item 3), so admission works before any zygote exists. It refus
 values:
 
 - with `ERR_DESCRIPTOR`: a `descriptor_version` other than 1; bytes that are not canonical (fields in number order,
-  no unknown field, no field equal to its default except `recorded_fields`, which is emitted whenever it is set); an
+  no unknown field, no field equal to its default except `recorded_fields`, which is emitted whenever it is set); a `ROW` or
+  `MAP_BATCHES_FRAME` entry whose `recorded_fields` is absent; an
   `entry` other than `UdfCode.entry`; a spec shape outside `shapes`; `arg_types`, `return_type` or `state_type` that
   differ from the spec's (for `ROW` and `MAP_BATCHES_FRAME`, the types of the recorded fields against the spec's
   `arg_types` of the same names); a `RecordedFields` whose lists are not ascending by UTF-8 bytes, repeat a name, or
   share one; `BATCH_FORMAT_UNSPECIFIED`, or a batch format not built yet; and a `serializer`, `python_abi` or
   `distribution` set on a form that does not use it;
 - with `ERR_READ_SET_MISMATCH`: a `ROW` or `MAP_BATCHES_FRAME` whose `arg_types` names, as a sorted set, differ from
-  the union of `recorded_fields.fields` and `recorded_fields.key_fields`, when `recorded_fields` is set; when it is
-  unset, the names are not compared (IF §3.1). For a `ROW` the plan always carries a read set (IF §3.1), so only a
-  `MAP_BATCHES_FRAME` can reach `validate` with `recorded_fields` compared or not;
+  the union of `recorded_fields.fields` and `recorded_fields.key_fields`. The names are always compared, because the
+  plan always carries a read set on these two kinds (§6.1);
 - with `ERR_UNSUPPORTED`: a `VALUE` whose `python_abi` differs from the `abi` option, because a pickled code object
   belongs to its interpreter's minor (IF §3.1, *The runtime's ABI tag*); the zygote's own tag is checked against the
   same option at `HELLO` (§3.1).
 
 **`load` runs in the zygote** and checks that the imported function agrees with the descriptor: its qualified name,
 its parameters, and its type hints where it has them (`ERR_LOAD` otherwise).
+
+### 6.1 The read set: whose duty is what
+
+`UdfRef.read_set` (`UdfReadSet`, IF §3.1) is required on `ROW` and on `MAP_BATCHES_FRAME`, grouped or not. It may be
+set and empty (the function reads no column); unset is refused. It stays refused on every other kind
+(`OPTIMIZED_UDF_READ_SET_KIND`), because `SCALAR`, `MAP_BATCHES_COLUMN` and `AGGREGATE` carry their columns as their
+arguments (`arg_types`) and a `STEP` has no input. So every kind that receives rows or a frame carries an explicit
+list, and for these two kinds `arg_types` equals the read set's names in order. Each part has a duty:
+
+- **The producer supplies it.** `ROW`: `columns=[...]`, else an annotation of the row parameter (`TypedDict`,
+  dataclass), else the SDK's static scan of the function's bytecode for attribute and subscript reads on the row
+  parameter. `MAP_BATCHES_FRAME`: `columns=[...]` or an annotation of the frame parameter, else the input frame's
+  columns at that point of the plan, which the producer knows from the schema; a grouped frame's read set contains
+  its `group_by` columns (`OPTIMIZED_UDF_READ_SET_GROUP_KEY`). The user narrows a frame with `columns=`; there is no
+  static scan for frames.
+- **Capture refuses** a `ROW` function whose reads neither `columns=` nor an annotation bounds and the scan cannot
+  bound, with `UDF_READ_SET_REQUIRED` naming the function and `columns=[...]`. It never falls back to every input
+  column.
+- **Admission refuses** a `ROW` or `MAP_BATCHES_FRAME` `UdfRef` whose `read_set` is unset, with
+  `OPTIMIZED_UDF_READ_SET_REQUIRED` naming the UDF's index.
+- **The engine passes only those columns:** only they stay live, down to the scan, and a frame node needs from its
+  child only the read set.
+- **A read outside the set fails loudly.** The `ROW` proxy answers `ERR_FIELD_NOT_DECLARED`, naming the field and the
+  read set, even when user code catches the exception. In a frame the batches hold only the read set's columns, and
+  the worker maps the batch format's column-lookup error for a name outside the read set (`KeyError` from pandas and
+  pyarrow, polars' `ColumnNotFoundError`) to `ERR_FIELD_NOT_DECLARED` naming the column and the read set. A lookup
+  error the worker cannot recognise is raised by the data library and answered as `ERR_RAISED` with the read set in
+  the message.
+- **The descriptor records it** (§6): `recorded_fields` is always written for these two kinds.
 
 ## 7. Packaging and the local run
 
@@ -508,7 +539,7 @@ from them, and none of them ships:
 - Fork on macOS is decided (below).
 - Workers end with their zygote: `PR_SET_PDEATHSIG` on Linux, a watcher thread on macOS; the zygote kills its workers
   at end of file (§5.4).
-- The descriptor message, its canonical bytes and what `validate` compares (§6).
+- The descriptor message, its canonical bytes and what `validate` compares (§6), and the read set's duties (§6.1).
 - A local run admits against `code_root` and the session's `sys_path`, without image checks (§7).
 
 **macOS fork.** On macOS, a child forked from a process that has loaded Apple's system frameworks (numpy uses the
@@ -539,3 +570,32 @@ The runtime-specific cases (Z for the zygote and workers, S for supervision) are
 [the conformance corpus](udf_runtime_conformance.md#cases-of-the-komirapython-runtime). They are the runtime's own
 tests (IF §6.3, last bullet): welded to `src/udf_python/` (C, through the Mojo harness) and to `python/` (the worker,
 in Python, the one surface where Python tests are allowed, `AGENTS.md` T11).
+
+## 11. Code that must change for the required read set
+
+No code changes in this pull request. The work, each item a brief of its own:
+
+1. **Plan proto:** `src/plan_proto/plan.proto`, `UdfRef.arg_types` (:1684), `UdfRef.read_set` (:1708) and message
+   `UdfReadSet` (:1721): the comments say required on `ROW` and `MAP_BATCHES_FRAME`; today the `read_set` comment
+   (:1705-1707) and the `UdfReadSet` comment (:1717-1719) say that unset reads every input column. No field number, type or name
+   changes; presence stays (empty is valid, unset is refused). Regenerate `src/plan_proto/generated` if it carries
+   comments.
+2. **Admission:** `src/plan_wire/plan_wire_udf.mojo`, `_check_udf_ref` (:380): refuse a `ROW` or
+   `MAP_BATCHES_FRAME` with `read_set` unset with the new token `OPTIMIZED_UDF_READ_SET_REQUIRED`, declared beside
+   `OPTIMIZED_UDF_READ_SET_KIND` (:97), listed in the file's token header, and exported from
+   `src/plan_wire/__init__.mojo`. `src/plan_wire/plan_wire_udf_check.mojo`: drop the unset-read-set branches (`not
+   u.read_set`, :425 and :588). `src/plan_ir/udf_ref.mojo`: the `read_set` docstring (:152) and the header comment
+   (:12).
+3. **Tests:** `src/plan_wire/tests` (`test_plan_wire_udf_ref.mojo`, `test_plan_wire_udf_plans.mojo`,
+   `test_plan_wire_udf_args.mojo`, `test_plan_wire_udf_position_sweeps.mojo`): refusal of an unset read set on each
+   of the two kinds, acceptance of an empty one, and every `ROW` and frame fixture given a read set.
+4. **The producer library** (each SDK's plan builder; for Python, `python/komira`'s `@udf` and plan encoding): fill
+   `read_set` on every `ROW` and `MAP_BATCHES_FRAME` as §6.1 says, with the static scan and `columns=`; raise
+   `UDF_READ_SET_REQUIRED` and add it to the SDK's error table; write `recorded_fields` in every `ROW` and frame
+   descriptor.
+5. **The `komira/python` runtime (this document):** `validate` refuses an absent `recorded_fields`; the worker maps
+   a frame's column-lookup errors (§6.1).
+6. **`komira/native`:** unchanged (it already answers `ERR_DESCRIPTOR` on an absent field list); its export helper
+   records the field list for `ROW` and frame entries.
+7. **The optimizer's projection pushdown and lowering (not built yet):** no every-column path for either kind.
+8. **`udf_runtime_conformance.md`:** changed in this pull request.
