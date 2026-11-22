@@ -60,7 +60,11 @@ and no environment variable and touches no global, so equal arguments give a
   (INT64, INT32, FLOAT64, FLOAT32, DATE32, BOOL, DECIMAL128 or STRING);
   a string key is `DICT_ENCODED` only when the scan's footers say every row
   group stores it dictionary encoded and no projection stands between the scan
-  and the aggregation, and otherwise `COLUMNAR`.
+  and the aggregation, and otherwise `COLUMNAR`. A key of several columns is
+  `(STRING, DICT_ENCODED)` when every column is such a dictionary string, and
+  `(COMPOSITE, COLUMNAR)` otherwise: any mix of those types, each column
+  keeping its own (a distinct's columns are its group keys, so a distinct over
+  several columns gets the same row).
 - `render`: the deterministic text of a `LoweredPlan`.
 
 ## Refusals
@@ -87,11 +91,10 @@ shape:
   type, decimal precision and scale and timezone; the concatenation reads
   every branch by position in the union's layout, so the producer casts and
   renames the branches first).
-- `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key of a
-  type with no row (an 8- or 16-bit integer, a timestamp, a binary, ...), a
-  key of several columns that are not all dictionary encoded strings (a
-  distinct's columns are its group keys, so a distinct over several columns is
-  served only when they are), or a segment whose triple has no row.
+- `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key with a
+  column of a type with no row (an 8- or 16-bit integer, a timestamp, a
+  binary, ...), alone or beside served columns, or a segment whose triple has
+  no row.
 - `LOWERING_SCAN_NOT_TOTAL`: a Hive partitioned scan that lists its files
   lazily (a directory scan or a partition predicate), a scan on a file system
   other than the local one, or a scan marked unbounded. The segment's Parquet
