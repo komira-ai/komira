@@ -17,8 +17,10 @@
 #                       consumer does not wait for the producer
 #
 # The combine order of a segment (`order_key_kind`) is checked the same way:
-# ORDER_NONE and ORDER_PARTITION_ID are served; ORDER_ROW_RANGE needs a source
-# that claims grains and is refused.
+# ORDER_NONE, ORDER_PARTITION_ID and ORDER_ROW_RANGE are served, any other value
+# is refused. ORDER_ROW_RANGE is served for the ungrouped aggregation sink only,
+# which folds each source position on its own and merges in position order;
+# `plan_check` refuses it on any other sink.
 
 from physical_plan.physical_plan import (
     EDGE_E1_MORSEL_STREAM,
@@ -85,10 +87,12 @@ def order_key_name(kind: UInt8) -> String:
 
 def check_order_key(kind: UInt8) raises:
     """Raise, naming the kind, unless the driver serves `kind`."""
-    if kind == ORDER_NONE or kind == ORDER_PARTITION_ID:
+    if (
+        kind == ORDER_NONE
+        or kind == ORDER_PARTITION_ID
+        or kind == ORDER_ROW_RANGE
+    ):
         return
     raise Error(
-        "pipeline_exec: the driver cannot serve "
-        + order_key_name(kind)
-        + ": no source claims grains yet"
+        "pipeline_exec: the driver cannot serve " + order_key_name(kind)
     )

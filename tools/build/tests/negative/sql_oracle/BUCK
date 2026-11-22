@@ -314,6 +314,15 @@ sql_oracle(
     outputs = ["out.tsv"],
 )
 
+# REFUSED: an input path whose segment starts with `=`: a segment may hold `=`
+# (a Hive layout) only after its first character.
+sql_oracle(
+    name = "input_equals_first",
+    srcs = "ok.sql",
+    inputs = {"=day/part.csv": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
 # REFUSED: `version ... is not a release number (^[0-9.]+$)`. `injection` is
 # the attack itself: a version that would end the version check's SQL string
 # and comment out the rest; it holds a quote, spaces, letters, a semicolon

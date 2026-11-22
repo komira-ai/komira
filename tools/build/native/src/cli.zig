@@ -1,17 +1,20 @@
-//! prefix_tool's command line: the arguments of each mode, the files it
-//! reads and writes, and the `elfsyms` run (README.md).
+//! prefix_tool's command line: the arguments of each mode, and the files it
+//! reads and writes (README.md). The archive is read in this process by
+//! `native_objects` (native_elf.zig): a System V archive of ELF objects or a
+//! BSD one of Mach-O objects.
 //!
-//!   prefix_tool header --elfsyms <exe> --archive <lib.a> --header <out>
-//!       --symbols <out> --style boringssl|strip --prefix <p> [--strip <s>]
-//!       --min <n> [--extra <name>]...
-//!   prefix_tool check --elfsyms <exe> --archive <lib.a> --result <out>
-//!       --prefix <p> --min <n> [--allow <pattern>]... [--names <file>]...
+//!   prefix_tool header --archive <lib.a> --header <out> --symbols <out>
+//!       --style boringssl|strip --prefix <p> [--strip <s>] --min <n>
+//!       [--extra <name>]...
+//!   prefix_tool check --archive <lib.a> --result <out> --prefix <p>
+//!       --min <n> [--allow <pattern>]... [--names <file>]...
 //!
 //! `outcome` runs one command and returns its exit code and output: 0 when
 //! it wrote its outputs, 1 on a refusal or a red check, 2 on bad arguments.
 
 const std = @import("std");
 const P = @import("prefix.zig");
+const objects = @import("native_objects");
 
 pub const Outcome = struct {
     code: u8,
@@ -20,9 +23,9 @@ pub const Outcome = struct {
 };
 
 pub const usage =
-    \\usage: prefix_tool header --elfsyms <exe> --archive <lib.a> --header <out> --symbols <out>
+    \\usage: prefix_tool header --archive <lib.a> --header <out> --symbols <out>
     \\           --style boringssl|strip --prefix <p> [--strip <s>] --min <n> [--extra <name>]...
-    \\       prefix_tool check --elfsyms <exe> --archive <lib.a> --result <out> --prefix <p>
+    \\       prefix_tool check --archive <lib.a> --result <out> --prefix <p>
     \\           --min <n> [--allow <pattern>]... [--names <file>]...
     \\
 ;
@@ -44,9 +47,9 @@ pub const Args = struct {
             .lists = std.StringHashMap(std.ArrayList([]const u8)).init(P.a()),
         };
         const single: []const []const u8 = if (std.mem.eql(u8, r.mode, "header"))
-            &.{ "--elfsyms", "--archive", "--header", "--symbols", "--style", "--prefix", "--strip", "--min" }
+            &.{ "--archive", "--header", "--symbols", "--style", "--prefix", "--strip", "--min" }
         else if (std.mem.eql(u8, r.mode, "check"))
-            &.{ "--elfsyms", "--archive", "--result", "--prefix", "--min" }
+            &.{ "--archive", "--result", "--prefix", "--min" }
         else
             return P.fail("prefix_tool: unknown mode {s}", .{r.mode});
         const multi: []const []const u8 = if (std.mem.eql(u8, r.mode, "header")) many[0..1] else many[1..];
@@ -98,24 +101,20 @@ pub fn shown(cwd: []const u8, path: []const u8) []const u8 {
     return P.fmt("{s}/{s}", .{ cwd, path });
 }
 
-/// `elfsyms <mode> <archive>`'s output; refused unless it exits 0.
-fn elfsyms(exe: []const u8, mode: []const u8, archive: []const u8) P.Fail![]const u8 {
-    const r = std.process.Child.run(.{
-        .allocator = P.a(),
-        .argv = P.a().dupe([]const u8, &.{ exe, mode, archive }) catch P.oom(),
-        .max_output_bytes = std.math.maxInt(usize),
-    }) catch |e| return P.fail("prefix_tool: cannot run {s}: {s}", .{ exe, @errorName(e) });
-    const ok = switch (r.term) {
-        .Exited => |c| c == 0,
-        else => false,
-    };
-    if (!ok) return P.fail("{s}prefix_tool: elfsyms {s} {s} failed ({any})", .{ r.stderr, mode, archive, r.term });
-    return r.stdout;
-}
-
 fn read(path: []const u8) P.Fail![]const u8 {
     return std.fs.cwd().readFileAlloc(P.a(), path, std.math.maxInt(usize)) catch |e|
         P.fail("prefix_tool: cannot read {s}: {s}", .{ path, @errorName(e) });
+}
+
+/// The symbols of every member of the archive `bytes` (`native_objects`'s
+/// `readArchive`); refused, naming `shown_path` and what is wrong, when a
+/// member cannot be read: a reader that skips what it cannot read must not
+/// pass a check.
+pub fn archiveSymbols(bytes: []const u8, shown_path: []const u8) P.Fail![]const P.Sym {
+    return objects.readArchive(P.a(), bytes) catch |e| switch (e) {
+        error.BadObject => P.fail("prefix_tool: {s}: {s}", .{ shown_path, objects.why }),
+        error.OutOfMemory => P.oom(),
+    };
 }
 
 fn write(path: []const u8, data: []const u8) P.Fail!void {
@@ -126,9 +125,9 @@ fn header(args: Args, cwd: []const u8) P.Fail!Outcome {
     const style = std.meta.stringToEnum(P.Style, args.get("--style")) orelse
         return P.fail("prefix_tool: unknown style {s}", .{args.get("--style")});
     const min = try args.min();
-    const archive = args.get("--archive");
-    const armap = try elfsyms(args.get("--elfsyms"), "armap", archive);
-    const names = try P.symbols(armap, args.list("--extra"), shown(cwd, archive), min);
+    const archive = shown(cwd, args.get("--archive"));
+    const syms = try archiveSymbols(try read(args.get("--archive")), archive);
+    const names = try P.symbols(P.definedNames(syms), args.list("--extra"), archive, min);
     const text = try P.header(style, args.get("--prefix"), args.get("--strip"), names);
     try write(args.get("--symbols"), P.symbolsFile(names));
     try write(args.get("--header"), text);
@@ -137,11 +136,11 @@ fn header(args: Args, cwd: []const u8) P.Fail!Outcome {
 
 fn check(args: Args, cwd: []const u8) P.Fail!Outcome {
     const min = try args.min();
-    const archive = args.get("--archive");
-    const symtab = try elfsyms(args.get("--elfsyms"), "symtab", archive);
+    const archive = shown(cwd, args.get("--archive"));
+    const syms = try archiveSymbols(try read(args.get("--archive")), archive);
     var files = std.ArrayList([]const u8).empty;
     for (args.list("--names")) |f| files.append(P.a(), try read(f)) catch P.oom();
-    const v = try P.check(symtab, files.items, shown(cwd, archive), args.get("--prefix"), min, args.list("--allow"));
+    const v = try P.check(syms, files.items, archive, args.get("--prefix"), min, args.list("--allow"));
     if (v.red) return .{ .code = 1, .stderr = v.stderr };
     try write(args.get("--result"), v.result);
     return .{ .code = 0, .stdout = v.stdout };

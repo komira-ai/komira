@@ -1,0 +1,3 @@
+-- order: rows
+-- DECIMAL(12,2) UNION ALL BIGINT is DECIMAL(21,2)
+SELECT typeof(v) AS t, v FROM (SELECT dec1 AS v FROM B UNION ALL SELECT bi FROM B) u

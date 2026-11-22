@@ -11,8 +11,9 @@
 # `lower`. The walk and its arms are `cut_walk` and the modules it names.
 #
 # Segment ids are dense and follow the cut order, which is dependency order:
-# a producer is cut before its consumer. Every segment is ORDER_NONE with one
-# partition. `card_estimate_rows` is the row count of the scan's footers when
+# a producer is cut before its consumer. Every segment has one partition and
+# is ORDER_NONE, except the one an arm asks to be ORDER_ROW_RANGE
+# (`cut_aggregate`: an ungrouped float SUM or AVG). `card_estimate_rows` is the row count of the scan's footers when
 # the host supplied one, an upper bound on the rows that reach the sink, and 0
 # otherwise; `mem_estimate_bytes` is 0 (no memory decision is recorded).
 # =============================================================================
@@ -73,7 +74,7 @@ struct _Pipe(Movable):
     """The schema of the rows the pipeline delivers."""
     var scan_index: Int
     """Pre-order index of the scan that is this pipeline's source; -1 when the
-    source is a breaker's output."""
+    source is a breaker's output or a union's concatenation."""
     var has_project: Bool
     var sorted_input: Bool
     """True while the rows the pipeline delivers are a sort's output in that
@@ -113,6 +114,7 @@ struct _Pipe(Movable):
         orientation: UInt8,
         param_id: Int,
         card_estimate_rows: Int,
+        order_key_kind: UInt8,
     ) -> SegmentDescPod:
         """Consume the pipeline into the segment that ends it in a sink."""
         return SegmentDescPod(
@@ -128,7 +130,7 @@ struct _Pipe(Movable):
             self.deps^,
             self.edge_tags^,
             1,
-            ORDER_NONE,
+            order_key_kind,
             0,
             card_estimate_rows,
         )
@@ -183,8 +185,10 @@ struct _Cutter(Movable):
         orientation: UInt8,
         param_id: Int,
         inputs: LoweringInputs,
+        order_key_kind: UInt8 = ORDER_NONE,
     ) -> Int:
-        """End `pipe` in a sink and record it as the next segment."""
+        """End `pipe` in a sink and record it as the next segment, whose
+        combine order is `order_key_kind`."""
         var seg_id = len(self.segments)
         var card = 0
         if pipe.scan_index >= 0:
@@ -194,7 +198,13 @@ struct _Cutter(Movable):
         self.flow_schemas.append(pipe.schema.copy())
         self.segments.append(
             pipe^.into_segment(
-                seg_id, sink_kind, key_dtype, orientation, param_id, card
+                seg_id,
+                sink_kind,
+                key_dtype,
+                orientation,
+                param_id,
+                card,
+                order_key_kind,
             )
         )
         return seg_id

@@ -1,0 +1,49 @@
+[2026-11-21T13:39:40.053+00:00] Build ID: 00000000-0000-0000-0000-000000000000
+[2026-11-21T13:39:42.516+00:00] RE Session: GRPC-SESSION-ID
+[2026-11-21T13:40:17.627+00:00] Action failed: komira//tools/build/examples/cshim:add (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (c_compile add_files/add.c (pic))
+[2026-11-21T13:40:17.627+00:00] Remote command returned non-zero exit code 1
+[2026-11-21T13:40:17.627+00:00] Remote action digest: '0000000000000000000000000000000000000000000000000000000000000000:141'
+[2026-11-21T13:40:17.627+00:00] Stdout: <empty>
+[2026-11-21T13:40:17.627+00:00] Stderr:
+buck-out/v2/art/komira/tools/build/examples/cshim/__add_files__/8d0f4b377008a812/add_files/add.c:4:2: error: "compiled without AVX2: the toolchain's target_cpu (x86-64-v3) was not applied"
+    4 | #error "compiled without AVX2: the toolchain's target_cpu (x86-64-v3) was not applied"
+      |  ^
+1 error generated.
+
+[2026-11-21T13:40:24.647+00:00] Waiting on komira//src/simd_ops:test_simd_pattern_copy_extend__cov_bin (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- mojo_unit komira-ai/simd_ops@0.1.0#mojo1.0.0/test:src/simd_ops/tests/test_simd_pattern_copy_extend.mojo [re_execute], and 219 other actions
+[2026-11-21T16:00:37.362+00:00] Action failed: komira//tools/build/proto-codegen:aws_conformance_driver_rest_json (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (mojo_build)
+[2026-11-21T16:00:37.362+00:00] Internal error (stage: remote_call_error): Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:141 for ReSession GRPC-SESSION-ID
+[2026-11-21T16:00:37.362+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-21T16:00:37.362+00:00] Remote action digest: '0000000000000000000000000000000000000000000000000000000000000000:141'
+[2026-11-21T16:00:37.362+00:00] Stdout: <empty>
+[2026-11-21T16:00:37.362+00:00] Stderr: <empty>
+
+[2026-11-21T16:00:49.631+00:00] Cache hits: 85%
+[2026-11-21T16:00:49.631+00:00] Commands: 24380 (cached: 20707, remote: 3673, local: 0)
+[2026-11-21T16:00:49.631+00:00] Network: up 51MiB  down 1.1GiB  session GRPC-SESSION-ID
+[2026-11-21T16:00:49.632+00:00]
+[2026-11-21T16:00:49.632+00:00] BUILD ERRORS (68)
+[2026-11-21T16:00:49.632+00:00] The following actions failed during the execution of this command:
+[2026-11-21T16:00:49.632+00:00] Action failed: komira//tools/build/examples/cshim:add (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (c_compile add_files/add.c (pic))
+[2026-11-21T16:00:49.632+00:00] Remote command returned non-zero exit code 1
+[2026-11-21T16:00:49.632+00:00] Remote action digest: '0000000000000000000000000000000000000000000000000000000000000000:141'
+[2026-11-21T16:00:49.632+00:00] Stdout: <empty>
+[2026-11-21T16:00:49.632+00:00] Stderr:
+buck-out/v2/art/komira/tools/build/examples/cshim/__add_files__/8d0f4b377008a812/add_files/add.c:4:2: error: "compiled without AVX2: the toolchain's target_cpu (x86-64-v3) was not applied"
+    4 | #error "compiled without AVX2: the toolchain's target_cpu (x86-64-v3) was not applied"
+      |  ^
+1 error generated.
+
+[2026-11-21T16:00:49.632+00:00] Action failed: komira//tools/build/proto-codegen:aws_conformance_driver_rest_json (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (mojo_build)
+[2026-11-21T16:00:49.632+00:00] Internal error (stage: remote_call_error): Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:141 for ReSession GRPC-SESSION-ID
+[2026-11-21T16:00:49.632+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-21T16:00:49.632+00:00] Remote action digest: '0000000000000000000000000000000000000000000000000000000000000000:141'
+[2026-11-21T16:00:49.632+00:00] Stdout: <empty>
+[2026-11-21T16:00:49.632+00:00] Stderr: <empty>
+
+[2026-11-21T16:00:49.633+00:00]
+BUILD FAILED
+Error running dynamic analysis for `tests//functional/c_deps:c_linked (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)`
+
+Caused by:
+    Failed to build 'komira//tools/build/examples/cshim:add (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)'

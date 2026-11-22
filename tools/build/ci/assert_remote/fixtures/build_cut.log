@@ -1,0 +1,44 @@
+[2026-11-21T16:23:12.728+00:00] Build ID: 00000000-0000-0000-0000-000000000000
+[2026-11-21T16:23:13.295+00:00] Target komira//:test_weld (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) does not have any outputs. This means the rule did not define any outputs. See https://buck2.build/docs/users/faq/common_issues/#why-does-my-target-not-have-any-outputs for more information
+[2026-11-21T16:23:14.887+00:00] RE Session: GRPC-SESSION-ID
+[2026-11-21T16:23:21.928+00:00] Waiting on komira//src/tests/conformance/komira_sql_conformance:cross_string/distinct_string_full (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- materializing `work/answer.tsv`, and 629 other actions
+[2026-11-21T16:23:29.028+00:00] Waiting on komira//src/morsel:morsel (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- mojo_build_test test_vtable_source_failure_paths, and 125 other actions
+[2026-11-21T16:23:36.028+00:00] Waiting on komira//tools/build/package/libkomira:komira_so_libkomira_conda (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- materializing `out`, and 34 other actions
+[2026-11-21T16:48:35.653+00:00] Action failed: komira//src/bench_q6_phases:komira_bench_q6_phases_main (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (mojo_build)
+[2026-11-21T16:48:35.653+00:00] Internal error (stage: remote_call_error): Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:141 for ReSession GRPC-SESSION-ID
+[2026-11-21T16:48:35.653+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-21T16:48:35.653+00:00] Remote action digest: '0000000000000000000000000000000000000000000000000000000000000000:141'
+[2026-11-21T16:48:35.653+00:00] Stdout: <empty>
+[2026-11-21T16:48:35.653+00:00] Stderr: <empty>
+
+[2026-11-21T16:48:35.653+00:00] Action failed: komira//src/bench_runner:komira_bench_runner_main (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (mojo_build)
+[2026-11-21T16:48:35.653+00:00] Internal error (stage: remote_call_error): Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:141 for ReSession GRPC-SESSION-ID
+[2026-11-21T16:48:35.653+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-21T16:48:35.653+00:00] Remote action digest: '0000000000000000000000000000000000000000000000000000000000000000:141'
+[2026-11-21T16:48:35.653+00:00] Stdout: <empty>
+[2026-11-21T16:48:35.653+00:00] Stderr: <empty>
+
+[2026-11-21T16:48:35.702+00:00] Cache hits: 99%
+[2026-11-21T16:48:35.702+00:00] Commands: 13570 (cached: 13478, remote: 92, local: 0)
+[2026-11-21T16:48:35.702+00:00] Network: up 6.9MiB  down 101MiB  session GRPC-SESSION-ID
+[2026-11-21T16:48:35.702+00:00]
+[2026-11-21T16:48:35.702+00:00] BUILD ERRORS (2)
+[2026-11-21T16:48:35.702+00:00] The following actions failed during the execution of this command:
+[2026-11-21T16:48:35.702+00:00] Action failed: komira//src/bench_q6_phases:komira_bench_q6_phases_main (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (mojo_build)
+[2026-11-21T16:48:35.702+00:00] Internal error (stage: remote_call_error): Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:141 for ReSession GRPC-SESSION-ID
+[2026-11-21T16:48:35.702+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-21T16:48:35.702+00:00] Remote action digest: '0000000000000000000000000000000000000000000000000000000000000000:141'
+[2026-11-21T16:48:35.702+00:00] Stdout: <empty>
+[2026-11-21T16:48:35.702+00:00] Stderr: <empty>
+
+[2026-11-21T16:48:35.703+00:00] Action failed: komira//src/bench_runner:komira_bench_runner_main (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (mojo_build)
+[2026-11-21T16:48:35.703+00:00] Internal error (stage: remote_call_error): Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:141 for ReSession GRPC-SESSION-ID
+[2026-11-21T16:48:35.703+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-21T16:48:35.703+00:00] Remote action digest: '0000000000000000000000000000000000000000000000000000000000000000:141'
+[2026-11-21T16:48:35.703+00:00] Stdout: <empty>
+[2026-11-21T16:48:35.703+00:00] Stderr: <empty>
+
+[2026-11-21T16:48:35.703+00:00]
+BUILD FAILED
+Failed to build 'komira//src/bench_q6_phases:komira_bench_q6_phases_main (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)'
+Failed to build 'komira//src/bench_runner:komira_bench_runner_main (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)'

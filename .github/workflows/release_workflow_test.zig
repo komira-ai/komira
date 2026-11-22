@@ -40,12 +40,17 @@
 //!    with is the one the release stages and publishes with), so a bump of one that forgets
 //!    the other, or the prose, is red.
 //! The reader's own cases are workflow texts written here: each defect above
-//! is planted in the real text and must be refused with its message.
+//! is written into the real text and must be refused with its message.
+//!  - no wheel: release.yml holds no job `wheel` or `wheel-user-test`, no setup-python, no
+//!    `//python:komira_wheel` target and no `pypi_smoke` (pypi.yml builds the wheel and installs it
+//!    as a user does, on every push to main), so a per-merge wheel stage that comes back is red.
 
 const std = @import("std");
 const t = std.testing;
 
 const BETA_JOBS = [_][]const u8{ "mopm-stage-beta", "mopm-publish-beta", "mopm-e2e-beta" };
+const WHEEL_JOBS = [_][]const u8{ "wheel", "wheel-user-test" };
+const WHEEL_WORDS = [_][]const u8{ "setup-python", "//python:komira_wheel", "pypi_smoke" };
 const OLD_PROD_JOB = "mopm-publish";
 const PROD_STAGE_JOB = "mopm-stage";
 const TOOL = "release_beta_version";
@@ -132,6 +137,19 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     for (BETA_JOBS) |name| {
         var bn: usize = 0;
         if ((try jobLines(ar, text, name, &bn)) != null) return try std.fmt.allocPrint(ar, "the beta job {s} is still there: komira does not publish to beta", .{name});
+    }
+    // no wheel stage: pypi.yml builds the wheel and installs it as a user does, on every push
+    for (WHEEL_JOBS) |name| {
+        var wn: usize = 0;
+        if ((try jobLines(ar, text, name, &wn)) != null) return try std.fmt.allocPrint(ar, "the job {s} is still there: pypi.yml tests the wheel, release.yml holds no wheel stage", .{name});
+    }
+    var wit = std.mem.splitScalar(u8, text, '\n');
+    while (wit.next()) |l| {
+        const code = std.mem.trim(u8, l, " ");
+        if (code.len == 0 or code[0] == '#') continue;
+        for (WHEEL_WORDS) |word| {
+            if (std.mem.indexOf(u8, code, word) != null) return try std.fmt.allocPrint(ar, "a line names {s}: release.yml holds no wheel stage", .{word});
+        }
     }
     var bit = std.mem.splitScalar(u8, text, '\n');
     while (bit.next()) |l| {
@@ -462,7 +480,7 @@ test "release.yml holds the contract of the continuous prod publish" {
     }
 }
 
-test "each defect planted in the real release.yml (beta, switch, triggers, versions) is refused with its message" {
+test "each defect written into the real release.yml (beta, switch, triggers, versions) is refused with its message" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -520,6 +538,24 @@ test "each defect planted in the real release.yml (beta, switch, triggers, versi
     try expectRefused(ar, try replaced(ar, text, "  cancel-in-progress: false\n", "  cancel-in-progress: true\n"), "concurrency");
     try expectRefused(ar, try replaced(ar, text, "  cancel-in-progress: false\n", ""), "concurrency");
     try expectRefused(ar, try replaced(ar, text, "    branches: [main]\n", "    branches: [main, 'release/**']\n"), "branches");
+}
+
+test "release.yml holds no wheel stage, and a wheel job or a wheel line written back in is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try readWorkflow(ar);
+    inline for (WHEEL_JOBS) |name| {
+        var n: usize = 0;
+        try t.expect((try jobLines(ar, text, name, &n)) == null);
+        try expectRefused(ar, try replaced(ar, text, "  prod-stage:\n", "  " ++ name ++ ":\n    runs-on: ubuntu-24.04\n\n  prod-stage:\n"), "still there");
+    }
+    inline for (WHEEL_WORDS) |word| {
+        try t.expect(std.mem.indexOf(u8, text, "uses: " ++ word) == null);
+        try expectRefused(ar, try replaced(ar, text, "  prod-stage:\n", "  prod-stage:\n    # x\n    env: " ++ word ++ "\n"), word);
+    }
+    // a comment may say where the wheel is tested; a line may not hold a wheel stage
+    try t.expect((try check(ar, try replaced(ar, text, "name: release\n", "name: release\n# the wheel: pypi.yml, pypi_smoke, setup-python\n"))) == null);
 }
 
 /// `head` with its prod gate line replaced by `to` (a whole line with its newline, or nothing).
