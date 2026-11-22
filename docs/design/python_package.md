@@ -145,7 +145,7 @@ The whole public surface of the first release is these names in `komira.__all__`
 | `Session.register_parquet(name, path)` | registers a local Parquet file as the table `name` (`komira_register_parquet`). `path` is a `str` or `os.PathLike`; a relative path is resolved against the working directory when the call is made, `~` is expanded. Registering a name again replaces it |
 | `Session.sql(query) -> Result` | runs one SQL statement over the session's tables through the SQL entry of the library (`komira_sql_stream`), which parses and binds the text to a logical plan. **This is the official door of the first release**, not an escape hatch |
 | `Result` | the answer of one `sql` call: `to_arrow() -> pyarrow.Table`, `to_reader() -> pyarrow.RecordBatchReader`, `to_pandas()`, `to_polars()`, and `__arrow_c_stream__(requested_schema=None)` (the Arrow PyCapsule interface, so `pyarrow.table(r)`, `polars.from_arrow(r)` and DuckDB take the stream itself; no batch is converted in Python) |
-| `sql(query) -> Result`, `register_parquet(name, path)` | the same two calls on the process's default session (decision 5). `add_sql_binding(name, source)` joins them with the sources and credentials of [credentials_and_writes.md](credentials_and_writes.md) |
+| `sql(query) -> Result`, `register_parquet(name, path)` | the same two calls on the process's default session (decision 5). `add_sql_binding(name, source)` joins them with the sources and credentials of [credentials_and_writes.md](credentials_and_writes.md), which also gives `sql` its later forms `sql(query, /, **sources)` and `sql(source, query, /, **sources)`; the first release takes the query alone |
 | `KomiraError` | the base class of every error the package raises on purpose (decision 9) |
 | `UnsupportedOperation` | a `KomiraError`: komira refused a construct by name (an SQL feature the engine does not run yet, an option it does not take) |
 | `LibraryLoadError` | a `KomiraError`: `libkomira` or a library it needs could not be loaded, or its ABI major version is not the one this package was written for. That includes a file missing from the package (the message is the loader's and names the file) and a Mojo runtime of another build already loaded in the process (decision 6) |
@@ -171,7 +171,8 @@ Behaviour each later pull request implements, fixed here so they agree:
   the session pull request's choice, held by a test of each case it allows.
 - **One session, any thread.** A `Session` may be used from several threads; it holds a lock around each
   call into the library, its `Result`s' batch reads included, so one context never runs two calls at
-  once (a thread reading a large result holds up a `sql` call on the same session between batches, not
+  once. With call bindings ([credentials_and_writes.md](credentials_and_writes.md) decision 8), the
+  lock is held from the first staged call binding through the `komira_sql_stream` that consumes it (a thread reading a large result holds up a `sql` call on the same session between batches, not
   for the whole read). Sessions are independent of one another. The lock goes when the ABI design states
   that a context is safe to share.
 - **Fork.** A child process made by `os.fork` must not use a session of its parent: the package
@@ -432,7 +433,7 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
 | the wheel tags of linux-arm64 and macos-arm64, the supported CPython range, `Requires-Dist` ranges, sdist, release member, PyPI stages | the wheel and release design |
 | the verbs of the two DataFrame surfaces, the refusal policy for verbs | the DataFrame surface design |
 | Python UDFs in worker processes | [udf_runtime_interface.md](udf_runtime_interface.md) and its Python design |
-| sources, credentials and binding them (`Session.add_sql_binding`, then `sql(query)`), `https://` reads, `COPY ... TO` and its result | [credentials_and_writes.md](credentials_and_writes.md) |
+| sources, credentials and binding them (`Session.add_sql_binding`, and `sql(query, **sources)` for one statement), `https://` reads, `COPY ... TO` and its result | [credentials_and_writes.md](credentials_and_writes.md) |
 
 ## What must always hold?
 

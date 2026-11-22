@@ -148,7 +148,8 @@ wire bound belongs to the plan format.
 
 It runs one SQL statement against the tables registered on the context with
 `komira_register_parquet` and `komira_add_sql_binding` ([credentials_and_writes.md](credentials_and_writes.md)
-decision 8): it runs over the context's whole binding table. A registration is visible
+decision 8): it runs over the context's whole binding table, and over the call-scope bindings staged
+just before it, which apply to that run only and are dropped when it returns. A registration is visible
 to every later run on the context.
 - **The route.** It is `sdk_exec.run_sql` with the session's `EngineContext`. The
   library converts the SQL text to a logical plan by parsing and binding it.

@@ -74,7 +74,7 @@ the surface has no spelling, and the cell stays empty by decision.
 | `distinct` | `df.drop_duplicates()`, `df.drop_duplicates(subset=...)` | `lf.unique()`, `lf.unique(subset=..., keep="any")` | DISTINCT, of whole rows or of `subset` | whole rows served by lowering for the key coverage of the grouped sinks; `subset` refused at lower |
 | `union` | `km.concat(frames)` | `kpl.concat(frames, how="vertical")` | UNION of one schema (`concat_schema_check`; rules section 8, ruling 15) | cut |
 | `subquery` | - | - | neither library has a subquery inside an expression; a broadcast aggregate is a window | - |
-| `view` | `km.add_sql_binding(name, df)`, then `km.sql(...)` | `km.add_sql_binding(name, lf)`, then `km.sql(...)` | VIEW_REF | not wired |
+| `view` | `km.add_sql_binding(name, df)`, then `km.sql(...)`; or `km.sql(..., name=df)` | `km.add_sql_binding(name, lf)`, then `km.sql(...)`; or `km.sql(..., name=lf)` | VIEW_REF | not wired |
 | `udf_map` | `s.map(f)`, `s.apply(f)`, `df.apply(f, axis=1)` | `expr.map_elements(f, return_dtype=...)`, `expr.map_batches(f, return_dtype=...)` | a `UdfRef` called by `WireUdfApply` | refused at lower; the verbs raise until UDF workers land |
 | `udf_filter` | `df[df["x"].map(f)]` | `lf.filter(expr.map_elements(f, return_dtype="bool"))` | a boolean `WireUdfApply` in a FILTER | as `udf_map` |
 | `udf_agg` | `df.groupby(k).agg(out=("c", f))` | `lf.group_by(k).agg(expr.agg_udf(f, return_dtype=...))` (komira's verb) | `AGG_UDF` over an AGGREGATE `UdfRef` | as `udf_map` |

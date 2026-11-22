@@ -172,15 +172,15 @@ The frames are immutable, except for one pandas idiom:
   process's default session when `session` is `None`, as `km.sql` does. `Session` gains no reader
   methods, so there is one way to read a file.
 - **Frames of two sessions never meet.** A verb that combines them (`merge`, `join`, `concat`, `isin`)
-  raises `UnsupportedOperation`. So does adding a frame with `add_sql_binding` on a session that is not the frame's own.
+  raises `UnsupportedOperation`. So does adding a frame with `add_sql_binding`, or passing it to a `sql` call, on a session that is not the frame's own.
 - **`from_arrow(data, *, session=None)`** makes a frame of any object that exports the Arrow C stream
   (`__arrow_c_stream__`): a `pyarrow.Table`, a polars `DataFrame`, or a pandas `DataFrame`. The stream
   is read once, when `from_arrow` is called, and registered with the session. This needs the engine's
   in-memory table, which plan bytes do not carry. Until that lands, the scan raises at the terminal.
-- **A frame is a source for SQL.** `Session.add_sql_binding(name, frame)` names a frame's plan so that
-  the SQL reads it as a view (the `view` capability). `km.add_sql_binding(name, frame)` does the same on
+- **A frame is a source for SQL.** `Session.add_sql_binding(name, frame)`, or `s.sql(query, name=frame)`
+  for one statement, names a frame's plan so that the SQL reads it as a view (the `view` capability). `km.add_sql_binding(name, frame)` does the same on
   the default session. This is the one SQL binding of every kind of source
-  ([credentials_and_writes.md decision 2](credentials_and_writes.md#2-binding-a-sql-name-add_sql_binding-on-the-session)),
+  ([credentials_and_writes.md decision 2](credentials_and_writes.md#2-binding-a-sql-name-on-the-session-or-for-one-call)),
   and it replaces the `register_view` of earlier drafts. The readers take objects or paths directly and
   read no SQL binding.
 
