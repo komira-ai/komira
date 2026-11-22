@@ -381,7 +381,7 @@ and closing it succeeds (IF §4.5). Nothing is retried.
 
 No per-process memory cap is set at the first release: `RLIMIT_AS` breaks allocators that reserve address space,
 and a cap is optional (IF §4.8). `worker_mem_bytes` alone sizes the pool, and the library does not report
-`MEMORY_REPORT`.
+`MEMORY_REPORT`; memory is one setting, and a cap per worker would be a second one (§9).
 
 ### 5.4 When the zygote or the engine ends
 
@@ -437,7 +437,8 @@ values:
   `distribution` set on a form that does not use it;
 - with `ERR_READ_SET_MISMATCH`: a `ROW` or `MAP_BATCHES_FRAME` whose `arg_types` names, as a sorted set, differ from
   the union of `recorded_fields.fields` and `recorded_fields.key_fields`, when `recorded_fields` is set; when it is
-  unset, the names are not compared (IF §3.1);
+  unset, the names are not compared (IF §3.1). For a `ROW` the plan always carries a read set (IF §3.1), so only a
+  `MAP_BATCHES_FRAME` can reach `validate` with `recorded_fields` compared or not;
 - with `ERR_UNSUPPORTED`: a `VALUE` whose `python_abi` differs from the `abi` option, because a pickled code object
   belongs to its interpreter's minor (IF §3.1, *The runtime's ABI tag*); the zygote's own tag is checked against the
   same option at `HELLO` (§3.1).
@@ -495,21 +496,32 @@ from them, and none of them ships:
 - The frame's input iterator re-enters the worker's dispatcher to serve nested calls (§4.5).
 - Cancel is a shared word holding the id of the call to cancel; a forced stop is a `SIGKILL` the library records and
   sends itself, through a pidfd on Linux (§5.2, §5.3).
-- No per-process memory cap and no `MEMORY_REPORT` at the first release (§5.3).
+- No per-process memory cap and no `MEMORY_REPORT` at the first release (§5.3). This is deliberate: memory is one
+  setting, the session's memory setting, which sizes the pool (`worker_mem_bytes` counts against it); a cap per worker
+  would be a second memory knob.
+- Workers run on the user's own interpreter, with `cloudpickle` and `pyarrow` as dependencies of the wheel. This is
+  deliberate, and an exception to the rule that the package carries what it runs (it carries `libkomira` and the
+  runtime library). It cannot be otherwise: a UDF imports the user's own packages (numpy, pandas, their model code)
+  from the user's environment, which only the user's interpreter sees; a `VALUE` pickled by the producer's
+  `cloudpickle` must be loaded by the same `cloudpickle` and interpreter minor; and `pyarrow` is a C extension built
+  for that interpreter. A bundled interpreter would see none of the user's packages.
+- Fork on macOS is decided (below).
 - Workers end with their zygote: `PR_SET_PDEATHSIG` on Linux, a watcher thread on macOS; the zygote kills its workers
   at end of file (§5.4).
 - The descriptor message, its canonical bytes and what `validate` compares (§6).
 - A local run admits against `code_root` and the session's `sys_path`, without image checks (§7).
 
+**macOS fork.** On macOS, a child forked from a process that has loaded Apple's system frameworks (numpy uses the
+Accelerate math framework) can crash or hang when it calls into them, because those frameworks are not made to
+survive a fork without exec. This is a known macOS limit, which is why CPython itself stopped using fork by default
+for `multiprocessing` on macOS, in Python 3.8. It only touches people running Python UDFs locally on a Mac, since
+hosts run Linux. Case Z9 of the conformance corpus is the single check, run in the macOS release build. If Z9 fails
+on `macos-arm64`, the macOS wheel ships without Python UDFs: `describe` reports no shapes and a plan with a Python
+UDF is refused by name (`OPTIMIZED_UDF_KIND_UNSUPPORTED`). There is no second mode and no further work.
+
 **Open, with what happens either way.**
 
-1. **Fork on macOS.** CPython's own `multiprocessing` starts processes by spawning on macOS, because system
-   frameworks can be unsafe in a forked child *(inferred: that is the stated reason for its default)*. The zygote
-   loads only the user's modules and the numerical libraries; whether a worker forked from it can call a numerical
-   library that uses the system's Accelerate framework is case Z9 of the conformance corpus. If Z9 fails on
-   `macos-arm64`, the macOS wheel ships without Python UDFs: `describe` reports no shapes and a plan with a Python UDF
-   is refused by name (`OPTIMIZED_UDF_KIND_UNSUPPORTED`). It does not get a second mode.
-2. **Which CPython minors** the wheel supports is the wheel design's. The runtime supports every minor whose tag the
+1. **Which CPython minors** the wheel supports is the wheel design's. The runtime supports every minor whose tag the
    SDK passes, and refuses only other implementations and free-threaded builds.
 
 ## 10. What the next work needs from this design
