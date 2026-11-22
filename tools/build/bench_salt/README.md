@@ -45,7 +45,7 @@ through `salted(env)`.
 Not salted, on purpose:
 
 - **Tools and toolchains**: `zig_unpack`, `zig_build_exe`, `zig_test`,
-  `zig_bootstrap_*`, `conda_unpack`, `tar_member`, `c_exe`, the downloads, the
+  `zig_bootstrap_*`, `conda_unpack`, `tar_member`, the downloads, the
   Rust sysroot and crate unpacking and patching, `protoc_unpack`. Salting them
   would rebuild the compiler and every tool on each new value, and the
   measurement is of one target's actions.

@@ -6,19 +6,30 @@
 //!   komira_wheel write <flags> --out <wheel>
 //!   komira_wheel check <flags> --wheel <wheel> --require-stamped true|false
 //!       [--twin <wheel>] --out <marker>
-//! cli.zig lists the flags. `write` refuses to write a wheel policy.zig
-//! refuses; `check` writes `ok` to --out only if check.zig refuses nothing.
+//!   komira_wheel libs --wheel <wheel> --entry <member path>
+//!       --runtime-lib <name>=<file>... [--runtime-license <name>]...
+//!       [--runtime-dist <distribution>]...
+//!       [--expect-refusal <text>] --out <marker>
+//! cli.zig lists the flags of `write` and `check`. `write` refuses to write a
+//! wheel policy.zig refuses; `check` writes `ok` to --out only if check.zig
+//! refuses nothing. `libs` reads the wheel
+//! alone (libs.zig): --out gets the libraries the entry loads, in load order,
+//! one member path a line, only if libs.zig refuses nothing (with
+//! --expect-refusal, `refused: <text>` only if it refuses the wheel with
+//! exactly that text); each `--runtime-lib` file is the toolchain's copy of
+//! that Mojo runtime library.
 //!
 //! A static executable: no shell, no PATH, no network, no clock. Exit status 2
 //! on any refusal, with its reason. This file only forwards; the sections are
 //! cli.zig (flags and files), stamp.zig (version), tag.zig, wheel.zig (the
-//! wheel), policy.zig and elf.zig (what its libraries need), zip.zig and
-//! check.zig.
+//! wheel), policy.zig, elf.zig and macho.zig (what its libraries need), zip.zig,
+//! check.zig and libs.zig.
 
 const std = @import("std");
 const diag = @import("diag.zig");
 const cli = @import("cli.zig");
 const check = @import("check.zig");
+const libs = @import("libs.zig");
 const wheel = @import("wheel.zig");
 const zip = @import("zip.zig");
 const Alloc = std.mem.Allocator;
@@ -50,6 +61,18 @@ fn cmdCheck(alloc: Alloc, d: *diag.Diag, argv: []const []const u8) diag.Refused!
     try writeOut(alloc, d, try a.one(alloc, d, "--out"), "ok\n");
 }
 
+/// The files `komira_wheel libs` names, read from the file system.
+const Disk = struct {
+    pub fn read(_: Disk, alloc: Alloc, d: *diag.Diag, path: []const u8) diag.Refused![]const u8 {
+        return cli.readFile(alloc, d, path);
+    }
+};
+
+fn cmdLibs(alloc: Alloc, d: *diag.Diag, argv: []const []const u8) diag.Refused!void {
+    const r = try libs.command(alloc, d, argv, Disk{});
+    try writeOut(alloc, d, r.out, r.marker);
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -59,12 +82,11 @@ pub fn main() !void {
     var rest = std.ArrayList([]const u8).empty;
     for (argv[@min(argv.len, 2)..]) |x| try rest.append(alloc, x);
     const cmd: []const u8 = if (argv.len >= 2) argv[1] else "";
-    const result = if (std.mem.eql(u8, cmd, "write"))
-        cmdWrite(alloc, &d, rest.items)
-    else if (std.mem.eql(u8, cmd, "check"))
-        cmdCheck(alloc, &d, rest.items)
-    else
-        diag.refuse(&d, alloc, "usage: komira_wheel write|check --flag value ...", .{});
+    const result = if (cli.subcommand(alloc, &d, cmd)) |c| switch (c) {
+        .write => cmdWrite(alloc, &d, rest.items),
+        .check => cmdCheck(alloc, &d, rest.items),
+        .libs => cmdLibs(alloc, &d, rest.items),
+    } else |err| err;
     result catch |err| {
         switch (err) {
             error.Refused => std.debug.print("komira_wheel: {s}\n", .{d.msg}),

@@ -1,7 +1,9 @@
 //! The command line and the files it names: flags parsed, an unknown or
 //! valueless one refused; `<name>=<value>` split at the first `=`; a file or
 //! a directory staged at its path with its mode, a symbolic link refused; and
-//! a whole input read from files, the stamp's version in it.
+//! a whole input read from files, the stamp's version in it, the README
+//! as the description alone; the command names, another one refused with
+//! the usage line.
 
 const std = @import("std");
 const diag = @import("diag.zig");
@@ -132,4 +134,45 @@ test "a whole input read from flags and files, with the stamp's version" {
     try t.expectEqualStrings("3.4.30", x.in.max_glibcxx.?);
     try t.expect(x.in.max_cxxabi == null);
     try t.expectEqual(@as(usize, 1), x.in.external_needed.len);
+}
+
+test "the README is the description as it is, and a readme preface flag is unknown" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeFile(tmp.dir, "README.md", "# k\n");
+    const readme = try std.fs.path.join(a, &.{ try tmp.dir.realpathAlloc(a, "."), "README.md" });
+    const base = [_][]const u8{
+        "--name",               "komira",
+        "--summary",            "s",
+        "--readme",             readme,
+        "--requires-python",    ">=3.13",
+        "--license-expression", "Apache-2.0",
+        "--tag",                "py3-none-manylinux_2_34_x86_64",
+        "--stamp",              "0",
+        "--commit",             "",
+        "--timestamp-ms",       "0",
+    };
+    const args = try cli.parse(a, &d, &base, &.{});
+    try t.expectEqualStrings("# k\n", (try cli.input(a, &d, args)).in.readme);
+    try t.expectError(error.Refused, cli.parse(a, &d, &(base ++ [_][]const u8{ "--readme-preface", "p" }), &.{}));
+    try t.expectEqualStrings("unknown argument --readme-preface", d.msg);
+}
+
+test "the commands are write, check and libs; another name, runtime-record among them, is refused with the usage line" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    try t.expectEqual(cli.Command.write, try cli.subcommand(a, &d, "write"));
+    try t.expectEqual(cli.Command.check, try cli.subcommand(a, &d, "check"));
+    try t.expectEqual(cli.Command.libs, try cli.subcommand(a, &d, "libs"));
+    for ([_][]const u8{ "runtime-record", "", "Write", "libs " }) |name| {
+        d = diag.Diag{};
+        try t.expectError(error.Refused, cli.subcommand(a, &d, name));
+        try t.expectEqualStrings("usage: komira_wheel write|check|libs --flag value ...", d.msg);
+    }
 }

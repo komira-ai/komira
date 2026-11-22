@@ -6,8 +6,10 @@
 #
 #   * E1, E2 and E3 make a consumer wait for its producer; E5 does not; E4 and a
 #     value that is no tag are refused by name.
-#   * ORDER_NONE and ORDER_PARTITION_ID are served; ORDER_ROW_RANGE and an
-#     unknown kind are refused by name.
+#   * ORDER_NONE, ORDER_PARTITION_ID and ORDER_ROW_RANGE are served; an unknown
+#     kind is refused by name. `check_plan` accepts ORDER_ROW_RANGE on the
+#     ungrouped aggregation sink and refuses it, naming the segment, on a
+#     collect sink and on a grouped aggregation sink.
 #   * The ready set is the unfinished segments whose waited-for dependencies
 #     finished, in id order: a chain opens one segment at a time, two
 #     independent segments are ready together, a segment behind both waits for
@@ -30,6 +32,10 @@ from physical_plan.physical_plan import (
     ORDER_NONE,
     ORDER_PARTITION_ID,
     ORDER_ROW_RANGE,
+    KEY_DTYPE_I64,
+    KEY_DTYPE_NONE,
+    KEY_DTYPE_STRING,
+    SINK_AGG,
     SegmentDescPod,
 )
 from pipeline_exec.edge_policy import (
@@ -90,11 +96,7 @@ def test_edge_policy_per_tag() raises:
 def test_order_key_policy() raises:
     check_order_key(ORDER_NONE)
     check_order_key(ORDER_PARTITION_ID)
-    try:
-        check_order_key(ORDER_ROW_RANGE)
-        assert_true(False, "ORDER_ROW_RANGE must be refused")
-    except e:
-        assert_true("ORDER_ROW_RANGE" in String(e), String(e))
+    check_order_key(ORDER_ROW_RANGE)
     try:
         check_order_key(UInt8(7))
         assert_true(False, "kind 7 must be refused")
@@ -172,6 +174,32 @@ def test_check_plan_accepts_a_diamond_and_an_independent_cycle() raises:
     check_plan(List[SegmentDescPod]())
 
 
+def _row_range_agg(key_dtype: UInt8) -> List[SegmentDescPod]:
+    var descs = List[SegmentDescPod]()
+    descs.append(_seg(0))
+    descs[0].order_key_kind = ORDER_ROW_RANGE
+    descs[0].sink_kind = SINK_AGG
+    descs[0].sink_key_dtype = key_dtype
+    return descs^
+
+
+def test_check_plan_serves_row_range_on_the_ungrouped_aggregation_only() raises:
+    var ungrouped = _row_range_agg(KEY_DTYPE_NONE)
+    check_plan(ungrouped)
+    var grouped = _row_range_agg(KEY_DTYPE_I64)
+    _expect_refusal(
+        grouped,
+        "pipeline_exec: segment 0 asks for ORDER_ROW_RANGE on sink kind "
+        + String(Int(SINK_AGG))
+        + " with key dtype "
+        + String(Int(KEY_DTYPE_I64))
+        + "; only the ungrouped aggregation sink (SINK_AGG, KEY_DTYPE_NONE)"
+        " folds by source position",
+    )
+    var strings = _row_range_agg(KEY_DTYPE_STRING)
+    _expect_refusal(strings, "asks for ORDER_ROW_RANGE")
+
+
 def test_check_plan_refuses_a_plan_it_cannot_run() raises:
     var wrong_version = List[SegmentDescPod]()
     wrong_version.append(_seg(0))
@@ -207,10 +235,17 @@ def test_check_plan_refuses_a_plan_it_cannot_run() raises:
     _expect_refusal(e4, "E4_PARTITION_WISE")
     _expect_refusal(e4, "segment 1")
 
+    # A collect sink folds nothing by position.
     var row_range = List[SegmentDescPod]()
     row_range.append(_seg(0))
-    row_range[0].order_key_kind = ORDER_ROW_RANGE
-    _expect_refusal(row_range, "ORDER_ROW_RANGE")
+    row_range.append(_seg(1, 0))
+    row_range[1].order_key_kind = ORDER_ROW_RANGE
+    _expect_refusal(row_range, "segment 1 asks for ORDER_ROW_RANGE")
+
+    var unknown_order = List[SegmentDescPod]()
+    unknown_order.append(_seg(0))
+    unknown_order[0].order_key_kind = UInt8(7)
+    _expect_refusal(unknown_order, "order key kind 7 (segment 0)")
 
     var cycle = List[SegmentDescPod]()
     cycle.append(_seg(0, 1))
@@ -228,4 +263,7 @@ def main() raises:
     suite.test[test_ready_set_does_not_wait_for_an_independent_edge]()
     suite.test[test_check_plan_accepts_a_diamond_and_an_independent_cycle]()
     suite.test[test_check_plan_refuses_a_plan_it_cannot_run]()
+    suite.test[
+        test_check_plan_serves_row_range_on_the_ungrouped_aggregation_only
+    ]()
     suite^.run()

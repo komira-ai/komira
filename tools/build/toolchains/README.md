@@ -124,9 +124,13 @@ To update buck2, change each platform's `size`, `digest` and release URL in
 targets for macOS on Apple silicon. `toolchains//:mojo` selects the toolchain
 by the target platform's os: `komira//tools/build/toolchains/darwin:mojo` for
 macos, built from the sha256-pinned osx-arm64 compiler package of the same
-release. The Rust and protobuf toolchains are linux x86_64 only, so a
-darwin-arm64 target that needs one is incompatible rather than built for
-linux. The C/C++ toolchain (`toolchains//:cxx`) also admits darwin-arm64, for
+release. The Rust toolchain is linux x86_64 only, so a darwin-arm64 target
+that needs it is incompatible rather than built for linux. The protobuf
+toolchain (`toolchains//:mojo_proto`) admits darwin-arm64 too, on the same
+`toolchains:is_macos_arm64` select as the C/C++ one: protoc and the plugins are
+execution dependencies that run on the linux execution platform, and what they
+write is the same for any target, so a macOS package whose welded tests read a
+`proto_fixture_check` report configures. The C/C++ toolchain (`toolchains//:cxx`) also admits darwin-arm64, for
 compile and archive only: the pinned zig, on the linux x86_64 execution
 platform, compiles for `aarch64-macos` at zig's generic arm64 CPU and writes the
 static archive, and its linker is a refusal (a link would write a linux

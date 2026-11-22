@@ -466,8 +466,10 @@ def _rel_col_null_free(
     """True iff `col` of FROM relation `rel` provably holds no NULL: `rel` is a
     parquet relation (a `read_parquet('path')` TVF or a catalog parquet table,
     not a CTE / derived table) and the null count recorded before binding
-    (`cte_scope.parquet`) is 0 for the column in every one of its files.
-    Anything else (no recorded count, a glob, another source kind, an error)
+    (`cte_scope.parquet`) is 0 for the column in every one of its files (a
+    `read_parquet` relation's resolved files, a catalog table's paths). A Hive
+    partition column is in no file, has no recorded count, and so answers
+    False. Anything else (no recorded count, a glob, another source kind, an error)
     answers False, which only costs the NOT IN lowering its run-time NULL
     checks, never a wrong answer.
 
@@ -478,7 +480,11 @@ def _rel_col_null_free(
         if rel.tvf_path:
             if not is_parquet_tvf_kind(rel.tvf_kind):
                 return False
-            paths.append(String(rel.tvf_path.value()))
+            var src = cte_scope.parquet.source_of(
+                rel.tvf_path.value(), rel.tvf_opts.hive_partitioning
+            )
+            for i in range(len(src.paths)):
+                paths.append(String(src.paths[i]))
         else:
             if cte_scope.find(rel.name) >= 0 or not catalog.has(rel.name):
                 return False

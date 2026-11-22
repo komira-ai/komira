@@ -34,6 +34,7 @@ from arrow.write_target import WFMT_CSV
 from sql.sql_ast import STMT_COPY, STMT_CREATE_TABLE_AS, STMT_QUERY
 from sql.sql_bind_parquet import NoParquetFooters, SqlParquetFooters
 from sql.sql_catalog import SqlCatalog
+from scan_source.parquet_source import ParquetSource
 from sql.sql_frontend import (
     STATEMENT_NOT_A_QUERY,
     plan_from_sql,
@@ -74,6 +75,11 @@ struct _Footers(SqlParquetFooters):
 
     def column_null_count(self, path: String, column: String) raises -> Optional[Int]:
         return None
+
+    def parquet_relation(
+        self, path: String, hive_partitioning: UInt8
+    ) raises -> ParquetSource:
+        return ParquetSource(String(path), self.footer_schema(path), None)
 
 
 def _plan_err(sql: String) raises -> String:

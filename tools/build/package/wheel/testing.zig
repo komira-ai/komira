@@ -1,6 +1,8 @@
 //! What the komira_wheel tests share: a synthetic ELF shared library of
-//! chosen DT_NEEDED, run path and symbol versions (no real library needed),
-//! and the input of a wheel holding a library, its owner and a Python file.
+//! chosen DT_NEEDED, run path and symbol versions, a synthetic Mach-O dylib
+//! of chosen install name, loads, run paths and minimum macOS (no real
+//! library needed), and the input of a wheel holding a library, its owner and
+//! a Python file, or of a macOS wheel holding a dylib and the Mojo runtime's.
 
 const std = @import("std");
 const wheel = @import("wheel.zig");
@@ -188,4 +190,140 @@ pub fn input(alloc: Alloc) !wheel.Input {
         .max_cxxabi = "1.3.13",
         .external_needed = &external,
     };
+}
+
+pub const LC_LOAD_DYLIB: u32 = 0xc;
+
+pub const MachO = struct {
+    /// CPU_TYPE_ARM64.
+    cputype: u32 = 0x0100000c,
+    /// MH_DYLIB.
+    filetype: u32 = 6,
+    install_name: ?[]const u8 = null,
+    loads: []const []const u8 = &.{},
+    /// The load command of each of `loads`, by index; LC_LOAD_DYLIB where
+    /// this is shorter.
+    load_kinds: []const u32 = &.{},
+    rpaths: []const []const u8 = &.{},
+    /// The minimum macOS, `xxxx.yy.zz` packed (11.0 is 0x000b0000).
+    minos: u32 = 0x000b0000,
+    /// LC_VERSION_MIN_MACOSX instead of LC_BUILD_VERSION.
+    version_min: bool = false,
+    /// No version command at all.
+    no_version: bool = false,
+};
+
+/// The packed `xxxx.yy.zz` of a macOS version.
+pub fn macosVersion(major: u32, minor: u32, patch: u32) u32 {
+    return major << 16 | minor << 8 | patch;
+}
+
+fn lcStr(alloc: Alloc, out: *std.ArrayList(u8), cmd: u32, str_off: u32, s: []const u8) !void {
+    const size: u32 = @intCast(std.mem.alignForward(usize, str_off + s.len + 1, 8));
+    const start = out.items.len;
+    try put(alloc, out, u32, cmd);
+    try put(alloc, out, u32, size);
+    try put(alloc, out, u32, str_off);
+    if (str_off == 24) {
+        try put(alloc, out, u32, 2); // timestamp
+        try put(alloc, out, u32, 0); // current_version
+        try put(alloc, out, u32, 0); // compatibility_version
+    }
+    try out.appendSlice(alloc, s);
+    try out.append(alloc, 0);
+    while (out.items.len - start < size) try out.append(alloc, 0);
+}
+
+/// A thin 64-bit little-endian Mach-O file: a 32-byte header and the load
+/// commands of `m` (each string NUL-terminated, each command padded to a
+/// multiple of 8, `sizeofcmds` exact).
+pub fn machO(alloc: Alloc, m: MachO) ![]u8 {
+    var cmds = std.ArrayList(u8).empty;
+    var n: u32 = 0;
+    if (m.install_name) |name| {
+        try lcStr(alloc, &cmds, 0xd, 24, name);
+        n += 1;
+    }
+    for (m.loads, 0..) |l, i| {
+        try lcStr(alloc, &cmds, if (i < m.load_kinds.len) m.load_kinds[i] else LC_LOAD_DYLIB, 24, l);
+        n += 1;
+    }
+    for (m.rpaths) |r| {
+        try lcStr(alloc, &cmds, 0x8000001c, 12, r);
+        n += 1;
+    }
+    if (!m.no_version) {
+        if (m.version_min) {
+            try put(alloc, &cmds, u32, 0x24);
+            try put(alloc, &cmds, u32, 16);
+            try put(alloc, &cmds, u32, m.minos);
+            try put(alloc, &cmds, u32, 0); // sdk
+        } else {
+            try put(alloc, &cmds, u32, 0x32);
+            try put(alloc, &cmds, u32, 24);
+            try put(alloc, &cmds, u32, 1); // PLATFORM_MACOS
+            try put(alloc, &cmds, u32, m.minos);
+            try put(alloc, &cmds, u32, 0); // sdk
+            try put(alloc, &cmds, u32, 0); // ntools
+        }
+        n += 1;
+    }
+    var out = std.ArrayList(u8).empty;
+    try put(alloc, &out, u32, 0xfeedfacf);
+    try put(alloc, &out, u32, m.cputype);
+    try put(alloc, &out, u32, 0); // cpusubtype
+    try put(alloc, &out, u32, m.filetype);
+    try put(alloc, &out, u32, n);
+    try put(alloc, &out, u32, @intCast(cmds.items.len));
+    try put(alloc, &out, u32, 0); // flags
+    try put(alloc, &out, u32, 0); // reserved
+    try out.appendSlice(alloc, cmds.items);
+    return out.toOwnedSlice(alloc);
+}
+
+/// The Mojo runtime libraries a macOS wheel carries beside libkomira.
+pub const runtime_dylibs = [_][]const u8{ "libAsyncRTRuntimeGlobals.dylib", "libKGENCompilerRTShared.dylib", "libMSupportGlobals.dylib" };
+
+/// A dylib the macOS policy passes: install name `@rpath/libkomira.dylib`,
+/// the runtime libraries by `@rpath`, the system's libSystem and libc++, the
+/// run path `@loader_path/lib`, minimum macOS 11.0.
+pub fn goodDylib(alloc: Alloc) ![]u8 {
+    return machO(alloc, .{
+        .install_name = "@rpath/libkomira.dylib",
+        .loads = &.{ "@rpath/libKGENCompilerRTShared.dylib", "@rpath/libAsyncRTRuntimeGlobals.dylib", "/usr/lib/libSystem.B.dylib", "/usr/lib/libc++.1.dylib" },
+        .rpaths = &.{"@loader_path/lib"},
+    });
+}
+
+/// One of the runtime dylibs: install name `@rpath/<name>`, minimum macOS 11.0.
+pub fn runtimeDylib(alloc: Alloc, name: []const u8) ![]u8 {
+    return machO(alloc, .{
+        .install_name = try std.fmt.allocPrint(alloc, "@rpath/{s}", .{name}),
+        .loads = &.{"/usr/lib/libSystem.B.dylib"},
+    });
+}
+
+/// The macOS wheel's input: libkomira.dylib and the three runtime dylibs
+/// (0755), and a Python file, under the tag py3-none-macosx_11_0_arm64, with
+/// `lib` as libkomira.dylib.
+pub fn macosInputOf(alloc: Alloc, lib: []const u8) !wheel.Input {
+    var in = try input(alloc);
+    var files = std.ArrayList(wheel.File).empty;
+    try files.append(alloc, .{ .path = "komira/__init__.py", .data = "__all__: list[str] = []\n" });
+    try files.append(alloc, .{ .path = "komira/_lib/libkomira.dylib", .data = lib, .mode = 0o755 });
+    for (runtime_dylibs) |n| {
+        try files.append(alloc, .{ .path = try std.fmt.allocPrint(alloc, "komira/_lib/lib/{s}", .{n}), .data = try runtimeDylib(alloc, n), .mode = 0o755 });
+    }
+    in.files = try files.toOwnedSlice(alloc);
+    in.tag = "py3-none-macosx_11_0_arm64";
+    in.requires_dist = &.{"pyarrow"};
+    in.max_glibcxx = null;
+    in.max_cxxabi = null;
+    in.external_needed = &.{};
+    return in;
+}
+
+/// The macOS wheel's input with the good libkomira.dylib.
+pub fn macosInput(alloc: Alloc) !wheel.Input {
+    return macosInputOf(alloc, try goodDylib(alloc));
 }

@@ -1,0 +1,9 @@
+id,note,amount
+1,plain,10
+2,"comma, inside",20
+3,"say ""hi""",30
+4,"two
+lines",40
+5,"  padded  ",50
+6,"café",60
+7,"""quoted at both ends""",70

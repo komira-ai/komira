@@ -7,9 +7,9 @@
 # asked of it.
 #   1. path_has_glob / is_parquet_tvf_kind: `*`, `?` and `[` mark a glob; only
 #      the CSV, JSON and Avro readers are not parquet.
-#   2. ParquetFacts keeps the first schema and the first null count recorded
-#      for a path (and for a path and column); an unrecorded schema raises,
-#      an unrecorded count reads as unknown.
+#   2. ParquetFacts keeps the first source recorded for a path and mode and
+#      the first null count recorded for a file and column; an unrecorded
+#      relation raises, an unrecorded count reads as unknown.
 #   3. A `read_parquet` relation's footer schema is collected without any
 #      null count unless the statement holds a NOT IN subquery.
 #   4. With a NOT IN subquery every column of a non-glob parquet relation gets
@@ -21,15 +21,17 @@
 #      body and a subquery body are collected too.
 #   7. A NOT IN inside a CTE body turns counts on for the whole statement; a
 #      catalog table whose path is a glob gets no counts.
-#   8. NoParquetFooters refuses a `read_parquet` relation by name and reports
-#      every null count as unknown.
+#   8. NoParquetFooters refuses a `read_parquet` relation by name (the schema
+#      read and the relation read) and reports every null count as unknown.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from arrow.arrow_types import ArrowType
 from arrow.schema import Field, Schema, SchemaBuilder
 
-from sql.sql_ast import TVF_AVRO, TVF_CSV, TVF_JSON
+from scan_source.parquet_source import ParquetSource
+
+from sql.sql_ast import HIVE_PARTITIONING_AUTO, TVF_AVRO, TVF_CSV, TVF_JSON
 from sql.sql_bind_parquet import (
     NoParquetFooters,
     ParquetFacts,
@@ -73,6 +75,11 @@ struct _Footers(SqlParquetFooters):
             return 7
         return 0
 
+    def parquet_relation(
+        self, path: String, hive_partitioning: UInt8
+    ) raises -> ParquetSource:
+        return ParquetSource(String(path), self.footer_schema(path), None)
+
 
 def _facts(sql: String, catalog: SqlCatalog) raises -> ParquetFacts:
     return collect_parquet_facts(parse_sql(tokenize(sql)), catalog, _Footers())
@@ -91,14 +98,15 @@ def test_glob_and_kind_predicates() raises:
 
 def test_facts_keep_the_first_record() raises:
     var f = ParquetFacts()
-    assert_false(f.has_schema("p"))
+    assert_false(f.has_relation("p", HIVE_PARTITIONING_AUTO))
     assert_false(f.has_null_count("p", "a"))
     assert_false(f.null_count("p", "a").__bool__())
-    f.add_schema("p", _schema())
+    f.add_relation("p", HIVE_PARTITIONING_AUTO, ParquetSource(String("p"), _schema(), None))
     var other = SchemaBuilder()
     other.add_field(Field(String("z"), ArrowType.INT64, True))
-    f.add_schema("p", other.build())
-    assert_equal(f.schema_of("p").num_columns(), 4)
+    f.add_relation("p", HIVE_PARTITIONING_AUTO, ParquetSource(String("p"), other.build(), None))
+    assert_equal(f.schema_of("p", HIVE_PARTITIONING_AUTO).num_columns(), 4)
+    assert_equal(f.source_of("p", HIVE_PARTITIONING_AUTO).path, "p")
     f.add_null_count("p", "a", Optional[Int](3))
     f.add_null_count("p", "a", Optional[Int](9))
     f.add_null_count("p", "b", Optional[Int]())
@@ -108,7 +116,7 @@ def test_facts_keep_the_first_record() raises:
     assert_false(f.has_null_count("q", "a"))
     var raised = False
     try:
-        _ = f.schema_of("q")
+        _ = f.schema_of("q", HIVE_PARTITIONING_AUTO)
     except e:
         raised = True
         assert_true(String(e).find("no parquet footer was read for 'q'") >= 0)
@@ -117,8 +125,8 @@ def test_facts_keep_the_first_record() raises:
 
 def test_schema_is_collected_and_counts_wait_for_not_in() raises:
     var f = _facts("SELECT a FROM read_parquet('p.parquet')", SqlCatalog())
-    assert_true(f.has_schema("p.parquet"))
-    assert_equal(f.schema_of("p.parquet").field_name(1), "b")
+    assert_true(f.has_relation("p.parquet", HIVE_PARTITIONING_AUTO))
+    assert_equal(f.schema_of("p.parquet", HIVE_PARTITIONING_AUTO).field_name(1), "b")
     assert_false(f.has_null_count("p.parquet", "a"))
 
 
@@ -135,7 +143,7 @@ def test_not_in_collects_counts_and_records_unknowns() raises:
     assert_false(f.null_count("p.parquet", "boom").__bool__())
     assert_true(f.has_null_count("p.parquet", "unk"))
     assert_false(f.null_count("p.parquet", "unk").__bool__())
-    assert_true(f.has_schema("q.parquet"))
+    assert_true(f.has_relation("q.parquet", HIVE_PARTITIONING_AUTO))
     assert_equal(f.null_count("q.parquet", "b").value(), 7)
 
 
@@ -144,7 +152,7 @@ def test_glob_path_gets_a_schema_and_no_counts() raises:
         "SELECT a FROM read_parquet('d/*.parquet') WHERE a NOT IN (SELECT a FROM read_parquet('d/*.parquet'))",
         SqlCatalog(),
     )
-    assert_true(f.has_schema("d/*.parquet"))
+    assert_true(f.has_relation("d/*.parquet", HIVE_PARTITIONING_AUTO))
     assert_false(f.has_null_count("d/*.parquet", "a"))
     assert_false(f.has_null_count("d/*.parquet", "b"))
 
@@ -153,11 +161,11 @@ def test_parquet_catalog_table_counts_under_not_in_only() raises:
     var cat = SqlCatalog()
     cat.add_parquet("pt", "t1.parquet", _schema())
     var plain = _facts("SELECT a FROM pt", cat)
-    assert_false(plain.has_schema("t1.parquet"))
+    assert_false(plain.has_relation("t1.parquet", HIVE_PARTITIONING_AUTO))
     assert_false(plain.has_null_count("t1.parquet", "a"))
     var f = _facts("SELECT a FROM pt WHERE a NOT IN (SELECT a FROM pt)", cat)
     # A catalog table's schema is its declared one, so no footer is read.
-    assert_false(f.has_schema("t1.parquet"))
+    assert_false(f.has_relation("t1.parquet", HIVE_PARTITIONING_AUTO))
     assert_equal(f.null_count("t1.parquet", "b").value(), 7)
     assert_equal(f.null_count("t1.parquet", "a").value(), 0)
     assert_false(f.null_count("t1.parquet", "unk").__bool__())
@@ -166,14 +174,14 @@ def test_parquet_catalog_table_counts_under_not_in_only() raises:
 def test_csv_is_skipped_and_nested_bodies_are_walked() raises:
     # `x.csv` has no footer in the fake: asking for one would raise.
     var csv = _facts("SELECT a FROM read_csv('x.csv')", SqlCatalog())
-    assert_false(csv.has_schema("x.csv"))
+    assert_false(csv.has_relation("x.csv", HIVE_PARTITIONING_AUTO))
     var f = _facts(
         "WITH c AS (SELECT a FROM read_parquet('c.parquet')) "
         "SELECT a FROM c WHERE a IN (SELECT a FROM read_parquet('s.parquet'))",
         SqlCatalog(),
     )
-    assert_true(f.has_schema("c.parquet"))
-    assert_true(f.has_schema("s.parquet"))
+    assert_true(f.has_relation("c.parquet", HIVE_PARTITIONING_AUTO))
+    assert_true(f.has_relation("s.parquet", HIVE_PARTITIONING_AUTO))
 
 
 def test_not_in_inside_a_cte_body_collects_counts() raises:
@@ -221,6 +229,17 @@ def test_no_footers_reader_refuses_by_name() raises:
         assert_true(String(e).find("read_parquet('p.parquet') needs a parquet footer reader") >= 0)
     assert_true(raised)
     assert_false(NoParquetFooters().column_null_count("p", "a").__bool__())
+    var rel_raised = False
+    try:
+        _ = NoParquetFooters().parquet_relation("p.parquet", HIVE_PARTITIONING_AUTO)
+    except e:
+        rel_raised = True
+        assert_equal(
+            String(e),
+            "SQL bind error: read_parquet('p.parquet') needs a parquet footer"
+            " reader, and this binding was given none",
+        )
+    assert_true(rel_raised)
 
 
 def main() raises:

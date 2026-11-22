@@ -8,18 +8,24 @@
 #             an in-memory scan);
 #   streaming PLAN_FILTER, PLAN_PROJECT, PLAN_LIMIT: appended to the open
 #             pipeline's `ops`;
-#   breaker   PLAN_AGGREGATE, PLAN_SORT: ends the open pipeline in a sink and
-#             opens a pipeline whose source is that segment's output
-#             (SOURCE_SINK_OUTPUT), joined by an E3 edge.
+#   breaker   PLAN_AGGREGATE, PLAN_DISTINCT, PLAN_SORT: ends the open
+#             pipeline in a sink and opens a pipeline whose source is that
+#             segment's output (SOURCE_SINK_OUTPUT), joined by an E3 edge.
+#   union     PLAN_UNION: each branch ends in a segment of its own, and a
+#             pipeline opens whose source is the concatenation of their
+#             outputs in branch order (SOURCE_CONCAT), joined by an E3 edge to
+#             each.
 #
 # This module is only the dispatch on the node's tag. Each arm is its own
 # module: `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
-# `cut_aggregate` and `cut_sort`; what they share (the open pipeline, the
-# cutter's state and the close and reopen of a breaker) is `cut_state`. The
-# filter, project, limit and aggregate arms have two halves: the first holds
-# every check that refuses the node itself and runs before the child is
-# walked; the second fuses onto, or closes, the child's pipeline. The sort arm
-# has only the second.
+# `cut_aggregate`, `cut_distinct`, `cut_sort` and `cut_union`; what they share
+# (the open pipeline, the cutter's state and the close and reopen of a
+# breaker) is `cut_state`. The filter, project, limit, aggregate and distinct
+# arms have two halves: the first holds every check that refuses the node
+# itself and runs before the child is walked; the second fuses onto, or
+# closes, the child's pipeline. The sort arm has only the second. The union
+# arm checks its branches' schemas before it walks them, walks them in order,
+# ends each in a segment and opens the concatenation.
 #
 # The root is a SINK_COLLECT segment, unless the plan's top node is a breaker:
 # then that breaker's segment is the result and nothing is appended.
@@ -30,12 +36,14 @@
 # =============================================================================
 
 from lowering.cut_aggregate import _aggregate_exprs, _close_aggregate
+from lowering.cut_distinct import _distinct_keys, _close_distinct
 from lowering.cut_filter import _filter_op, _fuse_filter
 from lowering.cut_limit import _limit_op, _fuse_limit
 from lowering.cut_project import _project_op, _fuse_project
 from lowering.cut_scan import _open_scan
 from lowering.cut_sort import _close_sort
 from lowering.cut_state import CutResult, _Cutter, _Pipe, _uncuttable
+from lowering.cut_union import _check_union, _end_branch, _open_concat
 from lowering.lowered_plan import LoweringInputs, LOWERING_INPUTS_SCAN_COUNT
 from plan_ir.logical_plan import (
     LogicalPlan,
@@ -43,8 +51,10 @@ from plan_ir.logical_plan import (
     PLAN_FILTER,
     PLAN_PROJECT,
     PLAN_AGGREGATE,
+    PLAN_DISTINCT,
     PLAN_SORT,
     PLAN_LIMIT,
+    PLAN_UNION,
 )
 from physical_plan.physical_plan import (
     SINK_COLLECT,
@@ -78,9 +88,21 @@ def _walk(
         var aggs = _aggregate_exprs(node)
         var pipe = _walk(cutter, node.aggregate_data_ref().child[], inputs)
         return _close_aggregate(cutter, node, pipe^, aggs^, inputs)
+    if tag == PLAN_DISTINCT:
+        var keys = _distinct_keys(node)
+        var pipe = _walk(cutter, node.distinct_data_ref().child[], inputs)
+        return _close_distinct(cutter, node, pipe^, keys^, inputs)
     if tag == PLAN_SORT:
         var pipe = _walk(cutter, node.sort_data_ref().child[], inputs)
         return _close_sort(cutter, node, pipe^, inputs)
+    if tag == PLAN_UNION:
+        _check_union(node)
+        ref ud = node.union_data_ref()
+        var producers = List[Int]()
+        for i in range(len(ud.children)):
+            var branch = _walk(cutter, ud.children[i][], inputs)
+            producers.append(_end_branch(cutter, branch^, inputs))
+        return _open_concat(node, producers)
     raise _uncuttable(node, "no cutter arm for this node")
 
 
