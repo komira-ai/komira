@@ -471,8 +471,9 @@ def _shipped_rules_cases():
 #
 # `toolchains//:cxx` (komira_cxx_toolchains) configured for each target platform, read off
 # the analysed toolchain: macOS arm64 compiles and archives for `aarch64-macos` at zig's
-# generic arm64 CPU and its linker is a refusal; linux x86_64 compiles for the glibc triple
-# and its linker is zig's; a platform that is macOS on another CPU, or arm64 on another OS,
+# generic arm64 CPU and its linker is a refusal; linux x86_64 compiles for the glibc triple at
+# x86-64-v2, the floor of the row's `isa_variants` (every CPU level of libkomira links the
+# same C, so no higher level may reach the compile line), and its linker is zig's; a platform that is macOS on another CPU, or arm64 on another OS,
 # is incompatible (the toolchain admits macOS AND arm64 together, never one of them).
 
 _CXX = "toolchains//:cxx"
@@ -480,8 +481,8 @@ _FIXTURE_PLATFORMS = "komira//tools/build/ci/fixture/platforms"
 
 # (target platform, the triple the C is compiled for, the CPU it is compiled at, what must not be on the compile line)
 _CXX_ADMITTED = [
-    ("komira//tools/build/platforms:darwin-arm64", "aarch64-macos", "-mcpu=generic", ["x86_64-linux-gnu", "x86_64_v3"]),
-    ("komira//tools/build/platforms:linux-x86_64", "x86_64-linux-gnu", "-mcpu=x86_64_v3", ["aarch64-macos", "-mcpu=generic"]),
+    ("komira//tools/build/platforms:darwin-arm64", "aarch64-macos", "-mcpu=generic", ["x86_64-linux-gnu", "x86_64_v2", "x86_64_v3"]),
+    ("komira//tools/build/platforms:linux-x86_64", "x86_64-linux-gnu", "-mcpu=x86_64_v2", ["aarch64-macos", "-mcpu=generic", "x86_64_v3"]),
 ]
 _CXX_REFUSED = [
     _FIXTURE_PLATFORMS + ":macos_x86_64",
