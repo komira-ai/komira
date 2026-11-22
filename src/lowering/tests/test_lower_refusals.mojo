@@ -8,10 +8,10 @@
 # detail lowers. A refused plan never produces a LoweredPlan.
 #
 # Tests, and the behaviour each asserts:
-#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a join,
+#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a
 #     top-n, view reference, shared-subplan reference and cast to string are
 #     each refused by their tag name.
-#   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a join under an
+#   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a top-n under an
 #     aggregate refuses the plan; the aggregate over a scan lowers.
 #   test_a_distinct_over_a_column_list_is_refused_and_one_over_the_row_is_cut:
 #     a distinct that names columns is refused with the exact text; the same
@@ -150,7 +150,6 @@ def _refused_with(message: String, token: String, why: String) raises:
 
 
 def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
-
     var topn = LogicalPlan.topn(_names("k"), _bools(False), 5, _scan())
     _refused_with(_message(topn, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_TOPN))
 
@@ -165,12 +164,9 @@ def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
 
 
 def test_a_refused_node_below_a_breaker_refuses_the_whole_plan() raises:
-    var children = List[OwnedPointer[LogicalPlan]]()
-    children.append(OwnedPointer(_scan()))
-    children.append(OwnedPointer(_scan()))
-    var union = LogicalPlan.union(children^, _schema())
-    var plan = _count_by(union^, List[String]())
-    _refused_with(_message(plan, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_UNION))
+    var topn = LogicalPlan.topn(_names("k"), _bools(False), 5, _scan())
+    var plan = _count_by(topn^, List[String]())
+    _refused_with(_message(plan, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_TOPN))
     # The same aggregate over a scan lowers.
     assert_equal(_message(_count_by(_scan(), List[String]()), _inputs()), "")
 
