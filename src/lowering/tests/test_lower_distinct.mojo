@@ -33,7 +33,8 @@
 #     first over E3.
 #   test_a_distinct_over_an_aggregate_reads_the_aggregate_output: a distinct
 #     above an aggregate is a second SINK_AGG segment grouped by the
-#     aggregate's output columns.
+#     aggregate's output columns: over its two integer columns the COMPOSITE
+#     row, over its one key column the I64 row.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -307,16 +308,17 @@ def test_a_distinct_over_an_aggregate_reads_the_aggregate_output() raises:
     keys.append(_col("k"))
     var agg = LogicalPlan.aggregate(keys^, aggs^, _scan(_int_schema()))
     var plan = LogicalPlan.distinct(None, agg^)
-    # The aggregate's output is (k INT64, n INT64): two integer columns have
-    # no sink row, so the plan is refused by name rather than cut.
-    try:
-        _ = _lowered(plan, _inputs())
-        assert_true(False, "a distinct over two integer columns lowered")
-    except e:
-        assert_equal(
-            String(e),
-            "LOWERING_SINK_UNSERVED: a group key of 2 columns is served only when every column is a dictionary encoded string",
-        )
+    # The aggregate's output is (k INT64, n INT64): the distinct over both
+    # columns is a second SINK_AGG of the COMPOSITE row, grouped by k and n,
+    # reading the first over its output.
+    var both = _lowered(plan, _inputs())
+    assert_equal(len(both.segments), 2)
+    ref top = both.segments[1]
+    assert_equal(triple_name(top.sink_kind, top.sink_key_dtype, top.sink_orientation), "(SINK_AGG, COMPOSITE, COLUMNAR)")
+    assert_equal(len(both.params.agg[1].group_by_exprs), 2)
+    assert_equal(String(both.params.agg[1].group_by_exprs[0]), String(_col("k")))
+    assert_equal(String(both.params.agg[1].group_by_exprs[1]), String(_col("n")))
+    assert_equal(len(both.params.agg[1].agg_exprs), 0)
     # Over the aggregate's single key column it is a second SINK_AGG.
     var aggs2 = AggExprArray()
     aggs2.append(AggExpr(AGG_COUNT, Optional[Expr](), Optional[String]("n")))

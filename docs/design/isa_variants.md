@@ -14,8 +14,8 @@ program bundles of `tools/build/package` already have their own level check and 
 
 Each platform row compiles for exactly one CPU. **EXISTS:** `target_cpu` in
 [tools/build/platforms/table.bzl](../../tools/build/platforms/table.bzl) is `x86-64-v3` for
-linux-x86_64, `apple-m1` for darwin-arm64, and `generic` with `+outline-atomics` for the reserved
-linux-arm64 row. Every `mojo build` passes that value as `--target-cpu`
+linux-x86_64, `apple-m1` for darwin-arm64, and `generic` with `+outline-atomics` for the
+linux-arm64 row (registered, with no toolchain building for it yet). Every `mojo build` passes that value as `--target-cpu`
 ([tools/build/mojo/compile.bzl](../../tools/build/mojo/compile.bzl), `_build_executable`), and so does
 every Linux C compile through zig's `-mcpu` ([tools/build/mojo/cxx.bzl](../../tools/build/mojo/cxx.bzl));
 macOS C compiles at zig's generic arm64.
@@ -60,7 +60,7 @@ below it.
 |---|---|---|
 | linux-x86_64 | `x86-64-v2`, `x86-64-v3`, `x86-64-v4` | v2 and v3. v4 waits for [the conditions in 4](#4-when-a-higher-variant-is-added) |
 | darwin-arm64 | `apple-m1` | yes, as today: one variant |
-| linux-arm64 (reserved) | `generic` (+outline-atomics), `neoverse-n1` | generic when the row is registered. neoverse-n1 waits for the conditions in 4 |
+| linux-arm64 | `generic` (+outline-atomics), `neoverse-n1` | generic once a toolchain builds for the row (it is registered, with none yet). neoverse-n1 waits for the conditions in 4 |
 
 - **linux-x86_64 gets an x86-64-v2 floor.**
   - The floor library runs on every x86-64 CPU sold in the last fifteen years except the rare parts
@@ -86,7 +86,7 @@ below it.
   BF16, I8MM and SME, which no komira source uses, and no Apple chip offers SVE outside SME's
   streaming mode. A second variant would add size and no faster code.
 - **linux-arm64 gets `generic` and `neoverse-n1`.**
-  - The reserved row's comment already sets a generic ARMv8-A floor, because a Raspberry Pi must run
+  - The row's comment already sets a generic ARMv8-A floor, because a Raspberry Pi must run
     what the servers build. The Pi 4's Cortex-A72 is ARMv8.0 without the crypto extension.
   - `neoverse-n1` (ARMv8.2 with LSE atomics, dot product, FP16 and the crypto extension) is the CPU of
     the Neoverse N1 servers, and every later Neoverse core implements it.

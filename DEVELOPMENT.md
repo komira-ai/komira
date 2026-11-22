@@ -334,7 +334,7 @@ not share a remote cache.
 ## Troubleshooting
 
 - **`komira_local_execution_platforms: no platform row matches this host`** (or
-  `this host is linux-arm64, which komira reserves a row for but does not
+  `this host is <row>, which komira reserves a row for but does not
   build for yet`). Local builds run this machine's own platform, one row of
   [the platform table](tools/build/platforms/table.bzl); a machine no
   registered row matches builds through a remote service ([advanced](#advanced-remote-execution)), naming

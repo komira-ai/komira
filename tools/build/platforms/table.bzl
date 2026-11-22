@@ -541,15 +541,18 @@ PLATFORMS = {
         "zig_exe_sha256": "c007814ca1128eeceeb9ce4d625be4d0b13d85228bef8a5534aeb6bcfb56a529",
         "zig_triple": "aarch64-macos.11.0",
     },
-    # RESERVED. Linux on aarch64: Ampere Altra servers (Neoverse N1) are the
-    # main build machines, and a Raspberry Pi must run what they build, so the
-    # floor is generic ARMv8-A with outline atomics (the LSE atomics of an
-    # Altra are used where the CPU has them, chosen at run time) and run-time
-    # dispatch for anything wider. A tuned `neoverse-n1` variant is a later,
-    # opt-in addition; it is not this row. Not a build key yet: no platform
-    # target, no execution platform, and `linux_arm64_properties` is refused.
+    # Linux on aarch64: Ampere Altra servers (Neoverse N1) are the main build
+    # machines, and a Raspberry Pi must run what they build, so the floor is
+    # generic ARMv8-A with outline atomics (the LSE atomics of an Altra are
+    # used where the CPU has them, chosen at run time) and run-time dispatch
+    # for anything wider. A tuned `neoverse-n1` variant is a later, opt-in
+    # addition; it is not this row. A build key: it has a platform target and,
+    # when `linux_arm64_properties` names workers, an execution platform. No
+    # toolchain states it as its target or its execution platform yet, so a
+    # target built for it is incompatible until the toolchains of
+    # tools/build/toolchains do.
     "linux-arm64": {
-        "applets": pending("busybox has no upstream aarch64 static binary; the bring-up chooses the applet carrier"),
+        "applets": none("no aarch64 static busybox exists upstream, so no toolchain of this row has a carrier of applets yet; the toolchain that brings one sets this list"),
         "assets": {
             "actionlint": pin(
                 "actionlint_1.7.12_linux_arm64.tar.gz",
@@ -558,9 +561,10 @@ PLATFORMS = {
                 size = 2111482,
             ),
             # busybox.net publishes no aarch64 binary (its binaries directory
-            # holds i686 and x86_64 only); a pinned source build or another
-            # extractor is chosen when the platform is brought up.
-            "busybox": pending("no upstream aarch64 static busybox exists; the bring-up chooses a pinned source build or the zig-built unpacker"),
+            # holds i686 and x86_64 only, and its multiarch build is 32-bit
+            # ARM); the toolchain that runs actions on this row chooses a pinned
+            # source build or another carrier, and pins it here.
+            "busybox": none("no aarch64 static busybox exists upstream; no toolchain runs actions on this row yet"),
             "kcov_bzip2": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
             "kcov_elfutils": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
             "kcov_lzma": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
@@ -598,7 +602,15 @@ PLATFORMS = {
                 "da1772742c54f1f8f7b883e6338b1fe5de4592f2c882220dcceae623cc661e57",
                 size = 66479788,
             ),
-            "pixi": pending("the pixi linux-aarch64 executable is recorded when the platform is brought up"),
+            # pixi, the raw static (musl) executable of the same release as the
+            # other rows'.
+            "pixi": pin(
+                "pixi-0.67.2-aarch64-unknown-linux-musl",
+                "https://github.com/prefix-dev/pixi/releases/download/v0.67.2/pixi-aarch64-unknown-linux-musl",
+                "9d0a16ec2122e9a2a9cf6c5fdb1c93852236d292e6be1bf0405e9e24f8ee403e",
+                size = 59751088,
+                executable = True,
+            ),
             "protoc": pin(
                 "protoc-29.1-linux-aarch_64.zip",
                 "https://github.com/protocolbuffers/protobuf/releases/download/v29.1/protoc-29.1-linux-aarch_64.zip",
@@ -638,7 +650,7 @@ PLATFORMS = {
                 size = 49471996,
             ),
         },
-        "bundles": True,
+        "bundles": False,
         "cache_line_bytes": 64,
         "constraints": [
             "prelude//os/constraints:linux",
@@ -646,19 +658,19 @@ PLATFORMS = {
         ],
         "cpu": "arm64",
         "features": ["epoll", "futex", "neon", "thp"],
-        "golden_config_hash": pending("the platform exists once the row is registered"),
+        "golden_config_hash": "8aa836c51d8d91b8",
         "host": {"arch": "aarch64", "os": "linux"},
         # The generic floor (the `Features` words every ARMv8-A CPU lists). `neoverse-n1`
         # is added once a worker runs it and a measurement shows a gain.
         "isa_variants": [isa_variant("generic", "generic", ["asimd", "fp"], target_features = ["+outline-atomics"])],
         "object_format": "elf",
-        "oci_base": pending("the distroless base-debian12 linux/arm64 manifest and its blobs are recorded when the platform is brought up"),
+        "oci_base": none("bundles, OCI images and the launcher are built for linux-x86_64 only (tools/build/package/defs.bzl); an arm64 base is pinned when they are built for this row"),
         "os": "linux",
         "os_floor": "glibc-2.34",
         "page_bytes": 4096,
         "pool": "pool=linux-arm64-sized",
         "re_key": "linux_arm64_properties",
-        "registered": False,  # komira-limit:linux-arm64-unregistered
+        "registered": True,
         "remote_required": False,
         # Measured on the linux-aarch64 compiler package: the same three
         # libraries, and the same NEEDED libstdc++.so.6 and libgcc_s.so.1.
@@ -876,15 +888,19 @@ def row(name):
     return PLATFORMS[name]
 
 def registered_names():
-    """The registered rows' names, linux-x86_64 first.
+    """The registered rows' names: linux-x86_64 first, the other linux rows, then the rest.
 
     Order is registration order: a target stating no execution constraint gets
     the first execution platform, so linux-x86_64 comes first and every
     platform added later must never become the first match of an action that
-    states no os.
+    states no os or cpu. The macOS row comes last.
     """
-    first = [n for n in sorted(PLATFORMS) if n == "linux-x86_64" and PLATFORMS[n]["registered"]]
-    return first + [n for n in sorted(PLATFORMS) if n != "linux-x86_64" and PLATFORMS[n]["registered"]]
+    names = [n for n in sorted(PLATFORMS) if PLATFORMS[n]["registered"]]
+    return (
+        [n for n in names if n == "linux-x86_64"] +
+        [n for n in names if n != "linux-x86_64" and PLATFORMS[n]["os"] == "linux"] +
+        [n for n in names if PLATFORMS[n]["os"] != "linux"]
+    )
 
 def reserved_names():
     """The rows declared but not yet a build key, sorted."""
@@ -921,21 +937,19 @@ def release_version(name, role):
         fail("platform {}: the `{}` pin's url names no release: {}".format(name, role, asset(name, role)["url"]))
     return v
 
-def by_target_os(role):
-    """For `select()`: each registered row's os constraint -> `:<name of its pinned_file of role>`.
+def setting_name(name):
+    """The name of the `config_setting` of row `name` (`is_linux_x86_64`): both its os and its cpu constraint, declared in //tools/build/toolchains."""
+    return "is_" + name.replace("-", "_")
+
+def by_target_platform(role):
+    """For `select()`: each registered row's `config_setting` (`setting_name`) -> `:<name of its pinned_file of role>`.
 
     A tool chosen by this map comes from the row of the target platform, which
-    is the client's own row unless `--target-platforms` names another.
+    is the client's own row unless `--target-platforms` names another. Two rows
+    share an os (linux x86_64 and arm64), so the key is the os and the cpu
+    together.
     """
-    out = {}
-    rows = {}
-    for n in registered_names():
-        key = "prelude//os/constraints:" + PLATFORMS[n]["os"]
-        if key in rows:
-            fail("rows {} and {} share the os `{}`: `{}` cannot be chosen by os alone".format(rows[key], n, PLATFORMS[n]["os"], role))
-        rows[key] = n
-        out[key] = ":" + asset(n, role)["name"]
-    return out
+    return {":" + setting_name(n): ":" + asset(n, role)["name"] for n in registered_names()}
 
 def os_floor_version(name):
     """The version of row `name`'s `os_floor` (`macos-11.0` -> `11.0`)."""

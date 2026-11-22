@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # tools/build/tests/functional/platform_table/check.sh -- the platform table against the
 # tree: its limits, its configuration hashes and applets, the linux-x86_64
-# golden. (Its load-time cases, the platforms it declares, `host`, the
-# reserved row's key and the key that decides remote execution are the
+# golden. (Its load-time cases, the platforms it declares, `host`, the arm64
+# execution platform and the key that decides remote execution are the
 # scenarios //tools/build/selftest:analysis_refusals_platform_table and
 # :exec_platforms.)
 #
@@ -46,7 +46,7 @@ table_val() { # row, field -> the string value in table.bzl
     awk -v row="    \"$1\": {" -v f="        \"$2\": " 'index($0, row) == 1 {on = 1; next} on && /^    },/ {on = 0} on && index($0, f) == 1 {sub(f, ""); gsub(/[",]/, ""); print; exit}' tools/build/platforms/table.bzl
 }
 bad=
-for r in linux-x86_64 darwin-arm64; do
+for r in linux-x86_64 linux-arm64 darwin-arm64; do
     want=$(table_val "$r" golden_config_hash)
     if ! "$BUCK2" cquery --target-platforms "komira//tools/build/platforms:$r" komira//tools/build/toolchains:conda_unpack > "$LOG/platform_hash_$r.txt" 2>&1 ||
         ! grep -qF "komira//tools/build/platforms:$r#$want" "$LOG/platform_hash_$r.txt"; then
@@ -56,7 +56,7 @@ done
 if [ -n "$bad" ]; then
     fail "table: golden_config_hash differs from the configuration buck2 gives the platform:$bad"
 else
-    pass "table: golden_config_hash of linux-x86_64 and darwin-arm64 is the configuration hash buck2 gives each platform"
+    pass "table: golden_config_hash of linux-x86_64, linux-arm64 and darwin-arm64 is the configuration hash buck2 gives each platform"
 fi
 dar_table=$(table_val darwin-arm64 applets | tr -d '[]' | tr ',' ' ' | xargs)
 dar_sh=$(sed -n 's/^APPLETS="\(.*\)"$/\1/p' tools/build/mojo/darwin/busybox.sh)
