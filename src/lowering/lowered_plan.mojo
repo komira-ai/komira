@@ -13,6 +13,7 @@ from physical_plan.physical_plan import (
     SegmentDescPod,
     AggSinkData,
     SortSinkData,
+    TopNSinkData,
 )
 from plan_stats.table_stats import TableStats
 from scan_source.in_memory_source import InMemorySource
@@ -65,18 +66,20 @@ struct ParamTable(Movable):
     cut order, so equal inputs give equal indices.
 
     `SINK_AGG` segments index `agg` by `sink_param_id`, `SINK_SORT` segments
-    index `sort`; a `SINK_COLLECT` segment indexes nothing (`sink_param_id` is
+    index `sort`, `SINK_TOPN` segments index `topn`; a `SINK_COLLECT` segment indexes nothing (`sink_param_id` is
     -1). `SOURCE_BATCH` segments index `batches` by
     `source_spec.batch_handle_id`.
     """
 
     var agg: List[AggSinkData]
     var sort: List[SortSinkData]
+    var topn: List[TopNSinkData]
     var batches: List[InMemorySource]
 
     def __init__(out self):
         self.agg = List[AggSinkData]()
         self.sort = List[SortSinkData]()
+        self.topn = List[TopNSinkData]()
         self.batches = List[InMemorySource]()
 
 

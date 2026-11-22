@@ -191,6 +191,8 @@ def render_lowered_plan(plan: LoweredPlan) -> String:
         + String(len(p.agg))
         + " sort="
         + String(len(p.sort))
+        + " topn="
+        + String(len(p.topn))
         + " batches="
         + String(len(p.batches))
         + "\n"
@@ -218,5 +220,15 @@ def render_lowered_plan(plan: LoweredPlan) -> String:
             out += " desc" if s.descending[k] else " asc"
             out += " nulls_first" if s.nulls_first[k] else " nulls_last"
         out += "\n"
+    for i in range(len(p.topn)):
+        ref t = p.topn[i]
+        out += "  topn " + String(i) + ": keys="
+        for k in range(len(t.sort_keys)):
+            if k > 0:
+                out += ", "
+            out += t.sort_keys[k]
+            out += " desc" if t.descending[k] else " asc"
+            out += " nulls_first" if t.nulls_first[k] else " nulls_last"
+        out += " offset=" + String(t.offset) + " n=" + String(t.n) + "\n"
     out += "result: segment " + String(plan.result_seg_id) + "\n"
     return out^

@@ -233,8 +233,10 @@ Import each module by name; the package root exports nothing.
   reservation returns its blocks when it is dropped. The aggregation sink's
   state is fixed in size, so it draws once per worker; the grouped sink draws as
   its tables grow.
-- `sink_sort`, `sort_nulls`: the in-memory sort `(SINK_SORT, KEY_DTYPE_NONE,
-  SINK_ORIENT_COLUMNAR)`, for a small result (TPC-H Q1's ORDER BY over its
+- `sink_sort`, `sort_nulls`, `sort_range`: the in-memory sort `(SINK_SORT, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)` and the top-N `(SINK_TOPN, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)`, which is the same sink built from a `TopNSinkData`; the
+  sort is for a small result (TPC-H Q1's ORDER BY over its
   grouped rows). It collects with a `CollectSink` (morsels in position order),
   then sorts the one batch by `SortSinkData`: keys, directions and per-key
   NULL placement (an empty `nulls_first` means the engine's default, NULLS
@@ -251,6 +253,19 @@ Import each module by name; the package root exports nothing.
   pool sized by `SortSinkData.memory_budget` (when positive). The budget bounds
   the estimated peak, and the consume that takes the input past it fails. There is no
   spill. `sort_harness` is the table and the oracle of its tests.
+  The top-N answers rows [offset, offset + n) of the full sort's order (ties keep
+  the collected order: morsel position, then worker slot, then arrival) and holds
+  about `offset + n` rows per worker, not every row. A worker tags each morsel's
+  rows with three hidden INT64 columns (`sort_range`: partition id, origin hint,
+  and worker * 2^40 + the rows it tagged before; named so that no input column
+  has their name) and, once it holds `max(2 * (offset + n), 2048)` rows, sorts
+  them by the keys and then the three columns and keeps the first `offset + n`.
+  `combine` sorts what every worker kept the same way, slices the range and drops
+  the hidden columns, so the answer is the full sort's slice on any number of
+  workers and any schedule. A count of zero, or an offset past the rows, answers
+  no row under the input's schema; a negative count or offset is refused by name
+  when the sink is built. The top-N has no memory budget of its own and draws on
+  the segment pool alone, as each batch is about to exist.
 - `spike/intern_spike.mojo` (target `intern_spike`, not part of the library): the
   dictionary-interning spike of the string group-by. A standalone program that times
   interned dictionary codes, hashing every row, the fragment merge and the string-table
@@ -268,9 +283,10 @@ Import each module by name; the package root exports nothing.
   the grouped rows I64, I32, F64, F32, DATE32, BOOL and DECIMAL128,
   `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED)` and `(SINK_AGG, KEY_DTYPE_STRING,
   SINK_ORIENT_COLUMNAR)`, and `(SINK_SORT, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)` and `(SINK_TOPN, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, and refuses every other kind by name. It keeps the
   resident batches (`add_resident`), the aggregation sink data a descriptor's
-  `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`) and the segment pool
+  `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`), the top-N data (`add_topn_sink`) and the segment pool
   (`set_memory_budget`, unbounded until set), shares one set of operator parts among the
   workers of a segment run, and derives the empty-output schema by running the
   chain's projections over a batch of no rows. Three origins name the borrows of
@@ -279,7 +295,7 @@ Import each module by name; the package root exports nothing.
 - `plan_harness`: segment descriptors for the four sources with an operator
   chain and a collect sink (`with_agg_sink` turns one into an aggregation),
   `project_columns`, and a sample table with readers, for plans written by hand
-  (`with_group_sink`, `with_string_group_sink` and `grouped_agg_data` for the
+  (`with_sort_sink` and `with_topn_sink` for the sorts, `with_group_sink`, `with_string_group_sink` and `grouped_agg_data` for the
   grouped sinks).
 - `group_harness`: a table with NULL integer keys, a DECIMAL and a high-cardinality
   column, and one with float keys, whose every cell is a function of its row

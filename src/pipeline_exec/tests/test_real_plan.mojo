@@ -47,6 +47,7 @@ from physical_plan.physical_plan import (
     SINK_COLLECT,
     SINK_ORIENT_COLUMNAR,
     SINK_TOPN,
+    SINK_PARTITION_TOPN,
     SOURCE_BATCH,
     SOURCE_CONCAT,
     SOURCE_SINK_OUTPUT,
@@ -382,12 +383,20 @@ def test_what_the_builder_does_not_serve_is_refused_by_name() raises:
     with assert_raises(contains="operator tag 3 of segment 0 is not served"):
         _ = run_plan(_one(probe^), builder, dispatch, 1, CancellationToken.new())
 
-    var sorted = SegmentDescPod(
+    var windowed = SegmentDescPod(
+        0, SOURCE_BATCH, SourceSpecPod.batch(handle), Slab[MorselOp](),
+        SINK_PARTITION_TOPN, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR, -1, 0,
+        List[Int](), List[UInt8](),
+    )
+    with assert_raises(contains="the sink of segment 0 is not served"):
+        _ = run_plan(_one(windowed^), builder, dispatch, 1, CancellationToken.new())
+
+    var top = SegmentDescPod(
         0, SOURCE_BATCH, SourceSpecPod.batch(handle), Slab[MorselOp](), SINK_TOPN,
         KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR, -1, 0, List[Int](), List[UInt8](),
     )
-    with assert_raises(contains="the sink of segment 0 is not served"):
-        _ = run_plan(_one(sorted^), builder, dispatch, 1, CancellationToken.new())
+    with assert_raises(contains="segment 0 names top-n sink data -1, and the builder holds 0"):
+        _ = run_plan(_one(top^), builder, dispatch, 1, CancellationToken.new())
 
     with assert_raises(contains="reads resident batch 5, and the builder holds 1"):
         _ = run_plan(

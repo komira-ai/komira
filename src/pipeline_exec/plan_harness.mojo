@@ -13,7 +13,8 @@
 #
 # `with_agg_sink` turns a segment into an ungrouped aggregation and
 # `ungrouped_agg_data` builds the sink data the builder keeps for it;
-# `with_sort_sink` turns one into the in-memory sort.
+# `with_sort_sink` turns one into the in-memory sort and `with_topn_sink` into
+# the sort that keeps a range of its order.
 #
 # The sample batch has three columns:
 #   a  INT64, no NULL, row r holds r
@@ -47,6 +48,7 @@ from physical_plan.physical_plan import (
     SINK_ORIENT_COLUMNAR,
     SINK_ORIENT_DICT_ENCODED,
     SINK_SORT,
+    SINK_TOPN,
     SOURCE_BATCH,
     SOURCE_CSV,
     SOURCE_PARQUET,
@@ -177,6 +179,16 @@ def with_sort_sink(var desc: SegmentDescPod, param_id: Int) -> SegmentDescPod:
     """`desc` with its sink changed to the in-memory sort whose data the
     builder holds as `param_id` (`RealBuilder.add_sort_sink`)."""
     desc.sink_kind = SINK_SORT
+    desc.sink_key_dtype = KEY_DTYPE_NONE
+    desc.sink_orientation = SINK_ORIENT_COLUMNAR
+    desc.sink_param_id = param_id
+    return desc^
+
+
+def with_topn_sink(var desc: SegmentDescPod, param_id: Int) -> SegmentDescPod:
+    """`desc` with its sink changed to the top-N whose data the builder holds
+    as `param_id` (`RealBuilder.add_topn_sink`)."""
+    desc.sink_kind = SINK_TOPN
     desc.sink_key_dtype = KEY_DTYPE_NONE
     desc.sink_orientation = SINK_ORIENT_COLUMNAR
     desc.sink_param_id = param_id

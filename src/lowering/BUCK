@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Lowering: a bound LogicalPlan, a HostProfile and the resolved inputs to the
-# PhysicalPlan IR (version 16) and the ParamTable its segments index. Pure: the
+# PhysicalPlan IR (version 17) and the ParamTable its segments index. Pure: the
 # entry opens no file, reads no clock and no environment variable and touches
 # no global (README.md).
 #
@@ -32,6 +32,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        beside each that lowers (a distinct over a column
 #                        list, a repeated name, no column or a column no sink
 #                        row serves included).
+# test_lower_topn        a range of a sort's order cut as one SINK_TOPN segment: a
+#                        top-n over a scan, a limit with an offset over a sort,
+#                        the projections above it fused onto the reading
+#                        pipeline, limits over a sort or a top-n composed into
+#                        one range (saturating at Int.MAX), a top-n over an
+#                        aggregate, in a union branch and below a filter, and
+#                        the shapes that stay an operator or a sort sink.
 # test_lower_union       a UNION ALL: one segment per branch (a collect, or the
 #                        branch's own breaker segment) and a SOURCE_CONCAT
 #                        segment over them in branch order with an E3 edge to
@@ -81,6 +88,7 @@ mojo_library(
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",
         "tests/test_lower_sum_fuse.mojo",
+        "tests/test_lower_topn.mojo",
         "tests/test_lower_union.mojo",
         "tests/test_sink_capability.mojo",
     ],

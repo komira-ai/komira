@@ -1,7 +1,7 @@
 # lowering
 
 Lowering: a bound `LogicalPlan`, a `HostProfile` and the resolved inputs go in;
-the physical plan (`physical_plan`, IR version 16) and the `ParamTable`
+the physical plan (`physical_plan`, IR version 17) and the `ParamTable`
 its segments index come out. It is pure. `lower` opens no file, reads no clock
 and no environment variable and touches no global, so equal arguments give a
 `LoweredPlan` that renders byte-equal.
@@ -12,7 +12,8 @@ and no environment variable and touches no global, so equal arguments give a
   admission against the sink capability table.
 - `lowered_plan`: `LoweringInputs` (one `ScanFacts` per scan in scan
   pre-order: the footers' statistics and the columns every row group stores
-  dictionary encoded), `ParamTable`, `LoweredPlan` and the four refusal tokens.
+  dictionary encoded), `ParamTable` (`agg`, `sort`, `topn`, `batches`),
+  `LoweredPlan` and the four refusal tokens.
 - `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, whose
   spec lists the files when there are several; `SOURCE_BATCH` for an in-memory
   scan; `SOURCE_CSV` for a CSV scan, whose spec carries the path, the dialect
@@ -21,7 +22,14 @@ and no environment variable and touches no global, so equal arguments give a
   a Parquet scan with Hive partition columns, over the files' columns followed
   by the partition columns). A filter, a projection and a limit fuse into it.
   An aggregation, a distinct or a sort ends it in a sink and opens a pipeline
-  that reads that segment's output over an `E3` edge. A distinct is a
+  that reads that segment's output over an `E3` edge. A top-n, and a limit
+  that reaches a sort or a top-n through only projections (without a UDF) and
+  other limits, is cut as one `SINK_TOPN` segment that keeps the composed range
+  of rows `[offset, offset + n)` of the sort's order (a limit of `n` after
+  `offset` over a range `(start, count)` keeps `(start + offset, min(n, count -
+  offset))`, at least zero rows, with offsets saturating at the largest
+  integer); the projections between are fused, bottom up, onto the pipeline
+  that reads that segment. A distinct is a
   `SINK_AGG` grouped by every column, in order, with no aggregate, so its
   sink row is the one an aggregation with those group keys gets. A union
   (`UNION ALL`) ends each branch in a segment of its own (a `SINK_COLLECT`
@@ -32,7 +40,7 @@ and no environment variable and touches no global, so equal arguments give a
   segment unless the top node is a breaker, which is then the result.
   `cut_walk` is only the dispatch on the node's tag; each arm is its own
   module (`cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
-  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union`), and
+  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_topn`, `cut_union`), and
   `cut_state` holds what they share: the open pipeline, the cutter's segments
   and ParamTable, and the close and reopen of a breaker. A new node kind is a
   new arm module and one branch in `cut_walk`.
@@ -52,12 +60,15 @@ and no environment variable and touches no global, so equal arguments give a
 Lowering refuses by name and never replaces what it cannot lower with another
 shape:
 
-- `LOWERING_UNCUTTABLE_NODE`, naming the node: a join, top-n,
+- `LOWERING_UNCUTTABLE_NODE`, naming the node: a join,
   window, view or shared-subplan reference, cast to string or exchange node
   (the cutter has no arm for any of them, so an exchange is refused rather
   than elided on one host); a filter, projection or aggregation that carries a
-  UDF, an aggregate function that is a UDF; a limit with an offset or a
-  negative count; a limit above a sort (see Order); a partial or final
+  UDF, an aggregate function that is a UDF; a limit with a negative
+  count or a negative offset, or a top-n with a negative count; a limit with
+  an offset that does not reach a sort (only a sort's output has an order to
+  skip rows of); a limit over a sorted stream with a filter between them (see
+  Order); a partial or final
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
   than Parquet, in memory or CSV; a CSV scan with `header=false` (the reader
@@ -104,10 +115,12 @@ other segment is `ORDER_NONE`: an integer, `DECIMAL`, `COUNT`, `MIN` or `MAX`
 fold is exact in any order, and the grouped sinks fold no float argument. A
 sort's output keeps the sort's order through filters,
 projections and the final collect only as far as the engine's sink-output
-source keeps it; lowering does not state more. A limit above a sort is
-refused, because the rows it keeps would depend on that order, and a limit
-above an aggregation that reads a sort is cut: the aggregation ends the sorted
-stream.
+source keeps it; lowering does not state more. A limit that reaches a
+sort through projections and limits is cut as a `SINK_TOPN` segment, which
+answers rows of the sort's order, ties kept in the collected order. A limit
+above a sort with a filter between them is refused, because the rows it keeps
+would depend on an order no segment records, and a limit above an aggregation
+that reads a sort is cut: the aggregation ends the sorted stream.
 
 ## Dependencies
 

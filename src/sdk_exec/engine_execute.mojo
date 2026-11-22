@@ -28,7 +28,7 @@ from phase_timers.phase_timers import (
     pt_now,
     pt_record,
 )
-from physical_plan.physical_plan import AggSinkData, SortSinkData
+from physical_plan.physical_plan import AggSinkData, SortSinkData, TopNSinkData
 from pipeline_exec.real_builder import RealBuilder
 from pipeline_exec.run_plan import run_plan
 from plan_expr.expr_pool import ExprPool
@@ -87,6 +87,13 @@ def run_lowered_plan(
         reversed_sorts.append(lowered.params.sort.pop())
     while len(reversed_sorts) > 0:
         _ = builder.add_sort_sink(reversed_sorts.pop())
+    # And the top-n sinks, which SINK_TOPN segments index: an ORDER BY with a
+    # LIMIT or an OFFSET.
+    var reversed_topns = List[TopNSinkData]()
+    while len(lowered.params.topn) > 0:
+        reversed_topns.append(lowered.params.topn.pop())
+    while len(reversed_topns) > 0:
+        _ = builder.add_topn_sink(reversed_topns.pop())
     var token = CancellationToken.new()
     ref dispatch = ctx.runtime.dispatcher()
     pt_record[PH_EXEC_SETUP](t_setup)

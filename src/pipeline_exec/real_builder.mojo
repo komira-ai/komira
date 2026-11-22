@@ -35,6 +35,9 @@
 #                                 keep string dictionaries.
 #            SINK_SORT, key NONE  `SortSink` (`sink_sort`), from the `SortSinkData`
 #                                 the descriptor's `sink_param_id` names
+#            SINK_TOPN, key NONE  `SortSink` keeping a range of its order, from
+#                                 the `TopNSinkData` the descriptor's
+#                                 `sink_param_id` names
 #
 # Anything else (OP_JOIN_PROBE and the other sinks) is refused by name,
 # because no member serves it yet.
@@ -96,7 +99,9 @@ from physical_plan.physical_plan import (
     SINK_AGG,
     SINK_COLLECT,
     SINK_SORT,
+    SINK_TOPN,
     SortSinkData,
+    TopNSinkData,
     SINK_ORIENT_COLUMNAR,
     SINK_ORIENT_DICT_ENCODED,
     SOURCE_BATCH,
@@ -198,6 +203,7 @@ struct RealBuilder[
     var _parts: List[_OpParts]
     var _agg_sinks: List[AggSinkData]
     var _sort_sinks: List[SortSinkData]
+    var _topn_sinks: List[TopNSinkData]
     var _segment_pool: SegmentPool
 
     def __init__(
@@ -211,6 +217,7 @@ struct RealBuilder[
         self._parts = List[_OpParts]()
         self._agg_sinks = List[AggSinkData]()
         self._sort_sinks = List[SortSinkData]()
+        self._topn_sinks = List[TopNSinkData]()
         self._segment_pool = SegmentPool()
 
     def add_agg_sink(mut self, var data: AggSinkData) -> Int:
@@ -224,6 +231,12 @@ struct RealBuilder[
         `sink_param_id` names."""
         self._sort_sinks.append(data^)
         return len(self._sort_sinks) - 1
+
+    def add_topn_sink(mut self, var data: TopNSinkData) -> Int:
+        """Keep `data` for SINK_TOPN segments; returns the id their
+        `sink_param_id` names."""
+        self._topn_sinks.append(data^)
+        return len(self._topn_sinks) - 1
 
     def set_memory_budget(mut self, bytes: Int):
         """Bound the memory the sinks of later segment runs may draw, in
@@ -506,6 +519,26 @@ struct RealBuilder[
                         rows_schema^,
                     )
                 )
+            if desc.sink_kind == SINK_TOPN and key == KEY_DTYPE_NONE:
+                var id = desc.sink_param_id
+                if id < 0 or id >= len(self._topn_sinks):
+                    raise Error(
+                        "pipeline_exec: segment "
+                        + String(desc.seg_id)
+                        + " names top-n sink data "
+                        + String(id)
+                        + ", and the builder holds "
+                        + String(len(self._topn_sinks))
+                    )
+                var rows_schema = self._result_schema(desc, source_schema)
+                return Self.Sink.third(
+                    SortSink(
+                        self._topn_sinks[id],
+                        self._segment_pool.share(),
+                        desc.seg_id,
+                        rows_schema^,
+                    )
+                )
         raise Error(
             "pipeline_exec: the sink of segment "
             + String(desc.seg_id)
@@ -513,8 +546,9 @@ struct RealBuilder[
             " SINK_ORIENT_COLUMNAR), (SINK_AGG, KEY_DTYPE_NONE, I64, I32,"
             " F64, F32, DATE32, BOOL or DECIMAL128, SINK_ORIENT_COLUMNAR),"
             " (SINK_AGG, KEY_DTYPE_STRING,"
-            " SINK_ORIENT_COLUMNAR or SINK_ORIENT_DICT_ENCODED) and"
-            " (SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
+            " SINK_ORIENT_COLUMNAR or SINK_ORIENT_DICT_ENCODED),"
+            " (SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) and"
+            " (SINK_TOPN, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
         )
 
     def _result_schema(

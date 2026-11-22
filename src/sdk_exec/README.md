@@ -163,6 +163,14 @@ The tests run when the package is built.
   empty branch, the first branch's names, LIMIT, integer literal branches
   (INTEGER, or BIGINT when one needs it); a VARCHAR with an INTEGER is refused
   at bind and an ORDER BY before UNION ALL at parse.
+- `test_run_sql_topn`: ORDER BY with LIMIT and OFFSET through `run_sql` over
+  Parquet tables in small row groups on 1, 3 and 7 workers: every case of the
+  `order_by_limit` corpus with a LIMIT or an OFFSET (ties at the cut, NULLS
+  FIRST and LAST in both directions, NaN above inf, a 20000-row table, total
+  orders carrying `k`) answers the pinned DuckDB's rows in its order; the
+  comparison reports a reordered, changed, missing and added row; an OFFSET with
+  no LIMIT is refused at bind by name (the two corpus cases that have one are
+  listed, not skipped); a negative LIMIT is refused at parse.
 - `test_secret_capability_reveal`: a capability reveals exactly the secret
   bound to its own node id, once and after one store resolve; two capabilities
   over one bindings table each reveal their own value; an unbound node or a
@@ -178,7 +186,7 @@ the columns `col_0`, `col_1`, ... where DuckDB names them `column0`,
 `column1`, ...), the one-row relation a SELECT with no FROM reads (an integer
 literal of the result's SELECT list or of a UNION ALL branch's is INT32 when it fits, as in DuckDB; an
 integer literal anywhere else, `1 + 1` included, is still INT64), filter,
-projection, limit, aggregation, distinct and sort, and UNION ALL, the
+projection, limit (with or without an offset), aggregation, distinct, sort and top-n, and UNION ALL, the
 concatenation of its branches. The post-rewrite gate and
 the plan validation gate are not called from `run_sql`.
 

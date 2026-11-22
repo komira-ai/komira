@@ -79,9 +79,12 @@ from physical_plan.sink_data import (
 #       `parquet_partition_values` — the file list and the Hive partition
 #       constants of a Parquet source of several files. Empty for a spec of
 #       one plain file, which is read from `parquet_path` as before.
+#   17: `TopNSinkData.offset` — the rows of the sort order a top-N skips
+#       before the `n` it keeps (LIMIT n OFFSET m over a sort). 0 is the plain
+#       top-N.
 #   Retired `MorselOp` tag values (4-13) are not reused.
 
-comptime PHYSICAL_PLAN_IR_VERSION: Int = 16
+comptime PHYSICAL_PLAN_IR_VERSION: Int = 17
 
 
 # =============================================================================
