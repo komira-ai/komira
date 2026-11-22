@@ -11,7 +11,7 @@ Status: design, not built. This document makes buildable the first slice of the 
 
 Statements marked *(inferred)* are reasoning, not something read in code or in a specification. Statements marked *(to confirm)* are behaviour of a third-party catalog or engine, or of Iceberg Java beyond the specification, that this document has not checked. The REST protocol facts come from the Iceberg REST OpenAPI ([rest-catalog-open-api.yaml](https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml)) and the table facts from the [Iceberg table spec](https://iceberg.apache.org/spec/).
 
-**What the user holds is a catalog, not a table.** `komira.iceberg(...)` is an Iceberg REST catalog of many tables. Added on the session with `s.add_sql_binding("sales_catalog", sales_catalog)`, its tables are addressed in SQL as `sales_catalog.namespace.table`. One table of it, `sales_catalog.table("sales.orders")`, can be added under a name of its own, and SQL then says just that name ([What the user sees](#what-the-user-sees)).
+**What the user holds is a catalog, not a table.** `komira.iceberg(...)` is an Iceberg REST catalog of many tables. Added on the session with `s.add_sql_binding("sales_catalog", sales_catalog)`, or for one statement as `s.sql(query, sales_catalog=sales_catalog)`, its tables are addressed in SQL as `sales_catalog.namespace.table`. One table of it, `sales_catalog.table("sales.orders")`, can be added under a name of its own, and SQL then says just that name ([What the user sees](#what-the-user-sees)).
 
 ## Two questions for the owner
 
@@ -56,7 +56,7 @@ Out of the first slice. Each item is refused by name, and none is silently ignor
 
 Sources, credentials and bindings follow one model for every kind of source. That model is owned by the credentials design, `credentials_and_writes.md` (komira-ai/komira#2117), and this document uses its spelling and defines no second one.
 
-**`komira.iceberg(...)` is a catalog of many tables, not one table.** A SQL statement names a table in it as `catalog.namespace.table`. One table of it can also be bound under a name of its own, and then SQL says just that name. The examples below are that design's, character for character.
+**`komira.iceberg(...)` is a catalog of many tables, not one table.** A SQL statement names a table in it as `catalog.namespace.table`. One table of it can also be bound under a name of its own, and then SQL says just that name. Both are bound the same two ways: on the session with `add_sql_binding`, or for one statement as a keyword of `sql`. The examples below are that design's, character for character.
 
 A catalog, which holds many tables. SQL names a table in it as `catalog.namespace.table`:
 
@@ -68,6 +68,8 @@ sales_catalog = komira.iceberg(
 )
 s.add_sql_binding("sales_catalog", sales_catalog)
 s.sql("SELECT * FROM sales_catalog.sales.orders LIMIT 10")
+# for one statement:
+s.sql("SELECT * FROM sales_catalog.sales.orders LIMIT 10", sales_catalog=sales_catalog)
 ```
 
 One table of that catalog, bound under a name of its own, so SQL says just the name:
@@ -81,6 +83,12 @@ A statement over two bindings, a file source and the catalog:
 
 ```python
 s.sql("INSERT INTO sales_catalog.sales.orders SELECT * FROM raw_orders")
+```
+
+One source given before the query, read as `self` for that statement:
+
+```python
+s.sql(sales_catalog.table("sales.orders"), "SELECT count(*) FROM self")
 ```
 
 Here `s` is a `komira.Session()` and `raw_orders` a `komira.files(...)` source added under that name, as in that design's first example. The statements this document adds, and the DataFrame-door read, which takes the catalog object and reads no SQL binding:
@@ -98,8 +106,8 @@ sales.filter(sales.region == "emea").to_arrow()
 **How a catalog reaches a statement.** The Mojo SQL front end cannot turn a table name into a source by itself, so the user supplies the mapping:
 
 1. **A catalog is a source the user holds**: `komira.iceberg(uri, *, warehouse=None, credential=komira.AMBIENT, signing=None, access_delegation="vended-credentials")`. Building it does no I/O. **One table of it** is `catalog.table(name)`, where `name` is `"namespace.table"` or a tuple of namespace levels and the table name. It uses the catalog's credential.
-2. **A name in the SQL is bound to either** on the session, with `s.add_sql_binding(name, source)`. Then `s.sql(query)` takes the query alone, and every call reads the session's bindings. Re-adding a name replaces its binding.
-3. **The binder plugs the source in.** For `sales_catalog.sales.orders`, it looks `sales_catalog` up in the session's bindings and loads `sales.orders` from that catalog under the catalog's credential. For `orders_table`, the binding already names the catalog and the table. Either way it emits a `komira.iceberg.table` scan or the Iceberg write target.
+2. **A name in the SQL is bound to either** on the session, with `s.add_sql_binding(name, source)`, after which `s.sql(query)` takes the query alone; or for one statement, as a keyword of `sql` (`sales_catalog=sales_catalog`), which wins over a session binding of the same name for that statement only. `s.sql(source, query)` binds its one unnamed source as `self`; an unnamed catalog is read as `self.ns.t`. Re-adding a name on the session replaces its binding.
+3. **The binder plugs the source in.** For `sales_catalog.sales.orders`, it looks `sales_catalog` up in the statement's bindings (the call's, over the session's) and loads `sales.orders` from that catalog under the catalog's credential. For `orders_table`, the binding already names the catalog and the table. Either way it emits a `komira.iceberg.table` scan or the Iceberg write target.
 4. **The plan carries the catalog's location and the name of its credential, never a credential's value, and never a session-local name.** Two users' `sales_catalog` may be two catalogs, so a name a user bound never reaches the wire. `IcebergTableRef.catalog` is a `WireIcebergCatalog`: the `uri`, the `warehouse`, and a `WireSourceAccess` holding the credential name (`catalog-etl`) and the signing settings ([The plan wire](#the-plan-wire)). `sales_catalog.sales.orders` and `orders_table` therefore give the same plan. Whoever runs the plan resolves `catalog-etl` to a value: the session locally, or, on a job manager, the customer's secret store or the run's identity for `ambient`.
 
 What this document adds to that model is only what is specific to Iceberg:
@@ -147,7 +155,7 @@ The `DataFrame` verb `frame.write_table(sales_catalog, "sales.orders", mode="app
 ```
  Python  s.add_sql_binding("sales_catalog", sales_catalog); s.sql("INSERT INTO sales_catalog.sales.orders ...") / komira.read_table(sales_catalog, ...)
    |
- SQL parser and binder: catalog.ns.table or a one-table name, via the session's bindings -> IcebergTableRef; INSERT, CTAS, CREATE OR REPLACE
+ SQL parser and binder: catalog.ns.table or a one-table name, via the call's and the session's bindings -> IcebergTableRef; INSERT, CTAS, CREATE OR REPLACE
    |                                                (binder loads the table: uuid, schema, spec, current snapshot)
  plan: scans carry IcebergPin; the write carries WireWriteTarget.iceberg (catalog uri, warehouse, credential NAME; never a value)
    |
@@ -686,10 +694,10 @@ Every error message starts with its token, and the Python layer maps each `ICEBE
 | `iceberg_catalog` | `IcebergRestRequest` gains `method` and `body`, and the transport's `get` becomes `send`; the scripted transport records the method, the body and every header; the top-level config fields; `create_table`, `commit_table(requirements, updates, idempotency_key)` and `credentials` on `IcebergRestCatalog`; typed `TableRequirement` and `TableUpdate` values with their JSON; the committer of [Commit semantics](#commit-semantics); the bearer and OAuth2 client-credentials providers and SigV4 request signing, each built from a credential the session's resolver returned for the catalog's credential name; the error tokens. It depends on `iceberg` (for the schema, spec and snapshot types) and `aws_core` (for signing). `iceberg` does not depend on it, so HTTP stays out of the format package |
 | `parquet_api`, `parquet` | `SchemaElement.field_id`, written and read; on read, columns bind by field id, falling back to `schema.name-mapping.default`, then to names |
 | `parquet_writer` | narrow and unsigned integer widening; BINARY, FIXED_LEN_BYTE_ARRAY and UUID columns; timestamp and time annotations; decimal at the minimum width; a byte-based row-group cut; per-column metrics returned beside the bytes |
-| `sql` | qualified names of two or more parts (two parts refused with `ICEBERG_NAMESPACE_REQUIRED`); `INSERT INTO ... SELECT` and `VALUES`; `CREATE TABLE <name> (<columns>)`; qualified names in `CREATE [OR REPLACE] TABLE [IF NOT EXISTS] ... AS`; `SQL_STATEMENT_UNSUPPORTED` for the statements outside the slice; binder resolution of `catalog.ns.table`, and of a one-table binding (`orders_table`: read by its name, `INSERT` as the same append, `CREATE [OR REPLACE]` refused with `SQL_STATEMENT_UNSUPPORTED`), through the session's bindings (the binding model's statement plus the session's binding table) to the `komira.iceberg.table` kind, with the catalog's `WireIcebergCatalog`, its `data_access` set from the covering scope, in the plan |
+| `sql` | qualified names of two or more parts (two parts refused with `ICEBERG_NAMESPACE_REQUIRED`); `INSERT INTO ... SELECT` and `VALUES`; `CREATE TABLE <name> (<columns>)`; qualified names in `CREATE [OR REPLACE] TABLE [IF NOT EXISTS] ... AS`; `SQL_STATEMENT_UNSUPPORTED` for the statements outside the slice; binder resolution of `catalog.ns.table`, and of a one-table binding (`orders_table`: read by its name, `INSERT` as the same append, `CREATE [OR REPLACE]` refused with `SQL_STATEMENT_UNSUPPORTED`), through the call's and the session's bindings (the binding model's statement plus the session's binding table) to the `komira.iceberg.table` kind, with the catalog's `WireIcebergCatalog`, its `data_access` set from the covering scope, in the plan |
 | `arrow`, `plan_proto`, `plan_wire` | `WriteTarget` gains the Iceberg form; the wire arm, enum and version above, with goldens; `IcebergTableRef` moves into `plan.proto` with field 1 re-typed to the binding model's `WireIcebergCatalog` |
 | `lowering`, `pipeline_exec`, `sdk_exec` | the Iceberg file sink arm, in its own file per the lowering split, after lowering's writes slice; the scan planner for `komira.iceberg.table`; `run_sql` serves the write statements |
-| `so` (C ABI), the Python package | nothing of its own for declaring or binding: `komira.iceberg`, `catalog.table(...)`, the credential classes, `komira.SigV4`, `add_sql_binding` and `sql` are the binding model's, encoded as its `WireBoundSource` (a catalog as `WireIcebergCatalog`, one table as `IcebergTableRef iceberg_table = 4`). This document adds `read_table` and the `ICEBERG_*` exception classes |
+| `so` (C ABI), the Python package | nothing of its own for declaring or binding: `komira.iceberg`, `catalog.table(...)`, the credential classes, `komira.SigV4`, `add_sql_binding`, `sql` with its call bindings and `self` are the binding model's, encoded as its `WireBoundSource` (a catalog as `WireIcebergCatalog`, one table as `IcebergTableRef iceberg_table = 4`). This document adds `read_table` and the `ICEBERG_*` exception classes |
 
 **No new catalog trait.** `IcebergCatalog` keeps its one method. The committer is generic over `IcebergRestCatalog[T, P]`, with its transport `T` and credentials `P`. A trait for "catalogs that commit" would have one implementation until the Glue or Hive Metastore adapter lands, so it waits for that adapter (rule R9).
 
@@ -808,7 +816,8 @@ A loopback variant serves the same logic over `http_server`, for the HTTP transp
   - No secret appears in any error: each error is asserted by exact equality (rule T13).
 - **Binding.**
   - With the catalog added as `s.add_sql_binding("sales_catalog", sales_catalog)` and its credential named `catalog-etl`, `s.sql("SELECT * FROM sales_catalog.sales.orders")` plans a `komira.iceberg.table` scan whose `IcebergTableRef.catalog` holds the test catalog's `uri`, its `warehouse` and the credential name `catalog-etl`. No string field of the decoded plan equals `sales_catalog`, and the encoded plan holds no byte sequence of the client secret.
-  - `s.add_sql_binding("orders_table", sales_catalog.table("sales.orders"))` and `s.sql("SELECT * FROM orders_table")` encode to the same bytes as the qualified form. `INSERT INTO orders_table` encodes to the same bytes as `INSERT INTO sales_catalog.sales.orders`.
+  - The same statement with the catalog given for one call, `s.sql("SELECT * FROM sales_catalog.sales.orders", sales_catalog=sales_catalog)`, encodes to the same bytes, and so does `s.sql(sales_catalog, "SELECT * FROM self.sales.orders")`.
+  - `s.add_sql_binding("orders_table", sales_catalog.table("sales.orders"))` and `s.sql("SELECT * FROM orders_table")` encode to the same bytes as the qualified form, and so does `s.sql(sales_catalog.table("sales.orders"), "SELECT * FROM self")`. `INSERT INTO orders_table` encodes to the same bytes as `INSERT INTO sales_catalog.sales.orders`.
   - `CREATE TABLE orders_table AS ...` and `CREATE OR REPLACE TABLE orders_table AS ...` both fail with `SQL_STATEMENT_UNSUPPORTED`, and `orders_table.x` with `BIND_NOT_A_CATALOG`.
   - `komira.read_table(sales_catalog, "sales.orders")` on a session where `sales_catalog` was never added plans the same bytes as `s.sql("SELECT * FROM sales_catalog.sales.orders")` after adding it, and raises no `BIND_NAME_UNBOUND`.
   - `access_delegation="none"` encodes `vended = false`, and the test catalog records no `X-Iceberg-Access-Delegation` header on the load.
@@ -818,7 +827,7 @@ A loopback variant serves the same logic over `http_server`, for the HTTP transp
   - A staged `CREATE TABLE ... AS` on two fake hosts writes each host's files under the staged location through `data_access`. With no scope covering that location, it fails with `ICEBERG_STAGED_CREATE_NO_SCOPE`, and the test store holds no file.
   - The decoder refuses a `WireWriteTarget` with both `iceberg` and `access`.
   - Two loads of one table under two credential names, or two generations of one name, are two cache entries.
-  - The binding rules themselves (adding, re-adding, generations) are tested with the binding model in `credentials_and_writes.md`, not here.
+  - The binding rules themselves (adding, re-adding, a call binding over a session binding, `CREDENTIAL_NAME_CONFLICT`, generations) are tested with the binding model in `credentials_and_writes.md`, not here.
 - **Writes.**
   - Every row of the type table, refusals included.
   - Every transform, against the spec's test vectors (for example, `bucket[16]` of the int `34` is `3`).
@@ -879,7 +888,7 @@ Each decision states the recommendation first.
 9. **No file deletion after an unknown outcome until a lookup proves the commit absent; best-effort deletion after a definite failure; orphans left to the table's maintainer.**
 10. **Pruning runs where the scan is lowered, from the pin; the plan carries no file list.**
     - Rejected: the producer listing files into the plan. Plans would grow with the table, and the pin already names the file set exactly.
-11. **SQL is the first door, in DuckDB's forms. A catalog is a source the user holds (`komira.iceberg`), bound to a SQL name through the binding model of `credentials_and_writes.md`; this document adds `read_table` and `komira.IcebergError`.** The binder plugs the source in from the session's bindings, which hold a catalog or one of its tables. The plan carries the catalog's location and its credential's name, never the name the user typed in SQL.
+11. **SQL is the first door, in DuckDB's forms. A catalog is a source the user holds (`komira.iceberg`), bound to a SQL name through the binding model of `credentials_and_writes.md`; this document adds `read_table` and `komira.IcebergError`.** The binder plugs the source in from the statement's bindings, on the session or for one call, which hold a catalog or one of its tables. The plan carries the catalog's location and its credential's name, never the name the user typed in SQL.
     - Rejected: an Iceberg-only registration call (`attach_iceberg`) and a session lookup by name (`catalog("lake")`). That would be a second way to declare a source beside the shared one. `komira.iceberg(...)` is the catalog object they stood for.
     - Rejected: SQL `ATTACH ... (TYPE iceberg, ...)` in the first slice. It would put secrets in SQL text, which plans and logs carry.
 12. **Write format v2 only and read v1 and v2; refuse v3 by name.** v3 needs row lineage, deletion vectors and `initial-default`, which come later.
