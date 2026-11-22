@@ -1,0 +1,958 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 4
+plan {
+  output_schema {
+    fields {
+      name: "c_f64"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "c_i32"
+      arrow_type_id: 4
+      dtype_code: _DT_INT32
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "c_f16"
+      arrow_type_id: 10
+      dtype_code: _DT_FLOAT16
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "c_try"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "c_date"
+      arrow_type_id: 15
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "c_ts"
+      arrow_type_id: 24
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "c_str"
+      arrow_type_id: 13
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "c_dec"
+      arrow_type_id: 18
+      nullable: true
+      decimal_precision: 10
+      decimal_scale: 3
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "c_try_dec"
+      arrow_type_id: 18
+      nullable: true
+      decimal_precision: 18
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "c_both"
+      arrow_type_id: 23
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "w_int"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "w_promote"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "w_null_float"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "w_null_int"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "w_str"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "w_dec"
+      arrow_type_id: 18
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "w_bool_float"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "w_nested"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  project {
+    exprs {
+      alias {
+        child {
+          cast {
+            child {
+              col_ref {
+                name: "a"
+                side: COL_SIDE_NONE
+              }
+            }
+            target_dtype_code: _DT_FLOAT64
+            target_arrow_type_id: 12
+          }
+        }
+        name: "c_f64"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          cast {
+            child {
+              col_ref {
+                name: "f"
+                side: COL_SIDE_NONE
+              }
+            }
+            target_dtype_code: _DT_INT32
+            target_arrow_type_id: 4
+          }
+        }
+        name: "c_i32"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          cast {
+            child {
+              col_ref {
+                name: "i"
+                side: COL_SIDE_NONE
+              }
+            }
+            target_dtype_code: _DT_FLOAT16
+            target_arrow_type_id: 10
+          }
+        }
+        name: "c_f16"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          cast {
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            target_dtype_code: _DT_INT64
+            target_arrow_type_id: 5
+            try_cast: true
+          }
+        }
+        name: "c_try"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          cast {
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            target_dtype_code: _DT_INT32
+            target_arrow_type_id: 15
+          }
+        }
+        name: "c_date"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          cast {
+            child {
+              col_ref {
+                name: "a"
+                side: COL_SIDE_NONE
+              }
+            }
+            target_dtype_code: _DT_INT64
+            target_arrow_type_id: 24
+          }
+        }
+        name: "c_ts"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          cast {
+            child {
+              col_ref {
+                name: "a"
+                side: COL_SIDE_NONE
+              }
+            }
+            target_arrow_type_id: 13
+          }
+        }
+        name: "c_str"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          cast {
+            child {
+              col_ref {
+                name: "f"
+                side: COL_SIDE_NONE
+              }
+            }
+            target_arrow_type_id: 18
+            decimal_precision: 10
+            decimal_scale: 3
+          }
+        }
+        name: "c_dec"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          cast {
+            child {
+              col_ref {
+                name: "a"
+                side: COL_SIDE_NONE
+              }
+            }
+            target_arrow_type_id: 18
+            decimal_precision: 18
+            try_cast: true
+          }
+        }
+        name: "c_try_dec"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          cast {
+            child {
+              col_ref {
+                name: "a"
+                side: COL_SIDE_NONE
+              }
+            }
+            target_dtype_code: _DT_INT64
+            target_arrow_type_id: 23
+          }
+        }
+        name: "c_both"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          when {
+            cases {
+              condition {
+                binary_op {
+                  op: BIN_GT
+                  left {
+                    col_ref {
+                      name: "a"
+                      side: COL_SIDE_NONE
+                    }
+                  }
+                  right {
+                    literal {
+                      dtype_code: _DT_INT64
+                      kind: SCALAR_KIND_DTYPE
+                      time_unit: SCALAR_TIME_UNIT_MICRO
+                    }
+                  }
+                }
+              }
+              result {
+                literal {
+                  dtype_code: _DT_INT64
+                  int_val: 1
+                  kind: SCALAR_KIND_DTYPE
+                  time_unit: SCALAR_TIME_UNIT_MICRO
+                }
+              }
+            }
+            cases {
+              condition {
+                binary_op {
+                  op: BIN_LT
+                  left {
+                    col_ref {
+                      name: "b"
+                      side: COL_SIDE_NONE
+                    }
+                  }
+                  right {
+                    literal {
+                      dtype_code: _DT_INT64
+                      kind: SCALAR_KIND_DTYPE
+                      time_unit: SCALAR_TIME_UNIT_MICRO
+                    }
+                  }
+                }
+              }
+              result {
+                literal {
+                  dtype_code: _DT_INT64
+                  int_val: 2
+                  kind: SCALAR_KIND_DTYPE
+                  time_unit: SCALAR_TIME_UNIT_MICRO
+                }
+              }
+            }
+            default_expr {
+              literal {
+                dtype_code: _DT_INT64
+                int_val: -1
+                kind: SCALAR_KIND_DTYPE
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "w_int"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          when {
+            cases {
+              condition {
+                binary_op {
+                  op: BIN_GT
+                  left {
+                    col_ref {
+                      name: "a"
+                      side: COL_SIDE_NONE
+                    }
+                  }
+                  right {
+                    literal {
+                      dtype_code: _DT_INT64
+                      kind: SCALAR_KIND_DTYPE
+                      time_unit: SCALAR_TIME_UNIT_MICRO
+                    }
+                  }
+                }
+              }
+              result {
+                literal {
+                  dtype_code: _DT_FLOAT64
+                  float_val: 1
+                  kind: SCALAR_KIND_DTYPE
+                  time_unit: SCALAR_TIME_UNIT_MICRO
+                }
+              }
+            }
+            default_expr {
+              literal {
+                dtype_code: _DT_FLOAT64
+                float_val: 2.5
+                kind: SCALAR_KIND_DTYPE
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "w_promote"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          when {
+            cases {
+              condition {
+                unary_op {
+                  op: UN_IS_NULL
+                  child {
+                    col_ref {
+                      name: "b"
+                      side: COL_SIDE_NONE
+                    }
+                  }
+                }
+              }
+              result {
+                literal {
+                  kind: SCALAR_KIND_DTYPE
+                  null_dtype_code: _DT_FLOAT64
+                  time_unit: SCALAR_TIME_UNIT_MICRO
+                }
+              }
+            }
+            default_expr {
+              col_ref {
+                name: "f"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "w_null_float"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          when {
+            cases {
+              condition {
+                unary_op {
+                  op: UN_IS_NULL
+                  child {
+                    col_ref {
+                      name: "b"
+                      side: COL_SIDE_NONE
+                    }
+                  }
+                }
+              }
+              result {
+                literal {
+                  kind: SCALAR_KIND_DTYPE
+                  null_dtype_code: _DT_INT64
+                  time_unit: SCALAR_TIME_UNIT_MICRO
+                }
+              }
+            }
+            default_expr {
+              col_ref {
+                name: "a"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "w_null_int"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          when {
+            cases {
+              condition {
+                string_op {
+                  op: STR_STARTS_WITH
+                  child {
+                    col_ref {
+                      name: "s"
+                      side: COL_SIDE_NONE
+                    }
+                  }
+                  pattern: "x"
+                }
+              }
+              result {
+                col_ref {
+                  name: "s"
+                  side: COL_SIDE_NONE
+                }
+              }
+            }
+            default_expr {
+              literal {
+                string_val: "none"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "w_str"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          when {
+            cases {
+              condition {
+                binary_op {
+                  op: BIN_GT
+                  left {
+                    col_ref {
+                      name: "a"
+                      side: COL_SIDE_NONE
+                    }
+                  }
+                  right {
+                    literal {
+                      dtype_code: _DT_INT64
+                      kind: SCALAR_KIND_DTYPE
+                      time_unit: SCALAR_TIME_UNIT_MICRO
+                    }
+                  }
+                }
+              }
+              result {
+                col_ref {
+                  name: "d"
+                  side: COL_SIDE_NONE
+                }
+              }
+            }
+            default_expr {
+              col_ref {
+                name: "d"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "w_dec"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          when {
+            cases {
+              condition {
+                binary_op {
+                  op: BIN_GT
+                  left {
+                    col_ref {
+                      name: "a"
+                      side: COL_SIDE_NONE
+                    }
+                  }
+                  right {
+                    literal {
+                      dtype_code: _DT_INT64
+                      kind: SCALAR_KIND_DTYPE
+                      time_unit: SCALAR_TIME_UNIT_MICRO
+                    }
+                  }
+                }
+              }
+              result {
+                literal {
+                  dtype_code: _DT_BOOL
+                  bool_val: true
+                  kind: SCALAR_KIND_DTYPE
+                  time_unit: SCALAR_TIME_UNIT_MICRO
+                }
+              }
+            }
+            default_expr {
+              literal {
+                dtype_code: _DT_FLOAT64
+                float_val: 1.5
+                kind: SCALAR_KIND_DTYPE
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "w_bool_float"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          when {
+            cases {
+              condition {
+                binary_op {
+                  op: BIN_GT
+                  left {
+                    col_ref {
+                      name: "a"
+                      side: COL_SIDE_NONE
+                    }
+                  }
+                  right {
+                    literal {
+                      dtype_code: _DT_INT64
+                      kind: SCALAR_KIND_DTYPE
+                      time_unit: SCALAR_TIME_UNIT_MICRO
+                    }
+                  }
+                }
+              }
+              result {
+                when {
+                  cases {
+                    condition {
+                      binary_op {
+                        op: BIN_LT
+                        left {
+                          col_ref {
+                            name: "b"
+                            side: COL_SIDE_NONE
+                          }
+                        }
+                        right {
+                          literal {
+                            dtype_code: _DT_INT64
+                            kind: SCALAR_KIND_DTYPE
+                            time_unit: SCALAR_TIME_UNIT_MICRO
+                          }
+                        }
+                      }
+                    }
+                    result {
+                      literal {
+                        dtype_code: _DT_FLOAT64
+                        float_val: 1
+                        kind: SCALAR_KIND_DTYPE
+                        time_unit: SCALAR_TIME_UNIT_MICRO
+                      }
+                    }
+                  }
+                  default_expr {
+                    literal {
+                      dtype_code: _DT_FLOAT64
+                      float_val: 2
+                      kind: SCALAR_KIND_DTYPE
+                      time_unit: SCALAR_TIME_UNIT_MICRO
+                    }
+                  }
+                }
+              }
+            }
+            default_expr {
+              literal {
+                dtype_code: _DT_FLOAT64
+                float_val: 3
+                kind: SCALAR_KIND_DTYPE
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "w_nested"
+      }
+    }
+    child {
+      output_schema {
+        fields {
+          name: "a"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+          metadata_keys: "unit"
+          metadata_values: "cents"
+        }
+        fields {
+          name: "b"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "i"
+          arrow_type_id: 4
+          dtype_code: _DT_INT32
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "f"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "d"
+          arrow_type_id: 18
+          nullable: true
+          decimal_precision: 12
+          decimal_scale: 2
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "s"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "dt"
+          arrow_type_id: 15
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "ts"
+          arrow_type_id: 24
+          dtype_code: _DT_INT64
+          nullable: true
+          tz: "UTC"
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "iv"
+          arrow_type_id: 40
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "st"
+          arrow_type_id: 21
+          nullable: true
+          dict_index_type_id: 4
+          child_names: "k"
+          child_names: "v"
+          child_type_ids: 5
+          child_type_ids: 13
+          child_nullables: false
+          child_nullables: true
+        }
+      }
+      scan {
+        source {
+          binding {
+            kind_id: 1056219456
+            kind_name: "komira.orc"
+            name: "wide"
+            params {
+              key: "has_footer"
+              tag: PARAM_BOOL
+              i: 1
+            }
+            params {
+              key: "path"
+              tag: PARAM_STR
+              s: "/data/wide.orc"
+            }
+            params {
+              key: "stripe_count"
+              tag: PARAM_I64
+              i: 7
+            }
+            schema {
+              fields {
+                name: "a"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+                metadata_keys: "unit"
+                metadata_values: "cents"
+              }
+              fields {
+                name: "b"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "i"
+                arrow_type_id: 4
+                dtype_code: _DT_INT32
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "f"
+                arrow_type_id: 12
+                dtype_code: _DT_FLOAT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "d"
+                arrow_type_id: 18
+                nullable: true
+                decimal_precision: 12
+                decimal_scale: 2
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "s"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "dt"
+                arrow_type_id: 15
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "ts"
+                arrow_type_id: 24
+                dtype_code: _DT_INT64
+                nullable: true
+                tz: "UTC"
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "iv"
+                arrow_type_id: 40
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "st"
+                arrow_type_id: 21
+                nullable: true
+                dict_index_type_id: 4
+                child_names: "k"
+                child_names: "v"
+                child_type_ids: 5
+                child_type_ids: 13
+                child_nullables: false
+                child_nullables: true
+              }
+            }
+            fingerprint: 3735928559
+            structural_id: 4277009102
+            pushdown_gate {
+              mode: GATE_SHAPED
+              allowed_binary_ops: 63
+              allow_and_recurse: true
+              allow_in_list: true
+              require_stat_friendly_col: true
+            }
+            snapshot_policy: SNAPSHOT_PINNED
+            snapshot_token: 1234567890
+            orientation: SOURCE_KIND_COLUMNAR
+            variant_tag: SOURCE_VARIANT_ORC
+          }
+        }
+        has_schema: true
+        schema {
+          fields {
+            name: "a"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+            metadata_keys: "unit"
+            metadata_values: "cents"
+          }
+          fields {
+            name: "b"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "i"
+            arrow_type_id: 4
+            dtype_code: _DT_INT32
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "f"
+            arrow_type_id: 12
+            dtype_code: _DT_FLOAT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "d"
+            arrow_type_id: 18
+            nullable: true
+            decimal_precision: 12
+            decimal_scale: 2
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "s"
+            arrow_type_id: 13
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "dt"
+            arrow_type_id: 15
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "ts"
+            arrow_type_id: 24
+            dtype_code: _DT_INT64
+            nullable: true
+            tz: "UTC"
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "iv"
+            arrow_type_id: 40
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "st"
+            arrow_type_id: 21
+            nullable: true
+            dict_index_type_id: 4
+            child_names: "k"
+            child_names: "v"
+            child_type_ids: 5
+            child_type_ids: 13
+            child_nullables: false
+            child_nullables: true
+          }
+        }
+        source_kind: SOURCE_KIND_COLUMNAR
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+# The UDF runtime C ABI (docs/design/udf_runtime_interface.md section 4.3): one
+# header that every runtime library under src/ and the engine-side harness
+# include. Header only: no library is built here.
+
+export_file(
+    name = "komira_udf_runtime.h",
+    visibility = ["PUBLIC"],
+)
+
+filegroup(
+    name = "headers",
+    srcs = ["komira_udf_runtime.h"],
+    visibility = ["PUBLIC"],
+)

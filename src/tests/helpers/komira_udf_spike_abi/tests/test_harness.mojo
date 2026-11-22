@@ -96,6 +96,7 @@ def _statuses() raises:
         "UDF_HOST_CONTRACT_VIOLATION",
         "UDF_DEADLINE_EXCEEDED",
         "OPTIMIZED_UDF_READ_SET_DESCRIPTOR_MISMATCH",
+        "UDF_RUNTIME_FAULT",
     ]
     var lost: List[Int] = [13, 14, 17, 19]
     assert_equal(len(want), STATUS_COUNT)
@@ -124,7 +125,7 @@ def _statuses() raises:
         "an outcome's cancel state reaches the table",
     )
     assert_equal(run_error(Int32(STATUS_COUNT), True), "UDF_RUNTIME_FAULT", "an unknown status")
-    assert_equal(status_name(Int32(STATUS_COUNT)), "UNKNOWN(21)")
+    assert_equal(status_name(Int32(STATUS_COUNT)), "UNKNOWN(22)")
     var msg = String()
     try:
         _ = status_from_name("ERR_NOPE")
