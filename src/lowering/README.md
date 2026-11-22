@@ -12,7 +12,7 @@ and no environment variable and touches no global, so equal arguments give a
   admission against the sink capability table.
 - `lowered_plan`: `LoweringInputs` (one `ScanFacts` per scan in scan
   pre-order: the footers' statistics and the columns every row group stores
-  dictionary encoded), `ParamTable`, `LoweredPlan` and the four refusal tokens.
+  dictionary encoded), `ParamTable`, `LoweredPlan` and the five refusal tokens.
 - `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, whose
   spec lists the files when there are several; `SOURCE_BATCH` for an in-memory
   scan; `SOURCE_CSV` for a CSV scan, whose spec carries the path, the dialect
@@ -28,11 +28,14 @@ and no environment variable and touches no global, so equal arguments give a
   segment, or the branch's aggregation, distinct or sort segment when nothing
   is fused after it) and opens a pipeline whose source is `SOURCE_CONCAT` over
   those segments in branch order, with an `E3` edge to each; what stands above
-  the union fuses onto or closes that pipeline. The root is a `SINK_COLLECT`
+  the union fuses onto or closes that pipeline. An inner equi-join
+  (`cut_join`) ends its build child in a `SINK_HASH_BUILD` segment and fuses an
+  `OP_JOIN_PROBE` into the probe child's pipeline, with an `E3` edge to the
+  build segment. The root is a `SINK_COLLECT`
   segment unless the top node is a breaker, which is then the result.
   `cut_walk` is only the dispatch on the node's tag; each arm is its own
   module (`cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
-  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union`), and
+  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union`, `cut_join`), and
   `cut_state` holds what they share: the open pipeline, the cutter's segments
   and ParamTable, and the close and reopen of a breaker. A new node kind is a
   new arm module and one branch in `cut_walk`.
@@ -43,12 +46,14 @@ and no environment variable and touches no global, so equal arguments give a
   host serves, and admission. A group key picks its row from its column type
   (INT64, INT32, FLOAT64, FLOAT32, DATE32, BOOL, DECIMAL128 or STRING);
   a string key is `DICT_ENCODED` only when the scan's footers say every row
-  group stores it dictionary encoded and no projection stands between the scan
-  and the aggregation, and otherwise `COLUMNAR`. A key of several columns is
-  `(STRING, DICT_ENCODED)` when every column is such a dictionary string, and
-  `(COMPOSITE, COLUMNAR)` otherwise: any mix of those types, each column
-  keeping its own (a distinct's columns are its group keys, so a distinct over
-  several columns gets the same row).
+  group stores it dictionary encoded and no projection or join stands between
+  the scan and the aggregation, and otherwise `COLUMNAR`. A key of several
+  columns is `(STRING, DICT_ENCODED)` when every column is such a dictionary
+  string, and `(COMPOSITE, COLUMNAR)` otherwise: any mix of those types, each
+  column keeping its own (a distinct's columns are its group keys, so a
+  distinct over several columns gets the same row). The last row is
+  `(SINK_HASH_BUILD, NONE, COLUMNAR)`, a join's build segment; it indexes no
+  ParamTable row, so its `sink_param_id` is -1.
 - `render`: the deterministic text of a `LoweredPlan`.
 
 ## Refusals
@@ -56,12 +61,21 @@ and no environment variable and touches no global, so equal arguments give a
 Lowering refuses by name and never replaces what it cannot lower with another
 shape:
 
-- `LOWERING_UNCUTTABLE_NODE`, naming the node: a join, top-n,
+- `LOWERING_UNCUTTABLE_NODE`, naming the node: a top-n,
   window, view or shared-subplan reference, cast to string or exchange node
   (the cutter has no arm for any of them, so an exchange is refused rather
   than elided on one host); a filter, projection or aggregation that carries a
   UDF, an aggregate function that is a UDF; a limit with an offset or a
   negative count; a limit above a sort (see Order); a partial or final
+  aggregation; an aggregation with a group top-k; a source other than Parquet
+  or in memory.
+- `LOWERING_JOIN_UNSERVED`, naming the reason, raised before either child of
+  the join is walked: a join type other than INNER, a join with no key or with
+  key lists of different lengths, more than 8 keys, a residual predicate, the
+  sort-merge algorithm hint, a build side the plan does not define, a key that
+  is not a column of its side, a key pair whose types the probe does not
+  compare (INT64 and INT32 in any pairing, FLOAT64 with FLOAT64, STRING with
+  STRING), and a join whose output names one column twice.
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
   than Parquet, in memory or CSV; a CSV scan with `header=false` (the reader
@@ -88,13 +102,25 @@ shape:
 `morsel_rows` comes from the host profile and the schema that flows into the
 sink. `card_estimate_rows` is the row count of the scan's footers when the host
 supplied statistics, an upper bound on the rows that reach the sink, and 0
-otherwise. `mem_estimate_bytes` is 0, and `AggSinkData.estimated_groups` is 0:
+otherwise and after a join (a join can emit more rows than its probe side
+has). `mem_estimate_bytes` is 0, and `AggSinkData.estimated_groups` is 0:
 no memory decision is recorded, and no statistic a producer recorded in the
 plan is read. Every segment has one partition, and its order key is the one
 the Order section names. Whether an integer key's
 aggregation is dense or partitioned is not a field of the IR and is not
-recorded here. The payload narrowing rule of `lowering_rules` has no
-consumer without a join and is not called.
+recorded here. The payload narrowing rule of `lowering_rules` is not
+called: the build segment of a join collects its rows whole.
+
+## Joins
+
+The build side is the one the plan records (`JoinData.build_side`). Lowering
+never chooses or swaps it: RIGHT builds the right child, LEFT the left child,
+and UNSET builds the right child. The left child is walked first, then the
+right, so scans are met in pre-order whichever side builds. The probe emits
+its own columns and then the build columns. When the left child builds, a
+projection fused after the probe restores the node's column order. Several
+joins on one probe pipeline each add their own build segment. A join, like a
+projection, leaves no dictionary key to an aggregation above it.
 
 ## Order
 

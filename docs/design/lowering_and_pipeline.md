@@ -117,8 +117,8 @@ here. The cutter's output is complete or `lower` raises.
 2. `derive_payload_narrow` over `inputs`, the one host-local rule on `main` (the others of
    [the optimized plan](optimized_plan.md) §5.3 join as they are built). Its output, one `PayloadNarrowSpec` per column,
    is stored in `ParquetSourceData.payload_narrow` of the scan's source spec. The field is advisory and one leaf honours
-   it (the build-side join materializer), so a plan without a join, which is every plan of the MVP, gets an empty list;
-   the rule is wired in the slice that adds joins;
+   it (the build-side join materializer), and lowering does not call the rule yet, so the list stays empty even for a
+   plan with an inner join, whose build segment collects its rows whole;
 3. `record_segment_morsel_rows(host_profile, segment, schema)`, which records the morsel size in each segment;
 4. admission (§2.4 and §4.2): each segment's sink triple must be a row of the sink capability table, or `lower`
    raises.
@@ -211,8 +211,8 @@ policy and never instantiates one code path per edge):
 
 The first slices emit `E1` and `E3`. Q6 as one segment has no edge; the first `E3` of the MVP is the one between Q1's
 aggregation and its sort (§7.1), and the joins of the later steps use `E3` too. Of the five kinds, `E1` and `E3` are
-emitted; `E2` and `E4` are latent (a tag and a policy comment in the IR, lowered to `E3`), and `E5` is emitted when a
-join has independent build sides. The driver raises on a tag it has no policy for, and a test says so (§8), so a cutter
+emitted; `E2` and `E4` are latent (a tag and a policy comment in the IR, lowered to `E3`), and `E5` is not emitted yet (a join's
+build segments are cut with `E3`). The driver raises on a tag it has no policy for, and a test says so (§8), so a cutter
 that starts to emit `E4` cannot be silently serialized.
 
 **Combine order** (`order_key_kind`): `ORDER_NONE` is for exact folds (integer sums, counts, min, max, `DECIMAL`
@@ -253,7 +253,7 @@ bit-reproducible across worker counts; a grouped one is not served yet.
 `LOWERING_SINK_UNSERVED`, naming the triple. The alternative, to turn that segment into a generic collect and
 compute the sink another way, changes what runs without changing what the plan says; the plan's author sees a slow
 or different answer and no refusal. The same applies to the Parquet arm that is not total (§2.2) and to a join the
-probe operator cannot take: `LOWERING_JOIN_UNSERVED`, naming the join type and the strategy.
+probe operator cannot take: `LOWERING_JOIN_UNSERVED`, naming the reason (the join type, the algorithm hint or the key types).
 
 A host that has to re-optimize to lower is a bug in the optimizer, not a thing for lowering to do. If a plan reaches
 `lower` in a form the cutter cannot cut, the fix is a rewrite in `optimizer`, run before `lower`.
@@ -266,7 +266,7 @@ A host that has to re-optimize to lower is a bug in the optimizer, not a thing f
 | `lowered_plan` | `LoweredPlan`, `LoweringInputs`, `ParamTable` and the refusal tokens |
 | `cut_walk` | the three-role walk of §2.3: the dispatch on the node's tag, one branch per arm |
 | `cut_state` | what the arms share: the open pipeline, the cutter's segments and `ParamTable`, the close of a pipeline in a sink and the reopen over an `E3` edge |
-| `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_sort` | one arm each: the checks that refuse the node, run before its child is walked, and the fuse or close onto the child's pipeline |
+| `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_sort`, `cut_join` | one arm each: the checks that refuse the node, run before its child is walked, and the fuse or close onto the child's pipeline |
 | `sink_capability` | the table of sink triples a host serves (§4.2): data, no operator |
 | `render` | the deterministic text render of a `LoweredPlan` the corpus compares |
 
@@ -717,7 +717,7 @@ size at which the sink gets its own package.
 | `SINK_HASH_BUILD` and `OP_JOIN_PROBE` | joins | `op_join_build` with komira#1396 and #1397; probes komira#1427 to #1431, #1459, #1465; semi and anti marking komira#1485; fused kernels komira#1413 | step 3 |
 | `SINK_PARTITION_BY`, `SINK_PARTITION_TOPN` | window functions | komira#1469 to #1472 | step 4 |
 
-Each of these pull requests is open and none is on `main`; some are typed stage operators and some are runtime-spec
+The operator packages these pull requests built (the `op_join_*` packages) are on `main`; some are typed stage operators and some are runtime-spec
 kernels, and which a sink wraps is read from the pull request when its slice starts. The capability table has a `spillable` column per row, false for every row of the MVP, so the arbitrator of step 6 knows
 which sinks it may ask and a denial of a non-spillable row fails the query (§3.4). A sink whose kernels are not
 merged has no row in the capability table, and a plan that needs it is refused at lowering (§2.4), not run slowly.
@@ -935,6 +935,23 @@ Each step adds a sink, an edge or an operator, and none changes the cutter's thr
 | 8. Composite group key | the row that serves what §4.2 once refused: a group key of two or more mixed-type columns, compared by cells, over the per-worker tables and serial merge of slice 5 (built; D8's partitioned sink is not) | slice 5 |
 | 9. Reproducible float sinks | 9a: position-derived morsel ids in `parquet_scan` (§3.3), 1.0 to 1.6k lines. 9b: `GrainSourceImpl`, `ORDER_ROW_RANGE`, grain state in the ungrouped and dense sinks and the determinism tests (D7), 2.0 to 3.0k lines | the first float sink; slices 3 and 5 |
 
+**What step 3 built, against the row above (inner joins).** `lowering.cut_join` cuts an INNER equi-join. The build child's
+pipeline ends in a `SINK_HASH_BUILD` segment (key `NONE`, orientation `COLUMNAR`, `sink_param_id` -1, since it indexes no
+`ParamTable` row). The probe child's pipeline stays open and gains `OP_JOIN_PROBE` naming that segment, with an `E3` edge
+to it. The left child is walked first, then the right. The build side is the one the plan records; `UNSET` builds the
+right child, and lowering never chooses or swaps a side. When the left child builds, a fused projection restores the
+node's column order after the probe. After a join the cardinality estimate is 0 and no dictionary key is recognised.
+`lower` refuses with `LOWERING_JOIN_UNSERVED`, before it walks either child: a join type other than INNER, no key or key lists
+of unequal length, more than 8 keys, a residual, the sort-merge hint, an undefined build side, a key that is not a column
+of its side, a key pair the probe does not compare (INT64 and INT32 in any pairing, FLOAT64, STRING), and an output that
+names a column twice. It differs from section 3.6 in one place. The build segment publishes its rows as a batch (a
+`CollectSink`), and the probe segment's builder indexes them once, serially, before its workers start
+(`op_join_probe`'s `MultiKeyHashJoinBuilder`), instead of publishing a built table. `run_segment`, `PublishedOutputs` and
+the morsel sink trait carry only batches, and the index is built once and serially either way. One answer departs
+from DuckDB, by name: the kernel stands for a NULL key by the INT64 value 9221120237041090561, so a non-NULL INT64 key
+holding it is refused (`JOIN_KEY_RESERVED`) instead of matching; a validity bit beside the key slot would lift it. Not built: outer, semi,
+anti and cross joins, a parallel build in the build segment's finalize, runtime filters, build-side memory accounting and
+spill, chunking of a large probe output (a morsel gives one batch), and DATE and DECIMAL keys.
 **What step 9 built, against the row above.** The ungrouped sink, the only one that folds a float argument, is
 reproducible; neither 9a nor `GrainSourceImpl` was built, because the sources already stamp a position on every morsel:
 the Parquet source's partition id is its flat row group times 2^20 plus the morsel's index in that row group (the
