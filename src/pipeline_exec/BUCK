@@ -10,10 +10,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # Two sets of members stand behind that seam. The fakes (`fake_support`,
 # `fake_members`, `fake_builder`, `fake_dispatch`) drive the scheduler in tests.
 # The real members are the sources `source_parquet`, `source_batch`,
-# `source_sink_output` and `source_jsonl` (a JSONL file read at the plan's
-# schema, served as a batch source), the operators `op_filter`, `op_project` and `op_limit`,
+# `source_sink_output`, `source_csv` (a CSV file decoded at its bound column
+# types, served as a resident batch) and `source_jsonl` (a JSONL file read at
+# the plan's schema, served as a batch source), the operators `op_filter`, `op_project` and `op_limit`,
 # the sinks `sink_collect`, `sink_agg` (the ungrouped aggregation, over
-# `agg_fold` and `agg_output`, drawing memory from `segment_pool`), `sink_group_agg` (the same keyed by
+# `agg_fold` and `agg_output`, drawing memory from `segment_pool`; COUNT(DISTINCT) in
+# every aggregation sink is `count_distinct`), `sink_group_agg` (the same keyed by
 # fixed-width columns, its tables charged as they grow), `sink_string_group_agg` (the same keyed by
 # strings, over `string_keys`' intern table; `string_harness` is its test table), `sink_sort`
 # (the in-memory sort, over `sort_nulls` and `op_sort`; `sort_harness` is its
@@ -22,8 +24,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # writes descriptors and sample data by hand and `tpch_q6` and `tpch_q1` are Q6 and Q1 as
 # such plans with lineitem-shaped tables.
 #
+# test_count_distinct_state       the COUNT(DISTINCT) state by itself: value cells of
+#                                 every type, entries per aggregate, group and value,
+#                                 the merge, the table limits and a denied pool.
 # test_edge_policy_and_ready_set  the edge tag and order key policies, the plan
 #                                 checks and the ready set.
+# test_float_sum_workers_concurrent
+#                                 a float SUM and AVG in ORDER_ROW_RANGE on real
+#                                 runtimes of 1, 2, 4 and 7 workers: the same bits
+#                                 as the position-order fold over Parquet and a
+#                                 resident batch, 1e16, 1, -1e16, 1 exactly 1.0,
+#                                 the cursor-grain route's refusal.
 # test_variants                   each variant slot forwards to its member.
 # test_run_segment                every row once, the end of input once per
 #                                 worker, the operator chain, combine once
@@ -50,7 +61,20 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 gathered, the output schema of empty input.
 # test_sources                    resident and sink-output sources, the Parquet
 #                                 source built from a spec: projection, glob,
-#                                 pushed filter, morsel size, refusals.
+#                                 pushed filter, morsel size, refusals, a spec
+#                                 that lists its files and their partition
+#                                 constants.
+# test_real_concat                SOURCE_CONCAT: the producers' rows in the spec's
+#                                 order, on several workers, producers with no
+#                                 rows, operators on the concatenation, the
+#                                 nullability of any producer kept, and a
+#                                 producer outside the dependencies refused.
+# test_source_csv                 the CSV source built from a spec: typed, quoted
+#                                 and NULL cells, gzip by extension, a dialect,
+#                                 the declared types over inference, a header
+#                                 with no row; a plan over it end to end;
+#                                 refusals of a spec with no file, a file whose
+#                                 columns are not the bound ones, a missing file.
 # test_source_jsonl               the JSONL source built from a spec: every row
 #                                 at the spec's schema and order, a missing key
 #                                 NULL, an unread key skipped, a file of
@@ -73,6 +97,36 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 128-bit decimal sums, refusals by name.
 # test_sink_agg_partials          non-empty partials merged: dealing, the merge's
 #                                 overflow refusal, pool return on failure.
+# test_sink_count_distinct        COUNT(DISTINCT x) in the ungrouped sink: every value
+#                                 type, NaN and zero, dictionaries read by value, NULL
+#                                 and empty input, several workers, refusals by exact
+#                                 message, a pool too small.
+# test_sink_count_distinct_grouped
+#                                 COUNT(DISTINCT x) per group and SELECT DISTINCT (keys
+#                                 and no aggregate) in the fixed-width and string-keyed
+#                                 sinks against an oracle.
+# test_sink_count_distinct_grouped_limits
+#                                 the grouped sinks' COUNT(DISTINCT) refusals by exact
+#                                 message and the pool charged and refused in a worker
+#                                 and in the merge.
+# test_sink_float_agg             SUM, AVG, MIN, MAX and the counts of FLOAT64 and
+#                                 FLOAT32 columns against a plain loop: the fold
+#                                 order (rows, then workers) bit for bit, NaN above
+#                                 every value on every cut, infinities and
+#                                 overflow, -0.0, NULL and no row, declared types
+#                                 and refusals, the grouped sinks' refusal.
+# test_sink_float_agg_duckdb      the same aggregates held to the pinned DuckDB's
+#                                 answers (the agg_float_ungrouped corpus) by the
+#                                 README's tolerance rule, through run_plan and
+#                                 dealt to workers; the comparison's own refusals.
+# test_sink_float_agg_positions   the sink folding by source position
+#                                 (ORDER_ROW_RANGE): one SUM and AVG, bit for bit,
+#                                 on 1 to 7 workers and every dealing; chunks of
+#                                 one morsel, two morsels at one position refused,
+#                                 no row, the pool charged per position.
+# test_sink_group_agg_keys        the grouped sink over DATE32, BOOL and DECIMAL128
+#                                 keys against a dict oracle, empty input, the
+#                                 refusals by name, decimal scale and precision.
 # test_sink_int_sum_decimal       SUM over an integer column declared DECIMAL(38, 0):
 #                                 exact past INT64 in both signs, equal to the
 #                                 DECIMAL fold of the cast form, NULL and empty,
@@ -111,6 +165,33 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # test_tpch_q6                    Q6 over Parquet, end to end, against an
 #                                 oracle and a hand-computed answer.
 # test_tpch_q6_concurrent         Q6 on threads, run after run.
+
+# The cases of komira_sql_conformance's agg_float_ungrouped corpus.
+_FLOAT_AGG_CASES = [
+    "c01_v_double",
+    "c02_v_float",
+    "c03_nan_mixed_double",
+    "c04_nan_mixed_float",
+    "c05_nan_first_double",
+    "c06_nan_first_float",
+    "c07_nan_only_double",
+    "c08_nan_only_float",
+    "c09_pos_inf_double",
+    "c10_pos_inf_float",
+    "c11_neg_inf_double",
+    "c12_neg_inf_float",
+    "c13_both_inf_double",
+    "c14_both_inf_float",
+    "c15_overflow_double",
+    "c16_overflow_float",
+    "c17_all_null_double",
+    "c18_all_null_float",
+    "c19_none_double",
+    "c20_none_float",
+    "c21_neg_zero_double",
+    "c22_neg_zero_float",
+]
+
 mojo_library(
     name = "pipeline_exec",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "spike/**/*.mojo"]),
@@ -123,6 +204,7 @@ mojo_library(
         "//src/byte_buffer:byte_buffer",
         "//src/containers:containers",
         "//src/column_kernels:column_kernels",
+        "//src/csv:csv",
         "//src/exec_types:exec_types",
         "//src/fs:fs",
         "//src/jsonl:jsonl",
@@ -143,16 +225,20 @@ mojo_library(
         "//src/scan_source:scan_source",
     ],
     test_deps = [
+        "//src/compression:compression",
         "//src/parquet_api:parquet_api",
         "//src/parquet_writer:parquet_writer",
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
+        "tests/test_count_distinct_state.mojo",
         "tests/test_edge_policy_and_ready_set.mojo",
+        "tests/test_float_sum_workers_concurrent.mojo",
         "tests/test_group_agg_plan.mojo",
         "tests/test_op_filter.mojo",
         "tests/test_op_limit_concurrent.mojo",
         "tests/test_op_project_limit.mojo",
+        "tests/test_real_concat.mojo",
         "tests/test_real_plan.mojo",
         "tests/test_real_plan_concurrent.mojo",
         "tests/test_run_plan.mojo",
@@ -163,13 +249,21 @@ mojo_library(
         "tests/test_sink_agg.mojo",
         "tests/test_sink_agg_partials.mojo",
         "tests/test_sink_collect.mojo",
+        "tests/test_sink_count_distinct.mojo",
+        "tests/test_sink_count_distinct_grouped.mojo",
+        "tests/test_sink_count_distinct_grouped_limits.mojo",
+        "tests/test_sink_float_agg.mojo",
+        "tests/test_sink_float_agg_duckdb.mojo",
+        "tests/test_sink_float_agg_positions.mojo",
         "tests/test_sink_group_agg.mojo",
+        "tests/test_sink_group_agg_keys.mojo",
         "tests/test_sink_int_sum_decimal.mojo",
         "tests/test_sink_sort.mojo",
         "tests/test_sink_string_group_agg.mojo",
         "tests/test_sort_keys.mojo",
         "tests/test_sort_plan.mojo",
         "tests/test_sort_plan_concurrent.mojo",
+        "tests/test_source_csv.mojo",
         "tests/test_source_jsonl.mojo",
         "tests/test_sources.mojo",
         "tests/test_string_group_memory.mojo",
@@ -180,6 +274,14 @@ mojo_library(
         "tests/test_tpch_q6_concurrent.mojo",
         "tests/test_variants.mojo",
     ],
+    # Declared data is staged at the path given, and the test opens it by that
+    # path: DuckDB's answer to each case of the agg_float_ungrouped corpus.
+    test_data = {
+        "tests/test_sink_float_agg_duckdb.mojo": {
+            "duckdb/" + c + ".tsv": "//src/tests/conformance/komira_sql_conformance:agg_float_ungrouped/" + c
+            for c in _FLOAT_AGG_CASES
+        },
+    },
     visibility = ["PUBLIC"],
 )
 

@@ -6,7 +6,7 @@ is used, never at load.
     test_minor.py --lib-dir <dir> --runtime-dir <dir> --fake <name> --version <n>
 
 `<dir>/<name>/libkomira.so` is a stand-in of fake_libkomira.c reporting
-version `<n>`.
+version `<n>` (`--runtime-dir`, which the rule passes, is not read).
 """
 
 import os
@@ -25,7 +25,7 @@ def main(args):
     # action started, and the loader reports the absolute path.
     directory = os.path.abspath(os.path.join(arg("--lib-dir"), arg("--fake")))
     version = int(arg("--version"))
-    native = _native.load(directory, search_path=[os.path.abspath(arg("--runtime-dir"))])
+    native = _native.load(directory)
     assert native.abi_version == version, native.abi_version
     assert komira.abi_version() == version
     assert "komira_sql_stream" not in _native._FUNCTIONS

@@ -3,8 +3,11 @@
 Status: design, partly built. The allowlist entry that admits the package (`python` in `PYTHON_SURFACE`,
 [tests/python_closure_allowlist.bzl](../../tests/python_closure_allowlist.bzl)) landed with this document.
 Release 1's surface is built ([python/README.md](../../python/README.md)): the loader, `Session` with
-`register_parquet` and `close`, `abi_version()`, `__version__`, `KomiraError`, `LibraryLoadError` and
-`UnsupportedCpuError`, and their tests. `Session.sql`, `Result` and the default session are not.
+`register_parquet` and `close`, `abi_version()`, `__version__`, `KomiraError`, `LibraryLoadError`
+and `UnsupportedCpuError`, and their tests. The linux-x86_64 wheel is built and carries `libkomira`, its native
+owners and the Mojo runtime libraries in one directory (decision 6), so `pip install komira` needs no other
+distribution. `Session.sql`, `Result` and the default session are not built; the linux-arm64 and macos-arm64
+wheels are not built.
 
 ## Release 1
 
@@ -13,14 +16,14 @@ it installs, imports and loads `libkomira` at ABI 1.1, and nothing in it runs a 
 library's run call does not exist yet.
 
 - Its public names are `__version__`, `abi_version()` (the library's `komira_abi_version()`, loading the
-  library if needed), `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError` and `Session`. `Session()` takes no argument and
-  has `register_parquet(name, path)`, `close()`, `closed` and the context-manager methods. `Session.sql`, `Result`,
+  library if needed), `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError`
+  and `Session`. `Session()` takes no argument and has `register_parquet(name, path)`, `close()`, `closed` and the context-manager methods. `Session.sql`, `Result`,
   the module-level `sql` and `register_parquet`, and `UnsupportedOperation` arrive with the run call.
 - The per-session lock and the `os.register_at_fork` hook of decision 3's behaviour list are not built
   yet; they come with `Session.sql`, the first call that runs long enough to need them.
 - It has no dependency on pyarrow: no call returns Arrow data until `Session.sql`. pyarrow becomes a
   dependency with the Arrow terminals, as decision 7 lists.
-- It depends on Modular's `mojo-compiler` for the Mojo runtime libraries (decision 6).
+- It has no dependency on any other distribution: the Mojo runtime libraries are in the wheel (decision 6).
 - The calls of ABI 1.1 that return protobuf bytes or plan text (`komira_parquet_schema`,
   `komira_csv_binding`, `komira_json_binding`, `komira_plan_render`) are bound only as private methods of
   `komira._native.Native`: they have no Python type yet and no public API.
@@ -42,19 +45,20 @@ mapping, the wheel rule, the release member). Each of them needs the same answer
 lives, what it and its modules are called, which names are public, which parts of the earlier,
 never-published Python SDK are carried over, and what its metadata says. This document gives those
 answers. It does not decide the C ABI (symbols and status codes), the wheel's platform tags and CPython
-range, the Mojo runtime route, or the DataFrame surface; each has its own design, named under
+range, or the DataFrame surface; each has its own design, named under
 [What is decided elsewhere](#what-is-decided-elsewhere).
 
 Fixed before this design and not reopened here: the distribution (the name on PyPI, the name `pip install`
 takes) is `komira`, the same as the import package (`komira-ai` is the organisation's name only: the GitHub
 organisation, the PyPI organisation account and the mopm namespace; PyPI has one flat namespace); it is
-published by the top-level workflow
-`.github/workflows/pypi.yml` through the GitHub environments `testpypi` and `pypi`, by trusted
+published by the top-level workflows
+`.github/workflows/pypi.yml` (the Linux wheel) and `.github/workflows/pypi-macos-arm64.yml` (the macOS arm64
+wheel) through the GitHub environments `testpypi` and `pypi`, by trusted
 publishing with no token, and nothing is uploaded or registered by hand. The owner has given the go to release `komira` from that workflow
 before the DataFrame surfaces exist, so the name is registered on PyPI by the first release the workflow
 makes, and no one registers or uploads it any other way; the package lives in `python/` in this repository; it is published as a wheel first; the wheel
-carries `libkomira` and never the Mojo runtime (if the library needs runtime libraries at load time, the
-wheel depends on Modular's own published package for them); the release platforms are linux-x86_64,
+carries `libkomira`, its native owners and the Mojo runtime libraries the library loads, and depends on no
+package of Modular's (decision 6); the release platforms are linux-x86_64,
 linux-arm64 and macos-arm64; the first public API is SQL-first and the DataFrame surfaces follow (the first
 release on PyPI comes before it, with no query call and no pyarrow: [Release 1](#release-1)). The design of the SDK is settled
 and is a port of the earlier one: two DataFrame surfaces, one shaped like pandas and one shaped like polars,
@@ -74,11 +78,12 @@ python/
   komira/           the import package
     __init__.py     the public names, and nothing else (decision 3)
     py.typed        the PEP 561 marker (decision 8)
-    _native.py      the ctypes loader: finds and opens libkomira, checks the ABI major version
+    _native.py      the ctypes loader: opens libkomira, checks the ABI major version
+    _runtime.py     the check of a Mojo runtime already loaded in the process (decision 6)
     _session.py     Session, Result, the default session
     _errors.py      KomiraError and its subclasses
     _arrow.py       the Arrow C stream import
-    _lib/           not in the repository: the wheel rule stages libkomira here (decision 6)
+    _lib/           not in the repository: the wheel rule copies libkomira's directory here (decision 6)
   tests/
     BUCK            python_binding_test targets
     test_*.py
@@ -143,7 +148,7 @@ The whole public surface of the first release is these names in `komira.__all__`
 | `sql(query) -> Result`, `register_parquet(name, path)` | the same two calls on the process's default session (decision 5) |
 | `KomiraError` | the base class of every error the package raises on purpose (decision 9) |
 | `UnsupportedOperation` | a `KomiraError`: komira refused a construct by name (an SQL feature the engine does not run yet, an option it does not take) |
-| `LibraryLoadError` | a `KomiraError`: `libkomira` or a library it needs could not be loaded, or its ABI major version is not the one this package was written for |
+| `LibraryLoadError` | a `KomiraError`: `libkomira` or a library it needs could not be loaded, or its ABI major version is not the one this package was written for. That includes a file missing from the package (the message is the loader's and names the file) and a Mojo runtime of another build already loaded in the process (decision 6) |
 | `UnsupportedCpuError` | a `LibraryLoadError`: on Linux x86_64 the CPU lacks a flag of x86-64-v3, the level `libkomira` is compiled for there, so the library is not opened; the message names the missing flags |
 | `__version__` | the installed distribution's version, read with `importlib.metadata.version("komira")` (the distribution's name) |
 
@@ -235,13 +240,65 @@ visible from every thread, as a module-level name would be.
 
 ### 6. Finding the library, with no environment variable
 
-- An installed package loads `komira/_lib/libkomira.so` (`libkomira.dylib` on macOS), the library the
-  wheel carries beside its own `lib/` directory of native owners, which is the library's run path
-  (`$ORIGIN/lib:$ORIGIN`, [tools/build/mojo/README.md](../../tools/build/mojo/README.md)). It is the
-  layout of `//src/so:libkomira[runnable]`, so the wheel rule copies that directory.
-- The Mojo runtime libraries are not in the wheel. Where the loader finds them is the runtime route's
-  decision; whatever it is, a missing or wrong runtime raises `LibraryLoadError` naming the library and
-  the version it needed.
+The macOS arm64 wheel (`//python:komira_wheel_macos_arm64`, macOS 11 or later on Apple silicon, tagged
+`py3-none-macosx_11_0_arm64`) is built from its own `[dist]` directory and its own pinned compiler. It is built
+and tested only by pypi-macos-arm64.yml, never in a pull request (`//python:wheel_install_test_macos_arm64`, on
+the farm's macOS workers), and a run publishes it only from main.
+
+- An installed package loads `komira/_lib/libkomira.so`. The wheel carries
+  `//src/so:libkomira[dist]` whole at `komira/_lib/`: `libkomira.so`, and in `_lib/lib/` the native owners
+  and the three Mojo runtime libraries. The runtime libraries are the ones of the toolchain's pinned
+  `mojo-compiler` package that compiled libkomira, so runtime and compiler match by construction. `[dist]`
+  is `[runnable]` without the C++ runtime (`libstdc++.so.6`, `libgcc_s.so.1`); `[runnable]` keeps it,
+  because build workers have none. On macOS arm64 `[dist]` is `libkomira.dylib` and, in `lib/`, the three
+  runtime `.dylib` files, with no owners (the C archives are linked into the dylib) and no C++ runtime; its
+  run path is `@loader_path/lib`.
+- The library's run path (`$ORIGIN/lib:$ORIGIN`,
+  [tools/build/mojo/README.md](../../tools/build/mojo/README.md)) resolves the owners and the runtime in
+  `_lib/lib/`, so the loader sets no search path and preloads nothing. It opens `<dir>/libkomira.so` with
+  `RTLD_LOCAL`. A file missing from the package raises `LibraryLoadError` with the loader's own message,
+  which names the file.
+- **The runtime check.** Before the open, `komira._runtime.check_loaded_runtime` looks, for each of the
+  three runtime names, for a copy already loaded in the process (`dlopen(name, RTLD_NOLOAD)`, its
+  directory from `dlinfo`). A copy from the package's own file is fine. A copy from another file is
+  accepted when its GNU build id equals the package's (the same build, for example Modular's PyPI
+  `mojo-compiler` 1.0.0 beside the package); a different or absent build id raises `LibraryLoadError`
+  saying the library is already loaded from that directory as another build and that a process holds one
+  Mojo runtime. The check runs on Linux and does nothing elsewhere.
+- **Two Mojo runtimes in one process** (read from the pinned files and glibc's loader, and run by the
+  `//python:beside_*` targets). The three libraries have `DT_SONAME` equal to the file name, default
+  visibility for every defined symbol and no symbol versioning. glibc matches a `NEEDED` name against the
+  name and SONAME of every loaded object before it searches any path, whatever the `RTLD_LOCAL` or
+  `RTLD_GLOBAL` of the earlier open; opening a different file by absolute path maps a second copy.
+  - Modular's runtime imported first, same version: libkomira binds to Modular's copy and the package's
+    copy is never mapped. The build ids are equal, so the check accepts it.
+  - The package's library first, then Modular's `libKGENCompilerRTShared.so` by path, same version: a
+    second KGEN is mapped, and its `NEEDED` runtime libraries bind to the package's copies. Both work.
+  - Another Mojo version imported first (`mojo-compiler` 1.2.0, which `max` 26.7.0 requires): without the
+    check, libkomira would bind silently to that runtime, whose symbol names are a superset. The check
+    refuses by name instead.
+  - Another Mojo version imported after libkomira: Modular's KGEN fails to load with the loader's
+    `undefined symbol` (it needs `AsyncRT` and `Globals` symbols the 1.0.0 libraries lack), and libkomira
+    keeps working. This cannot be made safe: one process holds one Mojo runtime version, so `import max`
+    beside komira works only while both were built with the same Mojo version.
+  - Why not `RTLD_GLOBAL` for the package's runtime: it would put the package's KGEN in the global scope,
+    where its default-visibility definitions interpose the ones other Mojo libraries bring. Why not
+    renaming the sonames: it means modifying Modular's binaries, and two copies of the Globals libraries
+    would mean two allocators, two CPU-device tables and two fault handlers, the state those libraries
+    exist to prevent.
+- **Upgrading, and moving the Mojo pin.** `pip install --upgrade komira` uninstalls the old release's files
+  (its `RECORD`) and installs the new one, so a file the new release no longer carries (a runtime library a
+  new Mojo renamed, for example) is gone and `_lib/` is whole again. `//python:upgrade_test` installs two releases of the wheel one after the other into
+  one environment the way pip does and holds the
+  result to everything `//python:wheel_install_test` holds of a fresh install, plus that every file
+  only the older release had is gone. A libkomira beside another build's runtime is not made by an upgrade:
+  the wheel carries the runtime that built its libkomira, both out of one `[dist]` directory. The mixed case is in a
+  process: another Mojo build's runtime already loaded when libkomira opens is refused by name
+  (`//python:beside_other_mojo_loaded_first`, the runtime check above). To move the Mojo pin: change
+  `mojo_compiler` in `tools/build/platforms/table.bzl` for every platform row, and the `third_party/modular`
+  wheels of the same version in the same commit; `//python:refuses_modular_unlike_toolchain` fails when the
+  two differ, and the wheel rule refuses a wheel whose runtime needs more glibc or C++ runtime than the
+  limits in `_NATIVE_NEEDS` (`python/BUCK`).
 - Tests load the library their target staged: the private `_native.load(lib_dir)` takes the directory a
   `python_binding_test` passes as `--lib-dir`. It is an argument of a private function, not a user setting.
 - There is no lookup by environment variable (`KOMIRA_NATIVE_LIB`, `KOMIRA_NATIVE_LIBDIR` and the
@@ -264,9 +321,9 @@ name = "komira"
 dynamic = ["version"]   # stamped by the wheel rule
 description = "SQL over local files, with libkomira, the komira query engine, in process"
 readme = "README.md"
-requires-python = ">=3.13"   # the oldest CPython the package's tests run; the wheel design may widen it
-license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.11"   # the oldest CPython the package's tests run (python/pythons.bzl)
+license = "Apache-2.0 AND LicenseRef-Modular-Proprietary"
+license-files = ["LICENSE", "NOTICE", "MODULAR_LICENSE", "MODULAR_THIRD_PARTY_NOTICES"]
 authors = [{ name = "The komira authors" }]
 keywords = ["sql", "arrow", "parquet", "query-engine"]
 classifiers = [
@@ -276,13 +333,16 @@ classifiers = [
   "Operating System :: MacOS",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Database",
   "Typing :: Typed",
 ]
 dependencies = [
-  "pyarrow",   # range: the wheel design, from the range the Arrow terminals are tested at
-  # the Mojo runtime package, if the runtime route needs one
+  # none in release 1: no Requires-Dist, and none for the Mojo runtime (decision 6)
+  # "pyarrow",   # arrives with the Arrow terminals; range from the range they are tested at
 ]
 
 [project.optional-dependencies]
@@ -290,26 +350,43 @@ pandas = ["pandas"]   # range: as for pyarrow
 polars = ["polars"]
 
 [project.urls]
-Homepage = "https://github.com/komira-ai/komira"
 Source = "https://github.com/komira-ai/komira"
 Issues = "https://github.com/komira-ai/komira/issues"
+Documentation = "https://github.com/komira-ai/komira/blob/main/docs/install.md"
+Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
 ```
 
-- **PEP 639 licence metadata.** `license` is the SPDX expression of the repository's licence and
-  `license-files` puts the licence text in the wheel's `.dist-info/licenses/`. There is no
-  `License ::` classifier: PEP 639 deprecates them alongside an expression. `LICENSE` and `NOTICE` are the
-  repository root's files (`//:LICENSE` is already an exported file); the wheel rule stages them, so
-  `python/` holds no copy that could drift from the root. The wheel rule's read-back check refuses a
-  wheel without both: an absent licence file must not build a wheel with no licence in it.
+- **PEP 639 licence metadata.** `license` is an SPDX expression with two terms: `Apache-2.0` for the
+  repository's code and `LicenseRef-Modular-Proprietary` for the three Mojo runtime libraries the wheel
+  carries. The pinned `mojo-compiler` conda package states `LicenseRef-Modular-Proprietary` in its
+  metadata and ships the Modular Community License Terms as `info/licenses/LICENSE` and a list of its
+  third-party components as `info/licenses/Third-Party-Notices`; it has no Apache text and no per-file
+  statement for the three libraries. So `license-files` puts four files in the wheel's
+  `.dist-info/licenses/`: `LICENSE` and `NOTICE` (the repository root's) and `MODULAR_LICENSE` and
+  `MODULAR_THIRD_PARTY_NOTICES` (those two files of the conda package, extracted unmodified at build
+  time). There is no `License ::` classifier: PEP 639 deprecates them alongside an expression. The wheel
+  rule stages the files, so `python/` holds no copy that could drift. The wheel rule's read-back check
+  refuses a wheel without them: an absent licence file must not build a wheel with no licence in it.
+- **No `Requires-Dist`.** The wheel's `METADATA` lists no dependency in release 1, and none on
+  `mojo-compiler`: the runtime libraries are in the wheel (decision 6).
+- **The tag is `py3-none-manylinux_2_35_x86_64`.** `libAsyncRTRuntimeGlobals.so` needs
+  `GLIBC_2.35`, so a `manylinux_2_34` tag would promise a glibc the library does not run on; the highest
+  C++ runtime versions the three need are `GLIBCXX_3.4.30` and `CXXABI_1.3.11`
+  (`libKGENCompilerRTShared.so`), which manylinux_2_35's limits admit. The wheel rule
+  takes the floor as an attribute, set per platform in `python/BUCK` with those two symbol-version
+  limits, and its read-back check holds the wheel's native files to them.
 - **No internal names.** Authors are "The komira authors", not a person; the URLs name only this
   repository; no internal host, no private repository, no address. The public-boundary lint reads
   `python/` like every file of the cell.
 - **Only what is true.** The `Operating System` classifiers name the release platforms, each of which
-  gets its wheel only after that wheel's install test passes on that platform (in the release workflow
+  gets its wheel only after that wheel's install test passes on that platform (in pypi-macos-arm64.yml
   for macOS, never in a pull request's check). The CPython classifiers name the interpreters the
-  package's tests run: 3.13 today ([third_party/python](../../third_party/python/README.md)), and 3.14
-  when a test of the package runs the pinned 3.14. `requires-python` starts at the oldest of them;
-  claiming older versions waits for a test on them. `Typing :: Typed` because the package ships
+  package's tests run: 3.11, 3.12, 3.13 and 3.14, each pinned in
+  [third_party/python](../../third_party/python/README.md) and listed once in
+  [python/pythons.bzl](../../python/pythons.bzl), which the wheel's metadata, the tests and the release
+  workflow's smoke jobs all read. `requires-python` starts at the oldest of them; claiming an older
+  version waits for a test on it. 3.10, which reached its end of life in October 2026, is outside, and
+  an install test holds that it is refused. `Typing :: Typed` because the package ships
   `py.typed` (decision 8).
 - **`python/` is not an installable project.** It has no `pyproject.toml` and no `[build-system]`
   table, so `pip install ./python` fails, as expected: the package is installed from its wheel. The
@@ -349,8 +426,7 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
 | question | where |
 |---|---|
 | the SQL and plan doors of the C ABI, the Arrow C stream export, session options, status codes, abort containment | the ABI design for running a query (`src/so`) |
-| wheel tags, the supported CPython range, `Requires-Dist` ranges, RUNPATH, sdist, release member, PyPI stages | the wheel and release design |
-| where the Mojo runtime comes from | the runtime route decision |
+| the wheel tags of linux-arm64 and macos-arm64, the supported CPython range, `Requires-Dist` ranges, sdist, release member, PyPI stages | the wheel and release design |
 | the verbs of the two DataFrame surfaces, the refusal policy for verbs | the DataFrame surface design |
 | Python UDFs in worker processes | [udf_runtime_interface.md](udf_runtime_interface.md) and its Python design |
 
@@ -360,8 +436,9 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
   refuses one, and the package adds nothing to its ceiling.
 - No public name of the package is configured by an environment variable.
 - The public names are exactly `komira.__all__`; a private module's name is never in user documentation.
-- The wheel carries `libkomira` and its native owners, its licence files and `py.typed`, and no file of
-  Modular's runtime distribution.
+- The wheel carries `libkomira`, its native owners, the three Mojo runtime libraries of the
+  toolchain's pinned `mojo-compiler`, the licence files of both and `py.typed`, and requires no other
+  distribution.
 - A query answers what DuckDB answers for the same SQL, or refuses by name.
 
 ## How is it tested?
@@ -373,6 +450,10 @@ ABI major version and an absent library with `LibraryLoadError`; `SELECT 1 AS n`
 checked-in Parquet fixture answer as DuckDB does; an unknown table, a syntax error and an unsupported
 construct raise from `sql` with their step and code; a `Result` read twice refuses the second read;
 closing a session with an unread result does not crash.
+
+The wheel is installed into an empty environment and run there (`//python:wheel_install_test` on CPython 3.13,
+and `_py311`, `_py312` and `_py314` on the other supported minors), alone: the environment holds komira and no other distribution, and the runtime is mapped from
+`<site-packages>/komira/_lib/lib`. `//python/tests:runtime_test` holds the runtime check on stand-in libraries.
 
 ## What are the limits and open questions?
 

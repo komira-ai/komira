@@ -1,8 +1,12 @@
 //! The export list and the per-library checks of `native_so`
-//! (native_so.zig), as functions of what native_elf.zig and
-//! native_callsites.zig read, so each is unit-tested on its own inputs
-//! (native_so_test.zig). The numbers are the checks of
-//! docs/design/native_packaging.md, "Checks, per library".
+//! (native_so.zig), as functions of what native_elf.zig, native_macho.zig
+//! and native_callsites.zig read, so each is unit-tested on its own inputs
+//! (native_so_test.zig, native_macho_test.zig). The numbers are the checks
+//! of docs/design/native_packaging.md, "Checks, per library". Checks 4 to 7
+//! read a Mach-O library (`Shared.format == .macho`) by their Mach-O rules,
+//! the `*MachO` functions below: the same property, held through the load
+//! commands and two-level binding instead of the dynamic section and symbol
+//! versions.
 //!
 //! A check adds one line per finding to a `Red`; the caller fails the build
 //! action when any line was added, and otherwise writes the green message
@@ -10,6 +14,7 @@
 
 const std = @import("std");
 const elf = @import("native_elf.zig");
+const macho = @import("native_macho.zig");
 
 pub const Alloc = std.mem.Allocator;
 const Sym = elf.Sym;
@@ -213,6 +218,29 @@ pub fn versionScript(alloc: Alloc, soname: []const u8, names: []const []const u8
     return b.items;
 }
 
+/// The exported symbols list (ld64's `-exported_symbols_list`) exporting
+/// exactly `names`: one per line, each with the `_` Mach-O prepends to a C
+/// name; every other symbol is not exported.
+pub fn exportedSymbolsList(alloc: Alloc, names: []const []const u8) ![]const u8 {
+    var b = std.ArrayList(u8).empty;
+    for (names) |n| try b.writer(alloc).print("_{s}\n", .{n});
+    return b.items;
+}
+
+/// The C names of an exported symbols list `exportedSymbolsList` wrote,
+/// sorted: each line without its leading `_`. A line without one names no C
+/// symbol and is kept whole, so check 1 shows it.
+pub fn symbolsListNames(alloc: Alloc, text: []const u8) ![][]const u8 {
+    var out = std.ArrayList([]const u8).empty;
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (line.len == 0) continue;
+        try out.append(alloc, if (line.len > 1 and line[0] == '_') line[1..] else line);
+    }
+    return sorted(alloc, out.items);
+}
+
 /// The global names of a version script `versionScript` wrote: the lines
 /// between `global:` and `local:`, without their `;`.
 pub fn scriptGlobals(alloc: Alloc, text: []const u8) ![][]const u8 {
@@ -243,18 +271,20 @@ pub fn lines(alloc: Alloc, text: []const u8) ![][]const u8 {
 // ---- checks 1 to 7 ---------------------------------------------------------
 
 /// 1. Every export starts komira_, and the exports equal the generated list
-/// (and the version script's global names equal it too).
+/// (and the version script's global names equal it too; for a Mach-O
+/// library, the exported symbols list's names).
 pub fn check1(alloc: Alloc, so: Shared, list: []const []const u8, script: []const []const u8, red: *Red) ![]const u8 {
+    const what = if (so.format == .macho) "exported symbols list" else "version script";
     const exp = try exportsOf(alloc, so);
     var bad = std.ArrayList([]const u8).empty;
     for (exp) |n| if (!std.mem.startsWith(u8, n, komira)) try bad.append(alloc, n);
     try red.names("exports without the komira_ prefix", bad.items);
     try red.names("listed names the library does not export", try minus(alloc, list, exp));
     try red.names("exports not in the generated list", try minus(alloc, exp, list));
-    try red.names("version script names not in the list", try minus(alloc, script, list));
-    try red.names("listed names not in the version script", try minus(alloc, list, script));
+    try red.names(try std.fmt.allocPrint(alloc, "{s} names not in the list", .{what}), try minus(alloc, script, list));
+    try red.names(try std.fmt.allocPrint(alloc, "listed names not in the {s}", .{what}), try minus(alloc, list, script));
     if (exp.len == 0) try red.add("the library exports nothing", .{});
-    return std.fmt.allocPrint(alloc, "{d} exports, all komira_, exactly the generated list and the version script", .{exp.len});
+    return std.fmt.allocPrint(alloc, "{d} exports, all komira_, exactly the generated list and the {s}", .{ exp.len, what });
 }
 
 /// 2. Every name a caller calls that the owner's archives define is
@@ -323,7 +353,8 @@ pub fn check3(alloc: Alloc, so: Shared, weak: []const []const u8, owners: []cons
 /// Whether the library calls outside komira at all: a strong undefined symbol
 /// without the komira_ prefix. A shim of atomics alone (async_api's
 /// pool depth) needs nothing of glibc, so the link records no libc.so.6 and
-/// no GLIBC_ version, and that is green.
+/// no GLIBC_ version, and that is green. A Mach-O library is read the same
+/// way, for libSystem (check4MachO).
 pub fn callsGlibc(so: Shared) bool {
     for (so.syms) |s| {
         if (!s.defined and s.bind != .weak and !std.mem.startsWith(u8, s.name, komira)) return true;
@@ -350,6 +381,7 @@ fn contains(list: []const []const u8, x: []const u8) bool {
 /// library calls outside komira, `callsGlibc`) and exactly the declared owners (`owners`, their SONAMEs); DT_RUNPATH is `$ORIGIN`
 /// alone when an owner is declared, and absent otherwise; no DT_RPATH.
 pub fn check4(alloc: Alloc, so: Shared, soname: []const u8, owners: []const []const u8, red: *Red) ![]const u8 {
+    if (so.format == .macho) return check4MachO(alloc, so, soname, owners, red);
     if (so.soname) |s| {
         if (!std.mem.eql(u8, s, soname)) try red.add("SONAME is {s}, not {s}", .{ s, soname });
     } else try red.add("no SONAME (want {s})", .{soname});
@@ -407,6 +439,7 @@ pub fn versionAbove(a: []const u32, b: []const u32) bool {
 /// 5. Every GLIBC_ version the object needs is a release at or below
 /// `floor` (the platform row's os_floor).
 pub fn check5(alloc: Alloc, so: Shared, floor: []const u8, red: *Red) ![]const u8 {
+    if (so.format == .macho) return check5MachO(alloc, so, floor, red);
     const fl = (try parseVersion(alloc, floor)) orelse {
         try red.add("the floor {s} is not a dotted version", .{floor});
         return "";
@@ -450,6 +483,7 @@ pub fn check5(alloc: Alloc, so: Shared, floor: []const u8, red: *Red) ![]const u
 /// 6. DT_FLAGS carries DF_SYMBOLIC (zig links with -z now, so the value
 /// also carries DF_BIND_NOW: 0xa).
 pub fn check6(alloc: Alloc, so: Shared, red: *Red) ![]const u8 {
+    if (so.format == .macho) return check6MachO(alloc, so, red);
     const f = so.flags orelse {
         try red.add("no DT_FLAGS entry: not linked -Bsymbolic", .{});
         return "";
@@ -461,6 +495,7 @@ pub fn check6(alloc: Alloc, so: Shared, red: *Red) ![]const u8 {
 /// 7. Every strong undefined symbol is GLIBC_-versioned or a komira_ symbol
 /// (check 3's), and the weak undefined ones are exactly `weak`.
 pub fn check7(alloc: Alloc, so: Shared, weak: []const []const u8, red: *Red) ![]const u8 {
+    if (so.format == .macho) return check7MachO(alloc, so, weak, red);
     var stray = std.ArrayList([]const u8).empty;
     var strong_n: usize = 0;
     for (try undefinedOf(alloc, so, false)) |s| {
@@ -476,6 +511,136 @@ pub fn check7(alloc: Alloc, so: Shared, weak: []const []const u8, red: *Red) ![]
     try red.names("weak undefined symbols not on the recorded weak list", try minus(alloc, have.items, ws));
     try red.names("recorded weak names the library no longer references (update the list)", try minus(alloc, ws, have.items));
     return std.fmt.allocPrint(alloc, "{d} strong undefined symbols, all GLIBC_ or komira_; weak undefined exactly the {d} recorded", .{ strong_n, ws.len });
+}
+
+// ---- checks 4 to 7 of a Mach-O library -------------------------------------
+
+/// What a Mach-O library may load besides the declared komira owners: the
+/// system's C library (libSystem, glibc's counterpart) and its C++ runtime
+/// (an owner with `cxx_runtime` links the system libc++, which macOS ships
+/// and keeps ABI-stable, where an ELF owner links zig's statically).
+pub const macos_system_dylibs = [_][]const u8{
+    "/usr/lib/libSystem.B.dylib",
+    "/usr/lib/libc++.1.dylib",
+};
+
+fn isMacSystem(name: []const u8) bool {
+    for (macos_system_dylibs) |d| if (std.mem.eql(u8, d, name)) return true;
+    return false;
+}
+
+/// The run path a Mach-O library with a komira owner carries: the owners'
+/// install names are `@rpath/<file>`, found beside the library.
+pub const loader_path = "@loader_path";
+
+/// 4, Mach-O. The install name (LC_ID_DYLIB) is `soname`; the loaded
+/// dylibs are the system's (`macos_system_dylibs`; libSystem among them
+/// whenever the library calls outside komira) and exactly the declared
+/// owners (their install names); LC_RPATH is `@loader_path` alone when an
+/// owner is declared, and absent otherwise. Every dylib is loaded by a plain
+/// LC_LOAD_DYLIB: a re-export would hand the loaded library's whole API on
+/// as this library's own (exports check 1 cannot see in LC_SYMTAB), and a
+/// weak, upward or lazy load is never what an owner's link asks for.
+pub fn check4MachO(alloc: Alloc, so: Shared, soname: []const u8, owners: []const []const u8, red: *Red) ![]const u8 {
+    const id = so.soname orelse "";
+    if (!std.mem.eql(u8, id, soname)) try red.add("install name is {s}, not {s}", .{ id, soname });
+    var other = std.ArrayList([]const u8).empty;
+    var system = false;
+    for (so.needed) |n| {
+        if (std.mem.eql(u8, n, macos_system_dylibs[0])) system = true;
+        if (!isMacSystem(n) and !contains(owners, n)) try other.append(alloc, n);
+    }
+    try red.names("loaded dylibs that are neither the system's nor a declared owner", other.items);
+    var odd = std.ArrayList([]const u8).empty;
+    for (so.needed, 0..) |n, i| {
+        const cmd = if (i < so.load_cmds.len) so.load_cmds[i] else macho.LC_LOAD_DYLIB;
+        if (cmd != macho.LC_LOAD_DYLIB) try odd.append(alloc, try std.fmt.allocPrint(alloc, "{s} ({s})", .{ n, macho.loadName(cmd) }));
+    }
+    try red.names("dylibs loaded by a command other than LC_LOAD_DYLIB", odd.items);
+    var absent = std.ArrayList([]const u8).empty;
+    for (owners) |o| if (!contains(so.needed, o)) try absent.append(alloc, o);
+    try red.names("declared owners not loaded", absent.items);
+    if (!system and callsGlibc(so)) try red.add("libSystem is not loaded, but the library has undefined symbols outside komira_ (not linked against the system?)", .{});
+    if (owners.len == 0) {
+        try red.names("LC_RPATH entries (no komira owner is loaded, so none is wanted)", so.runpath);
+    } else if (so.runpath.len == 0) {
+        try red.add("no LC_RPATH, but a komira owner is loaded: dyld would not find {s} beside this library (want LC_RPATH {s})", .{ owners[0], loader_path });
+    } else {
+        var extra = std.ArrayList([]const u8).empty;
+        for (so.runpath) |r| if (!std.mem.eql(u8, r, loader_path)) try extra.append(alloc, r);
+        try red.names("LC_RPATH entries other than @loader_path", extra.items);
+        if (so.runpath.len > 1 and extra.items.len == 0) try red.add("LC_RPATH lists @loader_path {d} times", .{so.runpath.len});
+    }
+    var b = std.ArrayList(u8).empty;
+    try b.writer(alloc).print("install name {s}; loads", .{soname});
+    for (so.needed) |n| try b.writer(alloc).print(" {s}", .{n});
+    try b.appendSlice(alloc, if (owners.len == 0) "; no run path" else "; LC_RPATH @loader_path");
+    return b.items;
+}
+
+/// 5, Mach-O. The library is built for macOS with a minimum OS version
+/// (LC_BUILD_VERSION) at or below `floor` (the platform row's os_floor,
+/// `11.0`): dyld refuses to load it on an older macOS, as an ELF library
+/// needing a newer GLIBC_ version fails on an older glibc.
+pub fn check5MachO(alloc: Alloc, so: Shared, floor: []const u8, red: *Red) ![]const u8 {
+    const fl = (try parseVersion(alloc, floor)) orelse {
+        try red.add("the floor {s} is not a dotted version", .{floor});
+        return "";
+    };
+    const minos = so.minos orelse {
+        try red.add("no LC_BUILD_VERSION: the library records no minimum macOS version", .{});
+        return "";
+    };
+    if ((so.platform orelse 0) != macho.PLATFORM_MACOS) try red.add("built for platform {d}, not macOS ({d})", .{ so.platform orelse 0, macho.PLATFORM_MACOS });
+    const v = (try parseVersion(alloc, minos)).?;
+    if (versionAbove(v, fl)) try red.add("minimum macOS version {s} is above the floor {s}", .{ minos, floor });
+    return std.fmt.allocPrint(alloc, "minimum macOS version {s}, at or below the floor {s}", .{ minos, floor });
+}
+
+/// 6, Mach-O. ld64 has no -Bsymbolic; what it guards is that the library's
+/// own references bind to its own definitions. In Mach-O they do unless the
+/// library is linked flat (MH_FORCE_FLAT, or MH_TWOLEVEL missing: every
+/// undefined name looked up in every image) or a definition is weak and
+/// exported (dyld coalesces a weak definition with another image's copy).
+pub fn check6MachO(alloc: Alloc, so: Shared, red: *Red) ![]const u8 {
+    if (so.mh_flags & macho.MH_TWOLEVEL == 0) try red.add("header flags 0x{x} lack MH_TWOLEVEL (0x80): linked with a flat namespace", .{so.mh_flags});
+    if (so.mh_flags & macho.MH_FORCE_FLAT != 0) try red.add("header flags 0x{x} carry MH_FORCE_FLAT (0x100): linked -flat_namespace", .{so.mh_flags});
+    var weak = std.ArrayList([]const u8).empty;
+    for (so.syms) |s| if (s.exported() and s.bind == .weak) try weak.append(alloc, s.name);
+    try red.names("exported weak definitions (dyld may bind them to another image's copy)", try sorted(alloc, weak.items));
+    return std.fmt.allocPrint(alloc, "header flags 0x{x}: two-level namespace, no exported weak definition", .{so.mh_flags});
+}
+
+/// 7, Mach-O. Every strong undefined symbol is komira_ (check 3's) or
+/// binds, by its two-level ordinal, to a system dylib
+/// (`macos_system_dylibs`); a flat lookup, the main executable or the
+/// library itself is not a place any undefined symbol, komira_ included, may
+/// bind to (check 3 matches komira_ names to owners by name alone). The weak
+/// undefined ones are exactly `weak`.
+pub fn check7MachO(alloc: Alloc, so: Shared, weak: []const []const u8, red: *Red) ![]const u8 {
+    var stray = std.ArrayList([]const u8).empty;
+    var strong_n: usize = 0;
+    var unbound = std.ArrayList([]const u8).empty;
+    for (so.syms) |s| {
+        if (s.defined) continue;
+        const l = s.lib orelse continue;
+        if (std.mem.eql(u8, l, macho.lib_flat) or std.mem.eql(u8, l, macho.lib_self) or std.mem.eql(u8, l, macho.lib_executable))
+            try unbound.append(alloc, try std.fmt.allocPrint(alloc, "{s} from {s}", .{ s.name, l }));
+    }
+    try red.names("undefined symbols bound to no loaded dylib", try sorted(alloc, unbound.items));
+    for (try undefinedOf(alloc, so, false)) |s| {
+        strong_n += 1;
+        if (std.mem.startsWith(u8, s.name, komira)) continue;
+        if (s.lib) |l| if (isMacSystem(l)) continue;
+        try stray.append(alloc, try std.fmt.allocPrint(alloc, "{s} from {s}", .{ s.name, s.lib orelse "<no library>" }));
+    }
+    try red.names("strong undefined symbols neither bound to a system dylib nor komira_", try sorted(alloc, stray.items));
+    var have = std.ArrayList([]const u8).empty;
+    for (try undefinedOf(alloc, so, true)) |s| try have.append(alloc, s.name);
+    const ws = try sorted(alloc, weak);
+    try red.names("weak undefined symbols not on the recorded weak list", try minus(alloc, have.items, ws));
+    try red.names("recorded weak names the library no longer references (update the list)", try minus(alloc, ws, have.items));
+    return std.fmt.allocPrint(alloc, "{d} strong undefined symbols, all system or komira_; weak undefined exactly the {d} recorded", .{ strong_n, ws.len });
 }
 
 // ---- the README program calls the library's C (slice 10) ---------------------

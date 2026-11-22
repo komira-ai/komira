@@ -24,9 +24,10 @@ Each library's BUCK file builds it three times over the same arguments:
 1. `<lib>_unprefixed`, a `cxx_library` with upstream's names, which nothing
    links;
 2. `prefix_symbols`, a `prefix_header` ([`defs.bzl`](defs.bzl),
-   `prefix_tool header`): `elfsyms armap` reads the
-   unprefixed archive's symbol table, aws-lc's `util/read_symbols.go` skip
-   list (and the compiler builtin `__umodti3`) is applied, and the header
+   `prefix_tool header`): the defined non-local symbols of every member of
+   the unprefixed archive (the names its symbol table lists) are read;
+   aws-lc's `util/read_symbols.go` skip list (and the compiler builtin
+   `__umodti3`) is applied, and the header
    says `#define X <prefixed X>` for each name left, plus the
    `extra_symbols` (names the library references but never defines, such as
    aws-lc's four weak `OPENSSL_memory_*` allocator hooks). Its `[symbols]`
@@ -39,8 +40,8 @@ Each library's BUCK file builds it three times over the same arguments:
    its C users.
 
 `prefixed_archive_check` (`prefix_tool check`) then reads
-every member of the prefixed archive (`elfsyms symtab`) and fails its build
-action unless
+every non-local symbol of every member of the prefixed archive and fails its
+build action unless
 
 - every defined symbol starts with the prefix (or matches the target's
   `allow`, each with its reason in the BUCK file: `__umodti3` and
@@ -59,21 +60,28 @@ is a `ValidationInfo`, and Buck2 runs the validations of every target in the
 graph it builds, so no build that links the library succeeds while the
 check is red.
 
-## elfsyms
-
-[`elfsyms.c`](elfsyms.c), built static (musl) with the pinned zig by `c_exe`:
-the C toolchain has no `nm` or `readelf` (an action may not take one from the
-worker), so the build reads ELF itself. `elfsyms armap <lib.a>` prints an
-archive's symbol table; `elfsyms symtab <lib.a>` prints every non-local
-symbol of every member as `DEF|UND <bind> <type> <visibility> <name>`. A
-member it cannot read is an error, never skipped.
-
 ## prefix_tool
 
 Both rules' actions run `prefix_tool`, a Zig program
 ([`src/main.zig`](src/main.zig)), built by `zig_exe` behind its unit tests
-(`:prefix_tool_unit`); no shell runs. It reads the archive by running
-`elfsyms` and nothing else.
+(`:prefix_tool_unit`); no shell runs and no other program. The C toolchain
+has no `nm` or `readelf` (an action may not take one from the worker), so
+the tool reads the archive itself, with the object reader `native_so` uses
+(the module `:native_objects`: [`native_elf.zig`](native_elf.zig), which
+hands Mach-O to [`native_macho.zig`](native_macho.zig)):
+
+- a System V archive (the GNU `/` or `/SYM64/` symbol table, `//` long
+  names) of 64-bit little-endian ELF objects, as the Linux builds make, or
+- a BSD archive (`__.SYMDEF` symbol table, `#1/<n>` long names) of thin
+  arm64 Mach-O objects, as the darwin-arm64 build makes. A Mach-O name loses
+  the one `_` Mach-O prepends to a C name (`_snappy_compress` is
+  `snappy_compress`), so the header renames the names the C sources use and
+  the check holds the same names to the prefix on either platform.
+
+Every member is read, never only the archive's symbol table, so the header
+and the check read the same symbols. A member it cannot read (another
+format, a thin archive, a header or a name pointing outside its file) fails
+the action, naming the archive and what is wrong; nothing is skipped.
 
 - `prefix_tool header` ([`src/prefix.zig`](src/prefix.zig)) sorts the names
   by bytes, each once (as `LC_ALL=C sort -u` does), and writes the header:
@@ -90,7 +98,8 @@ Both rules' actions run `prefix_tool`, a Zig program
 
 The command line is in [`src/cli.zig`](src/cli.zig); the cases are in
 [`src/prefix_test.zig`](src/prefix_test.zig) and
-[`src/cli_test.zig`](src/cli_test.zig).
+[`src/cli_test.zig`](src/cli_test.zig), which reads two committed archives
+of the same C, one of each kind ([`src/testdata`](src/testdata/README.md)).
 
 ## Each library's shared library
 
@@ -155,8 +164,27 @@ Mojo library calls) and the owners whose C its own archives call
    loaded"). The linked README programs cannot be read for this: `mojo
    build` strips their symbol tables.
 
+`native_so` reads Mach-O as well as ELF, by each file's magic: a `.dylib`,
+Mach-O objects, and BSD-layout archives of them (`#1/<n>` long names, a
+`__.SYMDEF` symbol table member), in
+[`native_macho.zig`](native_macho.zig). Only thin arm64 is read. A C name
+loses the `_` Mach-O prepends, an owner is named by its install name, and
+`native_so exports --format macho` writes the exported symbols list ld64
+takes in place of the version script (check 1 reads it back). Checks 4 to 7
+hold a Mach-O library to the same properties through its load commands; no
+rule links one yet:
+
+| check | fails when (Mach-O) |
+|---|---|
+| 4 | the install name (`LC_ID_DYLIB`) differs; a loaded dylib is neither `/usr/lib/libSystem.B.dylib`, `/usr/lib/libc++.1.dylib` nor a declared owner; a declared owner is not loaded; a dylib is loaded by a command other than `LC_LOAD_DYLIB` (a re-export would pass the loaded library's API on as this one's); libSystem is not loaded though the library has a strong undefined symbol outside `komira_`; `LC_RPATH` is not exactly `@loader_path` when an owner is declared, or present when none is |
+| 5 | no `LC_BUILD_VERSION` (or `LC_VERSION_MIN_MACOSX`), a platform other than macOS, or a minimum macOS version above the floor (the row's `os_floor` version, `11.0`) |
+| 6 | `MH_TWOLEVEL` is clear or `MH_FORCE_FLAT` set (a flat namespace), or an exported definition is weak: ld64 has no `-Bsymbolic`, and these are the ways a name the library defines could bind to another image's copy |
+| 7 | any undefined symbol, `komira_` included, is bound to flat lookup, the main executable or the library itself; a strong undefined symbol is neither `komira_` nor bound by its two-level ordinal to libSystem or libc++; or the weak undefined symbols differ from `weak_undefined` |
+
 `[dynsym]` is `native_so dynsym`: the dynamic section, the versions needed
-and every dynamic symbol with its version. The unit tests
+and every dynamic symbol with its version (for a Mach-O library: its install
+name, loaded dylibs, `LC_RPATH`, header flags, minimum OS version and
+symbols, each undefined one with the dylib it binds to). The unit tests
 ([`native_so_test.zig`](native_so_test.zig), `:native_so_unit`, which
 `:native_so` waits for) show each check green on a library shaped as
 crypto's is and red on its defect;
@@ -164,6 +192,10 @@ crypto's is and red on its defect;
 byte by byte, with every dynamic tag and version section the reader keeps
 (several NEEDED and run path entries among them), and checks what the
 reader reads from it.
+[`native_macho_test.zig`](native_macho_test.zig) does the same for Mach-O: a
+dylib, an object and a BSD archive built byte by byte, every malformed input
+refused with its reason, and each check green on an owner-shaped `.dylib`
+and red on its defect.
 
 Each owner of the design's table has its `<library>_native` target in its
 own BUCK file: crypto, http_core (`NEEDED` crypto's),

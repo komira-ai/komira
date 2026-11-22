@@ -4,8 +4,9 @@ Licensed under the Apache License, Version 2.0 (see LICENSE).
 This file records third-party material that text committed to this repository
 is derived from, the third-party code compiled into the native files of the
 Python wheel, and, in its last section, the third-party runtime that the
-wheel and the conda packages built from this repository depend on but
-do not carry. Material that
+bundled flavour of the wheel carries and its external flavour and the conda
+packages built from this repository depend on.
+Material that
 is only built or tested against (the C and C++ libraries of third_party/, the
 toolchains) is fetched from pinned archives at build time and is not
 committed; each is under its own license, which its archive carries.
@@ -61,7 +62,8 @@ Third-party code inside the native files
 Two of the native owner libraries that libkomira links, and that the wheel
 carries, hold third-party code compiled in (docs/design/wheel_licence_audit.md
 lists every native file of the wheel). The other native files are komira's own
-code. Redistributed here in binary form, with the notices their licenses
+code, except the three Mojo runtime libraries the bundled flavour carries,
+which are Modular's (the last section). Redistributed here in binary form, with the notices their licenses
 require.
 
 1. snappy 1.3.1, statically linked into `libkomira_compression_native.so.1`.
@@ -136,13 +138,14 @@ require.
    License text is in LICENSE.
 
 None of the other libraries the wheel's files need at run time is carried: not
-the system's glibc (`libc.so.6`, `libpthread.so.0`), and not the codec
+the C++ runtime the Mojo runtime libraries need (libstdc++.so.6, libgcc_s.so.1),
+not the system's glibc (`libc.so.6`, `libpthread.so.0`), and not the codec
 libraries libz, liblz4, libzstd, libbz2 and liblzma, which komira opens by name
 from the host when a file uses that codec. The libraries it does not carry
 include no aws-lc, s2n-tls or other TLS library: none is linked.
 
-The Mojo runtime: a dependency, not distributed
------------------------------------------------
+The Mojo runtime: Modular's libraries, carried in the bundled wheel
+-------------------------------------------------------------------
 
 komira's libraries, the shared library libkomira among them, are compiled
 by Modular's Mojo compiler and need the Mojo runtime libraries when they are
@@ -151,17 +154,43 @@ libMSupportGlobals; .so on Linux, .dylib on macOS). These libraries are
 Modular's, are not part of this repository, and are not covered by its
 Apache License grant.
 
-The Python package `komira` and komira's conda packages are built to carry
-none of these libraries and no other file of Modular's. Each declares a
-dependency on Modular's own `mojo-compiler` package at the compiler version
-the libraries were built with, and the user's package installer fetches that
-package from Modular's publication (PyPI for the wheel, Modular's conda
-channel for the conda packages) under the license that package declares. On
-PyPI, `mojo-compiler` 1.0.0 declares `LicenseRef-MAX-Platform-Software-License`.
-docs/design/mojo_runtime_pypi_vs_conda.md records what that package holds.
-The wheel carries this file as one of its two license files; a conda package
-carries only LICENSE.
+The Python wheel `komira` is built in two flavours (python/flavour.bzl), and a
+release publishes one of them.
 
-This section does not cover `mojo_bundle` outputs (tools/build/package), such
-as the base image under packaging/images: a bundle does carry the Mojo runtime
-libraries in its `lib/`.
+The bundled flavour carries these three files, unmodified, at
+`komira/_lib/lib/`: libKGENCompilerRTShared.so, libAsyncRTRuntimeGlobals.so
+and libMSupportGlobals.so, taken from the Mojo compiler package that compiled
+libkomira (Modular's conda package `mojo-compiler` 1.0.0, pinned by sha256 in
+tools/build/platforms/table.bzl). It carries no other file of Modular's.
+
+The external flavour carries none of them and no other file of Modular's. It
+declares a dependency on Modular's PyPI package `mojo-compiler` at the
+compiler version libkomira was built with, which the user's package installer
+fetches from PyPI under the licence that package declares, and it loads the
+three libraries from where that package installs them. Its
+License-Expression is `Apache-2.0`, and it carries LICENSE and this file
+only. The paragraph below is about the bundled flavour.
+
+The licence those files are distributed under is the one their package
+states. That package's metadata declares `LicenseRef-Modular-Proprietary`,
+and its licence file, `info/licenses/LICENSE`, is the Modular Community
+License Terms; its `info/licenses/Third-Party-Notices` lists the third-party
+components of Modular's software. Neither file, nor the three libraries,
+states the Apache License: Modular's statement that Mojo is licensed under
+the Apache License v2.0 with LLVM Exceptions is made for the source code it
+publishes, and the package of these binary files does not repeat it. The
+bundled wheel carries both files, unmodified, as `.dist-info/licenses/MODULAR_LICENSE`
+and `.dist-info/licenses/MODULAR_THIRD_PARTY_NOTICES`, and its
+License-Expression is `Apache-2.0 AND LicenseRef-Modular-Proprietary`: komira's
+own files under the first, the three Mojo runtime libraries under the second.
+docs/design/mojo_runtime_pypi_vs_conda.md records where each statement was
+read.
+
+komira's conda packages carry none of these libraries. Each declares a
+dependency on Modular's `mojo-compiler` conda package at the compiler version
+the libraries were built with, and the user's package installer fetches that
+package from Modular's channel under the licence that package declares. A
+conda package carries only LICENSE.
+
+`mojo_bundle` outputs (tools/build/package), such as the base image under
+packaging/images, also carry the Mojo runtime libraries in their `lib/`.

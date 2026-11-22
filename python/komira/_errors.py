@@ -25,7 +25,9 @@ class KomiraError(Exception):
 
 
 class LibraryLoadError(KomiraError):
-    """libkomira, or a library it needs, could not be loaded; or its ABI major
+    """libkomira, or a library it needs, could not be loaded (the message names
+    the file: a file missing from the package names the missing file); or a
+    Mojo runtime of another build is already in the process; or its ABI major
     version is not the one this package was written for; or it lacks a
     function this package calls."""
 

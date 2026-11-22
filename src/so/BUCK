@@ -111,9 +111,10 @@ mojo_library(
 #   gate_register_parquet  a Parquet file is registered by name; NULL ctx -1,
 #                      NULL name or path -2, a missing or non-Parquet file -3
 #                      with the reader's message as the last error;
-#   gate_native_owners the library's DT_NEEDED entries (ELF dynamic section)
-#                      name each native_owners SONAME; an owner dropped from
-#                      the list is embedded silently and fails here;
+#   gate_native_owners (Linux) the library's DT_NEEDED entries (ELF dynamic
+#                      section) name each native_owners SONAME; an owner
+#                      dropped from the list is embedded silently and fails
+#                      here;
 #   gate_parquet_schema, gate_csv_binding, gate_json_binding, gate_plan_render
 #                      a good input through the two-call protocol, NULL ctx -1,
 #                      NULL input or out_len -2, a bad file or plan -3 with a
@@ -142,7 +143,6 @@ mojo_shared_lib(
         "tests/gate/gate_fresh_error.mojo",
         "tests/gate/gate_new_free.mojo",
         "tests/gate/gate_no_extra_exports.mojo",
-        "tests/gate/gate_native_owners.mojo",
         "tests/gate/gate_null_ctx.mojo",
         "tests/gate/gate_null_out_len.mojo",
         "tests/gate/gate_csv_binding.mojo",
@@ -152,17 +152,39 @@ mojo_shared_lib(
         "tests/gate/gate_register_parquet.mojo",
         "tests/gate/gate_two_call.mojo",
         "tests/gate/gate_version.mojo",
-    ],
+    ] + select({
+        "DEFAULT": ["tests/gate/gate_native_owners.mojo"],
+        "prelude//os/constraints:macos": [],
+    }),
     deps = [":so"],
-    native_owners = NATIVE_OWNERS,
-    visibility = ["komira//ci:", "komira//tools/build/package/libkomira:", "//node:", "//python/tests:"],
+    # macOS arm64: no owner libraries. A native owner is an ELF shared
+    # library (tools/build/native/shared.bzl); on macOS the C archives of the
+    # closure are linked into libkomira.dylib, whose exported symbols list
+    # keeps them out of its ABI, and gate_native_owners, which reads the ELF
+    # dynamic section, is not one of its gates.
+    native_owners = select({
+        "DEFAULT": NATIVE_OWNERS,
+        "prelude//os/constraints:macos": [],
+    }),
+    visibility = ["komira//ci:", "komira//tools/build/package/libkomira:", "//node:", "//python:", "//python/tests:"],
 )
 
 # The Parquet file the C-ABI gates and the Node and Python bindings' tests read.
 export_file(
     name = "tests/fixtures/two_columns.parquet",
     src = "tests/fixtures/two_columns.parquet",
-    visibility = ["komira//ci:", "//node:", "//python/tests:"],
+    visibility = ["komira//ci:", "//node:", "//python:", "//python/tests:"],
+)
+
+# The ABI golden, read by the Python package's install test (python/BUCK,
+# wheel_install_test), which holds komira.abi_version() of the installed
+# library to its `version` line, and by the install page's check
+# (python/smoke/BUCK, install_page_shows_quickstart), which holds the
+# output the page shows to it.
+export_file(
+    name = "abi/komira.tsv",
+    src = "abi/komira.tsv",
+    visibility = ["//python:", "//python/smoke:"],
 )
 
 # The C header of libkomira, komira.h, made from abi/komira.tsv (the golden:

@@ -10,7 +10,7 @@
 #   * test_an_empty_spec_reads_no_file: the default spec names no JSONL path
 #     and holds a schema of no column.
 #   * test_the_kind_is_new_and_the_version_moved: SOURCE_JSONL is a value no
-#     other source kind has, and the IR version is 15, the version that
+#     other source kind has, and the IR version is 17, the version that
 #     added it.
 # =============================================================================
 
@@ -22,6 +22,7 @@ from physical_plan.physical_plan import (
     PHYSICAL_PLAN_IR_VERSION,
     SOURCE_BATCH,
     SOURCE_CONCAT,
+    SOURCE_CSV,
     SOURCE_JSONL,
     SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
@@ -62,10 +63,11 @@ def test_the_kind_is_new_and_the_version_moved() raises:
     others.append(SOURCE_BATCH)
     others.append(SOURCE_SINK_OUTPUT)
     others.append(SOURCE_CONCAT)
+    others.append(SOURCE_CSV)
     for i in range(len(others)):
         assert_true(others[i] != SOURCE_JSONL)
-    assert_equal(Int(SOURCE_JSONL), 4)
-    assert_equal(PHYSICAL_PLAN_IR_VERSION, 15)
+    assert_equal(Int(SOURCE_JSONL), 5)
+    assert_equal(PHYSICAL_PLAN_IR_VERSION, 17)
 
 
 def main() raises:

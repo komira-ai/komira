@@ -4,14 +4,19 @@
 #
 # `build_parquet_source` turns the Parquet arm of a segment's `SourceSpecPod`
 # into a `parquet_scan.ParquetSource` on the local file system. The
-# spec names a path (a file, a directory or a glob), the columns to read and a
-# filter the decode applies; the builder
+# spec names either a path (a file, a directory or a glob) or a list of files
+# with the constant partition columns each file carries (`parquet_paths`), the
+# columns to read and a filter the decode applies; the builder
 #
 #   * refuses a spec that is not total (`parquet_spec_is_total`): the spec
 #     would then stand for a scan with more in it than the three fields say
 #     (more files, a window, a partition predicate), and reading it would
 #     silently read file 0 of N;
-#   * resolves the projection names to leaf indices through the footer;
+#   * lists the files: a spec with `parquet_paths` reads exactly those files,
+#     in that order, and the source appends the partition columns after the
+#     data columns with each file's constants; any other spec lists its path;
+#   * resolves the projection names to leaf indices through the footer of the
+#     first file (every file of a table has the same schema);
 #   * registers the filter's conjuncts in the caller's expression pool as the
 #     decode filter (every conjunct is applied, rows that fail it never leave
 #     the scan, an UNKNOWN row fails) and the whole filter as the pushed
@@ -29,7 +34,7 @@ from std.memory import Pointer
 
 from async_rt.ops.waker_sink import NoopSink
 from fs.column_set import ColumnSet
-from fs.file_discovery import EagerGlobDiscovery
+from fs.explicit_file_discovery import ExplicitFileDiscovery
 from fs.local_fs import LocalFs
 from morsel.dynamic_join_filter import DynamicJoinFilter
 from parquet.runtime_footer_cache import ParquetMetadataCache
@@ -54,7 +59,7 @@ comptime LocalParquetSource[
     pool_o: Origin[mut=True],
     filter_o: Origin[mut=True],
 ] = ParquetSource[
-    LocalScanFs, EagerGlobDiscovery, cache_o, pool_o, filter_o
+    LocalScanFs, ExplicitFileDiscovery, cache_o, pool_o, filter_o
 ]
 """The Parquet source over the local file system, borrowing the footer cache
 (`cache_o`), the expression pool (`pool_o`) and, when a join filter is
@@ -96,9 +101,17 @@ def build_parquet_source[
         raise Error("pipeline_exec: a Parquet source names no path")
     # The path may be a glob or a directory: the columns are named against the
     # footer of the first file it lists, the one the source's union schema
-    # starts from.
+    # starts from. A spec that lists its files hands them over as they are.
     var fs = LocalScanFs.new()
-    var discovery = EagerGlobDiscovery.open(fs, spec.parquet_path)
+    var discovery: ExplicitFileDiscovery
+    if len(spec.parquet_paths) > 0:
+        discovery = ExplicitFileDiscovery.from_files(
+            spec.parquet_paths,
+            spec.parquet_partition_cols,
+            spec.parquet_partition_values,
+        )
+    else:
+        discovery = ExplicitFileDiscovery.open(fs, spec.parquet_path)
     var projection = ColumnSet.all()
     if spec.parquet_projection:
         projection = resolve_projection_indices(

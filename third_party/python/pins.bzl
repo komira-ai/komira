@@ -6,7 +6,8 @@ Every wheel of WHEELS and PROTOBUF_EDGES is a binary
 wheel for CPython 3.13 on manylinux x86_64 (glibc 2.28 or older) or a
 pure-Python one, and every wheel of WHEELS_314 one for CPython 3.14 (`cp314`)
 or free-threaded 3.14 (`cp314t`), or a pure-Python one; there is no source
-distribution. `license` is the SPDX expression of the
+distribution. CPython 3.10, 3.11 and 3.12 (PYTHON_310, PYTHON_311,
+PYTHON_312) have no closure here. `license` is the SPDX expression of the
 distribution as recorded in README.md (Licences); `deps` are the
 distributions it requires on linux, by `name`.
 """
@@ -24,7 +25,8 @@ PYTHON = {
 # CPython 3.14 from the same python-build-standalone release, with the GIL
 # and free-threaded (`3.14t`, whose interpreter is `bin/python3.14t`), each
 # with a closure of its own (WHEELS_314). Test-only, for measurements of
-# Python user-defined functions; the 3.13 pin above stays every other test's
+# Python user-defined functions and, with the GIL, for the Python package's
+# tests (python/pythons.bzl); the 3.13 pin above stays every other test's
 # interpreter.
 PYTHON_314 = {
     "abi": "cp314",
@@ -38,6 +40,50 @@ PYTHON_314 = {
     "version": "3.14.8",
 }
 
+# CPython 3.11 and 3.12 from the same python-build-standalone release, with
+# the GIL: the oldest minors the Python package supports
+# (python/pythons.bzl), on which its tests and its wheel's install test run.
+# Their closures are the wheels those tests install (python/tests/BUCK); no
+# wheel here is for them.
+PYTHON_311 = {
+    "abi": "cp311",
+    "archive": "cpython-3.11.17-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "freethreaded": False,
+    "license": "PSF-2.0",
+    "name": "cpython311",
+    "sha256": "aadcba18994cb8f9ee752aceb31d61e04f75b5d900d76fb575c6fbfabadec434",
+    "size": 30785899,
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.11.17%2B20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "version": "3.11.17",
+}
+
+PYTHON_312 = {
+    "abi": "cp312",
+    "archive": "cpython-3.12.15-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "freethreaded": False,
+    "license": "PSF-2.0",
+    "name": "cpython312",
+    "sha256": "731af898886c5f821890dc901eca3c651cca8e51fa7308c159d12a1194aeac91",
+    "size": 34285590,
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.12.15%2B20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "version": "3.12.15",
+}
+
+# CPython 3.10, the minor below the package's Requires-Python: one install
+# test (python/BUCK, `refuses_python_outside_requires_python`) runs it to show
+# that the wheel is refused there. Nothing else runs it.
+PYTHON_310 = {
+    "abi": "cp310",
+    "archive": "cpython-3.10.22-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "freethreaded": False,
+    "license": "PSF-2.0",
+    "name": "cpython310",
+    "sha256": "d34d8c8df51eefaf23d1f19ca8b383d5bf6fc91579e370d0b8af7968ad97f8f0",
+    "size": 29308448,
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.10.22%2B20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "version": "3.10.22",
+}
+
 PYTHON_314T = {
     "abi": "cp314t",
     "archive": "cpython-3.14.8-20261003-x86_64-unknown-linux-gnu-freethreaded-install_only_stripped.tar.gz",
@@ -48,6 +94,19 @@ PYTHON_314T = {
     "size": 36459200,
     "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.14.8%2B20261003-x86_64-unknown-linux-gnu-freethreaded-install_only_stripped.tar.gz",
     "version": "3.14.8",
+}
+
+# CPython 3.13 for macOS arm64 from the same python-build-standalone release as
+# the linux archive, with the closure MACOS_WHEELS. The interpreter loads
+# only the operating system's libraries, so it needs no `native_libs`.
+PYTHON_MACOS = {
+    "archive": "cpython-3.13.16-20261003-aarch64-apple-darwin-install_only_stripped.tar.gz",
+    "license": "PSF-2.0",
+    "name": "cpython_macos",
+    "sha256": "9e01f63bbb08576cd9c8bc2d0564d098cb30c8453a0cd4bcf6aef458f6d2a147",
+    "size": 25246115,
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.13.16%2B20261003-aarch64-apple-darwin-install_only_stripped.tar.gz",
+    "version": "3.13.16",
 }
 
 def _wheel(name, version, url, sha256, size, license, deps = []):
@@ -274,3 +333,46 @@ PROTOBUF_EDGES = [
         "BSD-3-Clause",
     ),
 ]
+
+# The macOS arm64 file of each WHEELS distribution that has a binary build: the
+# same version as the linux wheel, a CPython 3.13 (`cp313`) or abi3 wheel tagged
+# `macosx_<floor>_arm64` (`universal2` where no arm64-only wheel is published),
+# floor 12.0 at most. A distribution of WHEELS that is not here is a
+# pure-Python wheel, the same file on both platforms.
+MACOS_WHEELS = {
+    "duckdb": {
+        "url": "https://files.pythonhosted.org/packages/d4/a0/bf87071170835ee4a34fe764fc11c1c6e7040a0e021b36c1b6f834a4c22f/duckdb-1.5.6-cp313-cp313-macosx_11_0_arm64.whl",
+        "sha256": "97dd7a555b8f5298b76bc7d48a11cb2c64336e8de9bfde783cffb86ea9f54807",
+        "size": 15533132,
+    },
+    "grpcio": {
+        "url": "https://files.pythonhosted.org/packages/c5/4b/ed8e22a1237e6b2be6ef4f221d074a5b0e0dd8a0da8c944c04aea731f0eb/grpcio-1.84.0-cp313-cp313-macosx_11_0_universal2.whl",
+        "sha256": "e41c3993eee896c617dbd8a505085d28b6e84a0445ed9a1f40f95808473cf678",
+        "size": 12336549,
+    },
+    "numpy": {
+        "url": "https://files.pythonhosted.org/packages/2f/06/9dc9e48b5e5e941c8b10350c5ff2d721da42a20517d911d15544246775ff/numpy-2.5.3-cp313-cp313-macosx_11_0_arm64.whl",
+        "sha256": "92f30e89b8ee0ecf363033576c422b2f58fed6a80bed0aa48dff6d14c654663e",
+        "size": 12003676,
+    },
+    "pandas": {
+        "url": "https://files.pythonhosted.org/packages/ea/ca/87f8548f73d452aab35e4a90f8b39ae303295e0f2ef0b4055c44d6b3f1be/pandas-3.0.6-cp313-cp313-macosx_11_0_arm64.whl",
+        "sha256": "60d81f9e1799b36f3739e7fff44d1fbb2e8fd5a271b3863e03de9715fccda0fa",
+        "size": 10064785,
+    },
+    "polars-runtime-32": {
+        "url": "https://files.pythonhosted.org/packages/c2/e0/f3dc93fce4b4e99370db6a89001a1b8d3c606e3560d0d91dda809d6c6324/polars_runtime_32-1.44.2-cp310-abi3-macosx_11_0_arm64.whl",
+        "sha256": "e0fd43720c8222ae39919c8ff891636d53b352706087120e62f83544dd3ff782",
+        "size": 43331099,
+    },
+    "protobuf": {
+        "url": "https://files.pythonhosted.org/packages/32/72/98342feb672507c8f3a69e34b4fa8961f608edba5c1a48a6f47156d92cb5/protobuf-7.36.2-cp310-abi3-macosx_10_9_universal2.whl",
+        "sha256": "cbc70b17ee27e28894c7fee8bb04be1abead49e936bc70eb60052531eee2079e",
+        "size": 456039,
+    },
+    "pyarrow": {
+        "url": "https://files.pythonhosted.org/packages/cc/8d/8f271a7a034c834910ec925d56fa4b29733b1380f5289419f5aaa3b02777/pyarrow-25.0.1-cp313-cp313-macosx_12_0_arm64.whl",
+        "sha256": "c7c534ec03c358a76ea3e505e74c1b6aef290af90c444dfd092dbfe23e755b85",
+        "size": 35855328,
+    },
+}

@@ -1,0 +1,10 @@
+[2026-11-21T04:57:12.747+00:00] Build ID: 00000000-0000-0000-0000-000000000000
+[2026-11-21T04:57:13.069+00:00] Soft Error: dep_only_incompatible_version_two: komira//release:mopm_darwin_libs (komira//tools/build/platforms:darwin-arm64#7fd7ccfd5d5f8024) does not pass compatibility check (will be error in future) because its transitive dep toolchains//:mojo_proto
+[2026-11-21T04:57:13.069+00:00]     is incompatible with komira//tools/build/platforms:darwin-arm64#7fd7ccfd5d5f8024 (prelude//os/constraints:linux unsatisfied), check the target's compatibility attributes
+[2026-11-21T04:57:13.072+00:00] Network: up 0B  down 0B
+BUILD FAILED
+Error running analysis for `komira//release:mopm_darwin_libs (komira//tools/build/platforms:darwin-arm64#7fd7ccfd5d5f8024)`
+
+Caused by:
+    komira//release:mopm_darwin_libs (komira//tools/build/platforms:darwin-arm64#7fd7ccfd5d5f8024) does not pass compatibility check (will be error in future) because its transitive dep toolchains//:mojo_proto
+        is incompatible with komira//tools/build/platforms:darwin-arm64#7fd7ccfd5d5f8024 (prelude//os/constraints:linux unsatisfied), check the target's compatibility attributes

@@ -25,7 +25,7 @@
 #   * test_the_legacy_ndjson_factory_lowers_the_same: `LogicalPlan.scan(path,
 #     SOURCE_NDJSON, ...)` builds the same JSON leaf and is cut the same way.
 #   * test_an_unbounded_json_scan_is_refused: LOWERING_SCAN_NOT_TOTAL.
-#   * test_a_csv_scan_is_still_refused: the arm is JSON's only.
+#   * test_an_avro_scan_is_still_refused: the arm is JSON's only.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -57,10 +57,10 @@ from plan_ir.logical_plan import (
     LogicalPlan,
     ExprArray,
     AggExprArray,
-    SOURCE_CSV,
     SOURCE_NDJSON,
 )
 from plan_ir.plan_decisions import SCAN_UNBOUNDED
+from scan_source.avro_source import AvroSource
 from scan_source.json_source import JsonSource
 from scan_source.source_variant import SourceVariant
 
@@ -143,7 +143,7 @@ def test_a_json_scan_reads_its_projection_at_the_bound_types() raises:
     assert_true(seg.morsel_rows > 0)
     var expected = String("ir_version ") + String(PHYSICAL_PLAN_IR_VERSION) + "\n"
     expected += "segment 0\n"
-    expected += "  source: SOURCE_JSONL path=rows.jsonl columns=[s string, id int64]\n"
+    expected += "  source: SOURCE_JSONL path=rows.jsonl columns=[s:string, id:int64]\n"
     expected += "  sink: (SINK_COLLECT, NONE, COLUMNAR) param=-1 state=0\n"
     expected += "  deps: none\n"
     expected += "  order: ORDER_NONE partitions=1\n"
@@ -252,10 +252,15 @@ def test_an_unbounded_json_scan_is_refused() raises:
     assert_true(message.startswith(String(LOWERING_SCAN_NOT_TOTAL) + ": "), message)
 
 
-def test_a_csv_scan_is_still_refused() raises:
-    var message = _message(LogicalPlan.scan(String("t.csv"), SOURCE_CSV, _schema()))
+def test_an_avro_scan_is_still_refused() raises:
+    var schema = _schema()
+    var message = _message(
+        LogicalPlan.scan_from_source(
+            SourceVariant(AvroSource(String("t.avro"), schema.copy())), schema^
+        )
+    )
     assert_true(message.startswith(String(LOWERING_UNCUTTABLE_NODE) + ": "), message)
-    assert_true("csv" in message, message)
+    assert_true("avro" in message, message)
 
 
 def main() raises:
