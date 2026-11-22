@@ -238,7 +238,7 @@ def serve(sock_fd, cancel_fd, ctl_sock, wakeup_fds, zygote_pid, scratch, registr
                 next_instance += 1
             elif msg.op == wire.OP_CLOSE_INSTANCE:
                 instances.pop(handle, None)
-                reply = b""
+                reply = struct.pack("<I", len(instances))
             elif msg.op == wire.OP_CALL_BATCH:
                 instance = instances.get(handle)
                 if instance is None:

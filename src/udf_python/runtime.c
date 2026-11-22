@@ -301,8 +301,14 @@ static void t_unload(komira_udf_udf* u) {
   udfpy_gen* g = u->gen;
   if (g != NULL && !g->shut && !g->dead) {
     udfpy_msg r;
-    if (udfpy_ctl_request(rt, g, UDFPY_OP_UNLOAD, 0, u->id, NULL, 0, NULL, 0, &r, NULL) == KOMIRA_UDF_OK)
+    if (udfpy_ctl_request(rt, g, UDFPY_OP_UNLOAD, 0, u->id, NULL, 0, NULL, 0, &r, NULL) == KOMIRA_UDF_OK) {
+      if (r.op == UDFPY_OP_OK && r.len >= 4) { /* the UDFs the zygote still holds */
+        uint32_t left = 0;
+        memcpy(&left, r.payload, 4);
+        udfpy_trace(rt, "unload gen=%d udf=%llu left=%u", g->number, (unsigned long long)u->id, left);
+      }
       udfpy_msg_free(&r);
+    }
   }
   pthread_mutex_unlock(&rt->zy_mu);
   udf_free(u);

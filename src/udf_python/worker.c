@@ -253,7 +253,15 @@ void udfpy_close_instance(udfpy_inst* in) {
   if (in == NULL) return;
   if (!in->ctx->lost) {
     udfpy_msg r;
-    if (ask(in->ctx, UDFPY_OP_CLOSE_INSTANCE, in->id, NULL, NULL, 0, &r, NULL) == KOMIRA_UDF_OK) udfpy_msg_free(&r);
+    if (ask(in->ctx, UDFPY_OP_CLOSE_INSTANCE, in->id, NULL, NULL, 0, &r, NULL) == KOMIRA_UDF_OK) {
+      uint32_t left = 0;
+      if (r.len >= 4) { /* the instances the worker still holds */
+        memcpy(&left, r.payload, 4);
+        udfpy_trace(in->ctx->rt, "close_instance ctx=%llu inst=%llu left=%u", (unsigned long long)in->ctx->id,
+                    (unsigned long long)in->id, left);
+      }
+      udfpy_msg_free(&r);
+    }
   }
   free(in);
 }

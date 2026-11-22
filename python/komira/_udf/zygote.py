@@ -180,7 +180,7 @@ class Zygote:
                 reply = self._load(handle, body)
             elif msg.op == w.OP_UNLOAD:
                 self.registry.pop(handle, None)
-                reply = b""
+                reply = struct.pack("<I", len(self.registry))
             elif msg.op == w.OP_FORK:
                 reply = self._fork(handle, body, msg.fds)
             elif msg.op == w.OP_SHUTDOWN:

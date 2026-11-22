@@ -381,4 +381,4 @@ _UDF_PYARROW = {
     data = {"libkomira_udf_python.so": "komira//src/udf_python:komira_udf_python"},
     deps = ["//python:komira", _UDF_PYARROW[p["suffix"]]],
     **_ON[p["suffix"]]
-) for test in ["test_udf_contract", "test_udf_process", "test_udf_calls"] for p in PYTHONS if p["suffix"] in _UDF_PYARROW]
+) for test in ["test_udf_contract", "test_udf_process", "test_udf_calls", "test_udf_lifecycle"] for p in PYTHONS if p["suffix"] in _UDF_PYARROW]

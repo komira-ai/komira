@@ -42,7 +42,7 @@ code forms PACKAGE and BUNDLE. Linux only, with glibc 2.34 or later.
 | `udfpy.h` | the private structures |
 
 The `trace` option appends one line per event (`spawn`, `hello`, `load`, `fork`, `exit`, `cancel_word`,
-`retire`, `shutdown`) to a file; it exists for tests.
+`retire`, `shutdown`, `unload`, `close_instance`) to a file; it exists for tests.
 
 ## Not built yet
 
