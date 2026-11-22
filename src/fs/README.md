@@ -15,8 +15,8 @@ local implementation:
 - `write_file_atomic(path, data)` (`atomic_write`): replace a local file
   with `data`, all or nothing. The bytes go to a temporary file in the same
   directory (`.<name>.<random>.tmp`), which is synced and renamed over
-  `path`, then the directory is synced. A failure removes the temporary file
-  and leaves `path` as it was; it raises `STORAGE_NOT_FOUND` when the
+  `path`, then the directory is synced. A failure before the rename removes
+  the temporary file and leaves `path` as it was; it raises `STORAGE_NOT_FOUND` when the
   directory does not exist (it is never created) and `STORAGE_IO` naming the
   step and the errno otherwise.
 - Path discovery: the glob engine (`*`, `?`, `[a-z]`, POSIX classes, `**`

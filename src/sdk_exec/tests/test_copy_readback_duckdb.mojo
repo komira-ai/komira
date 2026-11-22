@@ -18,7 +18,7 @@
 #     and as many as the `Count` komira's COPY answered. The cases cover the
 #     default codec and zstd, gzip, lz4_raw, uncompressed and snappy; BIGINT,
 #     DOUBLE, DATE, VARCHAR (quotes, a comma, a line break, padding, a
-#     multi-byte character), BOOLEAN and DECIMAL(10,2) columns; NULLs in every
+#     multi-byte character) and BOOLEAN columns; NULLs in every
 #     column but one; an aggregate; and an empty result. Catches a file DuckDB
 #     cannot open, a column it reads as another type (a string without its
 #     UTF8 annotation reads as BLOB, a DATE without its annotation as

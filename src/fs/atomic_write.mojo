@@ -7,7 +7,10 @@
 # destination's directory, named with a leading dot and a random suffix
 # (`.<name>.<16 hex digits>.tmp`), syncs it, closes it, renames it over `path`
 # and syncs the directory. A failure before the rename removes the temporary
-# file and leaves `path` as it was (absent, or the old file whole). A crash
+# file and leaves `path` as it was (absent, or the old file whole). After the
+# rename `path` is the whole new file, so a failed sync of the directory is not
+# reported as a failed write: it only leaves the rename's durability to the
+# file system. A crash
 # can leave a temporary file behind, never a partial `path`. Because the new
 # file replaces the old one only by the rename, a write may read the file it
 # replaces until the rename.
@@ -100,9 +103,7 @@ def write_file_atomic(path: String, data: Span[UInt8, _]) raises:
     Raises:
         `STORAGE_NOT_FOUND` when the directory of `path` does not exist, and
         `STORAGE_IO` naming the step and the errno for any other failure. Before
-        raising, the temporary file is removed and `path` is unchanged, except
-        after the directory sync fails, when the rename has already put the
-        new file in place.
+        raising, the temporary file is removed and `path` is unchanged.
     """
     var parts = _split_path(path)
     var dir = parts[2]
@@ -150,9 +151,9 @@ def write_file_atomic(path: String, data: Span[UInt8, _]) raises:
         _remove(tmp)
         raise _io_error(path, "rename", rc)
 
+    # The new file is in place; the directory sync only makes the rename
+    # durable, and its failure changes nothing a reader sees.
     # SAFETY: `dir` pins the NUL-terminated path across the synchronous call.
-    rc = external_call["komira_fs_fsync_dir", Int32](
+    _ = external_call["komira_fs_fsync_dir", Int32](
         dir.as_c_string_slice().unsafe_ptr()
     )
-    if rc != 0:
-        raise _io_error(path, "fsync of the directory", rc)

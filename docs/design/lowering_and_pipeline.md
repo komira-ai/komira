@@ -818,8 +818,9 @@ and passes the context, which is the one place a name, a footer and a worker poo
 4. `lower(plan, ctx.host_profile, inputs)`, with `inputs` built from the same footer cache the binder read (§6.2).
 5. `run_plan(lowered, ctx)`.
 
-A statement that is not a query (`COPY`, `CREATE TABLE AS`) is refused with a named error until a writes slice exists;
-the binder reports the statement kind and the door does not guess. Each step's refusal reaches the caller unchanged.
+A `COPY ... TO` a local Parquet file runs steps 1 to 5 and then writes the result (`sdk_exec.engine_write`), answering
+one BIGINT row `Count`; `CREATE TABLE AS` is refused with a named error, since it needs a bound catalog. The binder
+reports the statement kind and the door does not guess. Each step's refusal reaches the caller unchanged.
 The door does not retry, does not catch and rerun on another route, and does not keep a second path for the plans the
 first rejects.
 

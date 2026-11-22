@@ -30,8 +30,8 @@
 #   * test_each_failing_step_is_named_and_cleaned_up: create, fsync, close and
 #     rename failures each name their step and errno, leave the old file and
 #     leave no temporary file; a failing random source is named.
-#   * test_a_failed_directory_sync_reports_after_the_rename: the new file is in
-#     place and the failure is still reported.
+#   * test_a_failed_directory_sync_is_not_a_failed_write: after the rename the
+#     destination is the whole new file, so the write returns normally.
 #   * test_split_path: the prefix, name and directory of `a/b/c`, `/c` and `c`.
 # =============================================================================
 
@@ -226,15 +226,13 @@ def test_each_failing_step_is_named_and_cleaned_up() raises:
     _assert_only(d, ["out.bin"])
 
 
-def test_a_failed_directory_sync_reports_after_the_rename() raises:
+def test_a_failed_directory_sync_is_not_a_failed_write() raises:
     var d = _dir("dirsync")
     var path = d + "/out.bin"
     _put(path, "old")
-    assert_equal(
-        _failure(path, _bytes("new"), _FSYNC_DIR),
-        String(STORAGE_IO) + ": write '" + path
-        + "': fsync of the directory failed: errno 5 (EIO)",
-    )
+    _inject(_FSYNC_DIR)
+    write_file_atomic(path, Span(_bytes("new")))
+    _inject(_NONE)
     assert_equal(_read(path), "new")
     _assert_only(d, ["out.bin"])
 
@@ -265,6 +263,6 @@ def main() raises:
     suite.test[test_a_directory_at_the_path_is_storage_io_at_rename]()
     suite.test[test_a_full_disk_leaves_the_old_file_whole]()
     suite.test[test_each_failing_step_is_named_and_cleaned_up]()
-    suite.test[test_a_failed_directory_sync_reports_after_the_rename]()
+    suite.test[test_a_failed_directory_sync_is_not_a_failed_write]()
     suite.test[test_split_path]()
     suite^.run()

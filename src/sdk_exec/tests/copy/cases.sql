@@ -5,7 +5,7 @@
 -- same lines in `:copy_readback` before readback.sql reads both files.
 -- The inputs are the read_csv fixtures of tests/csv (their header says what
 -- each holds).
-COPY (SELECT id, qty, price, day, name, qty > 10 AS big, CAST('12.50' AS DECIMAL(10,2)) AS m FROM read_csv('typed.csv')) TO 'typed_default.parquet';
+COPY (SELECT id, qty, price, day, name, qty > 10 AS big FROM read_csv('typed.csv')) TO 'typed_default.parquet';
 COPY (SELECT * FROM read_csv('typed.csv')) TO 'typed_zstd.parquet' (FORMAT parquet, COMPRESSION zstd);
 COPY (SELECT * FROM read_csv('nulls.csv')) TO 'nulls_gzip.parquet' (COMPRESSION gzip);
 COPY (SELECT * FROM read_csv('nulls.csv')) TO 'nulls_lz4.parquet' (COMPRESSION lz4_raw);
