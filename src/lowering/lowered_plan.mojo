@@ -48,7 +48,9 @@ struct ScanFacts(Copyable, Movable):
 
 struct LoweringInputs(Copyable, Movable):
     """The resolved inputs of one `lower` call: one `ScanFacts` per scan of the
-    plan, in scan pre-order (a node before its children)."""
+    plan, in scan pre-order (a node before its children). A shared-subplan
+    reference is a leaf with no scan: the scans of the subplan it names are
+    counted once, where its canonical subtree stands."""
 
     var scans: List[ScanFacts]
 
