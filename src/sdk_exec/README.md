@@ -30,11 +30,11 @@ do is a free function in a module of its own.
 
 | module | does |
 |---|---|
-| `engine_options` | `EngineOptions`: `worker_count` and `memory_budget_bytes`, each `Optional` (absent means the host profile's own value). Values the caller fills from its flags; no environment variable is read |
-| `engine_context` | `EngineContext(options)`: probes the host once, applies the options over the profile, starts the worker runtime. Holds the catalog, the registered tables, `footers` (a `ParquetFooters`), `host_profile` and `runtime`. A count or budget below 1 is refused with `ENGINE_OPTIONS_INVALID`. `begin_query` drops the footer cache |
+| `engine_options` | `EngineOptions`: `worker_count` and `memory_budget_bytes`, each `Optional` (absent means the host profile's own value), and `spill_directory` (`Optional`; absent means no spill). Values the caller fills from its flags; no environment variable is read |
+| `engine_context` | `EngineContext(options)`: probes the host once, applies the options over the profile, starts the worker runtime. Holds the catalog, the registered tables, `footers` (a `ParquetFooters`), `host_profile`, `runtime` and `spill_directory`. A count or budget below 1, and an empty spill directory, are refused with `ENGINE_OPTIONS_INVALID`. `begin_query` drops the footer cache |
 | `engine_catalog` | `register_parquet(ctx, name, path)`: the table's schema is its file's footer |
 | `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema) and `lower_for_context` |
-| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
+| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, the context's spill directory (when it has one) on the builder, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
 | `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize_for_run`, lower, run. `optimize_for_run(plan)` is `optimize` (refusing a plan that needs a scalar subquery executed first, `OPTIMIZE_UNRESOLVED_SCALAR`) and then `plan_cse_eliminate`, which holds each subtree the plan repeats once (a CTE read twice, two equal UNION ALL branches) so lowering cuts it once and every reference reads it (`lowering.cut_shared`). Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
 
 **The footer cache is pinned to a query.** `parquet_footers.FooterCache`
@@ -75,7 +75,7 @@ it in the plan as a CROSS join, which lowering refuses with
 `LOWERING_JOIN_UNSERVED`; the
 door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
 asks for a scalar to be executed first, a guard no query tested here reaches); a sink denied its memory by the
-budget, a sum outside its declared type and a pool not whole after a run (step
+budget (unless it spills, see Spill below), a sum outside its declared type and a pool not whole after a run (step
 `execute`); and whatever lowering, the binder or the parser refuses (an INNER
 equi-join is served; any other join is `LOWERING_JOIN_UNSERVED` at `lower`).
 Lowering given fewer scan facts than
@@ -149,6 +149,16 @@ The tests run when the package is built.
 - `test_run_sql_int_sum`: an integer `sum()` over INT64 and INT32 columns is
   DECIMAL(38, 0) and exact past the INT64 range; an empty or all-NULL sum is
   NULL; expressions, CASE and HAVING over the sum run.
+- `test_run_sql_spill`: a GROUP BY of 60,001 groups (two rows each, a NULL
+  key, NULL values) on a context whose memory budget the group tables
+  outgrow and which has a spill directory answers an oracle computed in the
+  test (count, exact sum, min, max, NULL where a group has no value) on one
+  and two workers, as the same query with no budget does; the spill directory
+  exists afterwards and is empty; the same budget with no spill directory is
+  refused at `execute`; an ungrouped count and a GROUP BY of ten groups under
+  the budget do not create the directory; an empty `spill_directory` is
+  `ENGINE_OPTIONS_INVALID`; a directory that cannot be created fails the
+  spilling query at `execute` and the context runs the next one.
 - `test_run_sql_multifile`: a table of several Parquet files from a directory
   (files at any depth; a dot-name and a non-Parquet file skipped), a glob, a
   brace glob, `read_parquet('<glob>')` and `FROM '<glob>'`; a Hive tree whose
@@ -181,8 +191,22 @@ The tests run when the package is built.
 
 ## Limits
 
-The context does not yet hold a source registry, a plan cache, spill options or
-the plan validation switch. `run_sql` serves the plans `lowering` cuts: Parquet scans (one file or several), `read_csv`
+The context does not yet hold a source registry, a plan cache or the plan
+validation switch.
+
+**Spill.** `EngineOptions.spill_directory` lets a GROUP BY over fixed-width
+keys (integers, floats, DATE32, BOOL, DECIMAL128, one or more columns) that
+outgrows `memory_budget_bytes` spill instead of being refused at `execute`:
+the grouped sink writes a worker's group table to disk by hash partition,
+merges one partition at a time and deletes the files when the query ends
+(`pipeline_exec`'s README says how). The answer is the one without a
+spill, since the folds are exact. Each spill writes a sub-directory of its own
+(`thsplc_groupagg_<pid>_<counter>`), so contexts and processes can share one
+directory; a query that does not spill never creates it. Not spilled, and
+refused over the budget as before: a GROUP BY with COUNT(DISTINCT) (its
+refusal says so), a GROUP BY over a string or a mixed string key, the sort
+(ORDER BY), and the output rows of every partition, which must fit the budget
+together, since the result is returned whole. `run_sql` serves the plans `lowering` cuts: Parquet scans (one file or several), `read_csv`
 scans of one local file with a header row (decoded whole before the first
 morsel; `header=false` is refused at lowering, because the reader would name
 the columns `col_0`, `col_1`, ... where DuckDB names them `column0`,
