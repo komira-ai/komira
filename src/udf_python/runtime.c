@@ -7,6 +7,17 @@
  * generation (zygote.c). validate is pure (descriptor.c). Contexts and
  * calls are in worker.c.
  *
+ * A fork of the engine's process (design section 2.3): init registers, once
+ * per process, a pthread_atfork child handler. In the child it closes every
+ * descriptor each runtime owns (control and worker sockets, pidfds, the
+ * trace) and marks the runtime forked, so the zygote still sees end of file
+ * when the engine's process ends, and in the child every load, open_context
+ * and call returns ERR_INSTANCE_LOST; closing and shutdown there free memory
+ * only. The prepare handler takes every runtime's zygote lock, so the child
+ * never copies a runtime in the middle of a change; a fork waits for a load,
+ * a FORK or the wait for an EXIT report in progress. The parent is
+ * unaffected.
+ *
  * The one exported symbol is komira_udf_runtime_init_v1.
  */
 #include <ctype.h>
@@ -76,6 +87,7 @@ static const char* value_problem(const char* key, const char* value) {
 
 static int32_t parse_options(const komira_udf_host* host, udfpy_options* o, komira_udf_error* err) {
   memset(o, 0, sizeof(*o));
+  o->grace_ms = 2000;
   size_t n = 0;
   const char* const* opts = NULL;
   if (host->struct_size >= offsetof(komira_udf_host, options) + sizeof(host->options)) {
@@ -164,7 +176,7 @@ static int32_t t_describe(komira_udf_rt* rt, komira_udf_capabilities* out) {
   out->max_descriptor_version = 1;
   out->shapes = KOMIRA_UDF_SHAPE_SCALAR | KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN;
   out->devices = KOMIRA_UDF_DEVICE_CPU;
-  out->features = 0;
+  out->features = KOMIRA_UDF_FEATURE_CONTAINS_CRASHES | KOMIRA_UDF_FEATURE_FORCED_STOP;
   out->udf_class = KOMIRA_UDF_CLASS_MANAGED;
   return KOMIRA_UDF_OK;
 }
@@ -220,6 +232,7 @@ static void udf_free(udfpy_udf* u) {
  * generation. rt->zy_mu is held. */
 static int32_t load_locked(udfpy_rt* rt, udfpy_udf* u, const udfpy_buf* body, komira_udf_error* err) {
   for (int attempt = 0; attempt < 2; attempt++) {
+    if (rt->cur != NULL) udfpy_ctl_drain(rt, rt->cur); /* a zygote that ended retires its generation */
     udfpy_gen* g = rt->cur;
     if (g == NULL) {
       int32_t rc = udfpy_gen_spawn(rt, &g, err);
@@ -263,6 +276,7 @@ static int32_t t_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_ud
   uint32_t bf = 0;
   int32_t rc = udfpy_validate(s, &bf, err);
   if (rc != KOMIRA_UDF_OK) return rc;
+  if (rt->forked) return udfpy_fail(err, KOMIRA_UDF_ERR_INSTANCE_LOST, -1, "komira/python: %s", UDFPY_FORKED_WHY);
   udfpy_udf* u = (udfpy_udf*)calloc(1, sizeof(*u));
   if (u == NULL) return udfpy_fail(err, KOMIRA_UDF_ERR_OUT_OF_MEMORY, -1, "no memory for a udf");
   const char* why = NULL;
@@ -392,7 +406,76 @@ static int32_t t_agg_state(komira_udf_groups* g, uint32_t n, struct ArrowDeviceA
 
 static void t_agg_close(komira_udf_groups* g) { (void)g; }
 
+/* ---- forks of the engine's process ---------------------------------------------------------- */
+
+static pthread_mutex_t g_rts_mu = PTHREAD_MUTEX_INITIALIZER;
+static udfpy_rt* g_rts = NULL; /* every runtime between init and shutdown */
+static pthread_once_t g_atfork_once = PTHREAD_ONCE_INIT;
+
+static void fork_prepare(void) {
+  pthread_mutex_lock(&g_rts_mu);
+  for (udfpy_rt* r = g_rts; r != NULL; r = r->next_rt) pthread_mutex_lock(&r->zy_mu);
+}
+
+static void fork_parent(void) {
+  for (udfpy_rt* r = g_rts; r != NULL; r = r->next_rt) pthread_mutex_unlock(&r->zy_mu);
+  pthread_mutex_unlock(&g_rts_mu);
+}
+
+/* In the child: the processes are the parent's; let go of every descriptor
+ * that reaches them, and signal none of them. */
+static void forget_processes(udfpy_rt* r) {
+  r->forked = 1;
+  if (r->trace_fd >= 0) close(r->trace_fd);
+  r->trace_fd = -1;
+  for (int i = 0; i < r->n_gens; i++) {
+    udfpy_gen* g = r->gens[i];
+    if (g->sock >= 0) close(g->sock);
+    g->sock = -1;
+    g->pid = -1;
+    g->reaped = g->dead = g->retired = g->shut = 1;
+  }
+  r->cur = NULL;
+  for (int i = 0; i < r->n_ctxs; i++) {
+    komira_udf_context_t* c = r->ctxs[i];
+    if (c->sock >= 0) close(c->sock);
+    if (c->pidfd >= 0) close(c->pidfd);
+    c->sock = c->pidfd = -1;
+    c->lost = 1;
+    snprintf(c->lost_why, sizeof(c->lost_why), "%s", UDFPY_FORKED_WHY);
+  }
+}
+
+static void fork_child(void) {
+  for (udfpy_rt* r = g_rts; r != NULL; r = r->next_rt) {
+    forget_processes(r);
+    pthread_mutex_unlock(&r->zy_mu);
+  }
+  pthread_mutex_unlock(&g_rts_mu);
+}
+
+static void register_atfork(void) { pthread_atfork(fork_prepare, fork_parent, fork_child); }
+
+static void rts_add(udfpy_rt* r) {
+  pthread_once(&g_atfork_once, register_atfork);
+  pthread_mutex_lock(&g_rts_mu);
+  r->next_rt = g_rts;
+  g_rts = r;
+  pthread_mutex_unlock(&g_rts_mu);
+}
+
+static void rts_remove(udfpy_rt* r) {
+  pthread_mutex_lock(&g_rts_mu);
+  for (udfpy_rt** p = &g_rts; *p != NULL; p = &(*p)->next_rt)
+    if (*p == r) {
+      *p = r->next_rt;
+      break;
+    }
+  pthread_mutex_unlock(&g_rts_mu);
+}
+
 static void t_shutdown(komira_udf_rt* rt) {
+  rts_remove(rt);
   pthread_mutex_lock(&rt->zy_mu);
   for (int i = 0; i < rt->n_gens; i++) udfpy_gen_shutdown(rt, rt->gens[i]);
   pthread_mutex_unlock(&rt->zy_mu);
@@ -466,6 +549,7 @@ EXPORT const komira_udf_runtime* komira_udf_runtime_init_v1(const komira_udf_hos
   }
   r->host = host;
   pthread_mutex_init(&r->zy_mu, NULL);
+  rts_add(r);
   *rt = r;
   return &TABLE;
 }

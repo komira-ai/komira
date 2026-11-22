@@ -32,8 +32,9 @@ comptime LOWERING_INPUTS_SCAN_COUNT = "LOWERING_INPUTS_SCAN_COUNT"
 """Refusal: `LoweringInputs` does not hold exactly one entry per scan."""
 
 comptime LOWERING_JOIN_UNSERVED = "LOWERING_JOIN_UNSERVED"
-"""Refusal: a join the INNER hash join does not serve (its type, keys, key
-types, residual, algorithm hint, build side or output names)."""
+"""Refusal: a join the hash join does not serve (a join type the IR does not
+define, a SEMI or ANTI join that builds its left side, a CROSS join with a key,
+its keys, key types, residual, algorithm hint, build side or output names)."""
 
 comptime LOWERING_WINDOW_UNSERVED = "LOWERING_WINDOW_UNSERVED"
 """Refusal: a window node the window sink does not serve (a key or argument

@@ -105,6 +105,89 @@ _MIXED_TEST_DATA = {
 
 _MIXED_TEST_DATA.update({c + ".tsv": ":group_keys_mixed_oracle[" + c + ".tsv]" for c in _MIXED_CASES})
 
+# DuckDB's tables and answers for test_run_sql_join_kinds:
+# tests/join_kinds/data.sql writes l, r, n, e and big (Parquet, small row
+# groups), and each line of tests/join_kinds/cases.sql runs one join over them
+# and writes its answer.
+_JOIN_KINDS_CASES = [
+    "left_rows",
+    "right_rows",
+    "full_rows",
+    "left_outer_keyword",
+    "left_string",
+    "right_string",
+    "full_string",
+    "left_int32_int64",
+    "right_int32_int64",
+    "full_int32_int64",
+    "full_int32_int32",
+    "left_double",
+    "full_double",
+    "left_two_keys",
+    "right_two_keys",
+    "full_two_keys",
+    "left_count",
+    "right_count",
+    "full_count",
+    "left_right_conjunct",
+    "left_anti_idiom",
+    "left_where_left",
+    "left_chain",
+    "inner_then_left",
+    "left_empty_build",
+    "left_empty_probe",
+    "right_empty_build",
+    "right_empty_probe",
+    "full_empty_build",
+    "full_empty_probe",
+    "exists",
+    "exists_inner_filter",
+    "exists_two_keys",
+    "exists_string",
+    "not_exists",
+    "not_exists_two_keys",
+    "exists_empty",
+    "not_exists_empty",
+    "in_subquery",
+    "in_int32_int64",
+    "in_string",
+    "semi_keyword",
+    "anti_keyword",
+    "semi_count",
+    "not_in_with_nulls",
+    "not_in_null_free",
+    "not_in_empty_filtered",
+    "not_in_empty_table",
+    "not_in_nulls_filtered",
+    "not_in_string_nulls_filtered",
+    "not_in_string_with_nulls",
+    "cross_rows",
+    "comma_rows",
+    "cross_count",
+    "cross_empty_build",
+    "cross_empty_probe",
+    "cross_chunked",
+    "scalar_max",
+    "scalar_count",
+]
+
+_JOIN_KINDS_TABLES = ["l", "r", "n", "e", "big"]
+
+sql_oracle(
+    name = "join_kinds_oracle",
+    srcs = [
+        "tests/join_kinds/data.sql",
+        "tests/join_kinds/cases.sql",
+    ],
+    outputs = [t + ".parquet" for t in _JOIN_KINDS_TABLES] + [c + ".tsv" for c in _JOIN_KINDS_CASES],
+)
+
+_JOIN_KINDS_TEST_DATA = {"cases.sql": "tests/join_kinds/cases.sql"}
+
+_JOIN_KINDS_TEST_DATA.update({t + ".parquet": ":join_kinds_oracle[" + t + ".parquet]" for t in _JOIN_KINDS_TABLES})
+
+_JOIN_KINDS_TEST_DATA.update({c + ".tsv": ":join_kinds_oracle[" + c + ".tsv]" for c in _JOIN_KINDS_CASES})
+
 # DuckDB's table and answers for test_run_sql_window: tests/window/data.sql
 # writes win.parquet, and each line of tests/window/cases.sql runs one window
 # query over it and writes its answer.
@@ -176,7 +259,9 @@ _WINDOW_TEST_DATA.update({c + ".tsv": ":window_oracle[" + c + ".tsv]" for c in _
 # - test_run_sql_q6: run_sql over an EngineContext. TPC-H Q6's text from
 #   bench_corpus over a lineitem-shaped Parquet file gives the integer
 #   oracle's DECIMAL(38,4); a self-join counts the key pairs of the oracle; a
-#   LEFT JOIN, a syntax error, an unknown table, a COPY or CTAS and a replaced
+#   LEFT self-join counts the pairs and the unmatched rows of the oracle and a
+#   scalar subquery gives the oracle's count; a LEFT JOIN with a residual over
+#   both sides, a syntax error, an unknown table, a COPY or CTAS and a replaced
 #   file are named refusals; the footer is read once per
 #   query; contexts are created and dropped repeatedly.
 # - test_run_sql_distinct: run_sql over Parquet tables in several row groups:
@@ -207,6 +292,15 @@ _WINDOW_TEST_DATA.update({c + ".tsv": ":window_oracle[" + c + ".tsv]" for c in _
 #   empty string, under a WHERE and a HAVING, with count(DISTINCT), SELECT
 #   DISTINCT over three columns, an all-NULL key and no row, on one and three
 #   workers; every case is run.
+# - test_run_sql_join_kinds: run_sql over Parquet tables DuckDB wrote (the
+#   :join_kinds_oracle action above) answers what the pinned DuckDB answers for
+#   each case of tests/join_kinds/cases.sql, on one and three workers: LEFT,
+#   RIGHT and FULL joins on BIGINT, VARCHAR, INTEGER = BIGINT, DOUBLE and
+#   two-column keys, under counts, filters and chained joins, and against an
+#   empty table on either side; EXISTS, NOT EXISTS, IN, NOT IN (NULL-aware) and
+#   the SEMI JOIN and ANTI JOIN keywords; CROSS joins (also past one output
+#   chunk), a comma join and scalar subqueries; a LEFT JOIN with a residual over
+#   both sides is refused at lower; every case is run.
 # - test_run_sql_joins: run_sql over six TPC-H-typed Parquet tables (INT32 and
 #   INT64 keys with NULLs and unmatched keys, DECIMAL(15,2) money, DATE32): the
 #   shapes of Q3, Q5 (a six-table join on two keys) and Q10 as comma joins in
@@ -380,6 +474,7 @@ mojo_library(
         "tests/test_run_sql_group_keys.mojo",
         "tests/test_run_sql_group_keys_mixed.mojo",
         "tests/test_run_sql_int_sum.mojo",
+        "tests/test_run_sql_join_kinds.mojo",
         "tests/test_run_sql_joins.mojo",
         "tests/test_run_sql_multifile.mojo",
         "tests/test_run_sql_no_from.mojo",
@@ -400,6 +495,7 @@ mojo_library(
         "tests/test_run_sql_cte.mojo": _CTE_TEST_DATA,
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,
         "tests/test_run_sql_window.mojo": _WINDOW_TEST_DATA,
+        "tests/test_run_sql_join_kinds.mojo": _JOIN_KINDS_TEST_DATA,
     },
     visibility = ["PUBLIC"],
 )

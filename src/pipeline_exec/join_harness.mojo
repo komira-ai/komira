@@ -2,7 +2,7 @@
 # join_harness -- join plans by hand, small tables to join, and the oracle
 # =============================================================================
 #
-# What a test needs to run an inner equi join through `run_plan` and
+# What a test needs to run a join of any kind through `run_plan` and
 # `RealBuilder`, or through `HashProbeOp` alone:
 #
 #   * segment descriptors: `build_segment` (a resident batch collected for a
@@ -55,7 +55,9 @@
 #     `keep_rows` reduce a table, and `sorted_rows`
 #     gives a table's rows as sorted strings so that two results compare as
 #     multisets whatever order the workers produced them in; `expect_rows`
-#     asserts two such lists equal.
+#     asserts two such lists equal; `oracle_join_kind` is the nested-loop join
+#     of any kind (INNER, LEFT, RIGHT, FULL, SEMI, ANTI, and CROSS when the key
+#     lists are empty), a padded side's cells shown as NULL_TEXT.
 
 from std.memory import bitcast
 from std.testing import assert_equal
@@ -79,7 +81,14 @@ from physical_plan.physical_plan import (
     SINK_HASH_BUILD,
     SINK_ORIENT_COLUMNAR,
 )
-from plan_ir.logical_plan import JOIN_INNER
+from plan_ir.logical_plan import (
+    JOIN_ANTI,
+    JOIN_FULL,
+    JOIN_INNER,
+    JOIN_LEFT,
+    JOIN_RIGHT,
+    JOIN_SEMI,
+)
 
 from .plan_harness import batch_segment, chain
 
@@ -541,6 +550,87 @@ def oracle_join(
             keyed.extend(build.keyed[b].copy())
             out.shown.append(shown^)
             out.keyed.append(keyed^)
+    return out^
+
+
+def _null_cells(n: Int) -> List[String]:
+    var out = List[String]()
+    for _ in range(n):
+        out.append(String(NULL_TEXT))
+    return out^
+
+
+def _push_row(mut out: JoinTable, var cells: List[String]):
+    out.shown.append(cells.copy())
+    out.keyed.append(cells^)
+
+
+def _pair_matches(
+    ref probe: JoinTable,
+    ref build: JoinTable,
+    pcols: List[Int],
+    bcols: List[Int],
+    p: Int,
+    b: Int,
+) -> Bool:
+    """True when every key pair of probe row `p` and build row `b` is non-NULL
+    on both sides and equal; with no key, every pair matches."""
+    for k in range(len(pcols)):
+        var pv = probe.keyed[p][pcols[k]].copy()
+        var bv = build.keyed[b][bcols[k]].copy()
+        if pv == NULL_TEXT or bv == NULL_TEXT or pv != bv:
+            return False
+    return True
+
+
+def oracle_join_kind(
+    kind: UInt8,
+    ref probe: JoinTable,
+    ref build: JoinTable,
+    probe_keys: List[String],
+    build_keys: List[String],
+) raises -> JoinTable:
+    """The join of `kind` of `probe` and `build` by a nested loop: matched
+    pairs, probe rows without a partner padded with NULL for LEFT and FULL,
+    build rows without a partner padded with NULL for RIGHT and FULL, the
+    probe rows with (SEMI) or without (ANTI) a partner alone. With no key
+    every pair matches (CROSS). The columns are the probe's then the build's,
+    the probe's alone for SEMI and ANTI."""
+    var pcols = List[Int]()
+    var bcols = List[Int]()
+    for k in range(len(probe_keys)):
+        pcols.append(probe.column(probe_keys[k]))
+        bcols.append(build.column(build_keys[k]))
+    var out = JoinTable()
+    if kind == JOIN_SEMI or kind == JOIN_ANTI:
+        out.names = probe.names.copy()
+    else:
+        var inner = oracle_join(probe, build, probe_keys, build_keys)
+        out.names = inner.names.copy()
+    var build_matched = List[Bool](length=build.num_rows(), fill=False)
+    for p in range(probe.num_rows()):
+        var found = False
+        for b in range(build.num_rows()):
+            if not _pair_matches(probe, build, pcols, bcols, p, b):
+                continue
+            found = True
+            build_matched[b] = True
+            if kind != JOIN_SEMI and kind != JOIN_ANTI:
+                var cells = probe.shown[p].copy()
+                cells.extend(build.shown[b].copy())
+                _push_row(out, cells^)
+        if (kind == JOIN_SEMI and found) or (kind == JOIN_ANTI and not found):
+            _push_row(out, probe.shown[p].copy())
+        if (kind == JOIN_LEFT or kind == JOIN_FULL) and not found:
+            var cells = probe.shown[p].copy()
+            cells.extend(_null_cells(len(build.names)))
+            _push_row(out, cells^)
+    if kind == JOIN_RIGHT or kind == JOIN_FULL:
+        for b in range(build.num_rows()):
+            if not build_matched[b]:
+                var cells = _null_cells(len(probe.names))
+                cells.extend(build.shown[b].copy())
+                _push_row(out, cells^)
     return out^
 
 

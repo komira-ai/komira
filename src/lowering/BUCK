@@ -28,11 +28,21 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        parameter indices, equal arguments rendering equal
 #                        and a different host changing only the morsel size.
 # test_lower_join_refusals
-#                        every reason an inner equi-join is refused with
-#                        LOWERING_JOIN_UNSERVED (join type, keys, residual,
-#                        hint, build side, key types, repeated output names),
-#                        a join that lowers beside each, and the refusal
-#                        coming before any scan is counted.
+#                        every reason a join is refused with
+#                        LOWERING_JOIN_UNSERVED (a join type the IR does not
+#                        define, a SEMI or ANTI join that builds its left side,
+#                        a CROSS join that names a key, keys, residual, hint,
+#                        build side, key types, repeated output names), a join
+#                        that lowers beside each, the outer, semi, anti and
+#                        cross types lowering, and the refusal coming before
+#                        any scan is counted.
+# test_lower_join_kinds  LEFT, RIGHT, FULL, SEMI, ANTI and CROSS joins: the
+#                        build segment, the probe's join type (the plan's when
+#                        the right child builds; LEFT and RIGHT exchanged,
+#                        with a projection restoring the node's columns and
+#                        names, when the left child builds), the keys of each
+#                        side, the E3 edge, the columns a SEMI or ANTI join
+#                        keeps and a CROSS join's empty key lists.
 # test_lower_joins       the rendered physical plan of inner equi-joins: the
 #                        build segment and the fused probe for either build
 #                        side, the projection that restores the node's columns
@@ -115,6 +125,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_lower_join_refusals.mojo",
+        "tests/test_lower_join_kinds.mojo",
         "tests/test_lower_joins.mojo",
         "tests/test_lower_csv.mojo",
         "tests/test_lower_distinct.mojo",
