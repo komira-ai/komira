@@ -131,6 +131,11 @@ _WINDOW_CASES = [
     "over_where",
     "ordered_output",
     "no_row",
+    "cte_window_twice",
+    "cte_window_split",
+    "cte_window_over_group",
+    "cte_window_over_union",
+    "cte_window_join_shared",
 ]
 
 sql_oracle(
@@ -256,7 +261,10 @@ _WINDOW_TEST_DATA.update({c + ".tsv": ":window_oracle[" + c + ".tsv]" for c in _
 #   DOUBLE and VARCHAR), running sums over the default RANGE frame and over a
 #   unique key, running min, max, avg and count over tied keys, whole-partition sum, count, avg, min and max, first_value,
 #   last_value and nth_value, no PARTITION BY, two partition keys, several
-#   windows in one SELECT, a WHERE, an outer ORDER BY and no row, with NULL
+#   windows in one SELECT, a WHERE, an outer ORDER BY and no row, a CTE holding
+#   a window read twice, a window over a CTE aggregation read twice (and over a
+#   union of the reads) and a join with a window on its left side beside a CTE
+#   read twice, with NULL
 #   keys, tied order keys and the empty string, on one and three workers, each
 #   column of the right type; every case is run; a sum over an INTEGER, a DATE
 #   partition key, a DECIMAL order key, an explicit ROWS frame and a float

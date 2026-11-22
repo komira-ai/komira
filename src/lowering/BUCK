@@ -57,7 +57,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        reference found by its hash before folding, a join's
 #                        right child walked first (a self-join, scan facts
 #                        kept, a shared join), one of scans, filters, projections
-#                        and unions cut again over the same scan facts, and
+#                        and unions cut again over the same scan facts, a
+#                        window read twice cut once, one with a reference
+#                        under it or holding one, a window as a join's left
+#                        child keeping its scan facts, and
 #                        the refusal of a reference with no canonical subtree,
 #                        before it or of another layout, and of a view
 #                        reference.

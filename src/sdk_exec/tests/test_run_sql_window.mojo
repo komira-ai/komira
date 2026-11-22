@@ -48,6 +48,14 @@
 #                                            (two with one spec), a window over
 #                                            a WHERE, an outer ORDER BY on a
 #                                            total key, a WHERE no row passes.
+#   test_windows_with_shared_subplans_equal_duckdb
+#                                            a CTE holding a window read twice
+#                                            (whole, and under two filters), a
+#                                            window over a CTE aggregation read
+#                                            twice (one window per read, and
+#                                            one over a union of the reads),
+#                                            and a join whose left side is a
+#                                            window while a CTE is read twice.
 #   test_every_case_is_run                   each case of cases.sql belongs to
 #                                            one of the tests above.
 #   test_unserved_windows_are_named_refusals_at_lower
@@ -258,6 +266,16 @@ def _ordered() -> List[String]:
     return out^
 
 
+def _shared() -> List[String]:
+    var out = List[String]()
+    out.append("cte_window_twice")
+    out.append("cte_window_split")
+    out.append("cte_window_over_group")
+    out.append("cte_window_over_union")
+    out.append("cte_window_join_shared")
+    return out^
+
+
 def test_ranking_functions_equal_duckdb() raises:
     _check_all(_ranking())
 
@@ -279,6 +297,10 @@ def test_window_shapes_equal_duckdb() raises:
     _check_all(_ordered(), total=True)
 
 
+def test_windows_with_shared_subplans_equal_duckdb() raises:
+    _check_all(_shared())
+
+
 def test_every_case_is_run() raises:
     var known = _ranking()
     known.extend(_lag_lead())
@@ -286,6 +308,7 @@ def test_every_case_is_run() raises:
     known.extend(_values())
     known.extend(_shapes())
     known.extend(_ordered())
+    known.extend(_shared())
     var cases = _cases()
     assert_equal(len(cases), len(known), "cases in cases.sql")
     for i in range(len(cases)):

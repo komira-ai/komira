@@ -30,3 +30,12 @@ COPY (SELECT id, row_number() OVER (PARTITION BY g ORDER BY id) AS rn, rank() OV
 COPY (SELECT id, g, row_number() OVER (PARTITION BY g ORDER BY id) AS rn, sum(v) OVER (PARTITION BY g ORDER BY o) AS sv FROM read_parquet('win.parquet') WHERE v > 0 AND g IS NOT NULL) TO 'over_where.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT g, id, row_number() OVER (PARTITION BY g ORDER BY id) AS rn FROM read_parquet('win.parquet') ORDER BY g, id) TO 'ordered_output.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT id, g, row_number() OVER (PARTITION BY g ORDER BY id) AS rn, sum(v) OVER (PARTITION BY g) AS sv FROM read_parquet('win.parquet') WHERE id < 0) TO 'no_row.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+-- A window and a CTE that holds a repeated subtree: a CTE with a window read
+-- twice, whole and under two filters; a window over a CTE that is an
+-- aggregation read twice (a window per read, and over a union of the reads);
+-- a join whose left side is a window while a CTE is read twice.
+COPY (WITH w AS (SELECT id, g, row_number() OVER (PARTITION BY g ORDER BY id) AS rn FROM read_parquet('win.parquet')) SELECT id, g, rn FROM w UNION ALL SELECT id, g, rn FROM w) TO 'cte_window_twice.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (WITH w AS (SELECT id, g, row_number() OVER (PARTITION BY g ORDER BY id) AS rn FROM read_parquet('win.parquet')) SELECT id, g, rn FROM w WHERE id < 2500 UNION ALL SELECT id, g, rn FROM w WHERE id >= 2500) TO 'cte_window_split.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (WITH c AS (SELECT g, max(v) AS mxv FROM read_parquet('win.parquet') GROUP BY g) SELECT g, mxv, rank() OVER (ORDER BY mxv) AS rk FROM c UNION ALL SELECT g, mxv, dense_rank() OVER (ORDER BY g) AS rk FROM c) TO 'cte_window_over_group.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (WITH c AS (SELECT g, max(v) AS mxv FROM read_parquet('win.parquet') GROUP BY g) SELECT g, mxv, rank() OVER (ORDER BY mxv) AS rk FROM (SELECT g, mxv FROM c UNION ALL SELECT g, mxv FROM c) u) TO 'cte_window_over_union.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (WITH c AS (SELECT g, max(v) AS mxv FROM read_parquet('win.parquet') GROUP BY g) SELECT w.id, w.rn, a.mxv FROM (SELECT id, g, row_number() OVER (PARTITION BY g ORDER BY id) AS rn FROM read_parquet('win.parquet')) w JOIN c a ON w.g = a.g UNION ALL SELECT mxv AS id, mxv AS rn, mxv FROM c) TO 'cte_window_join_shared.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

@@ -23,14 +23,15 @@
 # never nest, so the first to finish is the first in the producer's order. A canonical subtree is cut in one of two ways, judged on
 # that expanded form:
 #
-#   materialized  the subtree holds an aggregation, a distinct, a sort or a
-#                 limit: it ends in a segment of its own (the
+#   materialized  the subtree holds an aggregation, a distinct, a sort, a
+#                 window or a limit: it ends in a segment of its own (the
 #                 breaker's, or a SINK_COLLECT one, as a union branch does),
 #                 and the canonical position and every reference read that
 #                 segment's output over an E3 edge (SOURCE_SINK_OUTPUT). Each
 #                 reader gets the same rows: the engine hands each the
 #                 output, a copy to all but the last (`PublishedOutputs`).
-#                 A reader of a sort's output is a sorted input, as the
+#                 A reader of a sort's output, or of a keyed window's (one
+#                 with a partition or an order key), is a sorted input, as the
 #                 sort's own reader is, so a limit above it is refused.
 #   streaming     the subtree is scans, filters, projections and unions of
 #                 them only: it is cut again at every reference, over the
@@ -67,6 +68,7 @@ from plan_ir.logical_plan import (
     PLAN_AGGREGATE,
     PLAN_DISTINCT,
     PLAN_SORT,
+    PLAN_PARTITION_BY,
     PLAN_LIMIT,
     PLAN_UNION,
     PLAN_JOIN,
@@ -95,6 +97,8 @@ def _referenced_hashes(plan: LogicalPlan, mut out: List[UInt64]):
         _referenced_hashes(plan.distinct_data_ref().child[], out)
     elif tag == PLAN_SORT:
         _referenced_hashes(plan.sort_data_ref().child[], out)
+    elif tag == PLAN_PARTITION_BY:
+        _referenced_hashes(plan.partition_by_data_ref().child[], out)
     elif tag == PLAN_UNION:
         ref ud = plan.union_data_ref()
         for i in range(len(ud.children)):
@@ -123,6 +127,8 @@ def _scan_count(plan: LogicalPlan) -> Int:
         return _scan_count(plan.distinct_data_ref().child[])
     if tag == PLAN_SORT:
         return _scan_count(plan.sort_data_ref().child[])
+    if tag == PLAN_PARTITION_BY:
+        return _scan_count(plan.partition_by_data_ref().child[])
     if tag == PLAN_UNION:
         ref ud = plan.union_data_ref()
         var n = 0
@@ -190,6 +196,8 @@ def _expand_inplace(mut plan: LogicalPlan, cutter: _Cutter):
         _expand_inplace(plan._distinct.value()[].child[], cutter)
     elif tag == PLAN_SORT:
         _expand_inplace(plan._sort.value()[].child[], cutter)
+    elif tag == PLAN_PARTITION_BY:
+        _expand_inplace(plan._partition_by.value()[].child[], cutter)
     elif tag == PLAN_UNION:
         var n = len(plan._union.value()[].children)
         for i in range(n):
