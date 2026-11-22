@@ -900,7 +900,7 @@ Specified in [`optimized_plan_udfs.md`](optimized_plan_udfs.md) (§10.1-§10.9) 
   UDF has none is refused with `OPTIMIZED_UDF_READ_SET_REQUIRED`, because a `ROW` UDF without one keeps every column
   of a wide input live. The SDK fills it from an explicit declaration or a static scan, and a function whose reads
   neither bounds is refused at capture with `UDF_READ_SET_REQUIRED`, naming the function and the argument to give,
-  `columns=[...]`; the SDK never lists every input column instead. A frame (`MAP_BATCHES_FRAME`, grouped or not) UDF
+  `columns=[...]`; for a `ROW` the SDK never lists every input column instead. A frame (`MAP_BATCHES_FRAME`, grouped or not) UDF
   carries one too, and a plan whose frame UDF has none is refused with `OPTIMIZED_UDF_READ_SET_REQUIRED`: the SDK
   writes `columns=[...]` or the annotation of the frame parameter when given, otherwise the input frame's columns at
   that point of the plan, and the optimizer projects the input to it. Every kind that receives rows or a frame

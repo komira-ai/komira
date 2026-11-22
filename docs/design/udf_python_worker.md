@@ -6,6 +6,18 @@ Status: proposed, not built. This is the build design of the `komira/python` run
 document points here. Its runtime-specific conformance cases are in
 [the conformance corpus](udf_runtime_conformance.md#cases-of-the-komirapython-runtime).
 
+> **Open question, a product decision: must a frame UDF name its columns?** Every UDF now carries in the plan the list of
+> columns it reads (§6.1). A row UDF must say which fields it reads, or the SDK finds them by reading the function, or
+> it is refused. A frame UDF (a function that takes a whole table, `map_batches` over a frame) gets a default: if the
+> user does not pass `columns=[...]` or annotate the parameter, the SDK writes every column of the table at that
+> point of the plan. The list is explicit, but it is the whole table, so a frame UDF that reads 2 of 100 columns
+> still makes the engine read all 100. The choice: keep that default, or require `columns=[...]` (or an annotation)
+> on every frame UDF, as for a row UDF that cannot be read. **Recommendation: require it.** It keeps one rule for
+> every UDF, and a user whose function really uses the whole table writes so in one line (`columns=list(df.columns)`).
+> The cost is one more argument on frame UDFs. The documents describe the default today; requiring it changes one
+> sentence in §6.1, the producer rule in `optimized_plan_udfs.md` §10.2, and one refusal at capture
+> (`UDF_READ_SET_REQUIRED` for frames too).
+
 Citations are to komira `main` as of 2026-11-20. Section numbers without a file name are this document's; `IF §x` is
 `udf_runtime_interface.md`; as in the interface document, `§7.x` is `optimized_plan.md`, `§10.1` to `§10.9` are
 `optimized_plan_udfs.md`, and `§10.10` to `§10.14` are `optimized_plan_udf_runtime.md`. Statements marked *(inferred)* are a reading, not a fact taken from the code.
@@ -412,10 +424,11 @@ it is readable forever (IF §8.2), so it changes only additively (`AGENTS.md` B8
 message PythonDescriptor {
   string             entry           = 1;  // equals UdfCode.entry: "pkg.mod:qualname"
   uint32             shapes          = 2;  // the shapes the entry supports, as KOMIRA_UDF_SHAPE_* bits (IF §4.2)
-  repeated WireField arg_types       = 3;  // the signature captured (empty for ROW and MAP_BATCHES_FRAME)
+  repeated WireField arg_types       = 3;  // SCALAR, MAP_BATCHES_COLUMN, AGGREGATE, STEP: the argument types captured;
+                                           // empty for ROW and MAP_BATCHES_FRAME, whose columns are recorded_fields
   WireField          return_type     = 4;
   WireField          state_type      = 5;  // mergeable AGGREGATE only
-  RecordedFields     recorded_fields = 6;  // ROW and MAP_BATCHES_FRAME: always set (the read set's fields, and key_fields for a grouped frame); absent is refused
+  RecordedFields     recorded_fields = 6;  // ROW and MAP_BATCHES_FRAME only, always set: fields + key_fields = the read set
   BatchFormat        batch_format    = 7;  // required: UNSPECIFIED is refused
   string             serializer      = 8;  // VALUE only: "cloudpickle/<version>"
   string             python_abi      = 9;  // VALUE only: the tag the payload needs, "cp313"
@@ -433,14 +446,17 @@ values:
 - with `ERR_DESCRIPTOR`: a `descriptor_version` other than 1; bytes that are not canonical (fields in number order,
   no unknown field, no field equal to its default except `recorded_fields`, which is emitted whenever it is set); a `ROW` or
   `MAP_BATCHES_FRAME` entry whose `recorded_fields` is absent; an
-  `entry` other than `UdfCode.entry`; a spec shape outside `shapes`; `arg_types`, `return_type` or `state_type` that
-  differ from the spec's (for `ROW` and `MAP_BATCHES_FRAME`, the types of the recorded fields against the spec's
-  `arg_types` of the same names); a `RecordedFields` whose lists are not ascending by UTF-8 bytes, repeat a name, or
+  `entry` other than `UdfCode.entry`; a spec shape outside `shapes`; for `SCALAR`, `MAP_BATCHES_COLUMN`, `AGGREGATE` and
+  `STEP`, a descriptor `arg_types` that differs from the `UdfRef`'s `arg_types` (the spec's `args`), and a
+  `recorded_fields` that is set; for `ROW` and `MAP_BATCHES_FRAME`, a descriptor `arg_types` that is not empty, and a
+  recorded field whose type differs from the `UdfRef.arg_types` entry of the same name; a `return_type` or
+  `state_type` that differs from the spec's; a `RecordedFields` whose lists are not ascending by UTF-8 bytes, repeat a name, or
   share one; `BATCH_FORMAT_UNSPECIFIED`, or a batch format not built yet; and a `serializer`, `python_abi` or
   `distribution` set on a form that does not use it;
-- with `ERR_READ_SET_MISMATCH`: a `ROW` or `MAP_BATCHES_FRAME` whose `arg_types` names, as a sorted set, differ from
-  the union of `recorded_fields.fields` and `recorded_fields.key_fields`. The names are always compared, because the
-  plan always carries a read set on these two kinds (§6.1);
+- with `ERR_READ_SET_MISMATCH`: a `ROW` or `MAP_BATCHES_FRAME` whose `UdfRef.arg_types` names (which plan validation
+  holds equal to its `read_set`) differ, as a sorted set, from the union of the descriptor's `recorded_fields.fields`
+  and `recorded_fields.key_fields`. The names are always compared, because the plan always carries a read set on
+  these two kinds (§6.1);
 - with `ERR_UNSUPPORTED`: a `VALUE` whose `python_abi` differs from the `abi` option, because a pickled code object
   belongs to its interpreter's minor (IF §3.1, *The runtime's ABI tag*); the zygote's own tag is checked against the
   same option at `HELLO` (§3.1).
@@ -454,13 +470,26 @@ its parameters, and its type hints where it has them (`ERR_LOAD` otherwise).
 set and empty (the function reads no column); unset is refused. It stays refused on every other kind
 (`OPTIMIZED_UDF_READ_SET_KIND`), because `SCALAR`, `MAP_BATCHES_COLUMN` and `AGGREGATE` carry their columns as their
 arguments (`arg_types`) and a `STEP` has no input. So every kind that receives rows or a frame carries an explicit
-list, and for these two kinds `arg_types` equals the read set's names in order. Each part has a duty:
+list, and for these two kinds the `UdfRef`'s `arg_types` equals its read set's names in order. Where each list
+lives:
+
+| Place | `ROW` | `MAP_BATCHES_FRAME` |
+|---|---|---|
+| `UdfRef.read_set` (the plan) | The fields the function reads | The columns the function receives, a grouped frame's `group_by` columns included |
+| `UdfRef.arg_types` (the plan) | The same names, same order, with their types | The same |
+| Descriptor `arg_types` | Empty | Empty |
+| Descriptor `recorded_fields.fields` | The read set as capture found it (`columns=`, annotation or scan) | The read set as capture found it (`columns=`, annotation or the default) |
+| Descriptor `recorded_fields.key_fields` | Empty | The `group_by` columns capture added because `fields` lacks them |
+
+`fields` and `key_fields` are disjoint, and their union is the read set. Each part has a duty:
 
 - **The producer supplies it.** `ROW`: `columns=[...]`, else an annotation of the row parameter (`TypedDict`,
   dataclass), else the SDK's static scan of the function's bytecode for attribute and subscript reads on the row
   parameter. `MAP_BATCHES_FRAME`: `columns=[...]` or an annotation of the frame parameter, else the input frame's
   columns at that point of the plan, which the producer knows from the schema; a grouped frame's read set contains
-  its `group_by` columns (`OPTIMIZED_UDF_READ_SET_GROUP_KEY`). The user narrows a frame with `columns=`; there is no
+  its `group_by` columns (`OPTIMIZED_UDF_READ_SET_GROUP_KEY`). The schema is always known there: the frame's `arg_types` carry each column's
+  Arrow type, so the plan cannot be built without the child's output schema, and a child whose schema the producer
+  cannot bind is refused by the plan builder's own binding, before capture. The user narrows a frame with `columns=`; there is no
   static scan for frames.
 - **Capture refuses** a `ROW` function whose reads neither `columns=` nor an annotation bounds and the scan cannot
   bound, with `UDF_READ_SET_REQUIRED` naming the function and `columns=[...]`. It never falls back to every input
@@ -550,11 +579,6 @@ hosts run Linux. Case Z9 of the conformance corpus is the single check, run in t
 on `macos-arm64`, the macOS wheel ships without Python UDFs: `describe` reports no shapes and a plan with a Python
 UDF is refused by name (`OPTIMIZED_UDF_KIND_UNSUPPORTED`). There is no second mode and no further work.
 
-**Open, with what happens either way.**
-
-1. **Which CPython minors** the wheel supports is the wheel design's. The runtime supports every minor whose tag the
-   SDK passes, and refuses only other implementations and free-threaded builds.
-
 ## 10. What the next work needs from this design
 
 | Work | Uses |
@@ -565,6 +589,7 @@ UDF is refused by name (`OPTIMIZED_UDF_KIND_UNSUPPORTED`). There is no second mo
 | The Python `@udf` decorator | §6 (the descriptor it writes), §7 (where it writes code objects), IF §6.1 |
 | The UDF conformance cases | The shared corpus and the cases of this runtime (the conformance corpus) |
 | Types beyond numerics | §4.1 (the C codec), P4 |
+| The wheel design | §7; it decides the CPython minors the wheel supports, and the runtime supports every minor whose tag the SDK passes, refusing only other implementations and free-threaded builds (§3.1) |
 
 The runtime-specific cases (Z for the zygote and workers, S for supervision) are listed in
 [the conformance corpus](udf_runtime_conformance.md#cases-of-the-komirapython-runtime). They are the runtime's own
@@ -589,13 +614,23 @@ No code changes in this pull request. The work, each item a brief of its own:
 3. **Tests:** `src/plan_wire/tests` (`test_plan_wire_udf_ref.mojo`, `test_plan_wire_udf_plans.mojo`,
    `test_plan_wire_udf_args.mojo`, `test_plan_wire_udf_position_sweeps.mojo`): refusal of an unset read set on each
    of the two kinds, acceptance of an empty one, and every `ROW` and frame fixture given a read set.
-4. **The producer library** (each SDK's plan builder; for Python, `python/komira`'s `@udf` and plan encoding): fill
-   `read_set` on every `ROW` and `MAP_BATCHES_FRAME` as §6.1 says, with the static scan and `columns=`; raise
-   `UDF_READ_SET_REQUIRED` and add it to the SDK's error table; write `recorded_fields` in every `ROW` and frame
-   descriptor.
-5. **The `komira/python` runtime (this document):** `validate` refuses an absent `recorded_fields`; the worker maps
+4. **The Python SDK's producer** (`python/komira`: the `@udf` decorator, the DataFrame verbs and the plan encoding):
+   - the `columns=[...]` argument on every `ROW` and frame verb, and the `TypedDict` or dataclass annotation read as
+     a declaration;
+   - for a `ROW`, the static scan of the function's bytecode, and `UDF_READ_SET_REQUIRED` naming `columns=[...]` when
+     nothing bounds the reads;
+   - for a frame, the default: the input frame's columns at that point of the plan, plus the `group_by` columns;
+   - `read_set` and `arg_types` written on every `ROW` and frame `UdfRef`, and `recorded_fields` in every `ROW` and
+     frame descriptor (§6);
+   - the error table (`_errors.py`): `UDF_READ_SET_REQUIRED` from capture, and `OPTIMIZED_UDF_READ_SET_REQUIRED` from
+     admission, each with its message and fix-it.
+5. **The TypeScript SDK's producer** (`node/`, when its UDF verbs land): the same `columns` value on every `ROW` and
+   frame verb and the same frame default. It has no static scan at first (a TypeScript function keeps no types at run
+   time, and its source is not read), so a `ROW` verb without `columns` is refused at capture with
+   `UDF_READ_SET_REQUIRED`. Its error table gains both tokens.
+6. **The `komira/python` runtime (this document):** `validate` refuses an absent `recorded_fields`; the worker maps
    a frame's column-lookup errors (§6.1).
-6. **`komira/native`:** unchanged (it already answers `ERR_DESCRIPTOR` on an absent field list); its export helper
+7. **`komira/native`:** unchanged (it already answers `ERR_DESCRIPTOR` on an absent field list); its export helper
    records the field list for `ROW` and frame entries.
-7. **The optimizer's projection pushdown and lowering (not built yet):** no every-column path for either kind.
-8. **`udf_runtime_conformance.md`:** changed in this pull request.
+8. **The optimizer's projection pushdown and lowering (not built yet):** no every-column path for either kind.
+9. **`udf_runtime_conformance.md`:** changed in this pull request.

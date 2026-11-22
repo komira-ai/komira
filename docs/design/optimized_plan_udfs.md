@@ -157,7 +157,7 @@ the input columns the function reads (`udf_runtime_interface.md` §3.1). It is *
   name the same set, else `UDF_READ_SET_INVALID`; never merged); (2) for a `ROW`, the SDK's static scan of field
   accesses, counting every branch, taken or not; (3) for a `MAP_BATCHES_FRAME`, the input frame's columns at that point
   of the plan, which the producer knows from the schema, in the canonical order; the user narrows it with `columns=[...]`
-  (the SDK's diagnostic suggests it when the frame reads few of many columns; a frame has no static-scan requirement).
+  (the SDK's diagnostic suggests it when the frame reads few of many columns; a frame has no static-scan requirement). The schema is always known there: a frame's `arg_types` carry each column's Arrow type, so a plan with a frame UDF cannot be built without its child's output schema, and a child whose schema the producer cannot bind is refused by the plan builder's own binding, before capture.
   For a `ROW`, iterating, converting, unpacking or passing on the whole row, or a name the scan cannot
   resolve (a computed `getattr`, `r[var]`), bounds nothing, and the function is refused at capture, on the
   user's machine, with `UDF_READ_SET_REQUIRED`, naming the function and the argument to give, `columns=[...]`. A `ROW`
