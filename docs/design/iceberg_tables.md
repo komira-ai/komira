@@ -13,12 +13,16 @@ Statements marked *(inferred)* are reasoning, not something read in code or in a
 
 **What the user holds is a catalog, not a table.** `komira.iceberg(...)` is an Iceberg REST catalog of many tables. Added on the session with `s.add_sql_binding("sales_catalog", sales_catalog)`, or for one statement as `s.sql(query, sales_catalog=sales_catalog)`, its tables are addressed in SQL as `sales_catalog.namespace.table`. One table of it, `sales_catalog.table("sales.orders")`, can be added under a name of its own, and SQL then says just that name ([What the user sees](#what-the-user-sees)).
 
-## Two questions for the owner
+## Three questions for the owner
 
 Each has a recommendation in one line. The rest of the document is written to it.
 
 1. **`CREATE TABLE ... AS` on a catalog that refuses a staged create.** Recommendation: fail by name (`ICEBERG_CATALOG_REJECTED`, quoting the catalog), with no create-then-append fallback, because the fallback shows readers an empty table and leaves one behind on failure ([Create](#create), [Decisions](#decisions) 3).
 2. **`CREATE OR REPLACE` on a table another tool created.** Recommendation: allow it, because the user named the statement, and Iceberg's replace keeps the table's uuid and history, so the old snapshots stay readable until the table's maintainer expires them ([Decisions](#decisions) 15).
+3. **The positional form `s.sql(table_object, "SELECT ... FROM self")`, binding one unnamed source for one statement under the name `self`.** As worded in the credentials design's questions for the owner:
+   - DuckDB: DuckDB's Python API has no such argument: it resolves a Python variable named in the SQL by inspecting the caller's frame; polars' `DataFrame.sql` reads its frame as `self` *(to confirm against the pinned polars)*.
+   - This design: served, Python only, beside named call bindings; TypeScript and Mojo write `{ self: source }`.
+   - Recommendation: keep it: it is the owner's own spelling, it costs one reserved name, and it never conflicts with a named binding because a call binding wins for its statement.
 
 ## What the first slice does not give
 
@@ -85,7 +89,7 @@ A statement over two bindings, a file source and the catalog:
 s.sql("INSERT INTO sales_catalog.sales.orders SELECT * FROM raw_orders")
 ```
 
-One source given before the query, read as `self` for that statement:
+One source given before the query, read as `self` for that statement. This form is not ruled; it is question 3 at the top:
 
 ```python
 s.sql(sales_catalog.table("sales.orders"), "SELECT count(*) FROM self")
@@ -106,8 +110,8 @@ sales.filter(sales.region == "emea").to_arrow()
 **How a catalog reaches a statement.** The Mojo SQL front end cannot turn a table name into a source by itself, so the user supplies the mapping:
 
 1. **A catalog is a source the user holds**: `komira.iceberg(uri, *, warehouse=None, credential=komira.AMBIENT, signing=None, access_delegation="vended-credentials")`. Building it does no I/O. **One table of it** is `catalog.table(name)`, where `name` is `"namespace.table"` or a tuple of namespace levels and the table name. It uses the catalog's credential.
-2. **A name in the SQL is bound to either** on the session, with `s.add_sql_binding(name, source)`, after which `s.sql(query)` takes the query alone; or for one statement, as a keyword of `sql` (`sales_catalog=sales_catalog`), which wins over a session binding of the same name for that statement only. `s.sql(source, query)` binds its one unnamed source as `self`; an unnamed catalog is read as `self.ns.t`. Re-adding a name on the session replaces its binding.
-3. **The binder plugs the source in.** For `sales_catalog.sales.orders`, it looks `sales_catalog` up in the statement's bindings (the call's, over the session's) and loads `sales.orders` from that catalog under the catalog's credential. For `orders_table`, the binding already names the catalog and the table. Either way it emits a `komira.iceberg.table` scan or the Iceberg write target.
+2. **A name in the SQL is bound to either** on the session, with `s.add_sql_binding(name, source)`, after which `s.sql(query)` takes the query alone; or for one statement, as a keyword of `sql` (`sales_catalog=sales_catalog`), which wins over a session binding of the same name for that statement only. `s.sql(source, query)` binds its one unnamed source as `self`, and an unnamed catalog is read as `self.ns.t`; that form is question 3 at the top. Re-adding a name on the session replaces its binding.
+3. **Every `sql` call hands the SQL-to-plan converter the full binding table: the session's bindings plus that call's own**, the call's winning on a shared name, and the converter looks nothing up by itself (`credentials_and_writes.md`, decision 3). **The binder plugs the source in.** For `sales_catalog.sales.orders`, it looks `sales_catalog` up in the statement's bindings (the call's, over the session's) and loads `sales.orders` from that catalog under the catalog's credential. For `orders_table`, the binding already names the catalog and the table. Either way it emits a `komira.iceberg.table` scan or the Iceberg write target.
 4. **The plan carries the catalog's location and the name of its credential, never a credential's value, and never a session-local name.** Two users' `sales_catalog` may be two catalogs, so a name a user bound never reaches the wire. `IcebergTableRef.catalog` is a `WireIcebergCatalog`: the `uri`, the `warehouse`, and a `WireSourceAccess` holding the credential name (`catalog-etl`) and the signing settings ([The plan wire](#the-plan-wire)). `sales_catalog.sales.orders` and `orders_table` therefore give the same plan. Whoever runs the plan resolves `catalog-etl` to a value: the session locally, or, on a job manager, the customer's secret store or the run's identity for `ambient`.
 
 What this document adds to that model is only what is specific to Iceberg:
