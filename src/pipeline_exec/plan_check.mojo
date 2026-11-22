@@ -6,14 +6,18 @@
 # the driver cannot run: an IR version other than the one this build reads, a
 # segment whose id is not its position, a dependency outside the plan or on the
 # segment itself, edge tags that do not match the dependencies one to one, an
-# edge tag or an order key without a policy, and a dependency cycle through the
-# edges a consumer waits for.
+# edge tag or an order key without a policy, ORDER_ROW_RANGE on a sink other
+# than the ungrouped aggregation sink (the only sink that folds by source
+# position), and a dependency cycle through the edges a consumer waits for.
 #
 # `ready_set` is the scheduler's view of a plan: the segments that have not
 # finished and whose waited-for dependencies have, in segment id order.
 
 from physical_plan.physical_plan import (
+    KEY_DTYPE_NONE,
+    ORDER_ROW_RANGE,
     PHYSICAL_PLAN_IR_VERSION,
+    SINK_AGG,
     SegmentDescPod,
 )
 
@@ -109,6 +113,19 @@ def check_plan(ref descs: List[SegmentDescPod]) raises:
             check_order_key(desc.order_key_kind)
         except e:
             raise Error(String(e) + " (" + where + ")")
+        if desc.order_key_kind == ORDER_ROW_RANGE and (
+            desc.sink_kind != SINK_AGG or desc.sink_key_dtype != KEY_DTYPE_NONE
+        ):
+            raise Error(
+                "pipeline_exec: "
+                + where
+                + " asks for ORDER_ROW_RANGE on sink kind "
+                + String(Int(desc.sink_kind))
+                + " with key dtype "
+                + String(Int(desc.sink_key_dtype))
+                + "; only the ungrouped aggregation sink (SINK_AGG,"
+                " KEY_DTYPE_NONE) folds by source position"
+            )
 
     # A cycle through waited-for edges leaves the ready set empty before every
     # segment has finished.

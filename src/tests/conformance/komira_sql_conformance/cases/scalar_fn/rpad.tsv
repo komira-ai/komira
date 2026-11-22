@@ -1,0 +1,14 @@
+k	rpad(s, 6, 'xy')
+0	xyxyxy
+1	abcxyx
+10	Ünïcod
+11	abcdex
+12	abcdef
+2	  Hell
+3	Ünïcod
+4	
+5	kitten
+6	flawxy
+7	axyxyx
+8	abxyxy
+9	a,bxyx

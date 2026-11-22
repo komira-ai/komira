@@ -7,17 +7,22 @@ pinned download (`pinned_file`): on a remote-cache hit, nothing is fetched.
 No source distribution is built and pip never runs.
 
 The Python surface is the shared library's bindings and their tests
-(`python_binding_test`, [tools/build/python](../../tools/build/python/README.md#binding-tests)).
+(`python_binding_test`, [tools/build/python](../../tools/build/python/README.md#binding-tests)),
+and the Python package `python/` ([design](../../docs/design/python_package.md)).
 The package that tested the pins (the pinned versions, the
 licences, the protobuf gencode, the 3.14 interpreters) is already gone:
-no test holds what this page says about the pins.
+apart from the protobuf runtimes ([protobuf](#protobuf)), no test holds what
+this page says about the pins.
 
 | target | what |
 |---|---|
 | `:cpython` | CPython 3.13.16, python-build-standalone release 20261003, `x86_64-unknown-linux-gnu-install_only_stripped` |
+| `:cpython_macos` | CPython 3.13.16, the same release, `aarch64-apple-darwin-install_only_stripped`, for a target configured for macOS ([macOS arm64](#macos-arm64)) |
 | `:native_libs` | `libgcc_s.so.1`, `libstdc++.so.6` (GCC 15.3) and `libz.so.1` (zlib 1.3.1), unpacked from the conda-forge packages the [platform table](../../tools/build/platforms/table.bzl) pins for the toolchains; `py_test` loads them before a script runs |
 | `:<distribution>` | one wheel installed, e.g. `:pyarrow`; its `deps` are the distributions it requires on linux |
-| `:cpython314`, `:cpython314t` | CPython 3.14.8 from the same release, with the GIL (`install_only_stripped`) and free-threaded (`freethreaded-install_only_stripped`, interpreter `bin/python3.14t`), for measurements of Python user-defined functions ([CPython 3.14](#cpython-314)) |
+| `:cpython311`, `:cpython312` | CPython 3.11.17 and 3.12.15 from the same release (`install_only_stripped`), the Python package's oldest supported minors ([CPython 3.10, 3.11 and 3.12](#cpython-310-311-and-312)) |
+| `:cpython310` | CPython 3.10.22 from the same release, the minor below the package's `Requires-Python`, for the one install test that must refuse it |
+| `:cpython314`, `:cpython314t` | CPython 3.14.8 from the same release, with the GIL (`install_only_stripped`) and free-threaded (`freethreaded-install_only_stripped`, interpreter `bin/python3.14t`), for measurements of Python user-defined functions and, with the GIL, the Python package's tests ([CPython 3.14](#cpython-314)) |
 | `:<distribution>-cp314`, `:<distribution>-cp314t` | one wheel of a 3.14 closure installed, e.g. `:numpy-cp314t` |
 
 ## The closure
@@ -46,15 +51,64 @@ its `deps` name it: its `tzdata/zoneinfo` directory is the action's `TZDIR`
 and Python's only zone path ([tools/build/python](../../tools/build/python/README.md#time-zones)),
 so a zone is never read from the worker.
 
-protobuf 7.36.2 loads the Python gencode of the repository's protoc (29.1,
-which writes gencode 5.29.1): its runtime check refuses only gencode newer
-than the runtime (or of another domain), not an older major. With protobuf
-5.28.3 pinned instead, loading that gencode fails with `VersionError:
-Detected incompatible Protobuf Gencode/Runtime versions`.
-
 Not in the closure yet, each for the change that brings its consumer: the
 Google Cloud Storage testbench, kafka-python and opensearch-py (service
 drivers), and anything they require.
+
+## macOS arm64
+
+`PYTHON_MACOS` pins the macOS arm64 build of the same CPython, and
+`MACOS_WHEELS` the macOS file of every distribution of the closure that has a
+binary build: the same versions as the linux wheels, tagged
+`macosx_<floor>_arm64` (`universal2` for grpcio and protobuf, which publish no
+arm64-only wheel), floor 12.0 at most, so every wheel loads on the toolchain's
+macOS floor or the one above it that the tag names. The pure-Python wheels
+(polars, python-dateutil, six, typing-extensions, tzdata) are the same files.
+`:<distribution>` is the one target for both platforms: configured for macOS it
+installs the macOS file with `:cpython_macos`, otherwise the linux file with
+`:cpython`, so a `py_test`'s `deps` do not change. The macOS interpreter loads
+only the operating system's libraries, so there is no `native_libs` for it.
+Only the 3.13 closure has a macOS build: the 3.14 closures and the protobuf
+edges stay linux-only. Nothing here is built in a pull request; the macOS
+harness is built by the release workflow
+([tools/build/python](../../tools/build/python/README.md#macos-arm64)).
+
+## protobuf
+
+The repository's protoc (29.1) writes Python gencode 5.29.1, and the gencode
+checks the runtime when it is imported: protobuf 5.29.1 and later load it
+(7.36.2's check refuses only gencode newer than the runtime, or of another
+domain, not an older major), and an older runtime refuses it with
+`VersionError: Detected incompatible Protobuf Gencode/Runtime versions`. The
+Python package declares the range its plan modules load under,
+`protobuf>=5.29.1,<8` ([python/dependencies.bzl](../../python/dependencies.bzl)),
+and [python/tests](../../python/tests/BUCK) loads them under each edge:
+
+| version | in `pins.bzl` | target | for |
+|---|---|---|---|
+| 7.36.2 | `WHEELS` | `:protobuf` (this package) | the range's upper edge, the newest release of major 7 |
+| 5.29.1 | `PROTOBUF_EDGES` | `komira//python/tests:protobuf-5.29.1` | the range's lower edge |
+| 5.28.3 | `PROTOBUF_EDGES` | `komira//python/tests:protobuf-5.28.3` | the release below the range, which must refuse the gencode |
+
+`PROTOBUF_EDGES` holds the binary wheels (`cp38-abi3`, manylinux x86_64) of
+the two older releases, BSD-3-Clause like 7.36.2. python/tests/BUCK declares
+their downloads and installed targets, so that they are inside the Python
+surface, and only its tests depend on them. It also installs all three for
+each other minor the package supports (3.11, 3.12 and 3.14), as
+`protobuf-<version>_py311` and so on: each wheel is `abi3`, one file for every
+minor.
+
+## CPython 3.10, 3.11 and 3.12
+
+`PYTHON_311` and `PYTHON_312` in [`pins.bzl`](pins.bzl) pin CPython 3.11.17
+and 3.12.15, with the GIL, from the same python-build-standalone release as
+the others, so that the Python package's tests and its wheel's install and
+upgrade tests run on every minor it supports
+([python/pythons.bzl](../../python/pythons.bzl)). `PYTHON_310` pins CPython
+3.10.22, the minor below the package's `Requires-Python`, which one install
+test runs to show that the wheel is refused there. None has a closure here:
+the package's tests install what they need (protobuf, above), and every
+`py_test` takes the pure-Python `:tzdata` of the 3.13 closure.
 
 ## CPython 3.14
 
@@ -125,11 +179,14 @@ new version, is reviewed by hand.
 The hermetic Python is for tests. What keeps it out of every published
 package:
 
-- **Visibility.** `:cpython`, `:cpython314`, `:cpython314t`, `:native_libs`
+- **Visibility.** `:cpython`, `:cpython310`, `:cpython311`, `:cpython312`,
+  `:cpython314`, `:cpython314t`, `:native_libs`
   and every wheel are visible only to the
   packages `_TEST_ONLY` in [`BUCK`](BUCK) lists, all test-only: packages under
   `src/tests` (`//:src_layout` holds that directory to test-only packages),
-  and `release/ci/tests`, which holds only the `py_test` of the CI scripts. A
+  `release/ci/tests`, which holds only the `py_test` of the CI scripts,
+  `tools/build/examples/python_binding` and `python/tests`, which hold only
+  tests and, in `python/tests`, the protobuf wheels only they use. A
   `mojo_bundle`, `conda_package` or any other target elsewhere that names one
   fails analysis with a visibility error.
 - **What a test hands on.** A `py_test`'s only output is its pass marker:
@@ -138,3 +195,10 @@ package:
   README (`komira_pack conda-check`,
   [package/README.md](../../tools/build/package/README.md)), which no Python
   file can become.
+
+The repository does write a wheel of its own: `wheel_file`
+([package/README.md](../../tools/build/package/README.md#the-python-wheel))
+packs the files its target names, and its writer is a Zig tool that uses
+nothing here. The pinned wheels and interpreters above are still never in it,
+or in any other published package: `_TEST_ONLY` keeps them out of every
+target that is not a test.

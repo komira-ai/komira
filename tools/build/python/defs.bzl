@@ -1,5 +1,6 @@
-"""Hermetic Python for tests: `python_dist`, `python_wheel`, `py_test`,
-`python_binding_test`, `python_oracle` and `python_proto`.
+"""Hermetic Python for tests: `python_dist`, `python_wheel`,
+`python_source_package`, `py_test`, `python_binding_test`, `python_oracle` and
+`python_proto`.
 
 `python_dist` unpacks a sha256-pinned CPython archive (an `install_only`
 archive of python-build-standalone) into a directory and fails unless the
@@ -7,13 +8,15 @@ interpreter in it runs and reports the pinned version, and is free-threaded
 exactly when the target says so. `python_wheel` installs
 one sha256-pinned wheel into a directory of its own, with that interpreter
 and `wheel_install.py` (no pip): it fails unless the wheel's `.dist-info` names
-the pinned distribution and version. `py_test` runs one Python script with that
-interpreter as a build action, through `pyrun.py`; its output exists only if
+the pinned distribution and version. `python_source_package` stages the files
+of an import package of this repository at their paths in a directory of its
+own, which a test imports from as it does a wheel's. `py_test` runs one Python
+script with that interpreter as a build action, through `pyrun.py`; its output exists only if
 the script passed, so building the target is running the test.
 `python_oracle` runs one script twice, through `oracle_run.py`, and outputs
 the directory it wrote, which other targets take as test data; it fails
 unless both runs wrote the same tree. `python_proto` runs the pinned protoc
-to generate one `_pb2.py` module.
+to generate the `_pb2.py` modules of a set of `.proto` files.
 
 Every action runs `bin/python3.<minor>` (`bin/python3.<minor>t` for a
 free-threaded build) of the unpacked archive with `-I -S`:
@@ -38,13 +41,18 @@ environment `LC_ALL=C PYTHONHASHSEED=0 TZ=UTC0 TZDIR=<absolute>` and nothing
 else, so that string hashes are the same in every run; `-I` would ignore
 `PYTHONHASHSEED`.
 
-The rules are linux x86_64 only: the macros set `exec_compatible_with` to
-the linux x86_64 execution platform.
+The rules run on linux x86_64 and on macOS arm64. The macros choose the
+execution platform from the target platform's operating system:
+`exec_compatible_with` is the linux x86_64 platform, or the darwin arm64 one
+for a target configured for macOS, and `python` (and, for `python_binding_test`,
+`runtime`) default to the interpreter and Mojo runtime of that platform. The
+macOS interpreter is unpacked, and its version checked, by a macOS build of
+`python_act` that a macOS worker runs.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:test_runtime.bzl", "data_map")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 PythonDistInfo = provider(
@@ -104,7 +112,7 @@ def _python_dist_impl(ctx):
         fail("{}: preload names libraries but native_libs is not set".format(ctx.label))
     ctx.actions.run(
         cmd_args(
-            ctx.attrs._python_act[RunInfo],
+            ctx.attrs.act[RunInfo],
             "dist",
             "--archive",
             archive,
@@ -142,7 +150,9 @@ _python_dist = rule(
         "native_libs": attrs.option(attrs.dep(), default = None),
         "preload": attrs.list(attrs.string(), default = []),
         "version": attrs.string(),
-        "_python_act": attrs.exec_dep(default = "komira//tools/build/python_act:python_act", providers = [RunInfo]),
+        # The unpacker and version check: python_act built for the platform
+        # that runs the interpreter.
+        "act": attrs.exec_dep(default = "komira//tools/build/python_act:python_act", providers = [RunInfo]),
     },
 )
 
@@ -266,38 +276,74 @@ _py_test = rule(
 # A `py_test` that also loads shared libraries: the `mojo_shared_lib` targets
 # of `libs` are copied, by file name, into one directory of the action, and the
 # Mojo runtime libraries they link (the toolchain's `mojo_runtime`) are a
-# second. The action's LD_LIBRARY_PATH is those two directories and nothing
+# second. The action's LD_LIBRARY_PATH and DYLD_LIBRARY_PATH are those two directories and nothing
 # else, so the loader finds the library and the runtime in the action's inputs
 # and never on the worker. The script learns the first directory from
 # `--lib-dir <dir>`, its first two arguments (a flag, not an environment
-# variable); `ctypes.CDLL(os.path.join(libdir, "<out_name>.so"))` loads a
-# library by path.
+# variable), and the second from `--runtime-dir <dir>`, the next two (for a
+# script that opens a runtime library by path); `ctypes.CDLL(os.path.join(libdir, "<out_name>.so"))` loads a
+# library by path. `data` ({dest: source}) is staged in the same directory at
+# `dest`: a library's runnable directory (`libkomira[runnable]`, the library
+# with its lib/ beside it) or a stand-in library under a path of its own.
 
 def _python_binding_test_impl(ctx):
-    libs = {}
+    libs = data_map(ctx, str(ctx.label.raw_target()), ctx.attrs.data)
+    tops = {dest.split("/")[0]: True for dest in libs}
     for l in ctx.attrs.libs:
         out = l[DefaultInfo].default_outputs
         if len(out) != 1:
             fail("{}: lib {} has {} outputs, a shared library has one".format(ctx.label, l.label, len(out)))
         name = out[0].basename
-        if name in libs:
-            fail("{}: two libs are named {}".format(ctx.label, name))
+        if name in libs or name in tops:
+            fail("{}: two libs (or a lib and data) are named {}".format(ctx.label, name))
         libs[name] = out[0]
     libdir = ctx.actions.copied_dir("libs", libs)
     runtime = ctx.attrs.runtime[DefaultInfo].default_outputs[0]
     return _run_py_test(
         ctx,
-        lib_args = ["--lib-dir", libdir],
-        env_extra = {"LD_LIBRARY_PATH": cmd_args(libdir, runtime, delimiter = ":")},
+        lib_args = ["--lib-dir", libdir, "--runtime-dir", runtime],
+        env_extra = {
+            "DYLD_LIBRARY_PATH": cmd_args(libdir, runtime, delimiter = ":"),
+            "LD_LIBRARY_PATH": cmd_args(libdir, runtime, delimiter = ":"),
+        },
     )
 
 _python_binding_test = rule(
     impl = _python_binding_test_impl,
-    doc = "A `py_test` that loads shared libraries: `libs` (`mojo_shared_lib` targets) are staged by file name in one directory, passed to the script as `--lib-dir <dir>`; the action's LD_LIBRARY_PATH is that directory and the Mojo runtime libraries (`runtime`), and nothing else.",
+    doc = "A `py_test` that loads shared libraries: `libs` (`mojo_shared_lib` targets) are staged by file name in one directory, and `data` ({dest: source}, a build output allowed) at `dest` in it; the directory is passed to the script as `--lib-dir <dir>` and the runtime directory as `--runtime-dir <dir>`; the action's LD_LIBRARY_PATH and DYLD_LIBRARY_PATH are that directory and the Mojo runtime libraries (`runtime`), and nothing else.",
     attrs = _PY_TEST_ATTRS | {
-        "libs": attrs.list(attrs.dep()),
+        "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
+        "libs": attrs.list(attrs.dep(), default = []),
         "runtime": attrs.exec_dep(default = "komira//tools/build/toolchains:mojo_runtime"),
         "_category": attrs.string(default = "python_binding_test"),
+    },
+)
+
+# ---- python_source_package ---------------------------------------------------
+#
+# The files of an import package of this repository (`python/komira`) staged at
+# their paths from the package in one directory, the site directory a test puts
+# on sys.path with `--site`, as it does a wheel's: a test lists the target in
+# `deps` and imports the package by its name. The closure's key is the target's
+# name and its version is "source", so a wheel of the same distribution in the
+# same closure fails analysis like any version clash.
+
+def _python_source_package_impl(ctx):
+    files = {}
+    for s in ctx.attrs.srcs:
+        files[s.short_path] = s
+    site = ctx.actions.copied_dir("site", files)
+    name = normalize(ctx.label.name)
+    return [
+        DefaultInfo(default_output = site),
+        PythonWheelInfo(name = name, version = "source", closure = {name: ("source", site)}),
+    ]
+
+_python_source_package = rule(
+    impl = _python_source_package_impl,
+    doc = "The files `srcs` of an import package of this repository, staged at their paths from the package in one directory; a `py_test` or `python_binding_test` that lists the target in `deps` imports from it. The distribution's name is the target's name and its version is `source`.",
+    attrs = {
+        "srcs": attrs.list(attrs.source()),
     },
 )
 
@@ -405,60 +451,110 @@ _python_oracle = rule(
 # ---- python_proto ------------------------------------------------------------
 
 def _python_proto_impl(ctx):
-    src = ctx.attrs.src
-    if not src.basename.endswith(".proto"):
-        fail("{}: src {} is not a .proto file".format(ctx.label.raw_target(), src.basename))
-    stem = src.basename[:-len(".proto")]
+    where = ctx.label.raw_target()
+    prefix = ctx.attrs.import_prefix
+    if prefix:
+        for part in prefix.split("/"):
+            if part in ("", ".", ".."):
+                fail("{}: import_prefix {} holds an empty, `.` or `..` segment".format(where, repr(prefix)))
+    if not ctx.attrs.srcs:
+        fail("{}: srcs is empty".format(where))
+    staged = {}
+    outs = {}
+    for src in ctx.attrs.srcs:
+        if not src.basename.endswith(".proto"):
+            fail("{}: src {} is not a .proto file".format(where, src.basename))
+        path = prefix + "/" + src.basename if prefix else src.basename
+        if path in staged:
+            fail("{}: two srcs are named {}".format(where, src.basename))
+        staged[path] = src
+        module = src.basename[:-len(".proto")] + "_pb2"
+        outs[module] = ctx.actions.declare_output(path[:-len(".proto")] + "_pb2.py")
     protoc = ctx.attrs._protoc[DefaultInfo].default_outputs[0]
-    proto_path = ctx.actions.copied_dir(ctx.label.name + ".proto_path", {src.basename: src})
-    out = ctx.actions.declare_output(stem + "_pb2.py")
+    proto_path = ctx.actions.copied_dir(ctx.label.name + ".proto_path", staged)
+    modules = sorted(outs.keys())
+    # protoc writes `<import_prefix>/<stem>_pb2.py` under --python_out, so the
+    # root is the first module's directory, one level up per prefix segment.
+    depth = 1 + (len(prefix.split("/")) if prefix else 0)
     ctx.actions.run(
         cmd_args(
             cmd_args(protoc, format = "{}/bin/protoc"),
             cmd_args(proto_path, format = "--proto_path={}"),
-            cmd_args(out.as_output(), parent = 1, format = "--python_out={}"),
-            cmd_args(proto_path, format = "{}/" + src.basename),
+            cmd_args(outs[modules[0]].as_output(), parent = depth, format = "--python_out={}"),
+            [cmd_args(proto_path, format = "{}/" + p) for p in sorted(staged.keys())],
+            hidden = [outs[m].as_output() for m in modules[1:]],
         ),
         category = "python_proto",
     )
-    return [DefaultInfo(default_output = out)]
+    return [DefaultInfo(
+        default_outputs = [outs[m] for m in modules],
+        sub_targets = {m: [DefaultInfo(default_output = outs[m])] for m in modules},
+    )]
 
 _python_proto = rule(
     impl = _python_proto_impl,
-    doc = "The Python module (`<stem>_pb2.py`) the pinned protoc (`komira//tools/build/toolchains/proto:protoc`) generates for one `.proto` with no imports, for a `py_test`'s `srcs`.",
+    doc = "The Python modules the pinned protoc (`komira//tools/build/toolchains/proto:protoc`) generates for `srcs`, each `.proto` at `<import_prefix>/<name>.proto`, so the imports between them resolve: one `<import_prefix>/<stem>_pb2.py` per file, each the sub-target `[<stem>_pb2]`, for a `py_test`'s `srcs`.",
     attrs = {
-        "src": attrs.source(),
+        # The directory the files are imported from (`import "<import_prefix>/<name>.proto"`),
+        # and so the Python package the modules import each other as; empty: the top level.
+        "import_prefix": attrs.string(default = ""),
+        "srcs": attrs.list(attrs.source()),
         "_protoc": attrs.exec_dep(default = "komira//tools/build/toolchains/proto:protoc"),
     },
 )
 
-def _linux(kwargs):
+_MACOS = "prelude//os/constraints:macos"
+
+def _by_os(linux, macos):
+    return select({_MACOS: macos, "DEFAULT": linux})
+
+def _platform(kwargs):
+    """Defaults a rule's execution platform to that of its target platform's OS, and `python` to that platform's interpreter."""
     if "exec_compatible_with" not in kwargs:
-        kwargs["exec_compatible_with"] = LINUX_X86_64
+        kwargs["exec_compatible_with"] = _by_os(LINUX_X86_64, DARWIN_ARM64)
+    return kwargs
+
+def _interpreter(kwargs):
+    if "python" not in kwargs:
+        kwargs["python"] = _by_os("komira//third_party/python:cpython", "komira//third_party/python:cpython_macos")
     return kwargs
 
 def _dist_macro(**kwargs):
-    _python_dist(**_linux(kwargs))
+    # A dist is for one platform, named by its exec_compatible_with and `act`.
+    if "exec_compatible_with" not in kwargs:
+        kwargs["exec_compatible_with"] = LINUX_X86_64
+    _python_dist(**kwargs)
 
 def _wheel_macro(**kwargs):
-    _python_wheel(**_linux(kwargs))
+    _python_wheel(**_platform(kwargs))
+
+def _source_package_macro(**kwargs):
+    _python_source_package(**kwargs)
 
 def _py_test_macro(**kwargs):
-    _py_test(**_linux(kwargs))
+    _py_test(**_interpreter(_platform(kwargs)))
 
 def _binding_test_macro(**kwargs):
-    _python_binding_test(**_linux(kwargs))
+    if "runtime" not in kwargs:
+        kwargs["runtime"] = _by_os("komira//tools/build/toolchains:mojo_runtime", "komira//tools/build/toolchains/darwin:mojo_runtime")
+    _python_binding_test(**_interpreter(_platform(kwargs)))
 
 def _oracle_macro(**kwargs):
-    _python_oracle(**_linux(kwargs))
+    # An oracle computes its answer on linux whatever the target platform.
+    if "exec_compatible_with" not in kwargs:
+        kwargs["exec_compatible_with"] = LINUX_X86_64
+    _python_oracle(**kwargs)
 
 def _proto_macro(**kwargs):
-    _python_proto(**_linux(kwargs))
+    if "exec_compatible_with" not in kwargs:
+        kwargs["exec_compatible_with"] = LINUX_X86_64
+    _python_proto(**kwargs)
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 python_dist = declares_docs(_dist_macro)
 python_wheel = declares_docs(_wheel_macro)
+python_source_package = declares_docs(_source_package_macro)
 py_test = declares_docs(_py_test_macro)
 python_binding_test = declares_docs(_binding_test_macro)
 python_oracle = declares_docs(_oracle_macro)

@@ -93,6 +93,27 @@ sql_oracle(
     outputs = ["expected.tsv"],
 ) for case in ["unplaced", "unordered"]]
 
+# RED: the case runner of komira_sql_conformance (its sql/answer.sql and
+# sql/check.sql, with the comparison sql/compare.sql) on a planted case
+# whose committed answer is wrong (`corpus case: answer.tsv differs from
+# the committed expected.tsv, line 2: ...`), and on one with no row order
+# line first (`corpus case: case.sql must start with ...`). A runner that
+# stopped comparing, or that ran a case with no row order, builds them
+# green.
+[sql_oracle(
+    name = "corpus_" + case,
+    srcs = [
+        "komira//src/tests/conformance/komira_sql_conformance:sql/compare.sql",
+        "komira//src/tests/conformance/komira_sql_conformance:sql/answer.sql",
+        "komira//src/tests/conformance/komira_sql_conformance:sql/check.sql",
+    ],
+    inputs = {
+        "case.sql": "corpus_" + case + ".sql",
+        "expected.tsv": "corpus_answer.tsv",
+    },
+    outputs = ["answer.tsv"],
+) for case in ["answer_differs", "unordered"]]
+
 # RED: each other dot command the README names as refused in safe mode
 # (`.system`, `.read`, `.output`, `.cd`, `.open`, `.import`), with the
 # message the selftest requires. The file each names is an input or a
@@ -290,6 +311,15 @@ sql_oracle(
         "data/*.csv": "staged.csv",
         "z.csv": "staged.csv",
     },
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an input path whose segment starts with `=`: a segment may hold `=`
+# (a Hive layout) only after its first character.
+sql_oracle(
+    name = "input_equals_first",
+    srcs = "ok.sql",
+    inputs = {"=day/part.csv": "staged.csv"},
     outputs = ["out.tsv"],
 )
 

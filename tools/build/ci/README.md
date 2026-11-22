@@ -134,8 +134,8 @@ reading is in `lock_graphs.zig` (`declaresLoad`, `opensLibrary`, `checkSystemLib
 behind unit tests that call each with a clean and a defective input.
 
 **The aggregate holds no Python.** Python serves only the Python SDK and its
-tests (`PYTHON_SURFACE` in `tests/python_closure_allowlist.bzl`, empty until
-the SDK lands), so the checks of `EXCLUDED` in `rules.bzl` are left out of
+tests (`PYTHON_SURFACE` in `tests/python_closure_allowlist.bzl`: the binding
+tests and `python/`), so the checks of `EXCLUDED` in `rules.bzl` are left out of
 `TARGETS` and of the completeness guard, each with its reason: the pinned
 CPython and wheels (`third_party/python`), the py_test of the CI scripts, and
 the three TLS interop tests that run a CPython peer. A row whose package is

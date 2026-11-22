@@ -1,4 +1,4 @@
-# The release build of komira's conda packages, and the continuous prod publish of its mopm
+# The release build of komira's conda packages and the continuous prod publish of its mopm
 # packages (docs/ci.md, "release.yml").
 #
 # komira publishes its conda release set to NO channel for now, and publishing will move to mopm
@@ -12,9 +12,9 @@
 # THE MOPM JOBS. The libraries moved to mopm (every src/<name> that has a
 # mopm.toml; //release:mopm_artifacts builds them) are published to the mopm
 # registry as one group, apart from the release set. The publish is CONTINUOUS:
-# EVERY push to main runs it, to the registry `prod`, in six jobs: build and
-# stage, stage in prod, test the staged bytes, commit, smoke, and (when one of
-# them failed or the run was cancelled) abort. This workflow publishes to no other
+# EVERY push to main runs it, to the registry `prod`, in seven jobs: build and
+# stage, stage in prod, test the staged bytes, commit, smoke, add from prod, and
+# (when one of them failed or the run was cancelled) abort. This workflow publishes to no other
 # registry (no beta stage), and no repository variable switches it.
 #   `mopm-stage`    on every push to main (and on a manual run, which only
 #                   stages): builds the packages and the pinned mopm on the
@@ -28,8 +28,8 @@
 #                   `-c komira_release.staged=stage` at that version); then
 #                   `mopm publish --staged S --registry prod --dry-run`. It
 #                   sends nothing and holds no token.
-#   `prod-stage`, `prod-test`, `prod-commit`, `prod-abort`, `prod-smoke`  the
-#                   prod publish, in five jobs, ONLY on a push to main (never on a
+#   `prod-stage`, `prod-test`, `prod-commit`, `prod-abort`, `prod-smoke`, `prod-add`
+#                   the prod publish, in six jobs, ONLY on a push to main (never on a
 #                   manual run). It stages the set the e2e of `mopm-stage`
 #                   passed on, tests the files the registry now holds in
 #                   quarantine, and only then commits:
@@ -54,9 +54,18 @@
 #                   published files from the prod channel and compares each with
 #                   the plan; on a difference it prints the command a human runs
 #                   to yank the group. It yanks nothing.
+#     prod-add      (needs prod-commit and prod-smoke; no environment, no identity)
+#                   what a user gets: in a fresh project, the pinned mopm runs
+#                   `mopm add komira-ai/<name> --registry prod` for json, uuid
+#                   and libc, then `mopm sync`; the lock must record full names
+#                   under https://conda.mopm.dev/komira-ai/ at this run's version,
+#                   and the installed files must be the plan's (sha256 and size).
 #                   These jobs need a mopm that has `--no-commit` and `--abort`
 #                   (0.0.66 and later) and a registry whose prod CI identity may
 #                   act for the package owner; docs/ci.md, "The prod publish".
+#
+# NO WHEEL HERE. The Python wheel is built and installed as a user installs it by pypi.yml on every
+# push (docs/ci.md, "pypi.yml: publishing the Python package"), so this file holds no wheel job.
 #
 # It runs named Buck2 targets on the farm, through the buck2-farm action
 # (.github/actions/buck2-farm), which fails a step unless buck2 succeeded and
@@ -276,8 +285,8 @@ jobs:
         with:
           args: build //tools/build/ci:release_beta_version --out ${{ runner.temp }}/mopm-publish/release_beta_version
           assert-remote: ${{ steps.assert.outputs.path }}
-      # Built here, run by `prod-test` and `prod-smoke` (the smoke job has no farm and no
-      # buck2, so it takes the tool from this job's artifact).
+      # Built here, run by `prod-test`, `prod-smoke` and `prod-add` (the smoke and add jobs
+      # have no farm and no buck2, so they take the tool from this job's artifact).
       - name: build the staged-set verify tool
         uses: ./.github/actions/buck2-farm
         with:
@@ -314,8 +323,8 @@ jobs:
       - name: mopm publish --staged --dry-run
         run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged release/staged_set --registry prod --dry-run'
       # What `prod-stage` uploads: the set the e2e just passed on, byte for
-      # byte, the mopm that stages and commits it, and the verify tool the
-      # smoke runs (it needs no farm).
+      # byte, the mopm that stages and commits it (and that `prod-add` adds
+      # with), and the verify tool the smoke and add jobs run (they need no farm).
       - name: keep the staged set
         run: cp -r release/staged_set "$RUNNER_TEMP/mopm-publish/staged"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -331,7 +340,7 @@ jobs:
         if: always()
         run: ./buck2 kill || true
 
-  # THE PROD PUBLISH, in five jobs (see the header). Every one runs only on a
+  # THE PROD PUBLISH, in six jobs (see the header). Every one runs only on a
   # push to main (a manual run never reaches the environment `prod`), and
   # `prod-stage` needs the set `mopm-stage` tried and passed the README e2e on, so a set
   # that did not pass is never staged in prod (docs/ci.md, "The prod publish", says
@@ -542,3 +551,32 @@ jobs:
         run: chmod +x "$RUNNER_TEMP/mopm-publish/release_staged_verify"
       - name: the prod channel serves the published files
         run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" smoke --staged "$RUNNER_TEMP/prod-smoke/committed" --config-url https://api.mopm.dev/index/config.json --attempts 5 --delay 30'
+
+  # ADD. What a user gets. `release_staged_verify add` makes a fresh project with the
+  # pinned mopm (the one that staged and committed the set), runs `mopm add
+  # komira-ai/<name> --registry prod` for a library, one with dependencies and one that
+  # ships a native library, then `mopm sync`, and checks the lock they wrote (full names,
+  # each namespace's channel under https://conda.mopm.dev/, the version of this run, the
+  # plan's sha256 and size) and the files sync installed against the plan. It runs after
+  # `prod-smoke`, so the channel already serves every file. Like the smoke job it holds no
+  # identity, no secret and no farm (farm actions have no network), and it yanks nothing.
+  prod-add:
+    needs: [prod-commit, prod-smoke]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-prod-committed-${{ github.sha }}
+          path: ${{ runner.temp }}/prod-add/committed
+      - name: mopm and the verify tool are executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm" "$RUNNER_TEMP/mopm-publish/release_staged_verify"
+      - name: mopm add from prod installs the published files
+        run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" add --staged "$RUNNER_TEMP/prod-add/committed" --mopm "$RUNNER_TEMP/mopm-publish/mopm" --work "$RUNNER_TEMP/prod-add/work"'

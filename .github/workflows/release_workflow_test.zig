@@ -3,7 +3,7 @@
 //! (the zig_test's `data`, under KOMIRA_TEST_WORK/workflows/release.yml).
 //!
 //! The prod publish is continuous: every push to main publishes to the registry `prod`, in the
-//! jobs `mopm-stage` and `prod-stage`, `prod-test`, `prod-commit`, `prod-abort`, `prod-smoke`.
+//! jobs `mopm-stage` and `prod-stage`, `prod-test`, `prod-commit`, `prod-abort`, `prod-smoke`, `prod-add`.
 //! There is no beta publish and no switch: no line of the file, comment or not, names the
 //! variable `MOPM_PUBLISH_ENABLED` or `MOPM_BETA_PUBLISH_ENABLED`. What the cases catch:
 //!  - no beta: none of the jobs `mopm-stage-beta`, `mopm-publish-beta` and `mopm-e2e-beta` exists,
@@ -21,29 +21,36 @@
 //!    number, so every release is a new version and prod publishes what the e2e passed on;
 //!  - no secret: no line outside a comment names `MOPM_TOKEN` or `secrets`;
 //!  - the workflow's top-level `permissions` is `{}` (a job holds only what it names);
-//!  - the prod publish, five jobs under one gate (`prod-stage`, `prod-test`,
-//!    `prod-commit`, `prod-abort`, `prod-smoke`; checkProd says what each must hold):
-//!    each job's `needs`, its exact `if:` (the push-to-main gate; the abort job's
+//!  - the prod publish, six jobs under one gate (`prod-stage`, `prod-test`,
+//!    `prod-commit`, `prod-abort`, `prod-smoke`, `prod-add`; checkProd says what each must
+//!    hold): each job's `needs`, its exact `if:` (the push-to-main gate; the abort job's
 //!    `failure() || cancelled()` condition with the gate and
 //!    `needs.prod-stage.result != 'skipped'`), its environment (`prod` for the three
-//!    that talk to the registry, `build` for the test, none for the smoke), its exact
-//!    permissions (`id-token: write` only where a registry identity is exchanged, or
+//!    that talk to the registry, `build` for the test, none for the smoke and the add), its
+//!    exact permissions (`id-token: write` only where a registry identity is exchanged, or
 //!    for farm-connect in the test), no secret anywhere in the file, the commands (the
 //!    stage with `--oidc --no-commit`, the commit with `--oidc` and neither `--no-commit`
 //!    nor `--abort`, the abort with `--abort`, the verify and the e2e on the verified
-//!    set in the test, the smoke), the order of the test's steps, and that the test and
-//!    the smoke never name a registry-writing verb or the OIDC exchange.
+//!    set in the test, the smoke, the add with the mopm of mopm-stage on the committed
+//!    directory), the order of the test's steps, that the test, the smoke and the add
+//!    never name a registry-writing verb or the OIDC exchange, and that the smoke and the
+//!    add never join the farm (the test joins it for the README e2e).
 //!  - one mopm: every `build toolchains//:mopm_*` label of release.yml and every such label of
 //!    docs/ci.md equals `MOPM` of release/readme_e2e/packages.bzl (the mopm the README e2e installs
 //!    with is the one the release stages and publishes with), so a bump of one that forgets
 //!    the other, or the prose, is red.
 //! The reader's own cases are workflow texts written here: each defect above
-//! is planted in the real text and must be refused with its message.
+//! is written into the real text and must be refused with its message.
+//!  - no wheel: release.yml holds no job `wheel` or `wheel-user-test`, no setup-python, no
+//!    `//python:komira_wheel` target and no `pypi_smoke` (pypi.yml builds the wheel and installs it
+//!    as a user does, on every push to main), so a per-merge wheel stage that comes back is red.
 
 const std = @import("std");
 const t = std.testing;
 
 const BETA_JOBS = [_][]const u8{ "mopm-stage-beta", "mopm-publish-beta", "mopm-e2e-beta" };
+const WHEEL_JOBS = [_][]const u8{ "wheel", "wheel-user-test" };
+const WHEEL_WORDS = [_][]const u8{ "setup-python", "//python:komira_wheel", "pypi_smoke" };
 const OLD_PROD_JOB = "mopm-publish";
 const PROD_STAGE_JOB = "mopm-stage";
 const TOOL = "release_beta_version";
@@ -66,6 +73,7 @@ const STAGE_E2E_RUN = PROD_E2E_RUN;
 const PROD_REWRITE_NAME = "      - name: every member gets the version of this run";
 const PROD_MOPM_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.0.0 --out release/staged_set --registry prod'";
 const PROD_SMOKE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" smoke --staged \"$RUNNER_TEMP/prod-smoke/committed\" --config-url https://api.mopm.dev/index/config.json --attempts 5 --delay 30'";
+const PROD_ADD_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" add --staged \"$RUNNER_TEMP/prod-add/committed\" --mopm \"$RUNNER_TEMP/mopm-publish/mopm\" --work \"$RUNNER_TEMP/prod-add/work\"'";
 const STAGE_BUILD_VERIFY = "          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/mopm-publish/release_staged_verify";
 const STAGE_UPLOAD_VERIFY = "            ${{ runner.temp }}/mopm-publish/release_staged_verify";
 const E2E_FARM_CONNECT = "      - uses: ./.github/actions/farm-connect";
@@ -129,6 +137,19 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     for (BETA_JOBS) |name| {
         var bn: usize = 0;
         if ((try jobLines(ar, text, name, &bn)) != null) return try std.fmt.allocPrint(ar, "the beta job {s} is still there: komira does not publish to beta", .{name});
+    }
+    // no wheel stage: pypi.yml builds the wheel and installs it as a user does, on every push
+    for (WHEEL_JOBS) |name| {
+        var wn: usize = 0;
+        if ((try jobLines(ar, text, name, &wn)) != null) return try std.fmt.allocPrint(ar, "the job {s} is still there: pypi.yml tests the wheel, release.yml holds no wheel stage", .{name});
+    }
+    var wit = std.mem.splitScalar(u8, text, '\n');
+    while (wit.next()) |l| {
+        const code = std.mem.trim(u8, l, " ");
+        if (code.len == 0 or code[0] == '#') continue;
+        for (WHEEL_WORDS) |word| {
+            if (std.mem.indexOf(u8, code, word) != null) return try std.fmt.allocPrint(ar, "a line names {s}: release.yml holds no wheel stage", .{word});
+        }
     }
     var bit = std.mem.splitScalar(u8, text, '\n');
     while (bit.next()) |l| {
@@ -214,7 +235,7 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
 }
 
 
-/// The five jobs of the prod publish. What each must hold is below; `prod_stage` is the job `mopm-stage`
+/// The six jobs of the prod publish. What each must hold is below; `prod_stage` is the job `mopm-stage`
 /// (it builds the verify tool and hands it on in its artifact).
 const ProdJob = struct {
     name: []const u8,
@@ -232,9 +253,10 @@ const prod_jobs = [_]ProdJob{
     .{ .name = "prod-commit", .needs = "    needs: prod-test", .gate = PROD_GATE, .environment = "    environment: prod", .id_token = true },
     .{ .name = "prod-abort", .needs = "    needs: [prod-stage, prod-test, prod-commit]", .gate = ABORT_IF, .environment = "    environment: prod", .id_token = true },
     .{ .name = "prod-smoke", .needs = "    needs: prod-commit", .gate = PROD_GATE, .environment = null, .id_token = false },
+    .{ .name = "prod-add", .needs = "    needs: [prod-commit, prod-smoke]", .gate = PROD_GATE, .environment = null, .id_token = false },
 };
 
-/// What none of the lines of the test and smoke jobs may contain: they send nothing to a registry and
+/// What none of the lines of the test, smoke and add jobs may contain: they send nothing to a registry and
 /// ask for no identity (a mopm verb that writes, the OIDC exchange, a hand-made PUT or POST).
 const prod_readonly_forbidden = [_][]const u8{ "mopm publish", "--oidc", "--abort", "--no-commit", "yank", "login", "curl", "wget", "-X PUT", "-X POST", "--request", "--data", "--upload-file" };
 
@@ -379,6 +401,23 @@ fn checkProd(ar: std.mem.Allocator, text: []const u8, stage_job: []const []const
     if (mentions(smoke, "farm") or mentions(smoke, "buck2")) return "prod-smoke joins the farm or runs buck2";
     if (!has(smoke, PROD_SMOKE_RUN)) return "prod-smoke does not run release_staged_verify smoke against the prod index with the committed directory";
     if (lineAt(smoke, "          name: mopm-prod-committed-${{ github.sha }}") == null) return "prod-smoke does not download the committed directory";
+
+    const add = (try jobLines(ar, text, "prod-add", &scratch)).?;
+    for (add) |l| {
+        if (std.mem.eql(u8, l, "    needs: [prod-commit, prod-smoke]") or std.mem.eql(u8, l, PROD_GATE)) continue;
+        for (prod_readonly_forbidden) |w| {
+            if (std.ascii.indexOfIgnoreCase(l, w) != null) return "prod-add yanks, publishes or exchanges an identity: it only adds and installs";
+        }
+    }
+    if (mentions(add, "farm") or mentions(add, "buck2")) return "prod-add joins the farm or runs buck2";
+    const add_at = lineAt(add, PROD_ADD_RUN) orelse return "prod-add does not run release_staged_verify add with the mopm of mopm-stage on the committed directory";
+    const add_dl = lineAt(add, "          name: mopm-prod-committed-${{ github.sha }}") orelse return "prod-add does not download the committed directory";
+    if (!(add_dl < add_at)) return "prod-add adds before it has the committed directory";
+    var add_runs: usize = 0;
+    for (add) |l| if (std.mem.indexOf(u8, l, "release_staged_verify\" add ") != null) {
+        add_runs += 1;
+    };
+    if (add_runs != 1) return "prod-add runs release_staged_verify more than once";
     return null;
 }
 
@@ -441,7 +480,7 @@ test "release.yml holds the contract of the continuous prod publish" {
     }
 }
 
-test "each defect planted in the real release.yml (beta, switch, triggers, versions) is refused with its message" {
+test "each defect written into the real release.yml (beta, switch, triggers, versions) is refused with its message" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -501,6 +540,24 @@ test "each defect planted in the real release.yml (beta, switch, triggers, versi
     try expectRefused(ar, try replaced(ar, text, "    branches: [main]\n", "    branches: [main, 'release/**']\n"), "branches");
 }
 
+test "release.yml holds no wheel stage, and a wheel job or a wheel line written back in is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try readWorkflow(ar);
+    inline for (WHEEL_JOBS) |name| {
+        var n: usize = 0;
+        try t.expect((try jobLines(ar, text, name, &n)) == null);
+        try expectRefused(ar, try replaced(ar, text, "  prod-stage:\n", "  " ++ name ++ ":\n    runs-on: ubuntu-24.04\n\n  prod-stage:\n"), "still there");
+    }
+    inline for (WHEEL_WORDS) |word| {
+        try t.expect(std.mem.indexOf(u8, text, "uses: " ++ word) == null);
+        try expectRefused(ar, try replaced(ar, text, "  prod-stage:\n", "  prod-stage:\n    # x\n    env: " ++ word ++ "\n"), word);
+    }
+    // a comment may say where the wheel is tested; a line may not hold a wheel stage
+    try t.expect((try check(ar, try replaced(ar, text, "name: release\n", "name: release\n# the wheel: pypi.yml, pypi_smoke, setup-python\n"))) == null);
+}
+
 /// `head` with its prod gate line replaced by `to` (a whole line with its newline, or nothing).
 fn swapGate(ar: std.mem.Allocator, head: []const u8, to: []const u8) ![]const u8 {
     const at = std.mem.indexOf(u8, head, PROD_GATE).?;
@@ -519,6 +576,7 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     const commit_head = "    needs: prod-test\n" ++ PROD_GATE ++ nl ++ runs ++ "    environment: prod\n";
     const smoke_head = "    needs: prod-commit\n" ++ PROD_GATE ++ nl ++ runs ++ "    timeout-minutes: 30\n";
     const abort_head = "    needs: [prod-stage, prod-test, prod-commit]\n" ++ ABORT_IF ++ nl ++ runs ++ "    environment: prod\n";
+    const add_head = "    needs: [prod-commit, prod-smoke]\n" ++ PROD_GATE ++ nl ++ runs ++ "    timeout-minutes: 30\n";
 
     // the old token job is not back, and no job reads a secret
     try expectRefused(ar, try replaced(ar, text, "  prod-stage:\n", "  mopm-publish:\n    runs-on: ubuntu-24.04\n\n  prod-stage:\n"), "still there");
@@ -529,7 +587,7 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     try expectRefused(ar, try replaced(ar, text, STAGE_UPLOAD_VERIFY ++ nl, ""), "hand release_staged_verify");
 
     // the gate of each job, and the whole if
-    const gates = [_][]const u8{ stage_head, test_head, commit_head, smoke_head };
+    const gates = [_][]const u8{ stage_head, test_head, commit_head, smoke_head, add_head };
     for (gates) |head| {
         const wrong = [_][]const u8{
             "    if: github.event_name == 'push'\n",
@@ -648,6 +706,24 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     try expectRefused(ar, try replaced(ar, text, PROD_SMOKE_RUN, PROD_SMOKE_RUN ++ "\n      - run: mopm yank --group g --registry prod --reason x"), "only reads");
     try expectRefused(ar, try replaced(ar, text, PROD_SMOKE_RUN, PROD_SMOKE_RUN ++ "\n      - run: ./mopm publish --staged x --registry prod --oidc"), "only reads");
     try expectRefused(ar, try replaced(ar, text, PROD_SMOKE_RUN, PROD_SMOKE_RUN ++ "\n      - uses: ./.github/actions/farm-connect"), "prod-smoke joins the farm");
+
+    // the add: after the commit and the smoke, no environment and no identity, the pinned mopm on the committed
+    // directory, once, and it only adds and installs
+    try expectRefused(ar, try replaced(ar, text, add_head, "    needs: prod-commit\n" ++ add_head["    needs: [prod-commit, prod-smoke]\n".len..]), "prod-add: needs");
+    try expectRefused(ar, try replaced(ar, text, add_head, "    needs: [prod-test, prod-smoke]\n" ++ add_head["    needs: [prod-commit, prod-smoke]\n".len..]), "prod-add: needs");
+    try expectRefused(ar, try replaced(ar, text, add_head, add_head[0 .. add_head.len - "    timeout-minutes: 30\n".len] ++ "    environment: prod\n    timeout-minutes: 30\n"), "prod-add holds an environment");
+    try expectRefused(ar, try replaced(ar, text, add_head ++ "    permissions:\n      contents: read\n", add_head ++ "    permissions:\n      contents: read\n      id-token: write\n"), "prod-add: id-token: write is held");
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" add --staged \"$RUNNER_TEMP/mopm-publish/staged\" --mopm \"$RUNNER_TEMP/mopm-publish/mopm\" --work \"$RUNNER_TEMP/prod-add/work\"'"), "prod-add does not run");
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" add --staged \"$RUNNER_TEMP/prod-add/committed\" --mopm mopm --work \"$RUNNER_TEMP/prod-add/work\"'"), "prod-add does not run");
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ " || true"), "prod-add ignores a failure");
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ "\n        continue-on-error: true"), "prod-add ignores a failure");
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ "\n      - run: ./mopm publish --staged x --registry prod --oidc"), "it only adds and installs");
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ "\n      - run: mopm login"), "it only adds and installs");
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ "\n      - uses: ./.github/actions/farm-connect"), "prod-add joins the farm");
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ nl ++ PROD_ADD_RUN), "more than once");
+    const add_dl = "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n          name: mopm-prod-committed-${{ github.sha }}\n          path: ${{ runner.temp }}/prod-add/committed\n";
+    try expectRefused(ar, try replaced(ar, text, add_dl, "      - name: early\n" ++ PROD_ADD_RUN ++ nl ++ add_dl), "adds before it has the committed directory");
+    try expectRefused(ar, try replaced(ar, text, "          name: mopm-prod-committed-${{ github.sha }}\n          path: ${{ runner.temp }}/prod-add/committed\n", "          name: mopm-prod-staged-${{ github.sha }}\n          path: ${{ runner.temp }}/prod-add/committed\n"), "prod-add does not download the committed directory");
 }
 
 test "a comment naming MOPM_TOKEN does not count, a line does" {

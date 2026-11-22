@@ -4,7 +4,8 @@ The engine-execution layer of the SDK: twelve modules, ten leaves that need
 nothing from the rest of the package except each other, and the plan gates
 (`plan_validation_gate`, `parquet_glob_options`), which build on `sdk`;
 and the engine context with its SQL door (`engine_*` below), which runs a SQL
-query over Parquet files from text to record batches. Views, writes, the plan
+query over Parquet files, and over CSV files named by `read_csv` (plain or
+`.gz`, `.zst`, `.lz4`), from text to record batches. Views, writes, the plan
 cache and the plan gates' call sites are not wired into the context yet.
 
 | module | does |
@@ -33,7 +34,7 @@ do is a free function in a module of its own.
 | `engine_context` | `EngineContext(options)`: probes the host once, applies the options over the profile, starts the worker runtime. Holds the catalog, the registered tables, `footers` (a `ParquetFooters`), `host_profile` and `runtime`. A count or budget below 1 is refused with `ENGINE_OPTIONS_INVALID`. `begin_query` drops the footer cache |
 | `engine_catalog` | `register_parquet(ctx, name, path)`: the table's schema is its file's footer |
 | `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema) and `lower_for_context` |
-| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
+| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
 | `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize`, lower, run. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
 
 **The footer cache is pinned to a query.** `parquet_footers.FooterCache`
@@ -57,21 +58,30 @@ across queries only because no plan is cached between them; wiring
 pin is the footer reads: one by the footer cache per file per query, and one
 more by the scan.
 
+**Served: one table, several files.** `register_parquet` takes a file, a
+glob or a directory (every `.parquet` file under it); the files are listed at
+registration and every query re-reads each footer. `read_parquet('<glob>')` in
+SQL expands a glob the same way. Hive `key=value` directories become columns
+after the data columns (DATE, TIMESTAMP, BIGINT or VARCHAR by DuckDB's rule),
+and a filter on one prunes files. Rows come back in no promised order across
+files. Refused by name: no file matches (`PARQUET_GLOB_NO_MATCH`), a directory
+given to SQL `read_parquet` (`PARQUET_PATH_IS_DIRECTORY`), files whose schemas
+differ (`PARQUET_FILES_SCHEMA_MISMATCH`), and the Hive shapes the footer
+package lists (`HIVE_PARTITION_*`).
+
 **Refused here, by name.** A statement that is not a query
 (`STATEMENT_NOT_A_QUERY`, step `bind`); a scalar subquery (the optimizer keeps
 it in the plan and lowering refuses the node, `LOWERING_UNCUTTABLE_NODE`; the
 door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
-asks for a scalar to be executed first, a guard no query tested here reaches); a plan that
-scans an in-memory batch, such as a SELECT with no FROM
-(`EXECUTE_UNSUPPORTED_PARAM`, step `execute`); a sink denied its memory by the
+asks for a scalar to be executed first, a guard no query tested here reaches); a sink denied its memory by the
 budget, a sum outside its declared type and a pool not whole after a run (step
 `execute`); and whatever lowering, the binder or the parser refuses (a join is
-`LOWERING_UNCUTTABLE_NODE` at `lower`). A glob path and a table of several
-files are refused by the footer package. Lowering given fewer scan facts than
+`LOWERING_UNCUTTABLE_NODE` at `lower`). Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
-`lowering_inputs` descends only scan, filter, project, limit, aggregate and sort
-nodes and gives a facts entry per scan it reaches, and the cutter refuses any
-other node by name before it asks for the scans below it. `worker_count` and
+`lowering_inputs` descends only scan, filter, project, limit, aggregate,
+distinct, sort and union nodes (a union's branches in order) and gives a facts
+entry per scan it reaches, and the cutter refuses any other node by name
+before it asks for the scans below it. `worker_count` and
 `memory_budget_bytes` have a lower bound of 1 and no upper bound. A
 cancellation token is local to a call, so cancel is not reachable from
 `run_sql`. After a refusal the context is unchanged and runs the next query.
@@ -94,15 +104,65 @@ The tests run when the package is built.
 - `test_plan_validation_routes_ledger`: the ledger's self check and lookups,
   and the wiring's refusal of an unregistered token and of a handle from
   another epoch.
+- `test_run_sql_csv`: `read_csv` through `run_sql` answers what the pinned
+  DuckDB answers (the `:csv_oracle` build action) for every case of
+  `tests/csv/cases.sql`: the inferred types and the rows of typed, quoted,
+  NULL-bearing and `|`-delimited files and of a header with no row, filters,
+  grouped and ungrouped aggregates and `all_varchar`, each over the committed
+  file and over a gzip copy; a missing file is refused at bind and
+  `header=false` at lowering.
 - `test_run_sql_q6`: TPC-H Q6's text from `bench_corpus` over a lineitem-shaped
   Parquet file gives the integer oracle's DECIMAL(38,4); a join, a syntax error,
   an unknown table, a missing file, CREATE TABLE AS and a replaced file are named
   refusals, as are a tiny memory budget, an INT64 sum out of range, a scalar
-  subquery (refused by lowering) and a SELECT with no FROM; the context runs on after a refusal; the
+  subquery (refused by lowering); the context runs on after a refusal; the
   footer cache reads each file once per query and shares it between bind and
   lower; a file replaced between queries is read again; options are validated;
   contexts are created and dropped repeatedly, the segment pool whole after
   each run.
+- `test_run_sql_distinct`: SELECT DISTINCT over an INT64 and a STRING column
+  gives each value once and one NULL row (NULL and the empty string are two
+  rows), below a filter and with ORDER BY; COUNT(DISTINCT x) ignores NULL, is
+  an INT64 that is 0 for no rows and for all NULL, counts per group (the NULL
+  key and an all-NULL group included), runs beside SUM and over a STRING;
+  SELECT DISTINCT over two INT64 columns is refused at `lower` with
+  `LOWERING_SINK_UNSERVED`.
+- `test_run_sql_group_keys`: GROUP BY one DATE32, BOOL, DECIMAL(12, 2) or
+  DECIMAL(30, 4) column over a Parquet table of six row groups equals an oracle
+  computed in the test, the NULL key being one group (count(*), count(v) and
+  sum(v) per group; the key keeps its type, precision and scale; decimal keys
+  past INT64 are exact); min and max of dates and the sum of decimals run under
+  a BOOL key; a WHERE before the grouping keeps only the passing rows; an
+  all-NULL key is one group; `group by d, b` is refused at `lower` with
+  LOWERING_SINK_UNSERVED.
+- `test_run_sql_int_sum`: an integer `sum()` over INT64 and INT32 columns is
+  DECIMAL(38, 0) and exact past the INT64 range; an empty or all-NULL sum is
+  NULL; expressions, CASE and HAVING over the sum run.
+- `test_run_sql_multifile`: a table of several Parquet files from a directory
+  (files at any depth; a dot-name and a non-Parquet file skipped), a glob, a
+  brace glob, `read_parquet('<glob>')` and `FROM '<glob>'`; a Hive tree whose
+  keys are columns after the data columns, with filters on a key (files
+  pruned) and on a data column, GROUP BY a key, count(*), ORDER BY and LIMIT;
+  `hive_partitioning = false`; a glob with no file, a directory in SQL text and
+  files of different schemas are named refusals at their step; a replaced file
+  is read again.
+- `test_run_sql_no_from`: `SELECT 1 AS n` is one row, an INT32 column `n`
+  holding 1, DuckDB's answer; a result literal is INT32 from -2147483647 to
+  2147483647 and INT64 past either bound and at -2147483648 (as in DuckDB);
+  one past BIGINT is refused at bind; a literal a derived table holds stays
+  INT64 (`n + 5000000000` over a derived `1 AS n` is the INT64 5000000001)
+  and `SELECT 1 AS n UNION ALL SELECT 2` binds to INT32, as in DuckDB; `7 / 2`, `count(*)` and a false WHERE with no FROM;
+  `SELECT 1 FROM` a Parquet table; an in-memory source of two batches is read
+  whole and one of none gives no rows with its schema.
+- `test_run_sql_union_all`: UNION ALL over six small Parquet tables answers
+  what DuckDB answers for the same SQL: INTEGER with BIGINT is BIGINT,
+  INTEGER with FLOAT is FLOAT, BIGINT or FLOAT or a DECIMAL with DOUBLE is
+  DOUBLE, DECIMAL(12,2) with DECIMAL(10,4) is DECIMAL(14,4) and with INTEGER
+  DECIMAL(12,2), values exact and NULLs kept; three branches with a FROM-less
+  one, count(*), sum, GROUP BY and WHERE over `FROM (... UNION ALL ...) u`, an
+  empty branch, the first branch's names, LIMIT, integer literal branches
+  (INTEGER, or BIGINT when one needs it); a VARCHAR with an INTEGER is refused
+  at bind and an ORDER BY before UNION ALL at parse.
 - `test_secret_capability_reveal`: a capability reveals exactly the secret
   bound to its own node id, once and after one store resolve; two capabilities
   over one bindings table each reveal their own value; an unbound node or a
@@ -111,8 +171,15 @@ The tests run when the package is built.
 ## Limits
 
 The context does not yet hold a source registry, a plan cache, spill options or
-the plan validation switch. `run_sql` serves one result segment of Parquet
-scans; Q1 waits for the grouped sinks and the sort. The post-rewrite gate and
+the plan validation switch. `run_sql` serves the plans `lowering` cuts: Parquet scans (one file or several), `read_csv`
+scans of one local file with a header row (decoded whole before the first
+morsel; `header=false` is refused at lowering, because the reader would name
+the columns `col_0`, `col_1`, ... where DuckDB names them `column0`,
+`column1`, ...), the one-row relation a SELECT with no FROM reads (an integer
+literal of the result's SELECT list or of a UNION ALL branch's is INT32 when it fits, as in DuckDB; an
+integer literal anywhere else, `1 + 1` included, is still INT64), filter,
+projection, limit, aggregation, distinct and sort, and UNION ALL, the
+concatenation of its branches. The post-rewrite gate and
 the plan validation gate are not called from `run_sql`.
 
 `post_rewrite_gate` is a free-standing check; its call sites belong to the

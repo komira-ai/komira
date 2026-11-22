@@ -1,9 +1,9 @@
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_libs")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load("@komira//tools/build/python:defs.bzl", "python_dist", "python_wheel")
-load(":pins.bzl", "PYTHON", "PYTHON_314", "PYTHON_314T", "WHEELS", "WHEELS_314")
+load(":pins.bzl", "MACOS_WHEELS", "PYTHON", "PYTHON_310", "PYTHON_311", "PYTHON_312", "PYTHON_314", "PYTHON_314T", "PYTHON_MACOS", "WHEELS", "WHEELS_314")
 
 # The hermetic Python of the tests (README.md): CPython from a
 # python-build-standalone archive and a closure of binary wheels, every file
@@ -18,6 +18,8 @@ _TEST_ONLY = [
     "komira//release/ci/tests:",
     # The binding tests of the shared library (python_binding_test).
     "komira//tools/build/examples/python_binding:",
+    # The Python package and its tests (python_binding_test).
+    "komira//python/...",
 ]
 
 pinned_file(
@@ -65,6 +67,27 @@ python_dist(
     visibility = _TEST_ONLY,
 )
 
+# CPython for macOS arm64 (PYTHON_MACOS), unpacked and checked on a macOS worker
+# by the macOS build of python_act. It loads only the operating system's
+# libraries, so it has no native_libs. A py_test configured for macOS takes it
+# in place of `:cpython` (tools/build/python/defs.bzl).
+pinned_file(
+    name = PYTHON_MACOS["archive"],
+    url = PYTHON_MACOS["url"],
+    sha256 = PYTHON_MACOS["sha256"],
+    size_bytes = PYTHON_MACOS["size"],
+)
+
+python_dist(
+    name = PYTHON_MACOS["name"],
+    act = "komira//tools/build/python_act:python_act_darwin",
+    archive = ":" + PYTHON_MACOS["archive"],
+    exec_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-python-dist
+    version = PYTHON_MACOS["version"],
+    visibility = _TEST_ONLY,
+)
+
 [pinned_file(
     name = w["file"],
     url = w["url"],
@@ -72,21 +95,45 @@ python_dist(
     size_bytes = w["size"],
 ) for w in WHEELS]
 
-# One target per distribution, named by it (`:pyarrow`), with its deps.
+# The macOS arm64 files of the wheels that have a binary build, by distribution.
+_MACOS_FILES = {n: w["url"].rsplit("/", 1)[1] for n, w in MACOS_WHEELS.items()}
+
+[pinned_file(
+    name = _MACOS_FILES[n],
+    url = w["url"],
+    sha256 = w["sha256"],
+    size_bytes = w["size"],
+) for n, w in MACOS_WHEELS.items()]
+
+# One target per distribution, named by it (`:pyarrow`), with its deps. It is
+# the linux x86_64 wheel installed by `:cpython`, or, configured for macOS, the
+# macOS arm64 wheel (the same file for a pure-Python one) installed by
+# `:cpython_macos` on a macOS worker.
 [python_wheel(
     name = w["name"],
     distribution = w["name"],
     version = w["version"],
-    wheel = ":" + w["file"],
-    python = ":" + PYTHON["name"],
+    wheel = select({
+        "prelude//os/constraints:macos": ":" + _MACOS_FILES.get(w["name"], w["file"]),
+        "DEFAULT": ":" + w["file"],
+    }),
+    python = select({
+        "prelude//os/constraints:macos": ":" + PYTHON_MACOS["name"],
+        "DEFAULT": ":" + PYTHON["name"],
+    }),
     deps = [":" + d for d in w["deps"]],
     visibility = _TEST_ONLY,
 ) for w in WHEELS]
 
-# CPython 3.14, with the GIL and free-threaded, each with its own closure
-# (pins.bzl, WHEELS_314): `:cpython314` and `:cpython314t`, and one target per
-# distribution and interpreter, named `<distribution>-<abi>` (`:numpy-cp314t`).
-# A pure-Python wheel is downloaded once and installed for each interpreter.
+# The other linux x86_64 interpreters, each `:<name>` of its pin: CPython
+# 3.10, 3.11 and 3.12 (`:cpython310`, `:cpython311`, `:cpython312`), with no
+# closure here, and CPython 3.14, with the GIL and free-threaded, each with
+# its own closure (pins.bzl, WHEELS_314): `:cpython314` and `:cpython314t`, and
+# one target per distribution and interpreter, named `<distribution>-<abi>`
+# (`:numpy-cp314t`). A pure-Python wheel is downloaded once and installed for
+# each interpreter.
+_OTHER_PYTHONS = [PYTHON_310, PYTHON_311, PYTHON_312, PYTHON_314, PYTHON_314T]
+
 _WHEEL_FILES = [w["file"] for w in WHEELS]
 
 [pinned_file(
@@ -94,7 +141,7 @@ _WHEEL_FILES = [w["file"] for w in WHEELS]
     url = p["url"],
     sha256 = p["sha256"],
     size_bytes = p["size"],
-) for p in [PYTHON_314, PYTHON_314T]]
+) for p in _OTHER_PYTHONS]
 
 [python_dist(
     name = p["name"],
@@ -108,7 +155,7 @@ _WHEEL_FILES = [w["file"] for w in WHEELS]
     ],
     version = p["version"],
     visibility = _TEST_ONLY,
-) for p in [PYTHON_314, PYTHON_314T]]
+) for p in _OTHER_PYTHONS]
 
 [pinned_file(
     name = f,

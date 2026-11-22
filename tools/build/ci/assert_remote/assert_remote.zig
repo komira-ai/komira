@@ -8,6 +8,13 @@
 //! Exit 0: the log shows no local execution. Exit 1: it does not (the reason
 //! is on stderr). Exit 2: the log cannot be read or the usage is wrong.
 //!
+//!     assert_remote run --log <file> --summary <file> -- <buck2> <subcommand> [args...]
+//!
+//! runs the buck2 command that writes that log, and runs it once more when
+//! its only failure is a cut connection to the farm (farm_retry.zig, beside
+//! this file, says what it runs, reads and writes). One executable does both
+//! because the buck2-farm action gets one built tool from its caller.
+//!
 //! What buck2 prints (recorded in fixtures/, measured on the farm):
 //!   * a run that executed any action ends with
 //!     `Commands: N (cached: N, remote: N, local: N)`, for `build` and for
@@ -28,6 +35,7 @@
 //! and that is a failure: the check must not pass by not finding what it
 //! looks for.
 const std = @import("std");
+const farm_retry = @import("farm_retry.zig");
 
 pub const Verdict = union(enum) {
     ok,
@@ -145,6 +153,7 @@ pub fn main() !u8 {
     var err = std.fs.File.stderr().writer(&buf);
     const args = try std.process.argsAlloc(a);
     defer std.process.argsFree(a, args);
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "run")) return farm_retry.main(a, args[2..], max_log_bytes, &err.interface);
     if (args.len != 2) {
         try err.interface.writeAll("usage: assert_remote <log-file>\n");
         try err.interface.flush();

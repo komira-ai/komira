@@ -5,8 +5,9 @@
 # What a test, or a measurement before the binder exists, needs to run a plan
 # it wrote by hand through `run_plan` and `RealBuilder`:
 #
-#   * segment descriptors for the three sources with an operator chain and a
-#     collect sink (`parquet_segment`, `batch_segment`, `output_segment`);
+#   * segment descriptors for the four sources with an operator chain and a
+#     collect sink (`parquet_segment`, `batch_segment`, `output_segment`,
+#     `csv_segment`);
 #   * the operators of the chain (`op_filter`, `op_project`, `op_limit`);
 #   * a sample batch and readers for what comes out of a plan.
 #
@@ -47,6 +48,7 @@ from physical_plan.physical_plan import (
     SINK_ORIENT_DICT_ENCODED,
     SINK_SORT,
     SOURCE_BATCH,
+    SOURCE_CSV,
     SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
     SourceSpecPod,
@@ -120,6 +122,24 @@ def batch_segment(
     )
 
 
+def csv_segment(
+    seg_id: Int,
+    var spec: SourceSpecPod,
+    var ops: Slab[MorselOp] = Slab[MorselOp](),
+    morsel_rows: Int = 0,
+) -> SegmentDescPod:
+    """A segment that reads the CSV file `spec` names and collects."""
+    return _segment(
+        seg_id,
+        SOURCE_CSV,
+        spec^,
+        ops^,
+        morsel_rows,
+        List[Int](),
+        List[UInt8](),
+    )
+
+
 def output_segment(
     seg_id: Int,
     producer: Int,
@@ -174,8 +194,8 @@ def with_group_sink(
     var desc: SegmentDescPod, param_id: Int, key_dtype: UInt8
 ) -> SegmentDescPod:
     """`desc` with its sink changed to the grouped aggregation of key row
-    `key_dtype` (`KEY_DTYPE_I64`, `I32`, `F64` or `F32`) whose data the builder
-    holds as `param_id`."""
+    `key_dtype` (`KEY_DTYPE_I64`, `I32`, `F64`, `F32`, `DATE32`, `BOOL` or
+    `DECIMAL128`) whose data the builder holds as `param_id`."""
     desc.sink_kind = SINK_AGG
     desc.sink_key_dtype = key_dtype
     desc.sink_orientation = SINK_ORIENT_COLUMNAR

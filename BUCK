@@ -21,6 +21,17 @@ load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAP
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
 
+# The notices the wheel carries beside LICENSE (tools/build/package/wheel.bzl).
+export_file(name = "NOTICE", visibility = ["PUBLIC"])
+
+# The install page, whose python and text blocks the smoke driver's
+# install_page_shows_quickstart test holds to the quickstart (python/smoke/BUCK).
+export_file(
+    name = "docs/install.md",
+    src = "docs/install.md",
+    visibility = ["//python/smoke:"],
+)
+
 # The files under .github/, which the root doc_tree's glob skips, at their
 # paths, for the interpreter list (//tools/build/lint:interpreter_budget).
 doc_tree(
@@ -101,7 +112,9 @@ zig_test(
 # The cases of the mopm jobs of release.yml: the continuous prod publish (each prod job's
 # gate, needs, environment and permissions, the commands), no beta job, no schedule, the
 # release-main concurrency group, no secret and the version of every run
-# (.github/workflows/release_workflow_test.zig says what each catches). A build action.
+# (.github/workflows/release_workflow_test.zig says what each catches), and no wheel stage (no
+# wheel job, no setup-python, no wheel target, no smoke driver: pypi.yml tests the wheel). A build
+# action.
 zig_test(
     name = "release_workflow_cases",
     exec_compatible_with = LINUX_X86_64,
@@ -115,11 +128,95 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
-# The cases of the macOS build of the release (.github/workflows/release_macos_test.zig says
-# what each catches): the workflow release-macos.yml builds the macOS set on the farm, in a
-# concurrency group of its own, and release.yml holds no macOS job; the build
-# holds up nothing, no workflow that runs on a pull request names a macOS platform, the check
-# set holds no macOS build, and the set's definition is one list. A build action.
+# The cases of the pull request's check on its two events (.github/workflows/pr_workflow_test.zig
+# says what each catches): pr.yml runs the job `check`, the one required status check, on a pull
+# request and on a merge group of the merge queue, with a concurrency group per merge group, the
+# change base of each event and a bound below the queue's check timeout that docs/ci.md sets; and no
+# other workflow has a job `check`. A build action.
+zig_test(
+    name = "pr_workflow_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/pr_workflow_test.zig",
+    data = dict(
+        {"ci.md": "docs/ci.md"},
+        **{"workflows/" + w.removeprefix(".github/workflows/"): w for w in WORKFLOWS}
+    ),
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# The cases of pypi.yml, the publish of the Python package's Linux wheel
+# (.github/workflows/pypi_workflow_contract.zig says what the contract of its text holds,
+# pypi_workflow_test.zig writes each defect into the real text, pypi_workflow_run.zig plays runs of it
+# with pypi_workflow_play.zig): a push to main of code with release.yml's paths-ignore, one daily
+# schedule and a manual run, one concurrency group per half that cancels no run, the ten jobs of the two
+# halves (the TestPyPI half on a push, the promotion to PyPI otherwise) with the exact gate, runner,
+# needs, environment and permissions of each and no macOS job, the identity in the build and upload jobs
+# alone, the farm in the build job alone, the record saved only after every TestPyPI smoke passed and
+# restored by the promotion alone, the size of the project printed on both indexes, and every action
+# pinned; and runs played from the file for each event and each answer of the indexes (a push uploads to
+# TestPyPI and never to PyPI, a push of documentation starts no run, the promotion uploads the newest
+# version that passed and names a newer one that did not, a version on PyPI is not uploaded again, two
+# waiting pushes leave the newer, a failed job is a red run naming it). The macOS wheel's workflow is
+# //:pypi_macos_workflow_cases'. A build action.
+zig_test(
+    name = "pypi_workflow_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/pypi_workflow_test.zig",
+    imports = [
+        ".github/workflows/pypi_workflow_contract.zig",
+        ".github/workflows/pypi_workflow_play.zig",
+        ".github/workflows/pypi_workflow_run.zig",
+        ".github/workflows/pypi_workflow_text.zig",
+        ".github/workflows/wheel_user_test_job.zig",
+    ],
+    data = {
+        "workflows/pypi.yml": ".github/workflows/pypi.yml",
+        "workflows/release.yml": ".github/workflows/release.yml",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# The cases of pypi-macos-arm64.yml, the publish of the Python package's macOS arm64 wheel, a workflow
+# of its own so that its verdict is a run of its own (.github/workflows/pypi_macos_workflow_contract.zig
+# says what the contract of its text holds, pypi_macos_workflow_test.zig writes each defect into the real
+# text, pypi_macos_workflow_run.zig plays runs of it and of it beside pypi.yml): pypi.yml's triggers line
+# for line, a concurrency group per half of its own, the nine macOS jobs with the exact gate, runner,
+# needs, environment and permissions of each and each one's outputs and steps after the build; runs of
+# the file for each event and each answer of the farm and the indexes; and the two workflows side by
+# side: for every pair of a Linux and a macOS outcome, each workflow's run is green exactly when its own
+# chain passed (a merge whose Linux wheel passed and whose macOS build failed is one green run and one red
+# run), a push starts both or neither, and no run of one waits on, replaces or cancels a run of the
+# other. The macOS build's own steps are //:release_macos_cases'. A build action.
+zig_test(
+    name = "pypi_macos_workflow_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/pypi_macos_workflow_test.zig",
+    imports = [
+        ".github/workflows/pypi_macos_workflow_contract.zig",
+        ".github/workflows/pypi_macos_workflow_run.zig",
+        ".github/workflows/pypi_workflow_contract.zig",
+        ".github/workflows/pypi_workflow_play.zig",
+        ".github/workflows/pypi_workflow_text.zig",
+        ".github/workflows/wheel_user_test_job.zig",
+    ],
+    data = {
+        "workflows/pypi-macos-arm64.yml": ".github/workflows/pypi-macos-arm64.yml",
+        "workflows/pypi.yml": ".github/workflows/pypi.yml",
+        "workflows/release.yml": ".github/workflows/release.yml",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# The cases of the macOS builds of the release workflows (.github/workflows/release_macos_test.zig
+# says what each catches): the workflow release-macos.yml builds the macOS set on the farm, in a
+# concurrency group of its own, and release.yml holds no macOS job; the macOS jobs, in
+# pypi-macos-arm64.yml and not in pypi.yml, build the macOS wheel only when an index lacks it and share
+# no needs with the Linux jobs; the
+# builds hold up nothing, no workflow that runs on a pull request names a macOS platform, the check
+# set holds no macOS build or macOS wheel target, and the set's definition is one list. A build action.
 zig_test(
     name = "release_macos_cases",
     exec_compatible_with = LINUX_X86_64,
@@ -139,7 +236,8 @@ zig_test(
 
 # The cases of the buck2-farm action (.github/actions/buck2-farm/action_test.zig
 # says what each catches): action.yml's shape, and its two run lines run
-# end to end over recorded buck2 output with the real //tools/build/ci:assert_remote.
+# end to end over recorded buck2 output with the real //tools/build/ci:assert_remote,
+# a cut connection to the farm run once more and every other failure not.
 zig_test(
     name = "buck2_farm_cases",
     exec_compatible_with = LINUX_X86_64,
@@ -472,8 +570,8 @@ limits(
 # as it does for every graph_check.
 #
 # The allowlist, tests/python_closure_allowlist.bzl: the Python surface
-# (empty today) and the ceiling, every finding allowed today, which only
-# shrinks.
+# (the binding tests and the Python package, python/) and the ceiling,
+# every finding allowed today, which only shrinks.
 [graph_check(
     name = "python_closure",
     check = "python_closure",

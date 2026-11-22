@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k, TRY_CAST(i64 AS INTEGER) FROM T

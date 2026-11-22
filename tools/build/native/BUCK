@@ -1,8 +1,7 @@
-# Symbol prefixing of the vendored C libraries (README.md): the symbol reader
-# and the tool of the rules in defs.bzl.
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+# Symbol prefixing of the vendored C libraries (README.md): the tool of the
+# rules in defs.bzl, and the shared-library tools of shared.bzl.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load(":defs.bzl", "c_exe")
 load(":shared.bzl", "glibc_floor_test")
 
 # Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
@@ -10,26 +9,22 @@ load(":shared.bzl", "glibc_floor_test")
 _ZIG = "komira//tools/build/toolchains:zig_next"
 _ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 
-# elfsyms: an archive's symbol table and its members' symbols (elfsyms.c).
-c_exe(
-    name = "elfsyms",
-    exec_compatible_with = LINUX_X86_64,
-    src = "elfsyms.c",
-    visibility = ["PUBLIC"],
-)
-
 # native_so: a library's shared library, its export list and checks 1 to 7
-# (README.md, "Each library's shared library"; shared.bzl), in Zig.
+# (README.md, "Each library's shared library"; shared.bzl), in Zig. It reads
+# ELF and Mach-O (native_macho.zig) alike.
 _NATIVE_SO = [
     "native_callsites.zig",
     "native_checks.zig",
     "native_elf.zig",
     "native_elf_test.zig",
+    "native_macho.zig",
+    "native_macho_test.zig",
     "native_so_test.zig",
 ]
 
-# The unit tests (native_so_test.zig: each check green, and red on its
-# planted defect), run as a build action.
+# The unit tests (native_so_test.zig: each check green, and red on the
+# defect it exists for; native_macho_test.zig: the Mach-O reader and checks 1 to 7
+# on Mach-O bytes), run as a build action.
 zig_test(
     name = "native_so_unit",
     exec_compatible_with = LINUX_X86_64,
@@ -51,7 +46,56 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
-_SRCS = glob(["src/*.zig"])
+# so_report: the ELF record of libkomira and what it loads (so_report.zig),
+# as a markdown table. Its tests read built shared objects and values.
+# native_elf.zig imports native_macho.zig (it hands Mach-O bytes there), so the
+# Mach-O reader is an input here too.
+_SO_REPORT = [
+    "native_elf.zig",
+    "native_elf_test.zig",
+    "native_checks.zig",
+    "native_macho.zig",
+    "so_report_test.zig",
+]
+
+zig_test(
+    name = "so_report_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SO_REPORT,
+    src = "so_report.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+# Built behind its unit tests: no report is written unless they pass.
+zig_exe(
+    name = "so_report",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SO_REPORT,
+    src = "so_report.zig",
+    unit_tests = [":so_report_unit", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
+
+# The object reader (native_elf.zig, which hands Mach-O to native_macho.zig) as
+# a module prefix_tool imports by name, `@import("native_objects")`: zig refuses
+# a relative import of ../native_elf.zig from src/. Welded to the reader's own
+# cases (`:native_so_unit` runs native_elf_test.zig and native_macho_test.zig).
+zig_module(
+    name = "native_objects",
+    src = "native_elf.zig",
+    imports = ["native_macho.zig"],
+    unit_tests = [":native_so_unit"],
+)
+
+# prefix_tool's sources, and the two archives its cases read
+# (src/testdata/README.md says what each holds and how it was made).
+_SRCS = glob(["src/*.zig"]) + [
+    "src/testdata/elf_x86_64.a",
+    "src/testdata/macho_arm64.a",
+]
 
 # The unit tests of prefix_tool: `zig test` of main.zig, whose test block
 # imports prefix_test.zig and cli_test.zig, run as a build action.
@@ -60,6 +104,7 @@ zig_test(
     exec_compatible_with = LINUX_X86_64,
     imports = _SRCS,
     src = "src/main.zig",
+    deps = [":native_objects"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
 )
@@ -72,6 +117,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = _SRCS,
     src = "src/main.zig",
+    deps = [":native_objects"],
     unit_tests = [":prefix_tool_unit", _ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,

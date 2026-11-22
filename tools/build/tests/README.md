@@ -995,6 +995,11 @@ such as `abfss://<container>@<account>.dfs.core.windows.net`; before any other
 host it is read), and a commit id in prose, in a file's contents or (dates,
 home directories, deny-list words) its path. Binary data is not read, but its
 path is; nothing committed is upstream bytes, so `third_party/` is read whole.
+The Python package under `python/` is read like any package: its `.py` and
+`.pyi` files (docstrings are prose), `pyproject.toml`, and a wheel's or
+sdist's `METADATA` and `PKG-INFO` (every line is prose); a built `.whl`,
+`.egg`, `.pyc` or `.pyd` is binary data. A dotfile there (a glob skips it, as
+in any package) is read only when the root package's `srcs` lists it.
 It is checked by a Zig tool,
 [`lint/public_boundary`](../lint/public_boundary/BUCK), run with no shell:
 [`check.zig`](../lint/public_boundary/src/check.zig) says what is read and the

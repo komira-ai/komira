@@ -5,8 +5,10 @@ Python serves only komira's Python surface: its SDK or bindings and their own
 tests. No other target depends on it and no other file is Python; CI runs it
 only through those tests, in the pull-request sets.
 
-PYTHON_SURFACE: package paths (`src/<pkg>`) where Python is allowed.
-Adding one is a ruling, not a review; the shared library's bindings are one.
+PYTHON_SURFACE: paths of the cell where Python is allowed: a finding of a
+target whose package is the path or under it, or of a file under it. Adding
+one is a ruling, not a review; the shared library's bindings are one, and the
+Python package (python/, docs/design/python_package.md) is another.
 
 PYTHON_CEILING: the findings allowed today, exactly as the check spells them
 (`target <label>`, `file <path>`, `exec <path>`). It only shrinks: the check
@@ -18,6 +20,19 @@ PYTHON_SURFACE = [
     # The hello test of python_binding_test, and the home of the binding tests
     # of the shared library (so).
     "tools/build/examples/python_binding",
+    # The Python package (pip install komira, import komira) and its tests
+    # (docs/design/python_package.md).
+    "python",
+    # The Python package's publish workflow: its user-test jobs set up the Python
+    # a user has (actions/setup-python) and pip-install the wheel: from the file
+    # and from TestPyPI on every push to main that changes code, and from PyPI
+    # in each promotion (docs/ci.md, "pypi.yml: publishing the Python
+    # package"). It and pypi-macos-arm64.yml, the same publish for the macOS
+    # arm64 wheel (its smoke jobs set up Python on a hosted Mac), are the two
+    # workflows that run Python; their only python_closure finding is the
+    # setup-python `uses:` line (the run lines start with the driver).
+    ".github/workflows/pypi.yml",
+    ".github/workflows/pypi-macos-arm64.yml",
 ]
 
 PYTHON_CEILING = [
@@ -39,14 +54,23 @@ PYTHON_CEILING = [
     "target komira//third_party/python:cloudpickle-cp314",
     "target komira//third_party/python:cloudpickle-cp314t",
     "target komira//third_party/python:cpython",
+    "target komira//third_party/python:cpython-3.10.22-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "target komira//third_party/python:cpython-3.11.17-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "target komira//third_party/python:cpython-3.12.15-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "target komira//third_party/python:cpython-3.13.16-20261003-aarch64-apple-darwin-install_only_stripped.tar.gz",
     "target komira//third_party/python:cpython-3.13.16-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
     "target komira//third_party/python:cpython-3.14.8-20261003-x86_64-unknown-linux-gnu-freethreaded-install_only_stripped.tar.gz",
     "target komira//third_party/python:cpython-3.14.8-20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "target komira//third_party/python:cpython310",
+    "target komira//third_party/python:cpython311",
+    "target komira//third_party/python:cpython312",
     "target komira//third_party/python:cpython314",
     "target komira//third_party/python:cpython314t",
     "target komira//third_party/python:duckdb",
+    "target komira//third_party/python:duckdb-1.5.6-cp313-cp313-macosx_11_0_arm64.whl",
     "target komira//third_party/python:duckdb-1.5.6-cp313-cp313-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl",
     "target komira//third_party/python:grpcio",
+    "target komira//third_party/python:grpcio-1.84.0-cp313-cp313-macosx_11_0_universal2.whl",
     "target komira//third_party/python:grpcio-1.84.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
     "target komira//third_party/python:joblib-1.6.0-py3-none-any.whl",
     "target komira//third_party/python:joblib-cp314",
@@ -59,12 +83,14 @@ PYTHON_CEILING = [
     "target komira//third_party/python:narwhals-cp314t",
     "target komira//third_party/python:native_libs",
     "target komira//third_party/python:numpy",
+    "target komira//third_party/python:numpy-2.5.3-cp313-cp313-macosx_11_0_arm64.whl",
     "target komira//third_party/python:numpy-2.5.3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
     "target komira//third_party/python:numpy-2.5.3-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
     "target komira//third_party/python:numpy-2.5.3-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
     "target komira//third_party/python:numpy-cp314",
     "target komira//third_party/python:numpy-cp314t",
     "target komira//third_party/python:pandas",
+    "target komira//third_party/python:pandas-3.0.6-cp313-cp313-macosx_11_0_arm64.whl",
     "target komira//third_party/python:pandas-3.0.6-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
     "target komira//third_party/python:pandas-3.0.6-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
     "target komira//third_party/python:pandas-3.0.6-cp314-cp314t-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
@@ -73,10 +99,13 @@ PYTHON_CEILING = [
     "target komira//third_party/python:polars",
     "target komira//third_party/python:polars-1.44.2-py3-none-any.whl",
     "target komira//third_party/python:polars-runtime-32",
+    "target komira//third_party/python:polars_runtime_32-1.44.2-cp310-abi3-macosx_11_0_arm64.whl",
     "target komira//third_party/python:polars_runtime_32-1.44.2-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
     "target komira//third_party/python:protobuf",
+    "target komira//third_party/python:protobuf-7.36.2-cp310-abi3-macosx_10_9_universal2.whl",
     "target komira//third_party/python:protobuf-7.36.2-cp310-abi3-manylinux2014_x86_64.whl",
     "target komira//third_party/python:pyarrow",
+    "target komira//third_party/python:pyarrow-25.0.1-cp313-cp313-macosx_12_0_arm64.whl",
     "target komira//third_party/python:pyarrow-25.0.1-cp313-cp313-manylinux_2_28_x86_64.whl",
     "target komira//third_party/python:pyarrow-25.0.1-cp314-cp314-manylinux_2_28_x86_64.whl",
     "target komira//third_party/python:pyarrow-25.0.1-cp314-cp314t-manylinux_2_28_x86_64.whl",

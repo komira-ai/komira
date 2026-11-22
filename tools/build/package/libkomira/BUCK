@@ -1,4 +1,6 @@
 load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":dist.bzl", "libkomira_dist_load", "picked_dir")
+load(":elf_report.bzl", "libkomira_elf_report")
 load("@komira//tools/build/package/install_check:install_check.bzl", "conda_install_check")
 
 # libkomira as a conda package. The package is so's own: the library's
@@ -72,4 +74,74 @@ conda_install_check(
     expect_red = "does not hold `mojo-compiler ==0.0.0`",
     lib = "libkomira.so",
     package = ":komira_so_libkomira_conda",
+)
+
+# What libkomira links and weighs, read from the built files: size, SONAME,
+# RUNPATH and DT_NEEDED of the library, of each native owner and of the Mojo
+# runtime libraries, the highest GLIBC, GLIBCXX and CXXABI version each needs,
+# which owners the library reaches, and the wheel tag that floor allows. The
+# table in src/so/README.md is this target's output.
+libkomira_elf_report(
+    name = "libkomira_elf_report",
+    lib = "//src/so:libkomira",
+    native_owners = [
+        "//src/async_rt:komira_async_native",
+        "//src/async_api:komira_async_api_native",
+        "//src/compression:komira_compression_native",
+        "//src/fs:komira_fs_native",
+        "//src/libc:komira_libc_native",
+        "//src/metrics:komira_metrics_native",
+        "//src/parquet_codec:komira_parquet_codec_native",
+        "//src/scan_source:komira_scan_source_native",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# ---- The native directory language packages carry ----------------------------
+#
+# `//src/so:libkomira[dist]`: libkomira, its native owners and the three Mojo
+# runtime libraries, the one directory the Python wheel (python/BUCK) and every
+# other language package copy as it is. These targets copy it to another path
+# and load it there from a C caller with no library path set, no Python and
+# nothing of Modular's (dist.bzl): libkomira answers komira_abi_version() as
+# komira.h states, and every library is mapped from the copy.
+
+_DIST = "//src/so:libkomira[dist]"
+
+libkomira_dist_load(
+    name = "libkomira_dist_load",
+    dir = _DIST,
+    src = "dist_load.c",
+    header = "//src/so:komira_abi",
+)
+
+# The same directory with libMSupportGlobals.so left out: the load fails, and
+# the loader's error names the missing file. The owners' file names are the
+# table of src/so/README.md.
+_OWNERS = [
+    "libkomira_async_api_native.so.1",
+    "libkomira_async_rt_native.so.1",
+    "libkomira_compression_native.so.1",
+    "libkomira_fs_native.so.1",
+    "libkomira_libc_native.so.1",
+    "libkomira_metrics_native.so.1",
+    "libkomira_parquet_codec_native.so.1",
+    "libkomira_scan_source_native.so.1",
+]
+
+picked_dir(
+    name = "dist_without_msupport",
+    dir = _DIST,
+    paths = ["libkomira.so"] + ["lib/" + n for n in _OWNERS + [
+        "libAsyncRTRuntimeGlobals.so",
+        "libKGENCompilerRTShared.so",
+    ]],
+)
+
+libkomira_dist_load(
+    name = "libkomira_dist_load_refuses_missing_runtime",
+    dir = ":dist_without_msupport",
+    src = "dist_load.c",
+    header = "//src/so:komira_abi",
+    expect_failure = "dist_load: cannot load <dir>/libkomira.so: libMSupportGlobals.so: cannot open shared object file: No such file or directory",
 )

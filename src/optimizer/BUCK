@@ -134,6 +134,8 @@ mojo_library(
         "tests/test_optimizer_transitive_edges.mojo",
         "tests/test_optimizer_udf_carry.mojo",
         "tests/test_optimizer_udf_node_opacity.mojo",
+        "tests/test_optimizer_udf_opacity.mojo",
+        "tests/test_optimizer_union_branches.mojo",
         "tests/test_optimizer_when_pushdown.mojo",
         "tests/test_optimizer_window_rewrite.mojo",
         "tests/test_optimizer_window_rewrite_arms.mojo",

@@ -10,6 +10,7 @@ here executes a plan.
 | module | what it holds |
 |---|---|
 | `optimizer_filter` | filter fusion, filter decomposition, predicate pushdown, cross-join elimination and equi-filter folding, join residual to side |
+| `optimizer_udf_opacity` | whether a Filter may move below a UDF-carrying Project: the columns a typed UDF writes (`udf_modified_columns`), whether it is opaque to pushdown, whether it passes a column through, and the plan-level check `push_predicates_down` calls (`udf_project_passes_predicate`) |
 | `optimizer_filter_selectivity` | predicate-aware filter selectivity estimates and the scaling of table stats by a selectivity |
 | `optimizer_or_factoring` | hoisting conjuncts common to every branch of an OR above the OR |
 | `optimizer_symmetric_or` | inferring single-column IN predicates from a symmetric swap OR (`(A=x AND B=y) OR (A=y AND B=x)`) |
@@ -59,7 +60,7 @@ here executes a plan.
 | `optimizer_agg_cse` | finding a duplicated grouped aggregate subtree and replacing it with one shared in-memory source, and collapsing identical aggregate expressions within one Aggregate |
 | `optimizer_scan_share` | deciding which Parquet scans share one read (`plan_scan_shares`), the dynamic-filter slot, and which scans stay Parquet sources |
 | `optimizer_config` | `OptimizerConfig`: the optimizer's options and their defaults, as one value |
-| `optimizer_driver` | `optimize(plan, config, deps)`: the rules above run over one logical plan in a fixed order, returning the optimized logical plan; `optimize_status`, its non-raising twin returning an `OptimizeResult`; `optimize_portable(plan, config, profile)`, the same order under a `PortableProfile` (no scalar bindings, a plan that needs an executed sub-plan refused) |
+| `optimizer_driver` | `optimize(plan, config, deps)`: the rules above run over one logical plan in a fixed order, returning the optimized logical plan; `optimize_status`, its non-raising twin returning an `OptimizeResult`; `optimize_portable(plan, config, profile)`, the same order under a `PortableProfile` (no scalar bindings, a plan that needs an executed sub-plan refused). Every rule treats a Union as a leaf, so the driver first runs the whole order on each Union branch (reached through single-child nodes and both join sides, and recursively through nested Unions) |
 | `optimizer_partition_topn` | fusing a row_number / rank, a `<= K` filter and the column drop into one PartitionTopN |
 | `optimizer_count_distinct` | whether an aggregate is the streaming COUNT(DISTINCT) shape over a Parquet scan (a decision for the caller that executes it; no rewrite) |
 | `optimizer_window_rewrite` | window co-location and fusion of matching PartitionBy nodes, and eliding a Sort the PartitionBy already satisfies |

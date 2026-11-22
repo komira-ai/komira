@@ -175,7 +175,7 @@ rules. Graph checks are BXL scripts that the gate runs, following the test_weld 
     closure of `//...` and `tests//functional/...` as a graph (each node's kind, direct dependencies of
     every kind and sources), every file of the trees, and the kci textprotos and workflows themselves;
     `graph/python_closure.zig` says what is refused. Its allowlist, `tests/python_closure_allowlist.bzl`,
-    holds the Python surface (empty) and a ceiling of today's findings that only shrinks. Its fixtures
+    holds the Python surface (the binding tests and `python/`) and a ceiling of today's findings that only shrinks. Its fixtures
     are `tests//negative/python_closure`, run by the scenario `graph_check_refusals`.
 - A graph query that needs its own `-c` overrides, such as the aquery diffs across coverage and
   optimization switches, stays a scenario: a BXL script runs in the gate's own configuration.
