@@ -1,0 +1,1074 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 4
+plan {
+  output_schema {
+    fields {
+      name: "c_id"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "flag"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "n"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "n_s"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sum_qty"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sum_u"
+      arrow_type_id: 9
+      dtype_code: _DT_UINT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sum_f32"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sum_amt"
+      arrow_type_id: 18
+      nullable: true
+      decimal_precision: 38
+      decimal_scale: 2
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sum_price"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sum_flag"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sum_expr"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "avg_price"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "min_ts"
+      arrow_type_id: 24
+      dtype_code: _DT_INT64
+      nullable: true
+      tz: "UTC"
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "max_amt"
+      arrow_type_id: 18
+      nullable: true
+      decimal_precision: 12
+      decimal_scale: 2
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "first_s"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "last_s"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "any_o"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "nd"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "med"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sd"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "kavg"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "kurt"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "prod"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "top2"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "corr"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "slope"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "cov"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "rc"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "n_flag"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "all_flag"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "any_flag"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  sort {
+    keys: "c_id"
+    keys: "n"
+    descending: false
+    descending: true
+    nulls_first: false
+    nulls_first: true
+    child {
+      output_schema {
+        fields {
+          name: "c_id"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "flag"
+          arrow_type_id: 1
+          dtype_code: _DT_BOOL
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "n"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "n_s"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "sum_qty"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "sum_u"
+          arrow_type_id: 9
+          dtype_code: _DT_UINT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "sum_f32"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "sum_amt"
+          arrow_type_id: 18
+          nullable: true
+          decimal_precision: 38
+          decimal_scale: 2
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "sum_price"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "sum_flag"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "sum_expr"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "avg_price"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "min_ts"
+          arrow_type_id: 24
+          dtype_code: _DT_INT64
+          nullable: true
+          tz: "UTC"
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "max_amt"
+          arrow_type_id: 18
+          nullable: true
+          decimal_precision: 12
+          decimal_scale: 2
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "first_s"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "last_s"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "any_o"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "nd"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "med"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "sd"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "kavg"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "kurt"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "prod"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "top2"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "corr"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "slope"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "cov"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "rc"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "n_flag"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "all_flag"
+          arrow_type_id: 1
+          dtype_code: _DT_BOOL
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "any_flag"
+          arrow_type_id: 1
+          dtype_code: _DT_BOOL
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      aggregate {
+        group_by {
+          col_ref {
+            name: "c_id"
+            side: COL_SIDE_NONE
+          }
+        }
+        group_by {
+          col_ref {
+            name: "flag"
+            side: COL_SIDE_NONE
+          }
+        }
+        agg_exprs {
+          func: AGG_COUNT
+          has_alias_name: true
+          alias_name: "n"
+        }
+        agg_exprs {
+          func: AGG_COUNT
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "s"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "n_s"
+        }
+        agg_exprs {
+          func: AGG_SUM
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "qty"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "sum_qty"
+        }
+        agg_exprs {
+          func: AGG_SUM
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "u"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "sum_u"
+        }
+        agg_exprs {
+          func: AGG_SUM
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "f32"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "sum_f32"
+        }
+        agg_exprs {
+          func: AGG_SUM
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "amount"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "sum_amt"
+        }
+        agg_exprs {
+          func: AGG_SUM
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "price"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "sum_price"
+        }
+        agg_exprs {
+          func: AGG_SUM
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "flag"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "sum_flag"
+        }
+        agg_exprs {
+          func: AGG_SUM
+          has_child0: true
+          child0 {
+            binary_op {
+              op: BIN_MUL
+              left {
+                col_ref {
+                  name: "price"
+                  side: COL_SIDE_NONE
+                }
+              }
+              right {
+                col_ref {
+                  name: "qty"
+                  side: COL_SIDE_NONE
+                }
+              }
+            }
+          }
+          has_alias_name: true
+          alias_name: "sum_expr"
+        }
+        agg_exprs {
+          func: AGG_MEAN
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "price"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "avg_price"
+        }
+        agg_exprs {
+          func: AGG_MIN
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "ts"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "min_ts"
+        }
+        agg_exprs {
+          func: AGG_MAX
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "amount"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "max_amt"
+        }
+        agg_exprs {
+          func: AGG_FIRST
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "s"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "first_s"
+        }
+        agg_exprs {
+          func: AGG_LAST
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "s"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "last_s"
+        }
+        agg_exprs {
+          func: AGG_ANY_VALUE
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "o_id"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "any_o"
+        }
+        agg_exprs {
+          func: AGG_COUNT_DISTINCT
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "s"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "nd"
+        }
+        agg_exprs {
+          func: AGG_MEDIAN
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "price"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "med"
+        }
+        agg_exprs {
+          func: AGG_STDDEV_SAMP
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "price"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "sd"
+        }
+        agg_exprs {
+          func: AGG_KAHAN_AVG
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "price"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "kavg"
+        }
+        agg_exprs {
+          func: AGG_KURTOSIS
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "price"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "kurt"
+        }
+        agg_exprs {
+          func: AGG_PRODUCT
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "price"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "prod"
+        }
+        agg_exprs {
+          func: AGG_LARGEST_K
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "price"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "top2"
+        }
+        agg_exprs {
+          func: AGG_CORR
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "price"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_child1: true
+          child1 {
+            col_ref {
+              name: "qty"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "corr"
+        }
+        agg_exprs {
+          func: AGG_REGR_SLOPE
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "qty"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_child1: true
+          child1 {
+            col_ref {
+              name: "price"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "slope"
+        }
+        agg_exprs {
+          func: AGG_COVAR_POP
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "qty"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_child1: true
+          child1 {
+            col_ref {
+              name: "price"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "cov"
+        }
+        agg_exprs {
+          func: AGG_REGR_COUNT
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "qty"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_child1: true
+          child1 {
+            col_ref {
+              name: "price"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "rc"
+        }
+        agg_exprs {
+          func: AGG_COUNT_IF
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "flag"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "n_flag"
+        }
+        agg_exprs {
+          func: AGG_BOOL_AND
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "flag"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "all_flag"
+        }
+        agg_exprs {
+          func: AGG_BOOL_OR
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "flag"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "any_flag"
+        }
+        child {
+          output_schema {
+            fields {
+              name: "o_id"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              dict_index_type_id: 4
+              metadata_keys: "unit"
+              metadata_values: "id"
+            }
+            fields {
+              name: "c_id"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "qty"
+              arrow_type_id: 4
+              dtype_code: _DT_INT32
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "price"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "amount"
+              arrow_type_id: 18
+              nullable: true
+              decimal_precision: 12
+              decimal_scale: 2
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "flag"
+              arrow_type_id: 1
+              dtype_code: _DT_BOOL
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "u"
+              arrow_type_id: 7
+              dtype_code: _DT_UINT16
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "f32"
+              arrow_type_id: 11
+              dtype_code: _DT_FLOAT32
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "ts"
+              arrow_type_id: 24
+              dtype_code: _DT_INT64
+              nullable: true
+              tz: "UTC"
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "s"
+              arrow_type_id: 13
+              nullable: true
+              dict_index_type_id: 4
+            }
+          }
+          scan {
+            source {
+              parquet {
+                paths: "/data/orders.parquet"
+                schema {
+                  fields {
+                    name: "o_id"
+                    arrow_type_id: 5
+                    dtype_code: _DT_INT64
+                    dict_index_type_id: 4
+                    metadata_keys: "unit"
+                    metadata_values: "id"
+                  }
+                  fields {
+                    name: "c_id"
+                    arrow_type_id: 5
+                    dtype_code: _DT_INT64
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "qty"
+                    arrow_type_id: 4
+                    dtype_code: _DT_INT32
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "price"
+                    arrow_type_id: 12
+                    dtype_code: _DT_FLOAT64
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "amount"
+                    arrow_type_id: 18
+                    nullable: true
+                    decimal_precision: 12
+                    decimal_scale: 2
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "flag"
+                    arrow_type_id: 1
+                    dtype_code: _DT_BOOL
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "u"
+                    arrow_type_id: 7
+                    dtype_code: _DT_UINT16
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "f32"
+                    arrow_type_id: 11
+                    dtype_code: _DT_FLOAT32
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "ts"
+                    arrow_type_id: 24
+                    dtype_code: _DT_INT64
+                    nullable: true
+                    tz: "UTC"
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "s"
+                    arrow_type_id: 13
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                }
+                fs_is_local: true
+              }
+            }
+            has_schema: true
+            schema {
+              fields {
+                name: "o_id"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+                metadata_keys: "unit"
+                metadata_values: "id"
+              }
+              fields {
+                name: "c_id"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "qty"
+                arrow_type_id: 4
+                dtype_code: _DT_INT32
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "price"
+                arrow_type_id: 12
+                dtype_code: _DT_FLOAT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "amount"
+                arrow_type_id: 18
+                nullable: true
+                decimal_precision: 12
+                decimal_scale: 2
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "flag"
+                arrow_type_id: 1
+                dtype_code: _DT_BOOL
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "u"
+                arrow_type_id: 7
+                dtype_code: _DT_UINT16
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "f32"
+                arrow_type_id: 11
+                dtype_code: _DT_FLOAT32
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "ts"
+                arrow_type_id: 24
+                dtype_code: _DT_INT64
+                nullable: true
+                tz: "UTC"
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "s"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+            }
+            source_kind: SOURCE_KIND_COLUMNAR
+          }
+        }
+      }
+    }
+  }
+}
