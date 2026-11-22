@@ -20,6 +20,11 @@ python/komira/_ops/_expr.py	the Python package: its sources are Python (docs/des
 python/komira/_ops/_rel.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_ops/_vocab.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_ops/_walk.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_plan/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_plan/_expr.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_plan/_field.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_plan/_scalar.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_plan/_wire.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_runtime.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_session.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/tests/test_beside_modular.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
@@ -33,6 +38,8 @@ python/tests/test_ops_rel.py	the Python package's tests: the SDK surface is test
 python/tests/test_ops_rel_join.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_ops_verbs.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_ops_walk.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_plan_expr.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_plan_expr_goldens.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_plan_pb2.py	SDK test: the Python package's generated plan modules are tested in Python, under the protobuf runtimes users install
 python/tests/test_runtime.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_upgrade.py	the Python package's tests: the wheel upgraded from its previous release is tested in Python, by the interpreter it is installed for
