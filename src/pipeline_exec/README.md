@@ -178,7 +178,7 @@ Import each module by name; the package root exports nothing.
 - `sink_string_group_agg`, `string_keys`: the grouped aggregation sinks keyed by
   strings, `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED | SINK_ORIENT_COLUMNAR)`,
   over one or more STRING key columns (a fixed-width key beside a string key is
-  refused by name; `lowering` never asks for one). They use slice 5's
+  the COMPOSITE row's and refused by name here). They use slice 5's
   `group_table`, folds (`agg_fold`), merge rule, refusals and charging. A worker
   keeps an `InternTable` (`string_keys`): each distinct key string once, in a byte
   arena, with its 64-bit content hash computed once when the entry is made; the
@@ -191,6 +191,16 @@ Import each module by name; the package root exports nothing.
   to plain encoding gives the answer a dictionary chunk does. `RealBuilder` makes
   the Parquet source keep dictionaries (`preserve_dict`) only for the
   DICT_ENCODED row. NULL is a group of its own and the empty string is another.
+  The same sink built `composite` is `(SINK_AGG, KEY_DTYPE_COMPOSITE,
+  SINK_ORIENT_COLUMNAR)`: a key of several columns of mixed types (GROUP BY an
+  integer, a string and a date). A STRING column is interned as above and
+  takes one cell; any other column takes the cells of the fixed-width row that
+  keys its type (`group_keys.fixed_key_dtype`: a decimal two, every other one),
+  with that row's NULL, float and decimal-scale rules, and must arrive in its
+  declared type. The cells lie column by column in one `group_table` row; a
+  group's hash mixes, in column order, each string's content hash and each
+  fixed-width cell, and the merge remaps the string cells by value and copies
+  the others.
   A group exists when a selected row reached it; the intern table only names
   strings, and a dictionary entry no selected row used is never interned.
   `combine` merges by value, in worker order: each string of a worker's groups
@@ -281,9 +291,9 @@ Import each module by name; the package root exports nothing.
   OP_PROJECT, OP_LIMIT and the sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
   the grouped rows I64, I32, F64, F32, DATE32, BOOL and DECIMAL128,
-  `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED)` and `(SINK_AGG, KEY_DTYPE_STRING,
-  SINK_ORIENT_COLUMNAR)`, and `(SINK_SORT, KEY_DTYPE_NONE,
-  SINK_ORIENT_COLUMNAR)` and `(SINK_TOPN, KEY_DTYPE_NONE,
+  `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED)`, `(SINK_AGG, KEY_DTYPE_STRING,
+  SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR)`,
+  `(SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)` and `(SINK_TOPN, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, and refuses every other kind by name. It keeps the
   resident batches (`add_resident`), the aggregation sink data a descriptor's
   `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`), the top-N data (`add_topn_sink`) and the segment pool

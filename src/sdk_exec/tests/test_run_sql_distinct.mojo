@@ -38,10 +38,9 @@
 #     (DECIMAL(38, 0)) is of every row, and an all-NULL group sums to NULL.
 #   * test_count_distinct_over_a_string_column: COUNT(DISTINCT s), ungrouped
 #     and per key, counts the empty string as a value and NULL not at all.
-#   * test_distinct_over_two_int64_columns_is_refused_by_name: SELECT DISTINCT
-#     a, b over two INT64 columns is refused at step lower with the token
-#     LOWERING_SINK_UNSERVED and the reason that names the limit; this states
-#     what is not served yet, and the context still answers a query after it.
+#   * test_distinct_over_two_int64_columns_gives_each_pair_once: SELECT
+#     DISTINCT k, v over two INT64 columns gives each (k, v) pair of the rows
+#     once, a NULL in either column a value of its own.
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
@@ -63,7 +62,7 @@ from scalar_arithmetic.decimal_arith import I128
 from sdk_exec.engine_catalog import register_parquet
 from sdk_exec.engine_context import EngineContext
 from sdk_exec.engine_options import EngineOptions
-from sdk_exec.engine_sql import STEP_LOWER, run_sql
+from sdk_exec.engine_sql import run_sql
 
 
 def _w(v: Int) -> I128:
@@ -540,30 +539,43 @@ def test_count_distinct_over_a_string_column() raises:
     )
 
 
-def test_distinct_over_two_int64_columns_is_refused_by_name() raises:
+def _pair_text(null: Bool, v: Int64) -> String:
+    return "N" if null else String(v)
+
+
+def test_distinct_over_two_int64_columns_gives_each_pair_once() raises:
     var r = _keys_table()
     var ctx = _new_context()
     _register(ctx, "two", r, 7)
-    var out = run_sql(ctx, "select distinct k, v from t_two")
-    assert_false(out.ok(), "expected a refusal")
-    assert_equal(out.refusal.value().step, String(STEP_LOWER))
-    var reason = out.refusal.value().reason
-    assert_true(
-        reason.startswith("LOWERING_SINK_UNSERVED"),
-        "reason '" + reason + "' does not start with the token",
-    )
-    var limit = String(
-        "a group key of 2 columns is served only when every column is a"
-        " dictionary encoded string"
-    )
-    assert_true(
-        limit in reason,
-        "reason '" + reason + "' does not name the limit",
-    )
-    assert_equal(len(out.batches), 0)
-    # The context still answers.
-    var batch = _run(ctx, "select count(distinct v) from t_two")
-    assert_equal(batch.num_rows(), 1)
+    var batch = _run(ctx, "select distinct k, v from t_two")
+    # The distinct (k, v) pairs of the rows, a NULL in either column a value
+    # of its own.
+    var want = List[String]()
+    for x in range(r.rows()):
+        var key = _pair_text(r.k_null[x], r.k[x]) + "|" + _pair_text(
+            r.v_null[x], r.v[x]
+        )
+        var found = False
+        for j in range(len(want)):
+            if want[j] == key:
+                found = True
+        if not found:
+            want.append(key)
+    assert_equal(batch.num_rows(), len(want))
+    var seen = List[Bool](length=len(want), fill=False)
+    var k = batch.column_at(0).as_primitive[DType.int64]()
+    var v = batch.column_at(1).as_primitive[DType.int64]()
+    for i in range(batch.num_rows()):
+        var key = _pair_text(batch.column_at(0).is_null_at(i), k.get(i)) + "|" + _pair_text(
+            batch.column_at(1).is_null_at(i), v.get(i)
+        )
+        var at = -1
+        for j in range(len(want)):
+            if want[j] == key:
+                at = j
+        assert_true(at >= 0, "a pair no row holds: " + key)
+        assert_false(seen[at], "pair " + key + " twice")
+        seen[at] = True
 
 
 def main() raises:

@@ -38,6 +38,7 @@ from physical_plan.physical_plan import (
     KEY_DTYPE_DATE32,
     KEY_DTYPE_BOOL,
     KEY_DTYPE_DECIMAL128,
+    KEY_DTYPE_COMPOSITE,
 )
 
 
@@ -75,6 +76,7 @@ def test_the_table_holds_exactly_these_rows_in_this_order() raises:
     expected += "(SINK_AGG, DATE32, COLUMNAR)\n"
     expected += "(SINK_AGG, BOOL, COLUMNAR)\n"
     expected += "(SINK_AGG, DECIMAL128, COLUMNAR)\n"
+    expected += "(SINK_AGG, COMPOSITE, COLUMNAR)\n"
     expected += "(SINK_SORT, NONE, COLUMNAR)\n"
     expected += "(SINK_TOPN, NONE, COLUMNAR)\n"
     expected += "(SINK_COLLECT, NONE, COLUMNAR)\n"
@@ -112,6 +114,8 @@ def test_every_row_is_served_and_nearby_triples_are_not() raises:
     assert_false(is_sink_served(SINK_SORT, KEY_DTYPE_DATE32, SINK_ORIENT_COLUMNAR))
     assert_false(is_sink_served(SINK_COLLECT, KEY_DTYPE_BOOL, SINK_ORIENT_COLUMNAR))
     assert_false(is_sink_served(SINK_HASH_BUILD, KEY_DTYPE_DECIMAL128, SINK_ORIENT_COLUMNAR))
+    assert_false(is_sink_served(SINK_AGG, KEY_DTYPE_COMPOSITE, SINK_ORIENT_DICT_ENCODED))
+    assert_false(is_sink_served(SINK_SORT, KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR))
 
 
 def test_a_key_type_prints_its_name_and_an_unknown_tag_prints_its_number() raises:
@@ -119,7 +123,8 @@ def test_a_key_type_prints_its_name_and_an_unknown_tag_prints_its_number() raise
     assert_equal(key_dtype_name(KEY_DTYPE_BOOL), "BOOL")
     assert_equal(key_dtype_name(KEY_DTYPE_DECIMAL128), "DECIMAL128")
     assert_equal(key_dtype_name(KEY_DTYPE_STRING), "STRING")
-    assert_equal(key_dtype_name(UInt8(9)), "KEY_9")
+    assert_equal(key_dtype_name(KEY_DTYPE_COMPOSITE), "COMPOSITE")
+    assert_equal(key_dtype_name(UInt8(10)), "KEY_10")
 
 
 def test_admission_passes_a_served_segment_and_names_an_unserved_one() raises:

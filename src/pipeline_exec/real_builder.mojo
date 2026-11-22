@@ -33,6 +33,9 @@
 #            (DICT_ENCODED or     from that data too, behind `AnyAggSink`. A
 #            COLUMNAR)            DICT_ENCODED sink makes its Parquet source
 #                                 keep string dictionaries.
+#            SINK_AGG, key        `StringGroupAggSink` built `composite`, from
+#            COMPOSITE (COLUMNAR) that data too, behind `AnyAggSink`: a key of
+#                                 several columns of mixed types
 #            SINK_SORT, key NONE  `SortSink` (`sink_sort`), from the `SortSinkData`
 #                                 the descriptor's `sink_param_id` names
 #            SINK_TOPN, key NONE  `SortSink` keeping a range of its order, from
@@ -82,6 +85,7 @@ from parquet.runtime_footer_cache import ParquetMetadataCache
 from parquet_scan.cursor_grain_feed import cursor_grain_enabled
 from physical_plan.physical_plan import (
     KEY_DTYPE_BOOL,
+    KEY_DTYPE_COMPOSITE,
     KEY_DTYPE_DATE32,
     KEY_DTYPE_DECIMAL128,
     KEY_DTYPE_F32,
@@ -419,7 +423,12 @@ struct RealBuilder[
     def build_sink(
         mut self, ref desc: SegmentDescPod, ref source_schema: Schema
     ) raises -> Self.Sink:
-        if (
+        var composite = (
+            desc.sink_kind == SINK_AGG
+            and desc.sink_key_dtype == KEY_DTYPE_COMPOSITE
+            and desc.sink_orientation == SINK_ORIENT_COLUMNAR
+        )
+        if composite or (
             desc.sink_kind == SINK_AGG
             and desc.sink_key_dtype == KEY_DTYPE_STRING
             and (
@@ -444,6 +453,7 @@ struct RealBuilder[
                         desc.sink_orientation == SINK_ORIENT_DICT_ENCODED,
                         self._segment_pool.share(),
                         desc.seg_id,
+                        composite=composite,
                     )
                 )
             )
@@ -547,6 +557,7 @@ struct RealBuilder[
             " F64, F32, DATE32, BOOL or DECIMAL128, SINK_ORIENT_COLUMNAR),"
             " (SINK_AGG, KEY_DTYPE_STRING,"
             " SINK_ORIENT_COLUMNAR or SINK_ORIENT_DICT_ENCODED),"
+            " (SINK_AGG, KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR),"
             " (SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) and"
             " (SINK_TOPN, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
         )
