@@ -62,7 +62,13 @@ from plan_expr.udf_data import (
     DTAG_I64,
 )
 from plan_expr.expr import Expr, BIN_GT
-from plan_expr.fs_descriptor_pod import FsDescriptorPod, FS_SCHEME_S3
+from plan_expr.fs_descriptor_pod import (
+    FsDescriptorPod,
+    FS_SCHEME_AZURE,
+    FS_SCHEME_FILE,
+    FS_SCHEME_GCS,
+    FS_SCHEME_S3,
+)
 from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import (
     LogicalPlan,
@@ -205,13 +211,31 @@ def _parquet_scan(var source: ParquetSource) raises -> LogicalPlan:
     return LogicalPlan.scan_from_source(SourceVariant(source^), _schema())
 
 
+def _on(desc: FsDescriptorPod) raises -> LogicalPlan:
+    return _parquet_scan(ParquetSource(String("a.parquet"), _schema()).with_fs_descriptor(desc))
+
+
 def test_a_parquet_scan_the_segment_arm_cannot_carry_is_refused() raises:
-    var remote = _parquet_scan(
-        ParquetSource(String("a.parquet"), _schema()).with_fs_descriptor(
-            FsDescriptorPod.cloud(FS_SCHEME_S3, String("bucket"), 3)
-        )
+    assert_equal(
+        _message(_on(FsDescriptorPod.cloud(FS_SCHEME_GCS, String("raw"), 3)), _inputs()),
+        "LOWERING_SCAN_NOT_TOTAL: a Parquet scan on gs://raw; the segment's"
+        " Parquet arm reads the local file system and S3",
     )
-    _refused_with(_message(remote, _inputs()), LOWERING_SCAN_NOT_TOTAL, "local")
+    _refused_with(
+        _message(_on(FsDescriptorPod.cloud(FS_SCHEME_AZURE, String("box"), 3)), _inputs()),
+        LOWERING_SCAN_NOT_TOTAL,
+        "az://box",
+    )
+    # A local scan with an explicit binding names a resolver the segment does
+    # not carry.
+    _refused_with(
+        _message(_on(FsDescriptorPod(scheme=FS_SCHEME_FILE, bucket=String(""), node_id=5)), _inputs()),
+        LOWERING_SCAN_NOT_TOTAL,
+        "file://",
+    )
+
+    # A scan of an S3 bucket lowers.
+    assert_equal(_message(_on(FsDescriptorPod.cloud(FS_SCHEME_S3, String("lake"), 3)), _inputs()), "")
 
     # One local file lowers.
     assert_equal(_message(_parquet_scan(ParquetSource(String("a.parquet"), _schema())), _inputs()), "")

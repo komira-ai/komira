@@ -21,10 +21,16 @@ the generated `aws_s3` client:
   must pass.
 - `S3PresignSigner`: presigned GET and PUT URLs (SigV4 query signing, only
   `host` signed).
+- `S3ScanFs`: fs's `ScanFsOpener` for S3, the value an engine is handed with a
+  plan that scans S3: it opens one `S3Fs` per bucket a scan names, with one
+  configuration, connector factory, credential source and clock, and refuses
+  another scheme with `SCAN_FS_UNSERVED`. An opened `S3Fs` keys its objects in
+  a shared footer cache under `s3://<bucket>/` (`key_prefix`).
 
 Every verb that reaches S3 needs a network and credentials; the examples below
-are the parts that run offline: configuration, error mapping, ranges and URL
-presigning with a fixed clock.
+are the parts that run offline: configuration, error mapping, ranges, URL
+presigning with a fixed clock, and opening a scan's file system, which dials
+nothing.
 
 ## Examples
 
@@ -105,4 +111,30 @@ assert_equal(url.expires_unix_seconds, Int64(now + 3600))
 assert_true("&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20260921%2Fus-east-1%2Fs3%2Faws4_request" in url.url)
 assert_true("&X-Amz-SignedHeaders=host&X-Amz-Expires=3600" in url.url)
 assert_true(url.url.endswith("&X-Amz-Signature=6798df2c76303ed78e600fe26fee836b2fc1bbe2eb7209fd5c778b0d47d8a347"))
+```
+
+The file system a scan of a bucket reads, opened from the plan's scheme code
+and bucket; nothing is dialed until the first read:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_raises -->
+```mojo
+from aws_core import AwsCredential, StaticCredsSource, SystemAwsClock
+from http_client.client import HttpClientConfig
+from http_client.scheme_connector import KernelSchemeConnector, kernel_plain_scheme_connector
+from objectstore_s3 import S3Config, S3ScanFs
+from plan_expr.fs_descriptor_pod import FS_SCHEME_GCS, FS_SCHEME_S3
+
+var opener = S3ScanFs[KernelSchemeConnector, StaticCredsSource, SystemAwsClock](
+    S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
+    kernel_plain_scheme_connector,
+    HttpClientConfig.defaults(),
+    StaticCredsSource(AwsCredential("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", "")),
+    SystemAwsClock(),
+)
+var fs = opener.open_scan_fs(FS_SCHEME_S3, "lake")
+assert_equal(fs.bucket(), "lake")
+assert_equal(fs.key_prefix(), "s3://lake/")
+assert_equal(fs.stores_built(), 0)
+with assert_raises(contains="SCAN_FS_UNSERVED: no file system of this run reads gs://raw"):
+    _ = opener.open_scan_fs(FS_SCHEME_GCS, "raw")
 ```

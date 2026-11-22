@@ -13,6 +13,9 @@
 #     elaboration of associated-type alias `S: WakerSink` + parametric
 #     return types involving Self.S).
 #   * `local_fs.mojo` — `LocalFile` + `LocalFs[S]` impl.
+#   * `scan_fs.mojo` — `ScanFsOpener`, which opens the file system a scan
+#     on a store other than the local disk reads, and its refusal
+#     `SCAN_FS_UNSERVED`.
 #   * `file_format.mojo` — `FileFormat` trait shape (validate parametric
 #     methods over `FS: FileSystem` on a trait body).
 #

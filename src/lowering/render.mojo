@@ -106,6 +106,8 @@ def _segment_text(seg: SegmentDescPod) -> String:
         ref s = seg.source_spec
         out += " path=" + s.parquet_path
         out += " total=" + String(s.parquet_spec_is_total)
+        if not s.parquet_fs.is_local():
+            out += " fs=" + s.parquet_fs.url_prefix()
         if len(s.parquet_paths) > 0:
             out += " files=" + _names(s.parquet_paths)
             if len(s.parquet_partition_cols) > 0:

@@ -33,9 +33,9 @@ do is a free function in a module of its own.
 | `engine_options` | `EngineOptions`: `worker_count` and `memory_budget_bytes`, each `Optional` (absent means the host profile's own value). Values the caller fills from its flags; no environment variable is read |
 | `engine_context` | `EngineContext(options)`: probes the host once, applies the options over the profile, starts the worker runtime. Holds the catalog, the registered tables, `footers` (a `ParquetFooters`), `host_profile` and `runtime`. A count or budget below 1 is refused with `ENGINE_OPTIONS_INVALID`. `begin_query` drops the footer cache |
 | `engine_catalog` | `register_parquet(ctx, name, path)`: the table's schema is its file's footer |
-| `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema) and `lower_for_context` |
-| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
-| `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize`, lower, run. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
+| `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema; a scan of an S3 bucket has no facts, since `ctx.footers` reads the local file system only) and `lower_for_context` |
+| `engine_execute` | `run_lowered_plan_with(ctx, lowered, opener)`: a `RealBuilder` over a per-run metadata cache (keyed per file system) and expression pool, reading a Parquet scan of a bucket through the file system the `ScanFsOpener` opens on it (`objectstore_s3.S3ScanFs` for S3), the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch. `run_lowered_plan(ctx, lowered)` is that with `LocalOnlyScanFs`, which refuses a scan of a bucket with `SCAN_FS_UNSERVED` |
+| `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize`, lower, run. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message. `run_sql_with(ctx, text, opener)` runs with the opener a scan of a bucket is read through |
 
 **The footer cache is pinned to a query.** `parquet_footers.FooterCache`
 has no cap, so the context does not keep it: `run_sql` starts by replacing it
@@ -111,6 +111,13 @@ The tests run when the package is built.
   grouped and ungrouped aggregates and `all_varchar`, each over the committed
   file and over a gzip copy; a missing file is refused at bind and
   `header=false` at lowering.
+- `test_run_sql_s3`: catalog tables whose `ParquetSource` names an S3 bucket,
+  read by `run_sql_with` through `S3ScanFs` over the fake S3, answer what the
+  same files answer locally through `run_sql`: a filter and a projection, a
+  GROUP BY and a count, a table of two keys, one key in two buckets under
+  UNION ALL; a missing and a refused object are the store's NOT_FOUND and
+  ACCESS_DENIED at step `execute`; `run_sql` refuses the S3 scan with
+  `SCAN_FS_UNSERVED`; a `gs://` table is refused at step `lower`.
 - `test_run_sql_q6`: TPC-H Q6's text from `bench_corpus` over a lineitem-shaped
   Parquet file gives the integer oracle's DECIMAL(38,4); a join, a syntax error,
   an unknown table, a missing file, CREATE TABLE AS and a replaced file are named
@@ -178,7 +185,7 @@ The tests run when the package is built.
 ## Limits
 
 The context does not yet hold a source registry, a plan cache, spill options or
-the plan validation switch. `run_sql` serves the plans `lowering` cuts: Parquet scans (one file or several), `read_csv`
+the plan validation switch. `run_sql` serves the plans `lowering` cuts: Parquet scans (one file or several; through `run_sql_with`, objects of an S3 bucket too, from a catalog table whose source names the bucket: no SQL text names an S3 URL yet, the context's footers read local files only, and the session holds no S3 settings or credentials), `read_csv`
 scans of one local file with a header row (decoded whole before the first
 morsel; `header=false` is refused at lowering, because the reader would name
 the columns `col_0`, `col_1`, ... where DuckDB names them `column0`,

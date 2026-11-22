@@ -54,7 +54,13 @@ Import each module by name; the package root exports nothing.
   and installs the filter as the decode filter (every conjunct is applied; a row
   whose predicate is UNKNOWN is dropped) and as the pushed predicate that
   row-group statistics are checked against. The source borrows the caller's
-  footer cache and expression pool. `BatchSource` serves a copy of a resident
+  footer cache and expression pool. `build_parquet_source_on` is the same over
+  any file system: a spec whose store (`parquet_fs`) is a bucket is read
+  through the file system the builder's `ScanFsOpener` (fs) opens on it, its
+  paths object keys and its one path never listed; `build_parquet_source`
+  refuses such a spec, and so does a builder made without an opener, with
+  `SCAN_FS_UNSERVED` naming the store (`LocalOnlyScanFs`, the default opener,
+  opens nothing). `BatchSource` serves a copy of a resident
   batch and `SinkOutputSource` the batch a finished segment published, each as
   morsels claimed from one shared cursor. `build_csv_source` reads the file
   of the CSV arm of a `SourceSpecPod` (a `.csv.gz`, `.csv.zst` or `.csv.lz4`
@@ -286,7 +292,11 @@ Import each module by name; the package root exports nothing.
   workers of a segment run, and derives the empty-output schema by running the
   chain's projections over a batch of no rows. Three origins name the borrows of
   the Parquet source (the footer cache, the expression pool, an absent dynamic
-  filter).
+  filter), and a fourth parameter `R` the `ScanFsOpener` of the remote store a
+  Parquet spec may name (`LocalOnlyScanFs` by default): a builder made with an
+  opener (`RealBuilder(cache, pool, opener)`) reads a spec on a bucket through
+  the file system the opener opens on it, beside the local ones, with one
+  footer cache keyed per file system.
 - `plan_harness`: segment descriptors for the four sources with an operator
   chain and a collect sink (`with_agg_sink` turns one into an aggregation),
   `project_columns`, and a sample table with readers, for plans written by hand

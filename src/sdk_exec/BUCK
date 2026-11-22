@@ -136,6 +136,14 @@ _MIXED_TEST_DATA.update({c + ".tsv": ":group_keys_mixed_oracle[" + c + ".tsv]" f
 #   alone, GROUP BY a key, count(*), ORDER BY and LIMIT; hive_partitioning =
 #   false; a glob with no file, a directory in SQL text and files of different
 #   schemas are named refusals at their step; a replaced file is read again.
+# - test_run_sql_s3: run_sql_with over catalog tables whose source names an S3
+#   bucket, read through S3ScanFs over the fake S3 (objectstore_s3, aws_core,
+#   http_client and komira_test_fake_s3 are test_deps for it): a filter and a
+#   projection, a GROUP BY and a count, a table of two keys, and one key in two
+#   buckets under UNION ALL each answer what the local files answer; a missing
+#   and a refused object are the store's NOT_FOUND and ACCESS_DENIED at step
+#   execute; run_sql refuses the S3 scan with SCAN_FS_UNSERVED; a gs:// table is
+#   refused at step lower.
 # - test_run_sql_no_from: SELECT 1 AS n is one INT32 row holding 1, as in
 #   DuckDB; a result literal is INT32 from -2147483647 to 2147483647 and
 #   INT64 otherwise, as DuckDB types it, while a literal a derived table holds
@@ -251,6 +259,7 @@ mojo_library(
         "tests/test_run_sql_group_keys_mixed.mojo",
         "tests/test_run_sql_int_sum.mojo",
         "tests/test_run_sql_multifile.mojo",
+        "tests/test_run_sql_s3.mojo",
         "tests/test_run_sql_no_from.mojo",
         "tests/test_run_sql_q6.mojo",
         "tests/test_run_sql_timers_off.mojo",
@@ -258,9 +267,13 @@ mojo_library(
         "tests/test_secret_capability_reveal.mojo",
     ],
     test_deps = [
+        "//src/aws_core:aws_core",
         "//src/bench_corpus:bench_corpus",
+        "//src/http_client:http_client",
+        "//src/objectstore_s3:objectstore_s3",
         "//src/parquet_writer:parquet_writer",
         "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
+        "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
     ],
     test_data = {
         "tests/test_run_sql_csv.mojo": _CSV_TEST_DATA,

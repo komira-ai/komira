@@ -184,7 +184,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   the test: parse once, shared footers and one pin, revalidation of a
 #   rewritten or freshly written file, the pin budget, invalidate, the
 #   row-count memo, the stripped footer and summary, a file system that is
-#   not mmap-backed, and the budget policy.
+#   not mmap-backed, one path on two file systems of different key prefixes
+#   as two entries (and two row-count memos), and the budget policy.
 # - test_table_stats_direct: the eager fold and the provider: bounds decoded
 #   by type (unsigned, UINT_64 past Int64.MAX, DECIMAL), top-level leaves,
 #   HLL register merge against one sketch over the union, the path entry

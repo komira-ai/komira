@@ -79,9 +79,12 @@ from physical_plan.sink_data import (
 #       `parquet_partition_values` — the file list and the Hive partition
 #       constants of a Parquet source of several files. Empty for a spec of
 #       one plain file, which is read from `parquet_path` as before.
+#   17: `SourceSpecPod.parquet_fs` — the store a Parquet source reads (the
+#       scan's `FsDescriptorPod`); local by default, so a spec minted before
+#       it reads the local disk as before.
 #   Retired `MorselOp` tag values (4-13) are not reused.
 
-comptime PHYSICAL_PLAN_IR_VERSION: Int = 16
+comptime PHYSICAL_PLAN_IR_VERSION: Int = 17
 
 
 # =============================================================================
@@ -696,7 +699,8 @@ struct SourceSpecPod(Movable):
       * SOURCE_PARQUET: `parquet_path` + `parquet_projection` (pushed) +
         `parquet_filter` (pushed decode filter); a source of several files or
         with Hive partition columns also carries `parquet_paths`,
-        `parquet_partition_cols` and `parquet_partition_values`.
+        `parquet_partition_cols` and `parquet_partition_values`; `parquet_fs`
+        names the store the files are on.
       * SOURCE_SINK_OUTPUT: `dep_seg_ids[0]` = the producer segment whose output
         this reads.
       * SOURCE_CONCAT: `dep_seg_ids` = the N producer segments, concat order.
@@ -705,8 +709,9 @@ struct SourceSpecPod(Movable):
         (`csv_source_spec`).
 
     Every field is inert: `String`, `Optional[List[String]]`, `Optional[Expr]`,
-    `List[Int]`, `List[Field]`, `List[List[String]]`, `Int`, `Bool`, and
-    `CsvSourceSpec` of the same kinds. Passes the inert-IR lint.
+    `List[Int]`, `List[Field]`, `List[List[String]]`, `Int`, `Bool`,
+    `FsDescriptorPod` (a `UInt8`, a `String`, an `Int`) and `CsvSourceSpec`
+    of the same kinds. Passes the inert-IR lint.
 
     ⛔ THE PARQUET ARM IS LOSSY, AND `parquet_spec_is_total` IS HOW A CONSUMER
     FINDS OUT. It carries THREE of `ParquetSourceData`'s ELEVEN fields. Read that
@@ -724,7 +729,8 @@ struct SourceSpecPod(Movable):
 
     ⛔ WHAT IT EXISTS TO STOP: a silent-wrong-results class.
     `ParquetSourceData` has ELEVEN fields; this pod carries THREE. The
-    eight it drops are `hive_partition_cols`, `hive_predicate`, `fs_descriptor`,
+    eight it drops are `hive_partition_cols`, `hive_predicate`, `fs_descriptor`
+    (carried since IR version 17, as `parquet_fs`),
     `preserve_numeric_dict`, `explicit_paths`, `row_window`,
     `preserve_string_dict` (and the pod re-spells the other three). The mint site
     takes the path from `ScanData.source_path`, which is `ParquetSource.paths[0]`
@@ -750,9 +756,10 @@ struct SourceSpecPod(Movable):
     ⚠ TOTAL IS NOT THE SAME AS SINGLE-FILE. It is the conjunction the DEFAULTS
     define. Since IR version 16 the pod carries the file list
     (`parquet_paths`) and the Hive partition constants, so a source of several
-    files is total too; a scan on another file system, an unbounded one or a
-    lazy Hive shape (a directory scan, a partition predicate) is still not
-    carried and is refused at the cut."""
+    files is total too, and since 17 it carries the store (`parquet_fs`), so a
+    scan of S3 objects is total; a scan of another remote store, an unbounded
+    one or a lazy Hive shape (a directory scan, a partition predicate) is
+    still not carried and is refused at the cut."""
     var parquet_paths: List[String]
     """SOURCE_PARQUET ONLY. Every file of the source, in read order. Empty for
     a spec built by `parquet()`, which names one file in `parquet_path`; a spec
@@ -764,6 +771,10 @@ struct SourceSpecPod(Movable):
     """SOURCE_PARQUET ONLY. `[file][column]`: the decoded value text of each
     partition column for each file of `parquet_paths`. Empty when
     `parquet_partition_cols` is."""
+    var parquet_fs: FsDescriptorPod
+    """SOURCE_PARQUET ONLY. The store the files are on: the local file
+    system (`FsDescriptorPod.local()`, the default), or a bucket, whose
+    `parquet_path` and `parquet_paths` are then object keys in it."""
     var dep_seg_ids: List[Int]                   # SOURCE_SINK_OUTPUT (len 1) / SOURCE_CONCAT (len N)
     var batch_handle_id: Int                     # SOURCE_BATCH (-1 unused)
     var csv_spec: CsvSourceSpec                  # SOURCE_CSV (empty = the CSV defaults)
@@ -777,6 +788,7 @@ struct SourceSpecPod(Movable):
         self.parquet_paths = List[String]()
         self.parquet_partition_cols = List[Field]()
         self.parquet_partition_values = List[List[String]]()
+        self.parquet_fs = FsDescriptorPod.local()
         self.dep_seg_ids = List[Int]()
         self.batch_handle_id = -1
         self.csv_spec = CsvSourceSpec()
@@ -787,6 +799,7 @@ struct SourceSpecPod(Movable):
         var projection: Optional[List[String]],
         var pushed_filter: Optional[Expr],
         spec_is_total: Bool = False,
+        var fs: FsDescriptorPod = FsDescriptorPod.local(),
     ) -> SourceSpecPod:
         """Mint the SOURCE_PARQUET arm.
 
@@ -798,6 +811,7 @@ struct SourceSpecPod(Movable):
         s.parquet_projection = projection^
         s.parquet_filter = pushed_filter^
         s.parquet_spec_is_total = spec_is_total
+        s.parquet_fs = fs^
         return s^
 
     @staticmethod
@@ -807,6 +821,7 @@ struct SourceSpecPod(Movable):
         var partition_values: List[List[String]],
         var projection: Optional[List[String]],
         var pushed_filter: Optional[Expr],
+        var fs: FsDescriptorPod = FsDescriptorPod.local(),
     ) -> SourceSpecPod:
         """Mint the SOURCE_PARQUET arm for a source of several files, or of
         files with Hive partition columns: total, `parquet_path` the first
@@ -822,6 +837,7 @@ struct SourceSpecPod(Movable):
         s.parquet_projection = projection^
         s.parquet_filter = pushed_filter^
         s.parquet_spec_is_total = True
+        s.parquet_fs = fs^
         return s^
 
     @staticmethod
