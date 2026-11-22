@@ -353,7 +353,7 @@ On a table komira did not create, komira writes data and delete files and snapsh
 - `parquet` reads files: `file_reader.mojo` (`ParquetFileReader`), `nested.mojo` (Dremel reconstruction), and INT96 to nanoseconds (`decode_plain_int96_to_int64`, `plain.mojo:929`).
 - `sdk`'s `ParquetReadOptions` carries Hive partitioning and a partition filter.
 
-What does not exist yet: a Parquet file writer, the Iceberg metadata parser and writer, and a Delta reader.
+What exists since this revision was written: a Parquet file writer (`src/parquet_writer`, which writes no Iceberg field ids yet) and a file-based Iceberg writer (`src/iceberg`, which commits without a catalog). What does not exist yet: a parser for Iceberg metadata that other writers produced, the catalog write path, and a Delta reader. [iceberg_tables.md](iceberg_tables.md) designs the first slice of the catalog write path.
 
 ### Adoption
 

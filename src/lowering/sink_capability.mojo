@@ -69,6 +69,7 @@ def sink_capability() -> List[SinkRow]:
     rows.append(_row(SINK_AGG, KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR))
     rows.append(_row(SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR))
     rows.append(_row(SINK_COLLECT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR))
+    rows.append(_row(SINK_HASH_BUILD, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR))
     return rows^
 
 

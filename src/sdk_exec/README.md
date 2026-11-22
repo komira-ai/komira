@@ -71,17 +71,21 @@ package lists (`HIVE_PARTITION_*`).
 
 **Refused here, by name.** A statement that is not a query
 (`STATEMENT_NOT_A_QUERY`, step `bind`); a scalar subquery (the optimizer keeps
-it in the plan and lowering refuses the node, `LOWERING_UNCUTTABLE_NODE`; the
+it in the plan as a CROSS join, which lowering refuses with
+`LOWERING_JOIN_UNSERVED`; the
 door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
 asks for a scalar to be executed first, a guard no query tested here reaches); a sink denied its memory by the
 budget, a sum outside its declared type and a pool not whole after a run (step
-`execute`); and whatever lowering, the binder or the parser refuses (a join is
-`LOWERING_UNCUTTABLE_NODE` at `lower`). Lowering given fewer scan facts than
+`execute`); and whatever lowering, the binder or the parser refuses (an INNER
+equi-join is served; any other join is `LOWERING_JOIN_UNSERVED` at `lower`).
+Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
 `lowering_inputs` descends only scan, filter, project, limit, aggregate,
-distinct, sort and union nodes (a union's branches in order) and gives a facts
-entry per scan it reaches, and the cutter refuses any other node by name
-before it asks for the scans below it. `worker_count` and
+distinct, sort, union and join nodes (a union's branches in order; a join's
+left child, then its right, for every join, so a join the cutter refuses has
+its scans' facts read first) and gives a facts entry per scan it reaches; the
+cutter refuses any other node by name before it asks for the scans below it.
+`worker_count` and
 `memory_budget_bytes` have a lower bound of 1 and no upper bound. A
 cancellation token is local to a call, so cancel is not reachable from
 `run_sql`. After a refusal the context is unchanged and runs the next query.
@@ -112,7 +116,7 @@ The tests run when the package is built.
   file and over a gzip copy; a missing file is refused at bind and
   `header=false` at lowering.
 - `test_run_sql_q6`: TPC-H Q6's text from `bench_corpus` over a lineitem-shaped
-  Parquet file gives the integer oracle's DECIMAL(38,4); a join, a syntax error,
+  Parquet file gives the integer oracle's DECIMAL(38,4); a join of a kind lowering does not serve, a syntax error,
   an unknown table, a missing file, CREATE TABLE AS and a replaced file are named
   refusals, as are a tiny memory budget, an INT64 sum out of range, a scalar
   subquery (refused by lowering); the context runs on after a refusal; the

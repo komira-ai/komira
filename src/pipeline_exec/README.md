@@ -46,7 +46,9 @@ Import each module by name; the package root exports nothing.
   `build_sink` the schema of the source's morsels (a sink that must name its
   output when no morsel reaches it needs it).
 - `source_variant`, `op_variant`, `pipeline_sink`: the closed variants. Each
-  holds one of three member types, fixed where the variant is named, and a tag;
+  holds one of its member types, fixed where the variant is named (three for a
+  source and a sink, four for an operator: the fourth slot defaults to
+  `NoOperator` and is read as `fourth()` under `OP_TAG_FOURTH`), and a tag;
   its trait methods test the tag and call the member. `unused_members` fills
   the slots a list leaves empty with members that refuse to run.
 - `source_parquet`, `source_batch`, `source_sink_output`, `source_csv`: the
@@ -279,8 +281,12 @@ Import each module by name; the package root exports nothing.
   spec's order into one batch it serves as a `SinkOutputSource`, with each
   column nullable when any producer's is; a concatenation of no segment is
   refused), OP_FILTER,
-  OP_PROJECT, OP_LIMIT and the sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
-  SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
+  OP_PROJECT, OP_LIMIT, OP_JOIN_PROBE (a `HashProbeOp`, whose index
+  `build_source` makes from the rows the build segment published; a build
+  segment that is not among the segment's dependencies is refused) and the
+  sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)`, `(SINK_HASH_BUILD, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)` (a `CollectSink`), `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
   the grouped rows I64, I32, F64, F32, DATE32, BOOL and DECIMAL128,
   `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED)`, `(SINK_AGG, KEY_DTYPE_STRING,
   SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR)`
@@ -293,6 +299,18 @@ Import each module by name; the package root exports nothing.
   chain's projections over a batch of no rows. Three origins name the borrows of
   the Parquet source (the footer cache, the expression pool, an absent dynamic
   filter).
+- `op_hash_probe`: `HashProbeShared` and `HashProbeOp`, OP_JOIN_PROBE for an
+  INNER equi-join. The probe segment's builder takes the rows the build segment
+  published and makes one composite hash index over the build key columns
+  (`op_join_probe`'s `MultiKeyHashJoinBuilder`), once and on the calling
+  thread before any worker starts. Each worker's `HashProbeOp` reads the index
+  and the build rows and never writes them. A morsel with a selection mask is
+  gathered first; a morsel with no row or no match is FILTERED_EMPTY. The
+  output is the probe columns then the build columns, a build name the probe
+  side uses suffixed `_right`. A NULL key on either side matches nothing; the
+  key types are the kernel's (INT64 and INT32, FLOAT64, STRING). An INT64 key
+  equal to the value the kernel uses for NULL is refused by name
+  (`JOIN_KEY_RESERVED`) rather than silently unmatched.
 - `plan_harness`: segment descriptors for the four sources with an operator
   chain and a collect sink (`with_agg_sink` turns one into an aggregation),
   `project_columns`, and a sample table with readers, for plans written by hand
@@ -354,6 +372,17 @@ the raise fails the query through the first-error slot.
 - **The collect sink holds every chunk until `take_output`.** Chunks stay in the
   worker slots, then in the merged list, and `take_output` concatenates them
   into the output batch, so a segment's peak memory is about twice its output.
+
+- **The join build is serial and unmeasured.** The index over the build rows
+  is made at the start of the probe segment, on one thread, before its workers
+  start. The build rows and the index are not charged to the segment pool, so
+  the memory budget does not see them. There is no runtime filter: the probe
+  side's scan reads every row.
+- **A join morsel gives one output batch.** A probe morsel whose rows each
+  match many build rows yields one batch as large as the fan-out, because the
+  probe does not return HAVE_MORE_OUTPUT to split it.
+- **One INT64 key value is refused.** The kernel stands for NULL by one INT64
+  value; a join key equal to it raises `JOIN_KEY_RESERVED`.
 
 ## Example
 

@@ -11,7 +11,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # `fake_members`, `fake_builder`, `fake_dispatch`) drive the scheduler in tests.
 # The real members are the sources `source_parquet`, `source_batch`,
 # `source_sink_output` and `source_csv` (a CSV file decoded at its bound column
-# types, served as a resident batch), the operators `op_filter`, `op_project` and `op_limit`,
+# types, served as a resident batch), the operators `op_filter`, `op_project`,
+# `op_limit` and `op_hash_probe` (the INNER equi-join probe over an index of
+# the build rows),
 # the sinks `sink_collect`, `sink_agg` (the ungrouped aggregation, over
 # `agg_fold` and `agg_output`, drawing memory from `segment_pool`; COUNT(DISTINCT) in
 # every aggregation sink is `count_distinct`), `sink_group_agg` (the same keyed by
@@ -19,7 +21,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # strings, over `string_keys`' intern table; `string_harness` is its test table), `sink_sort`
 # (the in-memory sort, over `sort_nulls` and `op_sort`; `sort_harness` is its
 # test table and oracle), and
-# `real_builder` that constructs them from a segment descriptor; `plan_harness`
+# `real_builder` that constructs them from a segment descriptor; the join is two
+# segments, a build side ending in `sink_collect` as SINK_HASH_BUILD and a probe
+# side whose chain carries `op_hash_probe` (`join_harness` writes join plans by
+# hand and is the oracle's nested-loop join); `plan_harness`
 # writes descriptors and sample data by hand and `tpch_q6` and `tpch_q1` are Q6 and Q1 as
 # such plans with lineitem-shaped tables.
 #
@@ -34,7 +39,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 as the position-order fold over Parquet and a
 #                                 resident batch, 1e16, 1, -1e16, 1 exactly 1.0,
 #                                 the cursor-grain route's refusal.
-# test_variants                   each variant slot forwards to its member.
+# test_variants                   each variant slot forwards to its member, the
+#                                 fourth operator slot included.
 # test_run_segment                every row once, the end of input once per
 #                                 worker, the operator chain, combine once
 #                                 after every worker, a worker count of one to
@@ -83,6 +89,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 project and limit; a segment reading another's
 #                                 output; what the builder refuses.
 # test_real_plan_concurrent       the same plans on threads, run after run, on a
+#                                 runtime stopped and started again.
+# test_hash_probe                 the join probe by itself against a nested-loop
+#                                 oracle: refusals by message, the reserved INT64
+#                                 key, NULL keys, duplicates, masks, output
+#                                 names, key types, a changed morsel schema.
+# test_join_plan                  inner joins as hand-built plans: resident and
+#                                 Parquet probe sides, 1 to 7 workers, filter
+#                                 and projection around the probe, two probes in
+#                                 a chain, a probe over a sort's output, no row
+#                                 with the joined schema, a build segment that is
+#                                 not a dependency, a plan run twice.
+# test_join_plan_concurrent       the same joins on threads, run after run, on a
 #                                 runtime stopped and started again.
 # test_segment_pool               the atomic pool and the worker reservations:
 #                                 budget, blocks, give-back, exact grants under
@@ -210,6 +228,7 @@ mojo_library(
         "//src/metrics:metrics",
         "//src/morsel:morsel",
         "//src/op_sort:op_sort",
+        "//src/op_join_probe:op_join_probe",
         "//src/op_sources:op_sources",
         "//src/operator_api:operator_api",
         "//src/parquet:parquet",
@@ -218,6 +237,7 @@ mojo_library(
         "//src/phase_timers:phase_timers",
         "//src/physical_plan:physical_plan",
         "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
         "//src/plan_stats:plan_stats",
         "//src/scalar_arithmetic:scalar_arithmetic",
         "//src/scan_planning:scan_planning",
@@ -233,6 +253,9 @@ mojo_library(
         "tests/test_edge_policy_and_ready_set.mojo",
         "tests/test_float_sum_workers_concurrent.mojo",
         "tests/test_group_agg_plan.mojo",
+        "tests/test_hash_probe.mojo",
+        "tests/test_join_plan.mojo",
+        "tests/test_join_plan_concurrent.mojo",
         "tests/test_op_filter.mojo",
         "tests/test_op_limit_concurrent.mojo",
         "tests/test_op_project_limit.mojo",

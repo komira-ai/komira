@@ -21,17 +21,25 @@
 #             one of scans, filters, projections and unions is cut again at
 #             each reference (`cut_shared`).
 #
+# A PLAN_JOIN is both: its build child's pipeline ends in a SINK_HASH_BUILD
+# segment, and its probe child's pipeline stays open with an OP_JOIN_PROBE
+# fused onto it and an E3 edge to the build segment (`cut_join`). In a plan
+# that holds a shared-subplan reference its right child is walked first, the
+# order the plan's producer visits a join in (`cut_shared`); the scan count
+# is set for each child, so its scans keep their pre-order indices.
+#
 # This module is the dispatch on the node's tag (`_walk_node`) and, around it,
 # the resolution of shared subplans (`_walk`, `_resolve`). Each arm is its own
 # module: `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
-# `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union` and `cut_shared`;
-# what they share (the open pipeline, the cutter's state and the close and
-# reopen of a breaker) is `cut_state`. The filter, project, limit, aggregate and distinct
-# arms have two halves: the first holds every check that refuses the node
-# itself and runs before the child is walked; the second fuses onto, or
-# closes, the child's pipeline. The sort arm has only the second. The union
-# arm checks its branches' schemas before it walks them, walks them in order,
-# ends each in a segment and opens the concatenation.
+# `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union`, `cut_join` and
+# `cut_shared`; what they share (the open pipeline, the cutter's state and the
+# close and reopen of a breaker) is `cut_state`. The filter, project, limit,
+# aggregate, distinct and join arms have two halves: the first holds every
+# check that refuses the node itself and runs before the child (or the
+# children) is walked; the second fuses onto, or closes, the child's
+# pipeline. The sort arm has only the second. The union arm checks its
+# branches' schemas before it walks them, walks them in order, ends each in a
+# segment and opens the concatenation.
 #
 # The root is a SINK_COLLECT segment, unless the plan's top node is a breaker:
 # then that breaker's segment is the result and nothing is appended.
@@ -45,6 +53,7 @@
 from lowering.cut_aggregate import _aggregate_exprs, _close_aggregate
 from lowering.cut_distinct import _distinct_keys, _close_distinct
 from lowering.cut_filter import _filter_op, _fuse_filter
+from lowering.cut_join import join_shape, _close_join
 from lowering.cut_limit import _limit_op, _fuse_limit
 from lowering.cut_project import _project_op, _fuse_project
 from lowering.cut_scan import _open_scan
@@ -55,6 +64,7 @@ from lowering.cut_shared import (
     _names,
     _read_shared,
     _referenced_hashes,
+    _scan_count,
 )
 from lowering.cut_sort import _close_sort
 from lowering.cut_state import CutResult, _Cutter, _Pipe, _uncuttable
@@ -69,6 +79,7 @@ from plan_ir.logical_plan import (
     PLAN_DISTINCT,
     PLAN_SORT,
     PLAN_LIMIT,
+    PLAN_JOIN,
     PLAN_UNION,
     PLAN_CSE_REF,
     PLAN_VIEW_REF,
@@ -155,6 +166,24 @@ def _walk_node(
     if tag == PLAN_SORT:
         var pipe = _walk(cutter, node.sort_data_ref().child[], inputs)
         return _close_sort(cutter, node, pipe^, inputs)
+    if tag == PLAN_JOIN:
+        var shape = join_shape(node)
+        ref jd = node.join_data_ref()
+        if len(cutter.referenced) == 0:
+            var left = _walk(cutter, jd.left[], inputs)
+            var right = _walk(cutter, jd.right[], inputs)
+            return _close_join(cutter, node, shape^, left^, right^, inputs)
+        # The right child first, as the producer of the references visits a
+        # join, so a canonical subtree there is cut before a reference to it
+        # on the left; each child's scans keep their pre-order indices.
+        var start = cutter.scans_seen
+        cutter.scans_seen = start + _scan_count(jd.left[])
+        var right = _walk(cutter, jd.right[], inputs)
+        var end = cutter.scans_seen
+        cutter.scans_seen = start
+        var left = _walk(cutter, jd.left[], inputs)
+        cutter.scans_seen = end
+        return _close_join(cutter, node, shape^, left^, right^, inputs)
     if tag == PLAN_UNION:
         _check_union(node)
         ref ud = node.union_data_ref()

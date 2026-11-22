@@ -1,5 +1,5 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64", "TOOL_EXEC", "tool_exec_name")
-load("@komira//tools/build/platforms:table.bzl", "by_target_os", "pinned_kwargs", "release_version", "row", "zig_strip_prefix")
+load("@komira//tools/build/platforms:table.bzl", "by_target_platform", "constraints", "pinned_kwargs", "registered_names", "release_version", "row", "setting_name", "zig_strip_prefix")
 load("@komira//tools/build/package:defs.bzl", "oci_base")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime", "zig_dist", "zig_exe", "zig_test")
@@ -68,18 +68,33 @@ pinned_file(**pinned_kwargs("linux-x86_64", "pixi", out = "pixi"))
 
 pinned_file(**pinned_kwargs("darwin-arm64", "pixi", out = "pixi"))
 
+pinned_file(**pinned_kwargs("linux-arm64", "pixi", out = "pixi"))
+
+# One selectable form per registered row: its os and its cpu together (two rows
+# share linux, and two share arm64), named by `setting_name`.
+[
+    config_setting(
+        name = setting_name(n),
+        constraint_values = constraints(n),
+        visibility = ["PUBLIC"],
+    )
+    for n in registered_names()
+]
+
 # The pixi of the target platform's row: the client's own unless
-# `--target-platforms` names another, so a Mac gets the macOS executable and a
-# Linux x86_64 machine the linux one. Runnable (`$(exe ...)`, `buck2 run`).
+# `--target-platforms` names another, so a Mac gets the macOS executable, a
+# Linux x86_64 machine the linux one and a Linux arm64 machine the aarch64 one.
+# Runnable (`$(exe ...)`, `buck2 run`).
 alias(
     name = "pixi",
-    actual = select(by_target_os("pixi")),
+    actual = select(by_target_platform("pixi")),
     visibility = ["PUBLIC"],
 )
 
-# The linux pin runs and reports the release its URL names. A remote linux
+# The linux x86_64 pin runs and reports the release its URL names. A remote linux
 # action, so `./buck2 build //...` fails when the bytes are not that release.
-# The macOS pin is checked by its sha256 only: no linux worker can run it.
+# The macOS and linux arm64 pins are checked by their sha256 only: no linux
+# x86_64 worker can run them.
 zig_test(
     name = "version_check_unit",
     exec_compatible_with = TOOL_EXEC,

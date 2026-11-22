@@ -19,8 +19,8 @@
 #                       times, a filtered scan read twice, a limit read twice
 #                       (the same rows each time, so the count is exact), a
 #                       subquery that reads a CTE twice read twice, a union of a
-#                       filtered scan read twice read twice, an ungrouped
-#                       aggregation read twice.
+#                       filtered scan read twice read twice, a CTE joined
+#                       with itself, an ungrouped aggregation read twice.
 #   test_every_case_is_run
 #                       each case of cases.sql belongs to one of the tests
 #                       above, so none is skipped.
@@ -149,7 +149,7 @@ def test_a_cte_read_more_than_once_equals_duckdb() raises:
 
 def test_every_case_is_run() raises:
     var cases = _cases()
-    assert_true(len(cases) >= 14, "cases.sql holds " + String(len(cases)) + " cases")
+    assert_true(len(cases) >= 15, "cases.sql holds " + String(len(cases)) + " cases")
     for i in range(len(cases)):
         var name = cases[i].name
         assert_true(

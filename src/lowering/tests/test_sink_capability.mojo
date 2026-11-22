@@ -29,6 +29,7 @@ from physical_plan.physical_plan import (
     SINK_TOPN,
     SINK_COLLECT,
     SINK_HASH_BUILD,
+    SINK_PARTITION_BY,
     SINK_ORIENT_COLUMNAR,
     SINK_ORIENT_DICT_ENCODED,
     KEY_DTYPE_NONE,
@@ -78,6 +79,7 @@ def test_the_table_holds_exactly_these_rows_in_this_order() raises:
     expected += "(SINK_AGG, COMPOSITE, COLUMNAR)\n"
     expected += "(SINK_SORT, NONE, COLUMNAR)\n"
     expected += "(SINK_COLLECT, NONE, COLUMNAR)\n"
+    expected += "(SINK_HASH_BUILD, NONE, COLUMNAR)\n"
     assert_equal(got, expected)
 
 
@@ -142,7 +144,7 @@ def test_admitting_a_plan_stops_at_the_first_unserved_segment() raises:
 
     var mixed = List[SegmentDescPod]()
     mixed.append(_segment(0, SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR))
-    mixed.append(_segment(1, SINK_HASH_BUILD, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR))
+    mixed.append(_segment(1, SINK_PARTITION_BY, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR))
     mixed.append(_segment(2, SINK_TOPN, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR))
     var message = String()
     try:
@@ -150,7 +152,7 @@ def test_admitting_a_plan_stops_at_the_first_unserved_segment() raises:
     except e:
         message = String(e)
     assert_true(": segment 1 " in message, message)
-    assert_true("(SINK_HASH_BUILD, NONE, COLUMNAR)" in message, message)
+    assert_true("(SINK_PARTITION_BY, NONE, COLUMNAR)" in message, message)
 
 
 def main() raises:

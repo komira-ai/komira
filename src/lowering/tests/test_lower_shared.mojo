@@ -17,6 +17,9 @@
 #     every reference over the same scan facts (statistics and dictionary
 #     encoded keys), also when it holds a reference itself, and the
 #     references take no facts of their own.
+#   * In a join the right child is walked first, as the producer visits it:
+#     a self-join cuts the right scan and recuts it on the left, each child's
+#     scans keep their facts, and a shared join is cut once.
 #   * References under every node kind the cutter cuts are found; a shared
 #     subtree holding a reference, and a second inline subtree of a named hash,
 #     are cut as the rules say.
@@ -42,8 +45,10 @@ from physical_plan.physical_plan import (
     EDGE_E3_PUBLISH_WAIT,
     KEY_DTYPE_STRING,
     OP_FILTER,
+    OP_JOIN_PROBE,
     SINK_AGG,
     SINK_COLLECT,
+    SINK_HASH_BUILD,
     SINK_ORIENT_DICT_ENCODED,
     SINK_SORT,
     SOURCE_CONCAT,
@@ -58,6 +63,9 @@ from plan_ir.logical_plan import (
     ExprArray,
     AggExprArray,
     SOURCE_PARQUET,
+    JOIN_INNER,
+    JOIN_ALGO_AUTO,
+    JOIN_BUILD_SIDE_RIGHT,
     PLAN_CSE_REF,
     PLAN_VIEW_REF,
     plan_tag_name,
@@ -197,6 +205,14 @@ def _expect_concat(lp: LoweredPlan, seg: Int, want: List[Int]) raises:
         assert_equal(s.source_spec.dep_seg_ids[i], want[i])
         assert_equal(s.deps[i], want[i])
         assert_equal(s.edge_tags[i], EDGE_E3_PUBLISH_WAIT)
+
+
+def _inner_join(var left: LogicalPlan, var right: LogicalPlan) -> LogicalPlan:
+    """left JOIN right ON k = k, the right child building."""
+    return LogicalPlan.join(
+        left^, right^, _keys("k"), _keys("k"), JOIN_INNER, JOIN_ALGO_AUTO,
+        None, JOIN_BUILD_SIDE_RIGHT,
+    )
 
 
 def _ids(a: Int, b: Int) -> List[Int]:
@@ -541,6 +557,72 @@ def test_a_union_with_a_breaker_in_a_branch_is_cut_once() raises:
     assert_equal(lp.segments[2].sink_kind, SINK_COLLECT)
     _expect_concat(lp, 2, _ids(0, 1))
     _expect_concat(lp, 3, _ids(2, 2))
+
+
+# =============================================================================
+# Joins: the producer visits the right child first
+# =============================================================================
+
+
+def test_a_self_join_cuts_the_right_scan_and_recuts_it_on_the_left() raises:
+    # The producer saw X JOIN X; it visits the right child first, so the right
+    # X is the canonical subtree and the left one the reference.
+    var x = LogicalPlan.filter(_k_gt(1), _scan())
+    var plan = _inner_join(_ref_to(x), x.copy())
+    var inputs = LoweringInputs()
+    inputs.add_scan(Optional[TableStats](_stats(50)))
+    var lp = _lowered(plan, inputs)
+    assert_equal(len(lp.segments), 2)
+    # 0: the right X builds. 1: the left X, cut again over the same scan,
+    # probes it.
+    assert_equal(lp.segments[0].source_kind, SEG_SOURCE_PARQUET)
+    assert_equal(lp.segments[0].sink_kind, SINK_HASH_BUILD)
+    assert_equal(lp.segments[0].card_estimate_rows, 50)
+    assert_equal(lp.segments[1].source_kind, SEG_SOURCE_PARQUET)
+    assert_equal(lp.segments[1].source_spec.parquet_path, "a.parquet")
+    assert_equal(len(lp.segments[1].deps), 1)
+    assert_equal(lp.segments[1].deps[0], 0)
+    var probes = 0
+    for i in range(len(lp.segments[1].ops)):
+        if lp.segments[1].ops[i].tag == OP_JOIN_PROBE:
+            probes += 1
+    assert_equal(probes, 1)
+
+
+def test_a_join_keeps_each_scans_facts_when_its_right_child_is_walked_first() raises:
+    # Left: b.parquet (scan 0, 7 rows). Right: X UNION ALL ref(X) with X a
+    # scan of a.parquet (scan 1, 50 rows).
+    var x = _scan("a.parquet")
+    var right = _union(_two(x.copy(), _ref_to(x)))
+    var plan = _inner_join(_scan("b.parquet"), right^)
+    var inputs = LoweringInputs()
+    inputs.add_scan(Optional[TableStats](_stats(7)))
+    inputs.add_scan(Optional[TableStats](_stats(50)))
+    var lp = _lowered(plan, inputs)
+    # 0, 1: X and its recut, each with scan 1's rows. 2: their concatenation,
+    # which builds. 3: b.parquet with scan 0's facts, which probes.
+    assert_equal(len(lp.segments), 4)
+    for seg in range(2):
+        assert_equal(lp.segments[seg].source_spec.parquet_path, "a.parquet")
+        assert_equal(lp.segments[seg].card_estimate_rows, 50)
+    _expect_concat(lp, 2, _ids(0, 1))
+    assert_equal(lp.segments[2].sink_kind, SINK_HASH_BUILD)
+    assert_equal(lp.segments[3].source_spec.parquet_path, "b.parquet")
+    assert_equal(lp.segments[3].deps[0], 2)
+
+
+def test_a_shared_join_is_cut_once() raises:
+    # The producer saw J UNION ALL J with J = X JOIN Y; it keeps the first J
+    # and folds the second.
+    var j = _inner_join(_scan("a.parquet"), _scan("b.parquet"))
+    var plan = _union(_two(j.copy(), _ref_to(j)))
+    var lp = _lowered(plan, _inputs(2))
+    # 0: b builds. 1: a probes, collected as the shared segment. 2: 1 twice.
+    assert_equal(len(lp.segments), 3)
+    assert_equal(lp.segments[0].sink_kind, SINK_HASH_BUILD)
+    assert_equal(lp.segments[1].source_spec.parquet_path, "a.parquet")
+    assert_equal(lp.segments[1].sink_kind, SINK_COLLECT)
+    _expect_concat(lp, 2, _ids(1, 1))
 
 
 # =============================================================================

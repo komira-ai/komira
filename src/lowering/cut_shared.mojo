@@ -8,8 +8,9 @@
 # a PLAN_CSE_REF leaf carrying the canonical subtree's `structural_hash()`
 # (`optimizer.plan_cse`). The canonical subtree is the first node of that
 # hash the walk reaches; the cutter walks a node before its children and the
-# children in order (a union's branches first to last), the order the plan's
-# producer visits them in.
+# children in order (a union's branches first to last, and in a plan that
+# holds a reference a join's right child before its left), the order the
+# plan's producer visits them in.
 #
 # Before the walk the cutter collects the hashes the plan's references name
 # (`_referenced_hashes`). While it is not empty, the walk hashes each node once
@@ -68,6 +69,7 @@ from plan_ir.logical_plan import (
     PLAN_SORT,
     PLAN_LIMIT,
     PLAN_UNION,
+    PLAN_JOIN,
     PLAN_CSE_REF,
 )
 
@@ -97,6 +99,40 @@ def _referenced_hashes(plan: LogicalPlan, mut out: List[UInt64]):
         ref ud = plan.union_data_ref()
         for i in range(len(ud.children)):
             _referenced_hashes(ud.children[i][], out)
+    elif tag == PLAN_JOIN:
+        ref jd = plan.join_data_ref()
+        _referenced_hashes(jd.left[], out)
+        _referenced_hashes(jd.right[], out)
+
+
+def _scan_count(plan: LogicalPlan) -> Int:
+    """The scans of `plan` under the node kinds the cutter cuts: the entries
+    `LoweringInputs` holds for it. A reference holds none."""
+    var tag = plan.tag
+    if tag == PLAN_SCAN:
+        return 1
+    if tag == PLAN_FILTER:
+        return _scan_count(plan.filter_data_ref().child[])
+    if tag == PLAN_PROJECT:
+        return _scan_count(plan.project_data_ref().child[])
+    if tag == PLAN_LIMIT:
+        return _scan_count(plan.limit_data_ref().child[])
+    if tag == PLAN_AGGREGATE:
+        return _scan_count(plan.aggregate_data_ref().child[])
+    if tag == PLAN_DISTINCT:
+        return _scan_count(plan.distinct_data_ref().child[])
+    if tag == PLAN_SORT:
+        return _scan_count(plan.sort_data_ref().child[])
+    if tag == PLAN_UNION:
+        ref ud = plan.union_data_ref()
+        var n = 0
+        for i in range(len(ud.children)):
+            n += _scan_count(ud.children[i][])
+        return n
+    if tag == PLAN_JOIN:
+        ref jd = plan.join_data_ref()
+        return _scan_count(jd.left[]) + _scan_count(jd.right[])
+    return 0
 
 
 def _names(hashes: List[UInt64], h: UInt64) -> Bool:
@@ -158,6 +194,9 @@ def _expand_inplace(mut plan: LogicalPlan, cutter: _Cutter):
         var n = len(plan._union.value()[].children)
         for i in range(n):
             _expand_inplace(plan._union.value()[].children[i][], cutter)
+    elif tag == PLAN_JOIN:
+        _expand_inplace(plan._join.value()[].left[], cutter)
+        _expand_inplace(plan._join.value()[].right[], cutter)
 
 
 def _expanded(cutter: _Cutter, node: LogicalPlan) -> LogicalPlan:

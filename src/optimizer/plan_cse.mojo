@@ -53,8 +53,9 @@
 # resolves it to the canonical result, and must reach the canonical occurrence
 # before any reference to it. The consumer is lowering (`lowering.cut_shared`),
 # which cuts the canonical occurrence once and has every reference read it;
-# its cutter walks a union's branches in order and cuts no join, so it reaches
-# the canonical occurrence first. This pass is not part of
+# in a plan that holds a reference its cutter walks in this same order (a
+# union's branches in order, a join's right child first), so it reaches the
+# canonical occurrence first. This pass is not part of
 # `optimizer_driver`'s fixed order, so `optimize` never produces a reference;
 # `sdk_exec.engine_sql.optimize_for_run` calls it on the optimized plan.
 #
