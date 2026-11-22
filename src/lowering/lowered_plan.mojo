@@ -30,6 +30,10 @@ comptime LOWERING_SCAN_NOT_TOTAL = "LOWERING_SCAN_NOT_TOTAL"
 comptime LOWERING_INPUTS_SCAN_COUNT = "LOWERING_INPUTS_SCAN_COUNT"
 """Refusal: `LoweringInputs` does not hold exactly one entry per scan."""
 
+comptime LOWERING_JOIN_UNSERVED = "LOWERING_JOIN_UNSERVED"
+"""Refusal: a join the INNER hash join does not serve (its type, keys, key
+types, residual, algorithm hint, build side or output names)."""
+
 
 @fieldwise_init
 struct ScanFacts(Copyable, Movable):
@@ -65,8 +69,8 @@ struct ParamTable(Movable):
     cut order, so equal inputs give equal indices.
 
     `SINK_AGG` segments index `agg` by `sink_param_id`, `SINK_SORT` segments
-    index `sort`; a `SINK_COLLECT` segment indexes nothing (`sink_param_id` is
-    -1). `SOURCE_BATCH` segments index `batches` by
+    index `sort`; a `SINK_COLLECT` or `SINK_HASH_BUILD` segment indexes nothing
+    (`sink_param_id` is -1): a join's keys are on its OP_JOIN_PROBE. `SOURCE_BATCH` segments index `batches` by
     `source_spec.batch_handle_id`.
     """
 

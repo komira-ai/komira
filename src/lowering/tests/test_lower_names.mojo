@@ -206,7 +206,7 @@ def test_render_names_every_source_edge_order_and_operator() raises:
     expected += "  source: SOURCE_BATCH batch=7\n"
     expected += "  op 0: PROJECT x := " + String(_col("a")) + ", y := " + String(_col("b")) + "\n"
     expected += "  op 1: LIMIT 5\n"
-    expected += "  op 2: JOIN_PROBE build_seg=3\n"
+    expected += "  op 2: JOIN_PROBE build_seg=3 on=[]\n"
     expected += "  sink: (SINK_COLLECT, NONE, COLUMNAR) param=-1 state=0\n"
     expected += "  deps: none\n"
     expected += "  order: ORDER_NONE partitions=1\n"
