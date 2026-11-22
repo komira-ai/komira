@@ -399,7 +399,7 @@ struct _RecordingTransport(IcebergRestTransport, Movable, Deinitable):
         self.ports = List[UInt16]()
         self.headers = List[String]()
 
-    def get(
+    def send(
         mut self, request: IcebergRestRequest
     ) raises -> IcebergRestResponse:
         self.hosts.append(String(request.host))

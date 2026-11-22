@@ -220,7 +220,7 @@ def _assert_echoed_request(body: String, path: String, host: String) raises:
 
 def test_plaintext_get_sends_path_headers_and_returns_body() raises:
     var tr = HttpIcebergRestTransport[_EchoConnector](_echo_200_plain)
-    var resp = tr.get(_request(String("/v1/p/namespaces/db/tables/t"), 8181))
+    var resp = tr.send(_request(String("/v1/p/namespaces/db/tables/t"), 8181))
     assert_equal(resp.status, 200)
     _assert_echoed_request(
         resp.body, String("/v1/p/namespaces/db/tables/t"), String("192.0.2.1:8181")
@@ -232,7 +232,7 @@ def test_tls_get_uses_https() raises:
     # call succeeds is the scheme proof. Port 443 is https's default, so the
     # Host header carries no port.
     var tr = HttpIcebergRestTransport[_EchoConnector](_echo_200_tls)
-    var resp = tr.get(_request(String("/v1/config"), 443))
+    var resp = tr.send(_request(String("/v1/config"), 443))
     assert_equal(resp.status, 200)
     _assert_echoed_request(resp.body, String("/v1/config"), String("192.0.2.1"))
     assert_true(not _has(resp.body, String("192.0.2.1:")), resp.body)
@@ -240,11 +240,11 @@ def test_tls_get_uses_https() raises:
 
 def test_non_200_is_returned_not_raised() raises:
     var tls = HttpIcebergRestTransport[_EchoConnector](_echo_404_tls)
-    var r404 = tls.get(_request(String("/v1/config"), 9443))
+    var r404 = tls.send(_request(String("/v1/config"), 9443))
     assert_equal(r404.status, 404)
     assert_true(r404.body.startswith(String("GET /v1/config HTTP/1.1 | ")))
     var plain = HttpIcebergRestTransport[_EchoConnector](_echo_503_plain)
-    var r503 = plain.get(_request(String("/v1/x"), 80))
+    var r503 = plain.send(_request(String("/v1/x"), 80))
     assert_equal(r503.status, 503)
     assert_true(_has(r503.body, String(" | Host: 192.0.2.1")), r503.body)
     assert_true(not _has(r503.body, String("192.0.2.1:")), r503.body)
@@ -254,8 +254,8 @@ def test_each_call_dials_a_fresh_connector() raises:
     # Two GETs through one transport: the echo stream answers once, so a
     # transport that reused one stream would read nothing on the second.
     var tr = HttpIcebergRestTransport[_EchoConnector](_echo_200_plain)
-    var a = tr.get(_request(String("/v1/a"), 8181))
-    var b = tr.get(_request(String("/v1/b"), 8181))
+    var a = tr.send(_request(String("/v1/a"), 8181))
+    var b = tr.send(_request(String("/v1/b"), 8181))
     assert_true(a.body.startswith(String("GET /v1/a ")), a.body)
     assert_true(b.body.startswith(String("GET /v1/b ")), b.body)
 
@@ -264,7 +264,7 @@ def test_connector_factory_failure_propagates() raises:
     var tr = HttpIcebergRestTransport[_EchoConnector](_refusing)
     var msg = String("")
     try:
-        var _r = tr.get(_request(String("/v1/config"), 8181))
+        var _r = tr.send(_request(String("/v1/config"), 8181))
     except e:
         msg = String(e)
     assert_equal(msg, String("connector setup failed"))
@@ -294,7 +294,7 @@ def test_clocked_connector_factory_failure_propagates() raises:
     )
     var msg = String("")
     try:
-        var _r = tr.get(_request(String("/v1/config"), 8181))
+        var _r = tr.send(_request(String("/v1/config"), 8181))
     except e:
         msg = String(e)
     assert_equal(msg, String("clocked connector setup failed"))
@@ -315,7 +315,7 @@ def test_request_timeout_bounds_a_stalled_peer() raises:
     )
     var msg = String("")
     try:
-        var _r = tr.get(_request(String("/v1/config"), 8181))
+        var _r = tr.send(_request(String("/v1/config"), 8181))
     except e:
         msg = String(e)
     assert_true(_has(msg, String("TIMEOUT")), msg)
