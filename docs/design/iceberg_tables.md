@@ -19,10 +19,7 @@ Each has a recommendation in one line. The rest of the document is written to it
 
 1. **`CREATE TABLE ... AS` on a catalog that refuses a staged create.** Recommendation: fail by name (`ICEBERG_CATALOG_REJECTED`, quoting the catalog), with no create-then-append fallback, because the fallback shows readers an empty table and leaves one behind on failure ([Create](#create), [Decisions](#decisions) 3).
 2. **`CREATE OR REPLACE` on a table another tool created.** Recommendation: allow it, because the user named the statement, and Iceberg's replace keeps the table's uuid and history, so the old snapshots stay readable until the table's maintainer expires them ([Decisions](#decisions) 15).
-3. **The positional form `s.sql(table_object, "SELECT ... FROM self")`, binding one unnamed source for one statement under the name `self`.** As worded in the credentials design's questions for the owner:
-   - DuckDB: DuckDB's Python API has no such argument: it resolves a Python variable named in the SQL by inspecting the caller's frame; polars' `DataFrame.sql` reads its frame as `self` *(to confirm against the pinned polars)*.
-   - This design: served, Python only, beside named call bindings; TypeScript and Mojo write `{ self: source }`.
-   - Recommendation: keep it: it is the owner's own spelling, it costs one reserved name, and it never conflicts with a named binding because a call binding wins for its statement.
+3. **The unnamed-source form, `s.sql(source, query)`, read as `self`.** The ruling keeps two ways to bind a name: `add_sql_binding` on the session, and a keyword of one `sql` call. This third spelling follows the owner's own sketch, `s.sql(t, "COMMAND")`, and is not ruled. Recommendation: keep it. Keeping it costs a third spelling of a call binding, a reserved name `self` that every SDK spells (`{ self: source }` in TypeScript and Mojo), and two `TypeError` rules (a second unnamed source, and `self=` beside one); it changes no plan, because `self` is a session-local name and never reaches the wire. Dropping it costs nothing in the plan or the library; a one-source query is written `s.sql("SELECT count(*) FROM t", t=t)` instead, and the examples that use `self` change. The same question, in the same words, is in the credentials design's questions for the owner.
 
 ## What the first slice does not give
 
