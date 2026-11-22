@@ -491,8 +491,12 @@ bytes (`OPTIMIZED_PLAN_NOT_CANONICAL`). Then
 ```
 plan_digest = sha256(body ‖ canonical(DigestTrailer))
 DigestTrailer = { format_version, optimizer_contract_version, write_target, needs.udfs, needs.runtimes,
-                  needs.data_scopes, needs.scopes }
+                  needs.data_scopes, needs.scopes, needs.credentials }
 ```
+
+`needs.credentials` (`DeclaredNeeds.credentials = 11`) is the sorted set of credential names the body's
+sources carry. It is never a value, and a host refuses a header that differs from the body
+([credentials_and_writes.md](credentials_and_writes.md), decisions 4 and 5).
 
 The trailer binds the plan's effect, the code it runs (by digest; the environment image that holds it is outside the
 digest, §10.11), the data it may read and the contract version under which its

@@ -112,6 +112,9 @@ message IcebergTableRef {
   repeated string namespace = 2;  // one entry per level
   string          name      = 3;
 }
+// Superseded for field 1: a session-local catalog name cannot reach the wire, so field 1 becomes
+// `WireIcebergCatalog catalog = 1` (the catalog's uri, warehouse and credential name), as
+// credentials_and_writes.md decision 4 specifies. IcebergTableRef has not shipped.
 
 message IcebergPin {
   IcebergTableRef table             = 1;
@@ -235,7 +238,7 @@ or returns the original result less the erased subject (a rewritten tail); it ne
 
 | Param | Tag | Meaning |
 |---|---|---|
-| `catalog` | STR | the catalog name (`IcebergTableRef.catalog`) |
+| `catalog` | STR | the catalog name (`IcebergTableRef.catalog`); superseded: the catalog travels as a `WireIcebergCatalog` (uri, warehouse, credential name), never a session-local name ([credentials_and_writes.md](credentials_and_writes.md) decision 4) |
 | `namespace` | STR | levels joined by the unit separator `0x1F`, as the Iceberg REST protocol encodes a multi-level namespace |
 | `name` | STR | the table name |
 | `as_of_snapshot` | I64 | optional; time travel by snapshot id |
@@ -636,7 +639,7 @@ object. Each verb emits one bound form (§15.8.1), so one program yields one can
 
 ```python
 import komira as km                                   # Python
-cat = km.catalog("lake")                              # a name the deployment maps to a catalog
+cat = km.catalog("lake")                              # superseded: a catalog object, km.iceberg(...) (credentials_and_writes.md)
 tickets = km.read_table(cat, "support.tickets")
 text = tickets.search("refund not received", fields=["subject", "body"], k=20)
 near = tickets.knn("body_vec", km.embed("refund not received", model="m"), k=20, where=km.col("status") == "open")
@@ -646,14 +649,14 @@ hood = g.neighbors(g.entities.search("Acme", fields=["name"], k=5), on="entity_i
 ```
 
 ```ts
-const tickets = km.readTable(km.catalog("lake"), "support.tickets");               // TypeScript
+const tickets = km.readTable(km.catalog("lake"), "support.tickets");               // TypeScript; km.catalog superseded: a catalog object, km.iceberg(...) (credentials_and_writes.md)
 const text = tickets.search("refund not received", { fields: ["subject", "body"], k: 20 });
 const near = tickets.knn("body_vec", km.embed("refund not received", { model: "m" }),
   { k: 20, where: km.col("status").eq("open") });
 ```
 
 ```mojo
-var tickets = km.read_table(km.catalog("lake"), "support.tickets")                 # Mojo
+var tickets = km.read_table(km.catalog("lake"), "support.tickets")                 # Mojo; km.catalog superseded: a catalog object, km.iceberg(...) (credentials_and_writes.md)
 var text = tickets.search("refund not received", fields=["subject", "body"], k=20)
 var near = tickets.knn("body_vec", km.embed("refund not received", model="m"), k=20,
                        where=km.col("status") == "open")
