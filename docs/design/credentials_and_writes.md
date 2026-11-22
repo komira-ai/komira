@@ -477,6 +477,12 @@ message WireWriteTarget {
   - The binder fills `data_access` at bind time, from the scope covering the table's location, which
     it learns when it loads the table.
   - A later kind that needs a second credential follows the same rule with its own field.
+- **A scan carries its catalog once.** `IcebergTableRef.catalog` (`WireIcebergCatalog`) is the only
+  copy in the body.
+  - The Iceberg kind's `catalog` STR param and `WireScanBinding.table_catalog` were designed and never
+    shipped. They are dropped for Iceberg scans.
+  - `DataScope.catalog` in the header is derived from the ref's `uri` and `warehouse`, and checked
+    against the body at admission, as `DeclaredNeeds.credentials` is.
 - **What the existing name fields hold.**
   - The binder sets `WireParquetSource.name` (with `has_name`) to the source's location.
   - It sets `WireScanBinding.name` to the location, or to a catalog table's `namespace.name`.
@@ -499,9 +505,17 @@ message WireWriteTarget {
   - `komira_plan_render` (**EXISTS**, ABI 1.1) prints each source's credential name and settings (**PROPOSED**), so the rendered text,
     and the structural hash computed from it, tells two identities apart (decision 6).
 - **Compatibility.** Every field is new and optional, which is additive under rule B8.
-  - An old reader must not run a remote source as if it were local. The pull request that lifts the
-    codec's non-local refusal therefore raises the envelope's format version for a plan with any
-    `access`, and an older reader refuses that plan by name instead of dropping the field.
+  - An old reader must not run a remote source as if it were local. So an envelope declares **format
+    version 6** when it carries a `WireSourceAccess` anywhere, or the Iceberg write arm. The places a
+    `WireSourceAccess` can appear are:
+    - a file source's `access`;
+    - `WireWriteTarget.access`;
+    - an `IcebergTableRef`, whose catalog holds `access`.
+  - Consequences, the same number and rule as the Iceberg design's:
+    - a scan-only Iceberg plan, a `COPY ... TO 's3://...'` and an Iceberg write all declare 6;
+    - the accepted set becomes `{4, 5, 6}`;
+    - an understated version is refused, and an overstated one is accepted, as today.
+  - An older reader therefore refuses such a plan by name instead of dropping the field.
   - That version raise is a deliberate exception to B8's "no version floor". It is the same exception
     `plan.proto` already makes for `write_target`, for the same reason: dropping the field would change
     the answer silently.
@@ -572,8 +586,9 @@ bytes whichever party runs it.
     (`vended`). Otherwise the scope covering the file's location applies (decision 3).
   - A bound scope never widens where komira writes inside a table: the Iceberg design's
     `ICEBERG_LOCATION_REFUSED` rule stands.
-  - On several hosts, each host loads the table's credentials itself, through the catalog's credentials
-    endpoint, under the catalog's credential name. That replaces the Iceberg design's sentence "the
+  - On several hosts, each host loads the table's credentials itself, under the catalog's credential
+    name. It does so by `GET .../tables/{t}/credentials` where the server lists that endpoint, else by
+    loading the table (a load response vends them too). That replaces the Iceberg design's sentence "the
     committer hands each host the credentials for its job". The plan still carries no value.
   - **A staged `CREATE TABLE ... AS` on several hosts** writes a table that does not exist yet, so a
     host has nothing to load. Its data files are written with the credential named in `data_access`,
