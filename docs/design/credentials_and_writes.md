@@ -468,7 +468,8 @@ How each kind of name in SQL finds its source:
 
 **PROPOSED.** The plan carries a resolved source: where the data is, the settings needed to reach it,
 and the name of the credential.
-- It never carries a credential's value.
+- It never carries a credential's value, with one named exception: a presigned URL's query string,
+  bounded to plans that stay in the process (the last bullet of this decision).
 - It never carries the session-local binding name (`orders_table`, `sales_catalog`). Two users' `sales_catalog` may
   be two catalogs, and a job manager must not have to guess which.
 - It carries only the sources the statement uses (decision 3).
