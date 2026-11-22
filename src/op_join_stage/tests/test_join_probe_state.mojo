@@ -121,7 +121,7 @@ def _probe_state() raises -> Probe:
     var b = _build_batch()
     _feed_all(st, batch_view_over(b))
     var owned = st.take_join_build_table()
-    return Probe(owned^.take())
+    return Probe(owned^.into_inner())
 
 
 def _keys_batch(keys: List[Int64], nulls: List[Bool]) raises -> RecordBatch:
@@ -230,7 +230,7 @@ def test_float_key_column_and_nan_match() raises:
     for r in range(2):
         st.feed_row(bv, r)
     var owned = st.take_join_build_table()
-    var pst = ProbeF(owned^.take())
+    var pst = ProbeF(owned^.into_inner())
     var probe = RecordBatch.from_typed_columns_1(
         Schema.from_fields_1(Field("k", F64, True)),
         _col[F64](
@@ -266,7 +266,7 @@ def test_unique_keys_give_one_row_per_matching_probe_row() raises:
     var b = rbb.build(sb.build())
     _feed_all(st, batch_view_over(b))
     var owned = st.take_join_build_table()
-    var t = owned^.take()
+    var t = owned^.into_inner()
     assert_false(t.has_duplicate_keys)
     var pst = Probe(t^)
     var probe = _keys_batch([20, 30, 10, 20], [False, False, False, False])
@@ -314,7 +314,7 @@ def test_two_column_key_needs_both_columns_to_match() raises:
     for r in range(bv.n_rows()):
         st.feed_row(bv, r)
     var owned = st.take_join_build_table()
-    var pst = P2(owned^.take())
+    var pst = P2(owned^.into_inner())
     # Probe rows: match, NULL second, match, match, NULL first, (4, 0) whose
     # build row had a NULL second column, and the swapped (0, 3).
     var probe = RecordBatch.from_typed_columns_2(

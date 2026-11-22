@@ -40,7 +40,7 @@ They lend views and references whose origin is the collection. `ByteView[origin]
 
 ### How do I move a field out of a struct?
 
-Use a primitive that ends the source's ownership on the record: `Optional.take()`, `OwnedPointer.take()`, the standard library's `swap(field, default)`, `List.pop()`, or `Slab.take_slot_*`. Taking a field's address and calling `take_pointee()` on it is a **partial move via a pointer**: the compiler still believes the field is live and destroys it again when the struct dies.
+Use a primitive that ends the source's ownership on the record: `Optional.take()`, `OwnedPointer.into_inner()`, the standard library's `swap(field, default)`, `List.pop()`, or `Slab.take_slot_*`. Taking a field's address and calling `take_pointee()` on it is a **partial move via a pointer**: the compiler still believes the field is live and destroys it again when the struct dies.
 
 ### How is work run in parallel?
 

@@ -725,7 +725,7 @@ merged has no row in the capability table, and a plan that needs it is refused a
   indexed by worker id; `consume` takes `self` and writes only the caller's slot, and anything shared is atomic. This is
   the shape the traits of `morsel` document. Those traits hold the slab behind an `UnsafePointer`; that pointer
   stays private to the sink's module under a `# SAFETY:` comment, and no signature of either package exposes it.
-- No partial move through a pointer: a state is taken out with `Optional.take()`, `OwnedPointer.take()`, `swap` or
+- No partial move through a pointer: a state is taken out with `Optional.take()`, `OwnedPointer.into_inner()`, `swap` or
   `List.pop()`, and the slab is emptied explicitly after `combine`.
 - No public function of either package takes or returns an `UnsafePointer`. A concrete-origin pointer inside a kernel
   body carries a `# SAFETY:` comment. FFI stays in the module that owns the foreign resource.

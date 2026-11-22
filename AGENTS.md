@@ -165,8 +165,8 @@ holds M1 and M4 to M8.
   `MutExternalOrigin`, `MutUntrackedOrigin`.
 - **M5 BLOCK.** Banned: `unsafe_from_address=`.
 - **M6 BLOCK.** Banned: moving a field out through a pointer
-  (`UnsafePointer(to=x.f).take_pointee()`). Use `Optional.take()`, `OwnedPointer.take()`, `swap`,
-  `List.pop()`, or `Slab.take_slot_*`.
+  (`UnsafePointer(to=x.f).take_pointee()`). Use `Optional.take()`, `OwnedPointer.into_inner()`,
+  `swap`, `List.pop()`, or `Slab.take_slot_*`.
 - **M7 BLOCK.** Banned: stdlib `parallelize[`. Use a `ParallelDispatch` or `fork_join_shared` from
   `komira_core`.
 - **M8 BLOCK.** Banned: re-declaring libc `read` or `open`. Platform constants go through a C shim.
