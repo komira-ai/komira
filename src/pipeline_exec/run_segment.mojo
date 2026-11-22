@@ -7,9 +7,12 @@
 #   2. Size: `sink.resize_worker_state(num_workers)`, once, before any consume.
 #   3. Run: the dispatcher runs a `SegmentTask` once per worker
 #      (`run_with_state`), and the segment's workers share one `SegmentRun`.
-#   4. After the join, a recorded error is raised. A failed segment pushes no
-#      tail, and never combines, finalizes or takes output; its sink,
-#      operators and source are dropped by ownership.
+#   4. After the join, a recorded error is raised, also when the dispatcher
+#      raised (it does when it sees the token cancelled between tasks); a
+#      cancel the dispatcher raised is reported as the segment's
+#      cancellation. A failed segment pushes no tail, and never combines,
+#      finalizes or takes output; its sink, operators and source are dropped
+#      by ownership.
 #   5. Tails: for each operator, in chain order, the builder's `op_tail`
 #      gives the rows it owes after every worker finished (the build rows a
 #      RIGHT or FULL join matched to no probe row). Each batch is pushed, on
@@ -108,10 +111,26 @@ def run_segment[
 
     pt_mark_fork()
     var t_dispatch = pt_now()
-    _ = dispatch.run_with_state[
-        SegmentRun[B.Source, B.Op, B.Sink],
-        SegmentTask[B.Source, B.Op, B.Sink],
-    ](run, SegmentTask[B.Source, B.Op, B.Sink](), num_workers, token.clone())
+    try:
+        _ = dispatch.run_with_state[
+            SegmentRun[B.Source, B.Op, B.Sink],
+            SegmentTask[B.Source, B.Op, B.Sink],
+        ](
+            run,
+            SegmentTask[B.Source, B.Op, B.Sink](),
+            num_workers,
+            token.clone(),
+        )
+    except e:
+        # A dispatcher that sees the token cancelled between tasks raises its
+        # own error; the segment reports the worker's first error, or the
+        # cancellation, the same way whichever side saw it first.
+        var first = run.pipeline.take_error()
+        if first:
+            raise first.take().to_error()
+        if run.token.is_cancelled():
+            raise cancelled_error(run.token)
+        raise e^
     pt_record[PH_DISPATCH](t_dispatch)
     pt_record_join_tails()
 
