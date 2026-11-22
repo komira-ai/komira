@@ -131,7 +131,7 @@ python/
   `komira.pl`, which is the one public submodule the package will have. Both arrive with the DataFrame
   surface (decision 4), not in the first release. Their verbs and refusal policy are the DataFrame
   surface's design. The names that design must keep are the ones the design docs already use
-  at the top level: `read_parquet`, `read_table`, `col`, `catalog` (verb names are the same words in every
+  at the top level: `read_parquet`, `read_table`, `col` (verb names are the same words in every
   language, [optimized_plan_sources.md](optimized_plan_sources.md) §15.9). This design reserves them by
   not using them for anything else.
 
