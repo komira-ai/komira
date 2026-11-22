@@ -163,6 +163,7 @@ resets `tempfile.tempdir`:
 | Variable | Value | Why |
 |---|---|---|
 | `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `VECLIB_MAXIMUM_THREADS`, `NUMEXPR_NUM_THREADS` | `1` | Each worker runs one thread of numerical code (§4.3); the libraries read these when they load |
+| `JE_ARROW_MALLOC_CONF` | `background_thread:false` | pyarrow's bundled jemalloc otherwise starts a background thread (`jemalloc_bg_thd`), which fails the zygote's thread check (§3.2) for any module that imports pyarrow |
 | `LC_ALL` | `C` | One locale everywhere; `-X utf8` gives Python UTF-8 text under it |
 | `TZ` | `UTC` | One time zone everywhere |
 | `HOME`, `TMPDIR` | In the zygote, a directory of its own under `scratch`; in each worker, one of the worker's own | A library that writes a cache writes it there, not into the user's home |

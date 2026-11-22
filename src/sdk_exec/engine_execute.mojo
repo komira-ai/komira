@@ -8,7 +8,9 @@
 # so a later query never sees an earlier run's footer; within a run the scan
 # reads the footer a second time and nothing checks it against the footer
 # lowering read: komira#2024). The
-# builder's segment pool is sized from the host profile's memory budget.
+# builder's segment pool is sized from the host profile's memory budget, and
+# the context's spill directory, when it has one, is the builder's (a grouped
+# aggregation over fixed-width keys then spills instead of being refused).
 #
 # A plan that scans an in-memory batch (a SELECT with no FROM reads the
 # binder's one-row relation) names it by its index in `params.batches`; each
@@ -72,6 +74,8 @@ def run_lowered_plan(
         origin_of(cache), origin_of(pool), origin_of(placeholder)
     ](cache, pool)
     builder.set_memory_budget(ctx.host_profile.memory_budget_bytes)
+    if ctx.spill_directory:
+        builder.set_spill_directory(ctx.spill_directory.value())
     # A fresh builder holds no resident batch, so the i-th `add_resident` is
     # handle i, the index the plan's SOURCE_BATCH specs name.
     for i in range(len(lowered.params.batches)):

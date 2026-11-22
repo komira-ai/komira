@@ -17,7 +17,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # the sinks `sink_collect`, `sink_agg` (the ungrouped aggregation, over
 # `agg_fold` and `agg_output`, drawing memory from `segment_pool`; COUNT(DISTINCT) in
 # every aggregation sink is `count_distinct`), `sink_group_agg` (the same keyed by
-# fixed-width columns, its tables charged as they grow), `sink_string_group_agg` (the same keyed by
+# fixed-width columns, its tables charged as they grow and, given a spill directory,
+# written to disk by hash partition when the pool refuses them: `group_spill`),
+# `sink_string_group_agg` (the same keyed by
 # strings, over `string_keys`' intern table; `string_harness` is its test table), `sink_sort`
 # (the in-memory sort, over `sort_nulls` and `op_sort`; `sort_harness` is its
 # test table and oracle), and
@@ -155,8 +157,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 two keys with NULLs, workers and dealing,
 #                                 the merge's overflow, float keys, refusals,
 #                                 the pool charged as tables grow.
+# test_sink_group_agg_spill       the grouped sink with a spill directory: spilled
+#                                 tables give the oracle's groups on 1 to 4 workers,
+#                                 the same budget refused without one, no spill
+#                                 when the pool has room, the merge's refusals,
+#                                 COUNT(DISTINCT) and the group limit, the chunk
+#                                 format round trip, files deleted.
 # test_group_agg_plan             scan, filter and grouped sink over Parquet,
-#                                 inline and on threads, and a budget refusal.
+#                                 inline and on threads, a budget refusal, and the
+#                                 same budget spilled with a spill directory.
 # test_sink_string_group_agg      the string-keyed grouped sink against a dict oracle:
 #                                 one and two keys, flat and dictionary columns in
 #                                 both orientations, NULL and the empty string,
@@ -228,26 +237,36 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "spike/**/*.mojo"]),
     deps = [
         "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
         "//src/async_rt:async_rt",
         "//src/async_api:async_api",
         "//src/atomic_alias:atomic_alias",
         "//src/batch_eval:batch_eval",
         "//src/byte_buffer:byte_buffer",
-        "//src/containers:containers",
         "//src/column_format:column_format",
+        "//src/compression:compression",
+        "//src/containers:containers",
         "//src/column_kernels:column_kernels",
         "//src/counters:counters",
         "//src/csv:csv",
+        "//src/dynamic_filter:dynamic_filter",
         "//src/engine_runtime:engine_runtime",
-        "//src/expr:expr",
         "//src/exec_types:exec_types",
+        "//src/expr:expr",
         "//src/fs:fs",
+        "//src/host_probe:host_probe",
+        "//src/host_profile:host_profile",
+        "//src/join_assembly:join_assembly",
+        "//src/libc:libc",
+        "//src/log:log",
         "//src/metrics:metrics",
         "//src/morsel:morsel",
+        "//src/objectstore:objectstore",
         "//src/op_sort:op_sort",
         "//src/op_window:op_window",
         "//src/op_join_probe:op_join_probe",
         "//src/op_sources:op_sources",
+        "//src/op_spill_rows:op_spill_rows",
         "//src/operator_api:operator_api",
         "//src/parquet:parquet",
         "//src/parquet_codec:parquet_codec",
@@ -257,13 +276,15 @@ mojo_library(
         "//src/plan_expr:plan_expr",
         "//src/plan_ir:plan_ir",
         "//src/plan_stats:plan_stats",
+        "//src/row_format:row_format",
         "//src/scalar_arithmetic:scalar_arithmetic",
         "//src/scan_planning:scan_planning",
         "//src/scan_source:scan_source",
+        "//src/shuffle:shuffle",
+        "//src/simd_ops:simd_ops",
         "//src/udf:udf",
     ],
     test_deps = [
-        "//src/compression:compression",
         "//src/parquet_writer:parquet_writer",
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
@@ -298,6 +319,7 @@ mojo_library(
         "tests/test_sink_float_agg_duckdb.mojo",
         "tests/test_sink_float_agg_positions.mojo",
         "tests/test_sink_group_agg.mojo",
+        "tests/test_sink_group_agg_spill.mojo",
         "tests/test_sink_group_agg_keys.mojo",
         "tests/test_sink_int_sum_decimal.mojo",
         "tests/test_sink_sort.mojo",

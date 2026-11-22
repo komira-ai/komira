@@ -24,6 +24,8 @@ mojo_library(
         "tests/test_plan_wire_agg_args.mojo",
         "tests/test_plan_wire_codec_encode_refusals.mojo",
         "tests/test_plan_wire_codec_tampered_wire.mojo",
+        "tests/test_plan_wire_expr_goldens.mojo",
+        "tests/test_plan_wire_expr_goldens_fns.mojo",
         "tests/test_plan_wire_golden_bytes.mojo",
         "tests/test_plan_wire_hostile_bytes.mojo",
         "tests/test_plan_wire_hostile_values.mojo",
@@ -48,6 +50,8 @@ mojo_library(
             "tests/fixtures/golden/aggregate_every_fn.hex",
             "tests/fixtures/golden/aggregate_every_fn.canonical.hex",
         ],
+        "tests/test_plan_wire_expr_goldens.mojo": glob(["tests/fixtures/golden/expr_*.hex"]),
+        "tests/test_plan_wire_expr_goldens_fns.mojo": glob(["tests/fixtures/golden/expr_*.hex"]),
         "tests/test_plan_wire_golden_bytes.mojo": glob(["tests/fixtures/golden/*.hex"]),
         "tests/test_plan_wire_hostile_values.mojo": glob(
             ["tests/fixtures/hostile/*.hex"],
@@ -94,13 +98,22 @@ _PLAN_PROTO = ["//src/plan_proto:plan_proto_gen"]
 
 # `aggregate_every_fn` (COUNT(*) and one aggregate per AggFn member, each with
 # its arguments) is frozen and read back by tests/test_plan_wire_agg_args.mojo;
-# every other golden by tests/test_plan_wire_golden_bytes.mojo.
+# the `expr_*` goldens (projections of every expression kind the Python plan
+# encoder writes, which python/tests holds that encoder's bytes to) by
+# tests/test_plan_wire_expr_goldens.mojo and
+# tests/test_plan_wire_expr_goldens_fns.mojo; every other golden by
+# tests/test_plan_wire_golden_bytes.mojo.
 _GOLDEN = [
     "aggregate",
     "aggregate_every_fn",
     "asof_join",
     "correlated_subquery",
     "distinct",
+    "expr_cast_when",
+    "expr_literals",
+    "expr_math_temporal",
+    "expr_operators",
+    "expr_strings",
     "filter_over_scan",
     "index_pinned",
     "join",
