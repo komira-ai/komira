@@ -55,8 +55,8 @@
 #
 # THE SEAMS. `CommitClock` (time and waiting), `CommitIds` (snapshot ids and
 # UUIDv7 text) and `AppendSnapshotWriter` (the per-attempt manifest list).
-# Each has a production conformer or is implemented by the write sink; the
-# test conformers here are `ManualCommitClock` and `SequenceCommitIds`.
+# `CommitClock` and `CommitIds` have production conformers here, with test
+# ones (`ManualCommitClock`, `SequenceCommitIds`); the writer is the caller's.
 #
 # Not here yet: the staged-create and replace commits, `Retry-After`, and the
 # write sink's `AppendSnapshotWriter` (docs/design/iceberg_tables.md, "Order of
@@ -164,7 +164,7 @@ trait CommitIds(Movable):
 
 
 struct RandomCommitIds(CommitIds, Movable):
-    """The production ids: a snapshot id is 63 random bits of a fresh UUIDv7
+    """The production ids: a snapshot id is 62 random bits of a fresh UUIDv7
     (never 0); a uuid is a fresh UUIDv7. Raise when the system entropy source
     fails."""
 
@@ -866,6 +866,19 @@ def commit_append[
             )
             if found:
                 return _succeed(out^, reloaded.metadata, found.value(), written^)
+            if not _same_main(reloaded.metadata.main_snapshot_id, parent):
+                # Absent with main moved: the earlier attempt may have
+                # landed and been expired since, so a rebase could append
+                # the rows twice.
+                return _unknown(
+                    out^,
+                    key,
+                    written,
+                    String("the catalog answered 409; main moved from ")
+                    + _main_text(parent)
+                    + String(" to ")
+                    + _main_text(reloaded.metadata.main_snapshot_id),
+                )
         var now_main = _main_text(reloaded.metadata.main_snapshot_id)
         if len(commit.pinned_snapshot_ids) > 0:
             var pins = String("")

@@ -690,6 +690,29 @@ def test_unknown_outcome_then_a_409_that_changed_nothing_retries() raises:
     assert_equal(h.applied(), 1)
 
 
+def test_unknown_outcome_then_409_with_main_moved_fails_without_rebasing() raises:
+    # The retry after a 500 gets a 409 because another writer moved main.
+    # The lookup finds neither S nor C, but the first attempt may have landed
+    # and been expired, so the statement must not rebase onto the new main.
+    var h = _h()
+    h.fault(500, False)
+    var other = h.other_writer_body(100, 1, 900)
+    h.fault_with(CommitFault(409, apply_first=False, then_body=other^))
+    var o = h.run()
+    _no_deletion(o)
+    assert_equal(
+        o.message,
+        _unknown_message(
+            _u(2),
+            _ml(200, 1),
+            String("the catalog answered 409; main moved from 100 to 900"),
+        ),
+    )
+    assert_equal(o.posts, 2)
+    assert_equal(h.applied(), 1)
+    _ints(h.clock.waits, _i1(100))
+
+
 def test_unknown_outcome_then_403_finds_the_landed_commit() raises:
     var h = _h()
     h.fault(500, False)
@@ -909,6 +932,7 @@ def main() raises:
     test_main_moved_past_the_landed_commit_is_still_found()
     test_unknown_outcome_then_409_finds_the_landed_commit()
     test_unknown_outcome_then_a_409_that_changed_nothing_retries()
+    test_unknown_outcome_then_409_with_main_moved_fails_without_rebasing()
     test_unknown_outcome_then_403_finds_the_landed_commit()
     test_unknown_outcome_then_403_with_main_at_p_fails_and_allows_deletion()
     test_unknown_outcome_then_403_with_main_moved_fails_without_deletion()

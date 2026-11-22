@@ -36,7 +36,7 @@
 
 
 # =============================================================================
-# §0 — ResolvedTable — the resolve-only output every catalog conformer returns.
+# §0 — ResolvedTable — the output every catalog conformer's resolve returns.
 # =============================================================================
 
 
@@ -119,7 +119,7 @@ struct ResolvedTable(Copyable, Movable, Deinitable):
 
 
 # =============================================================================
-# §1 — IcebergCatalog — the RESOLVE-ONLY seam.
+# §1 — IcebergCatalog — the resolve seam.
 # =============================================================================
 
 

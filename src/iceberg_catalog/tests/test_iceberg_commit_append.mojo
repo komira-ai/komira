@@ -75,7 +75,7 @@ comptime _Client = IcebergRestCatalog[
 ]
 
 
-comptime _T0: Int64 = 1700000000000
+comptime _T0: Int64 = 1795132800000
 
 
 comptime _U1: String = "00000000-0000-4000-8000-000000000001"
@@ -481,7 +481,7 @@ def test_first_append_lands_snapshot_with_exact_summary_and_request() raises:
             '"},{"type":"assert-ref-snapshot-id","ref":"main","snapshot-id":null},'
             '{"type":"assert-current-schema-id","current-schema-id":0}],'
             '"updates":[{"action":"add-snapshot","snapshot":{"snapshot-id":7001,'
-            '"sequence-number":1,"timestamp-ms":1700000000000,"schema-id":0,'
+            '"sequence-number":1,"timestamp-ms":1795132800000,"schema-id":0,'
             '"manifest-list":"'
         )
         + _ml(7001, 0)
