@@ -33,6 +33,7 @@ comptime _FILES: List[String] = [
     "s3_fs.mojo",
     "s3_fs_jobs.mojo",
     "s3_fs_options.mojo",
+    "s3_scan_fs.mojo",
     "store.mojo",
 ]
 
@@ -78,6 +79,7 @@ def test_the_scan_saw_the_package() raises:
     assert_equal(_count(_read("presign.mojo"), "\nstruct S3PresignSigner["), 1)
     assert_equal(_count(_read("s3_fs.mojo"), "\nstruct S3Fs["), 1)
     assert_equal(_count(_read("s3_endpoint.mojo"), "\ndef s3_prod_fs["), 1)
+    assert_equal(_count(_read("s3_scan_fs.mojo"), "\nstruct S3ScanFs["), 1)
     assert_true(_read("store.mojo").byte_length() > 10000)
 
 

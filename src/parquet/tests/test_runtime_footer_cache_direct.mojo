@@ -430,14 +430,19 @@ def test_one_path_on_two_file_systems_is_two_entries() raises:
     assert_equal(cache.stripped_footer_via_fs("t.parquet", a).num_rows, 7)
     assert_equal(cache.size(), 2)
     assert_equal(cache.miss_count(), 2)
-    assert_equal(cache.hit_count_for("s3://a/t.parquet"), 1)
-    assert_equal(cache.hit_count_for("s3://b/t.parquet"), 0)
-    assert_equal(cache.hit_count_for("t.parquet"), 0)
-    # The same prefix and path is the one entry.
+    # Each entry is under its file system's key, parsed once; none under the
+    # bare path. A populate is not a hit, nor is a stripped footer.
+    assert_equal(cache.parse_count_for("s3://a/t.parquet"), 1)
+    assert_equal(cache.parse_count_for("s3://b/t.parquet"), 1)
+    assert_equal(cache.parse_count_for("t.parquet"), 0)
+    assert_equal(cache.hit_count_for("s3://a/t.parquet"), 0)
+    # The same prefix and path is the one entry: a hit, no parse.
     var a2 = _MemFs(_bytes([6, 1], 20), "s3://a/")
     assert_equal(cache.get_or_parse_shared_via_fs("t.parquet", a2).meta[].num_rows, 7)
     assert_equal(cache.size(), 2)
-    assert_equal(cache.hit_count_for("s3://a/t.parquet"), 2)
+    assert_equal(cache.miss_count(), 2)
+    assert_equal(cache.hit_count_for("s3://a/t.parquet"), 1)
+    assert_equal(cache.hit_count_for("s3://b/t.parquet"), 0)
 
 
 def test_the_row_count_memo_keys_on_the_prefix() raises:
