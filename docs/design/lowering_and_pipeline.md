@@ -233,9 +233,11 @@ batch standing in for a subtree discards the subtree's meaning and gives a well-
 else; "not yet cut" must stay visible as a refusal. The same holds for a plan with an `EXCHANGE` node when there is one
 host: the cutter elides the exchange ([the optimized plan](optimized_plan.md) §8.2) once the exchange slice exists;
 slice 1b has no arm for `EXCHANGE` and refuses it by name, which is safe and is the only divergence from this
-paragraph. A plan with a `STEP` or `MAP_BATCHES` (a UDF) is refused until the UDF slice exists. A limit above a sort is
-refused too (`LOWERING_UNCUTTABLE_NODE`): no segment records an order before the order slice, so the rows such a limit
-keeps are not defined. An ungrouped float `SUM` or `AVG` is cut with `ORDER_ROW_RANGE` since step 9 of §7.3, and is
+paragraph. A plan with a `STEP` or `MAP_BATCHES` (a UDF) is refused until the UDF slice exists. A top-n, and a limit
+that reads a sort or a top-n through nothing but projections and other limits, is cut as one `SINK_TOPN` segment
+keeping that range of the sort's order (src/lowering/README.md). A limit with a filter between it and the sort, and a
+limit with an offset over rows in no stated order, are refused (`LOWERING_UNCUTTABLE_NODE`): no segment records an
+order, so the rows such a limit keeps are not defined. An ungrouped float `SUM` or `AVG` is cut with `ORDER_ROW_RANGE` since step 9 of §7.3, and is
 bit-reproducible across worker counts; a grouped one is not served yet.
 
 ### 2.4 What lowering may and may not do
@@ -1012,7 +1014,7 @@ that no test reaches is a defect of the tests.
 |---|---|---|
 | Plan IR, expressions, wire | `plan_ir`, `plan_expr`, `plan_wire` | none |
 | Optimizer | `optimizer` and its driver | the shared-subplan and scan-dedup passes, in the optimizer (D5) |
-| Physical IR | `physical_plan`, version 16, with driver-table indices | the self-contained IR (§2.2) |
+| Physical IR | `physical_plan`, version 17, with driver-table indices | the self-contained IR (§2.2) |
 | Host rules, morsel sizing | `derive_payload_narrow`; `record_segment_morsel_rows` and `HostProfile` in `engine_runtime` | the other host-local rules; `host_profile` and `host_detect` (D9, §2.5) |
 | **Lowering** | none | `lowering` (§2) |
 | **Driver** | traits, `PipelineExecution`, segment execution context, `ParallelDispatch` | `pipeline_exec` (§3) |
@@ -1028,7 +1030,7 @@ recommendation each.
 
 | # | Question | Recommended | Alternative | Why |
 |---|---|---|---|---|
-| D1 | Which IR do the first slices lower to | The existing `physical_plan` version 16, with a `ParamTable` owned by the `LoweredPlan`, behind the final `lower(plan, host_profile, inputs)` signature; the self-contained IR is a later, separate design and slice (§2.2) | Build the self-contained IR first, so no query runs until it exists | The six changes the self-contained IR needs do not change the cut, the driver or the signature, so they can follow; the refusal gates (a non-total Parquet arm, an uncuttable node) keep the interim IR honest. This is the alternative [plan models](plan_models.md) D7 rejected ("port as is and fix later"), taken with an exit condition (no consumer outside `pipeline_exec` and no serialization until the self-contained IR lands, §2.2) and with the `ParamTable` as the single place the side tables live; a deviation in time, not in direction. The cost: a `ParamTable` wire form is one more item of the later slice. |
+| D1 | Which IR do the first slices lower to | The existing `physical_plan` version 17, with a `ParamTable` owned by the `LoweredPlan`, behind the final `lower(plan, host_profile, inputs)` signature; the self-contained IR is a later, separate design and slice (§2.2) | Build the self-contained IR first, so no query runs until it exists | The six changes the self-contained IR needs do not change the cut, the driver or the signature, so they can follow; the refusal gates (a non-total Parquet arm, an uncuttable node) keep the interim IR honest. This is the alternative [plan models](plan_models.md) D7 rejected ("port as is and fix later"), taken with an exit condition (no consumer outside `pipeline_exec` and no serialization until the self-contained IR lands, §2.2) and with the `ParamTable` as the single place the side tables live; a deviation in time, not in direction. The cost: a `ParamTable` wire form is one more item of the later slice. |
 | D2 | Which packages | New `lowering` (pure, no operator, no I/O) and new `pipeline_exec`; the context stays in `sdk_exec`; the `komira_compiler` row of [the architecture](../architecture.md) points here | One `komira_engine` for lowering, driver and context; or reuse the name `komira_compiler` | Purity is a property of a dependency list, and a package that also drives execution cannot show it; the name `komira_compiler` names nothing on `main`, and what it once covered is in `batch_eval` and `optimizer`. The costs: two packages to review, and `sdk_exec` gains a heavier dependency closure, which splitting its leaves from the context can undo if it matters. |
 | D3 | How a runtime plan selects a sink | A closed registry of untyped sinks selected by `(sink_kind, sink_key_dtype, sink_orientation)`, an `if` ladder with one module per row returning a closed variant, no erased box, no function pointer (§4.2) | Port the erased state box and thunk table, with a rule exception for `MutExternalOrigin`; or enumerate typed `HashAggTable` combinations | A closed variant keeps every pointer rule. The enumeration is unbounded for runtime key and aggregate types, and one module naming every sink is a very large translation unit, which the file-size rule exists to avoid. |
 | D4 | Who owns the untyped aggregation sinks, and at what size | Slices 3 to 6 here, over `op_agg_hash`, behind a farm spike for the dictionary route; if the sinks pass about 8,000 lines, they move to their own package; and tell the owners of the operator pull requests that those do not cover SQL aggregation | Port the earlier engine's untyped aggregation family (several times the size of the kernels it wraps) | The kernels are the runtime-spec layer already on `main`; what is missing is a thin driver, and measuring before writing the dictionary path is cheaper than rewriting it. |

@@ -7,7 +7,7 @@
 # from a `SortSinkData` it answers every row; built from a `TopNSinkData` it
 # answers rows [offset, offset + n) of the same order (ORDER BY ... LIMIT n
 # OFFSET m), and holds about `offset + n` rows per worker rather than every
-# row. The external sort is a later step.
+# row (none when n is 0). The external sort is a later step.
 #
 # The order. Ties keep the collected order: the order of the source's morsel
 # positions, then worker slots, then the order a worker received its morsels
@@ -206,7 +206,10 @@ def _cut(
         return _Refusal(code, "the concatenation of what a worker holds", held)
     var all = _concat(kept.chunks)
     draw.release(held)
-    var extra = held + sort_scratch_bytes(all, keys)
+    # The sort's keys include the three hidden ones.
+    var extra = held + sort_scratch_bytes(
+        all, TagNames.of_tagged(all.schema).keys(keys)
+    )
     code = draw.grow(extra)
     if code != _DRAWN:
         return _Refusal(
@@ -254,7 +257,8 @@ struct SortSink(MorselSinkImpl):
     var _offset: Int
     var _count: Int
     var _keep: Int
-    """`offset + count`, the rows of the order a top-N ever needs."""
+    """`offset + count`, the rows of the order a top-N ever needs; 0 when
+    `count` is 0."""
     var _schema: Optional[Schema]
 
     def __init__(
@@ -329,7 +333,8 @@ struct SortSink(MorselSinkImpl):
         self._top_n = True
         self._offset = data.offset
         self._count = data.n
-        self._keep = rows_to_keep(data.offset, data.n)
+        # A count of zero answers no row whatever the offset: nothing is held.
+        self._keep = 0 if data.n == 0 else rows_to_keep(data.offset, data.n)
 
     @staticmethod
     def _where(seg_id: Int) -> String:
@@ -504,7 +509,9 @@ struct SortSink(MorselSinkImpl):
         for w in range(len(self._slots)):
             self._slots[w][].give_back_all()
         check_sort_keys(rows.schema, self._keys, self._where(self._seg_id))
-        var extra = held + sort_scratch_bytes(rows, self._keys)
+        var extra = held + sort_scratch_bytes(
+            rows, TagNames.of_tagged(rows.schema).keys(self._keys)
+        )
         code = self._work.grow(extra)
         if code != _DRAWN:
             raise self._denied(code, "the sorted copy and the key batch", extra)
