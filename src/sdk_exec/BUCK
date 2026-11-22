@@ -105,6 +105,64 @@ _MIXED_TEST_DATA = {
 
 _MIXED_TEST_DATA.update({c + ".tsv": ":group_keys_mixed_oracle[" + c + ".tsv]" for c in _MIXED_CASES})
 
+# DuckDB's tables and answers for test_run_sql_set_ops: tests/set_ops/data.sql
+# writes the Parquet files, and each line of tests/set_ops/cases.sql runs one
+# INTERSECT or EXCEPT query over them and writes its answer.
+_SET_OPS_FILES = ["ta", "tb", "tn", "te", "ab", "l", "r"]
+
+_SET_OPS_CASES = [
+    "arms_intersect",
+    "arms_except",
+    "arms_except_reversed",
+    "arms_intersect_k",
+    "null_arm_intersect",
+    "null_arm_except",
+    "null_arm_self_except",
+    "empty_arm_intersect",
+    "empty_arm_except",
+    "empty_left_except",
+    "mixed_intersect",
+    "mixed_except",
+    "mixed_except_reversed",
+    "mixed_self_intersect",
+    "int_except",
+    "bigint_intersect",
+    "string_except",
+    "date_intersect",
+    "decimal_except",
+    "double_nan_intersect",
+    "double_nan_except",
+    "widen_int_bigint",
+    "widen_decimal_int",
+    "widen_int_double",
+    "union_all_then_intersect",
+    "intersect_then_union_all",
+    "except_then_intersect",
+    "except_twice",
+    "union_all_then_except",
+    "except_then_union_all",
+    "order_limit",
+    "count_over_derived",
+    "group_over_derived",
+    "distinct_inputs",
+    "literals",
+]
+
+sql_oracle(
+    name = "set_ops_oracle",
+    srcs = [
+        "tests/set_ops/data.sql",
+        "tests/set_ops/cases.sql",
+    ],
+    outputs = [f + ".parquet" for f in _SET_OPS_FILES] + [c + ".tsv" for c in _SET_OPS_CASES],
+)
+
+_SET_OPS_TEST_DATA = {"cases.sql": "tests/set_ops/cases.sql"}
+
+_SET_OPS_TEST_DATA.update({f + ".parquet": ":set_ops_oracle[" + f + ".parquet]" for f in _SET_OPS_FILES})
+
+_SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in _SET_OPS_CASES})
+
 # The engine-execution layer of the SDK: twelve modules (ten leaves plus the
 # plan gate modules) and the engine context with its SQL door (see README.md). Each module's header says what it is for.
 #
@@ -205,6 +263,14 @@ _MIXED_TEST_DATA.update({c + ".tsv": ":group_keys_mixed_oracle[" + c + ".tsv]" f
 #   lowered to one aggregation segment both branches read, a subquery holding
 #   a repeat written twice to one aggregation segment, and a filtered scan read
 #   twice to two scans.
+# - test_run_sql_set_ops: INTERSECT and EXCEPT through run_sql answer what the
+#   pinned DuckDB answers (the :set_ops_oracle action above) for each case of
+#   tests/set_ops/cases.sql, on one worker and on three: NULL rows equal, an
+#   all-NULL and an empty input, repeated rows, several columns of mixed types,
+#   one column of each key type, NaN, inputs widened to a common type, the
+#   precedence of INTERSECT over UNION ALL and EXCEPT, a sort, a limit and an
+#   aggregation over the result; every case is run; INTERSECT ALL and EXCEPT
+#   ALL are refused at parse by name.
 # - test_run_sql_timers_off: Q6 through run_sql on four workers in the default
 #   build gives the oracle's answer and leaves every phase timer
 #   (phase_timers) unregistered and at zero.
@@ -307,6 +373,7 @@ mojo_library(
         "tests/test_run_sql_multifile.mojo",
         "tests/test_run_sql_no_from.mojo",
         "tests/test_run_sql_q6.mojo",
+        "tests/test_run_sql_set_ops.mojo",
         "tests/test_run_sql_timers_off.mojo",
         "tests/test_run_sql_union_all.mojo",
         "tests/test_secret_capability_reveal.mojo",
@@ -320,6 +387,7 @@ mojo_library(
         "tests/test_run_sql_csv.mojo": _CSV_TEST_DATA,
         "tests/test_run_sql_cte.mojo": _CTE_TEST_DATA,
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,
+        "tests/test_run_sql_set_ops.mojo": _SET_OPS_TEST_DATA,
     },
     visibility = ["PUBLIC"],
 )

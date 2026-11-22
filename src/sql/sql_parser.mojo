@@ -48,7 +48,7 @@ from .sql_ast import (
     SXUN_NOT, SXUN_IS_NULL, SXUN_IS_NOT_NULL, SXUN_NEGATE, SXUN_ABS, SXLIKE_LIKE, SXLIKE_ILIKE,
     JK_CROSS, JK_LEFT, JK_RIGHT, JK_FULL, JK_SEMI, JK_ANTI,
     SUBQ_SCALAR, SUBQ_EXISTS, SUBQ_NOT_EXISTS, SUBQ_IN, SUBQ_NOT_IN, SUBQ_DERIVED,
-    SUBQ_UNION_ALL, _UNION_RESULT_ALIAS,
+    SUBQ_UNION_ALL, SUBQ_INTERSECT, SUBQ_EXCEPT, _UNION_RESULT_ALIAS,
     STMT_QUERY, STMT_COPY, STMT_CREATE_TABLE_AS,
     SXOP_EQ, SXOP_NE, SXOP_LT, SXOP_LE, SXOP_GT, SXOP_GE,
     SXOP_AND, SXOP_OR, SXOP_ADD, SXOP_SUB, SXOP_MUL, SXOP_DIV, SXOP_IDIV, SXOP_MOD,
@@ -177,33 +177,36 @@ struct _Parser(Movable):
         return stmt^
 
     def _parse_set_operator_tail(mut self, mut lhs: SelectStmt) raises:
-        """★ UNION ALL. `<select> UNION ALL <select>`.
+        """★ Set operators. `<select> UNION ALL | INTERSECT | EXCEPT <select>`.
 
         Without a set-operator production `_parse_select_stmt` would return
         after the first SELECT and `_finalize` would report the `UNION` keyword
         as "unexpected trailing tokens after query" — a message that names the
         symptom and not the missing clause.
 
-        ⭐ THE OPERATOR IS **NOT** A SEPARATE ENGINE CAPABILITY. `PLAN_UNION`
-        (tag 12) and `LogicalPlan.union` serve the untyped-Mojo door too; this
-        production is the SQL spelling of that node.
+        Each branch after the head is a subquery-table entry whose kind is the
+        operator joining it to the branches before it (`SUBQ_UNION_ALL`,
+        `SUBQ_INTERSECT`, `SUBQ_EXCEPT`). The chain is flat here; the binder
+        (`sql_bind_set_op`) applies DuckDB's precedence, INTERSECT before
+        UNION ALL and EXCEPT. `INTERSECT DISTINCT` / `EXCEPT DISTINCT` are the
+        set forms spelled out.
 
-        ⛔ BARE `UNION` IS REFUSED BY NAME AND MUST STAY REFUSED. `UNION`
-        without `ALL` DEDUPLICATES, and `PLAN_UNION` does not: binding it to
-        the same node would silently return duplicate rows for a query whose
-        whole point is that it does not. The refusal names the rewrite
+        ⛔ BARE `UNION` IS REFUSED BY NAME AND MUST STAY REFUSED UNTIL IT IS
+        BOUND TO A DEDUPLICATING PLAN. `UNION` without `ALL` DEDUPLICATES, and
+        `PLAN_UNION` does not: binding it to the same node would silently return
+        duplicate rows. The refusal names the rewrite
         (`SELECT DISTINCT * FROM (a UNION ALL b)`) rather than the node.
 
-        ⛔ `INTERSECT` / `EXCEPT` likewise — there is no set-difference or
-        set-intersection operator in this engine, and lowering either to a
-        UNION answers a strict superset of the right rows.
+        ⛔ `INTERSECT ALL` / `EXCEPT ALL` ARE REFUSED BY NAME. Their bag
+        results keep a row min(m, n) or max(m - n, 0) times, which needs the
+        rows numbered or repeated; no plan node here does either.
 
         ⚠ IT LOOPS, so `A UNION ALL B UNION ALL C` is three branches rather
         than a syntax error at the second `UNION`. Each branch is parsed by
         `_parse_select_stmt` — the SAME helper the first branch used — so a
         branch gets the whole SELECT grammar and cannot drift from it.
 
-        ⚠ ORDER BY / LIMIT / OFFSET BELONG TO THE WHOLE UNION, as in DuckDB.
+        ⚠ ORDER BY / LIMIT / OFFSET BELONG TO THE WHOLE CHAIN, as in DuckDB.
         On any branch before the last (the head included) they are a syntax
         error naming the clause. On the last branch they are moved off it by
         `_wrap_union_in_star_select`, which rewrites the query to
@@ -214,22 +217,13 @@ struct _Parser(Movable):
         while (
             self._is_kw("union") or self._is_kw("intersect") or self._is_kw("except")
         ):
-            if self._is_kw("intersect") or self._is_kw("except"):
-                var word = String(self.tokens[self.pos].text).upper()
-                raise Error(
-                    "SQL not supported: the " + word + " set operator. This"
-                    " engine's only set operator is UNION ALL (the PLAN_UNION"
-                    " node, which CONCATENATES branches); " + word + " needs a"
-                    " set-difference / set-intersection primitive that no plan"
-                    " node here computes, and lowering it to a concatenation"
-                    " would answer a strict SUPERSET of the right rows with a"
-                    " success code. Express it as a SEMI / ANTI join"
-                    " (`WHERE [NOT] EXISTS (...)`), which this engine does"
-                    " serve."
-                )
-            # ORDER BY / LIMIT / OFFSET apply to the whole union, so they may
-            # follow only the last branch. DuckDB refuses the same text with
-            # `Parser Error: syntax error at or near "union"`.
+            var word = String(self.tokens[self.pos].text).upper()
+            var op_name = word
+            if word == "UNION":
+                op_name = "UNION ALL"
+            # ORDER BY / LIMIT / OFFSET apply to the whole set operation, so
+            # they may follow only the last branch. DuckDB refuses the same
+            # text with `Parser Error: syntax error at or near "<operator>"`.
             var before = String("")
             if last < 0:
                 before = _tail_clause_name(lhs)
@@ -237,10 +231,29 @@ struct _Parser(Movable):
                 before = _tail_clause_name(self.subqueries[last].body)
             if before != "":
                 raise Error(
-                    "SQL syntax error: " + before + " before UNION ALL. ORDER BY,"
-                    " LIMIT and OFFSET apply to the whole UNION ALL, so they"
-                    " must follow its last branch."
+                    "SQL syntax error: " + before + " before " + op_name + "."
+                    " ORDER BY, LIMIT and OFFSET apply to the whole " + op_name
+                    + ", so they must follow its last branch."
                 )
+            var kind = SUBQ_UNION_ALL
+            if word != "UNION":
+                self._advance()  # 'intersect' / 'except'
+                if self._is_kw("all"):
+                    raise Error(
+                        "SQL not supported: " + word + " ALL. The bag form"
+                        " keeps a row min(m, n) (INTERSECT ALL) or"
+                        " max(m - n, 0) (EXCEPT ALL) times, which needs the"
+                        " rows of each side numbered or repeated, and no plan"
+                        " node here does either yet (komira-ai/komira#1229)."
+                        " " + word + " without ALL, which returns distinct"
+                        " rows, is served."
+                    )
+                if self._is_kw("distinct"):
+                    self._advance()  # 'distinct', the set form's default
+                kind = SUBQ_INTERSECT if word == "INTERSECT" else SUBQ_EXCEPT
+                self._append_set_branch(lhs, last, kind)
+                last = len(self.subqueries) - 1
+                continue
             self._advance()  # 'union'
             if not self._is_kw("all"):
                 raise Error(
@@ -253,23 +266,31 @@ struct _Parser(Movable):
                     " deduplicating form."
                 )
             self._advance()  # 'all'
-            var rhs = self._parse_select_stmt()
-            # ⚠ APPENDED **AFTER** THE BRANCH IS PARSED, so a nested subquery
-            # inside the branch takes a LOWER index than the branch itself —
-            # the same inner-before-outer ordering every other producer here
-            # maintains, which is what lets the query binder pre-bind by index.
-            var idx = len(self.subqueries)
-            self.subqueries.append(SubqueryDef(rhs^, SUBQ_UNION_ALL, String(""), String("")))
-            if last < 0:
-                lhs.union_all_idx = idx
-            else:
-                # Chain: hang each further branch off the PREVIOUS one, so the
-                # binder walks a single-linked list from the root and never has
-                # to recurse through a branch body.
-                self.subqueries[last].body.union_all_idx = idx
-            last = idx
+            self._append_set_branch(lhs, last, kind)
+            last = len(self.subqueries) - 1
         if last >= 0 and _tail_clause_name(self.subqueries[last].body) != "":
             self._wrap_union_in_star_select(lhs, last)
+
+    def _append_set_branch(mut self, mut lhs: SelectStmt, last: Int, kind: UInt8) raises:
+        """Parse the next branch of a set-operation chain and append it to the
+        subquery table with `kind`, the operator that joins it to the branches
+        before it (`SUBQ_UNION_ALL`, `SUBQ_INTERSECT` or `SUBQ_EXCEPT`). `last`
+        is the table index of the chain's previous branch, or -1 when `lhs`, the
+        head, is the only one so far."""
+        var rhs = self._parse_select_stmt()
+        # ⚠ APPENDED **AFTER** THE BRANCH IS PARSED, so a nested subquery
+        # inside the branch takes a LOWER index than the branch itself —
+        # the same inner-before-outer ordering every other producer here
+        # maintains, which is what lets the query binder pre-bind by index.
+        var idx = len(self.subqueries)
+        self.subqueries.append(SubqueryDef(rhs^, kind, String(""), String("")))
+        if last < 0:
+            lhs.union_all_idx = idx
+        else:
+            # Chain: hang each further branch off the PREVIOUS one, so the
+            # binder walks a single-linked list from the root and never has
+            # to recurse through a branch body.
+            self.subqueries[last].body.union_all_idx = idx
 
     def _wrap_union_in_star_select(mut self, mut lhs: SelectStmt, last: Int):
         """The last branch of the union starting at `lhs` carries ORDER BY /

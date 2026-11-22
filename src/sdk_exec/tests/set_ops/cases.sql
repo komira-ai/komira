@@ -1,0 +1,40 @@
+-- The cases of test_run_sql_set_ops: each COPY line below is one case, the
+-- query DuckDB runs over the Parquet files of data.sql and the file its answer
+-- goes to. The test reads THIS FILE for the query text and runs the same text
+-- through run_sql with each quoted file name replaced by the file's path, so a
+-- query has one source. A case's name is its output file without `.tsv`.
+COPY (SELECT k, g FROM read_parquet('ta.parquet') INTERSECT SELECT k, g FROM read_parquet('tb.parquet')) TO 'arms_intersect.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k, g FROM read_parquet('ta.parquet') EXCEPT SELECT k, g FROM read_parquet('tb.parquet')) TO 'arms_except.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k, g FROM read_parquet('tb.parquet') EXCEPT SELECT k, g FROM read_parquet('ta.parquet')) TO 'arms_except_reversed.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k FROM read_parquet('ta.parquet') INTERSECT SELECT k FROM read_parquet('tb.parquet')) TO 'arms_intersect_k.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k, g FROM read_parquet('ta.parquet') INTERSECT SELECT k, g FROM read_parquet('tn.parquet')) TO 'null_arm_intersect.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k, g FROM read_parquet('tn.parquet') EXCEPT SELECT k, g FROM read_parquet('ta.parquet')) TO 'null_arm_except.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k, g FROM read_parquet('tn.parquet') EXCEPT SELECT k, g FROM read_parquet('tn.parquet')) TO 'null_arm_self_except.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k, g FROM read_parquet('ta.parquet') INTERSECT SELECT k, g FROM read_parquet('te.parquet')) TO 'empty_arm_intersect.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k, g FROM read_parquet('tn.parquet') EXCEPT SELECT k, g FROM read_parquet('te.parquet')) TO 'empty_arm_except.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k, g FROM read_parquet('te.parquet') EXCEPT SELECT k, g FROM read_parquet('ta.parquet')) TO 'empty_left_except.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT i, s, d, m FROM read_parquet('l.parquet') INTERSECT SELECT i, s, d, m FROM read_parquet('r.parquet')) TO 'mixed_intersect.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT i, s, d, m FROM read_parquet('l.parquet') EXCEPT SELECT i, s, d, m FROM read_parquet('r.parquet')) TO 'mixed_except.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT i, s, d, m FROM read_parquet('r.parquet') EXCEPT SELECT i, s, d, m FROM read_parquet('l.parquet')) TO 'mixed_except_reversed.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT s, big FROM read_parquet('l.parquet') INTERSECT SELECT s, big FROM read_parquet('l.parquet')) TO 'mixed_self_intersect.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT i FROM read_parquet('l.parquet') EXCEPT SELECT i FROM read_parquet('r.parquet')) TO 'int_except.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT big FROM read_parquet('l.parquet') INTERSECT SELECT big FROM read_parquet('r.parquet')) TO 'bigint_intersect.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT s FROM read_parquet('l.parquet') WHERE i > 2 EXCEPT SELECT s FROM read_parquet('r.parquet') WHERE i < 0 AND d IS NULL) TO 'string_except.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT d FROM read_parquet('l.parquet') INTERSECT SELECT d FROM read_parquet('r.parquet')) TO 'date_intersect.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT m FROM read_parquet('l.parquet') EXCEPT SELECT m FROM read_parquet('r.parquet')) TO 'decimal_except.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT f FROM read_parquet('l.parquet') INTERSECT SELECT f FROM read_parquet('r.parquet')) TO 'double_nan_intersect.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT f FROM read_parquet('r.parquet') EXCEPT SELECT f FROM read_parquet('l.parquet')) TO 'double_nan_except.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT i FROM read_parquet('l.parquet') INTERSECT SELECT big FROM read_parquet('r.parquet')) TO 'widen_int_bigint.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT m FROM read_parquet('l.parquet') INTERSECT SELECT i FROM read_parquet('r.parquet')) TO 'widen_decimal_int.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT i FROM read_parquet('r.parquet') EXCEPT SELECT f FROM read_parquet('l.parquet')) TO 'widen_int_double.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k FROM read_parquet('ta.parquet') UNION ALL SELECT k FROM read_parquet('tb.parquet') INTERSECT SELECT k FROM read_parquet('tn.parquet')) TO 'union_all_then_intersect.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k FROM read_parquet('ta.parquet') INTERSECT SELECT k FROM read_parquet('tb.parquet') UNION ALL SELECT k FROM read_parquet('tn.parquet')) TO 'intersect_then_union_all.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k FROM read_parquet('ab.parquet') EXCEPT SELECT k FROM read_parquet('tb.parquet') INTERSECT SELECT k FROM read_parquet('ta.parquet')) TO 'except_then_intersect.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT i FROM read_parquet('l.parquet') EXCEPT SELECT i FROM read_parquet('r.parquet') WHERE i > 1 EXCEPT SELECT i FROM read_parquet('r.parquet') WHERE i < 0) TO 'except_twice.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k FROM read_parquet('ta.parquet') UNION ALL SELECT k FROM read_parquet('tb.parquet') EXCEPT SELECT k FROM read_parquet('tn.parquet')) TO 'union_all_then_except.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k FROM read_parquet('ta.parquet') EXCEPT SELECT k FROM read_parquet('tb.parquet') UNION ALL SELECT k FROM read_parquet('ta.parquet')) TO 'except_then_union_all.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT i, s FROM read_parquet('l.parquet') EXCEPT SELECT i, s FROM read_parquet('r.parquet') ORDER BY i, s LIMIT 5) TO 'order_limit.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT count(*) AS n, count(i) AS ni FROM (SELECT i, d FROM read_parquet('l.parquet') INTERSECT SELECT i, d FROM read_parquet('r.parquet')) x) TO 'count_over_derived.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT s, count(*) AS n FROM (SELECT s, i FROM read_parquet('l.parquet') EXCEPT SELECT s, i FROM read_parquet('r.parquet')) x GROUP BY s) TO 'group_over_derived.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT DISTINCT s FROM read_parquet('l.parquet') INTERSECT SELECT s FROM read_parquet('r.parquet') WHERE d IS NULL AND i IS NULL) TO 'distinct_inputs.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT 1 AS a, 'x' AS b INTERSECT SELECT 1, 'x') TO 'literals.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
