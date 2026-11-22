@@ -99,7 +99,7 @@ _JOIN_KINDS_CASES = [
     "left_anti_idiom",
     "left_where_left",
     "left_chain",
-    "inner_then_right",
+    "inner_then_left",
     "left_empty_build",
     "left_empty_probe",
     "right_empty_build",

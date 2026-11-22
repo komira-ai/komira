@@ -57,6 +57,11 @@
 #                                            refused at step `lower` with
 #                                            LOWERING_JOIN_UNSERVED naming
 #                                            the residual predicate.
+#   test_a_right_join_after_an_inner_join_on_is_refused_at_parse
+#                                            an INNER JOIN ... ON followed by a
+#                                            RIGHT JOIN is refused at step
+#                                            `parse` by name (its folded ON
+#                                            would drop the padded rows).
 #   test_every_case_is_run                   each case of cases.sql belongs to
 #                                            one of the tests above.
 # =============================================================================
@@ -73,7 +78,7 @@ from komira_plan_harness import (
 from runtime_paths import data_path, read_data
 from sdk_exec.engine_context import EngineContext
 from sdk_exec.engine_options import EngineOptions
-from sdk_exec.engine_sql import STEP_LOWER, run_sql
+from sdk_exec.engine_sql import STEP_LOWER, STEP_PARSE, run_sql
 
 
 struct _Case(Copyable, Movable):
@@ -191,7 +196,7 @@ def _left_right_full_aggregates_and_filters() -> List[String]:
     out.append("left_anti_idiom")
     out.append("left_where_left")
     out.append("left_chain")
-    out.append("inner_then_right")
+    out.append("inner_then_left")
     return out^
 
 
@@ -291,6 +296,25 @@ def test_a_left_join_with_a_residual_over_both_sides_is_refused_by_lowering() ra
         out.refusal.value().reason,
         "LOWERING_JOIN_UNSERVED: Join (a residual predicate) is not served by"
         " the hash join",
+    )
+    assert_equal(len(out.batches), 0)
+
+
+def test_a_right_join_after_an_inner_join_on_is_refused_at_parse() raises:
+    var query = (
+        "SELECT l.lk AS lk, r.rv AS rv, n.nk AS nk FROM read_parquet('l.parquet')"
+        " l JOIN read_parquet('r.parquet') r ON l.lk = r.rk RIGHT JOIN"
+        " read_parquet('n.parquet') n ON r.rk = n.nk"
+    )
+    var ctx = EngineContext(EngineOptions(worker_count=2))
+    var out = run_sql(ctx, _with_paths(query))
+    assert_false(out.ok(), "expected a refusal")
+    assert_equal(out.refusal.value().step, String(STEP_PARSE))
+    assert_true(
+        out.refusal.value().reason.startswith(
+            "SQL not supported: a RIGHT or FULL JOIN after an INNER JOIN"
+        ),
+        out.refusal.value().reason,
     )
     assert_equal(len(out.batches), 0)
 
