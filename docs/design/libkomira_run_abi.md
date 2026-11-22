@@ -147,14 +147,20 @@ wire bound belongs to the plan format.
 ### What `komira_sql_stream` runs
 
 It runs one SQL statement against the tables registered on the context with
-`komira_register_parquet` (and the later source calls). A registration is visible
+`komira_register_parquet` and `komira_add_sql_binding` ([credentials_and_writes.md](credentials_and_writes.md)
+decision 8): it runs over the context's whole binding table, and over the call-scope bindings staged
+just before it, which apply to that run only and are dropped when it returns. A registration is visible
 to every later run on the context.
 - **The route.** It is `sdk_exec.run_sql` with the session's `EngineContext`. The
   library converts the SQL text to a logical plan by parsing and binding it.
 - **Statements that are not queries.** `run_sql` runs `COPY ... TO` a local
   Parquet file and answers one row, the BIGINT `Count`
-  ([src/sdk_exec/README.md](../../src/sdk_exec/README.md)); it refuses
-  `CREATE TABLE ... AS` (`STATEMENT_NOT_A_QUERY`), which needs a bound catalog.
+  ([src/sdk_exec/README.md](../../src/sdk_exec/README.md)). It refuses
+  `CREATE TABLE ... AS` and the other statements that are not queries
+  (`STATEMENT_NOT_A_QUERY` today; the write design renames it `SQL_STATEMENT_UNSUPPORTED`). The write
+  design also lifts the refusal, into a bound catalog, for `CREATE TABLE ... AS` and `INSERT`, which
+  answer what DuckDB returns: a one-row `Count` stream, or no rows for `CREATE TABLE` with a column
+  list ([credentials_and_writes.md](credentials_and_writes.md#10-writes)).
 - **The error text.** **PROPOSED:** the last error text is `<step>: <reason>`,
   where the step is the one that refused (parse, bind, optimize, lower or
   execute). That text is for people, and bindings do not parse it (§6).
@@ -165,9 +171,11 @@ The input is an authored `komira.plan.v1.WirePlanEnvelope`. These are the same
 bytes `komira_plan_render` renders, and the format the SDKs' plan builders write.
 - **Envelopes it refuses.** `plan_from_bytes` refuses an envelope that carries a
   write target (`PLAN_WIRE_WRITE_TARGET_DROPPED`) or a UDF list
-  (`PLAN_WIRE_UDFS_DROPPED`). The door keeps those refusals (-3) until writes and
-  UDFs have their own design. `plan_envelope_from_bytes` already decodes both, for
-  the door that carries them later.
+  (`PLAN_WIRE_UDFS_DROPPED`). The door keeps those refusals (-3) until each lands.
+  The write target is lifted by the write design
+  ([credentials_and_writes.md](credentials_and_writes.md#10-writes)), the UDF list
+  by the UDFs' own. `plan_envelope_from_bytes` already decodes both, for the door
+  that carries them later.
 - **The route.** It is `plan_from_bytes`, then `optimize`, `lower_for_context` and
   `run_lowered_plan`: the tail of `run_sql` after bind. **PROPOSED:** `sdk_exec`
   gets one `run_plan(mut ctx, var plan: LogicalPlan) -> SqlOutcome`, and `run_sql`
@@ -325,7 +333,7 @@ additive. Today the README says only that every failure is negative.
   `SqlCatalog` that the 1.1 `Session` keeps itself goes away, so a registered table
   is never in two places.
 - **One engine, built lazily.** The `EngineContext` is built by the first call
-  that needs it: a registration (`komira_register_parquet`, later source calls) or
+  that needs it: a registration (`komira_register_parquet`, `komira_add_sql_binding`) or
   a run.
   - The describe calls (`komira_parquet_schema`, `komira_csv_binding`,
     `komira_json_binding`, `komira_plan_render`) do not build it.
@@ -438,7 +446,8 @@ The earlier golden's 23 rows, and where each one goes:
 The earlier golden has no row for any of the items below. **None of them is
 decided here.** Each is settled by its own change:
 - session options, cancel and progress by their feature pull requests;
-- credentials by the credentials and write API design.
+- credentials, and the structured error calls `komira_last_error_code` and
+  `komira_last_error_step`, by [credentials_and_writes.md](credentials_and_writes.md).
 
 What earlier drafts of this document proposed is kept as input for those
 changes:
@@ -463,8 +472,8 @@ changes:
   - A cancelled run returns a new status code (-6) and leaves `*out` untouched.
     An incrementally read stream would return `ECANCELED`.
   - Progress is polled, never called back into the host.
-- **Credentials** (the credentials and write API design). Constraints from the
-  repository rules that design starts from:
+- **Credentials** (decided in [credentials_and_writes.md](credentials_and_writes.md)).
+  Constraints from the repository rules that design starts from:
   - Configuration comes as explicit calls. The provider-standard environment
     (`AWS_*`, `GOOGLE_*`) is the one allowed exception (rule S2).
   - No endpoint is written into the code (rule S1).

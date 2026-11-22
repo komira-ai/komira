@@ -3,7 +3,7 @@
 load(
     "@komira//tools/build/platforms:table.bzl",
     "PLATFORMS",
-    "by_target_os",
+    "by_target_platform",
     "constraints",
     "host_refusal",
     "host_row",
@@ -58,10 +58,14 @@ _TABLE_CASES = [
     ("the table as committed", PLATFORMS, None),
     ("a pin missing from a registered linux row", _edit("linux-x86_64", drop_role = "rustc"), "row linux-x86_64: missing pin `rustc`"),
     ("a pin missing from the macOS row", _edit("darwin-arm64", drop_role = "zig"), "row darwin-arm64: missing pin `zig`"),
-    ("a pin missing from the reserved row", _edit("linux-arm64", drop_role = "protoc"), "row linux-arm64: missing pin `protoc`"),
+    ("a pin missing from the linux arm64 row", _edit("linux-arm64", drop_role = "protoc"), "row linux-arm64: missing pin `protoc`"),
+    ("a pin missing from a reserved row", _edit("linux-arm64", field = "registered", value = False, drop_role = "protoc"), "row linux-arm64: missing pin `protoc`"),
+    ("a registered row with a pending busybox", _edit("linux-arm64", role = "busybox", pin_value = pending("later")), "row linux-arm64: pin `busybox` is pending, but the row is registered"),
+    ("a registered row with pending applets", _edit("linux-arm64", field = "applets", value = pending("later")), "row linux-arm64: `applets` is pending, but the row is registered"),
+    ("a registered row with no pixi", _edit("linux-arm64", drop_role = "pixi"), "row linux-arm64: missing pin `pixi`"),
     ("a registered row with a pending pin", _edit("darwin-arm64", role = "mojo_compiler", pin_value = pending("later")), "row darwin-arm64: pin `mojo_compiler` is pending, but the row is registered"),
     ("a registered row with a pending container base", _edit("linux-x86_64", field = "oci_base", value = pending("later")), "row linux-x86_64: pin `oci_base` is pending, but the row is registered"),
-    ("a pending pin with no reason", _edit("linux-arm64", role = "busybox", pin_value = pending("")), "row linux-arm64: pin `busybox` is `pending` with no reason"),
+    ("a pending pin with no reason", _edit("linux-arm64", field = "registered", value = False, role = "busybox", pin_value = pending("")), "row linux-arm64: pin `busybox` is `pending` with no reason"),
     ("a sha256 that is not 64 hex digits", _edit("linux-x86_64", role = "zig", pin_value = pin("zig", "https://example.com/zig", "abc")), "row linux-x86_64: pin `zig`: sha256 is not 64 lowercase hex digits"),
     ("an upper-case sha256", _edit("linux-x86_64", role = "zig", pin_value = pin("zig", "https://example.com/zig", _GOOD_SHA.upper())), "sha256 is not 64 lowercase hex digits"),
     ("a url that is not https", _edit("linux-x86_64", role = "zig", pin_value = pin("zig", "http://example.com/zig", _GOOD_SHA)), "row linux-x86_64: pin `zig`: url is not https"),
@@ -86,7 +90,7 @@ _TABLE_CASES = [
     ("unsorted features", _edit("linux-x86_64", field = "features", value = ["thp", "epoll"]), "row linux-x86_64: `features` must be a sorted list"),
     ("a golden hash that is not 16 hex digits", _edit("linux-x86_64", field = "golden_config_hash", value = "03cc"), "row linux-x86_64: `golden_config_hash` is not 16 lowercase hex digits"),
     ("a registered row with a pending golden hash", _edit("darwin-arm64", field = "golden_config_hash", value = pending("later")), "row darwin-arm64: `golden_config_hash` is a dict that is not `pending(reason)` of an unregistered row"),
-    ("a golden hash recorded for a row with no platform", _edit("linux-arm64", field = "golden_config_hash", value = "03cc1a891c89e4be"), "row linux-arm64: `golden_config_hash` is recorded, but the row has no platform"),
+    ("a golden hash recorded for a row with no platform", _edit("linux-arm64", field = "registered", value = False), "row linux-arm64: `golden_config_hash` is recorded, but the row has no platform"),
     ("a pool that names no pool", _edit("linux-x86_64", field = "pool", value = "mojo-sized"), "row linux-x86_64: `pool` must be `pool=<name>`"),
     ("two rows sharing a pool", _edit("linux-arm64", field = "pool", value = "pool=mojo-sized"), "`pool` `pool=mojo-sized` is also row"),
     ("a zig digest that is not 64 hex digits", _edit("darwin-arm64", field = "zig_exe_sha256", value = "abc"), "row darwin-arm64: `zig_exe_sha256` is not 64 lowercase hex digits"),
@@ -97,7 +101,7 @@ _TABLE_CASES = [
     ("a registered row with a pending pixi", _edit("darwin-arm64", role = "pixi", pin_value = pending("later")), "row darwin-arm64: pin `pixi` is pending, but the row is registered"),
     ("a pixi pin that is not executable", _edit("linux-x86_64", role = "pixi", pin_value = pin("pixi", "https://github.com/prefix-dev/pixi/releases/download/v0.67.2/pixi-x86_64-unknown-linux-musl", _GOOD_SHA)), "row linux-x86_64: pin `pixi` is an executable, but is not pinned with `executable = True`"),
     ("a pixi pin whose url names no release", _edit("darwin-arm64", role = "pixi", pin_value = pin("pixi", "https://example.com/pixi", _GOOD_SHA, executable = True)), "row darwin-arm64: pin `pixi`: url names no release"),
-    ("pixi pinned at two releases", _edit("darwin-arm64", role = "pixi", pin_value = pin("pixi", "https://github.com/prefix-dev/pixi/releases/download/v0.66.0/pixi-aarch64-apple-darwin", _GOOD_SHA, executable = True, size = 1)), "pin `pixi` names more than one release: 0.66.0 in darwin-arm64; 0.67.2 in linux-x86_64"),
+    ("pixi pinned at two releases", _edit("darwin-arm64", role = "pixi", pin_value = pin("pixi", "https://github.com/prefix-dev/pixi/releases/download/v0.66.0/pixi-aarch64-apple-darwin", _GOOD_SHA, executable = True, size = 1)), "pin `pixi` names more than one release: 0.66.0 in darwin-arm64; 0.67.2 in linux-arm64, linux-x86_64"),
     ("a busybox pin that is not executable", _edit("linux-x86_64", role = "busybox", pin_value = pin("busybox", "https://example.com/busybox", _GOOD_SHA)), "row linux-x86_64: pin `busybox` is an executable"),
     # The size is the last check of a pin, so every case above keeps its own refusal.
     ("a pin with no size", _edit("linux-x86_64", role = "zig", pin_value = pin("zig", "https://example.com/zig", _GOOD_SHA)), "row linux-x86_64: pin `zig` has no positive `size`: None"),
@@ -116,7 +120,7 @@ _TABLE_CASES = [
 _HOST_CASES = [
     ("linux", "x86_64", "linux-x86_64", None),
     ("macos", "aarch64", "darwin-arm64", None),
-    ("linux", "aarch64", None, "reserves a row for but does not build for yet"),
+    ("linux", "aarch64", "linux-arm64", None),
     ("macos", "x86_64", None, "no platform row matches this host (os macos, arch x86_64)"),
     ("other", "other", None, "no platform row matches this host (os other, arch other)"),
 ]
@@ -136,19 +140,21 @@ def platform_table_cases():
         refusal = host_refusal(h)
         if (refusal == None) != (why == None) or (why != None and why not in refusal):
             fail("platform table: host {} {}: refusal is {}, expected {}".format(os, arch, refusal, why))
-    if registered_names() != ["linux-x86_64", "darwin-arm64"]:
-        fail("platform table: registered rows are {}, expected linux-x86_64 then darwin-arm64 (the first match of an action that states no os is linux)".format(registered_names()))
-    if reserved_names() != ["linux-arm64"]:
-        fail("platform table: reserved rows are {}, expected linux-arm64".format(reserved_names()))
+    if registered_names() != ["linux-x86_64", "linux-arm64", "darwin-arm64"]:
+        fail("platform table: registered rows are {}, expected linux-x86_64, linux-arm64, then darwin-arm64 (the first match of an action that states no os or cpu is linux x86_64)".format(registered_names()))
+    if reserved_names() != []:
+        fail("platform table: reserved rows are {}, expected none".format(reserved_names()))
 
-    # //tools/build/toolchains:pixi selects by the target platform's os: each
-    # registered row's own pixi, all one release.
+    # //tools/build/toolchains:pixi selects by the target platform's os and cpu
+    # together (two rows are linux, two are arm64): each registered row's own
+    # pixi, all one release.
     want_pixi = {
-        "prelude//os/constraints:linux": ":pixi-0.67.2-x86_64-unknown-linux-musl",
-        "prelude//os/constraints:macos": ":pixi-0.67.2-aarch64-apple-darwin",
+        ":is_darwin_arm64": ":pixi-0.67.2-aarch64-apple-darwin",
+        ":is_linux_arm64": ":pixi-0.67.2-aarch64-unknown-linux-musl",
+        ":is_linux_x86_64": ":pixi-0.67.2-x86_64-unknown-linux-musl",
     }
-    if by_target_os("pixi") != want_pixi:
-        fail("platform table: pixi by target os is {}, expected {}".format(by_target_os("pixi"), want_pixi))
+    if by_target_platform("pixi") != want_pixi:
+        fail("platform table: pixi by target platform is {}, expected {}".format(by_target_platform("pixi"), want_pixi))
     for n in registered_names():
         if release_version(n, "pixi") != "0.67.2":
             fail("platform table: row {} pins pixi {}, expected 0.67.2".format(n, release_version(n, "pixi")))

@@ -13,7 +13,12 @@
 //!    is remote; with only another platform's key set, it is the one local
 //!    platform and nothing fails. Catches a platform reading another
 //!    platform's key.
-//! 3. The recursion guard's key moves no configuration: under
+//! 3. `[komira_re] linux_arm64_properties` registers the linux-arm64
+//!    execution platform beside linux-x86_64's, both remote; naming the same
+//!    property set as linux x86_64's is refused, so an arm64 action never
+//!    matches an x86_64 worker. Catches the arm64 key read as nothing, or an
+//!    arm64 platform that shares the x86_64 workers.
+//! 4. The recursion guard's key moves no configuration: under
 //!    `-c komira_selftest.inner=true` (every inner command passes it),
 //!    `//tools/build/examples:hello` is configured for linux-x86_64 with the
 //!    hash the platform table pins (`golden_config_hash`).
@@ -56,11 +61,32 @@ const HOST_ONLY = [_][]const u8{
     "komira_re.linux_x86_64_properties=pool=host-check",
     "komira_re.darwin_arm64_properties=",
 };
+const BOTH_LINUX = [_][]const u8{
+    "komira.execution=auto",
+    "komira_re.darwin_macos_hosts=26.5-0123456789abcdef",
+    "komira_re.linux_x86_64_properties=pool=host-check",
+    "komira_re.linux_arm64_properties=pool=arm-check",
+    "komira_re.darwin_arm64_properties=",
+};
 const OTHER_ONLY = [_][]const u8{
     "komira.execution=auto",
     "komira_re.darwin_macos_hosts=26.5-0123456789abcdef",
     "komira_re.linux_x86_64_properties=",
     "komira_re.darwin_arm64_properties=pool=other-check",
+};
+
+const SAME_SET = [_]lib.Row{
+    .{
+        .name = "arm64_set_equals_x86_64_set",
+        .target = EP,
+        .text = "`linux_arm64` must name arm64 workers, but it equals the linux property set",
+        .cfg = &.{
+            "komira.execution=remote",
+            "komira_re.linux_x86_64_properties=pool=host-check",
+            "komira_re.linux_arm64_properties=pool=host-check",
+            "komira_re.darwin_arm64_properties=",
+        },
+    },
 };
 
 fn resolution(c: *lib.Ctx) !void {
@@ -107,6 +133,16 @@ fn keyLeg(c: *lib.Ctx, what: []const u8, cfg: []const []const u8, want_remote: u
     }
 }
 
+fn bothLinux(c: *lib.Ctx) !void {
+    const res = try c.run(&.{ "audit", "providers", EP }, .{ .cfg = &BOTH_LINUX });
+    const e = lib.parse.executors(res.stdout);
+    if (res.ok() and e.platforms == 2 and e.remote == 2 and e.local == 0) {
+        c.pass("execution: with [komira_re] linux_x86_64_properties and linux_arm64_properties set, the platforms are linux-x86_64 and linux-arm64, both remote", .{});
+    } else {
+        c.fail("execution: with both linux keys set: exit {?d}, {d} platform(s), {d} remote, {d} local (see {s})", .{ res.exit, e.platforms, e.remote, e.local, res.log });
+    }
+}
+
 fn innerKeyHash(c: *lib.Ctx) !void {
     const table = std.fs.cwd().readFileAlloc(c.a, "tools/build/platforms/table.bzl", 1 << 22) catch {
         c.fail("inner key: cannot read tools/build/platforms/table.bzl", .{});
@@ -130,6 +166,8 @@ fn body(c: *lib.Ctx) !void {
     try innerKeyHash(c);
     try keyLeg(c, "execution: with only [komira_re] linux_x86_64_properties set, the one execution platform is remote", &HOST_ONLY, 1, 0);
     try keyLeg(c, "execution: with only [komira_re] darwin_arm64_properties set (another platform's key), the one execution platform is local and nothing fails", &OTHER_ONLY, 0, 1);
+    try bothLinux(c);
+    try c.refusals(&SAME_SET);
 }
 
 pub fn main() u8 {

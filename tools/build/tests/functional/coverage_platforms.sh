@@ -2,8 +2,8 @@
 # coverage_platforms.sh -- coverage is measured on linux-x86_64 and never on
 # another platform (tools/build/platforms/limits.tsv, `coverage-linux-x86-64`):
 # on another target platform the switch is a no-op (test 41). With
-# --target-platforms darwin-arm64 (the one other registered platform; a
-# reserved row such as linux-arm64 is no target platform yet) and
+# --target-platforms darwin-arm64 (the one other registered platform that
+# builds: no toolchain targets linux-arm64 yet) and
 # `-c komira.coverage=true`, for the targets below (a library and a shared
 # library whose coverage comes from the switch, a library and a shared
 # library of the tests cell that force it, whose attributes go through the

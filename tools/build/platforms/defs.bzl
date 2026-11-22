@@ -1,8 +1,9 @@
 """Execution platforms: local by default, remote when `.buckconfig.local` asks.
 
 There is one execution platform per (os, cpu), one row of the platform table
-(table.bzl) each: `linux-x86_64`, and `darwin-arm64` when macOS workers are
-configured. A row komira reserves (`linux-arm64`) registers none. Each is registered under the label, and
+(table.bzl) each: `linux-x86_64`, `linux-arm64` when Linux arm64 workers are
+configured, and `darwin-arm64` when macOS workers are configured. A row komira
+reserves (`registered = False`) registers none. Each is registered under the label, and
 with the configuration, of the target platform of the same name in
 //tools/build/platforms, so a tool built to run in an action is configured
 exactly like a target built for that OS. Nothing here says which worker of a
@@ -16,8 +17,8 @@ one property set of the platform.
 - `komira_execution_platforms`: every action runs remotely, on workers whose
   property set is read from `.buckconfig.local`
   (`[komira_re] linux_x86_64_properties = key=value,...`, and
-  `darwin_arm64_properties` for macOS), so that no service address or worker
-  property is committed.
+  `linux_arm64_properties` and `darwin_arm64_properties` for the others), so
+  that no service address or worker property is committed.
 - `komira_default_execution_platforms`: the first when `[komira_re]` names no
   worker property set, the second when it does. A standalone checkout
   registers this one (//tools/build/platforms/default).
@@ -48,6 +49,8 @@ load(
 # the unpacking of the macOS toolchain, which only moves bytes). Read from the
 # platform table (table.bzl), the one place a platform is stated.
 LINUX_X86_64 = constraints("linux-x86_64")
+
+LINUX_ARM64 = constraints("linux-arm64")
 
 DARWIN_ARM64 = constraints("darwin-arm64")
 
@@ -162,11 +165,13 @@ def komira_host_platform(name, visibility = None):
 komira_host_platform = declares_docs(komira_host_platform)
 
 # Registration order matters: a target that states no execution constraint
-# gets the first platform, so linux comes first. The macOS arm64 platform
-# comes LAST: a platform added later must never become the first match of an
-# action that states no os. (Every komira target states its os through its
-# toolchain; the order keeps it so for anything that does not.)
+# gets the first platform, so linux x86_64 comes first, then linux arm64. The
+# macOS arm64 platform comes LAST: a platform added later must never become the
+# first match of an action that states no os. (Every komira target states its
+# os and cpu through its toolchain; the order keeps it so for anything that
+# does not.)
 _LINUX_PLATFORM = label("linux-x86_64")
+_LINUX_ARM64_PLATFORM = label("linux-arm64")
 _DARWIN_PLATFORM = label("darwin-arm64")
 
 # `[komira_re]` key of the linux execution platform's property set: the exact
@@ -174,13 +179,17 @@ _DARWIN_PLATFORM = label("darwin-arm64")
 # names it (`re_key`); the value is the client's, never committed.
 LINUX_PROPERTIES_KEY = row("linux-x86_64")["re_key"]
 
+# `[komira_re]` key of the linux arm64 execution platform's property set: the
+# exact properties its workers advertise (e.g. `pool=linux-arm64-sized`).
+LINUX_ARM64_PROPERTIES_KEY = row("linux-arm64")["re_key"]
+
 # `[komira_re]` key of the macOS arm64 execution platform's property set: the
 # exact REAPI properties its workers advertise (e.g. `pool=macos`).
 DARWIN_PROPERTIES_KEY = row("darwin-arm64")["re_key"]
 
 # Keys of a platform komira reserves a row for but does not build for yet
-# (the `registered = False` rows of table.bzl). Setting one is refused,
-# naming the reason, rather than read as configuration for nothing.
+# (the `registered = False` rows of table.bzl; none today). Setting one is
+# refused, naming the reason, rather than read as configuration for nothing.
 _RESERVED_KEYS = {PLATFORMS[n]["re_key"]: n for n in reserved_names()}
 
 # Keys of earlier layouts: one that split linux actions by worker class and
@@ -298,21 +307,25 @@ def darwin_properties_refusal(props, hosts):
             return "`[komira_re] {}`: `{}` is not a host identity (<sdk version>-<digest>)".format(DARWIN_HOSTS_KEY, h)
     return None
 
-def komira_execution_platforms(name, linux = None, darwin = None, visibility = None):
+def komira_execution_platforms(name, linux = None, darwin = None, linux_arm64 = None, visibility = None):
     """Registers komira's remote execution platforms, given their worker property sets.
 
     `linux` is the exact REAPI platform property dict every linux x86_64
-    action carries; the service picks the worker. `darwin` is the property
+    action carries; the service picks the worker. `linux_arm64` is the same
+    for linux arm64 actions, and must differ from `linux`, so an arm64 action
+    never matches an x86_64 worker. `darwin` is the property
     dict of the macOS arm64 workers that build darwin-arm64 targets; it needs
     the root cell's `[komira_re] darwin_macos_hosts` (see DARWIN_HOSTS_KEY),
     and without it no darwin-arm64 Mojo target can configure. Each is
     optional (a platform without a property set is not registered, so its
     actions cannot run remotely), but at least one is required.
     """
+    if linux_arm64 != None and not linux_arm64:
+        fail("komira_execution_platforms: `linux_arm64` must name at least one worker property; got {}".format(linux_arm64))
     if linux != None and not linux:
         fail("komira_execution_platforms: `linux` must name at least one worker property; got {}".format(linux))
-    if linux == None and darwin == None:
-        fail("komira_execution_platforms: name the worker property set of at least one platform (`linux` or `darwin`)")
+    if linux == None and darwin == None and linux_arm64 == None:
+        fail("komira_execution_platforms: name the worker property set of at least one platform (`linux`, `linux_arm64` or `darwin`)")
     names = []
     constraints = []
     properties = []
@@ -320,6 +333,14 @@ def komira_execution_platforms(name, linux = None, darwin = None, visibility = N
         names.append("linux")
         constraints.append(_LINUX_PLATFORM)
         properties.append(linux)
+    if linux_arm64 != None:
+        # An arm64 action must never match an x86_64 worker, nor the reverse.
+        if linux_arm64 == linux:
+            fail("komira_execution_platforms: `linux_arm64` must name arm64 workers, " +
+                 "but it equals the linux property set ({})".format(linux_arm64))
+        names.append("linux_arm64")
+        constraints.append(_LINUX_ARM64_PLATFORM)
+        properties.append(linux_arm64)
     if darwin != None:
         # A macOS action must never match a linux worker, nor the reverse.
         if darwin == linux:
@@ -474,6 +495,7 @@ def komira_default_execution_platforms(name, visibility = None):
     komira_execution_platforms(
         name = name,
         linux = _remote_properties(LINUX_PROPERTIES_KEY),
+        linux_arm64 = _remote_properties(LINUX_ARM64_PROPERTIES_KEY),
         darwin = _remote_properties(DARWIN_PROPERTIES_KEY),
         visibility = visibility,
     )
