@@ -53,7 +53,6 @@ from lowering.lowered_plan import (
     LOWERING_JOIN_UNSERVED,
 )
 from plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_UDF
-from plan_expr.partition_expr import PartitionExpr
 from plan_expr.partition_pred_pod import PartitionPredicatePod
 from plan_expr.udf_data import (
     UdfData,
@@ -80,7 +79,6 @@ from plan_ir.logical_plan import (
     PLAN_CAST_TO_VARCHAR,
     PLAN_LIMIT,
     PLAN_AGGREGATE,
-    PLAN_PARTITION_BY,
     PLAN_EXCHANGE,
     plan_tag_name,
 )
@@ -434,14 +432,7 @@ def test_a_final_aggregate_is_refused_and_a_single_one_is_cut() raises:
     assert_equal(_message(_count_by(_scan(), List[String](), AGG_MODE_UNSET), _inputs()), "")
 
 
-def test_a_window_and_an_exchange_are_refused() raises:
-    var exprs = List[PartitionExpr]()
-    exprs.append(PartitionExpr.row_number())
-    var window = LogicalPlan.partition_by(
-        _names("k"), _names("v"), _bools(False), exprs^, _scan()
-    )
-    _refused_with(_message(window, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_PARTITION_BY))
-
+def test_an_exchange_is_refused() raises:
     var exchange = LogicalPlan.exchange(_scan(), EXCHANGE_KIND_GATHER)
     _refused_with(_message(exchange, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_EXCHANGE))
     assert_equal(_message(_scan(), _inputs()), "")

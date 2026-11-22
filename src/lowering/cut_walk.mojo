@@ -8,9 +8,10 @@
 #             an in-memory scan);
 #   streaming PLAN_FILTER, PLAN_PROJECT, PLAN_LIMIT: appended to the open
 #             pipeline's `ops`;
-#   breaker   PLAN_AGGREGATE, PLAN_DISTINCT, PLAN_SORT: ends the open
-#             pipeline in a sink and opens a pipeline whose source is that
-#             segment's output (SOURCE_SINK_OUTPUT), joined by an E3 edge.
+#   breaker   PLAN_AGGREGATE, PLAN_DISTINCT, PLAN_SORT, PLAN_PARTITION_BY (a
+#             window): ends the open pipeline in a sink and opens a pipeline
+#             whose source is that segment's output (SOURCE_SINK_OUTPUT),
+#             joined by an E3 edge.
 #   union     PLAN_UNION: each branch ends in a segment of its own, and a
 #             pipeline opens whose source is the concatenation of their
 #             outputs in branch order (SOURCE_CONCAT), joined by an E3 edge to
@@ -22,12 +23,13 @@
 #
 # This module is only the dispatch on the node's tag. Each arm is its own
 # module: `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
-# `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union` and `cut_join`;
-# what they share (the open pipeline, the cutter's state and the close and
-# reopen of a breaker) is `cut_state`. The filter, project, limit, aggregate,
-# distinct and join arms have two halves: the first holds every check that
-# refuses the node itself and runs before the child (or the children) is
-# walked; the second fuses onto, or closes, the child's pipeline. The sort arm
+# `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_window`, `cut_union` and
+# `cut_join`; what they share (the open pipeline, the cutter's state and the
+# close and reopen of a breaker) is `cut_state`. The filter, project, limit,
+# aggregate, distinct, join and window arms have two halves: the first holds
+# every check that refuses the node itself and runs before the child (or the
+# children) is walked; the second fuses onto, or closes, the child's
+# pipeline. The sort arm
 # has only the second. The union arm checks its branches' schemas before it
 # walks them, walks them in order, ends each in a segment and opens the
 # concatenation.
@@ -50,6 +52,7 @@ from lowering.cut_scan import _open_scan
 from lowering.cut_sort import _close_sort
 from lowering.cut_state import CutResult, _Cutter, _Pipe, _uncuttable
 from lowering.cut_union import _check_union, _end_branch, _open_concat
+from lowering.cut_window import _window_data, _close_window
 from lowering.lowered_plan import LoweringInputs, LOWERING_INPUTS_SCAN_COUNT
 from plan_ir.logical_plan import (
     LogicalPlan,
@@ -62,6 +65,7 @@ from plan_ir.logical_plan import (
     PLAN_LIMIT,
     PLAN_JOIN,
     PLAN_UNION,
+    PLAN_PARTITION_BY,
 )
 from physical_plan.physical_plan import (
     SINK_COLLECT,
@@ -102,6 +106,10 @@ def _walk(
     if tag == PLAN_SORT:
         var pipe = _walk(cutter, node.sort_data_ref().child[], inputs)
         return _close_sort(cutter, node, pipe^, inputs)
+    if tag == PLAN_PARTITION_BY:
+        var data = _window_data(node)
+        var pipe = _walk(cutter, node.partition_by_data_ref().child[], inputs)
+        return _close_window(cutter, node, pipe^, data^, inputs)
     if tag == PLAN_JOIN:
         var shape = join_shape(node)
         ref jd = node.join_data_ref()

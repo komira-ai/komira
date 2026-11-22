@@ -41,6 +41,11 @@
 #                                 several columns of mixed types
 #            SINK_SORT, key NONE  `SortSink` (`sink_sort`), from the `SortSinkData`
 #                                 the descriptor's `sink_param_id` names
+#            SINK_PARTITION_BY,   `WindowSink` (`sink_window`), from the
+#            key NONE             `PartitionBySinkData` the descriptor's
+#                                 `sink_param_id` names: the rows sorted by the
+#                                 partition and order keys with one column per
+#                                 window expression
 #            SINK_HASH_BUILD,     `CollectSink`: the build side's rows, which the
 #            key NONE             probe segment takes and indexes
 #
@@ -110,8 +115,10 @@ from physical_plan.physical_plan import (
     SINK_AGG,
     SINK_COLLECT,
     SINK_HASH_BUILD,
+    SINK_PARTITION_BY,
     SINK_SORT,
     SortSinkData,
+    PartitionBySinkData,
     SINK_ORIENT_COLUMNAR,
     SINK_ORIENT_DICT_ENCODED,
     SOURCE_BATCH,
@@ -137,6 +144,7 @@ from .sink_agg_any import AnyAggSink
 from .sink_collect import CollectSink
 from .sink_group_agg import GroupAggSink
 from .sink_sort import SortSink
+from .sink_window import WindowSink
 from .sink_string_group_agg import StringGroupAggSink
 from .source_batch import BatchSource
 from .source_csv import build_csv_source
@@ -198,7 +206,7 @@ struct RealBuilder[
 ](SegmentBuilder):
     """Builds the real members of a segment: Parquet, batch, sink-output,
     CSV and concatenation sources; filter, project, limit and join probe operators; the collect,
-    aggregation, sort and hash build sinks."""
+    aggregation, sort, window and hash build sinks."""
 
     comptime Source = SourceVariant[
         LocalParquetSource[Self.cache_o, Self.pool_o, Self.filter_o],
@@ -206,7 +214,9 @@ struct RealBuilder[
         SinkOutputSource,
     ]
     comptime Op = OpVariant[FilterOp, MapOp, LimitOp, HashProbeOp]
-    comptime Sink = PipelineSink[CollectSink, AnyAggSink, SortSink]
+    comptime Sink = PipelineSink[
+        CollectSink, AnyAggSink, SortSink, WindowSink
+    ]
 
     # The borrowed cache and pool, kept as pointers (private) because a struct
     # field cannot hold a `ref` argument; the caller's objects outlive the
@@ -217,6 +227,7 @@ struct RealBuilder[
     var _parts: List[_OpParts]
     var _agg_sinks: List[AggSinkData]
     var _sort_sinks: List[SortSinkData]
+    var _window_sinks: List[PartitionBySinkData]
     var _segment_pool: SegmentPool
 
     def __init__(
@@ -230,6 +241,7 @@ struct RealBuilder[
         self._parts = List[_OpParts]()
         self._agg_sinks = List[AggSinkData]()
         self._sort_sinks = List[SortSinkData]()
+        self._window_sinks = List[PartitionBySinkData]()
         self._segment_pool = SegmentPool()
 
     def add_agg_sink(mut self, var data: AggSinkData) -> Int:
@@ -243,6 +255,12 @@ struct RealBuilder[
         `sink_param_id` names."""
         self._sort_sinks.append(data^)
         return len(self._sort_sinks) - 1
+
+    def add_window_sink(mut self, var data: PartitionBySinkData) -> Int:
+        """Keep `data` for SINK_PARTITION_BY segments; returns the id their
+        `sink_param_id` names."""
+        self._window_sinks.append(data^)
+        return len(self._window_sinks) - 1
 
     def set_memory_budget(mut self, bytes: Int):
         """Bound the memory the sinks of later segment runs may draw, in
@@ -559,6 +577,24 @@ struct RealBuilder[
                         rows_schema^,
                     )
                 )
+            if desc.sink_kind == SINK_PARTITION_BY and key == KEY_DTYPE_NONE:
+                var id = desc.sink_param_id
+                if id < 0 or id >= len(self._window_sinks):
+                    raise Error(
+                        "pipeline_exec: segment "
+                        + String(desc.seg_id)
+                        + " names window sink data "
+                        + String(id)
+                        + ", and the builder holds "
+                        + String(len(self._window_sinks))
+                    )
+                return Self.Sink.fourth(
+                    WindowSink(
+                        self._window_sinks[id],
+                        self._segment_pool.share(),
+                        desc.seg_id,
+                    )
+                )
         raise Error(
             "pipeline_exec: the sink of segment "
             + String(desc.seg_id)
@@ -568,7 +604,8 @@ struct RealBuilder[
             " (SINK_AGG, KEY_DTYPE_STRING,"
             " SINK_ORIENT_COLUMNAR or SINK_ORIENT_DICT_ENCODED),"
             " (SINK_AGG, KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR),"
-            " (SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) and"
+            " (SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR),"
+            " (SINK_PARTITION_BY, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) and"
             " (SINK_HASH_BUILD, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
         )
 

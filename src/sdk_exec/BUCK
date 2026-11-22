@@ -71,6 +71,50 @@ _MIXED_TEST_DATA = {
 
 _MIXED_TEST_DATA.update({c + ".tsv": ":group_keys_mixed_oracle[" + c + ".tsv]" for c in _MIXED_CASES})
 
+# DuckDB's table and answers for test_run_sql_window: tests/window/data.sql
+# writes win.parquet, and each line of tests/window/cases.sql runs one window
+# query over it and writes its answer.
+_WINDOW_CASES = [
+    "row_number_g",
+    "row_number_s_desc",
+    "rank_dense_rank",
+    "percent_rank_cume_dist",
+    "ntile4",
+    "lag_lead_v",
+    "lag_lead_default",
+    "lag_lead_t",
+    "lag_f_default",
+    "running_sum_v",
+    "running_aggs_peers",
+    "running_sum_f",
+    "whole_partition_aggs",
+    "whole_partition_f",
+    "value_functions",
+    "last_value_whole_frame",
+    "no_partition",
+    "two_keys",
+    "several_windows",
+    "over_where",
+    "ordered_output",
+    "no_row",
+]
+
+sql_oracle(
+    name = "window_oracle",
+    srcs = [
+        "tests/window/data.sql",
+        "tests/window/cases.sql",
+    ],
+    outputs = ["win.parquet"] + [c + ".tsv" for c in _WINDOW_CASES],
+)
+
+_WINDOW_TEST_DATA = {
+    "cases.sql": "tests/window/cases.sql",
+    "win.parquet": ":window_oracle[win.parquet]",
+}
+
+_WINDOW_TEST_DATA.update({c + ".tsv": ":window_oracle[" + c + ".tsv]" for c in _WINDOW_CASES})
+
 # The engine-execution layer of the SDK: twelve modules (ten leaves plus the
 # plan gate modules) and the engine context with its SQL door (see README.md). Each module's header says what it is for.
 #
@@ -161,6 +205,19 @@ _MIXED_TEST_DATA.update({c + ".tsv": ":group_keys_mixed_oracle[" + c + ".tsv]" f
 #   typed columns and their inferred types, quoted cells, NULL-bearing cells, a
 #   `|` dialect and a header with no row, each over the committed file and over
 #   a gzip copy; every case is run; a missing file is refused at bind.
+# - test_run_sql_window: run_sql over a Parquet table DuckDB wrote (the
+#   :window_oracle action below) answers what the pinned DuckDB answers for
+#   each case of tests/window/cases.sql: row_number, rank, dense_rank,
+#   percent_rank, cume_dist, ntile, lag and lead (offsets, defaults, BIGINT,
+#   DOUBLE and VARCHAR), running sums over the default RANGE frame and over a
+#   unique key, whole-partition sum, count, avg, min and max, first_value,
+#   last_value and nth_value, no PARTITION BY, two partition keys, several
+#   windows in one SELECT, a WHERE, an outer ORDER BY and no row, with NULL
+#   keys, tied order keys and the empty string, on one and three workers, each
+#   column of the right type; every case is run; a sum over an INTEGER, a DATE
+#   partition key, a DECIMAL order key, an explicit ROWS frame and a float
+#   default over a BIGINT lag are LOWERING_WINDOW_UNSERVED refusals at step
+#   lower.
 # - test_run_sql_timers_off: Q6 through run_sql on four workers in the default
 #   build gives the oracle's answer and leaves every phase timer
 #   (phase_timers) unregistered and at zero.
@@ -182,6 +239,7 @@ mojo_library(
         "//src/byte_buffer:byte_buffer",
         "//src/clock:clock",
         "//src/containers:containers",
+        "//src/column_format:column_format",
         "//src/column_kernels:column_kernels",
         "//src/compression:compression",
         "//src/counters:counters",
@@ -211,7 +269,9 @@ mojo_library(
         "//src/name_registry:name_registry",
         "//src/objectstore:objectstore",
         "//src/op_agg_state:op_agg_state",
+        "//src/op_sort:op_sort",
         "//src/op_sources:op_sources",
+        "//src/op_window:op_window",
         "//src/operator_api:operator_api",
         "//src/optimizer:optimizer",
         "//src/parquet:parquet",
@@ -264,6 +324,7 @@ mojo_library(
         "tests/test_run_sql_q6.mojo",
         "tests/test_run_sql_timers_off.mojo",
         "tests/test_run_sql_union_all.mojo",
+        "tests/test_run_sql_window.mojo",
         "tests/test_secret_capability_reveal.mojo",
     ],
     test_deps = [
@@ -274,6 +335,7 @@ mojo_library(
     test_data = {
         "tests/test_run_sql_csv.mojo": _CSV_TEST_DATA,
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,
+        "tests/test_run_sql_window.mojo": _WINDOW_TEST_DATA,
     },
     visibility = ["PUBLIC"],
 )

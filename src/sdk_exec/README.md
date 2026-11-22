@@ -34,7 +34,7 @@ do is a free function in a module of its own.
 | `engine_context` | `EngineContext(options)`: probes the host once, applies the options over the profile, starts the worker runtime. Holds the catalog, the registered tables, `footers` (a `ParquetFooters`), `host_profile` and `runtime`. A count or budget below 1 is refused with `ENGINE_OPTIONS_INVALID`. `begin_query` drops the footer cache |
 | `engine_catalog` | `register_parquet(ctx, name, path)`: the table's schema is its file's footer |
 | `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema) and `lower_for_context` |
-| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
+| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation, sort and window sink data (`params.agg`, `params.sort`, `params.window`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
 | `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize`, lower, run. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
 
 **The footer cache is pinned to a query.** `parquet_footers.FooterCache`
@@ -77,11 +77,13 @@ door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
 asks for a scalar to be executed first, a guard no query tested here reaches); a sink denied its memory by the
 budget, a sum outside its declared type and a pool not whole after a run (step
 `execute`); and whatever lowering, the binder or the parser refuses (an INNER
-equi-join is served; any other join is `LOWERING_JOIN_UNSERVED` at `lower`).
+equi-join is served; any other join is `LOWERING_JOIN_UNSERVED` at `lower`; a
+window function of a kind, type or frame the window sink does not serve is
+`LOWERING_WINDOW_UNSERVED` at `lower`).
 Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
 `lowering_inputs` descends only scan, filter, project, limit, aggregate,
-distinct, sort, union and join nodes (a union's branches in order; a join's
+distinct, sort, window (PARTITION_BY), union and join nodes (a union's branches in order; a join's
 left child, then its right, for every join, so a join the cutter refuses has
 its scans' facts read first) and gives a facts entry per scan it reaches; the
 cutter refuses any other node by name before it asks for the scans below it.
@@ -115,6 +117,15 @@ The tests run when the package is built.
   grouped and ungrouped aggregates and `all_varchar`, each over the committed
   file and over a gzip copy; a missing file is refused at bind and
   `header=false` at lowering.
+- `test_run_sql_window`: `run_sql` over a Parquet table DuckDB wrote (the
+  `:window_oracle` build action) answers what the pinned DuckDB answers for
+  every case of `tests/window/cases.sql`: ranking functions, `lag` and `lead`,
+  running and whole-partition aggregates, `first_value`, `last_value` and
+  `nth_value`, with no, one or two partition keys, several windows in one
+  SELECT, a WHERE and an outer ORDER BY, on one and three workers, each column
+  of its documented type; a sum over an INTEGER, a DATE partition key, a
+  DECIMAL order key, an explicit ROWS frame and a float default over a BIGINT
+  lag are `LOWERING_WINDOW_UNSERVED` refusals at `lower`.
 - `test_run_sql_q6`: TPC-H Q6's text from `bench_corpus` over a lineitem-shaped
   Parquet file gives the integer oracle's DECIMAL(38,4); a join of a kind lowering does not serve, a syntax error,
   an unknown table, a missing file, CREATE TABLE AS and a replaced file are named
@@ -189,7 +200,10 @@ the columns `col_0`, `col_1`, ... where DuckDB names them `column0`,
 `column1`, ...), the one-row relation a SELECT with no FROM reads (an integer
 literal of the result's SELECT list or of a UNION ALL branch's is INT32 when it fits, as in DuckDB; an
 integer literal anywhere else, `1 + 1` included, is still INT64), filter,
-projection, limit, aggregation, distinct and sort, and UNION ALL, the
+projection, limit, aggregation, distinct, sort, window functions (ranking,
+LAG and LEAD, FIRST/LAST/NTH_VALUE and SUM, COUNT, AVG, MIN and MAX over the
+default running RANGE frame or a whole partition, with INT64, INT32, FLOAT64,
+BOOL or STRING partition and order keys) and UNION ALL, the
 concatenation of its branches. The post-rewrite gate and
 the plan validation gate are not called from `run_sql`.
 

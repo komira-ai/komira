@@ -13,6 +13,7 @@ from physical_plan.physical_plan import (
     SegmentDescPod,
     AggSinkData,
     SortSinkData,
+    PartitionBySinkData,
 )
 from plan_stats.table_stats import TableStats
 from scan_source.in_memory_source import InMemorySource
@@ -33,6 +34,10 @@ comptime LOWERING_INPUTS_SCAN_COUNT = "LOWERING_INPUTS_SCAN_COUNT"
 comptime LOWERING_JOIN_UNSERVED = "LOWERING_JOIN_UNSERVED"
 """Refusal: a join the INNER hash join does not serve (its type, keys, key
 types, residual, algorithm hint, build side or output names)."""
+
+comptime LOWERING_WINDOW_UNSERVED = "LOWERING_WINDOW_UNSERVED"
+"""Refusal: a window node the window sink does not serve (a key or argument
+type, a function's arguments, a frame, or a column that is not the child's)."""
 
 
 @fieldwise_init
@@ -69,18 +74,21 @@ struct ParamTable(Movable):
     cut order, so equal inputs give equal indices.
 
     `SINK_AGG` segments index `agg` by `sink_param_id`, `SINK_SORT` segments
-    index `sort`; a `SINK_COLLECT` or `SINK_HASH_BUILD` segment indexes nothing
-    (`sink_param_id` is -1): a join's keys are on its OP_JOIN_PROBE. `SOURCE_BATCH` segments index `batches` by
-    `source_spec.batch_handle_id`.
+    index `sort`, `SINK_PARTITION_BY` segments index `window`; a
+    `SINK_COLLECT` or `SINK_HASH_BUILD` segment indexes nothing
+    (`sink_param_id` is -1): a join's keys are on its OP_JOIN_PROBE.
+    `SOURCE_BATCH` segments index `batches` by `source_spec.batch_handle_id`.
     """
 
     var agg: List[AggSinkData]
     var sort: List[SortSinkData]
+    var window: List[PartitionBySinkData]
     var batches: List[InMemorySource]
 
     def __init__(out self):
         self.agg = List[AggSinkData]()
         self.sort = List[SortSinkData]()
+        self.window = List[PartitionBySinkData]()
         self.batches = List[InMemorySource]()
 
 

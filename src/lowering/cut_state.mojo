@@ -80,7 +80,8 @@ struct _Pipe(Movable):
     var has_project: Bool
     var sorted_input: Bool
     """True while the rows the pipeline delivers are a sort's output in that
-    sort's order: set when the pipeline opens on a sort, kept by every
+    sort's order: set when the pipeline opens on a sort or on a window with a
+    partition or order key (its rows come out in key order), kept by every
     operator fused onto it, and false when it opens on an aggregation."""
     var broken_by: Int
     """The segment whose output this pipeline is, while no operator has been

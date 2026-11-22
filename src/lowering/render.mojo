@@ -196,6 +196,8 @@ def render_lowered_plan(plan: LoweredPlan) -> String:
         + String(len(p.agg))
         + " sort="
         + String(len(p.sort))
+        + " window="
+        + String(len(p.window))
         + " batches="
         + String(len(p.batches))
         + "\n"
@@ -223,5 +225,20 @@ def render_lowered_plan(plan: LoweredPlan) -> String:
             out += " desc" if s.descending[k] else " asc"
             out += " nulls_first" if s.nulls_first[k] else " nulls_last"
         out += "\n"
+    for i in range(len(p.window)):
+        ref w = p.window[i]
+        out += "  window " + String(i) + ": partition=" + _names(w.partition_keys)
+        out += " order=["
+        for k in range(len(w.order_keys)):
+            if k > 0:
+                out += ", "
+            out += w.order_keys[k]
+            out += " desc" if w.descending[k] else " asc"
+        out += "] exprs=["
+        for k in range(len(w.partition_exprs)):
+            if k > 0:
+                out += ", "
+            out += String(w.partition_exprs[k])
+        out += "]\n"
     out += "result: segment " + String(plan.result_seg_id) + "\n"
     return out^

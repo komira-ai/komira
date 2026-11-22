@@ -54,6 +54,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        integer sum, is lowered to SUM(<integer>) with its
 #                        declared DECIMAL(38, 0) output kept; every other shape
 #                        of cast, argument type and aggregate is left alone.
+# test_lower_window      the rendered physical plan of window nodes: a
+#                        scan, a filter and projection, a projection above, two
+#                        stacked windows, a node of two functions, a window
+#                        over a join and over an aggregation; the declared
+#                        schema's nullability; a limit above a window with keys
+#                        refused and one above a window with none cut.
+# test_lower_window_refusals
+#                        every reason a window is refused with
+#                        LOWERING_WINDOW_UNSERVED (the descending list, key
+#                        columns and types, function arguments and defaults,
+#                        frames, an unknown function), each by its exact text,
+#                        the refusal coming before the child is walked and in a
+#                        fixed order, and the windows that lower beside each.
 # test_sink_capability   the capability table's rows, which triples are not
 #                        served, and admission of hand-built segments.
 #
@@ -96,6 +109,8 @@ mojo_library(
         "tests/test_lower_refusals.mojo",
         "tests/test_lower_sum_fuse.mojo",
         "tests/test_lower_union.mojo",
+        "tests/test_lower_window.mojo",
+        "tests/test_lower_window_refusals.mojo",
         "tests/test_sink_capability.mojo",
     ],
     visibility = ["PUBLIC"],

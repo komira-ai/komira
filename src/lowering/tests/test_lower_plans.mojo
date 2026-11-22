@@ -182,7 +182,7 @@ def test_ungrouped_filter_aggregate_is_one_segment() raises:
     expected += "  deps: none\n"
     expected += "  order: ORDER_ROW_RANGE partitions=1\n"
     expected += "  estimates: morsel_rows=" + String(m) + " card_rows=6000 mem_bytes=0\n"
-    expected += "params: agg=1 sort=0 batches=0\n"
+    expected += "params: agg=1 sort=0 window=0 batches=0\n"
     expected += "  agg 0: group_by=[] aggs=[" + String(_revenue()) + "]\n"
     expected += "result: segment 0\n"
     assert_equal(render_lowered_plan(_lowered(plan, _one_scan())), expected)
@@ -216,7 +216,7 @@ def test_grouped_dictionary_aggregate_then_sort_is_two_segments() raises:
     expected += "  deps: 0/E3\n"
     expected += "  order: ORDER_NONE partitions=1\n"
     expected += "  estimates: morsel_rows=" + String(policy.default_morsel_rows(agg_schema)) + " card_rows=0 mem_bytes=0\n"
-    expected += "params: agg=1 sort=1 batches=0\n"
+    expected += "params: agg=1 sort=1 window=0 batches=0\n"
     var group_by = "[" + String(_col("flag")) + ", " + String(_col("status")) + "]"
     expected += "  agg 0: group_by=" + group_by + " aggs=["
     expected += String(_sum_as("qty", "sum_qty")) + ", "

@@ -12,7 +12,7 @@ and no environment variable and touches no global, so equal arguments give a
   admission against the sink capability table.
 - `lowered_plan`: `LoweringInputs` (one `ScanFacts` per scan in scan
   pre-order: the footers' statistics and the columns every row group stores
-  dictionary encoded), `ParamTable`, `LoweredPlan` and the five refusal tokens.
+  dictionary encoded), `ParamTable`, `LoweredPlan` and the six refusal tokens.
 - `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, whose
   spec lists the files when there are several; `SOURCE_BATCH` for an in-memory
   scan; `SOURCE_CSV` for a CSV scan, whose spec carries the path, the dialect
@@ -20,7 +20,7 @@ and no environment variable and touches no global, so equal arguments give a
   filter and projection of the last two become operators, and so do those of
   a Parquet scan with Hive partition columns, over the files' columns followed
   by the partition columns). A filter, a projection and a limit fuse into it.
-  An aggregation, a distinct or a sort ends it in a sink and opens a pipeline
+  An aggregation, a distinct, a sort or a window ends it in a sink and opens a pipeline
   that reads that segment's output over an `E3` edge. A distinct is a
   `SINK_AGG` grouped by every column, in order, with no aggregate, so its
   sink row is the one an aggregation with those group keys gets. A union
@@ -31,11 +31,15 @@ and no environment variable and touches no global, so equal arguments give a
   the union fuses onto or closes that pipeline. An inner equi-join
   (`cut_join`) ends its build child in a `SINK_HASH_BUILD` segment and fuses an
   `OP_JOIN_PROBE` into the probe child's pipeline, with an `E3` edge to the
-  build segment. The root is a `SINK_COLLECT`
+  build segment. A window (`cut_window`, one node with every function of
+  one `OVER` clause) ends its child in a `SINK_PARTITION_BY` segment whose
+  `sink_param_id` indexes `ParamTable.window`, opens a pipeline that reads it,
+  and marks that pipeline as a sorted stream when the node has a key. The root is a `SINK_COLLECT`
   segment unless the top node is a breaker, which is then the result.
   `cut_walk` is only the dispatch on the node's tag; each arm is its own
   module (`cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
-  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union`, `cut_join`), and
+  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_window`, `cut_union`,
+  `cut_join`), and
   `cut_state` holds what they share: the open pipeline, the cutter's segments
   and ParamTable, and the close and reopen of a breaker. A new node kind is a
   new arm module and one branch in `cut_walk`.
@@ -53,7 +57,9 @@ and no environment variable and touches no global, so equal arguments give a
   column keeping its own (a distinct's columns are its group keys, so a
   distinct over several columns gets the same row). The last row is
   `(SINK_HASH_BUILD, NONE, COLUMNAR)`, a join's build segment; it indexes no
-  ParamTable row, so its `sink_param_id` is -1.
+  ParamTable row, so its `sink_param_id` is -1. `(SINK_PARTITION_BY, NONE,
+  COLUMNAR)`, after the sort row, is a window's segment; it indexes
+  `ParamTable.window`.
 - `render`: the deterministic text of a `LoweredPlan`.
 
 ## Refusals
@@ -61,8 +67,8 @@ and no environment variable and touches no global, so equal arguments give a
 Lowering refuses by name and never replaces what it cannot lower with another
 shape:
 
-- `LOWERING_UNCUTTABLE_NODE`, naming the node: a top-n,
-  window, view or shared-subplan reference, cast to string or exchange node
+- `LOWERING_UNCUTTABLE_NODE`, naming the node: a top-n, partition top-n,
+  view or shared-subplan reference, cast to string or exchange node
   (the cutter has no arm for any of them, so an exchange is refused rather
   than elided on one host); a filter, projection or aggregation that carries a
   UDF, an aggregate function that is a UDF; a limit with an offset or a
@@ -85,6 +91,21 @@ shape:
   type, decimal precision and scale and timezone; the concatenation reads
   every branch by position in the union's layout, so the producer casts and
   renames the branches first).
+- `LOWERING_WINDOW_UNSERVED`, naming the reason, raised before the child of
+  the window is walked: a descending list whose length is not the order keys';
+  a partition or order key that is not a column of the child or whose type is
+  not INT64, INT32, FLOAT64, BOOL or STRING; an `NTILE` bucket count or an
+  `NTH_VALUE` n that is not above 0; a `LAG`, `LEAD`, `FIRST_VALUE`,
+  `LAST_VALUE` or `NTH_VALUE` argument that is not an INT64, FLOAT64 or STRING
+  column; a `SUM`, `AVG`, `MIN` or `MAX` argument that is not an INT64 or
+  FLOAT64 column; an argument that is not a column of the child; a `LAG` or
+  `LEAD` default the column would change (a float over INT64, a string over a
+  number, anything but a string over STRING); a function the sink does not
+  compute; and a frame of a value function or aggregate other than `RANGE`
+  `UNBOUNDED PRECEDING` to `CURRENT ROW` (SQL's default with an order) and
+  `UNBOUNDED PRECEDING` to `UNBOUNDED FOLLOWING` in `ROWS` or `RANGE` units.
+  The sink declares a `SUM`, `AVG`, `MIN` or `MAX` column nullable when its
+  argument is.
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key with a
   column of a type with no row (an 8- or 16-bit integer, a timestamp, a
   binary, ...), alone or beside served columns, or a segment whose triple has
@@ -134,7 +155,9 @@ fold is exact in any order, and the grouped sinks fold no float argument. A
 sort's output keeps the sort's order through filters,
 projections and the final collect only as far as the engine's sink-output
 source keeps it; lowering does not state more. A limit above a sort is
-refused, because the rows it keeps would depend on that order, and a limit
+refused, because the rows it keeps would depend on that order (a limit above
+a window with a partition or order key is refused the same way: its rows come out
+in key order), and a limit
 above an aggregation that reads a sort is cut: the aggregation ends the sorted
 stream.
 

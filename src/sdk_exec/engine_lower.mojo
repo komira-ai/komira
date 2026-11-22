@@ -11,7 +11,8 @@
 # facts of each of its files (`add_parquet_files_scan`). A join is descended
 # into left child first, then right, as the cutter walks it whichever side
 # builds; every join is, the ones the cutter then refuses included, so the
-# facts of a refused join's scans are read before the refusal. Any other node
+# facts of a refused join's scans are read before the refusal. A window
+# (PARTITION_BY) node is descended into its child. Any other node
 # the cutter does not cut is not descended into: the cutter refuses it by name
 # before it asks for any scan below, so no facts are read for a plan that
 # cannot lower.
@@ -30,6 +31,7 @@ from plan_ir.logical_plan import (
     PLAN_FILTER,
     PLAN_JOIN,
     PLAN_LIMIT,
+    PLAN_PARTITION_BY,
     PLAN_PROJECT,
     PLAN_SCAN,
     PLAN_SORT,
@@ -99,6 +101,8 @@ def _collect(
         _collect(inputs, node.distinct_data_ref().child[], ctx)
     elif tag == PLAN_SORT:
         _collect(inputs, node.sort_data_ref().child[], ctx)
+    elif tag == PLAN_PARTITION_BY:
+        _collect(inputs, node.partition_by_data_ref().child[], ctx)
     elif tag == PLAN_JOIN:
         _collect(inputs, node.join_data_ref().left[], ctx)
         _collect(inputs, node.join_data_ref().right[], ctx)
