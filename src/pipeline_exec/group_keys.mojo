@@ -24,6 +24,10 @@
 #                                  than its declared precision, so equal
 #                                  unscaled values are equal decimals.
 #
+# A composite key (`KEY_DTYPE_COMPOSITE`, `sink_string_group_agg`) reads each
+# of its fixed-width columns under the row `fixed_key_dtype` names for the
+# column's type, so its cells are the ones that row gives.
+#
 # A column of any other type, or of a family the row does not name, is refused
 # by name. Every cell under a NULL is zero, and all cells of one key column
 # carry that column's flag.
@@ -43,6 +47,8 @@ from physical_plan.physical_plan import (
     KEY_DTYPE_DECIMAL128,
     KEY_DTYPE_F32,
     KEY_DTYPE_F64,
+    KEY_DTYPE_I64,
+    KEY_DTYPE_NONE,
 )
 
 comptime _CANONICAL_NAN: UInt64 = 0x7FF8000000000000
@@ -83,6 +89,24 @@ def key_width(arrow: ArrowType) -> Int:
     if arrow == ArrowType.DECIMAL128:
         return 2
     return 1
+
+
+def fixed_key_dtype(t: ArrowType) -> UInt8:
+    """The fixed-width row that keys a column of type `t` (I64 for every
+    integer, F64 for both floats, DATE32, BOOL, DECIMAL128), or
+    `KEY_DTYPE_NONE` when no fixed-width row keys it. A composite key reads
+    each of its fixed-width columns under this row."""
+    if is_int_key_type(t):
+        return KEY_DTYPE_I64
+    if is_float_key_type(t):
+        return KEY_DTYPE_F64
+    if t == ArrowType.DATE32:
+        return KEY_DTYPE_DATE32
+    if t == ArrowType.BOOL:
+        return KEY_DTYPE_BOOL
+    if t == ArrowType.DECIMAL128:
+        return KEY_DTYPE_DECIMAL128
+    return KEY_DTYPE_NONE
 
 
 def row_keys_type(key_dtype: UInt8, t: ArrowType) -> Bool:

@@ -9,8 +9,11 @@
 # DATE32, BOOL, DECIMAL128 or STRING column picks that key dtype, COLUMNAR,
 # except that a string column of
 # the pipeline's Parquet scan that every row group stores dictionary encoded is
-# DICT_ENCODED; several columns are served only when every one is such a
-# dictionary string. Any other key is LOWERING_SINK_UNSERVED.
+# DICT_ENCODED. Several columns are (STRING, DICT_ENCODED) when every one is
+# such a dictionary string, and (COMPOSITE, COLUMNAR) otherwise: each column
+# keeps its own type, so integers, floats, dates, bools, decimals and strings
+# mix in one key. A key with a column of any other type is
+# LOWERING_SINK_UNSERVED.
 #
 # Refused (LOWERING_UNCUTTABLE_NODE) before the child is walked: an aggregation
 # with a UDF or a UDF aggregate function, one with a group top-k, and a partial
@@ -56,6 +59,7 @@ from physical_plan.physical_plan import (
     KEY_DTYPE_DATE32,
     KEY_DTYPE_BOOL,
     KEY_DTYPE_DECIMAL128,
+    KEY_DTYPE_COMPOSITE,
 )
 
 
@@ -143,14 +147,9 @@ def _agg_triple(
         ):
             all_dictionary_strings = False
     if n > 1:
-        if not all_dictionary_strings:
-            raise _unserved(
-                "a group key of "
-                + String(n)
-                + " columns is served only when every column is a dictionary"
-                " encoded string"
-            )
-        return _Triple(KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED)
+        if all_dictionary_strings:
+            return _Triple(KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED)
+        return _Triple(KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR)
     if first == Int(KEY_DTYPE_STRING):
         if all_dictionary_strings:
             return _Triple(KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED)
