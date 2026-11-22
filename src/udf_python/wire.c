@@ -3,9 +3,12 @@
  * helpers and the monotonic clock.
  *
  * Every send is one sendmsg with MSG_NOSIGNAL: a peer that died is an error
- * here, never a SIGPIPE in the engine.
+ * here, never a SIGPIPE in the engine. Every receive is a recvmsg with
+ * MSG_CMSG_CLOEXEC, so a descriptor a peer sends (the zygote's pidfd of a
+ * new worker) is never inherited by a process the engine starts.
  */
 #include <errno.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +16,7 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "udfpy.h"
 
@@ -20,6 +24,20 @@ int64_t udfpy_mono_ns(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+void udfpy_how_text(int how, int value, char* out, size_t n) {
+  if (how == 1) {
+    const char* abbrev = sigabbrev_np(value);
+    if (abbrev != NULL)
+      snprintf(out, n, "signal %d (SIG%s)", value, abbrev);
+    else
+      snprintf(out, n, "signal %d", value);
+  } else if (value >= 0) {
+    snprintf(out, n, "exit status %d", value);
+  } else {
+    snprintf(out, n, "an unknown status");
+  }
 }
 
 /* ---- errors ------------------------------------------------------------------ */
@@ -168,48 +186,84 @@ int udfpy_send(int sock, uint32_t op, uint64_t request_id, uint32_t flags, uint6
   return 0;
 }
 
-static int recv_all(int fd, void* dst, size_t n) {
+static void close_fds(udfpy_msg* m) {
+  for (int i = 0; i < m->nfds; i++)
+    if (m->fds[i] >= 0) close(m->fds[i]);
+  m->nfds = 0;
+}
+
+/* The SCM_RIGHTS descriptors of one recvmsg, kept in `m` up to its room. */
+static void take_fds(struct msghdr* h, udfpy_msg* m) {
+  for (struct cmsghdr* c = CMSG_FIRSTHDR(h); c != NULL; c = CMSG_NXTHDR(h, c)) {
+    if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS) continue;
+    size_t k = (c->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+    for (size_t i = 0; i < k; i++) {
+      int fd;
+      memcpy(&fd, CMSG_DATA(c) + i * sizeof(int), sizeof(fd));
+      if (m->nfds < UDFPY_MSG_FDS)
+        m->fds[m->nfds++] = fd;
+      else
+        close(fd);
+    }
+  }
+}
+
+static int recv_all(int fd, void* dst, size_t n, udfpy_msg* m) {
   uint8_t* p = (uint8_t*)dst;
   while (n > 0) {
-    ssize_t k = recv(fd, p, n, 0);
-    if (k == 0) return -1;
+    union {
+      char buf[CMSG_SPACE(sizeof(int) * UDFPY_MSG_FDS)];
+      struct cmsghdr align;
+    } ctl;
+    struct iovec v = {p, n};
+    struct msghdr h;
+    memset(&h, 0, sizeof(h));
+    h.msg_iov = &v;
+    h.msg_iovlen = 1;
+    h.msg_control = ctl.buf;
+    h.msg_controllen = sizeof(ctl.buf);
+    ssize_t k = recvmsg(fd, &h, MSG_CMSG_CLOEXEC);
     if (k < 0) {
       if (errno == EINTR) continue;
       return -1;
     }
+    take_fds(&h, m);
+    if (k == 0) return -1;
     p += k;
     n -= (size_t)k;
   }
   return 0;
 }
 
+static int recv_fail(udfpy_msg* m, int rc) {
+  udfpy_msg_free(m);
+  return rc;
+}
+
 int udfpy_recv(int sock, udfpy_msg* m, const char** why) {
   memset(m, 0, sizeof(*m));
   udfpy_header h;
-  if (recv_all(sock, &h, sizeof(h)) != 0) return -1;
+  if (recv_all(sock, &h, sizeof(h), m) != 0) return recv_fail(m, -1);
   if (h.magic != UDFPY_MAGIC) {
     *why = "the magic number is wrong";
-    return -2;
+    return recv_fail(m, -2);
   }
   if (h.payload_len > UDFPY_MAX_PAYLOAD) {
     *why = "the payload is longer than the wire allows";
-    return -2;
+    return recv_fail(m, -2);
   }
   if (h.payload_len > 0 && (h.flags & UDFPY_FLAG_INLINE) == 0) {
     *why = "a payload without the INLINE flag";
-    return -2;
+    return recv_fail(m, -2);
   }
   if (h.payload_len > 0) {
     void* p = NULL;
     if (posix_memalign(&p, UDFPY_ALIGN, (size_t)h.payload_len) != 0) {
       *why = "no memory for the payload";
-      return -2;
-    }
-    if (recv_all(sock, p, (size_t)h.payload_len) != 0) {
-      free(p);
-      return -1;
+      return recv_fail(m, -2);
     }
     m->payload = (uint8_t*)p;
+    if (recv_all(sock, p, (size_t)h.payload_len, m) != 0) return recv_fail(m, -1);
   }
   m->op = h.op;
   m->flags = h.flags;
@@ -222,6 +276,7 @@ void udfpy_msg_free(udfpy_msg* m) {
   free(m->payload);
   m->payload = NULL;
   m->len = 0;
+  close_fds(m);
 }
 
 static char* take_str(const uint8_t* p, size_t len, size_t* at, int* bad) {
