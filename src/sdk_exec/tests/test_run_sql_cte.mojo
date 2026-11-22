@@ -18,7 +18,7 @@
 #                       filters that split its rows, a distinct read three
 #                       times, a filtered scan read twice, a limit read twice
 #                       (the same rows each time, so the count is exact), a
-#                       CTE that reads another twice read twice, a union of a
+#                       subquery that reads a CTE twice read twice, a union of a
 #                       filtered scan read twice read twice, an ungrouped
 #                       aggregation read twice.
 #   test_every_case_is_run
@@ -29,11 +29,11 @@
 #                       `lower_for_context`) for a grouped aggregation read
 #                       twice holds one aggregation segment whose output both
 #                       branches read, and running it gives each group twice.
-#   test_a_cte_read_twice_that_holds_a_repeat_is_cut_once
-#                       a CTE whose body reads another CTE twice, itself read
-#                       twice, is lowered (each repeat found by its hash
-#                       before folding) with one aggregation segment, and
-#                       answers each count twice.
+#   test_a_repeat_that_holds_a_repeat_is_cut_once
+#                       a count over a CTE read twice, itself written twice,
+#                       is lowered (each repeat found by its hash before
+#                       folding) with one aggregation segment, and answers the
+#                       count twice.
 #   test_a_filtered_scan_read_twice_is_scanned_twice_over_one_input
 #                       a CTE of a filtered scan read twice is two scans of
 #                       the file, each with the filter, and no segment reads
@@ -225,13 +225,18 @@ def test_a_cte_read_twice_is_aggregated_once() raises:
     assert_equal(batch.num_rows(), 8)
 
 
-def test_a_cte_read_twice_that_holds_a_repeat_is_cut_once() raises:
+def test_a_repeat_that_holds_a_repeat_is_cut_once() raises:
     var ctx = EngineContext(EngineOptions(worker_count=2))
+    var branch = String(
+        "SELECT n FROM (SELECT count(*) AS n FROM (SELECT region FROM d"
+        " UNION ALL SELECT region FROM d) u) a"
+    )
     var lp = _lowered(
         ctx,
-        "WITH d AS (SELECT region FROM read_csv('sales.csv') WHERE qty > 2),"
-        " a AS (SELECT count(*) AS n FROM (SELECT region FROM d UNION ALL"
-        " SELECT region FROM d) u) SELECT n FROM a UNION ALL SELECT n FROM a",
+        "WITH d AS (SELECT region FROM read_csv('sales.csv') WHERE qty > 2) "
+        + branch
+        + " UNION ALL "
+        + branch,
     )
     assert_equal(_count(lp, SINK_AGG), 1)
     var batch = run_lowered_plan(ctx, lp^)

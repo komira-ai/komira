@@ -191,10 +191,11 @@ _MIXED_TEST_DATA.update({c + ".tsv": ":group_keys_mixed_oracle[" + c + ".tsv]" f
 #   tests/cte/cases.sql: a CTE read once (filtered, chained, unread, with NULL
 #   counts, sorted, inside a derived table) and read more than once (a grouped
 #   aggregation, the same under two filters, a distinct three times, a filtered
-#   scan, a limit, a CTE reading another twice, an ungrouped aggregation);
-#   every case is run; a grouped aggregation read twice is lowered to one
-#   aggregation segment both branches read, a CTE holding a repeat read twice
-#   to one aggregation segment, and a filtered scan read twice to two scans.
+#   scan, a limit, a subquery reading a CTE twice, an ungrouped
+#   aggregation); every case is run; a grouped aggregation read twice is
+#   lowered to one aggregation segment both branches read, a subquery holding
+#   a repeat written twice to one aggregation segment, and a filtered scan read
+#   twice to two scans.
 # - test_run_sql_timers_off: Q6 through run_sql on four workers in the default
 #   build gives the oracle's answer and leaves every phase timer
 #   (phase_timers) unregistered and at zero.
