@@ -51,7 +51,7 @@ def inflight_workers(n_jobs: Int, max_inflight: Int) -> Int:
 
 
 struct _Pull[
-    J: InflightJobs, jo: ImmutOrigin, no: MutOrigin, fo: MutOrigin
+    J: InflightJobs, jo: ImmOrigin, no: MutOrigin, fo: MutOrigin
 ](ForkJoinBody):
     """One body shared by every thread: the jobs, the next job's index and
     the failure flag."""
