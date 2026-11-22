@@ -8,7 +8,10 @@
 # the two moves every breaker makes: `_close` ends a pipeline in a sink and
 # records it as the next segment, `_reopen` opens the pipeline that reads that
 # segment's output over an E3 edge. `CutResult` is what the cutter hands
-# `lower`. The walk and its arms are `cut_walk` and the modules it names.
+# `lower`. The walk and its arms are `cut_walk` and the modules it names. The
+# cutter also records the shared subplans it has cut (`cut_shared`): the
+# canonical hashes the plan's references name and, for each canonical subtree
+# cut so far, its schema and the segment its references read.
 #
 # Segment ids are dense and follow the cut order, which is dependency order:
 # a producer is cut before its consumer. Every segment has one partition and
@@ -160,12 +163,49 @@ struct _Cutter(Movable):
     var flow_schemas: List[Schema]
     var params: ParamTable
     var scans_seen: Int
+    var referenced: List[UInt64]
+    """The canonical hash of every shared-subplan reference in the plan
+    (`cut_shared`); empty when the plan has none, and then no node is
+    hashed."""
+    var shared_hashes: List[UInt64]
+    """The canonical subtrees cut so far, in cut order; the lists below are
+    parallel to it."""
+    var shared_schemas: List[Schema]
+    var shared_segs: List[Int]
+    """The segment whose output the subtree is, or -1 for a streaming subtree,
+    which is cut again at every reference."""
+    var shared_sorted: List[Bool]
+    var shared_first_scan: List[Int]
+    """The pre-order index of the subtree's first scan."""
+    var shared_plans: Slab[LogicalPlan]
+    """A copy of each subtree with every reference in it replaced by the
+    subtree it names: the subtree as it stood before its producer folded it,
+    whose `structural_hash()` is the hash references carry."""
+    var shared_recuts: Slab[LogicalPlan]
+    """A copy of each subtree as it stands in the plan, its references kept:
+    what a streaming subtree's references cut again, so a reference inside it
+    takes its own subtree's scans, as in the plan."""
 
     def __init__(out self):
         self.segments = List[SegmentDescPod]()
         self.flow_schemas = List[Schema]()
         self.params = ParamTable()
         self.scans_seen = 0
+        self.referenced = List[UInt64]()
+        self.shared_hashes = List[UInt64]()
+        self.shared_schemas = List[Schema]()
+        self.shared_segs = List[Int]()
+        self.shared_sorted = List[Bool]()
+        self.shared_first_scan = List[Int]()
+        self.shared_plans = Slab[LogicalPlan]()
+        self.shared_recuts = Slab[LogicalPlan]()
+
+    def _shared_at(self, h: UInt64) -> Int:
+        """The index of the canonical subtree of hash `h` cut so far, or -1."""
+        for i in range(len(self.shared_hashes)):
+            if self.shared_hashes[i] == h:
+                return i
+        return -1
 
     def finish(deinit self, result_seg_id: Int) -> CutResult:
         return CutResult(
