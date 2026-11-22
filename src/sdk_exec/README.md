@@ -5,8 +5,9 @@ nothing from the rest of the package except each other, and the plan gates
 (`plan_validation_gate`, `parquet_glob_options`), which build on `sdk`;
 and the engine context with its SQL door (`engine_*` below), which runs a SQL
 query over Parquet files, and over CSV files named by `read_csv` (plain or
-`.gz`, `.zst`, `.lz4`), from text to record batches. Views, writes, the plan
-cache and the plan gates' call sites are not wired into the context yet.
+`.gz`, `.zst`, `.lz4`), from text to record batches, and writes a query's
+result to a local Parquet file with `COPY ... TO`. Views, other writes, the
+plan cache and the plan gates' call sites are not wired into the context yet.
 
 | module | does |
 |---|---|
@@ -35,7 +36,56 @@ do is a free function in a module of its own.
 | `engine_catalog` | `register_parquet(ctx, name, path)`: the table's schema is its file's footer |
 | `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema) and `lower_for_context` |
 | `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
-| `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize`, lower, run. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
+| `engine_write` | `write_parquet_result(batch, dest, codec)`: the result batch as a Parquet file at the local path `dest`, through `fs.atomic_write.write_file_atomic` (all or nothing), returning the rows written; `count_result(rows)`, the one-row BIGINT `Count` batch a COPY answers; `check_copy_target(dest, fmt)`, the refusals of a URL and of CSV or JSON |
+| `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize`, lower, run, and for a `COPY ... TO` write the file and answer `Count`. Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
+
+**COPY ... TO a local Parquet file.** `COPY <table> TO '<path>'` and
+`COPY (<query>) TO '<path>' (FORMAT parquet, COMPRESSION <codec>)` run the
+query like any other and write its result. The statement answers what DuckDB
+answers: one row, one BIGINT NOT NULL column `Count`, the rows written.
+
+- The format comes from `FORMAT`, or from the extension as DuckDB infers it
+  (`sql.sql_copy_format`); a name with no format's extension is
+  `COPY_FORMAT_NOT_INFERRED` at `parse`. CSV and JSON, inferred or named, are
+  refused with `COPY_FORMAT_UNSUPPORTED` at `bind`.
+- `COMPRESSION` is snappy (the default), uncompressed, zstd (level 3), gzip
+  (level 6), or lz4 or lz4_raw (both LZ4_RAW in the footer).
+- The write is all or nothing: a temporary `.<name>.<random>.tmp` in the
+  destination's directory, synced and renamed over the destination, then the
+  directory synced. A failure removes the temporary file and leaves the
+  destination as it was, so `COPY (SELECT * FROM 'a.parquet') TO 'a.parquet'`
+  is safe. An existing file is replaced, as DuckDB replaces it.
+- The path is taken as written; a relative path resolves against the working
+  directory. A missing directory is `STORAGE_NOT_FOUND` and is not created;
+  any other failure (no space, a directory at the path, ...) is `STORAGE_IO`
+  naming the step and the errno; both at `execute`. A destination URL
+  (`s3://...`) is `STORAGE_URL_REFUSED` at `bind`.
+- The file: the result's column names in order; a nullable column OPTIONAL and
+  a NOT NULL one REQUIRED; one row group per 122,880 rows; DATE annotated
+  DATE, DECIMAL as FIXED_LEN_BYTE_ARRAY(16) with its precision and scale,
+  strings UTF8. An empty result writes the schema with no rows. A column of a
+  type the writer cannot annotate (TIMESTAMP, TIME, INTERVAL and the like, the
+  unsigned and narrow integers, BLOB, nested) is `COPY_TYPE_UNSUPPORTED` at
+  `execute`, before any file is touched.
+- `CREATE TABLE ... AS` writes into a catalog table, and no catalog is bound:
+  it is refused with `STATEMENT_NOT_A_QUERY` at `bind`, naming the COPY that
+  writes a file.
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from std.tempfile import mkdtemp
+from sdk_exec.engine_context import EngineContext
+from sdk_exec.engine_options import EngineOptions
+from sdk_exec.engine_sql import run_sql
+
+var ctx = EngineContext(EngineOptions(worker_count=1))
+var dir = mkdtemp(prefix="komira_copy_readme_")
+var out = run_sql(ctx, "COPY (SELECT 1 AS n UNION ALL SELECT 2) TO '" + dir + "/n.parquet'")
+assert_equal(out.batches[0].schema.field_name(0), "Count")
+assert_equal(Int(out.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 2)
+var back = run_sql(ctx, "SELECT count(*) AS rows FROM '" + dir + "/n.parquet'")
+assert_equal(Int(back.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 2)
+```
 
 **The footer cache is pinned to a query.** `parquet_footers.FooterCache`
 has no cap, so the context does not keep it: `run_sql` starts by replacing it
@@ -69,7 +119,7 @@ given to SQL `read_parquet` (`PARQUET_PATH_IS_DIRECTORY`), files whose schemas
 differ (`PARQUET_FILES_SCHEMA_MISMATCH`), and the Hive shapes the footer
 package lists (`HIVE_PARTITION_*`).
 
-**Refused here, by name.** A statement that is not a query
+**Refused here, by name.** The COPY refusals above, `CREATE TABLE ... AS`
 (`STATEMENT_NOT_A_QUERY`, step `bind`); a scalar subquery (the optimizer keeps
 it in the plan and lowering refuses the node, `LOWERING_UNCUTTABLE_NODE`; the
 door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
@@ -89,6 +139,17 @@ cancellation token is local to a call, so cancel is not reachable from
 ## Tests
 
 The tests run when the package is built.
+
+- `test_run_sql_copy_parquet`: `COPY ... TO` a local Parquet file answers one
+  BIGINT NOT NULL row `Count`; the file read back equals the query that wrote
+  it (a table of BIGINT, DOUBLE, VARCHAR, BOOLEAN, DATE and DECIMAL columns with
+  NULLs, a query, an empty result, 130,000 rows in two row groups, a COPY over
+  the file it reads, a relative path), and its footer names the codec asked
+  for, for each of the six; CSV and JSON, an unknown extension, a URL, CREATE
+  TABLE AS and a TIMESTAMP column are named refusals that create no file; a
+  missing directory, a directory at the path and a full disk injected through
+  the file system's test seam are named and leave no temporary file and the old
+  file whole.
 
 - `test_plan_cache_full_sink_hash`: the sink kind is part of the Layer 2 key
   and the path is not.

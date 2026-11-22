@@ -151,8 +151,10 @@ It runs one SQL statement against the tables registered on the context with
 to every later run on the context.
 - **The route.** It is `sdk_exec.run_sql` with the session's `EngineContext`. The
   library converts the SQL text to a logical plan by parsing and binding it.
-- **Statements that are not queries.** `run_sql` refuses them
-  (`STATEMENT_NOT_A_QUERY`) until writes have their own design.
+- **Statements that are not queries.** `run_sql` runs `COPY ... TO` a local
+  Parquet file and answers one row, the BIGINT `Count`
+  ([src/sdk_exec/README.md](../../src/sdk_exec/README.md)); it refuses
+  `CREATE TABLE ... AS` (`STATEMENT_NOT_A_QUERY`), which needs a bound catalog.
 - **The error text.** **PROPOSED:** the last error text is `<step>: <reason>`,
   where the step is the one that refused (parse, bind, optimize, lower or
   execute). That text is for people, and bindings do not parse it (§6).

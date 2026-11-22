@@ -26,6 +26,7 @@ from std.builtin.swap import swap
 
 from containers.slab import Slab
 
+from .sql_copy_format import copy_codec_from_path, copy_format_from_path
 from .sql_interval_parse import interval_literal_starts, parse_interval_literal
 from .sql_token import (
     Token,
@@ -298,8 +299,7 @@ struct _Parser(Movable):
         """Parse `COPY <source> TO '<path>' [ (<opt> [, <opt>]*) ]`.
         `<source>` is either a bare table name (synthesized to `SELECT * FROM
         <table>`) or a parenthesized query `(WITH? SELECT …)`. Binds to a
-        STMT_COPY statement the exec layer writes through the EXISTING
-        `SinkVariant` file arms (`sql_exec`) — no new writer."""
+        STMT_COPY statement, which `sdk_exec.engine_sql.run_sql` runs."""
         self._expect_kw("copy")
         var source: SelectStmt
         if self._kind() == TK_LPAREN:
@@ -323,16 +323,14 @@ struct _Parser(Movable):
             raise Error("SQL syntax error: COPY ... TO expects a string path")
         var dest = String(self.tokens[self.pos].text)
         self._advance()
-        var fmt = WFMT_PARQUET
-        var codec = WCOMP_SNAPPY
-        if self._kind() == TK_LPAREN:
-            var opts = self._parse_copy_options()
-            fmt = opts[0]
-            codec = opts[1]
-        return SqlStatement(STMT_COPY, source^, dest, String(""), fmt, codec, False)
+        var opts = self._parse_copy_options(dest)
+        return SqlStatement(STMT_COPY, source^, dest, String(""), opts[0], opts[1], False)
 
-    def _parse_copy_options(mut self) raises -> Tuple[UInt8, UInt8]:
-        """Parse the parenthesized COPY option list -> (fmt, codec).
+    def _parse_copy_options(mut self, dest: String) raises -> Tuple[UInt8, UInt8]:
+        """Parse the parenthesized COPY option list, if any -> (fmt, codec).
+        With no FORMAT the format comes from `dest`'s extension, and with no
+        COMPRESSION the codec from the format and `dest`
+        (`sql_copy_format`).
 
         Grammar (the subset the DuckDB parity corpus writes, and no more):
 
@@ -356,12 +354,13 @@ struct _Parser(Movable):
         JSONL sink is newline-delimited by construction), a COMPRESSION_LEVEL
         other than the one the wired sink is parameterized on — is a clean
         raise naming what we would have done instead."""
+        if self._kind() != TK_LPAREN:
+            var inferred = copy_format_from_path(dest)
+            return (inferred, copy_codec_from_path(inferred, dest))
         self._expect(TK_LPAREN, "'(' to open COPY options")
         # --- pass 1: collect ---------------------------------------------------
-        # No FORMAT clause => parquet (DuckDB would infer from the extension; the
-        # corpus always states it, and inferring silently is exactly the
-        # accepted-and-ignored failure mode this parser refuses).
         var fmt = WFMT_PARQUET
+        var saw_format = False
         var codec_word = String("")
         var saw_codec = False
         var level = 0
@@ -380,6 +379,7 @@ struct _Parser(Movable):
             self._advance()
             if opt == "format":
                 fmt = _format_word(self._copy_option_word())
+                saw_format = True
             elif opt == "compression" or opt == "codec":
                 codec_word = self._copy_option_word()
                 saw_codec = True
@@ -403,9 +403,9 @@ struct _Parser(Movable):
             break
         self._expect(TK_RPAREN, "')' to close COPY options")
         # --- pass 2: validate, now that FORMAT is known ------------------------
-        # Default codec is per-format: parquet's is snappy (DuckDB's default page
-        # codec), csv/json have no container so theirs is "no compression".
-        var codec = WCOMP_UNCOMPRESSED if fmt != WFMT_PARQUET else WCOMP_SNAPPY
+        if not saw_format:
+            fmt = copy_format_from_path(dest)
+        var codec = copy_codec_from_path(fmt, dest)
         if saw_codec:
             codec = _codec_word(codec_word)
         if not write_target_supported(fmt, codec):

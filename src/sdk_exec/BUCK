@@ -1,5 +1,6 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+load(":copy_cases.bzl", "copy_cases")
 
 # DuckDB's answers for test_run_sql_csv: each line of tests/csv/cases.sql runs
 # one query over the committed CSV files and writes its answer.
@@ -38,6 +39,55 @@ _CSV_TEST_DATA.update({f + ".csv": "tests/csv/" + f + ".csv" for f in _CSV_FILES
 
 _CSV_TEST_DATA.update({c + ".tsv": ":csv_oracle[" + c + ".tsv]" for c in _CSV_CASES})
 
+# DuckDB reading back the Parquet files COPY writes, for
+# test_copy_readback_duckdb. Each line of tests/copy/cases.sql is one case:
+# `:copy_komira` runs every line through run_sql (copy_runner below) and
+# `:copy_readback` runs the same lines in the pinned DuckDB, then
+# tests/copy/readback.sql compares the two files of each case.
+_COPY_CASES = [
+    "typed_default",
+    "typed_zstd",
+    "nulls_gzip",
+    "nulls_lz4",
+    "quoted_uncompressed",
+    "grouped_snappy",
+    "empty",
+]
+
+_COPY_INPUTS = {f + ".csv": "tests/csv/" + f + ".csv" for f in ["typed", "nulls", "quoted"]}
+
+# The program that runs each COPY line of a cases file through run_sql
+# (copy_runner/main.mojo says how).
+mojo_binary(
+    name = "copy_runner",
+    srcs = ["copy_runner/main.mojo"],
+    main = "copy_runner/main.mojo",
+    deps = [":sdk_exec"],
+)
+
+copy_cases(
+    name = "copy_komira",
+    cases = "tests/copy/cases.sql",
+    inputs = _COPY_INPUTS,
+    outputs = [c + ".parquet" for c in _COPY_CASES] + ["counts.tsv"],
+    runner = ":copy_runner",
+)
+
+_COPY_READBACK_INPUTS = dict(_COPY_INPUTS)
+
+_COPY_READBACK_INPUTS.update({"komira/" + c + ".parquet": ":copy_komira[" + c + ".parquet]" for c in _COPY_CASES})
+
+sql_oracle(
+    name = "copy_readback",
+    srcs = ["tests/copy/cases.sql", "tests/copy/readback.sql"],
+    inputs = _COPY_READBACK_INPUTS,
+    outputs = [c + ".parquet" for c in _COPY_CASES] + [c + ".check.tsv" for c in _COPY_CASES],
+)
+
+_COPY_TEST_DATA = {"cases.sql": "tests/copy/cases.sql", "counts.tsv": ":copy_komira[counts.tsv]"}
+
+_COPY_TEST_DATA.update({c + ".check.tsv": ":copy_readback[" + c + ".check.tsv]" for c in _COPY_CASES})
+
 # The engine-execution layer of the SDK: twelve modules (ten leaves plus the
 # plan gate modules) and the engine context with its SQL door (see README.md). Each module's header says what it is for.
 #
@@ -59,8 +109,8 @@ _CSV_TEST_DATA.update({c + ".tsv": ":csv_oracle[" + c + ".tsv]" for c in _CSV_CA
 #   the consumer is called.
 # - test_run_sql_q6: run_sql over an EngineContext. TPC-H Q6's text from
 #   bench_corpus over a lineitem-shaped Parquet file gives the integer
-#   oracle's DECIMAL(38,4); a join, a syntax error, an unknown table, a COPY or
-#   CTAS and a replaced file are named refusals; the footer is read once per
+#   oracle's DECIMAL(38,4); a join, a syntax error, an unknown table, a CTAS
+#   and a replaced file are named refusals; the footer is read once per
 #   query; contexts are created and dropped repeatedly.
 # - test_run_sql_distinct: run_sql over Parquet tables in several row groups:
 #   SELECT DISTINCT over an INT64 and a STRING column gives each value once and
@@ -107,6 +157,19 @@ _CSV_TEST_DATA.update({c + ".tsv": ":csv_oracle[" + c + ".tsv]" for c in _CSV_CA
 #   a derived union, an empty branch, the first branch's names, LIMIT, and the
 #   refusals of a union with no common type and of an ORDER BY before UNION ALL;
 #   and an ORDER BY with no union (the sort sinks' data reaches the builder).
+# - test_copy_readback_duckdb: the pinned DuckDB reads every Parquet file
+#   run_sql's COPY wrote for tests/copy/cases.sql (:copy_readback above) and
+#   finds the same rows, column names and types as in the file DuckDB writes
+#   for the same line, and as many rows as the COPY's `Count`; every case of
+#   cases.sql is checked.
+# - test_run_sql_copy_parquet: COPY ... TO a local Parquet file through
+#   run_sql answers one BIGINT row `Count`; the file read back equals the query
+#   (a table, a query, an empty result, 130,000 rows in two row groups, every
+#   codec as the footer names it, a COPY over the file it reads, a relative
+#   path); CSV and JSON, an unknown extension, a URL, CREATE TABLE AS and a
+#   TIMESTAMP column are named refusals that touch no file; a missing
+#   directory, a directory at the path and an injected full disk leave no
+#   temporary file and the old file whole.
 # - test_run_sql_csv: read_csv through run_sql answers what the pinned DuckDB
 #   answers (the :csv_oracle action below) for each case of tests/csv/cases.sql:
 #   typed columns and their inferred types, quoted cells, NULL-bearing cells, a
@@ -117,7 +180,7 @@ _CSV_TEST_DATA.update({c + ".tsv": ":csv_oracle[" + c + ".tsv]" for c in _CSV_CA
 #   (phase_timers) unregistered and at zero.
 mojo_library(
     name = "sdk_exec",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "copy_runner/**/*.mojo"]),
     # The full transitive closure of the Mojo libraries this package builds on.
     # A later slice that pulls in a new library adds it here in the same change.
     deps = [
@@ -170,6 +233,7 @@ mojo_library(
         "//src/parquet_codec:parquet_codec",
         "//src/parquet_footers:parquet_footers",
         "//src/parquet_scan:parquet_scan",
+        "//src/parquet_writer:parquet_writer",
         "//src/phase_timers:phase_timers",
         "//src/physical_plan:physical_plan",
         "//src/pipeline_exec:pipeline_exec",
@@ -198,11 +262,13 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
+        "tests/test_copy_readback_duckdb.mojo",
         "tests/test_plan_cache_full_sink_hash.mojo",
         "tests/test_plan_validation_gate_direct.mojo",
         "tests/test_plan_validation_routes_ledger.mojo",
         "tests/test_resolved_cache_lru_eviction_stress.mojo",
         "tests/test_resolved_cache_pin_count.mojo",
+        "tests/test_run_sql_copy_parquet.mojo",
         "tests/test_run_sql_csv.mojo",
         "tests/test_run_sql_distinct.mojo",
         "tests/test_run_sql_float_sum_workers.mojo",
@@ -217,10 +283,10 @@ mojo_library(
     ],
     test_deps = [
         "//src/bench_corpus:bench_corpus",
-        "//src/parquet_writer:parquet_writer",
         "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
     ],
     test_data = {
+        "tests/test_copy_readback_duckdb.mojo": _COPY_TEST_DATA,
         "tests/test_run_sql_csv.mojo": _CSV_TEST_DATA,
     },
     visibility = ["PUBLIC"],

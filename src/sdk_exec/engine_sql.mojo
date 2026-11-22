@@ -3,7 +3,11 @@
 # =============================================================================
 #
 # In order: tokenize and parse; bind against the context's catalog and footers;
-# optimize; lower with inputs from the same footers; run. A step that refuses
+# optimize; lower with inputs from the same footers; run. A `COPY ... TO` runs
+# its query the same way and then writes the result as a local Parquet file
+# (`engine_write`, still step `execute`), answering one row with the BIGINT
+# column `Count`; its destination and format are checked at step `bind`, so a
+# refused COPY touches no file. A step that refuses
 # ends the call, and the outcome says which step and the step's own message
 # unchanged; the door retries nothing and keeps no second route. Nothing here
 # raises: a failure of any step is a value.
@@ -29,10 +33,10 @@ from phase_timers.phase_timers import (
     pt_now,
     pt_record,
 )
+from sql.sql_ast import STMT_COPY, STMT_QUERY
 from sql.sql_binder import bind_statement
 from sql.sql_frontend import (
     STATEMENT_NOT_A_QUERY as _SQL_STATEMENT_NOT_A_QUERY,
-    query_plan,
 )
 from sql.sql_parser import parse_sql
 from sql.sql_token import tokenize
@@ -40,6 +44,7 @@ from sql.sql_token import tokenize
 from .engine_context import EngineContext
 from .engine_execute import run_lowered_plan
 from .engine_lower import lower_for_context
+from .engine_write import check_copy_target, count_result, write_parquet_result
 
 comptime STEP_PARSE = "parse"
 comptime STEP_BIND = "bind"
@@ -48,8 +53,9 @@ comptime STEP_LOWER = "lower"
 comptime STEP_EXECUTE = "execute"
 
 comptime STATEMENT_NOT_A_QUERY = _SQL_STATEMENT_NOT_A_QUERY
-"""Refusal (step `bind`): COPY and CREATE TABLE AS wait for a writes slice.
-The same name `sql.sql_frontend.plan_from_sql` refuses them with."""
+"""Refusal (step `bind`): CREATE TABLE AS, which writes into a catalog table,
+and no catalog is bound. The same name `sql.sql_frontend.plan_from_sql`
+refuses a write with."""
 
 comptime OPTIMIZE_UNRESOLVED_SCALAR = "OPTIMIZE_UNRESOLVED_SCALAR"
 """Refusal (step `optimize`): the plan needs a scalar subquery executed first,
@@ -88,7 +94,8 @@ struct SqlOutcome(Movable):
 
 
 def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
-    """Run the SQL query `text` against `ctx`."""
+    """Run the SQL statement `text` against `ctx`: a query, or a
+    `COPY ... TO` a local Parquet file."""
     ctx.begin_query()
     var step = String(STEP_PARSE)
     try:
@@ -99,9 +106,16 @@ def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
         var t_bind = pt_now()
         var bound = bind_statement(stmt, ctx.catalog, ctx.footers)
         pt_record[PH_BIND](t_bind)
-        # COPY and CREATE TABLE AS wait for a writes slice: refused here with
-        # `sql.sql_frontend`'s STATEMENT_NOT_A_QUERY, at step `bind`.
-        var plan = query_plan(bound^)
+        if bound.kind == STMT_COPY:
+            check_copy_target(bound.dest_path, bound.fmt)
+        elif bound.kind != STMT_QUERY:
+            raise Error(
+                String(STATEMENT_NOT_A_QUERY)
+                + ": CREATE TABLE AS writes into a catalog table, and no"
+                " catalog is bound; write COPY (<query>) TO '<file>.parquet'"
+                " to write a file"
+            )
+        var plan = bound.take_plan()
         step = String(STEP_OPTIMIZE)
         var deps = ScalarDepTable()
         var t_optimize = pt_now()
@@ -119,7 +133,11 @@ def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
         step = String(STEP_EXECUTE)
         var batch = run_lowered_plan(ctx, lowered^)
         var outcome = SqlOutcome()
-        outcome.batches.append(batch^)
+        if bound.kind == STMT_COPY:
+            var rows = write_parquet_result(batch^, bound.dest_path, bound.codec)
+            outcome.batches.append(count_result(rows))
+        else:
+            outcome.batches.append(batch^)
         return outcome^
     except e:
         return SqlOutcome(step^, String(e))
