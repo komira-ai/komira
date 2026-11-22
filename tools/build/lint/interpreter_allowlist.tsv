@@ -56,6 +56,8 @@ python/tests/test_udf_cancel.py	the Python UDF runtime's tests: a ctypes host dr
 python/tests/test_udf_contract.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
 python/tests/test_udf_generations.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
 python/tests/test_udf_lifecycle.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
+python/tests/test_udf_supervision.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
+python/tests/test_udf_engine_child.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
 python/tests/test_udf_process.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
 src/arrow_ipc/tests/fixtures/arrow_ipc/gen_fixtures.py	fixture provenance: the pyarrow program that wrote the Arrow IPC fixtures beside it (a third-party writer is the point)
 src/arrow_ipc/tests/fixtures/arrow_ipc/gen_pyarrow_interop_fixtures.py	fixture provenance: the pyarrow program that wrote the Arrow IPC fixtures beside it (a third-party writer is the point)
