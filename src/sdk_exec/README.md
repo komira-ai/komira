@@ -189,7 +189,7 @@ The tests run when the package is built.
   worker and on three: NULL rows equal, an all-NULL and an empty input,
   repeated rows, several columns of mixed types, one column of each key type,
   NaN, inputs widened to a common type, INTERSECT binding tighter than UNION
-  ALL and EXCEPT, a sort, a limit and an aggregation over the result; every
+  ALL and EXCEPT, a sort and an aggregation over the result; every
   case is run; INTERSECT ALL and EXCEPT ALL are refused at parse by name.
 - `test_secret_capability_reveal`: a capability reveals exactly the secret
   bound to its own node id, once and after one store resolve; two capabilities

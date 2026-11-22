@@ -35,7 +35,7 @@
 #                       either side of them; EXCEPT twice folds left to right;
 #                       UNION ALL then EXCEPT, EXCEPT then UNION ALL.
 #   test_what_surrounds_a_set_operation_equals_duckdb
-#                       ORDER BY and LIMIT after the last branch, count(*) and
+#                       ORDER BY after the last branch, count(*) and
 #                       GROUP BY over a derived INTERSECT / EXCEPT, a SELECT
 #                       DISTINCT input, FROM-less literal inputs.
 #   test_every_case_is_run
@@ -183,7 +183,7 @@ def _precedence() -> List[String]:
 
 def _surroundings() -> List[String]:
     return List[String]([
-        "order_limit", "count_over_derived", "group_over_derived",
+        "order_by", "count_over_derived", "group_over_derived",
         "distinct_inputs", "literals",
     ])
 

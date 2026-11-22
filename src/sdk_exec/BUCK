@@ -141,7 +141,7 @@ _SET_OPS_CASES = [
     "except_twice",
     "union_all_then_except",
     "except_then_union_all",
-    "order_limit",
+    "order_by",
     "count_over_derived",
     "group_over_derived",
     "distinct_inputs",
@@ -275,7 +275,7 @@ _SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in
 #   tests/set_ops/cases.sql, on one worker and on three: NULL rows equal, an
 #   all-NULL and an empty input, repeated rows, several columns of mixed types,
 #   one column of each key type, NaN, inputs widened to a common type, the
-#   precedence of INTERSECT over UNION ALL and EXCEPT, a sort, a limit and an
+#   precedence of INTERSECT over UNION ALL and EXCEPT, a sort and an
 #   aggregation over the result; every case is run; INTERSECT ALL and EXCEPT
 #   ALL are refused at parse by name.
 # - test_run_sql_timers_off: Q6 through run_sql on four workers in the default

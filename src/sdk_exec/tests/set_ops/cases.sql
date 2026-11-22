@@ -33,7 +33,7 @@ COPY (SELECT k FROM read_parquet('ab.parquet') EXCEPT SELECT k FROM read_parquet
 COPY (SELECT i FROM read_parquet('l.parquet') EXCEPT SELECT i FROM read_parquet('r.parquet') WHERE i > 1 EXCEPT SELECT i FROM read_parquet('r.parquet') WHERE i < 0) TO 'except_twice.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT k FROM read_parquet('ta.parquet') UNION ALL SELECT k FROM read_parquet('tb.parquet') EXCEPT SELECT k FROM read_parquet('tn.parquet')) TO 'union_all_then_except.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT k FROM read_parquet('ta.parquet') EXCEPT SELECT k FROM read_parquet('tb.parquet') UNION ALL SELECT k FROM read_parquet('ta.parquet')) TO 'except_then_union_all.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
-COPY (SELECT i, s FROM read_parquet('l.parquet') EXCEPT SELECT i, s FROM read_parquet('r.parquet') ORDER BY i, s LIMIT 5) TO 'order_limit.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT i, s FROM read_parquet('l.parquet') EXCEPT SELECT i, s FROM read_parquet('r.parquet') ORDER BY i, s) TO 'order_by.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT count(*) AS n, count(i) AS ni FROM (SELECT i, d FROM read_parquet('l.parquet') INTERSECT SELECT i, d FROM read_parquet('r.parquet')) x) TO 'count_over_derived.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT s, count(*) AS n FROM (SELECT s, i FROM read_parquet('l.parquet') EXCEPT SELECT s, i FROM read_parquet('r.parquet')) x GROUP BY s) TO 'group_over_derived.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT DISTINCT s FROM read_parquet('l.parquet') INTERSECT SELECT s FROM read_parquet('r.parquet') WHERE d IS NULL AND i IS NULL) TO 'distinct_inputs.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
