@@ -30,6 +30,12 @@ lake = komira.iceberg(
 s.sql("SELECT * FROM lake.sales.orders LIMIT 10", lake=lake)
 ```
 
+One source given before the query, the owner's form, read as `self`:
+
+```python
+out = s.sql(orders, "SELECT region, sum(amount) FROM self GROUP BY region")
+```
+
 Both in one statement, with the catalog bound once on the session:
 
 ```python
@@ -37,6 +43,13 @@ s.bind("lake", lake)
 s.sql("INSERT INTO lake.sales.orders SELECT * FROM orders", orders=orders)
 ```
 
+- For the positional form, these alternatives were rejected:
+  - naming the source after the caller's variable, which Python cannot see reliably;
+  - a `sql` method on every source, a second door for the same thing;
+  - another name than `self` (`this`, `t`, `_`), where polars' choice is the one users have met
+    *(inferred)*.
+
+  The reasons are in [Options considered](#options-considered).
 - The SQL text is DuckDB's. Only the Python call is komira's: the names a statement reads come from
   keyword arguments of `sql`, or from `bind` on the session.
 - A source is an object the user holds. A credential is an object with a name.
@@ -55,7 +68,7 @@ The rest of the document assumes the recommendation.
 | plaintext `http://` URLs in a query | reads them | refuses them by name (`STORAGE_URL_REFUSED`); plaintext only through a bound source's `endpoint=` | refuse: a URL in a query should not be able to turn off transport security |
 | an S3 source with no region from any setting | assumes `us-east-1` | refuses by name (`STORAGE_REGION_UNKNOWN`) | refuse: a guessed region turns a missing setting into a redirect error from the wrong place |
 | `COPY ... TO` with no `FORMAT` and an extension it cannot read | writes CSV | refuses by name (`COPY_FORMAT_NOT_INFERRED`) | refuse: guessing writes a file the statement may not have meant |
-| a URL under no bound scope, on the default session or any other | sends the request with no credential unless a secret was created; the provider chain is opt-in (`CREATE SECRET (TYPE s3, PROVIDER credential_chain)`) *(to confirm against the pinned DuckDB)* | every session starts with `s3://` and `gs://` scopes bound to `komira.AMBIENT`, the process's own identity through the provider chains (decision 3) | keep the ambient default: it is what boto3, pyarrow and polars do beside komira, and `s.bind(..., komira.files("s3://", credential=komira.ANONYMOUS))` turns it off |
+| a URL under no bound scope, on the default session or any other | sends the request with no credential unless a secret was created; the provider chain is opt-in (`CREATE SECRET (TYPE s3, PROVIDER credential_chain)`) *(to confirm against the pinned DuckDB)* | every session starts with `s3://` and `gs://` scopes bound to `komira.AMBIENT`, the process's own identity through the provider chains (decision 3) | keep the ambient default: it is what boto3, pyarrow and polars do beside komira *(inferred from their default credential chains)*, and `s.bind(..., komira.files("s3://", credential=komira.ANONYMOUS))` turns it off. The third default scope, `https://`, is `komira.ANONYMOUS`. An `az://` URL has no default scope and is refused with `CREDENTIALS_NOT_FOUND` until a scope is bound |
 | the environment variables below, which `komira.AMBIENT` reads | its credential chain reads the same providers' variables | reads exactly the list below, inside the library, only for `komira.AMBIENT`, and `AwsProfile` reads only the file locators | allow the whole list as rule S2's provider-standard credentials, including the names outside `AWS_*` and `GOOGLE_*`: they are how the providers find credentials, and nothing else in komira reads the environment |
 
 ### The environment komira reads
@@ -70,7 +83,7 @@ The Python package reads none.
 | AWS | `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`, `AWS_ROLE_SESSION_NAME` | web identity |
 | AWS | `AWS_PROFILE`, `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE` | the profile and the files it lives in |
 | AWS | `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`, `AWS_CONTAINER_CREDENTIALS_FULL_URI`, `AWS_CONTAINER_AUTHORIZATION_TOKEN`, `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE` | the container credential service |
-| AWS | `AWS_EC2_METADATA_DISABLED`, `AWS_EC2_METADATA_SERVICE_ENDPOINT`, `AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE` and the other `AWS_EC2_METADATA_*` settings | the instance metadata service. Its endpoint says where credentials are, not where data goes |
+| AWS | `AWS_EC2_METADATA_DISABLED`, `AWS_EC2_METADATA_V1_DISABLED`, `AWS_EC2_METADATA_SERVICE_ENDPOINT`, `AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE` | the instance metadata service. Its endpoint says where credentials are, not where data goes |
 | AWS | `AWS_REGION`, `AWS_DEFAULT_REGION` | the region, only for `ambient` (decision 7) |
 | Google | `GOOGLE_APPLICATION_CREDENTIALS`, `CLOUDSDK_CONFIG`, `GCE_METADATA_HOST` | the credentials file, gcloud's directory, the metadata server |
 | both | `HOME`; `APPDATA` on Windows (`gcp_core` only) | to find the well-known files |
@@ -188,6 +201,8 @@ Fixed before this design and not reopened:
 
 ### 1. Sources are objects; credentials are named objects
 
+Every Python name in this decision is **PROPOSED**. `komira.Session` itself **EXISTS** (release 1).
+
 **A source** says where data is. It is a value the user builds and holds, and building one does no
 I/O. There is one kind of object per kind of source, and they all bind the same way (decision 2).
 
@@ -242,7 +257,7 @@ I/O. There is one kind of object per kind of source, and they all bind the same 
 ### 2. Binding a name: per call, or once on the session
 
 There is one operation: bind a name to a source. It has two spellings, which differ only in how long
-the binding lasts.
+the binding lasts. `bind` and `sql` are **PROPOSED**. `Session.register_parquet` **EXISTS**.
 
 | spelling | lasts | example |
 |---|---|---|
@@ -250,9 +265,10 @@ the binding lasts.
 | `s.sql(source, query, /, **sources)` | this statement | `out = s.sql(orders, "SELECT region, sum(amount) FROM self GROUP BY region")` |
 | `s.bind(name, source)` | until the session closes, or until the name is bound again | `s.bind("lake", lake)` |
 
-- **One unnamed source per call, as `self`.** The owner's form `s.sql(t, "COMMAND")` is served: a
-  source given before the query is bound for that statement under the name `self`. This is the name
-  polars' `DataFrame.sql` gives its frame.
+- **One unnamed source per call, as `self`.** The owner's form `s.sql(t, "COMMAND")` is served
+  (**PROPOSED**): a source given before the query is bound for that statement under the name `self`.
+  `self` is, by the author's reading of polars' documentation, the name polars' `DataFrame.sql` gives
+  its frame *(to confirm against the pinned polars)*.
   - Named sources may be added beside it.
   - A second unnamed source raises `TypeError`, because two sources cannot share one name. A keyword
     `self=` beside an unnamed source raises `TypeError` too.
@@ -268,17 +284,30 @@ the binding lasts.
 - **Binding a name again replaces it.** Nothing appends behind the user's back.
 - **Credential values follow the binding that brought them.**
   - A value that arrives with a session binding is the session's value of that name.
+    - Binding a new value under an existing name on the session changes it for every binding that
+      uses the name, session and call alike. This is intended: the plan says only the name, so a name
+      has one meaning in a session.
   - A value that arrives with a call binding is that call's value of the name. It is dropped with
     the call, and never changes the session's value.
+  - **Every value has a generation**, a number the session draws from one counter for each value it
+    seals, whether on the session or on a call (**PROPOSED**).
+    - A value byte-equal to the one already held under that name keeps its generation.
+    - Any other value gets a new one.
+    - So a user who passes a new token under the same name on each call, with no session binding,
+      gets a new generation on the call that brings it. No cache answers that call from an earlier
+      call's value (decision 6).
   - Within one statement, one credential name has one value. Two different values under one name
     are refused at bind with `CREDENTIAL_NAME_CONFLICT`, naming the credential and both binding names.
     This applies to two call bindings, and to a call binding against a session binding.
   - **The refusal of a call binding that differs from the session's value is intended.** The plan
     carries only the name, so one statement with two values for it would mean two identities under one
     name. No job manager could reproduce that.
-  - A user whose token was rotated does one of two things: binds the source on the session again
-    with the new value, which starts a new generation (decision 5), or gives the new value a new
-    credential name.
+  - A user whose token was rotated does one of three things:
+    - With no session binding of the name, they pass the new value on the next call. It gets a new
+      generation.
+    - With a session binding of the name, they bind the source on the session again with the new
+      value. That changes the name for every binding, at a new generation (decision 5).
+    - They give the new value a new credential name.
   - So reading one location under two credentials in one statement needs two credential names.
 - **`sql` takes no keyword other than sources, now or later.** Every keyword names a source, so a
   future option can never collide with a table name. Options belong on `Session`.
@@ -432,10 +461,15 @@ message WireWriteTarget {
 - **Location.** For files, the location is the path or URL already in `paths`, verbatim. For a catalog,
   it is `uri`, `warehouse`, and the table's `namespace` and `name`. Every one of these is something the
   user wrote, not something a deployment maps from a name.
-- **One `region` field, deliberately.** For an object store, the region a request is routed to and
-  the region SigV4 signs for are one region, by the protocol. A catalog has no store region, and uses
-  the field only for signing. No source needs the two to differ. If one ever does, a new optional
-  `signing_region` field would be additive and would default to `region`.
+- **One `region` field, deliberately.** It holds the region that requests are signed for, and it
+  routes requests only where the store routes by region.
+  - On AWS S3, routing and signing use one region, by the protocol.
+  - An S3-compatible store named by `endpoint` routes by its endpoint and uses `region` only to sign.
+    That is the counter-case to "routing region", and the field's meaning, signing first, covers it.
+  - A catalog uses `region` only to sign.
+  - *(Inferred)*: no source this design serves needs a signing region different from the region it
+    routes by, where it routes by region at all. If one ever does, a new optional `signing_region`
+    would be additive and would default to `region`.
 - **A source that needs two credentials carries two access fields, each named for what it reaches.**
   One field never holds two credentials.
   - A catalog has `access`, for the catalog's own API, and `data_access`, for its table files when
@@ -456,13 +490,13 @@ message WireWriteTarget {
   query or fragment. Each field is at most 2048 bytes. A violation is refused on decode, by name, so
   the rule does not depend on Python's checks.
 - **Settings that are local to one machine stay out of the plan.** Today the only such setting is
-  `Session(ca_file=...)`, the trust roots for `https://` (decision 9). A job manager uses its own
+  `Session(ca_file=...)` (**PROPOSED**), the trust roots for `https://` (decision 9). A job manager uses its own
   deployment's trust store.
 - **The credential name is in the body and in the header.**
   - Because it is in the body, the digest binds it. `DeclaredNeeds.credentials` joins the digest
     trailer ([optimized_plan.md](optimized_plan.md)), so a scheduler sees every name a plan needs
     without decoding the body.
-  - `komira_plan_render` prints each source's credential name and settings, so the rendered text,
+  - `komira_plan_render` (**EXISTS**, ABI 1.1) prints each source's credential name and settings (**PROPOSED**), so the rendered text,
     and the structural hash computed from it, tells two identities apart (decision 6).
 - **Compatibility.** Every field is new and optional, which is additive under rule B8.
   - An old reader must not run a remote source as if it were local. The pull request that lifts the
@@ -528,13 +562,12 @@ bytes whichever party runs it.
        `prod` credential to an address they control. In a local session, `endpoint=` stays the user's
        own choice.
   4. **Hosts resolve names, and nothing else hands them values.** A host gets a value only by
-     resolving a name its segment carries, through the same interface. It never gets one directly
-     from another host or from the committer. The coordinator's run-scoped names, below, are entries
-     in that same resolver.
+     resolving a name its segment carries, through the same interface, inside the customer's boundary
+     when the row says so. It never gets one from another host, from the committer or the coordinator,
+     or from a central service.
   5. **A conformance test holds the two together.** One plan is run by a local session and by a fake
      job-manager resolver that binds the same names, and both answer the same.
-- **Vended credentials** (Iceberg's `storage-credentials`) are not bound to a name, except for a
-  staged create on several hosts (below). Whoever loads a table gets them from the catalog, under the catalog's credential name.
+- **Vended credentials** (Iceberg's `storage-credentials`) are never bound to a name. Whoever loads a table gets them from the catalog, under the catalog's credential name.
   - For a table's data files, vended credentials come first when the catalog source asks for them
     (`vended`). Otherwise the scope covering the file's location applies (decision 3).
   - A bound scope never widens where komira writes inside a table: the Iceberg design's
@@ -548,21 +581,16 @@ bytes whichever party runs it.
   - The location of a staged table is known only from the stage-create response. So for a staged
     create, the coordinator fills `data_access` after that response and before it cuts the segments
     for the hosts.
-  - When the catalog only vends and no scope covers that location, the coordinator adds one
-    **run-scoped name** to the run's resolver, `vended.<statement id>`, which holds the staged create's
-    vended credentials. It puts that name in each host's segment as its `data_access.credential`.
-    - `<statement id>` is 32 lowercase hex digits the coordinator draws at random. The name fits
-      decision 1's grammar, and the prefix `vended.` is reserved for these names.
-    - A client-submitted plan that names a `vended.` credential is refused on decode.
-    - Each host segment's header lists its run-scoped name, so the header check holds per segment.
-    - The kind check and the endpoint allow-list do not apply to it. Its value comes from the catalog
-      for the table's own location, and the Iceberg design's `ICEBERG_LOCATION_REFUSED` rule bounds
-      where it is used.
-    - Hosts resolve it through the same interface as any other name. It exists only for that run.
-    - The resolver gains one **PROPOSED** operation for it: a coordinator adds a run-scoped name, and
-      the run's end removes it.
-
-    So a value reaches a host only through the resolver.
+  - **When no scope covers that location, a staged create on several hosts is refused at bind**,
+    before any file is written (`ICEBERG_STAGED_CREATE_NO_SCOPE`, the Iceberg design's code). The
+    message says to bind a scope over the table's location.
+    - The staged create's vended credentials stay with the party that ran the stage-create, for its
+      own writes. No other party receives them.
+    - The rejected alternative, a run-scoped name holding them, would have put a vended value in the
+      coordinator's hands and through the resolver to every host. That conflicts with item 4, and the
+      entry would have had no secret-catalog row to check its kind and endpoints against.
+    - A vend-only catalog can still be written by a staged create in one process, and by appends on
+      several hosts, which load the existing table's credentials themselves.
   - In the first slice there is one process, and the session uses the vended credentials directly.
 - **Bind time versus run time.** For a job-manager run, the client binds and optimizes with the user's
   credentials, and the hosts read with the run's. The plan's scan pins (data fingerprints) are checked
@@ -576,8 +604,15 @@ statement under two credential names (decision 2). A cache must never answer ide
 read for identity A.
 
 - **The identity of a read** is one tuple: `(location, credential name, credential generation,
-  endpoint, region, addressing)`. The location includes a URL's query string. Two reads that differ in
-  any part are two reads.
+  endpoint, region, addressing, signing service)`. The location includes a URL's query string. Two
+  reads that differ in any part are two reads.
+  - A table file read with a catalog's `data_access` has that access's credential name and generation
+    in its tuple. A file under the catalog's own `access` is never read with it.
+  - A table file read with vended credentials has, as its credential part,
+    `vended(<catalog credential name>, <its generation>, <table uuid>)`.
+    - A refresh of the vended value within that triple keeps the identity. It is the catalog's grant
+      to the same principal for the same table.
+    - A new catalog credential generation, or another table, is another identity.
   - Every key below is this tuple, or this tuple with the location narrowed to its scheme and bucket
     or account.
   - The one exception is the compile cache, which is handled by invalidation instead.
@@ -710,13 +745,16 @@ komira_last_error_step	Int32	Handle	1.x
     cross-origin hop.
 - **Plaintext `http://` URLs are refused** (`STORAGE_URL_REFUSED`; the owner question at the top). The
   only route to plaintext is a source's `endpoint=`.
-- **Trust roots.** `Session(ca_file=None)` adds a PEM file of trusted roots for every `https://` the
+- **Trust roots.** `Session(ca_file=None)` (**PROPOSED**) adds a PEM file of trusted roots for every `https://` the
   session reads. Tests of `https://` reads use a loopback TLS server with a test authority given this
   way.
 - **No proxy.** `http_client` has no `CONNECT` support, and komira reads no `HTTPS_PROXY`. A later
   `Session(proxy=...)` would be additive.
 
 ### 10. Writes
+
+Every Python call in this decision is **PROPOSED**. `komira_sql_stream` and `komira_plan_stream` are
+**PROPOSED** in the ABI design for running a query, and are not built.
 
 **One spelling per door.** The SQL door writes with `COPY` and, into a bound catalog, with
 `CREATE TABLE ... AS` and `INSERT`. The DataFrame door writes with the write terminals and, into a
@@ -802,7 +840,7 @@ Iceberg design's `IcebergError` is a `KomiraError` too.
 | `CREDENTIAL_KIND_MISMATCH` | a credential does not fit its source (an Azure key on `s3://`) | `bind` | `CredentialsError` |
 | `CREDENTIALS_NOT_FOUND` | `ambient` found nothing configured; a URL under no scope | `bind` or `execute` | `CredentialsError` |
 | `CREDENTIALS_INVALID` | a configured chain step is broken; a credentials file is unreadable or malformed; a token the provider rejects at exchange | `bind` or `execute` | `CredentialsError` |
-| `STORAGE_REGION_UNKNOWN` | no region for an S3 source (decision 7) | `bind` | `CredentialsError` |
+| `STORAGE_REGION_UNKNOWN` | no region for an S3 source (decision 7) | `bind` | `StorageError` |
 | `STORAGE_NOT_FOUND` | the object, or the destination's directory, does not exist | `bind` or `execute` | `StorageError` |
 | `STORAGE_ACCESS_DENIED` | the store refused the credential (401, 403), or the server's certificate failed verification, which the store layer classes with these | `bind` or `execute` | `StorageError` |
 | `STORAGE_THROTTLED` | still throttled after the retry policy's attempts | `execute` | `StorageError` |
@@ -893,7 +931,7 @@ merged) conforms to this model. The changes it makes:
 | `komira.session()`, `s.attach_iceberg("lake", uri=, warehouse=, auth=, access_delegation=)`, `s.catalog("lake")` | `komira.Session()`; `lake = komira.iceberg(uri, warehouse=, credential=, signing=, access_delegation=)`; bound per call (`lake=lake`) or with `s.bind("lake", lake)`. `read_table(lake, "sales.orders", as_of=)` takes the source object |
 | `auth=komira.BearerToken(token)`, `OAuth2ClientCredentials(client_id, client_secret, ...)`, `AwsSigV4(region, signing_name)` | the same classes take a name first, and are `credential=`. SigV4 becomes `signing=komira.SigV4(region, service)` with an AWS credential (`AMBIENT` for the chain) |
 | `IcebergTableRef.catalog = 1`: a catalog name the deployment maps to an endpoint and credentials | `WireIcebergCatalog catalog = 1`: the catalog's `uri`, `warehouse` and `access` (credential name, signing). A session-local name never reaches the wire |
-| "the committer hands each host the credentials for its job" | each host resolves the catalog's credential name and loads vended credentials itself. A staged `CREATE TABLE ... AS` on several hosts uses `data_access`, or the coordinator's run-scoped `vended.<statement id>` name (decision 5). No value is handed to a host outside the resolver |
+| "the committer hands each host the credentials for its job" | each host resolves the catalog's credential name and loads an existing table's vended credentials itself. A staged `CREATE TABLE ... AS` on several hosts writes with `data_access`, the scope covering the staged location, and is refused with `ICEBERG_STAGED_CREATE_NO_SCOPE` when none does (decision 5). No value reaches a host except through the resolver |
 | `WireWriteTarget { oneof destination { path = 1; iceberg = 10 } format = 2; codec = 3 }` | the same message, plus `WireSourceAccess access = 4` for a path destination, which must be absent with `iceberg` (decision 4) |
 | vended credentials, then "the session's storage options" | vended credentials, then the scope covering the file's location (decision 3). `ICEBERG_LOCATION_REFUSED` stands |
 | `ICEBERG_CATALOG_NOT_ATTACHED` | `BIND_NAME_UNBOUND`, or `BIND_NOT_A_CATALOG` |
@@ -993,9 +1031,11 @@ that changes an answer or a refusal.
   - A catalog scan whose catalog vends nothing carries the covering scope's credential in
     `data_access`.
   - A staged `CREATE TABLE ... AS` on two fake hosts reaches each host's files through `data_access`.
-    With a vend-only catalog, it reaches them through the run-scoped `vended.<statement id>` name, which
-    the fake resolver drops at the run's end.
-  - A client-submitted plan naming a `vended.` credential is refused on decode.
+    With no covering scope it gives `ICEBERG_STAGED_CREATE_NO_SCOPE` before any file is written, and
+    no host is asked for a value.
+  - Two calls passing different tokens under one name, with no session binding, read under two
+    generations: the second is not answered from the first's cached footer.
+  - Re-binding a name on the session changes what a call binding using that name reads.
   - The fake resolver refuses each of these:
     - a header that omits a name in the body (`OPTIMIZED_NEEDS_CREDENTIALS_MISMATCH`);
     - a row of the wrong kind (`CREDENTIAL_KIND_MISMATCH`);
@@ -1078,7 +1118,15 @@ that changes an answer or a refusal.
   would add a verb, and none of them works per statement. `register_parquet` stays only as a spelling of
   `bind`, because it is released.
 - **The owner's positional form, `s.sql(t, "COMMAND")`.** Served, as `s.sql(source, query)` with the
-  source named `self` (decision 2). Rejected around it:
+  source named `self` (decision 2). The spellings rejected for it:
+  - naming the source after the caller's variable, as DuckDB's Python replacement scans do. It
+    depends on frame inspection, breaks under a rename, and gives no name for an expression;
+  - a `source.sql(query)` method on every source kind, which would be a second door beside `Session.sql`
+    and would not say which session runs it;
+  - another fixed name (`this`, `t`, `_`). `self` is the name polars users have met *(inferred)*, and
+    any fixed name hides a session binding of the same name in the same way.
+
+  Rejected around it:
   - a second unnamed source, which would need two names for one word;
   - an unnamed session binding, which would make `self` silently mean the last thing bound.
 - **Session-local names on the wire** (the Iceberg design's catalog name). Rejected: a job manager
