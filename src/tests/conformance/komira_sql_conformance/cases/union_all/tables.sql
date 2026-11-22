@@ -1,0 +1,38 @@
+-- The UNION ALL corpus's tables: A and B hold one column of each type the
+-- union widening rules touch (TINYINT, SMALLINT, INTEGER, BIGINT, UTINYINT,
+-- UINTEGER, FLOAT, DOUBLE, DECIMAL(12,2), DECIMAL(10,4), VARCHAR,
+-- TIMESTAMP_MS, TIMESTAMP), with NULLs in some rows; EMPTY holds no row.
+-- A FLOAT or DOUBLE is a quoted literal cast to its type, and a value is a
+-- dyadic rational so a widened FLOAT prints the same as the DOUBLE it becomes.
+CREATE TABLE A (
+    id INTEGER, ti TINYINT, si SMALLINT, i INTEGER, bi BIGINT, uti UTINYINT, ui UINTEGER,
+    f FLOAT, d DOUBLE, dec1 DECIMAL(12,2), dec2 DECIMAL(10,4), s VARCHAR,
+    tms TIMESTAMP_MS, ts TIMESTAMP);
+INSERT INTO A VALUES
+    (1, -128, -32768, -2147483648, -9000000000, 0, 0,
+     '1.5'::FLOAT, '2.25'::DOUBLE, 10.50, 1.2500, 'a',
+     '2028-01-02 03:04:05.678', '2028-01-02 03:04:05.678901'),
+    (2, 127, 32767, 2147483647, 9000000000, 255, 4294967295,
+     '-0.5'::FLOAT, '-8.125'::DOUBLE, -99999999.99, 999999.9999, 'bb',
+     '2029-12-31 23:59:59.999', '2029-12-31 23:59:59.999999'),
+    (3, NULL, NULL, NULL, NULL, NULL, NULL,
+     NULL, NULL, NULL, NULL, NULL,
+     NULL, NULL),
+    (4, 0, 0, 0, 0, 7, 70000,
+     '0.0'::FLOAT, '0.0'::DOUBLE, 0.00, 0.0000, '',
+     '2028-02-29 00:00:00', '2028-02-29 00:00:00');
+CREATE TABLE B (
+    id INTEGER, ti TINYINT, si SMALLINT, i INTEGER, bi BIGINT, uti UTINYINT, ui UINTEGER,
+    f FLOAT, d DOUBLE, dec1 DECIMAL(12,2), dec2 DECIMAL(10,4), s VARCHAR,
+    tms TIMESTAMP_MS, ts TIMESTAMP);
+INSERT INTO B VALUES
+    (10, 5, 300, 70000, 5000000000, 200, 3000000000,
+     '3.0'::FLOAT, '1024.5'::DOUBLE, 123456.78, 12.3456, 'x',
+     '2028-06-30 12:00:00.5', '2028-06-30 12:00:00.123456'),
+    (11, -6, -301, -70001, -5000000001, 1, 1,
+     '-16.25'::FLOAT, '0.0625'::DOUBLE, -0.01, -0.0001, 'yy',
+     '2027-01-01 00:00:00', '2027-01-01 00:00:00'),
+    (12, NULL, 9, NULL, 8, NULL, 6,
+     '4.0'::FLOAT, NULL, 5.00, NULL, NULL,
+     NULL, '2028-03-03 03:03:03');
+CREATE TABLE EMPTY (id INTEGER, i INTEGER);

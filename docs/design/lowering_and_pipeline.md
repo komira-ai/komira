@@ -224,10 +224,10 @@ partition id order: it fixes the output order and says nothing about the float r
 first slices set `ORDER_NONE` only; step 9 sets `ORDER_ROW_RANGE` on the ungrouped float case. What `ORDER_ROW_RANGE`
 asks of the driver is in §3.3 and open point O1, and what step 9 built is after the table of §7.3.
 
-**What the cutter refuses.** An `ASOF` join (`SINK_ASOF_JOIN`), a union, a sort-merge join (`SINK_SMJ_BUILD`), the IR's `SOURCE_CONCAT` and
+**What the cutter refuses.** An `ASOF` join (`SINK_ASOF_JOIN`), a sort-merge join (`SINK_SMJ_BUILD`), the IR's
 `SINK_JOIN_PROBE` (a second, sink-form probe the cutter does not emit; the probe is `OP_JOIN_PROBE`, §3.6), a view reference, a shared-subplan reference (`PLAN_CSE_REF`) and
-a cast to string in a pipeline's spine are not cut yet: the IR has the tags, the cutter does not emit them, and "a union is refused" means the cutter does not
-produce a `SOURCE_CONCAT` for it. The cutter raises a named refusal
+a cast to string in a pipeline's spine are not cut yet: the IR has the tags and the cutter does not emit them. A union is cut: each branch ends in a
+segment of its own and the union's pipeline reads their outputs through a `SOURCE_CONCAT` in branch order (src/lowering/README.md). The cutter raises a named refusal
 (`LOWERING_UNCUTTABLE_NODE`, naming the node tag), and does not produce a segment that reads "some batch". A resident
 batch standing in for a subtree discards the subtree's meaning and gives a well-formed plan that computes something
 else; "not yet cut" must stay visible as a refusal. The same holds for a plan with an `EXCHANGE` node when there is one

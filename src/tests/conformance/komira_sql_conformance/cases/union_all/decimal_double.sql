@@ -1,0 +1,3 @@
+-- order: rows
+-- DECIMAL(12,2) UNION ALL DOUBLE is DOUBLE
+SELECT typeof(v) AS t, v FROM (SELECT dec1 AS v FROM B UNION ALL SELECT d FROM B) u

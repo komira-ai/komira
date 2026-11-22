@@ -74,7 +74,7 @@ struct _Pipe(Movable):
     """The schema of the rows the pipeline delivers."""
     var scan_index: Int
     """Pre-order index of the scan that is this pipeline's source; -1 when the
-    source is a breaker's output."""
+    source is a breaker's output or a union's concatenation."""
     var has_project: Bool
     var sorted_input: Bool
     """True while the rows the pipeline delivers are a sort's output in that

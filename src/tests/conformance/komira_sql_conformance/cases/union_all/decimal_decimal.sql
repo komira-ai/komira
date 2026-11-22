@@ -1,0 +1,3 @@
+-- order: rows
+-- DECIMAL(12,2) UNION ALL DECIMAL(10,4) is DECIMAL(14,4)
+SELECT typeof(v) AS t, v FROM (SELECT dec1 AS v FROM B UNION ALL SELECT dec2 FROM A) u

@@ -146,6 +146,13 @@ comptime SUBQ_DERIVED: UInt8 = 5  # `FROM (SELECT ...) alias` derived table (bou
 # does. `SX_SUBQUERY` never points at one.
 comptime SUBQ_UNION_ALL: UInt8 = 6
 
+# The qualifier the parser gives the derived table it wraps a whole UNION ALL in
+# when the last branch carries ORDER BY / LIMIT / OFFSET (the clauses belong to
+# the union, so the parser rewrites it to `SELECT * FROM (<union>) <alias>
+# ORDER BY ... LIMIT ...`). A `#` cannot occur in a lower-folded identifier, so
+# no query can name it. The relation key is `<alias>#<subquery index>`.
+comptime _UNION_RESULT_ALIAS: String = "#union"
+
 # --- FROM join-kind codes (on `JoinClause.kind`, one per FROM relation after the
 # first) ---------------------------------------------------------------------
 # JK_CROSS covers comma-joins, `CROSS JOIN`, and plain/`INNER JOIN` — for all of

@@ -42,6 +42,10 @@
 #      in a nested SELECT; an aliased derived table keyed by its bare alias
 #      or by index 0)
 #  12. A derived table's column-list rename and its malformed spellings.
+#  13. ORDER BY / LIMIT / OFFSET after the last UNION ALL branch move onto a
+#      `SELECT *` over the union parked as a derived table (qualifier `#union`)
+#      after every branch; on any earlier branch each is a syntax error naming
+#      the clause; a derived table may hold a UNION ALL, wrapped the same way.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -111,6 +115,102 @@ def test_union_all_chains_and_other_set_operators_refuse() raises:
     _refuses("SELECT a FROM t UNION SELECT a FROM u", "bare UNION")
     _refuses("SELECT a FROM t INTERSECT SELECT a FROM u", "the INTERSECT set operator")
     _refuses("SELECT a FROM t EXCEPT SELECT a FROM u", "the EXCEPT set operator")
+
+
+def test_union_all_trailing_clauses_wrap_the_union() raises:
+    # ORDER BY / LIMIT / OFFSET after the last branch belong to the whole
+    # union: the query becomes `SELECT * FROM (<union>) #union ORDER BY ...`
+    # over a derived table parked after both branches.
+    var st = _parse(
+        "SELECT a FROM t UNION ALL SELECT b FROM u ORDER BY 1 DESC LIMIT 3"
+        " OFFSET 2"
+    )
+    assert_equal(len(st.query.subqueries), 2)
+    assert_equal(Int(st.query.subqueries[0].kind), Int(SUBQ_UNION_ALL))
+    assert_equal(len(st.query.subqueries[0].body.order_by), 0)
+    assert_false(Bool(st.query.subqueries[0].body.limit))
+    assert_false(Bool(st.query.subqueries[0].body.offset))
+    assert_equal(Int(st.query.subqueries[1].kind), Int(SUBQ_DERIVED))
+    assert_equal(st.query.subqueries[1].derived_alias, "#union#1")
+    assert_equal(st.query.subqueries[1].body.from_tables[0].name, "t")
+    assert_equal(st.query.subqueries[1].body.union_all_idx, 0)
+    assert_equal(st.query.union_all_idx, -1)
+    assert_equal(len(st.query.select_items), 1)
+    assert_true(st.query.select_items[0].is_star)
+    assert_equal(len(st.query.from_tables), 1)
+    assert_equal(st.query.from_tables[0].name, "#union#1")
+    assert_equal(st.query.from_tables[0].rel_alias, "#union")
+    assert_equal(len(st.query.order_by), 1)
+    assert_true(st.query.order_by[0].descending)
+    assert_equal(st.query.limit.value(), 3)
+    assert_equal(st.query.offset.value(), 2)
+    # Each clause alone moves; a query with no trailing clause is not wrapped.
+    var only_offset = _parse("SELECT a FROM t UNION ALL SELECT b FROM u OFFSET 1")
+    assert_equal(only_offset.query.offset.value(), 1)
+    assert_true(only_offset.query.select_items[0].is_star)
+    var only_limit = _parse("SELECT a FROM t UNION ALL SELECT b FROM u LIMIT 1")
+    assert_equal(only_limit.query.limit.value(), 1)
+    var plain = _parse("SELECT a FROM t UNION ALL SELECT b FROM u")
+    assert_equal(plain.query.union_all_idx, 0)
+    assert_false(plain.query.select_items[0].is_star)
+    # A chain of three wraps once; the CTEs sit on the outer select.
+    var chain = _parse(
+        "WITH c AS (SELECT 1 AS a) SELECT a FROM c UNION ALL SELECT a FROM c"
+        " UNION ALL SELECT a FROM c ORDER BY a"
+    )
+    assert_equal(len(chain.query.subqueries), 3)
+    assert_equal(len(chain.query.ctes), 1)
+    assert_equal(chain.query.subqueries[2].derived_alias, "#union#2")
+    assert_equal(len(chain.query.order_by), 1)
+
+
+def test_union_all_clause_before_a_branch_is_a_syntax_error() raises:
+    _refuses(
+        "SELECT a FROM t ORDER BY a UNION ALL SELECT b FROM u",
+        "SQL syntax error: ORDER BY before UNION ALL",
+    )
+    _refuses(
+        "SELECT a FROM t LIMIT 1 UNION ALL SELECT b FROM u",
+        "SQL syntax error: LIMIT before UNION ALL",
+    )
+    _refuses(
+        "SELECT a FROM t OFFSET 1 UNION ALL SELECT b FROM u",
+        "SQL syntax error: OFFSET before UNION ALL",
+    )
+    _refuses(
+        "SELECT a FROM t UNION ALL SELECT b FROM u ORDER BY b UNION ALL"
+        " SELECT c FROM v",
+        "SQL syntax error: ORDER BY before UNION ALL",
+    )
+    _refuses(
+        "SELECT a FROM t UNION ALL SELECT b FROM u LIMIT 1 UNION ALL"
+        " SELECT c FROM v",
+        "SQL syntax error: LIMIT before UNION ALL",
+    )
+
+
+def test_a_derived_table_holds_a_union_all() raises:
+    var st = _parse("SELECT a FROM (SELECT a FROM t UNION ALL SELECT b FROM u) d")
+    assert_equal(len(st.query.subqueries), 2)
+    assert_equal(Int(st.query.subqueries[0].kind), Int(SUBQ_UNION_ALL))
+    assert_equal(Int(st.query.subqueries[1].kind), Int(SUBQ_DERIVED))
+    assert_equal(st.query.subqueries[1].derived_alias, "d#1")
+    assert_equal(st.query.subqueries[1].body.union_all_idx, 0)
+    # A trailing ORDER BY / LIMIT inside the parentheses is wrapped the same
+    # way: the derived entry holds the star select over the wrapped union.
+    var sorted_union = _parse(
+        "SELECT a FROM (SELECT a FROM t UNION ALL SELECT b FROM u ORDER BY 1"
+        " LIMIT 2) d"
+    )
+    assert_equal(len(sorted_union.query.subqueries), 3)
+    assert_equal(sorted_union.query.subqueries[1].derived_alias, "#union#1")
+    assert_equal(sorted_union.query.subqueries[2].derived_alias, "d#2")
+    assert_true(sorted_union.query.subqueries[2].body.select_items[0].is_star)
+    assert_equal(
+        sorted_union.query.subqueries[2].body.from_tables[0].name, "#union#1"
+    )
+    assert_equal(sorted_union.query.subqueries[2].body.limit.value(), 2)
+    assert_equal(len(sorted_union.query.subqueries[2].body.order_by), 1)
 
 
 def test_copy_heads() raises:
