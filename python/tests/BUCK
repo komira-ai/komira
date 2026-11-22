@@ -376,6 +376,31 @@ _PLAN_EXPR_RUNTIMES = [
     **_ON[p["suffix"]]
 ) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES for area in ["", "_goldens"]]
 
+# The plan encoder's relational nodes (komira/_plan), on the same runtimes:
+#
+# - plan_rel_test: the scan sources and the checks of a scan's declared
+#   columns, the field each aggregate and window function derives over each
+#   input type that changes it, join nullability and renaming, a residual typed
+#   by side, the window stacking and its shadow names, and every refusal with
+#   its full message.
+# - plan_rel_goldens_test: the plans of plan_wire's `rel_*` goldens, which the
+#   engine built (src/plan_wire/tests/test_plan_wire_rel_goldens*), encode to
+#   exactly each golden's `.canonical.hex`; and the check fails, at the node
+#   that differs, for a sort key, an aggregate's type, a join kind or a window
+#   frame that differs.
+# - plan_no_sql_test: the encoder imports nothing that reaches libkomira or SQL,
+#   and names and holds no SQL text.
+[py_test(
+    name = "plan_{}_test{}".format(area, suffix),
+    src = "test_plan_{}.py".format(area),
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    args = ["--golden", "$(location komira//src/plan_wire:golden_fixtures)"] if area == "rel_goldens" else [],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES for area in ["rel", "rel_goldens", "no_sql"]]
+
 # The clean-environment install tests of the wheel (python/BUCK,
 # wheel_install_test): the driver that installs the wheels into an empty
 # prefix and runs a test there, the three tests the installed interpreter runs
