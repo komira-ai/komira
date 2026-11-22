@@ -1,22 +1,22 @@
-//! The contract of pypi.yml's text, line by line, part of //:pypi_workflow_cases: `check` reads the
-//! workflow's text and says why it breaks the contract, or null. pypi_workflow_test.zig writes each
-//! defect into the real text and wants it refused with its message; pypi_workflow_run.zig plays runs of
-//! the file. What the contract holds:
+//! The contract of pypi.yml's text, the Linux wheel's publish workflow, line by line, part of
+//! //:pypi_workflow_cases: `check` reads the workflow's text and says why it breaks the contract, or null.
+//! pypi_workflow_test.zig writes each defect into the real text and wants it refused with its message;
+//! pypi_workflow_run.zig plays runs of the file. The file-level rules (`checkFile`) and each job's own
+//! (`checkJob`) are shared with the macOS wheel's workflow, pypi-macos-arm64.yml, whose contract is
+//! pypi_macos_workflow_contract.zig. What the contract of pypi.yml holds:
 //!  - the triggers: `on:` is exactly a push to main whose `paths-ignore` is release.yml's list, one
 //!    `schedule:` of one cron entry at a fixed minute and hour of every day, then `workflow_dispatch:` with
 //!    no input (no pull request, and no other schedule or cron outside a comment); no line outside a
 //!    comment reads a run input (`inputs.`); top-level `permissions` is `{}` exactly once; the concurrency
 //!    is one group per half (`pypi-testpypi` for a push, `pypi-promote` otherwise) with no run cancelled;
-//!  - the jobs are exactly the nineteen of JOBS, each once, each with its exact `if:` (main only, and the
-//!    half: `github.event_name == 'push'` for the TestPyPI half, `!= 'push'` for the promotion), runner,
-//!    `needs:`, environment and permissions; `id-token: write` is held by the two build jobs (the farm
-//!    only) and the four upload jobs (the upload only) and by no other job;
-//!  - farm-connect and buck2 are in the two build jobs alone, at `farm-qos: batch`; the promotion builds
-//!    nothing; `actions/cache/save` is in the two record jobs alone, `actions/cache/restore` in the two
-//!    promote jobs alone;
-//!  - the macOS jobs after the build: each one's outputs and steps exactly, in order (the macOS build's
-//!    present step and the gates of its Mac builds are in release_macos_test.zig);
-//!  - the Linux jobs' own lines: the build's stamp, wheel,
+//!  - the jobs are exactly the ten of JOBS, each once (no macOS job: that is pypi-macos-arm64.yml), each
+//!    with its exact `if:` (main only, and the half: `github.event_name == 'push'` for the TestPyPI half,
+//!    `!= 'push'` for the promotion), runner, `needs:`, environment and permissions; `id-token: write` is
+//!    held by the build job (the farm only) and the two upload jobs (the upload only) and by no other job;
+//!  - farm-connect and buck2 are in the build job alone, at `farm-qos: batch`; the promotion builds
+//!    nothing; `actions/cache/save` is in the record job alone, `actions/cache/restore` in the promote job
+//!    alone;
+//!  - the jobs' own lines: the build's stamp, wheel,
 //!    install test, driver, list of Pythons, dist directory with its record, copied quickstart files,
 //!    matrix and two artifacts; the user test (wheel_user_test_job.zig); the TestPyPI job's storage steps
 //!    before its state and upload; the record job's download and cache key; the promote job's restore,
@@ -26,7 +26,7 @@
 //!  - every `uses:` that is not local names a commit: owner/repo@<40 lowercase hex>;
 //!  - no line outside a comment holds a secret, a password, an API token, curl, wget, jq, twine,
 //!    continue-on-error or pull_request_target, and no `run:` line holds a `${{ }}` expression;
-//!  - the two Linux verdict jobs print exactly their steps, the notice `already ...` last.
+//!  - the two verdict jobs print exactly their steps, the notice `already ...` last.
 
 const std = @import("std");
 const reader = @import("pypi_workflow_text.zig");
@@ -51,15 +51,6 @@ pub const JOBS = [_][]const u8{
     "pypi",
     "pypi-smoke",
     "result-pypi",
-    "build-macos-arm64",
-    "testpypi-macos-arm64",
-    "testpypi-smoke-macos-arm64",
-    "testpypi-passed-macos-arm64",
-    "result-testpypi-macos-arm64",
-    "promote-macos-arm64",
-    "pypi-macos-arm64",
-    "pypi-smoke-macos-arm64",
-    "result-pypi-macos-arm64",
 };
 
 pub const PUSH_GATE = "    if: github.ref == 'refs/heads/main' && github.event_name == 'push'";
@@ -67,7 +58,7 @@ pub const PROMOTE_GATE = "    if: github.ref == 'refs/heads/main' && github.even
 pub const RESULT_PUSH_GATE = "    if: always() && github.ref == 'refs/heads/main' && github.event_name == 'push'";
 pub const RESULT_PROMOTE_GATE = "    if: always() && github.ref == 'refs/heads/main' && github.event_name != 'push'";
 
-const JobSpec = struct {
+pub const JobSpec = struct {
     name: []const u8,
     /// The whole `runs-on:` line.
     runs_on: []const u8,
@@ -78,9 +69,9 @@ const JobSpec = struct {
     perms: []const []const u8,
 };
 
-const BUILD_PERMS = [_][]const u8{ "      contents: read", "      id-token: write" };
-const UPLOAD_PERMS = [_][]const u8{"      id-token: write"};
-const NO_PERMS = [_][]const u8{};
+pub const BUILD_PERMS = [_][]const u8{ "      contents: read", "      id-token: write" };
+pub const UPLOAD_PERMS = [_][]const u8{"      id-token: write"};
+pub const NO_PERMS = [_][]const u8{};
 const empty: []const []const u8 = &.{};
 
 pub const UBUNTU = "    runs-on: ubuntu-24.04";
@@ -97,27 +88,14 @@ const SPECS = [_]JobSpec{
     .{ .name = "pypi", .runs_on = UBUNTU, .gate = PROMOTE_GATE, .needs = "    needs: promote", .environment = "    environment: pypi", .perms = &UPLOAD_PERMS },
     .{ .name = "pypi-smoke", .runs_on = UBUNTU, .gate = PROMOTE_GATE ++ " && needs.pypi.outputs.state != 'differs'", .needs = "    needs: [promote, pypi]", .environment = null, .perms = &NO_PERMS },
     .{ .name = "result-pypi", .runs_on = UBUNTU, .gate = RESULT_PROMOTE_GATE, .needs = "    needs: [promote, pypi, pypi-smoke]", .environment = null, .perms = &NO_PERMS },
-    // the macOS wheel: the build only asks the farm (an ubuntu runner), the smokes run on a hosted Mac
-    .{ .name = "build-macos-arm64", .runs_on = UBUNTU, .gate = PUSH_GATE, .needs = null, .environment = "    environment: build", .perms = &BUILD_PERMS },
-    .{ .name = "testpypi-macos-arm64", .runs_on = UBUNTU, .gate = PUSH_GATE ++ " && needs.build-macos-arm64.outputs.version != ''", .needs = "    needs: build-macos-arm64", .environment = "    environment: testpypi", .perms = &UPLOAD_PERMS },
-    .{ .name = "testpypi-smoke-macos-arm64", .runs_on = MACOS, .gate = PUSH_GATE ++ " && needs.testpypi-macos-arm64.outputs.state != 'differs'", .needs = "    needs: [build-macos-arm64, testpypi-macos-arm64]", .environment = null, .perms = &NO_PERMS },
-    .{ .name = "testpypi-passed-macos-arm64", .runs_on = UBUNTU, .gate = PUSH_GATE, .needs = "    needs: [build-macos-arm64, testpypi-smoke-macos-arm64]", .environment = null, .perms = &NO_PERMS },
-    .{ .name = "result-testpypi-macos-arm64", .runs_on = UBUNTU, .gate = RESULT_PUSH_GATE, .needs = "    needs: [build-macos-arm64, testpypi-macos-arm64, testpypi-smoke-macos-arm64, testpypi-passed-macos-arm64]", .environment = null, .perms = &NO_PERMS },
-    .{ .name = "promote-macos-arm64", .runs_on = UBUNTU, .gate = PROMOTE_GATE, .needs = null, .environment = null, .perms = &NO_PERMS },
-    .{ .name = "pypi-macos-arm64", .runs_on = UBUNTU, .gate = PROMOTE_GATE, .needs = "    needs: promote-macos-arm64", .environment = "    environment: pypi", .perms = &UPLOAD_PERMS },
-    .{ .name = "pypi-smoke-macos-arm64", .runs_on = MACOS, .gate = PROMOTE_GATE ++ " && needs.pypi-macos-arm64.outputs.state != 'differs'", .needs = "    needs: [promote-macos-arm64, pypi-macos-arm64]", .environment = null, .perms = &NO_PERMS },
-    .{ .name = "result-pypi-macos-arm64", .runs_on = UBUNTU, .gate = RESULT_PROMOTE_GATE, .needs = "    needs: [promote-macos-arm64, pypi-macos-arm64, pypi-smoke-macos-arm64]", .environment = null, .perms = &NO_PERMS },
 };
-
-fn isMacosJob(name: []const u8) bool {
-    return std.mem.endsWith(u8, name, "-macos-arm64");
-}
 
 fn isOneOf(name: []const u8, names: []const []const u8) bool {
     for (names) |n| if (std.mem.eql(u8, n, name)) return true;
     return false;
 }
 
+/// The jobs of either workflow that build, save a record and restore one (a workflow holds one of each).
 const BUILD_JOBS = [_][]const u8{ "build", "build-macos-arm64" };
 const PASSED_JOBS = [_][]const u8{ "testpypi-passed", "testpypi-passed-macos-arm64" };
 const PROMOTE_JOBS = [_][]const u8{ "promote", "promote-macos-arm64" };
@@ -155,6 +133,21 @@ pub const SCHEDULE = "  schedule:";
 pub const CRON_PREFIX = "    - cron: '";
 pub const DISPATCH = "  workflow_dispatch:";
 pub const GROUP = "  group: pypi-${{ github.event_name == 'push' && 'testpypi' || 'promote' }}";
+/// What a file-level check of one workflow needs: its concurrency group and its jobs, in order.
+pub const FileSpec = struct {
+    group: []const u8,
+    /// the refusal of another concurrency
+    group_why: []const u8,
+    jobs: []const []const u8,
+    /// the refusal of another job set
+    jobs_why: []const u8,
+};
+pub const FILE = FileSpec{
+    .group = GROUP,
+    .group_why = "concurrency is not exactly one group per half (pypi-testpypi for a push, pypi-promote otherwise) with cancel-in-progress: false",
+    .jobs = &JOBS,
+    .jobs_why = "the jobs are not exactly the ten of the two halves of the Linux wheel, each once, in order",
+};
 pub const NO_CANCEL = "  cancel-in-progress: false";
 
 /// What no line outside a comment may contain, whatever the case.
@@ -353,198 +346,6 @@ pub const RESULT_PYPI_LINES = [_][]const u8{
     "        run: 'echo \"::notice title=pypi::already published: komira $VERSION is on PyPI with the bytes TestPyPI served; nothing was uploaded, and the PyPI smoke passed\"'",
 };
 
-// ---- the macOS jobs after the build: each job's outputs and steps, exactly and in order ----
-// (comment and blank lines dropped; the build itself is held by release_macos_test.zig)
-pub const MAC_TESTPYPI_LINES = [_][]const u8{
-    "      state: ${{ steps.state.outputs.state }}",
-    "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
-    "        with:",
-    "          name: pypi-${{ needs.build-macos-arm64.outputs.version }}-macos-arm64-dist",
-    "          path: dist",
-    "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
-    "        with:",
-    "          name: pypi-${{ needs.build-macos-arm64.outputs.version }}-macos-arm64-smoke",
-    "          path: ${{ runner.temp }}/pypi-macos-arm64/smoke",
-    "      - name: the driver is executable",
-    "        run: chmod +x \"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke\"",
-    "      - name: the macOS wheel on TestPyPI",
-    "        id: state",
-    "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke\" state --index testpypi --dist dist --github-output \"$GITHUB_OUTPUT\"'",
-    "      - name: upload the macOS wheel to TestPyPI",
-    "        if: steps.state.outputs.state == 'absent'",
-    "        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3",
-    "        with:",
-    "          repository-url: https://test.pypi.org/legacy/",
-    "          packages-dir: dist",
-};
-pub const MAC_TESTPYPI_SMOKE_LINES = [_][]const u8{
-    "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
-    "        with:",
-    "          name: pypi-${{ needs.build-macos-arm64.outputs.version }}-macos-arm64-dist",
-    "          path: dist",
-    "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
-    "        with:",
-    "          name: pypi-${{ needs.build-macos-arm64.outputs.version }}-macos-arm64-smoke",
-    "          path: ${{ runner.temp }}/pypi-macos-arm64/smoke",
-    "      - name: the driver is executable",
-    "        run: chmod +x \"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64\"",
-    "      - name: TestPyPI serves the macOS wheel as built",
-    "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64\" verify --index testpypi --dist dist --attempts 5 --delay 30'",
-    "      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0",
-    "        id: python",
-    "        with:",
-    "          python-version: ${{ matrix.python }}",
-    "      - name: pip installs komira from TestPyPI on macOS and the quickstart prints what it should",
-    "        env:",
-    "          PYTHON: ${{ steps.python.outputs.python-path }}",
-    "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64\" install --index testpypi --dist dist --python \"$PYTHON\" --example \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.py\" --expect \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.expected\" --data \"$RUNNER_TEMP/pypi-macos-arm64/smoke/readings.parquet\" --abi-table \"$RUNNER_TEMP/pypi-macos-arm64/smoke/komira.tsv\" --work \"$RUNNER_TEMP/pypi-macos-arm64/install\" --attempts 5 --delay 30'",
-};
-pub const MAC_PASSED_LINES = [_][]const u8{
-    "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
-    "        with:",
-    "          name: pypi-${{ needs.build-macos-arm64.outputs.version }}-macos-arm64-smoke",
-    "          path: ${{ runner.temp }}/pypi-macos-arm64/passed",
-    "      - name: the record of the version that passed",
-    "        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
-    "        with:",
-    "          path: ${{ runner.temp }}/pypi-macos-arm64/passed",
-    "          key: pypi-passed-macos-arm64-${{ needs.build-macos-arm64.outputs.version }}",
-};
-pub const MAC_RESULT_TESTPYPI_LINES = [_][]const u8{
-    "      - name: the macOS build succeeded",
-    "        if: needs.build-macos-arm64.result != 'success'",
-    "        env:",
-    "          BUILD: ${{ needs.build-macos-arm64.result }}",
-    "        run: 'echo \"::error title=pypi-macos-arm64::the macOS build job did not succeed (build-macos-arm64 $BUILD)\" && exit 1'",
-    "      - name: the macOS wheel is on TestPyPI already",
-    "        if: needs.build-macos-arm64.outputs.version == ''",
-    "        run: 'echo \"::notice title=pypi-macos-arm64::the macOS wheel of this version is on TestPyPI already: nothing was built on the Macs\"'",
-    "      - name: the TestPyPI upload of the macOS wheel succeeded",
-    "        if: needs.build-macos-arm64.outputs.version != '' && needs.testpypi-macos-arm64.result != 'success'",
-    "        env:",
-    "          TESTPYPI: ${{ needs.testpypi-macos-arm64.result }}",
-    "        run: 'echo \"::error title=pypi-macos-arm64::the macOS TestPyPI upload job did not succeed (testpypi-macos-arm64 $TESTPYPI)\" && exit 1'",
-    "      - name: the bytes differ at the same version",
-    "        if: needs.testpypi-macos-arm64.outputs.state == 'differs'",
-    "        run: 'echo \"::notice title=pypi-macos-arm64::bytes differ at the same version: a commit that changed only what the stamp ignores changed the wheel; a code commit raises the version\"'",
-    "      - name: the macOS TestPyPI smoke and the record succeeded",
-    "        if: needs.build-macos-arm64.outputs.version != '' && needs.testpypi-macos-arm64.outputs.state != 'differs' && (needs.testpypi-smoke-macos-arm64.result != 'success' || needs.testpypi-passed-macos-arm64.result != 'success')",
-    "        env:",
-    "          TESTPYPI_SMOKE: ${{ needs.testpypi-smoke-macos-arm64.result }}",
-    "          PASSED: ${{ needs.testpypi-passed-macos-arm64.result }}",
-    "        run: 'echo \"::error title=pypi-macos-arm64::the macOS TestPyPI smoke or the record job did not succeed (testpypi-smoke-macos-arm64 $TESTPYPI_SMOKE, testpypi-passed-macos-arm64 $PASSED): this macOS wheel is never promoted to PyPI\" && exit 1'",
-};
-pub const MAC_PROMOTE_LINES = [_][]const u8{
-    "      version: ${{ steps.promote.outputs.version }}",
-    "      skipped: ${{ steps.promote.outputs.skipped }}",
-    "      matrix: ${{ steps.matrix.outputs.matrix }}",
-    "      - name: the newest record of a macOS wheel whose TestPyPI smoke passed",
-    "        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
-    "        with:",
-    "          path: ${{ runner.temp }}/pypi-macos-arm64/passed",
-    "          key: pypi-passed-macos-arm64-",
-    "          restore-keys: pypi-passed-macos-arm64-",
-    "          fail-on-cache-miss: true",
-    "      - name: the driver is executable",
-    "        run: chmod +x \"$RUNNER_TEMP/pypi-macos-arm64/passed/pypi_smoke\"",
-    "      - name: the version to promote, downloaded from TestPyPI and held to the record",
-    "        id: promote",
-    "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/passed/pypi_smoke\" promote --record \"$RUNNER_TEMP/pypi-macos-arm64/passed/built.txt\" --out \"$RUNNER_TEMP/pypi-macos-arm64/dist\" --github-output \"$GITHUB_OUTPUT\"'",
-    "      - name: the Pythons of the macOS PyPI smoke",
-    "        id: matrix",
-    "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/passed/pypi_smoke\" matrix --pythons \"$RUNNER_TEMP/pypi-macos-arm64/passed/pythons.json\" --platform macos-arm64 --github-output \"$GITHUB_OUTPUT\"'",
-    "      - name: keep the dist directory",
-    "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
-    "        with:",
-    "          name: pypi-${{ steps.promote.outputs.version }}-macos-arm64-dist",
-    "          path: ${{ runner.temp }}/pypi-macos-arm64/dist",
-    "          if-no-files-found: error",
-    "          retention-days: 14",
-    "      - name: keep the drivers and the record",
-    "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
-    "        with:",
-    "          name: pypi-${{ steps.promote.outputs.version }}-macos-arm64-smoke",
-    "          path: ${{ runner.temp }}/pypi-macos-arm64/passed",
-    "          if-no-files-found: error",
-    "          retention-days: 14",
-};
-pub const MAC_PYPI_LINES = [_][]const u8{
-    "      state: ${{ steps.state.outputs.state }}",
-    "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
-    "        with:",
-    "          name: pypi-${{ needs.promote-macos-arm64.outputs.version }}-macos-arm64-dist",
-    "          path: dist",
-    "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
-    "        with:",
-    "          name: pypi-${{ needs.promote-macos-arm64.outputs.version }}-macos-arm64-smoke",
-    "          path: ${{ runner.temp }}/pypi-macos-arm64/smoke",
-    "      - name: the driver is executable",
-    "        run: chmod +x \"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke\"",
-    "      - name: the macOS wheel on PyPI",
-    "        id: state",
-    "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke\" state --index pypi --dist dist --github-output \"$GITHUB_OUTPUT\"'",
-    "      - name: upload the macOS wheel to PyPI",
-    "        if: steps.state.outputs.state == 'absent'",
-    "        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3",
-    "        with:",
-    "          packages-dir: dist",
-};
-pub const MAC_PYPI_SMOKE_LINES = [_][]const u8{
-    "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
-    "        with:",
-    "          name: pypi-${{ needs.promote-macos-arm64.outputs.version }}-macos-arm64-dist",
-    "          path: dist",
-    "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
-    "        with:",
-    "          name: pypi-${{ needs.promote-macos-arm64.outputs.version }}-macos-arm64-smoke",
-    "          path: ${{ runner.temp }}/pypi-macos-arm64/smoke",
-    "      - name: the driver is executable",
-    "        run: chmod +x \"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64\"",
-    "      - name: PyPI serves the macOS wheel as built",
-    "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64\" verify --index pypi --dist dist --attempts 5 --delay 30'",
-    "      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0",
-    "        id: python",
-    "        with:",
-    "          python-version: ${{ matrix.python }}",
-    "      - name: pip installs komira from PyPI on macOS and the quickstart prints what it should",
-    "        env:",
-    "          PYTHON: ${{ steps.python.outputs.python-path }}",
-    "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64\" install --index pypi --dist dist --python \"$PYTHON\" --example \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.py\" --expect \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.expected\" --data \"$RUNNER_TEMP/pypi-macos-arm64/smoke/readings.parquet\" --abi-table \"$RUNNER_TEMP/pypi-macos-arm64/smoke/komira.tsv\" --work \"$RUNNER_TEMP/pypi-macos-arm64/install\" --attempts 5 --delay 30'",
-};
-pub const MAC_RESULT_PYPI_LINES = [_][]const u8{
-    "      - name: the newer macOS wheels on TestPyPI that were not promoted",
-    "        if: needs.promote-macos-arm64.outputs.skipped != ''",
-    "        env:",
-    "          SKIPPED: ${{ needs.promote-macos-arm64.outputs.skipped }}",
-    "          VERSION: ${{ needs.promote-macos-arm64.outputs.version }}",
-    "        run: 'echo \"::notice title=pypi-macos-arm64::not promoted: the macOS wheel of komira $SKIPPED on TestPyPI has no record that its TestPyPI smoke passed (the smoke failed, or its run had not ended); komira $VERSION is the newest version whose macOS wheel passed\"'",
-    "      - name: the macOS promotion found a version that passed and fetched it from TestPyPI",
-    "        if: needs.promote-macos-arm64.result != 'success'",
-    "        env:",
-    "          PROMOTE: ${{ needs.promote-macos-arm64.result }}",
-    "        run: 'echo \"::error title=pypi-macos-arm64::the macOS promote job did not succeed (promote-macos-arm64 $PROMOTE): no macOS wheel was published to PyPI; its log says why\" && exit 1'",
-    "      - name: the macOS PyPI upload succeeded",
-    "        if: needs.pypi-macos-arm64.result != 'success'",
-    "        env:",
-    "          PYPI: ${{ needs.pypi-macos-arm64.result }}",
-    "        run: 'echo \"::error title=pypi-macos-arm64::the macOS PyPI upload job did not succeed (pypi-macos-arm64 $PYPI)\" && exit 1'",
-    "      - name: PyPI holds the macOS wheel with the bytes TestPyPI served",
-    "        if: needs.pypi-macos-arm64.outputs.state == 'differs'",
-    "        env:",
-    "          VERSION: ${{ needs.promote-macos-arm64.outputs.version }}",
-    "        run: 'echo \"::error title=pypi-macos-arm64::PyPI holds the macOS wheel of komira $VERSION with other bytes than TestPyPI serves: nothing was uploaded and PyPI was not smoked\" && exit 1'",
-    "      - name: the macOS PyPI smoke succeeded",
-    "        if: needs.pypi-smoke-macos-arm64.result != 'success'",
-    "        env:",
-    "          PYPI_SMOKE: ${{ needs.pypi-smoke-macos-arm64.result }}",
-    "        run: 'echo \"::error title=pypi-macos-arm64::the macOS PyPI smoke job did not succeed (pypi-smoke-macos-arm64 $PYPI_SMOKE)\" && exit 1'",
-    "      - name: the macOS wheel is on PyPI already",
-    "        if: needs.pypi-macos-arm64.outputs.state == 'same'",
-    "        env:",
-    "          VERSION: ${{ needs.promote-macos-arm64.outputs.version }}",
-    "        run: 'echo \"::notice title=pypi-macos-arm64::already published: the macOS wheel of komira $VERSION is on PyPI with the bytes TestPyPI served; nothing was uploaded, and the PyPI smoke passed\"'",
-};
-
 // ---- the checks ---------------------------------------------------------------------------------
 
 /// The lines under the job's `    permissions:` key (indented deeper than the key), or null if the
@@ -627,7 +428,7 @@ fn onLinesHold(lines: []const []const u8, ignores: []const []const u8) bool {
 
 /// Null if the whole file passes its text-level rules, else the refusal: what no line may contain,
 /// the triggers, the permissions and concurrency of the workflow, the job set and the pins.
-fn checkFile(ar: std.mem.Allocator, text: []const u8, release_text: []const u8) !?[]const u8 {
+pub fn checkFile(ar: std.mem.Allocator, text: []const u8, release_text: []const u8, spec: FileSpec) !?[]const u8 {
     var run_indent: ?usize = null;
     var schedule_n: usize = 0;
     var cron_n: usize = 0;
@@ -671,16 +472,16 @@ fn checkFile(ar: std.mem.Allocator, text: []const u8, release_text: []const u8) 
 
     var conc_n: usize = 0;
     const conc = (try topLines(ar, text, "concurrency:", &conc_n)) orelse empty;
-    if (conc_n != 1 or conc.len != 2 or !has(conc, GROUP) or !has(conc, NO_CANCEL)) return "concurrency is not exactly one group per half (pypi-testpypi for a push, pypi-promote otherwise) with cancel-in-progress: false";
+    if (conc_n != 1 or conc.len != 2 or !has(conc, spec.group) or !has(conc, NO_CANCEL)) return spec.group_why;
 
     const names = try jobNames(ar, text);
-    var same_jobs = names.len == JOBS.len;
+    var same_jobs = names.len == spec.jobs.len;
     if (same_jobs) {
         for (names, 0..) |n, i| {
-            if (!std.mem.eql(u8, n, JOBS[i])) same_jobs = false;
+            if (!std.mem.eql(u8, n, spec.jobs[i])) same_jobs = false;
         }
     }
-    if (!same_jobs) return "the jobs are not exactly the nineteen of the two halves of the Linux and the macOS wheel, each once, in order";
+    if (!same_jobs) return spec.jobs_why;
 
     var pit = std.mem.splitScalar(u8, text, '\n');
     while (pit.next()) |line| {
@@ -699,7 +500,7 @@ fn checkFile(ar: std.mem.Allocator, text: []const u8, release_text: []const u8) 
 
 /// Null if the job holds what every job holds: its runner, gate, needs, environment and permissions,
 /// and the tools only some jobs may name.
-fn checkJob(ar: std.mem.Allocator, job: []const []const u8, spec: JobSpec) !?[]const u8 {
+pub fn checkJob(ar: std.mem.Allocator, job: []const []const u8, spec: JobSpec) !?[]const u8 {
     const n = spec.name;
     if (!has(job, spec.runs_on) or countPrefix(job, "    runs-on:") != 1) return try std.fmt.allocPrint(ar, "{s}: runs-on is not exactly `{s}`", .{ n, std.mem.trim(u8, spec.runs_on, " ") });
     if (!has(job, spec.gate) or countPrefix(job, "    if:") != 1) return try std.fmt.allocPrint(ar, "{s}: its if: is not exactly `{s}`", .{ n, std.mem.trim(u8, spec.gate, " ") });
@@ -725,12 +526,12 @@ fn checkJob(ar: std.mem.Allocator, job: []const []const u8, spec: JobSpec) !?[]c
     const wants_id_token = spec.perms.len > 0 and has(spec.perms, "      id-token: write");
     if (mentions(job, "id-token") != wants_id_token) return try std.fmt.allocPrint(ar, "{s}: id-token is named where the job does not hold it", .{n});
     const is_build = isOneOf(n, &BUILD_JOBS);
-    if (mentions(job, "farm-connect") != is_build) return try std.fmt.allocPrint(ar, "{s}: farm-connect is used outside the two build jobs, or missing from them", .{n});
-    if (!is_build and mentions(job, "buck2")) return try std.fmt.allocPrint(ar, "{s}: runs buck2: only the two build jobs build", .{n});
-    if (!is_build and mentions(job, "actions/checkout")) return try std.fmt.allocPrint(ar, "{s}: checks out the repository: only the two build jobs do", .{n});
+    if (mentions(job, "farm-connect") != is_build) return try std.fmt.allocPrint(ar, "{s}: farm-connect is used outside the build job, or missing from it", .{n});
+    if (!is_build and mentions(job, "buck2")) return try std.fmt.allocPrint(ar, "{s}: runs buck2: only the build job builds", .{n});
+    if (!is_build and mentions(job, "actions/checkout")) return try std.fmt.allocPrint(ar, "{s}: checks out the repository: only the build job does", .{n});
     if (std.mem.indexOf(u8, n, "-smoke") == null and !std.mem.eql(u8, n, user_test.JOB) and mentions(job, "setup-python")) return try std.fmt.allocPrint(ar, "{s}: sets up Python: only the smoke jobs and the user test do", .{n});
-    if (mentions(job, "actions/cache/save@") != isOneOf(n, &PASSED_JOBS)) return try std.fmt.allocPrint(ar, "{s}: saves to the cache where it may not, or the record job does not: only the two record jobs save a record", .{n});
-    if (mentions(job, "actions/cache/restore@") != isOneOf(n, &PROMOTE_JOBS)) return try std.fmt.allocPrint(ar, "{s}: restores from the cache where it may not, or the promote job does not: only the two promote jobs read a record", .{n});
+    if (mentions(job, "actions/cache/save@") != isOneOf(n, &PASSED_JOBS)) return try std.fmt.allocPrint(ar, "{s}: saves to the cache where it may not, or the record job does not: only the record job saves a record", .{n});
+    if (mentions(job, "actions/cache/restore@") != isOneOf(n, &PROMOTE_JOBS)) return try std.fmt.allocPrint(ar, "{s}: restores from the cache where it may not, or the promote job does not: only the promote job reads a record", .{n});
     if (mentions(job, "actions/cache@")) return try std.fmt.allocPrint(ar, "{s}: uses actions/cache, which saves at the end of any job: a record is saved by actions/cache/save alone", .{n});
     return null;
 }
@@ -853,7 +654,7 @@ fn outputsAndSteps(ar: std.mem.Allocator, job: []const []const u8, with_outputs:
 }
 
 /// Null if the job's outputs and steps are exactly `want`, in order; else the first line that differs.
-fn checkExact(ar: std.mem.Allocator, job: []const []const u8, name: []const u8, want: []const []const u8, with_outputs: bool) !?[]const u8 {
+pub fn checkExact(ar: std.mem.Allocator, job: []const []const u8, name: []const u8, want: []const []const u8, with_outputs: bool) !?[]const u8 {
     const got = try outputsAndSteps(ar, job, with_outputs);
     for (want, 0..) |w, i| {
         if (i >= got.len) return try std.fmt.allocPrint(ar, "{s}: its outputs and steps are not exactly the contract's: the line `{s}` is missing at the end", .{ name, std.mem.trim(u8, w, " ") });
@@ -863,35 +664,14 @@ fn checkExact(ar: std.mem.Allocator, job: []const []const u8, name: []const u8, 
     return null;
 }
 
-const MacExact = struct { name: []const u8, lines: []const []const u8, with_outputs: bool };
-const MAC_EXACT = [_]MacExact{
-    .{ .name = "testpypi-macos-arm64", .lines = &MAC_TESTPYPI_LINES, .with_outputs = true },
-    .{ .name = "testpypi-smoke-macos-arm64", .lines = &MAC_TESTPYPI_SMOKE_LINES, .with_outputs = false },
-    .{ .name = "testpypi-passed-macos-arm64", .lines = &MAC_PASSED_LINES, .with_outputs = false },
-    .{ .name = "result-testpypi-macos-arm64", .lines = &MAC_RESULT_TESTPYPI_LINES, .with_outputs = false },
-    .{ .name = "promote-macos-arm64", .lines = &MAC_PROMOTE_LINES, .with_outputs = true },
-    .{ .name = "pypi-macos-arm64", .lines = &MAC_PYPI_LINES, .with_outputs = true },
-    .{ .name = "pypi-smoke-macos-arm64", .lines = &MAC_PYPI_SMOKE_LINES, .with_outputs = false },
-    .{ .name = "result-pypi-macos-arm64", .lines = &MAC_RESULT_PYPI_LINES, .with_outputs = false },
-};
-
 /// Null if the workflow text holds the contract, else the refusal. `release_text` is release.yml's,
 /// whose push filter the push trigger repeats.
 pub fn check(ar: std.mem.Allocator, text: []const u8, release_text: []const u8) !?[]const u8 {
-    if (try checkFile(ar, text, release_text)) |why| return why;
+    if (try checkFile(ar, text, release_text, FILE)) |why| return why;
     for (SPECS) |spec| {
         var n: usize = 0;
         const job = (try jobLines(ar, text, spec.name, &n)) orelse return try std.fmt.allocPrint(ar, "the job {s} is missing", .{spec.name});
         if (try checkJob(ar, job, spec)) |why| return why;
-        // the macOS jobs after the build: their outputs and steps exactly; the macOS build's own
-        // contract (the present step, the gates of the Mac builds) is in release_macos_test.zig
-        if (isMacosJob(spec.name)) {
-            for (MAC_EXACT) |m| {
-                if (!std.mem.eql(u8, m.name, spec.name)) continue;
-                if (try checkExact(ar, job, m.name, m.lines, m.with_outputs)) |why| return why;
-            }
-            continue;
-        }
         const s = spec.name;
         const verdict = if (std.mem.eql(u8, s, "build"))
             try checkBuild(ar, job)
