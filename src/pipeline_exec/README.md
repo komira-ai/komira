@@ -16,7 +16,13 @@ Import each module by name; the package root exports nothing.
 - `run_segment`: build the members, size the sink for the workers, run one
   `SegmentTask` per worker, then combine once, finalize and take the output. A
   recorded error, or a cancellation by the caller's `CancellationToken`, is
-  raised after the workers joined, and the sink is never combined or read.
+  raised after the workers joined, and the sink is never combined or read. After
+  the workers join and before the combine, each operator's tail (the rows it
+  owes once every worker has finished: the build rows a RIGHT or FULL join
+  probe found no partner for) is asked of the builder (`op_tail`) and pushed on
+  the calling thread through the operators after it and into the sink as worker
+  0, at a partition position after every source position; a spent limit ends
+  the tails, and a cancel during them is raised after them.
 - `segment_task`: `SegmentRun`, the state the workers share, and `SegmentTask`,
   the worker body. A worker reads the cancel flag and the token at every morsel
   boundary, claims a morsel (`None` at the end of input, never asked again by
@@ -277,7 +283,10 @@ Import each module by name; the package root exports nothing.
   refused), OP_FILTER,
   OP_PROJECT, OP_LIMIT, OP_JOIN_PROBE (a `HashProbeOp`, whose index
   `build_source` makes from the rows the build segment published; a build
-  segment that is not among the segment's dependencies is refused) and the
+  segment that is not among the segment's dependencies is refused; for a RIGHT
+  or FULL probe `op_tail` gives the unmatched build rows, probe columns NULL at
+  the types the chain gives the rows before the probe, in batches of the
+  segment's morsel size, `DEFAULT_MORSEL_ROWS` when it names none) and the
   sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, `(SINK_HASH_BUILD, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)` (a `CollectSink`), `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
@@ -293,18 +302,27 @@ Import each module by name; the package root exports nothing.
   chain's projections over a batch of no rows. Three origins name the borrows of
   the Parquet source (the footer cache, the expression pool, an absent dynamic
   filter).
-- `op_hash_probe`: `HashProbeShared` and `HashProbeOp`, OP_JOIN_PROBE for an
-  INNER equi-join. The probe segment's builder takes the rows the build segment
-  published and makes one composite hash index over the build key columns
-  (`op_join_probe`'s `MultiKeyHashJoinBuilder`), once and on the calling
-  thread before any worker starts. Each worker's `HashProbeOp` reads the index
-  and the build rows and never writes them. A morsel with a selection mask is
-  gathered first; a morsel with no row or no match is FILTERED_EMPTY. The
-  output is the probe columns then the build columns, a build name the probe
-  side uses suffixed `_right`. A NULL key on either side matches nothing; the
-  key types are the kernel's (INT64 and INT32, FLOAT64, STRING). An INT64 key
-  equal to the value the kernel uses for NULL is refused by name
-  (`JOIN_KEY_RESERVED`) rather than silently unmatched.
+- `op_hash_probe`: `HashProbeShared` and `HashProbeOp`, OP_JOIN_PROBE for
+  INNER, LEFT, RIGHT, FULL, SEMI, ANTI and CROSS joins, the join type being the
+  probe's view (probe left, build right; `lowering` exchanges LEFT and RIGHT
+  when the plan builds its left child). The probe segment's builder takes the
+  rows the build segment published and makes one composite hash index over the
+  build key columns (`op_join_probe`'s `MultiKeyHashJoinBuilder`), once and on
+  the calling thread before any worker starts; a CROSS join has no key and no
+  index. Each worker's `HashProbeOp` reads the index and the build rows. A
+  morsel with a selection mask is gathered first; a morsel with no row or no
+  row to emit is FILTERED_EMPTY. The output is the probe columns then the
+  build columns, a build name the probe side uses suffixed `_right`, the
+  columns of a side an outer join pads nullable; SEMI and ANTI give the probe
+  columns only. LEFT and FULL pad a probe row without partner with NULL build
+  columns. RIGHT and FULL mark the build rows that found a partner in one
+  atomic byte each, shared by the workers (the only thing the workers write of
+  the shared part), and `unmatched_build_rows` gives the rest, probe columns
+  NULL, as the operator's tail. A CROSS morsel is emitted in chunks of whole
+  probe rows of about 65536 output rows (HAVE_MORE_OUTPUT between them). A NULL
+  key on either side matches nothing; the key types are the kernel's (INT64 and
+  INT32, FLOAT64, STRING). An INT64 key equal to the value the kernel uses for
+  NULL is refused by name (`JOIN_KEY_RESERVED`) rather than silently unmatched.
 - `plan_harness`: segment descriptors for the four sources with an operator
   chain and a collect sink (`with_agg_sink` turns one into an aggregation),
   `project_columns`, and a sample table with readers, for plans written by hand
@@ -372,9 +390,13 @@ the raise fails the query through the first-error slot.
   start. The build rows and the index are not charged to the segment pool, so
   the memory budget does not see them. There is no runtime filter: the probe
   side's scan reads every row.
-- **A join morsel gives one output batch.** A probe morsel whose rows each
-  match many build rows yields one batch as large as the fan-out, because the
-  probe does not return HAVE_MORE_OUTPUT to split it.
+- **A keyed join morsel gives one output batch.** A probe morsel whose rows
+  each match many build rows yields one batch as large as the fan-out, because
+  the keyed probes do not return HAVE_MORE_OUTPUT to split it; only CROSS does.
+- **The unmatched-row tail is pushed on one thread, after the workers.** A
+  RIGHT or FULL join's tail rows go through the rest of the segment's chain and
+  into the sink on the calling thread, so a long tail is not spread over the
+  workers.
 - **One INT64 key value is refused.** The kernel stands for NULL by one INT64
   value; a join key equal to it raises `JOIN_KEY_RESERVED`.
 

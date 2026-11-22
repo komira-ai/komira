@@ -12,8 +12,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # The real members are the sources `source_parquet`, `source_batch`,
 # `source_sink_output` and `source_csv` (a CSV file decoded at its bound column
 # types, served as a resident batch), the operators `op_filter`, `op_project`,
-# `op_limit` and `op_hash_probe` (the INNER equi-join probe over an index of
-# the build rows),
+# `op_limit` and `op_hash_probe` (the INNER, LEFT, RIGHT, FULL, SEMI, ANTI and
+# CROSS join probe over an index of the build rows; RIGHT and FULL owe their
+# unmatched build rows as a tail that `run_segment` pushes after the workers),
 # the sinks `sink_collect`, `sink_agg` (the ungrouped aggregation, over
 # `agg_fold` and `agg_output`, drawing memory from `segment_pool`; COUNT(DISTINCT) in
 # every aggregation sink is `count_distinct`), `sink_group_agg` (the same keyed by
@@ -94,9 +95,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 and projection around the probe, two probes in
 #                                 a chain, a probe over a sort's output, no row
 #                                 with the joined schema, a build segment that is
-#                                 not a dependency, a plan run twice.
+#                                 not a dependency, an unserved join type, a plan
+#                                 run twice.
 # test_join_plan_concurrent       the same joins on threads, run after run, on a
 #                                 runtime stopped and started again.
+# test_join_kinds_plan            LEFT, RIGHT, FULL, SEMI, ANTI and CROSS joins as
+#                                 hand-built plans against a nested-loop oracle:
+#                                 1 to 7 workers, NULL-key and empty build sides,
+#                                 the tail of RIGHT and FULL (once per build row,
+#                                 no probe row, a projection or filter, an
+#                                 aggregation or a limit after the probe, a
+#                                 second probe), a CROSS join that names a key.
+# test_join_kinds_plan_concurrent RIGHT, FULL, LEFT and SEMI joins on threads
+#                                 over a Parquet probe side, run after run.
 # test_segment_pool               the atomic pool and the worker reservations:
 #                                 budget, blocks, give-back, exact grants under
 #                                 contention.
