@@ -55,13 +55,18 @@ def _column_text(schema: Schema, col: Int) -> String:
     return out^
 
 
-def _schema_difference(want: Schema, got: Schema) -> String:
-    """How `got` differs from `want` in layout, or "" when it does not."""
+def _schema_difference(
+    want: Schema, got: Schema, whose: String = "the union"
+) -> String:
+    """How `got` differs from `want`, the layout of `whose`, or "" when it
+    does not."""
     if got.num_columns() != want.num_columns():
         return (
             String("has ")
             + String(got.num_columns())
-            + " columns and the union "
+            + " columns and "
+            + whose
+            + " "
             + String(want.num_columns())
         )
     for c in range(want.num_columns()):
@@ -77,7 +82,9 @@ def _schema_difference(want: Schema, got: Schema) -> String:
                 + String(c + 1)
                 + " is "
                 + _column_text(got, c)
-                + " and the union's is "
+                + " and "
+                + whose
+                + "'s is "
                 + _column_text(want, c)
             )
     return String("")
