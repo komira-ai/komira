@@ -3,20 +3,21 @@
 #   SEAM: `IcebergCatalog` + `ResolvedTable` + a storage-based conformer.
 # =============================================================================
 #
-# WHAT THIS IS. The catalog-agnostic RESOLVE-ONLY seam the Iceberg READ path
-# resolves a table through. Design decision: we WRITE Iceberg tables storage-based only (bucket+prefix),
-# but we must CONSUME external REST catalogs on the READ path. A catalog is a
-# READ-ONLY table-RESOLUTION layer: it maps `namespace.table` -> the object-store
-# URI of the table's current `metadata.json`. ALL actual DATA access then stays
-# bucket+prefix — the storage-based reader (an Iceberg table reader)
-# consumes that URI. This seam does NOT commit, does NOT write, does NOT read
-# data files — it RESOLVES.
+# WHAT THIS IS. The catalog-agnostic RESOLVE seam the Iceberg read path
+# resolves a table through: it maps `namespace.table` -> the object-store URI
+# of the table's current `metadata.json`. Reading the table's data from that
+# URI is a table reader's job. Creating and committing tables is not on this
+# seam: it is a method of the REST client (`IcebergRestCatalog.create_table`,
+# `commit_table`) and the committer (iceberg_commit.mojo), because only that
+# one adapter writes so far (docs/design/iceberg_tables.md, "Package
+# changes": no new catalog trait until a second adapter exists).
 #
 # THE SEAM. `IcebergCatalog.load_table(namespace, table) -> ResolvedTable`. Two
 # conformers ride the SAME seam so the read path is catalog-agnostic:
-#   * `IcebergRestCatalog[T]` (iceberg_rest_catalog_client.mojo) — the STANDARD
-#     Iceberg REST protocol (GET /v1/config + GET /v1/{prefix}/namespaces/{ns}/
-#     tables/{tbl}), parsing the loadTable JSON into a ResolvedTable.
+#   * `IcebergRestCatalog[T, P]` (iceberg_rest_catalog_client.mojo) — the
+#     STANDARD Iceberg REST protocol (GET /v1/config + GET /v1/{prefix}/
+#     namespaces/{ns}/tables/{tbl}), parsing the loadTable JSON into a
+#     ResolvedTable.
 #   * `StorageBasedCatalog` (below) — the "Hadoop"/bucket+prefix resolver: a
 #     table is at a KNOWN metadata-location; resolution is a pure map lookup, no
 #     network. This is the OTHER conformer, proving the seam covers BOTH the REST
@@ -30,7 +31,7 @@
 #
 # ENCAPSULATION. ZERO UnsafePointer in any signature; ZERO wildcard
 # origins; ZERO unsafe_from_address. Every field is an owned typed value
-# (`String` / `List[String]`). `def`-based, Mojo 1.0.0b2.
+# (`String` / `List[String]`). `def`-based, Mojo 1.0.0.
 # =============================================================================
 
 
@@ -129,9 +130,9 @@ trait IcebergCatalog(Movable, Deinitable):
     No UnsafePointer crosses the boundary — two `String`s in, a `ResolvedTable`
     out.
 
-    RESOLVE-ONLY: there is no `create_table` / `update_table` / `commit` on this
-    trait BY DESIGN — the catalog is a read-only table-resolution layer (a design
-    decision). Writes stay storage-based."""
+    Resolve only: creating and committing are methods of
+    `IcebergRestCatalog`, the one adapter that writes, until a second adapter
+    gives this trait a second implementation of them."""
 
     def load_table(
         mut self, namespace: String, table: String
