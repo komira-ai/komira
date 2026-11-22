@@ -94,7 +94,9 @@ Every kind is runtime-neutral. Whether a runtime supports a kind is a runtime ca
 (`OPTIMIZED_UDF_KIND_UNSUPPORTED`; the capability bit is `ROW` in `shapes`, `udf_runtime_interface.md` §4.2). At the
 first release `komira/python` supports all kinds and `komira/node` all but `STEP`. *(Not yet decided: whether
 `komira/node` ships `ROW` at the first release; the row proxy is staged in the Python runtime,
-`udf_runtime_interface.md` §9 S4.)*
+`udf_runtime_interface.md` §9 S4. Recommendation: ship it. The row object is getters over the `args` children, and
+the read set is explicit: TypeScript has no static scan, so a `ROW` verb takes `columns`. Then both managed runtimes
+offer the same kinds except `STEP`.)*
 
 - **The kind records the call shape.** A `WireUdfApply` targets `SCALAR`, `ROW`, `MAP_BATCHES_COLUMN` or (inside
   `AGG_UDF`) `AGGREGATE`; a `WireMapBatchesNode` targets `MAP_BATCHES_FRAME`; a `WireStepNode` targets `STEP`. Any other pairing
