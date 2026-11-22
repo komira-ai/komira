@@ -79,7 +79,8 @@ def describe_reports_the_runtime_and_the_table_its_entries(env):
     caps = rt.describe()
     assert caps == {
         "runtime_id": "komira/python", "runtime_abi": "cp399", "max_descriptor_version": 1,
-        "shapes": h.SHAPE_SCALAR | h.SHAPE_MAP_BATCHES_COLUMN, "devices": 1, "features": 0,
+        "shapes": h.SHAPE_SCALAR | h.SHAPE_MAP_BATCHES_COLUMN, "devices": 1,
+        "features": h.FEATURE_CONTAINS_CRASHES | h.FEATURE_FORCED_STOP,
         "udf_class": 2,
     }, caps
     t = rt.table

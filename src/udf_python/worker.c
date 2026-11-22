@@ -1,34 +1,56 @@
 /*
- * worker.c: a context's worker and the calls on it.
+ * worker.c: a context's worker, the calls on it, and its supervision
+ * (docs/design/udf_python_worker.md section 5).
  *
  * open_context asks the current generation's zygote to fork one worker, and
  * hands it two descriptors in the FORK request: its end of a fresh socket
- * pair, and the memfd of the cancel word. The context keeps the other end
- * of the socket and its own mapping of the word. Every call on the context's
- * instances goes to that worker, which runs user code on its one thread.
+ * pair, and the memfd of the cancel word. The FORK reply carries the
+ * worker's pid and a pidfd the zygote opened on it before answering, so the
+ * pidfd names that process and no other. The context keeps the other end of
+ * the socket, the pidfd and its own mapping of the word. Every call on the
+ * context's instances goes to that worker, which runs user code on its one
+ * thread.
  *
  * Cancel: the worker cannot read its socket during a call, so while the
  * library waits for a reply it polls in 10 ms ticks; a tick that finds the
- * host's cancel flag set or the deadline passed stores the call's id in the
- * cancel word (once), which the worker reads between rows. Nothing stops the
- * worker by force here.
+ * host's cancel flag set or the deadline passed (by host->now_ns) stores the
+ * call's id in the cancel word, once, which the worker reads between rows.
+ * A worker that has not answered grace_ms (by host->now_ns) after the store
+ * is stopped by force: the context records that it is sending the signal,
+ * then sends SIGKILL through the pidfd.
+ *
+ * Ends: end of file on the worker's socket means the worker ended. Before a
+ * status is returned the context waits, under rt->zy_mu, for the zygote's
+ * EXIT report of that worker, or for the zygote's own end, and names it:
+ *   - during a call: ERR_KILLED when the library's SIGKILL ended it, else
+ *     ERR_WORKER_CRASHED naming the signal or exit status, or the zygote's
+ *     end;
+ *   - before a request (the context polls the socket for a hang-up first, and
+ *     checks the generation's `dead` and its own `exit_known`), or in a
+ *     request that runs no user code: ERR_INSTANCE_LOST naming the same.
+ * Either way the context is lost: every later request returns
+ * ERR_INSTANCE_LOST without reaching a worker, and closing it succeeds.
+ * Nothing is retried.
  *
  * Ownership: `args` is moved in on every call whatever the status and
  * released once its bytes are encoded (or on early refusal). `out` is the
  * host's on OK only: arrays that borrow the reply's payload, whose bytes are
  * reserved through host->mem_reserve until the last array is released.
  *
- * A context is used by one engine thread at a time; only the registry and
- * the generation's counts, touched under rt->zy_mu, are shared.
+ * A context is used by one engine thread at a time; only the registry, the
+ * generation's counts and the EXIT fields, touched under rt->zy_mu, are
+ * shared.
  */
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 #include "udfpy.h"
@@ -39,17 +61,41 @@
 
 static void ctx_free(komira_udf_context_t* c) {
   if (c->sock >= 0) close(c->sock);
+  if (c->pidfd >= 0) close(c->pidfd);
   if (c->word != NULL) munmap((void*)c->word, 8);
   free(c);
 }
 
+/* The current generation in *out, after reading what its zygote sent
+ * unasked; a status with `err` filled when there is none to fork from. */
+static int32_t fork_gen(udfpy_rt* rt, udfpy_gen** out, komira_udf_error* err) {
+  udfpy_gen* g = rt->cur;
+  *out = NULL;
+  if (g != NULL) udfpy_ctl_drain(rt, g);
+  if (g == NULL && rt->n_gens > 0) g = rt->gens[rt->n_gens - 1]; /* the last one, to name its end */
+  if (g != NULL && g->dead && g->helloed) {
+    char how[48];
+    udfpy_how_text(g->exit_how, g->exit_value, how, sizeof(how));
+    return udfpy_fail(err, KOMIRA_UDF_ERR_INSTANCE_LOST, -1,
+                      "the zygote (pid %d) ended with %s; load the UDFs again to open a context", (int)g->spawn_pid,
+                      how);
+  }
+  if (g == NULL || g->retired)
+    return udfpy_fail(err, KOMIRA_UDF_ERR_UNSUPPORTED, -1, "no UDF is loaded; open a context after a load");
+  *out = g;
+  return KOMIRA_UDF_OK;
+}
+
 int32_t udfpy_open_context(udfpy_rt* rt, uint32_t slot, komira_udf_context_t** out, komira_udf_error* err) {
   *out = NULL;
+  if (rt->forked)
+    return udfpy_fail(err, KOMIRA_UDF_ERR_INSTANCE_LOST, -1, "komira/python: %s", UDFPY_FORKED_WHY);
   pthread_mutex_lock(&rt->zy_mu);
-  udfpy_gen* g = rt->cur;
-  if (g == NULL || g->retired) {
+  udfpy_gen* g = NULL;
+  int32_t gst = fork_gen(rt, &g, err);
+  if (gst != KOMIRA_UDF_OK) {
     pthread_mutex_unlock(&rt->zy_mu);
-    return udfpy_fail(err, KOMIRA_UDF_ERR_UNSUPPORTED, -1, "no UDF is loaded; open a context after a load");
+    return gst;
   }
   komira_udf_context_t* c = (komira_udf_context_t*)calloc(1, sizeof(*c));
   if (c == NULL) {
@@ -57,6 +103,7 @@ int32_t udfpy_open_context(udfpy_rt* rt, uint32_t slot, komira_udf_context_t** o
     return udfpy_fail(err, KOMIRA_UDF_ERR_OUT_OF_MEMORY, -1, "no memory for a context");
   }
   c->sock = -1;
+  c->pidfd = -1;
   int sv[2] = {-1, -1};
   int mfd = -1;
   int32_t rc = KOMIRA_UDF_OK;
@@ -79,10 +126,13 @@ int32_t udfpy_open_context(udfpy_rt* rt, uint32_t slot, komira_udf_context_t** o
     rc = udfpy_ctl_request(rt, g, UDFPY_OP_FORK, 0, id, (const uint8_t*)&slot, sizeof(slot), fds, 2, &r, err);
     if (rc == KOMIRA_UDF_OK) {
       rc = udfpy_reply_status(&r, err);
-      if (rc == KOMIRA_UDF_OK && r.len >= 4)
+      if (rc == KOMIRA_UDF_OK && r.len >= 4 && r.nfds == 1) {
         memcpy(&pid, r.payload, 4);
-      else if (rc == KOMIRA_UDF_OK)
+        c->pidfd = r.fds[0]; /* the context owns it now */
+        r.nfds = 0;
+      } else if (rc == KOMIRA_UDF_OK) {
         rc = udfpy_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "the zygote's FORK reply is malformed");
+      }
       udfpy_msg_free(&r);
     }
   }
@@ -138,35 +188,122 @@ void udfpy_close_context(komira_udf_context_t* c) {
   ctx_free(c);
 }
 
-/* ---- one request on the worker's socket ------------------------------------------------- */
+/* ---- the ends of a worker --------------------------------------------------------------- */
 
-static void mark_lost(komira_udf_context_t* c, const char* why) {
+static void mark_lost(komira_udf_context_t* c, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+static void mark_lost(komira_udf_context_t* c, const char* fmt, ...) {
   if (c->lost) return;
   c->lost = 1;
-  snprintf(c->lost_why, sizeof(c->lost_why), "%s", why);
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(c->lost_why, sizeof(c->lost_why), fmt, ap);
+  va_end(ap);
 }
 
 static int32_t lost_error(komira_udf_context_t* c, komira_udf_error* err) {
-  return udfpy_fail(err, KOMIRA_UDF_ERR_INSTANCE_LOST, -1, "the worker (pid %d) is gone; no user code ran", (int)c->pid);
+  return udfpy_fail(err, KOMIRA_UDF_ERR_INSTANCE_LOST, -1, "the worker (pid %d) is gone: %s; no user code ran",
+                    (int)c->pid, c->lost_why);
 }
 
-static int32_t crashed(komira_udf_context_t* c, komira_udf_error* err) {
-  char why[64];
-  snprintf(why, sizeof(why), "the worker (pid %d) ended during the call", (int)c->pid);
-  mark_lost(c, why);
-  return udfpy_fail(err, KOMIRA_UDF_ERR_WORKER_CRASHED, -1, "%s", why);
+static void send_kill(komira_udf_context_t* c) {
+  if (c->pidfd >= 0) syscall(SYS_pidfd_send_signal, c->pidfd, SIGKILL, NULL, 0);
 }
 
+/* How the context's worker ended, once it has: wait for its EXIT report (or
+ * the zygote's end) under the zygote lock. *known is 1 when the report came;
+ * else `zhow` names the zygote's end. */
+typedef struct ending {
+  int known, how, value;
+  pid_t zygote;
+  char text[64]; /* the worker's end, or the zygote's */
+} ending;
+
+static void await_end(komira_udf_context_t* c, ending* e) {
+  udfpy_rt* rt = c->rt;
+  pthread_mutex_lock(&rt->zy_mu);
+  udfpy_await_exit(rt, c);
+  e->known = c->exit_known;
+  e->how = c->exit_how;
+  e->value = c->exit_value;
+  e->zygote = c->gen->spawn_pid;
+  if (e->known)
+    udfpy_how_text(e->how, e->value, e->text, sizeof(e->text));
+  else
+    udfpy_how_text(c->gen->exit_how, c->gen->exit_value, e->text, sizeof(e->text));
+  pthread_mutex_unlock(&rt->zy_mu);
+}
+
+/* The worker ended while no call of user code was in progress. */
+static int32_t ended_idle(komira_udf_context_t* c, komira_udf_error* err) {
+  ending e;
+  await_end(c, &e);
+  if (e.known)
+    mark_lost(c, "it ended with %s while no call was running", e.text);
+  else
+    mark_lost(c, "its zygote (pid %d) ended with %s", (int)e.zygote, e.text);
+  return lost_error(c, err);
+}
+
+/* The worker's socket ended during a call. */
+static int32_t ended_in_call(komira_udf_context_t* c, komira_udf_error* err) {
+  ending e;
+  await_end(c, &e);
+  int pid = (int)c->pid;
+  if (e.known && c->killing && e.how == 1 && e.value == SIGKILL) {
+    mark_lost(c, "it was stopped with SIGKILL during an earlier call");
+    return udfpy_fail(err, KOMIRA_UDF_ERR_KILLED, -1,
+                      "the worker (pid %d) did not stop within grace_ms=%lld after %s and was stopped with SIGKILL", pid,
+                      (long long)c->rt->opt.grace_ms, c->kill_deadline ? "its deadline passed" : "the cancel");
+  }
+  if (e.known) {
+    mark_lost(c, "it ended during an earlier call with %s", e.text);
+    return udfpy_fail(err, KOMIRA_UDF_ERR_WORKER_CRASHED, -1, "the worker (pid %d) ended during the call with %s", pid,
+                      e.text);
+  }
+  mark_lost(c, "its zygote (pid %d) ended with %s", (int)e.zygote, e.text);
+  return udfpy_fail(err, KOMIRA_UDF_ERR_WORKER_CRASHED, -1,
+                    "the worker (pid %d) ended during the call when its zygote (pid %d) ended with %s", pid,
+                    (int)e.zygote, e.text);
+}
+
+/* The worker broke the protocol: it is stopped, and the context lost. */
 static int32_t broke(komira_udf_context_t* c, const char* why, komira_udf_error* err) {
-  kill(c->pid, SIGKILL);
-  mark_lost(c, "the worker's reply broke the framing");
+  send_kill(c);
+  mark_lost(c, "its reply broke the framing");
   return udfpy_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "the worker's reply broke the framing: %s", why);
 }
+
+/* Before a request: refuse it without reaching the worker when the context
+ * is lost, or when its worker or zygote has ended since the last request. */
+static int32_t check_alive(komira_udf_context_t* c, komira_udf_error* err) {
+  if (c->rt->forked) {
+    mark_lost(c, "%s", UDFPY_FORKED_WHY);
+    return lost_error(c, err);
+  }
+  if (c->lost) return lost_error(c, err);
+  struct pollfd p = {c->sock, POLLIN, 0}; /* an idle worker sends nothing: anything is its end */
+  if (poll(&p, 1, 0) > 0 || __atomic_load_n(&c->exit_known, __ATOMIC_ACQUIRE) ||
+      __atomic_load_n(&c->gen->dead, __ATOMIC_ACQUIRE))
+    return ended_idle(c, err);
+  return KOMIRA_UDF_OK;
+}
+
+/* ---- one request on the worker's socket ------------------------------------------------- */
 
 typedef struct watch {
   int stored;
   int deadline; /* what stored the id: 1 the deadline, 0 the cancel flag */
+  int64_t stored_at; /* host->now_ns when it was stored */
 } watch;
+
+/* grace_ms after the store, the library stops the worker by force. */
+static void force_stop(komira_udf_context_t* c, const watch* w, int64_t call_id, int64_t now) {
+  c->killing = 1;
+  c->kill_deadline = w->deadline;
+  udfpy_trace(c->rt, "sigkill ctx=%llu pid=%d call=%lld why=%s now=%lld", (unsigned long long)c->id, (int)c->pid,
+              (long long)call_id, w->deadline ? "deadline" : "cancel", (long long)now);
+  send_kill(c);
+}
 
 /* One request; with `call`, watch it. 0 with *reply (OK or ERROR), or a
  * status with `err` filled. */
@@ -174,37 +311,44 @@ static int32_t request(komira_udf_context_t* c, uint32_t op, uint64_t handle, co
                        const uint8_t* body, size_t body_len, udfpy_msg* reply, watch* w, komira_udf_error* err) {
   const komira_udf_host* host = c->rt->host;
   memset(reply, 0, sizeof(*reply));
-  w->stored = w->deadline = 0;
-  if (c->lost) return lost_error(c, err);
+  memset(w, 0, sizeof(*w));
+  int32_t st = check_alive(c, err);
+  if (st != KOMIRA_UDF_OK) return st;
   int64_t remaining = 0;
   int64_t call_id = call != NULL ? call->call_id : 0;
   if (call != NULL && call->deadline_ns != 0) remaining = call->deadline_ns - host->now_ns(host->host_data);
   uint64_t id = ++c->next_request;
+  c->killing = 0;
   /* The cancel word names a call by this request id, which is never 0 and
    * never repeats on a context, not by the host's call_id, which may be 0. */
-  if (udfpy_send(c->sock, op, id, 0, handle, remaining, (int64_t)id, body, body_len, NULL, 0) != 0) {
-    mark_lost(c, "the worker is gone");
-    return lost_error(c, err);
-  }
+  if (udfpy_send(c->sock, op, id, 0, handle, remaining, (int64_t)id, body, body_len, NULL, 0) != 0)
+    return ended_idle(c, err);
+  int64_t grace_ns = c->rt->opt.grace_ms * 1000000;
   while (call != NULL) { /* a request with no call waits in recv */
     struct pollfd p = {c->sock, POLLIN, 0};
     int r = poll(&p, 1, TICK_MS);
     if (r > 0) break;
-    if (r < 0 && errno != EINTR) return crashed(c, err);
-    if (w->stored) continue;
+    if (r < 0 && errno == EINTR) continue;
+    if (r < 0) return broke(c, "poll of its socket failed", err);
+    int64_t now = host->now_ns(host->host_data);
+    if (w->stored) {
+      if (!c->killing && now - w->stored_at >= grace_ns) force_stop(c, w, call_id, now);
+      continue;
+    }
     int cancel = call->cancel != NULL && __atomic_load_n(call->cancel, __ATOMIC_ACQUIRE) != 0;
-    int late = call->deadline_ns != 0 && host->now_ns(host->host_data) >= call->deadline_ns;
+    int late = call->deadline_ns != 0 && now >= call->deadline_ns;
     if (cancel || late) {
       __atomic_store_n(c->word, (int64_t)id, __ATOMIC_RELEASE);
       w->stored = 1;
       w->deadline = !cancel;
-      udfpy_trace(c->rt, "cancel_word ctx=%llu call=%lld why=%s", (unsigned long long)c->id, (long long)call_id,
-                  cancel ? "cancel" : "deadline");
+      w->stored_at = now;
+      udfpy_trace(c->rt, "cancel_word ctx=%llu call=%lld why=%s now=%lld", (unsigned long long)c->id,
+                  (long long)call_id, cancel ? "cancel" : "deadline", (long long)now);
     }
   }
   const char* why = "";
   int rc = udfpy_recv(c->sock, reply, &why);
-  if (rc == -1) return crashed(c, err);
+  if (rc == -1) return op == UDFPY_OP_CALL_BATCH ? ended_in_call(c, err) : ended_idle(c, err);
   if (rc == -2) return broke(c, why, err);
   if ((reply->op != UDFPY_OP_OK && reply->op != UDFPY_OP_ERROR) || reply->request_id != id) {
     udfpy_msg_free(reply);
@@ -342,8 +486,8 @@ int32_t udfpy_call_batch(udfpy_inst* in, const komira_udf_call* call, struct Arr
     rc = udfpy_fail(err, KOMIRA_UDF_ERR_ABI, -1, "komira/python needs a komira_udf_call of ABI 1.0");
   } else if (dev != ARROW_DEVICE_CPU) {
     rc = udfpy_fail(err, KOMIRA_UDF_ERR_HOST_CONTRACT, -1, "arguments on device type %d, not the CPU", (int)dev);
-  } else if (c->lost) {
-    rc = lost_error(c, err);
+  } else if (c->lost || c->rt->forked) {
+    rc = check_alive(c, err);
   } else if (call->cancel != NULL && __atomic_load_n(call->cancel, __ATOMIC_ACQUIRE) != 0) {
     rc = udfpy_fail(err, KOMIRA_UDF_ERR_CANCELLED, -1, "cancelled before the batch was sent");
   } else if (call->deadline_ns != 0 && host->now_ns(host->host_data) >= call->deadline_ns) {
@@ -369,7 +513,11 @@ int32_t udfpy_call_batch(udfpy_inst* in, const komira_udf_call* call, struct Arr
         if (e.release != NULL) e.release(&e);
         rc = udfpy_fail(err, KOMIRA_UDF_ERR_DEADLINE, row, "the call passed its deadline at row %lld", (long long)row);
       } else {
-        if (rc == KOMIRA_UDF_ERR_OUT_OF_MEMORY) mark_lost(c, "the worker ended after running out of memory");
+        if (rc == KOMIRA_UDF_ERR_OUT_OF_MEMORY) { /* the worker exits after it answers */
+          ending end;
+          await_end(c, &end);
+          mark_lost(c, "it ended with %s after it ran out of memory in an earlier call", end.text);
+        }
         udfpy_error_move(err, &e);
       }
     }

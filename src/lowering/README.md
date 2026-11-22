@@ -28,10 +28,10 @@ and no environment variable and touches no global, so equal arguments give a
   segment, or the branch's aggregation, distinct or sort segment when nothing
   is fused after it) and opens a pipeline whose source is `SOURCE_CONCAT` over
   those segments in branch order, with an `E3` edge to each; what stands above
-  the union fuses onto or closes that pipeline. An inner equi-join
-  (`cut_join`) ends its build child in a `SINK_HASH_BUILD` segment and fuses an
-  `OP_JOIN_PROBE` into the probe child's pipeline, with an `E3` edge to the
-  build segment. The root is a `SINK_COLLECT`
+  the union fuses onto or closes that pipeline. A join
+  (`cut_join`: INNER, LEFT, RIGHT, FULL, SEMI, ANTI and CROSS) ends its build
+  child in a `SINK_HASH_BUILD` segment and fuses an `OP_JOIN_PROBE` into the
+  probe child's pipeline, with an `E3` edge to the build segment. The root is a `SINK_COLLECT`
   segment unless the top node is a breaker, which is then the result.
   `cut_walk` is the dispatch on the node's tag and the resolution of shared
   subplans around it (below); each arm is its own module (`cut_scan`,
@@ -90,15 +90,6 @@ shape:
   scale and timezone); a filter, projection or aggregation that carries a
   UDF, an aggregate function that is a UDF; a limit with an offset or a
   negative count; a limit above a sort (see Order); a partial or final
-  aggregation; an aggregation with a group top-k; a source other than Parquet
-  or in memory.
-- `LOWERING_JOIN_UNSERVED`, naming the reason, raised before either child of
-  the join is walked: a join type other than INNER, a join with no key or with
-  key lists of different lengths, more than 8 keys, a residual predicate, the
-  sort-merge algorithm hint, a build side the plan does not define, a key that
-  is not a column of its side, a key pair whose types the probe does not
-  compare (INT64 and INT32 in any pairing, FLOAT64 with FLOAT64, STRING with
-  STRING), and a join whose output names one column twice.
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
   than Parquet, in memory or CSV; a CSV scan with `header=false` (the reader
@@ -108,6 +99,15 @@ shape:
   type, decimal precision and scale and timezone; the concatenation reads
   every branch by position in the union's layout, so the producer casts and
   renames the branches first).
+- `LOWERING_JOIN_UNSERVED`, naming the reason, raised before either child of
+  the join is walked: a join type the plan IR does not define, a SEMI or ANTI
+  join that builds its left side, a CROSS join that names a key, an equi-join
+  with no key or with key lists of different lengths, more than 8 keys, a
+  residual predicate, the sort-merge algorithm hint, a build side the plan
+  does not define, a key that is not a column of its side, a key pair whose
+  types the probe does not compare (INT64 and INT32 in any pairing, FLOAT64
+  with FLOAT64, STRING with STRING), and a join whose output names one column
+  twice.
 - `LOWERING_SINK_UNSERVED`, naming the triple or the key: a group key with a
   column of a type with no row (an 8- or 16-bit integer, a timestamp, a
   binary, ...), alone or beside served columns, or a segment whose triple has
@@ -144,8 +144,13 @@ holds a shared-subplan reference the right child is walked first, as the
 reference's producer visits a join, with the scan count set for each child,
 so the scans keep their pre-order indices and the right child's segments take
 the lower ids. The probe emits
-its own columns and then the build columns. When the left child builds, a
-projection fused after the probe restores the node's column order. Several
+its own columns and then the build columns (a SEMI or ANTI probe, its own
+columns only). The `OP_JOIN_PROBE`'s join type is the probe's view, the probe
+side as its left input: the plan's type when the right child builds; when the
+left child builds, LEFT and RIGHT are exchanged and INNER, FULL and CROSS stay,
+and a projection fused after the probe restores the node's column order and
+names. A SEMI or ANTI join that builds its left child is refused. A CROSS join
+names no key and its probe carries empty key lists. Several
 joins on one probe pipeline each add their own build segment. A join, like a
 projection, leaves no dictionary key to an aggregation above it.
 

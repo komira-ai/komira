@@ -1,0 +1,433 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 4
+plan {
+  output_schema {
+    fields {
+      name: "k"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "v"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "t"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  limit {
+    n: 3
+    child {
+      output_schema {
+        fields {
+          name: "k"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "v"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "t"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      union_all {
+        children {
+          output_schema {
+            fields {
+              name: "k"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "v"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "t"
+              arrow_type_id: 13
+              nullable: true
+              dict_index_type_id: 4
+            }
+          }
+          filter {
+            predicate {
+              binary_op {
+                op: BIN_GT
+                left {
+                  col_ref {
+                    name: "v"
+                    side: COL_SIDE_NONE
+                  }
+                }
+                right {
+                  literal {
+                    dtype_code: _DT_FLOAT64
+                    float_val: 1.5
+                    kind: SCALAR_KIND_DTYPE
+                    time_unit: SCALAR_TIME_UNIT_MICRO
+                  }
+                }
+              }
+            }
+            child {
+              output_schema {
+                fields {
+                  name: "k"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "v"
+                  arrow_type_id: 12
+                  dtype_code: _DT_FLOAT64
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "t"
+                  arrow_type_id: 13
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+              }
+              scan {
+                source {
+                  parquet {
+                    paths: "/data/events.parquet"
+                    schema {
+                      fields {
+                        name: "k"
+                        arrow_type_id: 5
+                        dtype_code: _DT_INT64
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "v"
+                        arrow_type_id: 12
+                        dtype_code: _DT_FLOAT64
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "t"
+                        arrow_type_id: 13
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                    }
+                    fs_is_local: true
+                  }
+                }
+                has_schema: true
+                schema {
+                  fields {
+                    name: "k"
+                    arrow_type_id: 5
+                    dtype_code: _DT_INT64
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "v"
+                    arrow_type_id: 12
+                    dtype_code: _DT_FLOAT64
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "t"
+                    arrow_type_id: 13
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                }
+                source_kind: SOURCE_KIND_COLUMNAR
+              }
+            }
+          }
+        }
+        children {
+          output_schema {
+            fields {
+              name: "k"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "v"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "t"
+              arrow_type_id: 13
+              nullable: true
+              dict_index_type_id: 4
+            }
+          }
+          scan {
+            source {
+              binding {
+                kind_id: 2103513342
+                kind_name: "komira.csv"
+                name: "/data/events.csv"
+                params {
+                  key: "delimiter"
+                  tag: PARAM_I64
+                  i: 44
+                }
+                params {
+                  key: "has_header"
+                  tag: PARAM_I64
+                  i: 1
+                }
+                params {
+                  key: "path"
+                  tag: PARAM_STR
+                  s: "/data/events.csv"
+                }
+                params {
+                  key: "quote_style_tag"
+                  tag: PARAM_I64
+                }
+                schema {
+                  fields {
+                    name: "k"
+                    arrow_type_id: 5
+                    dtype_code: _DT_INT64
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "v"
+                    arrow_type_id: 12
+                    dtype_code: _DT_FLOAT64
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "t"
+                    arrow_type_id: 13
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                }
+                fingerprint: 3035083686052407376
+                structural_id: 3035083686052407376
+                pushdown_gate {
+                  mode: GATE_REJECT_ALL
+                }
+                snapshot_policy: SNAPSHOT_PINNED
+                snapshot_token: 1234567890
+                orientation: SOURCE_KIND_ROW
+                legacy_source_type: SOURCE_CSV
+                variant_tag: SOURCE_VARIANT_CSV
+                has_legacy_source_type: true
+              }
+            }
+            has_schema: true
+            schema {
+              fields {
+                name: "k"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "v"
+                arrow_type_id: 12
+                dtype_code: _DT_FLOAT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "t"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+            }
+            source_kind: SOURCE_KIND_ROW
+          }
+        }
+        children {
+          output_schema {
+            fields {
+              name: "k"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "v"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "t"
+              arrow_type_id: 13
+              nullable: true
+              dict_index_type_id: 4
+            }
+          }
+          filter {
+            predicate {
+              unary_op {
+                op: UN_IS_NOT_NULL
+                child {
+                  col_ref {
+                    name: "t"
+                    side: COL_SIDE_NONE
+                  }
+                }
+              }
+            }
+            child {
+              output_schema {
+                fields {
+                  name: "k"
+                  arrow_type_id: 5
+                  dtype_code: _DT_INT64
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "v"
+                  arrow_type_id: 12
+                  dtype_code: _DT_FLOAT64
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+                fields {
+                  name: "t"
+                  arrow_type_id: 13
+                  nullable: true
+                  dict_index_type_id: 4
+                }
+              }
+              scan {
+                source {
+                  binding {
+                    kind_id: 2103513342
+                    kind_name: "komira.csv"
+                    name: "/data/events.csv"
+                    params {
+                      key: "delimiter"
+                      tag: PARAM_I64
+                      i: 44
+                    }
+                    params {
+                      key: "has_header"
+                      tag: PARAM_I64
+                      i: 1
+                    }
+                    params {
+                      key: "path"
+                      tag: PARAM_STR
+                      s: "/data/events.csv"
+                    }
+                    params {
+                      key: "quote_style_tag"
+                      tag: PARAM_I64
+                    }
+                    schema {
+                      fields {
+                        name: "k"
+                        arrow_type_id: 5
+                        dtype_code: _DT_INT64
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "v"
+                        arrow_type_id: 12
+                        dtype_code: _DT_FLOAT64
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                      fields {
+                        name: "t"
+                        arrow_type_id: 13
+                        nullable: true
+                        dict_index_type_id: 4
+                      }
+                    }
+                    fingerprint: 3035083686052407376
+                    structural_id: 3035083686052407376
+                    pushdown_gate {
+                      mode: GATE_REJECT_ALL
+                    }
+                    snapshot_policy: SNAPSHOT_PINNED
+                    snapshot_token: 1234567890
+                    orientation: SOURCE_KIND_ROW
+                    legacy_source_type: SOURCE_CSV
+                    variant_tag: SOURCE_VARIANT_CSV
+                    has_legacy_source_type: true
+                  }
+                }
+                has_schema: true
+                schema {
+                  fields {
+                    name: "k"
+                    arrow_type_id: 5
+                    dtype_code: _DT_INT64
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "v"
+                    arrow_type_id: 12
+                    dtype_code: _DT_FLOAT64
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "t"
+                    arrow_type_id: 13
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                }
+                source_kind: SOURCE_KIND_ROW
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
