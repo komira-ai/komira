@@ -313,8 +313,10 @@ session's thread, so it is not offered.
   isolate. The plan door refuses an envelope with UDFs by name until then.
 - **Remote jobs.** These submit an `OptimizedPlan` to a job manager, after its codec exists
   ([optimized_plan.md](optimized_plan.md)).
-- **Also later:** object stores and credentials; writes; progress; `explain()` through
-  `komira_plan_render`.
+- **Also later:** object stores and credentials, bound as in every SDK
+  (`s.sql(text, { orders, lake })` and `s.bind(name, source)`,
+  [credentials_and_writes.md](credentials_and_writes.md) decision 12); writes; progress; `explain()`
+  through `komira_plan_render`.
 
 ## 3. Packaging
 

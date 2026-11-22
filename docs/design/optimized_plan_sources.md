@@ -112,6 +112,9 @@ message IcebergTableRef {
   repeated string namespace = 2;  // one entry per level
   string          name      = 3;
 }
+// Superseded for field 1: a session-local catalog name cannot reach the wire, so field 1 becomes
+// `WireIcebergCatalog catalog = 1` (the catalog's uri, warehouse and credential name), as
+// credentials_and_writes.md decision 4 specifies. IcebergTableRef has not shipped.
 
 message IcebergPin {
   IcebergTableRef table             = 1;
@@ -235,7 +238,7 @@ or returns the original result less the erased subject (a rewritten tail); it ne
 
 | Param | Tag | Meaning |
 |---|---|---|
-| `catalog` | STR | the catalog name (`IcebergTableRef.catalog`) |
+| `catalog` | STR | the catalog name (`IcebergTableRef.catalog`); superseded: the catalog travels as a `WireIcebergCatalog` (uri, warehouse, credential name), never a session-local name ([credentials_and_writes.md](credentials_and_writes.md) decision 4) |
 | `namespace` | STR | levels joined by the unit separator `0x1F`, as the Iceberg REST protocol encodes a multi-level namespace |
 | `name` | STR | the table name |
 | `as_of_snapshot` | I64 | optional; time travel by snapshot id |

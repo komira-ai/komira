@@ -152,9 +152,11 @@ to every later run on the context.
 - **The route.** It is `sdk_exec.run_sql` with the session's `EngineContext`. The
   library converts the SQL text to a logical plan by parsing and binding it.
 - **Statements that are not queries.** `run_sql` refuses them
-  (`STATEMENT_NOT_A_QUERY`). The write design lifts that for `COPY ... TO` only,
-  which answers a one-row `Count` stream
-  ([credentials_and_writes.md](credentials_and_writes.md#7-writes)).
+  (`STATEMENT_NOT_A_QUERY` today; the write design renames it `SQL_STATEMENT_UNSUPPORTED`). The write
+  design lifts the refusal for `COPY ... TO` and, into a bound catalog, for `CREATE TABLE ... AS` and
+  `INSERT`, which answer what DuckDB returns: a one-row `Count` stream, or no rows for `CREATE TABLE`
+  with a column list
+  ([credentials_and_writes.md](credentials_and_writes.md#10-writes)).
 - **The error text.** **PROPOSED:** the last error text is `<step>: <reason>`,
   where the step is the one that refused (parse, bind, optimize, lower or
   execute). That text is for people, and bindings do not parse it (§6).
@@ -167,7 +169,7 @@ bytes `komira_plan_render` renders, and the format the SDKs' plan builders write
   write target (`PLAN_WIRE_WRITE_TARGET_DROPPED`) or a UDF list
   (`PLAN_WIRE_UDFS_DROPPED`). The door keeps those refusals (-3) until each lands.
   The write target is lifted by the write design
-  ([credentials_and_writes.md](credentials_and_writes.md#7-writes)), the UDF list
+  ([credentials_and_writes.md](credentials_and_writes.md#10-writes)), the UDF list
   by the UDFs' own. `plan_envelope_from_bytes` already decodes both, for the door
   that carries them later.
 - **The route.** It is `plan_from_bytes`, then `optimize`, `lower_for_context` and

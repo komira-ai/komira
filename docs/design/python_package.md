@@ -420,7 +420,7 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
   Which status and code map to which subclass is the error-mapping pull request's table. `code` and
   `step` come from the library's `komira_last_error_code` and `komira_last_error_step`, never from
   parsing the message; the rows for credentials, storage and writes are fixed in
-  [credentials_and_writes.md](credentials_and_writes.md#8-error-shapes).
+  [credentials_and_writes.md](credentials_and_writes.md#11-error-shapes).
 - The message is the engine's text, unchanged: a refusal names the construct (rule B21: unsupported
   features are refused by name), and the package does not rewrite it.
 
@@ -432,7 +432,7 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
 | the wheel tags of linux-arm64 and macos-arm64, the supported CPython range, `Requires-Dist` ranges, sdist, release member, PyPI stages | the wheel and release design |
 | the verbs of the two DataFrame surfaces, the refusal policy for verbs | the DataFrame surface design |
 | Python UDFs in worker processes | [udf_runtime_interface.md](udf_runtime_interface.md) and its Python design |
-| credentials and storage settings (`Session(storage=...)`), `https://` reads, `COPY ... TO` and its result | [credentials_and_writes.md](credentials_and_writes.md) |
+| sources, credentials and binding them (`Session.bind`, `sql(query, **sources)`), `https://` reads, `COPY ... TO` and its result | [credentials_and_writes.md](credentials_and_writes.md) |
 
 ## What must always hold?
 
@@ -440,7 +440,7 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
   refuses one, and the package adds nothing to its ceiling.
 - No public name of the package is configured by an environment variable. The package reads none;
   the variables read are the AWS and Google credential chains', inside the library, when a URL
-  needs them, and libcrypto's default trust-store variables ([credentials_and_writes.md](credentials_and_writes.md#3-the-provider-chains-and-the-only-environment-komira-reads)).
+  needs them, and libcrypto's default trust-store variables ([credentials_and_writes.md](credentials_and_writes.md#7-the-ambient-credential-and-the-only-environment-komira-reads)).
 - The public names are exactly `komira.__all__`; a private module's name is never in user documentation.
 - The wheel carries `libkomira`, its native owners, the three Mojo runtime libraries of the
   toolchain's pinned `mojo-compiler`, the licence files of both and `py.typed`, and requires no other
