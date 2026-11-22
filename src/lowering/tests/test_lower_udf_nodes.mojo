@@ -155,7 +155,7 @@ def _ref(
     )
 
 
-def _frame_ref(var reads: List[String], out: Schema) -> UdfRef:
+def _frame_ref(var reads: List[String], output: Schema) -> UdfRef:
     """A MAP_BATCHES_FRAME function reading `reads` (columns of `_t`)."""
     var t = _t()
     var args = List[UdfType]()
@@ -164,23 +164,23 @@ def _frame_ref(var reads: List[String], out: Schema) -> UdfRef:
             if t.field_name(c) == reads[i]:
                 args.append(_leaf(reads[i], t.field_arrow_type(c)))
     return _ref(
-        UDF_REF_KIND_MAP_BATCHES_FRAME, "m:frame", args^, _struct(out),
+        UDF_REF_KIND_MAP_BATCHES_FRAME, "m:frame", args^, _struct(output),
         Optional(reads^),
     )
 
 
-def _step_ref(literals: Int, out: Schema) -> UdfRef:
+def _step_ref(literals: Int, output: Schema) -> UdfRef:
     var args = List[UdfType]()
     for i in range(literals):
         args.append(_leaf("x" + String(i), ArrowType.INT64))
     return _ref(
-        UDF_REF_KIND_STEP, "m:step", args^, _struct(out),
+        UDF_REF_KIND_STEP, "m:step", args^, _struct(output),
         stability=UDF_STABILITY_VOLATILE,
     )
 
 
-def _frame(var child: LogicalPlan, index: Int, out: Schema) raises -> LogicalPlan:
-    return LogicalPlan.map_batches(child^, index, List[Expr](), out.copy())
+def _frame(var child: LogicalPlan, index: Int, output: Schema) raises -> LogicalPlan:
+    return LogicalPlan.map_batches(child^, index, List[Expr](), output.copy())
 
 
 def _stats(rows: Int) -> TableStats:

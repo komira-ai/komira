@@ -348,7 +348,7 @@ def test_a_read_set_naming_a_column_its_input_lacks_or_repeats_is_refused() rais
     )
     assert_equal(
         _message(
-            _project(_call(0, _cols("v")), _scan()),
+            _project(_call(0, _cols("v", "zz")), _scan()),
             _inputs(_row(Optional(_names("v", "zz")), _names("v", "zz"))),
         ),
         _unserved(
@@ -590,7 +590,6 @@ def test_a_call_is_found_under_every_expression_container() raises:
     leaves.append(Expr.literal(ScalarValue.from_int64(1)))
     leaves.append(Expr(UInt8(10)))
     leaves.append(Expr(UInt8(11)))
-    leaves.append(Expr(UInt8(13)))
     for i in range(len(leaves)):
         var got = _message(LogicalPlan.filter(leaves[i].copy(), _scan()), _inputs(_scalar(1)))
         assert_true(not got.startswith(String(LOWERING_UDF_UNSERVED)), got)

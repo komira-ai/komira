@@ -134,7 +134,7 @@ comptime PHYSICAL_PLAN_PURITY_UNCHECKABLE: StaticString = (
     "PHYSICAL_PLAN_PURITY_UNCHECKABLE"
 )
 
-# The four expression SITES a `SegmentDescPod` reaches, named so a refusal says
+# The five expression SITES a `SegmentDescPod` reaches, named so a refusal says
 # WHERE. Passed as an argument from the one call site that knows it — never
 # SELECTED by a ladder inside a function, which is the shape measured to bind
 # two parallel constant arrays independently and cross them in a shared library.
@@ -348,7 +348,7 @@ def expr_carries_correlated_subquery(expr: Expr) raises -> Bool:
 
 
 # =============================================================================
-# The SEGMENT half — the four expression sites a `SegmentDescPod` reaches.
+# The SEGMENT half — the five expression sites a `SegmentDescPod` reaches.
 # =============================================================================
 
 
