@@ -296,7 +296,9 @@ struct EagerGlobDiscovery(FileDiscovery, Movable, Deinitable):
           1. `has_glob(path_spec)` -> GLOB mode:
              `brace_expand` -> for each expanded pattern,
              `split_static_prefix` -> `fs.list(static_prefix)` -> keep paths
-             that `glob_match_path(pattern, path)`. Aggregate + dedupe.
+             that `glob_match_path(pattern, path)`. An expanded pattern with
+             no wildcard left names one file, kept when it exists.
+             Aggregate + dedupe.
           2. else `fs.is_dir(path_spec)` -> DIRECTORY mode: `fs.list(path_spec)`
              (the single-path behavior).
           3. else -> SINGLE-FILE mode: a one-element set `[path_spec]`.
@@ -338,6 +340,14 @@ struct EagerGlobDiscovery(FileDiscovery, Movable, Deinitable):
             for pi in range(len(patterns)):
                 var pattern = patterns[pi].copy()
                 var split = split_static_prefix(pattern)
+                if split[1].byte_length() == 0:
+                    # Brace expansion left no wildcard (`part-{0,2}.parquet`
+                    # gives `part-0.parquet`): the pattern names one file,
+                    # kept when that file exists. Listing it as a prefix
+                    # would find nothing, since a file is not a directory.
+                    if _is_existing_file(fs, pattern):
+                        _append_deduped(matched, pattern^)
+                    continue
                 var static_prefix = split[0].copy()
                 # List candidates under the static prefix (object stores have
                 # no server-side glob; the residual is filtered client-side).
@@ -495,6 +505,17 @@ def _append_deduped(mut out: List[String], var candidate: String):
         if out[i] == candidate:
             return
     out.append(candidate^)
+
+
+def _is_existing_file[
+    FS: FileSystem
+](mut fs: FS, path: String) -> Bool:
+    """`path` exists and is not a directory. `fs.is_dir` raises for a path
+    that is not there, which is no file either."""
+    try:
+        return not fs.is_dir(path)
+    except:
+        return False
 
 
 def _is_dir_or_false[

@@ -1,0 +1,3 @@
+-- order: rows
+-- INTEGER UNION ALL FLOAT is FLOAT
+SELECT typeof(v) AS t, v FROM (SELECT i AS v FROM B UNION ALL SELECT f FROM B) u

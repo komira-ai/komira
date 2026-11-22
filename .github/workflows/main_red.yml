@@ -25,10 +25,12 @@
 # `workflows:` of the trigger (a name in only one of them is never read, or
 # never started). A push-to-main workflow is added to both lists in the pull
 # request that introduces it, so no run of main goes unwatched in between.
-# It names one workflow, `release`.
+# It names two workflows: `release`, and `pypi`, whose push run builds the Python wheel
+# and installs it from the file and from TestPyPI (its scheduled and manual runs are not
+# push runs, so they are never read).
 #
-# WHY NO RED IS HIDDEN. The push runs of the watched workflows share a
-# concurrency group with cancel-in-progress false: a running release is
+# WHY NO RED IS HIDDEN. The push runs of each watched workflow share a
+# concurrency group of their own with cancel-in-progress false: a running run is
 # never cancelled, and a newer push replaces only a PENDING run, which never
 # started. The run that replaces it builds main at a later commit, which
 # carries every change of the replaced one, and the culprits are read from
@@ -50,7 +52,7 @@ name: main-red
 
 on:
   workflow_run:
-    workflows: [release]
+    workflows: [release, pypi]
     types: [completed]
     branches: [main]
 
@@ -88,7 +90,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
-        run: '"$RUNNER_TEMP/main_red" --repo "$GITHUB_REPOSITORY" --run-id "$RUN_ID" --workflow release'
+        run: '"$RUNNER_TEMP/main_red" --repo "$GITHUB_REPOSITORY" --run-id "$RUN_ID" --workflow release --workflow pypi'
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true

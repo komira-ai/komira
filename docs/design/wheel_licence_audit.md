@@ -1,14 +1,9 @@
 # Licence audit of the files the Python wheel carries
 
-The bundled wheel carries `libkomira`, the native owner libraries `libkomira`
+The wheel carries `libkomira`, the native owner libraries `libkomira`
 links as `DT_NEEDED`, the three Mojo runtime libraries it needs, the Python
 package, `py.typed` and four licence files (`LICENSE`, `NOTICE`,
-`MODULAR_LICENSE`, `MODULAR_THIRD_PARTY_NOTICES`). The external wheel
-([python_package.md](python_package.md#the-two-flavours)) carries the same
-files but the three Mojo runtime libraries and the two `MODULAR_*` licence
-files, and adds `komira/_lib/mojo_runtime.tsv`, komira's own text record of
-the runtime's build ids; the three rows of Modular's libraries below are the
-bundled wheel's alone. This page lists every native file, the third-party code
+`MODULAR_LICENSE`, `MODULAR_THIRD_PARTY_NOTICES`). This page lists every native file, the third-party code
 inside each, its licence, and where `NOTICE` reproduces the notice that
 licence requires. The file list is the measured table in
 [src/so/README.md](../../src/so/README.md) ("What the library links and
@@ -91,8 +86,7 @@ Verified by reading, not by running anything on a developer machine:
   libraries above, by soname, through the system loader.
 
 Offline behaviour follows: installing needs the network once, for `pip` to fetch
-the komira wheel (the bundled flavour depends on no other distribution; the
-external flavour makes `pip` fetch Modular's `mojo-compiler` too); running needs none.
+the komira wheel (it depends on no other distribution); running needs none.
 
 ## Keeping this page true
 

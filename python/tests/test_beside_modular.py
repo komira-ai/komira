@@ -6,8 +6,7 @@
         --runtime same|other --modular-version <v>
         --toolchain-mojo-version <v> --parquet <file.parquet>
 
-Run by wheel_install_run.py, which installed a komira wheel (either flavour:
-the external one only in the Modular-first orders) and Modular's
+Run by wheel_install_run.py, which installed the komira wheel and Modular's
 mojo-compiler into `--site` and starts this from an empty working directory.
 Each `--host-lib` is opened by path first (the C++ runtime a user's system
 provides, as in test_installed.py). Modular's runtime is loaded the way a Mojo
@@ -26,9 +25,8 @@ What each case holds (docs/design/python_package.md, decision 6, says why):
   libKGENCompilerRTShared.so then loads as a second copy, from
   <site>/modular/lib, while the two other libraries are komira's only; komira
   still answers;
-- `other`, Modular's first: komira's first call raises the runtime hook's
-  LibraryLoadError (the case states the line; the bundled and the external
-  wheel each word it their way);
+- `other`, Modular's first: komira's first call raises the runtime check's
+  LibraryLoadError (the case states the line);
 - `other`, komira's first: komira loads and answers; Modular's library fails
   to load with the loader's `undefined symbol` (its code needs symbols
   komira's libraries lack), and komira still answers.

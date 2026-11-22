@@ -1,11 +1,19 @@
-//! What `prefix_tool` computes, on text: the names a prefix header renames
+//! What `prefix_tool` computes, on an archive's symbols (as the object
+//! reader, `native_objects`, read them): the names a prefix header renames
 //! and the header itself (`header`), and the verdict on a prefixed archive's
 //! symbols (`check`). Nothing here reads a file or runs a program (cli.zig
 //! does), so the unit tests (prefix_test.zig) reach every rule.
 //!
 //! Names are sorted as `LC_ALL=C sort -u` sorts them: by bytes, each once.
+//! A Mach-O name has already lost the `_` Mach-O prepends to a C name
+//! (`_snappy_compress` is `snappy_compress`), so one header and one check
+//! hold for an archive of either format.
 
 const std = @import("std");
+const objects = @import("native_objects");
+
+/// One symbol of an archive member (native_elf.zig).
+pub const Sym = objects.Sym;
 
 /// A refusal: its text is `msg`.
 pub const Fail = error{Fail};
@@ -88,14 +96,25 @@ pub fn skipped(name: []const u8) bool {
     return false;
 }
 
-/// The names a header renames: every line of `armap` (`elfsyms armap`) and
+/// The names an archive's symbol table lists (the System V `/` member, the
+/// BSD `__.SYMDEF`): every defined non-local symbol of its members, in the
+/// members' order.
+pub fn definedNames(syms: []const Sym) [][]const u8 {
+    var out = std.ArrayList([]const u8).empty;
+    for (syms) |s| {
+        if (s.defined and s.bind != .local) out.append(a(), s.name) catch oom();
+    }
+    return out.items;
+}
+
+/// The names a header renames: every one of `defined` (`definedNames`) and
 /// every `extra`, sorted, each once, less the `skipped` ones. Refused when a
 /// name is empty, or fewer than `min` are left (an empty or wrong archive
 /// must not give a header that renames nothing); `archive` is the path the
 /// message names.
-pub fn symbols(armap: []const u8, extra: []const []const u8, archive: []const u8, min: u64) Fail![][]const u8 {
+pub fn symbols(defined: []const []const u8, extra: []const []const u8, archive: []const u8, min: u64) Fail![][]const u8 {
     var all = std.ArrayList([]const u8).empty;
-    all.appendSlice(a(), lines(armap)) catch oom();
+    all.appendSlice(a(), defined) catch oom();
     all.appendSlice(a(), extra) catch oom();
     var out = std.ArrayList([]const u8).empty;
     for (sortedUnique(all.items)) |n| {
@@ -187,37 +206,29 @@ pub fn header(style: Style, prefix: []const u8, strip: []const u8, names: []cons
     return out.items;
 }
 
-/// The symbols of an archive's members (`elfsyms symtab`), each list sorted
-/// and each name once.
+/// The non-local symbols of an archive's members, each list sorted and each
+/// name once.
 pub const Symtab = struct {
     def: [][]const u8,
     und: [][]const u8,
     weak_und: [][]const u8,
 };
 
-/// Reads `elfsyms symtab` lines, `DEF|UND <bind> <type> <visibility> <name>`
-/// (fields split at runs of spaces and tabs; a symbol without a name has
-/// four). Any other line is refused: a reader whose output this tool does not
-/// understand must not pass a check.
-pub fn readSymtab(text: []const u8) Fail!Symtab {
+/// `syms` split into the defined names, the undefined ones, and the weak
+/// undefined ones (a hook another object of the process could define); a
+/// local symbol is in none.
+pub fn symtabOf(syms: []const Sym) Symtab {
     var def = std.ArrayList([]const u8).empty;
     var und = std.ArrayList([]const u8).empty;
     var weak = std.ArrayList([]const u8).empty;
-    for (lines(text), 1..) |l, at| {
-        var f: [5][]const u8 = .{ "", "", "", "", "" };
-        var n: usize = 0;
-        var it = std.mem.tokenizeAny(u8, l, " \t");
-        while (it.next()) |t| {
-            if (n == 5) return fail("archive_check: symtab line {d} has more than 5 fields: {s}", .{ at, l });
-            f[n] = t;
-            n += 1;
+    for (syms) |s| {
+        if (s.bind == .local) continue;
+        if (s.defined) {
+            def.append(a(), s.name) catch oom();
+        } else {
+            und.append(a(), s.name) catch oom();
+            if (s.bind == .weak) weak.append(a(), s.name) catch oom();
         }
-        const is_def = std.mem.eql(u8, f[0], "DEF");
-        const is_und = std.mem.eql(u8, f[0], "UND");
-        if (n < 4 or !(is_def or is_und)) return fail("archive_check: symtab line {d} is not DEF|UND <bind> <type> <visibility> <name>: {s}", .{ at, l });
-        if (is_def) def.append(a(), f[4]) catch oom();
-        if (is_und) und.append(a(), f[4]) catch oom();
-        if (is_und and std.mem.eql(u8, f[1], "WEAK")) weak.append(a(), f[4]) catch oom();
     }
     return .{ .def = sortedUnique(def.items), .und = sortedUnique(und.items), .weak_und = sortedUnique(weak.items) };
 }
@@ -289,12 +300,12 @@ pub const Verdict = struct {
 ///   - an undefined symbol is one of the library's own unprefixed names
 ///     (the lines of each of `names_files`): a reference the renaming missed,
 ///   - fewer than `min` defined symbols start with `prefix`.
-/// Each red finding lists at most 50 names. `archive` is the path the
-/// messages name.
-pub fn check(symtab: []const u8, names_files: []const []const u8, archive: []const u8, prefix: []const u8, min: u64, allow: []const []const u8) Fail!Verdict {
+/// Each red finding lists at most 50 names. `syms` are the archive's
+/// symbols; `archive` is the path the messages name.
+pub fn check(syms: []const Sym, names_files: []const []const u8, archive: []const u8, prefix: []const u8, min: u64, allow: []const []const u8) Fail!Verdict {
     try identifier("prefix", prefix);
     for (allow) |p| try validAllow(p);
-    const s = try readSymtab(symtab);
+    const s = symtabOf(syms);
     var all = std.ArrayList([]const u8).empty;
     for (names_files) |t| all.appendSlice(a(), lines(t)) catch oom();
     const names = sortedUnique(all.items);
