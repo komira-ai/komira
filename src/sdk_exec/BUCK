@@ -38,6 +38,40 @@ _CSV_TEST_DATA.update({f + ".csv": "tests/csv/" + f + ".csv" for f in _CSV_FILES
 
 _CSV_TEST_DATA.update({c + ".tsv": ":csv_oracle[" + c + ".tsv]" for c in _CSV_CASES})
 
+# DuckDB's answers for test_run_sql_cte: each line of tests/cte/cases.sql runs
+# one WITH query over the committed tests/cte/sales.csv and writes its answer.
+_CTE_CASES = [
+    "one_filtered_group",
+    "one_chain",
+    "one_unused",
+    "one_null_counts",
+    "one_sorted_body",
+    "one_in_derived",
+    "twice_group",
+    "twice_split",
+    "twice_distinct_thrice",
+    "twice_scan",
+    "twice_limit",
+    "twice_nested",
+    "twice_nested_scan",
+    "twice_self_join",
+    "twice_ungrouped",
+]
+
+sql_oracle(
+    name = "cte_oracle",
+    srcs = ["tests/cte/cases.sql"],
+    inputs = {"sales.csv": "tests/cte/sales.csv"},
+    outputs = [c + ".tsv" for c in _CTE_CASES],
+)
+
+_CTE_TEST_DATA = {
+    "cases.sql": "tests/cte/cases.sql",
+    "sales.csv": "tests/cte/sales.csv",
+}
+
+_CTE_TEST_DATA.update({c + ".tsv": ":cte_oracle[" + c + ".tsv]" for c in _CTE_CASES})
+
 # DuckDB's table and answers for test_run_sql_group_keys_mixed:
 # tests/group_keys_mixed/data.sql writes mixed.parquet, and each line of
 # tests/group_keys_mixed/cases.sql runs one GROUP BY over it and writes its
@@ -161,6 +195,16 @@ _MIXED_TEST_DATA.update({c + ".tsv": ":group_keys_mixed_oracle[" + c + ".tsv]" f
 #   typed columns and their inferred types, quoted cells, NULL-bearing cells, a
 #   `|` dialect and a header with no row, each over the committed file and over
 #   a gzip copy; every case is run; a missing file is refused at bind.
+# - test_run_sql_cte: WITH queries through run_sql answer what the pinned
+#   DuckDB answers (the :cte_oracle action above) for each case of
+#   tests/cte/cases.sql: a CTE read once (filtered, chained, unread, with NULL
+#   counts, sorted, inside a derived table) and read more than once (a grouped
+#   aggregation, the same under two filters, a distinct three times, a filtered
+#   scan, a limit, a subquery reading a CTE twice, an ungrouped
+#   aggregation); every case is run; a grouped aggregation read twice is
+#   lowered to one aggregation segment both branches read, a subquery holding
+#   a repeat written twice to one aggregation segment, and a filtered scan read
+#   twice to two scans.
 # - test_run_sql_timers_off: Q6 through run_sql on four workers in the default
 #   build gives the oracle's answer and leaves every phase timer
 #   (phase_timers) unregistered and at zero.
@@ -253,6 +297,7 @@ mojo_library(
         "tests/test_resolved_cache_lru_eviction_stress.mojo",
         "tests/test_resolved_cache_pin_count.mojo",
         "tests/test_run_sql_csv.mojo",
+        "tests/test_run_sql_cte.mojo",
         "tests/test_run_sql_distinct.mojo",
         "tests/test_run_sql_float_sum_workers.mojo",
         "tests/test_run_sql_group_keys.mojo",
@@ -273,6 +318,7 @@ mojo_library(
     ],
     test_data = {
         "tests/test_run_sql_csv.mojo": _CSV_TEST_DATA,
+        "tests/test_run_sql_cte.mojo": _CTE_TEST_DATA,
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,
     },
     visibility = ["PUBLIC"],
