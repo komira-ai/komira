@@ -183,7 +183,7 @@ How the loader behaves:
   the directory it came from with `dlinfo`.
   - Not loaded, or loaded from komira's own file: nothing to do.
   - Loaded from another file with the same GNU build id as komira's copy (the
-    same Mojo build, such as the `mojo-compiler` 1.0.0 wheel): accepted, and
+    same Mojo build, such as the `mojo-compiler` 1.1.0 wheel): accepted, and
     libkomira uses that copy.
   - Another build id, or none: `LibraryLoadError` naming the library, the
     directory it was loaded from and komira's copy.
