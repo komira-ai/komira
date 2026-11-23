@@ -1331,6 +1331,8 @@ through the file system an `objectstore_s3.S3ScanFs`, `objectstore_gcs.GcsScanFs
 The three credential calls of decision 8 are built ([src/so](../../src/so/README.md)), and so are
 decision 1's credential objects in Python, private until `add_sql_binding` exports them
 (`python/komira/_credentials.py`, sealed by `Session._seal_credential`, refused as `CredentialsError`).
+Section 1's `komira.iceberg`, `catalog.table` and `komira.SigV4` are built as Python values, checked when
+built and private until `add_sql_binding` exports them (`python/komira/_iceberg.py`).
 No other surface, wire field or error code of this design is built. The parts it builds on are:
 - [src/sql](../../src/sql/sql_binder.mojo) (`sql_binder.mojo`, `sql_catalog.mojo`, `sql_parser.mojo`);
 - [src/so](../../src/so/README.md);

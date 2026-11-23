@@ -99,6 +99,7 @@ The engine is loaded on the first `Session()` or `abi_version()` call, not on
 - Results of any kind, such as Arrow tables or pandas and polars frames.
 - The DataFrame APIs: one shaped like pandas and one shaped like polars.
 - Registering CSV and JSON files.
+- Iceberg tables: reading one, and writing to one by its name in a catalog.
 
 SQL comes first in a later release of this same package, followed by the two
 DataFrame APIs.
@@ -115,6 +116,7 @@ The package's layout and API are designed in
 | `komira/__init__.py` | the public names, exactly `__all__` |
 | `komira/_capture/` | the capture of Python user functions (private; no query runs them yet): `udf`, the decorator that records a function's call shape (`scalar`, `map_batches_column`, `row`, `map_batches_frame`), its return type (`return_dtype=`, `schema=` or the type hints) and, for `row` and `map_batches_frame`, its read set (`columns=`, a `TypedDict` or dataclass annotation, or for `row` a scan of the function's bytecode, refused with `UDF_READ_SET_REQUIRED` when the reads are not bounded); `Udf.spec()`, the `UdfSpec` the plan encodes, with the function's code as a bundle named by its sha256 or as a reference into an installed distribution; and `write_code`, which writes each code object under its digest. Calling a decorated function calls the function, which is how the komira/python worker runs it. It imports no `ctypes` |
 | `komira/_credentials.py` | the credential objects (private; nothing public takes one yet): `AwsKeys`, `AwsProfile`, `GcpServiceAccount`, `GcpToken`, `AzureKey`, `AzureSas`, `BearerToken` and `OAuth2ClientCredentials`, each a name and its fields, checked when built (the name's grammar and reserved names; each value a non-empty `str` of at most 4096 bytes of UTF-8), with every secret shown as `<set>` by `repr` and no pickle or copy; and the built-in `AMBIENT` and `ANONYMOUS` ([docs/design/credentials_and_writes.md](https://github.com/komira-ai/komira/blob/main/docs/design/credentials_and_writes.md), decision 1) |
+| `komira/_iceberg.py` | the Iceberg sources (private; nothing public takes one yet): `iceberg(uri, *, warehouse=None, credential=AMBIENT, signing=None, access_delegation="vended-credentials")`, an `IcebergCatalog`; `catalog.table(name)`, an `IcebergTable`, with `name` as `"namespace.table"` or a tuple of namespace levels and the table; and `SigV4(region, service)`. Each is checked when built (an http or https URI with a host and no user, password, query or fragment; a credential that fits the catalog: `AMBIENT` or `AwsKeys` with SigV4, and `AMBIENT`, `ANONYMOUS`, `BearerToken` or `OAuth2ClientCredentials` without; `access_delegation` `vended-credentials` or `none`), does no I/O and loads no library; a catalog or a table shows its credential's secrets as `<set>` and refuses pickle and copy ([docs/design/iceberg_tables.md](https://github.com/komira-ai/komira/blob/main/docs/design/iceberg_tables.md), "What the user sees") |
 | `komira/_errors.py` | `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError`, and the private `UnsupportedOperation` and `CredentialsError` |
 | `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls of ABI 1.2 |
 | `komira/_plan/` | the plan encoder: `encode_plan`, a plan of `komira/_ops` as the `komira.plan.v1` `WirePlanEnvelope` the plan door takes, every node with the output schema the engine derives for it and every scan reading a source libkomira described (`parquet_source`, `binding_source`); calls of user functions (`UdfCall`, `MapBatches`) as `WireUdfApply` and `WireMapBatchesNode` over the envelope's `UdfRef` list, one per distinct function, each with the komira/python descriptor; `encode_expr`, an expression node as a `WireExpr`; and `expr_field`, the output field the engine derives for it. It writes no SQL text. It imports the generated plan modules, which the wheel does not ship yet, so `import komira` does not import it |
@@ -222,6 +224,7 @@ The tests below run on Linux x86_64 as build actions, with
 `//python/tests:session_test`, `//python/tests:minor0_test`,
 `//python/tests:minor3_test`, `//python/tests:two_call_test`,
 `//python/tests:credentials_test`, `//python/tests:credentials_lib_test`,
+`//python/tests:iceberg_test`,
 `//python/tests:runtime_test` and `//python/tests:cpu_test`:
 
 | test | what it covers |
@@ -231,6 +234,7 @@ The tests below run on Linux x86_64 as build actions, with
 | `minor0_test`, `minor3_test` | stand-ins of ABI 1.0 and 1.3 |
 | `two_call_test` | the error path, the two-call protocol and the arguments of each call, on a stand-in |
 | `credentials_test` | the credential objects, and what sealing each sends the library, on a stand-in's fake store that records every credential call |
+| `iceberg_test` | the Iceberg catalog, table and SigV4 values, with no library: each argument's checks and refusals with their full messages, which credential fits a catalog with and without SigV4, how a table name splits, repr, and no pickle or copy |
 | `credentials_lib_test` | sealing every kind of credential on the real library, and each of its refusals as a `CredentialsError` with its `CREDENTIALS_INVALID` message |
 | `runtime_test` | the runtime check on stand-in runtime libraries: not loaded, same build id, another build id, no build id, komira's copy unreadable, and the build id reader |
 | `cpu_test` | the CPU check on cpuinfo files written from `tests/fixtures/cpuinfo_x86_64_v3.txt`, and that a refused CPU never opens the library |
