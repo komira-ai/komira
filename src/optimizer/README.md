@@ -9,7 +9,7 @@ here executes a plan.
 
 | module | what it holds |
 |---|---|
-| `optimizer_filter` | filter fusion, filter decomposition, predicate pushdown, cross-join elimination and equi-filter folding, join residual to side |
+| `optimizer_filter` | filter fusion, filter decomposition, predicate pushdown, cross-join elimination and equi-filter folding (not over a cross join whose right side is always one row, a decorrelated scalar, whose equality stays a filter), join residual to side |
 | `optimizer_udf_opacity` | whether a Filter may move below a UDF-carrying Project: the columns a typed UDF writes (`udf_modified_columns`), whether it is opaque to pushdown, whether it passes a column through, and the plan-level check `push_predicates_down` calls (`udf_project_passes_predicate`) |
 | `optimizer_filter_selectivity` | predicate-aware filter selectivity estimates and the scaling of table stats by a selectivity |
 | `optimizer_or_factoring` | hoisting conjuncts common to every branch of an OR above the OR |
@@ -27,7 +27,7 @@ here executes a plan.
 | `flatten_dependent_joins` | lowering correlated subquery expressions into joins |
 | `flatten_hoist` | the outer-reference hoist of `flatten_dependent_joins`: splitting a correlated subquery's inner Filter into join keys, join residual and inner-only conjuncts, and refusing a conjunct it cannot place |
 | `join_predicate_decompose` | splitting a raw join predicate into equi keys and a residual |
-| `scalar_subquery_decorrelate` | lowering an uncorrelated scalar subquery with a provably single-row inner plan into a broadcast cross join |
+| `scalar_subquery_decorrelate` | lowering an uncorrelated scalar subquery with a provably single-row inner plan into a broadcast cross join, in a filter or a projection, under a CASE too; a body that may be empty (a LIMIT) is joined through a global `max`, so the cross join sees one row (NULL when the body has none), and only for a column type that `max` carries; a scalar inside a body is decorrelated in that body |
 | `resolve_scalar_subqueries` | finding uncorrelated scalar subqueries and inlining bound values as literals |
 | `optimizer_resolve_scalar_subqueries` | the driver for that pass: fold on a binding, record a request on a miss |
 | `optimizer_scalar_broadcast` | rewriting a Filter comparing against an aggregate of its own grouped input with a bound scalar value |

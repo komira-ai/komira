@@ -101,7 +101,9 @@ AS source), with the statement kind and a COPY's destination or a CTAS's
 table name. It resolves names case-insensitively against the catalog, the
 `WITH` definitions and derived tables; binds scalar and aggregate
 expressions, GROUP BY and HAVING, joins (inner, outer, NATURAL / USING, semi,
-anti), subqueries (scalar, `[NOT] EXISTS`, `[NOT] IN`, the last NULL-aware),
+anti), subqueries (scalar, also in a HAVING and in the SELECT list of a
+grouped query; `[NOT] EXISTS`; `[NOT] IN`, NULL-aware, its body either one
+table projecting one bare column or, uncorrelated, any query of one column),
 window functions, ORDER BY, LIMIT / OFFSET, DISTINCT and UNION ALL; and
 raises an `Error` starting `SQL bind error` or `SQL not supported`, naming
 the construct, for what it does not bind. The parquet facts a binding needs

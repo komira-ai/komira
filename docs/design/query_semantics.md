@@ -243,7 +243,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
   So a single NULL in the subquery's result removes every row. A frontend builds this from an ANTI join plus the two NULL conditions; the plan has no separate null-aware anti join.
 - **DuckDB.** Follows from §1.5 and the ANTI-join note in §3.2.
-- **Current behaviour.** The SQL AST names the null-aware construction (`src/sql/sql_ast.mojo:116`); the binder that builds it is not in this repository.
+- **Current behaviour.** The binder builds the null-aware construction (`src/sql/sql_bind_subquery.mojo`, `_bind_null_aware_not_in` and, for a body with GROUP BY, DISTINCT, a join or an expression, `_bind_uncorrelated_in_body`), and `run_sql` answers it as DuckDB does (`src/sdk_exec/tests/test_run_sql_join_kinds.mojo`, `test_run_sql_subquery.mojo`).
 - **Mark.** MATCHES.
 
 ### 3.4 Outer-join padding

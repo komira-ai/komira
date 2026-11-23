@@ -71,7 +71,7 @@ package lists (`HIVE_PARTITION_*`).
 
 **Refused here, by name.** A statement that is not a query
 (`STATEMENT_NOT_A_QUERY`, step `bind`); the door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
-asks for a scalar to be executed first, a guard no query tested here reaches); a sink denied its memory by the
+asks for a scalar to be executed first (a scalar subquery whose body is not provably one row, see Subqueries below); a sink denied its memory by the
 budget (unless it spills, see Spill below), a sum outside its declared type and a pool not whole after a run (step
 `execute`); and whatever lowering, the binder or the parser refuses (INNER, LEFT, RIGHT, FULL, SEMI, ANTI and CROSS joins are served, a scalar
 subquery being a CROSS join against its one-row aggregate; a join with a
@@ -88,6 +88,24 @@ cutter refuses any other node by name before it asks for the scans below it.
 `memory_budget_bytes` have a lower bound of 1 and no upper bound. A
 cancellation token is local to a call, so cancel is not reachable from
 `run_sql`. After a refusal the context is unchanged and runs the next query.
+
+**Subqueries.** An uncorrelated scalar subquery is served in a WHERE (under
+AND, OR and IS NULL too), in a SELECT list (under CASE and coalesce too), in a
+HAVING, in the SELECT list of a grouped query, beside an aggregate and inside
+another scalar's body, when its body is provably one row: a global aggregate,
+or a LIMIT 0 or LIMIT 1 body of a column type the pipeline's `max` carries
+(integers, DATE, DECIMAL, floats). The optimizer makes it a CROSS join against
+that row (a LIMIT body through a global `max`, so a body with no row is NULL,
+as in DuckDB) and keeps its comparison a filter. Any other body (several rows
+possible) is refused at `optimize` with `OPTIMIZE_UNRESOLVED_SCALAR`; DuckDB
+raises for such a body when it has several rows and answers it when it has
+one. `x IN (SELECT ...)` is a SEMI join and `x NOT IN (SELECT ...)` the
+NULL-aware ANTI join, as a WHERE conjunct, over a one-table body or (bound
+whole) a body with DISTINCT, GROUP BY / HAVING, a join, an expression or an
+aggregate. Refused by name: IN, NOT IN or EXISTS in a HAVING or a grouped
+SELECT list (`bind`), a left side that is not a column (`parse`), and keys
+the hash join does not compare, DATE and DECIMAL among them
+(`LOWERING_JOIN_UNSERVED` at `lower`).
 
 ## Tests
 
@@ -124,6 +142,21 @@ The tests run when the package is built.
   lower; a file replaced between queries is read again; options are validated;
   contexts are created and dropped repeatedly, the segment pool whole after
   each run.
+- `test_run_sql_subquery`: over Parquet tables the pinned DuckDB writes
+  (`:subquery_oracle`, several row groups, NULLs, duplicate and unmatched
+  values in BIGINT, INTEGER, DECIMAL, DATE and VARCHAR columns, an empty
+  table), each query of `tests/subquery/cases.sql` answers what DuckDB
+  answers, on one and three workers: scalar subqueries in a WHERE (=, <, >,
+  BIGINT, DOUBLE, DECIMAL, DATE; the TPC-H Q15 shape over a CTE), over an
+  empty table and as a LIMIT body with no row (NULL), in a SELECT list, under
+  CASE and coalesce, in a grouped SELECT list, beside an aggregate, in a
+  HAVING (the Q11 shape) and nested; IN and NULL-aware NOT IN over one-table
+  bodies and over DISTINCT, GROUP BY / HAVING (the Q18 shape), join and
+  expression bodies, with and without NULL, over the empty table, and IN and
+  NOT IN lists with NULL; a scalar body of several rows and a VARCHAR LIMIT
+  body are refused at `optimize`, DECIMAL and DATE IN keys at `lower`, an
+  expression left of IN at `parse` and IN in a HAVING at `bind`; every case
+  is run.
 - `test_run_sql_distinct`: SELECT DISTINCT over an INT64 and a STRING column
   gives each value once and one NULL row (NULL and the empty string are two
   rows), below a filter and with ORDER BY; COUNT(DISTINCT x) ignores NULL, is

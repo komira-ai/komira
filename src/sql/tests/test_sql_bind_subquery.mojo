@@ -15,8 +15,8 @@
 #   4. The correlated-predicate binder: inner vs outer columns by
 #      qualifier, the operators it binds, the constant-folded date_diff,
 #      and its refusals (another function, an aggregate, `*`, a dangling
-#      index); body-shape refusals (multi-table FROM, GROUP BY / ORDER BY /
-#      LIMIT / OFFSET, an IN body not projecting one bare column).
+#      index); body-shape refusals of EXISTS (multi-table FROM, GROUP BY /
+#      ORDER BY / LIMIT), and of an IN body projecting more than one column.
 #   5. The NOT IN null-freedom proof (with footer readers giving null
 #      counts) keeps the run-time `x IS NOT NULL` check when x is a
 #      join-renamed output column whose source holds NULLs, under a LEFT,
@@ -492,21 +492,23 @@ def test_correlated_predicate_refusals() raises:
         "SELECT k FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.k GROUP BY u.k)",
         "ERR: SQL not supported: GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET / DISTINCT inside a predicate subquery"
     )
+    # An IN body of another shape is bound whole (test_sql_bind_in_body):
+    # OFFSET without LIMIT then meets the parser's own refusal, and two
+    # columns are refused.
     _check(
         "SELECT k FROM t WHERE k IN (SELECT k FROM u OFFSET 3)",
-        "ERR: SQL not supported: GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET / DISTINCT inside a predicate subquery"
+        "ERR: SQL not supported: OFFSET without LIMIT — this dialect honours an"
+        " OFFSET only as part of a row window, so write `LIMIT <n> OFFSET 3` with"
+        " an explicit row count. (Refused rather than ignored: silently dropping"
+        " the OFFSET would return every row.)"
     )
     _check(
         "SELECT k FROM t WHERE k IN (SELECT k, w FROM u)",
         "ERR: SQL bind error: an IN subquery must project exactly one column"
     )
     _check(
-        "SELECT k FROM t WHERE k IN (SELECT k + 1 FROM u)",
-        "ERR: SQL bind error: an IN subquery must project a single bare column"
-    )
-    _check(
         "SELECT k FROM t WHERE k IN (SELECT * FROM u)",
-        "ERR: SQL bind error: an IN subquery must project a single bare column"
+        "ERR: SQL bind error: an IN subquery must project exactly one column"
     )
 
 
@@ -570,7 +572,9 @@ def test_not_in_null_freedom_proof_edges() raises:
     # refused when the query binds.
     _check(
         "SELECT k FROM t GROUP BY k HAVING k NOT IN (SELECT k FROM u)",
-        "ERR: SQL bind error: unsupported expression"
+        "ERR: SQL not supported: an EXISTS or IN subquery in a HAVING clause or in the"
+        " SELECT list of a grouped query (a scalar subquery is served there; a"
+        " predicate subquery is served as a WHERE conjunct)"
     )
     _check(
         "SELECT kk.k FROM kk LEFT JOIN mm ON kk.k = mm.k WHERE kk.k NOT IN (SELECT k FROM u)",
