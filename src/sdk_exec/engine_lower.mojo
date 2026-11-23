@@ -102,7 +102,7 @@ def _add_scan_facts(
         return
     if is_iceberg_binding(sd.source):
         var planned = plan_iceberg_scan(sd.source.binding_ref(), sd.filter)
-        inputs.add_iceberg_scan(planned.spec^)
+        inputs.add_iceberg_scan(planned.spec.copy())
         return
     # An in-memory or CSV scan: no facts here; the cutter serves both.
     inputs.add_scan()
