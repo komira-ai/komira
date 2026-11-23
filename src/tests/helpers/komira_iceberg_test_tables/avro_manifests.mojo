@@ -254,7 +254,7 @@ def _encode_entry(
     else:
         encode_union_tag(0, out)
     encode_union_tag(0, out)  # sort_order_id
-    if len(file.referenced_data_file) > 0:
+    if file.referenced_data_file.byte_length() > 0:
         encode_union_tag(1, out)
         encode_string(file.referenced_data_file, out)
     else:

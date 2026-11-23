@@ -249,7 +249,8 @@ def _strip_file_scheme(uri: String) raises -> String:
         )
     var rest = String(uri[byte=5 : uri.byte_length()])
     if rest.startswith("//"):
-        rest = String(rest[byte=2 : rest.byte_length()])
+        var after_slashes = String(rest[byte=2 : rest.byte_length()])
+        rest = after_slashes^
         if not rest.startswith("/"):
             raise Error(
                 ICEBERG_PATH_UNSUPPORTED
