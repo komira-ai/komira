@@ -11,6 +11,12 @@
 #   * `parquet_relation(path, hive_partitioning)`: the `ParquetSource` a
 #     `read_parquet(path)` relation scans, over the files `path` names
 #     (`parquet_files.resolve_parquet_source`).
+#   * `iceberg_relation(path, allow_moved_paths, snapshot_id)`: the source an
+#     `iceberg_scan(path, ...)` relation scans, resolved from the table's
+#     metadata (`iceberg_scan.table_ref`): a binding that names the metadata
+#     file, the snapshot it is pinned to and the table's columns. It reads the
+#     metadata file only (no footer, so nothing is cached), and the manifests
+#     are read when the scan is lowered.
 #   * `column_null_count(path, column)`: the column's null count summed over
 #     every row group, or None when the file has no such column or any row
 #     group records no count. Never a partial sum: one row group without a
@@ -31,7 +37,8 @@
 from arrow.arrow_types import ArrowType
 from arrow.schema import Schema
 from parquet_api.metadata import RowGroup
-from scan_source.source_variant import SOURCE_VARIANT_PARQUET
+from iceberg_scan.table_ref import iceberg_scan_binding, resolve_iceberg_table
+from scan_source.source_variant import SOURCE_VARIANT_PARQUET, SourceVariant
 from scan_source.parquet_source import ParquetSource
 from sql.sql_ast import HIVE_PARTITIONING_AUTO
 from sql.sql_bind_parquet import SqlParquetFooters, path_has_glob
@@ -96,6 +103,18 @@ struct ParquetFooters(SqlParquetFooters, Copyable, Movable):
         self, path: String, hive_partitioning: UInt8
     ) raises -> ParquetSource:
         return resolve_parquet_source(self, path, hive_partitioning, False)
+
+    def iceberg_relation(
+        self,
+        path: String,
+        allow_moved_paths: Bool,
+        snapshot_id: Optional[Int64],
+    ) raises -> SourceVariant:
+        return SourceVariant.from_binding(
+            iceberg_scan_binding(
+                resolve_iceberg_table(path, allow_moved_paths, snapshot_id)
+            )
+        )
 
     def column_null_count(
         self, path: String, column: String

@@ -4,8 +4,9 @@ The engine-execution layer of the SDK: twelve modules, ten leaves that need
 nothing from the rest of the package except each other, and the plan gates
 (`plan_validation_gate`, `parquet_glob_options`), which build on `sdk`;
 and the engine context with its SQL door (`engine_*` below), which runs a SQL
-query over Parquet files, and over CSV files named by `read_csv` (plain or
-`.gz`, `.zst`, `.lz4`), from text to record batches; `arrow_result`, which
+query over Parquet files, over CSV files named by `read_csv` (plain or
+`.gz`, `.zst`, `.lz4`) and over local Iceberg tables (`iceberg_scan`, or a table
+registered from a catalog), from text to record batches; `arrow_result`, which
 readies those batches for the Arrow C stream; and writes a query's result to a
 local Parquet, CSV or newline-delimited JSON file with `COPY ... TO`. Views, other writes, the plan cache and
 the plan gates' call sites are not wired into the context yet.
@@ -35,12 +36,34 @@ do is a free function in a module of its own.
 | `engine_options` | `EngineOptions`: `worker_count` and `memory_budget_bytes`, each `Optional` (absent means the host profile's own value), and `spill_directory` (`Optional`; absent means no spill). Values the caller fills from its flags; no environment variable is read |
 | `engine_context` | `EngineContext(options)`: probes the host once, applies the options over the profile, starts the worker runtime. Holds the catalog, the registered tables, `footers` (a `ParquetFooters`), `host_profile`, `runtime` and `spill_directory`. A count or budget below 1, and an empty spill directory, are refused with `ENGINE_OPTIONS_INVALID`. `begin_query` drops the footer cache |
 | `engine_catalog` | `register_parquet(ctx, name, path)`: the table's schema is its file's footer |
-| `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema; a scan of an S3 or GCS bucket or an Azure container has no facts, since `ctx.footers` reads the local file system only) and `lower_for_context` |
+| `engine_iceberg` | `register_iceberg_table(ctx, name, catalog, namespace, table, allow_moved_paths)`: asks an `iceberg_catalog.IcebergCatalog` where the table's current `metadata.json` is (a bare local path or a `file:///` URI; any other scheme is `ICEBERG_PATH_UNSUPPORTED`), reads the table's columns and current snapshot from it and registers it as `name` (not in `ctx.tables`, which lists Parquet tables) |
+| `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema; a scan of an S3 or GCS bucket or an Azure container has no facts, since `ctx.footers` reads the local file system only; an Iceberg scan is planned by `iceberg_scan.scan_planner.plan_iceberg_scan`, which reads its manifests, prunes by the pushed filter and matches the delete files) and `lower_for_context` |
 | `engine_execute` | `run_lowered_plan_with(ctx, lowered, opener)`: a `RealBuilder` over a per-run metadata cache (keyed per file system) and expression pool, reading a Parquet scan of a bucket through the file system the `ScanFsOpener` opens on it (`objectstore_s3.S3ScanFs` for S3, `objectstore_gcs.GcsScanFs` for GCS, `azure_blob.AzureScanFs` for Azure; one opener, so one remote store kind, per run), the segment pool sized from the memory budget, the context's spill directory (when it has one) on the builder, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch. `run_lowered_plan(ctx, lowered)` is that with `LocalOnlyScanFs`, which refuses a scan of a bucket with `SCAN_FS_UNSERVED` |
 | `engine_write` | `write_copy_result(batch, dest, fmt, codec)`: the result batch as a file at the local path `dest` in the format `fmt`, through `fs.atomic_write.write_file_atomic` (all or nothing), returning the rows written; `write_parquet_result(batch, dest, codec)` and `write_text_result(batch, dest, fmt, codec)` (CSV or JSON), which it calls; `count_result(rows)`, the one-row BIGINT `Count` batch a COPY answers; `check_copy_target(dest, fmt, codec)`, the refusals of a URL and of lz4 for CSV or JSON |
 | `engine_write_text` | `encode_csv(batch)` and `encode_ndjson(batch)`: the bytes DuckDB's COPY writes for a result as CSV and as newline-delimited JSON; `compress_text(bytes, codec)`, the whole file as gzip or zstd; `text_writable(type)`; and the cell texts they are made of, `csv_double_text`, `json_double_text`, `date_text`, `decimal_text` |
 | `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize_for_run`, lower, run, and for a `COPY ... TO` write the file and answer `Count`. `optimize_for_run(plan)` is `optimize` (refusing a plan that needs a scalar subquery executed first, `OPTIMIZE_UNRESOLVED_SCALAR`) and then `plan_cse_eliminate`, which holds each subtree the plan repeats once (a CTE read twice, two equal UNION ALL branches) so lowering cuts it once and every reference reads it (`lowering.cut_shared`). Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message. `run_sql_with(ctx, text, opener)` runs with the opener a scan of a bucket is read through |
 | `arrow_result` | `arrow_result(outcome) -> ArrowResult`: the batches of a `SqlOutcome` and their schema, each batch's selection mask applied, checked to cross the Arrow C Stream Interface whole (`arrow_ipc.c_data_stream_check`). Raises with the step and message of a refusal, for an outcome with no batch, and naming a column the export cannot carry |
+
+**Iceberg tables.** `SELECT ... FROM iceberg_scan('<path>' [, allow_moved_paths
+= true] [, snapshot_from_id = <n>])` reads an Iceberg table on the local file
+system; `<path>` is a `*.metadata.json` file or a table directory whose
+`metadata/version-hint.text` names the version (`ICEBERG_TABLE_VERSION_UNKNOWN`
+when there is none). `register_iceberg_table` does the same for a table a
+catalog resolves, after which SQL says `SELECT ... FROM <name>`. The snapshot is
+fixed when the relation is bound (the current one, or `snapshot_from_id`;
+`ICEBERG_SNAPSHOT_NOT_FOUND` for an id the table lacks). The manifests are read
+when the plan is lowered, and a scan refuses by name what the reader lacks
+(format version 3, a delete form such as a deletion vector, an ORC data file, a
+type with no Arrow mapping, a path off the local file system). Every other
+option of DuckDB's `iceberg_scan` is refused at `parse` by name.
+
+```text
+var ctx = EngineContext()
+var catalog = StorageBasedCatalog()
+catalog.register("db", "orders", "/warehouse/db/orders/metadata/v3.metadata.json")
+register_iceberg_table(ctx, "orders", catalog, "db", "orders")
+var outcome = run_sql(ctx, "SELECT id FROM orders WHERE id < 10")
+```
 
 **COPY ... TO a local Parquet, CSV or JSON file.** `COPY <table> TO '<path>'`
 and `COPY (<query>) TO '<path>' (FORMAT <format>, COMPRESSION <codec>)` run

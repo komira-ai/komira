@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Lowering: a bound LogicalPlan, a HostProfile and the resolved inputs to the
-# PhysicalPlan IR (version 18) and the ParamTable its segments index. Pure: the
+# PhysicalPlan IR (version 19) and the ParamTable its segments index. Pure: the
 # entry opens no file, reads no clock and no environment variable and touches
 # no global (README.md).
 #
@@ -16,6 +16,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        type and dictionary footer, the group keys in column
 #                        order, the sort, limit, filter, distinct and
 #                        aggregate it composes with.
+# test_lower_iceberg     a scan of an Iceberg table (a binding of kind
+#                        komira.iceberg.table) as a SOURCE_ICEBERG segment:
+#                        the spec the inputs carry (files, delete files,
+#                        bound columns and field ids), its filter and
+#                        projection as operators over the full schema, the
+#                        render line, the row estimate from the inputs, the
+#                        refusal of a scan whose files were not planned, and
+#                        a binding of another kind still not cut.
 # test_lower_names       the names a render and a refusal print for every
 #                        source, edge, order, operator and sink tag and for a
 #                        tag with no name, and the two group keys (over an
@@ -138,6 +146,7 @@ mojo_library(
         "tests/test_lower_csv.mojo",
         "tests/test_lower_distinct.mojo",
         "tests/test_lower_gcs_azure_scan.mojo",
+        "tests/test_lower_iceberg.mojo",
         "tests/test_lower_names.mojo",
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",

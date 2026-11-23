@@ -21,8 +21,20 @@
 # cannot lower. A shared-subplan reference (PLAN_CSE_REF) is a leaf with no
 # scan: the cutter reads the scans of the subplan it names where the canonical
 # subtree stands.
+#
+# An Iceberg table scan (a binding of kind `komira.iceberg.table`, from
+# `iceberg_scan(...)` or a table registered through `register_iceberg_table`)
+# is planned here: `plan_iceberg_scan` reads the table's metadata, manifest
+# list and manifests, prunes by the filter the optimizer pushed into the scan,
+# and matches the delete files to the data files that remain; the resulting
+# `IcebergScanSpec` is the scan's fact. It reads no Parquet footer and records
+# no row estimate. A table whose metadata cannot be planned (a delete form the
+# reader lacks, a path off the local file system) refuses here, at step
+# `lower`, naming the cause.
 
 from host_profile.host_profile import HostProfile
+from iceberg_scan.scan_planner import plan_iceberg_scan
+from iceberg_scan.table_ref import is_iceberg_binding
 from lowering.lower import lower
 from lowering.lowered_plan import LoweredPlan, LoweringInputs
 from parquet_footers.lowering_facts import (
@@ -87,6 +99,10 @@ def _add_scan_facts(
             add_catalog_table_scan(inputs, ctx.catalog, table, ctx.footers, ps)
         else:
             add_parquet_files_scan(inputs, ctx.footers, ps)
+        return
+    if is_iceberg_binding(sd.source):
+        var planned = plan_iceberg_scan(sd.source.binding_ref(), sd.filter)
+        inputs.add_iceberg_scan(planned.spec.copy())
         return
     # An in-memory or CSV scan: no facts here; the cutter serves both.
     inputs.add_scan()
