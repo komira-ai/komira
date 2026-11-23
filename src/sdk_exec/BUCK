@@ -398,8 +398,19 @@ _SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in
 #   projection, a GROUP BY and a count, a table of two keys, and one key in two
 #   buckets under UNION ALL each answer what the local files answer; a missing
 #   and a refused object are the store's NOT_FOUND and PERMISSION_DENIED at step
-#   execute; run_sql refuses the S3 scan with SCAN_FS_UNSERVED; a gs:// table is
-#   refused at step lower.
+#   execute; run_sql refuses the S3 scan with SCAN_FS_UNSERVED, and so does
+#   the S3 opener a gs:// table.
+# - test_run_sql_gcs_azure: run_sql_with over catalog tables whose source
+#   names a GCS bucket or an Azure container (the scheme from source_url's
+#   reading of a gs:// or az:// URL), read through GcsScanFs over
+#   objectstore_gcs's in-memory fake and through AzureScanFs over
+#   komira_test_fake_azure's fake Blob service (objectstore_gcs, azure_blob,
+#   azure_core, source_url and komira_test_fake_azure are test_deps for it):
+#   a filter and a projection, a GROUP BY and a count, a table of two keys,
+#   and one key in two buckets under UNION ALL each answer what the local
+#   files answer; a missing and a refused object are the store's NOT_FOUND and
+#   PERMISSION_DENIED at step execute; run_sql, and the opener of the other
+#   store, refuse each with SCAN_FS_UNSERVED naming the store.
 # - test_run_sql_no_from: SELECT 1 AS n is one INT32 row holding 1, as in
 #   DuckDB; a result literal is INT32 from -2147483647 to 2147483647 and
 #   INT64 otherwise, as DuckDB types it, while a literal a derived table holds
@@ -543,6 +554,7 @@ mojo_library(
         "tests/test_run_sql_copy_parquet.mojo",
         "tests/test_run_sql_csv.mojo",
         "tests/test_run_sql_cte.mojo",
+        "tests/test_run_sql_gcs_azure.mojo",
         "tests/test_run_sql_distinct.mojo",
         "tests/test_run_sql_float_sum_workers.mojo",
         "tests/test_run_sql_group_keys.mojo",
@@ -562,11 +574,16 @@ mojo_library(
     ],
     test_deps = [
         "//src/aws_core:aws_core",
+        "//src/azure_blob:azure_blob",
+        "//src/azure_core:azure_core",
         "//src/bench_corpus:bench_corpus",
         "//src/http_client:http_client",
+        "//src/objectstore_gcs:objectstore_gcs",
         "//src/objectstore_s3:objectstore_s3",
+        "//src/source_url:source_url",
         "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
         "//src/tests/helpers/komira_test_arrow_c_consumer:komira_test_arrow_c_consumer",
+        "//src/tests/helpers/komira_test_fake_azure:komira_test_fake_azure",
         "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
     ],
     test_data = {

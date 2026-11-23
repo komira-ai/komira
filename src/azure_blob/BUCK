@@ -12,7 +12,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Key, a SAS token, or anonymous) and AzureClientSpec, the endpoint,
 # credential and connector factory a client is built from; AzureFs,
 # fs's FileSystem over one container (read-only), which builds its
-# clients from a spec; parse_azure_url and AzureFsConfig (azure_url.mojo:
+# clients from a spec; AzureScanFs, fs's ScanFsOpener that opens an AzureFs
+# on each container a plan's scan names; parse_azure_url and AzureFsConfig (azure_url.mojo:
 # az://, abfs[s]://, the Blob service's https:// URL and an emulator's
 # path-style http:// URL, merged with the configured account and endpoint),
 # and azure_prod_fs, an AzureFs over http_client's
@@ -71,7 +72,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # over a scripted connector that keeps the wire: a SAS token in the query, a
 # Shared Key signing, anonymous, a clone signing as its source does, the
 # endpoint's scheme picking the connector, azure_prod_fs's connector and
-# refusals, and the production type cloning without dialing) and
+# refusals, and the production type cloning without dialing),
+# test_azure_scan_fs (AzureScanFs, fs's ScanFsOpener, opening an AzureFs on
+# the container a scan names and reading it over komira_test_fake_azure's
+# fake Blob service, a test_dep; its key prefix az://<container>/; no client
+# built until the first verb, nor by a clone; another scheme, an empty and a
+# malformed container refused) and
 # test_no_env_reads
 # (the package's sources read no environment). The same verbs over a real socket, against a fake service
 # that checks each signature itself, are komira_azure_blob_e2e's test.
@@ -104,6 +110,7 @@ mojo_library(
         "tests/test_azure_client_spec.mojo",
         "tests/test_azure_fs_scheme_read.mojo",
         "tests/test_azure_presign.mojo",
+        "tests/test_azure_scan_fs.mojo",
         "tests/test_azure_signing.mojo",
         "tests/test_azure_signing_body.mojo",
         "tests/test_azure_signing_layer.mojo",
@@ -113,6 +120,9 @@ mojo_library(
         "tests/test_azure_url.mojo",
         "tests/test_azure_xml.mojo",
         "tests/test_no_env_reads.mojo",
+    ],
+    test_deps = [
+        "//src/tests/helpers/komira_test_fake_azure:komira_test_fake_azure",
     ],
     visibility = ["PUBLIC"],
 )

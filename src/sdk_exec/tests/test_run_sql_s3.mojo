@@ -33,8 +33,9 @@
 #   * test_run_sql_without_an_opener_refuses_the_scan: `run_sql` reads the
 #     local file system only, so the S3 table is refused at step `execute`
 #     with SCAN_FS_UNSERVED naming the bucket, word for word.
-#   * test_a_scan_of_another_store_is_refused_at_lower: a table on gs:// is
-#     refused at step `lower` with LOWERING_SCAN_NOT_TOTAL naming it.
+#   * test_a_scan_of_another_store_is_refused_by_the_opener: a table on
+#     gs:// lowers, and the S3 opener refuses it at step `execute` with
+#     SCAN_FS_UNSERVED naming it, never reading it as an S3 bucket.
 # =============================================================================
 
 from std.os import makedirs
@@ -69,7 +70,6 @@ from sdk_exec.engine_context import EngineContext
 from sdk_exec.engine_options import EngineOptions
 from sdk_exec.engine_sql import (
     STEP_EXECUTE,
-    STEP_LOWER,
     SqlOutcome,
     SqlRefusal,
     run_sql,
@@ -373,7 +373,7 @@ def test_run_sql_without_an_opener_refuses_the_scan() raises:
     _same_ints(_ints(local, 0), [40], "local count")
 
 
-def test_a_scan_of_another_store_is_refused_at_lower() raises:
+def test_a_scan_of_another_store_is_refused_by_the_opener() raises:
     var ctx = _context("gcs")
     _add_remote(
         ctx,
@@ -383,12 +383,8 @@ def test_a_scan_of_another_store_is_refused_at_lower() raises:
         FsDescriptorPod.cloud(FS_SCHEME_GCS, "raw", 2),
     )
     var r = _refusal(run_sql_with(ctx, "SELECT id FROM remote_gcs", _opener(_mk_store)))
-    assert_equal(r.step, String(STEP_LOWER))
-    assert_equal(
-        r.reason,
-        "LOWERING_SCAN_NOT_TOTAL: a Parquet scan on gs://raw; the segment's"
-        " Parquet arm reads the local file system and S3",
-    )
+    assert_equal(r.step, String(STEP_EXECUTE))
+    assert_equal(r.reason, "SCAN_FS_UNSERVED: no file system of this run reads gs://raw")
 
 
 def main() raises:

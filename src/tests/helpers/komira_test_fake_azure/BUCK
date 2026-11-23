@@ -1,0 +1,29 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A fake Azure Blob service that keeps blobs in memory (fake_azure.mojo): a
+# http_core Connector whose streams answer the read verbs of the Blob service
+# path-style, as the Azurite emulator is addressed (Get Blob Properties, Get
+# Blob whole or by range), with one fault a test sets (a trapped blob answered
+# 403). Test-only, so no conda package: azure_blob and sdk_exec name it in
+# `test_deps`, which reaches those libraries' welded tests and nothing they
+# ship (tools/build/mojo/test_deps.bzl).
+#
+# The welded test, test_fake_azure_answers, holds each answer the fake gives
+# to a request's bytes: a HEAD's size and no body, a whole GET, a closed and
+# an open range, a percent-encoded name, the refusals (404, 403, 405, 416 for
+# a range past the end and for a suffix range), and a request with no
+# complete head.
+#
+# Deps: async_rt (the Reactor and Runtime of the stream methods) and
+# http_core (Connector, IoStream and ScriptedStream).
+mojo_library(
+    name = "komira_test_fake_azure",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/async_rt:async_rt",
+        "//src/http_core:http_core",
+    ],
+    test_srcs = ["tests/test_fake_azure_answers.mojo"],
+    visibility = ["//src/azure_blob:", "//src/sdk_exec:"],
+)

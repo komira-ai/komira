@@ -211,15 +211,12 @@ def _on(desc: FsDescriptorPod) raises -> LogicalPlan:
 
 
 def test_a_parquet_scan_the_segment_arm_cannot_carry_is_refused() raises:
+    # A scheme code that names no store the engine reads is refused, naming
+    # it by its number.
     assert_equal(
-        _message(_on(FsDescriptorPod.cloud(FS_SCHEME_GCS, String("raw"), 3)), _inputs()),
-        "LOWERING_SCAN_NOT_TOTAL: a Parquet scan on gs://raw; the segment's"
-        " Parquet arm reads the local file system and S3",
-    )
-    _refused_with(
-        _message(_on(FsDescriptorPod.cloud(FS_SCHEME_AZURE, String("box"), 3)), _inputs()),
-        LOWERING_SCAN_NOT_TOTAL,
-        "az://box",
+        _message(_on(FsDescriptorPod.cloud(UInt8(9), String("raw"), 3)), _inputs()),
+        "LOWERING_SCAN_NOT_TOTAL: a Parquet scan on scheme 9://raw; the"
+        " segment's Parquet arm reads the local file system, S3, GCS and Azure",
     )
     # A local scan with an explicit binding names a resolver the segment does
     # not carry.
@@ -229,8 +226,10 @@ def test_a_parquet_scan_the_segment_arm_cannot_carry_is_refused() raises:
         "file://",
     )
 
-    # A scan of an S3 bucket lowers.
+    # A scan of an S3 or GCS bucket, or of an Azure container, lowers.
     assert_equal(_message(_on(FsDescriptorPod.cloud(FS_SCHEME_S3, String("lake"), 3)), _inputs()), "")
+    assert_equal(_message(_on(FsDescriptorPod.cloud(FS_SCHEME_GCS, String("raw"), 3)), _inputs()), "")
+    assert_equal(_message(_on(FsDescriptorPod.cloud(FS_SCHEME_AZURE, String("box"), 3)), _inputs()), "")
 
     # One local file lowers.
     assert_equal(_message(_parquet_scan(ParquetSource(String("a.parquet"), _schema())), _inputs()), "")

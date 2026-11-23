@@ -41,8 +41,8 @@ the surface has no spelling, and the cell stays empty by decision.
 | `scan_arrow_ipc` | `km.read_feather(path)` | `kpl.scan_ipc(path)` | SCAN, `SOURCE_ARROW` | refused at lower |
 | `scan_in_memory` | `km.from_arrow(data)` | `kpl.from_arrow(data)` | SCAN of a table the session registered from the Arrow C stream (rules section 4) | not wired |
 | `scan_s3` | a reader given an `s3://` path | the same | SCAN with the `s3` scheme | cut; read through the run's `S3ScanFs` |
-| `scan_gs` | a reader given a `gs://` path | the same | SCAN with the `gcs` scheme | refused at lower |
-| `scan_az` | a reader given an `az://` path | the same | SCAN with the `azure` scheme | refused at lower |
+| `scan_gs` | a reader given a `gs://` path | the same | SCAN with the `gcs` scheme | cut; read through the run's `GcsScanFs` |
+| `scan_az` | a reader given an `az://` path | the same | SCAN with the `azure` scheme | cut; read through the run's `AzureScanFs` |
 | `filter` | `df[pred]`, where `pred` is a boolean `Series` of `df` | `lf.filter(pred)` | FILTER | cut |
 | `project` | `df[["a", "b"]]`, `df.rename(columns=...)`, `add_prefix`, `add_suffix` | `lf.select("a", "b")`, `lf.select(kpl.col("a").alias("b"))`, `lf.rename(...)` | PROJECT of column references and aliases | cut |
 | `computed_column` | `df.assign(x=...)`, `df["x"] = ...`; operators `+ - * / // % **`, comparisons, `& \| ~`; `abs()`, `round()`, `fillna`, `isna`, `notna` | `lf.with_columns(expr)`, `lf.select(expr)`; the same operators; `kpl.lit`, `abs`, `round`, `fill_null`, `fill_nan`, `is_null`, `is_nan` | PROJECT of literals, binary and unary ops (`build_with_columns_plan`) | cut |

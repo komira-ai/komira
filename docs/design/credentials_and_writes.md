@@ -1310,9 +1310,10 @@ that changes an answer or a refusal.
 
 ## Where is the code?
 
-Not built, except the engine's S3 read arm: lowering carries a scan's bucket and object keys
-(`SourceSpecPod.parquet_fs`), and `sdk_exec.run_sql_with` reads them through the file system an
-`objectstore_s3.S3ScanFs` opens on the bucket, with one footer cache keyed per bucket
+Not built, except the engine's S3, GCS and Azure read arms: lowering carries a scan's bucket (an
+Azure container) and object keys (`SourceSpecPod.parquet_fs`), and `sdk_exec.run_sql_with` reads them
+through the file system an `objectstore_s3.S3ScanFs`, `objectstore_gcs.GcsScanFs` or
+`azure_blob.AzureScanFs` opens on the bucket, with one footer cache keyed per bucket
 ([src/lowering/README.md](../../src/lowering/README.md), [src/sdk_exec/README.md](../../src/sdk_exec/README.md)).
 No surface, credential name, wire field or error code of this design is built. The parts it builds on are:
 - [src/sql](../../src/sql/sql_binder.mojo) (`sql_binder.mojo`, `sql_catalog.mojo`, `sql_parser.mojo`);
