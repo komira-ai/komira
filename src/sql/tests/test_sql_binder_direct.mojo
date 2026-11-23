@@ -255,7 +255,7 @@ def test_result_with_two_columns_of_one_name_keeps_both() raises:
 
 def test_hand_built_statements_without_a_target_are_refused() raises:
     var cat = _catalog()
-    var copy = parse_sql(tokenize("COPY t TO 'o'"))
+    var copy = parse_sql(tokenize("COPY t TO 'o.parquet'"))
     copy.dest_path = String("")
     try:
         _ = bind_statement(copy, cat, NoParquetFooters())

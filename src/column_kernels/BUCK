@@ -27,6 +27,7 @@ mojo_library(
         "tests/test_copy_share_table.mojo",
         "tests/test_cross_batch_gather.mojo",
         "tests/test_digest_functions.mojo",
+        "tests/test_empty_batch_decimal_metadata.mojo",
         "tests/test_fused_predicate.mojo",
         "tests/test_g4_bool_carried_batch_slice.mojo",
         "tests/test_g4_bool_union_hash_silent_overread.mojo",

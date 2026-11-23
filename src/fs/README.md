@@ -12,6 +12,13 @@ local implementation:
   memory map, footer reads, and positional and appending writes through
   `write(2)`, all synchronous. `S` is the async_rt waker-sink type the
   `FileSystem` trait is generic over.
+- `write_file_atomic(path, data)` (`atomic_write`): replace a local file
+  with `data`, all or nothing. The bytes go to a temporary file in the same
+  directory (`.<name>.<random>.tmp`), which is synced and renamed over
+  `path`, then the directory is synced. A failure before the rename removes
+  the temporary file and leaves `path` as it was; it raises `STORAGE_NOT_FOUND` when the
+  directory does not exist (it is never created) and `STORAGE_IO` naming the
+  step and the errno otherwise.
 - Path discovery: the glob engine (`*`, `?`, `[a-z]`, POSIX classes, `**`
   across directories, and `{a,b}` brace alternation), splitting a pattern
   into the static prefix a listing can use and the residual matched
@@ -166,4 +173,27 @@ assert_equal(
     String(scan_fs_unserved("s3://lake")),
     "SCAN_FS_UNSERVED: no file system of this run reads s3://lake",
 )
+```
+
+Replace a file all or nothing:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from std.os import listdir
+from std.tempfile import mkdtemp
+from fs.atomic_write import STORAGE_NOT_FOUND, write_file_atomic
+
+var dir = mkdtemp(prefix="komira_fs_atomic_readme_")
+write_file_atomic(dir + "/out.bin", "first".as_bytes())
+write_file_atomic(dir + "/out.bin", "second".as_bytes())
+with open(dir + "/out.bin", "r") as f:
+    assert_equal(f.read(), "second")
+assert_equal(len(listdir(dir)), 1)  # no temporary file is left
+
+var message = String()
+try:
+    write_file_atomic(dir + "/missing/out.bin", "x".as_bytes())
+except e:
+    message = String(e)
+assert_true(message.startswith(STORAGE_NOT_FOUND))
 ```

@@ -91,7 +91,7 @@ def _refuses(sql: String, needle: String) raises:
 
 
 def _copy(opts: String) raises -> SqlStatement:
-    return _parse("COPY t TO 'out' " + opts)
+    return _parse("COPY t TO 'out.parquet' " + opts)
 
 
 def _copy_pair(opts: String, fmt: UInt8, codec: UInt8) raises:
@@ -295,7 +295,7 @@ def test_copy_heads() raises:
     assert_equal(Int(st.codec), Int(WCOMP_SNAPPY))
     assert_true(st.query.select_items[0].is_star)
     assert_equal(st.query.from_tables[0].name, "t")
-    var q = _parse("COPY s.t2 TO 'o'")
+    var q = _parse("COPY s.t2 TO 'o.parquet'")
     assert_equal(q.query.from_tables[0].name, "t2")
     var sub = _parse("COPY (SELECT a FROM t WHERE a > 1) TO 'o.csv' (FORMAT csv);")
     assert_equal(sub.query.select_items[0].expr.text, "a")
@@ -323,37 +323,37 @@ def test_copy_options() raises:
     _copy_pair("(HEADER true, FORMAT 'csv')", WFMT_CSV, WCOMP_UNCOMPRESSED)
     _copy_pair("(FORMAT csv, HEADER '1', COMPRESSION zstd)", WFMT_CSV, WCOMP_ZSTD)
     _copy_pair("(FORMAT csv, HEADER on)", WFMT_CSV, WCOMP_UNCOMPRESSED)
-    _refuses("COPY t TO 'o' (5)", "expected a COPY option (FORMAT")
-    _refuses("COPY t TO 'o' (FOO 1)", "COPY option 'foo'")
-    _refuses("COPY t TO 'o' (FORMAT 7)", "expected a COPY option value")
-    _refuses("COPY t TO 'o' (FORMAT avro)", "(FORMAT 'avro')")
-    _refuses("COPY t TO 'o' (COMPRESSION brotli)", "COPY compression 'brotli'")
+    _refuses("COPY t TO 'o.parquet' (5)", "expected a COPY option (FORMAT")
+    _refuses("COPY t TO 'o.parquet' (FOO 1)", "COPY option 'foo'")
+    _refuses("COPY t TO 'o.parquet' (FORMAT 7)", "expected a COPY option value")
+    _refuses("COPY t TO 'o.parquet' (FORMAT avro)", "(FORMAT 'avro')")
+    _refuses("COPY t TO 'o.parquet' (COMPRESSION brotli)", "COPY compression 'brotli'")
     _refuses(
-        "COPY t TO 'o' (FORMAT csv, COMPRESSION snappy)",
+        "COPY t TO 'o.parquet' (FORMAT csv, COMPRESSION snappy)",
         "(FORMAT 'csv', COMPRESSION 'snappy') — no wired write sink",
     )
-    _refuses("COPY t TO 'o' (HEADER true)", "HEADER applies to FORMAT 'csv', not 'parquet'")
-    _refuses("COPY t TO 'o' (FORMAT csv, HEADER false)", "(HEADER false)")
-    _refuses("COPY t TO 'o' (FORMAT csv, HEADER 'off')", "(HEADER false)")
-    _refuses("COPY t TO 'o' (FORMAT csv, HEADER '0')", "(HEADER false)")
-    _refuses("COPY t TO 'o' (FORMAT csv, HEADER maybe)", "HEADER expects true/false, got 'maybe'")
-    _refuses("COPY t TO 'o' (FORMAT csv, ARRAY false)", "ARRAY applies to FORMAT 'json', not 'csv'")
-    _refuses("COPY t TO 'o' (FORMAT json, ARRAY true)", "(ARRAY true)")
-    _refuses("COPY t TO 'o' (FORMAT json, ARRAY '1')", "(ARRAY true)")
-    _refuses("COPY t TO 'o' (FORMAT json, ARRAY on)", "(ARRAY true)")
-    _refuses("COPY t TO 'o' (COMPRESSION_LEVEL 1)", "(COMPRESSION_LEVEL 1) — codec 'snappy' takes no level")
-    _refuses("COPY t TO 'o' (FORMAT csv, COMPRESSION lz4, COMPRESSION_LEVEL 1)", "codec 'lz4' takes no level")
+    _refuses("COPY t TO 'o.parquet' (HEADER true)", "HEADER applies to FORMAT 'csv', not 'parquet'")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER false)", "(HEADER false)")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER 'off')", "(HEADER false)")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER '0')", "(HEADER false)")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER maybe)", "HEADER expects true/false, got 'maybe'")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, ARRAY false)", "ARRAY applies to FORMAT 'json', not 'csv'")
+    _refuses("COPY t TO 'o.parquet' (FORMAT json, ARRAY true)", "(ARRAY true)")
+    _refuses("COPY t TO 'o.parquet' (FORMAT json, ARRAY '1')", "(ARRAY true)")
+    _refuses("COPY t TO 'o.parquet' (FORMAT json, ARRAY on)", "(ARRAY true)")
+    _refuses("COPY t TO 'o.parquet' (COMPRESSION_LEVEL 1)", "(COMPRESSION_LEVEL 1) — codec 'snappy' takes no level")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, COMPRESSION lz4, COMPRESSION_LEVEL 1)", "codec 'lz4' takes no level")
     _refuses(
-        "COPY t TO 'o' (COMPRESSION zstd, COMPRESSION_LEVEL 9)",
+        "COPY t TO 'o.parquet' (COMPRESSION zstd, COMPRESSION_LEVEL 9)",
         "(COMPRESSION 'zstd', COMPRESSION_LEVEL 9) — the wired sink is parameterized on level 3",
     )
-    _refuses("COPY t TO 'o' (COMPRESSION gzip, COMPRESSION_LEVEL 3)", "parameterized on level 6")
-    _refuses("COPY t TO 'o' (COMPRESSION_LEVEL x)", "expected an integer COPY option value")
+    _refuses("COPY t TO 'o.parquet' (COMPRESSION gzip, COMPRESSION_LEVEL 3)", "parameterized on level 6")
+    _refuses("COPY t TO 'o.parquet' (COMPRESSION_LEVEL x)", "expected an integer COPY option value")
     _refuses(
-        "COPY t TO 'o' (COMPRESSION_LEVEL 99999999999999999999)",
+        "COPY t TO 'o.parquet' (COMPRESSION_LEVEL 99999999999999999999)",
         "the COPY option value 99999999999999999999 is out of range for BIGINT (DuckDB v1.5.3 raises a Conversion Error",
     )
-    _refuses("COPY t TO 'o' (FORMAT csv", "')' to close COPY options")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv", "')' to close COPY options")
 
 
 def test_create_table_as() raises:

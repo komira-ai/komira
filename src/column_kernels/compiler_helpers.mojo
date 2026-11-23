@@ -1213,6 +1213,11 @@ def empty_batch_like(batch: RecordBatch) raises -> RecordBatch:
             null_count=0,
             offset=0,
         )
+        # A DECIMAL column carries its (precision, scale) itself, as the
+        # gather below keeps it; without them `as_decimal128` refuses it.
+        if at == ArrowType.DECIMAL128 or at == ArrowType.DECIMAL256:
+            col2._decimal_p = batch.schema.field_decimal_precision(i)
+            col2._decimal_s = batch.schema.field_decimal_scale(i)
         builder.add_column(col2^)
 
     var schema = sb.build()
@@ -1254,6 +1259,10 @@ def empty_batch_like_schema(schema: Schema) raises -> RecordBatch:
             null_count=0,
             offset=0,
         )
+        # As in `empty_batch_like`: the column carries its (precision, scale).
+        if at == ArrowType.DECIMAL128 or at == ArrowType.DECIMAL256:
+            col2._decimal_p = schema.field_decimal_precision(i)
+            col2._decimal_s = schema.field_decimal_scale(i)
         builder.add_column(col2^)
 
     var out_schema = sb.build()
