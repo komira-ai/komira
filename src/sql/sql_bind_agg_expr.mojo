@@ -14,9 +14,10 @@ from plan_expr.agg_expr import (
     AGG_REGR_SLOPE, AGG_REGR_SXX, AGG_REGR_SXY, AGG_REGR_SYY, AGG_SEM, AGG_SKEWNESS,
     AGG_STDDEV_POP, AGG_STDDEV_SAMP, AGG_VAR_POP, AGG_VAR_SAMP, AggExpr,
 )
+from plan_expr.corr_subquery_data import CORR_KIND_SCALAR
 from plan_expr.expr import (
-    EXPR_ALIAS, EXPR_BINARY_OP, EXPR_CAST, EXPR_COL_REF, EXPR_LITERAL, EXPR_UNARY_OP,
-    Expr,
+    EXPR_ALIAS, EXPR_BINARY_OP, EXPR_CAST, EXPR_COL_REF, EXPR_CORRELATED_SUBQUERY,
+    EXPR_LITERAL, EXPR_UNARY_OP, Expr,
 )
 from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import AggExprArray, _infer_expr_field
@@ -27,7 +28,7 @@ from sql.sql_bind_interval import (
 from sql.sql_ast import (
     SXAGG_COUNT, SXLIKE_ILIKE, SXOP_DIV, SXOP_IDIV, SXOP_MOD, SXUN_NEGATE, SX_AGG,
     SX_BINARY, SX_INTERVAL, SX_BOOL, SX_CALL, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT, SX_LIKE, SX_NULL,
-    SX_STAR, SX_STRING, SX_TIMESTAMP, SX_UNARY, SqlExpr, TSLIT_AWARE,
+    SX_STAR, SX_STRING, SX_SUBQUERY, SX_TIMESTAMP, SX_UNARY, SqlExpr, TSLIT_AWARE,
     sql_call_is_aggregate,
 )
 from sql.sql_bind_call import _bind_scalar_call
@@ -47,6 +48,29 @@ from sql.sql_catalog import SqlCatalog
 from sql.sql_fn_table import (
     FNK_MATH_FN, FNK_MATH_FN2, FNK_UNARY_NUM, sql_scalar_fn_spec,
 )
+
+
+comptime POST_AGG_PREDICATE_SUBQUERY_REFUSAL = (
+    "SQL not supported: an EXISTS or IN subquery in a HAVING clause or in the"
+    " SELECT list of a grouped query (a scalar subquery is served there; a"
+    " predicate subquery is served as a WHERE conjunct)"
+)
+
+
+def _post_agg_scalar_subquery(sx: SqlExpr, prebound: List[Expr]) raises -> Expr:
+    """The bound uncorrelated scalar subquery an SX_SUBQUERY node names, for a
+    position above an aggregate (a HAVING, or a SELECT item of a grouped
+    query). Its value does not depend on the group, so it stands in the
+    post-aggregate expression as it is, and `scalar_subquery_decorrelate`
+    joins it to the aggregate's output. A predicate subquery (EXISTS, IN, NOT
+    IN) there would need a MARK join and is refused by name."""
+    var idx = sx.subquery_index()
+    if idx < 0 or idx >= len(prebound):
+        raise Error("SQL bind error: dangling scalar-subquery index")
+    ref e = prebound[idx]
+    if e.tag != EXPR_CORRELATED_SUBQUERY or e._corr_subq.value()[].kind != CORR_KIND_SCALAR:
+        raise Error(POST_AGG_PREDICATE_SUBQUERY_REFUSAL)
+    return e.copy()
 
 
 def _sum_widens_to_hugeint(t: ArrowType) -> Bool:
@@ -691,6 +715,8 @@ def _extract_and_bind_post_agg(
         # date_diff folds to a constant (no aggregate); any other scalar call
         # binds via `_bind_scalar_call` (its non-agg args resolve as scalars).
         return _bind_scalar_call(sx, input_schema, scope, catalog, cte_scope, prebound)
+    if sx.tag == SX_SUBQUERY:
+        return _post_agg_scalar_subquery(sx, prebound)
     if sx.tag == SX_STAR:
         raise Error("SQL bind error: '*' not allowed in this position")
     raise Error("SQL bind error: unsupported expression")

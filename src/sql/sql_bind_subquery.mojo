@@ -308,7 +308,8 @@ def _bind_correlated_subquery_body(
     and `_bind_select` mutually recursive). Builds the inner plan directly
     (not via `_bind_select`) so the inner WHERE binds qualifier-aware,
     splitting inner from outer columns; `_bind_select` would reject the outer
-    refs.
+    refs. The exception is the uncorrelated IN body below, which
+    `_bind_uncorrelated_in_body` binds with `_bind_select`.
 
     IN is unified onto EXISTS by synthesizing the membership equi
     `inner_projected_col = in_lhs_col` and folding it into the inner WHERE
@@ -317,8 +318,16 @@ def _bind_correlated_subquery_body(
     into the semi join key. NOT IN is not that ANTI join alone: it is
     NULL-aware, and `_bind_null_aware_not_in` builds it.
 
-    Restrictions: a single-table inner FROM; no GROUP BY / HAVING / ORDER BY /
-    LIMIT / OFFSET / DISTINCT in the subquery body. Anything else raises."""
+    An IN / NOT IN body outside the shape below (a join, GROUP BY / HAVING,
+    DISTINCT, ORDER BY / LIMIT / OFFSET, a projection that is not one bare
+    column) is bound whole by `_bind_uncorrelated_in_body`, which serves it
+    uncorrelated only. For EXISTS and the IN shape below: a single-table inner
+    FROM; no GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET / DISTINCT in the
+    subquery body. Anything else raises."""
+    if (kind == SUBQ_IN or kind == SUBQ_NOT_IN) and _in_body_is_general(body):
+        return _bind_uncorrelated_in_body(
+            body, kind, in_lhs_col, catalog, cte_scope, prebound, lhs_null_free
+        )
     if len(body.from_tables) != 1:
         raise Error("SQL not supported: a predicate subquery must have a single-table FROM")
     # `body.offset` is refused with `body.limit`: without it,
@@ -372,6 +381,91 @@ def _bind_correlated_subquery_body(
     else:
         corr_kind = CORR_KIND_NOT_EXISTS
     return Expr.correlated_subquery(inner_plan^, uniq_refs^, corr_kind)
+
+
+# =============================================================================
+# IN / NOT IN over a body bound whole
+# =============================================================================
+
+
+# The name the single column of a whole-bound IN body is projected under, so
+# the membership equi and the NOT IN counts name it the same way whatever the
+# body's own output name is (`u.k - 2`, `max(v)`).
+comptime IN_BODY_COLUMN = "__in_y"
+
+
+def _in_body_is_general(body: SelectStmt) -> Bool:
+    """True when an IN / NOT IN body is not the one-table, one-bare-column,
+    WHERE-only shape `_bind_correlated_subquery_body` binds inner and outer
+    columns apart in: it has more than one FROM relation or a JOIN, a GROUP
+    BY, HAVING, DISTINCT, ORDER BY, LIMIT or OFFSET, or does not project
+    exactly one bare column."""
+    if len(body.from_tables) != 1 or len(body.joins) > 0:
+        return True
+    if (
+        len(body.group_by) > 0 or body.having_pred or len(body.order_by) > 0
+        or body.limit or body.offset or body.distinct
+    ):
+        return True
+    if len(body.select_items) != 1:
+        return True
+    ref it = body.select_items[0]
+    return it.is_star or it.expr.tag != SX_COLUMN
+
+
+def _bind_uncorrelated_in_body(
+    body: SelectStmt,
+    kind: UInt8,
+    in_lhs_col: String,
+    catalog: SqlCatalog,
+    cte_scope: CteScope,
+    prebound: List[Expr],
+    lhs_null_free: Bool,
+) raises -> Expr:
+    """`x [NOT] IN (<body>)` for a body `_in_body_is_general` names: the body
+    is bound whole (`_bind_select`), as a derived table would be, and its one
+    column projected as `IN_BODY_COLUMN` (y). The body is uncorrelated: it
+    binds against its own FROM only, so a column of the outer query in it is
+    the binder's unknown-column error.
+
+    IN is `EXISTS (body WHERE y = x)`, the SEMI join. NOT IN is that ANTI join
+    with the two query-wide facts of the uncorrelated NOT IN lowering (see the
+    NULL-aware section below): no y is NULL, and x is not NULL or the body is
+    empty. No parquet null count describes a whole-bound body, so the y check
+    always runs; the x check is left out when `lhs_null_free` proves x."""
+    var inner = _bind_select(body, catalog, cte_scope, prebound)
+    if inner.output_schema.num_columns() != 1:
+        raise Error("SQL bind error: an IN subquery must project exactly one column")
+    var proj = ExprArray()
+    proj.append(
+        Expr.alias(Expr.col_ref(inner.output_schema.field_name(0)), String(IN_BODY_COLUMN))
+    )
+    var body_plan = LogicalPlan.project(proj^, inner^)
+    var member = LogicalPlan.filter(
+        Expr.binary(BIN_EQ, Expr.col_ref(String(IN_BODY_COLUMN)), Expr.left(in_lhs_col)),
+        body_plan.copy(),
+    )
+    var refs = List[String]()
+    refs.append(String(in_lhs_col))
+    if kind == SUBQ_IN:
+        return Expr.correlated_subquery(member^, refs^, CORR_KIND_EXISTS)
+    var anti = Expr.correlated_subquery(member^, refs^, CORR_KIND_NOT_EXISTS)
+    var no_null_y = Expr.binary(
+        BIN_EQ,
+        _null_count_scalar(body_plan.copy(), String(IN_BODY_COLUMN)),
+        Expr.literal(ScalarValue.from_int64(0)),
+    )
+    if lhs_null_free:
+        return Expr.binary(BIN_AND, anti^, no_null_y^)
+    var s_empty = Expr.binary(
+        BIN_EQ,
+        _count_star_scalar(body_plan^, String("__not_in_rows")),
+        Expr.literal(ScalarValue.from_int64(0)),
+    )
+    var lhs_ok = Expr.binary(
+        BIN_OR, Expr.unary(UN_IS_NOT_NULL, Expr.col_ref(in_lhs_col)), s_empty^
+    )
+    return Expr.binary(BIN_AND, anti^, Expr.binary(BIN_AND, no_null_y^, lhs_ok^))
 
 
 # =============================================================================

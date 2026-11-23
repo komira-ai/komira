@@ -189,6 +189,24 @@ def test_cross_without_an_equi_key_is_left_alone() raises:
     assert_equal(len(j._join.value()[].left_on), 0)
 
 
+def test_cross_against_one_aggregate_row_keeps_its_equality_as_a_filter() raises:
+    # `a = (SELECT count(*) FROM r)` decorrelates to Filter(a = n) over t
+    # CROSS JOIN a global aggregate: a broadcast row. Defect: the equality
+    # folded into a hash join, which gains nothing over one row and is refused
+    # at lower for a key pair it does not serve (DECIMAL, DATE) where the
+    # filter compares them.
+    var aggs = AggExprArray()
+    var star: Optional[Expr] = None
+    aggs.append(AggExpr(AGG_COUNT, star^, Optional(String("n"))))
+    var one_row = LogicalPlan.aggregate(ExprArray(), aggs^, _r())
+    var out = _ecj(_eq("a", "n"), _cross(_t(), one_row^))
+    assert_equal(Int(out.tag), Int(PLAN_FILTER))
+    ref j = out._filter.value()[].child[]
+    assert_equal(Int(j._join.value()[].join_type), Int(JOIN_CROSS))
+    assert_equal(len(j._join.value()[].left_on), 0)
+    assert_equal(_render(out._filter.value()[].predicate), _render(_eq("a", "n")))
+
+
 def test_swapped_operands_are_classified_by_side() raises:
     # `ra = a`: the left operand is the right key. Defect: keys emitted in
     # operand order (left_on would name a right column).
