@@ -80,13 +80,13 @@ def test_defaults():
 
 def test_every_argument_held():
     cred = OAuth2ClientCredentials("catalog-etl", client_id="etl", client_secret="CLIENTSECRET")
-    c = iceberg("http://127.0.0.1:8181", warehouse="prod", credential=cred, access_delegation="none")
-    assert c.uri == "http://127.0.0.1:8181"
+    c = iceberg("http://catalog.example:8181", warehouse="prod", credential=cred, access_delegation="none")
+    assert c.uri == "http://catalog.example:8181"
     assert c.warehouse == "prod"
     assert c.credential is cred
     assert c.access_delegation == "none"
     assert repr(c) == (
-        "IcebergCatalog('http://127.0.0.1:8181', warehouse='prod', credential=OAuth2ClientCredentials("
+        "IcebergCatalog('http://catalog.example:8181', warehouse='prod', credential=OAuth2ClientCredentials("
         "'catalog-etl', client_id=<set>, client_secret=<set>, scope='catalog'), access_delegation='none')"
     )
     assert "SECRET" not in repr(c)
@@ -120,7 +120,11 @@ def test_uri_refused():
     expect(lambda: iceberg("https://catalog.example:notaport/"), ValueError, "uri is not a URI")
     expect(lambda: iceberg("https://catalog.example:99999/"), ValueError, "uri is not a URI")
     expect(lambda: iceberg("http://[catalog.example/"), ValueError, "uri is not a URI")
-    for uri in ("https://etl:PASSWORD@h/api", "https://etl@h/api", "https://:PASSWORD@h/api"):
+    for uri in (
+        "https://etl:PASSWORD@catalog.example/api",
+        "https://etl@catalog.example/api",
+        "https://:PASSWORD@catalog.example/api",
+    ):
         e = expect(
             lambda: iceberg(uri),
             ValueError,
