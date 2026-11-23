@@ -265,6 +265,12 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
         """The Azure container name this AzureFs is bound to."""
         return self._container
 
+    def key_prefix(self) -> String:
+        """`az://<container>/`: a cache shared with other file systems keys
+        this container's blobs apart from a local file, or another
+        container's blob, at the same path."""
+        return "az://" + self._container + "/"
+
     def spec(self) -> AzureClientSpec[Self.C]:
         """A copy of the spec this file system builds its clients from."""
         return self._spec.copy()

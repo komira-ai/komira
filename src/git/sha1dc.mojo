@@ -74,8 +74,8 @@ comptime _IV2: UInt32 = 0x98BADCFE
 comptime _IV3: UInt32 = 0x10325476
 comptime _IV4: UInt32 = 0xC3D2E1F0
 
-comptime _Words = InlineArray[UInt32, 80]
-comptime _State = InlineArray[UInt32, 5]
+comptime _Words = Array[UInt32, 80]
+comptime _State = Array[UInt32, 5]
 
 
 def is_object_id_collision(message: String) -> Bool:
@@ -254,7 +254,7 @@ struct Sha1dc(Copyable, Movable):
     """
 
     var _ihv: _State
-    var _buffer: InlineArray[UInt8, 64]
+    var _buffer: Array[UInt8, 64]
     var _total: UInt64
     var _found: Bool
     var _safe_hash: Bool
@@ -277,7 +277,7 @@ struct Sha1dc(Copyable, Movable):
     def __init__(out self):
         """An empty hash state with upstream's default switches."""
         self._ihv = [_IV0, _IV1, _IV2, _IV3, _IV4]
-        self._buffer = InlineArray[UInt8, 64](fill=0)
+        self._buffer = Array[UInt8, 64](fill=0)
         self._total = 0
         self._found = False
         self._safe_hash = True
@@ -338,7 +338,7 @@ struct Sha1dc(Copyable, Movable):
             self._buffer[i] = data[pos + i]
         self._total += UInt64(n - pos)
 
-    def finalize_into(self, mut out: InlineArray[UInt8, 20]) -> Bool:
+    def finalize_into(self, mut out: Array[UInt8, 20]) -> Bool:
         """Write the digest to `out`; True when a collision was detected (the
         digest is then the safe hash, unless safe hashing is off). The state
         is not changed, so more data may be absorbed afterwards."""
@@ -357,10 +357,10 @@ struct Sha1dc(Copyable, Movable):
             out[4 * i + 3] = UInt8(v & 0xFF)
         return h._found
 
-    def digest(self) raises -> InlineArray[UInt8, 20]:
+    def digest(self) raises -> Array[UInt8, 20]:
         """The digest, or the OBJECT_ID_COLLISION error when a collision was
         detected."""
-        var out = InlineArray[UInt8, 20](fill=0)
+        var out = Array[UInt8, 20](fill=0)
         if self.finalize_into(out):
             raise _collision_error(
                 "input of " + String(Int(self._total)) + " bytes"
@@ -421,7 +421,7 @@ struct Sha1dc(Copyable, Movable):
                 return
 
 
-def sha1dc(data: Span[UInt8, _]) raises -> InlineArray[UInt8, 20]:
+def sha1dc(data: Span[UInt8, _]) raises -> Array[UInt8, 20]:
     """The SHA-1 digest of `data`, or the OBJECT_ID_COLLISION error when
     `data` holds a block of a detected collision."""
     var h = Sha1dc()

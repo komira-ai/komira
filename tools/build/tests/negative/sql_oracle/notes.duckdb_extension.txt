@@ -1,1 +1,0 @@
-Named like a text file, though it holds the extension suffix inside its name.

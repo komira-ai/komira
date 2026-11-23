@@ -15,6 +15,10 @@
 #     def mk() raises -> MyBackend: ...
 #     var fs = GcsFs[MyBackend](bucket="my-bucket", backend=mk(), mk_backend=mk)
 #
+# `GcsFs(bucket, mk_backend)` leaves the first backend to the factory too, so
+# constructing it builds and dials nothing (`GcsScanFs` opens a scan's file
+# system this way).
+#
 # PER-WORKER clone(). A network backend's transport pool is single-thread by
 # design and cannot be copied, so `clone()` gives the clone an EMPTY slot that
 # the factory fills on the clone's first read. Sharing one backend across
@@ -113,6 +117,25 @@ struct GcsFs[B: GcsStorageBackend](FileSystem, Movable, Deinitable):
 
     def __init__(
         out self,
+        var bucket: String,
+        mk_backend: def () raises thin -> Self.B,
+    ):
+        """A GcsFs on `bucket` whose backend `mk_backend` builds on the first
+        read: nothing is built or dialed here.
+
+        Args:
+            bucket: The GCS bucket name.
+            mk_backend: Builds the backend of this file system and of each
+                clone.
+        """
+        self._bucket = bucket^
+        var slab = Slab[Optional[Self.B]]()
+        slab.append(Optional[Self.B](None))
+        self._backend = slab^
+        self._mk_backend = mk_backend
+
+    def __init__(
+        out self,
         var _bucket: String,
         var _backend: Slab[Optional[Self.B]],
         _mk_backend: def () raises thin -> Self.B,
@@ -148,6 +171,18 @@ struct GcsFs[B: GcsStorageBackend](FileSystem, Movable, Deinitable):
     def bucket(self) -> String:
         """The bucket this GcsFs reads."""
         return self._bucket
+
+    def backend_built(self) -> Bool:
+        """True once this file system holds a backend (given to its
+        constructor, or built by a read)."""
+        # SAFETY: get_mut_interior(0) invariants as `_build_backend_if_absent`.
+        return Bool(self._backend.get_mut_interior(0))
+
+    def key_prefix(self) -> String:
+        """`gs://<bucket>/`: a cache shared with other file systems keys this
+        bucket's objects apart from a local file, or another bucket's object,
+        at the same path."""
+        return "gs://" + self._bucket + "/"
 
     def list(self, prefix: String) raises -> List[String]:
         """Every key under `prefix`, at any depth, as bare object keys (the

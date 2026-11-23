@@ -157,6 +157,12 @@ narrow integers, BINARY, nested types) is refused. TIMESTAMP, DATE64, TIME and
 DURATION are written as INT64 or INT32 with no logical-type annotation: the
 values are right and a reader sees integers.
 
+`field_ids` (a trailing keyword of both functions) gives leaf `i` the Parquet
+field id `field_ids[i]` (SchemaElement field 9), which table formats such as
+Iceberg read to find a column. An empty list, the default, writes no field ids
+and the same bytes as before; any other length than the column count is
+refused with both counts named.
+
 ```mojo
 from arrow.arrow_types import ArrowType
 from arrow.column import Column

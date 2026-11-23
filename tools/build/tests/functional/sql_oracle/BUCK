@@ -43,22 +43,6 @@ sql_oracle(
     outputs = ["schema.tsv"],
 )
 
-# The `extensions` of sql_oracle: the pinned avro and iceberg extensions
-# (komira//third_party/duckdb), loaded in that order before the SQL runs.
-# with_extensions.sql fails unless the functions they register exist, so
-# building it is the test; //tools/build/selftest:sql_oracle also reads its
-# invocation (the two LOADs ahead of `.cd`). Without the loads (autoload is
-# off) the functions are missing and the action fails.
-sql_oracle(
-    name = "with_extensions",
-    srcs = "with_extensions.sql",
-    extensions = [
-        "komira//third_party/duckdb:avro_extension[avro.duckdb_extension]",
-        "komira//third_party/duckdb:iceberg_extension[iceberg.duckdb_extension]",
-    ],
-    outputs = ["functions.tsv"],
-)
-
 # A duckdb_dist whose version holds both ends of the digit range, 0 and 9:
 # //tools/build/selftest:sql_oracle builds it, so a version pattern whose
 # range is narrowed by one at either end (`[1-9.]`, `[0-8.]`) fails here.

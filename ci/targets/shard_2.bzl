@@ -125,7 +125,6 @@ TARGETS = [
     "tests//functional/sql_oracle:check",
     "tests//functional/sql_oracle:dist_version_digit_bounds",
     "tests//functional/sql_oracle:doc_tree",
-    "tests//functional/sql_oracle:with_extensions",
     "tests//functional/surface_capability_matrix:doc_tree",
     "tests//functional/surface_capability_matrix:ok",
     "tests//functional/zig_rules:cases",

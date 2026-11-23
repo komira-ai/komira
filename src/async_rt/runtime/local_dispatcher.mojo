@@ -404,7 +404,7 @@ struct _ShardMarkTable(Deinitable):
     """Two independent per-dispatch bitmasks over worker ids: DELIVERED (the
     shard reached `run()`) and ENTERED (it passed the generation guard and ran
     its body). Heap-owned by the dispatcher, marked concurrently by every
-    worker, read by the barrier's stall dump. POD interior (two `InlineArray`s
+    worker, read by the barrier's stall dump. POD interior (two `Array`s
     of `Int64` + one `Int64`), so it is safe across destroy-recreate and its address is stable for
     the dispatcher's whole life — which is what makes it safe for a shard to
     mark through a recycled pool slot."""

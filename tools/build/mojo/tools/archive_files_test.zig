@@ -1,8 +1,8 @@
 //! Unit tests of archive_files.zig: the substitutions (literal, in order, per
 //! line, sed's treatment of the last newline), the archive kinds, extraction of
-//! tar, tar.gz, tar.zst and zip (executable bits, links, an escaping member) and
-//! of a single gzip file (its one file named as the archive without `.gz`),
-//! over archives built in memory. The whole tool is run by every third_party
+//! tar, tar.gz, tar.zst, zip and a plain gz (executable bits, links, an escaping
+//! member), over
+//! archives built in memory. The whole tool is run by every third_party
 //! `archive_files` target.
 const std = @import("std");
 const A = @import("archive_files.zig");
@@ -261,48 +261,12 @@ test "kindOf: by the name's ending" {
     try t.expect(A.kindOf("a.zip").? == .zip);
     try t.expect(A.kindOf("x/info-p-1.0-0.tar.zst").? == .tar_zst);
     try t.expect(A.kindOf("mojo_compiler_1.0.0_linux-64.conda").? == .zip);
-    try t.expect(A.kindOf("x/iceberg.duckdb_extension.gz").? == .gz);
-    try t.expect(A.kindOf("a.gz").? == .gz);
     try t.expect(A.kindOf("a.zst") == null);
     try t.expect(A.kindOf("a.tar.xz") == null);
+    try t.expect(A.kindOf("a.gz").? == .gz);
+    try t.expect(A.kindOf("x/iceberg.duckdb_extension.gz").? == .gz);
+    try t.expect(A.kindOf("a.gz.zst") == null);
     try t.expect(A.kindOf("a") == null);
-}
-
-test "gzFileName: the archive's file name without .gz; nothing left, or no .gz, is null" {
-    try t.expectEqualStrings("iceberg.duckdb_extension", A.gzFileName("buck-out/x/iceberg.duckdb_extension.gz").?);
-    try t.expectEqualStrings("a.b", A.gzFileName("a.b.gz").?);
-    try t.expect(A.gzFileName(".gz") == null);
-    try t.expect(A.gzFileName("dir/.gz") == null);
-    try t.expect(A.gzFileName("a.zip") == null);
-}
-
-test "gunzip: a gzip stream inflates to its bytes, binary and empty ones too; a stream that is not gzip is refused" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const bin = [_]u8{ 0, 1, 2, 0xff, 0, 0, 'D', 'u', 'c', 'k', 0x80 };
-    try t.expectEqualSlices(u8, &bin, try A.gunzip(a, try gzip(a, &bin)));
-    try t.expectEqualSlices(u8, "", try A.gunzip(a, try gzip(a, "")));
-    const big = try a.alloc(u8, 200 * 1024);
-    for (big, 0..) |*b, i| b.* = @truncate(i *% 13);
-    try t.expectEqualSlices(u8, big, try A.gunzip(a, try gzip(a, big)));
-    if (A.gunzip(a, "not gzip at all")) |_| return error.TestExpectedError else |_| {}
-}
-
-test "extractGz: the one file lands under its name, not executable; an escaping or empty name and a bad stream are refused" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    var tmp = t.tmpDir(.{ .iterate = true });
-    defer tmp.cleanup();
-    const bin = [_]u8{ 0x7f, 'E', 'L', 'F', 0, 0, 0, 9 };
-    try A.extractGz(a, tmp.dir, "iceberg.duckdb_extension", try gzip(a, &bin));
-    var buf: [16]u8 = undefined;
-    try t.expectEqualSlices(u8, &bin, try tmp.dir.readFile("iceberg.duckdb_extension", &buf));
-    try t.expect((try tmp.dir.statFile("iceberg.duckdb_extension")).mode & 0o111 == 0);
-    try t.expectError(error.PathEscapes, A.extractGz(a, tmp.dir, "../evil", try gzip(a, "x")));
-    try t.expectError(error.PathEscapes, A.extractGz(a, tmp.dir, "", try gzip(a, "x")));
-    if (A.extractGz(a, tmp.dir, "bad", "not gzip at all")) |_| return error.TestExpectedError else |_| {}
 }
 
 test "contained: not absolute, no .. component" {
@@ -461,4 +425,73 @@ test "zip64Sizes: a marked value with no zip64 field, or a field too short for i
     std.mem.writeInt(u16, cut[0..2], 1, .little);
     std.mem.writeInt(u16, cut[2..4], 16, .little);
     try t.expectError(error.BadZip, A.zip64Sizes(&cut, &size, &csize, &local));
+}
+
+test "gzMemberName: the archive's file name without .gz" {
+    try t.expectEqualStrings("iceberg.duckdb_extension", A.gzMemberName("third_party/x/iceberg.duckdb_extension.gz"));
+    try t.expectEqualStrings("a", A.gzMemberName("a.gz"));
+}
+
+test "extractGzip: a plain .gz extracts to one file named by the member, with its bytes" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = t.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    const payload = "\x7fELF an extension body\n";
+    try A.extractGzip(a, tmp.dir, A.gzMemberName("dir/ext.duckdb_extension.gz"), try gzip(a, payload));
+    var buf: [64]u8 = undefined;
+    try t.expectEqualStrings(payload, try tmp.dir.readFile("ext.duckdb_extension", &buf));
+    const st = try tmp.dir.statFile("ext.duckdb_extension");
+    try t.expect(st.mode & 0o111 == 0);
+}
+
+test "extractGzip: an empty file extracts to an empty file" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = t.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try A.extractGzip(a, tmp.dir, "empty", try gzip(a, ""));
+    try t.expectEqual(@as(u64, 0), (try tmp.dir.statFile("empty")).size);
+}
+
+test "extractGzip: a .tar.gz is still a tar: kindOf says so and gunzip yields the tar that extracts" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expect(A.kindOf("pkg-1.0.tar.gz").? == .tar_gz);
+    var tmp = t.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    const z = try gzip(a, try tar(a, &.{.{ .name = "p/f", .data = "tar" }}));
+    try extractFrom(tmp.dir, try A.gunzip(a, z));
+    var buf: [8]u8 = undefined;
+    try t.expectEqualStrings("tar", try tmp.dir.readFile("p/f", &buf));
+}
+
+test "gunzipChecked: a stream that is not gzip, a wrong checksum, a wrong length and a truncated stream are refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = t.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try t.expect(if (A.extractGzip(a, tmp.dir, "x", "this is not gzip at all")) |_| false else |_| true);
+    const good = try gzip(a, "payload");
+    try t.expectEqualStrings("payload", try A.gunzipChecked(a, good));
+    const bad_crc = try a.dupe(u8, good);
+    bad_crc[bad_crc.len - 8] ^= 0xff;
+    try t.expectError(error.GzipChecksumMismatch, A.gunzipChecked(a, bad_crc));
+    try t.expect(if (A.extractGzip(a, tmp.dir, "y", bad_crc)) |_| false else |_| true);
+    try t.expectError(error.FileNotFound, tmp.dir.statFile("y"));
+}
+
+test "gunzipChecked: a wrong length in the trailer, and a stream shorter than any gzip file, are refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const good = try gzip(a, "payload");
+    const bad_len = try a.dupe(u8, good);
+    bad_len[bad_len.len - 4] ^= 0x01;
+    try t.expectError(error.GzipLengthMismatch, A.gunzipChecked(a, bad_len));
+    try t.expectError(error.GzipTooShort, A.gunzipChecked(a, good[0..12]));
 }

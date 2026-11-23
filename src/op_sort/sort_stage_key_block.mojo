@@ -108,7 +108,7 @@ trait SortKeyBlockTrait(Defaultable, Movable, Deinitable):
         ...
 
     def slot_sorts_before(
-        self, i: Int, j: Int, directions: InlineArray[UInt8, MAX_SORT_KEYS]
+        self, i: Int, j: Int, directions: Array[UInt8, MAX_SORT_KEYS]
     ) -> Bool:
         """True iff buffered row `i` sorts STRICTLY BEFORE buffered row `j` under
         the per-key (ASC/DESC) direction comparator (first non-equal key decides;
@@ -123,7 +123,7 @@ trait SortKeyBlockTrait(Defaultable, Movable, Deinitable):
         batch: BatchView[bo],
         row: Int,
         slot: Int,
-        directions: InlineArray[UInt8, MAX_SORT_KEYS],
+        directions: Array[UInt8, MAX_SORT_KEYS],
     ) -> Bool:
         """True if a CANDIDATE row read DIRECTLY off `batch` at `row` sorts BEFORE
         the buffered `slot`'s row under the per-key (ASC/DESC) direction
@@ -282,7 +282,7 @@ struct SortKeyBlock[*Keys: SortKeyColumn](SortKeyBlockTrait):
 
     @always_inline
     def slot_sorts_before(
-        self, i: Int, j: Int, directions: InlineArray[UInt8, MAX_SORT_KEYS]
+        self, i: Int, j: Int, directions: Array[UInt8, MAX_SORT_KEYS]
     ) -> Bool:
         # Comptime-unrolled lexicographic slot-vs-slot compare: each key read off
         # its native-DType column List via `compare_at` (the comptime `for k`
@@ -307,7 +307,7 @@ struct SortKeyBlock[*Keys: SortKeyColumn](SortKeyBlockTrait):
         batch: BatchView[bo],
         row: Int,
         slot: Int,
-        directions: InlineArray[UInt8, MAX_SORT_KEYS],
+        directions: Array[UInt8, MAX_SORT_KEYS],
     ) -> Bool:
         # Comptime-unrolled lexicographic compare: candidate read off the batch
         # (native DType, direct typed load per key — no slot store, no bit

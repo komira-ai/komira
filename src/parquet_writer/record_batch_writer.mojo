@@ -55,6 +55,31 @@ def _require_positive_row_group_size(who: String, max_rows_per_rg: Int) raises:
         )
 
 
+def _stamp_field_ids(
+    who: String, mut elements: List[SchemaElement], field_ids: List[Int]
+) raises:
+    """Set `field_id` on leaf `i` (`elements[i + 1]`) to `field_ids[i]`; an
+    empty list sets none.
+
+    Raises:
+        Error: `field_ids` is not empty and its length is not the leaf count.
+    """
+    if len(field_ids) == 0:
+        return
+    var leaves = len(elements) - 1
+    if len(field_ids) != leaves:
+        raise Error(
+            who
+            + ": "
+            + String(len(field_ids))
+            + " field id(s) for "
+            + String(leaves)
+            + " column(s)"
+        )
+    for i in range(leaves):
+        elements[i + 1].field_id = field_ids[i]
+
+
 def write_record_batch_to_parquet_bytes(
     batch: RecordBatch,
     codec: CompressionCodec = CompressionCodec.SNAPPY,
@@ -62,14 +87,12 @@ def write_record_batch_to_parquet_bytes(
     field_ids: List[Int] = List[Int](),
 ) raises -> List[UInt8]:
     """The bytes of a Parquet file holding `batch`, cut into row groups of at
-    most `max_rows_per_rg` rows. `field_ids`, when not empty, holds one id per
-    column, written as that column's schema-element `field_id` (what an
-    Iceberg writer stamps); empty, no column carries one.
+    most `max_rows_per_rg` rows.
 
     Raises:
-        Error: the batch has no columns, `max_rows_per_rg` is not positive,
-            `field_ids` is neither empty nor one per column, a column's Arrow
-            type has no encoder, or a REQUIRED column holds a null.
+        Error: the batch has no columns, `max_rows_per_rg` is not positive, a
+            column's Arrow type has no encoder, or a REQUIRED column holds a
+            null.
     """
     _require_positive_row_group_size(
         "write_record_batch_to_parquet_bytes", max_rows_per_rg
@@ -81,18 +104,9 @@ def write_record_batch_to_parquet_bytes(
     for c in range(num_cols):
         nullable.append(batch.schema.field_nullable(c))
     var elements = schema_elements_for(batch.schema, nullable)
-    if len(field_ids) > 0:
-        if len(field_ids) != num_cols:
-            raise Error(
-                "write_record_batch_to_parquet_bytes: "
-                + String(len(field_ids))
-                + " field ids for "
-                + String(num_cols)
-                + " columns"
-            )
-        # elements[0] is the root group; the leaves follow in column order.
-        for c in range(num_cols):
-            elements[c + 1].field_id = Optional[Int](field_ids[c])
+    _stamp_field_ids(
+        "write_record_batch_to_parquet_bytes", elements, field_ids
+    )
     return _write_single_batch_bytes(batch, elements, codec, max_rows_per_rg)
 
 
@@ -100,15 +114,19 @@ def write_record_batches_to_parquet_bytes(
     var batches: Slab[RecordBatch],
     codec: CompressionCodec = CompressionCodec.SNAPPY,
     max_rows_per_rg: Int = DEFAULT_MAX_ROWS_PER_RG,
+    field_ids: List[Int] = List[Int](),
 ) raises -> List[UInt8]:
     """The bytes of a Parquet file holding `batches` (consumed; all must have
     the same schema), as one row group when they fit in `max_rows_per_rg` rows
-    and cut into row groups of that size otherwise.
+    and cut into row groups of that size otherwise. `field_ids`, when not
+    empty, gives leaf `i` the Parquet field id `field_ids[i]`; empty writes no
+    field ids.
 
     Raises:
         Error: no batch, a batch with no columns or a different column count,
             `max_rows_per_rg` not positive, a column's Arrow type with no
-            encoder, or a REQUIRED column holding a null.
+            encoder, a REQUIRED column holding a null, or `field_ids` not
+            empty with a length other than the column count.
     """
     var who = String("write_record_batches_to_parquet_bytes")
     _require_positive_row_group_size(who, max_rows_per_rg)
@@ -137,6 +155,7 @@ def write_record_batches_to_parquet_bytes(
     for c in range(num_cols):
         nullable.append(_column_has_nulls(batches, n_batches, c))
     var elements = schema_elements_for(batches[0].schema, nullable)
+    _stamp_field_ids(who, elements, field_ids)
 
     var fast = n_batches >= 2 and total_rows <= max_rows_per_rg
     if fast:

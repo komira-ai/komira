@@ -8,8 +8,8 @@
 #
 # # Public API
 #
-#   fn x25519(scalar, u) -> InlineArray[UInt8, 32]
-#   fn x25519_base_mult(scalar) -> InlineArray[UInt8, 32]
+#   fn x25519(scalar, u) -> Array[UInt8, 32]
+#   fn x25519_base_mult(scalar) -> Array[UInt8, 32]
 #
 # Both are non-raising, which keeps a TLS handshake's key-share call sites
 # free of error plumbing.
@@ -76,7 +76,7 @@ def x25519(scalar: Span[UInt8, _], u: Span[UInt8, _]) -> Array[UInt8, 32]:
     Matches AWS-LC `X25519` byte-identically (this IS the AWS-LC
     implementation called via FFI). Per-call overhead vs a
     direct external_call: a few nanoseconds (Mojo's FFI dispatch +
-    InlineArray init).
+    Array init).
     """
     var out = Array[UInt8, 32](fill=UInt8(0))
     var ok = x25519_scalarmult(scalar, u, out)

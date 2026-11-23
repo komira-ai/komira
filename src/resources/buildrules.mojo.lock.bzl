@@ -50,7 +50,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/resources/tests/test_resources.mojo", "sha256": "39066564da8d3980e03ed3ccdb9b2290fc266dc6f7ef1488dce5e752ee9bb1f6"}
+        {"path": "src/resources/tests/test_resources.mojo", "sha256": "4eeab1cfee3b7ed01d74412ec1e353423ac084b115390f61595cd19def02d84c"}
       ],
       "deps": ["komira-ai/resources@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -113,7 +113,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/resources/tests/test_resources.mojo", "sha256": "39066564da8d3980e03ed3ccdb9b2290fc266dc6f7ef1488dce5e752ee9bb1f6"}
+        {"path": "src/resources/tests/test_resources.mojo", "sha256": "4eeab1cfee3b7ed01d74412ec1e353423ac084b115390f61595cd19def02d84c"}
       ],
       "deps": ["komira-ai/resources@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -173,7 +173,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/resources/tests/test_resources.mojo", "sha256": "39066564da8d3980e03ed3ccdb9b2290fc266dc6f7ef1488dce5e752ee9bb1f6"}
+        {"path": "src/resources/tests/test_resources.mojo", "sha256": "4eeab1cfee3b7ed01d74412ec1e353423ac084b115390f61595cd19def02d84c"}
       ],
       "deps": ["komira-ai/resources@0.1.0#mojo1.0.0/lib"],
       "natives": [],

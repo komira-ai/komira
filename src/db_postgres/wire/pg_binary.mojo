@@ -27,7 +27,7 @@
 # So  pg_micros = unix_micros - 946684800000000  and the inverse adds it back.
 #
 # Encapsulation: every surface is List[UInt8] / Span / String / typed scalars
-# / InlineArray. ZERO UnsafePointer crosses any boundary. All produced /
+# / Array. ZERO UnsafePointer crosses any boundary. All produced /
 # consumed values are single-level Lists in Movable structs — never stored in
 # a byte-backed slab, so there is no stale-pointer hazard on reuse.
 # =============================================================================

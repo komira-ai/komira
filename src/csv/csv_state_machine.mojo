@@ -25,7 +25,7 @@
 # =============================================================================
 
 # State byte values. Kept as plain `comptime` Int constants (not enum-wrapped)
-# so the scanner can index InlineArray transition tables directly in Phase 2.
+# so the scanner can index Array transition tables directly in Phase 2.
 comptime CSV_STATE_STANDARD: UInt8 = 0
 comptime CSV_STATE_QUOTED: UInt8 = 1
 comptime CSV_STATE_QUOTE_IN_QUOTED: UInt8 = 2

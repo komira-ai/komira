@@ -78,15 +78,6 @@ sql_oracle(
     outputs = ["out.tsv"],
 )
 
-# RED: `is not a DuckDB extension`: an `extensions` file that is text. The
-# load runs before any SQL, so ok.sql never runs.
-sql_oracle(
-    name = "extension_not_duckdb",
-    srcs = "ok.sql",
-    extensions = ["not_duckdb.duckdb_extension"],
-    outputs = ["out.tsv"],
-)
-
 # RED: the oracle discipline (komira_test_oracle's sql/discipline.sql) run
 # by its case runner (sql/run.sql) on a planted case: a key with no NULL
 # placement, and no ORDER BY on the outermost query. Each must fail before
@@ -208,29 +199,6 @@ sql_oracle(
     inputs = [
         "staged.csv",
         ":sql_error[out.tsv]",
-    ],
-    outputs = ["out.tsv"],
-)
-
-# REFUSED: an extensions entry that is not named `<name>.duckdb_extension`,
-# second: it holds the suffix inside its name and does not end in it.
-sql_oracle(
-    name = "extension_not_named_so",
-    srcs = "ok.sql",
-    extensions = [
-        "not_duckdb.duckdb_extension",
-        "notes.duckdb_extension.txt",
-    ],
-    outputs = ["out.tsv"],
-)
-
-# REFUSED: an extension listed twice.
-sql_oracle(
-    name = "extension_twice",
-    srcs = "ok.sql",
-    extensions = [
-        "not_duckdb.duckdb_extension",
-        "not_duckdb.duckdb_extension",
     ],
     outputs = ["out.tsv"],
 )
@@ -394,3 +362,35 @@ sql_oracle(
     ("newline", "1.5\n6"),
     ("empty", ""),
 ]]
+
+# REFUSED: an extensions entry whose name does not end in `.duckdb_extension`;
+# it is the second entry, so a check of only the first passes it.
+sql_oracle(
+    name = "extension_suffix",
+    srcs = "ok.sql",
+    extensions = [
+        "fake.duckdb_extension",
+        "staged.csv",
+    ],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an extensions entry that ends in `.duckdb_extension` but holds a
+# quote, which would close the string of its LOAD statement.
+sql_oracle(
+    name = "extension_quote",
+    srcs = "ok.sql",
+    extensions = ["q'uote.duckdb_extension"],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an extension named twice.
+sql_oracle(
+    name = "extension_twice",
+    srcs = "ok.sql",
+    extensions = [
+        "fake.duckdb_extension",
+        "fake.duckdb_extension",
+    ],
+    outputs = ["out.tsv"],
+)

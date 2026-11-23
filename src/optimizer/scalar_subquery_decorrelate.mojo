@@ -25,6 +25,11 @@
 #   branch and the outer branch → ONE physical plan, in which `customer`
 #   (Q22) / the germany-join (Q11) is read ONCE.
 #
+# A body that may be empty (a LIMIT) is joined through a global `max` of its
+# column, so the CROSS join always sees one row (NULL for an empty body), and
+# only for a column type that `max` carries. A subquery under a CASE is
+# rewritten too, and a scalar inside a collected body is decorrelated in it.
+#
 # "PROVABLY <= 1 row" predicate (conservative — fall through to
 # materialize-and-substitute otherwise):
 #   - `PLAN_AGGREGATE` with `len(group_by) == 0` (a global aggregate emits
@@ -77,6 +82,7 @@
 from std.collections import Optional, List
 
 from containers.slab import Slab
+from arrow.arrow_types import ArrowType
 from arrow.schema import Schema, Field, SchemaBuilder
 
 from plan_expr.expr import (
@@ -94,9 +100,12 @@ from plan_expr.expr import (
     EXPR_WINDOW_FN,
     EXPR_IN_LIST,
     EXPR_CORRELATED_SUBQUERY,
+    WhenCaseData,
 )
+from plan_expr.agg_expr import AGG_MAX, AggExpr
 from plan_ir.logical_plan import (
     LogicalPlan,
+    AggExprArray,
     ExprArray,
     CORR_KIND_SCALAR,
     JOIN_CROSS,
@@ -161,11 +170,37 @@ def _provably_at_most_one_row(plan: LogicalPlan) -> Bool:
     return False
 
 
+def always_exactly_one_row(plan: LogicalPlan) -> Bool:
+    """Does `plan` emit exactly one row whatever its input: a GLOBAL aggregate,
+    a `PLAN_PROJECT` / `PLAN_SORT` / `PLAN_DISTINCT` over one (none of those
+    adds or drops the single row), or a CROSS join of two such sides? A body that is at most one row only
+    by a LIMIT may emit none, and is not. `eliminate_cross_join` reads it too:
+    a CROSS join whose right side is such a broadcast row (a decorrelated
+    scalar) keeps its equality as a filter, since a hash join gains nothing
+    over one row and does not serve every key type a filter compares."""
+    if plan.tag == PLAN_AGGREGATE:
+        return len(plan._aggregate.value()[].group_by) == 0
+    if plan.tag == PLAN_PROJECT:
+        return always_exactly_one_row(plan._project.value()[].child[])
+    if plan.tag == PLAN_SORT:
+        return always_exactly_one_row(plan._sort.value()[].child[])
+    if plan.tag == PLAN_DISTINCT:
+        return always_exactly_one_row(plan._distinct.value()[].child[])
+    if plan.tag == PLAN_JOIN and plan._join.value()[].join_type == JOIN_CROSS:
+        # A body whose own scalar was decorrelated: one row times one row.
+        return always_exactly_one_row(plan._join.value()[].left[]) and always_exactly_one_row(
+            plan._join.value()[].right[]
+        )
+    return False
+
+
 @always_inline
 def _is_decorrelatable_scalar_subquery(expr: Expr) raises -> Bool:
     """True iff `expr` is an uncorrelated SCALAR subquery whose inner plan
     is provably <= 1 row AND has exactly one output column (a scalar
-    subquery used as an expression must return a single column).
+    subquery used as an expression must return a single column), and, when
+    the inner plan may be empty (a LIMIT), its column is a type a global
+    `max` carries (`_max_carries`).
 
     ⚠ `raises` SINCE 2026-09-03 — NOT because this predicate got a new failure
     mode, but because reaching the inner plan now goes through
@@ -177,9 +212,31 @@ def _is_decorrelatable_scalar_subquery(expr: Expr) raises -> Bool:
     if not _is_uncorrelated_scalar_subquery(expr):
         return False
     ref cs = expr._corr_subq.value()[]
-    if corr_data_inner_plan_ref(cs).output_schema.num_columns() != 1:
+    ref inner = corr_data_inner_plan_ref(cs)
+    if inner.output_schema.num_columns() != 1:
         return False
-    return _provably_at_most_one_row(corr_data_inner_plan_ref(cs))
+    if not _provably_at_most_one_row(inner):
+        return False
+    if always_exactly_one_row(inner):
+        return True
+    # A body that may be empty is joined through a global `max` of its column
+    # (`_alias_inner_single_column`), so only a column type that aggregate
+    # carries qualifies. Any other type stays a subquery for the
+    # materialize-and-substitute path, which the SQL door refuses by name
+    # (OPTIMIZE_UNRESOLVED_SCALAR), rather than a CROSS join that drops the
+    # outer rows when the body is empty.
+    return _max_carries(inner.output_schema.field_arrow_type(0))
+
+
+def _max_carries(t: ArrowType) -> Bool:
+    """The column types a global `max` produces in the pipeline: the integers,
+    DATE32, DECIMAL128 and the floats."""
+    return (
+        t == ArrowType.INT8 or t == ArrowType.INT16 or t == ArrowType.INT32
+        or t == ArrowType.INT64 or t == ArrowType.DATE32
+        or t == ArrowType.DECIMAL128 or t == ArrowType.FLOAT32
+        or t == ArrowType.FLOAT64
+    )
 
 
 # =============================================================================
@@ -210,6 +267,13 @@ def _expr_contains_decorrelatable_scalar(expr: Expr) raises -> Bool:
         return _expr_contains_decorrelatable_scalar(expr.in_list_child_ref())
     if expr.tag == EXPR_AGG_FN:
         return _expr_contains_decorrelatable_scalar(expr.agg_fn_child_ref())
+    if expr.tag == EXPR_WHEN:
+        for i in range(expr.when_num_cases()):
+            if _expr_contains_decorrelatable_scalar(expr.when_case_condition_ref(i)):
+                return True
+            if _expr_contains_decorrelatable_scalar(expr.when_case_result_ref(i)):
+                return True
+        return _expr_contains_decorrelatable_scalar(expr.when_default_ref())
     return False
 
 
@@ -243,6 +307,8 @@ def _collect_decorrelatable_in_expr(
         if _is_decorrelatable_scalar_subquery(expr):
             ref cs = expr._corr_subq.value()[]
             var inner_clone = corr_data_inner_plan_ref(cs).copy()
+            # The hash is the body's as written: the rewrite walk looks the
+            # site up by the hash of the subquery it meets, before this pass.
             var h = inner_clone.structural_hash()
             # Dedup against already-collected sites.
             var found = False
@@ -251,6 +317,12 @@ def _collect_decorrelatable_in_expr(
                     found = True
                     break
             if not found:
+                # A scalar subquery inside this body
+                # (`v > (SELECT avg(x) FROM u WHERE x < (SELECT max(y) FROM t))`)
+                # is decorrelated in the body before the body is joined, as
+                # the outer walk would never reach it: a subquery's inner
+                # plan is not a plan-tree child.
+                scalar_subquery_decorrelate_inplace(inner_clone)
                 var nm = SCALAR_SUBQ_COL_PREFIX + String(len(sites))
                 sites.append(_DecorrSite(inner_clone^, h, nm^))
         return
@@ -275,6 +347,12 @@ def _collect_decorrelatable_in_expr(
         return
     if expr.tag == EXPR_AGG_FN:
         _collect_decorrelatable_in_expr(expr.agg_fn_child_ref(), sites)
+        return
+    if expr.tag == EXPR_WHEN:
+        for i in range(expr.when_num_cases()):
+            _collect_decorrelatable_in_expr(expr.when_case_condition_ref(i), sites)
+            _collect_decorrelatable_in_expr(expr.when_case_result_ref(i), sites)
+        _collect_decorrelatable_in_expr(expr.when_default_ref(), sites)
         return
 
 
@@ -322,6 +400,19 @@ def _rewrite_decorrelated_in_expr(
     if expr.tag == EXPR_AGG_FN:
         var nc = _rewrite_decorrelated_in_expr(expr.agg_fn_child_ref(), sites)
         return Expr.agg_fn(expr.agg_fn_op(), nc^)
+    if expr.tag == EXPR_WHEN:
+        # `CASE WHEN v > (SELECT avg(x) ...) THEN 1 ELSE 0 END`, and
+        # `coalesce((SELECT ...), d)`, which the binder writes as a CASE.
+        var cases = List[WhenCaseData]()
+        for i in range(expr.when_num_cases()):
+            cases.append(
+                WhenCaseData(
+                    _rewrite_decorrelated_in_expr(expr.when_case_condition_ref(i), sites),
+                    _rewrite_decorrelated_in_expr(expr.when_case_result_ref(i), sites),
+                )
+            )
+        var nd = _rewrite_decorrelated_in_expr(expr.when_default_ref(), sites)
+        return Expr.when(cases^, nd^)
     return expr.copy()
 
 
@@ -341,8 +432,21 @@ def _alias_inner_single_column(var inner_plan: LogicalPlan, col_name: String) ra
     """Wrap `inner_plan` (which has exactly one output column) in a
     renaming Project that emits that column under `col_name`. Yields a
     single-column plan whose output field is canonically named — avoids any
-    name collision with the left side of the CROSS join."""
+    name collision with the left side of the CROSS join.
+
+    A body that is at most one row but may be none (`LIMIT 1`, `LIMIT 0`) is
+    instead wrapped in a global `max(<column>)` named `col_name`: the max of
+    one row is its value, and of no row is NULL, which is what DuckDB gives
+    an empty scalar subquery. Without it the CROSS join would see no row and
+    drop every row of the outer side, where the subquery's NULL should have
+    stood (`SELECT k, (SELECT v FROM t LIMIT 0)`, `(...) IS NULL`)."""
     var src_name = inner_plan.output_schema.field_name(0)
+    if not always_exactly_one_row(inner_plan):
+        var aggs = AggExprArray()
+        aggs.append(
+            AggExpr(AGG_MAX, Optional(Expr.col_ref(src_name)), Optional[String](String(col_name)))
+        )
+        return LogicalPlan.aggregate(ExprArray(), aggs^, inner_plan^)
     var exprs = ExprArray()
     exprs.append(Expr.alias(Expr.col_ref(src_name), col_name))
     return LogicalPlan.project(exprs^, inner_plan^)
@@ -491,8 +595,8 @@ def scalar_subquery_decorrelate_inplace(mut plan: LogicalPlan) raises:
     FIRST, then rewrites at this node. (A subquery's own inner plan is NOT a
     regular plan-tree child — it is only reachable via the
     `EXPR_CORRELATED_SUBQUERY` Expr — so the outer walk does not descend
-    into it. A nested decorrelatable subquery inside an inner plan is a
-    v0.5 concern; this pass does the top-level form which covers Q22/Q11).
+    into it; `_collect_decorrelatable_in_expr` decorrelates each collected
+    body in turn, so a scalar nested in a scalar body is joined there).
     """
     if plan.tag == PLAN_FILTER:
         scalar_subquery_decorrelate_inplace(plan._filter.value()[].child[])

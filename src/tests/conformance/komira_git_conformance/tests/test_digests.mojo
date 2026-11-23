@@ -34,7 +34,7 @@ from git import Sha1dc
 from komira_git_conformance import CSha1dc
 
 
-def _hex(d: InlineArray[UInt8, 20]) -> String:
+def _hex(d: Array[UInt8, 20]) -> String:
     var s = String()
     for i in range(20):
         var v = Int(d[i])
@@ -59,7 +59,7 @@ def _ours(data: Span[UInt8, _], combo: Int) -> String:
     h.set_detect_collision((combo & 4) == 0)
     h.set_detect_reduced_round_collision((combo & 8) != 0)
     h.update(data)
-    var d = InlineArray[UInt8, 20](fill=0)
+    var d = Array[UInt8, 20](fill=0)
     var found = h.finalize_into(d)
     return _hex(d) + (" coll" if found else " ok")
 
@@ -71,7 +71,7 @@ def _theirs(data: Span[UInt8, _], combo: Int) -> String:
     h.set_detect_collision((combo & 4) == 0)
     h.set_detect_reduced_round_collision((combo & 8) != 0)
     h.update(data)
-    var d = InlineArray[UInt8, 20](fill=0)
+    var d = Array[UInt8, 20](fill=0)
     var found = h.finalize_into(d)
     return _hex(d) + (" coll" if found else " ok")
 
@@ -111,8 +111,8 @@ def test_chunked() raises:
         theirs.update(Span(data)[b : b + nb])
         a += na
         b += nb
-    var d1 = InlineArray[UInt8, 20](fill=0)
-    var d2 = InlineArray[UInt8, 20](fill=0)
+    var d1 = Array[UInt8, 20](fill=0)
+    var d2 = Array[UInt8, 20](fill=0)
     var f1 = ours.finalize_into(d1)
     var f2 = theirs.finalize_into(d2)
     assert_equal(_hex(d1), _hex(d2))

@@ -42,7 +42,7 @@ from agg_api.agg_layout import (
 # in `_agg_ptr` / `update` / `update_count_only` behind the
 # `if self._layout_is_quartet:` predicate; the narrow-layout path reads
 # `self._layout.offsets[agg_idx]`. The literal lets LLVM const-fold the
-# offset multiplication and skip the InlineArray load (about 0.7 ms per
+# offset multiplication and skip the Array load (about 0.7 ms per
 # aggregate over 6M rows).
 comptime _QUARTET_SLOT_BYTES: Int = 32
 
@@ -94,7 +94,7 @@ struct PerfectHashAggregator(Movable):
     var _layout: AggLayout
     # PERF-CRITICAL: per-row tag dispatch (`self._layout.tags[agg_idx]`) in
     # `update` / `update_count_only` / `_agg_ptr` costs ~0.7 ms over 6M
-    # rows of one SUM. LLVM cannot const-fold the InlineArray load because
+    # rows of one SUM. LLVM cannot const-fold the Array load because
     # `self` is a mutable reference and the compiler conservatively
     # assumes other callers might mutate `_layout`. Cache the "all
     # slots are the 32B quartet" predicate at construction time and
@@ -227,7 +227,7 @@ struct PerfectHashAggregator(Movable):
 
         PERF-CRITICAL: for the 32B quartet layout the offset is the
         constant multiple `agg_idx * 32`, skipping the `_layout.offsets[]`
-        InlineArray load (see `_layout_is_quartet`). A narrow layout (via
+        Array load (see `_layout_is_quartet`). A narrow layout (via
         `with_layout`) reads the per-slot byte offset from `_layout`.
         """
         return slot + self._agg_off(agg_idx)
@@ -303,7 +303,7 @@ struct PerfectHashAggregator(Movable):
         """Increment count for COUNT(*) at the given key.
 
         PERF-CRITICAL: fast-path the quartet layout (count at +8) so the
-        per-row hot path is a single InlineArray-free load+store. Narrow
+        per-row hot path is a single Array-free load+store. Narrow
         count-only layouts (ACC_COUNT_STAR at +0) take the else branch.
         """
         var idx = Int(key + self._key_offset)

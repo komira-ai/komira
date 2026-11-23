@@ -9,10 +9,7 @@ The Parquet format's types and footer metadata, as plain Mojo values.
 - `metadata`: the footer structs. `FileMetaData` holds the flattened schema
   (`SchemaElement`), the row groups (`RowGroup` -> `ColumnChunk` ->
   `ColumnMetaData` -> `Statistics`) and the key-value metadata (`KeyValue`);
-  `PageHeader` and `SortingColumn` complete the set. A `SchemaElement` keeps
-  the writer's `field_id` (Thrift field 9) when the file has one: an Iceberg
-  writer stamps its column's field id there, which is how a reader binds a
-  column that was renamed or reordered since the file was written.
+  `PageHeader` and `SortingColumn` complete the set.
 - `hll_footer`: where a column chunk's HyperLogLog registers
   (`Statistics.hll_registers`, not part of the Parquet format) live in a
   footer. They travel in the chunk's `ColumnMetaData.key_value_metadata`
@@ -69,6 +66,7 @@ schema.append(
         type=ParquetType.BYTE_ARRAY,
         repetition_type=FieldRepetitionType.OPTIONAL,
         converted_type=CONVERTED_TYPE_UTF8,
+        field_id=2,
     )
 )
 var kvs = List[KeyValue]()
@@ -84,8 +82,12 @@ var footer = FileMetaData(
 assert_equal(footer.schema[0].num_children, 2)
 assert_equal(String(footer.schema[2].repetition_type.value()), "OPTIONAL")
 assert_equal(footer.schema[2].converted_type.value(), CONVERTED_TYPE_UTF8)
+assert_equal(footer.schema[2].field_id.value(), 2)
 assert_equal(footer.key_value_metadata.value()[0].value.value(), "1.0")
 ```
+
+`SchemaElement.field_id` is the optional field id (SchemaElement field 9) that
+table formats such as Iceberg use to identify a column; it is None unless set.
 
 Every type and ConvertedType constant is re-exported from the package root.
 The tests are welded into the build: the package cannot be built while one of

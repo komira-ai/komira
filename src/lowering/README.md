@@ -160,14 +160,14 @@ shape:
   no row.
 - `LOWERING_SCAN_NOT_TOTAL`: a Hive partitioned scan that lists its files
   lazily (a directory scan or a partition predicate), a Parquet scan on a
-  store other than the local file system and S3 (naming it, `gs://raw`), a
-  local scan with an explicit file system binding, an Iceberg scan whose files
-  the inputs do not carry (`an Iceberg scan whose files were not planned`), or
-  a scan marked unbounded.
-  The segment's Parquet arm carries the file list, the partition columns'
-  constants and the store (`parquet_fs`: local, or an S3 bucket whose object
-  keys the paths are), but no predicate, and its sources read a bounded
-  input.
+  store other than the local file system, S3, GCS and Azure (a scheme code
+  that names none of them, by its number: `scheme 9://raw`), a local scan
+  with an explicit file system binding, an Iceberg scan whose files the inputs
+  do not carry (`an Iceberg scan whose files were not planned`), or a scan
+  marked unbounded. The segment's Parquet arm carries the file list, the
+  partition columns' constants and the store (`parquet_fs`: local, or an S3 or
+  GCS bucket or an Azure container whose object keys the paths are), but no
+  predicate, and its sources read a bounded input.
   The scan's display name is not part of the segment.
 - `LOWERING_INPUTS_SCAN_COUNT`: the inputs do not hold one entry per scan.
 - `LOWERING_UDF_UNDECLARED_READ`, naming the node, the `UdfRef` index and

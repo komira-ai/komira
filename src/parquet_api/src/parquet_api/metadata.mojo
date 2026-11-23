@@ -145,10 +145,9 @@ struct SchemaElement(Movable, Copyable):
         converted_type: Deprecated converted type (still needed for compat).
         scale: Scale for Decimal logical type.
         precision: Precision for Decimal logical type.
-        field_id: The writer's field id for the column (Thrift field 9), or
-            None when the file carries none. Iceberg writers stamp the table's
-            field id here, which is how a reader binds a column that was renamed
-            or reordered since the file was written.
+        field_id: The field id (SchemaElement field 9) a table format such as
+            Iceberg uses to name a column across schema changes; None when
+            the element carries none.
     """
 
     var name: String

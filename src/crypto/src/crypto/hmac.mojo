@@ -7,8 +7,8 @@
 # OR-fold; AWS-LC's CRYPTO_memcmp would be a substitute but adds nothing).
 #
 # Public surface:
-#   * hmac_sha256(key, data) -> InlineArray[UInt8, 32]
-#   * hmac_sha256_string(key, data: String) -> InlineArray[UInt8, 32]
+#   * hmac_sha256(key, data) -> Array[UInt8, 32]
+#   * hmac_sha256_string(key, data: String) -> Array[UInt8, 32]
 #   * constant_time_eq_32(a, b) -> Bool
 # =============================================================================
 

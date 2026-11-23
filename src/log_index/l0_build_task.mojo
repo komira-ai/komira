@@ -87,7 +87,7 @@ struct L0BuildResult(
 
 
 def _object_key_for_uuid(
-    key_prefix: String, index: String, uuid: InlineArray[UInt8, 16]
+    key_prefix: String, index: String, uuid: Array[UInt8, 16]
 ) -> String:
     var hexdigits = "0123456789abcdef"
     var hb = hexdigits.as_bytes()
@@ -133,7 +133,7 @@ struct L0BuildTask[Storage: ConditionalWriteStore](
     var _metastore: SearchMetastore[Self.Storage]
     var _key_prefix: String
     var _index: String
-    var _split_uuid: InlineArray[UInt8, 16]
+    var _split_uuid: Array[UInt8, 16]
 
     def __init__(
         out self,
@@ -142,7 +142,7 @@ struct L0BuildTask[Storage: ConditionalWriteStore](
         var metastore: SearchMetastore[Self.Storage],
         var key_prefix: String,
         var index: String,
-        split_uuid: InlineArray[UInt8, 16],
+        split_uuid: Array[UInt8, 16],
     ):
         self._views = views^
         self._store = store^

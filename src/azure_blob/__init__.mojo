@@ -17,6 +17,9 @@ the file system and the service SAS signer.
     `AzureClientSpec`, the endpoint, credential and connector factory a
     client is built from.
   * `AzureFs` — fs's `FileSystem` over one container, read-only.
+  * `AzureScanFs` — fs's `ScanFsOpener` for Azure: it opens one `AzureFs`
+    per container a plan's scan names, every one built from one
+    `AzureClientSpec`, and refuses another scheme with `SCAN_FS_UNSERVED`.
   * `azure_url` — `parse_azure_url` (az://, abfs://, abfss://, the Blob
     service's https:// URL, and an emulator's path-style http:// URL) into
     an `AzureUrl`; `AzureFsConfig` (account, endpoint, path-style) and
@@ -58,6 +61,7 @@ from .azure_fs import (
     AzureWriteFile,
 )
 from .azure_sas_query import SasQueryLayer, azure_sas_query_normalize
+from .azure_scan_fs import AzureScanFs
 from .azure_url import (
     AzureFsConfig,
     AzureUrl,

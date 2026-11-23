@@ -185,12 +185,12 @@ def _xxh3_k_secret(i: Int) -> UInt8:
     The byte layout MUST match `XXH3_kSecret` in upstream `xxhash.h`
     byte for byte. KAT tests assert this.
 
-    Implementation note (Mojo 1.0.0b1): InlineArray's positional-literal
+    Implementation note (Mojo 1.0.0b1): Array's positional-literal
     constructor isn't available in this compiler version; we initialize
     via `fill=0` and explicitly assign each of the 192 bytes. The
     repetition is the price of compile-time correctness — the alternative
     (a 192-arm if/elif chain) is hot-path read-only and identical in
-    behavior. LLVM constant-folds the InlineArray writes when `i` is a
+    behavior. LLVM constant-folds the Array writes when `i` is a
     comptime constant; the per-byte writes amortize across hot-path calls
     once the function inlines.
 
@@ -742,12 +742,12 @@ def xxh3_64_scalar_span(
     Identical algorithm + identical result to `xxh3_64_scalar_bytes`, but
     takes a borrowed `Span[UInt8, _]` (origin-poly safe view) instead of a
     `List[UInt8]`. The caller can pass a zero-copy view over a contiguous
-    buffer it already owns (e.g. an `InlineArray[UInt8, N]` stack block via
+    buffer it already owns (e.g. an `Array[UInt8, N]` stack block via
     `Span(self.bytes)`) — NO heap allocation, NO per-element copy.
 
     This is the hot-path entry for fixed-width composite-key hashing
     (`CompositeKey.hash64`): the key bytes live contiguously in a stack
-    `InlineArray`, so a `List` materialization per probe row is pure
+    `Array`, so a `List` materialization per probe row is pure
     allocation overhead. Hashing the `Span` directly is what the column-
     format hot loop does (`row_block.mojo:_hash_row_bytes` over the row
     base pointer).

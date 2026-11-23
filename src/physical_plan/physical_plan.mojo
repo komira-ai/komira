@@ -615,9 +615,9 @@ struct SourceSpecPod(Movable):
     ⚠ TOTAL IS NOT THE SAME AS SINGLE-FILE. It is the conjunction the DEFAULTS
     define. Since IR version 16 the pod carries the file list
     (`parquet_paths`) and the Hive partition constants, so a source of several
-    files is total too, and since 18 so is an S3 scan (`parquet_fs`); another
-    remote store, an unbounded scan or a lazy Hive shape (a directory scan, a
-    partition predicate) is still not carried and is refused at the cut."""
+    files is total too, and since 18 so is an S3, GCS or Azure scan
+    (`parquet_fs`); an unknown store, an unbounded scan or a lazy Hive shape
+    (a directory scan, a partition predicate) is refused at the cut."""
     var parquet_paths: List[String]
     """SOURCE_PARQUET ONLY. Every file of the source, in read order. Empty for
     a spec built by `parquet()`, which names one file in `parquet_path`; a spec

@@ -386,7 +386,6 @@ def _parse_schema_element[
         elif fid == 8 and wt == 5:
             precision = reader._read_zigzag()
         elif fid == 9 and wt == 5:
-            # field_id: i32. Iceberg writers stamp the table's field id here.
             field_id = reader._read_zigzag()
         elif fid == 10 and wt == 12:
             # logicalType: LogicalType union (modern annotation): the

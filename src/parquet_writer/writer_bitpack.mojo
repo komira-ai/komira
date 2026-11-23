@@ -126,7 +126,7 @@ def _pack_group8_simd[
     # Spill the positioned lanes to a stack scratch; the OR-merge then reads
     # scalar words from the scratch (the vector store survives because its
     # result feeds a contiguous store, not 8 separate lane extractions).
-    var lane_words = InlineArray[UInt64, 8](uninitialized=True)
+    var lane_words = Array[UInt64, 8](uninitialized=True)
     var lane_ptr = lane_words.unsafe_ptr()
 
     comptime IOTA8 = SIMD[DType.uint64, 8](0, 1, 2, 3, 4, 5, 6, 7)

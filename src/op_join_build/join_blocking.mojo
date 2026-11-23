@@ -289,7 +289,7 @@ def geohash_encode(lat: Float64, lon: Float64, precision: UInt8) -> UInt64:
     return _interleave(lon_code, lat_code, lon_bits, lat_bits)
 
 
-def geohash_neighbors(hash: UInt64, precision: UInt8) -> InlineArray[UInt64, 8]:
+def geohash_neighbors(hash: UInt64, precision: UInt8) -> Array[UInt64, 8]:
     """Compute the 8 neighbor geohash cells of the given cell.
 
     Returns an array of 8 neighbor hashes. Invalid neighbors (outside
@@ -300,7 +300,7 @@ def geohash_neighbors(hash: UInt64, precision: UInt8) -> InlineArray[UInt64, 8]:
         precision: Geohash precision (1-8).
 
     Returns:
-        InlineArray of 8 neighbor hashes.
+        Array of 8 neighbor hashes.
     """
     var total_bits = UInt32(precision) * 5
     var lat_bits = total_bits / 2
@@ -315,7 +315,7 @@ def geohash_neighbors(hash: UInt64, precision: UInt8) -> InlineArray[UInt64, 8]:
 
     # 8 directions: N, NE, E, SE, S, SW, W, NW
     # (dlon, dlat) pairs.
-    var neighbors = InlineArray[UInt64, 8](uninitialized=True)
+    var neighbors = Array[UInt64, 8](uninitialized=True)
     comptime SENTINEL: UInt64 = ~UInt64(0)  # UInt64.MAX
 
     # Initialize all to sentinel.
@@ -324,8 +324,8 @@ def geohash_neighbors(hash: UInt64, precision: UInt8) -> InlineArray[UInt64, 8]:
 
     # Direction deltas: (dlon, dlat)
     # N=(0,1), NE=(1,1), E=(1,0), SE=(1,-1), S=(0,-1), SW=(-1,-1), W=(-1,0), NW=(-1,1)
-    var dlon = InlineArray[Int, 8](uninitialized=True)
-    var dlat = InlineArray[Int, 8](uninitialized=True)
+    var dlon = Array[Int, 8](uninitialized=True)
+    var dlat = Array[Int, 8](uninitialized=True)
     dlon[0] = 0;  dlat[0] = 1    # N
     dlon[1] = 1;  dlat[1] = 1    # NE
     dlon[2] = 1;  dlat[2] = 0    # E
