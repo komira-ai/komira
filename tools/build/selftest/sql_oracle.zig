@@ -70,17 +70,32 @@ const REFUSALS = [_]lib.Row{
     .{
         .name = "output_format_parquet",
         .target = PKG ++ "output_format_parquet",
-        .text = PKG ++ "output_format_parquet: output \"out.parquet.mparquet\" must end in one of .parquet, .csv, .tsv",
+        .text = PKG ++ "output_format_parquet: output \"out.parquet.mparquet\" must end in one of .parquet, .csv, .tsv, .json, .gz, .zst",
     },
     .{
         .name = "output_format_csv",
         .target = PKG ++ "output_format_csv",
-        .text = PKG ++ "output_format_csv: output \"out.csv.mcsv\" must end in one of .parquet, .csv, .tsv",
+        .text = PKG ++ "output_format_csv: output \"out.csv.mcsv\" must end in one of .parquet, .csv, .tsv, .json, .gz, .zst",
     },
     .{
         .name = "output_format_tsv",
         .target = PKG ++ "output_format_tsv",
-        .text = PKG ++ "output_format_tsv: output \"out.tsv.mtsv\" must end in one of .parquet, .csv, .tsv",
+        .text = PKG ++ "output_format_tsv: output \"out.tsv.mtsv\" must end in one of .parquet, .csv, .tsv, .json, .gz, .zst",
+    },
+    .{
+        .name = "output_format_json",
+        .target = PKG ++ "output_format_json",
+        .text = PKG ++ "output_format_json: output \"out.json.mjson\" must end in one of .parquet, .csv, .tsv, .json, .gz, .zst",
+    },
+    .{
+        .name = "output_format_gz",
+        .target = PKG ++ "output_format_gz",
+        .text = PKG ++ "output_format_gz: output \"out.gz.mgz\" must end in one of .parquet, .csv, .tsv, .json, .gz, .zst",
+    },
+    .{
+        .name = "output_format_zst",
+        .target = PKG ++ "output_format_zst",
+        .text = PKG ++ "output_format_zst: output \"out.zst.mzst\" must end in one of .parquet, .csv, .tsv, .json, .gz, .zst",
     },
     .{
         .name = "output_glob",

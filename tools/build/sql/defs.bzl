@@ -91,7 +91,7 @@ _duckdb_dist = rule(
 # rule documents. A name is matched by DuckDB literally (allowed_paths) and
 # also used as a glob pattern by the existence check, so no glob characters.
 _NAME = "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
-_OUTPUT_FORMATS = [".parquet", ".csv", ".tsv"]
+_OUTPUT_FORMATS = [".parquet", ".csv", ".tsv", ".json", ".gz", ".zst"]
 
 # An input path's segment may also hold `=`, after its first character, so an
 # input can sit in a Hive layout (`day=2028-01-01/part-0.parquet`). `=` is no
