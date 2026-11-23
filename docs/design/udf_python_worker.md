@@ -607,6 +607,12 @@ No code changes in this pull request. The work, each item a brief of its own:
      frame descriptor (§6);
    - the error table (`_errors.py`): `UDF_READ_SET_REQUIRED` from capture, and `OPTIMIZED_UDF_READ_SET_REQUIRED` from
      admission, each with its message and fix-it.
+
+   *Status.* Built, privately (no query runs a UDF yet): the `@udf` decorator with `columns=`, the annotation and the
+   `ROW` scan (`python/komira/_capture`), and the plan encoding with `read_set`, `arg_types` and `recorded_fields`
+   (`python/komira/_plan/_udf.py`). Not yet: the DataFrame verbs, the grouped frame's `group_by` columns, and
+   `OPTIMIZED_UDF_READ_SET_REQUIRED`, which comes with the run door. `UDF_READ_SET_REQUIRED` is the message prefix of
+   an `UnsupportedOperation`, not a table in `_errors.py`.
 5. **The TypeScript SDK's producer** (`node/`, when its UDF verbs land): the same `columns` value on every `ROW` and
    frame verb; a frame verb without `columns` is refused too. It has no static scan at first (a TypeScript function keeps no types at run
    time, and its source is not read), so a `ROW` verb without `columns` is refused at capture with
