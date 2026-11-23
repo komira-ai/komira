@@ -1327,7 +1327,10 @@ Not built, except the engine's S3 read arm: lowering carries a scan's bucket and
 (`SourceSpecPod.parquet_fs`), and `sdk_exec.run_sql_with` reads them through the file system an
 `objectstore_s3.S3ScanFs` opens on the bucket, with one footer cache keyed per bucket
 ([src/lowering/README.md](../../src/lowering/README.md), [src/sdk_exec/README.md](../../src/sdk_exec/README.md)).
-No surface, credential name, wire field or error code of this design is built. The parts it builds on are:
+The three credential calls of decision 8 are built ([src/so](../../src/so/README.md)), and so are
+decision 1's credential objects in Python, private until `add_sql_binding` exports them
+(`python/komira/_credentials.py`, sealed by `Session._seal_credential`, refused as `CredentialsError`).
+No other surface, wire field or error code of this design is built. The parts it builds on are:
 - [src/sql](../../src/sql/sql_binder.mojo) (`sql_binder.mojo`, `sql_catalog.mojo`, `sql_parser.mojo`);
 - [src/so](../../src/so/README.md);
 - [src/sdk_exec](../../src/sdk_exec/README.md) (`secret_capability.mojo`, `engine_sql.mojo`,
