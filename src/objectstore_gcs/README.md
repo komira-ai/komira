@@ -88,3 +88,33 @@ var backend = StorageGrpcBackend[GcsTlsConnector, T, K](
 gRPC server holding a certificate signed by a test CA, and checks that the
 default connector refuses the same server and that the trusting connector
 refuses it under a name its certificate does not carry.
+
+## Scanning a bucket
+
+`GcsScanFs[B]` is fs's `ScanFsOpener` for GCS, the value an engine is handed
+with a plan that scans GCS: it opens one `GcsFs` per bucket a scan names, each
+building its backend from one factory on its first read, and refuses another
+scheme with `SCAN_FS_UNSERVED`. An opened `GcsFs` keys its objects in a shared
+footer cache under `gs://<bucket>/` (`key_prefix`). Opening builds and dials
+nothing:
+
+```mojo module
+from std.testing import assert_equal, assert_false, assert_raises
+
+from objectstore_gcs import FakeGcsStorageBackend, GcsScanFs
+from plan_expr.fs_descriptor_pod import FS_SCHEME_GCS, FS_SCHEME_S3
+
+
+def mk_backend() raises -> FakeGcsStorageBackend:
+    return FakeGcsStorageBackend()
+
+
+def main() raises:
+    var opener = GcsScanFs[FakeGcsStorageBackend](mk_backend)
+    var fs = opener.open_scan_fs(FS_SCHEME_GCS, "raw")
+    assert_equal(fs.bucket(), "raw")
+    assert_equal(fs.key_prefix(), "gs://raw/")
+    assert_false(fs.backend_built())
+    with assert_raises(contains="SCAN_FS_UNSERVED: no file system of this run reads s3://lake"):
+        _ = opener.open_scan_fs(FS_SCHEME_S3, "lake")
+```

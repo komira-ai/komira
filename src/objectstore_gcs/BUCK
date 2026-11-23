@@ -4,7 +4,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # object-verb seam (`GcsStorageBackend`), an in-memory conformer of it for
 # hermetic tests (`FakeGcsStorageBackend`), the `ConditionalWriteStore`
 # conformer over the seam (`GcsConditionalStore`), the `FileSystem` read
-# conformer over the seam (`GcsFs`), and the StoreError kind reader; the
+# conformer over the seam (`GcsFs`), fs's `ScanFsOpener` that opens a
+# `GcsFs` on each bucket a plan's scan names (`GcsScanFs`), and the
+# StoreError kind reader; the
 # production conformer of the seam (`StorageGrpcBackend`), google.storage.v2
 # over gRPC through the generated gcp_storage client, with the bearer
 # token from a gcp_core `GcpTokenSource` and its deadlines on a
@@ -41,6 +43,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # under a name the leaf does not carry is refused. atomic_alias, connect, fork_join and
 # http_server are declared below for that test alone (the library
 # imports none of them).
+# test_gcs_scan_fs opens a GcsFs through GcsScanFs (fs's ScanFsOpener) over
+# the in-memory fake: it reads the bucket a scan names, keys its objects in a
+# shared footer cache under gs://<bucket>/, builds no backend until its first
+# read (nor does a clone), and another scheme and an empty bucket are refused
+# with SCAN_FS_UNSERVED.
 # test_env_source_only scans the package's own sources, staged as its data,
 # for any environment read; nothing here is exempt.
 _TLS_FIXTURES = {
@@ -86,6 +93,7 @@ mojo_library(
         "tests/test_gcs_conditional_store.mojo",
         "tests/test_gcs_fs_backend.mojo",
         "tests/test_gcs_presign_portability.mojo",
+        "tests/test_gcs_scan_fs.mojo",
         "tests/test_system_signing_clock.mojo",
         "tests/test_env_source_only.mojo",
         "tests/test_gcs_grpc_backend.mojo",

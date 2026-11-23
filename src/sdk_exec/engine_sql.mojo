@@ -19,7 +19,8 @@
 # again.
 #
 # `run_sql_with` takes the `ScanFsOpener` the run reads a remote store
-# through: a catalog table whose `ParquetSource` names an S3 bucket is bound
+# through: a catalog table whose `ParquetSource` names an S3 or GCS bucket or
+# an Azure container is bound
 # from the catalog's schema, lowered with no footer facts, and read through
 # the file system the opener opens on the bucket. `run_sql` is `run_sql_with`
 # and `LocalOnlyScanFs`, which refuses such a scan at step `execute` with
