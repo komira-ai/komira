@@ -1,0 +1,32 @@
+# The targets of the macOS part of the pull request check, as one label per line on stdout.
+#
+#   ./buck2 bxl komira//tools/build/ci/darwin.bxl:select @tools/build/ci/darwin_affected.args @targets.txt
+#
+# `targets.txt` is what affected.bxl printed for the change (pr.yml's step `the targets to build`).
+# darwin.bzl says what is picked: the whole macOS set (//release:mopm_darwin_libs) when the change is
+# built as an aggregate of the check set, else the `:lib` of each package of that set the change
+# reaches, else nothing. The set's packages are release/darwin_libs.bzl's DARWIN_PACKAGES, the list
+# release-macos.yml builds after the merge, so the two never disagree on what the macOS set is.
+# The reason goes to the log, not stdout; an empty stdout means no macOS build. It fails on a line
+# that is not a target label (BROKEN), so a selector whose output changed shape never reads as none.
+
+load("//release:darwin_libs.bzl", "DARWIN_PACKAGES")
+load(":darwin.bzl", "BROKEN", "darwin_select")
+load(":rules.bzl", "AGGREGATE", "DEFAULT")
+
+DARWIN_SET = "komira//release:mopm_darwin_libs"
+
+def _impl(ctx):
+    verdict = darwin_select(ctx.cli_args.affected, DARWIN_PACKAGES, [AGGREGATE, DEFAULT], DARWIN_SET)
+    if verdict.kind == BROKEN:
+        fail("darwin: BROKEN: " + verdict.reason)
+    print("darwin: {}: {}".format(verdict.kind, verdict.reason))
+    for t in verdict.targets:
+        ctx.output.print(t)
+
+select = bxl_main(
+    impl = _impl,
+    cli_args = {
+        "affected": cli_args.list(cli_args.string(), default = []),
+    },
+)

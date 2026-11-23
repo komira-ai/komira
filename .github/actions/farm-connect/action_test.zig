@@ -20,12 +20,17 @@
 //!    `max_concurrent_uploads_per_action = 4`, whatever the inputs, so a writer
 //!    that drops either (and leaves buck2's 10 s PING answer and unbounded
 //!    uploads per action) fails every case;
+//!  - with `darwin-config-file`, the macOS keys are written to that file alone
+//!    and the machine buckconfig is the linux-only one, both compared whole, so
+//!    a writer that leaves the keys in the machine buckconfig (and registers the
+//!    macOS platform for every step of the job) or drops one from the file fails;
 //!  - each refusal (macOS set without hosts and the reverse, a macOS set equal
 //!    to the linux one, macOS library directories without a macOS set, a
-//!    relative one, one holding `$`, or none at all, `tls` neither true nor false, a CA file with TLS off,
+//!    relative one, one holding `$`, or none at all, a macOS config file without
+//!    a macOS set, relative or holding `$`, `tls` neither true nor false, a CA file with TLS off,
 //!    relative, holding `$`, missing or a directory, a line break or carriage
 //!    return in a value) is a case that must exit 1 with its message and write
-//!    no buckconfig, so a check deleted or weakened fails it;
+//!    no buckconfig and no macOS file, so a check deleted or weakened fails it;
 //!  - the checks must come before the tailnet join (the step order is pinned),
 //!    no `run:` script may hold a `${{ }}` expression (script injection: inputs
 //!    arrive through `env:` only), and every input is used and every use is a
@@ -167,7 +172,14 @@ const Outcome = struct {
     out: []const u8,
     /// $HOME/.buckconfig.d/farm.buckconfig, or null when none was written.
     buckconfig: ?[]const u8,
+    /// $HOME/darwin.buckconfig, the file a case names as darwin-config-file
+    /// (`@HOME@/darwin.buckconfig`), or null when none was written.
+    darwin_file: ?[]const u8,
 };
+
+/// A case's value may name the case's own HOME as `@HOME@`: an absolute path the
+/// case cannot know in advance.
+const HOME_TOKEN = "@HOME@";
 
 /// The required inputs of every case; a case's values replace or add to them.
 const BASE = [_]Value{
@@ -203,7 +215,10 @@ fn runAction(ar: std.mem.Allocator, values: []const Value) !Outcome {
         var env = std.process.EnvMap.init(ar);
         try env.put("PATH", try std.process.getEnvVarOwned(ar, "PATH"));
         try env.put("HOME", home);
-        for (s.env) |e| try env.put(e.name, if (e.input) |in| try valueOf(action, values, in) else e.literal);
+        for (s.env) |e| {
+            const v = if (e.input) |in| try valueOf(action, values, in) else e.literal;
+            try env.put(e.name, try std.mem.replaceOwned(u8, ar, v, HOME_TOKEN, home));
+        }
         const r = try std.process.Child.run(.{
             .allocator = ar,
             .argv = &.{ "sh", "-e", "-c", s.run.? },
@@ -215,13 +230,17 @@ fn runAction(ar: std.mem.Allocator, values: []const Value) !Outcome {
             .Exited => |c| c,
             else => 255,
         };
-        if (code != 0) return .{ .code = code, .out = out.items, .buckconfig = readBuckconfig(ar, tmp.dir) };
+        if (code != 0) return .{ .code = code, .out = out.items, .buckconfig = readBuckconfig(ar, tmp.dir), .darwin_file = readDarwinFile(ar, tmp.dir) };
     }
-    return .{ .code = 0, .out = out.items, .buckconfig = readBuckconfig(ar, tmp.dir) };
+    return .{ .code = 0, .out = out.items, .buckconfig = readBuckconfig(ar, tmp.dir), .darwin_file = readDarwinFile(ar, tmp.dir) };
 }
 
 fn readBuckconfig(ar: std.mem.Allocator, home: std.fs.Dir) ?[]const u8 {
     return home.readFileAlloc(ar, ".buckconfig.d/farm.buckconfig", 1 << 20) catch null;
+}
+
+fn readDarwinFile(ar: std.mem.Allocator, home: std.fs.Dir) ?[]const u8 {
+    return home.readFileAlloc(ar, "darwin.buckconfig", 1 << 20) catch null;
 }
 
 fn expectWritten(values: []const Value, want: []const u8) !void {
@@ -231,6 +250,18 @@ fn expectWritten(values: []const Value, want: []const u8) !void {
     if (o.code != 0) std.debug.print("the action failed ({d}):\n{s}\n", .{ o.code, o.out });
     try t.expectEqual(@as(u8, 0), o.code);
     try t.expectEqualStrings(want, o.buckconfig orelse "<no buckconfig written>");
+    try t.expect(o.darwin_file == null);
+}
+
+/// The machine buckconfig and the file of the macOS keys, each compared whole.
+fn expectWrittenApart(values: []const Value, want: []const u8, want_darwin: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const o = try runAction(arena.allocator(), values);
+    if (o.code != 0) std.debug.print("the action failed ({d}):\n{s}\n", .{ o.code, o.out });
+    try t.expectEqual(@as(u8, 0), o.code);
+    try t.expectEqualStrings(want, o.buckconfig orelse "<no buckconfig written>");
+    try t.expectEqualStrings(want_darwin, o.darwin_file orelse "<no macOS file written>");
 }
 
 fn expectRefused(values: []const Value, message: []const u8) !void {
@@ -243,6 +274,7 @@ fn expectRefused(values: []const Value, message: []const u8) !void {
     try t.expect(std.mem.indexOf(u8, o.out, "::error title=farm-connect::") != null);
     try t.expect(std.mem.indexOf(u8, o.out, message) != null);
     try t.expect(o.buckconfig == null);
+    try t.expect(o.darwin_file == null);
 }
 
 const LINUX_ONLY =
@@ -330,6 +362,34 @@ test "macOS properties and hosts without library directories write no macos_libr
         \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
+        \\  darwin_arm64_properties = OSFamily=Darwin,label.pool=mac
+        \\  darwin_macos_hosts = 26.5-0123456789abcdef
+        \\
+    );
+}
+
+test "a macOS config file: the machine buckconfig is the linux-only one, and the file holds the macOS keys alone" {
+    try expectWrittenApart(&.{
+        .{ .name = "darwin-properties", .value = "OSFamily=Darwin,label.pool=mac" },
+        .{ .name = "darwin-macos-hosts", .value = "26.5-0123456789abcdef 27.0-fedcba9876543210" },
+        .{ .name = "macos-library-dirs", .value = "/opt/homebrew/lib" },
+        .{ .name = "darwin-config-file", .value = HOME_TOKEN ++ "/darwin.buckconfig" },
+    }, LINUX_ONLY,
+        \\[komira_re]
+        \\  darwin_arm64_properties = OSFamily=Darwin,label.pool=mac
+        \\  darwin_macos_hosts = 26.5-0123456789abcdef 27.0-fedcba9876543210
+        \\  macos_library_dirs = /opt/homebrew/lib
+        \\
+    );
+}
+
+test "a macOS config file without library directories holds no macos_library_dirs" {
+    try expectWrittenApart(&.{
+        .{ .name = "darwin-properties", .value = "OSFamily=Darwin,label.pool=mac" },
+        .{ .name = "darwin-macos-hosts", .value = "26.5-0123456789abcdef" },
+        .{ .name = "darwin-config-file", .value = HOME_TOKEN ++ "/darwin.buckconfig" },
+    }, LINUX_ONLY,
+        \\[komira_re]
         \\  darwin_arm64_properties = OSFamily=Darwin,label.pool=mac
         \\  darwin_macos_hosts = 26.5-0123456789abcdef
         \\
@@ -449,6 +509,19 @@ test "a relative, $-holding or empty macOS library directory list is refused" {
     try expectRefused(&(mac ++ [_]Value{.{ .name = "macos-library-dirs", .value = ": :" }}), "macos-library-dirs is set but names no directory");
 }
 
+test "a macOS config file without a macOS set is refused" {
+    try expectRefused(&.{.{ .name = "darwin-config-file", .value = HOME_TOKEN ++ "/darwin.buckconfig" }}, "darwin-config-file is set but darwin-properties is empty");
+}
+
+test "a relative or $-holding macOS config file is refused" {
+    const mac = [_]Value{
+        .{ .name = "darwin-properties", .value = "OSFamily=Darwin,label.pool=mac" },
+        .{ .name = "darwin-macos-hosts", .value = "26.5-0123456789abcdef" },
+    };
+    try expectRefused(&(mac ++ [_]Value{.{ .name = "darwin-config-file", .value = "darwin.buckconfig" }}), "darwin-config-file is 'darwin.buckconfig', not an absolute path");
+    try expectRefused(&(mac ++ [_]Value{.{ .name = "darwin-config-file", .value = "/tmp/$HOME/darwin.buckconfig" }}), "darwin-config-file holds a $");
+}
+
 test "tls neither true nor false is refused, the empty string included" {
     try expectRefused(&.{.{ .name = "tls", .value = "yes" }}, "tls is 'yes', not true or false");
     try expectRefused(&.{.{ .name = "tls", .value = "" }}, "tls is '', not true or false");
@@ -474,7 +547,7 @@ test "a CA path that is missing, or a directory, is refused" {
 
 test "a line break or carriage return in any value written is refused" {
     const msg = "an input holds a line break";
-    const names = [_][]const u8{ "farm-address", "farm-instance", "farm-properties", "darwin-properties", "darwin-macos-hosts", "macos-library-dirs", "tls", "tls-ca-certs", "farm-qos" };
+    const names = [_][]const u8{ "farm-address", "farm-instance", "farm-properties", "darwin-properties", "darwin-macos-hosts", "macos-library-dirs", "darwin-config-file", "tls", "tls-ca-certs", "farm-qos" };
     for (names) |name| {
         // The macOS pair is given whole, so only the line break can be refused.
         try expectRefused(&.{
@@ -529,7 +602,7 @@ test "every input is used, and every use names a declared input" {
     defer arena.deinit();
     const ar = arena.allocator();
     const action = try loadAction(ar);
-    try t.expectEqual(@as(usize, 12), action.inputs.len);
+    try t.expectEqual(@as(usize, 13), action.inputs.len);
     for (action.inputs) |in| {
         const use = try std.fmt.allocPrint(ar, "${{{{ inputs.{s} }}}}", .{in.name});
         if (std.mem.indexOf(u8, action.runs, use) == null) std.debug.print("input '{s}' is never used\n", .{in.name});

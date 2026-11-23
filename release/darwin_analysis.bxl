@@ -3,11 +3,12 @@
 #
 #   ./buck2 bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check
 #
-# The macOS set is built only by release-macos.yml, once per release, on the farm's macOS workers
-# (the workers are few, so no pull request builds for macOS). A change that makes the set fail
-# before anything is built (a target of its closure incompatible with darwin-arm64, a toolchain
-# with no execution platform, a rule that fails at analysis) would otherwise be seen first by that
-# workflow, after the merge. This script finds it in the pull request's check: configuring and
+# The whole macOS set is built by release-macos.yml, once per release, on the farm's macOS workers;
+# a pull request builds only the libraries of the set its change reaches (pr.yml's macOS part,
+# tools/build/ci/darwin.bxl), so a change that reaches none builds nothing for macOS. A change that
+# makes the set fail before anything is built (a target of its closure incompatible with darwin-arm64,
+# a toolchain with no execution platform, a rule that fails at analysis) would then be seen first by
+# that workflow, after the merge. This script finds it in the pull request's check: configuring and
 # analysing take seconds on a Linux runner and run no action, so no macOS worker is asked for
 # anything (darwin_analysis.buckconfig registers the macOS execution platform with a property set
 # that names no worker, which configuration needs and nothing uses).

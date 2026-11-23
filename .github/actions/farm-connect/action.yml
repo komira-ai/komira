@@ -54,6 +54,10 @@ inputs:
     description: Absolute directories, separated by `:` or spaces, that a macOS test run searches for a library it opens by its bare name, before /usr/local/lib:/usr/lib (buildrules' `macos_library_dirs`). Only with darwin-properties; left out, dyld's own defaults apply.
     required: false
     default: ""
+  darwin-config-file:
+    description: An absolute path, on the runner, to write the macOS keys (darwin-properties, darwin-macos-hosts, macos-library-dirs) to, as a buckconfig of their own, instead of into the machine buckconfig. Only with darwin-properties. Set, the job's buck2 commands configure no macOS platform unless they name the file with `--config-file`, so a job builds for macOS in the one step that asks and every other step keeps the linux-only configuration (pr.yml's step `build for macOS`). Left out, the keys go into the machine buckconfig.
+    required: false
+    default: ""
   farm-qos:
     description: The priority class the farm queues this job's actions in, `ci` or `batch` (a `batch` action starts after every queued `ci` action, so the pull-request checks go first when the farm is full). Written as the request header `x-kbf-qos` (buck2's `http_headers`); it is no platform property, so it does not change an action's digest or its cache entry. Left out, no header is sent and the farm queues the actions as `ci`. It takes effect only on a farm whose front end reads the header; one that does not ignores it.
     required: false
@@ -84,6 +88,7 @@ runs:
         DARWIN_PROPERTIES: ${{ inputs.darwin-properties }}
         DARWIN_MACOS_HOSTS: ${{ inputs.darwin-macos-hosts }}
         MACOS_LIBRARY_DIRS: ${{ inputs.macos-library-dirs }}
+        DARWIN_CONFIG_FILE: ${{ inputs.darwin-config-file }}
         TLS: ${{ inputs.tls }}
         TLS_CA_CERTS: ${{ inputs.tls-ca-certs }}
         FARM_QOS: ${{ inputs.farm-qos }}
@@ -111,7 +116,7 @@ runs:
         nl='
         '
         cr=$(printf '\r')
-        for v in "$FARM_ADDRESS" "$FARM_INSTANCE" "$FARM_PROPERTIES" "$DARWIN_PROPERTIES" "$DARWIN_MACOS_HOSTS" "$MACOS_LIBRARY_DIRS" "$TLS" "$TLS_CA_CERTS" "$FARM_QOS"; do
+        for v in "$FARM_ADDRESS" "$FARM_INSTANCE" "$FARM_PROPERTIES" "$DARWIN_PROPERTIES" "$DARWIN_MACOS_HOSTS" "$MACOS_LIBRARY_DIRS" "$DARWIN_CONFIG_FILE" "$TLS" "$TLS_CA_CERTS" "$FARM_QOS"; do
           case "$v" in
             *"$nl"* | *"$cr"*) refuse "an input holds a line break; each value must be one line of the buckconfig" ;;
           esac
@@ -150,6 +155,16 @@ runs:
           done
           set +f
           [ "$n" -gt 0 ] || refuse "macos-library-dirs is set but names no directory"
+        fi
+        # The file of the macOS keys: only with a macOS set (it would hold nothing), and
+        # absolute (a step's `--config-file` resolves a relative path from the checkout).
+        if [ -n "$DARWIN_CONFIG_FILE" ]; then
+          [ -n "$DARWIN_PROPERTIES" ] || refuse "darwin-config-file is set but darwin-properties is empty"
+          case "$DARWIN_CONFIG_FILE" in
+            *'$'*) refuse "darwin-config-file holds a \$" ;;
+            /*) ;;
+            *) refuse "darwin-config-file is '$DARWIN_CONFIG_FILE', not an absolute path" ;;
+          esac
         fi
         case "$TLS" in
           true | false) ;;
@@ -213,6 +228,7 @@ runs:
         DARWIN_PROPERTIES: ${{ inputs.darwin-properties }}
         DARWIN_MACOS_HOSTS: ${{ inputs.darwin-macos-hosts }}
         MACOS_LIBRARY_DIRS: ${{ inputs.macos-library-dirs }}
+        DARWIN_CONFIG_FILE: ${{ inputs.darwin-config-file }}
         TLS: ${{ inputs.tls }}
         TLS_CA_CERTS: ${{ inputs.tls-ca-certs }}
         FARM_QOS: ${{ inputs.farm-qos }}
@@ -221,6 +237,13 @@ runs:
         case "$CONCURRENCY" in
           ''|*[!0-9]*) echo "::error title=farm-connect::execution-concurrency-limit is not a number"; exit 1 ;;
         esac
+        darwin_keys() {
+          echo "  darwin_arm64_properties = $DARWIN_PROPERTIES"
+          echo "  darwin_macos_hosts = $DARWIN_MACOS_HOSTS"
+          if [ -n "$MACOS_LIBRARY_DIRS" ]; then
+            echo "  macos_library_dirs = $MACOS_LIBRARY_DIRS"
+          fi
+        }
         dir="$HOME/.buckconfig.d"
         mkdir -p "$dir"
         {
@@ -254,12 +277,12 @@ runs:
           fi
           echo "[komira_re]"
           echo "  linux_x86_64_properties = $FARM_PROPERTIES"
-          if [ -n "$DARWIN_PROPERTIES" ]; then
-            echo "  darwin_arm64_properties = $DARWIN_PROPERTIES"
-            echo "  darwin_macos_hosts = $DARWIN_MACOS_HOSTS"
-            if [ -n "$MACOS_LIBRARY_DIRS" ]; then
-              echo "  macos_library_dirs = $MACOS_LIBRARY_DIRS"
-            fi
+          if [ -n "$DARWIN_PROPERTIES" ] && [ -z "$DARWIN_CONFIG_FILE" ]; then
+            darwin_keys
           fi
         } > "$dir/farm.buckconfig"
         echo "wrote the farm's machine buckconfig ($dir/farm.buckconfig)"
+        if [ -n "$DARWIN_CONFIG_FILE" ]; then
+          { echo "[komira_re]"; darwin_keys; } > "$DARWIN_CONFIG_FILE"
+          echo "wrote the macOS keys ($DARWIN_CONFIG_FILE)"
+        fi

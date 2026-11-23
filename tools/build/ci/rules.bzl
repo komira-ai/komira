@@ -93,7 +93,7 @@ HEAVY = []
 EXCLUDED = [
     ("komira//third_party/python/...", "the pinned CPython and wheels: inputs of Python tests only"),
     ("komira//release/ci/tests:", "py_test of the CI scripts, not of the Python SDK"),
-    ("komira//release:mopm_darwin_libs", "the macOS arm64 build of the release: it is built for the darwin-arm64 platform on the farm's macOS workers by release-macos.yml (job release-macos), and never by a pull request (a Linux build of its libraries is the aggregate's own)"),
+    ("komira//release:mopm_darwin_libs", "the macOS arm64 build of the release: it is built for the darwin-arm64 platform on the farm's macOS workers by release-macos.yml (job release-macos) and by pr.yml's macOS part (tools/build/ci/darwin.bxl), never by the Linux part of the check (a Linux build of its libraries is the aggregate's own)"),
     ("komira//python:komira_wheel_macos_arm64", "the macOS arm64 wheel: it is built for the darwin-arm64 platform on the farm's macOS workers by pypi-macos-arm64.yml (job build-macos-arm64), and never by a pull request (the Linux wheel and the wheel rule's own cases are the aggregate's)"),
     ("komira//python:wheel_install_test_macos_arm64", "the macOS arm64 wheel's install test: it runs on the farm's macOS workers in pypi-macos-arm64.yml (job build-macos-arm64), and never in a pull request (the Linux install tests are the aggregate's)"),
     ("komira//python/smoke:pypi_smoke_macos_arm64", "the smoke driver built for macOS arm64, which pypi-macos-arm64.yml's smoke jobs run on a hosted macOS runner; built for darwin-arm64 by pypi-macos-arm64.yml (job build-macos-arm64) only (the Linux driver and its unit tests are the aggregate's)"),
