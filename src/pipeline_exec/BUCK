@@ -11,12 +11,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # `fake_members`, `fake_builder`, `fake_dispatch`) drive the scheduler in tests.
 # The real members are the sources `source_parquet`, `source_batch`,
 # `source_sink_output`, `source_csv` (a CSV file decoded at its bound column
-# types, served as a resident batch) and `source_jsonl` (a JSONL file read at
-# the plan's schema, served as a batch source), the operators `op_filter`,
-# `op_project`, `op_limit` and `op_hash_probe` (the INNER, LEFT, RIGHT, FULL,
-# SEMI, ANTI and CROSS join probe over an index of the build rows; RIGHT and
-# FULL owe their unmatched build rows as a tail that `run_segment` pushes after
-# the workers),
+# types, served as a resident batch), `source_iceberg` (the planned files of
+# an Iceberg snapshot, with their deletes applied, served as a resident batch)
+# and `source_jsonl` (a JSONL file read at the plan's schema, served as a batch
+# source), the operators `op_filter`, `op_project`,
+# `op_limit` and `op_hash_probe` (the INNER, LEFT, RIGHT, FULL, SEMI, ANTI and
+# CROSS join probe over an index of the build rows; RIGHT and FULL owe their
+# unmatched build rows as a tail that `run_segment` pushes after the workers),
 # the sinks `sink_collect`, `sink_agg` (the ungrouped aggregation, over
 # `agg_fold` and `agg_output`, drawing memory from `segment_pool`; COUNT(DISTINCT) in
 # every aggregation sink is `count_distinct`), `sink_group_agg` (the same keyed by
@@ -97,6 +98,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 with no row; a plan over it end to end;
 #                                 refusals of a spec with no file, a file whose
 #                                 columns are not the bound ones, a missing file.
+# test_source_iceberg             the Iceberg source built from a spec: the rows of
+#                                 several data files in spec order at the bound
+#                                 columns, NULL cells, a file with no row, a spec
+#                                 with no file; a plan over it end to end through
+#                                 a filter and a projection on several workers;
+#                                 a spec the reader refuses, as the run's error.
 # test_source_jsonl               the JSONL source built from a spec: every row
 #                                 at the spec's schema and order, a missing key
 #                                 NULL, an unread key skipped, a file of
@@ -257,8 +264,10 @@ mojo_library(
         "//src/async_rt:async_rt",
         "//src/async_api:async_api",
         "//src/atomic_alias:atomic_alias",
+        "//src/avro:avro",
         "//src/batch_eval:batch_eval",
         "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
         "//src/column_format:column_format",
         "//src/compression:compression",
         "//src/containers:containers",
@@ -270,14 +279,19 @@ mojo_library(
         "//src/exec_types:exec_types",
         "//src/expr:expr",
         "//src/fs:fs",
+        "//src/hashing:hashing",
         "//src/host_probe:host_probe",
         "//src/host_profile:host_profile",
+        "//src/iceberg_scan:iceberg_scan",
         "//src/join_assembly:join_assembly",
+        "//src/json:json",
         "//src/jsonl:jsonl",
         "//src/libc:libc",
         "//src/log:log",
+        "//src/lz4:lz4",
         "//src/metrics:metrics",
         "//src/morsel:morsel",
+        "//src/name_registry:name_registry",
         "//src/objectstore:objectstore",
         "//src/op_sort:op_sort",
         "//src/op_join_probe:op_join_probe",
@@ -285,6 +299,7 @@ mojo_library(
         "//src/op_spill_rows:op_spill_rows",
         "//src/operator_api:operator_api",
         "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
         "//src/parquet_codec:parquet_codec",
         "//src/parquet_scan:parquet_scan",
         "//src/phase_timers:phase_timers",
@@ -298,7 +313,11 @@ mojo_library(
         "//src/scan_source:scan_source",
         "//src/shuffle:shuffle",
         "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/sync:sync",
+        "//src/trace:trace",
         "//src/udf:udf",
+        "//src/zlib:zlib",
     ],
     test_deps = [
         "//src/parquet_api:parquet_api",
@@ -349,6 +368,7 @@ mojo_library(
         "tests/test_sort_plan.mojo",
         "tests/test_sort_plan_concurrent.mojo",
         "tests/test_source_csv.mojo",
+        "tests/test_source_iceberg.mojo",
         "tests/test_source_jsonl.mojo",
         "tests/test_sources.mojo",
         "tests/test_string_group_memory.mojo",

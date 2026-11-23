@@ -9,6 +9,7 @@
 
 from lowering.lowered_plan import LoweredPlan
 from lowering.sink_capability import triple_name
+from physical_plan.iceberg_scan_spec import IcebergScanSpec
 from physical_plan.udf_call_spec import UdfCallSpec
 from plan_ir.udf_ref import udf_ref_kind_name
 from physical_plan.physical_plan import (
@@ -20,6 +21,7 @@ from physical_plan.physical_plan import (
     SOURCE_CONCAT,
     SOURCE_CSV,
     SOURCE_UDF_STEP,
+    SOURCE_ICEBERG,
     SOURCE_JSONL,
     OP_FILTER,
     OP_PROJECT,
@@ -51,6 +53,8 @@ def _source_name(kind: UInt8) -> String:
         return "SOURCE_CSV"
     if kind == SOURCE_UDF_STEP:
         return "SOURCE_UDF_STEP"
+    if kind == SOURCE_ICEBERG:
+        return "SOURCE_ICEBERG"
     if kind == SOURCE_JSONL:
         return "SOURCE_JSONL"
     return "SOURCE_" + String(Int(kind))
@@ -86,6 +90,66 @@ def _names(items: List[String]) -> String:
         if i > 0:
             out += ", "
         out += items[i]
+    out += "]"
+    return out^
+
+
+def _ints(items: List[Int]) -> String:
+    var out = String("[")
+    for i in range(len(items)):
+        if i > 0:
+            out += ", "
+        out += String(items[i])
+    out += "]"
+    return out^
+
+
+def _iceberg_text(spec: IcebergScanSpec) -> String:
+    """` columns=[name:TYPE#field_id, ...] files=[...] deletes=[...]`: each
+    file with the path it opens, the path its manifest stores and the indices
+    of the delete files that apply; each delete file with its content, format
+    and equality columns."""
+    var out = String(" columns=[")
+    for i in range(len(spec.column_names)):
+        if i > 0:
+            out += ", "
+        out += (
+            spec.column_names[i]
+            + ":"
+            + String(spec.column_types[i])
+            + "#"
+            + String(spec.column_field_ids[i])
+        )
+    out += "] files=["
+    for f in range(len(spec.data_files)):
+        if f > 0:
+            out += ", "
+        ref df = spec.data_files[f]
+        out += (
+            df.path
+            + " (stored="
+            + df.stored_path
+            + " position_deletes="
+            + _ints(df.position_deletes)
+            + " equality_deletes="
+            + _ints(df.equality_deletes)
+            + ")"
+        )
+    out += "] deletes=["
+    for d in range(len(spec.deletes)):
+        if d > 0:
+            out += ", "
+        ref dl = spec.deletes[d]
+        out += (
+            dl.path
+            + " (content="
+            + String(dl.content)
+            + " format="
+            + dl.file_format
+            + " equality_columns="
+            + _names(dl.equality_columns)
+            + ")"
+        )
     out += "]"
     return out^
 
@@ -183,6 +247,8 @@ def _segment_text(seg: SegmentDescPod) -> String:
                 out += ", "
             out += s.csv_spec.column_names[i] + ":" + String(s.csv_spec.column_types[i])
         out += "]"
+    elif seg.source_kind == SOURCE_ICEBERG:
+        out += _iceberg_text(seg.source_spec.iceberg_spec)
     elif seg.source_kind == SOURCE_UDF_STEP:
         out += " " + _call_text(seg.source_spec.udf_step.value())
     elif seg.source_kind == SOURCE_JSONL:

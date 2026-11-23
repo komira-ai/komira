@@ -26,6 +26,7 @@ python/komira/_capture/_code.py	the Python package: its sources are Python (docs
 python/komira/_capture/_decorator.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_capture/_readset.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_capture/_types.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_credentials.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_plan/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_plan/_agg.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_plan/_expr.py	the Python package: its sources are Python (docs/design/python_package.md)
@@ -69,6 +70,8 @@ python/tests/fixtures/udfs/future.py	the Python package's tests: the user functi
 python/tests/fixtures/udfs/rows.py	the Python package's tests: the user functions the capture tests capture, which must be Python modules
 python/tests/fixtures/udfs/runtime.py	the Python package's tests: the user functions the capture tests capture, which must be Python modules
 python/tests/fixtures/udfs/scalars.py	the Python package's tests: the user functions the capture tests capture, which must be Python modules
+python/tests/test_credentials.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_credentials_lib.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_runtime.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_upgrade.py	the Python package's tests: the wheel upgraded from its previous release is tested in Python, by the interpreter it is installed for
 python/tests/test_session.py	the Python package's tests: the SDK surface is tested in Python

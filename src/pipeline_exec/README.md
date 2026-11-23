@@ -58,7 +58,8 @@ Import each module by name; the package root exports nothing.
   `NoOperator` and is read as `fourth()` under `OP_TAG_FOURTH`), and a tag;
   its trait methods test the tag and call the member. `unused_members` fills
   the slots a list leaves empty with members that refuse to run.
-- `source_parquet`, `source_batch`, `source_sink_output`, `source_csv`: the
+- `source_parquet`, `source_batch`, `source_sink_output`, `source_csv`,
+  `source_iceberg`: the
   sources of a plan. `build_parquet_source` makes a `parquet_scan` `ParquetSource` on
   the local file system from the Parquet arm of a `SourceSpecPod`: it refuses a
   spec that is not total, resolves the projection names through the footer of
@@ -83,8 +84,12 @@ Import each module by name; the package root exports nothing.
   column types the plan bound it at (no second inference), refuses a file whose
   column names are not the bound ones (`CSV_SOURCE_SCHEMA_MISMATCH`) and serves
   the decoded file as a `BatchSource`; the whole file is decoded before the
-  first morsel.
-  morsels claimed from one shared cursor.
+  first morsel. `build_iceberg_source` reads the Iceberg arm of a
+  `SourceSpecPod` with `iceberg_scan.scan_reader.read_iceberg_scan`: every data
+  file the spec lists, in that order, at the spec's bound columns, minus the
+  rows the position and equality deletes that apply to the file remove; it
+  serves the result as a `BatchSource`, and the files are read before the first
+  morsel. The scan's filter and projection are operators of the segment.
 - `source_jsonl`: `build_jsonl_source` reads the newline-delimited JSON file a
   SOURCE_JSONL spec names, at the spec's schema (the keys it names, in its
   order, at its types; a missing key is NULL, a key it does not name is
@@ -310,8 +315,8 @@ Import each module by name; the package root exports nothing.
   memory on a synthetic workload and checks each layout's counts; its numbers and what
   they decided are in `docs/design/lowering_and_pipeline.md` (section 4.3).
 - `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
-  serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CSV, SOURCE_JSONL,
-  SOURCE_CONCAT (a UNION ALL: it takes the output of every producer the spec
+  serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CSV,
+  SOURCE_ICEBERG, SOURCE_JSONL, SOURCE_CONCAT (a UNION ALL: it takes the output of every producer the spec
   names, after checking each is a dependency, and concatenates them in the
   spec's order into one batch it serves as a `SinkOutputSource`, with each
   column nullable when any producer's is; a concatenation of no segment is
@@ -528,4 +533,52 @@ try:
 except e:
     refused = String(e)
 assert_equal(refused, "pipeline_exec: a SOURCE_CSV spec names no file")
+```
+
+A SOURCE_ICEBERG spec through `source_iceberg` and `plan_harness`; reading the
+files is in the welded tests (`test_source_iceberg`):
+
+```mojo
+from std.testing import assert_equal, assert_true
+
+from arrow.arrow_types import ArrowType
+from physical_plan.iceberg_scan_spec import (
+    IcebergDataFileSpec,
+    IcebergDeleteSpec,
+    IcebergScanSpec,
+)
+from physical_plan.physical_plan import SOURCE_ICEBERG, SourceSpecPod
+from pipeline_exec.plan_harness import iceberg_segment
+from pipeline_exec.source_iceberg import build_iceberg_source
+
+var names = List[String]()
+names.append("id")
+var types = List[ArrowType]()
+types.append(ArrowType.INT64)
+var ids = List[Int]()
+ids.append(1)
+var files = List[IcebergDataFileSpec]()
+files.append(
+    IcebergDataFileSpec(
+        "no_such_dir/a.parquet",
+        "file:///warehouse/orders/a.parquet",
+        List[Int](),
+        List[Int](),
+    )
+)
+var spec = SourceSpecPod.iceberg(
+    IcebergScanSpec(
+        names^, types^, ids^, files^, List[IcebergDeleteSpec]()
+    )
+)
+# A file the spec lists that cannot be opened is the source's error.
+var failed = False
+try:
+    _ = build_iceberg_source(spec, 1024)
+except e:
+    failed = String(e).byte_length() > 0
+assert_true(failed)
+# A segment that reads the files and collects (plan_harness).
+var seg = iceberg_segment(0, spec^)
+assert_equal(seg.source_kind, SOURCE_ICEBERG)
 ```

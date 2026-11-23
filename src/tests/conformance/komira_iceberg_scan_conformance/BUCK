@@ -1,0 +1,161 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+load(":iceberg_table.bzl", "iceberg_table")
+load(":orders_files.bzl", "CASES", "ORDERS_INPUTS", "ORDERS_OUTPUTS")
+
+# Test-only: `iceberg_scan` through run_sql (the SQL door of sdk_exec) against
+# the answers of the pinned DuckDB's Iceberg extension, over a table written
+# the way Iceberg Java writes one.
+#
+#   :orders_writer  the program (runner/main.mojo) that writes the table
+#                   `orders` with komira_iceberg_test_tables: six snapshots
+#                   (two appends, a position delete, an equality delete older
+#                   than a later append that reinserts a deleted key, an
+#                   overwrite that marks a data file DELETED), partitioned by
+#                   the identity of `region`, recorded under
+#                   file:///warehouse/db/orders
+#   :orders_table   that program as a build action; each file it writes is a
+#                   sub-target (orders_files.bzl)
+#   :answers        oracle/cases.sql run by the pinned DuckDB with its avro
+#                   and iceberg extensions loaded (`extensions` of sql_oracle)
+#                   over the staged table: one TSV per case
+#
+#   test_iceberg_scan_parity  each case's query through run_sql over the
+#                             staged table, compared with DuckDB's rows;
+#                             older snapshots; a metadata file as the path;
+#                             an unknown snapshot and an unmoved table refused
+#
+# The checks are in the test (the library has no code of its own), so the
+# test is its own action. Nothing depends on this package.
+mojo_binary(
+    name = "orders_writer",
+    srcs = ["runner/main.mojo"],
+    main = "runner/main.mojo",
+    deps = ["//src/tests/helpers/komira_iceberg_test_tables:komira_iceberg_test_tables"],
+)
+
+iceberg_table(
+    name = "orders_table",
+    outputs = ORDERS_OUTPUTS,
+    writer = ":orders_writer",
+)
+
+sql_oracle(
+    name = "answers",
+    srcs = ["oracle/cases.sql"],
+    extensions = [
+        "komira//third_party/duckdb:avro_extension[avro.duckdb_extension]",
+        "komira//third_party/duckdb:iceberg_extension[iceberg.duckdb_extension]",
+    ],
+    inputs = ORDERS_INPUTS,
+    outputs = [c + ".tsv" for c in CASES],
+)
+
+_PARITY_DATA = {"cases.sql": "oracle/cases.sql"}
+
+_PARITY_DATA.update(ORDERS_INPUTS)
+
+_PARITY_DATA.update({c + ".tsv": ":answers[" + c + ".tsv]" for c in CASES})
+
+mojo_library(
+    name = "komira_iceberg_scan_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "runner/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries the test builds on
+    # (sdk_exec's, iceberg_scan, the table builder and the plan harness).
+    deps = [
+        "//src/agg:agg",
+        "//src/agg_api:agg_api",
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_api:async_api",
+        "//src/async_rt:async_rt",
+        "//src/atomic_alias:atomic_alias",
+        "//src/avro:avro",
+        "//src/awslc:awslc",
+        "//src/batch_eval:batch_eval",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/column_format:column_format",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/containers:containers",
+        "//src/counters:counters",
+        "//src/crypto:crypto",
+        "//src/csv:csv",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/encoding:encoding",
+        "//src/engine_runtime:engine_runtime",
+        "//src/exec_types:exec_types",
+        "//src/expr:expr",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/host_profile:host_profile",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/iceberg_catalog:iceberg_catalog",
+        "//src/iceberg_scan:iceberg_scan",
+        "//src/join_assembly:join_assembly",
+        "//src/json:json",
+        "//src/json_index:json_index",
+        "//src/jsonl:jsonl",
+        "//src/kernels:kernels",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/lowering:lowering",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/morsel:morsel",
+        "//src/name_registry:name_registry",
+        "//src/net:net",
+        "//src/objectstore:objectstore",
+        "//src/op_agg_state:op_agg_state",
+        "//src/op_join_probe:op_join_probe",
+        "//src/op_sort:op_sort",
+        "//src/op_sources:op_sources",
+        "//src/op_spill_rows:op_spill_rows",
+        "//src/operator_api:operator_api",
+        "//src/optimizer:optimizer",
+        "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_footers:parquet_footers",
+        "//src/parquet_scan:parquet_scan",
+        "//src/parquet_writer:parquet_writer",
+        "//src/phase_timers:phase_timers",
+        "//src/physical_plan:physical_plan",
+        "//src/pipeline_exec:pipeline_exec",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_proto:plan_proto",
+        "//src/plan_stats:plan_stats",
+        "//src/plan_wire:plan_wire",
+        "//src/proto_codec:proto_codec",
+        "//src/protobuf:protobuf",
+        "//src/row_format:row_format",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_planning:scan_planning",
+        "//src/scan_source:scan_source",
+        "//src/sdk:sdk",
+        "//src/sdk_exec:sdk_exec",
+        "//src/secret_registry:secret_registry",
+        "//src/secret_store:secret_store",
+        "//src/shuffle:shuffle",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/sql:sql",
+        "//src/sync:sync",
+        "//src/tests/helpers/komira_iceberg_test_tables:komira_iceberg_test_tables",
+        "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
+        "//src/trace:trace",
+        "//src/udf:udf",
+        "//src/uuid:uuid",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    conda = False,
+    test_srcs = ["tests/test_iceberg_scan_parity.mojo"],
+    test_data = {"tests/test_iceberg_scan_parity.mojo": _PARITY_DATA},
+    visibility = ["PUBLIC"],
+)

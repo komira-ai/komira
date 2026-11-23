@@ -19,6 +19,10 @@
 #            SOURCE_CSV           the CSV file the spec names, decoded at its
 #                                 bound column types and served as a resident
 #                                 batch (`source_csv`)
+#            SOURCE_ICEBERG       the data files the spec names, each with the
+#                                 delete files that apply to it, decoded at the
+#                                 spec's bound columns and served as a resident
+#                                 batch (`source_iceberg`)
 #            SOURCE_CONCAT        the outputs of the producers the spec names,
 #                                 moved out of `PublishedOutputs` and
 #                                 concatenated in the spec's order into one
@@ -147,6 +151,7 @@ from physical_plan.physical_plan import (
     SOURCE_BATCH,
     SOURCE_CONCAT,
     SOURCE_CSV,
+    SOURCE_ICEBERG,
     SOURCE_JSONL,
     SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
@@ -172,6 +177,7 @@ from .sink_sort import SortSink
 from .sink_string_group_agg import StringGroupAggSink
 from .source_batch import BatchSource
 from .source_csv import build_csv_source
+from .source_iceberg import build_iceberg_source
 from .source_jsonl import build_jsonl_source
 from .source_parquet import (
     LocalOnlyScanFs,
@@ -482,6 +488,8 @@ struct RealBuilder[
             )
         if desc.source_kind == SOURCE_CSV:
             return Self.Source.second(build_csv_source(spec, morsel_rows))
+        if desc.source_kind == SOURCE_ICEBERG:
+            return Self.Source.second(build_iceberg_source(spec, morsel_rows))
         if desc.source_kind == SOURCE_JSONL:
             return Self.Source.second(build_jsonl_source(spec, morsel_rows))
         if desc.source_kind == SOURCE_SINK_OUTPUT:
@@ -532,7 +540,8 @@ struct RealBuilder[
             + " of segment "
             + String(desc.seg_id)
             + " is not served (SOURCE_PARQUET, SOURCE_BATCH,"
-            " SOURCE_SINK_OUTPUT, SOURCE_CSV, SOURCE_CONCAT and SOURCE_JSONL are)"
+            " SOURCE_SINK_OUTPUT, SOURCE_CSV, SOURCE_ICEBERG, SOURCE_CONCAT and"
+            " SOURCE_JSONL are)"
         )
 
     def build_op(

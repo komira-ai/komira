@@ -1,7 +1,7 @@
 # lowering
 
 Lowering: a bound `LogicalPlan`, a `HostProfile` and the resolved inputs go in;
-the physical plan (`physical_plan`, IR version 19) and the `ParamTable`
+the physical plan (`physical_plan`, IR version 20) and the `ParamTable`
 its segments index come out. It is pure. `lower` opens no file, reads no clock
 and no environment variable and touches no global, so equal arguments give a
 `LoweredPlan` that renders byte-equal.
@@ -12,18 +12,24 @@ and no environment variable and touches no global, so equal arguments give a
   admission against the sink capability table.
 - `lowered_plan`: `LoweringInputs` (one `ScanFacts` per scan in scan
   pre-order: the footers' statistics and the columns every row group stores
-  dictionary encoded; and the plan's `UdfRef` list), `ParamTable` (which
+  dictionary encoded, and for an Iceberg table scan the files the host planned
+  (`add_iceberg_scan`); and the plan's `UdfRef` list), `ParamTable` (which
   carries that list whole, as `udfs`), `LoweredPlan` and the seven refusal
   tokens.
 - `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, whose
   spec lists the files when there are several; `SOURCE_BATCH` for an in-memory
   scan; `SOURCE_CSV` for a CSV scan, whose spec carries the path, the dialect
-  and every column of the file with the type the plan bound it at; `SOURCE_JSONL`
-  for a scan of one newline-delimited JSON file, whose spec names the file and
-  the schema it is read at: the scan's projection, in its order, at the types
-  the plan was bound at, and its pushed filter, when it has one, an operator
-  over every key; the pushed
-  filter and projection of the batch and CSV arms become operators, and so do those of
+  and every column of the file with the type the plan bound it at;
+  `SOURCE_ICEBERG` for a scan of an Iceberg table, a binding of kind
+  `komira.iceberg.table`, whose spec is the one the inputs carry for that scan
+  (the data files that survive pruning, the delete files that apply, and the
+  bound columns with their field ids): lowering reads no table metadata and
+  does not depend on the package that does; `SOURCE_JSONL` for a scan of one
+  newline-delimited JSON file, whose spec names the file and the schema it is
+  read at: the scan's projection, in its order, at the types the plan was
+  bound at, and its pushed filter, when it has one, an operator over every
+  key; the pushed filter and projection of the batch, CSV and Iceberg arms
+  become operators, and so do those of
   a Parquet scan with Hive partition columns, over the files' columns followed
   by the partition columns). A step, a user function run once, opens one too
   (`SOURCE_UDF_STEP`, see User functions). A filter, a projection, a limit and
@@ -137,8 +143,8 @@ shape:
   negative count; a limit above a sort (see Order); a partial or final
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
-  than Parquet, in memory, CSV or JSON; a JSON scan whose projection names
-  a column its schema does not hold; a CSV scan with `header=false` (the reader
+  than Parquet, in memory, CSV, JSON or an Iceberg table; a JSON scan whose
+  projection names a column its schema does not hold; a CSV scan with `header=false` (the reader
   would name its columns `col_0`, `col_1`, ..., where DuckDB names them
   `column0`, `column1`, ...); a union with no branch, or with a branch whose
   schema is not the union's (column count, and per column the name, Arrow
@@ -162,11 +168,12 @@ shape:
   lazily (a directory scan or a partition predicate), a Parquet scan on a
   store other than the local file system, S3, GCS and Azure (a scheme code
   that names none of them, by its number: `scheme 9://raw`), a local scan
-  with an explicit file system binding, or a scan marked unbounded. The
-  segment's Parquet arm carries the file list, the partition columns'
-  constants and the store (`parquet_fs`: local, or an S3 or GCS bucket or an
-  Azure container whose object keys the paths are), but no predicate, and its
-  sources read a bounded input.
+  with an explicit file system binding, an Iceberg scan whose files the inputs
+  do not carry (`an Iceberg scan whose files were not planned`), or a scan
+  marked unbounded. The segment's Parquet arm carries the file list, the
+  partition columns' constants and the store (`parquet_fs`: local, or an S3 or
+  GCS bucket or an Azure container whose object keys the paths are), but no
+  predicate, and its sources read a bounded input.
   The scan's display name is not part of the segment.
 - `LOWERING_INPUTS_SCAN_COUNT`: the inputs do not hold one entry per scan.
 - `LOWERING_UDF_UNDECLARED_READ`, naming the node, the `UdfRef` index and

@@ -39,7 +39,7 @@ from .sql_token import (
 from .sql_fn_table import CAST_DESUGAR_NAME as _CAST_DESUGAR_NAME, TRY_CAST_DESUGAR_NAME as _TRY_CAST_DESUGAR_NAME
 from .sql_fn_table import POSITION_IN_DESUGAR_NAME as _POSITION_IN_DESUGAR_NAME
 from .sql_tvf_options import (
-    TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO,
+    TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO, TVF_ICEBERG,
     hive_partitioning_value, _replacement_scan_kind, _file_stem,
 )
 from .sql_ast import (
@@ -1056,7 +1056,7 @@ struct _Parser(Movable):
                 " `WHERE [NOT] EXISTS (...)`."
             )
         # Table-valued function: read_parquet('path') / read_csv / read_json /
-        # read_avro. The ident is lower-folded by the tokenizer, so compare
+        # read_avro / iceberg_scan. The ident is lower-folded by the tokenizer, so compare
         # directly.
         #
         # ⭐ `read_avro` is the SQL spelling of an Avro file.
@@ -1068,20 +1068,25 @@ struct _Parser(Movable):
         if (
             (name == "read_parquet" or name == "read_csv" or name == "read_json"
              or name == "read_ndjson" or name == "read_json_auto"
-             or name == "read_csv_auto" or name == "read_avro")
+             or name == "read_csv_auto" or name == "read_avro"
+             or name == "iceberg_scan")
             and self.pos + 1 < len(self.tokens)
             and self.tokens[self.pos + 1].kind == TK_LPAREN
         ):
-            # ⚠ THE AVRO TEST MUST PRECEDE THE `!= "read_parquet"` CATCH-ALL.
-            # That elif is a DEFAULT-TO-JSON, not a JSON test: adding a sixth
-            # spelling to the clause above without a branch here would bind
+            # ⚠ THE AVRO AND ICEBERG TESTS MUST PRECEDE THE
+            # `!= "read_parquet"` CATCH-ALL.
+            # That elif is a DEFAULT-TO-JSON, not a JSON test: adding a spelling
+            # to the clause above without a branch here would bind
             # `read_avro('f.avro')` as JSONL and hand the JSON prefix inferrer
-            # an OCF container header.
+            # an OCF container header (and `iceberg_scan('t')` as JSONL over a
+            # table directory).
             var kind: UInt8 = TVF_PARQUET
             if name == "read_csv" or name == "read_csv_auto":
                 kind = TVF_CSV
             elif name == "read_avro":
                 kind = TVF_AVRO
+            elif name == "iceberg_scan":
+                kind = TVF_ICEBERG
             elif name != "read_parquet":
                 kind = TVF_JSON
             self._advance()  # func name -> now at '('
@@ -1246,6 +1251,11 @@ struct _Parser(Movable):
                 " An Avro OCF carries its writer schema and its codec in the"
                 + " container header, so there is no dialect to steer."
             )
+        elif kind == TVF_ICEBERG:
+            why = (
+                " An Iceberg table's metadata names its schema and its files,"
+                + " so there is no dialect for this option to steer."
+            )
         raise Error(
             "SQL not supported: " + fname + " option '" + key + "' is a "
             + belongs_to + " option and means nothing here." + why
@@ -1257,14 +1267,15 @@ struct _Parser(Movable):
         mut self, fname: String, kind: UInt8,
     ) raises -> TvfOptions:
         """Parse the trailing `, name = value` option list of a `read_csv` /
-        `read_json` call, positioned just after the path literal and returning
+        `read_json` / `read_parquet` / `iceberg_scan` call, positioned just after the path literal and returning
         with the cursor on the closing `')'`.
 
         THE ALLOWLIST IS THE POINT. Three classes, and every option is in exactly
         one of them:
 
           1. SEMANTIC — it changes what the result IS (`all_varchar`, `header`,
-             `delim`, `hive_partitioning`). Recorded on `TvfOptions`; the binder honors it.
+             `delim`, `hive_partitioning`, and for `iceberg_scan`
+             `allow_moved_paths` and `snapshot_from_id`). Recorded on `TvfOptions`; the binder honors it.
           2. NEUTRAL-BY-VALUE — it changes only HOW the engine gets there
              (`parallel`, `auto_detect=true`), or it restates something our
              reader derives for itself and AGREES with (`compression=` matching
@@ -1402,6 +1413,26 @@ struct _Parser(Movable):
                 opts.hive_partitioning = hive_partitioning_value(
                     self._tvf_bool_arg(fname, key)
                 )
+            elif key == "allow_moved_paths":
+                if kind != TVF_ICEBERG:
+                    self._refuse_option_for_kind(
+                        fname, key, kind, "iceberg_scan"
+                    )
+                opts.allow_moved_paths = self._tvf_bool_arg(fname, key)
+            elif key == "snapshot_from_id":
+                if kind != TVF_ICEBERG:
+                    self._refuse_option_for_kind(
+                        fname, key, kind, "iceberg_scan"
+                    )
+                if self._kind() != TK_INT:
+                    raise Error(
+                        "SQL syntax error: " + fname + " option '" + key
+                        + "' expects an integer snapshot id"
+                    )
+                opts.snapshot_from_id = Optional[Int64](
+                    self._small_int_tok("snapshot_from_id")
+                )
+                self._advance()
             elif key == "format":
                 if kind != TVF_JSON:
                     raise Error(
