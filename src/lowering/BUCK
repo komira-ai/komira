@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Lowering: a bound LogicalPlan, a HostProfile and the resolved inputs to the
-# PhysicalPlan IR (version 19) and the ParamTable its segments index. Pure: the
+# PhysicalPlan IR (version 20) and the ParamTable its segments index. Pure: the
 # entry opens no file, reads no clock and no environment variable and touches
 # no global (README.md).
 #
@@ -57,6 +57,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        after a left build, a three-table chain, a join under
 #                        an aggregate, a breaker below the build side, the
 #                        estimates and the scan order.
+# test_lower_jsonl_scan  a JSON scan is a SOURCE_JSONL segment whose spec reads
+#                        the projection at the bound types; a pushed filter
+#                        reads the whole file and becomes an operator; a
+#                        projection of a column the schema lacks and an
+#                        unbounded scan are refused; Avro is still refused.
 # test_lower_refusals    every refusal token, raised by the plan that should
 #                        raise it with the text that names why, and a plan
 #                        beside each that lowers (a distinct over a column
@@ -147,6 +152,7 @@ mojo_library(
         "tests/test_lower_distinct.mojo",
         "tests/test_lower_gcs_azure_scan.mojo",
         "tests/test_lower_iceberg.mojo",
+        "tests/test_lower_jsonl_scan.mojo",
         "tests/test_lower_names.mojo",
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",

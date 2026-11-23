@@ -11,8 +11,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # `fake_members`, `fake_builder`, `fake_dispatch`) drive the scheduler in tests.
 # The real members are the sources `source_parquet`, `source_batch`,
 # `source_sink_output`, `source_csv` (a CSV file decoded at its bound column
-# types, served as a resident batch) and `source_iceberg` (the planned files of
-# an Iceberg snapshot, with their deletes applied, served as a resident batch), the operators `op_filter`, `op_project`,
+# types, served as a resident batch), `source_iceberg` (the planned files of
+# an Iceberg snapshot, with their deletes applied, served as a resident batch)
+# and `source_jsonl` (a JSONL file read at the plan's schema, served as a batch
+# source), the operators `op_filter`, `op_project`,
 # `op_limit` and `op_hash_probe` (the INNER, LEFT, RIGHT, FULL, SEMI, ANTI and
 # CROSS join probe over an index of the build rows; RIGHT and FULL owe their
 # unmatched build rows as a tail that `run_segment` pushes after the workers),
@@ -102,6 +104,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 with no file; a plan over it end to end through
 #                                 a filter and a projection on several workers;
 #                                 a spec the reader refuses, as the run's error.
+# test_source_jsonl               the JSONL source built from a spec: every row
+#                                 at the spec's schema and order, a missing key
+#                                 NULL, an unread key skipped, a file of
+#                                 several chunks, an empty file, a compressed
+#                                 file, no trailing newline, keys of no column;
+#                                 a bad line, a value of another type, a
+#                                 missing file and no path refused naming the
+#                                 file; through run_plan with a filter and a
+#                                 projection, on one worker and on three.
 # test_real_plan                  hand-built plans end to end: scan, filter,
 #                                 project and limit; a segment reading another's
 #                                 output; what the builder refuses.
@@ -274,6 +285,7 @@ mojo_library(
         "//src/iceberg_scan:iceberg_scan",
         "//src/join_assembly:join_assembly",
         "//src/json:json",
+        "//src/jsonl:jsonl",
         "//src/libc:libc",
         "//src/log:log",
         "//src/lz4:lz4",
@@ -356,6 +368,7 @@ mojo_library(
         "tests/test_sort_plan_concurrent.mojo",
         "tests/test_source_csv.mojo",
         "tests/test_source_iceberg.mojo",
+        "tests/test_source_jsonl.mojo",
         "tests/test_sources.mojo",
         "tests/test_string_group_memory.mojo",
         "tests/test_string_keys.mojo",

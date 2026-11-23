@@ -1,7 +1,7 @@
 # lowering
 
 Lowering: a bound `LogicalPlan`, a `HostProfile` and the resolved inputs go in;
-the physical plan (`physical_plan`, IR version 19) and the `ParamTable`
+the physical plan (`physical_plan`, IR version 20) and the `ParamTable`
 its segments index come out. It is pure. `lower` opens no file, reads no clock
 and no environment variable and touches no global, so equal arguments give a
 `LoweredPlan` that renders byte-equal.
@@ -24,8 +24,12 @@ and no environment variable and touches no global, so equal arguments give a
   `komira.iceberg.table`, whose spec is the one the inputs carry for that scan
   (the data files that survive pruning, the delete files that apply, and the
   bound columns with their field ids): lowering reads no table metadata and
-  does not depend on the package that does; the pushed filter and projection
-  of the last three become operators, and so do those of
+  does not depend on the package that does; `SOURCE_JSONL` for a scan of one
+  newline-delimited JSON file, whose spec names the file and the schema it is
+  read at: the scan's projection, in its order, at the types the plan was
+  bound at, and its pushed filter, when it has one, an operator over every
+  key; the pushed filter and projection of the batch, CSV and Iceberg arms
+  become operators, and so do those of
   a Parquet scan with Hive partition columns, over the files' columns followed
   by the partition columns). A step, a user function run once, opens one too
   (`SOURCE_UDF_STEP`, see User functions). A filter, a projection, a limit and
@@ -44,9 +48,10 @@ and no environment variable and touches no global, so equal arguments give a
   probe child's pipeline, with an `E3` edge to the build segment. The root is a `SINK_COLLECT`
   segment unless the top node is a breaker, which is then the result.
   `cut_walk` is the dispatch on the node's tag and the resolution of shared
-  subplans around it (below); each arm is its own module (`cut_scan`,
-  `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_distinct`,
-  `cut_sort`, `cut_union`, `cut_join`, `cut_shared`), and `cut_state` holds
+  subplans around it (below); each arm is its own module (`cut_scan` and
+  its JSON arm `cut_scan_jsonl`, `cut_filter`, `cut_project`, `cut_limit`,
+  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union`, `cut_join`,
+  `cut_shared`), and `cut_state` holds
   what they share: the open pipeline, the cutter's segments and ParamTable,
   the shared subplans cut so far, and the close and reopen of a breaker. A new
   node kind is a new arm module and one branch in `cut_walk`.
@@ -138,7 +143,8 @@ shape:
   negative count; a limit above a sort (see Order); a partial or final
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
-  than Parquet, in memory, CSV or an Iceberg table; a CSV scan with `header=false` (the reader
+  than Parquet, in memory, CSV, JSON or an Iceberg table; a JSON scan whose
+  projection names a column its schema does not hold; a CSV scan with `header=false` (the reader
   would name its columns `col_0`, `col_1`, ..., where DuckDB names them
   `column0`, `column1`, ...); a union with no branch, or with a branch whose
   schema is not the union's (column count, and per column the name, Arrow

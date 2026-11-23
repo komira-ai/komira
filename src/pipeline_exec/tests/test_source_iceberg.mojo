@@ -282,7 +282,7 @@ def test_an_unserved_source_kind_is_refused_listing_the_served_ones() raises:
     var dispatch = InlineDispatch()
     var unknown = SegmentDescPod(
         0,
-        UInt8(7),
+        UInt8(200),
         SourceSpecPod(),
         Slab[MorselOp](),
         SINK_COLLECT,
@@ -295,9 +295,9 @@ def test_an_unserved_source_kind_is_refused_listing_the_served_ones() raises:
     )
     with assert_raises(
         contains=(
-            "pipeline_exec: source kind 7 of segment 0 is not served"
+            "pipeline_exec: source kind 200 of segment 0 is not served"
             " (SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CSV,"
-            " SOURCE_ICEBERG and SOURCE_CONCAT are)"
+            " SOURCE_ICEBERG, SOURCE_CONCAT and SOURCE_JSONL are)"
         )
     ):
         _ = run_plan(

@@ -90,6 +90,13 @@ Import each module by name; the package root exports nothing.
   rows the position and equality deletes that apply to the file remove; it
   serves the result as a `BatchSource`, and the files are read before the first
   morsel. The scan's filter and projection are operators of the segment.
+- `source_jsonl`: `build_jsonl_source` reads the newline-delimited JSON file a
+  SOURCE_JSONL spec names, at the spec's schema (the keys it names, in its
+  order, at its types; a missing key is NULL, a key it does not name is
+  skipped), through `jsonl`: a plain file in chunks of whole lines, one batch
+  each, a `.jsonl.gz`/`.zst`/`.lz4` (and `.ndjson`, `.json`) file decompressed
+  whole. The batches are served as a `BatchSource`; a file of no row is one
+  empty batch at the schema. A read that fails names the file.
 - `op_filter`, `op_project`, `op_limit`: the operators. A filter evaluates its
   predicate and records the rows it keeps as the batch's selection mask instead
   of gathering them; all rows kept leaves no mask, none kept is FILTERED_EMPTY,
@@ -309,7 +316,7 @@ Import each module by name; the package root exports nothing.
   they decided are in `docs/design/lowering_and_pipeline.md` (section 4.3).
 - `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
   serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CSV,
-  SOURCE_ICEBERG, SOURCE_CONCAT (a UNION ALL: it takes the output of every producer the spec
+  SOURCE_ICEBERG, SOURCE_JSONL, SOURCE_CONCAT (a UNION ALL: it takes the output of every producer the spec
   names, after checking each is a dependency, and concatenates them in the
   spec's order into one batch it serves as a `SinkOutputSource`, with each
   column nullable when any producer's is; a concatenation of no segment is

@@ -25,6 +25,8 @@
 # each becomes operators, the filter first, over the source's full schema. The
 # filter an Iceberg scan pushed is kept as an operator because the planner uses
 # it only to skip files.
+# A scan of one newline-delimited JSON file opens a SOURCE_JSONL pipeline
+# (`cut_scan_jsonl`).
 #
 # Refused: an unbounded scan, a Hive-partitioned scan that lists its files
 # lazily (a directory scan or a partition predicate) or a Parquet scan on a
@@ -40,6 +42,7 @@
 
 from arrow.schema import Field
 from containers.slab import Slab
+from lowering.cut_scan_jsonl import _open_jsonl_scan
 from lowering.cut_state import _Cutter, _Pipe, _uncuttable
 from lowering.lowered_plan import (
     LoweringInputs,
@@ -73,6 +76,7 @@ from scan_source.source_variant import (
     SOURCE_VARIANT_IN_MEMORY,
     SOURCE_VARIANT_CSV,
     SOURCE_VARIANT_BINDING,
+    SOURCE_VARIANT_JSON,
 )
 
 comptime ICEBERG_TABLE_KIND_NAME: StaticString = "komira.iceberg.table"
@@ -203,6 +207,8 @@ def _open_scan(
         )
         _scan_ops(pipe, node, pushed^, proj^)
         return pipe^
+    if sd.source.tag == SOURCE_VARIANT_JSON:
+        return _open_jsonl_scan(node, idx, proj^, pushed^)
     raise _uncuttable(node, "a " + sd.source.kind_name() + " source")
 
 

@@ -172,6 +172,7 @@ TARGETS = [
     "komira//src/supervisor_proto:table",
     "komira//src/tests/conformance/komira_contacts_store_conformance:komira_contacts_store_conformance",
     "komira//src/tests/conformance/komira_iceberg_scan_conformance:komira_iceberg_scan_conformance",
+    "komira//src/tests/conformance/komira_read_json_conformance:komira_read_json_conformance",
     "komira//src/tests/conformance/komira_xml_conformance:komira_xml_conformance",
     "komira//src/tests/helpers/komira_test_s3_adapter:komira_test_s3_adapter_conda",
     "komira//src/textproto:ci",
