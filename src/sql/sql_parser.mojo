@@ -2147,6 +2147,11 @@ struct _Parser(Movable):
         (`position(x IN (1, 2))` would still be the grammar form, as in DuckDB,
         whose parser commits on the keyword) is inside parentheses and so is
         not what makes the decision; only depth 1 counts."""
+        return self._top_level_keyword(lparen, "in")
+
+    def _top_level_keyword(self, lparen: Int, kw: String) -> Bool:
+        """The parenthesised list opening at `lparen` holds the keyword `kw`
+        at depth 1, before its first top-level `,` or its closing `)`."""
         var depth = 0
         var i = lparen
         while i < len(self.tokens):
@@ -2159,7 +2164,7 @@ struct _Parser(Movable):
                     return False
             elif depth == 1 and t.kind == TK_COMMA:
                 return False
-            elif depth == 1 and t.kind == TK_IDENT and t.text == "in":
+            elif depth == 1 and t.kind == TK_IDENT and t.text == kw:
                 return True
             elif t.kind == TK_EOF:
                 return False
@@ -2667,6 +2672,26 @@ struct _Parser(Movable):
                 pargs.append(hay^)
                 pargs.append(needle^)
                 return SqlExpr.call(String(_POSITION_IN_DESUGAR_NAME), pargs^)
+            # `SUBSTRING(s FROM start [FOR length])`, the standard form DuckDB
+            # reads as `substring(s, start[, length])`. A `FROM` at the top
+            # level of the parentheses decides it; `substring(a, b)` is a call.
+            if (
+                name == "substring"
+                and self.pos + 1 < len(self.tokens)
+                and self.tokens[self.pos + 1].kind == TK_LPAREN
+                and self._top_level_keyword(self.pos + 1, "from")
+            ):
+                self._advance()  # 'substring'
+                self._advance()  # '('
+                var sargs = Slab[SqlExpr]()
+                sargs.append(self._parse_op())
+                self._expect_kw("from")
+                sargs.append(self._parse_op())
+                if self._is_kw("for"):
+                    self._advance()  # 'for'
+                    sargs.append(self._parse_op())
+                self._expect(TK_RPAREN, "')' to close SUBSTRING(... FROM ...)")
+                return SqlExpr.call(String("substring"), sargs^)
             # ★★ `CAST(<expr> AS <type>)` / `TRY_CAST(<expr> AS <type>)`.
             #
             # A SEPARATE GRAMMAR ARM FOR THE SAME REASON `EXTRACT` HAS ONE:

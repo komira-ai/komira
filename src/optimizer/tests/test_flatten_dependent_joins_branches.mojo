@@ -23,6 +23,7 @@ from plan_expr.expr import (
     BIN_LT,
     BIN_GT,
     BIN_AND,
+    BIN_ADD,
     UN_NOT,
     UN_IS_NOT_NULL,
     STR_CONTAINS,
@@ -41,6 +42,7 @@ from plan_ir.logical_plan import (
     AggExprArray,
     PLAN_SCAN,
     PLAN_FILTER,
+    PLAN_PROJECT,
     PLAN_AGGREGATE,
     PLAN_JOIN,
     SOURCE_PARQUET,
@@ -214,18 +216,41 @@ def test_walk_lowers_under_every_node_kind() raises:
         assert_equal(lowered._join.value()[].join_type, JOIN_SEMI)
 
 
-def test_project_with_a_subquery_expression_raises() raises:
-    """A Project whose expression holds a subquery raises the "not yet
-    supported" error; the invariant check sees the subquery in a Project
+def test_project_with_a_subquery_expression() raises:
+    """A Project whose expression holds a scalar subquery becomes
+    `Project([__corr_scalar_0 AS x, c_custkey], LeftJoin(customer,
+    Aggregate))`: the subquery is replaced by its value over the join and a
+    plain expression is kept. One holding an EXISTS raises the "not yet
+    supported" error. The invariant check sees a subquery in a Project
     expression.
 
-    Catches: the Project lowering silently leaving the subquery in place;
-    the check's Project arm not looking at the expressions."""
+    Catches: the Project lowering silently leaving the subquery in place, or
+    dropping the other expressions; an EXISTS in a Project lowered as a
+    value; the check's Project arm not looking at the expressions."""
     var exprs = ExprArray()
     exprs.append(Expr.alias(_scalar_corr(), "x"))
+    exprs.append(Expr.col_ref("c_custkey"))
     var plan = LogicalPlan.project(exprs^, _customer())
     assert_true(_plan_contains_correlated_subquery(plan))
-    assert_true(_raises_with(plan^, "correlated subquery in Project not yet supported"))
+    var out = flatten_dependent_joins(plan^)
+    assert_false(_plan_contains_correlated_subquery(out))
+    assert_equal(out.tag, PLAN_PROJECT)
+    ref pj = out._project.value()[]
+    assert_equal(len(pj.exprs), 2)
+    assert_equal(pj.exprs[0].alias_name(), String("x"))
+    assert_equal(pj.exprs[0].alias_child_ref().col_ref_name(), String("__corr_scalar_0"))
+    assert_equal(pj.exprs[1].col_ref_name(), String("c_custkey"))
+    assert_equal(pj.child[]._join.value()[].join_type, JOIN_LEFT)
+
+    var plain = ExprArray()
+    plain.append(Expr.col_ref("c_custkey"))
+    var untouched = flatten_dependent_joins(LogicalPlan.project(plain^, _customer()))
+    assert_equal(untouched._project.value()[].child[].tag, PLAN_SCAN)
+
+    var pexprs = ExprArray()
+    pexprs.append(Expr.alias(_corr(CORR_KIND_EXISTS), "e"))
+    var pplan = LogicalPlan.project(pexprs^, _customer())
+    assert_true(_raises_with(pplan^, "correlated subquery in Project not yet supported"))
 
 
 # =============================================================================
@@ -264,18 +289,49 @@ def test_and_chain_stacks_semi_and_anti_joins_over_a_filter() raises:
     assert_equal(out2._join.value()[].left[]._join.value()[].left[].tag, PLAN_SCAN)
 
 
-def test_and_chain_with_a_nested_subquery_raises() raises:
-    """`c_nationkey > (scalar subquery) AND EXISTS(..)` raises: a subquery
-    inside an AND-chain conjunct is refused.
+def test_and_chain_with_a_nested_subquery() raises:
+    """`c_nationkey > 0 AND c_nationkey > (scalar subquery) AND EXISTS(..)`
+    becomes `Semi(Filter(c_nationkey > __corr_scalar_0, LeftJoin(Filter(
+    c_nationkey > 0, customer), Aggregate)), ..)`: the plain conjunct sits
+    on the child, the scalar's LEFT join above it with the rewritten
+    conjunct over the join, and the SEMI join on top. A bare scalar
+    conjunct is lowered the same way. An EXISTS under NOT inside an AND-chain
+    conjunct raises.
 
-    Catches: the nested conjunct treated as plain (the subquery would then
-    sit in the residual Filter, unlowered)."""
+    Catches: the scalar conjunct treated as plain (the subquery would then
+    sit in the residual Filter, unlowered); its comparison dropped; a bare
+    scalar conjunct lowered as a join with no Filter (every row kept); an
+    EXISTS under NOT lowered as a SEMI join."""
     var pred = Expr.binary(
         BIN_AND,
-        Expr.binary(BIN_GT, Expr.col_ref("c_nationkey"), _scalar_corr()),
+        Expr.binary(
+            BIN_AND,
+            _gt0("c_nationkey"),
+            Expr.binary(BIN_GT, Expr.col_ref("c_nationkey"), _scalar_corr()),
+        ),
         _corr(CORR_KIND_EXISTS),
     )
-    assert_true(_raises_with(LogicalPlan.filter(pred^, _customer()), "nested inside an AND-chain"))
+    var out = flatten_dependent_joins(LogicalPlan.filter(pred^, _customer()))
+    assert_equal(out._join.value()[].join_type, JOIN_SEMI)
+    ref f = out._join.value()[].left[]
+    assert_equal(f.tag, PLAN_FILTER)
+    ref p = f._filter.value()[].predicate
+    assert_equal(p.binary_op(), BIN_GT)
+    assert_equal(p.binary_right_ref().col_ref_name(), String("__corr_scalar_0"))
+    ref lj = f._filter.value()[].child[]
+    assert_equal(lj._join.value()[].join_type, JOIN_LEFT)
+    assert_equal(lj._join.value()[].left[].tag, PLAN_FILTER)
+
+    var bare = Expr.binary(BIN_AND, _gt0("c_nationkey"), _scalar_corr())
+    var out2 = flatten_dependent_joins(LogicalPlan.filter(bare^, _customer()))
+    assert_equal(out2.tag, PLAN_FILTER)
+    assert_equal(out2._filter.value()[].predicate.col_ref_name(), String("__corr_scalar_0"))
+    assert_equal(out2._filter.value()[].child[]._join.value()[].join_type, JOIN_LEFT)
+
+    var nested = Expr.binary(
+        BIN_AND, _gt0("c_nationkey"), Expr.unary(UN_NOT, _corr(CORR_KIND_EXISTS))
+    )
+    assert_true(_raises_with(LogicalPlan.filter(nested^, _customer()), "nested inside an AND-chain"))
 
 
 def test_scalar_subquery_on_the_left_of_a_comparison() raises:
@@ -303,8 +359,8 @@ def test_scalar_subquery_on_the_left_of_a_comparison() raises:
 def test_unsupported_filter_shapes_raise() raises:
     """Refused shapes, each with its own message: a comparison with an
     EXISTS on the right or on the left; `NOT EXISTS` written as a NOT over
-    EXISTS; a comparison of two scalar subqueries; a subquery nested below
-    the comparison's direct operand.
+    EXISTS; a scalar subquery under a node kind the scalar lowering does not
+    descend (an IN list).
 
     Catches: a non-SCALAR kind lowered as a scalar (its result column does
     not exist); an unsupported shape returning with the subquery still in
@@ -315,13 +371,38 @@ def test_unsupported_filter_shapes_raise() raises:
     assert_true(_raises_with(LogicalPlan.filter(lhs^, _customer()), "non-SCALAR correlated LHS"))
     var un = Expr.unary(UN_NOT, _corr(CORR_KIND_EXISTS))
     assert_true(_raises_with(LogicalPlan.filter(un^, _customer()), "unsupported parent-shape"))
+    var vals = List[ScalarValue]()
+    vals.append(ScalarValue.from_int(1))
+    var in_list = Expr.in_list_node(_scalar_corr(), vals^)
+    assert_true(_raises_with(LogicalPlan.filter(in_list^, _customer()), "unsupported parent-shape"))
+
+
+def test_scalar_subqueries_anywhere_in_a_filter_predicate() raises:
+    """A comparison of two scalar subqueries becomes `Filter(__corr_scalar_0
+    < __corr_scalar_1, LeftJoin(LeftJoin(customer, ..), ..))`; one nested
+    below the comparison's operand (`c_nationkey > (scalar) + 1`) is replaced
+    where it sits.
+
+    Catches: the second subquery reusing the first one's name (the Filter
+    would compare a column with itself); a nested subquery left in place."""
     var both = Expr.binary(BIN_LT, _scalar_corr(), _scalar_corr())
-    assert_true(_raises_with(LogicalPlan.filter(both^, _customer()), "unsupported parent-shape"))
+    var out = flatten_dependent_joins(LogicalPlan.filter(both^, _customer()))
+    assert_false(_plan_contains_correlated_subquery(out))
+    ref p = out._filter.value()[].predicate
+    assert_equal(p.binary_left_ref().col_ref_name(), String("__corr_scalar_0"))
+    assert_equal(p.binary_right_ref().col_ref_name(), String("__corr_scalar_1"))
+    ref outer = out._filter.value()[].child[]
+    assert_equal(outer._join.value()[].join_type, JOIN_LEFT)
+    assert_equal(outer._join.value()[].left[]._join.value()[].join_type, JOIN_LEFT)
+
     var deep = Expr.binary(
         BIN_GT, Expr.col_ref("c_nationkey"),
-        Expr.binary(BIN_GT, _scalar_corr(), Expr.literal(ScalarValue.from_int(1))),
+        Expr.binary(BIN_ADD, _scalar_corr(), Expr.literal(ScalarValue.from_int(1))),
     )
-    assert_true(_raises_with(LogicalPlan.filter(deep^, _customer()), "unsupported parent-shape"))
+    var out2 = flatten_dependent_joins(LogicalPlan.filter(deep^, _customer()))
+    assert_false(_plan_contains_correlated_subquery(out2))
+    ref p2 = out2._filter.value()[].predicate
+    assert_equal(p2.binary_right_ref().binary_left_ref().col_ref_name(), String("__corr_scalar_0"))
 
 
 # =============================================================================
@@ -353,13 +434,17 @@ def test_in_subquery_appends_its_key_after_the_correlation_keys() raises:
 
 
 def test_bare_scalar_kind_and_unknown_kind() raises:
-    """A SCALAR subquery used directly as the Filter predicate lowers to a
-    LEFT join; a subquery of an unknown kind (77) raises naming the kind.
+    """A SCALAR subquery used directly as the Filter predicate becomes
+    `Filter(__corr_scalar_0, LeftJoin(customer, ..))`: the Filter tests its
+    value. A subquery of an unknown kind (77) raises naming the kind.
 
-    Catches: the SCALAR arm of the kind switch removed (it then raises as
-    unknown); an unknown kind lowered to some join instead of refused."""
+    Catches: the bare scalar lowered to a join with no Filter (every outer
+    row kept whatever the value); an unknown kind lowered to some join
+    instead of refused."""
     var out = flatten_dependent_joins(LogicalPlan.filter(_scalar_corr(), _customer()))
-    assert_equal(out._join.value()[].join_type, JOIN_LEFT)
+    assert_equal(out.tag, PLAN_FILTER)
+    assert_equal(out._filter.value()[].predicate.col_ref_name(), String("__corr_scalar_0"))
+    assert_equal(out._filter.value()[].child[]._join.value()[].join_type, JOIN_LEFT)
     var odd = Expr.correlated_subquery(_orders(), _l("c_custkey"), UInt8(77))
     assert_true(_raises_with(LogicalPlan.filter(odd^, _customer()), "unknown correlated-subquery kind: 77"))
 
@@ -829,11 +914,12 @@ def test_try_lift_name_equi_shapes() raises:
 
 def main() raises:
     test_walk_lowers_under_every_node_kind()
-    test_project_with_a_subquery_expression_raises()
+    test_project_with_a_subquery_expression()
     test_and_chain_stacks_semi_and_anti_joins_over_a_filter()
-    test_and_chain_with_a_nested_subquery_raises()
+    test_and_chain_with_a_nested_subquery()
     test_scalar_subquery_on_the_left_of_a_comparison()
     test_unsupported_filter_shapes_raise()
+    test_scalar_subqueries_anywhere_in_a_filter_predicate()
     test_in_subquery_appends_its_key_after_the_correlation_keys()
     test_bare_scalar_kind_and_unknown_kind()
     test_lowering_with_a_residual_predicate_wraps_the_join()

@@ -239,6 +239,19 @@ SELECT list (`bind`), a left side that is not a column (`parse`), and keys
 the hash join does not compare, DATE and DECIMAL among them
 (`LOWERING_JOIN_UNSERVED` at `lower`).
 
+A correlated scalar subquery (its WHERE names an outer column, TPC-H Q2, Q17
+and Q20; Q2 as a whole is refused at `execute` for its ORDER BY on a DECIMAL
+key, which the sort sink does not order) is served in a WHERE, anywhere in the predicate, and in the SELECT
+list of an ungrouped query: the optimizer makes it a LEFT join of the outer
+rows with its body grouped by the correlation keys, so an outer row with no
+matching row (or a NULL key) reads the aggregates of no row, a count 0 and
+every other aggregate NULL, as in DuckDB. `[NOT] EXISTS` as a WHERE conjunct
+is a SEMI or ANTI join on its equality correlations (Q4, Q22). Refused by
+name: a correlated scalar the binder does not build (`bind`, see
+`src/sql/README.md`), and an EXISTS correlated by anything but equalities,
+which needs a join residual (Q21's `l2.l_suppkey <> l1.l_suppkey`,
+`LOWERING_JOIN_UNSERVED ... (a residual predicate)` at `lower`).
+
 **The answer as an Arrow C stream.** A C entry point that fills a caller's
 `struct ArrowArrayStream` calls `arrow_result` first, so every way the export
 can fail is a raise before the caller's struct is touched, never an EIO from
@@ -374,6 +387,18 @@ The tests run when the package is built.
   body are refused at `optimize`, DECIMAL and DATE IN keys at `lower`, an
   expression left of IN at `parse` and IN in a HAVING at `bind`; every case
   is run.
+- `test_run_sql_correlated`: over the eight TPC-H-typed tables the pinned
+  DuckDB writes (`:correlated_oracle`: orders with no lineitem, customers with
+  no order, NULL keys, ties), each query of `tests/correlated/cases.sql`
+  answers what DuckDB answers, on one and three workers: the corpus texts of
+  TPC-H Q4, Q17, Q20 and Q22, and Q2's body without its ORDER BY and LIMIT;
+  correlated scalars over no row (count 0, NULL), with NULL outer and inner
+  keys, two keys, two in one WHERE, under OR and BETWEEN, in a SELECT list
+  and a derived table; a DECIMAL compared with a DOUBLE; EXISTS and NOT
+  EXISTS with NULL keys. Q21 and an EXISTS correlated by `>` are refused at
+  `lower`, Q2 (its ORDER BY is a DECIMAL key, which the sort sink refuses)
+  at `execute`, an EXISTS over a join and the unserved correlated scalar
+  shapes at `bind`; the TPC-H lines are the corpus texts; every case is run.
 - `test_run_sql_distinct`: SELECT DISTINCT over an INT64 and a STRING column
   gives each value once and one NULL row (NULL and the empty string are two
   rows), below a filter and with ORDER BY; COUNT(DISTINCT x) ignores NULL, is

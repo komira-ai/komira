@@ -42,6 +42,7 @@ from plan_ir.logical_plan import (
     ExprArray,
     AggExprArray,
     SOURCE_PARQUET,
+    CORR_KIND_EXISTS,
     CORR_KIND_SCALAR,
     JOIN_INNER,
     JOIN_SEMI,
@@ -178,13 +179,13 @@ def _two_scalar_subquery_filters() -> LogicalPlan:
 
 
 def _correlated_subquery_in_project() -> LogicalPlan:
-    """Project [c_custkey, (correlated scalar subquery on c_custkey) AS s]:
-    a shape `flatten_dependent_joins` refuses."""
+    """Project [c_custkey, (correlated EXISTS on c_custkey) AS s]: a shape
+    `flatten_dependent_joins` refuses (an EXISTS has no value there)."""
     var cn: List[String] = ["c_custkey", "c_acctbal"]
     var pe = ExprArray()
     pe.append(Expr.col_ref("c_custkey"))
     pe.append(Expr.alias(
-        Expr.correlated_subquery(_global_agg(), _l1("c_custkey"), CORR_KIND_SCALAR), "s"
+        Expr.correlated_subquery(_global_agg(), _l1("c_custkey"), CORR_KIND_EXISTS), "s"
     ))
     return LogicalPlan.project(pe^, _scan("customer.parquet", cn))
 

@@ -24,7 +24,8 @@ here executes a plan.
 | `view_resolution_pass` | inlining registered views in place of view-reference leaves (depth limit, cycle detection) |
 | `partition_prune_scans` | Hive-partition pruning of a partitioned scan's path list from Filter conjuncts on partition columns |
 | `attach_hive_predicate` | attaching the partition predicate of a Filter (or an empty one) to a lazy dir-scanning Hive scan, leaving the data residual on the Filter |
-| `flatten_dependent_joins` | lowering correlated subquery expressions into joins |
+| `flatten_dependent_joins` | lowering correlated subquery expressions into joins: EXISTS / NOT EXISTS / IN as a bare filter conjunct into SEMI / ANTI joins, a scalar subquery anywhere in a filter predicate or a projection into a LEFT join on its correlation keys whose value replaces it (the SQL binder's grouped body, whose value is also its value over no row) |
+| `flatten_scalar` | the scalar subqueries inside an expression, for `flatten_dependent_joins`: replacing each with its value over the LEFT join it adds, and finding an EXISTS / NOT EXISTS / IN that sits inside a larger expression, which is refused |
 | `flatten_hoist` | the outer-reference hoist of `flatten_dependent_joins`: splitting a correlated subquery's inner Filter into join keys, join residual and inner-only conjuncts, and refusing a conjunct it cannot place |
 | `join_predicate_decompose` | splitting a raw join predicate into equi keys and a residual |
 | `scalar_subquery_decorrelate` | lowering an uncorrelated scalar subquery with a provably single-row inner plan into a broadcast cross join, in a filter or a projection, under a CASE too; a body that may be empty (a LIMIT) is joined through a global `max`, so the cross join sees one row (NULL when the body has none), and only for a column type that `max` carries; a scalar inside a body is decorrelated in that body |
