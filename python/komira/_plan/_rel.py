@@ -21,11 +21,17 @@ derived by the engine's own factory for the node (src/plan_ir/logical_plan.mojo)
                is nullable. The engine picks the algorithm (`JOIN_ALGO_AUTO`)
     Union      union_all: the first input's fields, which every input must
                have, the same names, types and nullability
+    MapBatches map_batches: the `UdfRef` of its function (komira/_plan/_udf.py)
+               by index; its fields are the children of the `UdfRef`'s return
+               type
 
 Refused by name (`UnsupportedOperation`), because the engine has no node that
 means them: a `Distinct` over a subset of the columns, a `Union` whose inputs
 differ in a column's type or nullability, and a `Write`, whose target the
 plan door does not take.
+
+The `UdfRef`s of the plan's user functions are collected in a `UdfTable` while
+the nodes are encoded, leaf to root, and become `WirePlanEnvelope.udfs`.
 
 Nothing is optimized or reordered: the engine's optimizer gets the plan as the
 node tree says it.
@@ -44,6 +50,7 @@ from komira._ops._rel import (
     Filter,
     Join,
     Limit,
+    MapBatches,
     Project,
     Scan,
     Sort,
@@ -58,6 +65,7 @@ from ._agg import encode_aggregate
 from ._expr import encode_expr, encode_residual
 from ._field import expr_field
 from ._source import encode_scan
+from ._udf import UdfTable, udf_ref
 from ._wire import member, pb, vocab
 from ._window import window_stack
 
@@ -82,13 +90,13 @@ def _item_expr(name: str, expr: Node) -> Node:
     return Alias(expr, name)
 
 
-def _project(node: Project, child: pb.WirePlan) -> pb.WirePlan:
+def _project(node: Project, child: pb.WirePlan, udfs: UdfTable) -> pb.WirePlan:
     below, items = window_stack(node.items, child)
     schema = list(below.output_schema.fields)
     out = pb.WirePlan()
     for name, expr in items:
         item = _item_expr(name, expr)
-        out.project.exprs.append(encode_expr(item, schema))
+        out.project.exprs.append(encode_expr(item, schema, udfs))
         out.output_schema.fields.append(expr_field(item, schema))
     out.project.child.CopyFrom(below)
     return out
@@ -100,7 +108,7 @@ def _sort_keys(msg, keys: tuple[SortKey, ...]) -> None:
     msg.nulls_first.extend(key.nulls_first for key in keys)
 
 
-def _join(node: Join, left: pb.WirePlan, right: pb.WirePlan) -> pb.WirePlan:
+def _join(node: Join, left: pb.WirePlan, right: pb.WirePlan, udfs: UdfTable) -> pb.WirePlan:
     out = pb.WirePlan()
     join = out.join
     join.left.CopyFrom(left)
@@ -112,7 +120,9 @@ def _join(node: Join, left: pb.WirePlan, right: pb.WirePlan) -> pb.WirePlan:
     if node.residual is not None:
         join.has_residual = True
         join.residual.CopyFrom(
-            encode_residual(node.residual, left.output_schema.fields, right.output_schema.fields)
+            encode_residual(
+                node.residual, left.output_schema.fields, right.output_schema.fields, udfs
+            )
         )
     left_names = set()
     for f in left.output_schema.fields:
@@ -150,9 +160,21 @@ def _union(inputs: list[pb.WirePlan]) -> pb.WirePlan:
     return out
 
 
-def encode_node(plan, sources: Mapping[str, pb.WireScanSource]) -> pb.WirePlan:
+def _map_batches(node: MapBatches, child: pb.WirePlan, udfs: UdfTable) -> pb.WirePlan:
+    schema = child.output_schema.fields
+    ref = udf_ref(node.udf, [expr_field(ColRef(name), schema) for name in node.udf.read_set])
+    out = pb.WirePlan()
+    out.map_batches.child.CopyFrom(child)
+    out.map_batches.udf_index = udfs.add(ref)
+    out.output_schema.fields.extend(ref.return_type.children)
+    return out
+
+
+def encode_node(
+    plan, sources: Mapping[str, pb.WireScanSource], udfs: UdfTable
+) -> pb.WirePlan:
     """The plan `plan` (a node of komira._ops) as a `WirePlan`, its scans
-    reading `sources` (by path)."""
+    reading `sources` (by path) and its user functions added to `udfs`."""
     if isinstance(plan, Scan):
         return encode_scan(plan, sources)
     if isinstance(plan, Write):
@@ -160,23 +182,27 @@ def encode_node(plan, sources: Mapping[str, pb.WireScanSource]) -> pb.WirePlan:
             "a Write cannot be encoded: the plan door returns rows and takes no write target"
         )
     if isinstance(plan, Join):
-        return _join(plan, encode_node(plan.left, sources), encode_node(plan.right, sources))
+        return _join(
+            plan, encode_node(plan.left, sources, udfs), encode_node(plan.right, sources, udfs), udfs
+        )
     if isinstance(plan, Union):
-        return _union([encode_node(c, sources) for c in plan.children])
+        return _union([encode_node(c, sources, udfs) for c in plan.children])
     if isinstance(plan, Distinct) and plan.subset is not None:
         raise UnsupportedOperation(
             "a Distinct over the columns " + ", ".join(plan.subset) + " cannot be encoded: "
             "the engine's distinct compares every column; select those columns first"
         )
-    child = encode_node(plan.child, sources)
+    child = encode_node(plan.child, sources, udfs)
+    if isinstance(plan, MapBatches):
+        return _map_batches(plan, child, udfs)
     if isinstance(plan, Project):
-        return _project(plan, child)
+        return _project(plan, child, udfs)
     if isinstance(plan, Aggregate):
-        return encode_aggregate(plan, child)
+        return encode_aggregate(plan, child, udfs)
     out = pb.WirePlan()
     _same_fields(out, child)
     if isinstance(plan, Filter):
-        out.filter.predicate.CopyFrom(encode_expr(plan.predicate, child.output_schema.fields))
+        out.filter.predicate.CopyFrom(encode_expr(plan.predicate, child.output_schema.fields, udfs))
         out.filter.child.CopyFrom(child)
     elif isinstance(plan, Sort):
         _sort_keys(out.sort, plan.keys)
@@ -204,5 +230,7 @@ def encode_plan(plan, sources: Mapping[str, pb.WireScanSource]) -> pb.WirePlanEn
     if not isinstance(sources, Mapping):
         raise TypeError(f"sources must be a mapping of paths to sources, not {type(sources).__name__}")
     out = pb.WirePlanEnvelope(format_version=FORMAT_VERSION)
-    out.plan.CopyFrom(encode_node(plan, sources))
+    udfs = UdfTable()
+    out.plan.CopyFrom(encode_node(plan, sources, udfs))
+    out.udfs.extend(udfs.refs)
     return out

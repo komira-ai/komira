@@ -38,15 +38,18 @@ from komira._ops._expr import (
     StringOp,
     StructField,
     Substring,
+    UdfCall,
     Unary,
     When,
 )
 from komira._ops._walk import column_refs
 
 from ._scalar import literal_field, scalar
+from ._udf import udf_ref
 from ._wire import arrow_id, dtype_code, field, pb, physical_dtype
 
 __all__ = [
+    "call_ref",
     "cast_parts",
     "check_columns",
     "columns_of",
@@ -316,6 +319,12 @@ def _struct_field(node: StructField, columns: dict[str, pb.WireField]) -> pb.Wir
     )
 
 
+def call_ref(node: UdfCall, columns: dict[str, pb.WireField]) -> pb.UdfRef:
+    """The `UdfRef` a call names: its arguments' fields over `columns`, refused
+    when one is not a type the komira/python runtime carries."""
+    return udf_ref(node.udf, [field_of(arg, columns) for arg in node.args])
+
+
 def field_of(node: Node, columns: dict[str, pb.WireField]) -> pb.WireField:
     """The field of `node` over `columns`, whose names `check_columns` has
     found in it."""
@@ -355,6 +364,8 @@ def field_of(node: Node, columns: dict[str, pb.WireField]) -> pb.WireField:
             f.name = "date_trunc"
             return f
         return field("extract", _INT64, True)
+    if isinstance(node, UdfCall):
+        return call_ref(node, columns).return_type
     return _struct_field(node, columns)
 
 

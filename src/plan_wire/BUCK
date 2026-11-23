@@ -36,6 +36,7 @@ mojo_library(
         "tests/test_plan_wire_scan_variant_tag.mojo",
         "tests/test_plan_wire_udf_tier.mojo",
         "tests/test_plan_wire_udf_args.mojo",
+        "tests/test_plan_wire_udf_goldens.mojo",
         "tests/test_plan_wire_udf_plans.mojo",
         "tests/test_plan_wire_udf_position_sweeps.mojo",
         "tests/test_plan_wire_udf_ref.mojo",
@@ -66,6 +67,7 @@ mojo_library(
         "tests/test_plan_wire_scan_variant_tag.mojo": [
             "tests/fixtures/golden/scan.canonical.hex",
         ],
+        "tests/test_plan_wire_udf_goldens.mojo": glob(["tests/fixtures/golden/udf_*.hex"]),
     },
     visibility = ["PUBLIC"],
 )
@@ -108,7 +110,9 @@ _PLAN_PROTO = ["//src/plan_proto:plan_proto_gen"]
 # tests/test_plan_wire_expr_goldens_fns.mojo; the `rel_*` goldens (plans of
 # every relational node the Python plan encoder writes, which python/tests holds
 # that encoder's bytes to) by tests/test_plan_wire_rel_goldens.mojo and
-# tests/test_plan_wire_rel_goldens_join.mojo; every other golden by
+# tests/test_plan_wire_rel_goldens_join.mojo; the `udf_*` goldens (plans that
+# call user functions, which python/tests holds the Python plan encoder's bytes
+# to) by tests/test_plan_wire_udf_goldens.mojo; every other golden by
 # tests/test_plan_wire_golden_bytes.mojo.
 _GOLDEN = [
     "aggregate",
@@ -139,6 +143,8 @@ _GOLDEN = [
     "sort",
     "topic_live",
     "topn",
+    "udf_frame",
+    "udf_project",
     "union",
     "window",
 ]

@@ -13,7 +13,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from ._columns import require_columns, require_unique, unknown_column
-from ._expr import EXPR_NODES, Alias, Node, is_predicate
+from ._expr import EXPR_NODES, Alias, Node, UdfSpec, is_predicate
 from ._vocab import (
     AGG_FUNCS,
     AGG_K_ARG,
@@ -43,6 +43,7 @@ __all__ = [
     "Frame",
     "Join",
     "Limit",
+    "MapBatches",
     "PLAN_NODES",
     "Plan",
     "Project",
@@ -658,7 +659,49 @@ class Write:
         return self._columns
 
 
-Plan = Scan | Filter | Project | Aggregate | Sort | Limit | TopN | Distinct | Join | Union | Write
+@dataclass(frozen=True, slots=True)
+class MapBatches:
+    """A `map_batches_frame` user function over the child's rows, called once
+    per batch. Its output columns are the columns of the function's declared
+    return type, and it reads the columns of the function's read set."""
+
+    child: Plan
+    udf: UdfSpec
+    _columns: tuple[str, ...] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        _need_plan(self.child, "child", "MapBatches")
+        if not isinstance(self.udf, UdfSpec):
+            raise TypeError(
+                f"MapBatches.udf must be a UdfSpec, not {type(self.udf).__name__}"
+            )
+        if self.udf.kind != "map_batches_frame":
+            raise ValueError(
+                f"MapBatches runs a map_batches_frame function, and {self.udf.name} "
+                f"is a {self.udf.kind} function"
+            )
+        require_columns(self.udf.read_set, self.child.columns)
+        _set_columns(self, tuple(name for name, _ in self.udf.return_type))
+
+    @property
+    def columns(self) -> tuple[str, ...]:
+        return self._columns
+
+
+Plan = (
+    Scan
+    | Filter
+    | Project
+    | Aggregate
+    | Sort
+    | Limit
+    | TopN
+    | Distinct
+    | Join
+    | Union
+    | Write
+    | MapBatches
+)
 
 PLAN_NODES = (
     Scan,
@@ -672,6 +715,7 @@ PLAN_NODES = (
     Join,
     Union,
     Write,
+    MapBatches,
 )
 
 

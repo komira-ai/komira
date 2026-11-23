@@ -148,7 +148,7 @@ def agg_field(name: str, agg: Agg, schema) -> pb.WireField:
     return _pick_field(name, arg)
 
 
-def _agg_expr(name: str, agg: Agg, schema) -> pb.WireAggExpr:
+def _agg_expr(name: str, agg: Agg, schema, udfs) -> pb.WireAggExpr:
     if agg.func == "largest_k" and agg.k != _LARGEST_K:
         raise UnsupportedOperation(
             f"the aggregate {name!r} keeps the largest {agg.k} values, and the engine's "
@@ -160,14 +160,15 @@ def _agg_expr(name: str, agg: Agg, schema) -> pb.WireAggExpr:
     out = pb.WireAggExpr(func=member("AGG_", agg.func))
     for slot, arg in enumerate(args):
         setattr(out, f"has_child{slot}", True)
-        getattr(out, f"child{slot}").CopyFrom(encode_expr(arg, schema))
+        getattr(out, f"child{slot}").CopyFrom(encode_expr(arg, schema, udfs))
     out.has_alias_name = True
     out.alias_name = name
     return out
 
 
-def encode_aggregate(node: Aggregate, child: pb.WirePlan) -> pb.WirePlan:
-    """`node` over its encoded child: group keys, then aggregates."""
+def encode_aggregate(node: Aggregate, child: pb.WirePlan, udfs) -> pb.WirePlan:
+    """`node` over its encoded child: group keys, then aggregates. The user
+    functions its aggregates call are added to `udfs`."""
     schema = list(child.output_schema.fields)
     out = pb.WirePlan()
     for key in node.keys:
@@ -175,7 +176,7 @@ def encode_aggregate(node: Aggregate, child: pb.WirePlan) -> pb.WirePlan:
         out.aggregate.group_by.append(encode_expr(ref, schema))
         out.output_schema.fields.append(expr_field(ref, schema))
     for name, agg in node.aggs:
-        out.aggregate.agg_exprs.append(_agg_expr(name, agg, schema))
+        out.aggregate.agg_exprs.append(_agg_expr(name, agg, schema, udfs))
         out.output_schema.fields.append(agg_field(name, agg, schema))
     out.aggregate.child.CopyFrom(child)
     return out

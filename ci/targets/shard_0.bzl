@@ -99,6 +99,8 @@ TARGETS = [
     "komira//src/plan_wire:golden_sort_canonical",
     "komira//src/plan_wire:golden_topic_live_canonical",
     "komira//src/plan_wire:golden_topn_canonical",
+    "komira//src/plan_wire:golden_udf_frame_canonical",
+    "komira//src/plan_wire:golden_udf_project_canonical",
     "komira//src/plan_wire:golden_union_canonical",
     "komira//src/plan_wire:golden_window_canonical",
     "komira//src/plan_wire:hostile_distinct_column_unknown_name_canonical",
