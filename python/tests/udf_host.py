@@ -293,17 +293,20 @@ def runtime_sys_path():
 
 
 def process_gone(pid):
+    """True once the process has ended, reaped or not: a zombie has ended."""
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+        with open("/proc/%d/stat" % pid, encoding="ascii", errors="replace") as f:
+            stat = f.read()
+    except (FileNotFoundError, ProcessLookupError):
         return True
-    return False
+    return stat.rpartition(")")[2].split()[0] in ("Z", "X")
 
 
 class Env:
     """A fresh scratch tree: code_root, the runtime's scratch, a trace file."""
 
-    def __init__(self, lib_dir):
+    def __init__(self, lib_dir, check_leaks=True):
+        self.check_leaks = check_leaks
         self.lib = os.path.join(os.path.abspath(lib_dir), "libkomira_udf_python.so")
         self.dir = os.path.realpath(tempfile.mkdtemp(prefix="udf-"))
         self.code_root = self._mk("code")
@@ -350,16 +353,24 @@ class Env:
         spec.hex = hexd
         return spec
 
-    def close(self):
+    def leaked(self):
+        """The zygotes and workers the trace names that are still running."""
+        pids = self.trace.pids("spawn") + self.trace.pids("fork")
+        return [pid for pid in pids if not process_gone(pid)]
+
+    def close(self, check=False):
         for rt in self.runtimes:
             rt.shutdown()
+        leaked = self.leaked() if check else []
         shutil.rmtree(self.dir, ignore_errors=True)
+        assert not leaked, "processes of the runtime outlived its shutdown: %s" % leaked
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
-        self.close()
+    def __exit__(self, kind, *rest):
+        # A case that already failed keeps its own error: a leak is reported after a pass only.
+        self.close(check=self.check_leaks and kind is None)
 
 
 # ---- the spec and the runtime ----------------------------------------------

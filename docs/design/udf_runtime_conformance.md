@@ -1,6 +1,6 @@
 # The UDF runtime conformance corpus
 
-Status: proposed, not built. This is the case list of the shared conformance corpus that [the UDF runtime interface](udf_runtime_interface.md) defines in its §6.3: what each case runs, the defect it catches, and the broken implementation it must fail on, which shows the case can fail. Only the case belongs in a test: a test's name and comments say what behaviour it holds, never the broken implementation (`AGENTS.md` T9). Section numbers (§x.y) refer to `udf_runtime_interface.md`; `§10.1` to `§10.9` refer to `optimized_plan_udfs.md` and `§10.10` to `§10.14` to `optimized_plan_udf_runtime.md`, as there.
+Status: the `komira/python` cases that can run today are built (see [Where the Python runtime's cases run](#where-the-python-runtimes-cases-run)); the rest are proposed. This is the case list of the shared conformance corpus that [the UDF runtime interface](udf_runtime_interface.md) defines in its §6.3: what each case runs, the defect it catches, and the broken implementation it must fail on, which shows the case can fail. Only the case belongs in a test: a test's name and comments say what behaviour it holds, never the broken implementation (`AGENTS.md` T9). Section numbers (§x.y) refer to `udf_runtime_interface.md`; `§10.1` to `§10.9` refer to `optimized_plan_udfs.md` and `§10.10` to `§10.14` to `optimized_plan_udf_runtime.md`, as there.
 
 ## Shared cases
 
@@ -156,3 +156,24 @@ table has a case: S5 (the library's stop), S1, S3 and S12 (another signal, durin
 exit not reported first) and S6 (a `MemoryError`). Two decisions have no case because they are absences: no
 per-process memory cap and no `MEMORY_REPORT`. What the runtime does through the C ABI that
 every runtime does is the shared and managed cases above.
+
+## Where the Python runtime's cases run
+
+The cases of the `komira/python` runtime are Python tests under `python/tests`, driven over the C ABI by
+`udf_host.py`. They are not rows of the Mojo harness's JSON corpus, which holds the shared cases for the echo and
+native runtimes.
+
+| Cases | Test file |
+|---|---|
+| Z1, Z2, Z3, Z5 (in the test's process), Z7 (without the free-threaded interpreter), Z8, Z9, Z10, Z11 (in the test's process), Z12, Z18's digest half | `test_udf_process.py`, `test_udf_generations.py`, `test_udf_contract.py` |
+| Z5 and Z11 from an engine in a child, Z6, Z13, S8 to S10, S13 | `test_udf_engine_child.py` |
+| S1 to S7, S11, S12 | `test_udf_supervision.py` |
+| Z15 (the wire codec, the HELLO version, the exactness of a returned value) | `test_udf_process.py` |
+
+Every `udf_host.py` case also checks, when it ends without failing, that no zygote or worker the runtime's trace names
+is still running after the runtime's shutdown. An engine the test ends by a signal is exempt, because the test
+watches its processes itself.
+
+Not built yet, because the runtime has no code for them: Z4 (it needs `numpy` and `pandas` in the test interpreter), Z7's
+free-threaded interpreter, Z14's `VALUE` half, Z16 and the frame, aggregate, `ROW` and `STEP` rows of the shared
+cases (stage P3), and Z17's descriptor fields the runtime still refuses as unsupported.
