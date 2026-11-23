@@ -390,6 +390,19 @@ _CASES = [
     "dtype",
 ]]
 
+# The Iceberg catalog and table sources (komira._iceberg), with no library:
+# the catalog URI's scheme, host, user, password, query and fragment, the
+# warehouse, which credential fits a catalog with and without SigV4 signing,
+# access_delegation's two values, how a table name splits into namespace
+# levels and a table, repr with secrets as <set>, no pickle or copy, and that
+# building one loads no library.
+[py_test(
+    name = "iceberg_test" + p["suffix"],
+    src = "test_iceberg.py",
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # Capture of a user function (komira._capture), with no library: the `@udf`
 # decorator, return types, the read set (columns=, annotations and the
 # bytecode scan), the package or bundle code form, the deterministic bundle
