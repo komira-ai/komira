@@ -16,6 +16,8 @@
 //!             `max_cxxabi` (ELF only);
 //!   minos     every Mach-O member states a minimum macOS (LC_BUILD_VERSION or
 //!             LC_VERSION_MIN_MACOSX), at most the tag's macOS;
+//!   signature every Mach-O member carries a code signature that matches its
+//!             bytes (codesign.zig): macOS on arm64 loads no other code;
 //!   installname  a Mach-O member's install name is `@rpath/<file name>`;
 //!   runpath   every DT_RUNPATH and DT_RPATH entry is `$ORIGIN` or under it
 //!             (`$ORIGIN/...`, `${ORIGIN}`), and every Mach-O LC_RPATH entry
@@ -32,6 +34,7 @@
 //! check refused.
 
 const std = @import("std");
+const codesign = @import("codesign.zig");
 const diag = @import("diag.zig");
 const elf = @import("elf.zig");
 const macho = @import("macho.zig");
@@ -117,6 +120,7 @@ fn checkMachO(alloc: Alloc, d: *Diag, p: Policy, m: Member, names: []const []con
     const minos_text = try macho.versionText(alloc, minos);
     if ((diag.compareVersions(minos_text, tag_macos) orelse unreachable) == .gt)
         return refuse(d, alloc, "minos: {s} needs macOS {s}, newer than the tag's macOS {s}", .{ m.name, minos_text, tag_macos });
+    try codesign.check(alloc, d, m.name, m.data);
     if (info.install_name) |n| {
         const file = if (std.mem.startsWith(u8, n, "@rpath/")) n["@rpath/".len..] else "";
         if (file.len == 0 or std.mem.indexOfScalar(u8, file, '/') != null)

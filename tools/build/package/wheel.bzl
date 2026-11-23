@@ -65,21 +65,37 @@ Sub-targets:
     [release_check]  [check] with a stamped wheel required
 
 `wheel_libs_check(name, wheel, entry, runtime_libs, runtime_licenses,
-runtime_dists, expect_refusal = None)` reads a finished wheel alone
-(`komira_wheel libs`, wheel/libs.zig) and refuses it unless the libraries in
-it load from it as an install would load them: from the library `entry` (a
-member path), each DT_NEEDED a manylinux system library, a library already
-loaded or a member its run path reaches, every run path entry
-`$ORIGIN`-relative and inside the import package, every ELF member loaded,
-and each of `runtime_libs` (the Mojo runtime) carried once with the bytes of
-the toolchain's copy, its licence files `runtime_licenses` in
-`.dist-info/licenses/` and named by METADATA, and no Requires-Dist of a
-distribution in `runtime_dists`. Beside the wheel it reads only those names and
-the toolchain's runtime libraries, nothing else the rule that wrote the wheel
-was given. The output, `<name>.libs`, lists the libraries `entry` loads, in
+runtime_dists, expect_refusal = None, runtime = None)` reads a finished wheel
+alone (`komira_wheel libs`, wheel/libs.zig) and refuses it unless the
+libraries in it load from it as an install would load them: from the library
+`entry` (a member path), for an ELF entry each DT_NEEDED a manylinux system
+library, a library already loaded or a member its run path reaches, every run
+path entry `$ORIGIN`-relative and inside the import package; for a Mach-O
+entry each load command a macOS system library (under /usr/lib or
+/System/Library), a library already loaded, or a member that `@rpath` (through
+the loading library's own LC_RPATH entries) or `@loader_path` reaches, every
+run path entry `@loader_path`-relative and inside the import package; every
+ELF and Mach-O member loaded; and each of `runtime_libs` (the Mojo runtime)
+carried once with the bytes of the runtime's copy, its licence files
+`runtime_licenses` in `.dist-info/licenses/` and named by METADATA, and no
+Requires-Dist of a distribution in `runtime_dists`. The runtime is the
+toolchain's (`toolchains//:mojo`), or the directory `runtime` names (a
+`mojo_runtime`: a macOS wheel's check runs on Linux, and the darwin toolchain
+executes on macOS). Beside the wheel it reads only those names and the
+runtime libraries, nothing else the rule that wrote the wheel was given. The output, `<name>.libs`, lists the libraries `entry` loads, in
 load order; with `expect_refusal`, it exists only if the wheel is refused with
 exactly that line (and says `refused: <line>`). Building the target is running
 the check.
+
+`wheel_same_check(name, wheel, like, only_in_wheel, only_in_like)` reads two
+finished wheels of one package for two platforms (`komira_wheel same`,
+wheel/compare.zig), the macOS wheel and the Linux wheel of one build, and
+refuses them unless every member but RECORD and WHEEL is in both with the same
+bytes and mode, apart from `only_in_wheel` and `only_in_like`: each in its own
+wheel alone, and each a native library (Mach-O or ELF), so no Python file can
+differ. WHEEL may differ only in its Tag's platform part (the Python and ABI
+tags are the same). The output, `<name>.same`, counts the members alike and
+lists each wheel's own.
 """
 
 load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
@@ -355,11 +371,11 @@ _wheel_tag_cases = rule(
 wheel_tag_cases = declares_docs(_wheel_tag_cases)
 
 def _wheel_libs_check_impl(ctx):
-    tc = ctx.attrs.toolchain[MojoToolchainInfo]
+    runtime = ctx.attrs.runtime if hasattr(ctx.attrs, "runtime") else ctx.attrs.toolchain[MojoToolchainInfo].runtime
     out = ctx.actions.declare_output(ctx.label.name + ".libs")
     cmd = cmd_args(ctx.attrs._wheel[RunInfo], "libs", "--wheel", ctx.attrs.wheel, "--entry", ctx.attrs.entry)
     for name in ctx.attrs.runtime_libs:
-        cmd.add("--runtime-lib", cmd_args(tc.runtime.project(name), format = name + "={}"))
+        cmd.add("--runtime-lib", cmd_args(runtime.project(name), format = name + "={}"))
     for name in ctx.attrs.runtime_licenses:
         cmd.add("--runtime-license", name)
     for name in ctx.attrs.runtime_dists:
@@ -370,22 +386,70 @@ def _wheel_libs_check_impl(ctx):
     ctx.actions.run(cmd, env = salted(), category = "wheel_libs")
     return [DefaultInfo(default_output = out)]
 
+_LIBS_CHECK_DOC = "Reads the finished wheel `wheel` alone with `komira_wheel libs` (wheel/libs.zig): the libraries the member `entry` (ELF or Mach-O) loads, through each one's run path, must all be in the wheel or be system libraries and be every native member, each of `runtime_libs` carried once with the bytes of the Mojo runtime and its `runtime_licenses` in the dist-info, and no Requires-Dist names one of `runtime_dists`. The output lists the loaded libraries; with `expect_refusal`, it exists only if the wheel is refused with exactly that line."
+
+_LIBS_CHECK_ATTRS = {
+    "entry": attrs.string(),
+    "expect_refusal": attrs.option(attrs.string(), default = None),
+    "runtime_dists": attrs.list(attrs.string(), default = []),
+    "runtime_libs": attrs.list(attrs.string()),
+    "runtime_licenses": attrs.list(attrs.string(), default = []),
+    "wheel": attrs.source(),
+    "_wheel": attrs.exec_dep(default = "komira//tools/build/package:komira_wheel", providers = [RunInfo]),
+}
+
+# The runtime is the toolchain's.
 _wheel_libs_check = rule(
     impl = _wheel_libs_check_impl,
-    doc = "Reads the finished wheel `wheel` alone with `komira_wheel libs` (wheel/libs.zig): the libraries the member `entry` loads, through each one's run path, must all be in the wheel and be every ELF member, each of `runtime_libs` carried once with the toolchain's bytes and its `runtime_licenses` in the dist-info, and no Requires-Dist names one of `runtime_dists`. The output lists the loaded libraries; with `expect_refusal`, it exists only if the wheel is refused with exactly that line.",
-    attrs = {
-        "entry": attrs.string(),
-        "expect_refusal": attrs.option(attrs.string(), default = None),
-        "runtime_dists": attrs.list(attrs.string(), default = []),
-        "runtime_libs": attrs.list(attrs.string()),
-        "runtime_licenses": attrs.list(attrs.string(), default = []),
+    doc = _LIBS_CHECK_DOC + " The runtime is the toolchain's.",
+    attrs = _LIBS_CHECK_ATTRS | {
         "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+    },
+)
+
+# The runtime is a directory named by the caller: the darwin toolchain executes
+# on macOS and this check on Linux, so a macOS wheel's check cannot reach the
+# runtime through the toolchain.
+_wheel_libs_check_runtime = rule(
+    impl = _wheel_libs_check_impl,
+    doc = _LIBS_CHECK_DOC + " The runtime is the directory `runtime` (a `mojo_runtime`).",
+    attrs = _LIBS_CHECK_ATTRS | {
+        "runtime": attrs.source(),
+    },
+)
+
+def _wheel_libs_check_macro(**kwargs):
+    if "runtime" in kwargs:
+        _wheel_libs_check_runtime(exec_compatible_with = LINUX_X86_64, **kwargs)
+    else:
+        _wheel_libs_check(exec_compatible_with = LINUX_X86_64, **kwargs)
+
+wheel_libs_check = declares_docs(_wheel_libs_check_macro)
+
+def _wheel_same_check_impl(ctx):
+    out = ctx.actions.declare_output(ctx.label.name + ".same")
+    cmd = cmd_args(ctx.attrs._wheel[RunInfo], "same", "--wheel", ctx.attrs.wheel, "--like", ctx.attrs.like)
+    for m in ctx.attrs.only_in_wheel:
+        cmd.add("--only-in-wheel", m)
+    for m in ctx.attrs.only_in_like:
+        cmd.add("--only-in-like", m)
+    cmd.add("--out", out.as_output())
+    ctx.actions.run(cmd, env = salted(), category = "wheel_same")
+    return [DefaultInfo(default_output = out)]
+
+_wheel_same_check = rule(
+    impl = _wheel_same_check_impl,
+    doc = "Reads two finished wheels of one package for two platforms, `wheel` and `like`, with `komira_wheel same` (wheel/compare.zig): every member but RECORD and WHEEL must be in both with the same bytes and mode, except `only_in_wheel` and `only_in_like`, each in its own wheel alone and each a native library; WHEEL may differ only in its Tag's platform part. The output lists the members alike and each wheel's own.",
+    attrs = {
+        "like": attrs.source(),
+        "only_in_like": attrs.list(attrs.string(), default = []),
+        "only_in_wheel": attrs.list(attrs.string(), default = []),
         "wheel": attrs.source(),
         "_wheel": attrs.exec_dep(default = "komira//tools/build/package:komira_wheel", providers = [RunInfo]),
     },
 )
 
-def _wheel_libs_check_macro(**kwargs):
-    _wheel_libs_check(exec_compatible_with = LINUX_X86_64, **kwargs)
+def _wheel_same_check_macro(**kwargs):
+    _wheel_same_check(exec_compatible_with = LINUX_X86_64, **kwargs)
 
-wheel_libs_check = declares_docs(_wheel_libs_check_macro)
+wheel_same_check = declares_docs(_wheel_same_check_macro)
