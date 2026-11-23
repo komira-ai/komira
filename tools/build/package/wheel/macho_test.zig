@@ -173,7 +173,8 @@ test "two minimum-OS commands, and a build version for another platform, are ref
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const one = try fixture.machO(a, .{ .version_min = true });
+    // Unsigned: the file is the header and its one command, nothing after.
+    const one = try fixture.machO(a, .{ .version_min = true, .unsigned = true });
     // The same 16-byte LC_VERSION_MIN_MACOSX again, then the counts to match.
     const two = try a.alloc(u8, one.len + 16);
     @memcpy(two[0..one.len], one);

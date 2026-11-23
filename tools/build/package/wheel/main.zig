@@ -10,6 +10,9 @@
 //!       --runtime-lib <name>=<file>... [--runtime-license <name>]...
 //!       [--runtime-dist <distribution>]...
 //!       [--expect-refusal <text>] --out <marker>
+//!   komira_wheel same --wheel <wheel> --like <wheel>
+//!       [--only-in-wheel <member path>]... [--only-in-like <member path>]...
+//!       --out <marker>
 //! cli.zig lists the flags of `write` and `check`. `write` refuses to write a
 //! wheel policy.zig refuses; `check` writes `ok` to --out only if check.zig
 //! refuses nothing. `libs` reads the wheel
@@ -17,18 +20,21 @@
 //! one member path a line, only if libs.zig refuses nothing (with
 //! --expect-refusal, `refused: <text>` only if it refuses the wheel with
 //! exactly that text); each `--runtime-lib` file is the toolchain's copy of
-//! that Mojo runtime library.
+//! that Mojo runtime library. `same` reads two wheels of one package for two
+//! platforms (compare.zig): --out gets the members alike and each wheel's own
+//! native libraries, only if they are the same package apart from those.
 //!
 //! A static executable: no shell, no PATH, no network, no clock. Exit status 2
 //! on any refusal, with its reason. This file only forwards; the sections are
 //! cli.zig (flags and files), stamp.zig (version), tag.zig, wheel.zig (the
-//! wheel), policy.zig, elf.zig and macho.zig (what its libraries need), zip.zig,
-//! check.zig and libs.zig.
+//! wheel), policy.zig, elf.zig, macho.zig and codesign.zig (what its libraries
+//! need), zip.zig, check.zig, libs.zig and compare.zig.
 
 const std = @import("std");
 const diag = @import("diag.zig");
 const cli = @import("cli.zig");
 const check = @import("check.zig");
+const compare = @import("compare.zig");
 const libs = @import("libs.zig");
 const wheel = @import("wheel.zig");
 const zip = @import("zip.zig");
@@ -73,6 +79,11 @@ fn cmdLibs(alloc: Alloc, d: *diag.Diag, argv: []const []const u8) diag.Refused!v
     try writeOut(alloc, d, r.out, r.marker);
 }
 
+fn cmdSame(alloc: Alloc, d: *diag.Diag, argv: []const []const u8) diag.Refused!void {
+    const r = try compare.command(alloc, d, argv, Disk{});
+    try writeOut(alloc, d, r.out, r.marker);
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -86,6 +97,7 @@ pub fn main() !void {
         .write => cmdWrite(alloc, &d, rest.items),
         .check => cmdCheck(alloc, &d, rest.items),
         .libs => cmdLibs(alloc, &d, rest.items),
+        .same => cmdSame(alloc, &d, rest.items),
     } else |err| err;
     result catch |err| {
         switch (err) {

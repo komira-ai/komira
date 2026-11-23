@@ -1,10 +1,12 @@
 //! What the komira_wheel tests share: a synthetic ELF shared library of
 //! chosen DT_NEEDED, run path and symbol versions, a synthetic Mach-O dylib
-//! of chosen install name, loads, run paths and minimum macOS (no real
-//! library needed), and the input of a wheel holding a library, its owner and
-//! a Python file, or of a macOS wheel holding a dylib and the Mojo runtime's.
+//! of chosen install name, loads, run paths and minimum macOS, signed ad hoc
+//! as Apple's linker signs one (no real library needed), and the input of a
+//! wheel holding a library, its owner and a Python file, or of a macOS wheel
+//! holding a dylib and the Mojo runtime's.
 
 const std = @import("std");
+const codesign = @import("codesign.zig");
 const wheel = @import("wheel.zig");
 const Alloc = std.mem.Allocator;
 
@@ -211,6 +213,19 @@ pub const MachO = struct {
     version_min: bool = false,
     /// No version command at all.
     no_version: bool = false,
+    /// No code signature (no LC_CODE_SIGNATURE); by default the file is signed
+    /// ad hoc, as `ld` signs an arm64 dylib.
+    unsigned: bool = false,
+    /// Bytes of code after the load commands (what the signature's pages
+    /// cover beside the header).
+    code: []const u8 = "\x1f\x20\x03\xd5\xc0\x03\x5f\xd6",
+    /// The signature's page size as a power of two (12: 4096 bytes).
+    page_shift: u8 = 12,
+    /// The CodeDirectory's hash type (codesign.HASH_*).
+    hash_type: u8 = 2,
+    /// The requirements blob the signature carries (an empty requirement
+    /// set, as `ld` writes it), hashed into special slot 2.
+    requirements: []const u8 = "\xfa\xde\x0c\x01\x00\x00\x00\x0c\x00\x00\x00\x00",
 };
 
 /// The packed `xxxx.yy.zz` of a macOS version.
@@ -268,6 +283,15 @@ pub fn machO(alloc: Alloc, m: MachO) ![]u8 {
         }
         n += 1;
     }
+    // LC_CODE_SIGNATURE last, its offset filled in once the code is laid out.
+    const sig_cmd = cmds.items.len;
+    if (!m.unsigned) {
+        try put(alloc, &cmds, u32, codesign.LC_CODE_SIGNATURE);
+        try put(alloc, &cmds, u32, 16);
+        try put(alloc, &cmds, u32, 0); // dataoff
+        try put(alloc, &cmds, u32, 0); // datasize
+        n += 1;
+    }
     var out = std.ArrayList(u8).empty;
     try put(alloc, &out, u32, 0xfeedfacf);
     try put(alloc, &out, u32, m.cputype);
@@ -278,7 +302,78 @@ pub fn machO(alloc: Alloc, m: MachO) ![]u8 {
     try put(alloc, &out, u32, 0); // flags
     try put(alloc, &out, u32, 0); // reserved
     try out.appendSlice(alloc, cmds.items);
+    if (m.unsigned) return out.toOwnedSlice(alloc);
+    try out.appendSlice(alloc, m.code);
+    while (out.items.len % 16 != 0) try out.append(alloc, 0);
+    const sig_off: u32 = @intCast(out.items.len);
+    const sig = try adHocSignature(alloc, out.items, m.page_shift, m.hash_type, m.requirements);
+    const at = 32 + sig_cmd;
+    std.mem.writeInt(u32, out.items[at + 8 ..][0..4], sig_off, .little);
+    std.mem.writeInt(u32, out.items[at + 12 ..][0..4], @intCast(sig.len), .little);
+    // The load command's fields are not covered by a page hash yet: the
+    // signature was computed over the file with them zero, so hash again.
+    const final = try adHocSignature(alloc, out.items, m.page_shift, m.hash_type, m.requirements);
+    try out.appendSlice(alloc, final);
     return out.toOwnedSlice(alloc);
+}
+
+fn putBe(alloc: Alloc, out: *std.ArrayList(u8), v: u32) !void {
+    var b: [4]u8 = undefined;
+    std.mem.writeInt(u32, &b, v, .big);
+    try out.appendSlice(alloc, &b);
+}
+
+/// An embedded signature of `code` (every byte before the signature) as `ld`
+/// writes one for an ad hoc signed dylib: a SuperBlob holding a CodeDirectory
+/// (slot 0, identifier `fixture`, flags adhoc and linker-signed, the page
+/// hashes of `code` and the hash of `requirements` in special slot 2) and the
+/// requirements blob (slot 2).
+pub fn adHocSignature(alloc: Alloc, code: []const u8, page_shift: u8, hash_type: u8, requirements: []const u8) ![]u8 {
+    const hsize = codesign.hashSize(hash_type) orelse 32;
+    // A page size of 2^0 stands for one page holding all of the code.
+    const page: usize = if (page_shift == 0) @max(code.len, 1) else @as(usize, 1) << @intCast(page_shift);
+    const pages = (code.len + page - 1) / page;
+    const ident = "fixture\x00";
+    const n_special: u32 = 2;
+    const hash_off: u32 = @intCast(44 + ident.len + n_special * hsize);
+    const cd_len: u32 = @intCast(hash_off + pages * hsize);
+    var cd = std.ArrayList(u8).empty;
+    try putBe(alloc, &cd, codesign.CODEDIRECTORY_MAGIC);
+    try putBe(alloc, &cd, cd_len);
+    try putBe(alloc, &cd, 0x20001); // version
+    try putBe(alloc, &cd, 0x20002); // flags: adhoc, linker-signed
+    try putBe(alloc, &cd, hash_off);
+    try putBe(alloc, &cd, 44); // identOffset
+    try putBe(alloc, &cd, n_special);
+    try putBe(alloc, &cd, @intCast(pages));
+    try putBe(alloc, &cd, @intCast(code.len)); // codeLimit
+    try cd.append(alloc, @intCast(hsize));
+    try cd.append(alloc, hash_type);
+    try cd.append(alloc, 0); // platform
+    try cd.append(alloc, page_shift);
+    try putBe(alloc, &cd, 0); // spare2
+    try cd.appendSlice(alloc, ident);
+    var buf: [48]u8 = undefined;
+    // special slot 2 (requirements), then slot 1 (Info.plist), empty
+    try cd.appendSlice(alloc, codesign.hash(hash_type, requirements, &buf));
+    try cd.appendNTimes(alloc, 0, hsize);
+    var p: usize = 0;
+    while (p < pages) : (p += 1) {
+        const end = @min((p + 1) * page, code.len);
+        try cd.appendSlice(alloc, codesign.hash(hash_type, code[p * page .. end], &buf));
+    }
+    const head: u32 = 12 + 2 * 8;
+    var sb = std.ArrayList(u8).empty;
+    try putBe(alloc, &sb, codesign.SUPERBLOB_MAGIC);
+    try putBe(alloc, &sb, @intCast(head + cd.items.len + requirements.len));
+    try putBe(alloc, &sb, 2);
+    try putBe(alloc, &sb, codesign.SLOT_CODEDIRECTORY);
+    try putBe(alloc, &sb, head);
+    try putBe(alloc, &sb, codesign.SLOT_REQUIREMENTS);
+    try putBe(alloc, &sb, @intCast(head + cd.items.len));
+    try sb.appendSlice(alloc, cd.items);
+    try sb.appendSlice(alloc, requirements);
+    return sb.toOwnedSlice(alloc);
 }
 
 /// The Mojo runtime libraries a macOS wheel carries beside libkomira.
