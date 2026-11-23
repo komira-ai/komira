@@ -480,6 +480,8 @@ def encode_manifest_entry(
     supplies one (any value != ICE_SEQ_INHERIT — delete files do); otherwise the
     commit-wide `sequence_number` argument (the append path). This is what lets
     the reader order deletes vs data-file generations from the manifest alone.
+    When both are ICE_SEQ_INHERIT the entry's `sequence_number` and
+    `file_sequence_number` are written null (v2 inheritance).
 
     The `content` + `equality_ids` come from `data_file` (0=data, no
     equality-ids for the append path; 1/2 + the equality field-ids for a delete
@@ -502,12 +504,19 @@ def encode_manifest_entry(
     # snapshot_id (["null","long"]): present.
     encode_union_tag(1, out)
     encode_long(snapshot_id, out)
-    # sequence_number (["null","long"]): present (the data sequence number).
-    encode_union_tag(1, out)
-    encode_long(entry_seq, out)
-    # file_sequence_number (["null","long"]): present.
-    encode_union_tag(1, out)
-    encode_long(entry_seq, out)
+    # sequence_number and file_sequence_number (["null","long"]): the data
+    # sequence number when one is known; null when it is ICE_SEQ_INHERIT, so the
+    # reader takes the sequence number of the manifest list that names this
+    # manifest (v2 inheritance, for a manifest written once and listed by
+    # several commit attempts).
+    if entry_seq == ICE_SEQ_INHERIT:
+        encode_union_tag(0, out)
+        encode_union_tag(0, out)
+    else:
+        encode_union_tag(1, out)
+        encode_long(entry_seq, out)
+        encode_union_tag(1, out)
+        encode_long(entry_seq, out)
 
     # ---- data_file (r2) ----
     # content (required int): 0 data / 1 position-delete / 2 equality-delete.
@@ -563,6 +572,60 @@ def encode_manifest_entry(
 # =============================================================================
 
 
+def _build_manifest_bytes(
+    schema_json: String,
+    schema_id: Int,
+    spec_id: Int,
+    spec_fields_json: String,
+    entry_schema: String,
+    snapshot_id: Int64,
+    sequence_number: Int64,
+    data_files: List[DataFileInfo],
+    manifest_content: Int,
+) raises -> List[UInt8]:
+    """The manifest OCF both public builders share: the Iceberg key-value
+    header (`schema`, `schema-id`, `partition-spec`, `partition-spec-id`,
+    `format-version`, `content`), then one block holding an ADDED entry per
+    data file (no block for an empty list)."""
+    var sync = generate_sync_marker()
+    var out = List[UInt8]()
+
+    # Iceberg-required manifest OCF key-value metadata (beyond avro.schema +
+    # avro.codec). These are read by the Iceberg reader to bind the manifest.
+    var kv_keys = List[String]()
+    var kv_vals = List[String]()
+    kv_keys.append(String("schema"))
+    kv_vals.append(schema_json)
+    kv_keys.append(String("schema-id"))
+    kv_vals.append(String(schema_id))
+    kv_keys.append(String("partition-spec"))
+    kv_vals.append(spec_fields_json)
+    kv_keys.append(String("partition-spec-id"))
+    kv_vals.append(String(spec_id))
+    kv_keys.append(String("format-version"))
+    kv_vals.append(String("2"))
+    kv_keys.append(String("content"))
+    kv_vals.append(
+        String("deletes") if manifest_content
+        == ICE_MANIFEST_CONTENT_DELETES else String("data")
+    )
+
+    emit_ocf_header_kv(entry_schema, AVRO_CODEC_NULL, sync, kv_keys, kv_vals, out)
+
+    # Encode all manifest_entry records into one block payload.
+    var payload = List[UInt8]()
+    var count = 0
+    for i in range(len(data_files)):
+        encode_manifest_entry(
+            snapshot_id, sequence_number, data_files[i], payload
+        )
+        count += 1
+    if count > 0:
+        emit_ocf_block(Span(payload), count, AVRO_CODEC_NULL, sync, out)
+
+    return out^
+
+
 def build_manifest_file(
     schema: IcebergSchema,
     schema_json: String,
@@ -588,49 +651,53 @@ def build_manifest_file(
     partition record + the `partition-spec-id` KV. Each data file's own
     `partition_avro` bytes are written into its entry — a partitioned data file
     records its partition tuple, an unpartitioned one records zero bytes (the
-    unpartitioned form)."""
-    var sync = generate_sync_marker()
-    var out = List[UInt8]()
+    unpartitioned form).
 
+    A `sequence_number` of ICE_SEQ_INHERIT (with a data file that has none of
+    its own) writes null sequence numbers, which the reader fills from the
+    manifest list."""
     # partition VALUE types (for the r102 schema): bucket -> int, identity ->
     # source type. Derived from spec + schema (empty for unpartitioned).
     var pv_types = partition_value_type_tags(spec, schema)
-
-    # Iceberg-required manifest OCF key-value metadata (beyond avro.schema +
-    # avro.codec). These are read by the Iceberg reader to bind the manifest.
-    var kv_keys = List[String]()
-    var kv_vals = List[String]()
-    kv_keys.append(String("schema"))
-    kv_vals.append(schema_json)
-    kv_keys.append(String("schema-id"))
-    kv_vals.append(String(schema.schema_id))
-    kv_keys.append(String("partition-spec"))
-    kv_vals.append(partition_spec_fields_json(spec))
-    kv_keys.append(String("partition-spec-id"))
-    kv_vals.append(String(spec.spec_id))
-    kv_keys.append(String("format-version"))
-    kv_vals.append(String("2"))
-    kv_keys.append(String("content"))
-    kv_vals.append(
-        String("deletes") if manifest_content
-        == ICE_MANIFEST_CONTENT_DELETES else String("data")
+    return _build_manifest_bytes(
+        schema_json,
+        schema.schema_id,
+        spec.spec_id,
+        partition_spec_fields_json(spec),
+        manifest_entry_schema_json(spec, pv_types),
+        snapshot_id,
+        sequence_number,
+        data_files,
+        manifest_content,
     )
 
-    var entry_schema = manifest_entry_schema_json(spec, pv_types)
-    emit_ocf_header_kv(entry_schema, AVRO_CODEC_NULL, sync, kv_keys, kv_vals, out)
 
-    # Encode all manifest_entry records into one block payload.
-    var payload = List[UInt8]()
-    var count = 0
-    for i in range(len(data_files)):
-        encode_manifest_entry(
-            snapshot_id, sequence_number, data_files[i], payload
-        )
-        count += 1
-    if count > 0:
-        emit_ocf_block(Span(payload), count, AVRO_CODEC_NULL, sync, out)
+def build_data_manifest(
+    schema_json: String,
+    schema_id: Int,
+    snapshot_id: Int64,
+    data_files: List[DataFileInfo],
+) raises -> List[UInt8]:
+    """Build a v2 manifest FILE listing `data_files` of an UNPARTITIONED table
+    (spec 0) whose schema is given as the table's own schema JSON text and id,
+    as a catalog reports them, not as an `IcebergSchema`.
 
-    return out^
+    Every entry is ADDED under `snapshot_id` with null sequence numbers
+    (ICE_SEQ_INHERIT): the manifest does not name a commit's sequence number,
+    so one manifest, written once, can be listed by several commit attempts
+    that carry different sequence numbers. The OCF header is the one
+    `build_manifest_file` writes, `content` = "data"."""
+    return _build_manifest_bytes(
+        schema_json,
+        schema_id,
+        0,
+        partition_spec_fields_json(PartitionSpec(0)),
+        manifest_entry_schema_json(),
+        snapshot_id,
+        ICE_SEQ_INHERIT,
+        data_files,
+        ICE_MANIFEST_CONTENT_DATA,
+    )
 
 
 # =============================================================================
