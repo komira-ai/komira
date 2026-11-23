@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Lowering: a bound LogicalPlan, a HostProfile and the resolved inputs to the
-# PhysicalPlan IR (version 17) and the ParamTable its segments index. Pure: the
+# PhysicalPlan IR (version 18) and the ParamTable its segments index. Pure: the
 # entry opens no file, reads no clock and no environment variable and touches
 # no global (README.md).
 #
@@ -81,6 +81,22 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        of cast, argument type and aggregate is left alone.
 # test_sink_capability   the capability table's rows, which triples are not
 #                        served, and admission of hand-built segments.
+# test_lower_udf_nodes   the rendered physical plan of user-function plans: an
+#                        ungrouped frame as an OP_UDF_FRAME over its read set,
+#                        a step as a SOURCE_UDF_STEP segment, a projection
+#                        column that is a call as an OP_UDF_APPLY before the
+#                        OP_PROJECT, the UdfRef list carried whole, and a
+#                        frame or step under a join, a union, an aggregation
+#                        and a shared subplan.
+# test_lower_udf_refusals
+#                        a read outside a declared read set refused with
+#                        LOWERING_UDF_UNDECLARED_READ naming the column (a ROW
+#                        call's argument, a frame's group key, a function that
+#                        declares no read set), and every LOWERING_UDF_UNSERVED
+#                        reason (index, kind, argument and literal counts, read
+#                        set columns, a grouped frame, a call inside an
+#                        expression, a filter or an aggregation), each beside a
+#                        plan that lowers.
 #
 # NO IMPURE PACKAGE IN THE CLOSURE. A lowering step must not reach a package
 # that opens files, talks to an object store, runs a worker pool, measures the
@@ -124,6 +140,8 @@ mojo_library(
         "tests/test_lower_shared.mojo",
         "tests/test_lower_sum_fuse.mojo",
         "tests/test_lower_union.mojo",
+        "tests/test_lower_udf_nodes.mojo",
+        "tests/test_lower_udf_refusals.mojo",
         "tests/test_sink_capability.mojo",
     ],
     visibility = ["PUBLIC"],

@@ -27,6 +27,7 @@ from arrow.schema import RecordBatch, Schema, Field
 from containers.slab import Slab
 
 from physical_plan.csv_source_spec import CsvSourceSpec
+from physical_plan.udf_call_spec import UdfCallSpec
 from physical_plan.sink_data import (
     AggSinkData,
     AsofJoinSinkData,
@@ -79,12 +80,12 @@ from physical_plan.sink_data import (
 #       `parquet_partition_values` — the file list and the Hive partition
 #       constants of a Parquet source of several files. Empty for a spec of
 #       one plain file, which is read from `parquet_path` as before.
-#   17: `SourceSpecPod.parquet_fs` — the store a Parquet source reads (the
-#       scan's `FsDescriptorPod`); local by default, so a spec minted before
-#       it reads the local disk as before.
+#   17: `OP_UDF_APPLY`, `OP_UDF_FRAME`, `SOURCE_UDF_STEP`, `MorselOp.udf` and
+#       `SourceSpecPod.udf_step` (`udf_call_spec`): a user-function call.
+#   18: `SourceSpecPod.parquet_fs` — a Parquet source's store (default local).
 #   Retired `MorselOp` tag values (4-13) are not reused.
 
-comptime PHYSICAL_PLAN_IR_VERSION: Int = 17
+comptime PHYSICAL_PLAN_IR_VERSION: Int = 18
 
 
 # =============================================================================
@@ -227,14 +228,17 @@ comptime SOURCE_SINK_OUTPUT: UInt8 = 2 # Read from a completed sink's output
 comptime SOURCE_CONCAT: UInt8 = 3      # Concatenate N completed sinks' outputs
                                        # (the physical form of PLAN_UNION)
 comptime SOURCE_CSV: UInt8 = 4         # Read one local CSV file
+comptime SOURCE_UDF_STEP: UInt8 = 5    # A STEP user function, run once
 
 # MorselOp tags
 comptime OP_FILTER: UInt8 = 0          # Predicate filter (SV-based)
 comptime OP_PROJECT: UInt8 = 1         # Column projection / expression eval
 comptime OP_LIMIT: UInt8 = 2           # Row count limit
 comptime OP_JOIN_PROBE: UInt8 = 3      # Hash join probe (streaming)
-# MorselOp tag values 4-13 are retired and must not be reused; the next free
-# tag id is 14.
+# MorselOp tag values 4-13 are retired and must not be reused.
+comptime OP_UDF_APPLY: UInt8 = 14      # A user-function call, one column appended
+comptime OP_UDF_FRAME: UInt8 = 15      # A frame user function per morsel
+# The next free tag id is 16.
 
 # Sink tags (`SegmentDescPod.sink_kind`)
 comptime SINK_AGG: UInt8 = 0           # Hash aggregation
@@ -439,6 +443,7 @@ struct MorselOp(Movable):
         OP_PROJECT: Evaluate expressions, replace batch columns.
         OP_LIMIT: Enforce row count limit (with atomic counter for parallel).
         OP_JOIN_PROBE: Probe a hash table built by a completed build segment.
+        OP_UDF_APPLY, OP_UDF_FRAME: A user-function call, `udf`.
 
     Late-materialization fields (OP_JOIN_PROBE only):
         probe_output_cols: Optional list of join-output column names to keep.
@@ -484,6 +489,14 @@ struct MorselOp(Movable):
     # its residual path. `Expr` is inert IR data (same as `filter_predicate`),
     # so this field keeps the IR inert.
     var probe_residual: Optional[Expr]
+    var udf: Optional[UdfCallSpec]  # OP_UDF_APPLY / OP_UDF_FRAME (`udf_call_spec`)
+
+    @staticmethod
+    def udf_call(tag: UInt8, var spec: UdfCallSpec) -> MorselOp:
+        """Create an OP_UDF_APPLY or OP_UDF_FRAME operator."""
+        var op = MorselOp(tag=tag)
+        op.udf = spec^
+        return op^
 
     @staticmethod
     def filter(var predicate: Expr) -> MorselOp:
@@ -617,6 +630,7 @@ struct MorselOp(Movable):
         self.probe_algo = JOIN_ALGO_HASH
         self.probe_output_cols = None
         self.probe_residual = None
+        self.udf = None
 
 # =============================================================================
 # The descriptor contract — SegmentDescPod + SourceSpecPod (inert POD)
@@ -690,7 +704,7 @@ comptime KEY_DTYPE_COMPOSITE: UInt8 = 9
 
 
 struct SourceSpecPod(Movable):
-    """POD source spec — the closed 5-kind `SOURCE_*` vocabulary as an
+    """POD source spec — the closed 6-kind `SOURCE_*` vocabulary as an
     INLINE descriptor field (source symmetry: the source set is bounded and
     is NOT the growth axis a new SINK kind widens, so it stays inline, not erased).
 
@@ -707,11 +721,12 @@ struct SourceSpecPod(Movable):
       * SOURCE_BATCH: `batch_handle_id` = index into the driver's batch table.
       * SOURCE_CSV: `csv_spec`, the file, its dialect and its bound columns
         (`csv_source_spec`).
+      * SOURCE_UDF_STEP: `udf_step`, the call (`udf_call_spec`).
 
     Every field is inert: `String`, `Optional[List[String]]`, `Optional[Expr]`,
     `List[Int]`, `List[Field]`, `List[List[String]]`, `Int`, `Bool`,
-    `FsDescriptorPod` (a `UInt8`, a `String`, an `Int`) and `CsvSourceSpec`
-    of the same kinds. Passes the inert-IR lint.
+    `FsDescriptorPod` (a `UInt8`, a `String`, an `Int`), and `CsvSourceSpec`
+    and `UdfCallSpec` of the same kinds. Passes the inert-IR lint.
 
     ⛔ THE PARQUET ARM IS LOSSY, AND `parquet_spec_is_total` IS HOW A CONSUMER
     FINDS OUT. It carries THREE of `ParquetSourceData`'s ELEVEN fields. Read that
@@ -730,8 +745,7 @@ struct SourceSpecPod(Movable):
     ⛔ WHAT IT EXISTS TO STOP: a silent-wrong-results class.
     `ParquetSourceData` has ELEVEN fields; this pod carries THREE. The
     eight it drops are `hive_partition_cols`, `hive_predicate`, `fs_descriptor`
-    (carried since IR version 17, as `parquet_fs`),
-    `preserve_numeric_dict`, `explicit_paths`, `row_window`,
+    (since IR 18 `parquet_fs`), `preserve_numeric_dict`, `explicit_paths`, `row_window`,
     `preserve_string_dict` (and the pod re-spells the other three). The mint site
     takes the path from `ScanData.source_path`, which is `ParquetSource.paths[0]`
     -- a DERIVED CACHE kept for single-path readers. So a consumer that
@@ -756,10 +770,9 @@ struct SourceSpecPod(Movable):
     ⚠ TOTAL IS NOT THE SAME AS SINGLE-FILE. It is the conjunction the DEFAULTS
     define. Since IR version 16 the pod carries the file list
     (`parquet_paths`) and the Hive partition constants, so a source of several
-    files is total too, and since 17 it carries the store (`parquet_fs`), so a
-    scan of S3 objects is total; a scan of another remote store, an unbounded
-    one or a lazy Hive shape (a directory scan, a partition predicate) is
-    still not carried and is refused at the cut."""
+    files is total too, and since 18 so is an S3 scan (`parquet_fs`); another
+    remote store, an unbounded scan or a lazy Hive shape (a directory scan, a
+    partition predicate) is still not carried and is refused at the cut."""
     var parquet_paths: List[String]
     """SOURCE_PARQUET ONLY. Every file of the source, in read order. Empty for
     a spec built by `parquet()`, which names one file in `parquet_path`; a spec
@@ -771,13 +784,11 @@ struct SourceSpecPod(Movable):
     """SOURCE_PARQUET ONLY. `[file][column]`: the decoded value text of each
     partition column for each file of `parquet_paths`. Empty when
     `parquet_partition_cols` is."""
-    var parquet_fs: FsDescriptorPod
-    """SOURCE_PARQUET ONLY. The store the files are on: the local file
-    system (`FsDescriptorPod.local()`, the default), or a bucket, whose
-    `parquet_path` and `parquet_paths` are then object keys in it."""
+    var parquet_fs: FsDescriptorPod  # SOURCE_PARQUET: the store; a bucket's paths are object keys
     var dep_seg_ids: List[Int]                   # SOURCE_SINK_OUTPUT (len 1) / SOURCE_CONCAT (len N)
     var batch_handle_id: Int                     # SOURCE_BATCH (-1 unused)
     var csv_spec: CsvSourceSpec                  # SOURCE_CSV (empty = the CSV defaults)
+    var udf_step: Optional[UdfCallSpec]          # SOURCE_UDF_STEP
 
     def __init__(out self):
         """Empty spec (SOURCE_SINK_OUTPUT/CONCAT default: fill dep_seg_ids)."""
@@ -792,6 +803,7 @@ struct SourceSpecPod(Movable):
         self.dep_seg_ids = List[Int]()
         self.batch_handle_id = -1
         self.csv_spec = CsvSourceSpec()
+        self.udf_step = None
 
     @staticmethod
     def parquet(
@@ -865,6 +877,13 @@ struct SourceSpecPod(Movable):
         s.csv_spec = spec^
         return s^
 
+    @staticmethod
+    def step(var spec: UdfCallSpec) -> SourceSpecPod:
+        """Mint the SOURCE_UDF_STEP arm."""
+        var s = SourceSpecPod()
+        s.udf_step = spec^
+        return s^
+
     # PORT(1.0.0): explicit destructor breaks the non-co-inductive
     # Deinitable check on this struct's recursive self-reference.
     # Field destructors still run (verified); ownership unchanged.
@@ -893,11 +912,11 @@ struct SegmentDescPod(Movable):
     var seg_id: Int                     # dense id; index into the runtime's per-seg tables
 
     # ---- SOURCE (tagged POD spec) ----
-    var source_kind: UInt8              # SOURCE_PARQUET | SOURCE_BATCH | SOURCE_SINK_OUTPUT | SOURCE_CONCAT | SOURCE_CSV
+    var source_kind: UInt8              # SOURCE_PARQUET | SOURCE_BATCH | SOURCE_SINK_OUTPUT | SOURCE_CONCAT | SOURCE_CSV | SOURCE_UDF_STEP
     var source_spec: SourceSpecPod
 
     # ---- OP CHAIN (the LANDED closed tagged union; runtime-N, no comptime over N) ----
-    var ops: Slab[MorselOp]             # {OP_FILTER, OP_PROJECT, OP_LIMIT, OP_JOIN_PROBE}; N is RUNTIME
+    var ops: Slab[MorselOp]             # {OP_FILTER, OP_PROJECT, OP_LIMIT, OP_JOIN_PROBE, OP_UDF_*}; N is RUNTIME
 
     # ---- SINK (ERASED — a TAG TRIPLE, never a struct-by-value) ----
     var sink_kind: UInt8                # SINK_AGG | SINK_HASH_BUILD | SINK_SORT | ... | SINK_COLLECT
