@@ -67,6 +67,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 once: disjoint ranges, no lost count.
 # test_sink_collect               the output ordered by morsel position, masks
 #                                 gathered, the output schema of empty input.
+# test_remote_parquet_source      a Parquet spec on a remote store read through
+#                                 the builder's opener (one served by the local
+#                                 file system here): the local answer for one
+#                                 key, every row of listed keys, SCAN_FS_UNSERVED
+#                                 with no opener, from the local entry point and
+#                                 from the default opener, the opener's refusal
+#                                 of a bucket as the run's error.
 # test_sources                    resident and sink-output sources, the Parquet
 #                                 source built from a spec: projection, glob,
 #                                 pushed filter, morsel size, refusals, a spec
@@ -303,6 +310,7 @@ mojo_library(
         "tests/test_real_plan.mojo",
         "tests/test_real_plan_concurrent.mojo",
         "tests/test_real_shared_output.mojo",
+        "tests/test_remote_parquet_source.mojo",
         "tests/test_run_plan.mojo",
         "tests/test_run_segment_concurrent.mojo",
         "tests/test_run_segment.mojo",

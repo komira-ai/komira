@@ -17,6 +17,13 @@
 # binder and lowering read each file's footer once and the next call reads
 # again.
 #
+# `run_sql_with` takes the `ScanFsOpener` the run reads a remote store
+# through: a catalog table whose `ParquetSource` names an S3 bucket is bound
+# from the catalog's schema, lowered with no footer facts, and read through
+# the file system the opener opens on the bucket. `run_sql` is `run_sql_with`
+# and `LocalOnlyScanFs`, which refuses such a scan at step `execute` with
+# `SCAN_FS_UNSERVED`.
+#
 # Parse and bind are the steps `sql.sql_frontend.plan_from_sql` composes; they
 # are called one by one here so a refusal names the step that refused.
 # `STATEMENT_NOT_A_QUERY` is `sql.sql_frontend`'s refusal, named here too so a
@@ -43,9 +50,11 @@ from sql.sql_frontend import (
 )
 from sql.sql_parser import parse_sql
 from sql.sql_token import tokenize
+from fs.scan_fs import ScanFsOpener
+from pipeline_exec.source_parquet import LocalOnlyScanFs
 
 from .engine_context import EngineContext
-from .engine_execute import run_lowered_plan
+from .engine_execute import run_lowered_plan_with
 from .engine_lower import lower_for_context
 from .engine_write import check_copy_target, count_result, write_parquet_result
 
@@ -118,8 +127,19 @@ def optimize_for_run(var plan: LogicalPlan) raises -> LogicalPlan:
 
 
 def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
-    """Run the SQL statement `text` against `ctx`: a query, or a
-    `COPY ... TO` a local Parquet file."""
+    """Run the SQL statement `text` against `ctx` (a query, or a `COPY ... TO`
+    a local Parquet file), reading the local file system only (`run_sql_with`
+    and `LocalOnlyScanFs`)."""
+    return run_sql_with(ctx, text, LocalOnlyScanFs())
+
+
+def run_sql_with[
+    R: ScanFsOpener
+](mut ctx: EngineContext, text: String, var opener: R) -> SqlOutcome:
+    """Run the SQL statement `text` against `ctx`: a query, or a `COPY ... TO`
+    a local Parquet file. A Parquet scan of a remote store (a catalog table
+    whose source names a bucket) reads through the file system `opener` opens
+    on the bucket."""
     ctx.begin_query()
     var step = String(STEP_PARSE)
     try:
@@ -149,7 +169,7 @@ def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
         var lowered = lower_for_context(optimized, ctx)
         pt_record[PH_LOWER](t_lower)
         step = String(STEP_EXECUTE)
-        var batch = run_lowered_plan(ctx, lowered^)
+        var batch = run_lowered_plan_with(ctx, lowered^, opener^)
         var outcome = SqlOutcome()
         if bound.kind == STMT_COPY:
             var rows = write_parquet_result(batch^, bound.dest_path, bound.codec)

@@ -92,3 +92,18 @@ struct FsDescriptorPod(Copyable, Movable, Deinitable):
         """True if this descriptor carries an explicit binding (a
         non-negative `node_id`); otherwise it is the local default."""
         return self.node_id >= 0
+
+    def url_prefix(self) -> String:
+        """The store as a URL prefix, for messages and rendered plans:
+        `s3://<bucket>`, `gs://<bucket>`, `az://<container>`, `file://` for
+        the local file system, and `scheme <code>://<bucket>` for a code that
+        is none of these."""
+        if self.scheme == FS_SCHEME_FILE:
+            return String("file://")
+        if self.scheme == FS_SCHEME_S3:
+            return "s3://" + self.bucket
+        if self.scheme == FS_SCHEME_GCS:
+            return "gs://" + self.bucket
+        if self.scheme == FS_SCHEME_AZURE:
+            return "az://" + self.bucket
+        return "scheme " + String(Int(self.scheme)) + "://" + self.bucket

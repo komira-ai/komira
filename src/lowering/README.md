@@ -1,7 +1,7 @@
 # lowering
 
 Lowering: a bound `LogicalPlan`, a `HostProfile` and the resolved inputs go in;
-the physical plan (`physical_plan`, IR version 17) and the `ParamTable`
+the physical plan (`physical_plan`, IR version 18) and the `ParamTable`
 its segments index come out. It is pure. `lower` opens no file, reads no clock
 and no environment variable and touches no global, so equal arguments give a
 `LoweredPlan` that renders byte-equal.
@@ -153,10 +153,13 @@ shape:
   binary, ...), alone or beside served columns, or a segment whose triple has
   no row.
 - `LOWERING_SCAN_NOT_TOTAL`: a Hive partitioned scan that lists its files
-  lazily (a directory scan or a partition predicate), a scan on a file system
-  other than the local one, or a scan marked unbounded. The segment's Parquet
-  arm carries the file list and the partition columns' constants, but no
-  predicate or file system descriptor, and its sources read a bounded input.
+  lazily (a directory scan or a partition predicate), a Parquet scan on a
+  store other than the local file system and S3 (naming it, `gs://raw`), a
+  local scan with an explicit file system binding, or a scan marked unbounded.
+  The segment's Parquet arm carries the file list, the partition columns'
+  constants and the store (`parquet_fs`: local, or an S3 bucket whose object
+  keys the paths are), but no predicate, and its sources read a bounded
+  input.
   The scan's display name is not part of the segment.
 - `LOWERING_INPUTS_SCAN_COUNT`: the inputs do not hold one entry per scan.
 - `LOWERING_UDF_UNDECLARED_READ`, naming the node, the `UdfRef` index and

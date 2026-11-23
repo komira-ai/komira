@@ -4,7 +4,13 @@
 #
 # `RealBuilder` constructs the members of a segment from its descriptor:
 #
-#   source   SOURCE_PARQUET       `ParquetSource` from the spec (`source_parquet`)
+#   source   SOURCE_PARQUET       `ParquetSource` from the spec (`source_parquet`):
+#                                 over the local file system when the spec's
+#                                 store is local, else over the file system
+#                                 the builder's opener opens on the spec's
+#                                 bucket (`SCAN_FS_UNSERVED` when it was
+#                                 given none, or the opener does not serve
+#                                 the store)
 #            SOURCE_BATCH         a copy of the resident batch the spec's handle
 #                                 names (`source_batch`)
 #            SOURCE_SINK_OUTPUT   the output of the producer the spec names,
@@ -79,6 +85,15 @@
 #
 # The builder borrows the footer cache and the expression pool the Parquet
 # source reads from; they belong to the caller and outlive every segment run.
+# One footer cache serves the local and the remote sources of a run: each file
+# system keys its entries under its own prefix (`FileSystem.key_prefix`), so
+# a local file and an object of the same name never share an entry.
+#
+# The remote store a Parquet spec names is reached through a
+# `ScanFsOpener` (`R`), handed to the builder by its caller with the plan: the
+# builder is compiled for that opener's one file system type, and opens one
+# file system on each bucket a spec names. A builder made without an opener
+# reads the local file system only (`R` defaults to `LocalOnlyScanFs`).
 # Resident batches are owned by the builder (`add_resident` returns the handle
 # a SOURCE_BATCH spec names), and so is the sink data of the plan
 # (`add_agg_sink` returns the id a descriptor's `sink_param_id` names). The
@@ -133,6 +148,7 @@ from physical_plan.physical_plan import (
     SOURCE_SINK_OUTPUT,
 )
 from containers.slab import Slab
+from fs.scan_fs import ScanFsOpener, scan_fs_unserved
 from plan_expr.expr_pool import ExprPool
 
 from .op_filter import FilterOp, FilterShared
@@ -152,9 +168,16 @@ from .sink_sort import SortSink
 from .sink_string_group_agg import StringGroupAggSink
 from .source_batch import BatchSource
 from .source_csv import build_csv_source
-from .source_parquet import LocalParquetSource, build_parquet_source
+from .source_parquet import (
+    LocalOnlyScanFs,
+    LocalParquetSource,
+    ParquetSourceOn,
+    build_parquet_source,
+    build_parquet_source_on,
+)
 from .source_sink_output import SinkOutputSource
 from .source_variant import SourceVariant
+from .unused_members import NoSource
 
 
 def _check_reads_a_dependency(ref desc: SegmentDescPod, producer: Int) raises:
@@ -207,13 +230,22 @@ struct RealBuilder[
     cache_o: Origin[mut=True],
     pool_o: Origin[mut=True],
     filter_o: Origin[mut=True],
+    R: ScanFsOpener = LocalOnlyScanFs,
 ](SegmentBuilder):
-    """Builds the real members of a segment: Parquet, batch, sink-output,
-    CSV and concatenation sources; filter, project, limit and join probe operators; the collect,
-    aggregation, sort and hash build sinks."""
+    """Builds the real members of a segment: Parquet (local, or on the store
+    `R` opens), batch, sink-output, CSV and concatenation sources; filter,
+    project, limit and join probe operators; the collect, aggregation, sort
+    and hash build sinks."""
 
-    comptime Source = SourceVariant[
+    comptime ParquetArm = SourceVariant[
         LocalParquetSource[Self.cache_o, Self.pool_o, Self.filter_o],
+        ParquetSourceOn[Self.R.FS, Self.cache_o, Self.pool_o, Self.filter_o],
+        NoSource,
+    ]
+    """A Parquet source: over the local file system (first) or over the
+    remote store's (second)."""
+    comptime Source = SourceVariant[
+        Self.ParquetArm,
         BatchSource,
         SinkOutputSource,
     ]
@@ -230,6 +262,7 @@ struct RealBuilder[
     var _agg_sinks: List[AggSinkData]
     var _sort_sinks: List[SortSinkData]
     var _segment_pool: SegmentPool
+    var _opener: Optional[Self.R]
     var _spill_dir: String
 
     def __init__(
@@ -237,6 +270,7 @@ struct RealBuilder[
         ref [Self.cache_o] cache: ParquetMetadataCache,
         ref [Self.pool_o] pool: ExprPool,
     ):
+        """A builder that reads the local file system only."""
         self._cache = Pointer(to=cache)
         self._pool = Pointer(to=pool)
         self._resident = List[RecordBatch]()
@@ -244,7 +278,19 @@ struct RealBuilder[
         self._agg_sinks = List[AggSinkData]()
         self._sort_sinks = List[SortSinkData]()
         self._segment_pool = SegmentPool()
+        self._opener = None
         self._spill_dir = String("")
+
+    def __init__(
+        out self,
+        ref [Self.cache_o] cache: ParquetMetadataCache,
+        ref [Self.pool_o] pool: ExprPool,
+        var opener: Self.R,
+    ):
+        """A builder that reads the local file system and the remote store
+        `opener` opens a file system on."""
+        self = Self(cache, pool)
+        self._opener = Optional[Self.R](opener^)
 
     def add_agg_sink(mut self, var data: AggSinkData) -> Int:
         """Keep `data` for SINK_AGG segments; returns the id their
@@ -373,20 +419,44 @@ struct RealBuilder[
                     " worker count, so the float sums would not be the same"
                     " bits on every worker count"
                 )
+            var preserve_dict = (
+                desc.sink_kind == SINK_AGG
+                and desc.sink_key_dtype == KEY_DTYPE_STRING
+                and desc.sink_orientation == SINK_ORIENT_DICT_ENCODED
+            )
+            if spec.parquet_fs.is_local():
+                return Self.Source.first(
+                    Self.ParquetArm.first(
+                        build_parquet_source[
+                            Self.cache_o, Self.pool_o, Self.filter_o
+                        ](
+                            spec,
+                            morsel_rows,
+                            num_workers,
+                            self._cache[],
+                            self._pool[],
+                            preserve_dict=preserve_dict,
+                        )
+                    )
+                )
+            if not self._opener:
+                raise scan_fs_unserved(spec.parquet_fs.url_prefix())
+            var fs = self._opener.value().open_scan_fs(
+                spec.parquet_fs.scheme, spec.parquet_fs.bucket
+            )
             return Self.Source.first(
-                build_parquet_source[
-                    Self.cache_o, Self.pool_o, Self.filter_o
-                ](
-                    spec,
-                    morsel_rows,
-                    num_workers,
-                    self._cache[],
-                    self._pool[],
-                    preserve_dict=(
-                        desc.sink_kind == SINK_AGG
-                        and desc.sink_key_dtype == KEY_DTYPE_STRING
-                        and desc.sink_orientation == SINK_ORIENT_DICT_ENCODED
-                    ),
+                Self.ParquetArm.second(
+                    build_parquet_source_on[
+                        Self.R.FS, Self.cache_o, Self.pool_o, Self.filter_o
+                    ](
+                        spec,
+                        fs^,
+                        morsel_rows,
+                        num_workers,
+                        self._cache[],
+                        self._pool[],
+                        preserve_dict=preserve_dict,
+                    )
                 )
             )
         if morsel_rows <= 0:

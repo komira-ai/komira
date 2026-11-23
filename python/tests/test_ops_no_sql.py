@@ -21,6 +21,7 @@ import re
 
 import komira
 from komira import _ops
+from komira._ops import _dtype
 from komira._ops import (
     EXPR_NODES,
     PLAN_NODES,
@@ -179,6 +180,7 @@ SUPPORT_INSTANCES = [
     WindowExpr("sum", arg="a"),
     WriteTarget("out.parquet", "parquet"),
     SCALAR,
+    _dtype.parse("struct<a: int64, b: timestamp[us]>"),
 ]
 
 
@@ -292,6 +294,7 @@ def test_the_search_finds_the_modules_and_classes_it_must_look_at():
         "komira._ops",
         "komira._ops._build",
         "komira._ops._columns",
+        "komira._ops._dtype",
         "komira._ops._expr",
         "komira._ops._rel",
         "komira._ops._vocab",
@@ -391,6 +394,7 @@ def test_the_source_scan_reads_every_file_of_the_ops_package():
         "__init__.py",
         "_build.py",
         "_columns.py",
+        "_dtype.py",
         "_expr.py",
         "_rel.py",
         "_vocab.py",
