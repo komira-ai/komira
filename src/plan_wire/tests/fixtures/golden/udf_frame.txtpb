@@ -1,0 +1,209 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 4
+plan {
+  output_schema {
+    fields {
+      name: "x"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "y2"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  project {
+    exprs {
+      col_ref {
+        name: "x"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      alias {
+        child {
+          binary_op {
+            op: BIN_MUL
+            left {
+              col_ref {
+                name: "y"
+                side: COL_SIDE_NONE
+              }
+            }
+            right {
+              literal {
+                dtype_code: _DT_FLOAT64
+                float_val: 2
+                kind: SCALAR_KIND_DTYPE
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "y2"
+      }
+    }
+    child {
+      output_schema {
+        fields {
+          name: "x"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "y"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      map_batches {
+        child {
+          output_schema {
+            fields {
+              name: "a"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "b"
+              arrow_type_id: 4
+              dtype_code: _DT_INT32
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "c"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+          }
+          scan {
+            source {
+              parquet {
+                paths: "/data/udf_events.parquet"
+                schema {
+                  fields {
+                    name: "a"
+                    arrow_type_id: 5
+                    dtype_code: _DT_INT64
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "b"
+                    arrow_type_id: 4
+                    dtype_code: _DT_INT32
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "c"
+                    arrow_type_id: 12
+                    dtype_code: _DT_FLOAT64
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                }
+                fs_is_local: true
+              }
+            }
+            has_schema: true
+            schema {
+              fields {
+                name: "a"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "b"
+                arrow_type_id: 4
+                dtype_code: _DT_INT32
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "c"
+                arrow_type_id: 12
+                dtype_code: _DT_FLOAT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+            }
+            source_kind: SOURCE_KIND_COLUMNAR
+          }
+        }
+      }
+    }
+  }
+}
+udfs {
+  kind: MAP_BATCHES_FRAME
+  return_type {
+    name: "out"
+    arrow_type_id: 21
+    nullable: true
+    dict_index_type_id: 4
+    children {
+      name: "x"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    children {
+      name: "y"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  stability: UDF_STABILITY_STABLE
+  null_mode: UDF_NULL_PROPAGATE
+  resources {
+  }
+  code {
+    runtime: "komira/python"
+    form: BUNDLE
+    entry: "m:frame"
+    code {
+      role: "bundle"
+      sha256: "\000\001\002\003\004\005\006\007\010\t\n\013\014\r\016\017\020\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037"
+    }
+    descriptor_version: 1
+    descriptor: "\n\007m:frame\020\0102\032\n\013\n\001a\020\005\030\005 \001@\004\n\013\n\001c\020\014\030\014 \001@\0048\002"
+  }
+  arg_types {
+    name: "a"
+    arrow_type_id: 5
+    dtype_code: _DT_INT64
+    nullable: true
+    dict_index_type_id: 4
+  }
+  arg_types {
+    name: "c"
+    arrow_type_id: 12
+    dtype_code: _DT_FLOAT64
+    nullable: true
+    dict_index_type_id: 4
+  }
+  read_set {
+    columns: "a"
+    columns: "c"
+  }
+}
