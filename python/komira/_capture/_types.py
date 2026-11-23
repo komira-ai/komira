@@ -104,24 +104,39 @@ def _nests(top, name: str, child: str) -> UnsupportedOperation:
     )
 
 
+def _optional_key(hint, key: str, resolved) -> bool:
+    """Whether the TypedDict `hint` lets `key` be left out. The key's resolved
+    hint decides first: `NotRequired[...]` or `Required[...]`, which the class
+    cannot see when the annotation is a string (`from __future__ import
+    annotations`); otherwise the class's own record, which follows `total=`."""
+    origin = typing.get_origin(resolved)
+    if origin is typing.NotRequired:
+        return True
+    if origin is typing.Required:
+        return False
+    return key in hint.__optional_keys__
+
+
 def _struct_of(hint, top, name: str, names: list, depth: int) -> str | None:
     """The struct dtype of the TypedDict or dataclass `hint` with the fields
     `names`, or None when a field's hint names no carried type. A TypedDict with
     optional keys is refused: a struct column's fields are all required."""
-    if typing.is_typeddict(hint) and hint.__optional_keys__:
-        optional = [key for key in hint.__annotations__ if key in hint.__optional_keys__]
-        raise UnsupportedOperation(
-            f"UDF_RETURN_TYPE_UNMAPPABLE: the return hint `{show(top)}` of `{name}()` holds the TypedDict "
-            f"`{hint.__qualname__}` with the optional keys {optional!r}, which a struct column cannot hold: "
-            f"every field of a struct is required. Declare every key required, or pass return_dtype= to udf"
-        )
     try:
         field_hints = typing.get_type_hints(hint)
+        extras = typing.get_type_hints(hint, include_extras=True) if typing.is_typeddict(hint) else {}
     except Exception as e:  # a hint may fail to evaluate in any way
         raise UnsupportedOperation(
             f"UDF_CAPTURE_UNSUPPORTED: the type hints of `{show(hint)}` cannot be resolved: "
             f"{type(e).__name__}: {e}"
         ) from None
+    if typing.is_typeddict(hint):
+        optional = [key for key in hint.__annotations__ if _optional_key(hint, key, extras.get(key))]
+        if optional:
+            raise UnsupportedOperation(
+                f"UDF_RETURN_TYPE_UNMAPPABLE: the return hint `{show(top)}` of `{name}()` holds the TypedDict "
+                f"`{hint.__qualname__}` with the optional keys {optional!r}, which a struct column cannot hold: "
+                f"every field of a struct is required. Declare every key required, or pass return_dtype= to udf"
+            )
     if not names:
         return None
     fields = []

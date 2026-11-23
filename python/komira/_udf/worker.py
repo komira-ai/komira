@@ -338,15 +338,17 @@ def _column_values(batch):
             columns.append(column.to_pylist())
             continue
         except (ValueError, OverflowError):
-            leaf = _unholdable_leaf(column, pa.types)
+            # The first row that fails, then the leaf inside that row alone:
+            # the message names a row and a type that belong together.
+            row, leaf = None, None
+            for i in range(len(column)):
+                try:
+                    column[i].as_py()
+                except (ValueError, OverflowError):
+                    row, leaf = i, _unholdable_leaf(column.slice(i, 1), pa.types)
+                    break
             if leaf is None:
                 raise
-        row = 0
-        for row in range(len(column)):
-            try:
-                column[row].as_py()
-            except (ValueError, OverflowError):
-                break
         python_type = "datetime.date" if pa.types.is_date32(leaf) else "datetime.datetime"
         message = "row %d of argument '%s' holds a %s outside the years 1 to 9999, which %s cannot hold" % (
             row,

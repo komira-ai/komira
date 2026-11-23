@@ -626,6 +626,14 @@ def a_date_python_cannot_hold_names_the_argument_and_the_leaf_type_inside_a_list
     refused(structured.call([records]), h.ERR_UNSUPPORTED, HELD % (1, "x", "date32[day]", "datetime.date"), 1)
     ok_records = pa.StructArray.from_arrays([pa.array([1, 2], I64), days(0, 1)], names=["n", "day"])
     assert structured.call_ok([ok_records]).equals(ok_records)
+    # Row 0 fails in its timestamp field and row 2 in its date field (which
+    # comes first): the message names row 0 and the type that fails there.
+    both = pa.struct([("day", pa.date32()), ("when", us)])
+    udf = rt.load_ok(env.bundle_spec({"ops.py": OPS}, "ops:ident", args=[("x", both)], result=both))
+    inst = rt.open_context_ok().open_instance_ok(udf)
+    mixed = pa.StructArray.from_arrays([days(0, 0, YEAR_10000_DAYS), build(us, [YEAR_10000_US, 0, 0])],
+                                       names=["day", "when"])
+    refused(inst.call([mixed]), h.ERR_UNSUPPORTED, HELD % (0, "x", "timestamp[us]", "datetime.datetime"), 0)
 
 
 def an_arrow_result_of_another_time_zone_is_refused_and_the_same_zone_is_accepted(env):

@@ -530,6 +530,15 @@ def test_a_typed_dict_return_hint_with_optional_keys_is_refused_by_name():
             spec_refuses(getattr(module, name), OPTIONAL_KEYS.format(shown=shown, name=name, cls=cls, keys=keys))
 
 
+def test_typed_dict_keys_are_judged_by_their_qualifiers_when_annotations_are_strings():
+    """Under `from __future__ import annotations` the class itself cannot see
+    `NotRequired` or `Required`: a NotRequired key is still optional, and a
+    Required key of a total=False class is still required."""
+    spec_refuses(future.partial, OPTIONAL_KEYS.format(
+        shown="<class 'fixtures.udfs.future.Partial'>", name="partial", cls="Partial", keys=["b"]))
+    assert future.all_required.spec().return_type == "struct<a: int64, b: large_string>"
+
+
 def test_unresolvable_hints_are_refused():
     spec_refuses(
         scalars.hint_unresolvable,
