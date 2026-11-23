@@ -12,7 +12,8 @@ from plan_ir.logical_plan import (
 from sql.sql_ast import (
     FROM_LESS_RELATION, JK_ANTI, JK_CROSS, JK_FULL, JK_LEFT, JK_RIGHT, JK_SEMI,
     STMT_COPY, STMT_CREATE_TABLE_AS, STMT_QUERY, SUBQ_DERIVED, SUBQ_NOT_IN, SUBQ_SCALAR,
-    SUBQ_UNION_ALL, SX_COLUMN, SelectStmt, SqlStatement, _UNION_RESULT_ALIAS,
+    SUBQ_EXCEPT, SUBQ_INTERSECT, SUBQ_UNION_ALL, SX_COLUMN, SelectStmt, SqlStatement,
+    _UNION_RESULT_ALIAS,
 )
 from sql.sql_bind_aggregate import (
     _bind_aggregate, _bind_projection,
@@ -32,7 +33,7 @@ from sql.sql_bind_subquery import (
     _bind_scalar_subquery_body, _bind_correlated_subquery_body,
     _corr_outer_of, _not_in_lhs_is_null_free, _in_lhs_output_name,
 )
-from sql.sql_bind_union import _bind_select_with_union
+from sql.sql_bind_set_op import _bind_select_with_union
 from sql.sql_bind_window_order import (
     _has_window, _bind_window_projection, _order_key_name, _OK_COLUMN, _OK_OUTPUT,
     _classify_order_keys, _order_output_column, _bind_order,
@@ -204,8 +205,13 @@ def _bind_query(
                 dplan = LogicalPlan.project(rename^, dplan^)
             cte_scope.add(sd.derived_alias, dplan^)
             prebound.append(Expr.literal(ScalarValue.from_int64(0)))  # placeholder
-        elif sd.kind == SUBQ_UNION_ALL:
-            # SQL-UNION-ALL: a BRANCH, not an operand. It binds to a PLAN,
+        elif (
+            sd.kind == SUBQ_UNION_ALL
+            or sd.kind == SUBQ_INTERSECT
+            or sd.kind == SUBQ_EXCEPT
+        ):
+            # A set-operation BRANCH (UNION ALL, INTERSECT, EXCEPT), not an
+            # operand. It binds to a PLAN,
             # which no `prebound` slot can hold, so it pushes the same
             # unreferenced placeholder SUBQ_DERIVED does and is bound below —
             # AFTER the left-hand SELECT, so both branches see the same CTE
