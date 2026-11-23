@@ -2,8 +2,8 @@
 # copy_runner -- run each COPY line of a cases file through run_sql
 # =============================================================================
 #
-# The program behind the `:copy_komira` build action, which writes the Parquet
-# files DuckDB reads back (`:copy_readback_oracle`, `test_copy_readback_duckdb`).
+# The program behind the `:copy_komira` build action, which writes the
+# Parquet, CSV and JSON files DuckDB reads back (`:copy_readback_oracle`, `test_copy_readback_duckdb`).
 #
 #   copy_runner --cases <cases.sql> --input-dir <dir> --out-dir <dir>
 #
@@ -12,10 +12,10 @@
 # `read_csv('<input-dir>/<name>` and its destination `TO '<file>` becomes
 # `TO '<out-dir>/<file>`. The program creates `<out-dir>`, runs the lines in
 # order on one context, and writes `<out-dir>/counts.tsv`: a header
-# `case<TAB>count`, then each case's name (the destination without
-# `.parquet`) and the `Count` it answered. A refused line, a missing flag or a
-# line with no `.parquet` destination ends the program with an error naming
-# it, so the build action fails.
+# `case<TAB>count`, then each case's name (the destination's file name up to
+# its first `.`) and the `Count` it answered. A refused line, a missing flag
+# or a line whose destination has no extension ends the program with an
+# error naming it, so the build action fails.
 
 from std.os import makedirs
 from std.sys import argv
@@ -48,10 +48,11 @@ def main() raises:
         if not line.startswith("COPY ("):
             continue
         var to = line.rfind(") TO '")
-        var ext = line.rfind(".parquet'")
-        if to < 0 or ext < to:
-            raise Error("copy_runner: no .parquet destination in: " + line)
-        var name = String(line[byte = to + 6 : ext])
+        var end = line.find("'", to + 6) if to >= 0 else -1
+        var dot = line.find(".", to + 6) if to >= 0 else -1
+        if to < 0 or dot < 0 or end < dot:
+            raise Error("copy_runner: no destination with an extension in: " + line)
+        var name = String(line[byte = to + 6 : dot])
         var sql = line.replace("read_csv('", "read_csv('" + inputs + "/")
         sql = sql.replace(") TO '", ") TO '" + out + "/")
         var outcome = run_sql(ctx, sql)
