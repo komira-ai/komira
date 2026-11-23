@@ -43,7 +43,8 @@ struct TableFiles[S: CloneableConditionalWriteStore](Movable):
         self._store = store^
         var p = prefix^
         while p.endswith(String("/")):
-            p = String(p[byte=0 : p.byte_length() - 1])
+            var trimmed = String(p[byte=0 : p.byte_length() - 1])
+            p = trimmed^
         self._prefix = p^
 
     def prefix(self) -> String:

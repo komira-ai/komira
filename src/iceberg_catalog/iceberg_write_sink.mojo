@@ -165,7 +165,8 @@ def table_schema_json(schema: TableSchema) -> String:
 def _strip_slashes(s: String) -> String:
     var p = String(s)
     while p.endswith(String("/")):
-        p = String(p[byte=0 : p.byte_length() - 1])
+        var trimmed = String(p[byte=0 : p.byte_length() - 1])
+        p = trimmed^
     return p^
 
 
