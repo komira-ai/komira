@@ -787,10 +787,12 @@ The table below gives the shipped runtimes' rows for common types. Each runtime'
 | int32, int16, int8 | `int` | that width | `number` |
 | float64, float32 | `float` | that width | `number` |
 | large_utf8, utf8 | `str` | string column | `string` |
-| large_binary | `bytes` | binary column | `Uint8Array` |
+| large_binary, binary | `bytes` | binary column | `Uint8Array` |
 | date32 | `datetime.date` | date column | `Date` at UTC midnight |
 | timestamp[us], no time zone | `datetime.datetime`, naive | timestamp column | `Date` (millisecond precision: microseconds are lost, and the table says so) |
-| large_list<T> | `list` | list column | `Array` |
+| timestamp with a time zone | `datetime.datetime`, aware | timestamp column with that zone | not built |
+| decimal128(P, S) | `decimal.Decimal` | decimal column | not built |
+| large_list<T>, list<T> | `list` | list column | `Array` |
 | map<utf8, T> | `dict` | map column | `Map` |
 | struct | `dict` (or the declared `TypedDict` or dataclass) | struct column or frame | plain object |
 | null in `MANUAL` mode | `None` (`NaN` or `pd.NA` in pandas, per §10.7) | the format's own null | `null` |

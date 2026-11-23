@@ -11,7 +11,8 @@
  * Files: runtime.c (the table, init, options, load and contexts),
  * descriptor.c (the descriptor decoder and validate), zygote.c (generations
  * and the control channel), worker.c (a context's channel and calls),
- * wire.c (framing, errors, trace), ipc.c (Arrow IPC).
+ * wire.c (framing, errors, trace), types.c (the bound Arrow types), ipc.c
+ * (Arrow IPC writing) and ipc_read.c (the checked reading of a worker's reply).
  *
  * Locking: one mutex, rt->zy_mu, guards the generations, the control
  * channel, the counters and the registry of contexts. A context is used by
@@ -58,43 +59,80 @@ void udfpy_buf_u32(udfpy_buf* b, uint32_t v);
 void udfpy_buf_u64(udfpy_buf* b, uint64_t v);
 void udfpy_buf_str(udfpy_buf* b, const char* s);
 
-/* ---- Arrow IPC (ipc.c) ---------------------------------------------------- */
+/* ---- Arrow types (types.c) ------------------------------------------------ */
 
-typedef struct udfpy_field {
-  char fmt; /* the C Data format: 'l', 'g' or 'i' */
-  int nullable;
+/* The kinds of type the runtime carries (README "Types"); every other Arrow
+ * type is refused by validate. */
+enum {
+  UDFPY_K_BOOL = 1,
+  UDFPY_K_INT,       /* width 1, 2, 4 or 8, signed */
+  UDFPY_K_FLOAT,     /* width 4 or 8 */
+  UDFPY_K_DATE32,    /* width 4, days */
+  UDFPY_K_TIMESTAMP, /* width 8, `unit`, `tz` */
+  UDFPY_K_DECIMAL,   /* width 16, `precision`, `scale` */
+  UDFPY_K_UTF8,      /* width: the offset width, 4 or 8 (large) */
+  UDFPY_K_BINARY,    /* width: the offset width, 4 or 8 (large) */
+  UDFPY_K_LIST,      /* width: the offset width, 4 or 8 (large); one child */
+  UDFPY_K_STRUCT,    /* one or more children */
+};
+
+#define UDFPY_MAX_NODES 256 /* type nodes in one schema */
+#define UDFPY_MAX_DEPTH 16  /* a column is depth 1 */
+
+/* One node of a type tree, in a schema's pre-order array. */
+typedef struct udfpy_type {
+  uint8_t kind;      /* UDFPY_K_* */
+  uint8_t width;     /* bytes per value, or the offset width (see the kinds) */
+  uint8_t unit;      /* a timestamp's: 0 s, 1 ms, 2 us, 3 ns */
+  uint8_t nullable;
+  int32_t precision; /* a decimal's, 1..38 */
+  int32_t scale;     /* a decimal's, 0..precision */
+  int32_t n_children;
+  int32_t next;      /* the index of the node after this one's subtree */
   char name[UDFPY_MAX_NAME];
-} udfpy_field;
+  char tz[UDFPY_MAX_NAME]; /* a timestamp's; "" for none */
+} udfpy_type;
 
+/* A bound type tree: `n` columns, whose roots and their descendants are the
+ * pre-order nodes t[0..n_nodes). The first column's root is t[0]; column
+ * i + 1's root is t[root(i).next]. */
 typedef struct udfpy_schema {
   int n;
-  int is_struct;
-  udfpy_field f[UDFPY_MAX_FIELDS];
+  int n_nodes;
+  udfpy_type t[UDFPY_MAX_NODES];
 } udfpy_schema;
 
-/* Read a bound ArrowSchema: a struct's children, or one leaf. 0, or -1 with
- * `why` set for a type this runtime does not carry. */
-int udfpy_schema_read(const struct ArrowSchema* s, udfpy_schema* out, const char** why);
+/* Read a bound ArrowSchema into `out`. `columns` 1: `s` is a struct and each
+ * child is one column (the arguments); `columns` 0: `s` is the one column (the
+ * result). 0, or -1 with the refusal written to `why` (README "Types" holds
+ * the texts). Pure: allocates nothing. */
+int udfpy_schema_read(const struct ArrowSchema* s, int columns, udfpy_schema* out, char* why, size_t why_n);
 
-/* Append one IPC Schema message holding `s`'s fields, with `n_kv` pairs of
+/* ---- Arrow IPC writing (ipc.c) --------------------------------------------- */
+
+/* Append one IPC Schema message holding `s`'s columns, with `n_kv` pairs of
  * custom metadata (none here). */
 void udfpy_ipc_schema(udfpy_buf* b, const udfpy_schema* s, int n_kv, const char* const* keys,
                       const char* const* values);
 
-/* Append one IPC RecordBatch message of `n` primitive columns of `length`
- * rows (`fmts[i]`); each column's validity bitmap and values are re-based to
- * offset 0. -1 with `why` set for a column this encoder cannot read. */
-int udfpy_ipc_batch(udfpy_buf* b, int64_t length, int n, const struct ArrowArray* const* cols,
-                    const char* fmts, const char** why);
+/* Append one IPC RecordBatch message of the `s->n` columns `cols` of `length`
+ * rows, each re-based to offset 0, nested nodes included. -1 with `why` set
+ * for a column that does not match its bound type. */
+int udfpy_ipc_batch(udfpy_buf* b, int64_t length, const udfpy_schema* s, const struct ArrowArray* const* cols,
+                    const char** why);
+
+/* ---- Arrow IPC reading (ipc_read.c) ---------------------------------------- */
 
 typedef struct udfpy_hold udfpy_hold;
 
-/* A RecordBatch message a worker sent, decoded against `fields` into arrays
- * that borrow the payload: layout and every buffer are checked against the
- * bound types and the body's bounds before a pointer is formed. Each
- * array's release drops a reference on `hold`. -1 with `why` set otherwise. */
-int udfpy_ipc_decode(const uint8_t* msg, size_t len, const udfpy_field* fields, int n, int64_t* length,
-                     udfpy_hold* hold, struct ArrowArray* cols, const char** why);
+/* A RecordBatch message a worker sent, decoded against the bound `s` into
+ * its `s->n` columns `cols`, arrays that borrow the payload: the layout of
+ * every node and every buffer is checked against the bound types and the
+ * body's bounds before a pointer is formed. Each array, children included,
+ * holds its own reference on `hold`. -1 with `why` set otherwise, and nothing
+ * built is left. */
+int udfpy_ipc_decode(const uint8_t* msg, size_t len, const udfpy_schema* s, int64_t* length, udfpy_hold* hold,
+                     struct ArrowArray* cols, const char** why);
 
 /* The payload block decoded arrays borrow, reference-counted; the last drop
  * releases the reserved bytes to the host and frees the payload. */
@@ -209,7 +247,14 @@ typedef struct komira_udf_udf {
   uint32_t batch_format;
   char* entry;
   udfpy_schema args, result;
+  /* The load's reference and one per open instance, whose calls read `args`
+   * and `result`: unload drops the load's, so an instance opened before an
+   * unload keeps a live udf until it closes. */
+  _Atomic int refs;
 } udfpy_udf;
+
+/* Drop one reference on `u`; the last frees it (runtime.c). */
+void udfpy_udf_drop(udfpy_udf* u);
 
 struct komira_udf_context {
   udfpy_rt* rt;

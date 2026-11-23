@@ -85,6 +85,13 @@ class CArray(Structure):
     ]
 
 
+_RELEASE = CFUNCTYPE(None, POINTER(CArray))
+
+
+def _mark_released(array):
+    array.contents.release = None
+
+
 class CDeviceArray(Structure):
     _fields_ = [
         ("array", CArray), ("device_id", c_int64), ("device_type", c_int32),
@@ -600,6 +607,11 @@ class Instance:
         args = CDeviceArray()
         pa.StructArray.from_arrays(list(columns), names=names)._export_to_c(addressof(args))
         args.device_id, args.device_type = 0, 1
+        return self.call_raw(args, deadline_ns, cancel)
+
+    def call_raw(self, args, deadline_ns=0, cancel=0):
+        """Call with the argument struct `args`, a CDeviceArray the caller built
+        (HandArray.device_array() builds one by hand); a Result."""
         out, err = CDeviceArray(), _new_error()
         self.cancel.value = cancel
         c = CCall()
@@ -622,3 +634,40 @@ class Instance:
 
     def close(self):
         self.rt.table.close_instance(self.handle)
+
+
+class HandArray:
+    """A C ArrowArray built field by field, for a call whose argument breaks the
+    Arrow C data layout in a way pyarrow will not export. `buffers` holds one
+    entry per buffer: bytes, or None for a NULL buffer. `children` are
+    HandArrays. `released=True` gives the array a NULL release callback, as a
+    child already released would have. Every buffer and child array stays
+    alive as long as this object does."""
+
+    def __init__(self, length, buffers, children=(), released=False, offset=0):
+        self._bufs = [None if b is None else (c_uint8 * max(len(b), 1)).from_buffer_copy(b or b"\0")
+                      for b in buffers]
+        self._buffer_ptrs = (c_void_p * max(len(buffers), 1))(
+            *[None if b is None else addressof(b) for b in self._bufs])
+        self.children = list(children)
+        self._child_ptrs = (c_void_p * max(len(self.children), 1))(
+            *[addressof(c.c) for c in self.children])
+        self._release = _RELEASE(_mark_released)
+        self.c = CArray()
+        self.c.length, self.c.null_count, self.c.offset = length, 0, offset
+        self.c.n_buffers, self.c.n_children = len(buffers), len(self.children)
+        self.c.buffers = addressof(self._buffer_ptrs)
+        self.c.children = addressof(self._child_ptrs) if self.children else None
+        self.c.dictionary = None
+        self.c.release = None if released else ctypes.cast(self._release, c_void_p).value
+        self.c.private_data = None
+
+    def device_array(self):
+        """A CPU CDeviceArray whose array is a copy of this one's fields."""
+        dev = CDeviceArray()
+        dev.array = self.c
+        dev.device_id, dev.device_type = 0, 1
+        # The copy points at this object's buffers, child pointers and release
+        # callback: it keeps this object alive for as long as it lives.
+        dev._owner = self
+        return dev

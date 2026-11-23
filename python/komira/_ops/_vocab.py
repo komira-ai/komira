@@ -329,8 +329,8 @@ IN_LIST_MAX = 64
 # User functions (komira/python, docs/design/optimized_plan_udfs.md §10.2):
 # the call shapes this package captures and encodes, how the code is reached,
 # the determinism and null declarations, and the batch format the function is
-# called with. The column types are the ones the komira/python runtime
-# carries today.
+# called with. The types a column may have are those of
+# _dtype.py.
 UDF_KINDS = frozenset({"scalar", "map_batches_column", "row", "map_batches_frame"})
 UDF_COLUMN_KINDS = frozenset({"scalar", "map_batches_column", "row"})
 UDF_READ_SET_KINDS = frozenset({"row", "map_batches_frame"})
@@ -338,4 +338,3 @@ UDF_FORMS = frozenset({"package", "bundle"})
 UDF_STABILITIES = frozenset({"immutable", "stable", "volatile"})
 UDF_NULL_MODES = frozenset({"manual", "propagate"})
 UDF_BATCH_FORMATS = frozenset({"values", "arrow"})
-UDF_DTYPES = frozenset({"int32", "int64", "float64"})
