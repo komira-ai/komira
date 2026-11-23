@@ -99,22 +99,27 @@ def test_the_constructor_is_iceberg():
 
 
 def test_uri_kept_as_written():
-    for uri in ("HTTPS://Catalog.Example.com", "https://catalog.example.com/", "http://[::1]:0/api", "http://h:1/a/b"):
+    for uri in (
+        "HTTPS://Catalog.Example.com",
+        "https://catalog.example.com/",
+        "http://[::1]:0/api",
+        "http://catalog.example:1/a/b",
+    ):
         assert iceberg(uri).uri == uri
 
 
 def test_uri_refused():
-    expect(lambda: iceberg(b"https://h"), TypeError, "uri must be a str, not bytes")
+    expect(lambda: iceberg(b"https://catalog.example"), TypeError, "uri must be a str, not bytes")
     expect(lambda: iceberg(None), TypeError, "uri must be a str, not NoneType")
     expect(lambda: iceberg(""), ValueError, "uri is empty")
-    expect(lambda: iceberg("https://h/\na"), ValueError, "uri holds a control character")
-    expect(lambda: iceberg("https://h/\x7f"), ValueError, "uri holds a control character")
+    expect(lambda: iceberg("https://catalog.example/\na"), ValueError, "uri holds a control character")
+    expect(lambda: iceberg("https://catalog.example/\x7f"), ValueError, "uri holds a control character")
     for uri in ("s3://bucket/warehouse", "file:///warehouse", "catalog.example.com", "/api/catalog"):
         expect(lambda: iceberg(uri), ValueError, "uri must be an http or https URI")
     expect(lambda: iceberg("https:///api"), ValueError, "uri has no host")
-    expect(lambda: iceberg("https://h:notaport/"), ValueError, "uri is not a URI")
-    expect(lambda: iceberg("https://h:99999/"), ValueError, "uri is not a URI")
-    expect(lambda: iceberg("http://[::1/"), ValueError, "uri is not a URI")
+    expect(lambda: iceberg("https://catalog.example:notaport/"), ValueError, "uri is not a URI")
+    expect(lambda: iceberg("https://catalog.example:99999/"), ValueError, "uri is not a URI")
+    expect(lambda: iceberg("http://[catalog.example/"), ValueError, "uri is not a URI")
     for uri in ("https://etl:PASSWORD@h/api", "https://etl@h/api", "https://:PASSWORD@h/api"):
         e = expect(
             lambda: iceberg(uri),
@@ -122,7 +127,12 @@ def test_uri_refused():
             "uri must not hold a user or a password: give the catalog a credential= instead",
         )
         assert "PASSWORD" not in str(e)
-    for uri in ("https://h/api?token=x", "https://h/api#x", "https://h/api?", "https://h/api#"):
+    for uri in (
+        "https://catalog.example/api?token=x",
+        "https://catalog.example/api#x",
+        "https://catalog.example/api?",
+        "https://catalog.example/api#",
+    ):
         expect(lambda: iceberg(uri), ValueError, "uri must not hold a query or a fragment")
 
 
