@@ -45,9 +45,9 @@
 //!    the macOS driver, read the quickstart from the smoke artifact (no checkout) and are one job per entry
 //!    of their chain's matrix (promote-macos-arm64's for the PyPI one); promote-macos-arm64 and
 //!    pypi-macos-arm64 run the Linux driver on ubuntu;
-//!  - the pull request's check set (ci/targets shards) names neither the macOS set, the three macOS targets
-//!    of the wheel (komira_wheel_macos_arm64, wheel_install_test_macos_arm64, pypi_smoke_macos_arm64) nor a
-//!    macOS runner;
+//!  - the pull request's check set (ci/targets shards) names neither the macOS set, the five macOS targets
+//!    of the wheel (komira_wheel_macos_arm64, wheel_install_test_macos_arm64, wheel_libs_macos_arm64,
+//!    wheel_same_macos_arm64, pypi_smoke_macos_arm64) nor a macOS runner;
 //!  - the macOS set is the packages of packages.bzl without the excluded ones, in one place: the
 //!    set's definition builds each member's `:lib`, and each excluded package is a package.
 //!  - the step `build the macOS Python harness tests` builds DARWIN_PYTHON_HARNESS of darwin_libs.bzl, the
@@ -385,7 +385,7 @@ const PYTHONS_RUN = "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_sm
 fn smokeMatrix(ar: std.mem.Allocator, producer: []const u8) ![4][]const u8 {
     return .{ "    strategy:", "      fail-fast: false", try std.fmt.allocPrint(ar, "      matrix: ${{{{ fromJSON(needs.{s}.outputs.matrix) }}}}", .{producer}), "          python-version: ${{ matrix.python }}" };
 }
-const MACOS_TARGETS = [_][]const u8{ "//python:komira_wheel_macos_arm64[release]", "//python:wheel_install_test_macos_arm64", "//python/smoke:pypi_smoke_macos_arm64" };
+const MACOS_TARGETS = [_][]const u8{ "//python:komira_wheel_macos_arm64[release]", "//python:wheel_install_test_macos_arm64", "//python:wheel_libs_macos_arm64", "//python:wheel_same_macos_arm64", "//python/smoke:pypi_smoke_macos_arm64" };
 
 /// Whether the `needs:` line names the job `job` (as one of its list items).
 fn needsJob(line: []const u8, job: []const u8) bool {
@@ -535,13 +535,13 @@ fn checkPypiMacos(ar: std.mem.Allocator, linux_text: []const u8, text: []const u
                 known = true;
             }
         }
-        if (!known) return "build-macos-arm64 builds a target for macOS that is not the wheel, its install test, its driver or the wheel's file name";
+        if (!known) return "build-macos-arm64 builds a target for macOS that is not the wheel, its install test, its read-back checks, its driver or the wheel's file name";
         if (first_mac_build == null) first_mac_build = i;
     }
     const tp_at = present_testpypi orelse return "build-macos-arm64 does not ask TestPyPI whether it lists the macOS wheel (pypi_smoke present --index testpypi)";
     const name_at = file_name_at orelse return "build-macos-arm64 does not build the macOS wheel's file name before it asks TestPyPI";
     if (name_at > tp_at) return "build-macos-arm64 asks the indexes before it has built the wheel's file name";
-    for (seen) |k| if (k != 1) return "build-macos-arm64 does not build each of the macOS wheel, its install test and its driver exactly once";
+    for (seen) |k| if (k != 1) return "build-macos-arm64 does not build each of the macOS wheel, its install test, its read-back checks and its driver exactly once";
     if (first_mac_build.? < tp_at) return "build-macos-arm64 starts a Mac build before the present step";
     for (steps) |step| {
         if (isDarwinBuild(step) and !mentions(step, "[file_name]") and !has(step, PRESENT_GATE)) return "a Mac build of build-macos-arm64 does not carry the present gate";
@@ -1012,7 +1012,13 @@ test "an edit of the real pypi-macos-arm64.yml that lets a Mac build start befor
     // the present step that is gone, or asks before the file name exists
     try expectRefusedPypi(ar, w.linux, try replaced(ar, text, "      - name: the macOS wheel on TestPyPI\n        id: testpypi_file\n" ++ PRESENT_TESTPYPI_RUN ++ "\n", ""), "does not ask TestPyPI");
     try expectRefusedPypi(ar, w.linux, try replaced(ar, try replaced(ar, text, PRESENT_STEPS, ""), "      - name: build the file name of the macOS wheel\n", PRESENT_STEPS ++ "      - name: build the file name of the macOS wheel\n"), "asks the indexes before it has built the wheel's file name");
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, "//python:wheel_install_test_macos_arm64\n", "//python:wheel_install_test\n"), "not the wheel, its install test, its driver or the wheel's file name");
+    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, "//python:wheel_install_test_macos_arm64\n", "//python:wheel_install_test\n"), "not the wheel, its install test, its read-back checks, its driver or the wheel's file name");
+    // the read-back checks dropped from their step, or built twice
+    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, " //python:wheel_libs_macos_arm64 //python:wheel_same_macos_arm64\n", " //python:wheel_libs_macos_arm64\n"), "exactly once");
+    const read_back = "      - name: the macOS wheel read back\n";
+    const read_back_step = text[std.mem.indexOf(u8, text, read_back).?..std.mem.indexOf(u8, text, "      - name: build the macOS smoke driver\n").?];
+    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, read_back_step, try std.mem.concat(ar, u8, &.{ read_back_step, read_back_step })), "exactly once");
+    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      - name: the macOS wheel read back\n" ++ PRESENT_GATE ++ "\n", "      - name: the macOS wheel read back\n"), "a Mac build of build-macos-arm64 does not carry the present gate");
     try expectRefusedPypi(ar, w.linux, try replaced(ar, text, "//python/smoke:pypi_smoke_macos_arm64 --out", "//python:komira_wheel_macos_arm64[release] --out"), "exactly once");
     try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      version: ${{ steps.dist.outputs.version }}\n", "      version: 0.1.0\n"), "does not publish the version");
 }
@@ -1054,7 +1060,7 @@ test "the pull request's check set names neither the macOS set, the macOS wheel'
             std.debug.print("{s} names the macOS set\n", .{name});
             return error.MacosSetInCheck;
         }
-        for ([_][]const u8{ "komira_wheel_macos_arm64", "wheel_install_test_macos_arm64", "pypi_smoke_macos_arm64" }) |target| {
+        for ([_][]const u8{ "komira_wheel_macos_arm64", "wheel_install_test_macos_arm64", "wheel_libs_macos_arm64", "wheel_same_macos_arm64", "pypi_smoke_macos_arm64" }) |target| {
             if (std.mem.indexOf(u8, text, target) != null) {
                 std.debug.print("{s} names the macOS wheel target {s}\n", .{ name, target });
                 return error.MacosSetInCheck;
