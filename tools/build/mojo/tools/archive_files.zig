@@ -93,9 +93,24 @@ pub fn gunzip(a: std.mem.Allocator, data: []const u8) ![]u8 {
     return out.written();
 }
 
+/// The bytes of the plain gzip file `data`, one member: its trailer (the
+/// CRC-32 and the length modulo 2^32 of the bytes, little-endian, in its last
+/// 8 bytes) must match what the stream inflates to, so a truncated or damaged
+/// file is refused. Data shorter than the 10-byte header and the 8-byte trailer
+/// together is refused before it is inflated.
+pub fn gunzipChecked(a: std.mem.Allocator, data: []const u8) ![]u8 {
+    if (data.len < 18) return error.GzipTooShort;
+    const plain = try gunzip(a, data);
+    const crc = std.mem.readInt(u32, data[data.len - 8 ..][0..4], .little);
+    const size = std.mem.readInt(u32, data[data.len - 4 ..][0..4], .little);
+    if (crc != std.hash.Crc32.hash(plain)) return error.GzipChecksumMismatch;
+    if (size != @as(u32, @truncate(plain.len))) return error.GzipLengthMismatch;
+    return plain;
+}
+
 /// Extracts the plain gzip file `data` into `dest` as the one file `member`.
 pub fn extractGzip(a: std.mem.Allocator, dest: std.fs.Dir, member: []const u8, data: []const u8) !void {
-    const plain = try gunzip(a, data);
+    const plain = try gunzipChecked(a, data);
     const f = try dest.createFile(member, .{ .mode = 0o644 });
     defer f.close();
     try f.writeAll(plain);

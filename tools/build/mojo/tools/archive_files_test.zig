@@ -469,15 +469,29 @@ test "extractGzip: a .tar.gz is still a tar: kindOf says so and gunzip yields th
     try t.expectEqualStrings("tar", try tmp.dir.readFile("p/f", &buf));
 }
 
-test "gunzip: a stream that is not gzip, and a stream with a wrong checksum, are refused" {
+test "gunzipChecked: a stream that is not gzip, a wrong checksum, a wrong length and a truncated stream are refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     var tmp = t.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     try t.expect(if (A.extractGzip(a, tmp.dir, "x", "this is not gzip at all")) |_| false else |_| true);
-    const z = try gzip(a, "payload");
-    z[z.len - 8] ^= 0xff;
-    try t.expect(if (A.gunzip(a, z)) |_| false else |_| true);
-    try t.expect(if (A.gunzip(a, z[0..12])) |_| false else |_| true);
+    const good = try gzip(a, "payload");
+    try t.expectEqualStrings("payload", try A.gunzipChecked(a, good));
+    const bad_crc = try a.dupe(u8, good);
+    bad_crc[bad_crc.len - 8] ^= 0xff;
+    try t.expectError(error.GzipChecksumMismatch, A.gunzipChecked(a, bad_crc));
+    try t.expect(if (A.extractGzip(a, tmp.dir, "y", bad_crc)) |_| false else |_| true);
+    try t.expectError(error.FileNotFound, tmp.dir.statFile("y"));
+}
+
+test "gunzipChecked: a wrong length in the trailer, and a stream shorter than any gzip file, are refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const good = try gzip(a, "payload");
+    const bad_len = try a.dupe(u8, good);
+    bad_len[bad_len.len - 4] ^= 0x01;
+    try t.expectError(error.GzipLengthMismatch, A.gunzipChecked(a, bad_len));
+    try t.expectError(error.GzipTooShort, A.gunzipChecked(a, good[0..12]));
 }
