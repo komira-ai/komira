@@ -1,10 +1,12 @@
 # =============================================================================
-# engine_write -- write a query's result as a local Parquet file
+# engine_write -- write a query's result as a local Parquet, CSV or JSON file
 # =============================================================================
 #
-# `COPY <table or (query)> TO '<path>' (FORMAT parquet, ...)` runs its query
-# like any other, then `write_parquet_result` encodes the result batch with
-# `parquet_writer` and writes it with `fs.atomic_write.write_file_atomic`: a
+# `COPY <table or (query)> TO '<path>' (FORMAT ..., ...)` runs its query like
+# any other, then `write_copy_result` encodes the result batch (Parquet with
+# `parquet_writer`, CSV and newline-delimited JSON with `engine_write_text`,
+# compressed whole for gzip or zstd) and writes it with
+# `fs.atomic_write.write_file_atomic`: a
 # temporary file in the destination's directory, synced and renamed over the
 # destination. A failure leaves no temporary file and the destination as it
 # was, so `COPY (SELECT * FROM 'a.parquet') TO 'a.parquet'` replaces the file
@@ -13,13 +15,26 @@
 # (`count_result`).
 #
 # Refused by name before any file is touched:
-#   COPY_FORMAT_UNSUPPORTED  FORMAT csv or json (only Parquet is written yet)
-#   STORAGE_URL_REFUSED      a destination URL (`s3://...`): local paths only
-#   COPY_TYPE_UNSUPPORTED    a column the writer has no annotated Parquet type
-#                            for (timestamps, times, durations, DATE64, the
-#                            unsigned and narrow integers, binary, nested)
+#   STORAGE_URL_REFUSED          a destination URL (`s3://...`): local paths
+#                                only (step `bind`)
+#   COPY_COMPRESSION_UNSUPPORTED CSV or JSON with COMPRESSION lz4, which
+#                                DuckDB does not write either (step `bind`)
+#   COPY_TYPE_UNSUPPORTED        a column the writer has no annotated Parquet
+#                                type for (timestamps, times, durations,
+#                                DATE64, the unsigned and narrow integers,
+#                                binary, nested), or, for CSV and JSON, a
+#                                timestamp, time, duration, DATE64, binary or
+#                                nested column (step `execute`)
+#   COPY_DUPLICATE_COLUMN        CSV or JSON of a result with two columns of
+#                                one name, which DuckDB would have renamed
+#                                (step `execute`)
 #
-# What the file is: one row group per 122,880 rows (`DEFAULT_MAX_ROWS_PER_RG`);
+# A CSV or JSON file holds the bytes DuckDB's COPY writes for the same
+# result (`engine_write_text` says which); COMPRESSION gzip (level 6) or zstd
+# (level 3), or a `.gz` or `.zst` destination with no COMPRESSION, compresses
+# the whole file.
+#
+# What a Parquet file is: one row group per 122,880 rows (`DEFAULT_MAX_ROWS_PER_RG`);
 # column names and order are the result's; a nullable column is OPTIONAL and a
 # NOT NULL one REQUIRED; DECIMAL is FIXED_LEN_BYTE_ARRAY(16) with its precision
 # and scale; DATE is INT32 annotated DATE; strings are UTF8. An empty result is
@@ -36,6 +51,7 @@ from arrow.write_target import (
     WCOMP_LZ4,
     WCOMP_UNCOMPRESSED,
     WCOMP_ZSTD,
+    WFMT_CSV,
     WFMT_PARQUET,
     write_format_name,
 )
@@ -44,8 +60,19 @@ from fs.atomic_write import write_file_atomic
 from parquet_api.types import CompressionCodec
 from parquet_writer.record_batch_writer import write_record_batch_to_parquet_bytes
 
-comptime COPY_FORMAT_UNSUPPORTED = "COPY_FORMAT_UNSUPPORTED"
-"""Refusal (step `bind`): a COPY to CSV or JSON, which is not written yet."""
+from .engine_write_text import (
+    compress_text,
+    encode_csv,
+    encode_ndjson,
+    text_writable,
+)
+
+comptime COPY_COMPRESSION_UNSUPPORTED = "COPY_COMPRESSION_UNSUPPORTED"
+"""Refusal (step `bind`): a COPY to CSV or JSON with COMPRESSION lz4."""
+
+comptime COPY_DUPLICATE_COLUMN = "COPY_DUPLICATE_COLUMN"
+"""Refusal (step `execute`, before any file is touched): a COPY to CSV or
+JSON of a result two of whose columns have one name."""
 
 comptime STORAGE_URL_REFUSED = "STORAGE_URL_REFUSED"
 """Refusal (step `bind`): a COPY destination that is a URL; only a local path
@@ -53,26 +80,27 @@ is written."""
 
 comptime COPY_TYPE_UNSUPPORTED = "COPY_TYPE_UNSUPPORTED"
 """Refusal (step `execute`, before any file is touched): a result column whose
-type the Parquet writer cannot write with its annotation."""
+type the file's writer cannot write (for Parquet, with its annotation)."""
 
 comptime COPY_COUNT_COLUMN = "Count"
 """The name of the one column a COPY answers, as DuckDB names it."""
 
 
-def check_copy_target(dest: String, fmt: UInt8) raises:
+def check_copy_target(dest: String, fmt: UInt8, codec: UInt8) raises:
     """Refuse a COPY this engine does not write: a destination URL
-    (`STORAGE_URL_REFUSED`) or a format other than Parquet
-    (`COPY_FORMAT_UNSUPPORTED`)."""
+    (`STORAGE_URL_REFUSED`), or CSV or JSON with the WCOMP_* `codec` lz4
+    (`COPY_COMPRESSION_UNSUPPORTED`)."""
     if dest.find("://") >= 0:
         raise Error(
             String(STORAGE_URL_REFUSED) + ": COPY ... TO '" + dest
             + "': only a local file path is written"
         )
-    if fmt != WFMT_PARQUET:
+    if fmt != WFMT_PARQUET and codec == WCOMP_LZ4:
         raise Error(
-            String(COPY_FORMAT_UNSUPPORTED) + ": COPY ... TO '" + dest
+            String(COPY_COMPRESSION_UNSUPPORTED) + ": COPY ... TO '" + dest
             + "' (FORMAT " + String(write_format_name(fmt))
-            + "): only FORMAT parquet is written"
+            + ", COMPRESSION lz4): CSV and JSON are written uncompressed, with"
+            " gzip or with zstd"
         )
 
 
@@ -130,6 +158,58 @@ def write_parquet_result(
     var bytes = write_record_batch_to_parquet_bytes(rows, _parquet_codec(codec))
     write_file_atomic(dest, Span(bytes))
     return rows.num_rows()
+
+
+def write_text_result(
+    var batch: RecordBatch, dest: String, fmt: UInt8, codec: UInt8
+) raises -> Int:
+    """Write `batch` to the local file `dest` as CSV (`fmt` WFMT_CSV) or
+    newline-delimited JSON (any other `fmt`), compressed by the WCOMP_*
+    `codec` (`compress_text`), all or nothing, and return the rows written.
+
+    Raises:
+        `COPY_TYPE_UNSUPPORTED` naming the first column of a type that is not
+        written, or `COPY_DUPLICATE_COLUMN` naming a name two columns have,
+        before any file is touched; `STORAGE_NOT_FOUND` or `STORAGE_IO` from
+        `write_file_atomic`, with `dest` unchanged.
+    """
+    var name = String("CSV") if fmt == WFMT_CSV else String("JSON")
+    for c in range(batch.num_columns()):
+        var at = batch.schema.field_arrow_type(c)
+        if not text_writable(at):
+            raise Error(
+                String(COPY_TYPE_UNSUPPORTED) + ": COPY ... TO '" + dest
+                + "': column '" + batch.schema.field_name(c) + "' has type "
+                + String(at) + ", which is not written to " + name + " yet"
+            )
+        for p in range(c):
+            if batch.schema.field_name(p) == batch.schema.field_name(c):
+                raise Error(
+                    String(COPY_DUPLICATE_COLUMN) + ": COPY ... TO '" + dest
+                    + "': the result has two columns named '"
+                    + batch.schema.field_name(c) + "'; give each column of a "
+                    + name + " file its own name (AS)"
+                )
+    var rows = materialize_selection_if_present(batch^)
+    var bytes: List[UInt8]
+    if fmt == WFMT_CSV:
+        bytes = encode_csv(rows)
+    else:
+        bytes = encode_ndjson(rows)
+    var file = compress_text(bytes^, codec)
+    write_file_atomic(dest, Span(file))
+    return rows.num_rows()
+
+
+def write_copy_result(
+    var batch: RecordBatch, dest: String, fmt: UInt8, codec: UInt8
+) raises -> Int:
+    """Write `batch` to the local file `dest` in the WFMT_* format `fmt`
+    with the WCOMP_* compression `codec` (`write_parquet_result` or
+    `write_text_result`), all or nothing, and return the rows written."""
+    if fmt == WFMT_PARQUET:
+        return write_parquet_result(batch^, dest, codec)
+    return write_text_result(batch^, dest, fmt, codec)
 
 
 def count_result(rows: Int) raises -> RecordBatch:

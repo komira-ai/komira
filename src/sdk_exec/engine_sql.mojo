@@ -6,9 +6,10 @@
 # optimize, then hold each subtree the optimized plan repeats once
 # (`optimize_for_run`); lower with inputs from the same footers; run. A
 # `COPY ... TO` runs its query the same way and then writes the result as a
-# local Parquet file (`engine_write`, still step `execute`), answering one row
-# with the BIGINT column `Count`; its destination and format are checked at
-# step `bind`, so a refused COPY touches no file. A step that refuses
+# local Parquet, CSV or newline-delimited JSON file (`engine_write`, still
+# step `execute`), answering one row with the BIGINT column `Count`; its
+# destination and compression are checked at step `bind`, so a refused COPY
+# touches no file. A step that refuses
 # ends the call, and the outcome says which step and the step's own message
 # unchanged; the door retries nothing and keeps no second route. Nothing here
 # raises: a failure of any step is a value.
@@ -47,7 +48,7 @@ from sql.sql_token import tokenize
 from .engine_context import EngineContext
 from .engine_execute import run_lowered_plan
 from .engine_lower import lower_for_context
-from .engine_write import check_copy_target, count_result, write_parquet_result
+from .engine_write import check_copy_target, count_result, write_copy_result
 
 comptime STEP_PARSE = "parse"
 comptime STEP_BIND = "bind"
@@ -119,7 +120,7 @@ def optimize_for_run(var plan: LogicalPlan) raises -> LogicalPlan:
 
 def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
     """Run the SQL statement `text` against `ctx`: a query, or a
-    `COPY ... TO` a local Parquet file."""
+    `COPY ... TO` a local Parquet, CSV or JSON file."""
     ctx.begin_query()
     var step = String(STEP_PARSE)
     try:
@@ -131,7 +132,7 @@ def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
         var bound = bind_statement(stmt, ctx.catalog, ctx.footers)
         pt_record[PH_BIND](t_bind)
         if bound.kind == STMT_COPY:
-            check_copy_target(bound.dest_path, bound.fmt)
+            check_copy_target(bound.dest_path, bound.fmt, bound.codec)
         elif bound.kind != STMT_QUERY:
             raise Error(
                 String(STATEMENT_NOT_A_QUERY)
@@ -152,7 +153,9 @@ def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
         var batch = run_lowered_plan(ctx, lowered^)
         var outcome = SqlOutcome()
         if bound.kind == STMT_COPY:
-            var rows = write_parquet_result(batch^, bound.dest_path, bound.codec)
+            var rows = write_copy_result(
+                batch^, bound.dest_path, bound.fmt, bound.codec
+            )
             outcome.batches.append(count_result(rows))
         else:
             outcome.batches.append(batch^)
