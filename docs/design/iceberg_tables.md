@@ -680,6 +680,7 @@ Every error message starts with its token, and the Python layer maps each `ICEBE
 | `ICEBERG_LOCATION_REFUSED` | committer | a data or metadata path outside the table's location and the vended prefixes, or a scheme with no store |
 | `ICEBERG_COMMIT_CONFLICT` | committer | a 409 that ends the statement: the budget is spent, the plan read its target, or a replace's ids moved |
 | `ICEBERG_COMMIT_STATE_UNKNOWN` | committer | the outcome could not be determined, including a tainted statement that a 409 ends; names the snapshot id, the commit id and the manifest list |
+| `ICEBERG_MANIFEST_LIST_UNSUPPORTED` | sink | an append onto a `main` snapshot whose manifest list another writer wrote, until the general manifest-list reader of step 1 lands; an overwrite does not read it |
 | `ICEBERG_TABLE_REPLACED` | committer | the table uuid differs from the plan's |
 | `ICEBERG_SCHEMA_INCOMPATIBLE` | committer | a written column was dropped or changed type incompatibly |
 | `ICEBERG_WRITE_FORMAT_UNSUPPORTED` | committer | a write to a v1 or v3 table |

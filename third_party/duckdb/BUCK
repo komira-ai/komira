@@ -25,10 +25,11 @@ _LICENSE_SIZE = 1072
 # binary), the `csv_oracle` of src/sdk_exec (DuckDB's answers to the read_csv
 # cases test_run_sql_csv holds run_sql to; test data only), and the fixtures of
 # the rule's own
-# tests in the `tests` cell. `komira//src/iceberg_catalog:` runs the iceberg and
-# avro extensions below over the Iceberg tables the catalog package writes, to
-# read them back with a reader that is not komira's. That cell exists only in komira's own checkout; a label naming it would fail to load in a
+# tests in the `tests` cell. That cell exists only in komira's own checkout; a label naming it would fail to load in a
 # repository that uses komira as a cell, so it is named only when it exists.
+# `komira//src/iceberg_catalog:` loads the iceberg and avro extensions below
+# into a sql_oracle to read back the Iceberg tables that package writes, with
+# a reader that is not komira's.
 _USERS = ["komira//src/tests/...", "komira//src/bench_q6_phases:", "komira//src/sdk_exec:", "komira//src/tpch_answers:", "komira//src/iceberg_catalog:"] + ([
     "tests//functional/sql_oracle:",
     "tests//negative/sql_oracle:",
