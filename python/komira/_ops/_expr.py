@@ -377,6 +377,110 @@ class Alias:
             raise ValueError("an Alias cannot wrap another Alias")
 
 
+def _utf8_key(name):
+    return name.encode("utf-8")
+
+
+@dataclass(frozen=True, slots=True)
+class UdfSpec:
+    """A captured user function, as the plan names it: its call shape, where
+    its code is, and its declared types. Built by komira._capture; nothing here
+    reads code or hashes bytes.
+
+    - `name`: the function's qualified name, for messages.
+    - `kind`: one of `_vocab.UDF_KINDS`.
+    - `form`, `entry`: how the komira/python runtime reaches the code
+      (`"package"` or `"bundle"`) and its `"module:qualname"`.
+    - `code`: `(role, sha256)` of every code object, the digest 32 bytes:
+      one `("bundle", ...)` for a bundle, none for a package.
+    - `return_type`: a dtype of `_vocab.UDF_DTYPES` for a column kind; for
+      `map_batches_frame`, the output columns as `(name, dtype)` pairs.
+    - `stability`, `null_mode`, `batch_format`: the declarations of
+      `_vocab.UDF_STABILITIES`, `UDF_NULL_MODES` and `UDF_BATCH_FORMATS`.
+    - `read_set`: the columns a `row` or `map_batches_frame` function reads,
+      ascending by UTF-8 bytes, possibly empty; `None` for every other kind.
+    """
+
+    name: str
+    kind: str
+    form: str
+    entry: str
+    code: tuple
+    return_type: object
+    stability: str
+    null_mode: str
+    batch_format: str
+    read_set: tuple | None = None
+
+    def __post_init__(self):
+        _need_name(self.name, "name", "UdfSpec")
+        _need_op(self.kind, _vocab.UDF_KINDS, "UdfSpec kind")
+        _need_op(self.form, _vocab.UDF_FORMS, "UdfSpec form")
+        _need_name(self.entry, "entry", "UdfSpec")
+        if self.entry.count(":") != 1 or "" in self.entry.split(":"):
+            raise ValueError(f"UdfSpec.entry must be 'module:qualname', not {self.entry!r}")
+        _need_tuple(self.code, "code", "UdfSpec")
+        for item in self.code:
+            if not (isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str) and item[0]):
+                raise TypeError("UdfSpec.code holds (role, sha256) pairs with a non-empty role")
+            if not isinstance(item[1], bytes) or len(item[1]) != 32:
+                raise ValueError("UdfSpec.code digests are 32 bytes")
+        if (self.form == "bundle") != (len(self.code) == 1 and self.code[0][0] == "bundle"):
+            raise ValueError("UdfSpec.code is one ('bundle', sha256) for a bundle and empty for a package")
+        if self.kind == "map_batches_frame":
+            _need_tuple(self.return_type, "return_type", "UdfSpec")
+            names = []
+            for item in self.return_type:
+                if not (isinstance(item, tuple) and len(item) == 2):
+                    raise TypeError("UdfSpec.return_type of a frame holds (name, dtype) pairs")
+                _need_name(item[0], "return_type name", "UdfSpec")
+                _need_op(item[1], _vocab.UDF_DTYPES, "UdfSpec return_type dtype")
+                names.append(item[0])
+            if not names:
+                raise ValueError("UdfSpec.return_type of a frame names at least one column")
+            if len(set(names)) != len(names):
+                raise ValueError("UdfSpec.return_type of a frame repeats a column name")
+        else:
+            _need_op(self.return_type, _vocab.UDF_DTYPES, "UdfSpec return_type")
+        _need_op(self.stability, _vocab.UDF_STABILITIES, "UdfSpec stability")
+        _need_op(self.null_mode, _vocab.UDF_NULL_MODES, "UdfSpec null_mode")
+        _need_op(self.batch_format, _vocab.UDF_BATCH_FORMATS, "UdfSpec batch_format")
+        if self.kind in _vocab.UDF_READ_SET_KINDS:
+            if self.read_set is None:
+                raise ValueError(f"UdfSpec.read_set is required for a {self.kind} function")
+            _need_tuple(self.read_set, "read_set", "UdfSpec")
+            for name in self.read_set:
+                _need_name(name, "read_set name", "UdfSpec")
+            if list(self.read_set) != sorted(set(self.read_set), key=_utf8_key):
+                raise ValueError("UdfSpec.read_set must ascend by UTF-8 bytes with no repeats")
+        elif self.read_set is not None:
+            raise ValueError(f"UdfSpec.read_set is only for a row or map_batches_frame function, not {self.kind}")
+
+
+@dataclass(frozen=True, slots=True)
+class UdfCall:
+    """A call of a column-kind user function (`scalar`, `map_batches_column`
+    or `row`) on argument expressions. A `row` call's arguments are its read
+    set's columns, in the set's order."""
+
+    udf: UdfSpec
+    args: tuple
+
+    def __post_init__(self):
+        if not isinstance(self.udf, UdfSpec):
+            raise TypeError(f"UdfCall.udf must be a UdfSpec, not {type(self.udf).__name__}")
+        if self.udf.kind not in _vocab.UDF_COLUMN_KINDS:
+            raise ValueError(f"UdfCall calls a column function, and {self.udf.name} is a {self.udf.kind} function")
+        _need_tuple(self.args, "args", "UdfCall")
+        for arg in self.args:
+            _need_node(arg, "args", "UdfCall")
+        if self.udf.kind == "row":
+            if self.args != tuple(ColRef(c) for c in self.udf.read_set):
+                raise ValueError(f"UdfCall of the row function {self.udf.name} passes exactly its read set's columns")
+        elif not self.args:
+            raise ValueError(f"UdfCall of {self.udf.name} takes at least one argument")
+
+
 Node = (
     ColRef
     | Lit
@@ -396,6 +500,7 @@ Node = (
     | Extract
     | StructField
     | Alias
+    | UdfCall
 )
 
 EXPR_NODES = (
@@ -417,6 +522,7 @@ EXPR_NODES = (
     Extract,
     StructField,
     Alias,
+    UdfCall,
 )
 
 

@@ -73,7 +73,7 @@ def test_every_node_class_is_listed():
     assert names == [
         "ColRef", "Lit", "Compare", "Arith", "BoolOp", "Unary", "Cast", "When", "StringOp",
         "Regexp", "StringFn", "StringFnN", "Substring", "MathFn", "MathFn2", "Extract",
-        "StructField", "Alias",
+        "StructField", "Alias", "UdfCall",
     ], names
 
 

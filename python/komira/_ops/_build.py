@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from ._columns import require_columns
-from ._expr import ColRef, Node, Unary, and_all
+from ._expr import ColRef, Node, UdfSpec, Unary, and_all
 from ._rel import (
     PLAN_NODES,
     Agg,
@@ -25,6 +25,7 @@ from ._rel import (
     Filter,
     Join,
     Limit,
+    MapBatches,
     Plan,
     Project,
     Scan,
@@ -44,6 +45,7 @@ __all__ = [
     "filter_",
     "join",
     "limit",
+    "map_batches",
     "rename",
     "scan",
     "select",
@@ -272,3 +274,8 @@ def concat(plans: Sequence[Plan]) -> Plan:
 def write(plan: Plan, path: str, format: str) -> Write:
     """A `Write` of the plan to a path."""
     return Write(_plan(plan, "write plan"), WriteTarget(path, format))
+
+
+def map_batches(plan: Plan, udf: UdfSpec) -> MapBatches:
+    """A `MapBatches` of the `map_batches_frame` function over the plan."""
+    return MapBatches(_plan(plan, "map_batches plan"), udf)
