@@ -27,6 +27,14 @@ local implementation:
   value codec (`key=value` directory segments, percent-escaped, with
   `__HIVE_DEFAULT_PARTITION__` for null).
 
+- `ScanFsOpener` (`scan_fs`): what an engine is handed to read a scan on a
+  store other than the local disk. It opens one file system of its `FS` type
+  per bucket a plan's scan names, or refuses the store with
+  `SCAN_FS_UNSERVED` (`scan_fs_unserved`). `FileSystem.key_prefix()` names
+  the namespace a cache shared by several file systems keys a path under:
+  empty for the local file system, the bucket's URL prefix for an object
+  store.
+
 The object-store file systems live in their own packages (for example
 `objectstore_s3`). This package does not read any file format itself.
 
@@ -149,6 +157,22 @@ try:
 except e:
     message = String(e)
 assert_true("path not found" in message)
+```
+
+The local file system's cache keys are its paths, and the refusal of a store
+no file system of the run reads names that store:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from async_rt.ops.waker_sink import NoopSink
+from fs.local_fs import LocalFs
+from fs.scan_fs import scan_fs_unserved
+
+assert_equal(LocalFs[NoopSink].new().key_prefix(), "")
+assert_equal(
+    String(scan_fs_unserved("s3://lake")),
+    "SCAN_FS_UNSERVED: no file system of this run reads s3://lake",
+)
 ```
 
 Replace a file all or nothing:

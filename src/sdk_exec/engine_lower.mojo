@@ -7,8 +7,12 @@
 # binder read, so the plan the binder saw and the plan that is lowered read one
 # version of each file. A scan of a file registered on the context is checked
 # against its registered schema (`add_catalog_table_scan`), for the files the scan holds only (a subset of
-# the table's files after partition pruning); any other Parquet scan reads the
-# facts of each of its files (`add_parquet_files_scan`). A join is descended
+# the table's files after partition pruning); any other Parquet scan of the
+# local file system reads the facts of each of its files
+# (`add_parquet_files_scan`). A scan of a remote store (an S3 bucket) has no
+# facts here: the context's footers read the local file system only, so its
+# segment records no row estimate, and its footers are first read when the
+# engine runs it. A join is descended
 # into left child first, then right, as the cutter walks it whichever side
 # builds; every join is, the ones the cutter then refuses included, so the
 # facts of a refused join's scans are read before the refusal. Any other node
@@ -73,6 +77,11 @@ def _add_scan_facts(
     ref sd = node.scan_data_ref()
     if sd.source.tag == SOURCE_VARIANT_PARQUET:
         ref ps = sd.source._parquet.value()
+        if not ps.fs_descriptor.is_local():
+            # Checked first: a local table registered at a path that is also
+            # an object key is not this scan's table.
+            inputs.add_scan()
+            return
         var table = _table_of_paths(ps.paths, ctx)
         if table.byte_length() > 0:
             add_catalog_table_scan(inputs, ctx.catalog, table, ctx.footers, ps)

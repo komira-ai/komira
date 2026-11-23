@@ -30,17 +30,24 @@ from komira._ops import (
     UdfSpec,
 )
 from komira._plan import encode_expr, encode_plan, expr_field, parquet_source
-from komira._plan._udf import UdfTable
+from komira._plan._udf import UdfTable, _check_carried
 from komira.plan.v1 import plan_pb2 as pb
 from komira.plan.v1 import plan_vocabulary_pb2 as vocab
 
 DIGEST = bytes(range(32))
 OTHER = bytes(range(1, 33))
-DTYPES = {
-    "int32": vocab._DT_INT32,
-    "int64": vocab._DT_INT64,
-    "float64": vocab._DT_FLOAT64,
-}
+# The DType code a field of each carried Arrow type has: the type's own for a
+# numeric one, int64 for a timestamp, none for the others.
+DTYPES = {n: getattr(vocab, "_DT_" + n.upper()) for n in ("bool", "int8", "int16", "int32", "int64", "float32", "float64")}
+DTYPES.update({n: vocab._DT_INT64 for n in ("timestamp_s", "timestamp_ms", "timestamp_us", "timestamp_ns")})
+
+# What a refusal says of a type the runtime does not carry, of a timestamp_ns
+# a values function is given, and how it names the item or the field of a
+# nested type whose child is the one refused.
+NOT_CARRIED = "which the komira/python runtime does not carry"
+VALUES_NS = "which a values function cannot take: datetime.datetime holds microseconds"
+LIST_ITEM = "{arrow}, whose item has the Arrow type {child}"
+STRUCT_FIELD = "{arrow}, whose field '{name}' has the Arrow type {child}"
 
 
 def type_id(arrow):
@@ -54,6 +61,18 @@ def column(name, arrow, nullable=True, **slots):
     if arrow in DTYPES:
         slots.setdefault("dtype_code", DTYPES[arrow])
     return pb.WireField(name=name, arrow_type_id=type_id(arrow), nullable=nullable, **slots)
+
+
+def nested(name, arrow, *children, **slots):
+    """A list or struct column with one flat level of (name, Arrow type) children."""
+    return column(
+        name,
+        arrow,
+        child_names=[n for n, _ in children],
+        child_type_ids=[type_id(t) for _, t in children],
+        child_nullables=[True] * len(children),
+        **slots,
+    )
 
 
 def scan_of(path, *fields):
@@ -75,7 +94,29 @@ FIELDS = (
     column("k", "int64", False, metadata_keys=["unit"], metadata_values=["id"]),
     column("s", "string"),
     column("f", "float32"),
+    column("bl", "bool"),
+    column("bn", "binary"),
+    column("lb", "large_binary"),
+    column("ls", "large_string"),
+    column("dt", "date32"),
+    column("t_ms", "timestamp_ms"),
+    column("t_ns", "timestamp_ns"),
+    column("t_utc", "timestamp_us", tz="UTC"),
+    column("dec", "decimal128", decimal_precision=10, decimal_scale=2),
+    nested("li", "list", ("item", "int64")),
+    nested("lls", "large_list", ("item", "string")),
+    nested("st", "struct", ("a", "int64"), ("b", "string")),
+    nested("l_tns", "list", ("item", "timestamp_ns")),
+    nested("l_dec", "list", ("item", "decimal128")),
+    nested("l_l", "list", ("item", "list")),
+    nested("s_l", "struct", ("a", "int64"), ("b", "list")),
+    column("u8", "uint8"),
+    column("h", "float16"),
+    column("mp", "map"),
 )
+BY_NAME = {f.name: f for f in FIELDS}
+# The columns a function that takes values can read, one per carried type.
+VALUES_COLUMNS = ("a", "b", "f", "z", "bl", "s", "ls", "bn", "lb", "dt", "t_ms", "t_utc", "dec", "li", "lls", "st")
 T, SOURCES = scan_of("/data/t.parquet", *FIELDS)
 U, U_SOURCES = scan_of("/data/u.parquet", column("a", "int64"), column("w", "int64"))
 
@@ -446,61 +487,327 @@ def test_one_frame_function_over_the_same_column_type_is_one_ref():
     assert env.plan.map_batches.child.map_batches.udf_index == 0
 
 
-def message(what, name, arrow, fn):
+def message(fn, what, arrow, tail=NOT_CARRIED):
+    return f"{fn}: the {what} has the Arrow type {arrow}, {tail}"
+
+
+def shape(f):
+    """What a field says of its type: the slots a runtime reads."""
     return (
-        f"{fn}: the {what} '{name}' has the Arrow type {arrow}, and the komira/python runtime "
-        "carries only int32, int64 and float64"
+        f.name,
+        f.arrow_type_id,
+        f.nullable,
+        f.decimal_precision,
+        f.decimal_scale,
+        f.tz,
+        list(f.child_names),
+        list(f.child_type_ids),
+        list(f.child_nullables),
+        len(f.children),
     )
 
 
 def test_an_argument_of_a_type_the_runtime_does_not_carry_is_refused():
     refuses(
-        lambda: encoded(project(T, ("r", UdfCall(scalar(), (ColRef("a"), ColRef("s")))))),
+        lambda: encoded(project(T, ("r", UdfCall(scalar(), (ColRef("a"), ColRef("u8")))))),
         UnsupportedOperation,
-        "m.g: the argument 1 has the Arrow type string, and the komira/python runtime "
-        "carries only int32, int64 and float64",
+        message("m.g", "argument 1", "uint8"),
     )
     refuses(
-        lambda: encoded(project(T, ("r", UdfCall(scalar(kind="map_batches_column"), (ColRef("f"),))))),
+        lambda: encoded(project(T, ("r", UdfCall(scalar(kind="map_batches_column"), (ColRef("h"),))))),
         UnsupportedOperation,
-        "m.g: the argument 0 has the Arrow type float32, and the komira/python runtime "
-        "carries only int32, int64 and float64",
+        message("m.g", "argument 0", "float16"),
     )
     refuses(
-        lambda: encoded(project(T, ("r", UdfCall(scalar(), (Compare("gt", ColRef("a"), Lit(1)),))))),
+        lambda: encoded(project(T, ("r", UdfCall(scalar(), (ColRef("mp"),))))),
         UnsupportedOperation,
-        "m.g: the argument 0 has the Arrow type bool, and the komira/python runtime "
-        "carries only int32, int64 and float64",
+        message("m.g", "argument 0", "map"),
     )
     refuses(
-        lambda: expr_field(UdfCall(scalar(), (ColRef("s"),)), FIELDS),
+        lambda: expr_field(UdfCall(scalar(), (ColRef("h"),)), FIELDS),
         UnsupportedOperation,
-        "m.g: the argument 0 has the Arrow type string, and the komira/python runtime "
-        "carries only int32, int64 and float64",
+        message("m.g", "argument 0", "float16"),
     )
+
+
+def test_a_list_or_struct_argument_with_a_child_the_runtime_does_not_carry_is_refused():
+    refuses(
+        lambda: encoded(project(T, ("r", UdfCall(scalar(), (ColRef("l_dec"),))))),
+        UnsupportedOperation,
+        message("m.g", "argument 0", LIST_ITEM.format(arrow="list", child="decimal128")),
+    )
+    refuses(
+        lambda: encoded(project(T, ("r", UdfCall(scalar(), (ColRef("a"), ColRef("l_l")))))),
+        UnsupportedOperation,
+        message("m.g", "argument 1", LIST_ITEM.format(arrow="list", child="list")),
+    )
+    refuses(
+        lambda: encoded(project(T, ("r", UdfCall(scalar(), (ColRef("s_l"),))))),
+        UnsupportedOperation,
+        message("m.g", "argument 0", STRUCT_FIELD.format(arrow="struct", name="b", child="list")),
+    )
+
+
+def carried(f, spec=None):
+    """What `_check_carried` says of the one argument `f` of `spec`."""
+    return _check_carried(spec or scalar(), [f])
+
+
+def refused_argument(f, arrow):
+    refuses(lambda: carried(f), UnsupportedOperation, message("m.g", "argument 0", arrow))
+
+
+def test_a_decimal_column_with_a_precision_or_scale_out_of_range_is_refused():
+    for precision, scale in ((0, 0), (0, 2), (39, 0), (100, 2), (5, 6), (1, 2), (38, 39)):
+        refused_argument(column("d", "decimal128", decimal_precision=precision, decimal_scale=scale), "decimal128")
+    refuses(
+        lambda: carried(column("d", "decimal128", decimal_precision=0, decimal_scale=0), row(read_set=("d",))),
+        UnsupportedOperation,
+        message("m.r", "column 'd'", "decimal128"),
+    )
+
+
+def test_a_decimal_column_with_a_precision_and_scale_in_range_is_carried():
+    for precision, scale in ((1, 0), (1, 1), (10, 2), (38, 0), (38, 38)):
+        assert carried(column("d", "decimal128", decimal_precision=precision, decimal_scale=scale)) is None
+
+
+def test_a_list_column_with_other_than_one_item_is_refused():
+    refused_argument(nested("l2", "list", ("item", "int64"), ("item", "string")), "list")
+    refused_argument(nested("l2", "large_list", ("item", "int64"), ("item", "string")), "large_list")
+    refused_argument(nested("l0", "list"), "list")
+    refused_argument(nested("l0", "large_list"), "large_list")
+    assert carried(nested("l1", "list", ("item", "int64"))) is None
+    assert carried(nested("l1", "large_list", ("item", "string"))) is None
+
+
+def test_a_struct_column_with_no_child_is_refused():
+    refused_argument(nested("s0", "struct"), "struct")
+    refuses(
+        lambda: carried(nested("s0", "struct"), frame(read_set=("s0",))),
+        UnsupportedOperation,
+        message("m.f", "column 's0'", "struct"),
+    )
+    assert carried(nested("s1", "struct", ("a", "int64"))) is None
+
+
+def test_a_struct_with_children_in_field_16_takes_flat_fields_and_refuses_a_list_field():
+    flat = column("st", "struct", children=[column("a", "int64"), column("b", "string")])
+    assert carried(flat) is None
+    listed = column("st", "struct", children=[column("a", "int64"), nested("b", "list", ("item", "int64"))])
+    refused_argument(listed, STRUCT_FIELD.format(arrow="struct", name="b", child="list"))
 
 
 def test_a_read_set_column_of_a_type_the_runtime_does_not_carry_is_refused():
     refuses(
-        lambda: encoded(project(T, ("r", UdfCall(row(read_set=("a", "s")), (ColRef("a"), ColRef("s")))))),
+        lambda: encoded(project(T, ("r", UdfCall(row(read_set=("a", "u8")), (ColRef("a"), ColRef("u8")))))),
         UnsupportedOperation,
-        message("column", "s", "string", "m.r"),
+        message("m.r", "column 'u8'", "uint8"),
     )
     refuses(
-        lambda: encoded(MapBatches(T, frame(read_set=("a", "f")))),
+        lambda: encoded(MapBatches(T, frame(read_set=("a", "h")))),
         UnsupportedOperation,
-        message("column", "f", "float32", "m.f"),
+        message("m.f", "column 'h'", "float16"),
+    )
+    refuses(
+        lambda: encoded(MapBatches(T, frame(read_set=("l_dec",)))),
+        UnsupportedOperation,
+        message("m.f", "column 'l_dec'", LIST_ITEM.format(arrow="list", child="decimal128")),
     )
 
 
 def test_a_nested_call_with_an_unsupported_argument_is_refused_by_the_outer_call():
-    inner = UdfCall(scalar(name="m.in", entry="m:in", return_type="int32"), (ColRef("s"),))
+    inner = UdfCall(scalar(name="m.in", entry="m:in", return_type="int32"), (ColRef("u8"),))
     refuses(
         lambda: encoded(project(T, ("r", UdfCall(scalar(), (inner,))))),
         UnsupportedOperation,
-        "m.in: the argument 0 has the Arrow type string, and the komira/python runtime "
-        "carries only int32, int64 and float64",
+        message("m.in", "argument 0", "uint8"),
     )
+
+
+def test_a_timestamp_ns_argument_of_a_values_function_is_refused():
+    refuses(
+        lambda: encoded(project(T, ("r", UdfCall(scalar(), (ColRef("a"), ColRef("t_ns")))))),
+        UnsupportedOperation,
+        message("m.g", "argument 1", "timestamp_ns", VALUES_NS),
+    )
+    refuses(
+        lambda: encoded(project(T, ("r", UdfCall(row(read_set=("a", "t_ns")), (ColRef("a"), ColRef("t_ns")))))),
+        UnsupportedOperation,
+        message("m.r", "column 't_ns'", "timestamp_ns", VALUES_NS),
+    )
+    refuses(
+        lambda: encoded(MapBatches(T, frame(read_set=("t_ns",)))),
+        UnsupportedOperation,
+        message("m.f", "column 't_ns'", "timestamp_ns", VALUES_NS),
+    )
+    refuses(
+        lambda: expr_field(UdfCall(scalar(), (ColRef("t_ns"),)), FIELDS),
+        UnsupportedOperation,
+        message("m.g", "argument 0", "timestamp_ns", VALUES_NS),
+    )
+
+
+def test_a_list_of_timestamp_ns_argument_of_a_values_function_is_refused():
+    refuses(
+        lambda: encoded(project(T, ("r", UdfCall(scalar(), (ColRef("l_tns"),))))),
+        UnsupportedOperation,
+        message("m.g", "argument 0", LIST_ITEM.format(arrow="list", child="timestamp_ns"), VALUES_NS),
+    )
+
+
+def test_a_timestamp_ns_argument_is_carried_by_a_function_that_takes_arrow_batches():
+    spec = scalar(kind="map_batches_column", batch_format="arrow")
+    ref = call_ref(spec, ColRef("t_ns"))
+    assert list(ref.arg_types) == [column("t_ns", "timestamp_ns")]
+    ref = call_ref(spec, ColRef("l_tns"))
+    assert list(ref.arg_types) == [nested("l_tns", "list", ("item", "timestamp_ns"))]
+    ref = first_ref(MapBatches(T, frame(read_set=("a", "t_ns"), batch_format="arrow")))
+    assert list(ref.arg_types) == [column("a", "int64"), column("t_ns", "timestamp_ns")]
+
+
+def test_a_timestamp_ns_result_of_a_values_function_is_carried():
+    ref = call_ref(scalar(return_type="timestamp[ns]"), ColRef("a"))
+    assert ref.return_type == column("out", "timestamp_ns")
+    ref = call_ref(scalar(return_type="timestamp[ns, tz=UTC]"), ColRef("a"))
+    assert ref.return_type == column("out", "timestamp_ns", tz="UTC")
+
+
+def test_an_argument_of_each_carried_type_is_carried_with_its_parameters():
+    for name in VALUES_COLUMNS:
+        ref = call_ref(scalar(), ColRef(name))
+        assert [shape(f) for f in ref.arg_types] == [shape(BY_NAME[name])], name
+        assert ref.arg_types[0].arrow_type_id == BY_NAME[name].arrow_type_id, name
+    ref = call_ref(scalar(), ColRef("s"))
+    assert list(ref.arg_types) == [column("s", "string")]
+    ref = call_ref(scalar(), ColRef("dec"))
+    assert list(ref.arg_types) == [column("dec", "decimal128", decimal_precision=10, decimal_scale=2)]
+    ref = call_ref(scalar(), ColRef("t_utc"))
+    assert list(ref.arg_types) == [column("t_utc", "timestamp_us", tz="UTC")]
+    ref = call_ref(scalar(), ColRef("li"))
+    assert list(ref.arg_types) == [nested("li", "list", ("item", "int64"))]
+    assert list(ref.arg_types[0].child_names) == ["item"]
+    ref = call_ref(scalar(), ColRef("lls"))
+    assert list(ref.arg_types) == [nested("lls", "large_list", ("item", "string"))]
+    ref = call_ref(scalar(), ColRef("st"))
+    assert list(ref.arg_types) == [nested("st", "struct", ("a", "int64"), ("b", "string"))]
+    ref = call_ref(scalar(), Compare("gt", ColRef("a"), Lit(1)))
+    assert [f.arrow_type_id for f in ref.arg_types] == [type_id("bool")]
+
+
+def test_a_call_takes_any_number_of_arguments_of_any_carried_types():
+    names = ("s", "dec", "t_utc", "li", "st", "bl", "a")
+    ref = call_ref(scalar(return_type="string"), *[ColRef(n) for n in names])
+    assert [f.name for f in ref.arg_types] == list(names)
+    assert [shape(f) for f in ref.arg_types] == [shape(BY_NAME[n]) for n in names]
+    ref = call_ref(scalar(return_type="string"), *[ColRef(n) for n in VALUES_COLUMNS])
+    assert [f.name for f in ref.arg_types] == list(VALUES_COLUMNS)
+
+
+# (a return type, the Arrow type of its field, the slots the field sets)
+RETURN_FIELDS = [
+    ("bool", "bool", {}),
+    ("int8", "int8", {}),
+    ("int16", "int16", {}),
+    ("int32", "int32", {}),
+    ("int64", "int64", {}),
+    ("float32", "float32", {}),
+    ("float64", "float64", {}),
+    ("string", "string", {}),
+    ("large_string", "large_string", {}),
+    ("binary", "binary", {}),
+    ("large_binary", "large_binary", {}),
+    ("date32[day]", "date32", {}),
+    ("timestamp[s]", "timestamp_s", {}),
+    ("timestamp[ms]", "timestamp_ms", {}),
+    ("timestamp[us]", "timestamp_us", {}),
+    ("timestamp[ns]", "timestamp_ns", {}),
+    ("timestamp[s, tz=UTC]", "timestamp_s", {"tz": "UTC"}),
+    ("timestamp[us, tz=Europe/Paris]", "timestamp_us", {"tz": "Europe/Paris"}),
+    ("decimal128(1, 0)", "decimal128", {"decimal_precision": 1, "decimal_scale": 0}),
+    ("decimal128(38, 38)", "decimal128", {"decimal_precision": 38, "decimal_scale": 38}),
+]
+RETURN_NESTED = [
+    ("list<item: int64>", "list", (("item", "int64"),)),
+    ("large_list<item: string>", "large_list", (("item", "string"),)),
+    ("list<item: timestamp[ns]>", "list", (("item", "timestamp_ns"),)),
+    ("list<item: date32[day]>", "list", (("item", "date32"),)),
+    ("struct<a: int64>", "struct", (("a", "int64"),)),
+    ("struct<a: int64, b: string, c: timestamp[us]>", "struct", (("a", "int64"), ("b", "string"), ("c", "timestamp_us"))),
+]
+
+
+def test_a_return_type_of_each_carried_type_is_the_nullable_field_out():
+    for dtype, arrow, slots in RETURN_FIELDS:
+        ref = call_ref(scalar(return_type=dtype), ColRef("a"))
+        assert ref.return_type == column("out", arrow, **slots), dtype
+        env = encoded(project(T, ("r", UdfCall(scalar(return_type=dtype), (ColRef("a"),)))))
+        assert list(env.plan.output_schema.fields) == [column("r", arrow, **slots)], dtype
+
+
+def test_a_list_or_struct_return_type_carries_its_flat_children_in_the_child_lists():
+    for dtype, arrow, children in RETURN_NESTED:
+        ref = call_ref(scalar(return_type=dtype), ColRef("a"))
+        assert ref.return_type == nested("out", arrow, *children), dtype
+        assert len(ref.return_type.children) == 0, dtype
+        env = encoded(project(T, ("r", UdfCall(scalar(return_type=dtype), (ColRef("a"),)))))
+        assert list(env.plan.output_schema.fields) == [nested("r", arrow, *children)], dtype
+    ref = call_ref(scalar(return_type="list<item: int64>"), ColRef("a"))
+    assert list(ref.return_type.child_names) == ["item"]
+    assert list(ref.return_type.child_type_ids) == [type_id("int64")]
+    assert list(ref.return_type.child_nullables) == [True]
+
+
+def test_the_expression_field_of_a_call_has_the_return_types_parameters():
+    call = UdfCall(scalar(return_type="decimal128(12, 4)"), (ColRef("s"),))
+    assert expr_field(call, FIELDS) == column("out", "decimal128", decimal_precision=12, decimal_scale=4)
+    call = UdfCall(scalar(return_type="struct<a: int64, b: string>"), (ColRef("li"),))
+    assert expr_field(Alias(call, "n"), FIELDS) == nested("n", "struct", ("a", "int64"), ("b", "string"))
+    assert expr_field(UdfCall(scalar(return_type="string"), (ColRef("s"),)), FIELDS) == column("out", "string")
+
+
+def test_a_row_function_records_the_fields_of_its_string_decimal_list_and_struct_columns():
+    names = ("dec", "li", "s", "st")
+    ref = call_ref(row(read_set=names), *[ColRef(n) for n in names])
+    assert list(ref.read_set.columns) == list(names)
+    assert [shape(f) for f in ref.arg_types] == [shape(BY_NAME[n]) for n in names]
+    recorded = pb.RecordedFields(fields=ref.arg_types)
+    assert recorded.SerializeToString(deterministic=True) in ref.code.descriptor
+    assert list(ref.arg_types[1].child_names) == ["item"]
+
+
+def test_a_frame_reads_and_returns_string_decimal_list_and_struct_columns():
+    schema = (
+        ("s", "string"),
+        ("d", "decimal128(10, 2)"),
+        ("l", "list<item: int64>"),
+        ("t", "timestamp[us, tz=UTC]"),
+        ("st", "struct<a: int64, b: string>"),
+    )
+    spec = frame(read_set=("dec", "li", "st"), return_type=schema, batch_format="arrow")
+    env = encoded(MapBatches(T, spec))
+    ref = env.udfs[0]
+    assert [shape(f) for f in ref.arg_types] == [shape(BY_NAME[n]) for n in ("dec", "li", "st")]
+    want = [
+        column("s", "string"),
+        column("d", "decimal128", decimal_precision=10, decimal_scale=2),
+        nested("l", "list", ("item", "int64")),
+        column("t", "timestamp_us", tz="UTC"),
+        nested("st", "struct", ("a", "int64"), ("b", "string")),
+    ]
+    assert list(ref.return_type.children) == want
+    assert list(ref.return_type.child_names) == []
+    assert list(env.plan.output_schema.fields) == want
+    assert pb.RecordedFields(fields=ref.arg_types).SerializeToString(deterministic=True) in ref.code.descriptor
+
+
+def test_a_frame_over_a_list_column_outputs_a_list_column_for_the_next_function():
+    lower = frame(name="m.low", entry="m:low", read_set=("li",), return_type=(("l", "list<item: int64>"),))
+    upper = frame(name="m.up", entry="m:up", read_set=("l",), return_type=(("n", "int64"),))
+    env = encoded(MapBatches(MapBatches(T, lower), upper))
+    assert [u.code.entry for u in env.udfs] == ["m:low", "m:up"]
+    assert list(env.udfs[1].arg_types) == [nested("l", "list", ("item", "int64"))]
+    assert list(env.plan.output_schema.fields) == [column("n", "int64")]
 
 
 def test_a_call_over_a_missing_column_is_refused_before_it_is_encoded():

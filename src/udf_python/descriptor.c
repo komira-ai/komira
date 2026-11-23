@@ -2,9 +2,10 @@
  * descriptor.c: validate, the pure check of a spec against its descriptor.
  *
  * The descriptor is a protobuf message, decoded here by hand: no library,
- * no allocation, no file opened, no process started. It must be canonical
- * (fields in ascending number, each at most once, the right wire type,
- * varints in their shortest form, no field equal to its default), so one
+ * no file opened, no process started, and no allocation but the scratch
+ * copy of the bound types (types.c) that the check of the types reads. It must
+ * be canonical (fields in ascending number, each at most once, the right wire
+ * type, varints in their shortest form, no field equal to its default), so one
  * set of values has one set of bytes.
  *
  * Version 1 fields read by this build: 1 entry, 2 shapes, 7 batch_format,
@@ -14,6 +15,7 @@
  */
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "udfpy.h"
@@ -264,12 +266,23 @@ static int entry_ok(const char* e) {
 
 /* ---- types ---------------------------------------------------------------------- */
 
-static int carried(const struct ArrowSchema* s) {
-  return s != NULL && s->format != NULL && s->format[0] != 0 && s->format[1] == 0 &&
-         (s->format[0] == 'l' || s->format[0] == 'i' || s->format[0] == 'g') && s->n_children == 0;
+/* The path of the first timestamp[ns] in the subtree of node `ti`, written to
+ * `path` (`plen` bytes of it are the parent's), or 0 when there is none. */
+static int find_ns(const udfpy_schema* s, int ti, char* path, size_t cap, size_t plen) {
+  const udfpy_type* t = &s->t[ti];
+  int n = snprintf(path + plen, cap - plen, "%s%s", plen > 0 ? "." : "", t->name);
+  if (n < 0 || (size_t)n >= cap - plen) return 0;
+  plen += (size_t)n;
+  if (t->kind == UDFPY_K_TIMESTAMP && t->unit == 3) return 1;
+  int child = ti + 1;
+  for (int i = 0; i < t->n_children; i++) {
+    if (find_ns(s, child, path, cap, plen)) return 1;
+    child = s->t[child].next;
+  }
+  return 0;
 }
 
-static int32_t check_types(const komira_udf_spec* s, komira_udf_error* err) {
+static int32_t check_types(const komira_udf_spec* s, uint32_t batch_format, komira_udf_error* err) {
   if (s->args == NULL || s->args->format == NULL || strcmp(s->args->format, "+s") != 0)
     return udfpy_fail(err, KOMIRA_UDF_ERR_UNSUPPORTED, -1, "type '%s' of the arguments is not built in komira/python yet",
                       s->args != NULL && s->args->format != NULL ? s->args->format : "");
@@ -284,15 +297,28 @@ static int32_t check_types(const komira_udf_spec* s, komira_udf_error* err) {
       return udfpy_fail(err, KOMIRA_UDF_ERR_UNSUPPORTED, -1,
                         "an argument name of %zu bytes is not built in komira/python yet (the limit is %d)",
                         strlen(name), UDFPY_MAX_NAME - 1);
-    if (!carried(c))
-      return udfpy_fail(err, KOMIRA_UDF_ERR_UNSUPPORTED, -1, "type '%s' of %s is not built in komira/python yet",
-                        c != NULL && c->format != NULL ? c->format : "", name);
   }
-  if (!carried(s->result))
-    return udfpy_fail(err, KOMIRA_UDF_ERR_UNSUPPORTED, -1,
-                      "type '%s' of the result is not built in komira/python yet",
-                      s->result != NULL && s->result->format != NULL ? s->result->format : "");
-  return KOMIRA_UDF_OK;
+  /* The two bound schemas are large (udfpy.h), so they are not on the stack. */
+  udfpy_schema* both = (udfpy_schema*)calloc(2, sizeof(*both));
+  if (both == NULL) return udfpy_fail(err, KOMIRA_UDF_ERR_OUT_OF_MEMORY, -1, "no memory to check the types");
+  char why[1400];
+  int32_t rc = KOMIRA_UDF_OK;
+  if (udfpy_schema_read(s->args, 1, &both[0], why, sizeof(why)) != 0 ||
+      udfpy_schema_read(s->result, 0, &both[1], why, sizeof(why)) != 0) {
+    rc = udfpy_fail(err, KOMIRA_UDF_ERR_UNSUPPORTED, -1, "%s", why);
+  } else if (batch_format == BF_VALUES) {
+    char path[1400];
+    int ti = 0;
+    for (int i = 0; i < both[0].n && rc == KOMIRA_UDF_OK; i++) {
+      if (find_ns(&both[0], ti, path, sizeof(path), 0))
+        rc = udfpy_fail(err, KOMIRA_UDF_ERR_UNSUPPORTED, -1,
+                        "a timestamp[ns] in %s is not built for the VALUES batch format: datetime.datetime holds microseconds",
+                        path);
+      ti = both[0].t[ti].next;
+    }
+  }
+  free(both);
+  return rc;
 }
 
 /* ---- validate ------------------------------------------------------------------- */
@@ -342,7 +368,7 @@ int32_t udfpy_validate(const komira_udf_spec* s, uint32_t* batch_format, komira_
     return udfpy_fail(err, KOMIRA_UDF_ERR_UNSUPPORTED, -1, "code form VALUE is not built in komira/python yet");
   if (s->form != FORM_PACKAGE && s->form != FORM_BUNDLE)
     return udfpy_fail(err, KOMIRA_UDF_ERR_DESCRIPTOR, -1, "code form %d is not PACKAGE, BUNDLE or VALUE", (int)s->form);
-  int32_t rc = check_types(s, err);
+  int32_t rc = check_types(s, d.batch_format, err);
   if (rc != KOMIRA_UDF_OK) return rc;
   if (s->form == FORM_BUNDLE &&
       (s->n_code != 1 || s->code_roles == NULL || s->code_roles[0] == NULL || strcmp(s->code_roles[0], "bundle") != 0))

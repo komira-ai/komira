@@ -14,7 +14,7 @@ import struct
 from dataclasses import dataclass
 
 from komira._errors import UnsupportedOperation
-from komira._ops import _vocab
+from komira._ops import _dtype, _vocab
 
 
 def _need_node(value, field, owner):
@@ -39,6 +39,14 @@ def _need_op(op, vocab, owner):
         raise TypeError(f"{owner} op must be a str, not {type(op).__name__}")
     if op not in vocab:
         raise ValueError(f"{owner} op {op!r} is not one of: " + ", ".join(sorted(vocab)))
+
+
+def _need_dtype(value, owner):
+    if not isinstance(value, str):
+        raise TypeError(f"{owner} op must be a str, not {type(value).__name__}")
+    spelled = _dtype.canonical(value, owner)
+    if spelled != value:
+        raise ValueError(f"{owner} {value!r} is not a canonical dtype; write {spelled!r}")
 
 
 def _need_int(value, field, owner, minimum):
@@ -393,8 +401,9 @@ class UdfSpec:
       (`"package"` or `"bundle"`) and its `"module:qualname"`.
     - `code`: `(role, sha256)` of every code object, the digest 32 bytes:
       one `("bundle", ...)` for a bundle, none for a package.
-    - `return_type`: a dtype of `_vocab.UDF_DTYPES` for a column kind; for
-      `map_batches_frame`, the output columns as `(name, dtype)` pairs.
+    - `return_type`: a canonical dtype text (`_dtype.canonical`, the spelling of
+      the pyarrow type) for a column kind; for `map_batches_frame`, the output
+      columns as `(name, dtype)` pairs.
     - `stability`, `null_mode`, `batch_format`: the declarations of
       `_vocab.UDF_STABILITIES`, `UDF_NULL_MODES` and `UDF_BATCH_FORMATS`.
     - `read_set`: the columns a `row` or `map_batches_frame` function reads,
@@ -434,14 +443,14 @@ class UdfSpec:
                 if not (isinstance(item, tuple) and len(item) == 2):
                     raise TypeError("UdfSpec.return_type of a frame holds (name, dtype) pairs")
                 _need_name(item[0], "return_type name", "UdfSpec")
-                _need_op(item[1], _vocab.UDF_DTYPES, "UdfSpec return_type dtype")
+                _need_dtype(item[1], "UdfSpec return_type dtype")
                 names.append(item[0])
             if not names:
                 raise ValueError("UdfSpec.return_type of a frame names at least one column")
             if len(set(names)) != len(names):
                 raise ValueError("UdfSpec.return_type of a frame repeats a column name")
         else:
-            _need_op(self.return_type, _vocab.UDF_DTYPES, "UdfSpec return_type")
+            _need_dtype(self.return_type, "UdfSpec return_type")
         _need_op(self.stability, _vocab.UDF_STABILITIES, "UdfSpec stability")
         _need_op(self.null_mode, _vocab.UDF_NULL_MODES, "UdfSpec null_mode")
         _need_op(self.batch_format, _vocab.UDF_BATCH_FORMATS, "UdfSpec batch_format")
