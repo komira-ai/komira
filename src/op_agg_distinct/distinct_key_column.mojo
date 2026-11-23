@@ -83,7 +83,7 @@ comptime DISTINCT_FNV_PRIME: UInt64 = 1099511628211
 
 comptime DISTINCT_DEFAULT_CAPACITY: Int = 16
 """Initial reserve for the SoA key Lists. The Lists grow via `append` on a
-distinct-key miss (no fixed cap — unlike the InlineArray-backed HashAggTable's
+distinct-key miss (no fixed cap — unlike the Array-backed HashAggTable's
 MAX_GROUPS=16)."""
 
 comptime DISTINCT_DIR_INITIAL_CAPACITY: Int = 2048

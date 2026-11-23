@@ -100,7 +100,7 @@ comptime MAX_SPAN_DEPTH: Int = 16
 
 struct WorkerContextSlot(Copyable, Movable, Deinitable):
     # MOJO-1.0.0: `ImplicitlyCopyable` DROPPED, `Copyable` kept. 1.0.0 makes
-    # `InlineArray` non-implicitly-copyable, and a struct owning one cannot
+    # `Array` non-implicitly-copyable, and a struct owning one cannot
     # synthesise an implicit copy ctor -- there is no manual override (a
     # hand-written `__copyinit__` is not consulted). Copies of this POD
     # record are now spelled `.copy()`; that is the SAME memcpy an implicit copy emitted

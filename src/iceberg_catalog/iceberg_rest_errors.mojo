@@ -13,6 +13,11 @@
 
 from json import JsonValue, parse_json_value, JSON_OBJECT, JSON_STRING
 
+# The write sink's tokens that the format package raises: this package names
+# them in its own error module, so a caller of the sink imports all of them
+# from one place.
+from iceberg import ICEBERG_NULL_IN_REQUIRED_COLUMN, ICEBERG_TYPE_UNSUPPORTED
+
 
 # =============================================================================
 # §0 — the tokens.
@@ -37,6 +42,10 @@ comptime ICEBERG_TABLE_REPLACED: String = "ICEBERG_TABLE_REPLACED"
 comptime ICEBERG_SCHEMA_INCOMPATIBLE: String = "ICEBERG_SCHEMA_INCOMPATIBLE"
 comptime ICEBERG_WRITE_FORMAT_UNSUPPORTED: String = (
     "ICEBERG_WRITE_FORMAT_UNSUPPORTED"
+)
+comptime ICEBERG_LOCATION_REFUSED: String = "ICEBERG_LOCATION_REFUSED"
+comptime ICEBERG_MANIFEST_LIST_UNSUPPORTED: String = (
+    "ICEBERG_MANIFEST_LIST_UNSUPPORTED"
 )
 
 

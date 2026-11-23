@@ -6,12 +6,19 @@ one library and its flat C surface: no Mojo type crosses it. This package holds
 the surface's skeleton (the status codes, the version, the context handle and
 the last-error call) and the source and render calls: registering a Parquet
 file, the schema and scan bindings of Parquet, CSV and JSON files, and a plan
-rendered as text. No call runs a query yet.
+rendered as text; and the credential calls, which define a credential on the
+session by name and hold its values in the session's secret store. No call
+runs a query yet.
 
 - `abi/komira.tsv`: the golden of the C ABI; `komira.h` is made from it.
-- `status.mojo`: the six status codes, `KOMIRA_MAX_INPUT_BYTES`, `abi_version`, `buffer_status`, `input_length_status`.
+- `status.mojo`: the six status codes, `KOMIRA_MAX_INPUT_BYTES`, the credential
+  kinds, fields and scope, `abi_version`, `buffer_status`, `input_length_status`.
 - `session.mojo`: `Session`, the state a context handle stands for: the last
-  error and the catalog of registered tables.
+  error, the catalog of registered tables and the credentials.
+- `credentials.mojo`: `SessionCredentials`, the credential calls on values (a
+  kind, a name, a field's bytes in; an id out, or a raise with a named error).
+- `credential_store.mojo`: `SessionSecretStore`, the `SecretStore` the values
+  live in, wiped when replaced or dropped.
 - `sources.mojo`: what the source and render calls do on values (a path or the
   bytes of a plan in; bytes or text out, or a raise with the engine's message).
 - `_c_abi.mojo`: the exports. It is the only file here that holds pointers, it
@@ -39,6 +46,11 @@ int32_t  komira_json_binding(void *ctx, const char *path, uint8_t *out_buf,
 int32_t  komira_plan_render(void *ctx, const uint8_t *plan, uint64_t plan_len,
                             uint8_t *out_buf, uint64_t out_cap,
                             uint64_t *out_len);
+int32_t  komira_credential_add(void *ctx, int32_t kind, const char *name,
+                               int32_t *out_id);
+int32_t  komira_credential_set(void *ctx, int32_t id, int32_t field,
+                               const uint8_t *value, uint64_t value_len);
+int32_t  komira_credential_seal(void *ctx, int32_t id, int32_t scope);
 ```
 
 **Status codes.** Every fallible call returns one: `KOMIRA_OK` (0),
@@ -88,7 +100,7 @@ from so import ABI_MAJOR, ABI_MINOR, abi_version
 from std.testing import assert_equal
 
 assert_equal(abi_version(), ABI_MAJOR * 1000 + ABI_MINOR)
-assert_equal(abi_version(), Int32(1001))
+assert_equal(abi_version(), Int32(1002))
 ```
 
 **The handle.** `komira_ctx_new` returns a context the caller owns until it
@@ -157,6 +169,76 @@ binding and schema bytes are what a plan author splices into a scan leaf: the
 fingerprint, kind id and snapshot fields come from the engine and are not
 computed by the caller. A NULL `ctx` is -1 for all five.
 
+**Credentials.** A credential is defined in three calls and then belongs to
+the session under its name. `komira_credential_add(ctx, kind, name, &id)` opens
+a definition; `komira_credential_set(ctx, id, field, value, value_len)` sets one
+field of it; `komira_credential_seal(ctx, id, KOMIRA_BIND_SESSION)` checks it
+has every field its kind needs and makes it the session's value of `name`,
+replacing any earlier one. A secret never travels in a `const char *` or in an
+argument list a process shows: a value is bytes with a length, copied into the
+session's `SecretStore` before `komira_credential_set` returns (the caller may
+wipe its buffer at once), never written back and never put in an error. Values
+are wiped when they are replaced and when the context is freed.
+
+| kind (`KOMIRA_CRED_*`) | fields it needs (`KOMIRA_FIELD_*`) | fields it may set |
+|---|---|---|
+| `AWS_KEYS` 1 | `KEY_ID` 1, `SECRET` 2 | `SESSION_TOKEN` 3 |
+| `AWS_PROFILE` 2 | `PROFILE` 4 | |
+| `GCP_SERVICE_ACCOUNT` 3 | `FILE` 5 | |
+| `GCP_TOKEN` 4 | `TOKEN` 6 | |
+| `AZURE_KEY` 5 | `ACCOUNT` 7, `KEY` 8 | |
+| `AZURE_SAS` 6 | `ACCOUNT` 7, `SAS` 9 | |
+| `BEARER` 7 | `TOKEN` 6 | |
+| `OAUTH2_CLIENT` 8 | `CLIENT_ID` 10, `CLIENT_SECRET` 11 | `SCOPE` 12, `TOKEN_URL` 13 |
+
+A name is 1 to 128 bytes of letters, digits, `_`, `.` and `-`; `ambient` and
+`anonymous` (in any case) are built in and are not defined. A wrong definition
+is -3 with a named last error, `CREDENTIALS_INVALID: <operation>: <reason>`,
+which names the credential and the setting and never a value; a name that is
+refused is not quoted. A refused `set` or `seal` discards the definition. NULL
+`ctx` is -1; a NULL `name` or `out_id`, or a NULL `value` with a non-zero
+length, is -2; a `value_len` above `KOMIRA_MAX_INPUT_BYTES` is -5 before the
+value is read. `*out_id` is written only on `KOMIRA_OK`. Sealing a byte-equal
+value again keeps the name's generation; any other value takes the next one.
+The only scope today is the session; a per-call scope comes with the call that
+runs a query.
+
+```mojo
+from so import (
+    KOMIRA_BIND_SESSION,
+    KOMIRA_CRED_AWS_KEYS,
+    KOMIRA_FIELD_KEY_ID,
+    KOMIRA_FIELD_SECRET,
+    SessionCredentials,
+)
+from std.testing import assert_equal, assert_true
+
+var creds = SessionCredentials()
+var id = creds.add(KOMIRA_CRED_AWS_KEYS, "raw-etl")
+creds.set(id, KOMIRA_FIELD_KEY_ID, "AKIDEXAMPLE".as_bytes())
+try:
+    creds.seal(id, KOMIRA_BIND_SESSION)
+except e:
+    assert_equal(
+        String(e),
+        "CREDENTIALS_INVALID: seal credential=raw-etl: AwsKeys needs secret=",
+    )
+assert_true(not creds.is_sealed("raw-etl"))
+
+id = creds.add(KOMIRA_CRED_AWS_KEYS, "raw-etl")
+creds.set(id, KOMIRA_FIELD_KEY_ID, "AKIDEXAMPLE".as_bytes())
+creds.set(id, KOMIRA_FIELD_SECRET, "example-secret".as_bytes())
+creds.seal(id, KOMIRA_BIND_SESSION)
+assert_true(creds.is_sealed("raw-etl"))
+assert_equal(creds.kind_of("raw-etl"), KOMIRA_CRED_AWS_KEYS)
+```
+
+A consumer reads a sealed value only through a reveal: the session's
+`secret_bindings()` and `secret_store()` are what
+`SecretCapability(node_id_of(name, field)).open_connection_for` (in `sdk_exec`)
+takes, and the value reaches the consumer as a zeroizing `SecretValue` for the
+length of that one call.
+
 ## Building and testing
 
 ```sh
@@ -165,20 +247,23 @@ computed by the caller. A NULL `ctx` is -1 for all five.
 ```
 
 The library is published only if the gate passes: the exports check, then
-thirteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
-foreign host would. Seven cover the skeleton: the version (1001, which is 1.1),
+fourteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
+foreign host would. Seven cover the skeleton: the version (1002, which is 1.2),
 create and free (distinct handles, separate sessions), no symbol beyond the
-nine, a fresh session's empty error, the two-call protocol (zero capacity, one
+twelve, a fresh session's empty error, the two-call protocol (zero capacity, one
 byte short, exact, larger), a NULL context, and a NULL `out_len`. One driver per
 new call writes its input file under `$TEST_TMPDIR` and checks a good input,
 NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
 with the message as the last error) and, for the four calls with an output, the
 two-call protocol; a good call after a refusal leaves no error.
-`exports_exact` makes the nine names above the whole dynamic symbol table.
+`gate_credentials` defines a credential through the three calls and checks each
+named refusal word for word, the NULL and length cases, and that `*out_id` is
+untouched on a refusal.
+`exports_exact` makes the twelve names above the whole dynamic symbol table.
 On Linux the eight C owners in the library's closure (async, async_api, compression, fs,
 libc, metrics, parquet_codec, scan_source) are linked as their own shared libraries
 (`native_owners`), not embedded; on macOS arm64 there are none, and the C archives are linked
-statically into `libkomira.dylib`. On Linux the thirteenth driver, `gate_native_owners`,
+statically into `libkomira.dylib`. On Linux the fourteenth driver, `gate_native_owners`,
 reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
 the SONAME of each of the eight (`libkomira_<owner>_native.so.1`); an owner
 dropped from `native_owners` leaves its C embedded, and that driver fails.
@@ -206,11 +291,11 @@ the Mojo runtime libraries are the vendor's own.
 
 | file | role | size (bytes) | SONAME | RUNPATH | RPATH | highest GLIBC | highest GLIBCXX | highest CXXABI |
 |---|---|---|---|---|---|---|---|---|
-| `libkomira.so` | target | 3524608 | `libkomira.so` | `$ORIGIN/lib:$ORIGIN` | none | `GLIBC_2.34` | none | none |
+| `libkomira.so` | target | 3642072 | `libkomira.so` | `$ORIGIN/lib:$ORIGIN` | none | `GLIBC_2.34` | none | none |
 | `libkomira_async_api_native.so.1` | owner | 2760 | `libkomira_async_api_native.so.1` | none | none | none | none | none |
 | `libkomira_async_rt_native.so.1` | owner | 43992 | `libkomira_async_rt_native.so.1` | none | none | `GLIBC_2.17` | none | none |
 | `libkomira_compression_native.so.1` | owner | 244856 | `libkomira_compression_native.so.1` | none | none | `GLIBC_2.34` | none | none |
-| `libkomira_fs_native.so.1` | owner | 9344 | `libkomira_fs_native.so.1` | none | none | `GLIBC_2.33` | none | none |
+| `libkomira_fs_native.so.1` | owner | 11192 | `libkomira_fs_native.so.1` | none | none | `GLIBC_2.33` | none | none |
 | `libkomira_libc_native.so.1` | owner | 11080 | `libkomira_libc_native.so.1` | none | none | `GLIBC_2.33` | none | none |
 | `libkomira_metrics_native.so.1` | owner | 2600 | `libkomira_metrics_native.so.1` | none | none | none | none | none |
 | `libkomira_parquet_codec_native.so.1` | owner | 173736 | `libkomira_parquet_codec_native.so.1` | none | none | `GLIBC_2.14` | none | none |
@@ -254,14 +339,14 @@ the Mojo runtime libraries are the vendor's own.
 | `libgcc_s.so.1` | runtime | needed (through another library) | 0 |
 | `libstdc++.so.6` | runtime | needed (through another library) | 0 |
 
-Owners needed: 8 of 8 (490856 bytes); declared only: 0.
+Owners needed: 8 of 8 (492704 bytes); declared only: 0.
 
 Wheel tag: `manylinux_2_34` (highest GLIBC of the target and the owners: `GLIBC_2.34`).
 
 Reading it:
 
 - **Owners.** All eight are `DT_NEEDED` of libkomira (direct), none is embedded, and
-  together they weigh 490,856 bytes. They are needed at load time: the loader refuses
+  together they weigh 492,704 bytes. They are needed at load time: the loader refuses
   a library with a missing `DT_NEEDED`. Only three of the eight (libc, compression,
   parquet_codec) define a symbol that libkomira's own undefined symbols name; the other five
   (async_rt, async_api, fs, metrics, scan_source) are `DT_NEEDED` with no symbol bound to
@@ -284,16 +369,16 @@ Reading it:
   wheel copies it whole; the C++ libraries are not in it, the host provides them.
 
 The `libkomira_install` check loads libkomira from an empty prefix with `RTLD_NOW`
-and the probe measured `komira_abi_version` 1001; every library the loader mapped came from the
+and the probe calls `komira_abi_version`; every library the loader mapped came from the
 prefix's `lib/`: the eight owners, `libKGENCompilerRTShared.so`, and the runtime's
 own dependencies of it (`libAsyncRTRuntimeGlobals.so`, `libMSupportGlobals.so`,
 `libgcc_s.so.1`, `libstdc++.so.6`).
 
 ## The header and the golden
 
-`abi/komira.tsv` is the golden of the ABI: the version (1.1), one row per export
+`abi/komira.tsv` is the golden of the ABI: the version (1.2), one row per export
 with its return type, argument types and the version that added it, and one row
-per status code and per limit (`constant`). `komira_abi_golden` checks it on every
+per status code, limit and credential kind, field and scope (`constant`). `komira_abi_golden` checks it on every
 build against the `@export abi("C")` functions of `_c_abi.mojo` (names, return and
 argument types) and against `status.mojo` (the constants and their values), and
 writes `komira.h` from it:
@@ -310,12 +395,13 @@ plan bytes `const uint8_t *`; `_c_abi.mojo` declares `Handle`, `CStr` and
 a row changed: that compares with the previous release.
 
 `tests/c/abi_driver.c` is a C program that includes `komira.h` and nothing of
-ours. It opens `./libkomira.so`, binds each of the nine functions to a pointer
+ours. It opens `./libkomira.so`, binds each of the twelve functions to a pointer
 declared with the header's own prototype, and checks the version in the header
 against `komira_abi_version()`, the status codes, the input bound
 (`KOMIRA_MAX_INPUT_BYTES` plus one is -5), and the last-error round trip (NULL
 context, NULL `out_len`, an engine refusal, a buffer one byte short, an exact
-buffer). It is built by zig cc and run against the published library:
+buffer), and defines a credential with the header's constants, where one sealed
+without its secret is -3 with the named error. It is built by zig cc and run against the published library:
 
 ```sh
 ./buck2 build komira//src/so:c_abi_check     # exit 0 of the driver, or red

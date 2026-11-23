@@ -58,8 +58,8 @@ def test_skip_bound_is_exact_on_signed_messages() raises:
     assert_true("skip bound" in msg, "refused by the skip bound, not by another check: " + msg)
 
 
-def _fixed(start: Int, n: Int) -> InlineArray[UInt8, 32]:
-    var a = InlineArray[UInt8, 32](fill=UInt8(0))
+def _fixed(start: Int, n: Int) -> Array[UInt8, 32]:
+    var a = Array[UInt8, 32](fill=UInt8(0))
     for i in range(n):
         a[i] = UInt8(start + i)
     return a^
@@ -80,7 +80,7 @@ def _from_hex(s: String) -> List[UInt8]:
 
 
 def _fixed_share() -> SessionKeyShare:
-    var ratchet = InlineArray[UInt8, RATCHET_SIZE](fill=UInt8(0))
+    var ratchet = Array[UInt8, RATCHET_SIZE](fill=UInt8(0))
     for i in range(RATCHET_SIZE):
         ratchet[i] = UInt8(0x40 + (i % 64))
     return SessionKeyShare(_fixed(0x00, 32), ratchet, UInt32(7), _fixed(0x80, 32))

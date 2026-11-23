@@ -16,7 +16,7 @@ Nothing built with these rules is shipped.
 
 | rule | what it builds |
 |---|---|
-| `sql_oracle(name, srcs, inputs, outputs)` | runs `srcs` (one `.sql` file, or a list run in order in one session) with the pinned DuckDB. `inputs` are the files the SQL reads: a list of sources, each staged at its path in the package, or `{path: source}`, where a build output is allowed (`{"a/rows.csv": ":write[rows.csv]"}`). `outputs` are the file names the SQL writes with `COPY ... TO '<name>'`, each ending in `.parquet`, `.csv` or `.tsv`; each is a sub-target `[<name>]`, and all of them are the default outputs. |
+| `sql_oracle(name, srcs, inputs, outputs, extensions)` | runs `srcs` (one `.sql` file, or a list run in order in one session) with the pinned DuckDB. `inputs` are the files the SQL reads: a list of sources, each staged at its path in the package, or `{path: source}`, where a build output is allowed (`{"a/rows.csv": ":write[rows.csv]"}`). `outputs` are the file names the SQL writes with `COPY ... TO '<name>'`, each ending in `.parquet`, `.csv`, `.tsv` or `.json`, or in `.gz` or `.zst` (a file DuckDB compressed); each is a sub-target `[<name>]`, and all of them are the default outputs. `extensions` (default none) are DuckDB extension files, each named `<name>.duckdb_extension`, loaded in the order listed (see below). |
 | `duckdb_dist(name, binary, native_libs, version)` | the pinned binary, the directory whose `lib/` holds the C++ runtime it links (`libstdc++.so.6`, `libgcc_s.so.1`), and the version it must report, digits and dots only (anything else, which would be written into the version check's SQL, is refused at analysis). `sql_oracle` takes `komira//third_party/duckdb:duckdb`. |
 
 The macro sets `exec_compatible_with` to the linux x86_64 execution
@@ -35,6 +35,7 @@ duckdb -no-init -batch -bail \
     -cmd "SELECT CASE WHEN version() <> 'v<version>' THEN error(...) END" \
     -cmd "SELECT CASE WHEN getenv('TZ') IS DISTINCT FROM 'UTC' OR getenv('LC_ALL') IS DISTINCT FROM 'C'
           OR getenv('LD_LIBRARY_PATH') IS DISTINCT FROM '<native_libs>/lib' THEN error(...) END" \
+    -cmd "LOAD '../ext/<extension>'" ... \
     -cmd ".safe_mode" \
     -cmd ".mode duckbox" \
     -f ../sql/0_<src> -f ../sql/1_<src> ... \
@@ -52,7 +53,7 @@ duckdb -no-init -batch -bail \
 - **Settings.** One thread, so a result's row order and a Parquet file's
   bytes do not depend on the worker; the session time zone is UTC; no
   extension is installed or loaded on demand (the CLI's built-in Parquet,
-  CSV and ICU are there); no spilling to a temp
+  CSV and ICU are there; `extensions` are the only others); no spilling to a temp
   directory.
 - **The version check**: the binary must report the version
   `komira//third_party/duckdb:duckdb` pins
@@ -64,6 +65,14 @@ duckdb -no-init -batch -bail \
   farm's workers run in UTC with a libstdc++ of their own, so without this
   check an entry dropped from the rule's environment would build every
   fixture green.
+- **Extensions.** Each `extensions` entry is copied to `ext/<name>` beside
+  the working directory (not inside it, so the SQL cannot read it) and
+  loaded by `LOAD '../ext/<name>'` after the settings and checks and before
+  `.safe_mode`, in the order listed (an extension that needs another comes
+  after it). Nothing is installed or fetched: autoinstall and autoload stay
+  off. With no `extensions` the invocation has no `LOAD`. Analysis refuses
+  an entry whose name is not a plain file name ending in `.duckdb_extension`
+  (a quote would close the `LOAD` string) and one named twice.
 - **`.safe_mode`** sets `enable_external_access = false` and
   `lock_configuration = true` before any of the SQL runs. From then on:
   - the SQL can open only the paths in `allowed_paths`, its inputs and
@@ -86,13 +95,15 @@ duckdb -no-init -batch -bail \
 
 Analysis refuses: no `srcs`, a src that is not a `.sql` file, no `outputs`,
 an output that is not a plain file name (no directory, no glob character)
-or does not end in `.parquet`, `.csv` or `.tsv`, an output named twice or
+or does not end in `.parquet`, `.csv`, `.tsv`, `.json`, `.gz` or `.zst`, an output named twice or
 also an input path or an input's directory, an input path that is empty,
 absolute or ends in `/`, an input path with a segment that is not a plain
 name (empty, `.`, `..` or a glob character; a segment may hold `=` after its
 first character, for a Hive layout, which an output name may not), an input that is both a file
 and another input's directory, a source named twice in the list form of
-`inputs`, and a build output in that list form.
+`inputs`, a build output in that list form, an `extensions` entry whose name
+is not a plain file name ending in `.duckdb_extension`, and an extension
+named twice.
 
 ## Expected results and row order
 
@@ -145,7 +156,8 @@ DuckDB's parse of each case (`json_serialize_sql`) before the case runs
   cases the oracle discipline of komira_test_oracle refuses when its case
   runner calls it (a key with no NULL placement, no outer ORDER BY), and
   two cases komira_sql_conformance's case runner refuses (an answer that differs
-  from the committed one, a case with no row order line). The
+  from the committed one, a case with no row order line), and three `extensions` refusals (a name not
+ending in `.duckdb_extension`, a quote in the name, a repeated entry). The
   version and environment checks are pinned in the invocation from
   `SELECT` to `END`, and so is what stands between the pinned pieces (the
   version `buck2 uquery` reads from the dist, itself required to be digits

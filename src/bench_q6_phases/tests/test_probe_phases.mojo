@@ -167,7 +167,10 @@ def test_every_stage_of_a_run_is_timed() raises:
         assert_equal(a.lanes, 1)
     var task = snapshot_phase(PH_TASK)
     assert_true(task.calls >= 3 and task.calls % 3 == 0)
-    assert_equal(task.lanes, 3)
+    # Workers claim task ids from one shared cursor, so one worker may run
+    # two of a segment's three tasks: the task count is exact, the number
+    # of threads that ran one is not.
+    assert_true(task.lanes >= 1 and task.lanes <= 3)
     assert_equal(snapshot_phase(PH_WAKE).calls, task.calls)
     var segments = snapshot_phase(PH_DISPATCH).calls
     assert_true(segments >= 1)

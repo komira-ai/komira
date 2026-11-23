@@ -310,7 +310,7 @@ var digest = sha1dc(Span(abc))  # raises on a detected collision
 assert_equal(digest[0], UInt8(0xA9))  # a9993e36...
 var h = Sha1dc()
 h.update(Span(abc))
-var out = InlineArray[UInt8, 20](fill=0)
+var out = Array[UInt8, 20](fill=0)
 assert_false(h.finalize_into(out))  # True would mean: collision detected
 assert_equal(out[19], UInt8(0x9D))  # ...9cd0d89d
 assert_false(is_object_id_collision("git: loose object: empty file"))

@@ -145,6 +145,9 @@ struct SchemaElement(Movable, Copyable):
         converted_type: Deprecated converted type (still needed for compat).
         scale: Scale for Decimal logical type.
         precision: Precision for Decimal logical type.
+        field_id: The field id (SchemaElement field 9) a table format such as
+            Iceberg uses to name a column across schema changes; None when
+            the element carries none.
     """
 
     var name: String
@@ -167,6 +170,7 @@ struct SchemaElement(Movable, Copyable):
     # tz="UTC" tag).  None when the element is not a LogicalType TIMESTAMP.
     var logical_timestamp_unit: Optional[Int]
     var logical_timestamp_is_utc: Optional[Bool]
+    var field_id: Optional[Int]
 
     def __init__(
         out self,
@@ -180,6 +184,7 @@ struct SchemaElement(Movable, Copyable):
         precision: Optional[Int] = None,
         logical_timestamp_unit: Optional[Int] = None,
         logical_timestamp_is_utc: Optional[Bool] = None,
+        field_id: Optional[Int] = None,
     ):
         self.name = name^
         self.type = type
@@ -191,6 +196,7 @@ struct SchemaElement(Movable, Copyable):
         self.precision = precision
         self.logical_timestamp_unit = logical_timestamp_unit
         self.logical_timestamp_is_utc = logical_timestamp_is_utc
+        self.field_id = field_id
 
 
 # =============================================================================

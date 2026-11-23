@@ -39,21 +39,36 @@ _CSV_TEST_DATA.update({f + ".csv": "tests/csv/" + f + ".csv" for f in _CSV_FILES
 
 _CSV_TEST_DATA.update({c + ".tsv": ":csv_oracle[" + c + ".tsv]" for c in _CSV_CASES})
 
-# DuckDB reading back the Parquet files COPY writes, for
+# DuckDB reading back the Parquet, CSV and JSON files COPY writes, for
 # test_copy_readback_duckdb (the `copy_readback` library at the end of this
-# file). Each line of tests/copy/cases.sql is one case: `:copy_komira` runs
-# every line through run_sql (copy_runner below) and `:copy_readback_oracle`
-# runs the same lines in the pinned DuckDB, then tests/copy/readback.sql
-# compares the two files of each case.
-_COPY_CASES = [
-    "typed_default",
-    "typed_zstd",
-    "nulls_gzip",
-    "nulls_lz4",
-    "quoted_uncompressed",
-    "grouped_snappy",
-    "empty",
+# file). Each line of tests/copy/cases.sql is one case, named by its file up
+# to the first `.`: `:copy_komira` runs every line through run_sql
+# (copy_runner below) and `:copy_readback_oracle` runs the same lines in the
+# pinned DuckDB, then tests/copy/readback.sql compares the two files of each
+# case.
+_COPY_FILES = [
+    "typed_default.parquet",
+    "typed_zstd.parquet",
+    "nulls_gzip.parquet",
+    "nulls_lz4.parquet",
+    "quoted_uncompressed.parquet",
+    "grouped_snappy.parquet",
+    "empty.parquet",
+    "typed_csv.csv",
+    "quoted_csv.csv",
+    "nulls_csv.csv",
+    "empty_string_csv.csv",
+    "empty_csv.csv",
+    "grouped_csv.csv.gz",
+    "typed_zstd_csv.csv.zst",
+    "typed_json.json",
+    "quoted_json.json",
+    "nulls_json.json",
+    "grouped_json.json.gz",
+    "typed_zstd_json.json.zst",
 ]
+
+_COPY_CASES = [f.split(".")[0] for f in _COPY_FILES]
 
 _COPY_INPUTS = {f + ".csv": "tests/csv/" + f + ".csv" for f in ["typed", "nulls", "quoted"]}
 
@@ -70,19 +85,19 @@ copy_cases(
     name = "copy_komira",
     cases = "tests/copy/cases.sql",
     inputs = _COPY_INPUTS,
-    outputs = [c + ".parquet" for c in _COPY_CASES] + ["counts.tsv"],
+    outputs = _COPY_FILES + ["counts.tsv"],
     runner = ":copy_runner",
 )
 
 _COPY_READBACK_INPUTS = dict(_COPY_INPUTS)
 
-_COPY_READBACK_INPUTS.update({"komira/" + c + ".parquet": ":copy_komira[" + c + ".parquet]" for c in _COPY_CASES})
+_COPY_READBACK_INPUTS.update({"komira/" + f: ":copy_komira[" + f + "]" for f in _COPY_FILES})
 
 sql_oracle(
     name = "copy_readback_oracle",
     srcs = ["tests/copy/cases.sql", "tests/copy/readback.sql"],
     inputs = _COPY_READBACK_INPUTS,
-    outputs = [c + ".parquet" for c in _COPY_CASES] + [c + ".check.tsv" for c in _COPY_CASES],
+    outputs = _COPY_FILES + [c + ".check.tsv" for c in _COPY_CASES],
 )
 
 _COPY_TEST_DATA = {"cases.sql": "tests/copy/cases.sql", "counts.tsv": ":copy_komira[counts.tsv]"}
@@ -239,6 +254,97 @@ _JOIN_KINDS_TEST_DATA.update({t + ".parquet": ":join_kinds_oracle[" + t + ".parq
 
 _JOIN_KINDS_TEST_DATA.update({c + ".tsv": ":join_kinds_oracle[" + c + ".tsv]" for c in _JOIN_KINDS_CASES})
 
+# DuckDB's tables and answers for test_run_sql_subquery: tests/subquery/data.sql
+# writes t, u, nn and e (Parquet, small row groups), and each line of
+# tests/subquery/cases.sql runs one scalar, IN or NOT IN subquery over them and
+# writes its answer.
+_SUBQUERY_CASES = [
+    "scalar_eq_max",
+    "scalar_left_operand",
+    "scalar_avg_double",
+    "scalar_sum",
+    "scalar_decimal_eq",
+    "scalar_decimal_lt",
+    "scalar_date",
+    "scalar_int32_count",
+    "scalar_empty_max",
+    "scalar_empty_count",
+    "scalar_empty_is_null",
+    "scalar_two_bounds",
+    "scalar_and_chain",
+    "scalar_or",
+    "scalar_filtered_body",
+    "scalar_nested",
+    "scalar_count_star_where",
+    "scalar_limit_one_row",
+    "scalar_limit_no_row_select",
+    "scalar_limit_no_row_is_null",
+    "scalar_limit_date_select",
+    "scalar_limit_decimal_no_row",
+    "scalar_select_item",
+    "scalar_select_expr",
+    "scalar_select_empty",
+    "scalar_select_no_from",
+    "scalar_select_case",
+    "scalar_select_coalesce",
+    "scalar_grouped_select",
+    "scalar_agg_plus",
+    "scalar_having",
+    "scalar_having_decimal",
+    "scalar_cte_max",
+    "scalar_derived_body",
+    "in_with_nulls",
+    "in_int32",
+    "in_int32_int64",
+    "in_string",
+    "in_distinct",
+    "in_group_having",
+    "in_join_body",
+    "in_expr_body",
+    "in_limit_body",
+    "in_agg_body",
+    "in_empty",
+    "in_two",
+    "in_and_scalar",
+    "in_count",
+    "in_grouped_after",
+    "not_in_with_nulls",
+    "not_in_null_free",
+    "not_in_empty",
+    "not_in_int32",
+    "not_in_int32_nulls",
+    "not_in_string",
+    "not_in_distinct_nulls",
+    "not_in_distinct_null_free",
+    "not_in_group_having_nulls",
+    "not_in_group_having_null_free",
+    "not_in_group_empty",
+    "not_in_limit_body",
+    "not_in_expr_body_nulls",
+    "not_in_expr_body_null_free",
+    "not_in_and_filter",
+    "not_in_count",
+    "in_list_null",
+    "not_in_list",
+    "not_in_list_null",
+]
+
+_SUBQUERY_TABLES = ["t", "u", "nn", "e"]
+
+sql_oracle(
+    name = "subquery_oracle",
+    srcs = [
+        "tests/subquery/data.sql",
+        "tests/subquery/cases.sql",
+    ],
+    outputs = [t + ".parquet" for t in _SUBQUERY_TABLES] + [c + ".tsv" for c in _SUBQUERY_CASES],
+)
+
+_SUBQUERY_TEST_DATA = {"cases.sql": "tests/subquery/cases.sql"}
+
+_SUBQUERY_TEST_DATA.update({t + ".parquet": ":subquery_oracle[" + t + ".parquet]" for t in _SUBQUERY_TABLES})
+
+_SUBQUERY_TEST_DATA.update({c + ".tsv": ":subquery_oracle[" + c + ".tsv]" for c in _SUBQUERY_CASES})
 # DuckDB's tables and answers for test_run_sql_set_ops: tests/set_ops/data.sql
 # writes the Parquet files, and each line of tests/set_ops/cases.sql runs one
 # INTERSECT or EXCEPT query over them and writes its answer.
@@ -365,6 +471,14 @@ _SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in
 #   the SEMI JOIN and ANTI JOIN keywords; CROSS joins (also past one output
 #   chunk), a comma join and scalar subqueries; a LEFT JOIN with a residual over
 #   both sides is refused at lower; every case is run.
+# - test_run_sql_subquery: run_sql over Parquet tables DuckDB wrote (the
+#   :subquery_oracle action above) answers what the pinned DuckDB answers for
+#   each case of tests/subquery/cases.sql, on one and three workers: scalar
+#   subqueries in a WHERE, a SELECT list, a grouped SELECT list, a HAVING,
+#   under CASE, nested, over an empty table and as a LIMIT body with no row;
+#   IN and NULL-aware NOT IN over one-table and whole bodies (DISTINCT, GROUP
+#   BY / HAVING, a join, an expression), with and without NULL; the shapes it
+#   does not serve are refused by name at their step; every case is run.
 # - test_run_sql_joins: run_sql over six TPC-H-typed Parquet tables (INT32 and
 #   INT64 keys with NULLs and unmatched keys, DECIMAL(15,2) money, DATE32): the
 #   shapes of Q3, Q5 (a six-table join on two keys) and Q10 as comma joins in
@@ -398,8 +512,19 @@ _SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in
 #   projection, a GROUP BY and a count, a table of two keys, and one key in two
 #   buckets under UNION ALL each answer what the local files answer; a missing
 #   and a refused object are the store's NOT_FOUND and PERMISSION_DENIED at step
-#   execute; run_sql refuses the S3 scan with SCAN_FS_UNSERVED; a gs:// table is
-#   refused at step lower.
+#   execute; run_sql refuses the S3 scan with SCAN_FS_UNSERVED, and so does
+#   the S3 opener a gs:// table.
+# - test_run_sql_gcs_azure: run_sql_with over catalog tables whose source
+#   names a GCS bucket or an Azure container (the scheme from source_url's
+#   reading of a gs:// or az:// URL), read through GcsScanFs over
+#   objectstore_gcs's in-memory fake and through AzureScanFs over
+#   komira_test_fake_azure's fake Blob service (objectstore_gcs, azure_blob,
+#   azure_core, source_url and komira_test_fake_azure are test_deps for it):
+#   a filter and a projection, a GROUP BY and a count, a table of two keys,
+#   and one key in two buckets under UNION ALL each answer what the local
+#   files answer; a missing and a refused object are the store's NOT_FOUND and
+#   PERMISSION_DENIED at step execute; run_sql, and the opener of the other
+#   store, refuse each with SCAN_FS_UNSERVED naming the store.
 # - test_run_sql_no_from: SELECT 1 AS n is one INT32 row holding 1, as in
 #   DuckDB; a result literal is INT32 from -2147483647 to 2147483647 and
 #   INT64 otherwise, as DuckDB types it, while a literal a derived table holds
@@ -416,10 +541,22 @@ _SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in
 #   run_sql answers one BIGINT row `Count`; the file read back equals the query
 #   (a table, a query, an empty result, 130,000 rows in two row groups, every
 #   codec as the footer names it, a COPY over the file it reads, a relative
-#   path); CSV and JSON, an unknown extension, a URL, CREATE TABLE AS and a
-#   TIMESTAMP column are named refusals that touch no file; a missing
+#   path); an unknown extension, a URL, CREATE TABLE AS and a TIMESTAMP
+#   column are named refusals that touch no file; a missing
 #   directory, a directory at the path and an injected full disk leave no
 #   temporary file and the old file whole.
+# - test_run_sql_copy_text: COPY ... TO a local CSV or newline-delimited JSON
+#   file through run_sql writes the bytes DuckDB writes for the same rows
+#   (NULLs, quoting, the empty string, dates, decimals, doubles), with the
+#   format from the extension or FORMAT, gzip and zstd from the extension or
+#   COMPRESSION, an empty result as DuckDB writes it; lz4, a TIMESTAMP column
+#   and two columns of one name are named refusals that touch no file; a
+#   full disk leaves the old file and no temporary file.
+# - test_copy_text_encoding: the CSV and JSON encoders on batches of every
+#   type they write give DuckDB's bytes: each type and NULL, doubles across
+#   fixed and exponent notation, NaN and the infinities, FLOATs, dates
+#   before year 1 and after 9999, exact decimals, quoting and escaping;
+#   gzip and zstd decompress to their input; the writable types.
 # - test_run_sql_csv: read_csv through run_sql answers what the pinned DuckDB
 #   answers (the :csv_oracle action below) for each case of tests/csv/cases.sql:
 #   typed columns and their inferred types, quoted cells, NULL-bearing cells, a
@@ -535,14 +672,17 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_arrow_result.mojo",
+        "tests/test_copy_text_encoding.mojo",
         "tests/test_plan_cache_full_sink_hash.mojo",
         "tests/test_plan_validation_gate_direct.mojo",
         "tests/test_plan_validation_routes_ledger.mojo",
         "tests/test_resolved_cache_lru_eviction_stress.mojo",
         "tests/test_resolved_cache_pin_count.mojo",
         "tests/test_run_sql_copy_parquet.mojo",
+        "tests/test_run_sql_copy_text.mojo",
         "tests/test_run_sql_csv.mojo",
         "tests/test_run_sql_cte.mojo",
+        "tests/test_run_sql_gcs_azure.mojo",
         "tests/test_run_sql_distinct.mojo",
         "tests/test_run_sql_float_sum_workers.mojo",
         "tests/test_run_sql_group_keys.mojo",
@@ -556,17 +696,23 @@ mojo_library(
         "tests/test_run_sql_q6.mojo",
         "tests/test_run_sql_set_ops.mojo",
         "tests/test_run_sql_spill.mojo",
+        "tests/test_run_sql_subquery.mojo",
         "tests/test_run_sql_timers_off.mojo",
         "tests/test_run_sql_union_all.mojo",
         "tests/test_secret_capability_reveal.mojo",
     ],
     test_deps = [
         "//src/aws_core:aws_core",
+        "//src/azure_blob:azure_blob",
+        "//src/azure_core:azure_core",
         "//src/bench_corpus:bench_corpus",
         "//src/http_client:http_client",
+        "//src/objectstore_gcs:objectstore_gcs",
         "//src/objectstore_s3:objectstore_s3",
+        "//src/source_url:source_url",
         "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
         "//src/tests/helpers/komira_test_arrow_c_consumer:komira_test_arrow_c_consumer",
+        "//src/tests/helpers/komira_test_fake_azure:komira_test_fake_azure",
         "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
     ],
     test_data = {
@@ -574,6 +720,7 @@ mojo_library(
         "tests/test_run_sql_cte.mojo": _CTE_TEST_DATA,
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,
         "tests/test_run_sql_join_kinds.mojo": _JOIN_KINDS_TEST_DATA,
+        "tests/test_run_sql_subquery.mojo": _SUBQUERY_TEST_DATA,
         "tests/test_run_sql_set_ops.mojo": _SET_OPS_TEST_DATA,
     },
     visibility = ["PUBLIC"],
@@ -583,11 +730,12 @@ mojo_library(
 # (copy_readback/__init__.mojo says why this is a library of its own: its
 # test data is built by copy_runner, which depends on sdk_exec, so as test data
 # of sdk_exec it would be a cycle). Nothing depends on it.
-# - test_copy_readback_duckdb: the pinned DuckDB reads every Parquet file
-#   run_sql's COPY wrote for tests/copy/cases.sql (:copy_readback_oracle above)
-#   and finds the same rows, column names and types as in the file DuckDB
-#   writes for the same line, and as many rows as the COPY's `Count`; every
-#   case of cases.sql is checked.
+# - test_copy_readback_duckdb: the pinned DuckDB reads every Parquet, CSV and
+#   JSON file run_sql's COPY wrote for tests/copy/cases.sql
+#   (:copy_readback_oracle above) and finds the same rows, column names and
+#   types as in the file DuckDB writes for the same line, and as many rows as
+#   the COPY's `Count`; an uncompressed CSV or JSON file holds the same bytes
+#   as DuckDB's; every case of cases.sql is checked.
 mojo_library(
     name = "copy_readback",
     srcs = glob(["copy_readback/**/*.mojo"]),

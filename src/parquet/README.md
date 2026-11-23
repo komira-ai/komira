@@ -108,7 +108,8 @@ pages:
   top-level fields.
 - `metadata_parser`: `parse_full_metadata`, the whole `FileMetaData` (schema,
   row groups, column chunks, statistics, key-value metadata). Statistics
-  field 9 is the spec's `nan_count`; a chunk's HyperLogLog registers come
+  field 9 is the spec's `nan_count`; a SchemaElement's field 9 is read into
+  `SchemaElement.field_id`; a chunk's HyperLogLog registers come
   from its own key-value metadata (`parquet_api.hll_footer`).
 - `footer_header`: the light parses. `parse_metadata_header_and_schema`
   stops once `num_rows` and the schema are read and finds `ARROW:schema` by

@@ -194,7 +194,7 @@ def _local_fs_list_recursive(var root: String) raises -> List[String]:
     """
     # Out-param slots for the C shim: an 8-byte slot for the `char*` buffer
     # pointer and an 8-byte slot for the `unsigned long` length. We hold them
-    # in stack-local InlineArrays (the mmap_region.mojo:260 FFI pattern) so
+    # in stack-local Arrays (the mmap_region.mojo:260 FFI pattern) so
     # their addresses are stable across the synchronous call and no
     # wildcard-origin local pointer is needed.
     var buf_slot = Array[UInt8, 8](fill=UInt8(0))

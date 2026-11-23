@@ -21,6 +21,12 @@ Azure Blob Storage, hand-written:
   from.
 - **`AzureFs`**: fs's `FileSystem` over one container, read-only;
   its `list` follows `NextMarker` for at most `AZURE_LIST_MAX_PAGES` pages.
+- **`AzureScanFs`**: fs's `ScanFsOpener` for Azure, the value an engine is
+  handed with a plan that scans Azure: it opens one `AzureFs` per container a
+  scan names, each building its client from one `AzureClientSpec`, and
+  refuses another scheme with `SCAN_FS_UNSERVED`. An opened `AzureFs` keys
+  its blobs in a shared footer cache under `az://<container>/`
+  (`key_prefix`).
 - **`AzureSasSigner`**: objectstore's `ObjectUrlSigner`, minting
   blob service SAS URLs signed at the instant its `AzureSasClock` reports.
 
@@ -150,4 +156,31 @@ assert_equal(upload.method, "PUT")
 assert_true("?sp=cw&" in upload.url)
 assert_equal(upload.required_headers[0].name, "x-ms-blob-type")
 assert_equal(upload.required_headers[0].value, "BlockBlob")
+```
+
+The file system a scan of a container reads, opened from the plan's scheme
+code and container; nothing is built or dialed until its first verb:
+
+```mojo module
+from std.testing import assert_equal, assert_false, assert_raises
+
+from azure_blob import AzureClientSpec, AzureConfig, AzureCredential, AzureScanFs
+from http_client import KernelSchemeConnector, kernel_plain_scheme_connector
+from plan_expr.fs_descriptor_pod import FS_SCHEME_AZURE, FS_SCHEME_GCS
+
+
+def main() raises:
+    var opener = AzureScanFs[KernelSchemeConnector](
+        AzureClientSpec[KernelSchemeConnector](
+            AzureConfig.azurite(String("devstoreaccount1")),
+            AzureCredential.anonymous(),
+            kernel_plain_scheme_connector,
+        )
+    )
+    var fs = opener.open_scan_fs(FS_SCHEME_AZURE, "box")
+    assert_equal(fs.container(), "box")
+    assert_equal(fs.key_prefix(), "az://box/")
+    assert_false(fs.client_built())
+    with assert_raises(contains="SCAN_FS_UNSERVED: no file system of this run reads gs://raw"):
+        _ = opener.open_scan_fs(FS_SCHEME_GCS, "raw")
 ```

@@ -55,7 +55,7 @@
 #   * NO `UnsafePointer` in any signature here; the view holds
 #     `Pointer[IpcMorselFill, origin]` (origin-tracked) and all byte access goes
 #     through `SharedAlignedBuffer`'s typed `load_simd` / `read_u8_at`.
-#   * NO wildcard origins. `IpcColDesc` is POD (an InlineArray element, so no
+#   * NO wildcard origins. `IpcColDesc` is POD (an Array element, so no
 #     stale-pointer hazard across destroy and recreate).
 #   * Untrusted `(offset, length)` from the wire are validated against the frame
 #     with an EXPLICIT raise before any descriptor is recorded (release builds
@@ -91,7 +91,7 @@ from arrow.morsel_view import MorselView, NumericColView
 from byte_buffer.heap_region import HeapRegion
 
 
-# Max columns one fill descriptor table carries. POD InlineArray.
+# Max columns one fill descriptor table carries. POD Array.
 comptime MAX_IPC_FILL_COLS: Int = 64
 
 # Column descriptor kinds.
@@ -214,7 +214,7 @@ def _read_rb_descriptor[
 
 
 # =============================================================================
-# IpcColDesc -- the POD per-column descriptor (InlineArray element; no heap
+# IpcColDesc -- the POD per-column descriptor (Array element; no heap
 # field, no tracked origin).
 # =============================================================================
 
@@ -275,7 +275,7 @@ struct IpcMorselFill(Movable):
     which case the entire read path touches only mapped file pages.
 
     Safety: no wildcard-origin field, no owning raw pointer. `frame` / `meta`
-    are `SharedAlignedBuffer` (Arc-backed); `cols` is a POD `InlineArray`.
+    are `SharedAlignedBuffer` (Arc-backed); `cols` is a POD `Array`.
     """
 
     var frame: SharedAlignedBuffer[HeapRegion]

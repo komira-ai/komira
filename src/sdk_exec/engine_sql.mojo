@@ -6,9 +6,10 @@
 # optimize, then hold each subtree the optimized plan repeats once
 # (`optimize_for_run`); lower with inputs from the same footers; run. A
 # `COPY ... TO` runs its query the same way and then writes the result as a
-# local Parquet file (`engine_write`, still step `execute`), answering one row
-# with the BIGINT column `Count`; its destination and format are checked at
-# step `bind`, so a refused COPY touches no file. A step that refuses
+# local Parquet, CSV or newline-delimited JSON file (`engine_write`, still
+# step `execute`), answering one row with the BIGINT column `Count`; its
+# destination and compression are checked at step `bind`, so a refused COPY
+# touches no file. A step that refuses
 # ends the call, and the outcome says which step and the step's own message
 # unchanged; the door retries nothing and keeps no second route. Nothing here
 # raises: a failure of any step is a value.
@@ -18,7 +19,8 @@
 # again.
 #
 # `run_sql_with` takes the `ScanFsOpener` the run reads a remote store
-# through: a catalog table whose `ParquetSource` names an S3 bucket is bound
+# through: a catalog table whose `ParquetSource` names an S3 or GCS bucket or
+# an Azure container is bound
 # from the catalog's schema, lowered with no footer facts, and read through
 # the file system the opener opens on the bucket. `run_sql` is `run_sql_with`
 # and `LocalOnlyScanFs`, which refuses such a scan at step `execute` with
@@ -56,7 +58,7 @@ from pipeline_exec.source_parquet import LocalOnlyScanFs
 from .engine_context import EngineContext
 from .engine_execute import run_lowered_plan_with
 from .engine_lower import lower_for_context
-from .engine_write import check_copy_target, count_result, write_parquet_result
+from .engine_write import check_copy_target, count_result, write_copy_result
 
 comptime STEP_PARSE = "parse"
 comptime STEP_BIND = "bind"
@@ -128,7 +130,7 @@ def optimize_for_run(var plan: LogicalPlan) raises -> LogicalPlan:
 
 def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
     """Run the SQL statement `text` against `ctx` (a query, or a `COPY ... TO`
-    a local Parquet file), reading the local file system only (`run_sql_with`
+    a local Parquet, CSV or JSON file), reading the local file system only (`run_sql_with`
     and `LocalOnlyScanFs`)."""
     return run_sql_with(ctx, text, LocalOnlyScanFs())
 
@@ -137,7 +139,7 @@ def run_sql_with[
     R: ScanFsOpener
 ](mut ctx: EngineContext, text: String, var opener: R) -> SqlOutcome:
     """Run the SQL statement `text` against `ctx`: a query, or a `COPY ... TO`
-    a local Parquet file. A Parquet scan of a remote store (a catalog table
+    a local Parquet, CSV or JSON file. A Parquet scan of a remote store (a catalog table
     whose source names a bucket) reads through the file system `opener` opens
     on the bucket."""
     ctx.begin_query()
@@ -151,7 +153,7 @@ def run_sql_with[
         var bound = bind_statement(stmt, ctx.catalog, ctx.footers)
         pt_record[PH_BIND](t_bind)
         if bound.kind == STMT_COPY:
-            check_copy_target(bound.dest_path, bound.fmt)
+            check_copy_target(bound.dest_path, bound.fmt, bound.codec)
         elif bound.kind != STMT_QUERY:
             raise Error(
                 String(STATEMENT_NOT_A_QUERY)
@@ -172,7 +174,9 @@ def run_sql_with[
         var batch = run_lowered_plan_with(ctx, lowered^, opener^)
         var outcome = SqlOutcome()
         if bound.kind == STMT_COPY:
-            var rows = write_parquet_result(batch^, bound.dest_path, bound.codec)
+            var rows = write_copy_result(
+                batch^, bound.dest_path, bound.fmt, bound.codec
+            )
             outcome.batches.append(count_result(rows))
         else:
             outcome.batches.append(batch^)

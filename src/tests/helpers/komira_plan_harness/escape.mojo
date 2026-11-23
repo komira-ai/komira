@@ -226,7 +226,7 @@ def _canon_hex_escape(bs: Span[UInt8, _], i: Int) -> Bool:
         return True
     if v < 128:
         return False
-    var seq = InlineArray[UInt8, 4](fill=UInt8(0))
+    var seq = Array[UInt8, 4](fill=UInt8(0))
     seq[0] = UInt8(v)
     var count = 1
     var j = i + 4

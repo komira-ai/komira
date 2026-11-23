@@ -1,13 +1,13 @@
-"""`copy_cases`: the Parquet files komira writes for a cases file of COPY
-statements, as one build action, for DuckDB to read back.
+"""`copy_cases`: the Parquet, CSV and JSON files komira writes for a cases
+file of COPY statements, as one build action, for DuckDB to read back.
 
 The action runs `copy_runner` (copy_runner/main.mojo) with the cases file,
 a directory holding `inputs` (each at its name), and the output directory:
 
     copy_runner --cases <cases.sql> --input-dir <inputs> --out-dir <out>
 
-Every name in `outputs` (each `<case>.parquet`, and `counts.tsv`, the
-`Count` each case answered) is a sub-target `[<name>]`, which a
+Every name in `outputs` (each case's destination file, and `counts.tsv`,
+the `Count` each case answered) is a sub-target `[<name>]`, which a
 `sql_oracle` takes as an input in its dict form. A refused case fails the
 action. Nothing here reads an environment variable; the program takes its
 settings as flags.
@@ -40,7 +40,7 @@ def _copy_cases_impl(ctx):
 
 _copy_cases = rule(
     impl = _copy_cases_impl,
-    doc = "Runs `runner` (the copy_runner program) over the COPY lines of `cases`, reading `inputs` ({name: source}) and writing the Parquet files and counts.tsv named in `outputs`, each a sub-target `[<name>]`.",
+    doc = "Runs `runner` (the copy_runner program) over the COPY lines of `cases`, reading `inputs` ({name: source}) and writing the files and counts.tsv named in `outputs`, each a sub-target `[<name>]`.",
     attrs = {
         "cases": attrs.source(),
         "inputs": attrs.dict(attrs.string(), attrs.source()),

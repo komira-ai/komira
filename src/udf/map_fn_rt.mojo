@@ -168,7 +168,7 @@ struct MapFnRT[F: MapFn, col0: Int](RowTransform):
         with the one extra `_udf` field load that AggFnAcc also has).
 
         ROW-BUILD COST: the row build is a store into an
-        `InlineArray[F.InRow, 1]` slot and a load back out, and at ARITY=1
+        `Array[F.InRow, 1]` slot and a load back out, and at ARITY=1
         it is FREE — the optimizer folds it after inlining (an interleaved
         A/B, memory-bound and cache-resident, differs only by run-to-run
         noise). Method note for whoever re-measures:

@@ -26,7 +26,7 @@ comptime POW5_128_MAX_Q: Int = 308
 """The largest q with an entry (5^308)."""
 
 # fmt: off
-comptime _POW5_128: InlineArray[UInt64, 1302] = [
+comptime _POW5_128: Array[UInt64, 1302] = [
     0xEEF453D6923BD65A, 0x113FAA2906A13B3F,  # 5^-342
     0x9558B4661B6565F8, 0x4AC7CA59A424C507,  # 5^-341
     0xBAAEE17FA23EBF76, 0x5D79BCF00D2DF649,  # 5^-340

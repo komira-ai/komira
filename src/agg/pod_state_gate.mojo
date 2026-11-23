@@ -28,9 +28,9 @@
 #   (a) a flat `PodScalar` — Int8..Int64, UInt8..UInt64, Float32, Float64,
 #       Bool (the same allowlist `comptime_field_validation._dtype_matches`
 #       blesses), OR
-#   (b) an `InlineArray[T: PodScalar, N]` — the HLL workaround
+#   (b) an `Array[T: PodScalar, N]` — the HLL workaround
 #       (`agg_fn.mojo:~40`; same shape the engine's statistical accumulators
-#       use after the AggLayout -> InlineArray migration).
+#       use after the AggLayout -> Array migration).
 # Anything else (String / List / Set / OwnedPointer / a nested struct field)
 # is rejected. Nested @fieldwise_init struct-of-PodScalars is NOT accepted —
 # the design implies flat fields, and no existing conformer needs nesting
@@ -40,29 +40,29 @@
 # Mojo 1.0.0b1 idioms this gate relies on:
 #   - `reflect[S]().field_types()` returns a `TypeList` of `AnyType`-erased
 #     field types; `(ts[i] == U)` discriminates them.
-#   - An `InlineArray[Elem, N]` field reflects to a single internal field
+#   - An `Array[Elem, N]` field reflects to a single internal field
 #     named `_array` whose element type is an opaque `__mlir_type` that does
 #     NOT round-trip through `_type_is_eq` against `Elem`. So we CANNOT
 #     recover the element type by reflecting one level deeper. Instead we
-#     detect the InlineArray AND validate its element in one step: sweep
-#     `(FieldT == InlineArray[Elem, n])` over each PodScalar `Elem`
-#     and `n in [1, MAX_INLINE_ARRAY_N]`. A hit confirms BOTH "is InlineArray"
-#     AND "element is a blessed PodScalar" — so `InlineArray[String, N]` is
+#     detect the Array AND validate its element in one step: sweep
+#     `(FieldT == Array[Elem, n])` over each PodScalar `Elem`
+#     and `n in [1, MAX_INLINE_ARRAY_N]`. A hit confirms BOTH "is Array"
+#     AND "element is a blessed PodScalar" — so `Array[String, N]` is
 #     correctly REJECTED (String is not on the Elem allowlist), which the
 #     naive structural "single field named `_array`" check would miss.
-#   - `InlineArray[Elem, n]` requires `Elem: Copyable & Movable`, so the
+#   - `Array[Elem, n]` requires `Elem: Copyable & Movable`, so the
 #     sweep helper bounds `Elem` accordingly (every PodScalar satisfies it).
 # =============================================================================
 
 from std.collections import Array
 
 
-# The bounded support window for an `InlineArray[PodScalar, N]` State field.
-# The whole-type `(FieldT == InlineArray[Elem, n])` comparison
+# The bounded support window for an `Array[PodScalar, N]` State field.
+# The whole-type `(FieldT == Array[Elem, n])` comparison
 # needs a concrete `n`, and `n` is not recoverable from reflection — so we
 # sweep `n in [1, MAX_INLINE_ARRAY_N]`. 256 covers every realistic AggFn.State
-# InlineArray (the in-tree HLL / HashSet workarounds use N <= 16; an HLL with
-# precision p uses 2^p registers — p<=8 => N<=256). An InlineArray State field
+# Array (the in-tree HLL / HashSet workarounds use N <= 16; an HLL with
+# precision p uses 2^p registers — p<=8 => N<=256). An Array State field
 # wider than this cap is rejected with the gate message (raise the cap here if
 # a real conformer ever needs it; the sweep is comptime-only, run once per
 # distinct field type, so the cost is negligible).
@@ -102,9 +102,9 @@ def _is_pod_scalar[FieldT: AnyType]() -> Bool:
 def _is_inline_array_of_elem[
     FieldT: AnyType, Elem: Copyable & Movable
 ]() -> Bool:
-    """True iff `FieldT` is `InlineArray[Elem, n]` for some `n` in
+    """True iff `FieldT` is `Array[Elem, n]` for some `n` in
     `[1, MAX_INLINE_ARRAY_N]`. Whole-type comparison, so a hit confirms BOTH
-    the InlineArray shape AND the exact element type — `n` itself is not
+    the Array shape AND the exact element type — `n` itself is not
     recoverable from reflection, hence the bounded sweep."""
     var hit = False
     comptime for n in range(1, MAX_INLINE_ARRAY_N + 1):
@@ -114,9 +114,9 @@ def _is_inline_array_of_elem[
 
 
 def _is_pod_inline_array[FieldT: AnyType]() -> Bool:
-    """True iff `FieldT` is `InlineArray[PodScalar, N]` — the HLL workaround
-    carve-out. Sweeps the PodScalar element allowlist; `InlineArray[String,
-    N]` / `InlineArray[<heap-owning>, N]` is NOT on the list and is rejected.
+    """True iff `FieldT` is `Array[PodScalar, N]` — the HLL workaround
+    carve-out. Sweeps the PodScalar element allowlist; `Array[String,
+    N]` / `Array[<heap-owning>, N]` is NOT on the list and is rejected.
     """
     comptime if _is_inline_array_of_elem[FieldT, Int8]():
         return True
@@ -145,7 +145,7 @@ def _is_pod_inline_array[FieldT: AnyType]() -> Bool:
 
 def _is_pod_field[FieldT: AnyType]() -> Bool:
     """True iff a `State` field of type `FieldT` is slab-safe: a flat
-    PodScalar OR an `InlineArray[PodScalar, N]`. Everything else
+    PodScalar OR an `Array[PodScalar, N]`. Everything else
     (String / List / Set / OwnedPointer / nested struct) returns False."""
     comptime if _is_pod_scalar[FieldT]():
         return True
@@ -154,7 +154,7 @@ def _is_pod_field[FieldT: AnyType]() -> Bool:
 
 def assert_pod_state[S: AnyType & Copyable & Movable]():
     """THE slab-safety gate. Comptime-asserts that every field of `S` is slab-safe
-    (a flat PodScalar or `InlineArray[PodScalar, N]`). A heap-owning field
+    (a flat PodScalar or `Array[PodScalar, N]`). A heap-owning field
     (`String` / `List` / `Set` / `OwnedPointer` / a nested struct) emits a
     compile error — the raw `State` slab is bytewise dumped / merged across
     workers in `AggFnAcc.flush_partial_to_column` / `merge_aligned`, so a
@@ -173,4 +173,4 @@ def assert_pod_state[S: AnyType & Copyable & Movable]():
             " bytewise dumped + cross-worker merged at flush-partial, which"
             " corrupts the inner heap buffer (a stale-slab hazard). Use a flat PodScalar"
             " (Int8..Int64/UInt8..UInt64/Float32/Float64/Bool) or"
-            " InlineArray[PodScalar, N] State field instead.")
+            " Array[PodScalar, N] State field instead.")

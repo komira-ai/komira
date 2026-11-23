@@ -45,7 +45,7 @@
 #
 # Encapsulation invariants:
 #   * Zero `UnsafePointer` in any PUBLIC function signature. Public
-#     entries return `List[UInt8]` (composite) or `InlineArray[UInt8, W]`
+#     entries return `List[UInt8]` (composite) or `Array[UInt8, W]`
 #     (per-DType leaf); pointer arithmetic is confined to private
 #     (`_`-prefixed) byte-write helpers with concrete-origin pointers.
 #   * Zero wildcard origin.
@@ -452,7 +452,7 @@ def _append_zeros(mut out: List[UInt8], n: Int):
 def _append_inline_array_8(
     mut out: List[UInt8], v: Array[UInt8, 8]
 ):
-    """Append all 8 bytes of an InlineArray[UInt8, 8] to out."""
+    """Append all 8 bytes of an Array[UInt8, 8] to out."""
     out.append(v[0]); out.append(v[1]); out.append(v[2]); out.append(v[3])
     out.append(v[4]); out.append(v[5]); out.append(v[6]); out.append(v[7])
 
@@ -460,21 +460,21 @@ def _append_inline_array_8(
 def _append_inline_array_4(
     mut out: List[UInt8], v: Array[UInt8, 4]
 ):
-    """Append all 4 bytes of an InlineArray[UInt8, 4] to out."""
+    """Append all 4 bytes of an Array[UInt8, 4] to out."""
     out.append(v[0]); out.append(v[1]); out.append(v[2]); out.append(v[3])
 
 
 def _append_inline_array_2(
     mut out: List[UInt8], v: Array[UInt8, 2]
 ):
-    """Append all 2 bytes of an InlineArray[UInt8, 2] to out."""
+    """Append all 2 bytes of an Array[UInt8, 2] to out."""
     out.append(v[0]); out.append(v[1])
 
 
 def _append_inline_array_16(
     mut out: List[UInt8], v: Array[UInt8, 16]
 ):
-    """Append all 16 bytes of an InlineArray[UInt8, 16] to out."""
+    """Append all 16 bytes of an Array[UInt8, 16] to out."""
     out.append(v[0]); out.append(v[1]); out.append(v[2]); out.append(v[3])
     out.append(v[4]); out.append(v[5]); out.append(v[6]); out.append(v[7])
     out.append(v[8]); out.append(v[9]); out.append(v[10]); out.append(v[11])

@@ -23,7 +23,7 @@
 # getter API is identical regardless of who populated it.
 #
 # Encapsulation: every public surface takes / returns String /
-# typed scalars / InlineArray / List — ZERO UnsafePointer crosses any boundary.
+# typed scalars / Array / List — ZERO UnsafePointer crosses any boundary.
 # =============================================================================
 
 from db.db_value import (
