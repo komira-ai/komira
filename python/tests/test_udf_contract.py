@@ -108,6 +108,8 @@ def validate_accepts_the_built_shapes_and_starts_nothing(env):
         base_spec(code=code, args=[("a", pa.int64()), ("b", pa.int32()), ("c", pa.float64())],
                   result=pa.float64()),
         base_spec(code=code, args=[]),
+        base_spec(code=code, args=[("s", pa.string()), ("t", pa.timestamp("us", tz="UTC"))],
+                  result=pa.struct([("a", pa.list_(pa.decimal128(10, 2)))])),
     ]
     for spec in ok:
         assert rt.validate(spec) == (h.OK, None), spec.args
@@ -204,12 +206,12 @@ def validate_refuses_what_this_build_does_not_run(env):
 def validate_refuses_types_entries_and_code_lists(env):
     rt = env.runtime()
     code = [(h.ROLE_BUNDLE, bytes(32))]
-    check_refused(rt, env, base_spec(code=code, args=[("s", pa.string())]), h.ERR_UNSUPPORTED,
-                     "type 'u' of s is not built in komira/python yet")
-    check_refused(rt, env, base_spec(code=code, result=pa.string()), h.ERR_UNSUPPORTED,
-                     "type 'u' of the result is not built in komira/python yet")
-    check_refused(rt, env, base_spec(code=code, result=pa.struct([("a", pa.int64())])),
-                     h.ERR_UNSUPPORTED, "type '+s' of the result is not built in komira/python yet")
+    check_refused(rt, env, base_spec(code=code, args=[("s", pa.float16())]), h.ERR_UNSUPPORTED,
+                     "type 'e' of s is not built in komira/python yet")
+    check_refused(rt, env, base_spec(code=code, result=pa.uint8()), h.ERR_UNSUPPORTED,
+                     "type 'C' of the result is not built in komira/python yet")
+    check_refused(rt, env, base_spec(code=code, result=pa.map_(pa.string(), pa.int64())),
+                     h.ERR_UNSUPPORTED, "type '+m' of the result is not built in komira/python yet")
     many = [("a%d" % i, pa.int64()) for i in range(65)]
     status, err = rt.validate(base_spec(code=code, args=many))
     assert status == h.ERR_UNSUPPORTED, err

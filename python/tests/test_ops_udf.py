@@ -8,6 +8,7 @@ map_batches verb.
 
 import sys
 
+from komira._errors import UnsupportedOperation
 from komira._ops import (
     Alias,
     Arith,
@@ -40,6 +41,43 @@ A = ColRef("a")
 B = ColRef("b")
 DIGEST = bytes(range(32))
 OTHER = bytes(range(1, 33))
+
+# The types a refusal lists (komira._ops._dtype.CARRIED), and the texts a
+# return type that is not carried, one a list item or struct field cannot hold
+# and one that is not canonical are refused with.
+CARRIED = (
+    "bool, int8, int16, int32, int64, float32, float64, string, large_string, binary, large_binary, "
+    "date32[day], timestamp[s|ms|us|ns] with an optional tz, decimal128(p, s), list<item: T>, "
+    "large_list<item: T> and struct<name: T, ...>, where a list item or struct field is not a list, "
+    "a struct, a decimal or a zoned timestamp"
+)
+UNMAPPABLE = (
+    "UDF_RETURN_TYPE_UNMAPPABLE: {what} {value!r} is not a type komira/python carries; "
+    "the carried types are {carried}"
+)
+NESTS = (
+    "UDF_RETURN_TYPE_UNMAPPABLE: {what} {value!r} nests {child} in a list or struct, "
+    "which a komira column cannot hold; the carried types are {carried}"
+)
+NOT_CANONICAL = "{what} {value!r} is not a canonical dtype; write {want!r}"
+
+# Return types in their canonical spelling.
+CARRIED_DTYPES = (
+    "bool", "int8", "int16", "int32", "int64", "float32", "float64", "string", "large_string", "binary",
+    "large_binary", "date32[day]", "timestamp[s]", "timestamp[ms]", "timestamp[us]", "timestamp[ns]",
+    "timestamp[us, tz=UTC]", "decimal128(10, 2)", "decimal128(38, 38)", "list<item: int64>",
+    "large_list<item: string>", "struct<a: int64, b: string>",
+)
+# (a spelling that is not canonical, its canonical spelling)
+NON_CANONICAL = (
+    ("utf8", "string"),
+    ("large_utf8", "large_string"),
+    ("date32", "date32[day]"),
+    ("list<int64>", "list<item: int64>"),
+    ("decimal128(10,2)", "decimal128(10, 2)"),
+    ("struct<a:int64>", "struct<a: int64>"),
+    ("timestamp[us,tz=UTC]", "timestamp[us, tz=UTC]"),
+)
 
 
 def raised(call):
@@ -183,15 +221,44 @@ def test_code_refusals():
 def test_return_type_refusals_of_a_column_kind():
     refuses(lambda: scalar(return_type=7), TypeError, "UdfSpec return_type op must be a str, not int")
     refuses(
-        lambda: scalar(return_type="string"),
-        ValueError,
-        "UdfSpec return_type op 'string' is not one of: float64, int32, int64",
-    )
-    refuses(
         lambda: scalar(return_type=(("x", "int64"),)),
         TypeError,
         "UdfSpec return_type op must be a str, not tuple",
     )
+    for dtype in ("float16", "uint8", "map<string, int64>"):
+        refuses(
+            lambda: scalar(return_type=dtype),
+            UnsupportedOperation,
+            UNMAPPABLE.format(what="UdfSpec return_type", value=dtype, carried=CARRIED),
+        )
+    nested = "list<item: list<item: int64>>"
+    refuses(
+        lambda: scalar(return_type=nested),
+        UnsupportedOperation,
+        NESTS.format(what="UdfSpec return_type", value=nested, child="list<item: int64>", carried=CARRIED),
+    )
+
+
+def test_a_return_type_of_each_carried_type_is_accepted_as_written():
+    for dtype in CARRIED_DTYPES:
+        assert scalar(return_type=dtype).return_type == dtype
+        assert scalar(kind="map_batches_column", return_type=dtype).return_type == dtype
+        assert row(return_type=dtype).return_type == dtype
+        assert frame(return_type=(("x", dtype), ("y", "int64"))).return_type == (("x", dtype), ("y", "int64"))
+
+
+def test_a_return_type_must_be_the_canonical_spelling():
+    for given, want in NON_CANONICAL:
+        refuses(
+            lambda: scalar(return_type=given),
+            ValueError,
+            NOT_CANONICAL.format(what="UdfSpec return_type", value=given, want=want),
+        )
+        refuses(
+            lambda: frame(return_type=(("x", given),)),
+            ValueError,
+            NOT_CANONICAL.format(what="UdfSpec return_type dtype", value=given, want=want),
+        )
 
 
 def test_return_type_refusals_of_a_frame():
@@ -221,9 +288,14 @@ def test_return_type_refusals_of_a_frame():
         "UdfSpec.return_type name must be a str, not int",
     )
     refuses(
-        lambda: frame(return_type=(("x", "bool"),)),
-        ValueError,
-        "UdfSpec return_type dtype op 'bool' is not one of: float64, int32, int64",
+        lambda: frame(return_type=(("x", "float16"),)),
+        UnsupportedOperation,
+        UNMAPPABLE.format(what="UdfSpec return_type dtype", value="float16", carried=CARRIED),
+    )
+    refuses(
+        lambda: frame(return_type=(("x", "int64"), ("y", "uint8"))),
+        UnsupportedOperation,
+        UNMAPPABLE.format(what="UdfSpec return_type dtype", value="uint8", carried=CARRIED),
     )
     refuses(
         lambda: frame(return_type=()),
