@@ -34,11 +34,11 @@ from telemetry_store.segment_entry import (
 )
 
 
-def _uuid(fill: UInt8) -> InlineArray[UInt8, 16]:
-    return InlineArray[UInt8, 16](fill=fill)
+def _uuid(fill: UInt8) -> Array[UInt8, 16]:
+    return Array[UInt8, 16](fill=fill)
 
 
-def _flat(var us: List[InlineArray[UInt8, 16]]) -> List[UInt8]:
+def _flat(var us: List[Array[UInt8, 16]]) -> List[UInt8]:
     var out = List[UInt8]()
     for i in range(len(us)):
         for b in range(16):
@@ -52,7 +52,7 @@ def _flat(var us: List[InlineArray[UInt8, 16]]) -> List[UInt8]:
 
 
 def test_01_round_trip_preserves_every_field() raises:
-    var inputs = List[InlineArray[UInt8, 16]]()
+    var inputs = List[Array[UInt8, 16]]()
     inputs.append(_uuid(UInt8(7)))
     inputs.append(_uuid(UInt8(9)))
     var e = TelemetrySegmentEntry(
@@ -225,7 +225,7 @@ def test_05_an_unknown_body_version_is_refused() raises:
 
 
 def test_06_a_partial_merge_uuid_is_refused() raises:
-    var inputs = List[InlineArray[UInt8, 16]]()
+    var inputs = List[Array[UInt8, 16]]()
     inputs.append(_uuid(UInt8(7)))
     var e = TelemetrySegmentEntry(
         TELEMETRY_SEGMENT_ENTRY_VERSION, _uuid(UInt8(3)), String("x.parquet"),
@@ -299,7 +299,7 @@ def test_07_an_empty_or_inverted_segment_is_never_published() raises:
 
 
 def test_08_uuid_in_flat_matches_only_on_a_group_boundary() raises:
-    var us = List[InlineArray[UInt8, 16]]()
+    var us = List[Array[UInt8, 16]]()
     us.append(_uuid(UInt8(1)))
     us.append(_uuid(UInt8(2)))
     var flat = _flat(us^)
@@ -308,7 +308,7 @@ def test_08_uuid_in_flat_matches_only_on_a_group_boundary() raises:
     assert_false(uuid_in_flat(flat, _uuid(UInt8(3))), "8: absent uuid does NOT")
     # A uuid that STRADDLES the boundary (eight 1s then eight 2s) exists in the
     # flat bytes but is not a member. A byte-window scan would match it.
-    var straddle = InlineArray[UInt8, 16](fill=UInt8(1))
+    var straddle = Array[UInt8, 16](fill=UInt8(1))
     for i in range(8, 16):
         straddle[i] = UInt8(2)
     assert_false(
@@ -363,7 +363,7 @@ def test_09_the_envelope_field_order_is_the_documented_one() raises:
         "telemetry/logs/20261001/data/00000000000000000042-aa.parquet"
     )
     var klen = key.byte_length()
-    var inputs = List[InlineArray[UInt8, 16]]()
+    var inputs = List[Array[UInt8, 16]]()
     inputs.append(_uuid(UInt8(4)))
     inputs.append(_uuid(UInt8(5)))
     var min_ts = Int64(1790812800_000_000_000)

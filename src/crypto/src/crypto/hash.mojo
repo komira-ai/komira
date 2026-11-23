@@ -46,7 +46,7 @@ struct Sha256(Hash, Movable, Deinitable):
 
         var h = Sha256()
         h.update(message_bytes)
-        var digest = InlineArray[UInt8, 32](fill=0)
+        var digest = Array[UInt8, 32](fill=0)
         h.finalize_into(digest)
 
     `fork(self) -> Self` clones the streaming state via EVP_MD_CTX_copy_ex
@@ -198,7 +198,7 @@ struct Sha1(Movable, Deinitable):
         var h = Sha1()
         h.update(chunk_a)
         h.update(chunk_b)
-        var digest = InlineArray[UInt8, 20](fill=0)
+        var digest = Array[UInt8, 20](fill=0)
         h.finalize_into(digest)
 
     `finalize_into` is idempotent (it finalizes a clone of the state), so a

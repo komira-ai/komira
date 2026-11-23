@@ -22,7 +22,7 @@
 #                        - integer divide-by-10/100 via magic-mul codegen
 #                          (NO SIMD LUT: a 2-digit LUT indexed by value
 #                          spills 4 zmm registers per lookup)
-#                        - InlineArray[UInt8, 24] stack scratch
+#                        - Array[UInt8, 24] stack scratch
 #                          (uninit; written right-to-left)
 #                        - direct-pointer-cursor write into pre-grown `data`
 #                      Codegen: the 4-digit emit vectorizes to vpinsrb-pack +
@@ -515,7 +515,7 @@ def _emit_u64_itoa[
           the LUT and stays in scalar registers.
         - **NO SIMD[UInt8, 24] scratch.** SIMD indexed writes do runtime
           bounds-checking + cmov clamping. We use a fixed
-          `InlineArray[UInt8, 24]` on stack — direct addressed byte stores.
+          `Array[UInt8, 24]` on stack — direct addressed byte stores.
         - **Forward memcpy at end** to land the live span at write_pos.
 
     # SAFETY: caller has guaranteed `data_ptr + write_pos_in + 20` is

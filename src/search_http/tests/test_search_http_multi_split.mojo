@@ -70,8 +70,8 @@ from search_http.envelopes import (
 # -----------------------------------------------------------------------------
 
 
-def _uuid(seed: UInt8) -> InlineArray[UInt8, 16]:
-    var u = InlineArray[UInt8, 16](fill=0)
+def _uuid(seed: UInt8) -> Array[UInt8, 16]:
+    var u = Array[UInt8, 16](fill=0)
     for i in range(16):
         u[i] = seed + UInt8(i)
     return u^
@@ -85,7 +85,7 @@ def _short_id(seed: UInt8) -> String:
     return _short_id_of(_uuid(seed))
 
 
-def _short_id_of(uuid: InlineArray[UInt8, 16]) -> String:
+def _short_id_of(uuid: Array[UInt8, 16]) -> String:
     """Mirror a handler's split short id over an arbitrary 16-byte UUID (full 16
     bytes, hex)."""
     comptime HEX = "0123456789abcdef"
@@ -121,7 +121,7 @@ def _split_schema() raises -> Schema:
 
 
 def _drive_sink(
-    var batch: RecordBatch, var schema: Schema, uuid: InlineArray[UInt8, 16]
+    var batch: RecordBatch, var schema: Schema, uuid: Array[UInt8, 16]
 ) raises -> List[UInt8]:
     var sink = SearchSink(
         String("bucket"), String("prefix"), String("idx"),
@@ -134,7 +134,7 @@ def _drive_sink(
 
 
 def _build_split_uuid(
-    uuid: InlineArray[UInt8, 16],
+    uuid: Array[UInt8, 16],
     bodies: List[String],
     sources: List[String],
     genres: List[String],
@@ -171,8 +171,8 @@ def _search_split(bytes: List[UInt8], query: QueryIR) raises -> SearchResult:
 def _render_two_split_uuid(
     sa: List[UInt8],
     sb: List[UInt8],
-    uuid_a: InlineArray[UInt8, 16],
-    uuid_b: InlineArray[UInt8, 16],
+    uuid_a: Array[UInt8, 16],
+    uuid_b: Array[UInt8, 16],
     base_query: QueryIR,
     base_from: Int,
     base_size: Int,
@@ -346,8 +346,8 @@ def test_same_run_uuid_id_collision_regression() raises:
     # Two UUIDv7-shaped ids minted milliseconds apart in one ingest run: the
     # first 6 bytes (unix_ts_ms) are IDENTICAL; only the entropy (bytes[6..16))
     # differs (here bytes[6..8) carry ver|rand_a seq, bytes[8..16) carry rand_b).
-    var ua = InlineArray[UInt8, 16](fill=0)
-    var ub = InlineArray[UInt8, 16](fill=0)
+    var ua = Array[UInt8, 16](fill=0)
+    var ub = Array[UInt8, 16](fill=0)
     # Shared timestamp head: 01 9e ac bb 12 34 (== observed `019eacbb...`).
     var ts = [
         UInt8(0x01), UInt8(0x9e), UInt8(0xac), UInt8(0xbb),

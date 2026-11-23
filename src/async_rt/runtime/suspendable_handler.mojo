@@ -362,7 +362,7 @@ struct PollPgRead(Movable, Deinitable):
         accumulated; PENDING otherwise; ERR on a hard recv error / peer close
         before the full row-set.
 
-        SAFETY: the scratch buffer is a stack-local InlineArray owned by this
+        SAFETY: the scratch buffer is a stack-local Array owned by this
         frame; the recv FFI writes into it via its `.unsafe_ptr()` and does not
         retain the pointer. No pointer crosses any module boundary."""
         from std.ffi import external_call

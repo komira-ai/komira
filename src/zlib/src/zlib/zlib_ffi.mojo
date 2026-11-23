@@ -752,7 +752,7 @@ def zlib_inflate_into[
     if cap == 0:
         # libz refuses a null `next_out` even with `avail_out == 0`, and an
         # empty Span may carry one: offer a real one-byte buffer, capacity 0.
-        var scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+        var scratch = Array[UInt8, 1](fill=UInt8(0))
         # SAFETY: `scratch` and `src` are alive across this synchronous call
         # (local stack / the Span's concrete origin); libz writes 0 bytes and
         # reads at most `n` from `src`.
@@ -825,8 +825,8 @@ def zlib_inflate_once[
             + " bytes exceeds libz's 32-bit length"
         )
     var cap = min(len(dst), _UINT_MAX)
-    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
-    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var src_scratch = Array[UInt8, 1](fill=UInt8(0))
+    var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
     if n == 0 and cap == 0:
         # SAFETY: both locals are alive across this synchronous call; libz
         # reads 0 bytes and writes 0 bytes.

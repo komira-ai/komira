@@ -4,7 +4,7 @@
 #
 # Hot-path wire shape. Writing the full 192-byte `SpanRecord` per
 # start_span / end_span costs a few hundred ns/op at the producer site,
-# dominated by the InlineArray + slot copy.
+# dominated by the Array + slot copy.
 #
 # Split the wire shape: producers emit fixed-32-byte `SpanPacket`s (one
 # OPEN, one CLOSE per span); the drain joins matching pairs by `span_id`
@@ -13,7 +13,7 @@
 #
 # Layout (POD by construction):
 #   kind       UInt8     (PACKET_OPEN=0, PACKET_CLOSE=1)
-#   _pad0      InlineArray[UInt8, 3]
+#   _pad0      Array[UInt8, 3]
 #   name_id    UInt32    (FNV-1a hash; OPEN only — CLOSE leaves zero)
 #   span_id    UInt64
 #   parent_id  UInt64    (OPEN only — CLOSE leaves zero)
@@ -46,7 +46,7 @@ comptime PACKET_CLOSE: UInt8 = UInt8(1)
 
 struct SpanPacket(Copyable, Movable, Deinitable):
     # MOJO-1.0.0: `ImplicitlyCopyable` DROPPED, `Copyable` kept. 1.0.0 makes
-    # `InlineArray` non-implicitly-copyable, and a struct owning one cannot
+    # `Array` non-implicitly-copyable, and a struct owning one cannot
     # synthesise an implicit copy ctor -- there is no manual override (a
     # hand-written `__copyinit__` is not consulted). Copies of this POD
     # record are now spelled `.copy()`; that is the SAME memcpy an implicit copy emitted
@@ -54,7 +54,7 @@ struct SpanPacket(Copyable, Movable, Deinitable):
     """Compact open/close packet — POD by construction.
 
     Crosses the worker → drain boundary. Every field is a primitive
-    scalar or fixed-size InlineArray of UInt8. NO heap-owning fields.
+    scalar or fixed-size Array of UInt8. NO heap-owning fields.
     """
 
     var kind: UInt8

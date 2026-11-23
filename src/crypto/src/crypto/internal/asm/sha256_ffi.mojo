@@ -62,7 +62,7 @@
 #
 # Public API:
 #   * `sha2_oneshot[N]` free function takes `Span[UInt8, _]` + returns
-#     `InlineArray[UInt8, N]`. ZERO UnsafePointer in public signature.
+#     `Array[UInt8, N]`. ZERO UnsafePointer in public signature.
 #   * `Sha2Hasher[OUTPUT_SIZE]` struct: opaque wrapper around AWS-LC's
 #     heap-allocated EVP_MD_CTX*. Private `_ctx` field is the
 #     FFI-OPAQUE-HANDLE carve-out (same shape as AesGcmCtx._ctx in
@@ -96,7 +96,7 @@ from std.memory import UnsafePointer
 # lifetime is not expressible in Mojo's origin system. Opaque AWS-LC heap
 # handles are passed BY VALUE to `external_call` and never written through
 # Mojo-side, so an immutable static origin is sound. Data-buffer pointers
-# (Span/InlineArray/scalar out-params) carry the same origin; the SAFETY
+# (Span/Array/scalar out-params) carry the same origin; the SAFETY
 # contract is that the caller holds the buffer's real origin in scope across
 # the synchronous external_call (AWS-LC retains no pointer past the call).
 # -----------------------------------------------------------------------------

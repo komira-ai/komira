@@ -40,10 +40,10 @@ def _raw_getaddrinfo_rc(host: String) raises -> Int32:
     process then exits red without freeing the list."""
     var host_local = host.copy()
     var service = String("80")
-    var hints = InlineArray[UInt8, _ADDRINFO_SIZE](fill=UInt8(0))
+    var hints = Array[UInt8, _ADDRINFO_SIZE](fill=UInt8(0))
     # The list head is kept as a pointer-sized word: the probe never reads
     # the list, it only learns whether one came back.
-    var res_slot = InlineArray[UInt64, 1](fill=UInt64(0))
+    var res_slot = Array[UInt64, 1](fill=UInt64(0))
     # SAFETY: the C strings, the hints and the out-slot are locals that outlive
     # the call; getaddrinfo reads the first three and writes res_slot[0].
     var rc = external_call["getaddrinfo", Int32](
@@ -66,12 +66,12 @@ def _message(host: String, port: UInt16) -> String:
     return String("")
 
 
-def _tighten_nofile(saved: InlineArray[UInt64, 2]) raises:
+def _tighten_nofile(saved: Array[UInt64, 2]) raises:
     """Lower the soft descriptor limit to the lowest free descriptor."""
     var lowest = external_call["dup", Int32](Int32(2))
     assert_true(lowest >= Int32(0), "dup")
     _ = external_call["close", Int32](lowest)
-    var tight = InlineArray[UInt64, 2](fill=UInt64(0))
+    var tight = Array[UInt64, 2](fill=UInt64(0))
     tight[0] = UInt64(Int(lowest))
     tight[1] = saved[1]
     # SAFETY: `tight` is a local two-word rlimit the call reads synchronously.
@@ -81,15 +81,15 @@ def _tighten_nofile(saved: InlineArray[UInt64, 2]) raises:
     assert_equal(rc, Int32(0), "setrlimit")
 
 
-def _restore_nofile(saved: InlineArray[UInt64, 2]) -> Int32:
+def _restore_nofile(saved: Array[UInt64, 2]) -> Int32:
     # SAFETY: `saved` is a local two-word rlimit the call reads synchronously.
     return external_call["setrlimit", Int32](
         _RLIMIT_NOFILE_LINUX, saved.unsafe_ptr()
     )
 
 
-def _save_nofile() raises -> InlineArray[UInt64, 2]:
-    var saved = InlineArray[UInt64, 2](fill=UInt64(0))
+def _save_nofile() raises -> Array[UInt64, 2]:
+    var saved = Array[UInt64, 2](fill=UInt64(0))
     # SAFETY: `saved` is a local two-word rlimit the call fills synchronously.
     var rc = external_call["getrlimit", Int32](
         _RLIMIT_NOFILE_LINUX, saved.unsafe_ptr()

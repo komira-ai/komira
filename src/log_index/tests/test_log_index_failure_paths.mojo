@@ -199,7 +199,7 @@ def _l0_split_bytes(n: Int) raises -> List[UInt8]:
     var seg = L0SegmentBuilder(log_index_schema())
     seg.add_batch(log_views_to_record_batch(views))
     return seg.serialize_split_bytes(
-        LOG_INDEX_TEXT_FIELD, InlineArray[UInt8, 16](fill=UInt8(7))
+        LOG_INDEX_TEXT_FIELD, Array[UInt8, 16](fill=UInt8(7))
     )
 
 
@@ -223,7 +223,7 @@ def _task(
         RetryPolicy.fast_test(),
     )
     var metastore = SearchMetastore[RecordingStore](manifest^, String(_INDEX))
-    var uuid = InlineArray[UInt8, 16](fill=UInt8(0))
+    var uuid = Array[UInt8, 16](fill=UInt8(0))
     uuid[8] = UInt8(1)
     return L0BuildTask[RecordingStore](
         _login_views(n),
@@ -281,7 +281,7 @@ def test_idle_hook_puts_the_split_before_it_publishes() raises:
     the two leaves an unreferenced object, never a summary naming a missing
     one."""
     var store = RecordingStore()
-    var uuid = InlineArray[UInt8, 16](fill=UInt8(0))
+    var uuid = Array[UInt8, 16](fill=UInt8(0))
     uuid[8] = UInt8(2)
     var n = _build_and_publish_split[RecordingStore](
         _login_views(8),
@@ -512,7 +512,7 @@ def test_search_rejects_a_posting_that_disagrees_with_the_split() raises:
 
 def test_search_rejects_a_split_without_an_l0_region() raises:
     var views = _login_views(8)
-    var uuid = InlineArray[UInt8, 16](fill=UInt8(9))
+    var uuid = Array[UInt8, 16](fill=UInt8(9))
     var sink = SearchSink(
         String("bucket"),
         String("prefix"),

@@ -66,7 +66,7 @@
 # -------------
 # `FileIdentity` is a POD value type — five `Int`s and a `Bool`. No pointer
 # crosses this module's boundary. The single `UnsafePointer` is the FFI
-# out-parameter for the C shim, taken over a STACK `InlineArray` inside
+# out-parameter for the C shim, taken over a STACK `Array` inside
 # `stat_path` and never stored.
 # =============================================================================
 

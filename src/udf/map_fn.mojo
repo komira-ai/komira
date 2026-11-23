@@ -75,7 +75,7 @@ trait MapFn(Movable, Copyable, Deinitable):
     """
 
     # `& Deinitable` is load-bearing. The engine builds `InRow`
-    # itself (`row_builder._build_row[R]`) in an `InlineArray[R, 1]`
+    # itself (`row_builder._build_row[R]`) in an `Array[R, 1]`
     # slot, and Mojo will not let that slot be dropped unless R is
     # Deinitable. A plain `@fieldwise_init struct(Copyable, Movable)`
     # satisfies this implicitly, so no conformer had to change.

@@ -69,7 +69,7 @@ struct _ParallelWork[
             `origin_of(state[]._partitions)` or similar).
 
     Fields:
-        _views: InlineArray of ByteView slots, indexed by worker id.
+        _views: Array of ByteView slots, indexed by worker id.
         _n: Number of active slots (<= _MAX_PARTITIONS).
     """
 

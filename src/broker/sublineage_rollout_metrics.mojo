@@ -66,7 +66,7 @@
 #        * This struct is NEVER a byte-slab element; it is a
 #          long-lived holder behind an OwnedPointer, and its sole field is
 #          itself an OwnedPointer (no Movable-struct-in-byte-slab-with-heap-field
-#          shape). The metric primitives' own slab safety (InlineArray per-worker
+#          shape). The metric primitives' own slab safety (Array per-worker
 #          slabs + Atomic) is established in `metrics`.
 # =============================================================================
 

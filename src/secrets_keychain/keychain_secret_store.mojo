@@ -174,10 +174,10 @@ struct KeychainSecretStore[B: KeychainBackend](
 def _wipe_lookup(mut lookup: KeychainLookup):
     """Best-effort overwrite-then-clear of the lookup's `bytes` buffer (which held
     the secret on the found path). Defense-in-depth: the AUTHORITATIVE secure wipe
-    is on the `SecretValue` (InlineArray + the -O3-surviving FFI `zeroize_inline_
+    is on the `SecretValue` (Array + the -O3-surviving FFI `zeroize_inline_
     array`); the lookup holds the bytes only for the few instructions between the
     fetch and the `SecretValue` copy. (A plain loop may be DCE-eligible at -O3,
-    which is why the load-bearing wipe lives on the InlineArray-backed value.)"""
+    which is why the load-bearing wipe lives on the Array-backed value.)"""
     for i in range(len(lookup.bytes)):
         lookup.bytes[i] = UInt8(0)
     lookup.bytes.clear()

@@ -8,7 +8,7 @@
 #
 # # Why this exists
 #
-# A pure-Mojo RSA-PSS verify (InlineArray-backed schoolbook bigint mul +
+# A pure-Mojo RSA-PSS verify (Array-backed schoolbook bigint mul +
 # bit-by-bit shift-and-subtract reduction + square-and-multiply modexp on
 # the PUBLIC exponent + EMSA-PSS-VERIFY + MGF1 + I2OSP4) is correct per
 # RFC 8017 §8.1.2 + §9.1.2 but orders of magnitude slower than AWS-LC's
@@ -89,7 +89,7 @@ from std.memory import UnsafePointer
 # lifetime is not expressible in Mojo's origin system. Opaque AWS-LC heap
 # handles are passed BY VALUE to `external_call` and never written through
 # Mojo-side, so an immutable static origin is sound. Data-buffer pointers
-# (Span/InlineArray/scalar out-params) carry the same origin; the SAFETY
+# (Span/Array/scalar out-params) carry the same origin; the SAFETY
 # contract is that the caller holds the buffer's real origin in scope across
 # the synchronous external_call (AWS-LC retains no pointer past the call).
 # -----------------------------------------------------------------------------

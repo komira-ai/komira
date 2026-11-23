@@ -435,7 +435,7 @@ struct LogIndexConsumer[Storage: ConditionalWriteStore](
     def _build_segment(
         mut self,
         var batches: Slab[RecordBatch],
-        uuid: InlineArray[UInt8, 16],
+        uuid: Array[UInt8, 16],
         mut object_key: String,
     ) raises -> List[UInt8]:
         var sink = SearchSink(
@@ -468,7 +468,7 @@ struct LogIndexConsumer[Storage: ConditionalWriteStore](
         mut self,
         split_bytes: List[UInt8],
         object_key: String,
-        uuid: InlineArray[UInt8, 16],
+        uuid: Array[UInt8, 16],
         doc_count: Int64,
         byte_size: Int64,
     ) raises:
@@ -491,12 +491,12 @@ struct LogIndexConsumer[Storage: ConditionalWriteStore](
     # _next_uuid: mint a split uuid unique per (worker discriminant, install
     # epoch, sequence). Byte 0 is the worker discriminant, bytes 1..7 the low 56
     # bits of the install-time epoch (microseconds), bytes 8..15 the sequence.
-    # POD InlineArray, no heap.
+    # POD Array, no heap.
     # -------------------------------------------------------------------------
 
-    def _next_uuid(mut self) -> InlineArray[UInt8, 16]:
+    def _next_uuid(mut self) -> Array[UInt8, 16]:
         self._split_seq += Int64(1)
-        var u = InlineArray[UInt8, 16](fill=UInt8(0))
+        var u = Array[UInt8, 16](fill=UInt8(0))
         u[0] = self._worker_disc
         for i in range(7):
             u[1 + i] = UInt8(
