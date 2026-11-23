@@ -42,7 +42,7 @@ The governing rule, same SQL, same result as DuckDB, was ruled by the maintainer
 | §9.5 | `IGNORE NULLS` | PARITY GAP | DuckDB's meaning; refused by name until the plan carries it ([komira#1226](https://github.com/komira-ai/komira/issues/1226)). |
 | §9.6 | Explicit NULL placement in a window's ORDER BY | PARITY GAP | DuckDB's meaning; `NULLS FIRST` in `OVER` refused by name until built ([komira#1227](https://github.com/komira-ai/komira/issues/1227)). |
 | §9.8 | RANGE frames with offsets | MATCHES | DuckDB's frames, NULL and NaN keys measured; non-integer offsets refused by name until built ([komira#1228](https://github.com/komira-ai/komira/issues/1228)). |
-| §11.3 | INTERSECT and EXCEPT | PARITY GAP | DuckDB's set and bag forms, NULLs equal; refused by name until the plan has them ([komira#1229](https://github.com/komira-ai/komira/issues/1229)). |
+| §11.3 | INTERSECT and EXCEPT | MATCHES; ALL forms PARITY GAP | DuckDB's set and bag forms, NULLs equal; the set forms are built from UNION ALL, a grouped aggregation and a filter, and the ALL forms are refused by name until the plan can number or repeat rows ([komira#1229](https://github.com/komira-ai/komira/issues/1229)). |
 | §11.4 | Set-operation inputs: types and names | MATCHES | At the SQL surface: the frontend inserts DuckDB's implicit casts and takes the first query's names. |
 | §12.3 | Infinite dates and timestamps | REPRESENTATION DEPARTURE | Arrow cannot represent them; refused by name. |
 | §12.4 | Out-of-range dates and timestamps | MATCHES | DuckDB's range for each type and DuckDB's error outside it, not Arrow's wider range. |
@@ -68,7 +68,7 @@ Each gap is refused by name today and must answer as DuckDB does once built; its
 | §9.5 | `IGNORE NULLS` for LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE | [komira#1226](https://github.com/komira-ai/komira/issues/1226) | none known |
 | §9.6 | `NULLS FIRST` / `NULLS LAST` inside a window's ORDER BY | [komira#1227](https://github.com/komira-ai/komira/issues/1227) | none known |
 | §9.8 | RANGE frames with fractional and interval offsets | [komira#1228](https://github.com/komira-ai/komira/issues/1228) | none known |
-| §11.3 | INTERSECT and EXCEPT, with and without ALL | [komira#1229](https://github.com/komira-ai/komira/issues/1229) | TPC-DS q8, q14, q38 (INTERSECT); q87 (EXCEPT) |
+| §11.3 | INTERSECT ALL and EXCEPT ALL | [komira#1229](https://github.com/komira-ai/komira/issues/1229) | none known |
 | §13.5 | Avro `enum`, `uuid`, `duration`, `timestamp-nanos`, unions, records, arrays, maps | [komira#1230](https://github.com/komira-ai/komira/issues/1230) | none known |
 | §13.7 | JSON values of another type than the column, converted as `read_json` does | [komira#1231](https://github.com/komira-ai/komira/issues/1231) | none known |
 | §13.9 | A repeated JSON key, read as `read_json`'s default | [komira#1232](https://github.com/komira-ai/komira/issues/1232) | none known |

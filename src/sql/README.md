@@ -36,9 +36,9 @@ period tables; the function names and the specifier names are different sets.
 
 `sql.sql_parser` is a hand-written recursive-descent parser:
 `parse_sql(tokenize(sql))` returns a `SqlStatement`, a query (`WITH`,
-`SELECT`, `UNION ALL`), a `COPY ... TO` or a `CREATE TABLE ... AS`. Every
+`SELECT`, `UNION ALL`, `INTERSECT`, `EXCEPT`), a `COPY ... TO` or a `CREATE TABLE ... AS`. Every
 subquery body (scalar, `[NOT] EXISTS`, `[NOT] IN (SELECT ...)`, a derived
-table, a `UNION ALL` branch) is parked in the statement's flat `subqueries`
+table, a set-operation branch) is parked in the statement's flat `subqueries`
 table, and the expression node holds its index. Input the grammar has no
 production for raises an `Error` that names it (`SQL syntax error` or
 `SQL not supported`) instead of being read as something else. The ON of an
@@ -104,7 +104,8 @@ expressions, GROUP BY and HAVING, joins (inner, outer, NATURAL / USING, semi,
 anti), subqueries (scalar, also in a HAVING and in the SELECT list of a
 grouped query; `[NOT] EXISTS`; `[NOT] IN`, NULL-aware, its body either one
 table projecting one bare column or, uncorrelated, any query of one column),
-window functions, ORDER BY, LIMIT / OFFSET, DISTINCT and UNION ALL; and
+window functions, ORDER BY, LIMIT / OFFSET, DISTINCT, UNION ALL, INTERSECT
+and EXCEPT; and
 raises an `Error` starting `SQL bind error` or `SQL not supported`, naming
 the construct, for what it does not bind. The parquet facts a binding needs
 (the `ParquetSource` a `read_parquet('path')` relation scans, which may be
@@ -122,7 +123,8 @@ binder's code is split over the `sql_bind_*` modules (the FROM scope,
 operators, functions, casts and timestamps, subqueries, aggregates and
 GROUP BY, output names, windows and ORDER BY, joins, parquet facts).
 
-`UNION ALL` (`sql.sql_bind_union`) binds the chain `a UNION ALL b UNION ALL c`
+`UNION ALL` (`sql.sql_bind_set_op`, with the common types of
+`sql.sql_bind_union`) binds the chain `a UNION ALL b UNION ALL c`
 to one `PLAN_UNION` node with one child per branch, also as the body of a
 derived table (`FROM (a UNION ALL b) u`). Each column takes DuckDB's common
 type over the branches, folded left to right: the wider of two integers of one
@@ -142,7 +144,24 @@ refused. Bare integer literals of every branch are INT32 when they fit, so
 `OFFSET` after the last branch apply to the whole union: the parser rewrites the
 query to `SELECT * FROM (<union>) ORDER BY ... LIMIT ...`, so the sort and the
 row window bind above the union node. On any other branch they are a
-`SQL syntax error` naming the clause.
+`SQL syntax error` naming the clause and the operator after it.
+
+`INTERSECT` and `EXCEPT` (`sql.sql_bind_set_op`) are the set forms: whole rows compared with NULLs equal, each result
+row once. `INTERSECT DISTINCT` and `EXCEPT DISTINCT` spell the same;
+`INTERSECT ALL`, `EXCEPT ALL` and bare `UNION` are refused by name. A chain
+takes DuckDB's precedence: INTERSECT binds tighter than UNION ALL and EXCEPT,
+and each level folds left to right, so `a UNION ALL b INTERSECT c EXCEPT d` is
+`(a UNION ALL (b INTERSECT c)) EXCEPT d`; adjacent UNION ALL inputs stay one
+union node. The two inputs of an INTERSECT or EXCEPT take the common column
+types and the left input's names as UNION ALL's branches do (errors name the
+operator and the branch numbers as the query spells them), and the pair binds
+to plan nodes the engine already runs: a two-child union whose children add a
+constant side column `#set_side` (0 left, 1 right), an aggregation grouped by
+every column with `MIN` and `MAX` of the side, a filter (INTERSECT: min 0 and
+max 1; EXCEPT: max 0) and a projection back to the columns. Two result columns
+of one name are refused, since the grouping names its columns, and so is a
+column named as one of the helper columns (`#set_side`, `#set_lo`, `#set_hi`),
+which only a file's column can be.
 
 `sql.sql_frontend` is the text entry over the three steps.
 `statement_from_sql(sql, catalog, footers)` tokenizes, parses and binds in one
