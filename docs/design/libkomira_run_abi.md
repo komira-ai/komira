@@ -154,7 +154,7 @@ to every later run on the context.
 - **The route.** It is `sdk_exec.run_sql` with the session's `EngineContext`. The
   library converts the SQL text to a logical plan by parsing and binding it.
 - **Statements that are not queries.** `run_sql` runs `COPY ... TO` a local
-  Parquet file and answers one row, the BIGINT `Count`
+  Parquet, CSV or newline-delimited JSON file and answers one row, the BIGINT `Count`
   ([src/sdk_exec/README.md](../../src/sdk_exec/README.md)). It refuses
   `CREATE TABLE ... AS` and the other statements that are not queries
   (`STATEMENT_NOT_A_QUERY` today; the write design renames it `SQL_STATEMENT_UNSUPPORTED`). The write

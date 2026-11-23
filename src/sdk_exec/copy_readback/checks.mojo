@@ -2,8 +2,9 @@
 # copy_readback/checks.mojo -- read what the read-back build actions wrote
 # =============================================================================
 #
-#   case_names(cases_sql)  the case of each `COPY (` line of cases.sql: its
-#                          destination file name without `.parquet`
+#   case_files(cases_sql)  the destination file name of each `COPY (` line of
+#                          cases.sql
+#   case_name(file)        a case's name: its file name up to the first `.`
 #   tsv_row(tsv)           the first data row of a TSV with a header row, by
 #                          column name
 #   tsv_pairs(tsv)         every data row of a two-column TSV with a header
@@ -13,15 +14,23 @@
 # a name or cell the assertions do not expect, never a raise here.
 
 
-def case_names(cases_sql: String) -> List[String]:
-    """The case names of the `COPY (` lines of `cases_sql`, in order."""
+def case_files(cases_sql: String) -> List[String]:
+    """The destination file names of the `COPY (` lines of `cases_sql`, in
+    order: what follows the last `) TO '` up to the next `'`."""
     var out = List[String]()
     for raw in cases_sql.split("\n"):
         var line = String(raw)
         if line.startswith("COPY ("):
             var start = line.rfind(") TO '") + 6
-            out.append(String(line[byte = start : line.rfind(".parquet'")]))
+            out.append(String(line[byte = start : line.find("'", start)]))
     return out^
+
+
+def case_name(file: String) -> String:
+    """The case a destination file name is for: the name up to its first
+    `.` (`typed_csv.csv.gz` is `typed_csv`), or all of it with no `.`."""
+    var dot = file.find(".")
+    return String(file[byte = 0:dot]) if dot >= 0 else file
 
 
 def tsv_row(tsv: String) -> Dict[String, String]:

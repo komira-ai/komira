@@ -16,7 +16,7 @@ Nothing built with these rules is shipped.
 
 | rule | what it builds |
 |---|---|
-| `sql_oracle(name, srcs, inputs, outputs, extensions)` | runs `srcs` (one `.sql` file, or a list run in order in one session) with the pinned DuckDB. `inputs` are the files the SQL reads: a list of sources, each staged at its path in the package, or `{path: source}`, where a build output is allowed (`{"a/rows.csv": ":write[rows.csv]"}`). `outputs` are the file names the SQL writes with `COPY ... TO '<name>'`, each ending in `.parquet`, `.csv` or `.tsv`; each is a sub-target `[<name>]`, and all of them are the default outputs. `extensions` (default none) are DuckDB extension files, each named `<name>.duckdb_extension`, loaded in the order listed (see below). |
+| `sql_oracle(name, srcs, inputs, outputs, extensions)` | runs `srcs` (one `.sql` file, or a list run in order in one session) with the pinned DuckDB. `inputs` are the files the SQL reads: a list of sources, each staged at its path in the package, or `{path: source}`, where a build output is allowed (`{"a/rows.csv": ":write[rows.csv]"}`). `outputs` are the file names the SQL writes with `COPY ... TO '<name>'`, each ending in `.parquet`, `.csv`, `.tsv` or `.json`, or in `.gz` or `.zst` (a file DuckDB compressed); each is a sub-target `[<name>]`, and all of them are the default outputs. `extensions` (default none) are DuckDB extension files, each named `<name>.duckdb_extension`, loaded in the order listed (see below). |
 | `duckdb_dist(name, binary, native_libs, version)` | the pinned binary, the directory whose `lib/` holds the C++ runtime it links (`libstdc++.so.6`, `libgcc_s.so.1`), and the version it must report, digits and dots only (anything else, which would be written into the version check's SQL, is refused at analysis). `sql_oracle` takes `komira//third_party/duckdb:duckdb`. |
 
 The macro sets `exec_compatible_with` to the linux x86_64 execution
@@ -95,7 +95,7 @@ duckdb -no-init -batch -bail \
 
 Analysis refuses: no `srcs`, a src that is not a `.sql` file, no `outputs`,
 an output that is not a plain file name (no directory, no glob character)
-or does not end in `.parquet`, `.csv` or `.tsv`, an output named twice or
+or does not end in `.parquet`, `.csv`, `.tsv`, `.json`, `.gz` or `.zst`, an output named twice or
 also an input path or an input's directory, an input path that is empty,
 absolute or ends in `/`, an input path with a segment that is not a plain
 name (empty, `.`, `..` or a glob character; a segment may hold `=` after its

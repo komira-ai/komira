@@ -119,6 +119,10 @@ struct StoreSnapshotWriter[S: CloneableConditionalWriteStore](
             + self._statement_uuid
             + String(".avro")
         )
+        # A URI the store cannot hold is refused before it is recorded; one
+        # whose put was tried is recorded first, since a put that raises may
+        # still have landed.
+        _ = self._files.key_of(uri)
         self.written.append(uri)
         self._files.put(uri, bytes)
         return uri
@@ -133,6 +137,7 @@ struct StoreSnapshotWriter[S: CloneableConditionalWriteStore](
             + self._statement_uuid
             + String("-m0.avro")
         )
+        _ = self._files.key_of(uri)
         self.manifest_uri = String(uri)
         self.written.append(String(uri))
         self._files.put(uri, bytes)

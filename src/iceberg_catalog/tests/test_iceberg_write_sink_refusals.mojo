@@ -788,8 +788,12 @@ def test_a_failed_put_deletes_the_files_already_written() raises:
         + String("-1.parquet"),
     )
     assert_equal(o.posts, 0)
-    assert_equal(len(o.deleted), 1)
+    # The first file landed; the second one's put raised, and a put that
+    # raises may have landed, so both are deleted (deleting an absent object
+    # succeeds).
+    assert_equal(len(o.deleted), 2)
     assert_equal(o.deleted[0], _data_uri(String("t"), 0))
+    assert_equal(o.deleted[1], _data_uri(String("t"), 1))
     assert_equal(_object_count(store), 0)
     assert_equal(client.transport_ref().applied_commits, applied)
 

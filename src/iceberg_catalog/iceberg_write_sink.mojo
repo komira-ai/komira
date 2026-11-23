@@ -406,6 +406,9 @@ def _prepare[
         var encoded = encode_iceberg_data_file(
             batch, field_ids, required, String(uri), codec
         )
+        # Refused before it is recorded when the store cannot hold it;
+        # recorded before the put, which may land and still raise.
+        _ = files.key_of(uri)
         written.append(uri)
         files.put(uri, encoded.bytes)
         rows += Int64(encoded.info.record_count)
