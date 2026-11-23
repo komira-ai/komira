@@ -108,28 +108,28 @@ def _list_of_two() -> List[FixtureManifest]:
     return ms^
 
 
-def _check_list(read: List[IcebergManifestFile]) raises:
-    assert_equal(len(read), 3)
-    assert_equal(read[0].path, "/w/t/metadata/m0.avro")
-    assert_equal(read[0].spec_id, 0)
-    assert_equal(read[0].content, 0)
-    assert_equal(read[0].sequence_number, 3)
-    assert_equal(read[0].min_sequence_number, 2)
-    assert_equal(read[0].added_snapshot_id, 77)
-    assert_equal(len(read[0].partitions), 1)
-    assert_true(read[0].partitions[0].contains_null)
-    assert_false(read[0].partitions[0].contains_nan.value())
-    assert_true(read[0].partitions[0].lower.value() == fixture_int_bytes(10))
-    assert_true(read[0].partitions[0].upper.value() == fixture_int_bytes(20))
-    assert_equal(read[1].content, 1)
-    assert_equal(read[1].spec_id, 4)
-    assert_equal(read[1].sequence_number, 4)
-    assert_equal(len(read[1].partitions), 1)
-    assert_false(read[1].partitions[0].contains_null)
-    assert_false(Bool(read[1].partitions[0].contains_nan))
-    assert_false(Bool(read[1].partitions[0].lower))
-    assert_false(Bool(read[1].partitions[0].upper))
-    assert_equal(len(read[2].partitions), 0)
+def _check_list(got: List[IcebergManifestFile]) raises:
+    assert_equal(len(got), 3)
+    assert_equal(got[0].path, "/w/t/metadata/m0.avro")
+    assert_equal(got[0].spec_id, 0)
+    assert_equal(got[0].content, 0)
+    assert_equal(got[0].sequence_number, 3)
+    assert_equal(got[0].min_sequence_number, 2)
+    assert_equal(got[0].added_snapshot_id, 77)
+    assert_equal(len(got[0].partitions), 1)
+    assert_true(got[0].partitions[0].contains_null)
+    assert_false(got[0].partitions[0].contains_nan.value())
+    assert_true(got[0].partitions[0].lower.value() == fixture_int_bytes(10))
+    assert_true(got[0].partitions[0].upper.value() == fixture_int_bytes(20))
+    assert_equal(got[1].content, 1)
+    assert_equal(got[1].spec_id, 4)
+    assert_equal(got[1].sequence_number, 4)
+    assert_equal(len(got[1].partitions), 1)
+    assert_false(got[1].partitions[0].contains_null)
+    assert_false(Bool(got[1].partitions[0].contains_nan))
+    assert_false(Bool(got[1].partitions[0].lower))
+    assert_false(Bool(got[1].partitions[0].upper))
+    assert_equal(len(got[2].partitions), 0)
 
 
 def test_a_v2_manifest_list_reads_with_summaries() raises:
@@ -143,13 +143,13 @@ def test_a_v2_manifest_list_reads_with_summaries() raises:
 
 def test_a_v1_manifest_list_has_no_content_or_sequence_numbers() raises:
     var bytes = fixture_manifest_list(_list_of_two(), AVRO_CODEC_NULL, True)
-    var read = read_manifest_list(Span(bytes), 1)
-    assert_equal(len(read), 3)
-    assert_equal(read[1].content, 0)
-    assert_equal(read[1].sequence_number, 0)
-    assert_equal(read[1].min_sequence_number, 0)
-    assert_equal(read[0].added_snapshot_id, 77)
-    assert_equal(len(read[0].partitions), 1)
+    var got = read_manifest_list(Span(bytes), 1)
+    assert_equal(len(got), 3)
+    assert_equal(got[1].content, 0)
+    assert_equal(got[1].sequence_number, 0)
+    assert_equal(got[1].min_sequence_number, 0)
+    assert_equal(got[0].added_snapshot_id, 77)
+    assert_equal(len(got[0].partitions), 1)
     try:
         _ = read_manifest_list(Span(bytes), 2)
         assert_true(False, "a v1 list was read as v2")
@@ -225,10 +225,10 @@ def _entries() -> List[FixtureEntry]:
 
 
 def _check_entries(
-    read: List[IcebergFileEntry], spec_id: Int
+    got: List[IcebergFileEntry], spec_id: Int
 ) raises:
-    assert_equal(len(read), 3)
-    ref a = read[0]
+    assert_equal(len(got), 3)
+    ref a = got[0]
     assert_equal(a.status, ENTRY_ADDED)
     assert_equal(a.data_sequence_number, 5)  # inherited from the manifest
     assert_equal(a.content, 0)
@@ -257,13 +257,13 @@ def _check_entries(
     assert_false(Bool(a.upper_bounds.get(2)))
     assert_equal(len(a.equality_ids), 0)
     assert_false(Bool(a.referenced_data_file))
-    ref b = read[1]
+    ref b = got[1]
     assert_equal(b.status, ENTRY_EXISTING)
     assert_equal(b.data_sequence_number, 3)  # its own
     assert_equal(b.file_format, "PARQUET")
     assert_false(Bool(b.partition[0]))
     assert_equal(len(b.value_counts.ids), 0)
-    ref c = read[2]
+    ref c = got[2]
     assert_equal(c.status, ENTRY_DELETED)
     assert_equal(c.content, 2)
     assert_equal(c.file_format, "AVRO")
@@ -292,16 +292,16 @@ def test_metric_maps_written_as_avro_maps_read_the_same() raises:
     var v1 = fixture_manifest(
         _entries(), _names(), _types(), AVRO_CODEC_NULL, v1=True
     )
-    var read = read_manifest(
+    var got = read_manifest(
         Span(v1), _manifest_file("/w/t/metadata/v1.avro", 0), _spec(_names()), _schema()
     )
-    assert_equal(len(read), 3)
-    assert_equal(read[0].data_sequence_number, 0)
-    assert_equal(read[1].data_sequence_number, 0)
-    assert_equal(read[2].content, 0)
-    assert_equal(len(read[2].equality_ids), 0)
-    assert_false(Bool(read[2].referenced_data_file))
-    assert_equal(read[0].value_counts.get(1).value(), 5)
+    assert_equal(len(got), 3)
+    assert_equal(got[0].data_sequence_number, 0)
+    assert_equal(got[1].data_sequence_number, 0)
+    assert_equal(got[2].content, 0)
+    assert_equal(len(got[2].equality_ids), 0)
+    assert_false(Bool(got[2].referenced_data_file))
+    assert_equal(got[0].value_counts.get(1).value(), 5)
 
 
 def test_a_manifest_under_deflate_reads() raises:
@@ -348,16 +348,16 @@ def test_map_keys_that_are_no_field_id_and_a_missing_partition_are_ignored() rai
         '{"name":"value_counts","type":{"type":"map","values":"long"}}]}}]}',
         payload,
     )
-    var read = read_manifest(
+    var got = read_manifest(
         Span(bytes), _manifest_file("/w/t/metadata/m.avro", 2), _spec(_names()), _schema()
     )
-    assert_equal(len(read), 1)
-    assert_equal(len(read[0].value_counts.ids), 1)
-    assert_equal(read[0].value_counts.get(7).value(), 9)
+    assert_equal(len(got), 1)
+    assert_equal(len(got[0].value_counts.ids), 1)
+    assert_equal(got[0].value_counts.get(7).value(), 9)
     # The writer wrote no partition record: every field of the spec is null.
-    assert_equal(len(read[0].partition), 7)
-    assert_false(Bool(read[0].partition[3]))
-    assert_equal(read[0].data_sequence_number, 2)
+    assert_equal(len(got[0].partition), 7)
+    assert_false(Bool(got[0].partition[3]))
+    assert_equal(got[0].data_sequence_number, 2)
 
 
 def test_malformed_manifests_are_refused_by_message() raises:

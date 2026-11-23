@@ -181,6 +181,10 @@ def test_an_avro_file_holds_the_rows() raises:
     assert_equal(Int(batch.column_at(0).as_primitive[DType.int64]().get(1)), 11)
     assert_equal(batch.column_at(4).as_string().get(0), "alpha")
     assert_true(batch.column_at(4).is_null_at(1))
+    # The date is an int of days in Avro, as Iceberg stores one.
+    assert_true(batch.schema.field_arrow_type(2) == ArrowType.INT32)
+    assert_equal(Int(batch.column_at(2).as_primitive[DType.int32]().get(2)), 20900)
+    assert_true(batch.column_at(2).is_null_at(1))
 
 
 def test_a_row_with_the_wrong_number_of_cells_is_refused() raises:

@@ -36,9 +36,13 @@ from .table_model import (
 )
 
 
-def rows_to_batch(columns: List[TableColumn], rows: List[TableRow]) raises -> RecordBatch:
-    """The Arrow batch of `rows` under `columns`. A row with fewer cells than
-    there are columns is refused."""
+def rows_to_batch(
+    columns: List[TableColumn], rows: List[TableRow], dates_as_int: Bool = False
+) raises -> RecordBatch:
+    """The Arrow batch of `rows` under `columns`. A date column is DATE32, or
+    INT32 days with `dates_as_int` (the Avro form: Iceberg stores a date in
+    Avro as an int). A row with fewer cells than there are columns is
+    refused."""
     var n = len(rows)
     for r in range(n):
         if len(rows[r].cells) != len(columns):
@@ -68,7 +72,7 @@ def rows_to_batch(columns: List[TableColumn], rows: List[TableRow]) raises -> Re
                 a.set(r, Int32(cell.i))
                 if cell.is_null:
                     a._set_null(r)
-            if col.type_tag == TT_INT:
+            if col.type_tag == TT_INT or dates_as_int:
                 sb.add_field(Field(col.name.copy(), ArrowType.INT32, nullable))
                 rb.add_column(Column.from_primitive[DType.int32](a^))
             else:
@@ -130,7 +134,8 @@ def parquet_file_bytes(columns: List[TableColumn], rows: List[TableRow]) raises 
 def avro_file_bytes(columns: List[TableColumn], rows: List[TableRow]) raises -> List[UInt8]:
     """An Avro object container file of `rows` (deflate)."""
     return write_avro_bytes(
-        rows_to_batch(columns, rows), AvroWriterOptions(AVRO_CODEC_DEFLATE)
+        rows_to_batch(columns, rows, dates_as_int=True),
+        AvroWriterOptions(AVRO_CODEC_DEFLATE),
     )
 
 
