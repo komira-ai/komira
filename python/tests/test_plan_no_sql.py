@@ -112,7 +112,7 @@ def sql_strings(source):
 
 def test_the_search_reads_every_module_of_the_encoder():
     names = [n for n, _ in plan_sources()]
-    for module in ("__init__.py", "_agg.py", "_expr.py", "_field.py", "_rel.py", "_scalar.py", "_source.py", "_window.py", "_wire.py"):
+    for module in ("__init__.py", "_agg.py", "_expr.py", "_field.py", "_rel.py", "_scalar.py", "_source.py", "_udf.py", "_window.py", "_wire.py"):
         assert module in names, (module, names)
 
 
