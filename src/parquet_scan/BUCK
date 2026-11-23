@@ -86,6 +86,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_parquet_source_options_direct: the claim stride, the deferral, the
 #   partition ids, the dictionary count shape, hooks to capabilities, the
 #   sub-morsel cut and the emit of a count.
+# - test_resolve_projection_via_fs: projection names as leaf indices, in the
+#   order asked, through the local wrapper and the form generic over the file
+#   system; no names is every column; an unknown name refused; one footer read
+#   under the file system's cache key.
 # - test_parquet_source_direct: the source drained by 3 workers: file order
 #   (whole and cut morsels), the setup prune, a decode filter on each payload
 #   route with NULLs dropped, a file lacking the filter column read as NULL,
@@ -158,6 +162,7 @@ mojo_library(
         "tests/test_parquet_source_direct.mojo",
         "tests/test_parquet_source_options_direct.mojo",
         "tests/test_parquet_source_whole_decode_direct.mojo",
+        "tests/test_resolve_projection_via_fs.mojo",
         "tests/test_rg_prune_counter_direct.mojo",
         "tests/test_scan_chunk_sink_direct.mojo",
         "tests/test_staged_filter_direct.mojo",

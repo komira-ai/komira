@@ -65,6 +65,7 @@ mojo_library(
         "tests/test_pruned_hive_discovery.mojo",
         "tests/test_pruned_hive_raw_spelling.mojo",
         "tests/test_pruned_hive_writer_spellings.mojo",
+        "tests/test_scan_fs.mojo",
     ],
     visibility = ["PUBLIC"],
 )

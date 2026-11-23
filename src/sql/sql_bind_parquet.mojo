@@ -228,6 +228,10 @@ def _collect_select[P: SqlParquetFooters](
             if t.source.tag != SOURCE_VARIANT_PARQUET:
                 continue
             ref ps = t.source._parquet.value()
+            if not ps.fs_descriptor.is_local():
+                # The footers read the local file system only: an object key
+                # of a bucket is not a local path, so its counts stay unknown.
+                continue
             var file_schema = ps.schema()
             for p in range(len(ps.paths)):
                 _record_counts(facts, String(ps.paths[p]), file_schema, footers)
