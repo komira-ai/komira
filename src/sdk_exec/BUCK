@@ -291,6 +291,8 @@ _CORRELATED_CASES = [
     "scalar_empty_body",
     "scalar_in_derived",
     "decimal_vs_double",
+    "scalar_between_count",
+    "scalar_between_max",
 ]
 
 _CORRELATED_TABLES = [
@@ -539,12 +541,13 @@ _SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in
 # - test_run_sql_correlated: run_sql over eight TPC-H-typed Parquet tables
 #   DuckDB wrote (the :correlated_oracle action above) answers what the pinned
 #   DuckDB answers for each case of tests/correlated/cases.sql, on one and
-#   three workers: the corpus texts of TPC-H Q2 (without its LIMIT), Q4, Q17,
-#   Q20 and Q22; correlated scalars over no row, with NULL keys, two keys, in
-#   a WHERE anywhere, in a SELECT list and a derived table; EXISTS and NOT
-#   EXISTS with NULL keys; Q21 and the shapes it does not serve are refused by
-#   name at their step; the TPC-H cases are the corpus texts; every case is
-#   run.
+#   three workers: the corpus texts of TPC-H Q4, Q17, Q20 and Q22, and Q2's
+#   body without its ORDER BY and LIMIT; correlated scalars over no row, with
+#   NULL keys, two keys, in a WHERE anywhere (BETWEEN too), in a SELECT list
+#   and a derived table; EXISTS and NOT EXISTS with NULL keys; Q21, Q2 (whose
+#   ORDER BY is a DECIMAL key) and the shapes it does not serve are refused
+#   by name at their step; the TPC-H cases are the corpus texts; every case
+#   is run.
 # - test_run_sql_subquery: run_sql over Parquet tables DuckDB wrote (the
 #   :subquery_oracle action above) answers what the pinned DuckDB answers for
 #   each case of tests/subquery/cases.sql, on one and three workers: scalar

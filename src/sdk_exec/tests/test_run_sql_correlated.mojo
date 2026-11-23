@@ -27,7 +27,8 @@
 #       them keeps no row and IS NULL keeps every row; a NULL outer key
 #       matches no group (avg NULL, count 0) and a NULL inner key is no group
 #       any outer row matches; two keys; the subquery on the left; two in one
-#       WHERE and two in one comparison; under OR; a qualified outer column
+#       WHERE and two in one comparison; under OR; under BETWEEN (which
+#       repeats its operand); a qualified outer column
 #       of a joined table; a self-correlation through aliases; a DECIMAL
 #       column compared with a DOUBLE expression (DuckDB casts the DECIMAL).
 #   test_correlated_scalars_in_a_select_list_equal_duckdb
@@ -211,6 +212,8 @@ def _scalar_in_where() -> List[String]:
         "scalar_under_or",
         "scalar_qualified_outer",
         "decimal_vs_double",
+        "scalar_between_count",
+        "scalar_between_max",
     ]
 
 

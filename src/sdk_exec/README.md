@@ -217,7 +217,8 @@ the hash join does not compare, DATE and DECIMAL among them
 (`LOWERING_JOIN_UNSERVED` at `lower`).
 
 A correlated scalar subquery (its WHERE names an outer column, TPC-H Q2, Q17
-and Q20) is served in a WHERE, anywhere in the predicate, and in the SELECT
+and Q20; Q2 as a whole is refused at `execute` for its ORDER BY on a DECIMAL
+key, which the sort sink does not order) is served in a WHERE, anywhere in the predicate, and in the SELECT
 list of an ungrouped query: the optimizer makes it a LEFT join of the outer
 rows with its body grouped by the correlation keys, so an outer row with no
 matching row (or a NULL key) reads the aggregates of no row, a count 0 and
@@ -367,13 +368,14 @@ The tests run when the package is built.
   DuckDB writes (`:correlated_oracle`: orders with no lineitem, customers with
   no order, NULL keys, ties), each query of `tests/correlated/cases.sql`
   answers what DuckDB answers, on one and three workers: the corpus texts of
-  TPC-H Q4, Q17, Q20, Q22 and Q2 (Q2 without its `limit 100`, its answer
-  being shorter); correlated scalars over no row (count 0, NULL), with NULL
-  outer and inner keys, two keys, two in one WHERE, under OR, in a SELECT list
-  and a derived table; EXISTS and NOT EXISTS with NULL keys. Q21 and an
-  EXISTS correlated by `>` are refused at `lower`, an EXISTS over a join and
-  the unserved correlated scalar shapes at `bind`; the TPC-H lines are the
-  corpus texts; every case is run.
+  TPC-H Q4, Q17, Q20 and Q22, and Q2's body without its ORDER BY and LIMIT;
+  correlated scalars over no row (count 0, NULL), with NULL outer and inner
+  keys, two keys, two in one WHERE, under OR and BETWEEN, in a SELECT list
+  and a derived table; a DECIMAL compared with a DOUBLE; EXISTS and NOT
+  EXISTS with NULL keys. Q21 and an EXISTS correlated by `>` are refused at
+  `lower`, Q2 (its ORDER BY is a DECIMAL key, which the sort sink refuses)
+  at `execute`, an EXISTS over a join and the unserved correlated scalar
+  shapes at `bind`; the TPC-H lines are the corpus texts; every case is run.
 - `test_run_sql_distinct`: SELECT DISTINCT over an INT64 and a STRING column
   gives each value once and one NULL row (NULL and the empty string are two
   rows), below a filter and with ORDER BY; COUNT(DISTINCT x) ignores NULL, is

@@ -650,6 +650,20 @@ def _lower_grouped_scalar(
     row it is the group's, over an unmatched one (G's columns NULL) the value
     over no row."""
     ref pj = corr_data_inner_plan_ref(corr_data)._project.value()[]
+    var value = pj.exprs[0].copy()
+    var name = String("__corr_value")
+    var aliased = value.tag == EXPR_ALIAS
+    if aliased:
+        name = value.alias_name()
+        var unaliased = value.alias_child_ref().copy()
+        value = unaliased^
+    # The same subquery a second time over this plan (`x BETWEEN lo AND hi`
+    # repeats `x`): the first lowering's column already holds its value. The
+    # binder names every column after the subquery's index, so a name met
+    # again is that subquery's; an unaliased value has no such name.
+    var column = value.col_ref_name() if value.tag == EXPR_COL_REF else name
+    if aliased and _schema_has_field(outer_child.output_schema, column):
+        return ScalarLowering(outer_child^, Expr.col_ref(column))
     var left_on = List[String]()
     var right_on = List[String]()
     var residual = ExprArray()
@@ -667,12 +681,6 @@ def _lower_grouped_scalar(
             "flatten: a scalar subquery whose inner plan is not grouped by its"
             " correlation keys is not supported"
         )
-    var value = pj.exprs[0].copy()
-    var name = String("__corr_value")
-    if value.tag == EXPR_ALIAS:
-        name = value.alias_name()
-        var unaliased = value.alias_child_ref().copy()
-        value = unaliased^
     var join_plan = LogicalPlan.join(
         outer_child^, grouped^, left_on^, right_on^, JOIN_LEFT, JOIN_ALGO_AUTO,
     )

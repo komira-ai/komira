@@ -16,6 +16,10 @@ Project([o_custkey AS __corr0_k0, __corr0_a0], Aggregate(group_by=[o_custkey],
   test_a_grouped_scalar_value_names
       a computed value with no alias is the column `__corr_value`; a value
       that is a bare column is read straight off the join, no Project.
+  test_the_same_subquery_twice_is_joined_once
+      `x > 1 AND x < 5` over one binder subquery (BETWEEN repeats its
+      operand) adds one LEFT join and reads its column twice, for a computed
+      value and for a bare column; an unaliased value is joined each time.
   test_grouped_scalar_refusals
       a correlation that is not an equality (the join would need a
       residual), a Filter with no correlation at all, and a body not grouped
@@ -208,6 +212,56 @@ def test_a_grouped_scalar_value_names() raises:
     assert_equal(out2._filter.value()[].child[].tag, PLAN_JOIN)
 
 
+def _count_left_joins(plan: LogicalPlan) -> Int:
+    var n = 0
+    if plan.tag == PLAN_JOIN:
+        n = 1 + _count_left_joins(plan._join.value()[].left[])
+    elif plan.tag == PLAN_PROJECT:
+        n = _count_left_joins(plan._project.value()[].child[])
+    elif plan.tag == PLAN_FILTER:
+        n = _count_left_joins(plan._filter.value()[].child[])
+    return n
+
+
+def _between(var a: Expr, var b: Expr) -> LogicalPlan:
+    return LogicalPlan.filter(
+        Expr.binary(
+            BIN_AND,
+            Expr.binary(BIN_GT, a^, Expr.literal(ScalarValue.from_int(1))),
+            Expr.binary(BIN_LT, b^, Expr.literal(ScalarValue.from_int(5))),
+        ),
+        _customer(),
+    )
+
+
+def _bare_value_scalar() raises -> Expr:
+    var pe = ExprArray()
+    pe.append(Expr.alias(Expr.col_ref("__corr0_a0"), "__corr0_v"))
+    var inner = LogicalPlan.project(
+        pe^, LogicalPlan.filter(_key_eq(0, "c_custkey"), _grouped(_orders(), ["o_custkey"]))
+    )
+    return Expr.correlated_subquery(inner^, ["c_custkey"], CORR_KIND_SCALAR)
+
+
+def test_the_same_subquery_twice_is_joined_once() raises:
+    var out = flatten_dependent_joins(_between(_one_key_scalar(), _one_key_scalar()))
+    assert_false(_plan_contains_correlated_subquery(out))
+    assert_equal(_count_left_joins(out), 1)
+    ref p = out._filter.value()[].predicate
+    assert_equal(p.binary_left_ref().binary_left_ref().col_ref_name(), String("__corr0_v"))
+    assert_equal(p.binary_right_ref().binary_left_ref().col_ref_name(), String("__corr0_v"))
+    var bare = flatten_dependent_joins(_between(_bare_value_scalar(), _bare_value_scalar()))
+    assert_equal(_count_left_joins(bare), 1)
+    assert_equal(
+        bare._filter.value()[].predicate.binary_right_ref().binary_left_ref().col_ref_name(),
+        String("__corr0_a0"),
+    )
+    var unaliased = flatten_dependent_joins(
+        _between(_one_key_scalar(aliased=False), _one_key_scalar(aliased=False))
+    )
+    assert_equal(_count_left_joins(unaliased), 2)
+
+
 def test_grouped_scalar_refusals() raises:
     var nonequi = _binder_scalar(
         Expr.binary(BIN_LT, Expr.col_ref("__corr0_k0"), Expr.left("c_custkey")),
@@ -340,6 +394,7 @@ def test_scalar_lowering_per_expression_kind() raises:
 def main() raises:
     test_a_grouped_scalar_is_a_left_join_on_its_keys()
     test_a_grouped_scalar_value_names()
+    test_the_same_subquery_twice_is_joined_once()
     test_grouped_scalar_refusals()
     test_a_nested_subquery_in_a_grouped_body_is_lowered()
     test_predicate_subquery_search_per_expression_kind()

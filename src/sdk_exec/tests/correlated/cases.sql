@@ -46,3 +46,5 @@ COPY (SELECT c.c_custkey FROM customer c, nation n WHERE c.c_nationkey = n.n_nat
 COPY (SELECT p_partkey FROM part WHERE (SELECT max(l_quantity) FROM lineitem WHERE l_partkey = p_partkey AND l_quantity > 1000) IS NULL) TO 'scalar_empty_body.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT d.p_partkey, d.n FROM (SELECT p_partkey, (SELECT count(*) FROM partsupp WHERE ps_partkey = p_partkey AND ps_availqty > 20) AS n FROM part) d WHERE d.n > 1) TO 'scalar_in_derived.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT l_orderkey, l_linenumber FROM lineitem WHERE l_quantity < CAST(l_linenumber AS DOUBLE) * 7.5) TO 'decimal_vs_double.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT p_partkey FROM part WHERE (SELECT count(*) FROM lineitem WHERE l_partkey = p_partkey) BETWEEN 1 AND 3) TO 'scalar_between_count.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT p_partkey FROM part WHERE (SELECT max(l_quantity) FROM lineitem WHERE l_partkey = p_partkey) BETWEEN 30 AND 48) TO 'scalar_between_max.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

@@ -39,6 +39,13 @@
 #       subquery operand (also under a minus or a CAST) is typed by its body;
 #       a DECIMAL against an integer or a DECIMAL, and two non-DECIMALs, are
 #       not cast.
+#   test_comma_joins_and_nested_subqueries_bind_inside_the_body
+#       a comma and a CROSS join in the body bind into the grouped body; an
+#       uncorrelated scalar inside the body stays its own subquery there.
+#   test_substring_from_for_is_the_call
+#       `substring(s FROM a FOR b)` and `substring(s FROM a)` bind as
+#       `substring(s, a, b)` and `substring(s, a)`; a FROM nested in
+#       parentheses is not the grammar form; a second FOR is a syntax error.
 #   test_names_outer_and_extract_aggs_descend_every_node_kind
 #       an outer column under a LIKE, a NOT, a CASE (WHEN, THEN and ELSE) and a
 #       call argument makes the body correlated; aggregates under a CASE and a
@@ -348,8 +355,12 @@ def test_unserved_bodies_are_refused_by_name() raises:
 
 
 def _filter_text(sql: String) raises -> String:
+    """The bound plan from its Filter on, or the whole text (an `ERR: `)."""
     var text = _got(sql)
-    return String(text[byte = text.find("Filter(") :])
+    var at = text.find("Filter(")
+    if at < 0:
+        return text^
+    return String(text[byte=at:])
 
 
 def test_a_decimal_compared_with_a_float_is_cast_to_the_float() raises:
@@ -380,6 +391,47 @@ def test_a_decimal_compared_with_a_float_is_cast_to_the_float() raises:
     # EXISTS body) is left as written.
     var t9 = _got("SELECT k FROM t WHERE EXISTS (SELECT * FROM m WHERE m.dc < t.v)")
     assert_false(t9.startswith("ERR"), t9)
+
+
+def test_comma_joins_and_nested_subqueries_bind_inside_the_body() raises:
+    _inner_has(
+        "SELECT k FROM t WHERE v > (SELECT max(x) FROM u, r WHERE u.k = r.k AND u.g = t.g)",
+        ["r.parquet", "u.parquet", "Aggregate(group_by=[ColRef(g)]"],
+    )
+    _inner_has(
+        "SELECT k FROM t WHERE v > (SELECT max(w) FROM u CROSS JOIN r WHERE u.k = t.k AND r.x = 1)",
+        ["r.parquet", "u.parquet"],
+    )
+    _inner_has(
+        "SELECT k FROM t WHERE v > (SELECT max(w) FROM u WHERE u.k = t.k AND u.w > (SELECT min(x) FROM r))",
+        ["CorrelatedSubquery(kind=2, outer_refs=#0"],
+    )
+
+
+def _parsed_where(sql: String) raises -> String:
+    """The bound plan from its Filter on, or the whole text (an `ERR: `)."""
+    var text = _got(sql)
+    var at = text.find("Filter(")
+    if at < 0:
+        return text^
+    return String(text[byte=at:])
+
+
+def test_substring_from_for_is_the_call() raises:
+    assert_equal(
+        _parsed_where("SELECT k FROM t WHERE substring(CAST(k AS VARCHAR) FROM 1 FOR 2) = '1'"),
+        _parsed_where("SELECT k FROM t WHERE substring(CAST(k AS VARCHAR), 1, 2) = '1'"),
+    )
+    assert_equal(
+        _parsed_where("SELECT k FROM t WHERE substring(CAST(k AS VARCHAR) FROM 2) = '1'"),
+        _parsed_where("SELECT k FROM t WHERE substring(CAST(k AS VARCHAR), 2) = '1'"),
+    )
+    # A FROM inside nested parentheses does not make the grammar form.
+    var nested = _got("SELECT k FROM t WHERE substring((SELECT max(CAST(x AS VARCHAR)) FROM r), 1, 1) = '1'")
+    assert_false(nested.startswith("ERR: SQL syntax error"), nested)
+    assert_true(
+        _got("SELECT k FROM t WHERE substring(CAST(k AS VARCHAR) FROM 1 FOR 2 FOR 3) = '1'").startswith("ERR: SQL syntax error"),
+    )
 
 
 def main() raises:
