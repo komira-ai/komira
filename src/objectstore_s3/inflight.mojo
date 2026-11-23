@@ -91,6 +91,17 @@ def run_bounded_inflight[
     """Runs jobs 0..`n_jobs`-1 with at most `max_inflight` running at once,
     on `inflight_workers(n_jobs, max_inflight)` workers (module header). A
     bound of 1, or a single job, runs on the calling thread as worker 0."""
+    var failed = AtomicI64(0)
+    _run_bounded_inflight(jobs, n_jobs, max_inflight, Pointer(to=failed))
+
+
+def _run_bounded_inflight[
+    J: InflightJobs, fo: MutOrigin
+](jobs: J, n_jobs: Int, max_inflight: Int, failed: Pointer[AtomicI64, fo]) raises:
+    """`run_bounded_inflight` with the failure flag given by the caller, which
+    reads 0 until a job raises on a thread of a fork_join run. The tests pass
+    their own flag, so a job can wait until the runner has recorded a failure
+    and the order of a failure and the next take is fixed, not raced."""
     var workers = inflight_workers(n_jobs, max_inflight)
     if workers == 0:
         return
@@ -99,6 +110,5 @@ def run_bounded_inflight[
             jobs.run_job(0, job)
         return
     var next = AtomicI64(0)
-    var failed = AtomicI64(0)
-    var body = _Pull(Pointer(to=jobs), Pointer(to=next), Pointer(to=failed), n_jobs)
+    var body = _Pull(Pointer(to=jobs), Pointer(to=next), failed, n_jobs)
     fork_join(body, workers)
