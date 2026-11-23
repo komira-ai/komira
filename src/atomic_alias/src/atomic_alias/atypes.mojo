@@ -41,11 +41,10 @@
 # =============================================================================
 
 from std.atomic import Atomic
-from std.sys.info import CompilationTarget
 
 comptime AtomicI8 = Atomic[DType.int8]  # cov: unreachable a comptime alias emits no code, so no test binary holds a line of it
 comptime AtomicI32 = Atomic[DType.int32]  # cov: unreachable a comptime alias emits no code, so no test binary holds a line of it
 comptime AtomicI64 = Atomic[DType.int64]  # cov: unreachable a comptime alias emits no code, so no test binary holds a line of it
 comptime AtomicU8 = Atomic[DType.uint8]  # cov: unreachable a comptime alias emits no code, so no test binary holds a line of it
-comptime AtomicU32 = Atomic[DType.int32 if CompilationTarget.is_macos() else DType.uint32]  # cov: unreachable a comptime alias emits no code, so no test binary holds a line of it
+comptime AtomicU32 = Atomic[DType.uint32]  # cov: unreachable a comptime alias emits no code, so no test binary holds a line of it
 comptime AtomicU64 = Atomic[DType.uint64]  # cov: unreachable a comptime alias emits no code, so no test binary holds a line of it
