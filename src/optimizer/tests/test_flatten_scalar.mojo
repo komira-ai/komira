@@ -273,7 +273,7 @@ def test_grouped_scalar_refusals() raises:
     var none = _binder_scalar(
         Expr.binary(BIN_GT, Expr.col_ref("__corr0_a0"), Expr.literal(ScalarValue.from_int(0))),
         _grouped(_orders(), ["o_custkey"]),
-        List[String](),
+        ["c_custkey"],
     )
     assert_true(_raises_with(_gt_nation(none^), corr_msg))
     var grouped_msg = "not grouped by its correlation keys"

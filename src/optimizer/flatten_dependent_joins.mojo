@@ -670,7 +670,11 @@ def _lower_grouped_scalar(
     var grouped = _hoist_outer_eq_predicates(
         pj.child[], corr_data.outer_refs, left_on, right_on, residual
     )
-    if len(residual) > 0 or len(left_on) == 0:
+    var keys_lifted = len(residual) == 0 and len(left_on) > 0
+    for i in range(len(right_on)):
+        if not _schema_has_field(grouped.output_schema, right_on[i]):
+            keys_lifted = False
+    if not keys_lifted:
         raise Error(
             "flatten: a scalar subquery correlated other than by inner = outer"
             " column equalities is not supported"
@@ -737,8 +741,12 @@ def _lower_scalar_correlated(
     ref corr_data = corr_expr._corr_subq.value()[]
     _validate_outer_refs(corr_data.outer_refs, outer_child.output_schema)
     ref inner_root = corr_data_inner_plan_ref(corr_data)
+    # An uncorrelated subquery keeps the lowering below: the earlier passes
+    # bound it when its body is provably one row, and a plan holding one they
+    # could not bind is the caller's to refuse (`OPTIMIZE_UNRESOLVED_SCALAR`).
     if (
-        inner_root.tag == PLAN_PROJECT
+        len(corr_data.outer_refs) > 0
+        and inner_root.tag == PLAN_PROJECT
         and len(inner_root._project.value()[].exprs) == 1
         and inner_root._project.value()[].child[].tag == PLAN_FILTER
     ):
