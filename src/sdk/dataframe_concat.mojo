@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # `LogicalPlan.union` (a `PLAN_UNION` with N children) already exists
-# and the SQL binder reaches it for `UNION ALL` (`_bind_union_all_chain`), but
+# and the SQL binder reaches it for `UNION ALL` (`_bind_set_chain`), but
 # the untyped Mojo carrier had NO verb over it: the corpus element `union` was
 # a DECLARED absence at @mojo (`MOJO_NO_VERB`). `PlanCarrier.concat(top,
 # bottom)` is that verb — polars' `pl.concat([top, bottom])`, answered the way

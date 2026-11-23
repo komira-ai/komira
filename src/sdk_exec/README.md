@@ -5,9 +5,10 @@ nothing from the rest of the package except each other, and the plan gates
 (`plan_validation_gate`, `parquet_glob_options`), which build on `sdk`;
 and the engine context with its SQL door (`engine_*` below), which runs a SQL
 query over Parquet files, and over CSV files named by `read_csv` (plain or
-`.gz`, `.zst`, `.lz4`), from text to record batches, and `arrow_result`,
-which readies those batches for the Arrow C stream. Views, writes, the plan
-cache and the plan gates' call sites are not wired into the context yet.
+`.gz`, `.zst`, `.lz4`), from text to record batches; `arrow_result`, which
+readies those batches for the Arrow C stream; and writes a query's result to a
+local Parquet file with `COPY ... TO`. Views, other writes, the plan cache and
+the plan gates' call sites are not wired into the context yet.
 
 | module | does |
 |---|---|
@@ -34,10 +35,59 @@ do is a free function in a module of its own.
 | `engine_options` | `EngineOptions`: `worker_count` and `memory_budget_bytes`, each `Optional` (absent means the host profile's own value), and `spill_directory` (`Optional`; absent means no spill). Values the caller fills from its flags; no environment variable is read |
 | `engine_context` | `EngineContext(options)`: probes the host once, applies the options over the profile, starts the worker runtime. Holds the catalog, the registered tables, `footers` (a `ParquetFooters`), `host_profile`, `runtime` and `spill_directory`. A count or budget below 1, and an empty spill directory, are refused with `ENGINE_OPTIONS_INVALID`. `begin_query` drops the footer cache |
 | `engine_catalog` | `register_parquet(ctx, name, path)`: the table's schema is its file's footer |
-| `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema) and `lower_for_context` |
-| `engine_execute` | `run_lowered_plan(ctx, lowered)`: a `RealBuilder` over a per-run metadata cache and expression pool, the segment pool sized from the memory budget, the context's spill directory (when it has one) on the builder, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch |
-| `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize_for_run`, lower, run. `optimize_for_run(plan)` is `optimize` (refusing a plan that needs a scalar subquery executed first, `OPTIMIZE_UNRESOLVED_SCALAR`) and then `plan_cse_eliminate`, which holds each subtree the plan repeats once (a CTE read twice, two equal UNION ALL branches) so lowering cuts it once and every reference reads it (`lowering.cut_shared`). Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message |
+| `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema; a scan of an S3 bucket has no facts, since `ctx.footers` reads the local file system only) and `lower_for_context` |
+| `engine_execute` | `run_lowered_plan_with(ctx, lowered, opener)`: a `RealBuilder` over a per-run metadata cache (keyed per file system) and expression pool, reading a Parquet scan of a bucket through the file system the `ScanFsOpener` opens on it (`objectstore_s3.S3ScanFs` for S3), the segment pool sized from the memory budget, the context's spill directory (when it has one) on the builder, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch. `run_lowered_plan(ctx, lowered)` is that with `LocalOnlyScanFs`, which refuses a scan of a bucket with `SCAN_FS_UNSERVED` |
+| `engine_write` | `write_parquet_result(batch, dest, codec)`: the result batch as a Parquet file at the local path `dest`, through `fs.atomic_write.write_file_atomic` (all or nothing), returning the rows written; `count_result(rows)`, the one-row BIGINT `Count` batch a COPY answers; `check_copy_target(dest, fmt)`, the refusals of a URL and of CSV or JSON |
+| `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize_for_run`, lower, run, and for a `COPY ... TO` write the file and answer `Count`. `optimize_for_run(plan)` is `optimize` (refusing a plan that needs a scalar subquery executed first, `OPTIMIZE_UNRESOLVED_SCALAR`) and then `plan_cse_eliminate`, which holds each subtree the plan repeats once (a CTE read twice, two equal UNION ALL branches) so lowering cuts it once and every reference reads it (`lowering.cut_shared`). Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message. `run_sql_with(ctx, text, opener)` runs with the opener a scan of a bucket is read through |
 | `arrow_result` | `arrow_result(outcome) -> ArrowResult`: the batches of a `SqlOutcome` and their schema, each batch's selection mask applied, checked to cross the Arrow C Stream Interface whole (`arrow_ipc.c_data_stream_check`). Raises with the step and message of a refusal, for an outcome with no batch, and naming a column the export cannot carry |
+
+**COPY ... TO a local Parquet file.** `COPY <table> TO '<path>'` and
+`COPY (<query>) TO '<path>' (FORMAT parquet, COMPRESSION <codec>)` run the
+query like any other and write its result. The statement answers what DuckDB
+answers: one row, one BIGINT NOT NULL column `Count`, the rows written.
+
+- The format comes from `FORMAT`, or from the extension as DuckDB infers it
+  (`sql.sql_copy_format`); a name with no format's extension is
+  `COPY_FORMAT_NOT_INFERRED` at `parse`. CSV and JSON, inferred or named, are
+  refused with `COPY_FORMAT_UNSUPPORTED` at `bind`.
+- `COMPRESSION` is snappy (the default), uncompressed, zstd (level 3), gzip
+  (level 6), or lz4 or lz4_raw (both LZ4_RAW in the footer).
+- The write is all or nothing: a temporary `.<name>.<random>.tmp` in the
+  destination's directory, synced and renamed over the destination, then the
+  directory synced. A failure removes the temporary file and leaves the
+  destination as it was, so `COPY (SELECT * FROM 'a.parquet') TO 'a.parquet'`
+  is safe. An existing file is replaced, as DuckDB replaces it.
+- The path is taken as written; a relative path resolves against the working
+  directory. A missing directory is `STORAGE_NOT_FOUND` and is not created;
+  any other failure (no space, a directory at the path, ...) is `STORAGE_IO`
+  naming the step and the errno; both at `execute`. A destination URL
+  (`s3://...`) is `STORAGE_URL_REFUSED` at `bind`.
+- The file: the result's column names in order; a nullable column OPTIONAL and
+  a NOT NULL one REQUIRED; one row group per 122,880 rows; DATE annotated
+  DATE, DECIMAL as FIXED_LEN_BYTE_ARRAY(16) with its precision and scale,
+  strings UTF8. An empty result writes the schema with no rows. A column of a
+  type the writer cannot annotate (TIMESTAMP, TIME, INTERVAL and the like, the
+  unsigned and narrow integers, BLOB, nested) is `COPY_TYPE_UNSUPPORTED` at
+  `execute`, before any file is touched.
+- `CREATE TABLE ... AS` writes into a catalog table, and no catalog is bound:
+  it is refused with `STATEMENT_NOT_A_QUERY` at `bind`, naming the COPY that
+  writes a file.
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from std.tempfile import mkdtemp
+from sdk_exec.engine_context import EngineContext
+from sdk_exec.engine_options import EngineOptions
+from sdk_exec.engine_sql import run_sql
+
+var ctx = EngineContext(EngineOptions(worker_count=1))
+var dir = mkdtemp(prefix="komira_copy_readme_")
+var out = run_sql(ctx, "COPY (SELECT 1 AS n UNION ALL SELECT 2) TO '" + dir + "/n.parquet'")
+assert_equal(out.batches[0].schema.field_name(0), "Count")
+assert_equal(Int(out.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 2)
+var back = run_sql(ctx, "SELECT count(*) AS rows FROM '" + dir + "/n.parquet'")
+assert_equal(Int(back.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 2)
+```
 
 **The footer cache is pinned to a query.** `parquet_footers.FooterCache`
 has no cap, so the context does not keep it: `run_sql` starts by replacing it
@@ -71,7 +121,7 @@ given to SQL `read_parquet` (`PARQUET_PATH_IS_DIRECTORY`), files whose schemas
 differ (`PARQUET_FILES_SCHEMA_MISMATCH`), and the Hive shapes the footer
 package lists (`HIVE_PARTITION_*`).
 
-**Refused here, by name.** A statement that is not a query
+**Refused here, by name.** The COPY refusals above, `CREATE TABLE ... AS`
 (`STATEMENT_NOT_A_QUERY`, step `bind`); the door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
 asks for a scalar to be executed first, a guard no query tested here reaches); a sink denied its memory by the
 budget (unless it spills, see Spill below), a sum outside its declared type and a pool not whole after a run (step
@@ -140,6 +190,17 @@ assert_equal(refusal, "run_sql refused at step bind: no column nope")
 
 The tests run when the package is built.
 
+- `test_run_sql_copy_parquet`: `COPY ... TO` a local Parquet file answers one
+  BIGINT NOT NULL row `Count`; the file read back equals the query that wrote
+  it (a table of BIGINT, DOUBLE, VARCHAR, BOOLEAN, DATE and DECIMAL columns with
+  NULLs, a query, an empty result, 130,000 rows in two row groups, a COPY over
+  the file it reads, a relative path), and its footer names the codec asked
+  for, for each of the six; CSV and JSON, an unknown extension, a URL, CREATE
+  TABLE AS and a TIMESTAMP column are named refusals that create no file; a
+  missing directory, a directory at the path and a full disk injected through
+  the file system's test seam are named and leave no temporary file and the old
+  file whole.
+
 - `test_plan_cache_full_sink_hash`: the sink kind is part of the Layer 2 key
   and the path is not.
 - `test_resolved_cache_pin_count`: a pinned entry survives an eviction wave,
@@ -161,6 +222,13 @@ The tests run when the package is built.
   grouped and ungrouped aggregates and `all_varchar`, each over the committed
   file and over a gzip copy; a missing file is refused at bind and
   `header=false` at lowering.
+- `test_run_sql_s3`: catalog tables whose `ParquetSource` names an S3 bucket,
+  read by `run_sql_with` through `S3ScanFs` over the fake S3, answer what the
+  same files answer locally through `run_sql`: a filter and a projection, a
+  GROUP BY and a count, a table of two keys, one key in two buckets under
+  UNION ALL; a missing and a refused object are the store's NOT_FOUND and
+  PERMISSION_DENIED at step `execute`; `run_sql` refuses the S3 scan with
+  `SCAN_FS_UNSERVED`; a `gs://` table is refused at step `lower`.
 - `test_run_sql_q6`: TPC-H Q6's text from `bench_corpus` over a lineitem-shaped
   Parquet file gives the integer oracle's DECIMAL(38,4); a LEFT self-join counts the matched pairs and the unmatched rows of the
   oracle and a scalar subquery gives the oracle's count; a LEFT JOIN with a
@@ -249,6 +317,13 @@ The tests run when the package is built.
   empty branch, the first branch's names, LIMIT, integer literal branches
   (INTEGER, or BIGINT when one needs it); a VARCHAR with an INTEGER is refused
   at bind and an ORDER BY before UNION ALL at parse.
+- `test_run_sql_set_ops`: INTERSECT and EXCEPT through `run_sql` answer what
+  the pinned DuckDB answers for each case of `tests/set_ops/cases.sql`, on one
+  worker and on three: NULL rows equal, an all-NULL and an empty input,
+  repeated rows, several columns of mixed types, one column of each key type,
+  NaN, inputs widened to a common type, INTERSECT binding tighter than UNION
+  ALL and EXCEPT, a sort and an aggregation over the result; every
+  case is run; INTERSECT ALL and EXCEPT ALL are refused at parse by name.
 - `test_secret_capability_reveal`: a capability reveals exactly the secret
   bound to its own node id, once and after one store resolve; two capabilities
   over one bindings table each reveal their own value; an unbound node or a
@@ -271,7 +346,7 @@ directory; a query that does not spill never creates it. Not spilled, and
 refused over the budget as before: a GROUP BY with COUNT(DISTINCT) (its
 refusal says so), a GROUP BY over a string or a mixed string key, the sort
 (ORDER BY), and the output rows of every partition, which must fit the budget
-together, since the result is returned whole. `run_sql` serves the plans `lowering` cuts: Parquet scans (one file or several), `read_csv`
+together, since the result is returned whole. `run_sql` serves the plans `lowering` cuts: Parquet scans (one file or several; through `run_sql_with`, objects of an S3 bucket too, from a catalog table whose source names the bucket: no SQL text names an S3 URL yet, the context's footers read local files only, and the session holds no S3 settings or credentials), `read_csv`
 scans of one local file with a header row (decoded whole before the first
 morsel; `header=false` is refused at lowering, because the reader would name
 the columns `col_0`, `col_1`, ... where DuckDB names them `column0`,

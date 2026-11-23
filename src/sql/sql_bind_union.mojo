@@ -1,15 +1,16 @@
 # =============================================================================
 # sql/sql_bind_union.mojo
-#   UNION ALL: binding a chain of branches into one `PLAN_UNION`, with DuckDB's
-#   common column types.
+#   DuckDB's common column types of a set operation's branches, and the
+#   projection that conforms a branch to them.
 # =============================================================================
 #
-# `<select> UNION ALL <select> ...` binds each branch, folds one common type per
-# column over the branches left to right, and puts one projection on every
-# branch whose names or types differ from the union's, so every child of the
-# node advertises exactly the node's schema (`LogicalPlan.union` does not
-# coerce). The casts and renames go into the branch's own SELECT-list
-# projection, by position, when the branch ends in one. A pair of types this
+# A set operation (`sql_bind_set_op`: UNION ALL, INTERSECT, EXCEPT) folds one
+# common type per column over its inputs left to right (`_union_merge_schema`)
+# and puts one projection on every input whose names or types differ from the
+# result's (`_union_conform_branch`), so every child of a `PLAN_UNION` node
+# advertises exactly the node's schema (`LogicalPlan.union` does not coerce).
+# The casts and renames go into the branch's own SELECT-list projection, by
+# position, when the branch ends in one. A pair of types this
 # engine cannot cast between is refused by name.
 #
 # Where DuckDB answers and this binder refuses, by name: UBIGINT with a signed
@@ -25,12 +26,7 @@ from arrow.arrow_types import ArrowType
 from arrow.schema import Field, Schema, SchemaBuilder
 from plan_expr.expr import Expr
 from plan_ir.logical_plan import ExprArray, LogicalPlan, PLAN_PROJECT, PLAN_SCAN
-from sql.sql_ast import SelectStmt
-from sql.sql_bind_scope import CteScope
-from sql.sql_binder import _bind_select
-from sql.sql_catalog import SqlCatalog
 from std.builtin.swap import swap
-from std.memory import OwnedPointer
 
 
 struct _Common(Copyable, Movable):
@@ -234,17 +230,31 @@ def _same_column_type(a: Schema, b: Schema, i: Int) -> Bool:
     return True
 
 
-def _union_merge_schema(acc: Schema, rhs: Schema, branch: Int) raises -> Schema:
-    """Fold branch number `branch` (2-based) into the union schema `acc` built
-    from the branches before it: the column count must match, each column takes
-    the common type of the two, the names stay `acc`'s (the first branch's, as in
-    DuckDB), and a column is nullable when either side is."""
+def _union_merge_schema(
+    acc: Schema,
+    rhs: Schema,
+    branch: Int,
+    op: String = "UNION ALL",
+    first: Int = 1,
+) raises -> Schema:
+    """Fold branch number `branch` (2-based) into the schema `acc` built from
+    branches `first` to `branch - 1` of a set operation `op` (`UNION ALL`,
+    `INTERSECT` or `EXCEPT`, which errors name): the column count must match,
+    each column takes the common type of the two, the names stay `acc`'s (the
+    left input's, as in DuckDB), and a column is nullable when either side
+    is."""
     if acc.num_columns() != rhs.num_columns():
+        var article = String("a ")
+        if op.startswith("I") or op.startswith("E"):
+            article = "an "
+        var left = String("the first branch")
+        if first > 1:
+            left = "branch " + String(first)
         raise Error(
-            "SQL bind error: UNION ALL branch " + String(branch) + " produces "
-            + String(rhs.num_columns()) + " column(s) but the first branch"
-            " produces " + String(acc.num_columns())
-            + ". Every branch of a UNION ALL must produce the same number of"
+            "SQL bind error: " + op + " branch " + String(branch) + " produces "
+            + String(rhs.num_columns()) + " column(s) but " + left
+            + " produces " + String(acc.num_columns())
+            + ". Every branch of " + article + op + " must produce the same number of"
             " columns, in the same order."
         )
     var builder = SchemaBuilder()
@@ -260,11 +270,14 @@ def _union_merge_schema(acc: Schema, rhs: Schema, branch: Int) raises -> Schema:
             rhs.field_tz(i),
         )
         if common.why != "":
-            var earlier = String("branch 1 gives")
-            if branch > 2:
-                earlier = "branches 1 to " + String(branch - 1) + " give"
+            var earlier = "branch " + String(first) + " gives"
+            if branch - 1 > first:
+                earlier = (
+                    "branches " + String(first) + " to " + String(branch - 1)
+                    + " give"
+                )
             raise Error(
-                "SQL not supported: UNION ALL column " + String(i + 1) + " ("
+                "SQL not supported: " + op + " column " + String(i + 1) + " ("
                 + String(acc.field_name(i)) + "): " + earlier + " "
                 + _union_type_name(acc, i) + " and branch " + String(branch)
                 + " gives " + _union_type_name(rhs, i) + "; " + common.why
@@ -362,76 +375,3 @@ def _conform_expr(
         else:
             e = Expr.cast_to_arrow(e^, out_schema.field_arrow_type(i))
     return Expr.alias(e^, String(out_schema.field_name(i)))
-
-
-def _bind_select_with_union(
-    body: SelectStmt,
-    top: SelectStmt,
-    catalog: SqlCatalog,
-    cte_scope: CteScope,
-    prebound: List[Expr],
-    result_names: Bool,
-) raises -> LogicalPlan:
-    """Bind `body`, a SELECT that may head a UNION ALL chain, to a plan: the
-    SELECT's own plan when `body.union_all_idx < 0`, else the chain's
-    `PLAN_UNION`. The chain's branch bodies live in `top.subqueries` (the
-    top-level statement's table, which `body.union_all_idx` indexes)."""
-    var head = _bind_select(
-        body, catalog, cte_scope, prebound, result_names,
-        body.union_all_idx >= 0,
-    )
-    if body.union_all_idx < 0:
-        return head^
-    return _bind_union_all_chain(
-        head^, top, body.union_all_idx, catalog, cte_scope, prebound
-    )
-
-
-def _bind_union_all_chain(
-    var head: LogicalPlan,
-    top: SelectStmt,
-    first_idx: Int,
-    catalog: SqlCatalog,
-    cte_scope: CteScope,
-    prebound: List[Expr],
-) raises -> LogicalPlan:
-    """`<select> UNION ALL <select> [UNION ALL ...]` -> one `PLAN_UNION`.
-
-    N branches make one node with N children, not a left-deep tree of
-    two-branch unions.
-
-    Iterative: the branch bodies live in the top-level statement's
-    `subqueries` table, so the chain is a linked list of indices into one
-    table, walked with a loop. Recursing through each branch body would
-    re-enter `_bind_select` from inside itself, a shape the Mojo compiler
-    hangs on.
-
-    The output schema folds each column's common type over the branches
-    (`_union_merge_schema`) and keeps the first branch's names, which is
-    DuckDB's rule: `SELECT a FROM t UNION ALL SELECT b FROM u` is a column
-    called `a`. Every branch then goes through `_union_conform_branch`. Each
-    branch's bare integer result literals are INT32 as in a lone SELECT, so
-    `SELECT 1 UNION ALL SELECT 5000000000` widens to BIGINT.
-    """
-    var out_schema = head.output_schema.copy()
-    var children = List[OwnedPointer[LogicalPlan]]()
-    children.append(OwnedPointer(head^))
-    var idx = first_idx
-    var branch = 2
-    while idx >= 0:
-        ref sd = top.subqueries[idx]
-        var plan = _bind_select(
-            sd.body, catalog, cte_scope, prebound, False, True
-        )
-        out_schema = _union_merge_schema(out_schema, plan.output_schema, branch)
-        var next_idx = sd.body.union_all_idx
-        children.append(OwnedPointer(plan^))
-        idx = next_idx
-        branch += 1
-    for i in range(len(children)):
-        var taken = LogicalPlan.union(
-            List[OwnedPointer[LogicalPlan]](), Schema()
-        )
-        swap(taken, children[i][])
-        children[i][] = _union_conform_branch(taken^, out_schema, i + 1)
-    return LogicalPlan.union(children^, out_schema^)

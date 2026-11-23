@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Lowering: a bound LogicalPlan, a HostProfile and the resolved inputs to the
-# PhysicalPlan IR (version 18) and the ParamTable its segments index. Pure: the
+# PhysicalPlan IR (version 19) and the ParamTable its segments index. Pure: the
 # entry opens no file, reads no clock and no environment variable and touches
 # no global (README.md).
 #
@@ -59,6 +59,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        beside each that lowers (a distinct over a column
 #                        list, a repeated name, no column or a column no sink
 #                        row serves included).
+# test_lower_s3_scan     a Parquet scan of S3 objects: the spec carries the
+#                        bucket beside the keys for one key, several and Hive
+#                        partitioned keys, and the render line names the store
+#                        of a remote scan only.
 # test_lower_union       a UNION ALL: one segment per branch (a collect, or the
 #                        branch's own breaker segment) and a SOURCE_CONCAT
 #                        segment over them in branch order with an E3 edge to
@@ -138,6 +142,7 @@ mojo_library(
         "tests/test_lower_names.mojo",
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",
+        "tests/test_lower_s3_scan.mojo",
         "tests/test_lower_shared.mojo",
         "tests/test_lower_sum_fuse.mojo",
         "tests/test_lower_union.mojo",

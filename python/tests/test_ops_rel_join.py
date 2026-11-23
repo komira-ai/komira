@@ -22,15 +22,21 @@ from komira._ops import (
     Join,
     Limit,
     Lit,
+    MapBatches,
     Project,
     Scan,
     Sort,
     SortKey,
     TopN,
+    UdfSpec,
     Union,
     Write,
     WriteTarget,
     walk_plan,
+)
+
+FRAME_SPEC = UdfSpec(
+    "m.f", "map_batches_frame", "package", "m:f", (), (("x", "int64"),), "stable", "propagate", "values", ("id",)
 )
 
 
@@ -419,6 +425,7 @@ def test_plan_nodes_lists_every_relational_class_once():
         "Join",
         "Union",
         "Write",
+        "MapBatches",
     ], names
     for node in (
         people(),
@@ -432,6 +439,7 @@ def test_plan_nodes_lists_every_relational_class_once():
         Join(people(), cities(), "cross"),
         Union((people(), people())),
         Write(people(), WriteTarget("o", "csv")),
+        MapBatches(people(), FRAME_SPEC),
     ):
         assert isinstance(node, PLAN_NODES), type(node).__name__
         assert isinstance(node.columns, tuple), type(node).__name__

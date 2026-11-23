@@ -153,12 +153,14 @@ just before it, which apply to that run only and are dropped when it returns. A 
 to every later run on the context.
 - **The route.** It is `sdk_exec.run_sql` with the session's `EngineContext`. The
   library converts the SQL text to a logical plan by parsing and binding it.
-- **Statements that are not queries.** `run_sql` refuses them
+- **Statements that are not queries.** `run_sql` runs `COPY ... TO` a local
+  Parquet file and answers one row, the BIGINT `Count`
+  ([src/sdk_exec/README.md](../../src/sdk_exec/README.md)). It refuses
+  `CREATE TABLE ... AS` and the other statements that are not queries
   (`STATEMENT_NOT_A_QUERY` today; the write design renames it `SQL_STATEMENT_UNSUPPORTED`). The write
-  design lifts the refusal for `COPY ... TO` and, into a bound catalog, for `CREATE TABLE ... AS` and
-  `INSERT`, which answer what DuckDB returns: a one-row `Count` stream, or no rows for `CREATE TABLE`
-  with a column list
-  ([credentials_and_writes.md](credentials_and_writes.md#10-writes)).
+  design also lifts the refusal, into a bound catalog, for `CREATE TABLE ... AS` and `INSERT`, which
+  answer what DuckDB returns: a one-row `Count` stream, or no rows for `CREATE TABLE` with a column
+  list ([credentials_and_writes.md](credentials_and_writes.md#10-writes)).
 - **The error text.** **PROPOSED:** the last error text is `<step>: <reason>`,
   where the step is the one that refused (parse, bind, optimize, lower or
   execute). That text is for people, and bindings do not parse it (§6).

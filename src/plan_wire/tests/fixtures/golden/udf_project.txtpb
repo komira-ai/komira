@@ -1,0 +1,301 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 4
+plan {
+  output_schema {
+    fields {
+      name: "a"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "inc1"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "inc2"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "norm"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "tot"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  project {
+    exprs {
+      col_ref {
+        name: "a"
+        side: COL_SIDE_NONE
+      }
+    }
+    exprs {
+      alias {
+        child {
+          udf_apply {
+            args {
+              col_ref {
+                name: "b"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "inc1"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          udf_apply {
+            args {
+              col_ref {
+                name: "b"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "inc2"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          udf_apply {
+            udf_index: 1
+            args {
+              col_ref {
+                name: "c"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "norm"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          udf_apply {
+            udf_index: 2
+            args {
+              col_ref {
+                name: "a"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              col_ref {
+                name: "c"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "tot"
+      }
+    }
+    child {
+      output_schema {
+        fields {
+          name: "a"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "b"
+          arrow_type_id: 4
+          dtype_code: _DT_INT32
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "c"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      scan {
+        source {
+          parquet {
+            paths: "/data/udf_events.parquet"
+            schema {
+              fields {
+                name: "a"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "b"
+                arrow_type_id: 4
+                dtype_code: _DT_INT32
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "c"
+                arrow_type_id: 12
+                dtype_code: _DT_FLOAT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+            }
+            fs_is_local: true
+          }
+        }
+        has_schema: true
+        schema {
+          fields {
+            name: "a"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "b"
+            arrow_type_id: 4
+            dtype_code: _DT_INT32
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "c"
+            arrow_type_id: 12
+            dtype_code: _DT_FLOAT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+        }
+        source_kind: SOURCE_KIND_COLUMNAR
+      }
+    }
+  }
+}
+udfs {
+  kind: SCALAR
+  return_type {
+    name: "out"
+    arrow_type_id: 5
+    dtype_code: _DT_INT64
+    nullable: true
+    dict_index_type_id: 4
+  }
+  stability: UDF_STABILITY_IMMUTABLE
+  null_mode: UDF_NULL_PROPAGATE
+  resources {
+  }
+  code {
+    runtime: "komira/python"
+    form: BUNDLE
+    entry: "m:inc"
+    code {
+      role: "bundle"
+      sha256: "\000\001\002\003\004\005\006\007\010\t\n\013\014\r\016\017\020\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037"
+    }
+    descriptor_version: 1
+    descriptor: "\n\005m:inc\020\0018\001"
+  }
+  arg_types {
+    name: "b"
+    arrow_type_id: 4
+    dtype_code: _DT_INT32
+    nullable: true
+    dict_index_type_id: 4
+  }
+}
+udfs {
+  kind: MAP_BATCHES_COLUMN
+  return_type {
+    name: "out"
+    arrow_type_id: 12
+    dtype_code: _DT_FLOAT64
+    nullable: true
+    dict_index_type_id: 4
+  }
+  stability: UDF_STABILITY_STABLE
+  null_mode: UDF_NULL_PROPAGATE
+  resources {
+  }
+  code {
+    runtime: "komira/python"
+    form: PACKAGE
+    entry: "m:norm"
+    descriptor_version: 1
+    descriptor: "\n\006m:norm\020\0048\002"
+  }
+  arg_types {
+    name: "c"
+    arrow_type_id: 12
+    dtype_code: _DT_FLOAT64
+    nullable: true
+    dict_index_type_id: 4
+  }
+}
+udfs {
+  kind: ROW
+  return_type {
+    name: "out"
+    arrow_type_id: 12
+    dtype_code: _DT_FLOAT64
+    nullable: true
+    dict_index_type_id: 4
+  }
+  stability: UDF_STABILITY_VOLATILE
+  null_mode: UDF_NULL_MANUAL
+  resources {
+  }
+  code {
+    runtime: "komira/python"
+    form: BUNDLE
+    entry: "m:tot"
+    code {
+      role: "bundle"
+      sha256: "\000\001\002\003\004\005\006\007\010\t\n\013\014\r\016\017\020\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037"
+    }
+    descriptor_version: 1
+    descriptor: "\n\005m:tot\020\0022\032\n\013\n\001a\020\005\030\005 \001@\004\n\013\n\001c\020\014\030\014 \001@\0048\001"
+  }
+  arg_types {
+    name: "a"
+    arrow_type_id: 5
+    dtype_code: _DT_INT64
+    nullable: true
+    dict_index_type_id: 4
+  }
+  arg_types {
+    name: "c"
+    arrow_type_id: 12
+    dtype_code: _DT_FLOAT64
+    nullable: true
+    dict_index_type_id: 4
+  }
+  read_set {
+    columns: "a"
+    columns: "c"
+  }
+}

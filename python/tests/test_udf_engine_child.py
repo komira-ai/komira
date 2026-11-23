@@ -38,6 +38,36 @@ def zygote_pid(x):
     return os.getppid()
 
 
+def hold(x):
+    import signal
+    open(os.path.join(WORK, "started"), "w").close()
+    with open(os.path.join(WORK, "handler"), "w") as f:
+        f.write("1" if signal.getsignal(signal.SIGINT) is signal.default_int_handler else "0")
+    while not os.path.exists(os.path.join(WORK, "release")):
+        time.sleep(0.001)
+    return os.getpid()
+
+
+def ask(x):
+    input()
+    return x
+
+
+def probe(x):
+    import json
+    import tempfile
+    fds = {}
+    for name in os.listdir("/proc/self/fd"):
+        try:
+            fds[name] = os.readlink("/proc/self/fd/" + name)
+        except FileNotFoundError:
+            pass
+    info = {"environ": dict(os.environ), "fds": fds, "tmp": tempfile.gettempdir(), "cwd": os.listdir(".")}
+    with open(os.path.join(WORK, "probe.json"), "w", encoding="utf-8") as f:
+        json.dump(info, f)
+    return x
+
+
 def wait_forever(x):
     open(os.path.join(WORK, "started"), "w").close()
     while True:
@@ -79,8 +109,9 @@ def proc_masks():
 class Engine:
     """The child's side: a runtime with the fixture bundle, the report pipe and the go pipe."""
 
-    def __init__(self, env, report_fd, go_fd):
+    def __init__(self, env, report_fd, go_fd, extra=()):
         self.env = env
+        self.extra = list(extra)
         self.report = os.fdopen(report_fd, "w", encoding="utf-8")
         self.go = os.fdopen(go_fd, "r", encoding="utf-8")
         self.work = env._mk("work")
@@ -194,7 +225,52 @@ def engine_fork(e):
     e.wait_go()  # the test kills this process here
 
 
-ENGINES = {"orphan": engine_orphan, "reaped": engine_reaped, "signals": engine_signals, "fork": engine_fork}
+def engine_stdin(e):
+    outcome_of_input = outcome(e.instance("ask").call([ints(0)]))
+    e.tell(call=outcome_of_input)
+    e.wait_go()
+
+
+def engine_sigint(e):
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    inst = e.instance("hold")
+    first = []
+    threading.Thread(target=lambda: first.append(outcome(inst.call([ints(0)]))), daemon=True).start()
+    while not os.path.exists(os.path.join(e.work, "started")):
+        time.sleep(0.001)
+    _, workers = e.pids()
+    e.tell(work=e.work, workers=workers)
+    e.wait_go()  # the test has sent SIGINT to this process group and released the call
+    while not first:
+        time.sleep(0.001)
+    with open(os.path.join(e.work, "handler"), encoding="ascii") as f:
+        handler = f.read()
+    e.tell(first=first[0], second=outcome(inst.call([ints(0)])), handler=handler)
+
+
+def engine_probe(e):
+    # An inheritable descriptor of this process, which no worker may receive.
+    extra_path = e.env.path("extra_fd")
+    extra_fd = os.open(extra_path, os.O_CREAT | os.O_WRONLY, 0o600)
+    os.set_inheritable(extra_fd, True)
+    e.instance("probe").call_ok([ints(5)])
+    e.tell(work=e.work, extra_fd_path=extra_path)
+
+
+def engine_packages(e):
+    sys_path, *modules = e.extra
+    e.rt = e.env.runtime(options=e.env.options() + ["sys_path=" + sys_path])
+    done = {}
+    for module in modules:
+        status, udf, err = e.rt.load(h.Spec(module + ":inc", form=h.FORM_PACKAGE))
+        done[module] = {"status": status, "message": err.message if err else None,
+                        "values": None if udf is None else
+                        e.rt.open_context_ok().open_instance_ok(udf).call_ok([ints(4)]).to_pylist()}
+    e.tell(done=done)
+
+
+ENGINES = {"orphan": engine_orphan, "reaped": engine_reaped, "signals": engine_signals, "fork": engine_fork,
+           "stdin": engine_stdin, "sigint": engine_sigint, "probe": engine_probe, "packages": engine_packages}
 
 
 def engine_main(args):
@@ -202,8 +278,10 @@ def engine_main(args):
     lib_dir = args[args.index("--lib-dir") + 1]
     report_fd = int(args[args.index("--report-fd") + 1])
     go_fd = int(args[args.index("--go-fd") + 1])
-    with h.Env(lib_dir) as env:
-        ENGINES[scenario](Engine(env, report_fd, go_fd))
+    extra = args[args.index("--extra") + 1:] if "--extra" in args else []
+    # The test watches this engine's processes itself, and ends it with a signal in some cases.
+    with h.Env(lib_dir, check_leaks=False) as env:
+        ENGINES[scenario](Engine(env, report_fd, go_fd, extra))
 
 
 # ---- the test (the parent) -------------------------------------------------------
@@ -212,13 +290,16 @@ def engine_main(args):
 class Child:
     """An engine in a child process of its own group; read() its next report."""
 
-    def __init__(self, env, scenario):
+    def __init__(self, env, scenario, stdin=subprocess.DEVNULL, variables=None, extra=()):
         rep_r, rep_w = os.pipe()
         go_r, go_w = os.pipe()
         argv = [sys.executable, "-I", "-S", "-c", _BOOT, json.dumps(sys.path), env.dir, os.path.abspath(__file__),
                 "--child", scenario, "--lib-dir", os.path.dirname(env.lib),
                 "--report-fd", str(rep_w), "--go-fd", str(go_r)]
-        self.proc = subprocess.Popen(argv, pass_fds=(rep_w, go_r), process_group=0, stdin=subprocess.DEVNULL)
+        if extra:
+            argv += ["--extra"] + list(extra)
+        child_env = None if variables is None else dict(os.environ, **variables)
+        self.proc = subprocess.Popen(argv, pass_fds=(rep_w, go_r), process_group=0, stdin=stdin, env=child_env)
         os.close(rep_w)
         os.close(go_r)
         self.reports = os.fdopen(rep_r, "r", encoding="utf-8")
@@ -307,6 +388,92 @@ def a_fork_of_the_engine_cannot_reach_the_runtime_and_leaves_the_parent_working(
         pidfd = os.pidfd_open(got["zygote"])
         child.kill()
         wait_for_exit(pidfd)
+    finally:
+        child.close()
+
+
+def a_call_that_reads_input_gets_end_of_file_when_the_engines_stdin_is_a_pipe_nobody_writes(env):
+    held_r, held_w = os.pipe()
+    child = Child(env, "stdin", stdin=held_r)
+    try:
+        got = child.read()
+        assert got["call"] == {"status": h.ERR_RAISED, "values": None,
+                               "message": "EOFError: EOF when reading a line"}, got
+    finally:
+        child.close()
+        os.close(held_r)
+        os.close(held_w)
+
+
+def a_sigint_to_the_engines_group_leaves_a_call_running_and_the_worker_with_python_s_handler(env):
+    child = Child(env, "sigint")
+    try:
+        got = child.read()
+        (worker,) = got["workers"]
+        os.killpg(child.proc.pid, signal.SIGINT)
+        open(os.path.join(got["work"], "release"), "w").close()
+        child.go()
+        done = child.read()
+        assert done["first"] == {"status": h.OK, "message": None, "values": [worker]}, done
+        assert done["second"] == {"status": h.OK, "message": None, "values": [worker]}, done
+        assert done["handler"] == "1", done
+    finally:
+        child.close()
+
+
+def a_worker_sees_none_of_the_engines_environment_or_descriptors(env):
+    child = Child(env, "probe", variables={"KOMIRA_ENGINE_ONLY": "visible"})
+    try:
+        got = child.read()
+        with open(os.path.join(got["work"], "probe.json"), encoding="utf-8") as f:
+            info = json.load(f)
+        environ = info["environ"]
+        home = environ.pop("HOME")
+        tmp = environ.pop("TMPDIR")
+        assert environ == {
+            "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
+            "VECLIB_MAXIMUM_THREADS": "1", "NUMEXPR_NUM_THREADS": "1",
+            "JE_ARROW_MALLOC_CONF": "background_thread:false", "LC_ALL": "C",
+            "TZ": "UTC", "PATH": "/usr/bin:/bin",
+        }, environ
+        assert os.path.basename(os.path.dirname(home)).startswith("worker-"), home
+        assert info["tmp"] == tmp and info["cwd"] == [], info
+        exe = os.path.realpath(sys.executable)
+        # Descriptors 0 to 2 are the worker's own; above them only its cancel word and its socket.
+        rest = sorted(v for k, v in info["fds"].items() if int(k) > 2 and v != exe)
+        assert len(rest) == 2 and rest[0].startswith("/memfd:komira-udf-cancel") and \
+            rest[1].startswith("socket:"), info["fds"]
+        assert info["fds"]["0"] == "/dev/null", info["fds"]
+        assert got["extra_fd_path"] not in info["fds"].values(), info["fds"]
+    finally:
+        child.close()
+
+
+def a_package_resolves_from_the_sys_path_option_and_not_from_the_engines_path_or_user_site(env):
+    # The zygote gets a fixed environment and runs isolated, so the engine's PYTHONPATH and
+    # user site must stay out of its imports whatever the engine's own settings are.
+    import sysconfig
+    roots = {}
+    for name in ("pkgfirst", "pkgsecond", "pkgthird"):
+        roots[name] = env.path(name)
+        os.mkdir(roots[name])
+    home = env.path("home")
+    os.mkdir(home)
+    user_site = sysconfig.get_path("purelib", scheme="posix_user", vars={"userbase": home})
+    os.makedirs(user_site)
+    # pkgsecond is on the engine's PYTHONPATH, pkgthird in the user site of the engine's HOME.
+    for name, root in (("pkgfirst", roots["pkgfirst"]), ("pkgsecond", roots["pkgsecond"]), ("pkgthird", user_site)):
+        with open(os.path.join(root, name + ".py"), "w", encoding="utf-8") as f:
+            f.write("def inc(x):\n    return x + 1\n")
+    child = Child(env, "packages", variables={"PYTHONPATH": roots["pkgsecond"], "HOME": home},
+                  extra=[roots["pkgfirst"], "pkgfirst", "pkgsecond", "pkgthird"])
+    try:
+        done = child.read()["done"]
+        assert done["pkgfirst"] == {"status": h.OK, "message": None, "values": [5]}, done
+        for module in ("pkgsecond", "pkgthird"):
+            assert done[module]["status"] == h.ERR_LOAD and done[module]["values"] is None, done
+        assert done["pkgsecond"]["message"].startswith("import of 'pkgsecond' failed: ModuleNotFoundError"), done
+        assert done["pkgthird"]["message"].startswith("import of 'pkgthird' failed: ModuleNotFoundError"), done
     finally:
         child.close()
 

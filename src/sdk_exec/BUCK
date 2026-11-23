@@ -1,5 +1,6 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+load(":copy_cases.bzl", "copy_cases")
 
 # DuckDB's answers for test_run_sql_csv: each line of tests/csv/cases.sql runs
 # one query over the committed CSV files and writes its answer.
@@ -37,6 +38,56 @@ _CSV_TEST_DATA = {"cases.sql": "tests/csv/cases.sql"}
 _CSV_TEST_DATA.update({f + ".csv": "tests/csv/" + f + ".csv" for f in _CSV_FILES})
 
 _CSV_TEST_DATA.update({c + ".tsv": ":csv_oracle[" + c + ".tsv]" for c in _CSV_CASES})
+
+# DuckDB reading back the Parquet files COPY writes, for
+# test_copy_readback_duckdb (the `copy_readback` library at the end of this
+# file). Each line of tests/copy/cases.sql is one case: `:copy_komira` runs
+# every line through run_sql (copy_runner below) and `:copy_readback_oracle`
+# runs the same lines in the pinned DuckDB, then tests/copy/readback.sql
+# compares the two files of each case.
+_COPY_CASES = [
+    "typed_default",
+    "typed_zstd",
+    "nulls_gzip",
+    "nulls_lz4",
+    "quoted_uncompressed",
+    "grouped_snappy",
+    "empty",
+]
+
+_COPY_INPUTS = {f + ".csv": "tests/csv/" + f + ".csv" for f in ["typed", "nulls", "quoted"]}
+
+# The program that runs each COPY line of a cases file through run_sql
+# (copy_runner/main.mojo says how).
+mojo_binary(
+    name = "copy_runner",
+    srcs = ["copy_runner/main.mojo"],
+    main = "copy_runner/main.mojo",
+    deps = [":sdk_exec"],
+)
+
+copy_cases(
+    name = "copy_komira",
+    cases = "tests/copy/cases.sql",
+    inputs = _COPY_INPUTS,
+    outputs = [c + ".parquet" for c in _COPY_CASES] + ["counts.tsv"],
+    runner = ":copy_runner",
+)
+
+_COPY_READBACK_INPUTS = dict(_COPY_INPUTS)
+
+_COPY_READBACK_INPUTS.update({"komira/" + c + ".parquet": ":copy_komira[" + c + ".parquet]" for c in _COPY_CASES})
+
+sql_oracle(
+    name = "copy_readback_oracle",
+    srcs = ["tests/copy/cases.sql", "tests/copy/readback.sql"],
+    inputs = _COPY_READBACK_INPUTS,
+    outputs = [c + ".parquet" for c in _COPY_CASES] + [c + ".check.tsv" for c in _COPY_CASES],
+)
+
+_COPY_TEST_DATA = {"cases.sql": "tests/copy/cases.sql", "counts.tsv": ":copy_komira[counts.tsv]"}
+
+_COPY_TEST_DATA.update({c + ".check.tsv": ":copy_readback_oracle[" + c + ".check.tsv]" for c in _COPY_CASES})
 
 # DuckDB's answers for test_run_sql_cte: each line of tests/cte/cases.sql runs
 # one WITH query over the committed tests/cte/sales.csv and writes its answer.
@@ -188,6 +239,64 @@ _JOIN_KINDS_TEST_DATA.update({t + ".parquet": ":join_kinds_oracle[" + t + ".parq
 
 _JOIN_KINDS_TEST_DATA.update({c + ".tsv": ":join_kinds_oracle[" + c + ".tsv]" for c in _JOIN_KINDS_CASES})
 
+# DuckDB's tables and answers for test_run_sql_set_ops: tests/set_ops/data.sql
+# writes the Parquet files, and each line of tests/set_ops/cases.sql runs one
+# INTERSECT or EXCEPT query over them and writes its answer.
+_SET_OPS_FILES = ["ta", "tb", "tn", "te", "ab", "l", "r"]
+
+_SET_OPS_CASES = [
+    "arms_intersect",
+    "arms_except",
+    "arms_except_reversed",
+    "arms_intersect_k",
+    "null_arm_intersect",
+    "null_arm_except",
+    "null_arm_self_except",
+    "empty_arm_intersect",
+    "empty_arm_except",
+    "empty_left_except",
+    "mixed_intersect",
+    "mixed_except",
+    "mixed_except_reversed",
+    "mixed_self_intersect",
+    "int_except",
+    "bigint_intersect",
+    "string_except",
+    "date_intersect",
+    "decimal_except",
+    "double_nan_intersect",
+    "double_nan_except",
+    "widen_int_bigint",
+    "widen_decimal_int",
+    "widen_int_double",
+    "union_all_then_intersect",
+    "intersect_then_union_all",
+    "except_then_intersect",
+    "except_twice",
+    "union_all_then_except",
+    "except_then_union_all",
+    "order_by",
+    "count_over_derived",
+    "group_over_derived",
+    "distinct_inputs",
+    "literals",
+]
+
+sql_oracle(
+    name = "set_ops_oracle",
+    srcs = [
+        "tests/set_ops/data.sql",
+        "tests/set_ops/cases.sql",
+    ],
+    outputs = [f + ".parquet" for f in _SET_OPS_FILES] + [c + ".tsv" for c in _SET_OPS_CASES],
+)
+
+_SET_OPS_TEST_DATA = {"cases.sql": "tests/set_ops/cases.sql"}
+
+_SET_OPS_TEST_DATA.update({f + ".parquet": ":set_ops_oracle[" + f + ".parquet]" for f in _SET_OPS_FILES})
+
+_SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in _SET_OPS_CASES})
+
 # The engine-execution layer of the SDK: twelve modules (ten leaves plus the
 # plan gate modules) and the engine context with its SQL door (see README.md). Each module's header says what it is for.
 #
@@ -216,8 +325,8 @@ _JOIN_KINDS_TEST_DATA.update({c + ".tsv": ":join_kinds_oracle[" + c + ".tsv]" fo
 #   oracle's DECIMAL(38,4); a self-join counts the key pairs of the oracle; a
 #   LEFT self-join counts the pairs and the unmatched rows of the oracle and a
 #   scalar subquery gives the oracle's count; a LEFT JOIN with a residual over
-#   both sides, a syntax error, an unknown table, a COPY or CTAS and a replaced
-#   file are named refusals; the footer is read once per
+#   both sides, a syntax error, an unknown table, a CTAS and a replaced file
+#   are named refusals; the footer is read once per
 #   query; contexts are created and dropped repeatedly.
 # - test_run_sql_distinct: run_sql over Parquet tables in several row groups:
 #   SELECT DISTINCT over an INT64 and a STRING column gives each value once and
@@ -283,6 +392,14 @@ _JOIN_KINDS_TEST_DATA.update({c + ".tsv": ":join_kinds_oracle[" + c + ".tsv]" fo
 #   alone, GROUP BY a key, count(*), ORDER BY and LIMIT; hive_partitioning =
 #   false; a glob with no file, a directory in SQL text and files of different
 #   schemas are named refusals at their step; a replaced file is read again.
+# - test_run_sql_s3: run_sql_with over catalog tables whose source names an S3
+#   bucket, read through S3ScanFs over the fake S3 (objectstore_s3, aws_core,
+#   http_client and komira_test_fake_s3 are test_deps for it): a filter and a
+#   projection, a GROUP BY and a count, a table of two keys, and one key in two
+#   buckets under UNION ALL each answer what the local files answer; a missing
+#   and a refused object are the store's NOT_FOUND and PERMISSION_DENIED at step
+#   execute; run_sql refuses the S3 scan with SCAN_FS_UNSERVED; a gs:// table is
+#   refused at step lower.
 # - test_run_sql_no_from: SELECT 1 AS n is one INT32 row holding 1, as in
 #   DuckDB; a result literal is INT32 from -2147483647 to 2147483647 and
 #   INT64 otherwise, as DuckDB types it, while a literal a derived table holds
@@ -295,6 +412,14 @@ _JOIN_KINDS_TEST_DATA.update({c + ".tsv": ":join_kinds_oracle[" + c + ".tsv]" fo
 #   a derived union, an empty branch, the first branch's names, LIMIT, and the
 #   refusals of a union with no common type and of an ORDER BY before UNION ALL;
 #   and an ORDER BY with no union (the sort sinks' data reaches the builder).
+# - test_run_sql_copy_parquet: COPY ... TO a local Parquet file through
+#   run_sql answers one BIGINT row `Count`; the file read back equals the query
+#   (a table, a query, an empty result, 130,000 rows in two row groups, every
+#   codec as the footer names it, a COPY over the file it reads, a relative
+#   path); CSV and JSON, an unknown extension, a URL, CREATE TABLE AS and a
+#   TIMESTAMP column are named refusals that touch no file; a missing
+#   directory, a directory at the path and an injected full disk leave no
+#   temporary file and the old file whole.
 # - test_run_sql_csv: read_csv through run_sql answers what the pinned DuckDB
 #   answers (the :csv_oracle action below) for each case of tests/csv/cases.sql:
 #   typed columns and their inferred types, quoted cells, NULL-bearing cells, a
@@ -310,12 +435,20 @@ _JOIN_KINDS_TEST_DATA.update({c + ".tsv": ":join_kinds_oracle[" + c + ".tsv]" fo
 #   lowered to one aggregation segment both branches read, a subquery holding
 #   a repeat written twice to one aggregation segment, and a filtered scan read
 #   twice to two scans.
+# - test_run_sql_set_ops: INTERSECT and EXCEPT through run_sql answer what the
+#   pinned DuckDB answers (the :set_ops_oracle action above) for each case of
+#   tests/set_ops/cases.sql, on one worker and on three: NULL rows equal, an
+#   all-NULL and an empty input, repeated rows, several columns of mixed types,
+#   one column of each key type, NaN, inputs widened to a common type, the
+#   precedence of INTERSECT over UNION ALL and EXCEPT, a sort and an
+#   aggregation over the result; every case is run; INTERSECT ALL and EXCEPT
+#   ALL are refused at parse by name.
 # - test_run_sql_timers_off: Q6 through run_sql on four workers in the default
 #   build gives the oracle's answer and leaves every phase timer
 #   (phase_timers) unregistered and at zero.
 mojo_library(
     name = "sdk_exec",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "copy_runner/**/*.mojo", "copy_readback/**/*.mojo"]),
     # The full transitive closure of the Mojo libraries this package builds on.
     # A later slice that pulls in a new library adds it here in the same change.
     deps = [
@@ -372,6 +505,7 @@ mojo_library(
         "//src/parquet_codec:parquet_codec",
         "//src/parquet_footers:parquet_footers",
         "//src/parquet_scan:parquet_scan",
+        "//src/parquet_writer:parquet_writer",
         "//src/phase_timers:phase_timers",
         "//src/physical_plan:physical_plan",
         "//src/pipeline_exec:pipeline_exec",
@@ -406,6 +540,7 @@ mojo_library(
         "tests/test_plan_validation_routes_ledger.mojo",
         "tests/test_resolved_cache_lru_eviction_stress.mojo",
         "tests/test_resolved_cache_pin_count.mojo",
+        "tests/test_run_sql_copy_parquet.mojo",
         "tests/test_run_sql_csv.mojo",
         "tests/test_run_sql_cte.mojo",
         "tests/test_run_sql_distinct.mojo",
@@ -416,24 +551,51 @@ mojo_library(
         "tests/test_run_sql_join_kinds.mojo",
         "tests/test_run_sql_joins.mojo",
         "tests/test_run_sql_multifile.mojo",
+        "tests/test_run_sql_s3.mojo",
         "tests/test_run_sql_no_from.mojo",
         "tests/test_run_sql_q6.mojo",
+        "tests/test_run_sql_set_ops.mojo",
         "tests/test_run_sql_spill.mojo",
         "tests/test_run_sql_timers_off.mojo",
         "tests/test_run_sql_union_all.mojo",
         "tests/test_secret_capability_reveal.mojo",
     ],
     test_deps = [
+        "//src/aws_core:aws_core",
         "//src/bench_corpus:bench_corpus",
-        "//src/parquet_writer:parquet_writer",
+        "//src/http_client:http_client",
+        "//src/objectstore_s3:objectstore_s3",
         "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
         "//src/tests/helpers/komira_test_arrow_c_consumer:komira_test_arrow_c_consumer",
+        "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
     ],
     test_data = {
         "tests/test_run_sql_csv.mojo": _CSV_TEST_DATA,
         "tests/test_run_sql_cte.mojo": _CTE_TEST_DATA,
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,
         "tests/test_run_sql_join_kinds.mojo": _JOIN_KINDS_TEST_DATA,
+        "tests/test_run_sql_set_ops.mojo": _SET_OPS_TEST_DATA,
     },
+    visibility = ["PUBLIC"],
+)
+
+# Test-only: the pinned DuckDB reading back the files run_sql's COPY writes
+# (copy_readback/__init__.mojo says why this is a library of its own: its
+# test data is built by copy_runner, which depends on sdk_exec, so as test data
+# of sdk_exec it would be a cycle). Nothing depends on it.
+# - test_copy_readback_duckdb: the pinned DuckDB reads every Parquet file
+#   run_sql's COPY wrote for tests/copy/cases.sql (:copy_readback_oracle above)
+#   and finds the same rows, column names and types as in the file DuckDB
+#   writes for the same line, and as many rows as the COPY's `Count`; every
+#   case of cases.sql is checked.
+mojo_library(
+    name = "copy_readback",
+    srcs = glob(["copy_readback/**/*.mojo"]),
+    deps = ["//tools/build/mojo/runtime_paths:runtime_paths"],
+    conda = False,
+    # The package's README is sdk_exec's: its examples run as sdk_exec's.
+    readme = False,
+    test_srcs = ["tests/test_copy_readback_duckdb.mojo"],
+    test_data = {"tests/test_copy_readback_duckdb.mojo": _COPY_TEST_DATA},
     visibility = ["PUBLIC"],
 )

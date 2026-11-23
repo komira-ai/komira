@@ -1310,7 +1310,11 @@ that changes an answer or a refusal.
 
 ## Where is the code?
 
-Not built. The parts it builds on are:
+Not built, except the engine's S3 read arm: lowering carries a scan's bucket and object keys
+(`SourceSpecPod.parquet_fs`), and `sdk_exec.run_sql_with` reads them through the file system an
+`objectstore_s3.S3ScanFs` opens on the bucket, with one footer cache keyed per bucket
+([src/lowering/README.md](../../src/lowering/README.md), [src/sdk_exec/README.md](../../src/sdk_exec/README.md)).
+No surface, credential name, wire field or error code of this design is built. The parts it builds on are:
 - [src/sql](../../src/sql/sql_binder.mojo) (`sql_binder.mojo`, `sql_catalog.mojo`, `sql_parser.mojo`);
 - [src/so](../../src/so/README.md);
 - [src/sdk_exec](../../src/sdk_exec/README.md) (`secret_capability.mojo`, `engine_sql.mojo`,

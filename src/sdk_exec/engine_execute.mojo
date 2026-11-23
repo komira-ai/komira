@@ -12,6 +12,12 @@
 # the context's spill directory, when it has one, is the builder's (a grouped
 # aggregation over fixed-width keys then spills instead of being refused).
 #
+# A Parquet scan of a remote store is read through the file system the
+# caller's `ScanFsOpener` opens on its bucket (`run_lowered_plan_with`);
+# `run_lowered_plan` gives the builder `LocalOnlyScanFs`, so such a scan is
+# refused with `SCAN_FS_UNSERVED`. The run's one footer cache keys each file
+# system's entries apart (`FileSystem.key_prefix`).
+#
 # A plan that scans an in-memory batch (a SELECT with no FROM reads the
 # binder's one-row relation) names it by its index in `params.batches`; each
 # source is handed to the builder as one resident batch, in that order, so
@@ -31,8 +37,10 @@ from phase_timers.phase_timers import (
     pt_record,
 )
 from physical_plan.physical_plan import AggSinkData, SortSinkData
+from fs.scan_fs import ScanFsOpener
 from pipeline_exec.real_builder import RealBuilder
 from pipeline_exec.run_plan import run_plan
+from pipeline_exec.source_parquet import LocalOnlyScanFs
 from plan_expr.expr_pool import ExprPool
 from scan_source.in_memory_source import InMemorySource
 
@@ -55,20 +63,31 @@ def _resident_batch(src: InMemorySource) raises -> RecordBatch:
 def run_lowered_plan(
     mut ctx: EngineContext, var lowered: LoweredPlan
 ) raises -> RecordBatch:
+    """`run_lowered_plan_with` reading the local file system only: a scan of
+    a remote store is refused with `SCAN_FS_UNSERVED`."""
+    return run_lowered_plan_with(ctx, lowered^, LocalOnlyScanFs())
+
+
+def run_lowered_plan_with[
+    R: ScanFsOpener
+](mut ctx: EngineContext, var lowered: LoweredPlan, var opener: R) raises -> RecordBatch:
     """Run `lowered` on `ctx.runtime` with `ctx.host_profile.thread_count`
-    workers and return the result segment's batch.
+    workers and return the result segment's batch. A Parquet scan of a remote
+    store reads through the file system `opener` opens on its bucket.
 
     Raises:
         Error starting with `EXECUTE_POOL_NOT_RELEASED` when a run leaves
-        bytes granted, and the driver's or a member's error otherwise.
+        bytes granted, `SCAN_FS_UNSERVED` when `opener` does not serve a
+        scan's store, and the driver's, a member's or the store's error
+        otherwise.
     """
     var t_setup = pt_now()
     var cache = ParquetMetadataCache()
     var pool = ExprPool()
     var placeholder = 0
     var builder = RealBuilder[
-        origin_of(cache), origin_of(pool), origin_of(placeholder)
-    ](cache, pool)
+        origin_of(cache), origin_of(pool), origin_of(placeholder), R
+    ](cache, pool, opener^)
     builder.set_memory_budget(ctx.host_profile.memory_budget_bytes)
     if ctx.spill_directory:
         builder.set_spill_directory(ctx.spill_directory.value())

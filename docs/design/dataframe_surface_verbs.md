@@ -40,7 +40,7 @@ the surface has no spelling, and the cell stays empty by decision.
 | `scan_avro` | `km.read_avro(path)` (komira's verb; pandas has none) | `kpl.scan_avro(path)` (komira's verb; polars reads Avro only eagerly) | SCAN, `SOURCE_AVRO` | refused at lower |
 | `scan_arrow_ipc` | `km.read_feather(path)` | `kpl.scan_ipc(path)` | SCAN, `SOURCE_ARROW` | refused at lower |
 | `scan_in_memory` | `km.from_arrow(data)` | `kpl.from_arrow(data)` | SCAN of a table the session registered from the Arrow C stream (rules section 4) | not wired |
-| `scan_s3` | a reader given an `s3://` path | the same | SCAN with the `s3` scheme | refused at lower |
+| `scan_s3` | a reader given an `s3://` path | the same | SCAN with the `s3` scheme | cut; read through the run's `S3ScanFs` |
 | `scan_gs` | a reader given a `gs://` path | the same | SCAN with the `gcs` scheme | refused at lower |
 | `scan_az` | a reader given an `az://` path | the same | SCAN with the `azure` scheme | refused at lower |
 | `filter` | `df[pred]`, where `pred` is a boolean `Series` of `df` | `lf.filter(pred)` | FILTER | cut |
