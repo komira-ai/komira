@@ -249,6 +249,13 @@ The tests run when the package is built.
   empty branch, the first branch's names, LIMIT, integer literal branches
   (INTEGER, or BIGINT when one needs it); a VARCHAR with an INTEGER is refused
   at bind and an ORDER BY before UNION ALL at parse.
+- `test_run_sql_set_ops`: INTERSECT and EXCEPT through `run_sql` answer what
+  the pinned DuckDB answers for each case of `tests/set_ops/cases.sql`, on one
+  worker and on three: NULL rows equal, an all-NULL and an empty input,
+  repeated rows, several columns of mixed types, one column of each key type,
+  NaN, inputs widened to a common type, INTERSECT binding tighter than UNION
+  ALL and EXCEPT, a sort and an aggregation over the result; every
+  case is run; INTERSECT ALL and EXCEPT ALL are refused at parse by name.
 - `test_secret_capability_reveal`: a capability reveals exactly the secret
   bound to its own node id, once and after one store resolve; two capabilities
   over one bindings table each reveal their own value; an unbound node or a
