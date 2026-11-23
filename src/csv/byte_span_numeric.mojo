@@ -375,8 +375,8 @@ def fast_parse_float64_simple(cell: Span[UInt8, _]) -> Optional[Float64]:
 
 
 # 10^k for k in [0, 15] — compiled-in constants via a small switch
-# rather than an InlineArray alias (Mojo 1.0.0b1 stdlib does not
-# support `alias = InlineArray[T, N](v0, v1, ...)` positional-init
+# rather than an Array alias (Mojo 1.0.0b1 stdlib does not
+# support `alias = Array[T, N](v0, v1, ...)` positional-init
 # at module scope; `fill=` only). The switch compiles to a 16-entry
 # jump table or a chain of cmovs; either way it's <1 cycle per cell
 # in practice and bit-exact (each power-of-10 < 10^16 is exact in F64).

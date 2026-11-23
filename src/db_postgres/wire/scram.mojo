@@ -18,7 +18,7 @@
 # confidentiality; SCRAM-SHA-256-PLUS is a possible hardening step.
 #
 # Encapsulation: every public surface takes/returns Span[UInt8,_] / String /
-# InlineArray — ZERO UnsafePointer crosses any boundary.
+# Array — ZERO UnsafePointer crosses any boundary.
 # =============================================================================
 
 from crypto.hmac import hmac_sha256, constant_time_eq_32

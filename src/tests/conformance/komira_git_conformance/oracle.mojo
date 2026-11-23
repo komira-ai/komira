@@ -68,7 +68,7 @@ struct CSha1dc(Movable):
             self._ctx.unsafe_ptr(), data.unsafe_ptr(), UInt(len(data))
         )
 
-    def finalize_into(mut self, mut out: InlineArray[UInt8, 20]) -> Bool:
+    def finalize_into(mut self, mut out: Array[UInt8, 20]) -> Bool:
         """SHA1DCFinal: the digest into `out`; True when upstream reports a
         collision."""
         # SAFETY: out is 20 bytes, borrowed for the call, and C writes
@@ -80,8 +80,8 @@ struct CSha1dc(Movable):
 
     def last_recompression(
         mut self,
-        mut ihv2: InlineArray[UInt32, 5],
-        mut m2: InlineArray[UInt32, 80],
+        mut ihv2: Array[UInt32, 5],
+        mut m2: Array[UInt32, 80],
     ):
         """The last disturbance vector upstream's block check recompressed:
         ctx->ihv2 (the chaining value it started from) and ctx->m2 (its
@@ -94,9 +94,9 @@ struct CSha1dc(Movable):
         )
 
 
-def c_ubc_check(w: InlineArray[UInt32, 80]) -> UInt32:
+def c_ubc_check(w: Array[UInt32, 80]) -> UInt32:
     """upstream's ubc_check over the 80 words `w`."""
-    var mask = InlineArray[UInt32, 1](fill=0)
+    var mask = Array[UInt32, 1](fill=0)
     # SAFETY: w is 80 words and mask 1, both borrowed for the call; C reads
     # w and writes mask[0] only.
     external_call["ubc_check", NoneType](w.unsafe_ptr(), mask.unsafe_ptr())

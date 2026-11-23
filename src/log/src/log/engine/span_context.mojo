@@ -22,7 +22,7 @@
 #     at open); nested spans inherit the current trace_id so a whole call tree
 #     shares one trace. The high 8 bytes are 0 in P4a (analyzer-opaque).
 #
-# Encapsulation: every field is a scalar or a fixed `InlineArray` — POD
+# Encapsulation: every field is a scalar or a fixed `Array` — POD
 # by construction, exactly the obs `WorkerContextSlot` shape. Lives in a
 # `Slab[SpanContextSlot]` on the engine (the obs ring pattern); NO heap-owning
 # inner field, NO `UnsafePointer`, NO wildcard origin.
@@ -41,7 +41,7 @@ comptime _SPAN_ID_WORKER_SHIFT: UInt64 = UInt64(48)
 struct SpanContextSlot(
     Copyable, Movable, Deinitable
 ):
-    # `Copyable` but not `ImplicitlyCopyable`: `InlineArray` is not
+    # `Copyable` but not `ImplicitlyCopyable`: `Array` is not
     # implicitly copyable, and a struct owning one cannot synthesise an
     # implicit copy ctor (a hand-written `__copyinit__` is not consulted).
     # Copies of this POD record are spelled `.copy()`, a plain memcpy.

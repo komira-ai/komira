@@ -76,7 +76,7 @@ def parse_decimal_f32(text: String) raises -> Float32:
     if i < n and b[i] == UInt8(ord("-")):
         neg = True
         i += 1
-    var digits = InlineArray[UInt8, _MAX_DIGITS](fill=UInt8(0))
+    var digits = Array[UInt8, _MAX_DIGITS](fill=UInt8(0))
     var nd = 0
     var q = 0  # x = D * 10^q before the exponent part
     var tail = False  # a nonzero digit was dropped past the 120th

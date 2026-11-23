@@ -368,7 +368,7 @@ struct JsonEncoder(WireEncoder):
                     "JsonError: a well-known type cannot be a map key"
                 )
             self._begin_field(json_name)
-            trait_downcast[Proto3JsonWkt](v).write_proto3_json(self.buf)
+            v.write_proto3_json(self.buf)
             self._end_field()
         else:
             self._begin_field(json_name)
@@ -512,7 +512,7 @@ struct JsonEncoder(WireEncoder):
         # appends its canonical JSON value instead (see `write_message_field`).
         self._list_sep()
         comptime if conforms_to(M, Proto3JsonWkt):
-            trait_downcast[Proto3JsonWkt](v).write_proto3_json(self.buf)
+            v.write_proto3_json(self.buf)
         else:
             var child = JsonEncoder()
             v.encode[JsonEncoder](child)

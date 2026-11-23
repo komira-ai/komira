@@ -27,7 +27,7 @@
 #     An overlapping borrow surfaced as an extended-protocol tcmalloc
 #     corruption; scoping the borrow tightly removes the overlap.
 #   * `PgReactorStream.recv_some` (pg_tls.mojo) decrypts into a stack-local
-#     scratch InlineArray it OWNS, parks while ONLY scratch is live, and copies
+#     scratch Array it OWNS, parks while ONLY scratch is live, and copies
 #     the plaintext into `_rbuf` AFTER all parking is done. So `_rbuf` being
 #     live across the park is benign — nothing reads/writes it during the yield.
 # No borrowed slice of `_rbuf` (or of any caller buffer) ever escapes a park.

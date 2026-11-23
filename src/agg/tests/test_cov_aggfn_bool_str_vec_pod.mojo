@@ -20,7 +20,7 @@
 # The PodState gate (`pod_state_gate.mojo`) is a comptime check; its
 # predicates are ordinary functions, so they are called here at run time
 # against the documented allowlist: the eleven scalar types, and
-# `InlineArray[<scalar>, N]` for N in [1, MAX_INLINE_ARRAY_N]. A heap-owning
+# `Array[<scalar>, N]` for N in [1, MAX_INLINE_ARRAY_N]. A heap-owning
 # type and an array one past the cap must answer False. (A State that fails
 # the gate is a compile error, which a welded test cannot hold.)
 # =============================================================================
@@ -206,7 +206,7 @@ def test_pod_scalar_allowlist() raises:
 
 
 def test_pod_inline_array_allowlist() raises:
-    """`InlineArray[<scalar>, N]` passes for each scalar element and for N at
+    """`Array[<scalar>, N]` passes for each scalar element and for N at
     both ends of [1, MAX_INLINE_ARRAY_N]; N one past the cap, a String element
     and a bare scalar do not."""
     assert_equal(MAX_INLINE_ARRAY_N, 256)
@@ -230,7 +230,7 @@ def test_pod_inline_array_allowlist() raises:
 
 
 def test_pod_field_and_gate() raises:
-    """A field is slab-safe iff it is a PodScalar or a PodScalar InlineArray;
+    """A field is slab-safe iff it is a PodScalar or a PodScalar Array;
     the gate accepts States made only of those."""
     assert_true(_is_pod_field[Float64]())
     assert_true(_is_pod_field[Array[Int64, 2]]())

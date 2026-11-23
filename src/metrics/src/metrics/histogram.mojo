@@ -78,7 +78,7 @@
 #   the SHARED batch      the histogram arm given  first tick emitted
 #   ceiling               its own budget
 #
-# Encapsulation: `InlineArray` of POD + a `Slab[HistogramTable]`. No
+# Encapsulation: `Array` of POD + a `Slab[HistogramTable]`. No
 # `UnsafePointer` in any signature, no wildcard origin.
 # =============================================================================
 

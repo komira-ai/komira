@@ -95,7 +95,7 @@ comptime TAG_INVALID: UInt8 = 0x00
 # Implementation: 256-byte LUT indexed by byte value. Single L1d lookup per
 # emit (~3 cycles) vs the 7-way if-else cascade (~7 compares + 1 branch).
 # The LUT is `comptime`-constructible but Mojo currently lacks a
-# clean way to compute a 256-element InlineArray at compile time without
+# clean way to compute a 256-element Array at compile time without
 # template explosion — we build it lazily as a stack-local 256-byte SIMD
 # pattern. For the hot loop we use the table-lookup form via a stack array.
 

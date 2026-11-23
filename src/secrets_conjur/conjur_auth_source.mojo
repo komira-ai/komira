@@ -304,11 +304,11 @@ def _ascii_trim(var s: String) -> String:
 def _wipe_list(mut buf: List[UInt8]):
     """Best-effort overwrite-then-clear of a transient `List[UInt8]` that held
     token (or api-key-derived) bytes. Defense-in-depth: the authoritative wipe of
-    the SECRET value is the `SecretValue` (InlineArray + the -O3-surviving FFI
+    the SECRET value is the `SecretValue` (Array + the -O3-surviving FFI
     `zeroize_inline_array`); the authn token is a short-lived runtime credential,
     not the secret, but we scrub the transient anyway. (A plain loop may be
     DCE-eligible at -O3, which is why the load-bearing secure wipe lives on the
-    InlineArray-backed value, not here.)"""
+    Array-backed value, not here.)"""
     for i in range(len(buf)):
         buf[i] = UInt8(0)
     buf.clear()

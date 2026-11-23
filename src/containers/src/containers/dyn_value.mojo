@@ -8,7 +8,7 @@
 #
 # Key properties:
 #   - NO hand-written __moveinit__ -- all fields are trivially copyable
-#     (InlineArray[UInt8], fn-ptr, Bool, two StaticStrings). The synthesized
+#     (Array[UInt8], fn-ptr, Bool, two StaticStrings). The synthesized
 #     move copies `_storage` byte for byte, so `create[T]` refuses at compile
 #     time a T whose move constructor is not trivial.
 #   - NO UnsafePointer fields -- avoids the mojo 0.26 packager bug that
@@ -126,7 +126,7 @@ struct DynValue[MAX_SIZE: Int](Movable):
     var _type_tag: StaticString    # _tag_of[T]() of the stored T ("" when empty)
     var _type_name: StaticString   # reflect[T].name(), for error text only
 
-    # NOTE: No __moveinit__ -- auto-synthesized. All fields (InlineArray,
+    # NOTE: No __moveinit__ -- auto-synthesized. All fields (Array,
     # fn-ptr, Bool, StaticString) are trivially copyable.
 
     def __init__(out self):
@@ -164,7 +164,7 @@ struct DynValue[MAX_SIZE: Int](Movable):
         )
         var result = Self()
         # SAFETY: _storage is MAX_SIZE bytes, size_of[T]() <= MAX_SIZE.
-        # We cast the InlineArray storage to a T* and move the value in.
+        # We cast the Array storage to a T* and move the value in.
         var dst = UnsafePointer(to=result._storage).bitcast[T]()
         dst.unsafe_write(value^)
         result._destroy = _make_destroy[T]()

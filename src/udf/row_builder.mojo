@@ -29,15 +29,15 @@
 # ⚠ TWO RESIDUES THIS FILE EXISTS TO CONTAIN — BOTH INVISIBLE ON arm64
 # =============================================================================
 #
-# 1. ALIGNMENT. The blob MUST be `InlineArray[R, 1]`, never
-#    `InlineArray[UInt8, size_of[R]()]`. The byte-array spelling declares
+# 1. ALIGNMENT. The blob MUST be `Array[R, 1]`, never
+#    `Array[UInt8, size_of[R]()]`. The byte-array spelling declares
 #    ALIGNMENT 1 for a row that needs 8; arm64 executes the unaligned store
 #    silently and correctly, so NO test on an Apple-silicon box can catch
 #    it, and it faults (or tears) on linux-x86-64. Measured, on this exact
 #    pair of spellings:
-#        align_of[InlineArray[UInt8, size_of[Order]()]] = 1
-#        align_of[InlineArray[Order, 1]]                = 8
-#    `InlineArray[R, 1]` gets both size AND alignment from R, by type.
+#        align_of[Array[UInt8, size_of[Order]()]] = 1
+#        align_of[Array[Order, 1]]                = 8
+#    `Array[R, 1]` gets both size AND alignment from R, by type.
 #
 # 2. DESTRUCTION OF BYTES THAT WERE NEVER CONSTRUCTED. The slot is
 #    `uninitialized=True` and every field is written with `unsafe_write`.
@@ -140,7 +140,7 @@ def _build_row[R: Copyable & Movable & Deinitable, dt: DType](
         " the bytes — a silent wrong value."
     )
 
-    # RESIDUE 1 (alignment): InlineArray[R, 1] carries R's align, not 1.
+    # RESIDUE 1 (alignment): Array[R, 1] carries R's align, not 1.
     # RESIDUE 2 (destruction): uninitialized + unsafe_write, never `[] =`.
     var slot = Array[R, 1](uninitialized=True)
     var base = slot.unsafe_ptr().unsafe_bitcast[UInt8]()
@@ -229,12 +229,12 @@ def _build_row_n[
         " actually reads."
     )
 
-    # RESIDUE 1 (alignment): `InlineArray[R, 1]` carries R's align, not 1.
-    #   `InlineArray[UInt8, size_of[R]()]` declares alignment 1 for a row
+    # RESIDUE 1 (alignment): `Array[R, 1]` carries R's align, not 1.
+    #   `Array[UInt8, size_of[R]()]` declares alignment 1 for a row
     #   that needs 8. arm64 executes the unaligned store silently; linux
     #   x86-64 does not. Measured on this exact pair:
-    #     align_of[InlineArray[Order, 1]]                = 8
-    #     align_of[InlineArray[UInt8, size_of[Order]()]] = 1
+    #     align_of[Array[Order, 1]]                = 8
+    #     align_of[Array[UInt8, size_of[Order]()]] = 1
     # RESIDUE 2 (destruction): `uninitialized=True` + `unsafe_write` per
     #   field, never `[] =` (which would run R's destructor over
     #   uninitialised bytes). The invariant that makes the copy-out sound

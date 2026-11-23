@@ -136,7 +136,7 @@ def test_split_uuid_layout() raises:
         assert_equal(Int(u[i]), 0)
 
 
-def _same(a: InlineArray[UInt8, 16], b: InlineArray[UInt8, 16]) -> Bool:
+def _same(a: Array[UInt8, 16], b: Array[UInt8, 16]) -> Bool:
     for i in range(16):
         if a[i] != b[i]:
             return False

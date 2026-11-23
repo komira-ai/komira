@@ -22,7 +22,7 @@
 #
 # Encapsulation: no UnsafePointer crosses any module boundary. The header is
 # decoded out of a borrowed `Span[UInt8]` view of the file bytes; the result
-# is an owned OcfHeader value (owned String schema + InlineArray sync marker).
+# is an owned OcfHeader value (owned String schema + Array sync marker).
 # =============================================================================
 
 from .avro_schema import AvroSchema

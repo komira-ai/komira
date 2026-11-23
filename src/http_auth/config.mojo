@@ -58,7 +58,7 @@ comptime CLAIM_SUB: StaticString = "sub"
 #     copied claim of that name for the field.
 # The set is built from CLAIM_ISS and CLAIM_AUD, so a claim this package
 # writes is reserved by construction.
-comptime RESERVED_CLAIM_NAMES: InlineArray[StaticString, 7] = [
+comptime RESERVED_CLAIM_NAMES: Array[StaticString, 7] = [
     CLAIM_ISS,
     CLAIM_AUD,
     CLAIM_SUB,

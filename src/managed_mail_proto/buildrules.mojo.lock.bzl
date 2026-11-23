@@ -96,7 +96,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/managed_mail_proto/tests/test_mail_goldens.mojo", "sha256": "ed91c2179aee01c958f6551f6295f56d94db41b5e7f5f14b5f275d0c200ad225"}
+        {"path": "src/managed_mail_proto/tests/test_mail_goldens.mojo", "sha256": "962dc4fa31c91e9e79e39fa28c3a55bd22b873ae695ded9eccfc3779ca8db60c"}
       ],
       "deps": ["komira-ai/managed_mail_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -214,7 +214,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/managed_mail_proto/tests/test_mail_goldens.mojo", "sha256": "ed91c2179aee01c958f6551f6295f56d94db41b5e7f5f14b5f275d0c200ad225"}
+        {"path": "src/managed_mail_proto/tests/test_mail_goldens.mojo", "sha256": "962dc4fa31c91e9e79e39fa28c3a55bd22b873ae695ded9eccfc3779ca8db60c"}
       ],
       "deps": ["komira-ai/managed_mail_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -329,7 +329,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/managed_mail_proto/tests/test_mail_goldens.mojo", "sha256": "ed91c2179aee01c958f6551f6295f56d94db41b5e7f5f14b5f275d0c200ad225"}
+        {"path": "src/managed_mail_proto/tests/test_mail_goldens.mojo", "sha256": "962dc4fa31c91e9e79e39fa28c3a55bd22b873ae695ded9eccfc3779ca8db60c"}
       ],
       "deps": ["komira-ai/managed_mail_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],

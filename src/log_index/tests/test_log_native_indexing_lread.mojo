@@ -165,14 +165,14 @@ def _build_l0_split(views: List[LogRecordView]) raises -> List[UInt8]:
     var batch = log_views_to_record_batch(views)
     var seg = L0SegmentBuilder(schema^)
     seg.add_batch(batch^)
-    var uuid = InlineArray[UInt8, 16](fill=UInt8(7))
+    var uuid = Array[UInt8, 16](fill=UInt8(7))
     return seg.serialize_split_bytes(LOG_INDEX_TEXT_FIELD, uuid)
 
 
 def _build_optimized_split(views: List[LogRecordView]) raises -> List[UInt8]:
     var schema = log_index_schema()
     var batch = log_views_to_record_batch(views)
-    var uuid = InlineArray[UInt8, 16](fill=UInt8(9))
+    var uuid = Array[UInt8, 16](fill=UInt8(9))
     var sink = SearchSink(
         String("bucket"),
         String("prefix"),

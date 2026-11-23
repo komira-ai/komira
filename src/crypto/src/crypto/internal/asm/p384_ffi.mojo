@@ -57,7 +57,7 @@
 #
 # Public API:
 #   * 3 free functions (p384_sign_with_nonce / p384_verify /
-#     p384_pubkey_from_priv). Take Span[UInt8, _] + InlineArray
+#     p384_pubkey_from_priv). Take Span[UInt8, _] + Array
 #     outputs. ZERO UnsafePointer in public signatures.
 #
 # Internal FFI:
@@ -92,7 +92,7 @@ from std.memory import UnsafePointer
 # lifetime is not expressible in Mojo's origin system. Opaque AWS-LC heap
 # handles are passed BY VALUE to `external_call` and never written through
 # Mojo-side, so an immutable static origin is sound. Data-buffer pointers
-# (Span/InlineArray/scalar out-params) carry the same origin; the SAFETY
+# (Span/Array/scalar out-params) carry the same origin; the SAFETY
 # contract is that the caller holds the buffer's real origin in scope across
 # the synchronous external_call (AWS-LC retains no pointer past the call).
 # -----------------------------------------------------------------------------
@@ -135,7 +135,7 @@ comptime P384_POINT_OCT_LEN: Int = 97
 
 
 # -----------------------------------------------------------------------------
-# Coercion helpers — Span / InlineArray -> MutExternalOrigin ptr for FFI.
+# Coercion helpers — Span / Array -> MutExternalOrigin ptr for FFI.
 #
 # Mirror of `p256_ffi.mojo`. The MutExternalOrigin cast is the
 # FFI-BOUNDARY contract: the resulting pointer's Mojo-side lifetime is
@@ -164,7 +164,7 @@ def _span_ptr_mut(s: Span[UInt8, _]) -> _FfiByte:
 def _inline48_ptr_mut(
     mut a: Array[UInt8, 48],
 ) -> _FfiByte:
-    """Coerce InlineArray[UInt8, 48] -> FFI byte ptr (_FFI_ORIGIN).
+    """Coerce Array[UInt8, 48] -> FFI byte ptr (_FFI_ORIGIN).
 
     # SAFETY: a is caller-owned local in this fn's scope (held in scope
     # across the external_call site). AWS-LC writes exactly the documented
@@ -181,7 +181,7 @@ def _inline48_ptr_mut(
 def _inline97_ptr_mut(
     mut a: Array[UInt8, 97],
 ) -> _FfiByte:
-    """Coerce InlineArray[UInt8, 97] -> FFI byte ptr (_FFI_ORIGIN) (point2oct).
+    """Coerce Array[UInt8, 97] -> FFI byte ptr (_FFI_ORIGIN) (point2oct).
 
     # SAFETY: a is caller-owned local. AWS-LC's EC_POINT_point2oct writes
     # exactly `len` bytes (97 for uncompressed P-384 = format || x || y).

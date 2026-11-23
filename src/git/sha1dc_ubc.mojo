@@ -105,7 +105,7 @@ comptime _DV_II_56_0: UInt32 = 1 << 31
 
 # fmt: off
 # Per DV, in upstream's order: type (1 I, 2 II), K, b, recompression step.
-comptime _DV_INFO: InlineArray[Int, 4 * _DV_COUNT] = [
+comptime _DV_INFO: Array[Int, 4 * _DV_COUNT] = [
     1, 43, 0, 58,  # 0
     1, 44, 0, 58,  # 1
     1, 45, 0, 58,  # 2
@@ -141,7 +141,7 @@ comptime _DV_INFO: InlineArray[Int, 4 * _DV_COUNT] = [
 ]
 
 # Per DV, the first 16 words of its message difference `dm`.
-comptime _DV_DM16: InlineArray[UInt32, 16 * _DV_COUNT] = [
+comptime _DV_DM16: Array[UInt32, 16 * _DV_COUNT] = [
     # 0: DV I(43,0), tested at step 58
     0x08000000, 0x9800000c, 0xd8000010, 0x08000010, 0xb8000010, 0x98000000, 0x60000000, 0x00000008,
     0xc0000000, 0x90000014, 0x10000010, 0xb8000014, 0x28000000, 0x20000010, 0x48000000, 0x08000018,
@@ -254,7 +254,7 @@ def _dv_word(dv: Int, t: Int) -> UInt32:
     return global_constant[_DV_DM16]()[16 * dv + t]
 
 
-def _ubc_check(w: InlineArray[UInt32, 80]) -> UInt32:
+def _ubc_check(w: Array[UInt32, 80]) -> UInt32:
     """The mask of the DVs whose unavoidable bit conditions the expanded
     message block `w` meets (upstream's `ubc_check`)."""
     var mask: UInt32 = 0xFFFFFFFF
