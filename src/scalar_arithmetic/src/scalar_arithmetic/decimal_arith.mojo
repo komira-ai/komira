@@ -49,7 +49,7 @@ comptime DEC128_MAX_SCALE: Int = 38
 # 10^0 .. 10^38 fits in i128 (10^38 < 2^127).  10^0 .. 10^76 fits in i256
 # (10^76 < 2^255).  We build the tables iteratively at call time (the loops
 # are small and only run on the cold decimal path); a comptime table would
-# need int128/int256 InlineArray which is overkill here.
+# need int128/int256 Array which is overkill here.
 
 
 @always_inline

@@ -87,7 +87,7 @@ trait FilterFn(Predicate, Movable, Copyable, Deinitable):
 
     # `& Deinitable` is load-bearing — the engine builds
     # `InRow` itself (`row_builder._build_row[R]`) in an
-    # `InlineArray[R, 1]` slot, which Mojo will not let it drop unless R
+    # `Array[R, 1]` slot, which Mojo will not let it drop unless R
     # is Deinitable. Implicit for a plain `@fieldwise_init` row struct.
     comptime InRow: AnyType & Copyable & Movable & Deinitable & AutoKomiraSchema
     comptime InputSchema: SchemaDescriptor = _derive_schema[Self.InRow]()

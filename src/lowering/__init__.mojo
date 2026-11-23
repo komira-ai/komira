@@ -1,1 +1,1 @@
-"""Lowering: a bound LogicalPlan, a HostProfile and the resolved inputs go in; the PhysicalPlan IR (version 16) and the ParamTable its segments index come out. Pure: no file, clock, environment variable or global. The root exports nothing; import each module by name."""
+"""Lowering: a bound LogicalPlan, a HostProfile and the resolved inputs go in; the PhysicalPlan IR (version 18) and the ParamTable its segments index come out. Pure: no file, clock, environment variable or global. The root exports nothing; import each module by name."""

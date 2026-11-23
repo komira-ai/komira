@@ -19,6 +19,8 @@ mojo_library(
         "tests/test_physical_plan_purity_gate.mojo",
         "tests/test_source_spec_csv.mojo",
         "tests/test_source_spec_parquet_files.mojo",
+        "tests/test_source_spec_parquet_fs.mojo",
+        "tests/test_udf_call_spec.mojo",
     ],
     visibility = ["PUBLIC"],
 )

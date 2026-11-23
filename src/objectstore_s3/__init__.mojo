@@ -29,6 +29,9 @@ objectstore store, built on the generated `aws_s3` client.
   and `s3_prod_fs`, which pick the plaintext connector only for an
   `http://` endpoint and TLS otherwise, over http_client's
   `KernelSchemeConnector`.
+- `s3_scan_fs.mojo`: `S3ScanFs[C, T, K]`, fs's `ScanFsOpener` for S3: it
+  opens one `S3Fs` per bucket a plan's scan names, with one configuration,
+  connector factory, credential source and clock.
 - `presign.mojo`: `S3PresignSigner[T, K]`, presigned GET and PUT URLs as an
   `ObjectUrlSigner`, over aws_core's `sigv4_presign`, signing only
   `host`.
@@ -73,6 +76,7 @@ from .presign import S3PresignSigner, S3_UNSIGNED_PAYLOAD
 from .inflight import InflightJobs, inflight_workers, run_bounded_inflight
 from .s3_fs import S3FileHandle, S3Fs, S3WriteFile
 from .s3_endpoint import s3_connector_factory, s3_endpoint_is_plaintext, s3_prod_fs
+from .s3_scan_fs import S3ScanFs
 from .s3_fs_options import (
     S3FsOptions,
     S3_FS_ALL_RANGES,

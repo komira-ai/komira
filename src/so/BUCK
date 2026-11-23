@@ -20,8 +20,11 @@ NATIVE_OWNERS = [
 ]
 
 # The C ABI of komira's one shared library, libkomira: the status codes, the
-# ABI version, the session behind a context handle, and the source and render
-# operations (`sources.mojo`) the C calls are made of. The library is plain
+# ABI version, the session behind a context handle, the source and render
+# operations (`sources.mojo`) the C calls are made of, and the session's
+# credentials (`credentials.mojo`), held in a `SecretStore` (`secret_store`)
+# and bound for a reveal in a `SecretBindings` table (`secret_registry`);
+# `crypto` (and its `encoding`) wipes their values. The library is plain
 # Mojo with no pointer in it; `_c_abi.mojo`, the one file that holds pointers,
 # is not part of it but the source of the `libkomira` target below.
 #
@@ -29,7 +32,13 @@ NATIVE_OWNERS = [
 # and buffer_status, the two-call protocol's capacity test; test_session holds
 # the last-error text of a Session (fresh, set, replaced, cleared, moved);
 # test_sources holds the operations on values: a Parquet file registered and
-# its schema bytes, the CSV and JSON bindings, and a plan rendered.
+# its schema bytes, the CSV and JSON bindings, and a plan rendered;
+# test_credentials holds the three steps of a definition, each kind's fields
+# and every named refusal, word for word, and the generations of a name;
+# test_credentials_reveal reads sealed values through sdk_exec's
+# SecretCapability and reads an object of a fake S3 with them, where a wrong
+# key is refused by name (sdk_exec, the S3 store and the fake are test_deps:
+# they reach these tests, not the library).
 mojo_library(
     name = "so",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "_c_abi.mojo"]),
@@ -47,8 +56,10 @@ mojo_library(
         "//src/column_kernels:column_kernels",
         "//src/compression:compression",
         "//src/counters:counters",
+        "//src/crypto:crypto",
         "//src/csv:csv",
         "//src/dynamic_filter:dynamic_filter",
+        "//src/encoding:encoding",
         "//src/expr:expr",
         "//src/fork_join:fork_join",
         "//src/fs:fs",
@@ -77,6 +88,8 @@ mojo_library(
         "//src/scalar_arithmetic:scalar_arithmetic",
         "//src/scan_source:scan_source",
         "//src/sdk:sdk",
+        "//src/secret_registry:secret_registry",
+        "//src/secret_store:secret_store",
         "//src/simd_ops:simd_ops",
         "//src/spsc_ring:spsc_ring",
         "//src/sql:sql",
@@ -87,9 +100,18 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
     test_srcs = [
+        "tests/test_credentials.mojo",
+        "tests/test_credentials_reveal.mojo",
         "tests/test_session.mojo",
         "tests/test_sources.mojo",
         "tests/test_status.mojo",
+    ],
+    test_deps = [
+        "//src/aws_core:aws_core",
+        "//src/http_client:http_client",
+        "//src/objectstore_s3:objectstore_s3",
+        "//src/sdk_exec:sdk_exec",
+        "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
     ],
     test_data = {
         "tests/test_sources.mojo": ["tests/fixtures/two_columns.parquet"],
@@ -97,11 +119,11 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): nine exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): twelve exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). It is published only if every
 # gate driver passes, each of which dlopens it with RTLD_NOW and calls it as a
 # foreign host would:
-#   gate_version       the version is 1001 (1.1);
+#   gate_version       the version is 1002 (1.2);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op;
 #   gate_no_extra_exports  the linker's section markers and the Mojo helpers
@@ -126,6 +148,14 @@ mojo_library(
 #                      nothing written and no read of the plan; exactly 64 MiB
 #                      is read (garbage, so -3). gate_parquet_schema also: a
 #                      path that is not UTF-8 is -3 with a last error.
+#   gate_credentials   a credential added, set and sealed is 0 at each step;
+#                      one sealed without its secret, a field of another
+#                      kind, an empty value, a 4097-byte value, an unknown
+#                      kind, `ambient`, a malformed name, a name that is not
+#                      UTF-8 and a scope other than the session are
+#                      -3 with the named error word for word; NULL ctx -1,
+#                      NULL name, out_id or value (length non-zero) -2 with
+#                      the id slot untouched; value_len 64 MiB plus one -5.
 _LIBKOMIRA = dict(
     srcs = ["_c_abi.mojo"],
     out_name = "libkomira",
@@ -139,9 +169,13 @@ _LIBKOMIRA = dict(
         "komira_csv_binding",
         "komira_json_binding",
         "komira_plan_render",
+        "komira_credential_add",
+        "komira_credential_set",
+        "komira_credential_seal",
     ],
     exports_exact = True,
     gate_srcs = [
+        "tests/gate/gate_credentials.mojo",
         "tests/gate/gate_fresh_error.mojo",
         "tests/gate/gate_new_free.mojo",
         "tests/gate/gate_no_extra_exports.mojo",

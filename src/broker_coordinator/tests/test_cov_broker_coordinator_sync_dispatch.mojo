@@ -451,7 +451,7 @@ def _connect_loopback(port: UInt16) raises -> Int32:
     var fd = external_call["socket", Int32](_AF_INET, _SOCK_STREAM, Int32(0))
     if fd < Int32(0):
         raise Error("test: socket() failed")
-    var addr = InlineArray[UInt8, 16](fill=UInt8(0))
+    var addr = Array[UInt8, 16](fill=UInt8(0))
     comptime if CompilationTarget.is_macos():
         addr[0] = UInt8(16)
         addr[1] = UInt8(_AF_INET)

@@ -1107,7 +1107,10 @@ example). Memory or exceptions must not cross between C++ code and the Mojo
 runtime's C++ internals.
 
 `archive_files` ([`archive.bzl`](archive.bzl)) takes named files out of a
-pinned source archive, with CMake-style template substitution, for
+pinned source archive (`.tar.gz`, `.tgz`, `.tar`, `.tar.zst`, `.zip`,
+`.conda`, or a plain `.gz`, which is one gzip-compressed file extracting to
+one file named as the archive without `.gz`: `files = ["x.duckdb_extension"]`
+for `x.duckdb_extension.gz`), with CMake-style template substitution, for
 third-party code built from source: see
 [`third_party/snappy`](../../../third_party/snappy) (snappy 1.3.1, called from
 Mojo in [`../examples/snappy`](../examples/snappy)). With `one_tree = True`

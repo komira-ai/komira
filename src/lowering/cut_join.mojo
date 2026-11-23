@@ -2,14 +2,21 @@
 # cut_join -- the cutter's PLAN_JOIN arm: a build segment and a fused probe
 # =============================================================================
 #
-# An INNER equi-join is two edges. The build child's pipeline ends in a
-# SINK_HASH_BUILD segment (key NONE, COLUMNAR; it indexes no ParamTable row,
-# so its `sink_param_id` is -1): the sink collects the build rows. The probe
-# child's pipeline stays open and gains an OP_JOIN_PROBE naming that segment,
-# with the probe keys as `probe_left_keys` and the build keys as
-# `probe_right_keys`, paired by position, and an E3 edge to the build segment.
-# Several joins on one probe pipeline each add their own build segment and
-# edge.
+# A join is two edges. The build child's pipeline ends in a SINK_HASH_BUILD
+# segment (key NONE, COLUMNAR; it indexes no ParamTable row, so its
+# `sink_param_id` is -1): the sink collects the build rows. The probe child's
+# pipeline stays open and gains an OP_JOIN_PROBE naming that segment, with the
+# probe keys as `probe_left_keys` and the build keys as `probe_right_keys`,
+# paired by position, and an E3 edge to the build segment. Several joins on
+# one probe pipeline each add their own build segment and edge.
+#
+# Served: INNER, LEFT, RIGHT and FULL equi-joins, SEMI and ANTI equi-joins
+# (the left rows with, or without, a partner on the right), and CROSS joins
+# (no key). The OP_JOIN_PROBE's join type is the probe's view, the probe side
+# as its left input: the plan's type when the right child builds; LEFT and
+# RIGHT exchanged when the left child builds (a LEFT join that builds its left
+# child keeps the build rows, which is the probe's RIGHT), and INNER, FULL and
+# CROSS as they are.
 #
 # The build side is the one the plan records (`JoinData.build_side`); lowering
 # never chooses or swaps it. RIGHT builds the right child, LEFT the left one,
@@ -17,24 +24,30 @@
 # side follows.
 #
 # The probe emits the probe side's columns, then the build side's, a build
-# column whose name the probe side uses suffixed `_right`. The join node's
-# output is the left child's columns, then the right child's, renamed by the
-# same rule. When the right child builds, the two are the same columns under
-# the same names. When the left child builds, a projection of column
-# references is fused after the probe that puts the columns in the node's
-# order under the node's names.
+# column whose name the probe side uses suffixed `_right`; a SEMI or ANTI
+# probe emits the probe side's columns only. The join node's output is the
+# left child's columns, then (except for SEMI and ANTI) the right child's,
+# renamed by the same rule. When the right child builds, the two are the same
+# columns under the same names. When the left child builds, a projection of
+# column references is fused after the probe that puts the columns in the
+# node's order under the node's names.
 #
 # Both children are walked, the left before the right, so the scans are met in
-# pre-order whichever side builds.
+# pre-order whichever side builds. In a plan that holds a shared-subplan
+# reference `cut_walk` walks the right child first, as the reference's
+# producer visits a join, and sets the scan count for each child, so the scans
+# keep their pre-order indices and the right child's segments take the lower
+# ids (`cut_shared`).
 #
 # Refused (LOWERING_JOIN_UNSERVED) before either child is walked: a join type
-# other than INNER, a join with no key or with key lists of different lengths,
-# more keys than the probe takes, a residual predicate, the sort-merge
-# algorithm hint, a build side the plan does not define, a key that is not a
-# column of its side, a key pair whose types the probe does not compare, and a
-# join whose output names one column twice. Key
-# types: INT64 and INT32, in any pairing; FLOAT64 with FLOAT64; STRING with
-# STRING.
+# the plan IR does not define, a SEMI or ANTI join that builds its left child
+# (the probe would emit the build rows, which it has no rule for), a CROSS
+# join that names a key, an equi-join with no key or with key lists of
+# different lengths, more keys than the probe takes, a residual predicate, the
+# sort-merge algorithm hint, a build side the plan does not define, a key that
+# is not a column of its side, a key pair whose types the probe does not
+# compare, and a join whose output names one column twice. Key types: INT64
+# and INT32, in any pairing; FLOAT64 with FLOAT64; STRING with STRING.
 # =============================================================================
 
 from arrow.arrow_types import ArrowType
@@ -89,6 +102,19 @@ def _join_type_name(join_type: UInt8) -> String:
     return "type " + String(Int(join_type))
 
 
+def _served_type(join_type: UInt8) -> Bool:
+    """True for the join types the probe has a rule for."""
+    return (
+        join_type == JOIN_INNER
+        or join_type == JOIN_LEFT
+        or join_type == JOIN_RIGHT
+        or join_type == JOIN_FULL
+        or join_type == JOIN_SEMI
+        or join_type == JOIN_ANTI
+        or join_type == JOIN_CROSS
+    )
+
+
 def _unserved(node: LogicalPlan, what: String) -> Error:
     return Error(
         String(LOWERING_JOIN_UNSERVED)
@@ -96,7 +122,7 @@ def _unserved(node: LogicalPlan, what: String) -> Error:
         + plan_tag_name(node.tag)
         + " ("
         + what
-        + ") is not served by the INNER hash join"
+        + ") is not served by the hash join"
     )
 
 
@@ -162,11 +188,14 @@ def probe_output_names(
 
 struct JoinShape(Movable):
     """What a PLAN_JOIN node lowers to, decided before its children are
-    walked: which child builds, the keys of each side in pair order, and the
+    walked: which child builds, the probe's join type, the keys of each side
+    in pair order, and the
     projection that restores the node's column order and names after the
     probe, when one is needed."""
 
     var build_left: Bool
+    var probe_join_type: UInt8
+    """The OP_JOIN_PROBE's join type: the probe side is its left input."""
     var probe_keys: List[String]
     var build_keys: List[String]
     var reorder: Optional[MorselOp]
@@ -174,11 +203,13 @@ struct JoinShape(Movable):
     def __init__(
         out self,
         build_left: Bool,
+        probe_join_type: UInt8,
         var probe_keys: List[String],
         var build_keys: List[String],
         var reorder: Optional[MorselOp],
     ):
         self.build_left = build_left
+        self.probe_join_type = probe_join_type
         self.probe_keys = probe_keys^
         self.build_keys = build_keys^
         self.reorder = reorder^
@@ -188,12 +219,14 @@ def join_shape(node: LogicalPlan) raises -> JoinShape:
     """The shape a PLAN_JOIN node lowers to, or its refusal. Called before the
     children are walked."""
     ref jd = node.join_data_ref()
-    if jd.join_type != JOIN_INNER:
-        raise _unserved(
-            node, "a " + _join_type_name(jd.join_type) + " join"
-        )
+    var jt = jd.join_type
+    if not _served_type(jt):
+        raise _unserved(node, "a " + _join_type_name(jt) + " join")
     var n = len(jd.left_on)
-    if n == 0:
+    if jt == JOIN_CROSS:
+        if n != 0 or len(jd.right_on) != 0:
+            raise _unserved(node, "a CROSS join that names a key")
+    elif n == 0:
         raise _unserved(node, "a join with no equi key")
     if n != len(jd.right_on):
         raise _unserved(
@@ -247,10 +280,22 @@ def join_shape(node: LogicalPlan) raises -> JoinShape:
             node, "an output that names '" + out_names[dup] + "' twice"
         )
     var build_left = side == JOIN_BUILD_SIDE_LEFT
+    var keeps_left_only = jt == JOIN_SEMI or jt == JOIN_ANTI
+    if build_left and keeps_left_only:
+        raise _unserved(
+            node, "a " + _join_type_name(jt) + " join that builds its left side"
+        )
+    var probe_type = jt
+    if build_left and jt == JOIN_LEFT:
+        probe_type = JOIN_RIGHT
+    elif build_left and jt == JOIN_RIGHT:
+        probe_type = JOIN_LEFT
     var left_names = _names_of(left_schema)
     var right_names = _names_of(right_schema)
     var emitted: List[String]
-    if build_left:
+    if keeps_left_only:
+        emitted = left_names.copy()
+    elif build_left:
         emitted = probe_output_names(right_names, left_names)
     else:
         emitted = probe_output_names(left_names, right_names)
@@ -276,9 +321,11 @@ def join_shape(node: LogicalPlan) raises -> JoinShape:
         reorder = Optional(MorselOp.project(exprs^, out_names^))
     if build_left:
         return JoinShape(
-            True, jd.right_on.copy(), jd.left_on.copy(), reorder^
+            True, probe_type, jd.right_on.copy(), jd.left_on.copy(), reorder^
         )
-    return JoinShape(False, jd.left_on.copy(), jd.right_on.copy(), reorder^)
+    return JoinShape(
+        False, probe_type, jd.left_on.copy(), jd.right_on.copy(), reorder^
+    )
 
 
 def _close_join(
@@ -304,7 +351,10 @@ def _close_join(
     )
     probe.append_op(
         MorselOp.join_probe(
-            seg, shape.probe_keys.copy(), shape.build_keys.copy(), JOIN_INNER
+            seg,
+            shape.probe_keys.copy(),
+            shape.build_keys.copy(),
+            shape.probe_join_type,
         )
     )
     probe.deps.append(seg)

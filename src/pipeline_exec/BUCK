@@ -12,12 +12,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # The real members are the sources `source_parquet`, `source_batch`,
 # `source_sink_output` and `source_csv` (a CSV file decoded at its bound column
 # types, served as a resident batch), the operators `op_filter`, `op_project`,
-# `op_limit` and `op_hash_probe` (the INNER equi-join probe over an index of
-# the build rows),
+# `op_limit` and `op_hash_probe` (the INNER, LEFT, RIGHT, FULL, SEMI, ANTI and
+# CROSS join probe over an index of the build rows; RIGHT and FULL owe their
+# unmatched build rows as a tail that `run_segment` pushes after the workers),
 # the sinks `sink_collect`, `sink_agg` (the ungrouped aggregation, over
 # `agg_fold` and `agg_output`, drawing memory from `segment_pool`; COUNT(DISTINCT) in
 # every aggregation sink is `count_distinct`), `sink_group_agg` (the same keyed by
-# fixed-width columns, its tables charged as they grow), `sink_string_group_agg` (the same keyed by
+# fixed-width columns, its tables charged as they grow and, given a spill directory,
+# written to disk by hash partition when the pool refuses them: `group_spill`),
+# `sink_string_group_agg` (the same keyed by
 # strings, over `string_keys`' intern table; `string_harness` is its test table), `sink_sort`
 # (the in-memory sort, over `sort_nulls` and `op_sort`; `sort_harness` is its
 # test table and oracle), and
@@ -64,6 +67,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 once: disjoint ranges, no lost count.
 # test_sink_collect               the output ordered by morsel position, masks
 #                                 gathered, the output schema of empty input.
+# test_remote_parquet_source      a Parquet spec on a remote store read through
+#                                 the builder's opener (one served by the local
+#                                 file system here): the local answer for one
+#                                 key, every row of listed keys, SCAN_FS_UNSERVED
+#                                 with no opener, from the local entry point and
+#                                 from the default opener, the opener's refusal
+#                                 of a bucket as the run's error.
 # test_sources                    resident and sink-output sources, the Parquet
 #                                 source built from a spec: projection, glob,
 #                                 pushed filter, morsel size, refusals, a spec
@@ -74,6 +84,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 rows, operators on the concatenation, the
 #                                 nullability of any producer kept, and a
 #                                 producer outside the dependencies refused.
+# test_real_shared_output         one producer read by several segments (a
+#                                 shared subplan): two readers, a concatenation
+#                                 naming it twice, a reader beside a
+#                                 concatenation; the published outputs' copy for
+#                                 every reader but the last.
 # test_source_csv                 the CSV source built from a spec: typed, quoted
 #                                 and NULL cells, gzip by extension, a dialect,
 #                                 the declared types over inference, a header
@@ -94,9 +109,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 and projection around the probe, two probes in
 #                                 a chain, a probe over a sort's output, no row
 #                                 with the joined schema, a build segment that is
-#                                 not a dependency, a plan run twice.
+#                                 not a dependency, an unserved join type, a plan
+#                                 run twice.
 # test_join_plan_concurrent       the same joins on threads, run after run, on a
 #                                 runtime stopped and started again.
+# test_join_kinds_plan            LEFT, RIGHT, FULL, SEMI, ANTI and CROSS joins as
+#                                 hand-built plans against a nested-loop oracle:
+#                                 1 to 7 workers, NULL-key and empty build sides,
+#                                 the tail of RIGHT and FULL (once per build row,
+#                                 no probe row, a projection or filter, an
+#                                 aggregation or a limit after the probe, a
+#                                 second probe), a CROSS join that names a key.
+# test_join_kinds_plan_concurrent RIGHT, FULL, LEFT and SEMI joins on threads
+#                                 over a Parquet probe side, run after run.
 # test_segment_pool               the atomic pool and the worker reservations:
 #                                 budget, blocks, give-back, exact grants under
 #                                 contention.
@@ -148,8 +173,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 two keys with NULLs, workers and dealing,
 #                                 the merge's overflow, float keys, refusals,
 #                                 the pool charged as tables grow.
+# test_sink_group_agg_spill       the grouped sink with a spill directory: spilled
+#                                 tables give the oracle's groups on 1 to 4 workers,
+#                                 the same budget refused without one, no spill
+#                                 when the pool has room, the merge's refusals,
+#                                 COUNT(DISTINCT) and the group limit, the chunk
+#                                 format round trip, files deleted.
 # test_group_agg_plan             scan, filter and grouped sink over Parquet,
-#                                 inline and on threads, and a budget refusal.
+#                                 inline and on threads, a budget refusal, and the
+#                                 same budget spilled with a spill directory.
 # test_sink_string_group_agg      the string-keyed grouped sink against a dict oracle:
 #                                 one and two keys, flat and dictionary columns in
 #                                 both orientations, NULL and the empty string,
@@ -210,21 +242,35 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "spike/**/*.mojo"]),
     deps = [
         "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
         "//src/async_rt:async_rt",
         "//src/async_api:async_api",
         "//src/atomic_alias:atomic_alias",
         "//src/batch_eval:batch_eval",
         "//src/byte_buffer:byte_buffer",
+        "//src/column_format:column_format",
+        "//src/compression:compression",
         "//src/containers:containers",
         "//src/column_kernels:column_kernels",
+        "//src/counters:counters",
         "//src/csv:csv",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/engine_runtime:engine_runtime",
         "//src/exec_types:exec_types",
+        "//src/expr:expr",
         "//src/fs:fs",
+        "//src/host_probe:host_probe",
+        "//src/host_profile:host_profile",
+        "//src/join_assembly:join_assembly",
+        "//src/libc:libc",
+        "//src/log:log",
         "//src/metrics:metrics",
         "//src/morsel:morsel",
+        "//src/objectstore:objectstore",
         "//src/op_sort:op_sort",
         "//src/op_join_probe:op_join_probe",
         "//src/op_sources:op_sources",
+        "//src/op_spill_rows:op_spill_rows",
         "//src/operator_api:operator_api",
         "//src/parquet:parquet",
         "//src/parquet_codec:parquet_codec",
@@ -234,12 +280,15 @@ mojo_library(
         "//src/plan_expr:plan_expr",
         "//src/plan_ir:plan_ir",
         "//src/plan_stats:plan_stats",
+        "//src/row_format:row_format",
         "//src/scalar_arithmetic:scalar_arithmetic",
         "//src/scan_planning:scan_planning",
         "//src/scan_source:scan_source",
+        "//src/shuffle:shuffle",
+        "//src/simd_ops:simd_ops",
+        "//src/udf:udf",
     ],
     test_deps = [
-        "//src/compression:compression",
         "//src/parquet_writer:parquet_writer",
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
@@ -249,6 +298,9 @@ mojo_library(
         "tests/test_float_sum_workers_concurrent.mojo",
         "tests/test_group_agg_plan.mojo",
         "tests/test_hash_probe.mojo",
+        "tests/test_hash_probe_kinds.mojo",
+        "tests/test_join_kinds_plan.mojo",
+        "tests/test_join_kinds_plan_concurrent.mojo",
         "tests/test_join_plan.mojo",
         "tests/test_join_plan_concurrent.mojo",
         "tests/test_op_filter.mojo",
@@ -257,6 +309,8 @@ mojo_library(
         "tests/test_real_concat.mojo",
         "tests/test_real_plan.mojo",
         "tests/test_real_plan_concurrent.mojo",
+        "tests/test_real_shared_output.mojo",
+        "tests/test_remote_parquet_source.mojo",
         "tests/test_run_plan.mojo",
         "tests/test_run_segment_concurrent.mojo",
         "tests/test_run_segment.mojo",
@@ -273,6 +327,7 @@ mojo_library(
         "tests/test_sink_float_agg_duckdb.mojo",
         "tests/test_sink_float_agg_positions.mojo",
         "tests/test_sink_group_agg.mojo",
+        "tests/test_sink_group_agg_spill.mojo",
         "tests/test_sink_group_agg_keys.mojo",
         "tests/test_sink_int_sum_decimal.mojo",
         "tests/test_sink_sort.mojo",

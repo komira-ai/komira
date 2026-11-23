@@ -356,7 +356,7 @@ def lz4_decompress_into[
         if cap == 0:
             # An empty Span may carry a null pointer; give liblz4 a real
             # one-byte buffer with capacity 0, so only the empty block passes.
-            var scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+            var scratch = Array[UInt8, 1](fill=UInt8(0))
             # SAFETY: `scratch` and `src` are both alive across this
             # synchronous call (local stack / the Span's concrete origin);
             # liblz4 writes at most 0 bytes and reads exactly `n` from `src`.

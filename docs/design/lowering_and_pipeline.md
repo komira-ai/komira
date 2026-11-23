@@ -12,7 +12,7 @@ on [the optimized plan](optimized_plan.md) (§5.3, the closed list of host-local
 them. It does not describe streaming, which [plan models](plan_models.md) §4.3 covers over the same physical plan.
 
 **Where the code and the docs disagree today.**
-[Plan models](plan_models.md) §4.1 describes the physical IR as version 13 in `plan_ir`; the code is version 16
+[Plan models](plan_models.md) §4.1 describes the physical IR as version 13 in `plan_ir`; the code is version 18
 in `physical_plan`. That section is stale on this point and is corrected in the same change as this document's
 slice 1. The same section declares `lower(segment, host_profile, resolved_inputs)`; §2.1 below says how this document's
 entry relates to it. [The architecture](../architecture.md) names the lowering layer `komira_compiler`; no such
@@ -41,7 +41,7 @@ Parquet files, so they cannot run until the middle exists.
 | Parse | `sql`: `tokenize`, `parse_sql`, `SqlCatalog` | none |
 | Bind | open draft, komira#1216: `bind_statement(stmt, catalog, footers)` returns a `BoundStatement` holding a `LogicalPlan`; footers come from a caller-supplied `SqlParquetFooters` | the caller (§6.2) |
 | Optimize | `optimizer.optimizer_driver.optimize` | called, not changed (§6.1) |
-| **Lower** | `physical_plan` holds the IR (`SegmentDescPod`, version 16); `lowering_rules` holds one rule (`derive_payload_narrow`); `engine_runtime.record_segment_morsel_rows` sizes morsels; **no function produces segments from a plan** | §2, new `lowering` |
+| **Lower** | `physical_plan` holds the IR (`SegmentDescPod`, version 18); `lowering_rules` holds one rule (`derive_payload_narrow`); `engine_runtime.record_segment_morsel_rows` sizes morsels; **no function produces segments from a plan** | §2, new `lowering` |
 | **Drive** | `morsel` holds the source, operator and sink traits and `PipelineExecution`; `engine_runtime` holds the segment execution context; `async_api.ParallelDispatch` holds the fork-join surface; **no function runs a segment** | §3, new `pipeline_exec` |
 | **Sinks a SQL plan can pick at run time** | `op_agg_hash` holds the table kernels (`FlatHashAggregator`, `AggCommitPlan`); the typed stage tables of the open operator pull requests are compile-time typed | §4 |
 | **Session state** | `sdk_exec` holds twelve leaf modules; its README says the context is not there | §5 |
@@ -125,7 +125,7 @@ here. The cutter's output is complete or `lower` raises.
 
 ### 2.2 The target IR (D1)
 
-**Recommended: the first slices lower to the IR that exists, `physical_plan` version 16**, behind the `lower`
+**Recommended: the first slices lower to the IR that exists, `physical_plan` version 18**, behind the `lower`
 signature above, and the self-contained IR of [plan models](plan_models.md) §4.2 becomes its own later design and
 slice. This is the alternative that [plan models](plan_models.md) D7 rejected ("port as is and fix later", because side
 tables in the IR block the wire form). It is recommended here only with a stated exit (below) and because the
@@ -189,8 +189,8 @@ join are cut by the same classification of each node into one of three roles:
 
 | Role | Logical nodes | Effect |
 |---|---|---|
-| **Source** (a leaf; starts a pipeline) | `PLAN_SCAN` (Parquet, then in-memory) | `SOURCE_PARQUET` or `SOURCE_BATCH` |
-| **Streaming operator** (fused into the pipeline below it) | `PLAN_FILTER`, `PLAN_PROJECT`, `PLAN_LIMIT`, and a join's probe side | `OP_FILTER`, `OP_PROJECT`, `OP_LIMIT`, `OP_JOIN_PROBE` appended to `ops` |
+| **Source** (a leaf; starts a pipeline) | `PLAN_SCAN` (Parquet, then in-memory), `PLAN_STEP` | `SOURCE_PARQUET` or `SOURCE_BATCH`; `SOURCE_UDF_STEP` |
+| **Streaming operator** (fused into the pipeline below it) | `PLAN_FILTER`, `PLAN_PROJECT` (with an `OP_UDF_APPLY` before it per column that is a `UdfRef` call), `PLAN_LIMIT`, an ungrouped `PLAN_MAP_BATCHES`, and a join's probe side | `OP_FILTER`, `OP_PROJECT`, `OP_UDF_APPLY`, `OP_LIMIT`, `OP_UDF_FRAME`, `OP_JOIN_PROBE` appended to `ops` |
 | **Breaker** (ends a pipeline; its output is the next pipeline's source) | `PLAN_AGGREGATE`, `PLAN_SORT`, `PLAN_TOPN`, `PLAN_DISTINCT`, `PLAN_PARTITION_BY`, `PLAN_PARTITION_TOPN`, a join's build side, the root | `SINK_AGG` (also for `PLAN_DISTINCT`, grouped by every column), `SINK_SORT`, `SINK_TOPN`, `SINK_PARTITION_BY`, `SINK_PARTITION_TOPN`, `SINK_HASH_BUILD`, `SINK_COLLECT` (the root) |
 
 A breaker ends the pipeline below it and starts one whose source is `SOURCE_SINK_OUTPUT` over the breaker's segment.
@@ -225,15 +225,22 @@ first slices set `ORDER_NONE` only; step 9 sets `ORDER_ROW_RANGE` on the ungroup
 asks of the driver is in §3.3 and open point O1, and what step 9 built is after the table of §7.3.
 
 **What the cutter refuses.** An `ASOF` join (`SINK_ASOF_JOIN`), a sort-merge join (`SINK_SMJ_BUILD`), the IR's
-`SINK_JOIN_PROBE` (a second, sink-form probe the cutter does not emit; the probe is `OP_JOIN_PROBE`, §3.6), a view reference, a shared-subplan reference (`PLAN_CSE_REF`) and
+`SINK_JOIN_PROBE` (a second, sink-form probe the cutter does not emit; the probe is `OP_JOIN_PROBE`, §3.6), a view reference and
 a cast to string in a pipeline's spine are not cut yet: the IR has the tags and the cutter does not emit them. A union is cut: each branch ends in a
-segment of its own and the union's pipeline reads their outputs through a `SOURCE_CONCAT` in branch order (src/lowering/README.md). The cutter raises a named refusal
+segment of its own and the union's pipeline reads their outputs through a `SOURCE_CONCAT` in branch order (src/lowering/README.md). A shared-subplan
+reference (`PLAN_CSE_REF`) is cut: a canonical subtree with a breaker or a limit ends in a segment of its own that every reference reads over an `E3`
+edge, the driver handing each reader the same rows, and one of scans, filters, projections and unions is cut again at each reference over the same
+scans (src/lowering/README.md, `cut_shared`). The cutter raises a named refusal
 (`LOWERING_UNCUTTABLE_NODE`, naming the node tag), and does not produce a segment that reads "some batch". A resident
 batch standing in for a subtree discards the subtree's meaning and gives a well-formed plan that computes something
 else; "not yet cut" must stay visible as a refusal. The same holds for a plan with an `EXCHANGE` node when there is one
 host: the cutter elides the exchange ([the optimized plan](optimized_plan.md) §8.2) once the exchange slice exists;
 slice 1b has no arm for `EXCHANGE` and refuses it by name, which is safe and is the only divergence from this
-paragraph. A plan with a `STEP` or `MAP_BATCHES` (a UDF) is refused until the UDF slice exists. A limit above a sort is
+paragraph. A `STEP` is cut as a `SOURCE_UDF_STEP` source, an ungrouped `MAP_BATCHES` as an `OP_UDF_FRAME` operator over its read
+set, and a projection column that is wholly a `UdfRef` call (`EXPR_UDF_APPLY`) as an `OP_UDF_APPLY` before the projection (IR
+version 17); a read outside a `ROW` or frame function's declared read set is refused (`LOWERING_UDF_UNDECLARED_READ`), and a
+grouped frame or a call anywhere else is refused by name (`LOWERING_UDF_UNSERVED`, src/lowering/README.md). No driver runs
+those kinds yet. A limit above a sort is
 refused too (`LOWERING_UNCUTTABLE_NODE`): no segment records an order before the order slice, so the rows such a limit
 keeps are not defined. An ungrouped float `SUM` or `AVG` is cut with `ORDER_ROW_RANGE` since step 9 of §7.3, and is
 bit-reproducible across worker counts; a grouped one is not served yet.
@@ -253,7 +260,7 @@ bit-reproducible across worker counts; a grouped one is not served yet.
 `LOWERING_SINK_UNSERVED`, naming the triple. The alternative, to turn that segment into a generic collect and
 compute the sink another way, changes what runs without changing what the plan says; the plan's author sees a slow
 or different answer and no refusal. The same applies to the Parquet arm that is not total (§2.2) and to a join the
-probe operator cannot take: `LOWERING_JOIN_UNSERVED`, naming the reason (the join type, the algorithm hint or the key types).
+probe operator cannot take: `LOWERING_JOIN_UNSERVED`, naming the reason (the join type, the build side, the algorithm hint or the key types).
 
 A host that has to re-optimize to lower is a bug in the optimizer, not a thing for lowering to do. If a plan reaches
 `lower` in a form the cutter cannot cut, the fix is a rewrite in `optimizer`, run before `lower`.
@@ -466,7 +473,7 @@ dropped by ownership, not by a cleanup the failing path might skip.
 |---|---|
 | A worker raises (a decode error, an overflow, a refused expression) | first error wins; workers stop at the next morsel; the query fails with that error; no partial result |
 | A file disappears or its footer changed since bind | the source refuses at open when the footer's identity differs from the one the plan was bound with (§6.2), naming the file |
-| The memory budget is denied | the MVP has no spill: the sink's `try_grow` (§4.5) fails, the worker records a named error in the first-error slot, and the query fails; never an allocation failure. A later slice lets a sink whose capability row says `spillable` spill instead (step 6 of §7.3); the IR records no spill tier until §2.2 item 6. **The root reservation of the context (§5.1) is the only bound on memory in the MVP**: no per-segment, per-sink or per-operator budget exists (§2.2 item 6), and every sink draws from the root through the segment pool of §4.5 |
+| The memory budget is denied | the MVP has no spill: the sink's `try_grow` (§4.5) fails (built since: the fixed-width grouped aggregation sink, given `EngineOptions.spill_directory`, writes its group tables to disk by hash partition instead, `src/pipeline_exec/sink_group_agg.mojo`; every other sink, and that one without a spill directory, still fails as described here), the worker records a named error in the first-error slot, and the query fails; never an allocation failure. A later slice lets a sink whose capability row says `spillable` spill instead (step 6 of §7.3); the IR records no spill tier until §2.2 item 6. **The root reservation of the context (§5.1) is the only bound on memory in the MVP**: no per-segment, per-sink or per-operator budget exists (§2.2 item 6), and every sink draws from the root through the segment pool of §4.5 |
 | The process crashes | the run is lost; nothing was persisted; the caller reruns the query. Single node, no recovery state, by scope |
 | Cancellation by the caller | the same flag; the query returns a cancelled error and every sink drops its state |
 | Connectivity to remote storage is lost mid-scan | the file-system layer's error surfaces through the first-error slot; the query fails whole. Retrying a read is the file-system layer's, not the driver's, and a morsel is never replayed by the driver |
@@ -752,7 +759,7 @@ ANALYZE, cloud scans) arrives as its own module of functions over the same struc
 
 | Module | Holds |
 |---|---|
-| `engine_options` | `EngineOptions` (§5.2; built: `worker_count`, `memory_budget_bytes`) |
+| `engine_options` | `EngineOptions` (§5.2; built: `worker_count`, `memory_budget_bytes`, `spill_directory`) |
 | `engine_context` | the struct, its constructor and accessors |
 | `engine_catalog` | built: `register_parquet`; planned: an in-memory batch, resolve a name |
 | `engine_footers`, `engine_optimize` | planned modules. Built: the context holds `ParquetFooters` (§6.2) and `engine_sql` calls `optimize` itself; the plan gates are not called |
@@ -786,7 +793,7 @@ and parsed at startup. A field whose absence differs from a value is an `Optiona
 |---|---|
 | `worker_count: Optional[Int]` | workers; absent means the host profile's count |
 | `memory_budget_bytes: Optional[Int]` | the memory cap; absent means the host profile's default |
-| `spill_enabled`, `spill_directory: Optional[String]` | whether and where a breaker may spill (spill tiers go through the host profile) |
+| `spill_enabled`, `spill_directory: Optional[String]` | whether and where a breaker may spill (spill tiers go through the host profile). Built: `spill_directory` alone, absent meaning no spill (so no separate `spill_enabled`), read by the fixed-width grouped aggregation sink and not through the host profile, since it does not change the lowered plan |
 | `morsel_rows: Optional[Int]` | override of the morsel size policy, for tests |
 | `cap_workers: Bool` | the opt-in gate of `capped_worker_count`; default off (§3.2) |
 | `plan_validation: Bool` | arms the plan validation gate (default off, as `plan_validation_enabled(armed)` takes it) |
@@ -821,8 +828,9 @@ and passes the context, which is the one place a name, a footer and a worker poo
 4. `lower(plan, ctx.host_profile, inputs)`, with `inputs` built from the same footer cache the binder read (§6.2).
 5. `run_plan(lowered, ctx)`.
 
-A statement that is not a query (`COPY`, `CREATE TABLE AS`) is refused with a named error until a writes slice exists;
-the binder reports the statement kind and the door does not guess. Each step's refusal reaches the caller unchanged.
+A `COPY ... TO` a local Parquet, CSV or JSON file runs steps 1 to 5 and then writes the result (`sdk_exec.engine_write`), answering
+one BIGINT row `Count`; `CREATE TABLE AS` is refused with a named error, since it needs a bound catalog. The binder
+reports the statement kind and the door does not guess. Each step's refusal reaches the caller unchanged.
 The door does not retry, does not catch and rerun on another route, and does not keep a second path for the plans the
 first rejects.
 
@@ -935,13 +943,17 @@ Each step adds a sink, an edge or an operator, and none changes the cutter's thr
 | 8. Composite group key | the row that serves what §4.2 once refused: a group key of two or more mixed-type columns, compared by cells, over the per-worker tables and serial merge of slice 5 (built; D8's partitioned sink is not) | slice 5 |
 | 9. Reproducible float sinks | 9a: position-derived morsel ids in `parquet_scan` (§3.3), 1.0 to 1.6k lines. 9b: `GrainSourceImpl`, `ORDER_ROW_RANGE`, grain state in the ungrouped and dense sinks and the determinism tests (D7), 2.0 to 3.0k lines | the first float sink; slices 3 and 5 |
 
-**What step 3 built, against the row above (inner joins).** `lowering.cut_join` cuts an INNER equi-join. The build child's
+**What step 3 built, against the row above (joins).** `lowering.cut_join` cuts INNER, LEFT, RIGHT and FULL equi-joins, SEMI and ANTI
+equi-joins and CROSS joins. The build child's
 pipeline ends in a `SINK_HASH_BUILD` segment (key `NONE`, orientation `COLUMNAR`, `sink_param_id` -1, since it indexes no
 `ParamTable` row). The probe child's pipeline stays open and gains `OP_JOIN_PROBE` naming that segment, with an `E3` edge
 to it. The left child is walked first, then the right. The build side is the one the plan records; `UNSET` builds the
-right child, and lowering never chooses or swaps a side. When the left child builds, a fused projection restores the
-node's column order after the probe. After a join the cardinality estimate is 0 and no dictionary key is recognised.
-`lower` refuses with `LOWERING_JOIN_UNSERVED`, before it walks either child: a join type other than INNER, no key or key lists
+right child, and lowering never chooses or swaps a side. The `OP_JOIN_PROBE`'s join type is the probe's view, the probe
+side as its left input: the plan's type when the right child builds; LEFT and RIGHT exchanged when the left child builds;
+INNER, FULL and CROSS as they are. A SEMI or ANTI probe emits the probe side's columns only, and a CROSS join names no key.
+When the left child builds, a fused projection restores the node's column order and names after the probe. After a join the cardinality estimate is 0 and no dictionary key is recognised.
+`lower` refuses with `LOWERING_JOIN_UNSERVED`, before it walks either child: a join type the plan IR does not define, a SEMI
+or ANTI join that builds its left child, a CROSS join that names a key, an equi-join with no key or key lists
 of unequal length, more than 8 keys, a residual, the sort-merge hint, an undefined build side, a key that is not a column
 of its side, a key pair the probe does not compare (INT64 and INT32 in any pairing, FLOAT64, STRING), and an output that
 names a column twice. It differs from section 3.6 in one place. The build segment publishes its rows as a batch (a
@@ -949,9 +961,8 @@ names a column twice. It differs from section 3.6 in one place. The build segmen
 (`op_join_probe`'s `MultiKeyHashJoinBuilder`), instead of publishing a built table. `run_segment`, `PublishedOutputs` and
 the morsel sink trait carry only batches, and the index is built once and serially either way. One answer departs
 from DuckDB, by name: the kernel stands for a NULL key by the INT64 value 9221120237041090561, so a non-NULL INT64 key
-holding it is refused (`JOIN_KEY_RESERVED`) instead of matching; a validity bit beside the key slot would lift it. Not built: outer, semi,
-anti and cross joins, a parallel build in the build segment's finalize, runtime filters, build-side memory accounting and
-spill, chunking of a large probe output (a morsel gives one batch), and DATE and DECIMAL keys.
+holding it is refused (`JOIN_KEY_RESERVED`) instead of matching; a validity bit beside the key slot would lift it. Not built: a parallel build in the build segment's finalize, runtime filters, build-side memory accounting and
+spill, chunking of a large equi-join probe output (a morsel gives one batch; a CROSS join emits chunks of 65536 rows), and DATE and DECIMAL keys.
 **What step 9 built, against the row above.** The ungrouped sink, the only one that folds a float argument, is
 reproducible; neither 9a nor `GrainSourceImpl` was built, because the sources already stamp a position on every morsel:
 the Parquet source's partition id is its flat row group times 2^20 plus the morsel's index in that row group (the
@@ -1034,7 +1045,7 @@ that no test reaches is a defect of the tests.
 |---|---|---|
 | Plan IR, expressions, wire | `plan_ir`, `plan_expr`, `plan_wire` | none |
 | Optimizer | `optimizer` and its driver | the shared-subplan and scan-dedup passes, in the optimizer (D5) |
-| Physical IR | `physical_plan`, version 16, with driver-table indices | the self-contained IR (§2.2) |
+| Physical IR | `physical_plan`, version 18, with driver-table indices | the self-contained IR (§2.2) |
 | Host rules, morsel sizing | `derive_payload_narrow`; `record_segment_morsel_rows` and `HostProfile` in `engine_runtime` | the other host-local rules; `host_profile` and `host_detect` (D9, §2.5) |
 | **Lowering** | none | `lowering` (§2) |
 | **Driver** | traits, `PipelineExecution`, segment execution context, `ParallelDispatch` | `pipeline_exec` (§3) |

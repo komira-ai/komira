@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # The Phase-1 fix for the `MAX_GROUPS=16` silent-saturation correctness bug
-# (`hash_agg_table.mojo:54`). Replaces the fixed-16 InlineArray probe with a
+# (`hash_agg_table.mojo:54`). Replaces the fixed-16 Array probe with a
 # single growing dense open-addressing directory, built as the single-I64-key
 # sibling of `_CompositeHashTableF64` (`composite_hash_table.mojo`).
 #

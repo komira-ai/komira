@@ -4,9 +4,9 @@
 #
 # Validates the no-elide secure-zero helpers in `crypto/zeroize.mojo`:
 #
-#   * zeroize_inline_array[N]     — for InlineArray[UInt8, N]
-#   * zeroize_inline_array_u32[N] — for InlineArray[UInt32, N]
-#   * zeroize_inline_array_u64[N] — for InlineArray[UInt64, N]
+#   * zeroize_inline_array[N]     — for Array[UInt8, N]
+#   * zeroize_inline_array_u32[N] — for Array[UInt32, N]
+#   * zeroize_inline_array_u64[N] — for Array[UInt64, N]
 #   * zeroize_list                — for List[UInt8]
 #
 # The canonical secure-zero is `external_call["memset_s"]` on macOS /
@@ -84,7 +84,7 @@ def test_zeroize_uint32_basic() raises:
 
 
 def test_zeroize_uint32_sha256_state_shape() raises:
-    """The Sha256 struct uses InlineArray[UInt32, 8] for its hash state.
+    """The Sha256 struct uses Array[UInt32, 8] for its hash state.
     Verify the helper handles that exact shape."""
     var state = Array[UInt32, 8](fill=UInt32(0))
     state[0] = UInt32(0x6a09e667)

@@ -20,9 +20,16 @@
 #     the oracle (the sum over keys of count^2) computed here from the same
 #     keys. Catches a NULL key that matches, a dropped duplicate pair, and a
 #     pair counted once.
-#   * test_a_left_join_is_refused_by_lowering: a LEFT JOIN is a refusal at step
-#     `lower` with the cutter's token LOWERING_JOIN_UNSERVED, not a crash and
-#     not a wrong answer; Q6 then runs on the same context.
+#   * test_a_left_join_counts_the_matched_pairs_and_the_unmatched_rows: a LEFT
+#     self-join on the repeated-key table counts every pair of equal non-NULL
+#     keys plus one row for each NULL-key row, equal to the oracle computed here
+#     from the same keys. Catches an unmatched left row that is dropped and a
+#     NULL key that matches.
+#   * test_a_left_join_with_a_residual_on_both_sides_is_refused_by_lowering: a
+#     LEFT JOIN whose ON holds a conjunct over both sides stays a join with a
+#     residual, a refusal at step `lower` with the cutter's token
+#     LOWERING_JOIN_UNSERVED naming the residual predicate, not a crash and not a
+#     wrong answer; Q6 then runs on the same context.
 #   * test_a_syntax_error_is_refused_by_the_parser: step `parse`, "SQL syntax
 #     error".
 #   * test_an_unknown_table_and_a_missing_file_are_refused_at_bind: step
@@ -44,10 +51,10 @@
 #   * test_a_sum_past_int64_is_answered_exactly_and_the_context_runs_on: SUM of
 #     three INT64 values of 2^62 is the DECIMAL(38, 0) 3 * 2^62, and Q6 then
 #     runs on the same context.
-#   * test_a_scalar_subquery_is_refused_by_lowering: the optimizer leaves the
-#     subquery in the plan as a CROSS join against its one-row aggregate, so it
-#     is LOWERING_JOIN_UNSERVED, naming the CROSS join, at `lower`, and
-#     Q6 then runs on the same context.
+#   * test_a_scalar_subquery_is_answered: the optimizer leaves the subquery in
+#     the plan as a CROSS join against its one-row aggregate; the count of rows
+#     below the maximum equals the oracle computed here from the same
+#     quantities, and Q6 then runs on the same context.
 #   * test_a_refusal_leaves_the_context_usable: a bind and a parse refusal, then
 #     Q6 gives the oracle.
 #   * test_options_are_validated: a worker count or memory budget below 1 is
@@ -296,7 +303,53 @@ def test_a_self_join_counts_the_key_pairs() raises:
     )
 
 
-def test_a_left_join_is_refused_by_lowering() raises:
+def test_a_left_join_counts_the_matched_pairs_and_the_unmatched_rows() raises:
+    var rows = 200
+    # The oracle: a row with a NULL key has no match and appears once; a row
+    # with key k appears once for each row of key k.
+    var counts = List[Int]()
+    for _ in range(7):
+        counts.append(0)
+    for i in range(rows):
+        if not _dup_key_is_null(i):
+            counts[_dup_key(i)] += 1
+    var want = 0
+    for i in range(rows):
+        if _dup_key_is_null(i):
+            want += 1
+        else:
+            want += counts[_dup_key(i)]
+    var path = test_tmpdir() + "/sql_left_join_self.parquet"
+    var bytes = write_record_batch_to_parquet_bytes(
+        _duplicated_keys(rows), max_rows_per_rg=64
+    )
+    var fh = open(path, "w")
+    fh.write_bytes(Span(bytes))
+    fh.close()
+    var ctx = _new_context()
+    register_parquet(ctx, "lineitem", path)
+    var out = run_sql(
+        ctx,
+        "select count(*) from lineitem a left join lineitem b on a.l_orderkey"
+        " = b.l_orderkey",
+    )
+    if out.refusal:
+        assert_true(
+            False,
+            "refused at "
+            + out.refusal.value().step
+            + ": "
+            + out.refusal.value().reason,
+        )
+    assert_equal(len(out.batches), 1)
+    assert_equal(out.batches[0].num_rows(), 1)
+    assert_equal(
+        Int(out.batches[0].column_at(0).as_primitive[DType.int64]().get(0)),
+        want,
+    )
+
+
+def test_a_left_join_with_a_residual_on_both_sides_is_refused_by_lowering() raises:
     var t = q6_table(50)
     var o = _oracle(t)
     var ctx = _new_context()
@@ -304,9 +357,14 @@ def test_a_left_join_is_refused_by_lowering() raises:
     var out = run_sql(
         ctx,
         "select count(*) from lineitem a left join lineitem b on a.l_orderkey"
-        " = b.l_orderkey",
+        " = b.l_orderkey and a.l_orderkey < b.l_orderkey + 1",
     )
-    _expect_refusal(out, String(STEP_LOWER), "LOWERING_JOIN_UNSERVED")
+    _expect_refusal(
+        out,
+        String(STEP_LOWER),
+        "LOWERING_JOIN_UNSERVED: Join (a residual predicate) is not served by"
+        " the hash join",
+    )
     _expect_revenue(run_sql(ctx, _q6()), o.revenue)
 
 
@@ -462,9 +520,18 @@ def test_a_sum_past_int64_is_answered_exactly_and_the_context_runs_on() raises:
     _expect_revenue(run_sql(ctx, _q6()), o.revenue)
 
 
-def test_a_scalar_subquery_is_refused_by_lowering() raises:
+def test_a_scalar_subquery_is_answered() raises:
     var t = q6_table(100)
     var o = _oracle(t)
+    var top = t.quantity[0]
+    for i in range(len(t.quantity)):
+        if t.quantity[i] > top:
+            top = t.quantity[i]
+    var want = 0
+    for i in range(len(t.quantity)):
+        if t.quantity[i] < top:
+            want += 1
+    assert_true(want > 0 and want < len(t.quantity))
     var ctx = _new_context()
     register_parquet(ctx, "lineitem", _write("sql_scalar", t))
     var out = run_sql(
@@ -472,11 +539,19 @@ def test_a_scalar_subquery_is_refused_by_lowering() raises:
         "select count(*) from lineitem where l_quantity < (select"
         " max(l_quantity) from lineitem)",
     )
-    _expect_refusal(
-        out,
-        String(STEP_LOWER),
-        "LOWERING_JOIN_UNSERVED: Join (a CROSS join) is not served by the INNER"
-        " hash join",
+    if out.refusal:
+        assert_true(
+            False,
+            "refused at "
+            + out.refusal.value().step
+            + ": "
+            + out.refusal.value().reason,
+        )
+    assert_equal(len(out.batches), 1)
+    assert_equal(out.batches[0].num_rows(), 1)
+    assert_equal(
+        Int(out.batches[0].column_at(0).as_primitive[DType.int64]().get(0)),
+        want,
     )
     _expect_revenue(run_sql(ctx, _q6()), o.revenue)
 
@@ -526,7 +601,8 @@ def main() raises:
     var suite = TestSuite()
     suite.test[test_q6_text_gives_the_exact_decimal]()
     suite.test[test_a_self_join_counts_the_key_pairs]()
-    suite.test[test_a_left_join_is_refused_by_lowering]()
+    suite.test[test_a_left_join_counts_the_matched_pairs_and_the_unmatched_rows]()
+    suite.test[test_a_left_join_with_a_residual_on_both_sides_is_refused_by_lowering]()
     suite.test[test_a_syntax_error_is_refused_by_the_parser]()
     suite.test[test_an_unknown_table_and_a_missing_file_are_refused_at_bind]()
     suite.test[test_a_statement_that_is_not_a_query_is_refused]()
@@ -535,7 +611,7 @@ def main() raises:
     suite.test[test_a_file_replaced_between_queries_is_read_again]()
     suite.test[test_a_tiny_memory_budget_is_refused_at_execute]()
     suite.test[test_a_sum_past_int64_is_answered_exactly_and_the_context_runs_on]()
-    suite.test[test_a_scalar_subquery_is_refused_by_lowering]()
+    suite.test[test_a_scalar_subquery_is_answered]()
     suite.test[test_a_refusal_leaves_the_context_usable]()
     suite.test[test_options_are_validated]()
     suite.test[test_contexts_can_be_created_and_dropped_repeatedly]()

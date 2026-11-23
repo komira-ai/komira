@@ -40,7 +40,7 @@ from std.memory import bitcast
 def encode_long(n: Int64, mut out: List[UInt8]):
     """Encode an Avro `long` (zigzag varint) into `out`. 1-10 bytes."""
     # ZigZag: map signed -> unsigned so small-magnitude values stay short.
-    # NOTE: a stack-staged `InlineArray[UInt8, 10]` + `out.extend(Span(le)[:i])`
+    # NOTE: a stack-staged `Array[UInt8, 10]` + `out.extend(Span(le)[:i])`
     # variant (the stage-then-extend pattern of `encode_float`/`encode_double`)
     # was slower: for short varints (1-3 bytes, typical for int64 columns and
     # union tags) the per-byte `append` path avoids Span construction, slicing
@@ -86,7 +86,7 @@ def encode_boolean(v: Bool, mut out: List[UInt8]):
 def encode_float(v: Float32, mut out: List[UInt8]):
     """Encode an Avro `float`: 4 raw little-endian bytes (IEEE-754 binary32).
 
-    Stages the 4 LE bytes into a stack `InlineArray` then bulk-extends the
+    Stages the 4 LE bytes into a stack `Array` then bulk-extends the
     output in ONE grow+memcpy (vs 4 individual `append` bounds/capacity-check
     stores). The bytes are identical: LE IEEE-754 binary32, same as arrow-avro's
     `value.to_bits().to_le_bytes()` + one `write_all`."""
@@ -103,7 +103,7 @@ def encode_float(v: Float32, mut out: List[UInt8]):
 def encode_double(v: Float64, mut out: List[UInt8]):
     """Encode an Avro `double`: 8 raw little-endian bytes (IEEE-754 binary64).
 
-    Stages the 8 LE bytes into a stack `InlineArray` then bulk-extends the
+    Stages the 8 LE bytes into a stack `Array` then bulk-extends the
     output in ONE grow+memcpy (vs 8 individual `append` stores per value — on a
     float64-heavy schema this is the dominant write-append cost). Identical
     bytes to arrow-avro's `to_bits().to_le_bytes()` + one `write_all`."""

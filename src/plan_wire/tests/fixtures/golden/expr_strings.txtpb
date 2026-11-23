@@ -1,0 +1,1549 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 4
+plan {
+  output_schema {
+    fields {
+      name: "so_contains"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "so_starts_with"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "so_ends_with"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "rx_like"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "rx_match"
+      arrow_type_id: 20
+      nullable: true
+      dict_index_type_id: 4
+      child_names: "item"
+      child_type_ids: 13
+      child_nullables: true
+    }
+    fields {
+      name: "rx_replace"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "rx_extract"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "rx_split_to_array"
+      arrow_type_id: 20
+      nullable: true
+      dict_index_type_id: 4
+      child_names: "item"
+      child_type_ids: 13
+      child_nullables: true
+    }
+    fields {
+      name: "rx_extract_all"
+      arrow_type_id: 20
+      nullable: true
+      dict_index_type_id: 4
+      child_names: "item"
+      child_type_ids: 13
+      child_nullables: true
+    }
+    fields {
+      name: "rx_count"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "rx_instr"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "rx_substr"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "rx_full_match"
+      arrow_type_id: 1
+      dtype_code: _DT_BOOL
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_ascii"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_bin"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_bit_length"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_hex"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_length"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_lower"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_ltrim"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_md5"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_regexp_escape"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_reverse"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_rtrim"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_sha1"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_sha256"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_strlen"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_trim"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_unicode"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_upper"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_url_decode"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sf_url_encode"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_concat"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_concat_ws"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_damerau_levenshtein"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_hamming"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_jaccard"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_jaro"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_jaro_winkler"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_levenshtein"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_lpad"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_repeat"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_replace"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_rpad"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_strpos"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sn_translate"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sub_len"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sub_open"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "sub_zero"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  project {
+    exprs {
+      alias {
+        child {
+          string_op {
+            op: STR_CONTAINS
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            pattern: "ab"
+          }
+        }
+        name: "so_contains"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_op {
+            op: STR_STARTS_WITH
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            pattern: "ab"
+          }
+        }
+        name: "so_starts_with"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_op {
+            op: STR_ENDS_WITH
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            pattern: "ab"
+          }
+        }
+        name: "so_ends_with"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          regexp {
+            op: REGEXP_LIKE
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            pattern: "^a.*"
+          }
+        }
+        name: "rx_like"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          regexp {
+            op: REGEXP_MATCH
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            pattern: "(a)(b)"
+            flags: "i"
+          }
+        }
+        name: "rx_match"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          regexp {
+            op: REGEXP_REPLACE
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            pattern: "a+"
+            replacement: "X"
+            flags: "g"
+          }
+        }
+        name: "rx_replace"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          regexp {
+            op: REGEXP_EXTRACT
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            pattern: "(a)(b)"
+            group: 1
+          }
+        }
+        name: "rx_extract"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          regexp {
+            op: REGEXP_SPLIT_TO_ARRAY
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            pattern: ","
+          }
+        }
+        name: "rx_split_to_array"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          regexp {
+            op: REGEXP_EXTRACT_ALL
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            pattern: "(a)(b)"
+            group: 2
+          }
+        }
+        name: "rx_extract_all"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          regexp {
+            op: REGEXP_COUNT
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            pattern: "a"
+          }
+        }
+        name: "rx_count"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          regexp {
+            op: REGEXP_INSTR
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            pattern: "b"
+          }
+        }
+        name: "rx_instr"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          regexp {
+            op: REGEXP_SUBSTR
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            pattern: "a(b)"
+            group: 1
+          }
+        }
+        name: "rx_substr"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          regexp {
+            op: REGEXP_FULL_MATCH
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            pattern: "a.*b"
+            flags: "i"
+          }
+        }
+        name: "rx_full_match"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_ASCII
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_ascii"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_BIN
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_bin"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_BIT_LENGTH
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_bit_length"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_HEX
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_hex"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_LENGTH
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_length"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_LOWER
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_lower"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_LTRIM
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_ltrim"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_MD5
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_md5"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_REGEXP_ESCAPE
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_regexp_escape"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_REVERSE
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_reverse"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_RTRIM
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_rtrim"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_SHA1
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_sha1"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_SHA256
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_sha256"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_STRLEN
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_strlen"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_TRIM
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_trim"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_UNICODE
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_unicode"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_UPPER
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_upper"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_URL_DECODE
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_url_decode"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn {
+            op: STRFN_URL_ENCODE
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sf_url_encode"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_CONCAT
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "-"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sn_concat"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_CONCAT_WS
+            args {
+              literal {
+                string_val: ","
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+          }
+        }
+        name: "sn_concat_ws"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_DAMERAU_LEVENSHTEIN
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "abc"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_damerau_levenshtein"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_HAMMING
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "abc"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_hamming"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_JACCARD
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "abc"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_jaccard"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_JARO
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "abc"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_jaro"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_JARO_WINKLER
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "abc"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_jaro_winkler"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_LEVENSHTEIN
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "abc"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_levenshtein"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_LPAD
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                dtype_code: _DT_INT64
+                int_val: 5
+                kind: SCALAR_KIND_DTYPE
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+            args {
+              literal {
+                string_val: "*"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_lpad"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_REPEAT
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                dtype_code: _DT_INT64
+                int_val: 3
+                kind: SCALAR_KIND_DTYPE
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_repeat"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_REPLACE
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "a"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+            args {
+              literal {
+                string_val: "b"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_replace"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_RPAD
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                dtype_code: _DT_INT64
+                int_val: 5
+                kind: SCALAR_KIND_DTYPE
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+            args {
+              literal {
+                string_val: "*"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_rpad"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_STRPOS
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "a"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_strpos"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          string_fn_n {
+            op: STRFNN_TRANSLATE
+            args {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            args {
+              literal {
+                string_val: "ab"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+            args {
+              literal {
+                string_val: "xy"
+                kind: SCALAR_KIND_STRING
+                time_unit: SCALAR_TIME_UNIT_MICRO
+              }
+            }
+          }
+        }
+        name: "sn_translate"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          substring {
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            start: 2
+            length: 4
+          }
+        }
+        name: "sub_len"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          substring {
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            start: -3
+            length: -1
+          }
+        }
+        name: "sub_open"
+      }
+    }
+    exprs {
+      alias {
+        child {
+          substring {
+            child {
+              col_ref {
+                name: "s"
+                side: COL_SIDE_NONE
+              }
+            }
+            start: 1
+          }
+        }
+        name: "sub_zero"
+      }
+    }
+    child {
+      output_schema {
+        fields {
+          name: "a"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+          metadata_keys: "unit"
+          metadata_values: "cents"
+        }
+        fields {
+          name: "b"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "i"
+          arrow_type_id: 4
+          dtype_code: _DT_INT32
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "f"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "d"
+          arrow_type_id: 18
+          nullable: true
+          decimal_precision: 12
+          decimal_scale: 2
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "s"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "dt"
+          arrow_type_id: 15
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "ts"
+          arrow_type_id: 24
+          dtype_code: _DT_INT64
+          nullable: true
+          tz: "UTC"
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "iv"
+          arrow_type_id: 40
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "st"
+          arrow_type_id: 21
+          nullable: true
+          dict_index_type_id: 4
+          child_names: "k"
+          child_names: "v"
+          child_type_ids: 5
+          child_type_ids: 13
+          child_nullables: false
+          child_nullables: true
+        }
+      }
+      scan {
+        source {
+          binding {
+            kind_id: 1056219456
+            kind_name: "komira.orc"
+            name: "wide"
+            params {
+              key: "has_footer"
+              tag: PARAM_BOOL
+              i: 1
+            }
+            params {
+              key: "path"
+              tag: PARAM_STR
+              s: "/data/wide.orc"
+            }
+            params {
+              key: "stripe_count"
+              tag: PARAM_I64
+              i: 7
+            }
+            schema {
+              fields {
+                name: "a"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+                metadata_keys: "unit"
+                metadata_values: "cents"
+              }
+              fields {
+                name: "b"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "i"
+                arrow_type_id: 4
+                dtype_code: _DT_INT32
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "f"
+                arrow_type_id: 12
+                dtype_code: _DT_FLOAT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "d"
+                arrow_type_id: 18
+                nullable: true
+                decimal_precision: 12
+                decimal_scale: 2
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "s"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "dt"
+                arrow_type_id: 15
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "ts"
+                arrow_type_id: 24
+                dtype_code: _DT_INT64
+                nullable: true
+                tz: "UTC"
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "iv"
+                arrow_type_id: 40
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "st"
+                arrow_type_id: 21
+                nullable: true
+                dict_index_type_id: 4
+                child_names: "k"
+                child_names: "v"
+                child_type_ids: 5
+                child_type_ids: 13
+                child_nullables: false
+                child_nullables: true
+              }
+            }
+            fingerprint: 3735928559
+            structural_id: 4277009102
+            pushdown_gate {
+              mode: GATE_SHAPED
+              allowed_binary_ops: 63
+              allow_and_recurse: true
+              allow_in_list: true
+              require_stat_friendly_col: true
+            }
+            snapshot_policy: SNAPSHOT_PINNED
+            snapshot_token: 1234567890
+            orientation: SOURCE_KIND_COLUMNAR
+            variant_tag: SOURCE_VARIANT_ORC
+          }
+        }
+        has_schema: true
+        schema {
+          fields {
+            name: "a"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+            metadata_keys: "unit"
+            metadata_values: "cents"
+          }
+          fields {
+            name: "b"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "i"
+            arrow_type_id: 4
+            dtype_code: _DT_INT32
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "f"
+            arrow_type_id: 12
+            dtype_code: _DT_FLOAT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "d"
+            arrow_type_id: 18
+            nullable: true
+            decimal_precision: 12
+            decimal_scale: 2
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "s"
+            arrow_type_id: 13
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "dt"
+            arrow_type_id: 15
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "ts"
+            arrow_type_id: 24
+            dtype_code: _DT_INT64
+            nullable: true
+            tz: "UTC"
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "iv"
+            arrow_type_id: 40
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "st"
+            arrow_type_id: 21
+            nullable: true
+            dict_index_type_id: 4
+            child_names: "k"
+            child_names: "v"
+            child_type_ids: 5
+            child_type_ids: 13
+            child_nullables: false
+            child_nullables: true
+          }
+        }
+        source_kind: SOURCE_KIND_COLUMNAR
+      }
+    }
+  }
+}

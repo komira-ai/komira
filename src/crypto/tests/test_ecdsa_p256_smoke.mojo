@@ -208,7 +208,7 @@ def test_signature_byte_format() raises:
     )
     # No structural assertion possible beyond "no raise" — we already verified
     # the signature round-trip. This test exists for documentation that the
-    # output shape is fixed at 64 bytes (the InlineArray[UInt8, 64] return
+    # output shape is fixed at 64 bytes (the Array[UInt8, 64] return
     # type makes this a compile-time invariant).
     assert_equal(64, 64, "sig is 64 bytes (compile-time)")
     # Verify the round-trip works (smoke).

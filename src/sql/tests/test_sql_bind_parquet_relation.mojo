@@ -22,12 +22,16 @@
 #      tables of several files.
 #   6. `add_parquet_source` registers a table whose schema is the data columns
 #      then the partition columns and whose source is the one given.
+#   7. A catalog table whose source names an S3 bucket records no null count
+#      under NOT IN (the footers read local files, and its paths are object
+#      keys), while the same paths as a local table record each file's.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from arrow.arrow_types import ArrowType
 from arrow.schema import Field, Schema, SchemaBuilder
 
+from plan_expr.fs_descriptor_pod import FS_SCHEME_S3, FsDescriptorPod
 from scan_source.parquet_source import ParquetSource
 from sql.sql_ast import (
     HIVE_PARTITIONING_AUTO,
@@ -227,6 +231,24 @@ def test_null_free_needs_every_file_and_no_partition_column() raises:
         cat,
     )
     assert_true(part.find("kind=2") >= 0)
+
+
+def test_a_table_on_s3_records_no_null_count() raises:
+    var sql = String(
+        "SELECT k FROM read_parquet('one.parquet') WHERE k NOT IN"
+        " (SELECT k FROM t)"
+    )
+    var local = SqlCatalog()
+    local.add_parquet_source("t", _bad_source())
+    var f_local = _facts(sql, local)
+    assert_equal(f_local.null_count("bad/b.parquet", "k").value(), 3)
+    var remote = SqlCatalog()
+    remote.add_parquet_source(
+        "t", _bad_source().with_fs_descriptor(FsDescriptorPod.cloud(FS_SCHEME_S3, "lake", 0))
+    )
+    var f_remote = _facts(sql, remote)
+    assert_false(f_remote.has_null_count("bad/a.parquet", "k"))
+    assert_false(f_remote.has_null_count("bad/b.parquet", "k"))
 
 
 def test_add_parquet_source_registers_data_then_partition_columns() raises:

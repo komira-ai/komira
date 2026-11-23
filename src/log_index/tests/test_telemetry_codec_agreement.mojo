@@ -68,8 +68,8 @@ cross-decode returned garbage and raised nothing. Do not "tidy" this string: its
 LENGTH is the experimental condition."""
 
 
-def _uuid(fill: UInt8) -> InlineArray[UInt8, TELEMETRY_UUID_BYTES]:
-    return InlineArray[UInt8, TELEMETRY_UUID_BYTES](fill=fill)
+def _uuid(fill: UInt8) -> Array[UInt8, TELEMETRY_UUID_BYTES]:
+    return Array[UInt8, TELEMETRY_UUID_BYTES](fill=fill)
 
 
 def _put_i64(mut out: List[UInt8], v: Int64):

@@ -263,7 +263,7 @@ the farm's macOS workers), and a run publishes it only from main.
   three runtime names, for a copy already loaded in the process (`dlopen(name, RTLD_NOLOAD)`, its
   directory from `dlinfo`). A copy from the package's own file is fine. A copy from another file is
   accepted when its GNU build id equals the package's (the same build, for example Modular's PyPI
-  `mojo-compiler` 1.0.0 beside the package); a different or absent build id raises `LibraryLoadError`
+  `mojo-compiler` at the toolchain's version beside the package); a different or absent build id raises `LibraryLoadError`
   saying the library is already loaded from that directory as another build and that a process holds one
   Mojo runtime. The check runs on Linux and does nothing elsewhere.
 - **Two Mojo runtimes in one process** (read from the pinned files and glibc's loader, and run by the
@@ -275,13 +275,17 @@ the farm's macOS workers), and a run publishes it only from main.
     copy is never mapped. The build ids are equal, so the check accepts it.
   - The package's library first, then Modular's `libKGENCompilerRTShared.so` by path, same version: a
     second KGEN is mapped, and its `NEEDED` runtime libraries bind to the package's copies. Both work.
-  - Another Mojo version imported first (`mojo-compiler` 1.2.0, which `max` 26.7.0 requires): without the
-    check, libkomira would bind silently to that runtime, whose symbol names are a superset. The check
-    refuses by name instead.
-  - Another Mojo version imported after libkomira: Modular's KGEN fails to load with the loader's
-    `undefined symbol` (it needs `AsyncRT` and `Globals` symbols the 1.0.0 libraries lack), and libkomira
-    keeps working. This cannot be made safe: one process holds one Mojo runtime version, so `import max`
-    beside komira works only while both were built with the same Mojo version.
+  - Another Mojo version imported first (`mojo-compiler` 1.2.0, which `max` 26.7.0 requires, beside a
+    package built with 1.0.0): without the check, libkomira would bind silently to that runtime. The
+    check refuses by name instead, whichever version is the newer.
+  - Another Mojo version imported after libkomira: a newer Modular KGEN fails to load with the loader's
+    `undefined symbol` (1.2.0's needs `AsyncRT` and `Globals` symbols the 1.0.0 libraries lack), and
+    libkomira keeps working. An older one (1.0.0 or 1.1.0 beside a package built with 1.2.0) finds every
+    `M::` symbol it needs in the package's newer libraries, so it loads as a second KGEN bound to them,
+    and libkomira keeps working (INFERRED from the symbols, not yet run: no target is at a 1.2.0
+    toolchain; [mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)). Neither
+    can be made safe: one process holds one Mojo runtime version, so `import max` beside komira works
+    only while both were built with the same Mojo version.
   - Why not `RTLD_GLOBAL` for the package's runtime: it would put the package's KGEN in the global scope,
     where its default-visibility definitions interpose the ones other Mojo libraries bring. Why not
     renaming the sonames: it means modifying Modular's binaries, and two copies of the Globals libraries
@@ -296,10 +300,12 @@ the farm's macOS workers), and a run publishes it only from main.
   the wheel carries the runtime that built its libkomira, both out of one `[dist]` directory. The mixed case is in a
   process: another Mojo build's runtime already loaded when libkomira opens is refused by name
   (`//python:beside_other_mojo_loaded_first`, the runtime check above). To move the Mojo pin: change
-  `mojo_compiler` in `tools/build/platforms/table.bzl` for every platform row, and the `third_party/modular`
-  wheels of the same version in the same commit; `//python:refuses_modular_unlike_toolchain` fails when the
-  two differ, and the wheel rule refuses a wheel whose runtime needs more glibc or C++ runtime than the
-  limits in `_NATIVE_NEEDS` (`python/BUCK`).
+  `mojo_compiler` in `tools/build/platforms/table.bzl` for every platform row. The wheel carries the
+  runtime of the new pin with no other edit, the conda packages' `mojo-compiler ==<v>` follows
+  `MOJO_COMPILER_VERSION` (`tools/build/package/conda.bzl`), and the `beside_*` tests take Modular's
+  wheels of the pin's version and of the newest other version from `third_party/modular/pins.bzl`, which
+  must hold a row for the new version (`python/BUCK` does not load without one). The wheel rule refuses a
+  wheel whose runtime needs more glibc or C++ runtime than the limits in `_NATIVE_NEEDS` (`python/BUCK`).
 - Tests load the library their target staged: the private `_native.load(lib_dir)` takes the directory a
   `python_binding_test` passes as `--lib-dir`. It is an argument of a private function, not a user setting.
 - There is no lookup by environment variable (`KOMIRA_NATIVE_LIB`, `KOMIRA_NATIVE_LIBDIR` and the

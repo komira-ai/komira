@@ -4,7 +4,7 @@
 #
 # POD-only on cross-thread payloads. Every byte that crosses a worker
 # boundary (ring buffer slot, span event, link record) is POD:
-# `InlineArray[_, N]` or fixed-size primitives. NO `List[T]`, `String`,
+# `Array[_, N]` or fixed-size primitives. NO `List[T]`, `String`,
 # `OwnedPointer[T]`, or wildcard origins.
 #
 # This is a hard rule: a non-POD field in a slot that is destroyed and
@@ -20,7 +20,7 @@ from std.sys import size_of
 # size; do NOT raise without auditing the ring-buffer slot stride.
 comptime TRACE_ID_BYTES: Int = 16  # 128-bit, fits OTel-shaped trace_id
 comptime DEFAULT_MAX_LINKS: Int = 4
-comptime MAX_ATTR_STR_BYTES: Int = 32  # InlineArray[UInt8, 32] — string attr bound
+comptime MAX_ATTR_STR_BYTES: Int = 32  # Array[UInt8, 32] — string attr bound
 
 # Flag bits for SpanRecord.flags
 comptime SPAN_FLAG_ROOT: UInt32 = UInt32(1) << 0
@@ -36,14 +36,14 @@ comptime SPAN_STATUS_DROPPED: UInt8 = UInt8(2)
 
 struct SpanLink(Copyable, Movable, Deinitable):
     # MOJO-1.0.0: `ImplicitlyCopyable` DROPPED, `Copyable` kept. 1.0.0 makes
-    # `InlineArray` non-implicitly-copyable, and a struct owning one cannot
+    # `Array` non-implicitly-copyable, and a struct owning one cannot
     # synthesise an implicit copy ctor -- there is no manual override (a
     # hand-written `__copyinit__` is not consulted). Copies of this POD
     # record are now spelled `.copy()`; that is the SAME memcpy an implicit copy emitted
     # implicitly, so codegen and cost are unchanged.
     """A cross-thread happens-before edge — POD by construction.
 
-    Schema: `target_trace_id` (InlineArray[UInt8, 16]) +
+    Schema: `target_trace_id` (Array[UInt8, 16]) +
     `target_span_id` (UInt64) + `flags` (UInt32). Total: 16 + 8 + 4 = 28
     bytes (compiler may pad to 32 on aarch64).
     """
@@ -70,7 +70,7 @@ struct SpanLink(Copyable, Movable, Deinitable):
 
 struct SpanRecord(Copyable, Movable, Deinitable):
     # MOJO-1.0.0: `ImplicitlyCopyable` DROPPED, `Copyable` kept. 1.0.0 makes
-    # `InlineArray` non-implicitly-copyable, and a struct owning one cannot
+    # `Array` non-implicitly-copyable, and a struct owning one cannot
     # synthesise an implicit copy ctor -- there is no manual override (a
     # hand-written `__copyinit__` is not consulted). Copies of this POD
     # record are now spelled `.copy()`; that is the SAME memcpy an implicit copy emitted
@@ -78,7 +78,7 @@ struct SpanRecord(Copyable, Movable, Deinitable):
     """One span emission unit — POD by construction.
 
     Schema:
-        trace_id   InlineArray[UInt8, 16]
+        trace_id   Array[UInt8, 16]
         span_id    UInt64
         parent_id  UInt64           (0 = root)
         name_id    UInt32           (FNV-1a hash; lazy-registered)
@@ -88,10 +88,10 @@ struct SpanRecord(Copyable, Movable, Deinitable):
         flags      UInt32
         status     UInt8            (open / closed / dropped)
         n_links    UInt8            (number of valid entries in links[])
-        _pad       InlineArray[UInt8, 6]   (align to 8)
-        links      InlineArray[SpanLink, DEFAULT_MAX_LINKS]
+        _pad       Array[UInt8, 6]   (align to 8)
+        links      Array[SpanLink, DEFAULT_MAX_LINKS]
 
-    POD invariant: every field is a primitive scalar or an InlineArray of
+    POD invariant: every field is a primitive scalar or an Array of
     a POD element — proved by `tests/test_span_record_pod.mojo`.
     """
 

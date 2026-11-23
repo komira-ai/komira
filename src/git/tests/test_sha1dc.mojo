@@ -75,7 +75,7 @@ def _nibble(v: Int) -> String:
     return chr(v + 48) if v < 10 else chr(v + 87)
 
 
-def _hex(d: InlineArray[UInt8, 20]) -> String:
+def _hex(d: Array[UInt8, 20]) -> String:
     var s = String()
     for i in range(20):
         var v = Int(d[i])
@@ -105,7 +105,7 @@ def _corpus(n: Int, seed: UInt64) -> List[UInt8]:
 def _plain(data: Span[UInt8, _]) -> String:
     var h = Sha1()
     h.update(data)
-    var d = InlineArray[UInt8, 20](fill=0)
+    var d = Array[UInt8, 20](fill=0)
     h.finalize_into(d)
     return _hex(d)
 
@@ -123,7 +123,7 @@ def _dc(
     h.set_detect_collision(detect)
     h.set_detect_reduced_round_collision(reduced)
     h.update(data)
-    var d = InlineArray[UInt8, 20](fill=0)
+    var d = Array[UInt8, 20](fill=0)
     var found = h.finalize_into(d)
     return (_hex(d), found)
 
@@ -164,13 +164,13 @@ def test_plain_sha1_corpus() raises:
         var h = Sha1dc()
         h.update(Span(msg)[0:cut])
         h.update(Span(msg)[cut:150])
-        var d = InlineArray[UInt8, 20](fill=0)
+        var d = Array[UInt8, 20](fill=0)
         _ = h.finalize_into(d)
         assert_equal(_hex(d), want, "split at " + String(cut))
     var h = Sha1dc()
     for i in range(150):
         h.update(Span(msg)[i : i + 1])
-    var d = InlineArray[UInt8, 20](fill=0)
+    var d = Array[UInt8, 20](fill=0)
     _ = h.finalize_into(d)
     assert_equal(_hex(d), want)
     # finalize_into leaves the state as it was.
@@ -251,22 +251,22 @@ def test_recompress_inverts() raises:
     # values: the backward steps invert the forward ones.
     var x: UInt64 = 2024
     for trial in range(256):
-        var ihv = InlineArray[UInt32, 5](fill=0)
+        var ihv = Array[UInt32, 5](fill=0)
         for i in range(5):
             x = x * 6364136223846793005 + 1442695040888963407
             ihv[i] = UInt32(x >> 32)
-        var w = InlineArray[UInt32, 80](fill=0)
+        var w = Array[UInt32, 80](fill=0)
         for t in range(16):
             x = x * 6364136223846793005 + 1442695040888963407
             w[t] = UInt32(x >> 32)
         var before = ihv.copy()
-        var s58 = InlineArray[UInt32, 5](fill=0)
-        var s65 = InlineArray[UInt32, 5](fill=0)
+        var s58 = Array[UInt32, 5](fill=0)
+        var s65 = Array[UInt32, 5](fill=0)
         _compress_states(ihv, w, s58, s65)
         var me2 = w.copy()
         _expand(me2)
-        var ihvin = InlineArray[UInt32, 5](fill=0)
-        var ihvout = InlineArray[UInt32, 5](fill=0)
+        var ihvin = Array[UInt32, 5](fill=0)
+        var ihvout = Array[UInt32, 5](fill=0)
         _recompress[58](me2, s58, ihvin, ihvout)
         for i in range(5):
             assert_equal(ihvin[i], before[i], "step 58 in, trial " + String(trial))

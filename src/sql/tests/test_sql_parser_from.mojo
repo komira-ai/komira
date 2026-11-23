@@ -13,6 +13,11 @@
 #      USING, SEMI / ANTI without a condition, an OUTER join without ON, and
 #      the USING list forms. (catches: ASOF read as a table alias, the
 #      9-rows-for-2 shape)
+#   2b. test_a_right_or_full_join_after_an_inner_on_is_refused: a RIGHT or
+#      FULL join after an INNER JOIN ... ON (whose ON is folded into WHERE)
+#      is refused by name; a LEFT join after it, and a RIGHT or FULL join
+#      after a comma join, a USING join or before the INNER join, parse.
+#      (catches: the folded ON dropping the rows the outer join pads)
 #   3. A table reference: schema-qualified, aliased with or without AS, a
 #      table called `lateral`; LATERAL (...) refused. (catches: the alias
 #      grab eating a structural keyword)
@@ -138,6 +143,28 @@ def test_outer_semi_anti_and_natural_joins() raises:
     var left_using = _parse("SELECT * FROM a LEFT JOIN b USING (k)")
     assert_equal(Int(left_using.query.joins[0].kind), Int(JK_LEFT))
     assert_false(Bool(left_using.query.joins[0].on_pred))
+
+
+def test_a_right_or_full_join_after_an_inner_on_is_refused() raises:
+    _refuses(
+        "SELECT * FROM a JOIN b ON a.k = b.k RIGHT JOIN c ON b.k = c.k",
+        "a RIGHT or FULL JOIN after an INNER JOIN ... ON in one FROM",
+    )
+    _refuses(
+        "SELECT * FROM a INNER JOIN b ON a.k = b.k FULL OUTER JOIN c ON b.k = c.k",
+        "a RIGHT or FULL JOIN after an INNER JOIN ... ON in one FROM",
+    )
+    # A LEFT join after it keeps the folded ON's answer, and a RIGHT join
+    # after a comma join or a USING join folds nothing into WHERE.
+    var left = _parse("SELECT * FROM a JOIN b ON a.k = b.k LEFT JOIN c ON b.k = c.k")
+    assert_equal(Int(left.query.joins[1].kind), Int(JK_LEFT))
+    assert_true(Bool(left.query.where_pred))
+    var comma = _parse("SELECT * FROM a, b RIGHT JOIN c ON b.k = c.k")
+    assert_equal(Int(comma.query.joins[1].kind), Int(JK_RIGHT))
+    var keyed = _parse("SELECT * FROM a JOIN b USING (k) FULL JOIN c ON b.k = c.k")
+    assert_equal(Int(keyed.query.joins[1].kind), Int(JK_FULL))
+    var first = _parse("SELECT * FROM a RIGHT JOIN b ON a.k = b.k JOIN c ON b.k = c.k")
+    assert_equal(Int(first.query.joins[0].kind), Int(JK_RIGHT))
 
 
 def test_unserved_and_malformed_joins_refuse() raises:

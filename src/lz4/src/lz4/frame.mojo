@@ -134,7 +134,7 @@ def _lz4f_decode_once[
     # writes back the bytes produced / consumed.
     var dst_size = cap
     var src_size = n
-    var scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var scratch = Array[UInt8, 1](fill=UInt8(0))
     var dst_ptr = scratch.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
     if cap > 0:
         dst_ptr = dst.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
@@ -284,8 +284,8 @@ def lz4_frames_decompress_into[
     var dst_capacity = len(dst)
     var decoder = Lz4FrameDecoder()
     var handle_ptr = _default_lz4_codec_handle()
-    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
-    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
+    var src_scratch = Array[UInt8, 1](fill=UInt8(0))
     var total_out = 0
     var src_pos = 0
     while True:

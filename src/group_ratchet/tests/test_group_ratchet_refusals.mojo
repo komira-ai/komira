@@ -162,7 +162,7 @@ def test_seal_to_all_zero_prekey_refused() raises:
     """A recipient prekey of all zero bytes (a small-order point) is refused:
     no key share is sealed to a shared secret an observer can compute."""
     var s = OutboundGroupSession(_ascii("room-zero"))
-    var zero = InlineArray[UInt8, X25519_KEY_SIZE](fill=UInt8(0))
+    var zero = Array[UInt8, X25519_KEY_SIZE](fill=UInt8(0))
     var raised = False
     try:
         _ = seal_session_key(s.export_session_key(), zero)

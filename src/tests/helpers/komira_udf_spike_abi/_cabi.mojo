@@ -100,7 +100,7 @@ struct CArrowDeviceArray:
     var device_id: Int64
     var device_type: Int32
     var sync_event: Void
-    var reserved: InlineArray[Int64, 3]
+    var reserved: Array[Int64, 3]
 
 
 struct CArrowDeviceArrayStream:
@@ -139,6 +139,8 @@ struct CUdfHost:
     var mem_release: MemReleaseFn
     var now_ns: NowNsFn
     var log: LogFn
+    var n_options: Int
+    var options: Void
 
 
 struct CUdfCapabilities:

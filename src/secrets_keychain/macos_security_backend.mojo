@@ -235,7 +235,7 @@ def _wipe_string(mut s: String):
     (stdout) or backend diagnostics. Mojo cannot securely zero a `String`
     heap buffer (the same limitation `SecretValue` exists to avoid), so this drops
     the prior heap buffer by reassigning to empty. The AUTHORITATIVE secure wipe
-    is on the zeroizing `SecretValue` the store mints (InlineArray +
+    is on the zeroizing `SecretValue` the store mints (Array +
     `zeroize_inline_array`); this transient holds the secret only for the few
     instructions between the drain and the lookup copy."""
     s = String("")

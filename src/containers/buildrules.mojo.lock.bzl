@@ -48,9 +48,9 @@ GRAPH_JSON = r'''{
       "root": "src/containers/src/containers",
       "srcs": [
         {"path": "src/containers/src/containers/__init__.mojo", "sha256": "23fc12220005de7b1cdd30f8f531be8d7323493ab2c4c4fd33501e077fc06770"},
-        {"path": "src/containers/src/containers/dyn_value.mojo", "sha256": "33fa262351a4c44b84fe0805d7c04cb2f3df5d02b86a0cbc5ed4296121fac895"},
-        {"path": "src/containers/src/containers/hyperloglog.mojo", "sha256": "5361096859faa5cfeb58d25abbf92df2fd3c2451bf840693b12d6d52729086a5"},
-        {"path": "src/containers/src/containers/slab.mojo", "sha256": "97e87ae59d9bbee01e376e71d5cae0872b475866dec05c6d67c95bdc4ee0ca8d"},
+        {"path": "src/containers/src/containers/dyn_value.mojo", "sha256": "cd34da63a580b740703601b8fd76b0a329fb2f1f2a1e925768c814bf1686882c"},
+        {"path": "src/containers/src/containers/hyperloglog.mojo", "sha256": "6103e72b8f00edda53a7ed82fac7be510854ebfa1cdea08b23a74f0809689da4"},
+        {"path": "src/containers/src/containers/slab.mojo", "sha256": "e39c52efd81f589a9311f71440f5ec7c17a1f182d1733f30574cba497b3fd251"},
         {"path": "src/containers/src/containers/variadic_pack.mojo", "sha256": "8a49aa207d1044fcb81864b34f601f43c525a1fdbe82ed952e68c3333f33ef57"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.0.0/lib"],
@@ -198,9 +198,9 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "root": "src/containers/src/containers",
       "srcs": [
         {"path": "src/containers/src/containers/__init__.mojo", "sha256": "23fc12220005de7b1cdd30f8f531be8d7323493ab2c4c4fd33501e077fc06770"},
-        {"path": "src/containers/src/containers/dyn_value.mojo", "sha256": "33fa262351a4c44b84fe0805d7c04cb2f3df5d02b86a0cbc5ed4296121fac895"},
-        {"path": "src/containers/src/containers/hyperloglog.mojo", "sha256": "5361096859faa5cfeb58d25abbf92df2fd3c2451bf840693b12d6d52729086a5"},
-        {"path": "src/containers/src/containers/slab.mojo", "sha256": "97e87ae59d9bbee01e376e71d5cae0872b475866dec05c6d67c95bdc4ee0ca8d"},
+        {"path": "src/containers/src/containers/dyn_value.mojo", "sha256": "cd34da63a580b740703601b8fd76b0a329fb2f1f2a1e925768c814bf1686882c"},
+        {"path": "src/containers/src/containers/hyperloglog.mojo", "sha256": "6103e72b8f00edda53a7ed82fac7be510854ebfa1cdea08b23a74f0809689da4"},
+        {"path": "src/containers/src/containers/slab.mojo", "sha256": "e39c52efd81f589a9311f71440f5ec7c17a1f182d1733f30574cba497b3fd251"},
         {"path": "src/containers/src/containers/variadic_pack.mojo", "sha256": "8a49aa207d1044fcb81864b34f601f43c525a1fdbe82ed952e68c3333f33ef57"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.0.0/lib"],
@@ -345,9 +345,9 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "root": "src/containers/src/containers",
       "srcs": [
         {"path": "src/containers/src/containers/__init__.mojo", "sha256": "23fc12220005de7b1cdd30f8f531be8d7323493ab2c4c4fd33501e077fc06770"},
-        {"path": "src/containers/src/containers/dyn_value.mojo", "sha256": "33fa262351a4c44b84fe0805d7c04cb2f3df5d02b86a0cbc5ed4296121fac895"},
-        {"path": "src/containers/src/containers/hyperloglog.mojo", "sha256": "5361096859faa5cfeb58d25abbf92df2fd3c2451bf840693b12d6d52729086a5"},
-        {"path": "src/containers/src/containers/slab.mojo", "sha256": "97e87ae59d9bbee01e376e71d5cae0872b475866dec05c6d67c95bdc4ee0ca8d"},
+        {"path": "src/containers/src/containers/dyn_value.mojo", "sha256": "cd34da63a580b740703601b8fd76b0a329fb2f1f2a1e925768c814bf1686882c"},
+        {"path": "src/containers/src/containers/hyperloglog.mojo", "sha256": "6103e72b8f00edda53a7ed82fac7be510854ebfa1cdea08b23a74f0809689da4"},
+        {"path": "src/containers/src/containers/slab.mojo", "sha256": "e39c52efd81f589a9311f71440f5ec7c17a1f182d1733f30574cba497b3fd251"},
         {"path": "src/containers/src/containers/variadic_pack.mojo", "sha256": "8a49aa207d1044fcb81864b34f601f43c525a1fdbe82ed952e68c3333f33ef57"}
       ],
       "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.0.0/lib"],

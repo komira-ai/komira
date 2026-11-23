@@ -685,7 +685,7 @@ struct VTableMorselSource(MorselSourceImpl):
     def set_projection(mut self, cols: List[Int]) -> None:
         """⭐ PROJECTION PUSHDOWN ACROSS THE SEAM. `List[Int]` -> `int32*`.
 
-        The marshal is a stack `InlineArray` copy of at most 256 indices; a
+        The marshal is a stack `Array` copy of at most 256 indices; a
         wider projection is NOT pushed (the engine projects above the scan,
         which is correct, just slower). Nor is one holding an index outside
         the schema (below 0 or at/above its width): such an index means

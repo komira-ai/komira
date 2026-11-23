@@ -16,7 +16,14 @@ Import each module by name; the package root exports nothing.
 - `run_segment`: build the members, size the sink for the workers, run one
   `SegmentTask` per worker, then combine once, finalize and take the output. A
   recorded error, or a cancellation by the caller's `CancellationToken`, is
-  raised after the workers joined, and the sink is never combined or read.
+  raised after the workers joined, and the sink is never combined or read. After
+  the workers join and before the combine, each operator's tail (the rows it
+  owes once every worker has finished: the build rows a RIGHT or FULL join
+  probe found no partner for) is asked of the builder (`op_tail`) and pushed on
+  the calling thread through the operators after it and into the sink as worker
+  0, at a partition position after every source position; a spent limit
+  after an operator ends that operator's tail (the tails of operators after
+  the limit still run), and a cancel during them is raised after them.
 - `segment_task`: `SegmentRun`, the state the workers share, and `SegmentTask`,
   the worker body. A worker reads the cancel flag and the token at every morsel
   boundary, claims a morsel (`None` at the end of input, never asked again by
@@ -34,6 +41,12 @@ Import each module by name; the package root exports nothing.
   `check_plan` refuses ORDER_ROW_RANGE on any sink but the ungrouped
   aggregation sink.
 - `published_outputs`: `PublishedOutputs`, the batch each finished segment left.
+  `run_plan` builds it from the plan, counting as a reader of a segment every
+  SOURCE_SINK_OUTPUT and SOURCE_CONCAT spec that names it (a concatenation
+  that names it twice reads it twice). `take` gives every reader but the last
+  a copy and the last the batch itself, so a segment several others read (a
+  shared subplan) hands each the same rows; what no reader took, the result,
+  is what `run_plan` returns.
 - `segment_builder`: the `SegmentBuilder` trait through which a plan's members
   are constructed from a descriptor. `build_source` is given the worker count
   (a source that sizes per-worker state at construction needs it) and
@@ -56,7 +69,13 @@ Import each module by name; the package root exports nothing.
   and installs the filter as the decode filter (every conjunct is applied; a row
   whose predicate is UNKNOWN is dropped) and as the pushed predicate that
   row-group statistics are checked against. The source borrows the caller's
-  footer cache and expression pool. `BatchSource` serves a copy of a resident
+  footer cache and expression pool. `build_parquet_source_on` is the same over
+  any file system: a spec whose store (`parquet_fs`) is a bucket is read
+  through the file system the builder's `ScanFsOpener` (fs) opens on it, its
+  paths object keys and its one path never listed; `build_parquet_source`
+  refuses such a spec, and so does a builder made without an opener, with
+  `SCAN_FS_UNSERVED` naming the store (`LocalOnlyScanFs`, the default opener,
+  opens nothing). `BatchSource` serves a copy of a resident
   batch and `SinkOutputSource` the batch a finished segment published, each as
   morsels claimed from one shared cursor. `build_csv_source` reads the file
   of the CSV arm of a `SourceSpecPod` (a `.csv.gz`, `.csv.zst` or `.csv.lz4`
@@ -175,7 +194,21 @@ Import each module by name; the package root exports nothing.
   table while it doubles (at most half the bytes charged for that table). A
   table holds at most 2^30 groups (a 32-bit group index) and refuses more by
   name. The merge is serial, and there is no dense table for a
-  small key domain and no partitioned parallel finalize yet. `AnyAggSink` is the
+  small key domain and no partitioned parallel finalize yet.
+  Given a spill directory (`RealBuilder.set_spill_directory`), the fixed-width
+  grouped sink does not refuse a table the pool cannot grow: the worker writes
+  the table to disk (`group_spill`: one chunk per partition of 16, by the top
+  bits of the key hash, through `engine_runtime`'s `LocalDiskSpillStorage`
+  and THSPLC column codec, under a sub-directory made by
+  `op_spill_rows.spill_root`), returns its memory and folds on into a new
+  table. `combine` then merges one partition at a time from the workers'
+  tables and the chunks, keeping each partition's output rows (charged) and
+  freeing its table, and writes the workers' remaining tables to disk when the
+  pool denies a partition's merge. The folds are exact, so the groups and their
+  values are the ones without a spill. The spill files are deleted at the end
+  of `combine` or when the sink is dropped. A sink with COUNT(DISTINCT) does
+  not spill and says so in its refusal; the string-keyed sinks and the sort do
+  not spill. `AnyAggSink` is the
   one slot of the sink variant that holds the grouped or the ungrouped sink.
 - `sink_string_group_agg`, `string_keys`: the grouped aggregation sinks keyed by
   strings, `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED | SINK_ORIENT_COLUMNAR)`,
@@ -277,7 +310,10 @@ Import each module by name; the package root exports nothing.
   refused), OP_FILTER,
   OP_PROJECT, OP_LIMIT, OP_JOIN_PROBE (a `HashProbeOp`, whose index
   `build_source` makes from the rows the build segment published; a build
-  segment that is not among the segment's dependencies is refused) and the
+  segment that is not among the segment's dependencies is refused; for a RIGHT
+  or FULL probe `op_tail` gives the unmatched build rows, probe columns NULL at
+  the types the chain gives the rows before the probe, in batches of the
+  segment's morsel size, `DEFAULT_MORSEL_ROWS` when it names none) and the
   sinks `(SINK_COLLECT, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)`, `(SINK_HASH_BUILD, KEY_DTYPE_NONE,
   SINK_ORIENT_COLUMNAR)` (a `CollectSink`), `(SINK_AGG, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`,
@@ -288,23 +324,37 @@ Import each module by name; the package root exports nothing.
   SINK_ORIENT_COLUMNAR)`, and refuses every other kind by name. It keeps the
   resident batches (`add_resident`), the aggregation sink data a descriptor's
   `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`) and the segment pool
-  (`set_memory_budget`, unbounded until set), shares one set of operator parts among the
+  (`set_memory_budget`, unbounded until set) and the spill directory of the
+  fixed-width grouped sinks (`set_spill_directory`, none until set), shares one set of operator parts among the
   workers of a segment run, and derives the empty-output schema by running the
   chain's projections over a batch of no rows. Three origins name the borrows of
   the Parquet source (the footer cache, the expression pool, an absent dynamic
-  filter).
-- `op_hash_probe`: `HashProbeShared` and `HashProbeOp`, OP_JOIN_PROBE for an
-  INNER equi-join. The probe segment's builder takes the rows the build segment
-  published and makes one composite hash index over the build key columns
-  (`op_join_probe`'s `MultiKeyHashJoinBuilder`), once and on the calling
-  thread before any worker starts. Each worker's `HashProbeOp` reads the index
-  and the build rows and never writes them. A morsel with a selection mask is
-  gathered first; a morsel with no row or no match is FILTERED_EMPTY. The
-  output is the probe columns then the build columns, a build name the probe
-  side uses suffixed `_right`. A NULL key on either side matches nothing; the
-  key types are the kernel's (INT64 and INT32, FLOAT64, STRING). An INT64 key
-  equal to the value the kernel uses for NULL is refused by name
-  (`JOIN_KEY_RESERVED`) rather than silently unmatched.
+  filter), and a fourth parameter `R` the `ScanFsOpener` of the remote store a
+  Parquet spec may name (`LocalOnlyScanFs` by default): a builder made with an
+  opener (`RealBuilder(cache, pool, opener)`) reads a spec on a bucket through
+  the file system the opener opens on it, beside the local ones, with one
+  footer cache keyed per file system.
+- `op_hash_probe`: `HashProbeShared` and `HashProbeOp`, OP_JOIN_PROBE for
+  INNER, LEFT, RIGHT, FULL, SEMI, ANTI and CROSS joins, the join type being the
+  probe's view (probe left, build right; `lowering` exchanges LEFT and RIGHT
+  when the plan builds its left child). The probe segment's builder takes the
+  rows the build segment published and makes one composite hash index over the
+  build key columns (`op_join_probe`'s `MultiKeyHashJoinBuilder`), once and on
+  the calling thread before any worker starts; a CROSS join has no key and no
+  index. Each worker's `HashProbeOp` reads the index and the build rows. A
+  morsel with a selection mask is gathered first; a morsel with no row or no
+  row to emit is FILTERED_EMPTY. The output is the probe columns then the
+  build columns, a build name the probe side uses suffixed `_right`, the
+  columns of a side an outer join pads nullable; SEMI and ANTI give the probe
+  columns only. LEFT and FULL pad a probe row without partner with NULL build
+  columns. RIGHT and FULL mark the build rows that found a partner in one
+  atomic byte each, shared by the workers (the only thing the workers write of
+  the shared part), and `unmatched_build_rows` gives the rest, probe columns
+  NULL, as the operator's tail. A CROSS morsel is emitted in chunks of whole
+  probe rows of about 65536 output rows (HAVE_MORE_OUTPUT between them). A NULL
+  key on either side matches nothing; the key types are the kernel's (INT64 and
+  INT32, FLOAT64, STRING). An INT64 key equal to the value the kernel uses for
+  NULL is refused by name (`JOIN_KEY_RESERVED`) rather than silently unmatched.
 - `plan_harness`: segment descriptors for the four sources with an operator
   chain and a collect sink (`with_agg_sink` turns one into an aggregation),
   `project_columns`, and a sample table with readers, for plans written by hand
@@ -372,9 +422,13 @@ the raise fails the query through the first-error slot.
   start. The build rows and the index are not charged to the segment pool, so
   the memory budget does not see them. There is no runtime filter: the probe
   side's scan reads every row.
-- **A join morsel gives one output batch.** A probe morsel whose rows each
-  match many build rows yields one batch as large as the fan-out, because the
-  probe does not return HAVE_MORE_OUTPUT to split it.
+- **A keyed join morsel gives one output batch.** A probe morsel whose rows
+  each match many build rows yields one batch as large as the fan-out, because
+  the keyed probes do not return HAVE_MORE_OUTPUT to split it; only CROSS does.
+- **The unmatched-row tail is pushed on one thread, after the workers.** A
+  RIGHT or FULL join's tail rows go through the rest of the segment's chain and
+  into the sink on the calling thread, so a long tail is not spread over the
+  workers.
 - **One INT64 key value is refused.** The kernel stands for NULL by one INT64
   value; a join key equal to it raises `JOIN_KEY_RESERVED`.
 

@@ -188,7 +188,7 @@ struct AggCommitPlan[batch_origin: ImmOrigin](Movable):
     # savings. Instead each slot's tag is resolved to a row thunk at plan
     # time (`bind_layout`), with the byte offset of the slot
     # within an entry (`aggs_offset + layout.offsets[agg_idx]`), both in
-    # parallel per-bucket InlineArrays; `commit_row` then calls the
+    # parallel per-bucket Arrays; `commit_row` then calls the
     # pre-bound thunk with no per-row tag work.
     #
     # Per-bucket parallel arrays (same ordering as `*_agg_idxs`):
@@ -199,7 +199,7 @@ struct AggCommitPlan[batch_origin: ImmOrigin](Movable):
     # column is irrelevant; the slot offset is still stored because the
     # slot lives inside an entry.
     #
-    # Storage: `InlineArray[T, MAX_AGGS]` (NOT `List[T]`): the elements
+    # Storage: `Array[T, MAX_AGGS]` (NOT `List[T]`): the elements
     # live inline in `AggCommitPlan` itself, with no separate heap buffer
     # whose lifetime the compiler would have to chain through the plan.
     # MAX_AGGS is the same cap AggLayout uses.
@@ -234,7 +234,7 @@ struct AggCommitPlan[batch_origin: ImmOrigin](Movable):
 
     # -------------------------------------------------------------------------
     # Per-bucket parallel arrays of the `_count_with_validity` bucket, in
-    # the InlineArray pattern of the four type buckets.
+    # the Array pattern of the four type buckets.
     #
     # `count_validity_idxs[j]`        — agg_idx for the j-th validity-count
     #                                   slot (used by the
@@ -255,7 +255,7 @@ struct AggCommitPlan[batch_origin: ImmOrigin](Movable):
     #                                   Set by `bind_layout`.
     #
     # MAX_AGGS mirrors the four type buckets. UnsafePointer is Copyable,
-    # so the InlineArray holds the pointers inline.
+    # so the Array holds the pointers inline.
     # -------------------------------------------------------------------------
     var count_validity_idxs: Array[Int, MAX_AGGS]
     # Validity-bitmap pointers alias the batch's column validity buffers

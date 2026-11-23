@@ -1,8 +1,8 @@
 /*
  * komira_udf_runtime.h: the UDF runtime C ABI, version 1.0, as
- * docs/design/udf_runtime_interface.md section 4.3 states it. Test-only: this
- * copy serves the conformance harness and the reference runtimes under
- * src/tests/helpers; nothing outside src/tests may include it.
+ * docs/design/udf_runtime_interface.md section 4.3 states it. It lives in
+ * src/udf_abi/ and is included by every runtime library under src/, by the
+ * conformance harness and by the reference runtimes under src/tests/helpers.
  *
  * Plain C99, no include beyond <stdint.h> and <stddef.h>. The Arrow C Data,
  * C Stream and C Device structs are copied verbatim from the Arrow
@@ -146,7 +146,8 @@ typedef enum { /* 0 is success; values are never reused */
   KOMIRA_UDF_ERR_WORKER_CRASHED = 17, /* the process running user code died, not by the runtime's own stop; context lost */
   KOMIRA_UDF_ERR_HOST_CONTRACT = 18,  /* the host broke this ABI (section 4.5); message names the rule */
   KOMIRA_UDF_ERR_KILLED = 19,         /* user code ignored a cancel or deadline and was stopped by force; context lost */
-  KOMIRA_UDF_ERR_READ_SET_MISMATCH = 20 /* validate: ROW/FRAME arg_types names differ from the descriptor's fields */
+  KOMIRA_UDF_ERR_READ_SET_MISMATCH = 20, /* validate: ROW/FRAME arg_types names differ from the descriptor's fields */
+  KOMIRA_UDF_ERR_BAD_OPTION = 21 /* init: a runtime option is unknown, repeated, missing or has a bad value */
 } komira_udf_status;
 
 /* capabilities.udf_class (0 reserved, refused) */
@@ -202,6 +203,9 @@ typedef struct komira_udf_host { /* provided by the engine; valid until shutdown
   void (*mem_release)(void* host_data, int64_t bytes);
   int64_t (*now_ns)(void* host_data); /* monotonic clock deadlines are read against */
   void (*log)(void* host_data, int32_t level, const char* utf8);
+  /* Appended in 1.0 (a runtime reads them only when struct_size covers them): */
+  size_t n_options;           /* runtime options; opaque to the engine */
+  const char* const* options; /* UTF-8 "key=value"; borrowed for the init call */
 } komira_udf_host;
 
 typedef struct komira_udf_capabilities {

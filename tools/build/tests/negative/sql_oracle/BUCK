@@ -153,6 +153,9 @@ sql_oracle(
     "parquet",
     "csv",
     "tsv",
+    "json",
+    "gz",
+    "zst",
 ]]
 
 # REFUSED: an output name with a glob character, second: the name pattern,
@@ -359,3 +362,35 @@ sql_oracle(
     ("newline", "1.5\n6"),
     ("empty", ""),
 ]]
+
+# REFUSED: an extensions entry whose name does not end in `.duckdb_extension`;
+# it is the second entry, so a check of only the first passes it.
+sql_oracle(
+    name = "extension_suffix",
+    srcs = "ok.sql",
+    extensions = [
+        "fake.duckdb_extension",
+        "staged.csv",
+    ],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an extensions entry that ends in `.duckdb_extension` but holds a
+# quote, which would close the string of its LOAD statement.
+sql_oracle(
+    name = "extension_quote",
+    srcs = "ok.sql",
+    extensions = ["q'uote.duckdb_extension"],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an extension named twice.
+sql_oracle(
+    name = "extension_twice",
+    srcs = "ok.sql",
+    extensions = [
+        "fake.duckdb_extension",
+        "fake.duckdb_extension",
+    ],
+    outputs = ["out.tsv"],
+)

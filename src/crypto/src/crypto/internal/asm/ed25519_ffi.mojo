@@ -66,14 +66,14 @@
 #
 # Public API:
 #   * `ed25519_sign_from_seed(seed, msg, mut sig_out)` takes Span[UInt8, _]
-#     + mut InlineArray[UInt8, 64] — ZERO UnsafePointer in the public
+#     + mut Array[UInt8, 64] — ZERO UnsafePointer in the public
 #     signature.
 #   * `ed25519_verify(pubkey, msg, sig)` takes Span[UInt8, _] only —
 #     ZERO UnsafePointer.
 #   * `ed25519_pubkey_from_seed(seed, mut pubkey_out)` takes Span +
-#     mut InlineArray — ZERO UnsafePointer.
+#     mut Array — ZERO UnsafePointer.
 #   * `ed25519_keypair_generate(mut seed_out, mut pubkey_out)` takes
-#     mut InlineArray only — ZERO UnsafePointer.
+#     mut Array only — ZERO UnsafePointer.
 # Internal FFI:
 #   * Each `external_call[...]` site uses `UnsafePointer(to=...)` /
 #     `Span.unsafe_ptr()` with INFERRED origin (NOT wildcard widening),
@@ -117,7 +117,7 @@ def ed25519_pubkey_from_seed(
     Performance: matches AWS-LC's own `ED25519_keypair_from_seed`
     byte-identically — this IS the AWS-LC implementation. Per-call
     overhead vs a direct external_call: a few
-    nanoseconds (Mojo's FFI dispatch + InlineArray init).
+    nanoseconds (Mojo's FFI dispatch + Array init).
     """
     # ⚠ A REAL CHECK, NOT `debug_assert` — `debug_assert` is COMPILED OUT of the
     # shipped binary, and AWS-LC reads exactly 32 bytes from `seed` regardless of
@@ -149,7 +149,7 @@ def ed25519_pubkey_from_seed(
     #
     # Pointers are constructed via `UnsafePointer(to=x).bitcast[UInt8]()`
     # following the X25519 precedent. Origin is INFERRED from the locals
-    # `pubkey_out` (mut InlineArray) + `expanded_priv` (mut local InlineArray)
+    # `pubkey_out` (mut Array) + `expanded_priv` (mut local Array)
     # and the `seed` span — NOT a wildcard widening. The local pointers do
     # not escape this function body.
     external_call["komira_awslc_ED25519_keypair_from_seed", NoneType](

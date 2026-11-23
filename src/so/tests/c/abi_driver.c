@@ -34,6 +34,9 @@ DECLARE(komira_parquet_schema);
 DECLARE(komira_csv_binding);
 DECLARE(komira_json_binding);
 DECLARE(komira_plan_render);
+DECLARE(komira_credential_add);
+DECLARE(komira_credential_set);
+DECLARE(komira_credential_seal);
 
 static int bind_all(void *lib) {
     int missing = 0;
@@ -55,6 +58,9 @@ static int bind_all(void *lib) {
     BIND(komira_csv_binding);
     BIND(komira_json_binding);
     BIND(komira_plan_render);
+    BIND(komira_credential_add);
+    BIND(komira_credential_set);
+    BIND(komira_credential_seal);
 #undef BIND
     return missing;
 }
@@ -67,6 +73,12 @@ _Static_assert(KOMIRA_ERR_ENGINE == -3, "KOMIRA_ERR_ENGINE");
 _Static_assert(KOMIRA_ERR_BUFFER_TOO_SMALL == -4, "KOMIRA_ERR_BUFFER_TOO_SMALL");
 _Static_assert(KOMIRA_ERR_TOO_LARGE == -5, "KOMIRA_ERR_TOO_LARGE");
 _Static_assert(KOMIRA_MAX_INPUT_BYTES == 64 * 1024 * 1024, "KOMIRA_MAX_INPUT_BYTES");
+_Static_assert(KOMIRA_BIND_SESSION == 1, "KOMIRA_BIND_SESSION");
+_Static_assert(KOMIRA_CRED_AWS_KEYS == 1, "KOMIRA_CRED_AWS_KEYS");
+_Static_assert(KOMIRA_CRED_OAUTH2_CLIENT == 8, "KOMIRA_CRED_OAUTH2_CLIENT");
+_Static_assert(KOMIRA_FIELD_KEY_ID == 1, "KOMIRA_FIELD_KEY_ID");
+_Static_assert(KOMIRA_FIELD_SECRET == 2, "KOMIRA_FIELD_SECRET");
+_Static_assert(KOMIRA_FIELD_TOKEN_URL == 13, "KOMIRA_FIELD_TOKEN_URL");
 
 int main(void) {
     void *lib = dlopen("./libkomira.so", RTLD_NOW);
@@ -122,6 +134,31 @@ int main(void) {
     CHECK(p_komira_plan_render(ctx, plan, (uint64_t)KOMIRA_MAX_INPUT_BYTES + 1, out, sizeof out, &out_len) == KOMIRA_ERR_TOO_LARGE);
     CHECK(p_komira_plan_render(ctx, plan, UINT64_MAX, out, sizeof out, &out_len) == KOMIRA_ERR_TOO_LARGE);
     CHECK(p_komira_plan_render(ctx, NULL, 0, NULL, 0, NULL) == KOMIRA_ERR_NULL_ARG);
+
+    /* A credential through the header's constants: defined, then one sealed
+       without its secret is the engine's refusal, named in the last error. */
+    int32_t id = -7;
+    static const char key_id[] = "AKIDDRIVER";
+    static const char secret[] = "driver-secret";
+    CHECK(p_komira_credential_add(ctx, KOMIRA_CRED_AWS_KEYS, "raw-etl", &id) == KOMIRA_OK && id > 0);
+    CHECK(p_komira_credential_set(ctx, id, KOMIRA_FIELD_KEY_ID, (const uint8_t *)key_id, sizeof key_id - 1) == KOMIRA_OK);
+    CHECK(p_komira_credential_set(ctx, id, KOMIRA_FIELD_SECRET, (const uint8_t *)secret, sizeof secret - 1) == KOMIRA_OK);
+    CHECK(p_komira_credential_seal(ctx, id, KOMIRA_BIND_SESSION) == KOMIRA_OK);
+    CHECK(p_komira_credential_add(ctx, KOMIRA_CRED_AWS_KEYS, "raw-etl", &id) == KOMIRA_OK);
+    CHECK(p_komira_credential_set(ctx, id, KOMIRA_FIELD_KEY_ID, (const uint8_t *)key_id, sizeof key_id - 1) == KOMIRA_OK);
+    CHECK(p_komira_credential_seal(ctx, id, KOMIRA_BIND_SESSION) == KOMIRA_ERR_ENGINE);
+    static const char named[] = "CREDENTIALS_INVALID: seal credential=raw-etl: AwsKeys needs secret=";
+    memset(text, 0, sizeof text);
+    CHECK(p_komira_last_error(ctx, text, sizeof text, &again) == KOMIRA_OK);
+    CHECK(again == sizeof named - 1 && memcmp(text, named, sizeof named - 1) == 0);
+    /* NULL context, NULL out_id, NULL value with a length, a length past the bound. */
+    int32_t untouched = -7;
+    CHECK(p_komira_credential_add(NULL, KOMIRA_CRED_AWS_KEYS, "raw-etl", &untouched) == KOMIRA_ERR_NULL_CTX);
+    CHECK(p_komira_credential_add(ctx, KOMIRA_CRED_AWS_KEYS, "raw-etl", NULL) == KOMIRA_ERR_NULL_ARG);
+    CHECK(untouched == -7);
+    CHECK(p_komira_credential_set(ctx, 1, KOMIRA_FIELD_SECRET, NULL, 4) == KOMIRA_ERR_NULL_ARG);
+    CHECK(p_komira_credential_set(ctx, 1, KOMIRA_FIELD_SECRET, plan, (uint64_t)KOMIRA_MAX_INPUT_BYTES + 1) == KOMIRA_ERR_TOO_LARGE);
+    CHECK(p_komira_credential_seal(NULL, 1, KOMIRA_BIND_SESSION) == KOMIRA_ERR_NULL_CTX);
 
     p_komira_ctx_free(ctx);
     p_komira_ctx_free(other);

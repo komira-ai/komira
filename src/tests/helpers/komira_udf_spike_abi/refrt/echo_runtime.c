@@ -932,7 +932,7 @@ static const komira_udf_runtime TABLE = {
 /* A runtime on `host`, or NULL with *e filled. `any_major`: accept a host of
  * any ABI major (a variant's bug). */
 static komira_udf_rt* new_rt(const komira_udf_host* host, komira_udf_error* e, int any_major) {
-  if (host == NULL || host->struct_size < sizeof(komira_udf_host)) {
+  if (host == NULL || host->struct_size < offsetof(komira_udf_host, n_options)) {
     fail(NULL, e, KOMIRA_UDF_ERR_ABI, "this runtime needs a komira_udf_host of ABI 1.0", -1);
     return NULL;
   }

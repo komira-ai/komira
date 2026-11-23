@@ -408,7 +408,7 @@ def azure_shared_key_sign(
     var key_bytes = base64_decode(ctx.cred.key_b64)
     var mac = hmac_sha256_string(key_bytes, sts)
 
-    # Convert InlineArray[UInt8, 32] -> Span for base64_encode.
+    # Convert Array[UInt8, 32] -> Span for base64_encode.
     # NOTE: base64_encode takes Span[UInt8, _]; expose mac as a Span.
     var mac_list = List[UInt8](capacity=32)
     for i in range(32):

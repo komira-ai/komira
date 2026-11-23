@@ -43,7 +43,7 @@ that needs a later one is refused by name (`OPTIMIZED_UDF_KIND_UNSUPPORTED`, IF 
 | P1 | The library and the zygote: spawn, `HELLO`, `LOAD`, `FORK`, one worker per context, `SCALAR` and `MAP_BATCHES_COLUMN` with the `VALUES` and `ARROW` batch formats, `ERR_RAISED` with the user's trace, `validate` over the descriptor | Z1-Z15 and Z17-Z18: a UDF runs in a process whose pid is neither the engine's nor the zygote's, with correct rows |
 | P2 | Supervision: exit reports, cancel, deadlines, forced stops, crash attribution, the ends of the zygote and the engine (§5) | S1-S13: an aborting UDF gives `UDF_WORKER_CRASHED` naming the signal and the session survives; `describe` reports `CONTAINS_CRASHES` and `FORCED_STOP` |
 | P3 | `ROW` with the row proxy and the read set; frames, `STEP`, plain and mergeable aggregates; the nested-call rule (IF §4.3) | Z16, and the shared corpus with Python fixtures |
-| P4 | The `PANDAS`, `NUMPY` and `POLARS` batch formats and the types beyond numerics (IF §6.2's table) | The round trip of every type in the mapping table |
+| P4 | The `PANDAS`, `NUMPY` and `POLARS` batch formats. The types beyond numerics (strings, binary, bool, dates, timestamps, decimals, lists, structs) have landed: see the "Types" section of `src/udf_python/README.md` | Each of the three formats round-trips every type of that table |
 | Later | Shared-memory slot heaps for payloads (§4.4) | A measurement shows the socket copy matters |
 
 The lowering of the UDF plan nodes and the Python `@udf` decorator are not part of this runtime; they use it through
@@ -163,6 +163,7 @@ resets `tempfile.tempdir`:
 | Variable | Value | Why |
 |---|---|---|
 | `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `VECLIB_MAXIMUM_THREADS`, `NUMEXPR_NUM_THREADS` | `1` | Each worker runs one thread of numerical code (§4.3); the libraries read these when they load |
+| `JE_ARROW_MALLOC_CONF` | `background_thread:false` | pyarrow's bundled jemalloc otherwise starts a background thread (`jemalloc_bg_thd`), which fails the zygote's thread check (§3.2) for any module that imports pyarrow |
 | `LC_ALL` | `C` | One locale everywhere; `-X utf8` gives Python UTF-8 text under it |
 | `TZ` | `UTC` | One time zone everywhere |
 | `HOME`, `TMPDIR` | In the zygote, a directory of its own under `scratch`; in each worker, one of the worker's own | A library that writes a cache writes it there, not into the user's home |
@@ -272,8 +273,8 @@ Payloads are Arrow IPC encapsulated messages with 64-byte aligned bodies, after 
 decodes them with `pyarrow.ipc.read_record_batch` against the schema it bound at `LOAD` and encodes its result
 with `pyarrow`, which the SDK depends on. The library encodes `args` in C and decodes results in C, then validates the
 layout against the bound schema before it hands the array to the engine (IF §4.4); the prototype's encoder and
-validating decoder (`proxy/ipc.c`) carry 64-bit integers, 32-bit integers and doubles, and P4 extends them to
-every type in IF §6.2's table.
+validating decoder (`proxy/ipc.c`) carried 64-bit integers, 32-bit integers and doubles; `src/udf_python` now carries the types of its
+README's "Types" section, nested columns included, and the `PANDAS`, `NUMPY` and `POLARS` formats are still to land (P4).
 
 ### 4.2 Calls
 
@@ -291,7 +292,7 @@ every type in IF §6.2's table.
   the worker. A `MemoryError` is answered as `ERR_OUT_OF_MEMORY`, after which the worker exits (IF §4.5: the context is
   lost).
 - **Output:** the worker casts what user code returned to the bound result type, refusing a lossy cast with
-  `ERR_RETURN_TYPE`, and checks the length (`ERR_LENGTH`); the host checks both again (IF §4.6).
+  `ERR_RETURN_TYPE`, and checks the length (`ERR_LENGTH`); the host checks both again (IF §4.6). The cast of an `ARROW` result stays within its own kind, as the README's "Types" section lists.
 
 ### 4.3 Threads in a worker
 
@@ -569,7 +570,7 @@ from them, and none of them ships:
 | Lowering the UDF plan nodes | Only the C ABI (IF §3.3, §4); nothing of this document |
 | The Python `@udf` decorator | §6 (the descriptor it writes), §7 (where it writes code objects), IF §6.1 |
 | The UDF conformance cases | The shared corpus and the cases of this runtime (the conformance corpus) |
-| Types beyond numerics | §4.1 (the C codec), P4 |
+| The `PANDAS`, `NUMPY` and `POLARS` batch formats | §4.2 (the calls), P4; the types they carry are those of the README's "Types" section |
 | The wheel design | §7; it decides the CPython minors the wheel supports, and the runtime supports every minor whose tag the SDK passes, refusing only other implementations and free-threaded builds (§3.1) |
 
 The runtime-specific cases (Z for the zygote and workers, S for supervision) are listed in
@@ -606,6 +607,12 @@ No code changes in this pull request. The work, each item a brief of its own:
      frame descriptor (§6);
    - the error table (`_errors.py`): `UDF_READ_SET_REQUIRED` from capture, and `OPTIMIZED_UDF_READ_SET_REQUIRED` from
      admission, each with its message and fix-it.
+
+   *Status.* Built, privately (no query runs a UDF yet): the `@udf` decorator with `columns=`, the annotation and the
+   `ROW` scan (`python/komira/_capture`), and the plan encoding with `read_set`, `arg_types` and `recorded_fields`
+   (`python/komira/_plan/_udf.py`). Not yet: the DataFrame verbs, the grouped frame's `group_by` columns, and
+   `OPTIMIZED_UDF_READ_SET_REQUIRED`, which comes with the run door. `UDF_READ_SET_REQUIRED` is the message prefix of
+   an `UnsupportedOperation`, not a table in `_errors.py`.
 5. **The TypeScript SDK's producer** (`node/`, when its UDF verbs land): the same `columns` value on every `ROW` and
    frame verb; a frame verb without `columns` is refused too. It has no static scan at first (a TypeScript function keeps no types at run
    time, and its source is not read), so a `ROW` verb without `columns` is refused at capture with

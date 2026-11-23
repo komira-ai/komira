@@ -4,7 +4,13 @@
 #
 # `RealBuilder` constructs the members of a segment from its descriptor:
 #
-#   source   SOURCE_PARQUET       `ParquetSource` from the spec (`source_parquet`)
+#   source   SOURCE_PARQUET       `ParquetSource` from the spec (`source_parquet`):
+#                                 over the local file system when the spec's
+#                                 store is local, else over the file system
+#                                 the builder's opener opens on the spec's
+#                                 bucket (`SCAN_FS_UNSERVED` when it was
+#                                 given none, or the opener does not serve
+#                                 the store)
 #            SOURCE_BATCH         a copy of the resident batch the spec's handle
 #                                 names (`source_batch`)
 #            SOURCE_SINK_OUTPUT   the output of the producer the spec names,
@@ -68,13 +74,34 @@
 # be among the segment's dependencies) and indexes them once, before any
 # worker starts (`op_hash_probe.HashProbeShared`).
 #
+# `op_tail` gives a RIGHT or FULL join probe's tail: the build rows its
+# workers marked as matched by no probe row, in batches of the segment's
+# morsel size (the default morsel size when the descriptor records none). The
+# probe columns of those rows are NULL at the types the rows reaching the
+# probe have: the source's schema as each projection and probe before it in
+# the chain reshapes it (`_schema_at`, the same walk that names the output of
+# a segment no row reaches), so the tail is typed even when no probe row
+# arrived.
+#
 # The builder borrows the footer cache and the expression pool the Parquet
 # source reads from; they belong to the caller and outlive every segment run.
+# One footer cache serves the local and the remote sources of a run: each file
+# system keys its entries under its own prefix (`FileSystem.key_prefix`), so
+# a local file and an object of the same name never share an entry.
+#
+# The remote store a Parquet spec names is reached through a
+# `ScanFsOpener` (`R`), handed to the builder by its caller with the plan: the
+# builder is compiled for that opener's one file system type, and opens one
+# file system on each bucket a spec names. A builder made without an opener
+# reads the local file system only (`R` defaults to `LocalOnlyScanFs`).
 # Resident batches are owned by the builder (`add_resident` returns the handle
 # a SOURCE_BATCH spec names), and so is the sink data of the plan
 # (`add_agg_sink` returns the id a descriptor's `sink_param_id` names). The
 # builder also owns the segment pool the sinks draw their memory from
-# (`set_memory_budget`; unbounded until set).
+# (`set_memory_budget`; unbounded until set) and the spill directory it hands
+# the grouped aggregation sinks over fixed-width keys (`set_spill_directory`;
+# none until set, and then those sinks refuse a table the pool cannot grow
+# instead of spilling it).
 
 from std.memory import Pointer
 
@@ -121,6 +148,7 @@ from physical_plan.physical_plan import (
     SOURCE_SINK_OUTPUT,
 )
 from containers.slab import Slab
+from fs.scan_fs import ScanFsOpener, scan_fs_unserved
 from plan_expr.expr_pool import ExprPool
 
 from .op_filter import FilterOp, FilterShared
@@ -140,9 +168,16 @@ from .sink_sort import SortSink
 from .sink_string_group_agg import StringGroupAggSink
 from .source_batch import BatchSource
 from .source_csv import build_csv_source
-from .source_parquet import LocalParquetSource, build_parquet_source
+from .source_parquet import (
+    LocalOnlyScanFs,
+    LocalParquetSource,
+    ParquetSourceOn,
+    build_parquet_source,
+    build_parquet_source_on,
+)
 from .source_sink_output import SinkOutputSource
 from .source_variant import SourceVariant
+from .unused_members import NoSource
 
 
 def _check_reads_a_dependency(ref desc: SegmentDescPod, producer: Int) raises:
@@ -195,13 +230,22 @@ struct RealBuilder[
     cache_o: Origin[mut=True],
     pool_o: Origin[mut=True],
     filter_o: Origin[mut=True],
+    R: ScanFsOpener = LocalOnlyScanFs,
 ](SegmentBuilder):
-    """Builds the real members of a segment: Parquet, batch, sink-output,
-    CSV and concatenation sources; filter, project, limit and join probe operators; the collect,
-    aggregation, sort and hash build sinks."""
+    """Builds the real members of a segment: Parquet (local, or on the store
+    `R` opens), batch, sink-output, CSV and concatenation sources; filter,
+    project, limit and join probe operators; the collect, aggregation, sort
+    and hash build sinks."""
 
-    comptime Source = SourceVariant[
+    comptime ParquetArm = SourceVariant[
         LocalParquetSource[Self.cache_o, Self.pool_o, Self.filter_o],
+        ParquetSourceOn[Self.R.FS, Self.cache_o, Self.pool_o, Self.filter_o],
+        NoSource,
+    ]
+    """A Parquet source: over the local file system (first) or over the
+    remote store's (second)."""
+    comptime Source = SourceVariant[
+        Self.ParquetArm,
         BatchSource,
         SinkOutputSource,
     ]
@@ -218,12 +262,15 @@ struct RealBuilder[
     var _agg_sinks: List[AggSinkData]
     var _sort_sinks: List[SortSinkData]
     var _segment_pool: SegmentPool
+    var _opener: Optional[Self.R]
+    var _spill_dir: String
 
     def __init__(
         out self,
         ref [Self.cache_o] cache: ParquetMetadataCache,
         ref [Self.pool_o] pool: ExprPool,
     ):
+        """A builder that reads the local file system only."""
         self._cache = Pointer(to=cache)
         self._pool = Pointer(to=pool)
         self._resident = List[RecordBatch]()
@@ -231,6 +278,19 @@ struct RealBuilder[
         self._agg_sinks = List[AggSinkData]()
         self._sort_sinks = List[SortSinkData]()
         self._segment_pool = SegmentPool()
+        self._opener = None
+        self._spill_dir = String("")
+
+    def __init__(
+        out self,
+        ref [Self.cache_o] cache: ParquetMetadataCache,
+        ref [Self.pool_o] pool: ExprPool,
+        var opener: Self.R,
+    ):
+        """A builder that reads the local file system and the remote store
+        `opener` opens a file system on."""
+        self = Self(cache, pool)
+        self._opener = Optional[Self.R](opener^)
 
     def add_agg_sink(mut self, var data: AggSinkData) -> Int:
         """Keep `data` for SINK_AGG segments; returns the id their
@@ -249,6 +309,13 @@ struct RealBuilder[
         bytes (a negative value removes the bound). Replaces the pool, so call
         it between runs."""
         self._segment_pool = SegmentPool(bytes)
+
+    def set_spill_directory(mut self, var dir: String):
+        """Let the grouped aggregation sinks of later segment runs spill
+        their group tables under `dir` instead of refusing a table the pool
+        cannot grow (`sink_group_agg`); the empty string, the default, turns
+        spill off. Call it between runs."""
+        self._spill_dir = dir^
 
     def pool_granted(self) -> Int:
         """The bytes the sinks hold from the pool now; zero between runs."""
@@ -352,20 +419,44 @@ struct RealBuilder[
                     " worker count, so the float sums would not be the same"
                     " bits on every worker count"
                 )
+            var preserve_dict = (
+                desc.sink_kind == SINK_AGG
+                and desc.sink_key_dtype == KEY_DTYPE_STRING
+                and desc.sink_orientation == SINK_ORIENT_DICT_ENCODED
+            )
+            if spec.parquet_fs.is_local():
+                return Self.Source.first(
+                    Self.ParquetArm.first(
+                        build_parquet_source[
+                            Self.cache_o, Self.pool_o, Self.filter_o
+                        ](
+                            spec,
+                            morsel_rows,
+                            num_workers,
+                            self._cache[],
+                            self._pool[],
+                            preserve_dict=preserve_dict,
+                        )
+                    )
+                )
+            if not self._opener:
+                raise scan_fs_unserved(spec.parquet_fs.url_prefix())
+            var fs = self._opener.value().open_scan_fs(
+                spec.parquet_fs.scheme, spec.parquet_fs.bucket
+            )
             return Self.Source.first(
-                build_parquet_source[
-                    Self.cache_o, Self.pool_o, Self.filter_o
-                ](
-                    spec,
-                    morsel_rows,
-                    num_workers,
-                    self._cache[],
-                    self._pool[],
-                    preserve_dict=(
-                        desc.sink_kind == SINK_AGG
-                        and desc.sink_key_dtype == KEY_DTYPE_STRING
-                        and desc.sink_orientation == SINK_ORIENT_DICT_ENCODED
-                    ),
+                Self.ParquetArm.second(
+                    build_parquet_source_on[
+                        Self.R.FS, Self.cache_o, Self.pool_o, Self.filter_o
+                    ](
+                        spec,
+                        fs^,
+                        morsel_rows,
+                        num_workers,
+                        self._cache[],
+                        self._pool[],
+                        preserve_dict=preserve_dict,
+                    )
                 )
             )
         if morsel_rows <= 0:
@@ -524,6 +615,7 @@ struct RealBuilder[
                                 key,
                                 self._segment_pool.share(),
                                 desc.seg_id,
+                                spill_dir=self._spill_dir,
                             )
                         )
                     )
@@ -572,30 +664,61 @@ struct RealBuilder[
             " (SINK_HASH_BUILD, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
         )
 
+    def op_tail(
+        mut self,
+        ref desc: SegmentDescPod,
+        op_index: Int,
+        ref source_schema: Schema,
+    ) raises -> List[RecordBatch]:
+        """The unmatched build rows of a RIGHT or FULL join probe, in batches
+        of the segment's morsel size, with the probe columns NULL at the types
+        the chain gives them before the probe; no rows for any other
+        operator."""
+        if desc.ops[op_index].tag != OP_JOIN_PROBE:
+            return List[RecordBatch]()
+        var at = self._parts_index(desc, op_index)
+        if not self._parts[at].probe.value().has_tail():
+            return List[RecordBatch]()
+        var probe_schema = self._schema_at(desc, source_schema, op_index)
+        var rows = DEFAULT_MORSEL_ROWS
+        if desc.morsel_rows > 0:
+            rows = desc.morsel_rows
+        return self._parts[at].probe.value().unmatched_build_rows(
+            probe_schema, rows
+        )
+
+    def _schema_at(
+        mut self, ref desc: SegmentDescPod, ref source_schema: Schema, upto: Int
+    ) raises -> Schema:
+        """The schema of the rows that reach operator `upto` of the chain (the
+        segment's output for `upto` = the operator count): the source's, as
+        each projection and join probe before it reshapes it. A projection is
+        asked by running it over a batch of no rows; a probe gives its output
+        schema."""
+        var schema = source_schema.copy()
+        for i in range(upto):
+            if desc.ops[i].tag == OP_JOIN_PROBE:
+                var at = self._parts_index(desc, i)
+                schema = self._parts[at].probe.value().output_schema(schema)
+                continue
+            if desc.ops[i].tag != OP_PROJECT:
+                continue
+            var at = self._parts_index(desc, i)
+            var probe = self._parts[at].project.value().make()
+            var m = Morsel(empty_batch_like_schema(schema), 0, 0)
+            _ = probe.execute(m)
+            schema = m.batch.schema.copy()
+        return schema^
+
     def _result_schema(
         mut self, ref desc: SegmentDescPod, ref source_schema: Schema
     ) -> Optional[Schema]:
-        """The schema the segment's rows have: the source's, as each
-        projection and join probe of the chain reshapes it. A projection is
-        asked by running it over a batch of no rows; a probe appends the build
-        side's columns. None when that fails."""
+        """The schema the segment's rows have (`_schema_at` past the last
+        operator), or None when that fails."""
         try:
-            var schema = source_schema.copy()
-            for i in range(desc.num_ops()):
-                if desc.ops[i].tag == OP_JOIN_PROBE:
-                    var at = self._parts_index(desc, i)
-                    schema = self._parts[at].probe.value().output_schema(
-                        schema
-                    )
-                    continue
-                if desc.ops[i].tag != OP_PROJECT:
-                    continue
-                var at = self._parts_index(desc, i)
-                var probe = self._parts[at].project.value().make()
-                var m = Morsel(empty_batch_like_schema(schema), 0, 0)
-                _ = probe.execute(m)
-                schema = m.batch.schema.copy()
-            return Optional(schema^)
+            return Optional(
+                self._schema_at(desc, source_schema, desc.num_ops())
+            )
         except:
             return None
 

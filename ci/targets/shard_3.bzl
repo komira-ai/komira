@@ -13,6 +13,7 @@ TARGETS = [
     "komira//python:refuses_missing_runtime_library",
     "komira//python:refuses_modular_unlike_toolchain",
     "komira//python:refuses_other_distribution",
+    "komira//python:refuses_other_mojo_at_toolchain",
     "komira//python:refuses_owners_off_run_path",
     "komira//python:refuses_python_outside_requires_python",
     "komira//python:refuses_requires_python_not_the_oldest_supported",

@@ -14,9 +14,9 @@
 # `statement_from_sql` serves every statement kind (a query, `COPY ... TO`,
 # `CREATE TABLE ... AS`) and returns the `BoundStatement` that says which.
 # `plan_from_sql` serves a query only and refuses a write statement by name
-# (`STATEMENT_NOT_A_QUERY`), through `query_plan`, which `sdk_exec.engine_sql`'s
-# `run_sql` calls on its own bound statement too, so both refuse a write in the
-# same words.
+# (`STATEMENT_NOT_A_QUERY`), through `query_plan`. `sdk_exec.engine_sql`'s
+# `run_sql` runs a `COPY ... TO` itself and refuses a `CREATE TABLE AS` under
+# the same name.
 #
 # Every failure raises an `Error` whose text is the failing step's own message,
 # unchanged: `SQL syntax error ...` or `SQL not supported ...` from the
@@ -60,7 +60,7 @@ def query_plan(var bound: BoundStatement) raises -> LogicalPlan:
         raise Error(
             String(STATEMENT_NOT_A_QUERY)
             + ": only a query has a query plan; COPY and CREATE TABLE AS"
-            " bind to a write, which is not served yet"
+            " bind to a write"
         )
     return bound.take_plan()
 

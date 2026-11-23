@@ -29,7 +29,7 @@ THE PRIMITIVES IT BUILDS ON (all from crypto):
   zeroize_inline_array — secret-zero-on-drop for every retired key / ratchet.
 
 SAFETY GATE: ZERO UnsafePointer in any public signature;
-ratchet / key / nonce buffers are InlineArray (gap6-clean, no byte-slab-of-
+ratchet / key / nonce buffers are Array (gap6-clean, no byte-slab-of-
 heap-field); zeroize on every retired session + key; constant-time tag compare
 inside the AEAD.
 

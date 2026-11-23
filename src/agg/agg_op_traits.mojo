@@ -83,8 +83,8 @@ trait HashAggOpF64(Copyable, Movable, ImplicitlyCopyable):
     multi-bucket aggs (`for j in range(W): if mask[j]: ...`).
 
     StateTy bound: `Copyable & Movable` — required so HashAggTable's
-    `InlineArray[AggOp.StateTy, MAX_GROUPS]` slab storage compiles
-    (`InlineArray` requires `ElementType: Copyable`). All
+    `Array[AggOp.StateTy, MAX_GROUPS]` slab storage compiles
+    (`Array` requires `ElementType: Copyable`). All
     conformers (Float64 for Sum/Count/Min/Max; SIMD[float64, 2] for
     Avg) satisfy both bounds trivially.
     """

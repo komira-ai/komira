@@ -28,7 +28,7 @@ from std.builtin.globals import global_constant
 
 
 # fmt: off
-comptime _HUFFMAN_FIRST_CODE: InlineArray[UInt32, 31] = [
+comptime _HUFFMAN_FIRST_CODE: Array[UInt32, 31] = [
     0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
     0x14, 0x5c, 0xf8, 0x0, 0x3f8, 0x7fa,
     0xffa, 0x1ff8, 0x3ffc, 0x7ffc, 0x0, 0x0,
@@ -36,15 +36,15 @@ comptime _HUFFMAN_FIRST_CODE: InlineArray[UInt32, 31] = [
     0xffffea, 0x1ffffec, 0x3ffffe0, 0x7ffffde, 0xfffffe2, 0x0,
     0x3ffffffc,
 ]
-comptime _HUFFMAN_COUNT: InlineArray[UInt16, 31] = [
+comptime _HUFFMAN_COUNT: Array[UInt16, 31] = [
     0, 0, 0, 0, 0, 10, 26, 32, 6, 0, 5, 3, 2, 6, 2, 3,
     0, 0, 0, 3, 8, 13, 26, 29, 12, 4, 15, 19, 29, 0, 4,
 ]
-comptime _HUFFMAN_OFFSET: InlineArray[UInt16, 31] = [
+comptime _HUFFMAN_OFFSET: Array[UInt16, 31] = [
     0, 0, 0, 0, 0, 0, 10, 36, 68, 0, 74, 79, 82, 84, 90, 92,
     0, 0, 0, 95, 98, 106, 119, 145, 174, 186, 190, 205, 224, 0, 253,
 ]
-comptime _HUFFMAN_SYMBOLS: InlineArray[UInt16, 257] = [
+comptime _HUFFMAN_SYMBOLS: Array[UInt16, 257] = [
     48, 49, 50, 97, 99, 101, 105, 111, 115, 116, 32, 37, 45, 46, 47, 51,
     52, 53, 54, 55, 56, 57, 61, 65, 95, 98, 100, 102, 103, 104, 108, 109,
     110, 112, 114, 117, 58, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76,
