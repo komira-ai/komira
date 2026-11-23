@@ -137,9 +137,10 @@ a file under `db/<table>/metadata` and `db/<table>/data`. The build action
 `:iceberg_write_komira` (`iceberg_write_cases.bzl`) runs it, and
 `:iceberg_readback_oracle` runs `tests/readback.sql` in the pinned DuckDB with
 the avro and iceberg extensions loaded. The SQL scans each table with
-`iceberg_scan(<metadata file>, allow_moved_paths = true)`: the paths the
-metadata holds are `s3://wh/...` URIs, which DuckDB resolves against the
-directory of the metadata file by their `/metadata/` and `/data/` parts, so a
+`iceberg_scan('db/<table>', version = '3', allow_moved_paths = true)`, which
+opens `db/<table>/metadata/v3.metadata.json`: the paths the metadata holds are
+`s3://wh/...` URIs, which DuckDB resolves against the table directory by their
+`/metadata/` and `/data/` parts, so a
 table's location must contain neither part before its own and its files must
 lie under `metadata/` and `data/`, as `write_table`'s defaults do. It compares
 the rows with hand-written expected rows both ways, reads the column types and
