@@ -262,6 +262,7 @@ TARGETS = [
 ]
 
 TESTS = [
+    "komira//src/iceberg_catalog:test_iceberg_foreign_readback",
     "komira//src/iceberg_catalog:test_iceberg_rest_loopback",
     "komira//src/tests/helpers/komira_udf_spike_native:native_bench",
     "komira//tools/build/proto-codegen:xml_equiv_verdicts_test",
