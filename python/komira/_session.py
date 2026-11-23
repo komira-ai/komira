@@ -11,6 +11,7 @@ import weakref
 from types import TracebackType
 
 from . import _native
+from ._credentials import _BuiltIn, _Credential
 from ._errors import KomiraError
 
 
@@ -58,6 +59,33 @@ class Session:
             raise TypeError("path must be a str or os.PathLike[str], not {}".format(type(path).__name__))
         ctx = self._live()
         self._native.register_parquet(ctx, name, os.path.abspath(os.path.expanduser(path)))
+
+    def _seal_credential(self, credential: _Credential | _BuiltIn) -> None:
+        """Makes `credential` the session's value of its name, replacing any
+        earlier one (src/so/README.md, Credentials): `komira_credential_add`,
+        then `komira_credential_set` for each of its fields in turn, then
+        `komira_credential_seal` with the session scope. `AMBIENT` and
+        `ANONYMOUS` need no definition, so nothing is called for them.
+
+        This is the step `add_sql_binding` takes for each credential a source
+        names, before it binds the source; it is private until that call
+        lands. A credential the library refuses raises `CredentialsError` with
+        the library's message, and the library discards the definition, so
+        the session's value of the name is unchanged; any other failed call
+        raises `KomiraError`. Anything other than a credential is a
+        `TypeError`, raised before the library is called.
+        """
+        if isinstance(credential, _BuiltIn):
+            self._live()
+            return
+        if not isinstance(credential, _Credential):
+            raise TypeError("credential must be a komira credential, not {}".format(type(credential).__name__))
+        ctx = self._live()
+        kind, name, fields = credential._definition()
+        cred_id = self._native.credential_add(ctx, kind, name)
+        for field, value in fields:
+            self._native.credential_set(ctx, cred_id, field, value.encode("utf-8"))
+        self._native.credential_seal(ctx, cred_id)
 
     def close(self) -> None:
         """Frees the context. A second call does nothing."""
