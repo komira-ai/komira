@@ -183,7 +183,8 @@ How the loader behaves:
   the directory it came from with `dlinfo`.
   - Not loaded, or loaded from komira's own file: nothing to do.
   - Loaded from another file with the same GNU build id as komira's copy (the
-    same Mojo build, such as the `mojo-compiler` 1.0.0 wheel): accepted, and
+    same Mojo build, such as the `mojo-compiler` wheel of the toolchain's
+    version): accepted, and
     libkomira uses that copy.
   - Another build id, or none: `LibraryLoadError` naming the library, the
     directory it was loaded from and komira's copy.
@@ -192,8 +193,10 @@ How the loader behaves:
   - The runtime libraries are not opened with `RTLD_GLOBAL`: that would put
     komira's copy in the global scope, ahead of the definitions of other Mojo
     libraries. A process holds one Mojo runtime version, so Mojo code built
-    with another version (for example `max` with `mojo-compiler` 1.2.0) cannot
-    be loaded beside komira in either order.
+    with another version (for example `max` with `mojo-compiler` 1.2.0) does
+    not work beside komira: loaded first, komira refuses it; loaded after, a
+    newer runtime fails to load, and an older one (not yet run: inferred from
+    its symbols) loads on komira's libraries.
 - **The version check.** `komira_abi_version()` is read before any other
   symbol is looked up.
   - A major version other than 1 is refused with `LibraryLoadError`.
@@ -294,8 +297,13 @@ Modular's runtime from the `mojo-compiler` wheel, run by
 | `beside_modular_loaded_first` | the same Mojo version loaded first: libkomira binds to Modular's copy and works |
 | `beside_modular_loaded_after` | komira loaded first, then Modular's `libKGENCompilerRTShared` of the same version: both work |
 | `beside_other_mojo_loaded_first` | another Mojo version loaded first: the load is refused, naming the library |
-| `beside_other_mojo_loaded_after` | komira loaded first, then another Mojo version: Modular's library fails to load with the loader's `undefined symbol`, and komira keeps working |
-| `refuses_modular_unlike_toolchain` | the `mojo-compiler` wheel handed to the test is not the toolchain's version, and the test refuses it |
+| `beside_other_mojo_loaded_after` | komira loaded first, then another Mojo version: a newer one fails to load with the loader's `undefined symbol`, an older one loads as a second `libKGENCompilerRTShared` on komira's two other libraries (first run at a 1.1.0 or 1.2.0 toolchain; inferred from symbols until then), and komira keeps working |
+| `refuses_modular_unlike_toolchain` | the `mojo-compiler` wheel handed to a same-version case is not the toolchain's version, and the test refuses it |
+| `refuses_other_mojo_at_toolchain` | the `mojo-compiler` wheel handed to an other-version case is the toolchain's version, and the test refuses it |
+
+The toolchain's Mojo picks the versions: the pair at its version and the
+compiler wheel of the newest other version in
+`third_party/modular/pins.bzl`.
 
 `//tools/build/package/libkomira:libkomira_dist_load` loads a copy of the
 `[dist]` directory from C, with no Python, no library path and nothing of
