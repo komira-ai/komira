@@ -1,6 +1,8 @@
 """`archive_files`: named files out of a sha256-pinned source archive.
 
-A remote action unpacks the archive (tools/archive_files.zig) and copies out
+A remote action unpacks the archive (tools/archive_files.zig; `.tar.gz`,
+`.tgz`, `.tar`, `.tar.zst`, `.zip`, `.conda`, or a single gzip file `<name>.gz`
+holding the one file `<name>`) and copies out
 exactly the files listed in `files` (and `templates`); each becomes its own
 output and a sub-target named by its path, so a `cxx_library` can name
 `:<target>[snappy.cc]` as a source. A listed file missing from the archive

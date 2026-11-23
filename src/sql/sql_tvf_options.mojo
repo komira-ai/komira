@@ -38,6 +38,11 @@ comptime TVF_JSON: UInt8 = 3
 # is UNTESTED by the corpus: a `read_avro` over a file that really does carry a
 # logical type raises at bind or decodes wrong, and nothing here would catch it.
 comptime TVF_AVRO: UInt8 = 4
+# `iceberg_scan` (DuckDB's iceberg extension spelling). The kind sits OUTSIDE
+# the parquet-footer split too: `is_parquet_tvf_kind` is False for it, because
+# no footer names its files. A table's metadata does, and the caller's
+# `SqlParquetFooters.iceberg_relation` reads it before binding.
+comptime TVF_ICEBERG: UInt8 = 5
 
 # `read_parquet(..., hive_partitioning = ...)`: AUTO (no option written) reads
 # Hive `key=value` directories when every file of the relation has the same
@@ -70,18 +75,28 @@ struct TvfOptions(Copyable, Movable):
                       `HIVE_PARTITIONING_AUTO` (the default, no option
                       written), `_ON` or `_OFF`. Honored by the footer reader
                       that resolves the relation's files.
+        allow_moved_paths: DuckDB `allow_moved_paths=` (`iceberg_scan`).
+                      Default False. Honored by the reader that resolves the
+                      table (`SqlParquetFooters.iceberg_relation`).
+        snapshot_from_id: DuckDB `snapshot_from_id=` (`iceberg_scan`), the
+                      snapshot to read instead of the current one. Default
+                      None. Honored by the same reader.
     """
 
     var all_varchar: Bool
     var has_header: Bool
     var delimiter: UInt8
     var hive_partitioning: UInt8
+    var allow_moved_paths: Bool
+    var snapshot_from_id: Optional[Int64]
 
     def __init__(out self):
         self.all_varchar = False
         self.has_header = True
         self.delimiter = UInt8(ord(","))
         self.hive_partitioning = HIVE_PARTITIONING_AUTO
+        self.allow_moved_paths = False
+        self.snapshot_from_id = None
 
 
 def _replacement_scan_kind(path: String) raises -> UInt8:

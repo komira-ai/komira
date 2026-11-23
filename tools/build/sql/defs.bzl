@@ -10,6 +10,7 @@ report. `komira//third_party/duckdb:duckdb` is the one komira uses.
 script), with one fixed invocation:
 
     duckdb -no-init -batch -bail
+        [-cmd "LOAD '<extension>'" ...]
         -cmd ".cd <work>"
         -cmd ".mode trash"
         -cmd "SET threads = 1; SET TimeZone = 'UTC'; ...; SET allowed_paths = [...]"
@@ -26,6 +27,13 @@ with `LD_LIBRARY_PATH` naming the dist's `native_libs`, `LC_ALL=C` and
 `TZ=UTC`, and nothing else in its environment, read back by the getenv()
 check (the farm's workers run in UTC with a libstdc++ of their own, so a
 dropped entry would otherwise change nothing).
+
+`extensions` (default none) lists DuckDB extension files, each named
+`<name>.duckdb_extension`: the action loads them, in order, with one
+`-cmd "LOAD '<file>'"` each before everything else (the files are build
+paths, so before `.cd`), and so before the settings and `.safe_mode` that
+would refuse the load. With none the invocation is the one above without the
+bracketed line. Nothing is installed or loaded on demand.
 
 `<work>` is the action's working directory, the directory of its declared
 outputs, where every input is copied first. The SQL names inputs and outputs
@@ -91,6 +99,11 @@ _OUTPUT_FORMATS = [".parquet", ".csv", ".tsv"]
 # it literally. Outputs keep _NAME.
 _INPUT_SEGMENT = "^[A-Za-z0-9_][A-Za-z0-9_.=-]*$"
 
+# An extension file's name: DuckDB names the extension after its file, and
+# the name is written into the action's `LOAD '<path>'`, so it is a
+# lower-case identifier and the one suffix DuckDB looks for.
+_EXTENSION_FILE = "^[a-z][a-z0-9_]*[.]duckdb_extension$"
+
 def _where(ctx):
     return str(ctx.label.raw_target())
 
@@ -139,6 +152,13 @@ def _sql_oracle_impl(ctx):
     if not ctx.attrs.outputs:
         fail("{}: outputs is empty: an oracle writes its answer to declared files (COPY ... TO)".format(_where(ctx)))
     staged, dirs = _inputs(ctx)
+    loaded = {}
+    for e in ctx.attrs.extensions:
+        if not regex_match(_EXTENSION_FILE, e.basename):
+            fail("{}: extensions entry {} is not a <name>.duckdb_extension file ({}): DuckDB names the extension after its file".format(_where(ctx), repr(e.basename), _EXTENSION_FILE))
+        if e.basename in loaded:
+            fail("{}: extensions names {} twice".format(_where(ctx), repr(e.basename)))
+        loaded[e.basename] = True
     seen = {}
     for o in ctx.attrs.outputs:
         if not regex_match(_NAME, o) or o in (".", ".."):
@@ -200,6 +220,14 @@ def _sql_oracle_impl(ctx):
         "-no-init",
         "-batch",
         "-bail",
+    )
+
+    # The extensions load first: their paths are relative to the action's
+    # directory, which `.cd` leaves, and the load must precede the settings
+    # and `.safe_mode` that would refuse it.
+    for e in ctx.attrs.extensions:
+        cmd.add("-cmd", cmd_args(e, format = "LOAD '{}'"))
+    cmd.add(
         "-cmd",
         cmd_args(first.as_output(), parent = 1, format = ".cd {}"),
         # The rule's own statements print nothing (`trash`); the SQL's
@@ -238,8 +266,9 @@ def _sql_oracle_impl(ctx):
 
 _sql_oracle = rule(
     impl = _sql_oracle_impl,
-    doc = "Runs `srcs` (one .sql file or a list, in order) with the pinned DuckDB CLI as one build action, in-memory, threads=1, TimeZone 'UTC', from a working directory holding `inputs` (a list of sources, each at its path in the package, or {path: source}); the SQL writes every name in `outputs` there (`COPY ... TO '<name>'`), each a sub-target `[<name>]`. A file the SQL reads or writes that is neither an input nor an output, a missing output, a SQL error or a changed setting fails the action.",
+    doc = "Runs `srcs` (one .sql file or a list, in order) with the pinned DuckDB CLI as one build action, in-memory, threads=1, TimeZone 'UTC', from a working directory holding `inputs` (a list of sources, each at its path in the package, or {path: source}); the SQL writes every name in `outputs` there (`COPY ... TO '<name>'`), each a sub-target `[<name>]`. `extensions` (default none) lists DuckDB extension files, each `<name>.duckdb_extension`, which the action loads in order before anything else (`LOAD '<file>'`). A file the SQL reads or writes that is neither an input nor an output, a missing output, a SQL error or a changed setting fails the action.",
     attrs = {
+        "extensions": attrs.list(attrs.source(), default = []),
         "inputs": attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source()), default = []),
         "outputs": attrs.list(attrs.string()),
         "srcs": attrs.one_of(attrs.source(), attrs.list(attrs.source())),

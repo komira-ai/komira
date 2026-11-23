@@ -15,7 +15,7 @@ from plan_ir.logical_plan import (
 from scan_source.source_variant import SourceVariant
 from sql.sql_ast import (
     FROM_LESS_RELATION, FromRelation, JK_ANTI, JK_SEMI, JoinClause, SX_COLUMN,
-    SelectStmt, SqlExpr,
+    SelectStmt, SqlExpr, TVF_ICEBERG,
 )
 from sql.sql_bind_names import (
     _group_has, _group_spelling,
@@ -133,14 +133,28 @@ def _catalog_name(rel: FromRelation) raises -> String:
     return rel.name
 
 
+def _iceberg_source(rel: FromRelation, cte_scope: CteScope) raises -> SourceVariant:
+    """The source the caller's reader resolved for an `iceberg_scan` relation
+    before binding (`ParquetFacts.iceberg_source_of`)."""
+    return cte_scope.parquet.iceberg_source_of(
+        rel.tvf_path.value(),
+        rel.tvf_opts.allow_moved_paths,
+        rel.tvf_opts.snapshot_from_id,
+    )
+
+
 def _relation_schema(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope) raises -> Schema:
     """The schema of one FROM relation: a `read_parquet('path')` TVF's scan
     schema, the files' columns then the Hive partition columns (resolved before
     binding, `cte_scope.parquet`), a `read_csv` /
     `read_json` / `read_avro` TVF's inferred or header schema (`sql_tvf_bind`),
-    the FROM-less relation's one column, a CTE / derived-relation schema (the
-    name shadows the catalog), or a catalog lookup for a named table."""
+    an `iceberg_scan` TVF's table schema (the source the caller's reader
+    resolved before binding), the FROM-less relation's one column, a CTE /
+    derived-relation schema (the name shadows the catalog), or a catalog
+    lookup for a named table."""
     if rel.tvf_path:
+        if rel.tvf_kind == TVF_ICEBERG:
+            return _iceberg_source(rel, cte_scope).schema()
         if not is_parquet_tvf_kind(rel.tvf_kind):
             return tvf_relation_schema(rel)
         return cte_scope.parquet.schema_of(
@@ -159,10 +173,15 @@ def _relation_scan(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope) 
     `ParquetSource` resolved before binding (its files and partition columns), the same node
     `SqlCatalog.build_scan` builds for a registered parquet table; a CSV /
     JSONL / Avro TVF builds the lazy row-oriented leaf of `sql_tvf_bind`; the
-    FROM-less relation is its one-row scan; a CTE reference inlines a fresh
-    copy of the bound CTE subplan (the name shadows the catalog); otherwise a
-    catalog scan."""
+    FROM-less relation is its one-row scan; an `iceberg_scan` TVF scans the
+    source the caller's reader resolved before binding; a CTE reference inlines
+    a fresh copy of the bound CTE subplan (the name shadows the catalog);
+    otherwise a catalog scan."""
     if rel.tvf_path:
+        if rel.tvf_kind == TVF_ICEBERG:
+            var source = _iceberg_source(rel, cte_scope)
+            var schema = source.schema()
+            return LogicalPlan.scan_from_source(source^, schema^)
         if not is_parquet_tvf_kind(rel.tvf_kind):
             return tvf_relation_scan(rel)
         var path = rel.tvf_path.value()

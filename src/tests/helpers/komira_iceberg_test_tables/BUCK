@@ -1,0 +1,80 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: version-2 Iceberg tables written to a local directory the way
+# Iceberg Java lays one out (README.md): metadata.json per commit with refs
+# and a snapshot log, manifest lists and manifests as deflate-compressed Avro
+# with Java's record schemas (field ids, `["null", T]` unions, maps as arrays
+# of {key, value}), data files and delete files written by parquet_writer
+# (Parquet) or avro (Avro). `TestTable` commits appends, position and equality
+# deletes and overwrites; `orders_fixture.mojo` writes the table `orders` that
+# komira_iceberg_scan_conformance reads with komira and with DuckDB. Each
+# Parquet column carries its Iceberg field id.
+#
+# The welded tests (each file's header says what it holds):
+# - test_table_model: the type spellings, the cells.
+# - test_metrics: counts, NaN counts and the single-value serialization of
+#   bounds, by exact bytes.
+# - test_data_files: every column type as a Parquet and an Avro file, read back
+#   by the Parquet and Avro readers; file helpers; refusals.
+# - test_table_metadata: the JSON fragments by equality, metadata.json.
+# - test_manifests: manifest and manifest list records decoded field by field.
+# - test_test_table: the layout on disk, what each commit lists, sorted
+#   position deletes, equality deletes, overwrite, refusals.
+# - test_orders_fixture: the files `orders` writes are the files it lists.
+mojo_library(
+    name = "komira_iceberg_test_tables",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_api:async_api",
+        "//src/async_rt:async_rt",
+        "//src/atomic_alias:atomic_alias",
+        "//src/avro:avro",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/containers:containers",
+        "//src/counters:counters",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/join_assembly:join_assembly",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/name_registry:name_registry",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_writer:parquet_writer",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/row_format:row_format",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_source:scan_source",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/trace:trace",
+        "//src/udf:udf",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    # The reader decodes the files the builder writes; a library that uses the
+    # builder names it in its own test_deps.
+    test_deps = ["//src/parquet:parquet"],
+    test_srcs = [
+        "tests/test_data_files.mojo",
+        "tests/test_manifests.mojo",
+        "tests/test_metrics.mojo",
+        "tests/test_orders_fixture.mojo",
+        "tests/test_table_metadata.mojo",
+        "tests/test_table_model.mojo",
+        "tests/test_test_table.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

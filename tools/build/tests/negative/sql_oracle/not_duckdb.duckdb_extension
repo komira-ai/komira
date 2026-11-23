@@ -1,0 +1,1 @@
+This file is text, not a DuckDB extension: sql_oracle loads it before any SQL runs.

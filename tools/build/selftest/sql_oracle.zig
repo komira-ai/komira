@@ -49,12 +49,20 @@
 //! And: komira_sql_conformance's case runner no longer comparing its answer
 //! with the committed one (corpus_answer_differs builds green), or running
 //! a case whose first line names no row order (corpus_unordered).
+//! And, for `extensions`: an extension that is not loaded before the first
+//! setting and `.safe_mode` (the invocation of with_extensions lacks the two
+//! `LOAD` commands, in the order listed, ahead of `.cd`; the functional
+//! target fails without them), a file that is no DuckDB extension that
+//! loads green (extension_not_duckdb), and the two analysis checks of the
+//! list (extension_not_named_so, extension_twice).
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
 const PKG = "tests//negative/sql_oracle:";
 const GREEN = "tests//functional/sql_oracle:check";
 const WRITE = "tests//functional/sql_oracle:write";
+/// The oracle that loads the pinned avro and iceberg extensions.
+const WITH_EXTENSIONS = "tests//functional/sql_oracle:with_extensions";
 /// A duckdb_dist whose version is "0.9": both ends of the digit range.
 const DIST_BOUNDS = "tests//functional/sql_oracle:dist_version_digit_bounds";
 
@@ -98,6 +106,16 @@ const REFUSALS = [_]lib.Row{
         .name = "built_input_in_list",
         .target = PKG ++ "built_input_in_list",
         .text = PKG ++ "built_input_in_list: inputs entry work/out.tsv is built by " ++ PKG ++ "sql_error; a list entry is staged at its path in the package, so name a build output in the dict form, {path: target}",
+    },
+    .{
+        .name = "extension_not_named_so",
+        .target = PKG ++ "extension_not_named_so",
+        .text = PKG ++ "extension_not_named_so: extensions entry \"notes.duckdb_extension.txt\" is not a <name>.duckdb_extension file (^[a-z][a-z0-9_]*[.]duckdb_extension$): DuckDB names the extension after its file",
+    },
+    .{
+        .name = "extension_twice",
+        .target = PKG ++ "extension_twice",
+        .text = PKG ++ "extension_twice: extensions names \"not_duckdb.duckdb_extension\" twice",
     },
     .{
         .name = "input_dotdot",
@@ -228,6 +246,7 @@ const REDS = [_]Red{
     .{ .name = "missing_middle_output", .text = "Invalid Input Error: sql_oracle: the SQL wrote no middle.tsv, a declared output" },
     .{ .name = "missing_last_output", .text = "Invalid Input Error: sql_oracle: the SQL wrote no last.tsv, a declared output" },
     .{ .name = "sql_error", .text = "Parser Error: syntax error at or near \"SELEC\"" },
+    .{ .name = "extension_not_duckdb", .text = "is not a DuckDB extension" },
     .{ .name = "input_outside_inputs", .text = "Permission Error: Cannot access file \"not_staged.csv\" - file system operations are disabled by configuration" },
     .{ .name = "absolute_path", .text = "Permission Error: Cannot access file \"/etc/passwd\" - file system operations are disabled by configuration" },
     .{ .name = "setting_changed", .text = "Invalid Input Error: Cannot change configuration option \"threads\" - the configuration has been locked" },
@@ -286,6 +305,18 @@ const INVOCATION = [_]Pin{
     .{ .what = "the environment check (TZ=UTC, LC_ALL=C, the dist's lib/), right after the version check", .gap = .none, .text = "SELECT CASE WHEN getenv('TZ') IS DISTINCT FROM 'UTC' OR getenv('LC_ALL') IS DISTINCT FROM 'C' OR getenv('LD_LIBRARY_PATH') IS DISTINCT FROM '" },
     .{ .what = "the environment check's error, right after the output of " ++ NATIVE_LIBS, .gap = .native_libs, .text = "/lib' THEN error('sql_oracle: the action environment is TZ=' || coalesce(getenv('TZ'), '(unset)') || ' LC_ALL=' || coalesce(getenv('LC_ALL'), '(unset)') || ' LD_LIBRARY_PATH=' || coalesce(getenv('LD_LIBRARY_PATH'), '(unset)') || ', the rule sets TZ=UTC LC_ALL=C and the dist''s lib/') END" },
     .{ .what = ".safe_mode before the first src, right after the environment check", .gap = .none, .text = ", -cmd, .safe_mode, -cmd, .mode duckbox, -f, ../sql/0_write.sql, -cmd, .mode trash, -cmd, " },
+    .{ .what = "the in-memory database, last", .gap = .any, .text = ", :memory:]\"" },
+};
+
+/// The argv of an oracle with `extensions`: the avro and iceberg LOADs in the
+/// order listed, directly after the flags and ahead of `.cd`, then the
+/// settings and `.safe_mode` as in INVOCATION.
+const EXT_INVOCATION = [_]Pin{
+    .{ .what = "the first extension, loaded right after the flags", .gap = .any, .text = "duckdb, -no-init, -batch, -bail, -cmd, LOAD '" },
+    .{ .what = "the second extension, loaded right after the first", .gap = .path, .text = "/avro.duckdb_extension', -cmd, LOAD '" },
+    .{ .what = "the working directory, right after the second extension", .gap = .path, .text = "/iceberg.duckdb_extension', -cmd, .cd " },
+    .{ .what = "threads and TimeZone, right after the working directory", .gap = .path, .text = ", -cmd, .mode trash, -cmd, SET threads = 1; SET TimeZone = 'UTC'; " },
+    .{ .what = ".safe_mode before the first src", .gap = .any, .text = ", -cmd, .safe_mode, -cmd, .mode duckbox, -f, ../sql/0_with_extensions.sql, -cmd, .mode trash, -cmd, " },
     .{ .what = "the in-memory database, last", .gap = .any, .text = ", :memory:]\"" },
 };
 
@@ -397,6 +428,46 @@ fn invocation(c: *lib.Ctx) !void {
     c.pass("invocation: the sql_oracle action of {s} runs with all {d} pinned pieces in order, duckdb v{s}, {s}/lib", .{ WRITE, INVOCATION.len, version, native_libs });
 }
 
+/// `buck2 aquery` of the oracle with `extensions`: its argv holds every
+/// EXT_INVOCATION piece in order, each gap a path, and one `-f`.
+fn extensionsInvocation(c: *lib.Ctx) !void {
+    const build = try c.run(&.{ "build", WITH_EXTENSIONS }, .{});
+    if (!build.ok()) {
+        c.fail("extensions: {s} does not build (see {s}); its last lines:\n{s}", .{ WITH_EXTENSIONS, build.log, lib.text.tail(build.stderr, 12) });
+        return;
+    }
+    const res = try c.run(&.{ "aquery", WITH_EXTENSIONS, "--output-attribute", "cmd", "--output-attribute", "category", "--json" }, .{});
+    if (!res.ok()) {
+        c.fail("extensions: buck2 aquery {s} failed (see {s}); its last lines:\n{s}", .{ WITH_EXTENSIONS, res.log, lib.text.tail(res.stderr, 12) });
+        return;
+    }
+    if (lib.text.count(res.stdout, "\"category\": \"sql_oracle\"") != 1) {
+        c.fail("extensions: buck2 aquery {s} does not show one sql_oracle action (see {s})", .{ WITH_EXTENSIONS, res.log });
+        return;
+    }
+    var pos: usize = 0;
+    for (EXT_INVOCATION) |pin| {
+        const at = std.mem.indexOfPos(u8, res.stdout, pos, pin.text) orelse {
+            c.fail("extensions: the sql_oracle action of {s} lacks {s}: no `{s}` after byte {d} of its argv (see {s})", .{ WITH_EXTENSIONS, pin.what, pin.text, pos, res.log });
+            return;
+        };
+        if (badGap(pin.gap, res.stdout[pos..at], .{ .version = "", .native_libs = "" })) |why| {
+            c.fail("extensions: the sql_oracle action of {s} holds `{s}` before {s}: {s} (see {s})", .{ WITH_EXTENSIONS, res.stdout[pos..at], pin.what, why, res.log });
+            return;
+        }
+        pos = at + pin.text.len;
+    }
+    if (lib.text.count(res.stdout, ", -f, ") != 1) {
+        c.fail("extensions: the sql_oracle action of {s} runs -f {d} times, not once (see {s})", .{ WITH_EXTENSIONS, lib.text.count(res.stdout, ", -f, "), res.log });
+        return;
+    }
+    if (lib.text.count(res.stdout, "-cmd, LOAD '") != 2) {
+        c.fail("extensions: the sql_oracle action of {s} loads {d} extensions, not two (see {s})", .{ WITH_EXTENSIONS, lib.text.count(res.stdout, "-cmd, LOAD '"), res.log });
+        return;
+    }
+    c.pass("extensions: the sql_oracle action of {s} loads avro then iceberg ahead of `.cd`, with all {d} pinned pieces in order", .{ WITH_EXTENSIONS, EXT_INVOCATION.len });
+}
+
 fn holds(r: anytype, want: []const u8) bool {
     return lib.text.contains(r.stderr, want) or lib.text.contains(r.stdout, want);
 }
@@ -441,6 +512,7 @@ fn body(c: *lib.Ctx) !void {
     c.pass("precondition: {s} builds", .{GREEN});
     try farmOnly(c, "precondition");
     try invocation(c);
+    try extensionsInvocation(c);
     try c.refusals(&REFUSALS);
     const bounds = try c.run(&.{ "build", DIST_BOUNDS }, .{});
     if (!bounds.ok()) {

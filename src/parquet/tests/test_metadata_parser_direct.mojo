@@ -277,7 +277,7 @@ def test_schema_element_every_field() raises:
     w.i32(6, 5)  # DECIMAL
     w.i32(7, 2)
     w.i32(8, 30)
-    w.i64(9, 11)  # field_id: skipped
+    w.i64(9, 11)  # field_id sent as an i64 (it is an i32): skipped
     w.begin(10)
     w.begin(8)  # TIMESTAMP
     w.flag(1, False)
@@ -300,6 +300,35 @@ def test_schema_element_every_field() raises:
     assert_equal(e.precision.value(), 30)
     assert_equal(e.logical_timestamp_unit.value(), 2)
     assert_false(e.logical_timestamp_is_utc.value())
+
+
+def test_schema_element_field_id_is_field_9_as_an_i32() raises:
+    # Iceberg writers stamp the table's field id on each column.
+    var w = _W()
+    w.i32(1, 2)
+    w.text(4, "id")
+    w.i32(9, 42)
+    w.stop()
+    var r = ThriftCompactReader(_view(Span(w.out)))
+    assert_equal(_parse_schema_element(r).field_id.value(), 42)
+    # The largest reserved id (a position delete file's `file_path`).
+    var w2 = _W()
+    w2.text(4, "file_path")
+    w2.i32(9, 2147483546)
+    w2.stop()
+    var r2 = ThriftCompactReader(_view(Span(w2.out)))
+    assert_equal(_parse_schema_element(r2).field_id.value(), 2147483546)
+    # No field 9, or one sent as an i64: no id.
+    var w3 = _W()
+    w3.text(4, "plain")
+    w3.stop()
+    var r3 = ThriftCompactReader(_view(Span(w3.out)))
+    assert_false(Bool(_parse_schema_element(r3).field_id))
+    var w4 = _W()
+    w4.i64(9, 42)
+    w4.stop()
+    var r4 = ThriftCompactReader(_view(Span(w4.out)))
+    assert_false(Bool(_parse_schema_element(r4).field_id))
 
 
 def test_schema_element_text_backfill_never_overrides_field_6() raises:

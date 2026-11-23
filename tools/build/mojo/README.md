@@ -1109,7 +1109,10 @@ third-party code built from source: see
 Mojo in [`../examples/snappy`](../examples/snappy)). With `one_tree = True`
 its output is one directory holding every file at its archive path, for code
 that includes its own headers by relative path; `tree_dirs` names directories
-of it for `-I$(location ...)`.
+of it for `-I$(location ...)`. Its archive is a `.tar.gz`, `.tgz`, `.tar`,
+`.tar.zst`, `.zip` or `.conda`, or a single gzip file (`<name>.gz`, which holds
+the one file `<name>`: `files = ["<name>"]`), as the pinned DuckDB extensions
+of [`third_party/duckdb`](../../../third_party/duckdb/README.md) are.
 
 [`third_party/aws-lc`](../../../third_party/aws-lc) (libcrypto 1.39.0, not
 FIPS, linux x86_64) and [`third_party/s2n-tls`](../../../third_party/s2n-tls)

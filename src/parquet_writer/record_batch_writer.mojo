@@ -59,14 +59,17 @@ def write_record_batch_to_parquet_bytes(
     batch: RecordBatch,
     codec: CompressionCodec = CompressionCodec.SNAPPY,
     max_rows_per_rg: Int = DEFAULT_MAX_ROWS_PER_RG,
+    field_ids: List[Int] = List[Int](),
 ) raises -> List[UInt8]:
     """The bytes of a Parquet file holding `batch`, cut into row groups of at
-    most `max_rows_per_rg` rows.
+    most `max_rows_per_rg` rows. `field_ids`, when not empty, holds one id per
+    column, written as that column's schema-element `field_id` (what an
+    Iceberg writer stamps); empty, no column carries one.
 
     Raises:
-        Error: the batch has no columns, `max_rows_per_rg` is not positive, a
-            column's Arrow type has no encoder, or a REQUIRED column holds a
-            null.
+        Error: the batch has no columns, `max_rows_per_rg` is not positive,
+            `field_ids` is neither empty nor one per column, a column's Arrow
+            type has no encoder, or a REQUIRED column holds a null.
     """
     _require_positive_row_group_size(
         "write_record_batch_to_parquet_bytes", max_rows_per_rg
@@ -78,6 +81,18 @@ def write_record_batch_to_parquet_bytes(
     for c in range(num_cols):
         nullable.append(batch.schema.field_nullable(c))
     var elements = schema_elements_for(batch.schema, nullable)
+    if len(field_ids) > 0:
+        if len(field_ids) != num_cols:
+            raise Error(
+                "write_record_batch_to_parquet_bytes: "
+                + String(len(field_ids))
+                + " field ids for "
+                + String(num_cols)
+                + " columns"
+            )
+        # elements[0] is the root group; the leaves follow in column order.
+        for c in range(num_cols):
+            elements[c + 1].field_id = Optional[Int](field_ids[c])
     return _write_single_batch_bytes(batch, elements, codec, max_rows_per_rg)
 
 

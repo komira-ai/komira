@@ -97,3 +97,36 @@ pinned_file(
     size_bytes = 5649100,
     visibility = ["komira//src/bench_q6_phases:", "komira//src/tpch_answers:"],
 )
+
+# The avro and iceberg extensions of this DuckDB release for linux amd64
+# (extensions.duckdb.org, signed by DuckDB, gzip as the repository serves
+# them), which an `sql_oracle` loads through its `extensions` attribute so a
+# conformance test can hold komira's `iceberg_scan` to DuckDB's. `iceberg`
+# reads its manifests with `avro`, so an oracle lists `avro` first. Each
+# `*_extension` target unpacks its archive (a single gzip file) to the file
+# DuckDB loads, `<name>.duckdb_extension`; DuckDB names the extension after
+# that file. The sha256 and size are those of the archive as downloaded from
+# the URL.
+pinned_file(
+    name = "avro.duckdb_extension.gz",
+    url = "https://extensions.duckdb.org/v{}/linux_amd64/avro.duckdb_extension.gz".format(_VERSION),
+    sha256 = "ba5fe5d85de029f9398e9747baa912adfc335740b345f57cdc8d8069a7dfc499",
+    size_bytes = 3954460,
+)
+
+pinned_file(
+    name = "iceberg.duckdb_extension.gz",
+    url = "https://extensions.duckdb.org/v{}/linux_amd64/iceberg.duckdb_extension.gz".format(_VERSION),
+    sha256 = "ed140567c919269f2a175fed5f0455c707d7af6489459d46f32ae9e4362f0076",
+    size_bytes = 17948983,
+)
+
+# `:avro_extension[avro.duckdb_extension]` and
+# `:iceberg_extension[iceberg.duckdb_extension]` are the files to load.
+[archive_files(
+    name = name + "_extension",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":" + name + ".duckdb_extension.gz",
+    files = [name + ".duckdb_extension"],
+    visibility = _USERS,
+) for name in ["avro", "iceberg"]]

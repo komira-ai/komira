@@ -78,6 +78,15 @@ sql_oracle(
     outputs = ["out.tsv"],
 )
 
+# RED: `is not a DuckDB extension`: an `extensions` file that is text. The
+# load runs before any SQL, so ok.sql never runs.
+sql_oracle(
+    name = "extension_not_duckdb",
+    srcs = "ok.sql",
+    extensions = ["not_duckdb.duckdb_extension"],
+    outputs = ["out.tsv"],
+)
+
 # RED: the oracle discipline (komira_test_oracle's sql/discipline.sql) run
 # by its case runner (sql/run.sql) on a planted case: a key with no NULL
 # placement, and no ORDER BY on the outermost query. Each must fail before
@@ -196,6 +205,29 @@ sql_oracle(
     inputs = [
         "staged.csv",
         ":sql_error[out.tsv]",
+    ],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an extensions entry that is not named `<name>.duckdb_extension`,
+# second: it holds the suffix inside its name and does not end in it.
+sql_oracle(
+    name = "extension_not_named_so",
+    srcs = "ok.sql",
+    extensions = [
+        "not_duckdb.duckdb_extension",
+        "notes.duckdb_extension.txt",
+    ],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an extension listed twice.
+sql_oracle(
+    name = "extension_twice",
+    srcs = "ok.sql",
+    extensions = [
+        "not_duckdb.duckdb_extension",
+        "not_duckdb.duckdb_extension",
     ],
     outputs = ["out.tsv"],
 )

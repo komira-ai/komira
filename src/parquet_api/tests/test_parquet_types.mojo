@@ -216,6 +216,20 @@ def test_schema_element_leaf() raises:
     assert_false(elem.type_length)
     assert_false(elem.scale)
     assert_false(elem.precision)
+    assert_false(elem.field_id)  # a column the writer gave no id
+
+
+def test_schema_element_field_id() raises:
+    """A writer's field id (Thrift field 9) is kept, and defaults to none."""
+    var elem = SchemaElement(
+        name="id",
+        type=ParquetType.INT64,
+        field_id=7,
+    )
+    assert_equal(elem.field_id.value(), 7)
+    var copy = elem.copy()
+    assert_equal(copy.field_id.value(), 7)
+    assert_false(SchemaElement(name="plain").field_id)
 
 
 def test_schema_element_group() raises:

@@ -145,6 +145,10 @@ struct SchemaElement(Movable, Copyable):
         converted_type: Deprecated converted type (still needed for compat).
         scale: Scale for Decimal logical type.
         precision: Precision for Decimal logical type.
+        field_id: The writer's field id for the column (Thrift field 9), or
+            None when the file carries none. Iceberg writers stamp the table's
+            field id here, which is how a reader binds a column that was renamed
+            or reordered since the file was written.
     """
 
     var name: String
@@ -167,6 +171,7 @@ struct SchemaElement(Movable, Copyable):
     # tz="UTC" tag).  None when the element is not a LogicalType TIMESTAMP.
     var logical_timestamp_unit: Optional[Int]
     var logical_timestamp_is_utc: Optional[Bool]
+    var field_id: Optional[Int]
 
     def __init__(
         out self,
@@ -180,6 +185,7 @@ struct SchemaElement(Movable, Copyable):
         precision: Optional[Int] = None,
         logical_timestamp_unit: Optional[Int] = None,
         logical_timestamp_is_utc: Optional[Bool] = None,
+        field_id: Optional[Int] = None,
     ):
         self.name = name^
         self.type = type
@@ -191,6 +197,7 @@ struct SchemaElement(Movable, Copyable):
         self.precision = precision
         self.logical_timestamp_unit = logical_timestamp_unit
         self.logical_timestamp_is_utc = logical_timestamp_is_utc
+        self.field_id = field_id
 
 
 # =============================================================================

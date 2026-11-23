@@ -6,6 +6,8 @@
 #     rows written, and equal to the same rows written as one row group;
 #   - a projection returns only the listed columns, in the listed order;
 #   - a table of zero rows decodes to zero rows with its schema;
+#   - a column's field id (schema element field 9) written into a footer is
+#     read back, and the rows of the file are unchanged;
 #   - a footer value count that disagrees with the pages is refused before any
 #     buffer is sized from it; a LARGE_STRING column of non-UTF-8 bytes comes
 #     back intact (as STRING);
@@ -251,6 +253,44 @@ def test_a_projection_returns_the_listed_columns_in_order() raises:
             i * 1000003 - 5,
         )
 
+
+def test_a_column_field_id_is_written_and_read_back_and_the_rows_still_decode() raises:
+    # Iceberg writers stamp the table's field id on each column (field 9 of the
+    # schema element); the footer keeps it, and the column's rows are unchanged.
+    var file = write_record_batch_to_parquet_bytes(_batch(0, 20))
+    var plain = _footer_of(file)
+    for i in range(1, len(plain.schema)):
+        assert_equal(Bool(plain.schema[i].field_id), False, "no id until one is given")
+    var md = _footer_of(file)
+    md.schema[1].field_id = Optional[Int](7)
+    md.schema[5].field_id = Optional[Int](2147483546)
+    var stamped = _with_footer(file, md)
+    var back = _footer_of(stamped)
+    assert_equal(back.schema[1].field_id.value(), 7)
+    assert_equal(back.schema[5].field_id.value(), 2147483546)
+    assert_equal(Bool(back.schema[2].field_id), False)
+    assert_equal(Bool(back.schema[0].field_id), False)
+    _check_rows(_decode(stamped), 0, 20)
+
+
+def test_field_ids_given_to_the_writer_are_on_the_leaf_columns() raises:
+    var ids = List[Int]()
+    for i in range(7):
+        ids.append(100 + i)
+    var file = write_record_batch_to_parquet_bytes(
+        _batch(0, 20), field_ids=ids.copy()
+    )
+    var md = _footer_of(file)
+    assert_equal(Bool(md.schema[0].field_id), False, "the root carries none")
+    for i in range(7):
+        assert_equal(md.schema[i + 1].field_id.value(), 100 + i)
+    _check_rows(_decode(file), 0, 20)
+    var short = List[Int]()
+    short.append(1)
+    with assert_raises(
+        contains="write_record_batch_to_parquet_bytes: 1 field ids for 7 columns"
+    ):
+        _ = write_record_batch_to_parquet_bytes(_batch(0, 20), field_ids=short^)
 
 def test_a_table_of_zero_rows_decodes_to_zero_rows() raises:
     var file = write_record_batch_to_parquet_bytes(_batch(0, 0))

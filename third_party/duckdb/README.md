@@ -12,6 +12,8 @@ tests may declare a `sql_oracle` (the visibility of `:duckdb`).
 | `:native_libs` | `libgcc_s.so.1` and `libstdc++.so.6` (GCC 15.3), unpacked from the conda-forge packages the [platform table](../../tools/build/platforms/table.bzl) pins for the toolchains; every `sql_oracle` action names their directory in `LD_LIBRARY_PATH` |
 | `:duckdb` | `duckdb_dist`: the binary, `:native_libs` and the version, `sql_oracle`'s default |
 | `:LICENSE` | DuckDB's MIT license, the `LICENSE` of the repository at the release tag's commit, pinned by commit (the archive holds no license text) |
+| `:avro.duckdb_extension.gz`, `:iceberg.duckdb_extension.gz` | the `avro` and `iceberg` extensions of the release for linux amd64, gzip as `extensions.duckdb.org` serves them, pinned by sha256 and size |
+| `:avro_extension`, `:iceberg_extension` | each archive's one file, `avro.duckdb_extension` and `iceberg.duckdb_extension`, unpacked by `archive_files` (a single `.gz` file is one of its kinds); `:iceberg_extension[iceberg.duckdb_extension]` is the file an `sql_oracle` lists in `extensions` |
 
 ## The pin
 
@@ -27,8 +29,11 @@ The binary is the glibc build: it links `libstdc++.so.6` and `libgcc_s.so.1`
 host floor, [toolchains](../../tools/build/toolchains/README.md#host-floor)).
 The release's `-musl` build needs the musl loader, which no worker has. The
 CLI has Parquet, CSV and ICU (the time zones) built in: the fixtures read
-and write them with no extension loading; `sql_oracle`
-loads and installs no other extension.
+and write them with no extension loading. `sql_oracle` installs no extension
+and loads none on demand; it loads exactly the files its `extensions`
+attribute lists, before its first setting (`avro` and `iceberg` above, for the
+Iceberg scan conformance). The extension files are the release's own, signed
+by DuckDB, so the CLI runs with its default of refusing an unsigned one.
 
 Linux x86_64 only. The release also publishes `duckdb_cli-osx-arm64.zip`;
 it is not pinned: no macOS worker runs a `sql_oracle` action (the macro
@@ -40,7 +45,12 @@ places every one on the linux x86_64 execution platform).
    (`gh api repos/duckdb/duckdb/git/ref/tags/v<version>`); `_SHA256` and
    `_SIZE` of `duckdb_cli-linux-amd64.zip`, downloaded twice from the new
    release URL; `_LICENSE_SHA256` and `_LICENSE_SIZE` of the `LICENSE` at
-   that commit.
+   that commit; the URL of each extension archive follows `_VERSION`, so
+   the sha256 and size of `avro.duckdb_extension.gz` and
+   `iceberg.duckdb_extension.gz` (and of the `tpch` one) are read again from
+   `https://extensions.duckdb.org/v<version>/linux_amd64/`, downloaded twice
+   (an extension is built for one DuckDB version: the old file is refused by
+   the new binary).
 2. `duckdb_dist` refuses a `_VERSION` that is not digits and dots (it is
    written into the SQL of every oracle), and `sql_oracle` refuses a
    binary that reports another version than

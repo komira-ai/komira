@@ -356,6 +356,18 @@ _SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in
 #   empty string, under a WHERE and a HAVING, with count(DISTINCT), SELECT
 #   DISTINCT over three columns, an all-NULL key and no row, on one and three
 #   workers; every case is run.
+# - test_run_sql_iceberg: run_sql over an Iceberg table written in the test
+#   (format version 2, three columns, no snapshot): iceberg_scan of a table
+#   directory and of its metadata file answers the schema and no row, under a
+#   projection, a filter, an ORDER BY and count(*); allow_moved_paths is
+#   accepted; a snapshot the table lacks, a directory with no version hint and
+#   an s3:// path are named refusals at step bind; every other DuckDB option is
+#   refused at step parse by its exact message; register_iceberg_table over a
+#   StorageBasedCatalog (a bare path and a file:/// URI) is queried by name
+#   without regard to case, passes allow_moved_paths, and refuses an unknown
+#   table and a location off the local file system by exact message; an Iceberg
+#   and a Parquet table join in either order; the kind name lowering cuts an
+#   Iceberg scan by is the binding's.
 # - test_run_sql_join_kinds: run_sql over Parquet tables DuckDB wrote (the
 #   :join_kinds_oracle action above) answers what the pinned DuckDB answers for
 #   each case of tests/join_kinds/cases.sql, on one and three workers: LEFT,
@@ -393,8 +405,8 @@ _SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in
 #   false; a glob with no file, a directory in SQL text and files of different
 #   schemas are named refusals at their step; a replaced file is read again.
 # - test_run_sql_s3: run_sql_with over catalog tables whose source names an S3
-#   bucket, read through S3ScanFs over the fake S3 (objectstore_s3, aws_core,
-#   http_client and komira_test_fake_s3 are test_deps for it): a filter and a
+#   bucket, read through S3ScanFs over the fake S3 (objectstore_s3, aws_core
+#   and komira_test_fake_s3 are test_deps for it): a filter and a
 #   projection, a GROUP BY and a count, a table of two keys, and one key in two
 #   buckets under UNION ALL each answer what the local files answer; a missing
 #   and a refused object are the store's NOT_FOUND and PERMISSION_DENIED at step
@@ -460,6 +472,7 @@ mojo_library(
         "//src/async_api:async_api",
         "//src/atomic_alias:atomic_alias",
         "//src/avro:avro",
+        "//src/awslc:awslc",
         "//src/batch_eval:batch_eval",
         "//src/byte_buffer:byte_buffer",
         "//src/clock:clock",
@@ -480,6 +493,10 @@ mojo_library(
         "//src/hashing:hashing",
         "//src/host_probe:host_probe",
         "//src/host_profile:host_profile",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/iceberg_catalog:iceberg_catalog",
+        "//src/iceberg_scan:iceberg_scan",
         "//src/join_assembly:join_assembly",
         "//src/json:json",
         "//src/json_index:json_index",
@@ -492,6 +509,7 @@ mojo_library(
         "//src/metrics:metrics",
         "//src/morsel:morsel",
         "//src/name_registry:name_registry",
+        "//src/net:net",
         "//src/objectstore:objectstore",
         "//src/op_agg_state:op_agg_state",
         "//src/op_join_probe:op_join_probe",
@@ -530,6 +548,7 @@ mojo_library(
         "//src/sync:sync",
         "//src/trace:trace",
         "//src/udf:udf",
+        "//src/uuid:uuid",
         "//src/zlib:zlib",
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
@@ -547,6 +566,7 @@ mojo_library(
         "tests/test_run_sql_float_sum_workers.mojo",
         "tests/test_run_sql_group_keys.mojo",
         "tests/test_run_sql_group_keys_mixed.mojo",
+        "tests/test_run_sql_iceberg.mojo",
         "tests/test_run_sql_int_sum.mojo",
         "tests/test_run_sql_join_kinds.mojo",
         "tests/test_run_sql_joins.mojo",
@@ -563,7 +583,6 @@ mojo_library(
     test_deps = [
         "//src/aws_core:aws_core",
         "//src/bench_corpus:bench_corpus",
-        "//src/http_client:http_client",
         "//src/objectstore_s3:objectstore_s3",
         "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
         "//src/tests/helpers/komira_test_arrow_c_consumer:komira_test_arrow_c_consumer",

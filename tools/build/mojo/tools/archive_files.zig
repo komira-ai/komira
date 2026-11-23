@@ -7,7 +7,9 @@
 //!            (file|template <path under prefix> <out>)...
 //!
 //! The archive (`.tar.gz`, `.tgz`, `.tar`, `.tar.zst`, `.zip`, or `.conda`,
-//! which is a zip of `.tar.zst` members; the name says which) is
+//! which is a zip of `.tar.zst` members; or a single gzip file, `.gz`, which
+//! holds one file named as the archive is, without the `.gz`; the name says
+//! which) is
 //! extracted into a scratch directory, and each triple takes <path under prefix>
 //! from `<prefix>/` there to <out> (under <dir> after `--tree <dir>`; the
 //! directories of <out> are made): `file` copies it (executable when the
@@ -61,10 +63,11 @@ pub fn substitute(a: std.mem.Allocator, text: []const u8, pairs: []const Pair) !
     return out.toOwnedSlice(a);
 }
 
-pub const Kind = enum { tar_gz, tar, tar_zst, zip };
+pub const Kind = enum { tar_gz, tar, tar_zst, zip, gz };
 
 pub fn kindOf(archive: []const u8) ?Kind {
     if (std.mem.endsWith(u8, archive, ".tar.gz") or std.mem.endsWith(u8, archive, ".tgz")) return .tar_gz;
+    if (std.mem.endsWith(u8, archive, ".gz")) return .gz;
     if (std.mem.endsWith(u8, archive, ".tar")) return .tar;
     if (std.mem.endsWith(u8, archive, ".tar.zst")) return .tar_zst;
     if (std.mem.endsWith(u8, archive, ".zip") or std.mem.endsWith(u8, archive, ".conda")) return .zip;
@@ -84,6 +87,38 @@ pub fn zstdDecode(a: std.mem.Allocator, data: []const u8) ![]u8 {
     var zin: std.Io.Reader = .fixed(data);
     var dz = std.compress.zstd.Decompress.init(&zin, window, .{ .window_len = zstd_window_len });
     return dz.reader.allocRemaining(a, .limited(1 << 31)) catch |e| return if (e == error.ReadFailed) (dz.err orelse e) else e;
+}
+
+/// The bytes of the gzip stream `data`, inflated whole into memory with no
+/// window buffer (the windowed decoder of this release mishandles a
+/// fixed-Huffman match at the end of its window). The stream's checksum and
+/// length are checked.
+pub fn gunzip(a: std.mem.Allocator, data: []const u8) ![]u8 {
+    var gz_in: std.Io.Reader = .fixed(data);
+    var dec = std.compress.flate.Decompress.init(&gz_in, .gzip, &.{});
+    var plain = std.Io.Writer.Allocating.init(a);
+    _ = dec.reader.streamRemaining(&plain.writer) catch |e| return if (e == error.ReadFailed) (dec.err orelse e) else e;
+    return plain.written();
+}
+
+/// The name of the one file a gzip archive holds: the archive's file name
+/// without its `.gz`, or null when nothing is left of it.
+pub fn gzFileName(archive: []const u8) ?[]const u8 {
+    const base = std.fs.path.basename(archive);
+    if (!std.mem.endsWith(u8, base, ".gz")) return null;
+    const name = base[0 .. base.len - ".gz".len];
+    return if (name.len == 0) null else name;
+}
+
+/// Extracts the gzip file `data` into `dest` as the one file `name` (mode
+/// 0644): the inflated bytes, not executable.
+pub fn extractGz(a: std.mem.Allocator, dest: std.fs.Dir, name: []const u8, data: []const u8) !void {
+    if (name.len == 0 or !contained(name)) return error.PathEscapes;
+    const plain = try gunzip(a, data);
+    const f = try dest.createFile(name, .{ .mode = 0o644 });
+    defer f.close();
+    try f.writeAll(plain);
+    try f.chmod(0o644);
 }
 
 pub const Escapes = error{PathEscapes};
@@ -249,11 +284,8 @@ fn extractArchive(a: std.mem.Allocator, xd: std.fs.Dir, archive: []const u8, kin
             // Inflated into memory with no window buffer (the windowed decoder of
             // this release mishandles a fixed-Huffman match at the end of its window).
             const gz = file.readToEndAlloc(a, 1 << 31) catch |e| die("cannot read {s}: {s}", .{ archive, @errorName(e) });
-            var gz_in: std.Io.Reader = .fixed(gz);
-            var dec = std.compress.flate.Decompress.init(&gz_in, .gzip, &.{});
-            var tar_bytes = std.Io.Writer.Allocating.init(a);
-            _ = dec.reader.streamRemaining(&tar_bytes.writer) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(if (e == error.ReadFailed) (dec.err orelse e) else e) });
-            var tar_in: std.Io.Reader = .fixed(tar_bytes.written());
+            const tar_bytes = gunzip(a, gz) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
+            var tar_in: std.Io.Reader = .fixed(tar_bytes);
             extractTar(xd, &tar_in) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
         },
         .tar => {
@@ -270,6 +302,11 @@ fn extractArchive(a: std.mem.Allocator, xd: std.fs.Dir, archive: []const u8, kin
         .zip => {
             const bytes = file.readToEndAlloc(a, 1 << 31) catch |e| die("cannot read {s}: {s}", .{ archive, @errorName(e) });
             extractZip(a, xd, bytes) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
+        },
+        .gz => {
+            const bytes = file.readToEndAlloc(a, 1 << 31) catch |e| die("cannot read {s}: {s}", .{ archive, @errorName(e) });
+            const name = gzFileName(archive) orelse die("{s} names no file: a gzip archive is <name>.gz", .{archive});
+            extractGz(a, xd, name, bytes) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
         },
     }
 }

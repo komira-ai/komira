@@ -17,8 +17,9 @@ name tables that say which identifiers the grammar claims
 (`sql_agg_code`, `sql_call_is_aggregate`, `sql_name_claimed_by_grammar`).
 
 `sql.sql_tvf_options` holds what the nodes share about table functions: the reader
-kinds (`TVF_PARQUET`, `TVF_CSV`, `TVF_JSON`, `TVF_AVRO`), `TvfOptions` (the
-`all_varchar`, `header`, `delim` and `hive_partitioning` options of a `read_*` call
+kinds (`TVF_PARQUET`, `TVF_CSV`, `TVF_JSON`, `TVF_AVRO`, `TVF_ICEBERG`), `TvfOptions` (the
+`all_varchar`, `header`, `delim` and `hive_partitioning` options of a `read_*` call,
+the `allow_moved_paths` and `snapshot_from_id` options of `iceberg_scan`,
 and the `HIVE_PARTITIONING_*` modes), and the extension rules of the
 `FROM '<path>'` replacement scan (`_replacement_scan_kind`, `_file_stem`).
 `sql_ast` and `sql_parser` import them back, so the old import paths still work.
@@ -122,7 +123,19 @@ with no `read_parquet` relation. `read_parquet('path', hive_partitioning =
 true|false)` sets the mode the reader resolves the path under (no option is
 auto-detect); a column counts as NULL-free only when every file of the
 relation records no NULL and it is not a partition column.
-`SqlCatalog.add_parquet_source` registers such a resolved source as a table. A `read_csv`, `read_json` or `read_avro`
+`SqlCatalog.add_parquet_source` registers such a resolved source as a table.
+An `iceberg_scan('path' [, allow_moved_paths = true] [, snapshot_from_id = N])`
+relation is resolved the same way, by the reader's `iceberg_relation(path,
+allow_moved_paths, snapshot_id)`, which returns the `SourceVariant` the relation
+scans (its own schema is the relation's schema); a reader that does not
+override that method refuses with `SQL bind error: iceberg_scan('<path>') needs
+a binder that reads Iceberg tables`. `parquet_footers.ParquetFooters` reads
+Iceberg tables. Every other DuckDB `iceberg_scan` option (`version`,
+`version_name_format`, `mode`, `metadata_compression_codec`,
+`skip_schema_inference`, `snapshot_from_timestamp`) is refused by name, as is
+any CSV, JSON or Parquet option on `iceberg_scan`, and both Iceberg options on
+the other readers. `SqlCatalog.add_source` registers any resolved
+`SourceVariant` as a table under its own schema (an Iceberg table). A `read_csv`, `read_json` or `read_avro`
 relation gets its schema from `sql_tvf_bind`, which reads the file. The
 binder's code is split over the `sql_bind_*` modules (the FROM scope,
 operators, functions, casts and timestamps, subqueries, aggregates and

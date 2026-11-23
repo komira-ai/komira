@@ -15,9 +15,15 @@
 # (`read_csv`) opens a SOURCE_CSV pipeline whose spec carries the file's path,
 # its dialect (delimiter, header, quote style) and every column of the file
 # with the type the plan bound it at, so the reader decodes at the bound
-# schema and never infers a second one. Neither the batch arm nor the CSV arm
-# has a pushed filter or projection, so both become operators, the filter
-# first, over the source's full schema.
+# schema and never infers a second one. A scan of an Iceberg table (a binding
+# of kind `komira.iceberg.table`) opens a SOURCE_ICEBERG pipeline whose spec is
+# the one the host planned before lowering (`ScanFacts.iceberg`: the data files
+# that survive pruning, the delete files that apply, the bound columns); this
+# module reads no table metadata and does not depend on the package that does.
+# None of the batch, CSV and Iceberg arms has a pushed filter or projection, so
+# each becomes operators, the filter first, over the source's full schema. The
+# filter an Iceberg scan pushed is kept as an operator because the planner uses
+# it only to skip files.
 #
 # Refused: an unbounded scan, a Hive-partitioned scan that lists its files
 # lazily (a directory scan or a partition predicate) or a Parquet scan on a
@@ -26,7 +32,8 @@
 # beyond the inputs' count (LOWERING_INPUTS_SCAN_COUNT); a CSV scan with
 # header=false, whose columns the reader would not name as DuckDB does, and
 # any other source
-# (LOWERING_UNCUTTABLE_NODE).
+# (LOWERING_UNCUTTABLE_NODE); an Iceberg scan whose files the inputs do not
+# carry (LOWERING_SCAN_NOT_TOTAL).
 # =============================================================================
 
 from arrow.schema import Field
@@ -49,6 +56,7 @@ from physical_plan.physical_plan import (
     SOURCE_PARQUET,
     SOURCE_BATCH,
     SOURCE_CSV,
+    SOURCE_ICEBERG,
 )
 from arrow.arrow_types import ArrowType
 from arrow.schema import Schema
@@ -57,7 +65,13 @@ from scan_source.source_variant import (
     SOURCE_VARIANT_PARQUET,
     SOURCE_VARIANT_IN_MEMORY,
     SOURCE_VARIANT_CSV,
+    SOURCE_VARIANT_BINDING,
 )
+
+comptime ICEBERG_TABLE_KIND_NAME: StaticString = "komira.iceberg.table"
+"""The kind name of the binding an Iceberg table scan carries. Spelled here
+rather than imported: lowering does not depend on the package that reads
+Iceberg tables."""
 
 
 def _open_scan(
@@ -165,6 +179,23 @@ def _open_scan(
         var pipe = _Pipe(SOURCE_CSV, spec^, full.copy(), idx)
         _scan_ops(pipe, node, pushed^, proj^)
         return pipe^
+    if (
+        sd.source.tag == SOURCE_VARIANT_BINDING
+        and sd.source.binding_ref().kind_name == String(ICEBERG_TABLE_KIND_NAME)
+    ):
+        if not inputs.scans[idx].iceberg:
+            raise Error(
+                String(LOWERING_SCAN_NOT_TOTAL)
+                + ": an Iceberg scan whose files were not planned"
+            )
+        var pipe = _Pipe(
+            SOURCE_ICEBERG,
+            SourceSpecPod.iceberg(inputs.scans[idx].iceberg.value().copy()),
+            sd.source.schema(),
+            idx,
+        )
+        _scan_ops(pipe, node, pushed^, proj^)
+        return pipe^
     raise _uncuttable(node, "a " + sd.source.kind_name() + " source")
 
 
@@ -197,8 +228,8 @@ def _scan_ops(
     var proj: Optional[List[String]],
 ) raises:
     """The scan's pushed filter and projection as operators of `pipe`, the
-    filter first, over the source's full schema: the batch and CSV arms carry
-    neither."""
+    filter first, over the source's full schema: the batch, CSV and Iceberg arms
+    carry neither."""
     if pushed:
         pipe.append_op(MorselOp.filter(pushed.take()))
     if proj:
