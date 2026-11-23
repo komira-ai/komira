@@ -9,6 +9,8 @@
 
 from lowering.lowered_plan import LoweredPlan
 from lowering.sink_capability import triple_name
+from physical_plan.udf_call_spec import UdfCallSpec
+from plan_ir.udf_ref import udf_ref_kind_name
 from physical_plan.physical_plan import (
     SegmentDescPod,
     MorselOp,
@@ -17,11 +19,14 @@ from physical_plan.physical_plan import (
     SOURCE_SINK_OUTPUT,
     SOURCE_CONCAT,
     SOURCE_CSV,
+    SOURCE_UDF_STEP,
     SOURCE_JSONL,
     OP_FILTER,
     OP_PROJECT,
     OP_LIMIT,
     OP_JOIN_PROBE,
+    OP_UDF_APPLY,
+    OP_UDF_FRAME,
     EDGE_E1_MORSEL_STREAM,
     EDGE_E2_INGEST_STREAM,
     EDGE_E3_PUBLISH_WAIT,
@@ -44,6 +49,8 @@ def _source_name(kind: UInt8) -> String:
         return "SOURCE_CONCAT"
     if kind == SOURCE_CSV:
         return "SOURCE_CSV"
+    if kind == SOURCE_UDF_STEP:
+        return "SOURCE_UDF_STEP"
     if kind == SOURCE_JSONL:
         return "SOURCE_JSONL"
     return "SOURCE_" + String(Int(kind))
@@ -83,6 +90,31 @@ def _names(items: List[String]) -> String:
     return out^
 
 
+def _call_text(spec: UdfCallSpec) -> String:
+    """`udf=<index> <KIND>`, then whichever of reads, args, literals and out
+    the call carries."""
+    var out = (
+        "udf=" + String(spec.udf_index) + " " + udf_ref_kind_name(spec.kind)
+    )
+    if len(spec.reads) > 0:
+        out += " reads=" + _names(spec.reads)
+    if len(spec.args) > 0:
+        out += " args=["
+        for i in range(len(spec.args)):
+            if i > 0:
+                out += ", "
+            out += String(spec.args[i])
+        out += "]"
+    if len(spec.literals) > 0:
+        out += " literals=["
+        for i in range(len(spec.literals)):
+            if i > 0:
+                out += ", "
+            out += String(spec.literals[i])
+        out += "]"
+    return out + " out=" + _names(spec.out_names)
+
+
 def _op_line(op: MorselOp) -> String:
     if op.tag == OP_FILTER:
         return "FILTER " + String(op.filter_predicate.value())
@@ -104,6 +136,10 @@ def _op_line(op: MorselOp) -> String:
                 text += ", "
             text += op.probe_left_keys[k] + "=" + op.probe_right_keys[k]
         return text + "]"
+    if op.tag == OP_UDF_APPLY:
+        return "UDF_APPLY " + _call_text(op.udf.value())
+    if op.tag == OP_UDF_FRAME:
+        return "UDF_FRAME " + _call_text(op.udf.value())
     return "OP_" + String(Int(op.tag))
 
 
@@ -145,6 +181,8 @@ def _segment_text(seg: SegmentDescPod) -> String:
                 out += ", "
             out += s.csv_spec.column_names[i] + ":" + String(s.csv_spec.column_types[i])
         out += "]"
+    elif seg.source_kind == SOURCE_UDF_STEP:
+        out += " " + _call_text(seg.source_spec.udf_step.value())
     elif seg.source_kind == SOURCE_JSONL:
         ref s = seg.source_spec
         out += " path=" + s.jsonl_path + " columns=["
@@ -198,7 +236,8 @@ def _segment_text(seg: SegmentDescPod) -> String:
 
 
 def render_lowered_plan(plan: LoweredPlan) -> String:
-    """The text of `plan`: its segments, its parameter table and its result."""
+    """The text of `plan`: its segments, its parameter table (a `udf` line
+    for each `UdfRef`, when the plan has any) and its result."""
     var out = String("ir_version ") + String(plan.segments[0].ir_version) + "\n"
     for i in range(len(plan.segments)):
         out += _segment_text(plan.segments[i])
@@ -235,5 +274,18 @@ def render_lowered_plan(plan: LoweredPlan) -> String:
             out += " desc" if s.descending[k] else " asc"
             out += " nulls_first" if s.nulls_first[k] else " nulls_last"
         out += "\n"
+    for i in range(len(p.udfs)):
+        ref u = p.udfs[i]
+        out += (
+            "  udf "
+            + String(i)
+            + ": "
+            + udf_ref_kind_name(u.kind)
+            + " runtime="
+            + u.code.runtime
+            + " entry="
+            + u.code.entry
+            + "\n"
+        )
     out += "result: segment " + String(plan.result_seg_id) + "\n"
     return out^

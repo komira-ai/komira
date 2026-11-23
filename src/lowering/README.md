@@ -1,7 +1,7 @@
 # lowering
 
 Lowering: a bound `LogicalPlan`, a `HostProfile` and the resolved inputs go in;
-the physical plan (`physical_plan`, IR version 17) and the `ParamTable`
+the physical plan (`physical_plan`, IR version 18) and the `ParamTable`
 its segments index come out. It is pure. `lower` opens no file, reads no clock
 and no environment variable and touches no global, so equal arguments give a
 `LoweredPlan` that renders byte-equal.
@@ -12,7 +12,9 @@ and no environment variable and touches no global, so equal arguments give a
   admission against the sink capability table.
 - `lowered_plan`: `LoweringInputs` (one `ScanFacts` per scan in scan
   pre-order: the footers' statistics and the columns every row group stores
-  dictionary encoded), `ParamTable`, `LoweredPlan` and the five refusal tokens.
+  dictionary encoded; and the plan's `UdfRef` list), `ParamTable` (which
+  carries that list whole, as `udfs`), `LoweredPlan` and the seven refusal
+  tokens.
 - `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, whose
   spec lists the files when there are several; `SOURCE_BATCH` for an in-memory
   scan; `SOURCE_CSV` for a CSV scan, whose spec carries the path, the dialect
@@ -23,7 +25,9 @@ and no environment variable and touches no global, so equal arguments give a
   over every key; the pushed
   filter and projection of the batch and CSV arms become operators, and so do those of
   a Parquet scan with Hive partition columns, over the files' columns followed
-  by the partition columns). A filter, a projection and a limit fuse into it.
+  by the partition columns). A step, a user function run once, opens one too
+  (`SOURCE_UDF_STEP`, see User functions). A filter, a projection, a limit and
+  an ungrouped frame fuse into it.
   An aggregation, a distinct or a sort ends it in a sink and opens a pipeline
   that reads that segment's output over an `E3` edge. A distinct is a
   `SINK_AGG` grouped by every column, in order, with no aggregate, so its
@@ -78,7 +82,42 @@ and no environment variable and touches no global, so equal arguments give a
   distinct over several columns gets the same row). The last row is
   `(SINK_HASH_BUILD, NONE, COLUMNAR)`, a join's build segment; it indexes no
   ParamTable row, so its `sink_param_id` is -1.
+- `udf_check`: what a user-function call is held to before it is cut (see
+  User functions).
 - `render`: the deterministic text of a `LoweredPlan`.
+
+## User functions
+
+A plan names a user function by its index in the `UdfRef` list beside it
+(`LoweringInputs.add_udf`, in the list's order); the lowered plan carries the
+list whole (`ParamTable.udfs`) and each call names its entry by the same
+index. Three shapes are cut, each into the IR's `UdfCallSpec`:
+
+- `PLAN_MAP_BATCHES` with no group key (`cut_map_batches`): an `OP_UDF_FRAME`
+  fused onto the child's pipeline, called once per morsel with exactly the
+  columns of the function's read set, in the set's order. Its output (the
+  node's schema) replaces the morsel. Past it the pipeline keeps no row
+  estimate, no dictionary encoded key and no sort order.
+- `PLAN_STEP` (`cut_step`): a pipeline whose source is `SOURCE_UDF_STEP`, the
+  call with its literal arguments. It is not a scan and takes no `ScanFacts`.
+- A projection column that is wholly an `EXPR_UDF_APPLY` (under any aliases)
+  of a `SCALAR`, `ROW` or `MAP_BATCHES_COLUMN` function (`cut_project`): an
+  `OP_UDF_APPLY` fused before the projection's `OP_PROJECT`, which appends the
+  call's result as column `__udf_apply:<i>` (`i` the column's position) for
+  the `OP_PROJECT` to read in the call's place.
+
+A shared subplan that holds a frame or a step is cut once, never again at
+each reference, so its calls run once.
+
+**The read set is explicit.** A `ROW` or `MAP_BATCHES_FRAME` function
+receives the columns of its read set and nothing else. Lowering refuses,
+with `LOWERING_UDF_UNDECLARED_READ` naming the column and the set, a call
+that would hand it a column the set does not declare: a `ROW` call whose
+argument reads one, and a frame whose group key reads one. A function of
+either kind that declares no read set is refused with the same token; an
+unset read set is never widened to every input column. A read the code makes
+outside its set is refused when the code runs, by its runtime
+(`UDF_FIELD_NOT_DECLARED`), since the engine passes no other column.
 
 ## Refusals
 
@@ -93,7 +132,8 @@ shape:
   or with none in the plan, or whose schema is not the canonical subtree's
   (column count, and per column the name, Arrow type, decimal precision and
   scale and timezone); a filter, projection or aggregation that carries a
-  UDF, an aggregate function that is a UDF; a limit with an offset or a
+  UDF of the registered kind (`has_udf`), an aggregate function that is a UDF
+  (`AGG_UDF`); a limit with an offset or a
   negative count; a limit above a sort (see Order); a partial or final
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
@@ -125,14 +165,31 @@ shape:
   predicate or file system descriptor, and its sources read a bounded input.
   The scan's display name is not part of the segment.
 - `LOWERING_INPUTS_SCAN_COUNT`: the inputs do not hold one entry per scan.
+- `LOWERING_UDF_UNDECLARED_READ`, naming the node, the `UdfRef` index and
+  kind, the column and the read set: a `ROW` call's argument or a frame's
+  group key that reads a column outside the function's read set, and a `ROW`
+  or frame function that declares no read set.
+- `LOWERING_UDF_UNSERVED`, naming the reason, raised before the node's child
+  is walked: an index with no entry in the `UdfRef` list; an entry whose kind
+  the node or call does not take (a frame node calls `MAP_BATCHES_FRAME`, a
+  step node `STEP`, a call in an expression `SCALAR`, `ROW` or
+  `MAP_BATCHES_COLUMN`); a call whose argument count, or a step whose literal
+  count, is not the entry's declared argument count; a read set naming a
+  column the input does not output, or outputs twice; a grouped frame (one
+  call per group needs that group's rows gathered, which no segment does
+  yet); a call inside another call's argument, inside a larger expression of
+  a projection column (an operator, a function or a CASE, which evaluate it
+  only on the rows they select), in a filter's predicate, in an aggregation's
+  group key or argument, or in a frame's group key; a projection whose input
+  already has the column name an `OP_UDF_APPLY` would append.
 
 ## What a segment records
 
 `morsel_rows` comes from the host profile and the schema that flows into the
 sink. `card_estimate_rows` is the row count of the scan's footers when the host
 supplied statistics, an upper bound on the rows that reach the sink, and 0
-otherwise and after a join (a join can emit more rows than its probe side
-has). `mem_estimate_bytes` is 0, and `AggSinkData.estimated_groups` is 0:
+otherwise and after a join or a frame (either can emit more rows than its
+input has) and in a pipeline a step opens. `mem_estimate_bytes` is 0, and `AggSinkData.estimated_groups` is 0:
 no memory decision is recorded, and no statistic a producer recorded in the
 plan is read. Every segment has one partition, and its order key is the one
 the Order section names. Whether an integer key's

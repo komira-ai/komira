@@ -208,16 +208,16 @@ def test_door_refuses_an_empty_plan_rather_than_passing_it() raises:
 
 
 def test_door_refuses_a_segment_stamped_by_the_previous_release() raises:
-    """IR version 17 added the JSONL source (`SOURCE_JSONL`, `jsonl_path`,
-    `jsonl_schema`); a segment stamped 16 has no such fields and is refused by
+    """IR version 18 added the JSONL source (`SOURCE_JSONL`, `jsonl_path`,
+    `jsonl_schema`); a segment stamped 17 has no such fields and is refused by
     name."""
-    assert_equal(PHYSICAL_PLAN_IR_VERSION, 17)
+    assert_equal(PHYSICAL_PLAN_IR_VERSION, 18)
     var segs = List[SegmentDescPod]()
-    segs.append(_seg_at_version(0, 16))
+    segs.append(_seg_at_version(0, 17))
     var msg = _refusal_message(segs^)
     assert_true(
         String("PHYSICAL_PLAN_IR_VERSION_MISMATCH") in msg,
-        "a segment stamped 16 must be refused; got: " + msg,
+        "a segment stamped 17 must be refused; got: " + msg,
     )
 
 

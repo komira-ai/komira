@@ -39,6 +39,7 @@ src/so/_c_abi.mojo	the C ABI of libkomira: the context handle (void *) it hands 
 src/tests/helpers/komira_plan_harness/door.mojo	the C ABI of a plan-door shared library it dlopens (the handle slot, the context, last_error, the ArrowArrayStream box, Door B's NULL probe buffer)
 src/tests/helpers/komira_plan_harness/tests/door_stub/plan_door_stub.mojo	the C ABI (session, ArrowArrayStream, Door B buffers) of the plan_door_stub shared library
 src/tests/helpers/komira_plan_harness/tests/door_stub/plan_door_tiny.mojo	the C ABI (NULL session, unread plan and out pointers) of the plan_door_null_ctx and plan_door_no_bytes shared libraries
+src/tests/helpers/komira_test_arrow_c_consumer/c_consumer.mojo	the ArrowArrayStream struct it allocates and hands to the test C consumer, and the text buffer and length slot the C writes
 src/tests/helpers/komira_udf_spike_abi/_cabi.mojo	the Mojo mirror of the UDF runtime C ABI structs (komira_udf_runtime.h) and the layout probe
 src/tests/helpers/komira_udf_spike_abi/_host.mojo	the host side of the UDF runtime C ABI: the Arrow arrays, schemas and streams it exports to a runtime and the arrays it imports back
 src/tests/helpers/komira_udf_spike_abi/_nested.mojo	the nested-call context the C producer streams of native/producer.c hand back to the harness's scalar callback

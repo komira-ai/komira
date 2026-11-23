@@ -17,7 +17,8 @@
 #
 # Refused (LOWERING_UNCUTTABLE_NODE) before the child is walked: an aggregation
 # with a UDF or a UDF aggregate function, one with a group top-k, and a partial
-# or final aggregation.
+# or final aggregation; and (LOWERING_UDF_UNSERVED) one whose group key or
+# aggregate argument calls a `UdfRef` (an EXPR_UDF_APPLY).
 #
 # The segment's combine order is ORDER_ROW_RANGE when the aggregation has no
 # group key and a SUM or AVG whose argument is FLOAT32 or FLOAT64 in the
@@ -32,6 +33,7 @@ from arrow.schema import Schema
 from lowering.cut_state import _Cutter, _Pipe, _uncuttable
 from lowering.lowered_plan import LoweringInputs, LOWERING_SINK_UNSERVED
 from lowering.sum_fuse import lowered_agg_expr
+from lowering.udf_check import _agg_apply_count, _udf_apply_count, _udf_unserved
 from plan_expr.agg_expr import AGG_MEAN, AGG_SUM, AGG_UDF
 from plan_expr.expr import Expr
 from plan_ir.logical_plan import (
@@ -163,6 +165,9 @@ def _aggregate_exprs(node: LogicalPlan) raises -> AggExprArray:
     ref ad = node.aggregate_data_ref()
     if ad.has_udf():
         raise _uncuttable(node, "an aggregation with a UDF")
+    for i in range(len(ad.group_by)):
+        if _udf_apply_count(ad.group_by[i]) > 0:
+            raise _udf_unserved(node, "a call of a user function in a group key")
     if ad.group_topk:
         raise _uncuttable(node, "an aggregation with a group top-k")
     if ad.mode != AGG_MODE_UNSET and ad.mode != AGG_MODE_SINGLE:
@@ -171,6 +176,10 @@ def _aggregate_exprs(node: LogicalPlan) raises -> AggExprArray:
     for i in range(len(ad.agg_exprs)):
         if ad.agg_exprs[i].func == AGG_UDF:
             raise _uncuttable(node, "a UDF aggregate function")
+        if _agg_apply_count(ad.agg_exprs[i]) > 0:
+            raise _udf_unserved(
+                node, "a call of a user function in an aggregate's argument"
+            )
         # SUM(CAST(<signed integer> AS DECIMAL(38, 0))), the SQL integer
         # sum, runs as the integer fold (`sum_fuse`); the declared output
         # type is the node's and stays DECIMAL(38, 0).
