@@ -453,6 +453,58 @@ instead. The rest of this section is about `release-macos.yml`.
   move the job back into `release.yml` as a `needs` of `prod-commit` (or keep the workflow
   and have the publish wait on it).
 
+### Proposed: the macOS build of every `//src` library
+
+Not built yet. `//release:mopm_darwin_libs` covers the mopm packages only. Most of `//src` is
+not a mopm package, so a change that breaks one of those libraries on macOS is seen by nobody.
+Measured: a `uquery` of `kind(...)` for the library rules (`mojo_library`, gated, shared,
+system, native and `cxx_library`) over the `src` directory lists 415 targets. One
+`build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going
+--skip-incompatible-targets` of that list on the farm built 156 and stopped on 259. Every
+target that stopped has an open issue, one per cause. The counts in this table are from that
+build's report:
+
+| Cause | Targets | Issue |
+| --- | --- | --- |
+| aws-lc and s2n-tls had no darwin-arm64 build. Since komira-ai/komira#2203 all 133 configure for darwin-arm64 (a `cquery` of them); they have not been built for it again | 133 | komira-ai/komira#2196 |
+| a library's native shared library is ELF only | 9 | komira-ai/komira#2197 |
+| `so_exports` is the Linux binary on a macOS executor | the UDF spike helpers, `arrow_c_abi_probe` | komira-ai/komira#2198 |
+| the UDF spike helpers' C uses Linux-only APIs | 5 | komira-ai/komira#2199 |
+| `phase_timers` drops a join tail on the fork's clock tick | 1 | komira-ai/komira#2200 |
+| `http_core` and `host_probe` tests still read `/proc/self/status` (found in the sources; the sweep did not reach them) | not reached | komira-ai/komira#2201 |
+
+The rest of the 259 were stopped by three of our own failures, now fixed. Two tests read
+`/proc/self/status` and now use `//src/tests/helpers/komira_test_rss`. The int64 column sum
+depended on the SIMD lane count. A test wrote a fixed `/tmp` path.
+
+The proposal keeps this set built, in the same way as the mopm set:
+
+- **One named target, generated.** `//release:darwin_src_libs` is a generated list, like the
+  shards of `ci/targets/`, with a guard that fails when the list is stale. It holds every
+  library target of `//src` except a `DARWIN_SRC_EXCLUDED` table. Each row of that table names
+  a target and the issue above that keeps it out. A row is deleted in the pull request that
+  closes its issue. When a new library is added under `//src`, it joins the set when the list
+  is regenerated, with no second edit. No step names a pattern target. `//ci:pr`
+  leaves the target out (`EXCLUDED` of `tools/build/ci/rules.bzl`), as it does
+  `mopm_darwin_libs`.
+- **After merge, on main, through the farm.** A second build step in `release-macos.yml`,
+  after the mopm set:
+  `build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:darwin_src_libs`.
+  It runs through the `buck2-farm` action and its assertion, so the summary reads `local: 0`.
+  It has the same triggers, concurrency group and `farm-qos: batch` as the job above. It is
+  never in a pull request.
+- **Reported, not blocking.** `release-macos-result` reports it the way it reports the mopm
+  set, and nothing in `release.yml` waits on it. It becomes blocking with the mopm set, once
+  it has been green over several runs.
+
+How it fits with the pull request side. No macOS build runs in a pull request. In a pull
+request, macOS is only analysed, by the `darwin_analysis.bxl` step above, which builds nothing.
+That step can analyse `//release:darwin_src_libs` as well as the mopm set, so a dependency that
+is incompatible with darwin-arm64 is caught in the pull request that adds it, under the same
+exclusion table. What only a build shows (a compile, a welded test) is caught by this job after
+merge. So are the changes no selection reaches: a toolchain change, a change to the Mac hosts,
+or a change outside `src` that breaks a library no pull request touched.
+
 ## release.yml: the release
 
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) builds the

@@ -16,8 +16,9 @@
 #
 # The tests make a STRUCT of 64 INT64 children, each with a 2 KiB name,
 # followed by one child of a type outside the C ABI subset, has the builders
-# refuse it many times, and reads the process's resident set (`VmRSS` of
-# `/proc/self/status`) before and after. A schema refusal that leaks its 64
+# refuse it many times, and reads the process's resident set before and after
+# (komira_test_rss: `VmRSS` of `/proc/self/status` on Linux, task_info's
+# `resident_size` on macOS). A schema refusal that leaks its 64
 # children leaks their names (about 130 KiB), an array refusal about 7 KiB of
 # child structs and buffers arrays; a refusal that frees them reuses the same
 # heap blocks and leaves the resident set flat. The rounds are chosen so a
@@ -25,8 +26,6 @@
 # schema builder is driven the same way through `get_schema`, over a stream of
 # 64 such columns and one it refuses. The record batch array builder is driven
 # with one refused column, whose heap box for the child struct it must free.
-#
-# Linux only: `/proc/self/status` is the measurement.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -53,6 +52,7 @@ from arrow_ipc.c_data_stream import (
 from byte_buffer.heap_region import HeapRegion
 from byte_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from containers.slab import Slab
+from komira_test_rss.rss import resident_kib
 
 comptime _KIDS = 64
 comptime _SCHEMA_ROUNDS = 30
@@ -62,23 +62,8 @@ comptime _BOUND_BYTES = 3 * 512 * 1024
 
 
 def _resident_bytes() raises -> Int:
-    """`VmRSS` of `/proc/self/status`, in bytes (the file gives kB)."""
-    var text: String
-    with open("/proc/self/status", "r") as f:
-        text = f.read()
-    var key = String("VmRSS:")
-    var i = text.find(key)
-    if i < 0:
-        raise Error("/proc/self/status has no VmRSS")
-    var b = text.as_bytes()
-    var j = i + key.byte_length()
-    while j < len(b) and (b[j] == 32 or b[j] == 9):
-        j += 1
-    var v = 0
-    while j < len(b) and b[j] >= 48 and b[j] <= 57:
-        v = v * 10 + Int(b[j] - 48)
-        j += 1
-    return v * 1024
+    """The resident set now, in bytes (komira_test_rss gives KiB)."""
+    return resident_kib() * 1024
 
 
 def _i64(n: Int) -> Column[HeapRegion]:
