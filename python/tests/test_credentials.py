@@ -87,6 +87,28 @@ def check_values():
     expect(lambda: AwsKeys("k", key_id="id", secret=""), ValueError, "secret= is empty")
     # An optional field: None leaves it unset; empty is refused like any other.
     expect(lambda: AwsKeys("k", key_id="id", secret="s", session_token=""), ValueError, "session_token= is empty")
+    # None leaves only an optional field unset: for any other it is the
+    # wrong type, the defaulted scope= included.
+    expect(lambda: AwsKeys("k", key_id=None, secret="s"), TypeError, "key_id= must be a str, not NoneType")
+    expect(lambda: AwsKeys("k", key_id="i", secret=None), TypeError, "secret= must be a str, not NoneType")
+    expect(lambda: AwsProfile("k", profile=None), TypeError, "profile= must be a str, not NoneType")
+    expect(lambda: GcpToken("k", token=None), TypeError, "token= must be a str, not NoneType")
+    expect(lambda: BearerToken("k", token=None), TypeError, "token= must be a str, not NoneType")
+    expect(lambda: AzureKey("k", account=None, key="x"), TypeError, "account= must be a str, not NoneType")
+    expect(lambda: AzureSas("k", account="a", sas=None), TypeError, "sas= must be a str, not NoneType")
+    expect(
+        lambda: OAuth2ClientCredentials("k", client_id=None, client_secret="s"),
+        TypeError,
+        "client_id= must be a str, not NoneType",
+    )
+    expect(
+        lambda: OAuth2ClientCredentials("k", client_id="i", client_secret="s", scope=None),
+        TypeError,
+        "scope= must be a str, not NoneType",
+    )
+    expect(
+        lambda: GcpServiceAccount("k", file=None), TypeError, "file= must be a str or os.PathLike[str], not NoneType"
+    )
     # A required field cannot be left out.
     e = raised(lambda: AwsKeys("k", key_id="id"))
     assert type(e) is TypeError and "secret" in str(e), repr(e)
@@ -348,7 +370,9 @@ def check_native(native, ctx, store):
 def main(args):
     # Absolute, since the paths the rule passes are relative to where the
     # action started.
-    lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
+    # Resolved, so a path built after a chdir into it, which the working
+    # directory gives without symlinks, compares equal.
+    lib_dir = os.path.realpath(args[args.index("--lib-dir") + 1])
 
     # Building credentials loads nothing.
     check_names()

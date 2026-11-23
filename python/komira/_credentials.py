@@ -59,6 +59,10 @@ MAX_VALUE_BYTES = 4096
 # A name: 1 to 128 ASCII letters, digits, `_`, `.` and `-`.
 _NAME = re.compile(r"[A-Za-z0-9_.\-]{1,128}")
 
+# The fields a kind may leave unset: None for one of these is "not set"; for
+# every other field it is a value of the wrong type.
+_OPTIONAL = ("session_token", "token_url")
+
 # The built-in names, in any case: `AMBIENT` and `ANONYMOUS` are their only
 # spellings.
 _RESERVED = ("ambient", "anonymous")
@@ -103,12 +107,13 @@ class _Credential:
 
     def __init__(self, name: object, fields: list[tuple[str, int, object, bool]]) -> None:
         """`fields` holds (keyword, `KOMIRA_FIELD_*`, value, secret) for each
-        field of the kind; a value of None is a field left unset."""
+        field of the kind; None for an optional field leaves it unset, and
+        for any other field is refused with `TypeError`."""
         self._name = _check_name(name)
         self._fields = tuple(
             (setting, field, _check_value(setting, value), secret)
             for setting, field, value, secret in fields
-            if value is not None
+            if value is not None or setting not in _OPTIONAL
         )
 
     @property
