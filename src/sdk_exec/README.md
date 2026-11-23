@@ -119,7 +119,7 @@ The tests run when the package is built.
   same files answer locally through `run_sql`: a filter and a projection, a
   GROUP BY and a count, a table of two keys, one key in two buckets under
   UNION ALL; a missing and a refused object are the store's NOT_FOUND and
-  ACCESS_DENIED at step `execute`; `run_sql` refuses the S3 scan with
+  PERMISSION_DENIED at step `execute`; `run_sql` refuses the S3 scan with
   `SCAN_FS_UNSERVED`; a `gs://` table is refused at step `lower`.
 - `test_run_sql_q6`: TPC-H Q6's text from `bench_corpus` over a lineitem-shaped
   Parquet file gives the integer oracle's DECIMAL(38,4); a LEFT self-join counts the matched pairs and the unmatched rows of the

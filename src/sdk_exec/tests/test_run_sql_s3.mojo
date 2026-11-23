@@ -29,7 +29,7 @@
 #   * test_a_missing_object_is_refused_at_execute_naming_it: a key the bucket
 #     lacks is the store's NOT_FOUND error, naming the object's URL.
 #   * test_a_refused_read_is_refused_at_execute_naming_it: an object the store
-#     answers 403 for is the store's ACCESS_DENIED error.
+#     answers 403 for is the store's PERMISSION_DENIED error.
 #   * test_run_sql_without_an_opener_refuses_the_scan: `run_sql` reads the
 #     local file system only, so the S3 table is refused at step `execute`
 #     with SCAN_FS_UNSERVED naming the bucket, word for word.
@@ -359,7 +359,7 @@ def test_a_refused_read_is_refused_at_execute_naming_it() raises:
     var ctx = _context("denied")
     var r = _refusal(run_sql_with(ctx, "SELECT id FROM remote_a", _opener(_mk_store_refusing_a)))
     assert_equal(r.step, String(STEP_EXECUTE))
-    assert_true("StoreError[ACCESS_DENIED]" in r.reason, r.reason)
+    assert_true("StoreError[PERMISSION_DENIED]" in r.reason, r.reason)
     assert_true("s3://lake/t/a.parquet" in r.reason, r.reason)
 
 

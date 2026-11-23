@@ -284,7 +284,7 @@ _JOIN_KINDS_TEST_DATA.update({c + ".tsv": ":join_kinds_oracle[" + c + ".tsv]" fo
 #   http_client and komira_test_fake_s3 are test_deps for it): a filter and a
 #   projection, a GROUP BY and a count, a table of two keys, and one key in two
 #   buckets under UNION ALL each answer what the local files answer; a missing
-#   and a refused object are the store's NOT_FOUND and ACCESS_DENIED at step
+#   and a refused object are the store's NOT_FOUND and PERMISSION_DENIED at step
 #   execute; run_sql refuses the S3 scan with SCAN_FS_UNSERVED; a gs:// table is
 #   refused at step lower.
 # - test_run_sql_no_from: SELECT 1 AS n is one INT32 row holding 1, as in
