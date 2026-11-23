@@ -8,6 +8,7 @@
 
 from plan_expr.null_order_policy import derived_nulls_first
 from plan_expr.render_text import write_quoted
+from scan_source.source_variant import SOURCE_VARIANT_PARQUET
 from plan_ir.logical_plan import (
     LogicalPlan,
     AsofTolerance,
@@ -184,6 +185,14 @@ def _write_plan_node[
         write_quoted(writer, plan._scan.value()[].source_path)
         writer.write(", type=")
         _write_source_type(writer, plan._scan.value()[].source_type)
+        # A Parquet scan of a remote store names the store: the same object key
+        # in two buckets, or a local file and an object of one name, are two
+        # reads, and this render is plan identity (`plan_cse` shares subtrees
+        # of equal render). A local scan writes nothing here, as before.
+        if plan._scan.value()[].source.tag == SOURCE_VARIANT_PARQUET:
+            ref fs = plan._scan.value()[].source._parquet.value().fs_descriptor
+            if not fs.is_local():
+                writer.write(", fs=", fs.url_prefix())
         # Emit the in-memory source's CONTENT-
         # derived `structural_id()` so two distinct-CONTENT `from_record_batch`
         # sources NEVER produce the same display string (and therefore the same

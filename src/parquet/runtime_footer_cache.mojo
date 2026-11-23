@@ -5,7 +5,13 @@
 # One parsed footer per path for the life of the cache (a session), so a
 # file read by many queries, or by many workers of one query, is fetched and
 # parsed once. The same shape as DuckDB's ParquetFileMetadataCache, keyed by
-# path.
+# path: by the file system's `key_prefix()` followed by the path, so one cache
+# can serve several file systems (the local disk and S3 buckets in one run)
+# and a local `t.parquet` never shares an entry with the object `t.parquet`
+# of a bucket, nor one bucket's key with another's. The local file system's
+# prefix is empty, so a local entry's key is its path. The path-taking
+# counters (`hit_count_for`, `parse_count_for`) and `invalidate` take that
+# key.
 #
 # An entry holds:
 #   * the parsed `FileMetaData`, behind an `ArcPointer`: the shared surface
@@ -217,12 +223,13 @@ struct ParquetMetadataCache(MetadataCache, Movable, Deinitable):
         """One preamble fetch (with the window this dataset has taught the
         hints) and its parse, as an unpinned entry. Counts a miss."""
         self._miss_count += 1
-        var preamble = read_parquet_preamble[FS](fs, path, self._window_hints.suggest(path))
-        self._window_hints.observe(path, preamble.metadata_length + 8)
+        var key = fs.key_prefix() + path
+        var preamble = read_parquet_preamble[FS](fs, path, self._window_hints.suggest(key))
+        self._window_hints.observe(key, preamble.metadata_length + 8)
         var metadata = parse_full_metadata(preamble.metadata_bytes.view_range_ro(0, preamble.metadata_length))
         var size = preamble.file_size
         return _FooterEntry(
-            String(path),
+            key^,
             size,
             ArcPointer[FileMetaData](metadata^),
             preamble^,
@@ -231,8 +238,9 @@ struct ParquetMetadataCache(MetadataCache, Movable, Deinitable):
         )
 
     def _ensure_index_via_fs[FS: FileSystem](mut self, path: String, mut fs: FS) raises -> Int:
-        """The entry of `path`, read and parsed on a miss. No copy."""
-        var idx = self._find(path)
+        """The entry of `path` on `fs` (keyed by `fs.key_prefix()` and
+        `path`), read and parsed on a miss. No copy."""
+        var idx = self._find(fs.key_prefix() + path)
         if idx >= 0:
             return idx
         # Stamp the identity BEFORE reading: a rewrite between the stat and
@@ -376,10 +384,11 @@ struct ParquetMetadataCache(MetadataCache, Movable, Deinitable):
         return FileMetaData(meta.version, schema^, meta.num_rows, rgs^)
 
     @staticmethod
-    def _rg_counts_key(paths: List[String]) -> String:
+    def _rg_counts_key(prefix: String, paths: List[String]) -> String:
         var key = String(len(paths))
         for i in range(len(paths)):
             key += "\n"
+            key += prefix
             key += paths[i]
         return key^
 
@@ -389,7 +398,7 @@ struct ParquetMetadataCache(MetadataCache, Movable, Deinitable):
         """Append the per-row-group row counts of the ordered `paths`, file
         by file: what `row_window.resolve_row_group_window` takes. Memoized
         by the path set, so a repeat reads no footer."""
-        var key = Self._rg_counts_key(paths)
+        var key = Self._rg_counts_key(fs.key_prefix(), paths)
         for i in range(len(self._rg_counts_cache)):
             if self._rg_counts_cache[i].key == key:
                 self._rg_counts_cache_hits += 1

@@ -15,6 +15,7 @@
 from arrow.arrow_types import ArrowType
 from async_rt.ops.waker_sink import NoopSink
 from fs.column_set import ColumnSet
+from fs.file_system import FileSystem
 from fs.local_fs import LocalFs
 from morsel.source_hooks import LoweredSourceHooks
 from parquet.runtime_footer_cache import ParquetMetadataCache
@@ -269,10 +270,18 @@ def resolve_projection_indices_via_meta(meta: FileMetaData, names: List[String])
 
 
 def resolve_projection_indices(mut footer_cache: ParquetMetadataCache, path: String, names: List[String]) raises -> ColumnSet:
-    """`resolve_projection_indices_via_meta` over the footer of the local
-    file `path`, shared out of the session cache."""
+    """`resolve_projection_indices_via_fs` over the local file system."""
+    var fs = LocalFs[NoopSink].new()
+    return resolve_projection_indices_via_fs(footer_cache, path, fs, names)
+
+
+def resolve_projection_indices_via_fs[
+    FS: FileSystem
+](mut footer_cache: ParquetMetadataCache, path: String, mut fs: FS, names: List[String]) raises -> ColumnSet:
+    """`resolve_projection_indices_via_meta` over the footer of `path` on
+    `fs`, shared out of the session cache (keyed by `fs.key_prefix()` and
+    `path`, as the readers of the scan key it)."""
     if len(names) == 0:
         return ColumnSet.all()
-    var fs = LocalFs[NoopSink].new()
     var shared = footer_cache.get_or_parse_shared_via_fs(path, fs, False)
     return resolve_projection_indices_via_meta(shared.meta[], names)

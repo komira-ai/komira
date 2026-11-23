@@ -638,11 +638,15 @@ struct FakeS3Connector(Connector, Movable, Deinitable):
 
     def seed(mut self, key: String, body: String):
         """Stores `body` as `key` of bucket `lake` before any request."""
-        _ = self._state[].put(String("lake/") + key, _bytes(body))
+        self.seed_in("lake", key, _bytes(body))
 
     def seed_bytes(mut self, key: String, var body: List[UInt8]):
         """Stores `body` as `key` of bucket `lake` before any request."""
-        _ = self._state[].put(String("lake/") + key, body^)
+        self.seed_in("lake", key, body^)
+
+    def seed_in(mut self, bucket: String, key: String, var body: List[UInt8]):
+        """Stores `body` as `key` of `bucket` before any request."""
+        _ = self._state[].put(bucket + "/" + key, body^)
 
     def connect[RT: Runtime](
         mut self, mut reactor: Reactor[RT.Sink], ip_be: UInt32, port: UInt16
