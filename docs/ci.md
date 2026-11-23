@@ -385,7 +385,8 @@ and the macOS wheel after it.
   is one, and it fails when the log holds no verdict of the selection, or a verdict that disagrees with
   the labels. The cases are in `cases.bxl` (`darwin_cases.bzl`, including what the command prints and
   whether it fails) and in `//tools/build/ci:darwin_targets_unit` and `:darwin_targets_cli_cases`, over
-  recorded runs of `darwin.bxl:select`.
+  recorded runs of `darwin.bxl:select`; the self-test scenario `//tools/build/selftest:darwin_select` runs
+  the command itself, as pr.yml does, over five lists, and checks its exit status, stdout and verdict.
 - **Only that step sees the Macs.** `farm-connect` gets the macOS worker set and
   `darwin-config-file: ${{ runner.temp }}/darwin.buckconfig`: the macOS keys go to that file and not to
   the machine buckconfig, and the step `build for macOS` names it with `--config-file`. Every other step

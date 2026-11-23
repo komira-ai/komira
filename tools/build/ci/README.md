@@ -59,7 +59,9 @@ the fixture package (`fixture/`).
 `--target-platforms komira//tools/build/platforms:darwin-arm64` on the farm's macOS workers;
 [`darwin.bzl`](darwin.bzl) is the rule and `darwin_cases.bzl` its cases (run by `cases.bxl`):
 `darwin_answer` is everything the command prints and its failure, and its cases hold those lines for
-the lists of the recorded runs in `darwin_targets/fixtures`. The step after it, `the macOS targets to
+the lists of the recorded runs in `darwin_targets/fixtures`. The self-test scenario
+[`darwin_select`](../selftest/darwin_select.zig) runs the command itself over five lists and checks
+its exit status, stdout and verdict line. The step after it, `the macOS targets to
 build`, runs `//tools/build/ci:darwin_targets` over the run's log
 ([`darwin_targets.zig`](darwin_targets/darwin_targets.zig)): the labels go to `darwin_targets.txt`,
 `any=true` to the step's output when there is one, and a log with no verdict, two, or a verdict that
