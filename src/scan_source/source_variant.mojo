@@ -663,7 +663,7 @@ def _json_binding(var json: JsonSource) -> ScanBinding:
 
     ⚠ `orientation = SCAN_ORIENTATION_ROW`. JSONL is a row-major on-wire
     format. The columnar materializer
-    (`json.columnar_materializer.materialize_jsonl_to_batch`) is a
+    (`jsonl.columnar_materializer.materialize_jsonl_to_batch`) is a
     direct byte-level API: `lower_untyped.mojo`, `pipeline_compiler.mojo` and
     the optimizer passes hold no `SOURCE_JSON` / `SOURCE_VARIANT_JSON`
     references. Lowering's JSON arm (`lowering.cut_scan_jsonl`) cuts the scan

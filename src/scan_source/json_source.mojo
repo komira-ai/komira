@@ -14,7 +14,7 @@
 #      SOURCE_KIND_ROW scan's source.
 #
 # The columnar materializer
-# (`json.columnar_materializer.materialize_jsonl_to_batch`) is a direct
+# (`jsonl.columnar_materializer.materialize_jsonl_to_batch`) is a direct
 # byte-level API. Lowering cuts a scan of this source into a SOURCE_JSONL
 # segment (`lowering.cut_scan_jsonl`), which reads the file with it at the
 # plan's schema (`pipeline_exec.source_jsonl`); the declared orientation is
