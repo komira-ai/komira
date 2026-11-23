@@ -345,6 +345,7 @@ def _parse_schema_element[
     var precision = Optional[Int](None)
     var ts_unit = Optional[Int](None)
     var ts_is_utc = Optional[Bool](None)
+    var field_id = Optional[Int](None)
 
     while reader.pos < reader.data_len:
         var field = reader._read_field_header()
@@ -384,6 +385,8 @@ def _parse_schema_element[
             scale = reader._read_zigzag()
         elif fid == 8 and wt == 5:
             precision = reader._read_zigzag()
+        elif fid == 9 and wt == 5:
+            field_id = reader._read_zigzag()
         elif fid == 10 and wt == 12:
             # logicalType: LogicalType union (modern annotation): the
             # TIMESTAMP member and the four text members.
@@ -413,6 +416,7 @@ def _parse_schema_element[
         precision=precision^,
         logical_timestamp_unit=ts_unit^,
         logical_timestamp_is_utc=ts_is_utc^,
+        field_id=field_id^,
     )
 
 

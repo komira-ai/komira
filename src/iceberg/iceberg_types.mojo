@@ -305,14 +305,12 @@ struct DataFileInfo(Copyable, Movable, Deinitable):
     file.
 
     Fields:
-      var file_path: String       — the file's object-store KEY, recorded in the
-                                     manifest exactly as given. It is a key of
-                                     the store the table lives in (`location`
-                                     plus a relative part), not a URI with a
-                                     scheme: the store normalizes its keys, so
-                                     `s3://b/k` would not survive a read back.
-                                     An engine that opens the table resolves
-                                     the key itself (see the README).
+      var file_path: String       — the path the manifest records, exactly as
+                                     given: a bare object-store key for the
+                                     file-based writer, a full URI with a
+                                     scheme (`s3://wh/...`) for the catalog
+                                     write sink. `TableFiles.key_of` maps such
+                                     a URI back to the store key.
       var file_size_in_bytes: Int — on-disk byte size of the file.
       var record_count: Int       — number of rows in the file.
       var bounds: List[ColumnBound] — per-column stats keyed by field-id.
