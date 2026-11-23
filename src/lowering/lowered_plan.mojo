@@ -10,6 +10,7 @@
 # the segment whose output is the query's result.
 # =============================================================================
 
+from physical_plan.iceberg_scan_spec import IcebergScanSpec
 from physical_plan.physical_plan import (
     SegmentDescPod,
     AggSinkData,
@@ -59,6 +60,11 @@ struct ScanFacts(Copyable, Movable):
     var dict_encoded_columns: List[String]
     """The scan's columns that every row group of every pinned file stores
     dictionary encoded. A column not listed is lowered as by-value."""
+    var iceberg: Optional[IcebergScanSpec]
+    """An Iceberg table scan only: the files the host planned for it (the
+    data files that survive pruning and the delete files that apply). None for
+    every other scan, and for an Iceberg scan the host did not plan, which the
+    cutter refuses."""
 
 
 struct LoweringInputs(Copyable, Movable):
@@ -92,7 +98,22 @@ struct LoweringInputs(Copyable, Movable):
         var dict_encoded_columns: List[String] = List[String](),
     ):
         """Append the facts of the next scan."""
-        self.scans.append(ScanFacts(stats^, dict_encoded_columns^))
+        self.scans.append(ScanFacts(stats^, dict_encoded_columns^, None))
+
+    def add_iceberg_scan(
+        mut self,
+        var spec: IcebergScanSpec,
+        var stats: Optional[TableStats] = None,
+    ):
+        """Append the facts of the next scan, an Iceberg table scan whose files
+        the host planned into `spec`."""
+        self.scans.append(
+            ScanFacts(
+                stats^,
+                List[String](),
+                Optional[IcebergScanSpec](spec^),
+            )
+        )
 
 
 struct ParamTable(Movable):

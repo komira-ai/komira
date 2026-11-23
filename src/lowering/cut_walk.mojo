@@ -4,8 +4,9 @@
 #
 # One walk of the plan, bottom up. Every node has one of these roles:
 #
-#   source    PLAN_SCAN: opens a pipeline (SOURCE_PARQUET, or SOURCE_BATCH for
-#             an in-memory scan); PLAN_STEP, a user function run once, opens
+#   source    PLAN_SCAN: opens a pipeline (SOURCE_PARQUET, SOURCE_BATCH for
+#             an in-memory scan, SOURCE_CSV, or SOURCE_ICEBERG for an Iceberg
+#             table scan; `cut_scan`); PLAN_STEP, a user function run once, opens
 #             one whose source is SOURCE_UDF_STEP (`cut_step`);
 #   streaming PLAN_FILTER, PLAN_PROJECT, PLAN_LIMIT, and PLAN_MAP_BATCHES (an
 #             ungrouped frame, OP_UDF_FRAME): appended to the open pipeline's

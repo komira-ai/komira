@@ -15,6 +15,8 @@
 #   - `add_parquet_source(name, source)` binds a resolved ParquetSource (several
 #                                   files, Hive partition columns after the data
 #                                   columns).
+#   - `add_source(name, source)` binds any resolved `SourceVariant` under its own
+#                                   schema (an Iceberg table).
 #   - `schema_of(name)`   resolves a table's schema (for column binding).
 #   - `build_scan(name)`  builds the PLAN_SCAN node (copies the source + schema).
 #
@@ -183,6 +185,13 @@ struct SqlCatalog(Copyable, Movable):
         var schema = catalog_relation_schema(source)
         var src = SourceVariant(source^)
         self._tables.append(CatalogTable(name.lower(), schema^, src^))
+
+    def add_source(mut self, name: String, var source: SourceVariant):
+        """Register any resolved source under `name`; its schema is the source's
+        own (`SourceVariant.schema`). It is how a table of a kind with no
+        registrar of its own (an Iceberg table) enters the catalog."""
+        var schema = source.schema()
+        self._tables.append(CatalogTable(name.lower(), schema^, source^))
 
     def _find(self, name: String) -> Int:
         var target = name.lower()
