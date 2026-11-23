@@ -13,7 +13,13 @@
 //! directory beside the package, two or no dist-info directories, a missing
 //! entry, a missing or empty runtime licence or one METADATA does not name,
 //! and a Requires-Dist of the runtime's own distribution; and the command
-//! line's flags.
+//! line's flags. The same for a macOS wheel (libkomira.dylib, the runtime
+//! dylibs by `@rpath` through `@loader_path/lib`, signed ad hoc): it passes in
+//! dyld's order, and a load from Homebrew, a home directory, a conda prefix or
+//! by `@executable_path`, an `@rpath` no run path reaches, an `@loader_path`
+//! name outside the package, a run path that is absolute or leaves the
+//! package, a Mach-O member nothing loads and a Linux `.so` beside the dylib
+//! are each refused by their exact message.
 
 const std = @import("std");
 const diag = @import("diag.zig");
@@ -355,7 +361,7 @@ test "a missing entry, an entry that is no library and an entry outside a packag
     try t.expectEqualStrings("entry: the wheel has no komira/_lib/libkomira.so", try refusal(a, try goodPolicy(a), ms.items));
     var text = try goodMembers(a);
     set(&text, entry, "#!/bin/sh\n");
-    try t.expectEqualStrings("entry: komira/_lib/libkomira.so is not an ELF file", try refusal(a, try goodPolicy(a), text.items));
+    try t.expectEqualStrings("entry: komira/_lib/libkomira.so is neither an ELF nor a Mach-O file", try refusal(a, try goodPolicy(a), text.items));
     var p = try goodPolicy(a);
     p.entry = "libkomira.so";
     try t.expectEqualStrings("entry: `libkomira.so` is not a path under the import package", try refusal(a, p, (try goodMembers(a)).items));
@@ -522,5 +528,189 @@ test "an expected refusal ends ok only on exactly that refusal" {
     try t.expectEqualStrings(
         "--expect-refusal is given 2 times",
         try commandRefusal(a, &(good_argv ++ [_][]const u8{ "--expect-refusal", why, "--expect-refusal", why }), good),
+    );
+}
+
+// ---- The macOS wheel ---------------------------------------------------------
+
+const mentry = "komira/_lib/libkomira.dylib";
+const mkgen = "komira/_lib/lib/libKGENCompilerRTShared.dylib";
+const masync = "komira/_lib/lib/libAsyncRTRuntimeGlobals.dylib";
+const msup = "komira/_lib/lib/libMSupportGlobals.dylib";
+
+const Dylib = struct {
+    fn entryLib(a: Alloc, loads: []const []const u8, rpaths: []const []const u8) ![]u8 {
+        return fixture.machO(a, .{ .install_name = "@rpath/libkomira.dylib", .loads = loads, .rpaths = rpaths });
+    }
+    fn good(a: Alloc) ![]u8 {
+        return entryLib(a, &.{ "@rpath/libKGENCompilerRTShared.dylib", "@rpath/libAsyncRTRuntimeGlobals.dylib", "/usr/lib/libSystem.B.dylib", "/usr/lib/libc++.1.dylib" }, &.{"@loader_path/lib"});
+    }
+    fn kgenLib(a: Alloc) ![]u8 {
+        return fixture.machO(a, .{ .install_name = "@rpath/libKGENCompilerRTShared.dylib", .loads = &.{ "@rpath/libMSupportGlobals.dylib", "/usr/lib/libSystem.B.dylib" }, .rpaths = &.{"@loader_path"} });
+    }
+    fn asyncLib(a: Alloc) ![]u8 {
+        return fixture.machO(a, .{ .install_name = "@rpath/libAsyncRTRuntimeGlobals.dylib", .loads = &.{ "@rpath/libMSupportGlobals.dylib", "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation" }, .rpaths = &.{"@loader_path/../lib"} });
+    }
+    fn msupLib(a: Alloc) ![]u8 {
+        return fixture.machO(a, .{ .install_name = "@rpath/libMSupportGlobals.dylib", .loads = &.{"/usr/lib/libSystem.B.dylib"} });
+    }
+};
+
+fn macMembers(a: Alloc) !std.ArrayList(policy.Member) {
+    var ms = std.ArrayList(policy.Member).empty;
+    try ms.appendSlice(a, &.{
+        .{ .name = "komira/__init__.py", .data = "__all__: list[str] = []\n" },
+        .{ .name = mkgen, .data = try Dylib.kgenLib(a) },
+        .{ .name = masync, .data = try Dylib.asyncLib(a) },
+        .{ .name = msup, .data = try Dylib.msupLib(a) },
+        .{ .name = mentry, .data = try Dylib.good(a) },
+        .{ .name = info ++ "/METADATA", .data = metadata },
+        .{ .name = info ++ "/WHEEL", .data = "Wheel-Version: 1.0\n" },
+        .{ .name = info ++ "/licenses/LICENSE", .data = "Apache License text\n" },
+        .{ .name = info ++ "/licenses/MODULAR_LICENSE", .data = "Modular Community License Terms\n" },
+        .{ .name = info ++ "/licenses/MODULAR_THIRD_PARTY_NOTICES", .data = "Third-party notices\n" },
+        .{ .name = info ++ "/RECORD", .data = "" },
+    });
+    return ms;
+}
+
+fn macPolicy(a: Alloc) !libs.Policy {
+    return .{
+        .entry = mentry,
+        .runtime = try a.dupe(libs.Runtime, &.{
+            .{ .name = "libAsyncRTRuntimeGlobals.dylib", .data = try Dylib.asyncLib(a) },
+            .{ .name = "libKGENCompilerRTShared.dylib", .data = try Dylib.kgenLib(a) },
+            .{ .name = "libMSupportGlobals.dylib", .data = try Dylib.msupLib(a) },
+        }),
+        .runtime_licenses = &.{ "MODULAR_LICENSE", "MODULAR_THIRD_PARTY_NOTICES" },
+        .runtime_dists = &.{ "mojo", "mojo-compiler", "mojo-compiler-mojo-libs" },
+    };
+}
+
+/// The refusal of the good macOS wheel with libkomira.dylib loading `loads`
+/// through `rpaths`.
+fn macEntryRefusal(a: Alloc, loads: []const []const u8, rpaths: []const []const u8) ![]const u8 {
+    var ms = try macMembers(a);
+    set(&ms, mentry, try Dylib.entryLib(a, loads, rpaths));
+    return refusal(a, try macPolicy(a), ms.items);
+}
+
+test "macOS: komira's layout passes, its dylibs listed in dyld's order" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = diag.Diag{};
+    const got = try libs.check(a, &d, try macPolicy(a), (try macMembers(a)).items);
+    try t.expectEqual(@as(usize, 4), got.len);
+    try t.expectEqualStrings(mentry, got[0]);
+    try t.expectEqualStrings(mkgen, got[1]);
+    try t.expectEqualStrings(masync, got[2]);
+    try t.expectEqualStrings(msup, got[3]);
+}
+
+test "macOS: a load from Homebrew, a home directory, a conda prefix, by @executable_path or by a bare name is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_][]const u8{
+        "/opt/homebrew/lib/liblz4.1.dylib",
+        "/Users/runner/work/komira/buck-out/libkomira_fs.dylib",
+        "/Users/runner/miniconda3/lib/libc++.1.dylib",
+        "@executable_path/../lib/liblz4.dylib",
+        "liblz4.dylib",
+        "/usr/lib/../../opt/homebrew/lib/liblz4.dylib",
+    }) |bad| {
+        try t.expectEqualStrings(
+            try std.fmt.allocPrint(a, "needed: komira/_lib/libkomira.dylib loads `{s}`, a path outside the wheel that is not a macOS system library", .{bad}),
+            try macEntryRefusal(a, &.{ "@rpath/libKGENCompilerRTShared.dylib", "@rpath/libAsyncRTRuntimeGlobals.dylib", bad }, &.{"@loader_path/lib"}),
+        );
+    }
+}
+
+test "macOS: an @rpath no run path reaches is refused, naming where the wheel has it" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const loads = [_][]const u8{ "@rpath/libKGENCompilerRTShared.dylib", "@rpath/libAsyncRTRuntimeGlobals.dylib" };
+    try t.expectEqualStrings(
+        "needed: komira/_lib/libkomira.dylib loads @rpath/libKGENCompilerRTShared.dylib, which its run path `@loader_path` does not reach in the wheel (the wheel has it at komira/_lib/lib/libKGENCompilerRTShared.dylib)",
+        try macEntryRefusal(a, &loads, &.{"@loader_path"}),
+    );
+    try t.expectEqualStrings(
+        "needed: komira/_lib/libkomira.dylib loads @rpath/libKGENCompilerRTShared.dylib, and has no run path to find it in the wheel (the wheel has it at komira/_lib/lib/libKGENCompilerRTShared.dylib)",
+        try macEntryRefusal(a, &loads, &.{}),
+    );
+    try t.expectEqualStrings(
+        "needed: komira/_lib/libkomira.dylib loads @rpath/libnone.dylib, which its run path `@loader_path/lib` does not reach in the wheel",
+        try macEntryRefusal(a, &(loads ++ [_][]const u8{"@rpath/libnone.dylib"}), &.{"@loader_path/lib"}),
+    );
+}
+
+test "macOS: an @loader_path load is followed inside the package and refused outside it" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var ms = try macMembers(a);
+    set(&ms, mentry, try Dylib.entryLib(a, &.{ "@loader_path/lib/libKGENCompilerRTShared.dylib", "@rpath/libAsyncRTRuntimeGlobals.dylib" }, &.{"@loader_path/lib"}));
+    var d = diag.Diag{};
+    const got = try libs.check(a, &d, try macPolicy(a), ms.items);
+    try t.expectEqualStrings(mkgen, got[1]);
+    try t.expectEqualStrings(
+        "needed: komira/_lib/libkomira.dylib loads `@loader_path/../../liblz4.dylib`, which leads out of komira/",
+        try macEntryRefusal(a, &.{ "@rpath/libKGENCompilerRTShared.dylib", "@rpath/libAsyncRTRuntimeGlobals.dylib", "@loader_path/../../liblz4.dylib" }, &.{"@loader_path/lib"}),
+    );
+    try t.expectEqualStrings(
+        "needed: komira/_lib/libkomira.dylib loads @loader_path/lib/liblz4.dylib, and the wheel has no komira/_lib/lib/liblz4.dylib",
+        try macEntryRefusal(a, &.{ "@rpath/libKGENCompilerRTShared.dylib", "@rpath/libAsyncRTRuntimeGlobals.dylib", "@loader_path/lib/liblz4.dylib" }, &.{"@loader_path/lib"}),
+    );
+}
+
+test "macOS: a run path that is absolute, not @loader_path-relative or leaves the package is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const loads = [_][]const u8{ "@rpath/libKGENCompilerRTShared.dylib", "@rpath/libAsyncRTRuntimeGlobals.dylib" };
+    for ([_][]const u8{ "/opt/homebrew/lib", "@executable_path/lib", "@loader_pathx", "lib" }) |r| {
+        try t.expectEqualStrings(
+            try std.fmt.allocPrint(a, "runpath: komira/_lib/libkomira.dylib has the run path entry `{s}`, which is not @loader_path-relative", .{r}),
+            try macEntryRefusal(a, &loads, &.{ "@loader_path/lib", r }),
+        );
+    }
+    for ([_][]const u8{ "@loader_path/../..", "@loader_path/../../other" }) |r| {
+        try t.expectEqualStrings(
+            try std.fmt.allocPrint(a, "runpath: komira/_lib/libkomira.dylib has the run path entry `{s}`, which leads out of komira/", .{r}),
+            try macEntryRefusal(a, &loads, &.{r}),
+        );
+    }
+}
+
+test "macOS: a dylib nothing loads, and a Linux .so beside the dylib, are refused as stray" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var extra = try macMembers(a);
+    try extra.append(a, .{ .name = "komira/_lib/lib/liblz4.dylib", .data = try fixture.machO(a, .{ .install_name = "@rpath/liblz4.dylib" }) });
+    try t.expectEqualStrings("stray: komira/_lib/lib/liblz4.dylib is a shared library that komira/_lib/libkomira.dylib does not load", try refusal(a, try macPolicy(a), extra.items));
+    var linux = try macMembers(a);
+    try linux.append(a, .{ .name = "komira/_lib/libkomira.so", .data = try Lib.entryLib(a, "$ORIGIN/lib") });
+    try t.expectEqualStrings("stray: komira/_lib/libkomira.so is a shared library that komira/_lib/libkomira.dylib does not load", try refusal(a, try macPolicy(a), linux.items));
+}
+
+test "macOS: an @rpath that reaches a member that is not Mach-O is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var ms = try macMembers(a);
+    try ms.append(a, .{ .name = "komira/_lib/lib/liblz4.dylib", .data = "not a library\n" });
+    set(&ms, mentry, try Dylib.entryLib(a, &.{ "@rpath/libKGENCompilerRTShared.dylib", "@rpath/libAsyncRTRuntimeGlobals.dylib", "@rpath/liblz4.dylib" }, &.{"@loader_path/lib"}));
+    try t.expectEqualStrings(
+        "needed: komira/_lib/libkomira.dylib loads @rpath/liblz4.dylib, and its run path reaches komira/_lib/lib/liblz4.dylib, which is not a Mach-O file",
+        try refusal(a, try macPolicy(a), ms.items),
+    );
+    // The same member reached by @loader_path.
+    set(&ms, mentry, try Dylib.entryLib(a, &.{ "@rpath/libKGENCompilerRTShared.dylib", "@rpath/libAsyncRTRuntimeGlobals.dylib", "@loader_path/lib/liblz4.dylib" }, &.{"@loader_path/lib"}));
+    try t.expectEqualStrings(
+        "needed: komira/_lib/libkomira.dylib loads @loader_path/lib/liblz4.dylib, which is komira/_lib/lib/liblz4.dylib, not a Mach-O file",
+        try refusal(a, try macPolicy(a), ms.items),
     );
 }
