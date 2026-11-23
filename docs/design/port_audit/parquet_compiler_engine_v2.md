@@ -38,7 +38,7 @@ Part of the [port audit](../port_audit.md). Each row is one non-test source file
 
 ### Parquet file sink (local Parquet write)
 - Earlier files: komira_parquet/parquet_sink.mojo, komira_parquet/streaming_parquet_writer.mojo (and file output side of parquet_parallel_writer.mojo)
-- Missing: a Sink that writes batches to a .parquet file at a path, with compression, row-group size and dictionary options, row-group coalescing, bounded memory, footer written at finish, and removal of the partial file on error. Current src/parquet_writer returns bytes only and opens no file; src/scan_source/sink.mojo defines the Sink trait but no Parquet sink exists; src/sdk_exec runs SELECT only (COPY and CREATE TABLE AS are refused by name).
+- Missing: a Sink that writes batches to a .parquet file at a path, with compression, row-group size and dictionary options, row-group coalescing, bounded memory, footer written at finish, and removal of the partial file on error. Current src/parquet_writer returns bytes only and opens no file; src/scan_source/sink.mojo defines the Sink trait but no Parquet sink exists; src/sdk_exec runs a COPY to a local Parquet file by encoding the whole result with src/parquet_writer and writing it with fs.atomic_write.write_file_atomic (a temporary file renamed over the destination), not through a streaming sink; CREATE TABLE AS is refused by name.
 - Why: df.write_parquet and writing a query result to Parquet are core local-SDK operations.
 - Task: pysdk-engine-write-parquet
 
