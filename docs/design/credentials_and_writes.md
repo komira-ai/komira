@@ -204,9 +204,9 @@ Fixed before this design and not reopened:
   The (format, codec) pairs a sink exists for are `write_target_supported`'s 13
   ([src/arrow/write_target.mojo](../../src/arrow/write_target.mojo)). `WireWriteTarget` is `path` = 1,
   `format` = 2, `codec` = 3.
-- **EXISTS, a defect.** With no `FORMAT`, the `COPY` parser writes Parquet, whatever the path says.
-  DuckDB infers the format from the extension, so `COPY t TO 'out.csv'` would write Parquet into a
-  file named `.csv`. Decision 10 replaces this.
+- **FIXED.** With no `FORMAT`, the `COPY` parser takes the format from the extension as DuckDB does
+  (`sql.sql_copy_format`), and `run_sql` writes Parquet, CSV and newline-delimited JSON
+  ([src/sdk_exec/README.md](../../src/sdk_exec/README.md)).
 - **EXISTS, a TLS client.** `http_client` has ranged GET (`get_range`), redirects as a layer, and no
   proxy support ([src/http_client](../../src/http_client/README.md)). `source_url` refuses `http://`
   and any `https://` host that is not the Azure Blob service
@@ -1054,7 +1054,7 @@ var result = session.sql("SELECT * FROM sales_catalog.sales.orders LIMIT 10")
 
 | milestone | what |
 |---|---|
-| first release (local only) | `COPY ... TO` a local file, Parquet first: `Count`, the all-or-nothing write, extension inference. `SQL_STATEMENT_UNSUPPORTED` for the refused statements. `komira_last_error_code` and `_step` with the error-mapping pull request. Every remote URL refused with `STORAGE_URL_REFUSED` |
+| first release (local only) | `COPY ... TO` a local Parquet, CSV or JSON file: `Count`, the all-or-nothing write, extension inference. `SQL_STATEMENT_UNSUPPORTED` for the refused statements. `komira_last_error_code` and `_step` with the error-mapping pull request. Every remote URL refused with `STORAGE_URL_REFUSED` |
 | bindings | `komira_add_sql_binding`, `Session.add_sql_binding`, `sql` with call bindings and the unnamed source, `komira.files` for local files and frames, `BIND_NAME_UNBOUND`. `register_parquet` becomes `add_sql_binding` underneath, which fixes its re-registration defect |
 | object stores | credentials and their ABI calls; `WireSourceAccess` on the wire; the S3 read arm with `ambient`; `https://` reads; the S3 write arm; GCS and Azure reads |
 | catalogs | `komira.iceberg` and the Iceberg statements ([the Iceberg design](#reconciling-with-the-iceberg-design)) |

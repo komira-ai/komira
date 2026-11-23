@@ -39,21 +39,36 @@ _CSV_TEST_DATA.update({f + ".csv": "tests/csv/" + f + ".csv" for f in _CSV_FILES
 
 _CSV_TEST_DATA.update({c + ".tsv": ":csv_oracle[" + c + ".tsv]" for c in _CSV_CASES})
 
-# DuckDB reading back the Parquet files COPY writes, for
+# DuckDB reading back the Parquet, CSV and JSON files COPY writes, for
 # test_copy_readback_duckdb (the `copy_readback` library at the end of this
-# file). Each line of tests/copy/cases.sql is one case: `:copy_komira` runs
-# every line through run_sql (copy_runner below) and `:copy_readback_oracle`
-# runs the same lines in the pinned DuckDB, then tests/copy/readback.sql
-# compares the two files of each case.
-_COPY_CASES = [
-    "typed_default",
-    "typed_zstd",
-    "nulls_gzip",
-    "nulls_lz4",
-    "quoted_uncompressed",
-    "grouped_snappy",
-    "empty",
+# file). Each line of tests/copy/cases.sql is one case, named by its file up
+# to the first `.`: `:copy_komira` runs every line through run_sql
+# (copy_runner below) and `:copy_readback_oracle` runs the same lines in the
+# pinned DuckDB, then tests/copy/readback.sql compares the two files of each
+# case.
+_COPY_FILES = [
+    "typed_default.parquet",
+    "typed_zstd.parquet",
+    "nulls_gzip.parquet",
+    "nulls_lz4.parquet",
+    "quoted_uncompressed.parquet",
+    "grouped_snappy.parquet",
+    "empty.parquet",
+    "typed_csv.csv",
+    "quoted_csv.csv",
+    "nulls_csv.csv",
+    "empty_string_csv.csv",
+    "empty_csv.csv",
+    "grouped_csv.csv.gz",
+    "typed_zstd_csv.csv.zst",
+    "typed_json.json",
+    "quoted_json.json",
+    "nulls_json.json",
+    "grouped_json.json.gz",
+    "typed_zstd_json.json.zst",
 ]
+
+_COPY_CASES = [f.split(".")[0] for f in _COPY_FILES]
 
 _COPY_INPUTS = {f + ".csv": "tests/csv/" + f + ".csv" for f in ["typed", "nulls", "quoted"]}
 
@@ -70,19 +85,19 @@ copy_cases(
     name = "copy_komira",
     cases = "tests/copy/cases.sql",
     inputs = _COPY_INPUTS,
-    outputs = [c + ".parquet" for c in _COPY_CASES] + ["counts.tsv"],
+    outputs = _COPY_FILES + ["counts.tsv"],
     runner = ":copy_runner",
 )
 
 _COPY_READBACK_INPUTS = dict(_COPY_INPUTS)
 
-_COPY_READBACK_INPUTS.update({"komira/" + c + ".parquet": ":copy_komira[" + c + ".parquet]" for c in _COPY_CASES})
+_COPY_READBACK_INPUTS.update({"komira/" + f: ":copy_komira[" + f + "]" for f in _COPY_FILES})
 
 sql_oracle(
     name = "copy_readback_oracle",
     srcs = ["tests/copy/cases.sql", "tests/copy/readback.sql"],
     inputs = _COPY_READBACK_INPUTS,
-    outputs = [c + ".parquet" for c in _COPY_CASES] + [c + ".check.tsv" for c in _COPY_CASES],
+    outputs = _COPY_FILES + [c + ".check.tsv" for c in _COPY_CASES],
 )
 
 _COPY_TEST_DATA = {"cases.sql": "tests/copy/cases.sql", "counts.tsv": ":copy_komira[counts.tsv]"}
@@ -416,10 +431,22 @@ _SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in
 #   run_sql answers one BIGINT row `Count`; the file read back equals the query
 #   (a table, a query, an empty result, 130,000 rows in two row groups, every
 #   codec as the footer names it, a COPY over the file it reads, a relative
-#   path); CSV and JSON, an unknown extension, a URL, CREATE TABLE AS and a
-#   TIMESTAMP column are named refusals that touch no file; a missing
+#   path); an unknown extension, a URL, CREATE TABLE AS and a TIMESTAMP
+#   column are named refusals that touch no file; a missing
 #   directory, a directory at the path and an injected full disk leave no
 #   temporary file and the old file whole.
+# - test_run_sql_copy_text: COPY ... TO a local CSV or newline-delimited JSON
+#   file through run_sql writes the bytes DuckDB writes for the same rows
+#   (NULLs, quoting, the empty string, dates, decimals, doubles), with the
+#   format from the extension or FORMAT, gzip and zstd from the extension or
+#   COMPRESSION, an empty result as DuckDB writes it; lz4, a TIMESTAMP column
+#   and two columns of one name are named refusals that touch no file; a
+#   full disk leaves the old file and no temporary file.
+# - test_copy_text_encoding: the CSV and JSON encoders on batches of every
+#   type they write give DuckDB's bytes: each type and NULL, doubles across
+#   fixed and exponent notation, NaN and the infinities, FLOATs, dates
+#   before year 1 and after 9999, exact decimals, quoting and escaping;
+#   gzip and zstd decompress to their input; the writable types.
 # - test_run_sql_csv: read_csv through run_sql answers what the pinned DuckDB
 #   answers (the :csv_oracle action below) for each case of tests/csv/cases.sql:
 #   typed columns and their inferred types, quoted cells, NULL-bearing cells, a
@@ -535,12 +562,14 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_arrow_result.mojo",
+        "tests/test_copy_text_encoding.mojo",
         "tests/test_plan_cache_full_sink_hash.mojo",
         "tests/test_plan_validation_gate_direct.mojo",
         "tests/test_plan_validation_routes_ledger.mojo",
         "tests/test_resolved_cache_lru_eviction_stress.mojo",
         "tests/test_resolved_cache_pin_count.mojo",
         "tests/test_run_sql_copy_parquet.mojo",
+        "tests/test_run_sql_copy_text.mojo",
         "tests/test_run_sql_csv.mojo",
         "tests/test_run_sql_cte.mojo",
         "tests/test_run_sql_distinct.mojo",
@@ -583,11 +612,12 @@ mojo_library(
 # (copy_readback/__init__.mojo says why this is a library of its own: its
 # test data is built by copy_runner, which depends on sdk_exec, so as test data
 # of sdk_exec it would be a cycle). Nothing depends on it.
-# - test_copy_readback_duckdb: the pinned DuckDB reads every Parquet file
-#   run_sql's COPY wrote for tests/copy/cases.sql (:copy_readback_oracle above)
-#   and finds the same rows, column names and types as in the file DuckDB
-#   writes for the same line, and as many rows as the COPY's `Count`; every
-#   case of cases.sql is checked.
+# - test_copy_readback_duckdb: the pinned DuckDB reads every Parquet, CSV and
+#   JSON file run_sql's COPY wrote for tests/copy/cases.sql
+#   (:copy_readback_oracle above) and finds the same rows, column names and
+#   types as in the file DuckDB writes for the same line, and as many rows as
+#   the COPY's `Count`; an uncompressed CSV or JSON file holds the same bytes
+#   as DuckDB's; every case of cases.sql is checked.
 mojo_library(
     name = "copy_readback",
     srcs = glob(["copy_readback/**/*.mojo"]),

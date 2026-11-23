@@ -31,8 +31,7 @@
 #     holds only it.
 #   * test_a_relative_destination_is_the_working_directory: `TO 'rel.parquet'`
 #     is written where the process runs.
-#   * test_refused_copies_touch_no_file: FORMAT csv (inferred from `.csv`) and
-#     json at `bind` (COPY_FORMAT_UNSUPPORTED), `.txt` at `parse`
+#   * test_refused_copies_touch_no_file: `.txt` at `parse`
 #     (COPY_FORMAT_NOT_INFERRED), an `s3://` URL at `bind`
 #     (STORAGE_URL_REFUSED), CREATE TABLE AS at `bind`
 #     (STATEMENT_NOT_A_QUERY) and a TIMESTAMP column at `execute`
@@ -75,7 +74,6 @@ from sdk_exec.engine_sql import (
 )
 from sdk_exec.engine_write import (
     COPY_COUNT_COLUMN,
-    COPY_FORMAT_UNSUPPORTED,
     COPY_TYPE_UNSUPPORTED,
     STORAGE_URL_REFUSED,
 )
@@ -345,18 +343,6 @@ def test_a_relative_destination_is_the_working_directory() raises:
 def test_refused_copies_touch_no_file() raises:
     var ctx = _context_with_t()
     var d = _dir("refused")
-    var csv = d + "/out.csv"
-    _refusal(
-        ctx, "COPY t TO '" + csv + "'", String(STEP_BIND),
-        String(COPY_FORMAT_UNSUPPORTED) + ": COPY ... TO '" + csv
-        + "' (FORMAT csv): only FORMAT parquet is written",
-    )
-    var js = d + "/out.parquet"
-    _refusal(
-        ctx, "COPY t TO '" + js + "' (FORMAT json)", String(STEP_BIND),
-        String(COPY_FORMAT_UNSUPPORTED) + ": COPY ... TO '" + js
-        + "' (FORMAT json): only FORMAT parquet is written",
-    )
     var txt = d + "/out.txt"
     _refusal(
         ctx, "COPY t TO '" + txt + "'", String(STEP_PARSE),
