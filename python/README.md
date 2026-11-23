@@ -49,7 +49,7 @@ load fails. What each release changed is in the
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1001 is 1.1
+print(komira.abi_version())   # the engine's C ABI version: 1002 is 1.2
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
@@ -114,11 +114,12 @@ The package's layout and API are designed in
 |---|---|
 | `komira/__init__.py` | the public names, exactly `__all__` |
 | `komira/_capture/` | the capture of Python user functions (private; no query runs them yet): `udf`, the decorator that records a function's call shape (`scalar`, `map_batches_column`, `row`, `map_batches_frame`), its return type (`return_dtype=`, `schema=` or the type hints) and, for `row` and `map_batches_frame`, its read set (`columns=`, a `TypedDict` or dataclass annotation, or for `row` a scan of the function's bytecode, refused with `UDF_READ_SET_REQUIRED` when the reads are not bounded); `Udf.spec()`, the `UdfSpec` the plan encodes, with the function's code as a bundle named by its sha256 or as a reference into an installed distribution; and `write_code`, which writes each code object under its digest. Calling a decorated function calls the function, which is how the komira/python worker runs it. It imports no `ctypes` |
-| `komira/_errors.py` | `KomiraError`, `LibraryLoadError` and `UnsupportedCpuError` |
-| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the nine calls of ABI 1.1 |
+| `komira/_credentials.py` | the credential objects (private; nothing public takes one yet): `AwsKeys`, `AwsProfile`, `GcpServiceAccount`, `GcpToken`, `AzureKey`, `AzureSas`, `BearerToken` and `OAuth2ClientCredentials`, each a name and its fields, checked when built (the name's grammar and reserved names; each value a non-empty `str` of at most 4096 bytes of UTF-8), with every secret shown as `<set>` by `repr` and no pickle or copy; and the built-in `AMBIENT` and `ANONYMOUS` ([docs/design/credentials_and_writes.md](https://github.com/komira-ai/komira/blob/main/docs/design/credentials_and_writes.md), decision 1) |
+| `komira/_errors.py` | `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError`, and the private `UnsupportedOperation` and `CredentialsError` |
+| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls of ABI 1.2 |
 | `komira/_plan/` | the plan encoder: `encode_plan`, a plan of `komira/_ops` as the `komira.plan.v1` `WirePlanEnvelope` the plan door takes, every node with the output schema the engine derives for it and every scan reading a source libkomira described (`parquet_source`, `binding_source`); calls of user functions (`UdfCall`, `MapBatches`) as `WireUdfApply` and `WireMapBatchesNode` over the envelope's `UdfRef` list, one per distinct function, each with the komira/python descriptor; `encode_expr`, an expression node as a `WireExpr`; and `expr_field`, the output field the engine derives for it. It writes no SQL text. It imports the generated plan modules, which the wheel does not ship yet, so `import komira` does not import it |
 | `komira/_runtime.py` | `check_loaded_runtime`, called before libkomira is opened: it compares the Mojo runtime libraries already loaded in the process with komira's copies by build id, and the GNU build id reader it uses |
-| `komira/_session.py` | `Session` |
+| `komira/_session.py` | `Session`, and its private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal` |
 | `komira/py.typed` | the PEP 561 marker |
 | `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the plan encoder's tests; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |
@@ -183,7 +184,8 @@ How the loader behaves:
   the directory it came from with `dlinfo`.
   - Not loaded, or loaded from komira's own file: nothing to do.
   - Loaded from another file with the same GNU build id as komira's copy (the
-    same Mojo build, such as the `mojo-compiler` 1.0.0 wheel): accepted, and
+    same Mojo build, such as the `mojo-compiler` wheel of the toolchain's
+    version): accepted, and
     libkomira uses that copy.
   - Another build id, or none: `LibraryLoadError` naming the library, the
     directory it was loaded from and komira's copy.
@@ -192,8 +194,10 @@ How the loader behaves:
   - The runtime libraries are not opened with `RTLD_GLOBAL`: that would put
     komira's copy in the global scope, ahead of the definitions of other Mojo
     libraries. A process holds one Mojo runtime version, so Mojo code built
-    with another version (for example `max` with `mojo-compiler` 1.2.0) cannot
-    be loaded beside komira in either order.
+    with another version (for example `max` with `mojo-compiler` 1.2.0) does
+    not work beside komira: loaded first, komira refuses it; loaded after, a
+    newer runtime fails to load, and an older one (not yet run: inferred from
+    its symbols) loads on komira's libraries.
 - **The version check.** `komira_abi_version()` is read before any other
   symbol is looked up.
   - A major version other than 1 is refused with `LibraryLoadError`.
@@ -205,15 +209,19 @@ How the loader behaves:
 - **Call errors.** A failed call raises `KomiraError` with its status. The
   message is the context's last error, read with the two-call protocol: the
   first call learns the length, and the second passes a buffer of exactly that
-  length.
-- **Private calls.** `parquet_schema`, `csv_binding`, `json_binding` and
-  `plan_render` exist only on `_native.Native`. They have no public API and no
-  stability promise.
+  length. An engine refusal (-3) of a credential call, which the library
+  answers only with `CREDENTIALS_INVALID`, raises `CredentialsError`, a
+  `KomiraError`; the package never parses the message to choose the class.
+- **Private calls.** `parquet_schema`, `csv_binding`, `json_binding`,
+  `plan_render`, `credential_add`, `credential_set` and `credential_seal`
+  exist only on `_native.Native`. They have no public API and no stability
+  promise.
 
 The tests below run on Linux x86_64 as build actions, with
 `./buck2 build //python/tests:load_test` and the same for
 `//python/tests:session_test`, `//python/tests:minor0_test`,
 `//python/tests:minor3_test`, `//python/tests:two_call_test`,
+`//python/tests:credentials_test`, `//python/tests:credentials_lib_test`,
 `//python/tests:runtime_test` and `//python/tests:cpu_test`:
 
 | test | what it covers |
@@ -222,6 +230,8 @@ The tests below run on Linux x86_64 as build actions, with
 | `session_test` | the public surface on the real library |
 | `minor0_test`, `minor3_test` | stand-ins of ABI 1.0 and 1.3 |
 | `two_call_test` | the error path, the two-call protocol and the arguments of each call, on a stand-in |
+| `credentials_test` | the credential objects, and what sealing each sends the library, on a stand-in's fake store that records every credential call |
+| `credentials_lib_test` | sealing every kind of credential on the real library, and each of its refusals as a `CredentialsError` with its `CREDENTIALS_INVALID` message |
 | `runtime_test` | the runtime check on stand-in runtime libraries: not loaded, same build id, another build id, no build id, komira's copy unreadable, and the build id reader |
 | `cpu_test` | the CPU check on cpuinfo files written from `tests/fixtures/cpuinfo_x86_64_v3.txt`, and that a refused CPU never opens the library |
 
@@ -294,8 +304,13 @@ Modular's runtime from the `mojo-compiler` wheel, run by
 | `beside_modular_loaded_first` | the same Mojo version loaded first: libkomira binds to Modular's copy and works |
 | `beside_modular_loaded_after` | komira loaded first, then Modular's `libKGENCompilerRTShared` of the same version: both work |
 | `beside_other_mojo_loaded_first` | another Mojo version loaded first: the load is refused, naming the library |
-| `beside_other_mojo_loaded_after` | komira loaded first, then another Mojo version: Modular's library fails to load with the loader's `undefined symbol`, and komira keeps working |
-| `refuses_modular_unlike_toolchain` | the `mojo-compiler` wheel handed to the test is not the toolchain's version, and the test refuses it |
+| `beside_other_mojo_loaded_after` | komira loaded first, then another Mojo version: a newer one fails to load with the loader's `undefined symbol`, an older one loads as a second `libKGENCompilerRTShared` on komira's two other libraries (first run at a 1.1.0 or 1.2.0 toolchain; inferred from symbols until then), and komira keeps working |
+| `refuses_modular_unlike_toolchain` | the `mojo-compiler` wheel handed to a same-version case is not the toolchain's version, and the test refuses it |
+| `refuses_other_mojo_at_toolchain` | the `mojo-compiler` wheel handed to an other-version case is the toolchain's version, and the test refuses it |
+
+The toolchain's Mojo picks the versions: the pair at its version and the
+compiler wheel of the newest other version in
+`third_party/modular/pins.bzl`.
 
 `//tools/build/package/libkomira:libkomira_dist_load` loads a copy of the
 `[dist]` directory from C, with no Python, no library path and nothing of

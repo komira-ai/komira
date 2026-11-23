@@ -9,7 +9,7 @@
 # against its registered schema (`add_catalog_table_scan`), for the files the scan holds only (a subset of
 # the table's files after partition pruning); any other Parquet scan of the
 # local file system reads the facts of each of its files
-# (`add_parquet_files_scan`). A scan of a remote store (an S3 bucket) has no
+# (`add_parquet_files_scan`). A scan of a remote store (an S3 or GCS bucket, an Azure container) has no
 # facts here: the context's footers read the local file system only, so its
 # segment records no row estimate, and its footers are first read when the
 # engine runs it. A join is descended

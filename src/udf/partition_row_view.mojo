@@ -30,7 +30,7 @@
 from arrow.record_batch import RecordBatch
 
 
-# Max partition-UDF input arity. The resolved-index map is a fixed InlineArray
+# Max partition-UDF input arity. The resolved-index map is a fixed Array
 # (POD, slab-safe — no heap-owning element); the comptime-known per-UDF arity
 # (`InputSchema.num_cols()`) is asserted <= this at the construction site.
 comptime MAX_PARTITION_UDF_ARITY: Int = 16

@@ -48,7 +48,7 @@
 # EARLIER generation was executing against that generation's ctx while its slot
 # had already been recycled. The `CancellationToken` was merely the first
 # heap-owning field the shard touched — the VICTIM, not the cause. Replacing the
-# token's `List[ArcPointer[...]]` with an `InlineArray` (the destroy-recreate reflex) would
+# token's `List[ArcPointer[...]]` with an `Array` (the destroy-recreate reflex) would
 # only have moved the fault to `error_slot` or `state`.
 #
 # THE FIX (the generation guard) — make the borrowed handle SELF-VERIFYING. Each shard is

@@ -127,10 +127,10 @@ Fixed before this design, and not reopened here:
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.1, with nine exports
+- **EXISTS** `libkomira` is at ABI 1.2, with twelve exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
-  - It runs no query. The 1.2 run calls are designed but not built.
-  - On linux-x86_64 it is 3.5 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eight native owners
+  - It runs no query. The run calls are designed but not built; they take the next minor.
+  - On linux-x86_64 it is 3.6 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eight native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,
     `libAsyncRTRuntimeGlobals` and `libMSupportGlobals`

@@ -19,10 +19,10 @@
 
 def make_split_uuid(
     worker_disc: UInt8, epoch_us: UInt64, seq: Int64
-) -> InlineArray[UInt8, 16]:
+) -> Array[UInt8, 16]:
     """The split uuid of the `seq`-th split of the dispatcher that was built at
     `epoch_us` with discriminant `worker_disc`."""
-    var u = InlineArray[UInt8, 16](fill=UInt8(0))
+    var u = Array[UInt8, 16](fill=UInt8(0))
     u[0] = worker_disc
     for i in range(7):
         u[1 + i] = UInt8(Int((epoch_us >> UInt64(i * 8)) & UInt64(0xFF)))

@@ -5,9 +5,10 @@
 # A bounded Parquet scan of one local file, or of several, opens a
 # SOURCE_PARQUET pipeline whose spec carries the scan's projection and pushed
 # filter; several files are listed in the spec. A scan of objects in an S3
-# bucket is cut the same way, and the spec carries the scan's descriptor
-# (`parquet_fs`): its paths are then object keys in that bucket, which the
-# engine reads through the file system it is handed for the bucket. A scan with Hive partition
+# or GCS bucket or an Azure container is cut the same way, and the spec
+# carries the scan's descriptor (`parquet_fs`): its paths are then object keys
+# in that bucket, which the engine reads through the file system it is handed
+# for the bucket. A scan with Hive partition
 # columns lists its files and their partition values too, but pushes no
 # projection or filter: both become operators, the filter first, over the full
 # schema (the files' columns, then the partition columns). An in-memory scan
@@ -21,8 +22,9 @@
 #
 # Refused: an unbounded scan, a Hive-partitioned scan that lists its files
 # lazily (a directory scan or a partition predicate) or a Parquet scan on a
-# store other than the local file system and S3, or with an explicit local
-# binding (LOWERING_SCAN_NOT_TOTAL); a scan
+# store other than the local file system, S3, GCS and Azure (a scheme code
+# that names none of them), or with an explicit local binding
+# (LOWERING_SCAN_NOT_TOTAL); a scan
 # beyond the inputs' count (LOWERING_INPUTS_SCAN_COUNT); a CSV scan with
 # header=false, whose columns the reader would not name as DuckDB does, and
 # any other source
@@ -38,7 +40,12 @@ from lowering.lowered_plan import (
     LOWERING_INPUTS_SCAN_COUNT,
 )
 from plan_expr.expr import Expr
-from plan_expr.fs_descriptor_pod import FS_SCHEME_S3, FsDescriptorPod
+from plan_expr.fs_descriptor_pod import (
+    FS_SCHEME_AZURE,
+    FS_SCHEME_GCS,
+    FS_SCHEME_S3,
+    FsDescriptorPod,
+)
 from plan_ir.logical_plan import LogicalPlan
 from scan_source.source_variant import SourceVariant
 from plan_ir.plan_decisions import SCAN_BOUNDED
@@ -170,7 +177,7 @@ def _open_scan(
 
 def _carried_fs(desc: FsDescriptorPod) raises -> FsDescriptorPod:
     """The store a Parquet segment's spec names for a scan with `desc`: the
-    local file system, or an S3 bucket.
+    local file system, an S3 or GCS bucket, or an Azure container.
 
     Raises:
         `LOWERING_SCAN_NOT_TOTAL`, naming the store, for any other store (the
@@ -180,13 +187,18 @@ def _carried_fs(desc: FsDescriptorPod) raises -> FsDescriptorPod:
     """
     if desc.is_local():
         return FsDescriptorPod.local()
-    if desc.scheme == FS_SCHEME_S3:
+    if (
+        desc.scheme == FS_SCHEME_S3
+        or desc.scheme == FS_SCHEME_GCS
+        or desc.scheme == FS_SCHEME_AZURE
+    ):
         return desc.copy()
     raise Error(
         String(LOWERING_SCAN_NOT_TOTAL)
         + ": a Parquet scan on "
         + desc.url_prefix()
-        + "; the segment's Parquet arm reads the local file system and S3"
+        + "; the segment's Parquet arm reads the local file system, S3, GCS"
+        " and Azure"
     )
 
 

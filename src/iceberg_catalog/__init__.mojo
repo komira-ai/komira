@@ -17,7 +17,15 @@ commit tables through a catalog.
     commit returns (iceberg_table_metadata.mojo).
   * The append committer (iceberg_commit.mojo): `commit_append`, with retries
     on 409, the unknown-outcome lookup, and the cleanup lists, over the
-    `CommitClock`, `CommitIds` and `AppendSnapshotWriter` seams.
+    `CommitClock`, `CommitIds` and `AppendSnapshotWriter` seams. With
+    `AppendCommit.overwrite` it commits an `overwrite` snapshot that replaces
+    every row of `main` (iceberg_commit_summary.mojo builds the summary).
+  * The write sink: `write_table` (iceberg_write_sink.mojo) writes Arrow
+    batches as data files through a `TableFiles` (an object store and the URI
+    prefix it serves, iceberg_table_files.mojo), has a `StoreSnapshotWriter`
+    (iceberg_store_writer.mojo) write the manifest once and a manifest list
+    per attempt, and commits through `commit_append`, appending or
+    overwriting.
   * `InMemoryIcebergRestCatalog` (iceberg_rest_test_catalog.mojo): an
     in-process REST catalog that applies commits and can be scripted to
     fail, for tests.
@@ -31,7 +39,9 @@ credentials, and multi-level namespaces.
 A flat package, its own import root. It keeps the HTTP transport stack out
 of the Iceberg format package; it depends on komira_http (the REST
 transport), json (the JSON DOM), async_rt (`BlockingRuntime`), clock and uuid
-(the committer's production clock and ids).
+(the committer's production clock and ids), and, for the write sink, iceberg
+(data files, manifests), objectstore (the files' store), arrow (the batches),
+containers and parquet_api (the codec).
 
 Encapsulation: the public API exposes only typed values, owned
 `String`/`List[String]`, and the seam conformer structs. No UnsafePointer
@@ -85,6 +95,10 @@ from .iceberg_rest_errors import (
     ICEBERG_TABLE_REPLACED,
     ICEBERG_SCHEMA_INCOMPATIBLE,
     ICEBERG_WRITE_FORMAT_UNSUPPORTED,
+    ICEBERG_LOCATION_REFUSED,
+    ICEBERG_MANIFEST_LIST_UNSUPPORTED,
+    ICEBERG_TYPE_UNSUPPORTED,
+    ICEBERG_NULL_IN_REQUIRED_COLUMN,
 )
 
 from .iceberg_table_metadata import (
@@ -117,6 +131,19 @@ from .iceberg_commit import (
     AppendCommitOutcome,
     CommitRetryBudget,
     commit_append,
+)
+
+from .iceberg_table_files import TableFiles
+
+from .iceberg_store_writer import StoreSnapshotWriter
+
+from .iceberg_write_sink import (
+    TableWriteOutcome,
+    table_schema_json,
+    table_data_path,
+    table_metadata_path,
+    table_parquet_codec,
+    write_table,
 )
 
 from .iceberg_rest_test_catalog import (

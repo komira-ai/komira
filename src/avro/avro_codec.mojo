@@ -458,7 +458,7 @@ def _xz_lacks_stream_footer(payload: Span[UInt8, _]) -> Bool:
     truncated stream, a damaged footer, or other bytes after the footer. A
     payload that does not start like an .xz stream is left to liblzma,
     which names what is wrong with it."""
-    var magic: InlineArray[UInt8, _XZ_HEADER_MAGIC_LEN] = [
+    var magic: Array[UInt8, _XZ_HEADER_MAGIC_LEN] = [
         0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00
     ]
     var n = len(payload)
@@ -502,7 +502,7 @@ def _xz_lacks_stream_footer(payload: Span[UInt8, _]) -> Bool:
 
 @always_inline
 def _build_crc32_table() -> Array[UInt32, 256]:
-    """Returns an InlineArray (stack-allocated; no heap): a `List[UInt32]`
+    """Returns an Array (stack-allocated; no heap): a `List[UInt32]`
     would allocate and grow via 256 appends on EVERY snappy WRITE call.
     """
     var table = Array[UInt32, 256](fill=UInt32(0))

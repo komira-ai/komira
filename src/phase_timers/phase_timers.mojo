@@ -328,7 +328,7 @@ def _ru_fold(phase: Int, begin: Bool) raises:
     var g = _SLAB.get_or_create_ptr()
     var base = UnsafePointer(to=g[][])
     var s = _scratch_word(lane)
-    var vals = InlineArray[Int, 6](fill=0)
+    var vals = Array[Int, 6](fill=0)
     vals[0] = Int((base + s + 16)[].load())
     vals[1] = Int((base + s + 17)[].load())
     vals[2] = (

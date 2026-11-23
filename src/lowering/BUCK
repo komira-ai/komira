@@ -54,6 +54,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        beside each that lowers (a distinct over a column
 #                        list, a repeated name, no column or a column no sink
 #                        row serves included).
+# test_lower_gcs_azure_scan
+#                        a Parquet scan of GCS objects and of Azure blobs: the
+#                        spec carries the bucket or container beside one key
+#                        and several, and the render line names the store.
 # test_lower_s3_scan     a Parquet scan of S3 objects: the spec carries the
 #                        bucket beside the keys for one key, several and Hive
 #                        partitioned keys, and the render line names the store
@@ -133,6 +137,7 @@ mojo_library(
         "tests/test_lower_joins.mojo",
         "tests/test_lower_csv.mojo",
         "tests/test_lower_distinct.mojo",
+        "tests/test_lower_gcs_azure_scan.mojo",
         "tests/test_lower_names.mojo",
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",

@@ -40,8 +40,8 @@
 # ENCAPSULATION + gap6 (safety gate): ZERO UnsafePointer in any signature;
 # ZERO wildcard origins (Spans are origin_of(local)); ZERO unsafe_from_address;
 # ZERO take_pointee. The Ed25519 signing seed + ratchet are SECRET: zeroized on
-# drop. gap6 N/A: every field is InlineArray / a Movable GroupRatchet (itself
-# InlineArray-backed) / a scalar / owned List — no Movable-with-heap-field
+# drop. gap6 N/A: every field is Array / a Movable GroupRatchet (itself
+# Array-backed) / a scalar / owned List — no Movable-with-heap-field
 # byte-Slab element under a wildcard cast. def-based. Mojo 1.0.0b1.
 # =============================================================================
 
@@ -101,13 +101,13 @@ the chat layer rather than unbounded HMAC work here."""
 
 @always_inline
 def _make_nonce(
-    nonce_seed: InlineArray[UInt8, NONCE_SEED_SIZE], index: UInt32
-) -> InlineArray[UInt8, NONCE_SEED_SIZE]:
+    nonce_seed: Array[UInt8, NONCE_SEED_SIZE], index: UInt32
+) -> Array[UInt8, NONCE_SEED_SIZE]:
     """nonce = nonce_seed XOR le32(index) into the low 4 bytes. Per-index
     uniqueness within a session (the ratchet advances every message, so the
     derived key is per-index AND the nonce carries the index — defense in
     depth against any single-source nonce-reuse)."""
-    var nonce = InlineArray[UInt8, NONCE_SEED_SIZE](fill=UInt8(0))
+    var nonce = Array[UInt8, NONCE_SEED_SIZE](fill=UInt8(0))
     for i in range(NONCE_SEED_SIZE):
         nonce[i] = nonce_seed[i]
     for i in range(4):
@@ -117,7 +117,7 @@ def _make_nonce(
 
 @always_inline
 def _make_aad(
-    session_id: InlineArray[UInt8, SESSION_ID_SIZE],
+    session_id: Array[UInt8, SESSION_ID_SIZE],
     index: UInt32,
     room_id: List[UInt8],
 ) -> List[UInt8]:
@@ -154,19 +154,19 @@ struct SessionKeyShare(Movable, Deinitable):
       ed25519_pub — the sender's 32-byte signing public key (to verify
                     envelopes). PUBLIC, but bundled here for atomic delivery.
 
-    gap6 N/A: all fields InlineArray / scalar."""
+    gap6 N/A: all fields Array / scalar."""
 
-    var session_id: InlineArray[UInt8, SESSION_ID_SIZE]
-    var ratchet: InlineArray[UInt8, RATCHET_SIZE]
+    var session_id: Array[UInt8, SESSION_ID_SIZE]
+    var ratchet: Array[UInt8, RATCHET_SIZE]
     var index: UInt32
-    var ed25519_pub: InlineArray[UInt8, ED25519_PUB_SIZE]
+    var ed25519_pub: Array[UInt8, ED25519_PUB_SIZE]
 
     def __init__(
         out self,
-        session_id: InlineArray[UInt8, SESSION_ID_SIZE],
-        ratchet: InlineArray[UInt8, RATCHET_SIZE],
+        session_id: Array[UInt8, SESSION_ID_SIZE],
+        ratchet: Array[UInt8, RATCHET_SIZE],
         index: UInt32,
-        ed25519_pub: InlineArray[UInt8, ED25519_PUB_SIZE],
+        ed25519_pub: Array[UInt8, ED25519_PUB_SIZE],
     ):
         self.session_id = session_id.copy()
         self.ratchet = ratchet.copy()
@@ -210,11 +210,11 @@ struct SessionKeyShare(Movable, Deinitable):
                 + String(len(body))
             )
         var off = 0
-        var session_id = InlineArray[UInt8, SESSION_ID_SIZE](fill=UInt8(0))
+        var session_id = Array[UInt8, SESSION_ID_SIZE](fill=UInt8(0))
         for i in range(SESSION_ID_SIZE):
             session_id[i] = body[off + i]
         off += SESSION_ID_SIZE
-        var ratchet = InlineArray[UInt8, RATCHET_SIZE](fill=UInt8(0))
+        var ratchet = Array[UInt8, RATCHET_SIZE](fill=UInt8(0))
         for i in range(RATCHET_SIZE):
             ratchet[i] = body[off + i]
         off += RATCHET_SIZE
@@ -222,7 +222,7 @@ struct SessionKeyShare(Movable, Deinitable):
         for i in range(4):
             index |= UInt32(Int(body[off + i])) << UInt32(8 * i)
         off += 4
-        var ed25519_pub = InlineArray[UInt8, ED25519_PUB_SIZE](fill=UInt8(0))
+        var ed25519_pub = Array[UInt8, ED25519_PUB_SIZE](fill=UInt8(0))
         for i in range(ED25519_PUB_SIZE):
             ed25519_pub[i] = body[off + i]
         return SessionKeyShare(session_id, ratchet, index, ed25519_pub)
@@ -244,10 +244,10 @@ struct OutboundGroupSession(Movable, Deinitable):
     SECRET: the Ed25519 signing seed + the ratchet. Both zeroized on drop.
     Movable, NOT Copyable. gap6 N/A."""
 
-    var _session_id: InlineArray[UInt8, SESSION_ID_SIZE]
+    var _session_id: Array[UInt8, SESSION_ID_SIZE]
     var _ratchet: GroupRatchet
-    var _signing_seed: InlineArray[UInt8, ED25519_SEED_SIZE]
-    var _signing_pub: InlineArray[UInt8, ED25519_PUB_SIZE]
+    var _signing_seed: Array[UInt8, ED25519_SEED_SIZE]
+    var _signing_pub: Array[UInt8, ED25519_PUB_SIZE]
     var _room_id: List[UInt8]
 
     def __init__(out self, room_id: List[UInt8]) raises:
@@ -257,13 +257,13 @@ struct OutboundGroupSession(Movable, Deinitable):
 
         `room_id` is bound into every message's AEAD AAD (cross-room replay
         defense). It is copied in (the session owns its room_id)."""
-        var session_id = InlineArray[UInt8, SESSION_ID_SIZE](fill=UInt8(0))
+        var session_id = Array[UInt8, SESSION_ID_SIZE](fill=UInt8(0))
         system_entropy(Span[UInt8, origin_of(session_id)](session_id))
 
-        var seed = InlineArray[UInt8, RATCHET_SIZE](fill=UInt8(0))
+        var seed = Array[UInt8, RATCHET_SIZE](fill=UInt8(0))
         system_entropy(Span[UInt8, origin_of(seed)](seed))
 
-        var signing_seed = InlineArray[UInt8, ED25519_SEED_SIZE](fill=UInt8(0))
+        var signing_seed = Array[UInt8, ED25519_SEED_SIZE](fill=UInt8(0))
         system_entropy(Span[UInt8, origin_of(signing_seed)](signing_seed))
         var signing_pub = ed25519_pubkey_from_seed(
             Span[UInt8, origin_of(signing_seed)](signing_seed)
@@ -293,7 +293,7 @@ struct OutboundGroupSession(Movable, Deinitable):
         itself via GroupRatchet.__del__)."""
         zeroize_inline_array[ED25519_SEED_SIZE](self._signing_seed)
 
-    def session_id(self) -> InlineArray[UInt8, SESSION_ID_SIZE]:
+    def session_id(self) -> Array[UInt8, SESSION_ID_SIZE]:
         """The 32-byte session id (public — receivers key inbound sessions on
         it)."""
         return self._session_id.copy()
@@ -302,7 +302,7 @@ struct OutboundGroupSession(Movable, Deinitable):
         """The NEXT message index this session will encrypt at."""
         return self._ratchet.index()
 
-    def signing_pub(self) -> InlineArray[UInt8, ED25519_PUB_SIZE]:
+    def signing_pub(self) -> Array[UInt8, ED25519_PUB_SIZE]:
         """The Ed25519 public key (public — receivers verify envelopes)."""
         return self._signing_pub.copy()
 
@@ -384,10 +384,10 @@ struct InboundGroupSession(Movable, Deinitable):
 
     SECRET: the ratchet. Zeroized on drop. Movable, NOT Copyable. gap6 N/A."""
 
-    var _session_id: InlineArray[UInt8, SESSION_ID_SIZE]
+    var _session_id: Array[UInt8, SESSION_ID_SIZE]
     var _ratchet: GroupRatchet
     var _base_index: UInt32
-    var _ed25519_pub: InlineArray[UInt8, ED25519_PUB_SIZE]
+    var _ed25519_pub: Array[UInt8, ED25519_PUB_SIZE]
     var _room_id: List[UInt8]
 
     def __init__(out self, share: SessionKeyShare, room_id: List[UInt8]) raises:
@@ -410,7 +410,7 @@ struct InboundGroupSession(Movable, Deinitable):
     # No explicit __del__ needed beyond the ratchet's own zeroize-on-drop —
     # but we keep the public-field cleanup symmetric with the outbound session.
 
-    def session_id(self) -> InlineArray[UInt8, SESSION_ID_SIZE]:
+    def session_id(self) -> Array[UInt8, SESSION_ID_SIZE]:
         return self._session_id.copy()
 
     def base_index(self) -> UInt32:
@@ -552,12 +552,12 @@ struct SealedKeyShare(Movable, Deinitable):
     (key, nonce) pair is unique without needing a random nonce. NOT secret on
     the wire (it is the sealed form); no zeroize."""
 
-    var eph_pub: InlineArray[UInt8, X25519_KEY_SIZE]
+    var eph_pub: Array[UInt8, X25519_KEY_SIZE]
     var ciphertext_then_tag: List[UInt8]
 
     def __init__(
         out self,
-        eph_pub: InlineArray[UInt8, X25519_KEY_SIZE],
+        eph_pub: Array[UInt8, X25519_KEY_SIZE],
         var ciphertext_then_tag: List[UInt8],
     ):
         self.eph_pub = eph_pub.copy()
@@ -576,7 +576,7 @@ struct SealedKeyShare(Movable, Deinitable):
     def deserialize(body: List[UInt8]) raises -> SealedKeyShare:
         if len(body) < X25519_KEY_SIZE + AEAD_TAG_SIZE:
             raise Error("SealedKeyShare.deserialize: body too short")
-        var eph_pub = InlineArray[UInt8, X25519_KEY_SIZE](fill=UInt8(0))
+        var eph_pub = Array[UInt8, X25519_KEY_SIZE](fill=UInt8(0))
         for i in range(X25519_KEY_SIZE):
             eph_pub[i] = body[i]
         var ct = List[UInt8]()
@@ -588,8 +588,8 @@ struct SealedKeyShare(Movable, Deinitable):
 
 @always_inline
 def _derive_wrap_key(
-    shared: InlineArray[UInt8, X25519_KEY_SIZE]
-) raises -> InlineArray[UInt8, AEAD_KEY_SIZE]:
+    shared: Array[UInt8, X25519_KEY_SIZE]
+) raises -> Array[UInt8, AEAD_KEY_SIZE]:
     """wrap_key = HKDF-SHA-256(salt=0, IKM=shared, info=KEYSHARE_WRAP_INFO,
     L=32). The X25519 shared secret is NOT used directly as an AEAD key (it is
     not uniformly random); HKDF-Extract conditions it first (RFC 5869)."""
@@ -598,7 +598,7 @@ def _derive_wrap_key(
         Span[UInt8, origin_of(empty_salt)](empty_salt),
         Span[UInt8, origin_of(shared)](shared),
     )
-    var wrap_key = InlineArray[UInt8, AEAD_KEY_SIZE](fill=UInt8(0))
+    var wrap_key = Array[UInt8, AEAD_KEY_SIZE](fill=UInt8(0))
     Hkdf[Sha256].expand(
         Span[UInt8, origin_of(prk)](prk),
         KEYSHARE_WRAP_INFO.as_bytes(),
@@ -606,7 +606,7 @@ def _derive_wrap_key(
     )
     # MIGRATION FIX (1.0.0): this read `var prk_copy = prk` +
     # `zeroize(prk_copy)`, which wiped a COPY and left the real PRK live on
-    # the stack. b2's implicit InlineArray copy hid it; 1.0.0 refuses the
+    # the stack. b2's implicit Array copy hid it; 1.0.0 refuses the
     # copy and made it visible. See the twin at ratchet.mojo.
     zeroize_inline_array[32](prk)
     return wrap_key^
@@ -614,7 +614,7 @@ def _derive_wrap_key(
 
 def seal_session_key(
     share: SessionKeyShare,
-    recipient_x25519_pub: InlineArray[UInt8, X25519_KEY_SIZE],
+    recipient_x25519_pub: Array[UInt8, X25519_KEY_SIZE],
 ) raises -> SealedKeyShare:
     """X25519-seal a SessionKeyShare to ONE recipient's published prekey.
 
@@ -626,7 +626,7 @@ def seal_session_key(
 
     This is O(N devices) at session-start / re-key ONLY — NOT per message."""
     # Fresh ephemeral X25519 keypair.
-    var eph_priv = InlineArray[UInt8, X25519_KEY_SIZE](fill=UInt8(0))
+    var eph_priv = Array[UInt8, X25519_KEY_SIZE](fill=UInt8(0))
     system_entropy(Span[UInt8, origin_of(eph_priv)](eph_priv))
     var eph_pub = x25519_base_mult(
         Span[UInt8, origin_of(eph_priv)](eph_priv)
@@ -654,7 +654,7 @@ def seal_session_key(
     for _ in range(AEAD_TAG_SIZE):
         buf.append(UInt8(0))
 
-    var zero_nonce = InlineArray[UInt8, NONCE_SEED_SIZE](fill=UInt8(0))
+    var zero_nonce = Array[UInt8, NONCE_SEED_SIZE](fill=UInt8(0))
     var empty_aad = List[UInt8]()
     var cipher = ChaCha20Poly1305(wrap_key)
     cipher.seal_in_place(
@@ -672,7 +672,7 @@ def seal_session_key(
 
 def open_session_key(
     sealed: SealedKeyShare,
-    recipient_x25519_priv: InlineArray[UInt8, X25519_KEY_SIZE],
+    recipient_x25519_priv: Array[UInt8, X25519_KEY_SIZE],
 ) raises -> SessionKeyShare:
     """Open an X25519-sealed key share with the recipient's prekey private key
     (the inverse of seal_session_key). Raises on tag failure (tampered / wrong
@@ -694,7 +694,7 @@ def open_session_key(
     for i in range(len(sealed.ciphertext_then_tag)):
         buf.append(sealed.ciphertext_then_tag[i])
 
-    var zero_nonce = InlineArray[UInt8, NONCE_SEED_SIZE](fill=UInt8(0))
+    var zero_nonce = Array[UInt8, NONCE_SEED_SIZE](fill=UInt8(0))
     var empty_aad = List[UInt8]()
     var cipher = ChaCha20Poly1305(wrap_key)
     cipher.open_in_place(
@@ -715,12 +715,12 @@ def open_session_key(
 
 
 def x25519_prekey_generate() -> Tuple[
-    InlineArray[UInt8, X25519_KEY_SIZE], InlineArray[UInt8, X25519_KEY_SIZE]
+    Array[UInt8, X25519_KEY_SIZE], Array[UInt8, X25519_KEY_SIZE]
 ]:
     """Generate an X25519 prekey pair (priv, pub) for the group-key delivery
     channel. priv is random 32 bytes; pub = base_mult(priv).
     The CALLER must treat priv as SECRET and zeroize it after use."""
-    var priv = InlineArray[UInt8, X25519_KEY_SIZE](fill=UInt8(0))
+    var priv = Array[UInt8, X25519_KEY_SIZE](fill=UInt8(0))
     try:
         system_entropy(Span[UInt8, origin_of(priv)](priv))
     except:

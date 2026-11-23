@@ -87,9 +87,9 @@ def _hex_to_list(s: String) -> List[UInt8]:
     return out^
 
 
-def _seed_0_to_127() -> InlineArray[UInt8, RATCHET_SIZE]:
+def _seed_0_to_127() -> Array[UInt8, RATCHET_SIZE]:
     """The KAT seed: bytes 0x00, 0x01, ..., 0x7F (the Python reference seed)."""
-    var seed = InlineArray[UInt8, RATCHET_SIZE](fill=UInt8(0))
+    var seed = Array[UInt8, RATCHET_SIZE](fill=UInt8(0))
     for i in range(RATCHET_SIZE):
         seed[i] = UInt8(i)
     return seed^

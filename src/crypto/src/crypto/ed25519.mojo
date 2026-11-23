@@ -17,10 +17,10 @@
 # sign/verify/keypair surface.
 # # Public API
 #
-#   fn ed25519_sign(seed, msg) -> InlineArray[UInt8, 64]
+#   fn ed25519_sign(seed, msg) -> Array[UInt8, 64]
 #   fn ed25519_verify(pubkey, msg, sig) -> Bool
-#   fn ed25519_pubkey_from_seed(seed) -> InlineArray[UInt8, 32]
-#   fn ed25519_keypair_generate() -> (InlineArray[UInt8, 32], InlineArray[UInt8, 32])
+#   fn ed25519_pubkey_from_seed(seed) -> Array[UInt8, 32]
+#   fn ed25519_keypair_generate() -> (Array[UInt8, 32], Array[UInt8, 32])
 #
 # Where:
 #   - `seed`: 32 bytes (the RFC 8032 §5.1.5 "secret key" — random uniform).
@@ -121,7 +121,7 @@ def ed25519_sign(
     Matches AWS-LC's ED25519_sign byte-identically (this IS the AWS-LC
     implementation called via FFI). Per-call overhead vs a
     direct external_call: a few nanoseconds (Mojo's FFI dispatch +
-    InlineArray init). Per-sign cost includes one seed-expansion
+    Array init). Per-sign cost includes one seed-expansion
     (one SHA-512 hash + scalar clamp) since AWS-LC's ED25519_sign ABI
     requires the 64-byte expanded private key — see
     `internal/asm/ed25519_ffi.mojo` for the rationale.

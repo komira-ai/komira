@@ -118,7 +118,7 @@ def _one_batch(var rb: RecordBatch) -> Slab[RecordBatch]:
 # =============================================================================
 
 
-def _uuid_hex(u: InlineArray[UInt8, TELEMETRY_UUID_BYTES]) -> String:
+def _uuid_hex(u: Array[UInt8, TELEMETRY_UUID_BYTES]) -> String:
     var hexd = "0123456789abcdef"
     var hb = hexd.as_bytes()
     var out = String("")

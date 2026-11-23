@@ -1488,7 +1488,7 @@ def engine_pinned_worker_node_histogram(num_workers: Int) -> List[Int]:
     **DIAGNOSTIC ONLY — NOT FOR THE DISPATCH PATH.** Unlike every other
     `engine_numa_*` helper this one is NOT served from the frozen snapshot: the
     per-node CPU membership is a `List[List[Int]]` and `_NumaLocalSnapshot` is
-    deliberately plain data (Int / UInt8 / InlineArray only), so answering
+    deliberately plain data (Int / UInt8 / Array only), so answering
     this re-walks `/sys/devices/system/node` — the per-call sysfs cost the
     frozen snapshot exists to keep off the per-query driver path. Call it
     ONCE, from a harness or a startup log line — never from
@@ -1743,7 +1743,7 @@ def reset_current_thread_affinity_to_all() -> Bool:
 struct _AllowedCpuSnapshot(Copyable, Movable):
     """The PROCESS-WIDE allowed-CPU set, sampled once and frozen.
 
-    Storage is a 1024-bit mask in `InlineArray[UInt64, 16]` plus a count —
+    Storage is a 1024-bit mask in `Array[UInt64, 16]` plus a count —
     strictly POD (no `List`, no `String`, no `OwnedPointer`, no wildcard
     origin), so it is safe as `_Global` static storage: the hazard is
     heap-OWNING fields inside process-lifetime/byte-slab storage, and this
@@ -1836,7 +1836,7 @@ comptime _ALLOWED_CPU_SNAPSHOT = _Global[
 struct _TopologySnapshot(Copyable, Movable):
     """The DERIVED `CpuTopology`, frozen once per process.
 
-    Storage is three fixed `InlineArray[Int32, _CPU_SET_MAX]` lanes plus their
+    Storage is three fixed `Array[Int32, _CPU_SET_MAX]` lanes plus their
     lengths and the driver id — strictly POD (no `List`, no `String`, no
     `OwnedPointer`, no wildcard origin), so it is safe as `_Global`
     static storage, for exactly the reason `_AllowedCpuSnapshot` is: the
@@ -2030,7 +2030,7 @@ struct _NumaLocalSnapshot(Copyable, Movable):
     DRIVER, inside the serial region — so a per-call
     `/sys/devices/system/node/*` walk would be a per-query sysfs cost.
 
-    Plain data: `Int` + `UInt8` + `InlineArray` only, no `List` / `String` /
+    Plain data: `Int` + `UInt8` + `Array` only, no `List` / `String` /
     `OwnedPointer` / wildcard origin anywhere in the closure, which is what
     makes it legal as `_Global` process-lifetime storage.
     """

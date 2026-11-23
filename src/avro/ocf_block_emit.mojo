@@ -22,7 +22,7 @@
 # (matching the codec FFI precedent — no UnsafePointer crosses the public API).
 #
 # Encapsulation: the public API takes/returns owned values + borrowed Spans.
-# The entropy FFI confines its one pointer to a stack InlineArray it owns for
+# The entropy FFI confines its one pointer to a stack Array it owns for
 # the duration of the synchronous syscall.
 # =============================================================================
 
@@ -77,10 +77,10 @@ def generate_sync_marker() raises -> Array[UInt8, OCF_SYNC_LEN]:
             returns the count read (must equal 16).
     Darwin: arc4random_buf(buf, 16) — void, always succeeds.
 
-    SAFETY (FFI carve-out): `marker` is a stack InlineArray this function
+    SAFETY (FFI carve-out): `marker` is a stack Array this function
     owns; we hand the OS a pointer to its storage for the duration of the
     synchronous syscall only. The OS fills it and never retains the pointer.
-    No pointer crosses the module boundary (we return the InlineArray by
+    No pointer crosses the module boundary (we return the Array by
     value)."""
     var marker = Array[UInt8, OCF_SYNC_LEN](fill=0)
 

@@ -41,3 +41,10 @@ class UnsupportedCpuError(LibraryLoadError):
 class UnsupportedOperation(KomiraError):
     """komira refused a construct by name: the message names it, says why, and
     gives a spelling that works if there is one."""
+
+
+class CredentialsError(KomiraError):
+    """libkomira refused a credential: the message is its named refusal,
+    `CREDENTIALS_INVALID: <operation> ...`, which names the credential and the
+    setting and never a value (docs/design/credentials_and_writes.md, decision
+    11)."""

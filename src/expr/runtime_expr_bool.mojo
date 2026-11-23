@@ -17,7 +17,7 @@
 #
 # Contents:
 #   - Tag enum + RuntimeNode POD struct
-#   - RuntimeExprBool struct with InlineArray[RuntimeNode, MAX_NODES]
+#   - RuntimeExprBool struct with Array[RuntimeNode, MAX_NODES]
 #     storage (List is not Copyable, so it can't be a field on a
 #     Copyable-conforming struct).
 #   - Tree walker `eval[W]` dispatching on tag; AND/OR/NOT arms call the
@@ -38,7 +38,7 @@
 #   - No `UnsafePointer` in any public method signature.
 #   - All borrows are tracked via `BatchView[origin]` / `ByteView[origin]`
 #     with concrete `origin` parameters.
-#   - `InlineArray[RuntimeNode, MAX_NODES]` storage is heap-free
+#   - `Array[RuntimeNode, MAX_NODES]` storage is heap-free
 #     (no stale-slab hazard — RuntimeNode is a POD with no heap fields).
 # =============================================================================
 
@@ -101,7 +101,7 @@ comptime CMP_NE: UInt8 = 5
 comptime ISNULL_IS_NULL: UInt8 = 0
 comptime ISNULL_IS_NOT_NULL: UInt8 = 1
 
-# Maximum tree size — bounds RuntimeExprBool's storage. The InlineArray (vs List) is mandatory: List[T] cannot be a field
+# Maximum tree size — bounds RuntimeExprBool's storage. The Array (vs List) is mandatory: List[T] cannot be a field
 # on a Copyable struct in Mojo 1.0.0b1, and the trait surface
 # (ExprBoolU) requires Copyable conformance.
 comptime MAX_NODES: Int = 256
@@ -115,7 +115,7 @@ comptime MAX_NODES: Int = 256
 # Children referenced by Int index into the parent RuntimeExprBool's
 # `nodes` array. This shape:
 #   - Avoids stale-slab (no heap, no wildcard origin).
-#   - Allows InlineArray<RuntimeNode, N> on a Copyable struct.
+#   - Allows Array<RuntimeNode, N> on a Copyable struct.
 #   - Trivially Copyable / Movable via @fieldwise_init.
 #
 # Fields (overloaded per tag):
@@ -393,7 +393,7 @@ def rt_expr_cast(child: Int) -> RuntimeNode:
 
 
 def _rt_sentinel() -> RuntimeNode:
-    """Sentinel node — fills unused slots in the InlineArray. tag=255
+    """Sentinel node — fills unused slots in the Array. tag=255
     is reserved (out-of-range of the 16-tag set)."""
     return RuntimeNode(
         tag=UInt8(255),
@@ -443,7 +443,7 @@ struct RuntimeExprBool(Copyable, Movable, ExprBoolU):
     """Runtime-tree wrapper conforming to the unified `ExprBoolU` trait.
 
     Storage:
-        nodes: InlineArray[RuntimeNode, MAX_NODES] — heap-free, no
+        nodes: Array[RuntimeNode, MAX_NODES] — heap-free, no
             stale-pointer hazard. List[T] cannot be a field on a
             Copyable struct under Mojo 1.0.0b1, and the trait surface
             (ExprBoolU) requires Copyable / Movable / ImplicitlyCopyable

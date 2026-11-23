@@ -7,12 +7,12 @@
 # spill, perfect-hash sibling). Instead of SoA, the PER-AGG SLOT WIDTH
 # varies, so a SUM+COUNT query pays 16B per agg instead of 32B.
 #
-# The `tags` / `offsets` / `widths` storage is `InlineArray[T, MAX_AGGS]`,
+# The `tags` / `offsets` / `widths` storage is `Array[T, MAX_AGGS]`,
 # not `List[T]`. The `List[T]` form triggers a Mojo codegen bug: when
 # AggLayout lives inside a `FlatHashAggregator` that lives inside a
 # `Slab[FlatHashAggregator]` (the `PartitionedFlatHashAggregator` case),
 # reading `self._layout.offsets[agg_idx]` from `@always_inline def _agg_ptr`
-# returns pointer-sized garbage. Stack-backed InlineArray storage avoids the
+# returns pointer-sized garbage. Stack-backed Array storage avoids the
 # heap-pointer move path.
 #
 # MAX_AGGS=16 is well above the aggregate counts of typical analytical
@@ -114,7 +114,7 @@ struct AggLayout(Movable, Copyable):
       - kernels (thunk offset/width)
 
     Storage note: the tag/offset/width arrays are stored as
-    `InlineArray[T, MAX_AGGS]`, NOT `List[T]`. See module header for the
+    `Array[T, MAX_AGGS]`, NOT `List[T]`. See module header for the
     codegen bug that drove that choice. Only the first `num_aggs` entries
     are meaningful; positions in [num_aggs, MAX_AGGS) are zero.
     """

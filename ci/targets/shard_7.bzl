@@ -14,6 +14,14 @@ TARGETS = [
     "komira//python/tests:cpu_test_py311",
     "komira//python/tests:cpu_test_py312",
     "komira//python/tests:cpu_test_py314",
+    "komira//python/tests:credentials_lib_test",
+    "komira//python/tests:credentials_lib_test_py311",
+    "komira//python/tests:credentials_lib_test_py312",
+    "komira//python/tests:credentials_lib_test_py314",
+    "komira//python/tests:credentials_test",
+    "komira//python/tests:credentials_test_py311",
+    "komira//python/tests:credentials_test_py312",
+    "komira//python/tests:credentials_test_py314",
     "komira//python/tests:load_test",
     "komira//python/tests:load_test_py311",
     "komira//python/tests:load_test_py312",
@@ -169,6 +177,7 @@ TARGETS = [
     "komira//src/exec_types:exec_types_conda",
     "komira//src/http_auth:http_auth_conda",
     "komira//src/iceberg_catalog:iceberg_catalog_conda",
+    "komira//src/iceberg_catalog:test_iceberg_foreign_readback",
     "komira//src/iceberg_catalog:test_iceberg_rest_loopback",
     "komira//src/mail_tls:mail_tls_conda",
     "komira//src/morsel:morsel_conda",
@@ -261,6 +270,7 @@ TARGETS = [
 ]
 
 TESTS = [
+    "komira//src/iceberg_catalog:test_iceberg_foreign_readback",
     "komira//src/iceberg_catalog:test_iceberg_rest_loopback",
     "komira//src/tests/helpers/komira_udf_spike_native:native_bench",
     "komira//tools/build/proto-codegen:xml_equiv_verdicts_test",
