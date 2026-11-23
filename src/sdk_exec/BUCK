@@ -254,6 +254,71 @@ _JOIN_KINDS_TEST_DATA.update({t + ".parquet": ":join_kinds_oracle[" + t + ".parq
 
 _JOIN_KINDS_TEST_DATA.update({c + ".tsv": ":join_kinds_oracle[" + c + ".tsv]" for c in _JOIN_KINDS_CASES})
 
+# DuckDB's tables and answers for test_run_sql_correlated:
+# tests/correlated/data.sql writes the eight TPC-H-typed tables (Parquet, small
+# row groups), and each line of tests/correlated/cases.sql runs one query with
+# a correlated subquery or EXISTS over them and writes its answer.
+_CORRELATED_CASES = [
+    "tpch_q2",
+    "tpch_q2_body",
+    "tpch_q4",
+    "tpch_q17",
+    "tpch_q20",
+    "tpch_q21",
+    "tpch_q22",
+    "scalar_count_no_match",
+    "scalar_count_compare",
+    "scalar_avg_no_match",
+    "scalar_two_keys",
+    "scalar_left_operand",
+    "scalar_select_item",
+    "exists_null_outer_key",
+    "not_exists_null_outer_key",
+    "not_exists_null_inner_key",
+    "exists_join_body",
+    "exists_non_equi",
+    "not_exists_count",
+    "scalar_null_outer_key_avg",
+    "scalar_null_outer_key_count",
+    "scalar_null_inner_key",
+    "scalar_two_in_where",
+    "scalar_under_or",
+    "scalar_count_expr",
+    "scalar_count_column_nulls",
+    "scalar_select_count",
+    "scalar_select_date",
+    "scalar_qualified_outer",
+    "scalar_empty_body",
+    "scalar_in_derived",
+    "decimal_vs_double",
+]
+
+_CORRELATED_TABLES = [
+    "region",
+    "nation",
+    "supplier",
+    "part",
+    "partsupp",
+    "customer",
+    "orders",
+    "lineitem",
+]
+
+sql_oracle(
+    name = "correlated_oracle",
+    srcs = [
+        "tests/correlated/data.sql",
+        "tests/correlated/cases.sql",
+    ],
+    outputs = [t + ".parquet" for t in _CORRELATED_TABLES] + [c + ".tsv" for c in _CORRELATED_CASES],
+)
+
+_CORRELATED_TEST_DATA = {"cases.sql": "tests/correlated/cases.sql"}
+
+_CORRELATED_TEST_DATA.update({t + ".parquet": ":correlated_oracle[" + t + ".parquet]" for t in _CORRELATED_TABLES})
+
+_CORRELATED_TEST_DATA.update({c + ".tsv": ":correlated_oracle[" + c + ".tsv]" for c in _CORRELATED_CASES})
+
 # DuckDB's tables and answers for test_run_sql_subquery: tests/subquery/data.sql
 # writes t, u, nn and e (Parquet, small row groups), and each line of
 # tests/subquery/cases.sql runs one scalar, IN or NOT IN subquery over them and
@@ -471,6 +536,15 @@ _SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in
 #   the SEMI JOIN and ANTI JOIN keywords; CROSS joins (also past one output
 #   chunk), a comma join and scalar subqueries; a LEFT JOIN with a residual over
 #   both sides is refused at lower; every case is run.
+# - test_run_sql_correlated: run_sql over eight TPC-H-typed Parquet tables
+#   DuckDB wrote (the :correlated_oracle action above) answers what the pinned
+#   DuckDB answers for each case of tests/correlated/cases.sql, on one and
+#   three workers: the corpus texts of TPC-H Q2 (without its LIMIT), Q4, Q17,
+#   Q20 and Q22; correlated scalars over no row, with NULL keys, two keys, in
+#   a WHERE anywhere, in a SELECT list and a derived table; EXISTS and NOT
+#   EXISTS with NULL keys; Q21 and the shapes it does not serve are refused by
+#   name at their step; the TPC-H cases are the corpus texts; every case is
+#   run.
 # - test_run_sql_subquery: run_sql over Parquet tables DuckDB wrote (the
 #   :subquery_oracle action above) answers what the pinned DuckDB answers for
 #   each case of tests/subquery/cases.sql, on one and three workers: scalar
@@ -669,6 +743,7 @@ mojo_library(
         "tests/test_resolved_cache_pin_count.mojo",
         "tests/test_run_sql_copy_parquet.mojo",
         "tests/test_run_sql_copy_text.mojo",
+        "tests/test_run_sql_correlated.mojo",
         "tests/test_run_sql_csv.mojo",
         "tests/test_run_sql_cte.mojo",
         "tests/test_run_sql_distinct.mojo",
@@ -699,6 +774,7 @@ mojo_library(
         "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
     ],
     test_data = {
+        "tests/test_run_sql_correlated.mojo": _CORRELATED_TEST_DATA,
         "tests/test_run_sql_csv.mojo": _CSV_TEST_DATA,
         "tests/test_run_sql_cte.mojo": _CTE_TEST_DATA,
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,

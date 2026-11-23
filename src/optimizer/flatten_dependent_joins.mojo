@@ -114,6 +114,10 @@ from .flatten_hoist import (
     _join_conjuncts,
     _hoist_outer_eq_predicates,
 )
+from .flatten_scalar import (
+    expr_contains_predicate_subquery,
+    lower_scalar_subqueries_in,
+)
 
 
 # =============================================================================
@@ -340,8 +344,12 @@ def _maybe_lower_filter(mut plan: LogicalPlan) raises:
     var pred_copy = plan._filter.value()[].predicate.copy()
     var child_plan_copy = plan._filter.value()[].child[].copy()
 
-    # Case A: predicate IS the bare CorrelatedSubquery.
-    if pred_copy.tag == EXPR_CORRELATED_SUBQUERY:
+    # Case A: predicate IS a bare EXISTS / NOT EXISTS / IN subquery. A bare
+    # SCALAR one is a value the Filter tests, so it takes Case C below.
+    if (
+        pred_copy.tag == EXPR_CORRELATED_SUBQUERY
+        and pred_copy._corr_subq.value()[].kind != CORR_KIND_SCALAR
+    ):
         var lowered = _lower_correlated_into_join(
             child_plan_copy^, pred_copy, None,
         )
@@ -363,48 +371,38 @@ def _maybe_lower_filter(mut plan: LogicalPlan) raises:
             _lower_and_chain_with_corr(plan, pred_copy^, child_plan_copy^)
             return
 
-    # Case B: predicate is BIN_OP(lhs, CorrelatedSubquery) — a comparison
-    # whose RHS is a scalar-subquery. We only lower when the OUTER
-    # comparison is the immediate parent of the CorrelatedSubquery.
+    # Case B: a comparison with an EXISTS / NOT EXISTS / IN as its direct
+    # operand, which has no value to compare.
     if pred_copy.tag == EXPR_BINARY_OP:
-        var b_op = pred_copy._binary.value().op
-        var rhs_tag = pred_copy._binary.value().right[].tag
-        var lhs_tag = pred_copy._binary.value().left[].tag
-        var rhs_has_corr = _expr_contains_correlated_subquery(pred_copy._binary.value().right[])
-        var lhs_has_corr = _expr_contains_correlated_subquery(pred_copy._binary.value().left[])
+        var rhs = pred_copy._binary.value().right[].copy()
+        var lhs = pred_copy._binary.value().left[].copy()
+        if rhs.tag == EXPR_CORRELATED_SUBQUERY and rhs._corr_subq.value()[].kind != CORR_KIND_SCALAR:
+            raise Error("bare BIN_OP with non-SCALAR correlated RHS is unsupported")
+        if lhs.tag == EXPR_CORRELATED_SUBQUERY and lhs._corr_subq.value()[].kind != CORR_KIND_SCALAR:
+            raise Error("bare BIN_OP with non-SCALAR correlated LHS is unsupported")
 
-        if rhs_tag == EXPR_CORRELATED_SUBQUERY and not lhs_has_corr:
-            # SCALAR pattern (Q17): col > 0.2 * subquery; or
-            # col_lhs op subquery for any op.
-            var rhs_kind = pred_copy._binary.value().right[]._corr_subq.value()[].kind
-            if rhs_kind != CORR_KIND_SCALAR:
-                raise Error("bare BIN_OP with non-SCALAR correlated RHS is unsupported")
-            var agg_out_name = String("__corr_scalar_0")
-            var rhs_copy = pred_copy._binary.value().right[].copy()
-            var lhs_copy = pred_copy._binary.value().left[].copy()
-            var lowered = _lower_scalar_correlated(
-                child_plan_copy^, rhs_copy, agg_out_name.copy(),
-            )
-            var new_rhs = Expr.col_ref(agg_out_name^)
-            var new_pred = Expr.binary(b_op, lhs_copy^, new_rhs^)
-            plan = LogicalPlan.filter(new_pred^, lowered^)
-            return
-        if lhs_tag == EXPR_CORRELATED_SUBQUERY and not rhs_has_corr:
-            var lhs_kind = pred_copy._binary.value().left[]._corr_subq.value()[].kind
-            if lhs_kind != CORR_KIND_SCALAR:
-                raise Error("bare BIN_OP with non-SCALAR correlated LHS is unsupported")
-            var agg_out_name = String("__corr_scalar_0")
-            var lhs_copy = pred_copy._binary.value().left[].copy()
-            var rhs_copy = pred_copy._binary.value().right[].copy()
-            var lowered = _lower_scalar_correlated(
-                child_plan_copy^, lhs_copy, agg_out_name.copy(),
-            )
-            var new_lhs = Expr.col_ref(agg_out_name^)
-            var new_pred = Expr.binary(b_op, new_lhs^, rhs_copy^)
-            plan = LogicalPlan.filter(new_pred^, lowered^)
-            return
+    # Case C: scalar subqueries anywhere in the predicate (`col < (SCALAR)`,
+    # `(SCALAR) = 0`, `x < 0.5 * (SCALAR)`, two of them). Each becomes a LEFT
+    # join under the Filter and its value replaces it in the predicate
+    # (`lower_scalar_subqueries_in`); the first is named `__corr_scalar_0`.
+    if not expr_contains_predicate_subquery(pred_copy):
+        var base = child_plan_copy^
+        var n = 0
+        var rewritten = lower_scalar_subqueries_in(
+            base, pred_copy, n,
+            "unsupported parent-shape for correlated subquery in Filter predicate",
+        )
+        plan = LogicalPlan.filter(rewritten^, base^)
+        return
 
     raise Error("unsupported parent-shape for correlated subquery in Filter predicate")
+
+
+comptime _NESTED_IN_AND_CHAIN = (
+    "flatten: an EXISTS, NOT EXISTS or IN subquery nested inside an AND-chain"
+    " conjunct (under OR, NOT, a comparison or a CASE) is not supported; only"
+    " a bare one is lowered from an AND chain"
+)
 
 
 def _lower_and_chain_with_corr(
@@ -433,18 +431,16 @@ def _lower_and_chain_with_corr(
     _split_conjuncts(pred, conjuncts)
 
     var corr_conjuncts = ExprArray()
+    var scalar_conjuncts = ExprArray()
     var residual = ExprArray()
     for i in range(len(conjuncts)):
         ref c = conjuncts[i]
-        if c.tag == EXPR_CORRELATED_SUBQUERY:
+        if c.tag == EXPR_CORRELATED_SUBQUERY and c._corr_subq.value()[].kind != CORR_KIND_SCALAR:
             corr_conjuncts.append(c.copy())
+        elif expr_contains_predicate_subquery(c):
+            raise Error(_NESTED_IN_AND_CHAIN)
         elif _expr_contains_correlated_subquery(c):
-            raise Error(
-                "flatten: a correlated subquery nested inside an AND-chain"
-                " conjunct (e.g. a scalar comparison `col < (subquery)`) is not"
-                " yet supported; only bare EXISTS / NOT EXISTS / IN conjuncts"
-                " are lowered from an AND chain"
-            )
+            scalar_conjuncts.append(c.copy())
         else:
             residual.append(c.copy())
 
@@ -457,6 +453,20 @@ def _lower_and_chain_with_corr(
     else:
         base = child^
 
+    # Each scalar subquery of a conjunct adds a LEFT join over `base`; the
+    # rewritten conjuncts filter above those joins.
+    if len(scalar_conjuncts) > 0:
+        var n = 0
+        var rewritten = ExprArray()
+        for i in range(len(scalar_conjuncts)):
+            rewritten.append(
+                lower_scalar_subqueries_in(
+                    base, scalar_conjuncts[i], n, _NESTED_IN_AND_CHAIN
+                )
+            )
+        var sp = _join_conjuncts(rewritten^)
+        base = LogicalPlan.filter(sp.value().copy(), base^)
+
     # Chain each bare correlated subquery into its SEMI / ANTI join.
     for i in range(len(corr_conjuncts)):
         base = _lower_correlated_into_join(base^, corr_conjuncts[i], None)
@@ -465,18 +475,32 @@ def _lower_and_chain_with_corr(
 
 
 def _maybe_lower_project(mut plan: LogicalPlan) raises:
-    """Inspect plan (must be PLAN_PROJECT). If any project Expr contains an
-    EXPR_CORRELATED_SUBQUERY, lower it.
-
-    No project-shape is supported: any correlated subquery in a Project
-    expr raises. The shape is unusual in TPC-H (Q17 puts the SCALAR under
-    a Filter), so the scope is kept tight. A future extension can lower
-    projected scalar-subqueries.
-    """
+    """Inspect plan (must be PLAN_PROJECT). Each scalar subquery in its
+    expressions (a correlated scalar in a SELECT list) becomes a LEFT join
+    under the Project and its value replaces it in the expression
+    (`lower_scalar_subqueries_in`); the Project's own expressions fix its
+    output, so the joins' extra columns do not reach it. An EXISTS, NOT
+    EXISTS or IN subquery in a Project raises: it has no value there."""
     ref pj = plan._project.value()[]
+    var any_corr = False
     for i in range(len(pj.exprs)):
-        if _expr_contains_correlated_subquery(pj.exprs[i]):
+        if expr_contains_predicate_subquery(pj.exprs[i]):
+            # An EXISTS, NOT EXISTS or IN subquery.
             raise Error("correlated subquery in Project not yet supported")
+        if _expr_contains_correlated_subquery(pj.exprs[i]):
+            any_corr = True
+    if not any_corr:
+        return
+    var base = pj.child[].copy()
+    var exprs = ExprArray()
+    var n = 0
+    for i in range(len(pj.exprs)):
+        exprs.append(
+            lower_scalar_subqueries_in(
+                base, pj.exprs[i], n, "correlated subquery in Project not yet supported"
+            )
+        )
+    plan = LogicalPlan.project(exprs^, base^)
 
 
 # =============================================================================
@@ -513,14 +537,6 @@ def _lower_correlated_into_join(
         if not _schema_has_field(outer_child.output_schema, corr_data.in_lhs_col):
             raise Error("UnresolvedOuterRef: " + corr_data.in_lhs_col)
 
-    # Nested correlation: recursively lower any EXPR_CORRELATED_SUBQUERY
-    # within the inner plan tree BEFORE building the join. This makes the
-    # pass deterministic regardless of which correlation level we visit
-    # first (CorrelatedSubquery.inner_plan is NOT a regular plan-tree
-    # child, so the outer walk doesn't reach it).
-    var inner_pre_flat = corr_data_inner_plan_ref(corr_data).copy()
-    flatten_dependent_joins_inplace(inner_pre_flat)
-
     var join_type: UInt8
     if corr_data.kind == CORR_KIND_EXISTS:
         join_type = JOIN_SEMI
@@ -549,9 +565,17 @@ def _lower_correlated_into_join(
     var right_on = List[String]()
     var residual_conjuncts = ExprArray()
     var inner_after_hoist = _hoist_outer_eq_predicates(
-        inner_pre_flat^, corr_data.outer_refs, left_on, right_on,
-        residual_conjuncts,
+        corr_data_inner_plan_ref(corr_data), corr_data.outer_refs, left_on,
+        right_on, residual_conjuncts,
     )
+    # Nested correlation: lower every EXPR_CORRELATED_SUBQUERY left in the
+    # inner plan (CorrelatedSubquery.inner_plan is NOT a regular plan-tree
+    # child, so the outer walk doesn't reach it). AFTER the hoist, so the
+    # correlation conjuncts are still the root Filter's when it reads them
+    # (a nested scalar's LEFT join would otherwise sit between that Filter
+    # and its conjuncts' columns, TPC-H Q20's IN body). Lowering keeps every
+    # column the hoisted keys name.
+    flatten_dependent_joins_inplace(inner_after_hoist)
 
     # IN-correlated: append the original `IN` comparison as an extra
     # equi-key (`outer.in_lhs_col = inner.in_rhs_col`). This is the
@@ -592,12 +616,92 @@ def _lower_correlated_into_join(
     return join_plan^
 
 
+struct ScalarLowering(Movable):
+    """A lowered scalar subquery: the outer plan with its LEFT join, and the
+    expression over that join's columns that replaces the subquery."""
+
+    var plan: LogicalPlan
+    var value: Expr
+
+    def __init__(out self, var plan: LogicalPlan, var value: Expr):
+        self.plan = plan^
+        self.value = value^
+
+
+def _grouped_by(plan: LogicalPlan, nkeys: Int) -> Bool:
+    """Whether `plan` is an Aggregate with `nkeys` group keys under Projects
+    only: one row per key, so a LEFT join on those keys adds no outer row."""
+    if plan.tag == PLAN_PROJECT:
+        return _grouped_by(plan._project.value()[].child[], nkeys)
+    if plan.tag == PLAN_AGGREGATE:
+        return len(plan._aggregate.value()[].group_by) == nkeys
+    return False
+
+
+def _lower_grouped_scalar(
+    var outer_child: LogicalPlan, ref corr_data: CorrelatedSubqueryData
+) raises -> ScalarLowering:
+    """Lower a SCALAR subquery the SQL binder built
+    (`sql.sql_bind_corr_scalar`): `Project([v AS <name>], Filter(<inner key
+    = outer column> AND ..., G))`, `G` grouped by the inner keys. The Filter's
+    equalities become the keys of `LEFT JOIN(outer_child, G)` and `v`, which
+    the binder wrote to be the value over no row too (a count as
+    `coalesce(count, 0)`), is the value over the join: over a matched outer
+    row it is the group's, over an unmatched one (G's columns NULL) the value
+    over no row."""
+    ref pj = corr_data_inner_plan_ref(corr_data)._project.value()[]
+    var left_on = List[String]()
+    var right_on = List[String]()
+    var residual = ExprArray()
+    var grouped = _hoist_outer_eq_predicates(
+        pj.child[], corr_data.outer_refs, left_on, right_on, residual
+    )
+    if len(residual) > 0 or len(left_on) == 0:
+        raise Error(
+            "flatten: a scalar subquery correlated other than by inner = outer"
+            " column equalities is not supported"
+        )
+    flatten_dependent_joins_inplace(grouped)
+    if not _grouped_by(grouped, len(right_on)):
+        raise Error(
+            "flatten: a scalar subquery whose inner plan is not grouped by its"
+            " correlation keys is not supported"
+        )
+    var value = pj.exprs[0].copy()
+    var name = String("__corr_value")
+    if value.tag == EXPR_ALIAS:
+        name = value.alias_name()
+        var unaliased = value.alias_child_ref().copy()
+        value = unaliased^
+    var join_plan = LogicalPlan.join(
+        outer_child^, grouped^, left_on^, right_on^, JOIN_LEFT, JOIN_ALGO_AUTO,
+    )
+    if value.tag == EXPR_COL_REF:
+        return ScalarLowering(join_plan^, value^)
+    # A computed value (a count read through coalesce, which is a CASE) is a
+    # column of a Project over the join, and the caller reads that column: a
+    # filter does not evaluate a CASE in its predicate (its NULL scope depends
+    # on the branch taken, `batch_eval.predicate_null_scope`).
+    var exprs = ExprArray()
+    for i in range(join_plan.output_schema.num_columns()):
+        exprs.append(Expr.col_ref(join_plan.output_schema.field_name(i)))
+    exprs.append(Expr.alias(value^, name))
+    var projected = LogicalPlan.project(exprs^, join_plan^)
+    return ScalarLowering(projected^, Expr.col_ref(name^))
+
+
 def _lower_scalar_correlated(
     var outer_child: LogicalPlan,
     corr_expr: Expr,
     var agg_out_name: String,
-) raises -> LogicalPlan:
-    """Lower a SCALAR correlated subquery to LEFT join + aggregate sink.
+) raises -> ScalarLowering:
+    """Lower a SCALAR correlated subquery to LEFT join + aggregate sink, and
+    the expression that replaces it.
+
+    The SQL binder's shape, a Project of one expression over a Filter, is
+    `_lower_grouped_scalar`'s. The rest of this docstring is about a plan
+    built directly with an Aggregate at the inner root; its value is
+    `col_ref(agg_out_name)`.
 
     Q17 shape: the inner subquery `SELECT 0.2 * AVG(l_quantity) FROM
     lineitem WHERE l_partkey = outer.p_partkey` becomes:
@@ -624,10 +728,16 @@ def _lower_scalar_correlated(
     """
     ref corr_data = corr_expr._corr_subq.value()[]
     _validate_outer_refs(corr_data.outer_refs, outer_child.output_schema)
+    ref inner_root = corr_data_inner_plan_ref(corr_data)
+    if (
+        inner_root.tag == PLAN_PROJECT
+        and len(inner_root._project.value()[].exprs) == 1
+        and inner_root._project.value()[].child[].tag == PLAN_FILTER
+    ):
+        return _lower_grouped_scalar(outer_child^, corr_data)
 
     # Nested correlation: recursively lower any EXPR_CORRELATED_SUBQUERY
-    # within the inner plan tree BEFORE building the join (same rationale
-    # as the EXISTS path above).
+    # within the inner plan tree BEFORE building the join.
     var inner_pre_flat = corr_data_inner_plan_ref(corr_data).copy()
     flatten_dependent_joins_inplace(inner_pre_flat)
 
@@ -694,4 +804,4 @@ def _lower_scalar_correlated(
         JOIN_LEFT,
         JOIN_ALGO_AUTO,
     )
-    return join_plan^
+    return ScalarLowering(join_plan^, Expr.col_ref(agg_out_name^))
