@@ -345,7 +345,7 @@ def test_in_with_an_expression_on_the_left_is_refused_at_parse() raises:
 
 def test_a_predicate_subquery_in_a_having_is_refused_at_bind() raises:
     _refused(
-        "SELECT t.k AS k, count(*) AS n FROM read_parquet('t.parquet') t GROUP BY t.k HAVING t.k IN (SELECT u.k FROM read_parquet('u.parquet') u)",
+        "SELECT k, count(*) AS n FROM read_parquet('t.parquet') t GROUP BY k HAVING k IN (SELECT k FROM read_parquet('u.parquet') u)",
         String(STEP_BIND),
         "SQL not supported: an EXISTS or IN subquery in a HAVING clause or in the"
         " SELECT list of a grouped query (a scalar subquery is served there; a"
