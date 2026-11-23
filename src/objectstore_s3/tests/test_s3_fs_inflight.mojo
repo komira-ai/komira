@@ -75,7 +75,7 @@ from objectstore_s3 import (
     inflight_workers,
     run_bounded_inflight,
 )
-from objectstore_s3.inflight import _run_bounded_inflight
+from objectstore_s3.inflight import _FailureFlag, _run_bounded_inflight
 from retry import Backoff, Jitter, RetryPolicy
 
 
@@ -683,7 +683,24 @@ def test_a_bound_of_one_runs_in_order_on_the_caller() raises:
         assert_equal(got[1][j], 0)
 
 
-struct _FailFirstStore[fo: MutOrigin, ro: MutOrigin](InflightJobs):
+comptime _RunnerFailures = GlobalCounterTable["komira_objectstore_s3_test_inflight_failures", 1]
+
+
+struct _GlobalFlag(_FailureFlag):
+    """The runner's failure flag, kept in a global counter so the store's jobs
+    can read it without a reference to it beside the runner's own."""
+
+    def __init__(out self):
+        pass
+
+    def record(self) raises:
+        _RunnerFailures.incr(0)
+
+    def is_set(self) raises -> Bool:
+        return _RunnerFailures.read(0) != 0
+
+
+struct _FailFirstStore[ro: MutOrigin](InflightJobs):
     """Job 0 raises. Every other job records that it ran, then holds until the
     runner's failure flag is set, so the order is fixed, not raced: the job a
     worker holds ends only after the failure is recorded, and the worker's next
@@ -693,13 +710,9 @@ struct _FailFirstStore[fo: MutOrigin, ro: MutOrigin](InflightJobs):
     sets the flag leaves the held jobs waiting (the build's watchdog ends the
     run, as for the round tests above)."""
 
-    var failed: Pointer[AtomicI64, Self.fo]
     var ran_on: Pointer[List[Int], Self.ro]
 
-    def __init__(
-        out self, failed: Pointer[AtomicI64, Self.fo], ran_on: Pointer[List[Int], Self.ro]
-    ):
-        self.failed = failed
+    def __init__(out self, ran_on: Pointer[List[Int], Self.ro]):
         self.ran_on = ran_on
 
     def run_job(self, worker: Int, job: Int) raises:
@@ -708,19 +721,19 @@ struct _FailFirstStore[fo: MutOrigin, ro: MutOrigin](InflightJobs):
         self.ran_on[][job] = worker
         if job == 0:
             raise Error("job 0 failed")
-        while self.failed[].load() == 0:
+        while _RunnerFailures.read(0) == 0:
             _yield()
 
 
 def _check_a_failure_stops_new_jobs(bound: Int) raises:
     var n_jobs = 40
     var workers = inflight_workers(n_jobs, bound)
-    var failed = AtomicI64(0)
+    _RunnerFailures.reset()
     var ran_on = List[Int](length=n_jobs, fill=-1)
-    var store = _FailFirstStore(Pointer(to=failed), Pointer(to=ran_on))
+    var store = _FailFirstStore(Pointer(to=ran_on))
     with assert_raises(contains="job 0 failed"):
-        _run_bounded_inflight(store, n_jobs, bound, Pointer(to=failed))
-    assert_equal(Int(failed.load()), 1, "exactly one worker recorded a failure")
+        _run_bounded_inflight(store, n_jobs, bound, _GlobalFlag())
+    assert_equal(_RunnerFailures.read(0), 1, "exactly one worker recorded a failure")
     assert_true(ran_on[0] != -1, "job 0 did not run")
     for j in range(workers, n_jobs):
         assert_equal(ran_on[j], -1, String("job ") + String(j) + " was taken after one failed")

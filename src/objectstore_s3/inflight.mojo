@@ -50,22 +50,51 @@ def inflight_workers(n_jobs: Int, max_inflight: Int) -> Int:
     return min(n_jobs, max(1, max_inflight))
 
 
+trait _FailureFlag(Movable):
+    """The failure flag of one fork_join run: zero until a job raises.
+    `_LocalFlag` is the one `run_bounded_inflight` uses; the tests give the
+    runner a flag of their own (`_run_bounded_inflight`)."""
+
+    def record(self) raises:
+        """Counts one failed worker."""
+        ...
+
+    def is_set(self) raises -> Bool:
+        """True once any worker has failed."""
+        ...
+
+
+struct _LocalFlag[fo: MutOrigin](_FailureFlag):
+    """A failure flag on the runner's own stack."""
+
+    var count: Pointer[AtomicI64, Self.fo]
+
+    def __init__(out self, count: Pointer[AtomicI64, Self.fo]):
+        self.count = count
+
+    def record(self) raises:
+        _ = self.count[].fetch_add(1)
+
+    def is_set(self) raises -> Bool:
+        return self.count[].load() != 0
+
+
 struct _Pull[
-    J: InflightJobs, jo: ImmOrigin, no: MutOrigin, fo: MutOrigin
+    J: InflightJobs, F: _FailureFlag, jo: ImmOrigin, no: MutOrigin, fo: ImmOrigin
 ](ForkJoinBody):
     """One body shared by every thread: the jobs, the next job's index and
     the failure flag."""
 
     var jobs: Pointer[Self.J, Self.jo]
     var next: Pointer[AtomicI64, Self.no]
-    var failed: Pointer[AtomicI64, Self.fo]
+    var failed: Pointer[Self.F, Self.fo]
     var n_jobs: Int
 
     def __init__(
         out self,
         jobs: Pointer[Self.J, Self.jo],
         next: Pointer[AtomicI64, Self.no],
-        failed: Pointer[AtomicI64, Self.fo],
+        failed: Pointer[Self.F, Self.fo],
         n_jobs: Int,
     ):
         self.jobs = jobs
@@ -74,14 +103,14 @@ struct _Pull[
         self.n_jobs = n_jobs
 
     def run(self, tid: Int) raises:
-        while self.failed[].load() == 0:
+        while not self.failed[].is_set():
             var job = Int(self.next[].fetch_add(1))
             if job >= self.n_jobs:
                 return
             try:
                 self.jobs[].run_job(tid, job)
             except e:
-                _ = self.failed[].fetch_add(1)
+                self.failed[].record()
                 raise e^
 
 
@@ -91,17 +120,17 @@ def run_bounded_inflight[
     """Runs jobs 0..`n_jobs`-1 with at most `max_inflight` running at once,
     on `inflight_workers(n_jobs, max_inflight)` workers (module header). A
     bound of 1, or a single job, runs on the calling thread as worker 0."""
-    var failed = AtomicI64(0)
-    _run_bounded_inflight(jobs, n_jobs, max_inflight, Pointer(to=failed))
+    var count = AtomicI64(0)
+    _run_bounded_inflight(jobs, n_jobs, max_inflight, _LocalFlag(Pointer(to=count)))
 
 
 def _run_bounded_inflight[
-    J: InflightJobs, fo: MutOrigin
-](jobs: J, n_jobs: Int, max_inflight: Int, failed: Pointer[AtomicI64, fo]) raises:
-    """`run_bounded_inflight` with the failure flag given by the caller, which
-    reads 0 until a job raises on a thread of a fork_join run. The tests pass
-    their own flag, so a job can wait until the runner has recorded a failure
-    and the order of a failure and the next take is fixed, not raced."""
+    J: InflightJobs, F: _FailureFlag
+](jobs: J, n_jobs: Int, max_inflight: Int, failed: F) raises:
+    """`run_bounded_inflight` with the failure flag given by the caller. The
+    tests pass a flag their jobs can read without holding a reference to it,
+    so a job can wait until the runner has recorded a failure: the order of a
+    failure and the next take is then fixed, not raced."""
     var workers = inflight_workers(n_jobs, max_inflight)
     if workers == 0:
         return
@@ -110,5 +139,5 @@ def _run_bounded_inflight[
             jobs.run_job(0, job)
         return
     var next = AtomicI64(0)
-    var body = _Pull(Pointer(to=jobs), Pointer(to=next), failed, n_jobs)
+    var body = _Pull(Pointer(to=jobs), Pointer(to=next), Pointer(to=failed), n_jobs)
     fork_join(body, workers)
