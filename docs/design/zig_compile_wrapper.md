@@ -363,7 +363,7 @@ left inherited (`sigstate` red); scratch kept on a refusal (manifest case red).
 ### macOS
 
 The same cases runner and stand-in, built for the darwin triple, as a target that runs on the macOS
-workers. The pull-request check had no macOS leg when the wrapper landed, so the macOS pull request carried a farm build of that
+workers. The pull-request check builds for macOS only the libraries of the macOS set, not these targets, so the macOS pull request carries a farm build of that
 target and of `//tools/build/examples/libgate_ok:libgate_ok` on the macOS workers
 (`--target-platforms komira//tools/build/platforms:darwin-arm64`), with its summary line, as its proof.
 The `host-identity` value is checked on each macOS worker by the census target against the configured

@@ -342,7 +342,7 @@ const SELECT_NAME = "      - name: select the macOS targets";
 const SELECT_ARGS = "          args: bxl komira//tools/build/ci/darwin.bxl:select @tools/build/ci/darwin_affected.args @${{ runner.temp }}/targets.txt";
 const TARGETS_NAME = "      - name: the macOS targets to build";
 const TARGETS_ID = "        id: darwin";
-const TARGETS_RUN = "        run: grep -E '^[a-z_]+//[^ ]+$' \"$RUNNER_TEMP/buck2-farm.log\" > \"$RUNNER_TEMP/darwin_targets.txt\" && echo \"any=true\" >> \"$GITHUB_OUTPUT\" || true";
+const TARGETS_RUN = "        run: 'rc=0; grep -E \"^[a-z_]+//[^ ]+$\" \"$RUNNER_TEMP/buck2-farm.log\" > \"$RUNNER_TEMP/darwin_targets.txt\" || rc=$?; case $rc in 0) echo \"any=true\" >> \"$GITHUB_OUTPUT\" ;; 1) ;; *) exit 1 ;; esac'";
 const PR_BUILD_NAME = "      - name: build for macOS";
 const PR_BUILD_IF = "        if: steps.darwin.outputs.any == 'true'";
 const PR_BUILD_BOUND = "        timeout-minutes: 60";
@@ -1173,12 +1173,12 @@ test "pr.yml's macOS part holds its contract, and each edit that breaks it is re
         .{ .from = PR_BUILD_BOUND ++ "\n" ++ BUCK2_FARM, .to = PR_BUILD_BOUND ++ "\n        run: ./buck2 build @darwin_targets.txt", .want = "the buck2-farm action with the build and its remote assertion" },
         .{ .from = PR_BUILD_ARGS ++ "\n" ++ ASSERT, .to = PR_BUILD_ARGS, .want = "the buck2-farm action with the build and its remote assertion" },
         .{ .from = SELECT_ARGS ++ "\n" ++ ASSERT, .to = SELECT_ARGS, .want = "outside its buck2-farm step `select the macOS targets`" },
-        // the macOS keys handed to farm-connect's machine buckconfig (every step would configure macOS),
-        // or passed outside its step
-        .{ .from = DARWIN_FILE ++ "\n", .to = "          tls-ca-certs: ${{ runner.temp }}/darwin.buckconfig\n", .want = "the line of its macOS part: darwin-config-file" },
+        // the macOS file dropped from farm-connect (its keys would go into the machine buckconfig, and
+        // every step would configure macOS)
+        .{ .from = DARWIN_FILE ++ "\n", .to = "", .want = "the line of its macOS part: darwin-config-file" },
         // the targets written otherwise
         .{ .from = TARGETS_ID ++ "\n" ++ TARGETS_RUN, .to = TARGETS_RUN ++ "\n" ++ TARGETS_ID, .want = "is not its name, `id: darwin` and the one line" },
-        // the part moved before the linux test step, or after the analysis of the set
+        // the selection removed, or the linux test step renamed
         .{ .from = select_step, .to = "", .want = "0 times" },
         .{ .from = PR_TEST_NAME ++ "\n", .to = "      - name: tests\n", .want = "has no step `test`" },
         // a cold cache
@@ -1194,6 +1194,14 @@ test "pr.yml's macOS part holds its contract, and each edit that breaks it is re
     try expectMsg(try checkMacosPart(ar, moved), "is not after the step `test` and before the analysis of the macOS set");
     const early = try replacedPr(ar, try replacedPr(ar, pr, build_step, ""), select_step, build_step ++ select_step);
     try expectMsg(try checkMacosPart(ar, early), "in the order select, targets, build");
+    // the selection moved before the linux test step (it would read the list before `test` ran, and the
+    // macOS part would no longer follow the whole linux part)
+    const before_test = try replacedPr(ar, try replacedPr(ar, pr, select_step, ""), PR_TEST_NAME ++ "\n", select_step ++ PR_TEST_NAME ++ "\n");
+    try expectMsg(try checkMacosPart(ar, before_test), "is not after the step `test`");
+    // the targets step moved before the selection (it would read the log of another step)
+    const targets_step = TARGETS_NAME ++ "\n" ++ TARGETS_ID ++ "\n" ++ TARGETS_RUN ++ "\n";
+    const targets_first = try replacedPr(ar, try replacedPr(ar, pr, targets_step, ""), select_step, targets_step ++ select_step);
+    try expectMsg(try checkMacosPart(ar, targets_first), "in the order select, targets, build");
 }
 
 fn replacedPr(ar: std.mem.Allocator, text: []const u8, from: []const u8, to: []const u8) ![]const u8 {

@@ -519,7 +519,7 @@ test "a relative or $-holding macOS config file is refused" {
         .{ .name = "darwin-macos-hosts", .value = "26.5-0123456789abcdef" },
     };
     try expectRefused(&(mac ++ [_]Value{.{ .name = "darwin-config-file", .value = "darwin.buckconfig" }}), "darwin-config-file is 'darwin.buckconfig', not an absolute path");
-    try expectRefused(&(mac ++ [_]Value{.{ .name = "darwin-config-file", .value = "/tmp/$HOME/darwin.buckconfig" }}), "darwin-config-file holds a $");
+    try expectRefused(&(mac ++ [_]Value{.{ .name = "darwin-config-file", .value = "/opt/$HOME/darwin.buckconfig" }}), "darwin-config-file holds a $");
 }
 
 test "tls neither true nor false is refused, the empty string included" {

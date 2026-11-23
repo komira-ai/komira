@@ -264,9 +264,10 @@ jobs:
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: the macOS targets to build
         id: darwin
-        run: grep -E '^[a-z_]+//[^ ]+$' "$RUNNER_TEMP/buck2-farm.log" > "$RUNNER_TEMP/darwin_targets.txt" && echo "any=true" >> "$GITHUB_OUTPUT" || true
+        run: 'rc=0; grep -E "^[a-z_]+//[^ ]+$" "$RUNNER_TEMP/buck2-farm.log" > "$RUNNER_TEMP/darwin_targets.txt" || rc=$?; case $rc in 0) echo "any=true" >> "$GITHUB_OUTPUT" ;; 1) ;; *) exit 1 ;; esac'
       # While every Mac is busy the farm queues the actions and this step waits: the check
-      # stays pending. 60 minutes bound the wait (the whole set built cold took 14): past
+      # stays pending. 60 minutes bound the wait (the whole set with 1021 new actions took
+      # 14, docs/ci.md): past
       # it the step fails, so the check is red and never holds the merge queue to its own
       # limit.
       - name: build for macOS

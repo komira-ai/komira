@@ -123,7 +123,11 @@ It does three things, in this order:
    inputs add the rest: `darwin-properties` with `darwin-macos-hosts` (both or
    neither) write `darwin_arm64_properties` and `darwin_macos_hosts`;
    `macos-library-dirs` (only with `darwin-properties`; absolute directories
-   separated by `:` or spaces) writes `macos_library_dirs`; `tls`
+   separated by `:` or spaces) writes `macos_library_dirs`; `darwin-config-file`
+   (only with `darwin-properties`; an absolute path on the runner) writes those
+   macOS keys to that file instead of the machine buckconfig, so only a command
+   that names it with `--config-file` configures the macOS platform (`pr.yml`,
+   [The macOS part of the check](#the-macos-part-of-the-check)); `tls`
    (`false` by default) and `tls-ca-certs`, the absolute path of a PEM CA file
    on the runner, only with `tls: true`, write `tls` and `tls_ca_certs`.
    A user buckconfig is read before the repository's own, so a key the
@@ -132,7 +136,8 @@ It does three things, in this order:
 
 Every input is checked before the tailnet is joined: an empty required
 input, a value holding a line break, half of the macOS pair, a macOS set equal
-to the linux one, `tls` other than `true` or `false`, and a CA file that is not
+to the linux one, a macOS config file without a macOS set, relative or holding
+`$`, `tls` other than `true` or `false`, and a CA file that is not
 an absolute path to a readable file are refused. `//:farm_connect_cases` runs
 those checks and the writer from `action.yml`'s own scripts and compares the
 buckconfig written whole. It also reads every workflow and holds each step
@@ -391,8 +396,9 @@ and the macOS wheel after it.
   queues the actions and the step waits: `pr / check` is in progress (pending), not failed. The step's
   `timeout-minutes: 60` bounds that: past it the step fails and the check is red, which takes a queued
   pull request out of the merge queue (it is queued again after a re-run). So the macOS part holds a merge
-  at most 60 minutes past the Linux part. The bounds of the long steps add up to 300 minutes (build 150,
-  test 90, macOS 60), under the job's 330 and the queue's 360.
+  at most 60 minutes past the Linux part, and never past the job's own bound of 330 minutes, which ends
+  the check red before the queue's 360. The bounds of the three long steps add up to 300 minutes (build
+  150, test 90, macOS 60); the other steps are seconds each.
 - **How much it costs.** Measured on the farm (four Mac Studios, 32 cores each, 27 of them booked per Mac
   by the farm's pool: 108 Mac action slots), with `./buck2 build --target-platforms
   komira//tools/build/platforms:darwin-arm64` from a checkout of `main`:
