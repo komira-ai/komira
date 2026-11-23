@@ -484,6 +484,8 @@ def test_scan_refuses_every_unbounded_use_of_the_row():
         (rows.dunder, "`r.__class__` is a special attribute, not a column"),
         (rows.reads_locals, "it calls locals(), which can read the row by any name"),
         (rows.reads_vars, "it calls vars(), which can read the row by any name"),
+        (rows.reads_frame, "it calls _getframe(), whose frame holds the row"),
+        (rows.reads_current_frame, "it calls currentframe(), whose frame holds the row"),
         (rows.no_parameter, "it takes no parameter to receive the row"),
     ):
         spec_refuses(u, required(u.__name__, problem))

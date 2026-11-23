@@ -20,12 +20,16 @@ import typing
 from komira._errors import UnsupportedOperation
 
 # The names the design lists as pandas Series attributes as well as possible
-# fields (udf_runtime_interface.md §6.1): `r.name` may be the Series' own
+# fields (udf_runtime_interface.md, the informative note on what else leaves
+# the Python scan unbounded): `r.name` may be the Series' own
 # attribute, not a column, so a read of one is never counted as a column read.
 SERIES_ATTRIBUTES = frozenset({"name", "index", "values", "get"})
 
 # Names whose call reads the caller's local variables, the row among them.
 _FRAME_READERS = frozenset({"locals", "vars", "eval", "exec"})
+# Attributes whose call gives a frame, whose f_locals holds the row:
+# sys._getframe and inspect.currentframe.
+_FRAME_GETTERS = frozenset({"_getframe", "currentframe"})
 
 _COMPREHENSIONS = frozenset({"<listcomp>", "<setcomp>", "<dictcomp>", "<genexpr>"})
 
@@ -213,6 +217,8 @@ def scan_row(code):
             return (), _COMPREHENSION
         if op.opname in ("LOAD_GLOBAL", "LOAD_NAME") and op.argval in _FRAME_READERS:
             return (), f"it calls {op.argval}(), which can read the row by any name"
+        if op.opname in ("LOAD_ATTR", "LOAD_METHOD") and op.argval in _FRAME_GETTERS:
+            return (), f"it calls {op.argval}(), whose frame holds the row"
         if op.opname not in _VARIABLE_OPS:
             continue
         variables = op.argval if isinstance(op.argval, tuple) else (op.argval,)

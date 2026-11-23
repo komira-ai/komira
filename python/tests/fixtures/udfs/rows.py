@@ -1,6 +1,8 @@
 """Row and frame fixtures: the read set from columns=, annotations and the scan."""
 
 import dataclasses
+import inspect
+import sys
 from typing import TypedDict
 
 from komira._capture import udf
@@ -385,3 +387,13 @@ def frame_pairs(df):
 @udf(return_dtype="int64")
 def scalar_with_row_type(x: Point):
     return 1
+
+
+@udf(kind="row", return_dtype="int64")
+def reads_frame(r):
+    return len(sys._getframe().f_locals)
+
+
+@udf(kind="row", return_dtype="int64")
+def reads_current_frame(r):
+    return len(inspect.currentframe().f_locals)
