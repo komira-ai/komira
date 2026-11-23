@@ -231,22 +231,22 @@ def _put_metadata(
     files.put(loaded.metadata_location, List[UInt8](loaded.metadata.as_bytes()))
 
 
-def _publish(store: LocalFsConditionalStore, out: String) raises:
-    """Write every object of `store` as a plain file at `<out>/<key>`."""
+def _publish(store: LocalFsConditionalStore, out_dir: String) raises:
+    """Write every object of `store` as a plain file at `<out_dir>/<key>`."""
     var listed = store.list_with_delimiter(Path.parse(String("")))
     for i in range(len(listed.objects)):
         var key = String(listed.objects[i].location)
         var bytes = store.get(Path.parse(key))
         var slash = key.rfind("/")
         if slash > 0:
-            makedirs(out + "/" + String(key[byte = 0 : slash]), exist_ok=True)
-        write_file_atomic(out + "/" + key, Span(bytes))
+            makedirs(out_dir + "/" + String(key[byte = 0 : slash]), exist_ok=True)
+        write_file_atomic(out_dir + "/" + key, Span(bytes))
 
 
 def main() raises:
-    var out = _flag("--out-dir")
-    makedirs(out, exist_ok=True)
-    var store = LocalFsConditionalStore(out + "/store")
+    var out_dir = _flag("--out-dir")
+    makedirs(out_dir, exist_ok=True)
+    var store = LocalFsConditionalStore(out_dir + "/store")
     var files = _Files(store.clone(), String("s3://wh"))
     var cat = InMemoryIcebergRestCatalog(String(""), String("s3://wh"))
     cat.create_namespace(String("db"))
@@ -283,4 +283,4 @@ def main() raises:
     _put_metadata(client, files, String("appended"))
     _put_metadata(client, files, String("overwritten"))
     _put_metadata(client, files, String("emptied"))
-    _publish(store, out)
+    _publish(store, out_dir)
