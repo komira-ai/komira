@@ -248,6 +248,7 @@ jobs:
   # The smoke on TestPyPI for the macOS wheel, on a hosted Apple-silicon runner with the Python a user
   # has. The driver is the macOS build, the quickstart files the record's. The wheel it installs comes
   # from the index, never from the artifact.
+  # Hosted, not on a farm Mac: a farm action has no network, and the install from TestPyPI is the test.
   testpypi-smoke-macos-arm64:
     needs: [build-macos-arm64, testpypi-macos-arm64]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.testpypi-macos-arm64.outputs.state != 'differs'
@@ -412,6 +413,7 @@ jobs:
 
   # The smoke on PyPI for the macOS wheel: the same as testpypi-smoke-macos-arm64, against the real
   # index. It is the last proof that a macOS user's `pip install komira` works.
+  # Hosted, not on a farm Mac: a farm action has no network, and the install from PyPI is the test.
   pypi-smoke-macos-arm64:
     needs: [promote-macos-arm64, pypi-macos-arm64]
     if: github.ref == 'refs/heads/main' && github.event_name != 'push' && needs.pypi-macos-arm64.outputs.state != 'differs'
