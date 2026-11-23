@@ -7,11 +7,15 @@
 # padding and no separators.
 # =============================================================================
 
+from std.sys.info import CompilationTarget
+
 from .codec import SCHEME_HEX, decode, encode
 
 
 def hex_encode(data: Span[UInt8, _]) -> String:
     """Lower-case hex, two digits per byte."""
+    comptime if CompilationTarget.is_macos():
+        return encode(SCHEME_HEX, data, False).upper()
     return encode(SCHEME_HEX, data, False)
 
 

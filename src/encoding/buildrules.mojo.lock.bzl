@@ -40,14 +40,14 @@ GRAPH_JSON = r'''{
         {"path": "src/encoding/src/encoding/codec.mojo", "sha256": "724456d76a37aa532f0c90b6ce9994e5ff8825cd375ad32a59da36f9961a40bd"},
         {"path": "src/encoding/src/encoding/constant_time.mojo", "sha256": "da5fbb215c76b3647986106e65c7e8228c990103e359211cd254518ff9866f6d"},
         {"path": "src/encoding/src/encoding/errors.mojo", "sha256": "6310563e60eccc3b4945df4eeb3993764cd80c2f528b48be878b89d86c5b73fd"},
-        {"path": "src/encoding/src/encoding/hex.mojo", "sha256": "4c857f782beb4ddad07ce0bd15b97c30004b49bb3479fd545e7d0d4c61f8bc3f"},
+        {"path": "src/encoding/src/encoding/hex.mojo", "sha256": "b7ade742dbc263d1ccdd8260d5627cd23551fe2770f319cd07a221e6fc946277"},
         {"path": "src/encoding/src/encoding/pem.mojo", "sha256": "d4ad0398ba92d8ea48db9a5da9ef5b499268381986b122440d9689cf93b84814"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["encoding.mojoc"],
-      "key": "7d8431cca265b69b999a7bd7c175d0bfef183295e4c12e235a75e5c71caa92ab"
+      "key": "6b05f143217e3bb4ee578ad0f3a0d188597428203f2ac3899d37b2f155cbaefb"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_base32.mojo",
@@ -62,7 +62,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_base32.pass"],
-      "key": "d061cbd5819a4912e8a7ef2aecb39a275bc102e65cd5745c1b1ce02ac5760202"
+      "key": "3e51c8964e6e5954866fa52e0a29414d8d1a137f5d99fa4aa71d1c57b7898cd1"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_base64.mojo",
@@ -77,7 +77,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_base64.pass"],
-      "key": "ab772d3a800668d5156373ba59cadebd95121aa749a6df1fbf3f7b2b73828fd5"
+      "key": "adad64424cdff9a83264545cdbb3b5de31547bf8e846e4d8265cd9f20abed6b3"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_crypto_compat.mojo",
@@ -92,7 +92,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_crypto_compat.pass"],
-      "key": "31354d56a8f2c8c536c3cbf756640598c0f553b6dd85e22f8ac1fd5b78637476"
+      "key": "09cc0101cabb294f6832f13a14a1799bcb62e9266cc00145b6fb2294eaedc2b8"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_hex.mojo",
@@ -107,7 +107,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_hex.pass"],
-      "key": "a5f591b31179fef7df887598b053498e7bc478eb4fd63a985d067c97b8e3e622"
+      "key": "dd6fe52e57f5ad1698074e9e59ead0d38387810a57dbd1fa4e8d5e6eac7e062a"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_invalid_input.mojo",
@@ -122,7 +122,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_invalid_input.pass"],
-      "key": "f0ab9065e3758816999b7ee23e409cc39b8c2b5ab65bed1cdac40a4c2bb656db"
+      "key": "ad523858c8e6f09a7157dd3058d7afae0b5ab9628c5236ae95ab0681a2305adf"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_pem.mojo",
@@ -137,7 +137,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_pem.pass"],
-      "key": "41326448166e32cde35107d9aa71748575f87a838e324f9fe27c05cb99b79b73"
+      "key": "61642c9ba472d70040bfcc03492966651e48e8eb75d734b175879026fd8889e3"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_wipe.mojo",
@@ -152,7 +152,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_wipe.pass"],
-      "key": "5500e7da8270713f5221b7c2eed8986510d5707ab6003e66538eb31207cc4720"
+      "key": "4c7044c891cbcf7062b455ad3ef46b4d0376cc5ea62fe55c91367e3aef19a3e8"
     }
   ]
 }
@@ -189,14 +189,14 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
         {"path": "src/encoding/src/encoding/codec.mojo", "sha256": "724456d76a37aa532f0c90b6ce9994e5ff8825cd375ad32a59da36f9961a40bd"},
         {"path": "src/encoding/src/encoding/constant_time.mojo", "sha256": "da5fbb215c76b3647986106e65c7e8228c990103e359211cd254518ff9866f6d"},
         {"path": "src/encoding/src/encoding/errors.mojo", "sha256": "6310563e60eccc3b4945df4eeb3993764cd80c2f528b48be878b89d86c5b73fd"},
-        {"path": "src/encoding/src/encoding/hex.mojo", "sha256": "4c857f782beb4ddad07ce0bd15b97c30004b49bb3479fd545e7d0d4c61f8bc3f"},
+        {"path": "src/encoding/src/encoding/hex.mojo", "sha256": "b7ade742dbc263d1ccdd8260d5627cd23551fe2770f319cd07a221e6fc946277"},
         {"path": "src/encoding/src/encoding/pem.mojo", "sha256": "d4ad0398ba92d8ea48db9a5da9ef5b499268381986b122440d9689cf93b84814"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["encoding.mojoc"],
-      "key": "aad53b4495c3b58c80e36973c4826cc6b6109ac993bac9851fd4c83abf9a6f84"
+      "key": "ce1fcd2ff816110252c45c49b1c9b5268894718a2b82a008d761cd7fec56bada"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_base32.mojo",
@@ -211,7 +211,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_base32.pass"],
-      "key": "f8f33114936aadd7fa07d672acff96eb928d05cc2dd3f144a401e7bfcac795db"
+      "key": "02ec027840666d3e511a7468cb37c1612f8e9135aa22d2c2211d82c2745f3d91"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_base64.mojo",
@@ -226,7 +226,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_base64.pass"],
-      "key": "5e0f97182f98c7b441180ecd175d6ea6c19cc4ca78a0ee4322ecb7aea13a4b67"
+      "key": "c1c4b785e7f5a0f170df9cf38b4038c31a59bc0699d527f9ef1e7177ccb610e6"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_crypto_compat.mojo",
@@ -241,7 +241,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_crypto_compat.pass"],
-      "key": "84cf8572634fbcea041e3b8f0e4d7f4a96e7ecff88404e39d9a13c6927021fe1"
+      "key": "97aa30b5f5eb394c068e35671243554423d8752d47e3ddb6fecaf9875a8d3e01"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_hex.mojo",
@@ -256,7 +256,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_hex.pass"],
-      "key": "69997cd442628997a6bb0db46f9d25d5cd0b6926e57a2a70a51ae6ccf9cd0711"
+      "key": "7f8fb084969bc43c67a88bfc106b01a532af441724bccd2794fed7625c36875b"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_invalid_input.mojo",
@@ -271,7 +271,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_invalid_input.pass"],
-      "key": "883212efbf0e6bbdd3ac6861ea201f0339cd800cd453105b829a59ff3540f7a8"
+      "key": "8e4dc69f69fa1dbe6ee14aa07dec3532eaae5764a41a00620b6a25b76dfe1831"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_pem.mojo",
@@ -286,7 +286,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_pem.pass"],
-      "key": "09abd292e36f69a3ad92c13382a736142da7245b9cd8293cca5d9442f72a08d9"
+      "key": "6762fabe666911aa84dc40d13830db3d87bc6cd7f72a176b3b09fc506825f40e"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_wipe.mojo",
@@ -301,7 +301,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_wipe.pass"],
-      "key": "1317417262d6d7cd82cf3d956954dcbd04700852db2a16fb8743676ce5f9ece8"
+      "key": "f8f2e1a91c42cc7a640bbdee46da699191c6f15c8f6a58a898f51815a1c6b79b"
     }
   ]
 }
@@ -335,14 +335,14 @@ GRAPH_JSON_OSX_ARM64 = r'''{
         {"path": "src/encoding/src/encoding/codec.mojo", "sha256": "724456d76a37aa532f0c90b6ce9994e5ff8825cd375ad32a59da36f9961a40bd"},
         {"path": "src/encoding/src/encoding/constant_time.mojo", "sha256": "da5fbb215c76b3647986106e65c7e8228c990103e359211cd254518ff9866f6d"},
         {"path": "src/encoding/src/encoding/errors.mojo", "sha256": "6310563e60eccc3b4945df4eeb3993764cd80c2f528b48be878b89d86c5b73fd"},
-        {"path": "src/encoding/src/encoding/hex.mojo", "sha256": "4c857f782beb4ddad07ce0bd15b97c30004b49bb3479fd545e7d0d4c61f8bc3f"},
+        {"path": "src/encoding/src/encoding/hex.mojo", "sha256": "b7ade742dbc263d1ccdd8260d5627cd23551fe2770f319cd07a221e6fc946277"},
         {"path": "src/encoding/src/encoding/pem.mojo", "sha256": "d4ad0398ba92d8ea48db9a5da9ef5b499268381986b122440d9689cf93b84814"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["encoding.mojoc"],
-      "key": "caa652a3ff9e22511799cfdc3401869b5d952f2f1a52d0fc6e8af4fa0a6b33b4"
+      "key": "e4ce1d30042c6d71d8ba20d6038dd9995247cd15cb3c6990509572ba7445dccf"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_base32.mojo",
@@ -357,7 +357,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_base32.pass"],
-      "key": "a509d13b68c57b829c49774b8f67e11790d15561b226c57db89fa1e80bf10fb7"
+      "key": "6fce6c9c65801f09f2f1a878a0e1fa63a080a62e9dedbb379c73d238acf0aff1"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_base64.mojo",
@@ -372,7 +372,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_base64.pass"],
-      "key": "e09afa87401c8fd06889142f819767f2e21d172bc21024192b623e5c7cab99b1"
+      "key": "845c2b40a06b5768533c8b50c23a66ea20073658c50ad9eaa30fb55932a63c0b"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_crypto_compat.mojo",
@@ -387,7 +387,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_crypto_compat.pass"],
-      "key": "4f1d8ef07774e877220d8431f0f731e9cc80419cc99ab357b009b04bec09ea5f"
+      "key": "ddf00648f2b18b976551c2025c87edc37d8c4c7faf6d5b06448f156f30c3ca3b"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_hex.mojo",
@@ -402,7 +402,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_hex.pass"],
-      "key": "6b09b65fe2dcf0e76b66f43930265d6448f5a3ed3346001f169cb85536851de7"
+      "key": "6e67e3c09a809496f9f85e1f4e509375a01ebb2136a48a81a9cb69524a8d2d3c"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_invalid_input.mojo",
@@ -417,7 +417,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_invalid_input.pass"],
-      "key": "d4f0970e0715331716948c52ffd8cfb4c4c693e36111287ac0f5b04436e720f2"
+      "key": "f5881d94505d0f0d57884e0266242fec4eaa6efc4b4a60988e9590dad1c2ac3f"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_pem.mojo",
@@ -432,7 +432,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_pem.pass"],
-      "key": "ece37496505a7a7f902c0405e4392d434951b6e83aab34439d630dbc7b6d2513"
+      "key": "12695b066268194229902aa098217b03a76a94f5f5952c590ca755c100b1319a"
     },
     {
       "id": "komira-ai/encoding@0.1.0#mojo1.0.0/test:src/encoding/tests/test_wipe.mojo",
@@ -447,7 +447,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_wipe.pass"],
-      "key": "63b2c10b182e4317c1d1d16c381d9f1bcba407b9589376ef288a4b0f2a650eb6"
+      "key": "fc79857af10cf6d01351e553f894bb2fa353dab2bb48abcff8b7d2d324e4a159"
     }
   ]
 }
