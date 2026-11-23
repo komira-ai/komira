@@ -29,7 +29,8 @@
 #      guard;
 #   5. `test` of the list's standalone tests;
 #   6. the macOS part (docs/ci.md, "The macOS part of the check"): the libraries
-#      of the macOS set the list reaches (tools/build/ci/darwin.bxl), or the
+#      of the macOS set the list reaches (tools/build/ci/darwin.bxl, its labels
+#      read by tools/build/ci/darwin_targets), or the
 #      whole set when the list is the aggregate, built for darwin-arm64 on the
 #      farm's macOS workers, their welded tests included, bounded at 60 minutes;
 #      only this step names the file of the macOS keys, so no other step
@@ -137,6 +138,11 @@ jobs:
       - name: build the change tool
         id: change
         run: echo "path=$(./buck2 build komira//tools/build/ci:change --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      # The tool that reads the macOS part's selection (tools/build/ci/darwin_targets),
+      # built on the farm like the change tool; its path is the step's output.
+      - name: build the macOS targets tool
+        id: darwin_tool
+        run: echo "path=$(./buck2 build komira//tools/build/ci:darwin_targets --show-full-simple-output)" >> "$GITHUB_OUTPUT"
       # The change: the files the pull request (or the merge group) touches
       # (renames as a delete and an add) and the coverage holds of the base and
       # of the head, into changed.txt and held.txt. The base: a pull request's
@@ -264,9 +270,13 @@ jobs:
         with:
           args: bxl komira//tools/build/ci/darwin.bxl:select @tools/build/ci/darwin_affected.args @${{ runner.temp }}/targets.txt
           assert-remote: ${{ steps.assert.outputs.path }}
+      # The labels of the selection's log into darwin_targets.txt, and `any` set when
+      # there is one (tools/build/ci/darwin_targets says what it refuses).
       - name: the macOS targets to build
         id: darwin
-        run: 'rc=0; grep -E "^[a-z_]+//[^ ]+$" "$RUNNER_TEMP/buck2-farm.log" > "$RUNNER_TEMP/darwin_targets.txt" || rc=$?; case $rc in 0) echo "any=true" >> "$GITHUB_OUTPUT" ;; 1) ;; *) exit 1 ;; esac'
+        env:
+          DARWIN_TARGETS: ${{ steps.darwin_tool.outputs.path }}
+        run: '"$DARWIN_TARGETS" --log "$RUNNER_TEMP/buck2-farm.log" --out "$RUNNER_TEMP/darwin_targets.txt" --github-output "$GITHUB_OUTPUT"'
       # While every Mac is busy the farm queues the actions and this step waits: the check
       # stays pending. 60 minutes bound the wait (the whole set with 1021 new actions took
       # 14, docs/ci.md): past

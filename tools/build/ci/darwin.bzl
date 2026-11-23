@@ -54,3 +54,15 @@ def darwin_select(affected, packages, aggregates, darwin_set):
     if not picked:
         return struct(kind = NONE, targets = [], reason = "the change reaches no library of the macOS set")
     return struct(kind = SOME, targets = picked, reason = "{} of the {} libraries of the macOS set".format(len(picked), len(packages)))
+
+def darwin_answer(affected, packages, aggregates, darwin_set):
+    """What darwin.bxl:select does with `affected`: struct(failure, log, stdout).
+
+    `failure` is the message it fails with (BROKEN), else None; `log` is the one line it prints to
+    the log, `darwin: <KIND>: <reason>`; `stdout` the labels it prints, one per line. The recorded
+    runs of the command (tools/build/ci/darwin_targets/fixtures) hold these lines as it printed them.
+    """
+    verdict = darwin_select(affected, packages, aggregates, darwin_set)
+    if verdict.kind == BROKEN:
+        return struct(failure = "darwin: BROKEN: " + verdict.reason, log = None, stdout = [])
+    return struct(failure = None, log = "darwin: {}: {}".format(verdict.kind, verdict.reason), stdout = verdict.targets)

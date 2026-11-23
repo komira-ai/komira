@@ -337,8 +337,12 @@ const PR_MACOS_PART = [_][]const u8{
     DARWIN_FILE,
     SELECT_NAME,
     SELECT_ARGS,
+    TOOL_NAME,
+    TOOL_ID,
+    TOOL_RUN,
     TARGETS_NAME,
     TARGETS_ID,
+    TARGETS_ENV,
     TARGETS_RUN,
     PR_BUILD_NAME,
     PR_BUILD_IF,
@@ -349,7 +353,11 @@ const SELECT_NAME = "      - name: select the macOS targets";
 const SELECT_ARGS = "          args: bxl komira//tools/build/ci/darwin.bxl:select @tools/build/ci/darwin_affected.args @${{ runner.temp }}/targets.txt";
 const TARGETS_NAME = "      - name: the macOS targets to build";
 const TARGETS_ID = "        id: darwin";
-const TARGETS_RUN = "        run: 'rc=0; grep -E \"^[a-z_]+//[^ ]+$\" \"$RUNNER_TEMP/buck2-farm.log\" > \"$RUNNER_TEMP/darwin_targets.txt\" || rc=$?; case $rc in 0) echo \"any=true\" >> \"$GITHUB_OUTPUT\" ;; 1) ;; *) exit 1 ;; esac'";
+const TARGETS_ENV = "          DARWIN_TARGETS: ${{ steps.darwin_tool.outputs.path }}";
+const TARGETS_RUN = "        run: '\"$DARWIN_TARGETS\" --log \"$RUNNER_TEMP/buck2-farm.log\" --out \"$RUNNER_TEMP/darwin_targets.txt\" --github-output \"$GITHUB_OUTPUT\"'";
+const TOOL_NAME = "      - name: build the macOS targets tool";
+const TOOL_ID = "        id: darwin_tool";
+const TOOL_RUN = "        run: echo \"path=$(./buck2 build komira//tools/build/ci:darwin_targets --show-full-simple-output)\" >> \"$GITHUB_OUTPUT\"";
 const PR_BUILD_NAME = "      - name: build for macOS";
 const PR_BUILD_IF = "        if: steps.darwin.outputs.any == 'true'";
 const PR_BUILD_BOUND = "        timeout-minutes: 60";
@@ -389,10 +397,14 @@ fn checkMacosPart(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     // the selection: a buck2-farm step over the linux part's list
     const sel = lineAt(ls, SELECT_ARGS).?;
     if (!stepIs(ls, sel, SELECT_NAME, &.{})) return "pr.yml selects the macOS targets outside its buck2-farm step `select the macOS targets` (a step that ran an action locally would pass)";
-    // the targets: the selection's labels, and whether there is any
+    // the tool that reads the selection, built on the farm and its path the step's output
+    const tool = lineAt(ls, TOOL_ID).?;
+    if (!consecutive(ls, tool, &.{ TOOL_NAME, TOOL_ID, TOOL_RUN }))
+        return "pr.yml's step `build the macOS targets tool` is not its name, `id: darwin_tool` and the build of //tools/build/ci:darwin_targets";
+    // the targets: that tool over the selection's log, writing the labels and whether there is any
     const ids = lineAt(ls, TARGETS_ID).?;
-    if (ids == 0 or !std.mem.eql(u8, ls[ids - 1], TARGETS_NAME) or ids + 1 >= ls.len or !std.mem.eql(u8, ls[ids + 1], TARGETS_RUN))
-        return "pr.yml's step `the macOS targets to build` is not its name, `id: darwin` and the one line that writes darwin_targets.txt";
+    if (!consecutive(ls, ids, &.{ TARGETS_NAME, TARGETS_ID, "        env:", TARGETS_ENV, TARGETS_RUN }))
+        return "pr.yml's step `the macOS targets to build` is not its name, `id: darwin`, the tool's path and the one command that writes darwin_targets.txt";
     // the build
     const build = lineAt(ls, PR_BUILD_ARGS).?;
     if (!stepIs(ls, build, PR_BUILD_NAME, &.{ PR_BUILD_IF, PR_BUILD_BOUND }))
@@ -402,7 +414,15 @@ fn checkMacosPart(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     const analysis = lineAt(ls, ANALYSIS_ARGS) orelse return "pr.yml does not analyse the release's macOS set";
     if (!(tst < sel and sel < ids and ids < build and build < analysis))
         return "pr.yml's macOS part is not after the step `test` and before the analysis of the macOS set, in the order select, targets, build";
+    if (!(tool < ids)) return "pr.yml builds the macOS targets tool after the step that runs it";
     return null;
+}
+
+/// Whether `want` are lines of `ls`, one after the other, with `want[1]` at `at`.
+fn consecutive(ls: []const []const u8, at: usize, want: []const []const u8) bool {
+    if (at == 0 or at - 1 + want.len > ls.len) return false;
+    for (want, 0..) |w, i| if (!std.mem.eql(u8, ls[at - 1 + i], w)) return false;
+    return true;
 }
 
 /// Whether a step starts (`      - `) after line `from` and up to line `to`.
@@ -1190,7 +1210,11 @@ test "pr.yml's macOS part holds its contract, and each edit that breaks it is re
         // every step would configure macOS)
         .{ .from = DARWIN_FILE ++ "\n", .to = "", .want = "the line of its macOS part: darwin-config-file" },
         // the targets written otherwise
-        .{ .from = TARGETS_ID ++ "\n" ++ TARGETS_RUN, .to = TARGETS_RUN ++ "\n" ++ TARGETS_ID, .want = "is not its name, `id: darwin` and the one line" },
+        .{ .from = TARGETS_ENV ++ "\n" ++ TARGETS_RUN, .to = TARGETS_RUN ++ "\n" ++ TARGETS_ENV, .want = "is not its name, `id: darwin`, the tool's path and the one command" },
+        .{ .from = TARGETS_RUN ++ "\n", .to = "        run: grep -E '^[a-z_]+//[^ ]+$' \"$RUNNER_TEMP/buck2-farm.log\" > \"$RUNNER_TEMP/darwin_targets.txt\"\n", .want = "0 times, not once, the line of its macOS part: run: '\"$DARWIN_TARGETS\" --log" },
+        // the tool not built, or built otherwise
+        .{ .from = TOOL_NAME ++ "\n" ++ TOOL_ID ++ "\n" ++ TOOL_RUN ++ "\n", .to = "", .want = "0 times, not once, the line of its macOS part: - name: build the macOS targets tool" },
+        .{ .from = TOOL_ID ++ "\n" ++ TOOL_RUN, .to = TOOL_RUN ++ "\n" ++ TOOL_ID, .want = "is not its name, `id: darwin_tool` and the build" },
         // the selection removed, or the linux test step renamed
         .{ .from = select_step, .to = "", .want = "0 times" },
         .{ .from = PR_TEST_NAME ++ "\n", .to = "      - name: tests\n", .want = "has no step `test`" },
@@ -1212,9 +1236,13 @@ test "pr.yml's macOS part holds its contract, and each edit that breaks it is re
     const before_test = try replacedPr(ar, try replacedPr(ar, pr, select_step, ""), PR_TEST_NAME ++ "\n", select_step ++ PR_TEST_NAME ++ "\n");
     try expectMsg(try checkMacosPart(ar, before_test), "is not after the step `test`");
     // the targets step moved before the selection (it would read the log of another step)
-    const targets_step = TARGETS_NAME ++ "\n" ++ TARGETS_ID ++ "\n" ++ TARGETS_RUN ++ "\n";
+    const targets_step = TARGETS_NAME ++ "\n" ++ TARGETS_ID ++ "\n        env:\n" ++ TARGETS_ENV ++ "\n" ++ TARGETS_RUN ++ "\n";
     const targets_first = try replacedPr(ar, try replacedPr(ar, pr, targets_step, ""), select_step, targets_step ++ select_step);
     try expectMsg(try checkMacosPart(ar, targets_first), "in the order select, targets, build");
+    // the tool built after the step that runs it (that step would run an empty path)
+    const tool_step = TOOL_NAME ++ "\n" ++ TOOL_ID ++ "\n" ++ TOOL_RUN ++ "\n";
+    const tool_late = try replacedPr(ar, try replacedPr(ar, pr, tool_step, ""), PR_BUILD_NAME ++ "\n", tool_step ++ PR_BUILD_NAME ++ "\n");
+    try expectMsg(try checkMacosPart(ar, tool_late), "builds the macOS targets tool after the step that runs it");
 }
 
 fn replacedPr(ar: std.mem.Allocator, text: []const u8, from: []const u8, to: []const u8) ![]const u8 {

@@ -1,0 +1,8 @@
+[2026-11-23T16:13:46.496-06:00] Build ID: 00000000-0000-0000-0000-000000000000
+[2026-11-23T16:13:46.497-06:00] File changed: komira//src/encoding/buildrules.mojo.lock.bzl
+[2026-11-23T16:13:46.497-06:00] File changed: komira//src/encoding/src/encoding/hex.mojo
+[2026-11-23T16:13:46.497-06:00] Directory changed: komira//tools/build/ci/darwin_targets
+[2026-11-23T16:13:46.509-06:00] darwin: WHOLE: the change is built as komira//ci:pr, so the whole macOS set is
+komira//release:mopm_darwin_libs
+[2026-11-23T16:13:46.510-06:00] Network: up 0B  down 0B
+BXL SUCCEEDED

@@ -9,19 +9,21 @@
 # release-macos.yml builds after the merge, so the two never disagree on what the macOS set is.
 # The reason goes to the log, not stdout; an empty stdout means no macOS build. It fails on a line
 # that is not a target label (BROKEN), so a selector whose output changed shape never reads as none.
+# pr.yml's step `the macOS targets to build` reads its output with tools/build/ci/darwin_targets.
 
 load("//release:darwin_libs.bzl", "DARWIN_PACKAGES")
-load(":darwin.bzl", "BROKEN", "darwin_select")
+load(":darwin.bzl", "darwin_answer")
 load(":rules.bzl", "AGGREGATE", "DEFAULT")
 
 DARWIN_SET = "komira//release:mopm_darwin_libs"
 
 def _impl(ctx):
-    verdict = darwin_select(ctx.cli_args.affected, DARWIN_PACKAGES, [AGGREGATE, DEFAULT], DARWIN_SET)
-    if verdict.kind == BROKEN:
-        fail("darwin: BROKEN: " + verdict.reason)
-    print("darwin: {}: {}".format(verdict.kind, verdict.reason))
-    for t in verdict.targets:
+    # Everything it prints, and its failure, is darwin_answer's (darwin_cases.bzl holds them).
+    answer = darwin_answer(ctx.cli_args.affected, DARWIN_PACKAGES, [AGGREGATE, DEFAULT], DARWIN_SET)
+    if answer.failure:
+        fail(answer.failure)
+    print(answer.log)
+    for t in answer.stdout:
         ctx.output.print(t)
 
 select = bxl_main(
