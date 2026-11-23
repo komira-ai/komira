@@ -66,7 +66,7 @@ struct StderrSink(Movable):
     """Thread-safe synchronous stderr appender (fd 2).
 
     `Atomic` is NOT Movable in Mojo, so the lock word lives behind an
-    `OwnedPointer[Atomic[DType.uint8]]`. This keeps
+    `OwnedPointer[Atomic[UInt8]]`. This keeps
     `StderrSink` (and its owner `LogConfig`) Movable.
     """
 

@@ -4,6 +4,6 @@ def neg_add(a: Int32, b: Int32) abi("C") -> Int32:
 
 
 @export
-def neg_fill(buf: UnsafePointer[UInt8, MutExternalOrigin], n: Int) abi("C"):
+def neg_fill(buf: UnsafePointer[UInt8, MutUntrackedOrigin], n: Int) abi("C"):
     for i in range(n):
         buf[i] = 0

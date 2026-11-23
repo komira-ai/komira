@@ -9,7 +9,7 @@
 # construction so it is reusable beyond SCRAM.
 #
 # Encapsulation: every public surface takes/returns Span[UInt8,_] / List /
-# InlineArray — ZERO UnsafePointer crosses any boundary here. HMAC delegates
+# Array — ZERO UnsafePointer crosses any boundary here. HMAC delegates
 # to the AWS-LC-backed `hmac_sha256` one-shot.
 # =============================================================================
 

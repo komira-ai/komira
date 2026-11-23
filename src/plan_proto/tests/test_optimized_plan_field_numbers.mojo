@@ -555,7 +555,7 @@ def test_dag_and_edge(mut L: _Ledger) raises:
 # ---- held and reserved numbers ----------------------------------------------------------
 
 
-def _residue[M: Serializable & ImplicitlyDestructible](b: List[UInt8]) raises -> String:
+def _residue[M: Serializable & Deinitable](b: List[UInt8]) raises -> String:
     """What a decode then re-encode of `b` as `M` keeps, canonically: empty
     when no declared field read the record."""
     var out = List[UInt8]()

@@ -692,7 +692,10 @@ def test_refusal_classification() raises:
         assert_false(is_not_found(msg), "not absence: " + msg)
         assert_false(msg.find("If-None-Match") >= 0, "no lost-slot token")
         assert_false(msg.find("If-Match") >= 0, "no lost-slot token")
-        var bs = msg.as_bytes()
+        # The bytes are read from a copy: Mojo 1.1.0 refuses a read of `msg`
+        # (the message below) while a borrow of its own bytes is live.
+        var msg_text = msg.copy()
+        var bs = msg_text.as_bytes()
         for j in range(len(bs)):
             assert_false(
                 bs[j] >= UInt8(ord("0")) and bs[j] <= UInt8(ord("9")),

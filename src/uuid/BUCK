@@ -40,7 +40,7 @@ mojo_adopted_library(
 )
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
-# (`mojo-komira-ai.uuid-0.1.0-mojo1.0.0_0.conda`), which records atomic_alias, awslc and
+# (`mojo-komira-ai.uuid-0.1.0-mojo1.1.0_0.conda`), which records atomic_alias, awslc and
 # clock as dependencies (`mojo-komira-ai.<name> >=0.1,<0.2`) and holds none of their files. `members` is
 # the manifests of the path dependencies, staged at their repository paths, because `mopm pack` reads
 # the manifest of each beside the one it is given. `:lib` exists only once the test passed, so this
@@ -57,8 +57,8 @@ mojo_conda(
         "../awslc": "//src/awslc:mopm.toml",
         "../clock": "//src/clock:mopm.toml",
     },
-    mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_113",
+    mojo = "1.1.0",
+    mopm = "toolchains//:mopm_0_0_135",
     package = "komira-ai/uuid",
     version = "0.1.0",
     visibility = ["PUBLIC"],

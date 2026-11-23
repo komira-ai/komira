@@ -12,10 +12,9 @@
 #     var counter = AtomicI64(0)
 #     _ = counter.fetch_add(1)
 #
-# ⛔ DO NOT write `Atomic[DType.x]` in new code, and do not add an `Atomic`
-# import to a module. `atomic_alias/atypes.mojo` is the single file the
-# Mojo 1.1 compiler cutover edits; a stray inline spelling puts a site back
-# outside that window.
+# ⛔ DO NOT write `Atomic[...]` in new code, and do not add an `Atomic`
+# import to a module. `atomic_alias/atypes.mojo` is the single file that
+# spells the type parameter; a stray inline spelling puts a site outside it.
 # =============================================================================
 
 from .atypes import AtomicI8, AtomicI32, AtomicI64, AtomicU8, AtomicU32, AtomicU64

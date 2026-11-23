@@ -332,7 +332,7 @@ def _rec(field: Int, n: Int) -> List[UInt8]:
     return b^
 
 
-def _names_agree[E: ProtoEnum & ImplicitlyDestructible](v: String, n: Int, q: String) raises:
+def _names_agree[E: ProtoEnum & Deinitable](v: String, n: Int, q: String) raises:
     assert_true(E.is_known_json_name(v), q + ": not a declared value name")
     assert_equal(E.from_json_name(v).number(), n, q + ": the number its name maps to")
     assert_equal(E.from_number(n).json_name(), v, q + ": the name its number maps to")

@@ -91,13 +91,13 @@ struct NameRegistry(Deinitable):
     """
 
     var entries: Array[NameRegistryEntry, MAX_REGISTERED_NAMES]
-    var n_registered: Atomic[DType.int32]
+    var n_registered: Atomic[Int32]
 
     def __init__(out self):
         self.entries = Array[NameRegistryEntry, MAX_REGISTERED_NAMES](
             fill=NameRegistryEntry()
         )
-        self.n_registered = Atomic[DType.int32](Int32(0))
+        self.n_registered = Atomic[Int32](Int32(0))
 
     @always_inline
     def count(self) -> Int:

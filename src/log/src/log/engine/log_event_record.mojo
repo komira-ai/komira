@@ -26,10 +26,10 @@
 #   arg_inline_len UInt16  # bytes used of `arg_blob` when NOT spilled.
 #   arg_off      UInt32    # ring-arena offset when spilled (flags bit0 set).
 #   arg_len      UInt32    # ring-arena length when spilled.
-#   arg_blob     InlineArray[UInt8, ARG_INLINE_BYTES]  # SSO-style inline args.
+#   arg_blob     Array[UInt8, ARG_INLINE_BYTES]  # SSO-style inline args.
 #
 # Encapsulation:
-#   - EVERY field is a primitive scalar or a fixed-size InlineArray[UInt8, N].
+#   - EVERY field is a primitive scalar or a fixed-size Array[UInt8, N].
 #     NO `List`, `String`, `OwnedPointer`, `ArcPointer`, or wildcard-origin
 #     field. This is the stale-pointer-safe shape: the record can be stored in a
 #     byte-/Slab-backed ring with ZERO heap-owning inner field to dangle.
@@ -85,14 +85,14 @@ comptime ARG_INLINE_BYTES: Int = 48
 struct LogEventRecord(
     Copyable, Movable, Deinitable
 ):
-    # `Copyable` but not `ImplicitlyCopyable`: `InlineArray` is not
+    # `Copyable` but not `ImplicitlyCopyable`: `Array` is not
     # implicitly copyable, and a struct owning one cannot synthesise an
     # implicit copy ctor (a hand-written `__copyinit__` is not consulted).
     # Copies of this POD record are spelled `.copy()`, a plain memcpy.
     """The POD on-ring record — fixed stride, no heap-owning field.
 
     Crosses the producer→drain boundary by value (a single fixed-stride
-    copy). Every field is a primitive scalar or a fixed `InlineArray[UInt8]`.
+    copy). Every field is a primitive scalar or a fixed `Array[UInt8]`.
     The arg-blob is inline up to `ARG_INLINE_BYTES`; longer blobs reference
     the ring arena via (arg_off, arg_len) with `FLAG_HAS_ARG_OVERFLOW` set.
     """
@@ -138,7 +138,7 @@ struct LogEventRecord(
 # -----------------------------------------------------------------------------
 #
 # The P2b emit fast path encodes args DIRECTLY into the record's inline
-# `arg_blob: InlineArray[UInt8, ARG_INLINE_BYTES]` with ZERO heap allocation for
+# `arg_blob: Array[UInt8, ARG_INLINE_BYTES]` with ZERO heap allocation for
 # the common case (≤48 encoded bytes — ~6 scalar args or a short string set).
 # Only when the encoded args exceed the inline capacity does the writer spill
 # the OVERFLOW into a function-local `List[UInt8]` (the long-string path); the
@@ -166,7 +166,7 @@ struct ArgBlobWriter[origin: Origin[mut=True]](Movable):
     exceeds `ARG_INLINE_BYTES`. Common path = zero heap allocation."""
 
     # SAFETY: a concrete-origin `mut` reference to the record's own
-    # `InlineArray[UInt8, ARG_INLINE_BYTES]`. The writer is a function-local
+    # `Array[UInt8, ARG_INLINE_BYTES]`. The writer is a function-local
     # value the facade constructs over an on-stack record's `arg_blob`; it is
     # never stored, never crosses a module boundary, and the origin ties its
     # lifetime to that record. Not a wildcard origin.

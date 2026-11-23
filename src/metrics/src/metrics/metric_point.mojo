@@ -32,7 +32,7 @@
 #
 # Encapsulation: scalars only. No `UnsafePointer`, no wildcard origin,
 # no heap-owning field -- so a `MetricPoint` is trivially Copyable and can sit
-# in an `InlineArray` or cross a drain boundary by value.
+# in an `Array` or cross a drain boundary by value.
 # =============================================================================
 
 

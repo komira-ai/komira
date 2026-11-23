@@ -158,7 +158,7 @@ sources:
 test, the C file or a manifest of this package or of a sibling, run `buildrules mojo sync`, commit what it writes,
 and build `komira//src/crypto:lib` on the farm.
 
-`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.crypto-0.1.0-mojo1.0.0_0.conda`): the `.mojoc` and
+`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.crypto-0.1.0-mojo1.1.0_0.conda`): the `.mojoc` and
 `lib/libkomira_crypto_sha256_hw.a`, with `awslc` and `encoding` as dependencies. `:crypto` is
 `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): a package that lists it in `deps` links the same
 archives. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`. The shared

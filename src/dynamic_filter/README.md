@@ -139,6 +139,6 @@ with the package and its siblings staged, commit what it writes, and build `komi
 the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-komira-ai.dynamic_filter-0.1.0-mojo1.0.0_0.conda`), packed with the manifests of the path dependencies beside its
+(`mojo-komira-ai.dynamic_filter-0.1.0-mojo1.1.0_0.conda`), packed with the manifests of the path dependencies beside its
 own (`members`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it
 is a step of a CI job that takes that file, not a build action.

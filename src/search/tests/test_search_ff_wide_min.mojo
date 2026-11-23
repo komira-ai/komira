@@ -69,7 +69,7 @@ def _split(var ff: List[UInt8], n: Int) raises -> List[UInt8]:
         b.add_document(d, AnalyzedField(toks^))
         ds.append(String("d").as_bytes())
     var fi = b.finalize()
-    var uuid = InlineArray[UInt8, 16](fill=UInt8(3))
+    var uuid = Array[UInt8, 16](fill=UInt8(3))
     return serialize_split(
         fi,
         TermDictBuilder.build_from_finalized(fi),

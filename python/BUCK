@@ -270,11 +270,11 @@ _INSTALLED_ARGS = [
     _LICENSE_EXPRESSION,
 ] + _PYTHON_METADATA_ARGS
 
-# Modular's wheels of the Mojo compiler (third_party/modular/BUCK): 1.0.0, the
+# Modular's wheels of the Mojo compiler (third_party/modular/BUCK): 1.1.0, the
 # toolchain's version, with the wheel it requires, and 1.2.0.
 _MODULAR = [
-    "komira//third_party/modular:mojo_compiler-1.0.0-py3-none-manylinux_2_34_x86_64.whl",
-    "komira//third_party/modular:mojo_compiler_mojo_libs-1.0.0-py3-none-any.whl",
+    "komira//third_party/modular:mojo_compiler-1.1.0-py3-none-manylinux_2_34_x86_64.whl",
+    "komira//third_party/modular:mojo_compiler_mojo_libs-1.1.0-py3-none-any.whl",
 ]
 
 _MODULAR_OTHER = ["komira//third_party/modular:mojo_compiler-1.2.0-py3-none-manylinux_2_34_x86_64.whl"]
@@ -443,7 +443,7 @@ _LOAD_ERROR = "komira._errors.LibraryLoadError: cannot load libkomira from <site
     (
         "refuses_unmet_requirement",
         [":komira_wheel", _MODULAR[0]],
-        "install: mojo-compiler 1.0.0 requires mojo-compiler-mojo-libs==1.0.0, which is not installed",
+        "install: mojo-compiler 1.1.0 requires mojo-compiler-mojo-libs==1.1.0, which is not installed",
     ),
 ]]
 
@@ -642,7 +642,7 @@ _RELEASES = {
 #   is a second copy, bound to komira's two other libraries; both work;
 # - 1.2.0, Modular's first: the runtime check refuses it by name;
 # - 1.2.0, komira's first: Modular's library fails to load, with the loader's
-#   `undefined symbol` (its 1.2.0 code needs symbols komira's 1.0.0
+#   `undefined symbol` (its 1.2.0 code needs symbols komira's 1.1.0
 #   libraries lack), and komira keeps working.
 #
 # 1.2.0's mojo-compiler-mojo-libs is not installed (`skip_requirements`, pip's
@@ -668,8 +668,8 @@ _BESIDE_FILES = {"--parquet": "komira//src/so:tests/fixtures/two_columns.parquet
     skip_requirements = modular == _MODULAR_OTHER,
     expect_failure = expect,
 ) for name, modular, order, runtime, version, toolchain, expect in [
-    ("beside_modular_loaded_first", _MODULAR, "modular-first", "same", "1.0.0", _TOOLCHAIN_MOJO, None),
-    ("beside_modular_loaded_after", _MODULAR, "komira-first", "same", "1.0.0", _TOOLCHAIN_MOJO, None),
+    ("beside_modular_loaded_first", _MODULAR, "modular-first", "same", "1.1.0", _TOOLCHAIN_MOJO, None),
+    ("beside_modular_loaded_after", _MODULAR, "komira-first", "same", "1.1.0", _TOOLCHAIN_MOJO, None),
     (
         "beside_other_mojo_loaded_first",
         _MODULAR_OTHER,
@@ -691,9 +691,9 @@ _BESIDE_FILES = {"--parquet": "komira//src/so:tests/fixtures/two_columns.parquet
         _MODULAR,
         "modular-first",
         "same",
-        "1.0.0",
+        "1.1.0",
         "0.0.1",
-        "AssertionError: the same-version cases need Modular's runtime at the toolchain's Mojo: mojo-compiler 1.0.0 is installed, the toolchain's is 0.0.1",
+        "AssertionError: the same-version cases need Modular's runtime at the toolchain's Mojo: mojo-compiler 1.1.0 is installed, the toolchain's is 0.0.1",
     ),
 ]]
 

@@ -7,7 +7,7 @@
 # it or is dropped. Three heaps:
 #
 #   * `BoundedHeapInt64Payload[N]`: capacity N at compile time, storage an
-#     `InlineArray` (no allocation). A max-heap on an Int64 key: it keeps the
+#     `Array` (no allocation). A max-heap on an Int64 key: it keeps the
 #     N SMALLEST keys. A caller that wants the N largest stores `~key` (the
 #     bitwise NOT reverses the order of every Int64 without overflow) or any
 #     other order-reversing encoding; a caller with float or NULL keys maps
@@ -74,11 +74,11 @@ struct BoundedHeapInt64Payload[N: Int](Copyable, Movable):
     """A max-heap of at most N (key, payload id) slots that keeps the N
     smallest (key, payload id) slots; no child is worse than its parent."""
 
-    var slots: InlineArray[HeapSlot, Self.N]
+    var slots: Array[HeapSlot, Self.N]
     var n_used: Int
 
     def __init__(out self):
-        self.slots = InlineArray[HeapSlot, Self.N](fill=HeapSlot(Int64(0), Int64(0)))
+        self.slots = Array[HeapSlot, Self.N](fill=HeapSlot(Int64(0), Int64(0)))
         self.n_used = 0
 
     @always_inline

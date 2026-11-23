@@ -726,8 +726,8 @@ def read_csv_bytes_to_batch_parallel_impl[
     # primitive the row-path reader uses — deliberately, so the next fix to
     # it cannot land in one reader and miss the other.
     #
-    # Two parallel List[Int] are used (rather than List[InlineArray[Int,2]])
-    # because InlineArray requires keyword-only ctors
+    # Two parallel List[Int] are used (rather than List[Array[Int,2]])
+    # because Array requires keyword-only ctors
     # (`fill=` / `uninitialized=True`), and List[Int] is the simpler
     # POD shape with no pointer field.
     var _t_partition0 = perf_counter_ns() if _timing else 0

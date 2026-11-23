@@ -231,7 +231,7 @@ struct Reactor[S: WakerSink & Movable & Deinitable](
       var _epoll_fd: Int32                          # owned epoll fd (Linux); -1 elsewhere
       var _wakers: List[WakerSlot]                  # op_id -> WakerSlot
       var _sink: Self.S                             # worker waker sink
-      var _next_op_id: OwnedPointer[Atomic[DType.int64]]   # monotone op-id allocator
+      var _next_op_id: OwnedPointer[Atomic[Int64]]   # monotone op-id allocator
       var _pending_completions: List[Completion]    # buffer for try_pop_any_completion non-matches
 
     Scope: Linux epoll backend; the macOS kqueue backend; the mock

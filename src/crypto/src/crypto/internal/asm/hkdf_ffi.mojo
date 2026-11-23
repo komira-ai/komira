@@ -28,7 +28,7 @@
 #
 # # Encapsulation discipline
 #
-#   * ZERO UnsafePointer in public sigs (functions take/return InlineArray
+#   * ZERO UnsafePointer in public sigs (functions take/return Array
 #     + Span over open origin).
 #   * ZERO wildcard origins on public surface.
 #   * ZERO unsafe_from_address / take_pointee / ArcPointer.
@@ -56,7 +56,7 @@ from crypto.internal.asm.sha256_ffi import (
 # lifetime is not expressible in Mojo's origin system. Opaque AWS-LC heap
 # handles are passed BY VALUE to `external_call` and never written through
 # Mojo-side, so an immutable static origin is sound. Data-buffer pointers
-# (Span/InlineArray/scalar out-params) carry the same origin; the SAFETY
+# (Span/Array/scalar out-params) carry the same origin; the SAFETY
 # contract is that the caller holds the buffer's real origin in scope across
 # the synchronous external_call (AWS-LC retains no pointer past the call).
 # -----------------------------------------------------------------------------

@@ -53,14 +53,14 @@ from expr.composite_key import (
     eq_key_value1, eq_key_value2, eq_key_value3, eq_key_value4,
 )
 # LOWER-UNTYPED-AGG-MEDIAN-ARM — reuse the
-# existing MedianState POD (Int32 count + Int32 pad + InlineArray[Float64, 64])
+# existing MedianState POD (Int32 count + Int32 pad + Array[Float64, 64])
 # from aggregators_struct_builtin.mojo. The state struct is already POD,
 # gap6-safe (no heap-owning inner fields), and conforms to the
 # Copyable+Movable+Deinitable bound on HashAggOpF64.StateTy.
 #
 # ERR-CAT-A-LARGEST-K-WIREUP — reuse the
 # existing LargestKState POD (Int32 count + Int32 pad +
-# InlineArray[Float64, 2]) for the LARGEST_K AGG wireup. Same POD shape;
+# Array[Float64, 2]) for the LARGEST_K AGG wireup. Same POD shape;
 # K=2 hardcoded (matches H2O h8 `largest2(v3)` semantics).
 #
 # ERR-CAT-A-STDDEV-WIREUP — reuse the existing
@@ -341,7 +341,7 @@ struct LastF64(HashAggOpF64):
 
 # AvgF64 needs paired state (sum, count). PHASE-B uses SIMD[float64, 2]
 # as a fixed-size paired carrier (no nested struct — matches the spike's
-# "InlineArray[Float64, 2] per bucket" gap6-safe pattern from H2O §6
+# "Array[Float64, 2] per bucket" gap6-safe pattern from H2O §6
 # lines 332-380).
 @fieldwise_init
 struct AvgF64(HashAggOpF64):
@@ -391,7 +391,7 @@ struct AvgF64(HashAggOpF64):
 # of Float64 values; insertion-sort + middle-element pick on finalize).
 #
 # StateTy = `MedianState` (520 bytes; Int32 count + 4-byte pad +
-# `InlineArray[Float64, 64]` = MAX_MEDIAN_VALUES values).  POD-only, no
+# `Array[Float64, 64]` = MAX_MEDIAN_VALUES values).  POD-only, no
 # heap-owning inner field — gap6-safe by construction.  Trait method
 # bodies are identical to `MedianAggregator.update` / `.finalize`; the
 # `combine` method is not exposed at the HashAggOpF64 trait surface
@@ -411,7 +411,7 @@ struct MedianF64(HashAggOpF64):
     """Median over Float64 — fixed-capacity inline reservoir (cap=64).
 
     StateTy = MedianState (520-byte POD: Int32 count + Int32 pad +
-    InlineArray[Float64, 64]).  Update appends value if count < 64;
+    Array[Float64, 64]).  Update appends value if count < 64;
     otherwise drops (FIRST-64 retention).  Finalize insertion-sorts a
     local copy of the buffer and returns the middle element (odd n) or
     the average of the two middle elements (even n).  Returns NaN for
@@ -486,7 +486,7 @@ struct MedianF64(HashAggOpF64):
 # values; finalize emits the LARGER of the top-2).
 #
 # StateTy = `LargestKState` (24 bytes; Int32 count + Int32 pad +
-# `InlineArray[Float64, 2]` heap). POD-only, no heap-owning inner field —
+# `Array[Float64, 2]` heap). POD-only, no heap-owning inner field —
 # gap6-safe by construction. Trait method bodies are identical to
 # `LargestKAggregator.update` / `.combine` / `.finalize`.
 #
@@ -500,7 +500,7 @@ struct LargestKF64(HashAggOpF64):
     """LARGEST-K (K=2) over Float64 — per-group min-heap of top-2.
 
     StateTy = LargestKState (24-byte POD: Int32 count + Int32 pad +
-    InlineArray[Float64, 2]). Update is a K=2 min-heap push (replace-and-
+    Array[Float64, 2]). Update is a K=2 min-heap push (replace-and-
     sift-down on the single parent/child relationship). Finalize returns
     the LARGER of the top-2 (heap[1] when count==2; heap[0] when count==1;
     NaN when count==0). Mirrors `LargestKAggregator` semantics from

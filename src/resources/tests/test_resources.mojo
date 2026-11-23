@@ -52,7 +52,7 @@ def _exit_status(path: String) raises -> Int:
     """The exit status of program `path` run with no arguments; -1 when it did
     not exit normally, 127 when it could not be started."""
     var p = path.copy()
-    var argv = InlineArray[Int, 2](fill=0)
+    var argv = Array[Int, 2](fill=0)
     # FFI-BOUNDARY: execv reads argv as a NULL-terminated char*[]; its one
     # entry is the address of `p`'s NUL-terminated bytes.
     argv[0] = Int(p.as_c_string_slice().unsafe_ptr())

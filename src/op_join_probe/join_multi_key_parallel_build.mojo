@@ -21,7 +21,7 @@
 
 from std.atomic import Ordering
 from std.io import FileDescriptor
-from std.memory import alloc, memset, OwnedPointer, UnsafePointer
+from std.memory import alloc, unsafe_memset, OwnedPointer, UnsafePointer
 from std.sys import num_physical_cores, size_of
 
 from arrow.primitive_array import PrimitiveArray
@@ -185,7 +185,7 @@ struct _MkFillWork(SharedChunkWork):
         # fill materialises it exactly — the identical bytes the driver's single
         # `memset` writes in the gate-OFF arm.
         var ht_ptr = bp[].hash_table.value().unsafe_ptr()
-        memset(
+        unsafe_memset(
             (ht_ptr + lo).bitcast[UInt8](),
             UInt8(0xFF),
             (hi - lo) * size_of[Int](),
@@ -280,7 +280,7 @@ struct _MkBuildWork(SharedChunkWork):
         # SAFETY: `hash_table` is the builder's own `List[Int]`; `Int` and
         # `Int64` are layout-identical on every supported target, so the bitcast
         # is a pure reinterpretation that lets the aligned 64-bit chain-head slot
-        # bind `Atomic[DType.int64].compare_exchange` directly. Same shape as the
+        # bind `Atomic[Int64].compare_exchange` directly. Same shape as the
         # single-key `hash_chain_parallel_build`. Origin is the borrowed
         # payload's; the pointers never leave this method.
         var ht_ptr = bp[].hash_table.value().unsafe_ptr().bitcast[
@@ -476,7 +476,7 @@ def multi_key_hash_join_build_parallel[
     if not fan_fill:
         # SAFETY: `cap` Int slots owned by this frame; the pointer does not
         # escape.
-        memset(
+        unsafe_memset(
             ht.unsafe_ptr().bitcast[UInt8](), UInt8(0xFF), cap * size_of[Int]()
         )
 

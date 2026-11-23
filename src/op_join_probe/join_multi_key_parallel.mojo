@@ -12,7 +12,7 @@
 # `MultiKeyHashJoinBuilder.probe_inner_into`; only their order differs.
 # =============================================================================
 
-from std.memory import memcpy, UnsafePointer
+from std.memory import unsafe_memcpy, UnsafePointer
 
 from async_rt.ops.waker_sink import NoopSink
 from async_rt.runtime.local_dispatcher import LocalDispatcher
@@ -105,12 +105,12 @@ struct _MKMergeWork[o_b: MutOrigin, o_p: MutOrigin](SharedChunkWork):
             )
 
         if n > 0:
-            memcpy(
+            unsafe_memcpy(
                 dest=self.dst_build + off,
                 src=pp[].build[chunk_id].unsafe_ptr(),
                 count=n,
             )
-            memcpy(
+            unsafe_memcpy(
                 dest=self.dst_probe + off,
                 src=pp[].probe[chunk_id].unsafe_ptr(),
                 count=n,

@@ -3,7 +3,7 @@
 # SEMI, ANTI and LEFT probes.
 # =============================================================================
 
-from std.memory import alloc, memset, UnsafePointer
+from std.memory import alloc, unsafe_memset, UnsafePointer
 from containers.slab import Slab
 from std.sys.intrinsics import prefetch, PrefetchOptions
 from std.sys import simd_width_of
@@ -74,7 +74,7 @@ struct PartitionTable(Movable):
         self._buckets = List[Int](capacity=cap)
         self._buckets.resize(unsafe_uninit_length=cap)
 
-        memset(self._buckets.unsafe_ptr().bitcast[UInt8](), 0xFF, cap * 8)
+        unsafe_memset(self._buckets.unsafe_ptr().bitcast[UInt8](), 0xFF, cap * 8)
 
 
     # --- Mutable-origin pointer helpers ---
@@ -223,7 +223,7 @@ struct RadixPartitionedHashJoin(Movable):
         # Phase 1: Build histogram of partition sizes.
         # SAFETY: Stack-allocated histogram, zeroed.
         var histogram = alloc[Int](_NUM_PARTITIONS)
-        memset(histogram.bitcast[UInt8](), 0, _NUM_PARTITIONS * 8)
+        unsafe_memset(histogram.bitcast[UInt8](), 0, _NUM_PARTITIONS * 8)
 
         # Pre-compute hashes and partition IDs for all build rows.
         # Store them to avoid recomputing during scatter.
@@ -322,7 +322,7 @@ struct RadixPartitionedHashJoin(Movable):
             (part_ids + i)[] = _partition_of(h)
 
         var histogram = alloc[Int](_NUM_PARTITIONS)
-        memset(histogram.bitcast[UInt8](), 0, _NUM_PARTITIONS * 8)
+        unsafe_memset(histogram.bitcast[UInt8](), 0, _NUM_PARTITIONS * 8)
         for i in range(n):
             if probe_has_nulls and probe_keys.is_null(i):
                 continue
@@ -423,7 +423,7 @@ struct RadixPartitionedHashJoin(Movable):
             (part_ids_buf + i)[] = _partition_of((hashes_buf + i)[])
 
         var histogram = alloc[Int](_NUM_PARTITIONS)
-        memset(histogram.bitcast[UInt8](), 0, _NUM_PARTITIONS * 8)
+        unsafe_memset(histogram.bitcast[UInt8](), 0, _NUM_PARTITIONS * 8)
         for i in range(n):
             if probe_has_nulls and probe_keys.is_null(i):
                 continue
@@ -509,7 +509,7 @@ struct RadixPartitionedHashJoin(Movable):
             (part_ids_buf + i)[] = _partition_of((hashes_buf + i)[])
 
         var histogram = alloc[Int](_NUM_PARTITIONS)
-        memset(histogram.bitcast[UInt8](), 0, _NUM_PARTITIONS * 8)
+        unsafe_memset(histogram.bitcast[UInt8](), 0, _NUM_PARTITIONS * 8)
         for i in range(n):
             if probe_has_nulls and probe_keys.is_null(i):
                 continue
@@ -594,7 +594,7 @@ struct RadixPartitionedHashJoin(Movable):
             (part_ids_buf + i)[] = _partition_of(h)
 
         var histogram = alloc[Int](_NUM_PARTITIONS)
-        memset(histogram.bitcast[UInt8](), 0, _NUM_PARTITIONS * 8)
+        unsafe_memset(histogram.bitcast[UInt8](), 0, _NUM_PARTITIONS * 8)
         for i in range(n):
             if probe_has_nulls and probe_keys.is_null(i):
                 continue

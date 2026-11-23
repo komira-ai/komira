@@ -34,12 +34,12 @@
 
 [external_cell_buildrules]
   git_origin = https://github.com/komira-ai/buildrules.git
-  # The commit of buildrules main that reads mopm 0.0.113: unit graph format 6 and lock_version 3, whose packages
+  # The commit of buildrules main that reads mopm 0.0.135: unit graph format 6 and lock_version 3, whose packages
   # have full names (`komira-ai/json`) that the rules map to import names, and a `.conda` named
-  # `mojo-<namespace>.<name>`; it pins mopm 0.0.113 for every host. A bump is one change: this line, then
+  # `mojo-<namespace>.<name>`; it pins mopm 0.0.135 (the first with the Mojo 1.1.0 toolchain) for every host. A bump is one change: this line, then
   # `buildrules mojo sync` (the pins in the directory `[cells] toolchains` names, and each package's
   # buildrules.mojo.lock.bzl) when the release pins another mopm.
-  commit_hash = 76cc62003d7e5d960f4bf4c7cebe1ca476d668d4
+  commit_hash = 7d4c16a57de140c9e7c7f28441c9a15c7fdc6664
 
 # buildrules reads every `[buildrules_re]` key from the root cell's configuration, whichever cell evaluates its
 # rules. Komira is the root cell when it is built standalone, so this section is the one read; a repository that

@@ -143,7 +143,7 @@ installed package links that archive. The files that are not sources:
 source, a test, the C file, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`,
 commit what it writes, and build `komira//src/libc:lib` on the farm.
 
-`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.libc-0.1.0-mojo1.0.0_0.conda`): the `.mojoc` and
+`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.libc-0.1.0-mojo1.1.0_0.conda`): the `.mojoc` and
 `lib/libkomira_libc_posix.a`. `:libc` is `:lib` as komira's Mojo rules take it
 (`mojo_adopted_library`): a package that lists it in `deps` links the same archive. It also compiles and runs
 the README's examples above (`[tests][readme]`) against `:lib` and the archive. The shared library

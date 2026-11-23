@@ -77,7 +77,7 @@ def _hex_nibble(c: UInt8) -> UInt8:
 
 
 def _hex_to_16(s: String) -> Array[UInt8, 16]:
-    """Parse a 32-char hex string into a 16-byte InlineArray."""
+    """Parse a 32-char hex string into a 16-byte Array."""
     var out = Array[UInt8, 16](fill=UInt8(0))
     var bs = s.as_bytes()
     for i in range(16):
@@ -88,7 +88,7 @@ def _hex_to_16(s: String) -> Array[UInt8, 16]:
 
 
 def _hex_to_32(s: String) -> Array[UInt8, 32]:
-    """Parse a 64-char hex string into a 32-byte InlineArray."""
+    """Parse a 64-char hex string into a 32-byte Array."""
     var out = Array[UInt8, 32](fill=UInt8(0))
     var bs = s.as_bytes()
     for i in range(32):
@@ -99,7 +99,7 @@ def _hex_to_32(s: String) -> Array[UInt8, 32]:
 
 
 def _ia16_to_hex(a: Array[UInt8, 16]) -> String:
-    """Format a 16-byte InlineArray as a 32-char lowercase hex string."""
+    """Format a 16-byte Array as a 32-char lowercase hex string."""
     var hex_chars = String("0123456789abcdef")
     var hb = hex_chars.as_bytes()
     var out = List[UInt8](capacity=32)

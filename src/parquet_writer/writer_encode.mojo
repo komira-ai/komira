@@ -14,7 +14,7 @@
 # a REQUIRED column that holds a null is refused (see `column_page`).
 # =============================================================================
 
-from std.memory import memcpy
+from std.memory import unsafe_memcpy
 from std.sys import size_of
 
 from arrow.bitmap import Bitmap
@@ -152,7 +152,7 @@ def encode_plain_values[dtype: DType](
     if not compact:
         # SAFETY: `src` is the array's offset-aware typed pointer over
         # `n` readable elements; `out` holds `n * elem_size` bytes.
-        memcpy(
+        unsafe_memcpy(
             dest=out.unsafe_ptr(),
             src=src.bitcast[UInt8](),
             count=n * elem_size,
@@ -245,7 +245,7 @@ def _append_prefixed(mut out: List[UInt8], value: Span[UInt8, _]):
     out.resize(cur + n, UInt8(0))
     # SAFETY: `out` was just resized to hold `n` more bytes; `value` holds
     # `n` readable bytes and is borrowed for the call.
-    memcpy(dest=out.unsafe_ptr() + cur, src=value.unsafe_ptr(), count=n)
+    unsafe_memcpy(dest=out.unsafe_ptr() + cur, src=value.unsafe_ptr(), count=n)
 
 
 def encode_plain_byte_array_data(

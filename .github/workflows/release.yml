@@ -272,7 +272,7 @@ jobs:
       - name: build the pinned mopm
         uses: ./.github/actions/buck2-farm
         with:
-          args: build toolchains//:mopm_0_0_113 --out ${{ runner.temp }}/mopm-publish/mopm
+          args: build toolchains//:mopm_0_0_135 --out ${{ runner.temp }}/mopm-publish/mopm
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: build the packages
         uses: ./.github/actions/buck2-farm
@@ -310,7 +310,7 @@ jobs:
       # gitignored input of //release/staged_set. A version the registry holds
       # with other bytes, or has yanked, makes the step fail.
       - name: mopm stage
-        run: '"$RUNNER_TEMP/mopm-publish/mopm" stage --workspace-root src --artifacts "$RUNNER_TEMP/mopm-publish/artifacts" --compiler 1.0.0 --out release/staged_set --registry prod'
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" stage --workspace-root src --artifacts "$RUNNER_TEMP/mopm-publish/artifacts" --compiler 1.1.0 --out release/staged_set --registry prod'
       # TRY. Every package's README examples, compiled and run on the farm as a
       # user would, against the `.conda` files of the set that was just staged
       # (the e2e installs offline from it, so the closure must be in it).

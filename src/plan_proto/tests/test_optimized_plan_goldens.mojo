@@ -118,7 +118,7 @@ def _read(path: String) raises -> List[UInt8]:
 # ---- the two legs --------------------------------------------------------------
 
 
-def _golden[M: Serializable & ImplicitlyDestructible](stem: String, mut mismatched: List[String]) raises -> M:
+def _golden[M: Serializable & Deinitable](stem: String, mut mismatched: List[String]) raises -> M:
     """Leg 1's decode of protoc's bytes, after leg 2: the Mojo encoding of
     that decode must be the committed `.hex`, and stable under a second
     decode and encode. A mismatch is collected, with the bytes the encoder

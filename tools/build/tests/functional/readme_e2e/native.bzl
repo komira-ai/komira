@@ -35,7 +35,7 @@ _native_conda = rule(
         "archive": attrs.dep(),
         "lib": attrs.dep(),
         "manifest": attrs.source(),
-        "mojo": attrs.string(default = "1.0.0"),
+        "mojo": attrs.string(default = "1.1.0"),
         "mopm": attrs.exec_dep(providers = [RunInfo]),
         "native_id": attrs.string(),
         "package": attrs.string(),

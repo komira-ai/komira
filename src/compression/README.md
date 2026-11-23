@@ -141,7 +141,7 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it writes, and build
 `komira//src/compression:lib` on the farm.
 
-`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.compression-0.1.0-mojo1.0.0_0.conda`): the `.mojoc` and
+`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.compression-0.1.0-mojo1.1.0_0.conda`): the `.mojoc` and
 `lib/libsnappy.a`, requiring `lz4`, `zlib` and the three conda packages above; `:conda_holds` reads it back.
 `:compression` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`); it declares the three
 sonames in `dlopen`, which `:compression_conda` (the release set's packaging) turns into the same requirements,

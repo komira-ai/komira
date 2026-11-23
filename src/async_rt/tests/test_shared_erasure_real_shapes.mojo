@@ -23,7 +23,7 @@
 #                                       real Segment-impl shape, e.g.
 #                                       parallel_fork_join.mojo) — the
 #                                       SHARED Segment, one home, N shards read it.
-#     * a real `Atomic[DType.int64]` in_flight counter, a real
+#     * a real `Atomic[Int64]` in_flight counter, a real
 #       `CancellationToken`, and a first-error `List[String]`-shaped slot.
 #   `StateBoundWork[_RealDispatchCtx, origin]` carries that bundle through
 #   `ErasedHandle` with ZERO wildcard FIELD, and a runtime payload

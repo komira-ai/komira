@@ -9,15 +9,15 @@ from std.ffi import _Global
 from std.memory import OwnedPointer, UnsafePointer, alloc
 
 
-def _init_residual_latemat_counter() -> OwnedPointer[Atomic[DType.int64]]:
+def _init_residual_latemat_counter() -> OwnedPointer[Atomic[Int64]]:
     """`_Global` init_fn (non-raising): allocate the counter Atomic once per
     process, initialised to 0. Mirrors `dict_mat_counter._init_dict_mat_counter`
     (`alloc` + `init_pointee_move` + `OwnedPointer(unsafe_from_raw_pointer=)`)
     since `Atomic` is not movable-by-value.
     """
-    var raw = alloc[Atomic[DType.int64]](1)
-    UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[Atomic[DType.int64]](unsafe_from_raw_pointer=raw)
+    var raw = alloc[Atomic[Int64]](1)
+    raw.unsafe_write(Atomic[Int64](Int64(0)))
+    return OwnedPointer[Atomic[Int64]](unsafe_from_raw_pointer=raw)
 
 
 comptime _RESIDUAL_LATEMAT_CELLS = _Global[

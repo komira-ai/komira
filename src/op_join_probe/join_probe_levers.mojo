@@ -23,10 +23,10 @@ from async_rt.runtime.sched_trace import sched_trace_enabled
 from .join_defer_verdict import defer_verdict_fields
 
 
-def _init_jpl_i64() -> OwnedPointer[Atomic[DType.int64]]:
-    var raw = alloc[Atomic[DType.int64]](1)
-    UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[Atomic[DType.int64]](unsafe_from_raw_pointer=raw)
+def _init_jpl_i64() -> OwnedPointer[Atomic[Int64]]:
+    var raw = alloc[Atomic[Int64]](1)
+    raw.unsafe_write(Atomic[Int64](Int64(0)))
+    return OwnedPointer[Atomic[Int64]](unsafe_from_raw_pointer=raw)
 
 
 comptime _JPB_CFG = _Global["komira_join_probe_buf_reuse_cfg", _init_jpl_i64]

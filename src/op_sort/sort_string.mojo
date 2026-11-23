@@ -24,7 +24,7 @@
 # Both are stable: equal strings keep their input order.
 # =============================================================================
 
-from std.memory import alloc, memcpy
+from std.memory import alloc, unsafe_memcpy
 
 from counters.keyeq_census import keyeq_record, KEYEQ_SORTSTR_RUN_IDENT
 from arrow.column import Column
@@ -268,7 +268,7 @@ def _merge_string[
     """Merge two sorted halves [lo, mid) and [mid, hi) by string keys."""
     # Copy [lo, hi) of indices to tmp via memcpy (mirrors int64 merge).
     var range_len = hi - lo
-    memcpy(dest=tmp + lo, src=idx_ptr + lo, count=range_len)
+    unsafe_memcpy(dest=tmp + lo, src=idx_ptr + lo, count=range_len)
 
     var left = lo
     var right = mid
@@ -302,10 +302,10 @@ def _merge_string[
 
     var left_remaining = mid - left
     if left_remaining > 0:
-        memcpy(dest=idx_ptr + dest, src=tmp + left, count=left_remaining)
+        unsafe_memcpy(dest=idx_ptr + dest, src=tmp + left, count=left_remaining)
     var right_remaining = hi - right
     if right_remaining > 0:
-        memcpy(
+        unsafe_memcpy(
             dest=idx_ptr + dest + left_remaining,
             src=tmp + right,
             count=right_remaining,
@@ -450,7 +450,7 @@ def _merge_string_validity[
 ):
     """Merge two sorted halves, null-aware."""
     var range_len = hi - lo
-    memcpy(dest=tmp + lo, src=idx_ptr + lo, count=range_len)
+    unsafe_memcpy(dest=tmp + lo, src=idx_ptr + lo, count=range_len)
 
     var left = lo
     var right = mid
@@ -474,10 +474,10 @@ def _merge_string_validity[
 
     var left_remaining = mid - left
     if left_remaining > 0:
-        memcpy(dest=idx_ptr + dest, src=tmp + left, count=left_remaining)
+        unsafe_memcpy(dest=idx_ptr + dest, src=tmp + left, count=left_remaining)
     var right_remaining = hi - right
     if right_remaining > 0:
-        memcpy(
+        unsafe_memcpy(
             dest=idx_ptr + dest + left_remaining,
             src=tmp + right,
             count=right_remaining,
@@ -599,7 +599,7 @@ def _prefix_key_sort_segment[
     var lp_ptr = lp_view._unsafe_ptr().bitcast[Scalar[DType.int32]]()
     for i in range(seg_n):
         (tmp + lo + i)[] = (idx_ptr + lo + Int((lp_ptr + i)[]))[]
-    memcpy(dest=idx_ptr + lo, src=tmp + lo, count=seg_n)
+    unsafe_memcpy(dest=idx_ptr + lo, src=tmp + lo, count=seg_n)
 
     # Walk the now-chunk-sorted segment and recurse into maximal equal-chunk-key
     # sub-runs. Re-derive each row's chunk key (cheap; the segment is small
@@ -791,9 +791,9 @@ def _sort_indices_string_prefix_key(
         # Rotate so the null block [n_valid, n) precedes the sorted valids.
         # Copy [valids][nulls] → tmp as [nulls][valids].
         var n_null = n - n_valid
-        memcpy(dest=tmp, src=idx_ptr + n_valid, count=n_null)
-        memcpy(dest=tmp + n_null, src=idx_ptr, count=n_valid)
-        memcpy(dest=idx_ptr, src=tmp, count=n)
+        unsafe_memcpy(dest=tmp, src=idx_ptr + n_valid, count=n_null)
+        unsafe_memcpy(dest=tmp + n_null, src=idx_ptr, count=n_valid)
+        unsafe_memcpy(dest=idx_ptr, src=tmp, count=n)
 
     tmp.free()
     return indices^

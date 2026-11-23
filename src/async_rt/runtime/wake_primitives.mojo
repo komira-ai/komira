@@ -18,7 +18,7 @@
 # x86_64 through this package's own tests and the engine's runs.
 #
 # Pointer discipline:
-#   - Public API takes `ref [_] Atomic[DType.int32] word` — no UnsafePointer
+#   - Public API takes `ref [_] Atomic[Int32] word` — no UnsafePointer
 #     in public signatures.
 #   - FFI carve-out: `UnsafePointer[Int32, MutExternalOrigin](unsafe_from_address=
 #     Int(typed_ptr))` is the documented FFI laundering pattern, confined to
@@ -320,7 +320,7 @@ def pause_intrinsic() -> None:
 # unsafe_from_address=...)` shape (the pointer rules ban both the wildcard
 # origin and the Int laundering).
 #
-# Why the wrapper: Atomic[DType.int32] is non-Movable on Mojo 0.26.3 and
+# Why the wrapper: Atomic[Int32] is non-Movable on Mojo 0.26.3 and
 # ArcPointer requires `T: Movable`. _SleepingFlag is a Movable shell around
 # OwnedPointer[Atomic[Int32]] — the same shape as _AtomicSlot, _SpawnSlot,
 # _InflightCounter, etc.
@@ -354,9 +354,9 @@ comptime EFD_CLOEXEC: Int32 = 0o2000000    # O_CLOEXEC
 
 
 struct _SleepingFlag(Movable, Deinitable):
-    """Movable wrapper around OwnedPointer[Atomic[DType.int32]] so it can
+    """Movable wrapper around OwnedPointer[Atomic[Int32]] so it can
     live inside ArcPointer (which requires `T: Movable`).
-    Atomic[DType.int32] is non-Movable on Mojo 0.26.3, so we go through
+    Atomic[Int32] is non-Movable on Mojo 0.26.3, so we go through
     the OwnedPointer indirection that 9 in-tree precedents already use
     (`_AtomicSlot` in cancellation/token.mojo, `_SpawnSlot` /
     `_InflightCounter` in spawner/local_spawner.mojo, the `_WakeWord` in
