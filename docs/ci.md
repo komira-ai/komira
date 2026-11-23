@@ -466,12 +466,12 @@ build's report:
 
 | Cause | Targets | Issue |
 | --- | --- | --- |
-| aws-lc and s2n-tls have no darwin-arm64 build (limits `aws-lc-x86-64-linux`, `s2n-tls-x86-64-linux`) | 133 | komira-ai/komira#2196 |
+| aws-lc and s2n-tls had no darwin-arm64 build. Since komira-ai/komira#2203 all 133 configure for darwin-arm64 (a `cquery` of them); they have not been built for it again | 133 | komira-ai/komira#2196 |
 | a library's native shared library is ELF only | 9 | komira-ai/komira#2197 |
 | `so_exports` is the Linux binary on a macOS executor | the UDF spike helpers, `arrow_c_abi_probe` | komira-ai/komira#2198 |
 | the UDF spike helpers' C uses Linux-only APIs | 5 | komira-ai/komira#2199 |
 | `phase_timers` drops a join tail on the fork's clock tick | 1 | komira-ai/komira#2200 |
-| `http_core` and `host_probe` tests still read `/proc/self/status` (found in the sources; behind the aws-lc limit today) | not reached | komira-ai/komira#2201 |
+| `http_core` and `host_probe` tests still read `/proc/self/status` (found in the sources; the sweep did not reach them) | not reached | komira-ai/komira#2201 |
 
 The rest of the 259 were stopped by three of our own failures, now fixed. Two tests read
 `/proc/self/status` and now use `//src/tests/helpers/komira_test_rss`. The int64 column sum
