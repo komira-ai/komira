@@ -1,0 +1,14 @@
+[2026-11-23T16:13:46.556-06:00] Build ID: 00000000-0000-0000-0000-000000000000
+[2026-11-23T16:13:46.560-06:00] Network: up 0B  down 0B
+Command failed: 
+Traceback (most recent call last):
+  File <builtin>, in <module>
+  * tools/build/ci/darwin.bxl:22, in _impl
+      fail("darwin: BROKEN: " + verdict.reason)
+error: fail: darwin: BROKEN: "not a label" is not a target label: the selector's output changed shape
+  --> tools/build/ci/darwin.bxl:22:9
+   |
+22 |         fail("darwin: BROKEN: " + verdict.reason)
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+BXL FAILED

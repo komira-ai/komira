@@ -118,8 +118,8 @@ library's answer). Without `runtime` on the library path, `hello` fails with
 ## macOS arm64
 
 The same rules run on macOS arm64, in the release workflow only
-(`.github/workflows/release-macos.yml`; no pull-request check builds a macOS
-target, B9). The macros choose the execution platform from the target
+(`.github/workflows/release-macos.yml`; the pull-request check's macOS part
+builds the libraries of the macOS set, never these harness targets). The macros choose the execution platform from the target
 platform's operating system, so a target built `--target-platforms
 komira//tools/build/platforms:darwin-arm64` runs its actions on a macOS
 worker, and a build for linux runs on linux as before:

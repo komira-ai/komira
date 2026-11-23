@@ -215,8 +215,10 @@ zig_test(
 # concurrency group of its own, and release.yml holds no macOS job; the macOS jobs, in
 # pypi-macos-arm64.yml and not in pypi.yml, build the macOS wheel only when an index lacks it and share
 # no needs with the Linux jobs; the
-# builds hold up nothing, no workflow that runs on a pull request names a macOS platform, the check
-# set holds no macOS build or macOS wheel target, and the set's definition is one list. A build action.
+# builds hold up nothing, no workflow that runs on a pull request names a macOS platform outside
+# pr.yml's macOS part (which holds its contract: the macOS keys in a file only its build step names,
+# that step bounded and through the buck2-farm action), the check set holds no macOS build or macOS
+# wheel target, and the set's definition is one list. A build action.
 zig_test(
     name = "release_macos_cases",
     exec_compatible_with = LINUX_X86_64,

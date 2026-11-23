@@ -1,0 +1,21 @@
+[2026-11-23T16:13:46.581-06:00] Build ID: 00000000-0000-0000-0000-000000000000
+[2026-11-23T16:13:46.586-06:00] darwin: SOME: 17 of the 66 libraries of the macOS set
+komira//src/broker_proto:lib
+komira//src/calendar:lib
+komira//src/calendar_ics:lib
+komira//src/calendar_proto:lib
+komira//src/chat_proto:lib
+komira//src/contacts_proto:lib
+komira//src/crm_proto:lib
+komira//src/crypto:lib
+komira//src/encoding:lib
+komira//src/job_report_proto:lib
+komira//src/mail_message:lib
+komira//src/managed_mail_proto:lib
+komira//src/mcp_server:lib
+komira//src/plan_proto:lib
+komira//src/proto_codec:lib
+komira//src/supervisor_proto:lib
+komira//src/wkt:lib
+[2026-11-23T16:13:46.586-06:00] Network: up 0B  down 0B
+BXL SUCCEEDED
