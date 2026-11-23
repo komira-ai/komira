@@ -320,7 +320,6 @@ mojo_library(
         "//src/zlib:zlib",
     ],
     test_deps = [
-        "//src/parquet_api:parquet_api",
         "//src/parquet_writer:parquet_writer",
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
