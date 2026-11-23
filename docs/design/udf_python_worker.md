@@ -43,7 +43,7 @@ that needs a later one is refused by name (`OPTIMIZED_UDF_KIND_UNSUPPORTED`, IF 
 | P1 | The library and the zygote: spawn, `HELLO`, `LOAD`, `FORK`, one worker per context, `SCALAR` and `MAP_BATCHES_COLUMN` with the `VALUES` and `ARROW` batch formats, `ERR_RAISED` with the user's trace, `validate` over the descriptor | Z1-Z15 and Z17-Z18: a UDF runs in a process whose pid is neither the engine's nor the zygote's, with correct rows |
 | P2 | Supervision: exit reports, cancel, deadlines, forced stops, crash attribution, the ends of the zygote and the engine (§5) | S1-S13: an aborting UDF gives `UDF_WORKER_CRASHED` naming the signal and the session survives; `describe` reports `CONTAINS_CRASHES` and `FORCED_STOP` |
 | P3 | `ROW` with the row proxy and the read set; frames, `STEP`, plain and mergeable aggregates; the nested-call rule (IF §4.3) | Z16, and the shared corpus with Python fixtures |
-| P4 | The `PANDAS`, `NUMPY` and `POLARS` batch formats and the types beyond numerics (IF §6.2's table) | The round trip of every type in the mapping table |
+| P4 | The `PANDAS`, `NUMPY` and `POLARS` batch formats. The types beyond numerics (strings, binary, bool, dates, timestamps, decimals, lists, structs) have landed: see the "Types" section of `src/udf_python/README.md` | Each of the three formats round-trips every type of that table |
 | Later | Shared-memory slot heaps for payloads (§4.4) | A measurement shows the socket copy matters |
 
 The lowering of the UDF plan nodes and the Python `@udf` decorator are not part of this runtime; they use it through
@@ -292,7 +292,7 @@ README's "Types" section, nested columns included, and the `PANDAS`, `NUMPY` and
   the worker. A `MemoryError` is answered as `ERR_OUT_OF_MEMORY`, after which the worker exits (IF §4.5: the context is
   lost).
 - **Output:** the worker casts what user code returned to the bound result type, refusing a lossy cast with
-  `ERR_RETURN_TYPE`, and checks the length (`ERR_LENGTH`); the host checks both again (IF §4.6).
+  `ERR_RETURN_TYPE`, and checks the length (`ERR_LENGTH`); the host checks both again (IF §4.6). The cast of an `ARROW` result stays within its own kind, as the README's "Types" section lists.
 
 ### 4.3 Threads in a worker
 
@@ -570,7 +570,7 @@ from them, and none of them ships:
 | Lowering the UDF plan nodes | Only the C ABI (IF §3.3, §4); nothing of this document |
 | The Python `@udf` decorator | §6 (the descriptor it writes), §7 (where it writes code objects), IF §6.1 |
 | The UDF conformance cases | The shared corpus and the cases of this runtime (the conformance corpus) |
-| Types beyond numerics | §4.1 (the C codec), P4 |
+| The `PANDAS`, `NUMPY` and `POLARS` batch formats | §4.2 (the calls), P4; the types they carry are those of the README's "Types" section |
 | The wheel design | §7; it decides the CPython minors the wheel supports, and the runtime supports every minor whose tag the SDK passes, refusing only other implementations and free-threaded builds (§3.1) |
 
 The runtime-specific cases (Z for the zygote and workers, S for supervision) are listed in

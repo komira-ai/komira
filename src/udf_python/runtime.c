@@ -227,6 +227,10 @@ static void udf_free(udfpy_udf* u) {
   free(u);
 }
 
+void udfpy_udf_drop(udfpy_udf* u) {
+  if (u != NULL && atomic_fetch_sub_explicit(&u->refs, 1, memory_order_acq_rel) == 1) udf_free(u);
+}
+
 /* Load in the current generation, spawning one when there is none; a reply
  * that retires the generation and asks for a retry is answered once in a new
  * generation. rt->zy_mu is held. */
@@ -279,6 +283,7 @@ static int32_t t_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_ud
   if (rt->forked) return udfpy_fail(err, KOMIRA_UDF_ERR_INSTANCE_LOST, -1, "komira/python: %s", UDFPY_FORKED_WHY);
   udfpy_udf* u = (udfpy_udf*)calloc(1, sizeof(*u));
   if (u == NULL) return udfpy_fail(err, KOMIRA_UDF_ERR_OUT_OF_MEMORY, -1, "no memory for a udf");
+  atomic_init(&u->refs, 1);
   char why[1400];
   why[0] = 0;
   u->entry = strdup(s->entry);
@@ -326,7 +331,7 @@ static void t_unload(komira_udf_udf* u) {
     }
   }
   pthread_mutex_unlock(&rt->zy_mu);
-  udf_free(u);
+  udfpy_udf_drop(u);
 }
 
 /* ---- contexts, instances, calls ---------------------------------------------------------- */

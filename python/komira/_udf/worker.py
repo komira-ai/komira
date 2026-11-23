@@ -305,10 +305,63 @@ def _check_value(value, rtype, row):
         raise _Fail(wire.ERR_RETURN_TYPE, message, row) from None
 
 
+def _unholdable_leaf(array, types):
+    """The type of the first date32 or timestamp array inside `array` (itself included) that Python cannot hold."""
+    t = array.type
+    if types.is_date32(t) or types.is_timestamp(t):
+        try:
+            array.to_pylist()
+        except (ValueError, OverflowError):
+            return t
+        return None
+    if types.is_struct(t):
+        inner = array.flatten()
+    elif types.is_list(t) or types.is_large_list(t):
+        inner = [array.flatten()]
+    else:
+        return None
+    for child in inner:
+        found = _unholdable_leaf(child, types)
+        if found is not None:
+            return found
+    return None
+
+
+def _column_values(batch):
+    """Every argument column as Python lists. A date or timestamp that a `datetime.date` or `datetime.datetime`
+    cannot hold (before year 1 or past year 9999) ends the call with ERR_UNSUPPORTED naming the row and the argument."""
+    import pyarrow as pa
+
+    columns = []
+    for position, column in enumerate(batch.columns):
+        try:
+            columns.append(column.to_pylist())
+            continue
+        except (ValueError, OverflowError):
+            leaf = _unholdable_leaf(column, pa.types)
+            if leaf is None:
+                raise
+        row = 0
+        for row in range(len(column)):
+            try:
+                column[row].as_py()
+            except (ValueError, OverflowError):
+                break
+        python_type = "datetime.date" if pa.types.is_date32(leaf) else "datetime.datetime"
+        message = "row %d of argument '%s' holds a %s outside the years 1 to 9999, which %s cannot hold" % (
+            row,
+            batch.schema.field(position).name,
+            leaf,
+            python_type,
+        )
+        raise _Fail(wire.ERR_UNSUPPORTED, message, row)
+    return columns
+
+
 def _run_values(fn, batch, rtype, cancel, call_id):
     import pyarrow as pa
 
-    columns = [c.to_pylist() for c in batch.columns]
+    columns = _column_values(batch)
     out = []
     for i in range(batch.num_rows):
         if call_id != 0 and struct.unpack_from("<q", cancel, 0)[0] == call_id:
@@ -324,6 +377,41 @@ def _run_values(fn, batch, rtype, cancel, call_id):
         return pa.array(out, type=rtype)
     except (pa.ArrowInvalid, pa.ArrowTypeError, OverflowError) as e:
         raise _Fail(wire.ERR_RETURN_TYPE, "the returned values do not fit %s: %s" % (rtype, e)) from None
+
+
+def _cast_stays_in_a_family(src, dst, types):
+    """Whether an Arrow type `src` may be cast to `dst` without changing what kind of value it holds: integer to
+    integer or float, float to float, string or binary to its large form (and back), timestamp to a timestamp of
+    the same time zone, decimal to decimal, date32 to date32, bool to bool, and a list or struct whose items or
+    fields (same names, same order) pass the same rule."""
+    if types.is_integer(src):
+        return types.is_integer(dst) or types.is_floating(dst)
+    if types.is_floating(src):
+        return types.is_floating(dst)
+    if types.is_string(src) or types.is_large_string(src):
+        return types.is_string(dst) or types.is_large_string(dst)
+    if types.is_binary(src) or types.is_large_binary(src):
+        return types.is_binary(dst) or types.is_large_binary(dst)
+    if types.is_timestamp(src):
+        return types.is_timestamp(dst) and src.tz == dst.tz
+    if types.is_decimal128(src):
+        return types.is_decimal128(dst)
+    if types.is_date32(src):
+        return types.is_date32(dst)
+    if types.is_boolean(src):
+        return types.is_boolean(dst)
+    if types.is_list(src) or types.is_large_list(src):
+        return (types.is_list(dst) or types.is_large_list(dst)) and _cast_stays_in_a_family(
+            src.value_type, dst.value_type, types
+        )
+    if types.is_struct(src):
+        if not types.is_struct(dst) or src.num_fields != dst.num_fields:
+            return False
+        return all(
+            src[i].name == dst[i].name and _cast_stays_in_a_family(src[i].type, dst[i].type, types)
+            for i in range(src.num_fields)
+        )
+    return False
 
 
 def _run_arrow(fn, batch, rtype):
@@ -342,7 +430,7 @@ def _run_arrow(fn, batch, rtype):
         raise _Fail(wire.ERR_RETURN_TYPE, "returned %s, not a pyarrow Array" % type(result).__name__)
     if result.type != rtype:
         lossy = _Fail(wire.ERR_RETURN_TYPE, "returned %s, which is not %s without loss" % (result.type, rtype))
-        if pa.types.is_timestamp(result.type) and pa.types.is_timestamp(rtype) and result.type.tz != rtype.tz:
+        if not _cast_stays_in_a_family(result.type, rtype, pa.types):
             raise lossy
         try:
             cast = pc.cast(result, rtype, safe=True)

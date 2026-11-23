@@ -4,8 +4,9 @@ structs, at any depth the runtime holds, through validate, load and
 call_batch. Each type is round-tripped by a VALUES and an ARROW identity
 function (nulls, boundaries, an empty batch, sliced and re-based inputs); the
 refusal of a result that is not the declared type without loss is exact;
-validate refuses what is not carried by name; and a worker whose reply is
-corrupt, replaced inside the worker, is refused by the checked reader.
+validate refuses what is not carried by name; and a date or timestamp that
+Python cannot hold is refused by row and argument. The hostile replies and
+host arrays are in test_udf_ipc.py.
 
     test_udf_types.py --lib-dir <dir>
 
@@ -14,7 +15,6 @@ corrupt, replaced inside the worker, is refused by the checked reader.
 
 import datetime
 import decimal
-import gc
 import math
 import os
 import sys
@@ -39,29 +39,9 @@ ZONE_TOO_LONG = "a time zone of %d bytes in %s is not built in komira/python yet
 NO_CHILDREN = "type '+s' of %s has no children"
 NS_VALUES = "a timestamp[ns] in %s is not built for the VALUES batch format: datetime.datetime holds microseconds"
 
-# What a call refuses with when the worker's reply fails the checked reader.
-FAILED = "the worker's output failed validation: "
-COUNTS = "the RecordBatch's columns or buffers differ from the bound schema"
-NOT_IPC = "the reply is not an IPC message (no continuation marker)"
-LENGTH_DIFFERS = "a column's length differs from the batch's"
-NULLS_RANGE = "a column's null count is out of range"
-VALIDITY_SHORT = "a validity bitmap is shorter than the column"
-VALUES_SHORT = "a values buffer is shorter than the column"
-OUTSIDE_BODY = "a buffer lies outside the body"
-OFFSETS_SHORT = "an offsets buffer is shorter than the column"
-OFFSETS_ALIGN = "an offsets buffer is not aligned to its type"
-OFFSETS_BAD = "offsets decrease or are negative"
-OFFSET_PAST = "an offset runs past the data"
-LIST_CHILD_SHORT = "a list child is shorter than its offsets"
-STRUCT_CHILD = "a struct child's length differs from the struct's"
-NOT_UTF8 = "a string is not valid UTF-8"
-BITMAP_SHORT = "a boolean values bitmap is shorter than the column"
-
 OPS = r"""import dataclasses
 import datetime as dt
 import decimal
-import struct
-import sys
 
 import pyarrow as pa
 
@@ -72,12 +52,25 @@ class Rec:
     b: str
 
 
+@dataclasses.dataclass
+class Short:
+    a: int
+
+
 def ident(x):
     return x
 
 
 def ident_arrow(x):
     return x
+
+
+def first(a, b):
+    return a
+
+
+def bad_at_two(x):
+    return "a" if x == 2 else x
 
 
 def mixed(i, s, t, d, l, st):
@@ -122,6 +115,13 @@ CONSTANTS = {
     "r_dict_missing": {"a": 1},
     "r_dict_extra": {"a": 1, "b": "x", "c": 2},
     "r_dict_bad_field": {"a": 2.5, "b": "x"},
+    "r_dataclass_short": Short(1),
+    "r_dataclass_class": Rec,
+    "r_dec38_over": 10**38,
+    "r_dec52_over": decimal.Decimal("1000.00"),
+    "r_inf_decimal": decimal.Decimal("Infinity"),
+    "r_ns_over": dt.datetime(2262, 4, 12),
+    "r_f32_odd": 16777217,
     "ok_f32_half": 0.5,
     "ok_f32_int": 3,
     "ok_f64_int": 2 ** 53,
@@ -132,6 +132,12 @@ CONSTANTS = {
     "ok_dec_exponent": decimal.Decimal("1E+1"),
     "ok_dec_max": decimal.Decimal("9" * 38),
     "ok_dec_fraction": decimal.Decimal("-0." + "9" * 38),
+    "ok_dec38_int": 10**38 - 1,
+    "ok_dec52_max": decimal.Decimal("999.99"),
+    "ok_dec52_zero_tail": decimal.Decimal("1.230"),
+    "ok_dec52_negative_zero": decimal.Decimal("-0.00"),
+    "ok_ns_edge": dt.datetime(2262, 4, 11),
+    "ok_f32_even": 16777216,
     "ok_tuple": (1, 2),
     "ok_dataclass": Rec(1, "x"),
     "ok_offset_instant": dt.datetime(2027, 1, 1, 5, 30, tzinfo=PLUS),
@@ -154,6 +160,27 @@ for _name, _value in CONSTANTS.items():
     globals()[_name] = _const(_value)
 
 
+# Arrow arrays returned for a declared type that is not their own.
+ARRAYS = {
+    "ar_int64": lambda: pa.array([1, 2], pa.int64()),
+    "ar_int32": lambda: pa.array([1, 2], pa.int32()),
+    "ar_string": lambda: pa.array(["a", "b"], pa.string()),
+    "ar_bool": lambda: pa.array([True, False], pa.bool_()),
+    "ar_list_int32": lambda: pa.array([[1], [2, 3]], pa.list_(pa.int32())),
+}
+
+
+def _array_of(make):
+    def fn(x):
+        return make()
+
+    return fn
+
+
+for _name, _make in ARRAYS.items():
+    globals()[_name] = _array_of(_make)
+
+
 def stamp_naive(x):
     return pa.array([0] * len(x), pa.timestamp("us"))
 
@@ -164,142 +191,9 @@ def stamp_utc(x):
 
 def stamp_offset(x):
     return pa.array([0] * len(x), pa.timestamp("us", tz="+05:30"))
-
-
-# A worker that sends a corrupt reply. The call's first value is the mode (0:
-# send the valid reply); the function returns a valid array and the worker's
-# reply sender is replaced for one send by one that sends the corrupt bytes.
-def _message(array):
-    return pa.RecordBatch.from_arrays([array], names=["result"]).serialize().to_pybytes()
-
-
-def _hijack(reply):
-    wire = sys.modules["_komira_udf_wire"]
-    original = wire.send_ok
-
-    def once(sock, request_id, body=b"", flags=0):
-        wire.send_ok = original
-        original(sock, request_id, reply, flags)
-
-    wire.send_ok = once
-
-
-def _q(*values):
-    return struct.pack("<%dq" % len(values), *values)
-
-
-def _vec(*flat):
-    # A flatbuffers vector of (a, b) int64 structs: its count, then the pairs.
-    return struct.pack("<I", len(flat) // 2) + _q(*flat)
-
-
-def _edit(msg, *alternatives):
-    hits = [(old, new) for old, new in alternatives if msg.count(old) == 1]
-    assert len(hits) == 1, "the edit does not apply to this message"
-    old, new = hits[0]
-    assert len(old) == len(new)
-    return msg.replace(old, new)
-
-
-def _armed(mode, valid, edits):
-    # `edits(msg)` maps each mode to a function that gives the corrupt bytes.
-    if mode:
-        _hijack(edits(_message(valid))[mode]())
-    return valid
-
-
-def _text(rtype, fmt):
-    width = struct.calcsize(fmt)
-    size = 3 * width
-
-    def hostile(x):
-        offs = struct.pack("<3" + fmt, 0, 7, 11)
-        data = b"abcdefghijk"
-        sizes = sorted({size, (size + 7) // 8 * 8})
-
-        def edits(msg):
-            return {
-                1: lambda: _edit(msg, (offs, struct.pack("<3" + fmt, 0, 7, 1000))),
-                2: lambda: _edit(msg, (offs, struct.pack("<3" + fmt, 0, 11, 7))),
-                3: lambda: _edit(msg, (offs, struct.pack("<3" + fmt, -1, 7, 11))),
-                4: lambda: _edit(msg, (data, b"abc\xffefghijk")),
-                5: lambda: _edit(msg, (data, b"ab\xc0\x80efghijk")),
-                6: lambda: _edit(msg, (data, b"a\xed\xa0\x80efghijk")),
-                7: lambda: _edit(msg, (data, b"abc\xf4\x90\x80\x80hijk")),
-                8: lambda: _edit(msg, (data, b"abcde\xe2\x82\xachij")),
-                9: lambda: _edit(msg, *[(_q(0, 0, 0, m), _q(0, 0, width // 2, m)) for m in sizes]),
-            }
-
-        return _armed(x[0].as_py(), pa.array(["abcdefg", "hijk"], rtype), edits)
-
-    return hostile
-
-
-def _lists(rtype, fmt):
-    width = struct.calcsize(fmt)
-    size = 3 * width
-
-    def hostile(x):
-        offs = struct.pack("<3" + fmt, 0, 3, 4)
-        sizes = sorted({size, (size + 7) // 8 * 8})
-
-        def edits(msg):
-            return {
-                1: lambda: _edit(msg, (_vec(2, 0, 4, 0), _vec(2, 0, 3, 0))),
-                2: lambda: _edit(msg, (offs, struct.pack("<3" + fmt, 0, 4, 3))),
-                3: lambda: _edit(msg, (offs, struct.pack("<3" + fmt, 0, 3, 100))),
-                4: lambda: _edit(msg, *[(_q(0, 0, 0, m), _q(0, 0, width // 2, m)) for m in sizes]),
-            }
-
-        return _armed(x[0].as_py(), pa.array([[1, 2, 3], [4]], rtype), edits)
-
-    return hostile
-
-
-hostile_string = _text(pa.string(), "i")
-hostile_large_string = _text(pa.large_string(), "q")
-hostile_list = _lists(pa.list_(pa.int64()), "i")
-hostile_large_list = _lists(pa.large_list(pa.int64()), "q")
-
-
-def hostile_text_list(x):
-    valid = pa.array([["abcdefg", "hijk"]], pa.list_(pa.string()))
-    child_longer = lambda msg: {1: lambda: _edit(msg, (_vec(1, 0, 2, 0), _vec(1, 0, 5, 0)))}
-    return _armed(x[0].as_py(), valid, child_longer)
-
-
-def hostile_struct(x):
-    valid = pa.array([{"a": 111}, {"a": 222}], pa.struct([("a", pa.int64())]))
-    child_shorter = lambda msg: {1: lambda: _edit(msg, (_vec(2, 0, 2, 0), _vec(2, 0, 1, 0)))}
-    return _armed(x[0].as_py(), valid, child_shorter)
-
-
-def hostile_bool(x):
-    valid = pa.array([True] * len(x), pa.bool_())
-    short = [(_q(0, 0, 0, m), _q(0, 0, 0, 1)) for m in (2, 8)]
-    return _armed(x[0].as_py(), valid, lambda msg: {1: lambda: _edit(msg, *short)})
-
-
-def hostile_int64(x):
-    valid = pa.array([1, 2], pa.int64())
-    two_columns = pa.RecordBatch.from_arrays([valid, valid], names=["result", "other"])
-
-    def edits(msg):
-        return {
-            1: lambda: _message(pa.array(["a", "b"], pa.string())),
-            2: lambda: two_columns.serialize().to_pybytes(),
-            3: lambda: bytes(16),
-            4: lambda: _edit(msg, (_vec(2, 0), _vec(3, 0))),
-            5: lambda: _edit(msg, (_vec(2, 0), _vec(2, 3))),
-            6: lambda: _edit(msg, (_vec(2, 0), _vec(2, 1))),
-            7: lambda: _edit(msg, (_q(0, 0, 0, 16), _q(0, 0, 0, 8))),
-            8: lambda: _edit(msg, (_q(0, 0, 0, 16), _q(0, 0, 4096, 16))),
-        }
-
-    return _armed(x[0].as_py(), valid, edits)
 """
 
-_NAMES = {"__name__": "ops_expected"}
+_NAMES = {"__name__": "ops"}
 exec(OPS, _NAMES)
 CONSTANTS = _NAMES["CONSTANTS"]
 mixed = _NAMES["mixed"]
@@ -554,6 +448,14 @@ REFUSED = [
     ("r_dict_missing", AB, ": the field 'b' is missing"),
     ("r_dict_extra", AB, ": the key 'c' is not a field"),
     ("r_dict_bad_field", AB, ": ['a'] is float 2.5"),
+    ("r_dataclass_short", AB, ": the field 'b' is missing"),
+    ("r_dataclass_class", AB, ""),
+    ("r_dec38_over", pa.decimal128(38, 0), ""),
+    ("r_dec52_over", pa.decimal128(5, 2), ""),
+    ("r_nan_decimal", pa.decimal128(5, 2), ""),
+    ("r_inf_decimal", pa.decimal128(5, 2), ""),
+    ("r_ns_over", pa.timestamp("ns"), ""),
+    ("r_f32_odd", pa.float32(), ""),
 ]
 
 # (function, declared result type, the value as the type holds it)
@@ -568,6 +470,12 @@ ACCEPTED = [
     ("ok_dec_exponent", pa.decimal128(10, 2), D("10.00")),
     ("ok_dec_max", pa.decimal128(38, 0), D("9" * 38)),
     ("ok_dec_fraction", pa.decimal128(38, 38), D("-0." + "9" * 38)),
+    ("ok_dec38_int", pa.decimal128(38, 0), D("9" * 38)),
+    ("ok_dec52_max", pa.decimal128(5, 2), D("999.99")),
+    ("ok_dec52_zero_tail", pa.decimal128(5, 2), D("1.23")),
+    ("ok_dec52_negative_zero", pa.decimal128(5, 2), D("0.00")),
+    ("ok_ns_edge", pa.timestamp("ns"), datetime.datetime(2262, 4, 11)),
+    ("ok_f32_even", pa.float32(), 16777216.0),
     ("ok_tuple", pa.list_(I64), [1, 2]),
     ("ok_dataclass", AB, {"a": 1, "b": "x"}),
     ("ok_offset_instant", pa.timestamp("us", tz="UTC"), datetime.datetime(2027, 1, 1, tzinfo=UTC)),
@@ -624,6 +532,100 @@ def the_loose_python_forms_of_each_type_are_accepted_and_stored_exactly(env):
         out = inst.call_ok([pa.array([1, 2], I64)])
         want = pa.array([value, value], t)
         assert out.type == t and out.equals(want), (name, out.to_pylist(), want.to_pylist())
+
+
+def only_the_failing_row_is_named_when_the_rows_before_it_are_fine(env):
+    rt, insts = session(env, [("bad_at_two", I64)])
+    refused(insts[0].call([pa.array([0, 1, 2], I64)]), h.ERR_RETURN_TYPE,
+            "row 2 returned str 'a', which is not int64 without loss", 2)
+    assert insts[0].call_ok([pa.array([0, 1, 3], I64)]).to_pylist() == [0, 1, 3]
+
+
+# (function, declared type of the Arrow result, the type the function returns)
+ARROW_REFUSED = [
+    ("ar_int64", pa.string(), "int64"),
+    ("ar_string", I64, "string"),
+    ("ar_bool", pa.int8(), "bool"),
+]
+
+# (function, declared type of the Arrow result, the values as the type holds them)
+ARROW_ACCEPTED = [
+    ("ar_int32", I64, [1, 2]),
+    ("ar_int64", F64, [1.0, 2.0]),
+    ("ar_string", pa.large_string(), ["a", "b"]),
+    ("ar_list_int32", pa.large_list(I64), [[1], [2, 3]]),
+]
+
+
+def an_arrow_result_is_cast_only_within_one_kind_of_type(env):
+    rt, insts = session(env, [(name, t) for name, t, _ in ARROW_REFUSED], batch_format=h.ARROW)
+    for inst, (name, t, given) in zip(insts, ARROW_REFUSED):
+        refused(inst.call([pa.array([1, 2], I64)]), h.ERR_RETURN_TYPE,
+                "returned %s, which is not %s without loss" % (given, t))
+    rt, insts = session(env, [(name, t) for name, t, _ in ARROW_ACCEPTED], batch_format=h.ARROW)
+    for inst, (name, t, values) in zip(insts, ARROW_ACCEPTED):
+        out = inst.call_ok([pa.array([1, 2], I64)])
+        assert out.type == t and out.to_pylist() == values, (name, out.type, out.to_pylist())
+
+
+def days(*values):
+    return pa.array(values, I32).cast(pa.date32())
+
+
+YEAR_10000_DAYS, BEFORE_YEAR_1_DAYS = 2932897, -719163
+YEAR_10000_US, BEFORE_YEAR_1_US = 253402300800 * 10**6, -62135596800 * 10**6 - 1
+
+
+HELD = "row %d of argument '%s' holds a %s outside the years 1 to 9999, which %s cannot hold"
+
+
+def a_date_or_timestamp_python_cannot_hold_is_refused_by_row_and_argument(env):
+    us, ms_utc, date = pa.timestamp("us"), pa.timestamp("ms", tz="UTC"), pa.date32()
+    # (type, the column that holds one value Python cannot, a column that it can, the failing row, the message)
+    cases = [
+        (us, build(us, [0, YEAR_10000_US, 0]), build(us, [0, 1, 2]), 1,
+         HELD % (1, "x", "timestamp[us]", "datetime.datetime")),
+        (us, build(us, [BEFORE_YEAR_1_US, 0]), build(us, [0, 1]), 0,
+         HELD % (0, "x", "timestamp[us]", "datetime.datetime")),
+        (date, days(0, 0, YEAR_10000_DAYS), days(0, 1, 2), 2, HELD % (2, "x", "date32[day]", "datetime.date")),
+        (date, days(BEFORE_YEAR_1_DAYS, 0), days(0, 1), 0, HELD % (0, "x", "date32[day]", "datetime.date")),
+        (ms_utc, build(ms_utc, [0, YEAR_10000_US // 1000]), build(ms_utc, [0, 1]), 1,
+         HELD % (1, "x", "timestamp[ms, tz=UTC]", "datetime.datetime")),
+    ]
+    rt = env.runtime()
+    loaded = [rt.load_ok(env.bundle_spec({"ops.py": OPS}, "ops:ident", args=[("x", t)], result=t))
+              for t, _, _, _, _ in cases]
+    ctx = rt.open_context_ok()
+    for udf, (t, column, fine, row, message) in zip(loaded, cases):
+        inst = ctx.open_instance_ok(udf)
+        refused(inst.call([column]), h.ERR_UNSUPPORTED, message, row)
+        assert inst.call_ok([fine]).equals(fine), "the instance answers the next call"
+
+
+def a_date_python_cannot_hold_names_the_argument_and_the_leaf_type_inside_a_list_or_struct(env):
+    us = pa.timestamp("us")
+    rt = env.runtime()
+    two = [("a", I64), ("when", us)]
+    nested = pa.list_(us)
+    record = pa.struct([("n", I64), ("day", pa.date32())])
+    loaded = [
+        rt.load_ok(env.bundle_spec({"ops.py": OPS}, "ops:first", args=two, result=I64)),
+        rt.load_ok(env.bundle_spec({"ops.py": OPS}, "ops:ident", args=[("x", nested)], result=nested)),
+        rt.load_ok(env.bundle_spec({"ops.py": OPS}, "ops:ident", args=[("x", record)], result=record)),
+    ]
+    ctx = rt.open_context_ok()
+    pair, listed, structured = [ctx.open_instance_ok(u) for u in loaded]
+    refused(pair.call([pa.array([1, 2], I64), build(us, [0, YEAR_10000_US])]), h.ERR_UNSUPPORTED,
+            HELD % (1, "when", "timestamp[us]", "datetime.datetime"), 1)
+    assert pair.call_ok([pa.array([1, 2], I64), build(us, [0, 1])]).to_pylist() == [1, 2]
+    lists = pa.ListArray.from_arrays(pa.array([0, 1, 2, 3], I32), build(us, [0, BEFORE_YEAR_1_US, 0]))
+    refused(listed.call([lists]), h.ERR_UNSUPPORTED, HELD % (1, "x", "timestamp[us]", "datetime.datetime"), 1)
+    ok_lists = pa.ListArray.from_arrays(pa.array([0, 1, 2], I32), build(us, [0, 0]))
+    assert listed.call_ok([ok_lists]).equals(ok_lists)
+    records = pa.StructArray.from_arrays([pa.array([1, 2], I64), days(0, YEAR_10000_DAYS)], names=["n", "day"])
+    refused(structured.call([records]), h.ERR_UNSUPPORTED, HELD % (1, "x", "date32[day]", "datetime.date"), 1)
+    ok_records = pa.StructArray.from_arrays([pa.array([1, 2], I64), days(0, 1)], names=["n", "day"])
+    assert structured.call_ok([ok_records]).equals(ok_records)
 
 
 def an_arrow_result_of_another_time_zone_is_refused_and_the_same_zone_is_accepted(env):
@@ -756,79 +758,6 @@ def a_values_function_cannot_take_a_nanosecond_timestamp_but_an_arrow_one_can(en
     inst = rt.open_context_ok().open_instance_ok(udf)
     out = inst.call_ok([pa.array([1], I64)])
     assert out.type == ns and out.cast(I64).to_pylist() == [micros(CONSTANTS["ok_ns"]) * 1000]
-
-
-# ---- a worker whose reply is corrupt --------------------------------------------
-
-
-def hostile_session(env, entry, rtype):
-    rt = env.runtime()
-    spec = env.bundle_spec({"ops.py": OPS}, "ops:" + entry, args=[("x", I64)], result=rtype,
-                           batch_format=h.ARROW)
-    udf = rt.load_ok(spec)
-    return rt, rt.open_context_ok().open_instance_ok(udf)
-
-
-def corrupt(rt, inst, rtype, rows, mode, why):
-    """A call whose worker sends the corrupt reply `mode`: refused as an
-    internal error with the reader's reason, nothing the call reserved is
-    still held, and the same instance answers the next call."""
-    gc.collect()
-    held = rt.state.reserved - rt.state.released
-    column = pa.array([mode] + [0] * (rows - 1), I64)
-    r = inst.call([column])
-    refused(r, h.ERR_INTERNAL, FAILED + why, -1)
-    gc.collect()
-    assert rt.state.reserved - rt.state.released == held, "the refused reply's bytes were not released"
-    out = inst.call_ok([pa.array([0] * rows, I64)])
-    assert out.type == rtype and len(out) == rows, out
-
-
-def a_corrupt_string_reply_is_refused_by_the_offsets_and_the_bytes(env):
-    for entry, t in (("hostile_string", pa.string()), ("hostile_large_string", pa.large_string())):
-        rt, inst = hostile_session(env, entry, t)
-        corrupt(rt, inst, t, 2, 1, OFFSET_PAST)
-        corrupt(rt, inst, t, 2, 2, OFFSETS_BAD)
-        corrupt(rt, inst, t, 2, 3, OFFSETS_BAD)
-        for mode in (4, 5, 6, 7, 8):
-            corrupt(rt, inst, t, 2, mode, NOT_UTF8)
-        corrupt(rt, inst, t, 2, 9, OFFSETS_ALIGN)
-        assert inst.call_ok([pa.array([0, 0], I64)]).to_pylist() == ["abcdefg", "hijk"]
-
-
-def a_corrupt_list_reply_is_refused_by_the_offsets_and_the_child_length(env):
-    for entry, t in (("hostile_list", pa.list_(I64)), ("hostile_large_list", pa.large_list(I64))):
-        rt, inst = hostile_session(env, entry, t)
-        corrupt(rt, inst, t, 2, 1, LIST_CHILD_SHORT)
-        corrupt(rt, inst, t, 2, 2, OFFSETS_BAD)
-        corrupt(rt, inst, t, 2, 3, LIST_CHILD_SHORT)
-        corrupt(rt, inst, t, 2, 4, OFFSETS_ALIGN)
-        assert inst.call_ok([pa.array([0, 0], I64)]).to_pylist() == [[1, 2, 3], [4]]
-    t = pa.list_(pa.string())
-    rt, inst = hostile_session(env, "hostile_text_list", t)
-    corrupt(rt, inst, t, 1, 1, OFFSETS_SHORT)
-    assert inst.call_ok([pa.array([0], I64)]).to_pylist() == [["abcdefg", "hijk"]]
-
-
-def a_corrupt_struct_reply_is_refused_by_the_child_length(env):
-    t = pa.struct([("a", I64)])
-    rt, inst = hostile_session(env, "hostile_struct", t)
-    corrupt(rt, inst, t, 2, 1, STRUCT_CHILD)
-    assert inst.call_ok([pa.array([0, 0], I64)]).to_pylist() == [{"a": 111}, {"a": 222}]
-
-
-def a_corrupt_boolean_reply_is_refused_by_the_bitmap_length(env):
-    rt, inst = hostile_session(env, "hostile_bool", pa.bool_())
-    corrupt(rt, inst, pa.bool_(), 16, 1, BITMAP_SHORT)
-    assert inst.call_ok([pa.array([0] * 16, I64)]).to_pylist() == [True] * 16
-
-
-def a_corrupt_int_reply_is_refused_by_the_layout_checks(env):
-    rt, inst = hostile_session(env, "hostile_int64", I64)
-    for mode, why in ((1, COUNTS), (2, COUNTS), (3, NOT_IPC), (4, LENGTH_DIFFERS), (5, NULLS_RANGE),
-                      (6, VALIDITY_SHORT), (7, VALUES_SHORT), (8, OUTSIDE_BODY)):
-        corrupt(rt, inst, I64, 2, mode, why)
-    assert inst.call_ok([pa.array([0, 0], I64)]).to_pylist() == [1, 2]
 
 
 def main(args):

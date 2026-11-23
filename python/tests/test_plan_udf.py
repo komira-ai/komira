@@ -30,7 +30,7 @@ from komira._ops import (
     UdfSpec,
 )
 from komira._plan import encode_expr, encode_plan, expr_field, parquet_source
-from komira._plan._udf import UdfTable
+from komira._plan._udf import UdfTable, _check_carried
 from komira.plan.v1 import plan_pb2 as pb
 from komira.plan.v1 import plan_vocabulary_pb2 as vocab
 
@@ -546,6 +546,56 @@ def test_a_list_or_struct_argument_with_a_child_the_runtime_does_not_carry_is_re
         UnsupportedOperation,
         message("m.g", "argument 0", STRUCT_FIELD.format(arrow="struct", name="b", child="list")),
     )
+
+
+def carried(f, spec=None):
+    """What `_check_carried` says of the one argument `f` of `spec`."""
+    return _check_carried(spec or scalar(), [f])
+
+
+def refused_argument(f, arrow):
+    refuses(lambda: carried(f), UnsupportedOperation, message("m.g", "argument 0", arrow))
+
+
+def test_a_decimal_column_with_a_precision_or_scale_out_of_range_is_refused():
+    for precision, scale in ((0, 0), (0, 2), (39, 0), (100, 2), (5, 6), (1, 2), (38, 39)):
+        refused_argument(column("d", "decimal128", decimal_precision=precision, decimal_scale=scale), "decimal128")
+    refuses(
+        lambda: carried(column("d", "decimal128", decimal_precision=0, decimal_scale=0), row(read_set=("d",))),
+        UnsupportedOperation,
+        message("m.r", "column 'd'", "decimal128"),
+    )
+
+
+def test_a_decimal_column_with_a_precision_and_scale_in_range_is_carried():
+    for precision, scale in ((1, 0), (1, 1), (10, 2), (38, 0), (38, 38)):
+        assert carried(column("d", "decimal128", decimal_precision=precision, decimal_scale=scale)) is None
+
+
+def test_a_list_column_with_other_than_one_item_is_refused():
+    refused_argument(nested("l2", "list", ("item", "int64"), ("item", "string")), "list")
+    refused_argument(nested("l2", "large_list", ("item", "int64"), ("item", "string")), "large_list")
+    refused_argument(nested("l0", "list"), "list")
+    refused_argument(nested("l0", "large_list"), "large_list")
+    assert carried(nested("l1", "list", ("item", "int64"))) is None
+    assert carried(nested("l1", "large_list", ("item", "string"))) is None
+
+
+def test_a_struct_column_with_no_child_is_refused():
+    refused_argument(nested("s0", "struct"), "struct")
+    refuses(
+        lambda: carried(nested("s0", "struct"), frame(read_set=("s0",))),
+        UnsupportedOperation,
+        message("m.f", "column 's0'", "struct"),
+    )
+    assert carried(nested("s1", "struct", ("a", "int64"))) is None
+
+
+def test_a_struct_with_children_in_field_16_takes_flat_fields_and_refuses_a_list_field():
+    flat = column("st", "struct", children=[column("a", "int64"), column("b", "string")])
+    assert carried(flat) is None
+    listed = column("st", "struct", children=[column("a", "int64"), nested("b", "list", ("item", "int64"))])
+    refused_argument(listed, STRUCT_FIELD.format(arrow="struct", name="b", child="list"))
 
 
 def test_a_read_set_column_of_a_type_the_runtime_does_not_carry_is_refused():

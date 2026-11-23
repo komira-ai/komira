@@ -139,6 +139,8 @@ TARGETS = [
     "komira//python/tests:udf_engine_child_test_py314",
     "komira//python/tests:udf_generations_test",
     "komira//python/tests:udf_generations_test_py314",
+    "komira//python/tests:udf_ipc_test",
+    "komira//python/tests:udf_ipc_test_py314",
     "komira//python/tests:udf_lifecycle_test",
     "komira//python/tests:udf_lifecycle_test_py314",
     "komira//python/tests:udf_plan_run_test",

@@ -76,6 +76,11 @@ SAME = [
     ("utf8", "string"),
     ("large_utf8", "large_string"),
     ("date32", "date32[day]"),
+    ("float", "float32"),
+    ("double", "float64"),
+    ("list<item: double>", "list<item: float64>"),
+    ("large_list<item: float>", "large_list<item: float32>"),
+    ("struct<a: float, b: double>", "struct<a: float32, b: float64>"),
     ("list<item: utf8>", "list<item: string>"),
     ("struct<a: date32, b: large_utf8>", "struct<a: date32[day], b: large_string>"),
     # the list shorthand
@@ -83,6 +88,8 @@ SAME = [
     ("large_list<string>", "large_list<item: string>"),
     ("large_list<utf8>", "large_list<item: string>"),
     ("list<date32>", "list<item: date32[day]>"),
+    ("list<double>", "list<item: float64>"),
+    ("large_list<float>", "large_list<item: float32>"),
     ("list<timestamp[ns]>", "list<item: timestamp[ns]>"),
     # whitespace around punctuation
     ("timestamp[s,tz=UTC]", "timestamp[s, tz=UTC]"),
@@ -158,6 +165,10 @@ def test_the_aliases_are_the_types_they_name():
     assert _dtype.parse("utf8") == _dtype.parse("string")
     assert _dtype.parse("large_utf8") == _dtype.parse("large_string")
     assert _dtype.parse("date32") == _dtype.parse("date32[day]")
+    assert _dtype.parse("double") == _dtype.parse("float64")
+    assert _dtype.parse("float") == _dtype.parse("float32")
+    assert _dtype.parse("double") != _dtype.parse("float32")
+    assert _dtype.parse("float") != _dtype.parse("float64")
     assert _dtype.parse("string") != _dtype.parse("large_string")
     assert _dtype.parse("binary") != _dtype.parse("large_binary")
     assert _dtype.parse("list<int64>") != _dtype.parse("large_list<int64>")
@@ -312,8 +323,6 @@ def test_names_the_runtime_does_not_carry_are_refused():
         " ",
         "int",
         "integer",
-        "double",
-        "float",
         "float16",
         "halffloat",
         "uint8",
@@ -416,6 +425,135 @@ def test_a_list_item_or_struct_field_must_be_a_flat_type():
         ("struct<a: struct<b: int64>>", "struct<b: int64>"),
     ):
         refused_both_ways(text, nests(text, child))
+
+
+def test_a_float_alias_is_a_name_not_a_prefix():
+    for text in ("floats", "double64", "float3", "doubles", "float 32", "list<doubled>", "struct<a: floaty>"):
+        refused_both_ways(text, unmappable(text))
+    assert _dtype.parse("struct<float: double, double: float>").children == (
+        ("float", _dtype.parse("float64")),
+        ("double", _dtype.parse("float32")),
+    )
+
+
+def test_a_decimal_parameter_of_a_long_digit_run_is_refused_by_name():
+    for text in (
+        "decimal128(" + "9" * 5000 + ", 0)",
+        "decimal128(5, " + "9" * 5000 + ")",
+        "decimal128(" + "0" * 5000 + "1, 0)",
+        "decimal128(" + "9" * 10 + ", 0)",
+        "decimal128(5, " + "9" * 10 + ")",
+        "list<item: decimal128(" + "9" * 5000 + ", 0)>",
+        "struct<a: decimal128(5, " + "9" * 5000 + ")>",
+    ):
+        refused_both_ways(text, unmappable(text))
+
+
+def test_a_struct_field_name_is_at_most_63_bytes():
+    ok = "struct<" + "a" * 63 + ": int64>"
+    assert _dtype.canonical(ok) == ok
+    assert _dtype.parse(ok).children[0][0] == "a" * 63
+    too_long = "struct<" + "a" * 64 + ": int64>"
+    refused_both_ways(too_long, unmappable(too_long))
+    refused_both_ways("struct<b: int64, " + "a" * 64 + ": int64>", unmappable("struct<b: int64, " + "a" * 64 + ": int64>"))
+
+
+def test_a_struct_field_name_is_measured_in_bytes_not_characters():
+    two_bytes = "\u00e9"
+    ok = "struct<" + two_bytes * 31 + "a: int64>"
+    assert len(two_bytes * 31 + "a") == 32
+    assert _dtype.canonical(ok) == ok
+    full = "struct<" + two_bytes * 31 + ": int64>"
+    assert _dtype.canonical(full) == full
+    too_long = "struct<" + two_bytes * 32 + ": int64>"
+    refused_both_ways(too_long, unmappable(too_long))
+    too_long_by_one = "struct<" + two_bytes * 31 + "ab: int64>"
+    refused_both_ways(too_long_by_one, unmappable(too_long_by_one))
+
+
+def test_a_time_zone_is_at_most_63_bytes():
+    ok = "timestamp[us, tz=" + "z" * 63 + "]"
+    assert _dtype.canonical(ok) == ok
+    assert _dtype.parse(ok).tz == "z" * 63
+    too_long = "timestamp[us, tz=" + "z" * 64 + "]"
+    refused_both_ways(too_long, unmappable(too_long))
+    in_list = "list<item: timestamp[ns, tz=" + "z" * 64 + "]>"
+    refused_both_ways(in_list, unmappable(in_list))
+
+
+def test_a_time_zone_is_measured_in_bytes_not_characters():
+    two_bytes = "\u00e9"
+    ok = "timestamp[ms, tz=" + two_bytes * 31 + "z]"
+    assert len(two_bytes * 31 + "z") == 32
+    assert _dtype.canonical(ok) == ok
+    too_long = "timestamp[ms, tz=" + two_bytes * 32 + "]"
+    refused_both_ways(too_long, unmappable(too_long))
+    too_long_by_one = "timestamp[ms, tz=" + two_bytes * 31 + "zz]"
+    refused_both_ways(too_long_by_one, unmappable(too_long_by_one))
+
+
+def test_field_name_problem_gives_the_reason_a_name_is_refused():
+    assert _dtype.field_name_problem("") == "is empty"
+    assert _dtype.field_name_problem("a,b") == "holds one of the characters , : < >"
+    assert _dtype.field_name_problem(" a") == "starts or ends with white space"
+    assert _dtype.field_name_problem("a ") == "starts or ends with white space"
+    assert _dtype.field_name_problem("a" * 63) is None
+    assert _dtype.field_name_problem("a" * 64) == "is longer than 63 bytes"
+    assert _dtype.field_name_problem("\u00e9" * 32) == "is longer than 63 bytes"
+    assert _dtype.field_name_problem("\u00e9" * 31) is None
+
+
+def test_nesting_past_the_parse_depth_is_refused_as_no_type_without_reading_further():
+    # The innermost type of k nested types is at depth k: depth 8 is read (and
+    # the nesting refused as a child a column cannot hold), depth 9 is not read.
+    for opener, closer, child in (
+        ("list<", ">", "list<item: int64>"),
+        ("large_list<item: ", ">", "large_list<item: int64>"),
+        ("struct<a: ", ">", "struct<a: int64>"),
+    ):
+        at_limit = opener * 8 + "int64" + closer * 8
+        refused_both_ways(at_limit, nests(at_limit, child))
+        past = opener * 9 + "int64" + closer * 9
+        refused_both_ways(past, unmappable(past))
+    # Far deeper than the interpreter's recursion limit: refused at depth 9.
+    deep = "list<" * 5000 + "int64" + ">" * 5000
+    refused_both_ways(deep, unmappable(deep))
+    unclosed = "struct<a: " * 5000 + "int64"
+    refused_both_ways(unclosed, unmappable(unclosed))
+
+
+def test_wire_of_a_scalar_is_its_arrow_name_with_no_parameters():
+    assert _dtype.wire(_dtype.parse("int64")) == _dtype.Wire("int64", 0, 0, "", ())
+    assert _dtype.wire(_dtype.parse("double")) == _dtype.Wire("float64", 0, 0, "", ())
+    assert _dtype.wire(_dtype.parse("date32")) == _dtype.Wire("date32", 0, 0, "", ())
+    assert _dtype.wire(_dtype.parse("timestamp[ms]")) == _dtype.Wire("timestamp_ms", 0, 0, "", ())
+
+
+def test_wire_of_a_decimal_has_its_precision_and_scale():
+    assert _dtype.wire(_dtype.parse("decimal128(10, 2)")) == _dtype.Wire("decimal128", 10, 2, "", ())
+    assert _dtype.wire(_dtype.parse("decimal128(38, 0)")) == _dtype.Wire("decimal128", 38, 0, "", ())
+    assert _dtype.wire(_dtype.parse("decimal128(1, 1)")) == _dtype.Wire("decimal128", 1, 1, "", ())
+
+
+def test_wire_of_a_zoned_timestamp_has_its_unit_in_the_name_and_its_zone():
+    assert _dtype.wire(_dtype.parse("timestamp[us, tz=UTC]")) == _dtype.Wire("timestamp_us", 0, 0, "UTC", ())
+    assert _dtype.wire(_dtype.parse("timestamp[ns, tz=Europe/Paris]")) == _dtype.Wire(
+        "timestamp_ns", 0, 0, "Europe/Paris", ()
+    )
+
+
+def test_wire_of_a_list_has_its_item_as_a_child():
+    assert _dtype.wire(_dtype.parse("list<string>")) == _dtype.Wire("list", 0, 0, "", (("item", "string"),))
+    assert _dtype.wire(_dtype.parse("large_list<item: timestamp[ns]>")) == _dtype.Wire(
+        "large_list", 0, 0, "", (("item", "timestamp_ns"),)
+    )
+
+
+def test_wire_of_a_struct_has_its_fields_in_order_as_children():
+    assert _dtype.wire(_dtype.parse("struct<b: int64, a: string, c: timestamp[ms]>")) == _dtype.Wire(
+        "struct", 0, 0, "", (("b", "int64"), ("a", "string"), ("c", "timestamp_ms"))
+    )
+    assert _dtype.wire(_dtype.parse("struct<f: double>")) == _dtype.Wire("struct", 0, 0, "", (("f", "float64"),))
 
 
 def main():

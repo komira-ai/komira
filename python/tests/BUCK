@@ -477,6 +477,7 @@ _UDF_PYARROW = {
     "test_udf_supervision",
     "test_udf_engine_child",
     "test_udf_types",
+    "test_udf_ipc",
 ] for p in PYTHONS if p["suffix"] in _UDF_PYARROW]
 
 # A function the SDK captured and the plan encoder wrote, run in the same

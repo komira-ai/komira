@@ -86,6 +86,11 @@ Where a type loses something, the table of the runtime says so:
 - A `timestamp[s]` or `[ms]` argument reaches a function as a `datetime` of the same instant; a result with a finer
   fraction is refused, not rounded.
 - A result `timestamp` with a time zone other than the declared one is refused in `ARROW` batches.
+- A `date32` or `timestamp` argument outside the years 1 to 9999 of `datetime` is refused at call time with
+  `ERR_UNSUPPORTED`, naming the row and the argument.
+- An `ARROW` function's result is cast to the declared type only within its own kind: integers to integers or
+  floats, floats to floats, `string` and `large_string`, `binary` and `large_binary`, timestamps of the same zone,
+  decimals, and lists and structs by their children. Any other result type is refused with `ERR_RETURN_TYPE`.
 - Every returned value that would change on the way into the declared type is refused with
   `ERR_RETURN_TYPE` naming the row, never rounded, truncated or wrapped.
 

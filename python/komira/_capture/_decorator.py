@@ -169,15 +169,17 @@ def udf(
     - `kind`: `scalar`, `map_batches_column`, `row` or `map_batches_frame`.
     - `return_dtype`: a column function's type, else taken from its return hint;
       `schema`: a frame function's output, a dict or `(name, dtype)` pairs.
-      A dtype is the text of the pyarrow type: `bool`, `int8` to `int64`,
-      `float32`, `float64`, `string`, `large_string`, `binary`, `large_binary`,
-      `date32[day]`, `timestamp[s]`, `[ms]`, `[us]` or `[ns]` (with `, tz=ZONE`
-      for a zone), `decimal128(p, s)`, `list<item: T>`, `large_list<item: T>` and
+      A dtype is the text of the pyarrow type, except that the floats are
+      `float32` and `float64` (pyarrow's `str()` gives `float` and `double`,
+      which are accepted too): `bool`, `int8` to `int64`, `float32`, `float64`,
+      `string`, `large_string`, `binary`, `large_binary`, `date32[day]`,
+      `timestamp[s]`, `[ms]`, `[us]` or `[ns]` (with `, tz=ZONE` for a zone),
+      `decimal128(p, s)`, `list<item: T>`, `large_list<item: T>` and
       `struct<a: T, ...>`, where an item or field is not a list, a struct, a
-      decimal or a zoned timestamp. `utf8`, `large_utf8`, `date32` and `list<T>`
-      are accepted and kept as `string`, `large_string`, `date32[day]` and
-      `list<item: T>`. A `scalar` or `row` function cannot take a
-      `timestamp[ns]` argument.
+      decimal or a zoned timestamp. `utf8`, `large_utf8`, `date32`, `float`,
+      `double` and `list<T>` are accepted and kept as `string`, `large_string`,
+      `date32[day]`, `float32`, `float64` and `list<item: T>`. A `scalar` or
+      `row` function cannot take a `timestamp[ns]` argument.
     - `columns`: the read set of a `row` or `map_batches_frame` function, else a
       TypedDict or dataclass annotation of its first parameter, else (`row`
       only) a scan of its reads.

@@ -3,10 +3,12 @@
 
 A dtype is written as the text `str()` of the matching pyarrow type gives
 (`int64`, `timestamp[us, tz=UTC]`, `decimal128(10, 2)`, `list<item: int64>`,
-`struct<a: int64, b: string>`), which is the canonical spelling. `parse` reads
-that text, with optional white space around the punctuation, `list<T>` for
-`list<item: T>`, and the aliases `utf8`, `large_utf8` and `date32`, into a
-`DType`; `canonical` gives the text back in the canonical spelling.
+`struct<a: int64, b: string>`), except for the floats: the canonical spelling
+is `float32` and `float64`, where pyarrow's `str()` gives `float` and `double`.
+`parse` reads that text, with optional white space around the punctuation,
+`list<T>` for `list<item: T>`, and the aliases `utf8`, `large_utf8`, `date32`,
+`float` and `double`, into a `DType`; `canonical` gives the text back in the
+canonical spelling.
 
 The engine's column keeps one level of children for a list or struct, each a
 name, a type id and a nullability (src/plan_expr/udf_type_field.mojo). So a
@@ -66,7 +68,7 @@ _SIMPLE = frozenset(
         "large_binary",
     }
 )
-_ALIASES = {"utf8": "string", "large_utf8": "large_string"}
+_ALIASES = {"utf8": "string", "large_utf8": "large_string", "float": "float32", "double": "float64"}
 _UNITS = ("s", "ms", "us", "ns")
 _LISTS = frozenset({"list", "large_list"})
 _NOT_FLAT = frozenset({"list", "large_list", "struct", "decimal128"})
@@ -86,7 +88,9 @@ FLAT_ARROW_NAMES = ARROW_NAMES - _NOT_FLAT
 _MAX_PARSE_DEPTH = 8
 
 _IDENT = re.compile(r"\s*([a-z][a-z0-9_]*)")
-_INT = re.compile(r"\s*([0-9]+)")
+# A run of at most nine digits: a longer run is no decimal parameter, and is
+# refused before it is converted to an int.
+_INT = re.compile(r"\s*([0-9]{1,9})(?![0-9])")
 _LABEL = re.compile(r"\s*([^,:<>]*?)\s*:")
 
 
@@ -122,7 +126,8 @@ class Wire(NamedTuple):
 
 
 def render(d: DType) -> str:
-    """The canonical text of `d`: what `str()` of the pyarrow type gives."""
+    """The canonical text of `d`: what `str()` of the pyarrow type gives, but
+    `float32` and `float64` for the floats pyarrow spells `float` and `double`."""
     kind = d.kind
     if kind == "date32":
         return "date32[day]"

@@ -106,7 +106,15 @@ def _nests(top, name: str, child: str) -> UnsupportedOperation:
 
 def _struct_of(hint, top, name: str, names: list, depth: int) -> str | None:
     """The struct dtype of the TypedDict or dataclass `hint` with the fields
-    `names`, or None when a field's hint names no carried type."""
+    `names`, or None when a field's hint names no carried type. A TypedDict with
+    optional keys is refused: a struct column's fields are all required."""
+    if typing.is_typeddict(hint) and hint.__optional_keys__:
+        optional = [key for key in hint.__annotations__ if key in hint.__optional_keys__]
+        raise UnsupportedOperation(
+            f"UDF_RETURN_TYPE_UNMAPPABLE: the return hint `{show(top)}` of `{name}()` holds the TypedDict "
+            f"`{hint.__qualname__}` with the optional keys {optional!r}, which a struct column cannot hold: "
+            f"every field of a struct is required. Declare every key required, or pass return_dtype= to udf"
+        )
     try:
         field_hints = typing.get_type_hints(hint)
     except Exception as e:  # a hint may fail to evaluate in any way
@@ -168,7 +176,9 @@ def dtype_from_hints(name: str, fn_name: str, hints: dict) -> str:
     bool, str is large_string, bytes is large_binary, datetime.date is
     date32[day], datetime.datetime is timestamp[us], list[T] is large_list of
     T's dtype, and a TypedDict or dataclass is the struct of its fields' dtypes
-    in declaration order. An Optional is the same as its type, at every level.
+    in declaration order (a TypedDict with an optional key is refused, and so
+    is a TypedDict or dataclass with no field). An Optional is the same as its
+    type, at every level.
     A list item or struct field is not a list, a struct or a decimal."""
     if "return" not in hints:
         raise UnsupportedOperation(

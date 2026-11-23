@@ -247,7 +247,14 @@ typedef struct komira_udf_udf {
   uint32_t batch_format;
   char* entry;
   udfpy_schema args, result;
+  /* The load's reference and one per open instance, whose calls read `args`
+   * and `result`: unload drops the load's, so an instance opened before an
+   * unload keeps a live udf until it closes. */
+  _Atomic int refs;
 } udfpy_udf;
+
+/* Drop one reference on `u`; the last frees it (runtime.c). */
+void udfpy_udf_drop(udfpy_udf* u);
 
 struct komira_udf_context {
   udfpy_rt* rt;

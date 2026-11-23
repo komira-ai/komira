@@ -387,6 +387,7 @@ int32_t udfpy_open_instance(komira_udf_context_t* c, udfpy_udf* u, udfpy_inst** 
   udfpy_inst* in = (udfpy_inst*)calloc(1, sizeof(*in));
   if (in == NULL) return udfpy_fail(err, KOMIRA_UDF_ERR_OUT_OF_MEMORY, -1, "no memory for an instance");
   in->ctx = c;
+  atomic_fetch_add_explicit(&u->refs, 1, memory_order_relaxed);
   in->udf = u;
   in->id = iid;
   *out = in;
@@ -408,6 +409,7 @@ void udfpy_close_instance(udfpy_inst* in) {
       udfpy_msg_free(&r);
     }
   }
+  udfpy_udf_drop(in->udf);
   free(in);
 }
 

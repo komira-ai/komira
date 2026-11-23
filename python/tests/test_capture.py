@@ -185,7 +185,8 @@ def test_the_decorator_refuses_wrong_arguments():
 # Every carried type as a user may spell it, and the spelling the spec keeps.
 CARRIED_DTYPES = [
     ("bool", "bool"), ("int8", "int8"), ("int16", "int16"), ("int32", "int32"), ("int64", "int64"),
-    ("float32", "float32"), ("float64", "float64"), ("string", "string"), ("utf8", "string"),
+    ("float32", "float32"), ("float64", "float64"), ("float", "float32"), ("double", "float64"),
+    ("string", "string"), ("utf8", "string"),
     ("large_string", "large_string"), ("large_utf8", "large_string"), ("binary", "binary"),
     ("large_binary", "large_binary"), ("date32", "date32[day]"), ("date32[day]", "date32[day]"),
     ("timestamp[s]", "timestamp[s]"), ("timestamp[ms]", "timestamp[ms]"), ("timestamp[us]", "timestamp[us]"),
@@ -194,6 +195,7 @@ CARRIED_DTYPES = [
     ("decimal128(10,2)", "decimal128(10, 2)"), ("decimal128(38, 0)", "decimal128(38, 0)"),
     ("list<int64>", "list<item: int64>"), ("list<item: utf8>", "list<item: string>"),
     ("large_list<timestamp[ns]>", "large_list<item: timestamp[ns]>"),
+    ("list<double>", "list<item: float64>"), ("struct<a: float, b: double>", "struct<a: float32, b: float64>"),
     ("struct<a:int64,b:utf8>", "struct<a: int64, b: string>"), ("struct<a: date32>", "struct<a: date32[day]>"),
 ]
 
@@ -390,7 +392,7 @@ import dataclasses
 import datetime
 import decimal
 import typing
-from typing import Optional, TypedDict
+from typing import NotRequired, Optional, TypedDict
 
 from komira._capture import udf
 
@@ -407,6 +409,21 @@ class Point:
     when: datetime.datetime
 
 
+WithList = TypedDict("WithList", {"a": int, "b": list[int]})
+OptTotal = TypedDict("OptTotal", {"a": int, "b": str}, total=False)
+OptNotRequired = TypedDict("OptNotRequired", {"a": int, "b": NotRequired[str], "c": NotRequired[int]})
+EmptyDict = TypedDict("EmptyDict", {})
+
+
+@dataclasses.dataclass
+class EmptyData:
+    pass
+
+
+@dataclasses.dataclass
+class Priced:
+    name: str
+    price: decimal.Decimal
 """
 
 # (function name, return hint as written, the dtype the spec gets)
@@ -424,19 +441,39 @@ HINT_DTYPES = [
     ("h_opt_list", "Optional[list[int]]", "large_list<item: int64>"),
     ("h_opt_item", "list[Optional[int]]", "large_list<item: int64>"),
     ("h_opt_both", "Optional[list[Optional[str]]]", "large_list<item: large_string>"),
+    ("h_opt_list_opt_int", "Optional[list[Optional[int]]]", "large_list<item: int64>"),
     ("h_opt_typed_dict", "Optional[Pair]", "struct<a: int64, b: large_string>"),
     ("h_opt_dataclass", "Point | None", "struct<x: int64, y: float64, when: timestamp[us]>"),
 ]
 
 # (function name, return hint as written, the hint as a refusal shows it)
-UNMAPPABLE_HINTS = [("u_dict", "dict[str, int]", "dict[str, int]"), ("u_set", "set[int]", "set[int]"), ("u_object", "object", "object")]
+UNMAPPABLE_HINTS = [
+    ("u_dict", "dict[str, int]", "dict[str, int]"), ("u_set", "set[int]", "set[int]"), ("u_object", "object", "object"),
+    ("u_empty_dict", "EmptyDict", "<class 'capt_hints.EmptyDict'>"),
+    ("u_empty_dataclass", "EmptyData", "<class 'capt_hints.EmptyData'>"),
+    ("u_list_empty_dataclass", "list[EmptyData]", "list[capt_hints.EmptyData]"),
+]
 
 # (function name, return hint as written, the hint as a refusal shows it, the child it nests)
 NESTED_HINTS = [
     ("n_list_list", "list[list[int]]", "list[list[int]]", "large_list<item: int64>"),
     ("n_opt_list_list", "Optional[list[list[int]]]", "list[list[int]] | None", "large_list<item: int64>"),
     ("n_list_dataclass", "list[Point]", "list[capt_hints.Point]", "struct<x: int64, y: float64, when: timestamp[us]>"),
+    ("n_list_with_list", "list[WithList]", "list[capt_hints.WithList]", "large_list<item: int64>"),
+    ("n_dataclass_decimal", "Priced", "<class 'capt_hints.Priced'>", "decimal.Decimal"),
 ]
+
+# (function name, return hint as written, the hint as a refusal shows it, the TypedDict, its optional keys)
+OPTIONAL_KEY_HINTS = [
+    ("o_total", "OptTotal", "<class 'capt_hints.OptTotal'>", "OptTotal", ["a", "b"]),
+    ("o_not_required", "OptNotRequired", "<class 'capt_hints.OptNotRequired'>", "OptNotRequired", ["b", "c"]),
+    ("o_list_total", "list[OptNotRequired]", "list[capt_hints.OptNotRequired]", "OptNotRequired", ["b", "c"]),
+]
+OPTIONAL_KEYS = (
+    "UDF_RETURN_TYPE_UNMAPPABLE: the return hint `{shown}` of `{name}()` holds the TypedDict `{cls}` with the "
+    "optional keys {keys!r}, which a struct column cannot hold: every field of a struct is required. "
+    "Declare every key required, or pass return_dtype= to udf"
+)
 
 DECIMAL_HINTS = [
     ("d_decimal", "decimal.Decimal", "<class 'decimal.Decimal'>"),
@@ -446,7 +483,7 @@ DECIMAL_HINTS = [
 
 def hints_module():
     body = HINTS_HEADER
-    for name, hint, *_ in HINT_DTYPES + UNMAPPABLE_HINTS + NESTED_HINTS + DECIMAL_HINTS:
+    for name, hint, *_ in HINT_DTYPES + UNMAPPABLE_HINTS + NESTED_HINTS + DECIMAL_HINTS + OPTIONAL_KEY_HINTS:
         body += f"\n@udf\ndef {name}(x) -> {hint}:\n    return x\n\n"
     return body
 
@@ -484,6 +521,13 @@ def test_a_return_hint_with_a_child_a_column_cannot_hold_is_refused_by_name():
         module = importlib.import_module("capt_hints")
         for name, _, shown, child in NESTED_HINTS:
             spec_refuses(getattr(module, name), NESTED_HINT.format(shown=shown, name=name, child=child, carried=CARRIED))
+
+
+def test_a_typed_dict_return_hint_with_optional_keys_is_refused_by_name():
+    with project({"capt_hints.py": hints_module()}, ["capt_hints"]):
+        module = importlib.import_module("capt_hints")
+        for name, _, shown, cls, keys in OPTIONAL_KEY_HINTS:
+            spec_refuses(getattr(module, name), OPTIONAL_KEYS.format(shown=shown, name=name, cls=cls, keys=keys))
 
 
 def test_unresolvable_hints_are_refused():
