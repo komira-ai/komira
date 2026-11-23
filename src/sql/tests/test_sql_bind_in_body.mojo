@@ -268,6 +268,13 @@ def test_a_scalar_subquery_above_an_aggregate_binds() raises:
         "  Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"n\")])\n"
         "    Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
+    # With no alias the item takes DuckDB's printed name of a subquery.
+    _check(
+        "SELECT k, count(*) AS n, (SELECT max(v) FROM t) FROM u GROUP BY k",
+        "Project(exprs=[ColRef(k), ColRef(n), Alias(CorrelatedSubquery(kind=2, outer_refs=#0, inner_tag=2), \"(SELECT ...)\")])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"n\")])\n"
+        "    Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
 
 
 comptime _POST_AGG_REFUSAL = (
