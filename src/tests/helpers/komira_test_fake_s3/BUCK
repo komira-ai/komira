@@ -3,9 +3,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # A fake S3 that keeps objects in memory (fake_s3.mojo): a http_core
 # Connector whose streams answer each request as S3 does, with faults a
 # test sets (a 409 conflict, a request budget, a trapped key, an overwrite
-# racing a read, failed multipart steps) and an optional record of the
+# racing a read, failed multipart steps, a key id every request must be
+# signed with) and an optional record of the
 # write verbs. Objects are seeded into bucket `lake`, or any bucket
-# (`seed_in`). Test-only, so no conda package: objectstore_s3 and sdk_exec
+# (`seed_in`). Test-only, so no conda package: objectstore_s3, sdk_exec and so
 # name it in `test_deps`, which reaches those libraries' welded tests and
 # nothing they ship (tools/build/mojo/test_deps.bzl).
 #
@@ -23,5 +24,5 @@ mojo_library(
         "//src/http_core:http_core",
     ],
     test_srcs = ["tests/test_fake_s3_names.mojo"],
-    visibility = ["//src/objectstore_s3:", "//src/sdk_exec:"],
+    visibility = ["//src/objectstore_s3:", "//src/sdk_exec:", "//src/so:"],
 )

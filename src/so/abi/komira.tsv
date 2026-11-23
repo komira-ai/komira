@@ -1,4 +1,4 @@
-version	1.1
+version	1.2
 # The C ABI of libkomira. One row per export: symbol, return type, argument types, the version that added it.
 # Types are Mojo's, origins dropped; see tools/build/mojo/abi_golden.bzl. Adding a row raises the minor version.
 # Changing or removing one raises the major version (status.mojo: ABI_MAJOR, ABI_MINOR).
@@ -11,6 +11,9 @@ komira_parquet_schema	Int32	Handle,CStr,UnsafePointer[UInt8],UInt64,UnsafePointe
 komira_csv_binding	Int32	Handle,CStr,UInt8,Int32,Int32,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.1
 komira_json_binding	Int32	Handle,CStr,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.1
 komira_plan_render	Int32	Handle,ConstBytes,UInt64,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.1
+komira_credential_add	Int32	Handle,Int32,CStr,UnsafePointer[Int32]	1.2
+komira_credential_set	Int32	Handle,Int32,Int32,ConstBytes,UInt64	1.2
+komira_credential_seal	Int32	Handle,Int32,Int32	1.2
 # Status codes (status.mojo): zero is success, every failure is negative.
 constant	KOMIRA_OK	0	1.0
 constant	KOMIRA_ERR_NULL_CTX	-1	1.0
@@ -20,3 +23,26 @@ constant	KOMIRA_ERR_BUFFER_TOO_SMALL	-4	1.0
 constant	KOMIRA_ERR_TOO_LARGE	-5	1.1
 # The longest byte input a call accepts: 64 MiB.
 constant	KOMIRA_MAX_INPUT_BYTES	67108864	1.1
+# The scope a credential is sealed in, its kinds and its fields (status.mojo).
+constant	KOMIRA_BIND_SESSION	1	1.2
+constant	KOMIRA_CRED_AWS_KEYS	1	1.2
+constant	KOMIRA_CRED_AWS_PROFILE	2	1.2
+constant	KOMIRA_CRED_GCP_SERVICE_ACCOUNT	3	1.2
+constant	KOMIRA_CRED_GCP_TOKEN	4	1.2
+constant	KOMIRA_CRED_AZURE_KEY	5	1.2
+constant	KOMIRA_CRED_AZURE_SAS	6	1.2
+constant	KOMIRA_CRED_BEARER	7	1.2
+constant	KOMIRA_CRED_OAUTH2_CLIENT	8	1.2
+constant	KOMIRA_FIELD_KEY_ID	1	1.2
+constant	KOMIRA_FIELD_SECRET	2	1.2
+constant	KOMIRA_FIELD_SESSION_TOKEN	3	1.2
+constant	KOMIRA_FIELD_PROFILE	4	1.2
+constant	KOMIRA_FIELD_FILE	5	1.2
+constant	KOMIRA_FIELD_TOKEN	6	1.2
+constant	KOMIRA_FIELD_ACCOUNT	7	1.2
+constant	KOMIRA_FIELD_KEY	8	1.2
+constant	KOMIRA_FIELD_SAS	9	1.2
+constant	KOMIRA_FIELD_CLIENT_ID	10	1.2
+constant	KOMIRA_FIELD_CLIENT_SECRET	11	1.2
+constant	KOMIRA_FIELD_SCOPE	12	1.2
+constant	KOMIRA_FIELD_TOKEN_URL	13	1.2
