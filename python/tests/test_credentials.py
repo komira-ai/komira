@@ -282,14 +282,16 @@ def check_seal(s, store):
         "seal 9 1",
     ]
     s._seal_credential(
-        OAuth2ClientCredentials("oauth", client_id="etl", client_secret="cs", scope="read", token_url="https://t/x")
+        OAuth2ClientCredentials(
+            "oauth", client_id="etl", client_secret="cs", scope="read", token_url="https://token.example/x"
+        )
     )
     assert store.take() == [
         "add 8 oauth 10",
         "set 10 10 " + hexed("etl"),
         "set 10 11 " + hexed("cs"),
         "set 10 12 " + hexed("read"),
-        "set 10 13 " + hexed("https://t/x"),
+        "set 10 13 " + hexed("https://token.example/x"),
         "seal 10 1",
     ]
     # The longest value, 4096 bytes of two-byte characters, goes whole.

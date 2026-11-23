@@ -74,7 +74,9 @@ def main(args):
             AzureSas("az-sas", account="acct", sas="sv=2024&sig=abc"),
             BearerToken("cat", token="t0k"),
             OAuth2ClientCredentials("oauth", client_id="etl", client_secret="cs"),
-            OAuth2ClientCredentials("oauth2", client_id="etl", client_secret="cs", scope="read", token_url="https://t/x"),
+            OAuth2ClientCredentials(
+                "oauth2", client_id="etl", client_secret="cs", scope="read", token_url="https://token.example/x"
+            ),
             AMBIENT,
             ANONYMOUS,
         ):
