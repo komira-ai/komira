@@ -30,7 +30,7 @@
 #       grouped query, are refused naming the position.
 # =============================================================================
 
-from std.testing import TestSuite, assert_equal, assert_false, assert_true
+from std.testing import TestSuite, assert_equal, assert_true
 
 from arrow.arrow_types import ArrowType
 from arrow.record_batch import RecordBatch
@@ -152,8 +152,6 @@ def _check(sql: String, want: String) raises:
 
 def _checkp(sql: String, want: String) raises:
     assert_equal(_gotp(sql), want, sql)
-
-
 
 
 def _member_body(sql: String) raises -> String:

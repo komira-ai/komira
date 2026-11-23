@@ -514,6 +514,45 @@ def test_exactly_one_row_is_a_global_aggregate_under_project_sort_distinct() rai
     assert_false(always_exactly_one_row(LogicalPlan.limit(1, _orders())))
     assert_false(always_exactly_one_row(_grouped_agg()))
     assert_false(always_exactly_one_row(_orders()))
+    # A global aggregate CROSS JOIN a global aggregate (a body whose own
+    # scalar was joined in) is one row; against a scan it is not.
+    var lk = List[String]()
+    var rk = List[String]()
+    assert_true(
+        always_exactly_one_row(
+            LogicalPlan.join(_global_agg(), _global_agg(AGG_MAX), lk.copy(), rk.copy(), JOIN_CROSS)
+        )
+    )
+    assert_false(
+        always_exactly_one_row(
+            LogicalPlan.join(_global_agg(), _orders(), lk.copy(), rk.copy(), JOIN_CROSS)
+        )
+    )
+    assert_false(
+        always_exactly_one_row(
+            LogicalPlan.join(_orders(), _global_agg(), lk^, rk^, JOIN_CROSS)
+        )
+    )
+
+
+def test_a_one_row_body_holding_a_scalar_is_not_joined_through_max() raises:
+    # `(SELECT max(o_total) - (SELECT sum(o_total) FROM orders) FROM orders)`:
+    # a Project over a global aggregate whose expression holds a scalar. Once
+    # that scalar is joined into the body, the body is a Project over a CROSS
+    # join of two one-row sides, still one row, so it is joined through its
+    # renaming Project and not a `max`. Catches: a body re-judged after its
+    # own decorrelation and wrapped in a `max` whose type was never checked.
+    var pe = ExprArray()
+    pe.append(Expr.alias(Expr.binary(BIN_EQ, Expr.col_ref(String("v")), _subq()), String("w")))
+    var body = LogicalPlan.project(pe^, _global_agg(AGG_MAX))
+    var out = scalar_subquery_decorrelate(
+        LogicalPlan.filter(_gt(_bal(), _subq_over(body^)), _customer())
+    )
+    _assert_filter_decorrelated(out)
+    ref r = out.project_data_ref().child[].filter_data_ref().child[].join_data_ref().right[]
+    ref inner = r.project_data_ref().child[]
+    assert_equal(inner.tag, PLAN_PROJECT)
+    assert_equal(inner.project_data_ref().child[].tag, PLAN_JOIN)
 
 
 # =============================================================================

@@ -25,6 +25,11 @@
 #   branch and the outer branch → ONE physical plan, in which `customer`
 #   (Q22) / the germany-join (Q11) is read ONCE.
 #
+# A body that may be empty (a LIMIT) is joined through a global `max` of its
+# column, so the CROSS join always sees one row (NULL for an empty body), and
+# only for a column type that `max` carries. A subquery under a CASE is
+# rewritten too, and a scalar inside a collected body is decorrelated in it.
+#
 # "PROVABLY <= 1 row" predicate (conservative — fall through to
 # materialize-and-substitute otherwise):
 #   - `PLAN_AGGREGATE` with `len(group_by) == 0` (a global aggregate emits
@@ -167,8 +172,8 @@ def _provably_at_most_one_row(plan: LogicalPlan) -> Bool:
 
 def always_exactly_one_row(plan: LogicalPlan) -> Bool:
     """Does `plan` emit exactly one row whatever its input: a GLOBAL aggregate,
-    or a `PLAN_PROJECT` / `PLAN_SORT` / `PLAN_DISTINCT` over one (none of
-    those adds or drops the single row)? A body that is at most one row only
+    a `PLAN_PROJECT` / `PLAN_SORT` / `PLAN_DISTINCT` over one (none of those
+    adds or drops the single row), or a CROSS join of two such sides? A body that is at most one row only
     by a LIMIT may emit none, and is not. `eliminate_cross_join` reads it too:
     a CROSS join whose right side is such a broadcast row (a decorrelated
     scalar) keeps its equality as a filter, since a hash join gains nothing
@@ -181,6 +186,11 @@ def always_exactly_one_row(plan: LogicalPlan) -> Bool:
         return always_exactly_one_row(plan._sort.value()[].child[])
     if plan.tag == PLAN_DISTINCT:
         return always_exactly_one_row(plan._distinct.value()[].child[])
+    if plan.tag == PLAN_JOIN and plan._join.value()[].join_type == JOIN_CROSS:
+        # A body whose own scalar was decorrelated: one row times one row.
+        return always_exactly_one_row(plan._join.value()[].left[]) and always_exactly_one_row(
+            plan._join.value()[].right[]
+        )
     return False
 
 
@@ -188,7 +198,9 @@ def always_exactly_one_row(plan: LogicalPlan) -> Bool:
 def _is_decorrelatable_scalar_subquery(expr: Expr) raises -> Bool:
     """True iff `expr` is an uncorrelated SCALAR subquery whose inner plan
     is provably <= 1 row AND has exactly one output column (a scalar
-    subquery used as an expression must return a single column).
+    subquery used as an expression must return a single column), and, when
+    the inner plan may be empty (a LIMIT), its column is a type a global
+    `max` carries (`_max_carries`).
 
     ⚠ `raises` SINCE 2026-09-03 — NOT because this predicate got a new failure
     mode, but because reaching the inner plan now goes through

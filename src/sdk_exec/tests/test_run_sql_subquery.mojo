@@ -21,8 +21,9 @@
 #   test_empty_and_limit_scalar_bodies_equal_duckdb
 #       a global aggregate over the empty table (max is NULL, count is 0), in a
 #       WHERE, under IS NULL, in a SELECT list and under coalesce; a LIMIT 1
-#       body of one row; a LIMIT 1 body of no row is NULL in a SELECT list and
-#       under IS NULL, so every outer row is kept.
+#       body of one row (BIGINT, DATE); a LIMIT 1 body of no row (BIGINT,
+#       DECIMAL) is NULL in a SELECT list and under IS NULL, so every outer row
+#       is kept.
 #   test_scalar_subqueries_in_other_positions_equal_duckdb
 #       a SELECT item alone, in arithmetic, with no FROM, under CASE; a SELECT
 #       item of a grouped query; beside an aggregate (sum(v) + (SELECT ..));
@@ -35,7 +36,7 @@
 #       holding NULL.
 #   test_in_over_a_whole_body_equals_duckdb
 #       IN over a body with DISTINCT, GROUP BY and HAVING (the TPC-H Q18
-#       shape), a join, an expression and an aggregate.
+#       shape), a join, an expression, an aggregate and a LIMIT.
 #   test_not_in_is_null_aware_like_duckdb
 #       NOT IN (SELECT) over a column with NULL (no row), without NULL (the
 #       NULL left key dropped), over the empty table (every row, NULL key
@@ -44,7 +45,7 @@
 #   test_not_in_over_a_whole_body_is_null_aware_like_duckdb
 #       NOT IN over a DISTINCT, a GROUP BY / HAVING and an expression body,
 #       each with a NULL in its result and without; a grouped body with no
-#       group.
+#       group; a LIMIT body holding a NULL.
 #   test_a_scalar_body_of_several_rows_is_refused_at_optimize
 #       a scalar body that is not provably one row (a plain filtered scan) is
 #       refused at step `optimize` with OPTIMIZE_UNRESOLVED_SCALAR; DuckDB
@@ -112,10 +113,11 @@ def _with_paths(query: String) raises -> String:
     return text^
 
 
-def _check(name: String, workers: Int, mut problems: List[String]) raises:
+def _check(
+    name: String, workers: Int, cases: List[_Case], mut problems: List[String]
+) raises:
     var label = name + " on " + String(workers) + " workers"
     var query = String("")
-    var cases = _cases()
     for i in range(len(cases)):
         if cases[i].name == name:
             query = cases[i].query
@@ -147,9 +149,10 @@ def _check(name: String, workers: Int, mut problems: List[String]) raises:
 
 def _check_all(var names: List[String]) raises:
     var problems = List[String]()
+    var cases = _cases()
     for i in range(len(names)):
-        _check(names[i], 1, problems)
-        _check(names[i], 3, problems)
+        _check(names[i], 1, cases, problems)
+        _check(names[i], 3, cases, problems)
     var text = String("")
     for i in range(len(problems)):
         text += "\n  " + problems[i]
@@ -199,6 +202,8 @@ def _scalar_empty_and_limit() -> List[String]:
     out.append("scalar_limit_one_row")
     out.append("scalar_limit_no_row_select")
     out.append("scalar_limit_no_row_is_null")
+    out.append("scalar_limit_date_select")
+    out.append("scalar_limit_decimal_no_row")
     return out^
 
 
@@ -238,6 +243,7 @@ def _in_whole_body() -> List[String]:
     out.append("in_join_body")
     out.append("in_expr_body")
     out.append("in_agg_body")
+    out.append("in_limit_body")
     return out^
 
 
@@ -265,6 +271,7 @@ def _not_in_whole_body() -> List[String]:
     out.append("not_in_group_empty")
     out.append("not_in_expr_body_nulls")
     out.append("not_in_expr_body_null_free")
+    out.append("not_in_limit_body")
     return out^
 
 

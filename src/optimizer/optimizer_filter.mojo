@@ -948,7 +948,8 @@ def eliminate_cross_join_inplace(mut plan: LogicalPlan) raises:
     Recurses children IN PLACE. Two cases fire:
 
     1. **Filter-above-Cross-Join** (original behavior): convert CROSS to
-       INNER by extracting equi-keys from the Filter predicate.
+       INNER by extracting equi-keys from the Filter predicate, unless the
+       right side is always one row (a decorrelated scalar), kept a filter.
     2. **Filter-above-Inner-Join** (bench-shape feature 1B): fold any
        equi-conjuncts from the Filter predicate that bridge the two
        sides into the existing INNER join's `left_on` / `right_on`,

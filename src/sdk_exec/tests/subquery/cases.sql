@@ -4,7 +4,7 @@
 -- for the query text and runs the same text through run_sql with each file
 -- name replaced by its path, so a query has one source. A case's name is its
 -- output file without `.tsv`.
-COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.v = (SELECT max(u.v) * 1 - 75 FROM read_parquet('u.parquet') u)) TO 'scalar_eq_max.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.v = (SELECT max(u.v) - 85 FROM read_parquet('u.parquet') u)) TO 'scalar_eq_max.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE (SELECT min(u.v) FROM read_parquet('u.parquet') u) + 100 < t.v) TO 'scalar_left_operand.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.v > (SELECT avg(u.v) FROM read_parquet('u.parquet') u)) TO 'scalar_avg_double.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.v * 10 >= (SELECT sum(u.v) FROM read_parquet('u.parquet') u)) TO 'scalar_sum.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
@@ -24,6 +24,8 @@ COPY (SELECT count(*) AS n FROM read_parquet('t.parquet') t WHERE t.v > (SELECT 
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.v > (SELECT u.v FROM read_parquet('u.parquet') u WHERE u.id = 3 LIMIT 1)) TO 'scalar_limit_one_row.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, (SELECT u.v FROM read_parquet('u.parquet') u WHERE u.id < 0 LIMIT 1) AS m FROM read_parquet('t.parquet') t) TO 'scalar_limit_no_row_select.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE (SELECT u.v FROM read_parquet('u.parquet') u WHERE u.id < 0 LIMIT 1) IS NULL) TO 'scalar_limit_no_row_is_null.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT t.id AS id, (SELECT u.dt FROM read_parquet('u.parquet') u WHERE u.id = 2 LIMIT 1) AS m FROM read_parquet('t.parquet') t) TO 'scalar_limit_date_select.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT t.id AS id, t.d AS d FROM read_parquet('t.parquet') t WHERE (SELECT u.d FROM read_parquet('u.parquet') u WHERE u.id < 0 LIMIT 1) IS NULL AND t.d > 3) TO 'scalar_limit_decimal_no_row.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, (SELECT max(u.v) FROM read_parquet('u.parquet') u) AS m FROM read_parquet('t.parquet') t) TO 'scalar_select_item.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.v - (SELECT min(u.v) FROM read_parquet('u.parquet') u) AS dv FROM read_parquet('t.parquet') t) TO 'scalar_select_expr.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, (SELECT max(e.v) FROM read_parquet('e.parquet') e) AS m FROM read_parquet('t.parquet') t) TO 'scalar_select_empty.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
@@ -44,6 +46,7 @@ COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHE
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.k IN (SELECT u.k FROM read_parquet('u.parquet') u GROUP BY u.k HAVING sum(u.v) > 300)) TO 'in_group_having.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.k IN (SELECT u.k FROM read_parquet('u.parquet') u, read_parquet('nn.parquet') nn WHERE u.k = nn.k AND nn.g = 0)) TO 'in_join_body.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.k IN (SELECT u.k - 2 FROM read_parquet('u.parquet') u)) TO 'in_expr_body.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.k IN (SELECT u.k FROM read_parquet('u.parquet') u WHERE u.id < 6 LIMIT 100)) TO 'in_limit_body.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.v IN (SELECT min(u.v) + 50 FROM read_parquet('u.parquet') u)) TO 'in_agg_body.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.k IN (SELECT e.k FROM read_parquet('e.parquet') e)) TO 'in_empty.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.k IN (SELECT u.k FROM read_parquet('u.parquet') u) AND t.g IN (SELECT nn.g FROM read_parquet('nn.parquet') nn)) TO 'in_two.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
@@ -61,6 +64,7 @@ COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHE
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.k NOT IN (SELECT u.k FROM read_parquet('u.parquet') u GROUP BY u.k HAVING count(*) < 4)) TO 'not_in_group_having_nulls.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.k NOT IN (SELECT u.k FROM read_parquet('u.parquet') u WHERE u.k IS NOT NULL GROUP BY u.k HAVING count(*) > 3)) TO 'not_in_group_having_null_free.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.k NOT IN (SELECT u.k FROM read_parquet('u.parquet') u GROUP BY u.k HAVING count(*) > 100)) TO 'not_in_group_empty.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.k NOT IN (SELECT u.k FROM read_parquet('u.parquet') u WHERE u.id < 6 LIMIT 100)) TO 'not_in_limit_body.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.k NOT IN (SELECT u.k - 2 FROM read_parquet('u.parquet') u)) TO 'not_in_expr_body_nulls.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.k NOT IN (SELECT nn.k - 2 FROM read_parquet('nn.parquet') nn)) TO 'not_in_expr_body_null_free.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT t.id AS id, t.k AS k, t.v AS v FROM read_parquet('t.parquet') t WHERE t.v > 50 AND t.k NOT IN (SELECT nn.k FROM read_parquet('nn.parquet') nn)) TO 'not_in_and_filter.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

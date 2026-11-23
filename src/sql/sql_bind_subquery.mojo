@@ -308,7 +308,8 @@ def _bind_correlated_subquery_body(
     and `_bind_select` mutually recursive). Builds the inner plan directly
     (not via `_bind_select`) so the inner WHERE binds qualifier-aware,
     splitting inner from outer columns; `_bind_select` would reject the outer
-    refs.
+    refs. The exception is the uncorrelated IN body below, which
+    `_bind_uncorrelated_in_body` binds with `_bind_select`.
 
     IN is unified onto EXISTS by synthesizing the membership equi
     `inner_projected_col = in_lhs_col` and folding it into the inner WHERE
