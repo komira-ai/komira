@@ -110,12 +110,15 @@ def _max_id(arr: JsonValue, key: String) raises -> Int64:
 
 def empty_table_metadata() raises -> JsonValue:
     """The metadata a staged create's commit starts from: format version 2,
-    no uuid, no location, no schema, spec, sort order or snapshot."""
+    no uuid, no location, no schema, spec, sort order or snapshot.
+    `last-updated-ms`, which the spec requires, starts at 0 and follows the
+    latest snapshot added (the test catalog has no clock of its own)."""
     var m = JsonValue.empty_object()
     m.set_member(String("format-version"), JsonValue.from_i64(2))
     m.set_member(String("table-uuid"), JsonValue.from_string(String("")))
     m.set_member(String("location"), JsonValue.from_string(String("")))
     m.set_member(String("last-sequence-number"), JsonValue.from_i64(0))
+    m.set_member(String("last-updated-ms"), JsonValue.from_i64(0))
     m.set_member(String("last-column-id"), JsonValue.from_i64(0))
     m.set_member(String("current-schema-id"), JsonValue.from_i64(-1))
     m.set_member(String("schemas"), JsonValue.empty_array())
@@ -359,8 +362,11 @@ def _add_snapshot(mut md: JsonValue, var snap: JsonValue) raises:
         raise Error(
             BAD_REQUEST + String(": snapshot ") + String(id) + String(" exists")
         )
+    var ts = int_member(snap, String("timestamp-ms"), 0)
     md.children[i].push(snap^)
     put_member(md, String("last-sequence-number"), JsonValue.from_i64(seq))
+    if ts > int_member(md, String("last-updated-ms"), 0):
+        put_member(md, String("last-updated-ms"), JsonValue.from_i64(ts))
 
 
 def remove_snapshot(mut md: JsonValue, snapshot_id: Int64) raises:

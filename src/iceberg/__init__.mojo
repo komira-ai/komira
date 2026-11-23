@@ -16,7 +16,8 @@ What the package emits (format-version 2):
 
 `IcebergTableWriter` appends data files and delete files as snapshots;
 `IcebergTableReader` reads the current snapshot with the deletes applied. The
-data files themselves are Parquet, built by `build_parquet_data_file` or by the
+data files themselves are Parquet, built by `build_parquet_data_file`, from an
+Arrow batch with field ids and bounds by `encode_iceberg_data_file`, or by the
 caller.
 """
 
@@ -103,6 +104,15 @@ from .iceberg_version import (
     current_version,
 )
 
+from .iceberg_arrow_data_file import (
+    ICEBERG_TYPE_UNSUPPORTED,
+    ICEBERG_NULL_IN_REQUIRED_COLUMN,
+    EncodedDataFile,
+    iceberg_type_of_arrow,
+    iceberg_type_of_column,
+    encode_iceberg_data_file,
+)
+
 from .iceberg_avro_manifest import (
     ICE_CONTENT_DATA,
     ICE_CONTENT_POSITION_DELETES,
@@ -120,6 +130,7 @@ from .iceberg_avro_manifest import (
     encode_manifest_entry,
     encode_manifest_file_record,
     build_manifest_file,
+    build_data_manifest,
     avro_field_name,
     build_manifest_list,
 )
@@ -128,6 +139,7 @@ from .iceberg_avro_manifest_read import (
     ManifestEntry,
     read_manifest_list,
     read_manifest_entries,
+    is_komira_manifest_list,
 )
 
 from .iceberg_row_value import (

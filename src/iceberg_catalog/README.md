@@ -2,10 +2,12 @@
 
 An Iceberg catalog client: it resolves `namespace.table` to the object-store
 location of the table's current `metadata.json`, loads a table's metadata,
-creates tables, and commits an append to a table through the customer's REST
-catalog. The package does not write data files or manifests (the caller's
-`AppendSnapshotWriter` writes the manifest list), and it does not read a
-table's data.
+creates tables, and commits an append or an overwrite to a table through the
+customer's REST catalog. Its write sink (`write_table`) writes Arrow batches
+as the table's Parquet data files, a manifest and a manifest list in an object
+store, and commits them. The committer itself writes no files: the
+`AppendSnapshotWriter` it is given writes the manifest list. The package does
+not read a table's data.
 
 ## Resolving a table
 
@@ -53,11 +55,19 @@ two implementations:
   transport error or a 200 whose body cannot be read, `COMMIT_REFUSED` for any
   other status.
 - `commit_append(catalog, writer, clock, ids, AppendCommit)` commits one
-  statement's append: it loads the base, checks the table uuid, format version
+  statement's append, or with `AppendCommit.overwrite` its overwrite of every
+  row of `main`: it loads the base, checks the table uuid, format version
   2 and the written columns, has the writer write the manifest list, and posts
   `assert-table-uuid`, `assert-ref-snapshot-id(main)` and
   `assert-current-schema-id` with `add-snapshot` and `set-snapshot-ref(main)`.
-  It retries a 409 on the new base within the table's `commit.retry.*`
+  An append's snapshot has operation `append` and the parent's `total-*`
+  counters plus what it added; an overwrite's has operation `overwrite`,
+  `deleted-data-files`, `deleted-records` and `removed-files-size` equal to the
+  parent's `total-data-files`, `total-records` and `total-files-size` (each
+  omitted when the parent lacks it), and `total-*` counters equal to what it
+  added, with 0 delete counters. With no files an append sends nothing; an
+  overwrite of a table that has a `main` snapshot still commits, and the
+  table is empty. It retries a 409 on the new base within the table's `commit.retry.*`
   budget (never when the statement read its target), resends an unknown
   outcome once under the same idempotency key when the catalog honours keys,
   looks its commit up by snapshot id and by the `komira.commit-id` summary
@@ -68,6 +78,74 @@ two implementations:
   `CommitIds` (`SequenceCommitIds` for tests).
 - Not here: the staged-create and replace committers, OAuth2 and SigV4
   credentials, vended credentials, multi-level namespaces.
+
+## Writing a table
+
+`write_table(catalog, files, clock, ids, namespace, table, batches, overwrite,
+pinned_snapshot_ids)` is one statement's write into an existing table. It never
+raises: the `TableWriteOutcome` has `committed`, `message` (starting with its
+token), the rows and files committed, the committer's ids and counts, the
+URIs deleted and the deletes that failed. In order, it:
+
+1. loads the table; only format version 2 is written;
+2. maps each batch to the table's current schema by position: the same number
+   of columns, and each column's Iceberg type (boolean, int, long, float,
+   double, string or date) equal to the table field's;
+3. takes the data path from `write.data.path`, else `<location>/data`, and the
+   metadata path from `write.metadata.path`, else `<location>/metadata`; a
+   path that is not under `<location>/` is refused;
+4. takes the Parquet codec from `write.parquet.compression-codec` (zstd,
+   snappy, gzip, uncompressed or lz4), else zstd;
+5. writes one data file `<data path>/<uuid>-<i>.parquet` for each batch `i`
+   that has rows, with the table's field ids on its columns, the table's
+   `required` flags, and per-column counts and bounds in its manifest entry;
+6. has `StoreSnapshotWriter` write the statement's manifest
+   (`<metadata path>/<uuid>-m0.avro`, once, with inherited sequence numbers)
+   and, for each attempt, a manifest list
+   (`<metadata path>/snap-<snapshot id>-<attempt>-<uuid>.avro`): an append
+   lists the manifests of the base's `main` snapshot, then the new one; an
+   overwrite lists only the new one, and none when there are no files. An
+   append reads the base's list, so a base list that another writer wrote
+   is `ICEBERG_MANIFEST_LIST_UNSUPPORTED`;
+7. commits with `commit_append`, then deletes: after a definite failure the
+   statement's data files and manifest, always the manifest lists the
+   committer names, and after an unknown outcome nothing else. A failure
+   before the commit deletes the data files already written.
+
+`TableFiles` is the object store and the URI prefix it serves (for example
+`s3://warehouse`); a URI under the prefix maps to the store key after it, and
+any other URI is `ICEBERG_LOCATION_REFUSED`. The store is a
+`CloneableConditionalWriteStore` (`LocalFsConditionalStore`,
+`SharedInMemoryConditionalStore`, ...): the writer and the caller each hold a
+handle on the same data. A store error is raised as the store raised it.
+
+Not in this first slice: partitioned tables, decimal, timestamp, time, binary
+and uuid columns, truncated string bounds, a base list another writer wrote,
+DELETED manifest entries for the files an overwrite drops (they stay in the
+store until the table's maintainer removes them), and rolling over a file by
+size.
+
+## Read by another engine
+
+The tables the sink writes are plain Iceberg v2 tables, so DuckDB's iceberg
+extension reads them. `iceberg_write_runner` (`iceberg_write_runner/main.mojo`)
+writes three tables through `write_table` into a `LocalFsConditionalStore`
+with deterministic ids (`db.appended`: two appends; `db.overwritten`: an append
+and an overwrite; `db.emptied`: an append and an overwrite with no rows), puts
+each table's metadata JSON at its metadata location and writes every object as
+a file under `db/<table>/metadata` and `db/<table>/data`. The build action
+`:iceberg_write_komira` (`iceberg_write_cases.bzl`) runs it, and
+`:iceberg_readback_oracle` runs `tests/readback.sql` in the pinned DuckDB with
+the avro and iceberg extensions loaded. The SQL scans each table with
+`iceberg_scan(<metadata file>, allow_moved_paths = true)`: the paths the
+metadata holds are `s3://wh/...` URIs, which DuckDB resolves against the
+directory of the metadata file by their `/metadata/` and `/data/` parts, so a
+table's location must contain neither part before its own and its files must
+lie under `metadata/` and `data/`, as `write_table`'s defaults do. It compares
+the rows with hand-written expected rows both ways, reads the column types and
+reads each data file's Parquet field ids. `test_iceberg_foreign_readback`
+asserts the answers. This is a test of the files; nothing in the package reads
+a table's data through DuckDB.
 
 ## Errors
 
@@ -87,7 +165,17 @@ the catalog's `ErrorModel` `type` and `message`, and never the raw body:
 
 The commit failures add `ICEBERG_COMMIT_CONFLICT`,
 `ICEBERG_COMMIT_STATE_UNKNOWN`, `ICEBERG_TABLE_REPLACED`,
-`ICEBERG_SCHEMA_INCOMPATIBLE` and `ICEBERG_WRITE_FORMAT_UNSUPPORTED`.
+`ICEBERG_SCHEMA_INCOMPATIBLE` and `ICEBERG_WRITE_FORMAT_UNSUPPORTED`. The write
+sink adds `ICEBERG_TYPE_UNSUPPORTED` (a column of a type the writer does not
+write, named with its type), `ICEBERG_NULL_IN_REQUIRED_COLUMN` (a null bound
+for a `required` column, named with the count; both are the `iceberg`
+package's tokens, named here too), `ICEBERG_LOCATION_REFUSED` (a data or
+metadata path outside the table's location, or a URI outside the store's
+prefix) and `ICEBERG_MANIFEST_LIST_UNSUPPORTED` (a base manifest list that
+another writer wrote). `ICEBERG_SCHEMA_INCOMPATIBLE` also names a batch whose
+column count or column types differ from the table's, and
+`ICEBERG_WRITE_FORMAT_UNSUPPORTED` a codec property value komira does not
+write.
 `StorageBasedCatalog` raises its own `IcebergCatalogError`.
 
 The REST client is generic over a transport (`IcebergRestTransport.send`:

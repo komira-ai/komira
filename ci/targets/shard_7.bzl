@@ -161,6 +161,7 @@ TARGETS = [
     "komira//src/exec_types:exec_types_conda",
     "komira//src/http_auth:http_auth_conda",
     "komira//src/iceberg_catalog:iceberg_catalog_conda",
+    "komira//src/iceberg_catalog:test_iceberg_foreign_readback",
     "komira//src/iceberg_catalog:test_iceberg_rest_loopback",
     "komira//src/mail_tls:mail_tls_conda",
     "komira//src/morsel:morsel_conda",
