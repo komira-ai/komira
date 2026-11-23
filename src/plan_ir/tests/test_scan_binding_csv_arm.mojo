@@ -44,12 +44,12 @@ from std.testing import (
     assert_not_equal,
     assert_raises,
 )
-from libc.posix import _read_env
 
 from arrow.arrow_types import ArrowType
 from arrow.schema import Field, Schema, SchemaBuilder
 from plan_expr.expr import Expr, ScalarValue, BIN_EQ
 from byte_buffer.file_identity import set_file_mtime_ns
+from libc.posix import _read_env
 from plan_ir.logical_plan import (
     LogicalPlan,
     derive_source_layout,
@@ -749,15 +749,15 @@ def test_the_legacy_csv_factory_no_longer_states_a_source_kind() raises:
     assert_equal(pq_sd.source_kind, SOURCE_KIND_COLUMNAR)
 
 
-def _scratch_dir() -> String:
-    """The directory this execution may write files into: TEST_TMPDIR (unique
-    per execution), else TMPDIR. A fixed `/tmp` path is shared by concurrent
-    executions and is not writable on the macOS executors."""
+def _scratch_dir() raises -> String:
+    """The directory this test action may write into: `TEST_TMPDIR`, else
+    `TMPDIR`. A fixed `/tmp` path is shared by every action on a worker, and a
+    macOS worker's sandbox refuses it."""
     var d = _read_env("TEST_TMPDIR")
     if d.byte_length() == 0:
         d = _read_env("TMPDIR")
     if d.byte_length() == 0:
-        return String("/tmp")
+        raise Error("neither TEST_TMPDIR nor TMPDIR is set: no scratch directory")
     return d
 
 

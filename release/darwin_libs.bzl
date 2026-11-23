@@ -46,6 +46,17 @@ def darwin_packages(packages = README_E2E_PACKAGES, excluded = DARWIN_EXCLUDED):
 
 DARWIN_PACKAGES = darwin_packages()
 
+# The macOS Python harness tests: release-macos.yml's step `build the macOS Python harness tests`
+# builds exactly these, after the set, for darwin-arm64 (//:release_macos_cases holds the step's
+# args to this list), and pr.yml's analysis of the set analyses them too (release/darwin_analysis.bxl),
+# so a target of their closure that cannot run on a macOS worker fails in its pull request.
+DARWIN_PYTHON_HARNESS = [
+    "komira//tools/build/examples/python_binding:hello",
+    "komira//tools/build/examples/python_binding:refuses_missing_lib",
+    "komira//tools/build/examples/python_binding:refuses_wrong_add",
+    "komira//tools/build/examples/python_binding:refuses_wrong_sum",
+]
+
 def _impl(ctx):
     tree = {}
     for name, lib in zip(ctx.attrs.names, ctx.attrs.libs):

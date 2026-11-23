@@ -378,8 +378,9 @@ instead. The rest of this section is about `release-macos.yml`.
   empty, and the same query for `--target-platforms
   komira//tools/build/platforms:darwin-arm64` over a library is not.
   `//:release_macos_cases` holds the workflows and the shards of `ci/targets/` to it, and holds
-  `pypi.yml` and `pypi-macos-arm64.yml` to not running on a pull request or a merge group. The three targets of the macOS wheel
+  `pypi.yml` and `pypi-macos-arm64.yml` to not running on a pull request or a merge group. The five targets of the macOS wheel
   (`//python:komira_wheel_macos_arm64`, `//python:wheel_install_test_macos_arm64`,
+  `//python:wheel_libs_macos_arm64`, `//python:wheel_same_macos_arm64`,
   `//python/smoke:pypi_smoke_macos_arm64`) stay out of the check twice: each has an `EXCLUDED` row in
   `tools/build/ci/rules.bzl`, so the pull-request selector never picks it, and each has
   `target_compatible_with = DARWIN_ARM64` (limit `pypi-wheel-macos-arm64` in
@@ -390,15 +391,22 @@ instead. The rest of this section is about `release-macos.yml`.
   execution platform, a rule that fails at analysis) is found in the pull request that
   causes it: the last buck2 step of `pr.yml` runs
   `bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check`,
-  which configures `//release:mopm_darwin_libs` for darwin-arm64 and analyses it, with its
-  whole closure, as the release's build would. Configuring and analysing run no action, so
+  which configures `//release:mopm_darwin_libs` and the macOS Python harness tests
+  (`DARWIN_PYTHON_HARNESS` of `release/darwin_libs.bzl`, the targets of the workflow's second build
+  step) for darwin-arm64 and analyses them, with their whole closure, as the release's build would.
+  It also refuses a Zig tool that an action of the closure runs and that is built for another
+  platform than the one the action runs on (`release/exec_tools.bzl`): a Linux tool configured for
+  the macOS execution platform analyses fine and fails only on the worker, with "cannot execute
+  binary file". Configuring and analysing run no action, so
   nothing is built for macOS and no macOS worker is asked for anything; the config file
   registers the macOS execution platform with a property set that names no worker, which
-  configuration needs and nothing uses. The step fails with buck2's own message, naming the
+  configuration needs and nothing uses. The step fails with buck2's own message (or, for a
+  Zig tool built for the wrong platform, with the tool, its triple and its platform), naming the
   target and the dependency. A failure that only a build shows (a compile, a welded test)
   is still seen first by `release-macos.yml`. `//:release_macos_cases` holds that this
-  step is in `pr.yml` once, through the `buck2-farm` action with its assertion, and that it
-  is the only line of a pull request workflow that names the macOS set.
+  step is in `pr.yml` once, through the `buck2-farm` action with its assertion, that it
+  is the only line of a pull request workflow that names the macOS set, and that the
+  workflow's harness step builds exactly `DARWIN_PYTHON_HARNESS`.
 - **On the farm's Macs, not a hosted runner.** The job runs on the same ubuntu
   runner as the others and asks the farm: `farm-connect` with the macOS worker set
   and hosts (the repository variables above), then
@@ -1204,7 +1212,7 @@ uploads, its smokes and its verdict jobs are the ones `pypi.yml` held, under the
 
 | job | half | environment | permissions | what it does |
 |---|---|---|---|---|
-| `build-macos-arm64` | push | `build` | `contents: read`, `id-token: write` (the tailnet only) | on an ubuntu runner that only asks the farm, whose Macs are the workers (`farm-connect` with the macOS worker set and hosts, `farm-qos: batch`): takes the stamp, builds the Linux driver and `//python:supported_pythons[macos-arm64]` and runs `pypi_smoke matrix --platform macos-arm64` (its output `matrix`), builds `//python:komira_wheel_macos_arm64[file_name]` (the wheel's file name, written at analysis) and asks TestPyPI whether it lists that file (`pypi_smoke present`). Only if it does not, it builds `//python:komira_wheel_macos_arm64[release]`, `//python:wheel_install_test_macos_arm64` and `//python/smoke:pypi_smoke_macos_arm64` for `--target-platforms komira//tools/build/platforms:darwin-arm64`, runs `pypi_smoke dist` with its record, copies the quickstart files, and keeps `pypi-<version>-macos-arm64-dist` and `pypi-<version>-macos-arm64-smoke` (both drivers, the quickstart files, `pythons.json`, `built.txt`). Its output `version` is empty when nothing was built. No upload step. |
+| `build-macos-arm64` | push | `build` | `contents: read`, `id-token: write` (the tailnet only) | on an ubuntu runner that only asks the farm, whose Macs are the workers (`farm-connect` with the macOS worker set and hosts, `farm-qos: batch`): takes the stamp, builds the Linux driver and `//python:supported_pythons[macos-arm64]` and runs `pypi_smoke matrix --platform macos-arm64` (its output `matrix`), builds `//python:komira_wheel_macos_arm64[file_name]` (the wheel's file name, written at analysis) and asks TestPyPI whether it lists that file (`pypi_smoke present`). Only if it does not, it builds `//python:komira_wheel_macos_arm64[release]`, `//python:wheel_install_test_macos_arm64`, the wheel read back (`//python:wheel_libs_macos_arm64` and `//python:wheel_same_macos_arm64`, one step) and `//python/smoke:pypi_smoke_macos_arm64` for `--target-platforms komira//tools/build/platforms:darwin-arm64`, runs `pypi_smoke dist` with its record, copies the quickstart files, and keeps `pypi-<version>-macos-arm64-dist` and `pypi-<version>-macos-arm64-smoke` (both drivers, the quickstart files, `pythons.json`, `built.txt`). Its output `version` is empty when nothing was built. No upload step. |
 | `testpypi-macos-arm64`, `testpypi-smoke-macos-arm64`, `testpypi-passed-macos-arm64`, `result-testpypi-macos-arm64` | push | as their twins in `pypi.yml` | as their twins in `pypi.yml` | the same as `pypi.yml`'s `testpypi`, `testpypi-smoke`, `testpypi-passed` and `result-testpypi` on the macOS dist, when the build made a wheel: the upload with the Linux driver (no storage steps), the smoke on the hosted runner `macos-15` (Apple silicon) with the macOS driver, the record under `pypi-passed-macos-arm64-<version>`, the verdict. |
 | `promote-macos-arm64`, `pypi-macos-arm64`, `pypi-smoke-macos-arm64`, `result-pypi-macos-arm64` | promotion | as their twins in `pypi.yml` | as their twins in `pypi.yml` | the same as `pypi.yml`'s promotion from the newest macOS record (the prefix `pypi-passed-macos-arm64-`), with the Linux driver on ubuntu and the macOS driver on `macos-15`; no storage steps. |
 
@@ -1236,6 +1244,23 @@ the order, the exact gate on each Mac build, that the file-name build alone is u
 `build-macos-arm64` runs on the ubuntu runner with the macOS worker set, hosts and the `tls` literal, that the
 macOS smoke jobs run the macOS driver, that each macOS job is in its half, and that `pypi.yml` holds none of
 them.
+
+**What the macOS wheel holds, read back.** Before anything is uploaded, the build holds the wheel to what a
+Mac loads (python/BUCK, "The macOS wheel, read back"). The wheel rule refuses, on every member
+(`tools/build/package/wheel/policy.zig`, `codesign.zig`): an ELF file (a Linux library), a Mach-O file for a
+CPU other than arm64 or a universal one, a minimum macOS (LC_BUILD_VERSION) above the tag's `macosx_11_0`,
+an install name that is not `@rpath/<file>`, a run path that is not `@loader_path`-relative, a load that is
+neither a member nor under `/usr/lib` or `/System/Library`, and a code signature that is missing or whose
+CodeDirectory hashes do not match the file (macOS on arm64 maps no unsigned code). The step `the macOS
+wheel read back` builds two checks of the finished file: `//python:wheel_libs_macos_arm64` walks the
+loads from `komira/_lib/libkomira.dylib` as dyld does, through each library's own LC_RPATH, so every
+`@rpath` and `@loader_path` load is a member of the wheel and every Mach-O member is loaded (nothing
+points at a build path, a home directory, Homebrew or conda), and the three Mojo runtime dylibs carry the
+darwin toolchain's bytes; `//python:wheel_same_macos_arm64` holds it to the Linux wheel of the same stamp:
+the same Python files, METADATA (so the same Requires-Python and classifiers) and licence files byte for
+byte, WHEEL differing only in its Tag's platform part (both `py3-none`), and the files only one wheel has
+are its native libraries: `libkomira.dylib` and the three runtime dylibs on macOS; `libkomira.so`, the
+eight native owner libraries and the three runtime `.so` files on Linux.
 
 
 ### Which run to look at

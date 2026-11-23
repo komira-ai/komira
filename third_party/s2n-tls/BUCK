@@ -5,6 +5,7 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/native:defs.bzl", "checked_cxx_library", "prefix_header", "prefixed_archive_check")
 load("@komira//tools/build/third_party_srcs:defs.bzl", "third_party_srcs")
 load(":features.bzl", "S2N_FEATURES")
+load(":features_macos.bzl", "S2N_FEATURES_MACOS")
 load(":srcs.bzl", "PRIVATE_HEADERS", "PROBES", "PUBLIC_HEADERS", "SRCS")
 
 # aws/s2n-tls 1.5.6, Apache-2.0 (LICENSE in the archive).
@@ -17,6 +18,9 @@ load(":srcs.bzl", "PRIVATE_HEADERS", "PROBES", "PUBLIC_HEADERS", "SRCS")
 # srcs.bzl (generated from the archive by :srcs_gen and held to it by the
 # test :srcs_drift), and the results of its feature probes are features.bzl
 # (held to a compile of every probe by tools/build/tests/c_libs_tests.sh).
+# For linux x86_64 and macOS arm64: the sources and flags are the same on
+# both (as in CMake, which adds nothing for Apple to the library's compile);
+# the features are each platform's own list.
 pinned_file(
     name = "s2n-tls-1.5.6.tar.gz",
     url = "https://github.com/aws/s2n-tls/archive/refs/tags/v1.5.6.tar.gz",
@@ -63,18 +67,24 @@ _C_FLAGS = [
 # shown to compile here (tests//functional/s2n_probes builds the probe of
 # every feature listed, and tests//negative/s2n_probes the rest), so a
 # feature with no probe of that name was never shown and is refused.
-_UNPROBED = [f for f in S2N_FEATURES if f not in PROBES]
+_UNPROBED = [f for f in S2N_FEATURES + S2N_FEATURES_MACOS if f not in PROBES]
 
-[fail("third_party/s2n-tls/features.bzl: {} name(s) no probe of srcs.bzl's PROBES (tests/features/<name>.c), so nothing shows they compile here: {}".format(len(_UNPROBED), ", ".join(_UNPROBED))) for _ in _UNPROBED[:1]]
+[fail("third_party/s2n-tls/features.bzl, features_macos.bzl: {} name(s) no probe of srcs.bzl's PROBES (tests/features/<name>.c), so nothing shows they compile here: {}".format(len(_UNPROBED), ", ".join(_UNPROBED))) for _ in _UNPROBED[:1]]
+
+_FEATURE_DEFINES = {
+    os: ["-D" + f for f in features] + (["-DS2N_STACKTRACE"] if "S2N_EXECINFO_AVAILABLE" in features else [])
+    for os, features in [("linux", S2N_FEATURES), ("macos", S2N_FEATURES_MACOS)]
+}
 
 _DEFINES = [
     "-DNDEBUG",
     "-DS2N_EXPORTS",
     "-D_POSIX_C_SOURCE=200809L",
     "-D_FORTIFY_SOURCE=2",
-] + ["-D" + f for f in S2N_FEATURES] + (
-    ["-DS2N_STACKTRACE"] if "S2N_EXECINFO_AVAILABLE" in S2N_FEATURES else []
-)
+] + select({
+    "DEFAULT": _FEATURE_DEFINES["linux"],
+    "prelude//os/constraints:macos": _FEATURE_DEFINES["macos"],
+})
 
 # Every argument of the libs2n compile but the prefix (below).
 _S2N = dict(
@@ -97,7 +107,6 @@ _S2N = dict(
     # Built on the prefixed aws-lc: its calls into libcrypto are to
     # komira_awslc_* names.
     exported_deps = ["//third_party/aws-lc:crypto"],
-    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:s2n-tls-x86-64-linux
 )
 
 # libs2n with s2n-tls's own symbol names. Nothing links it: its archive's
@@ -137,7 +146,7 @@ prefixed_archive_check(
     min_defined = 100,
     original_names = [
         ":prefix_symbols[symbols]",
-        "//third_party/aws-lc:prefix_symbols[symbols]",
+        "//third_party/aws-lc:prefix_symbols_names",
     ],
     prefix = THIRD_PARTY_OWNERS["third_party/s2n-tls"].prefix,
 )
