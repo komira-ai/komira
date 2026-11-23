@@ -1,7 +1,7 @@
 """Any minor version of ABI major 1 loads: a 1.0 library, which lacks the
-calls 1.1 added, and a 1.3 library, which lacks komira_sql_stream like every
-library of today. A call the library's minor does not include raises when it
-is used, never at load.
+calls 1.1 and 1.2 added, and a 1.3 library, which has the credential calls of
+1.2 and lacks komira_sql_stream like every library of today. A call the
+library's minor does not include raises when it is used, never at load.
 
     test_minor.py --lib-dir <dir> --runtime-dir <dir> --fake <name> --version <n>
 
@@ -15,6 +15,7 @@ import sys
 import komira
 from komira import KomiraError
 from komira import _native
+from komira._credentials import AMBIENT, GcpToken
 
 
 def main(args):
@@ -54,8 +55,19 @@ def main(args):
                 else:
                     raise AssertionError("a 1.0 library ran a 1.1 call")
             native.ctx_free(ctx)
+            # Sealing a credential needs the calls of 1.2; a built-in one
+            # calls nothing, so it needs none.
+            want = "komira_credential_add needs libkomira ABI version 1.2; the library at {} is 1.0".format(path)
+            try:
+                s._seal_credential(GcpToken("g", token="t"))
+            except KomiraError as e:
+                assert type(e) is KomiraError and str(e) == want and e.status is None, repr(e)
+            else:
+                raise AssertionError("a 1.0 library ran komira_credential_add")
+            assert s._seal_credential(AMBIENT) is None
         else:
             assert s.register_parquet("ok", "f.parquet") is None
+            assert s._seal_credential(GcpToken("g", token="t")) is None
     print("minor: libkomira {} loaded".format(version))
 
 
