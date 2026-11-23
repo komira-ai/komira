@@ -16,6 +16,7 @@ python/komira/_native.py	the Python package: its sources are Python (docs/design
 python/komira/_ops/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_ops/_build.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_ops/_columns.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_ops/_dtype.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_ops/_expr.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_ops/_rel.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_ops/_vocab.py	the Python package: its sources are Python (docs/design/python_package.md)
@@ -60,6 +61,7 @@ python/tests/test_plan_rel.py	the Python package's tests: the SDK surface is tes
 python/tests/test_plan_rel_goldens.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_capture.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_ops_udf.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_ops_dtype.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_plan_udf.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_plan_udf_goldens.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/fixtures/udfs/__init__.py	the Python package's tests: the user functions the capture tests capture, which must be Python modules
@@ -79,6 +81,7 @@ python/tests/test_udf_contract.py	the Python UDF runtime's tests: a ctypes host 
 python/tests/test_udf_generations.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
 python/tests/test_udf_lifecycle.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
 python/tests/test_udf_supervision.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
+python/tests/test_udf_types.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
 python/tests/test_udf_engine_child.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
 python/tests/test_udf_process.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
 python/tests/test_udf_plan_run.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)

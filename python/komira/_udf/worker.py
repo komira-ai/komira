@@ -4,6 +4,9 @@
 user code's stdout and stderr go to the inherited descriptors 1 and 2.
 """
 
+import dataclasses
+import datetime
+import decimal
 import mmap
 import os
 import signal
@@ -113,38 +116,193 @@ def _decode_schemas(entry):
     return cached
 
 
-def _check_value(value, rtype, row):
-    """Return `value` as an exact member of `rtype` (or None), else raise ERR_RETURN_TYPE."""
-    import pyarrow as pa
+_EPOCH = datetime.datetime(1970, 1, 1)
+_MICROSECOND = datetime.timedelta(microseconds=1)
+_MICROS_PER_TICK = {"s": 1000000, "ms": 1000, "us": 1}
+_FLOAT_CODES = {16: "e", 32: "f"}
 
-    def bad():
-        return _Fail(
-            wire.ERR_RETURN_TYPE,
-            "row %d returned %s %r, which is not %s without loss" % (row, type(value).__name__, value, rtype),
-            row,
-        )
 
+class _Mismatch(Exception):
+    """A value is not an exact member of a type: `path` is where in the value, `reason` says why if not by its type."""
+
+    def __init__(self, path, value, reason=None):
+        super().__init__(path)
+        self.path = path
+        self.value = value
+        self.reason = reason
+
+    def detail(self):
+        if self.reason:
+            return "%s: %s" % (self.path, self.reason) if self.path else self.reason
+        if self.path:
+            return "%s is %s %r" % (self.path, type(self.value).__name__, self.value)
+        return ""
+
+
+def _float_exact(value, bits):
+    """Whether the float `value` is the same number at `bits` bits of precision (NaN and infinities are)."""
+    code = _FLOAT_CODES.get(bits)
+    if code is None:
+        return True
+    try:
+        back = struct.unpack(code, struct.pack(code, value))[0]
+    except OverflowError:
+        return False
+    return back == value or value != value
+
+
+def _timestamp_ticks(value, t, path):
+    """The instant of the datetime `value` in the unit of the timestamp type `t`, by integer arithmetic."""
+    offset = value.utcoffset()
+    if (offset is not None) != (t.tz is not None):
+        raise _Mismatch(path, value)
+    delta = value.replace(tzinfo=None) - _EPOCH
+    if offset is not None:
+        delta -= offset
+    micros = delta // _MICROSECOND
+    if t.unit == "ns":
+        ticks = micros * 1000
+    else:
+        per = _MICROS_PER_TICK[t.unit]
+        if micros % per:
+            raise _Mismatch(path, value)
+        ticks = micros // per
+    if not -(1 << 63) <= ticks < (1 << 63):
+        raise _Mismatch(path, value)
+    return ticks
+
+
+def _decimal_exact(value, t, path):
+    """The decimal `value` as a Decimal with exactly the scale of the decimal128 type `t`, by integer arithmetic."""
+    precision, scale = t.precision, t.scale
+    if isinstance(value, int):
+        if abs(value) >= 10 ** (precision - scale):
+            raise _Mismatch(path, value)
+        unscaled = abs(value) * 10**scale
+        negative = value < 0
+    else:
+        if not value.is_finite():
+            raise _Mismatch(path, value)
+        sign, digits, exponent = value.as_tuple()
+        start = 0
+        while start < len(digits) and digits[start] == 0:
+            start += 1
+        digits = digits[start:]
+        shift = exponent + scale
+        if shift < 0:
+            drop = -shift
+            if drop >= len(digits):
+                if digits:
+                    raise _Mismatch(path, value)
+            elif any(digits[-drop:]):
+                raise _Mismatch(path, value)
+            else:
+                digits = digits[:-drop]
+            shift = 0
+        if len(digits) + (shift if digits else 0) > precision:
+            raise _Mismatch(path, value)
+        unscaled = int("".join(map(str, digits))) * 10**shift if digits else 0
+        negative = sign == 1
+    exact = tuple(int(c) for c in str(unscaled))
+    return decimal.Decimal((1 if negative and unscaled else 0, exact, -scale))
+
+
+def _convert(value, t, path, types):
+    """Return `value` as an exact member of the Arrow type `t` in the form `pa.array` takes, else raise _Mismatch."""
     if value is None:
         return None
-    if pa.types.is_floating(rtype):
+    if types.is_boolean(t):
+        if not isinstance(value, bool):
+            raise _Mismatch(path, value)
+        return value
+    if types.is_integer(t):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise _Mismatch(path, value)
+        bits = t.bit_width
+        low = -(1 << (bits - 1)) if types.is_signed_integer(t) else 0
+        if not low <= value < low + (1 << bits):
+            raise _Mismatch(path, value)
+        return value
+    if types.is_floating(t):
         if isinstance(value, bool):
-            raise bad()
+            raise _Mismatch(path, value)
         if isinstance(value, float):
+            if not _float_exact(value, t.bit_width):
+                raise _Mismatch(path, value)
             return value
         if isinstance(value, int):
             try:
                 ok = float(value) == value and int(float(value)) == value
             except OverflowError:
                 ok = False
-            if ok:
+            if ok and _float_exact(float(value), t.bit_width):
                 return float(value)
-        raise bad()
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise bad()
-    bits = rtype.bit_width
-    if not -(1 << (bits - 1)) <= value < (1 << (bits - 1)):
-        raise bad()
-    return value
+        raise _Mismatch(path, value)
+    if types.is_string(t) or types.is_large_string(t):
+        if not isinstance(value, str):
+            raise _Mismatch(path, value)
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise _Mismatch(path, value) from None
+        return value
+    if types.is_binary(t) or types.is_large_binary(t):
+        if not isinstance(value, (bytes, bytearray, memoryview)):
+            raise _Mismatch(path, value)
+        return bytes(value)
+    if types.is_date32(t):
+        if not isinstance(value, datetime.date) or isinstance(value, datetime.datetime):
+            raise _Mismatch(path, value)
+        return value
+    if types.is_timestamp(t):
+        if not isinstance(value, datetime.datetime):
+            raise _Mismatch(path, value)
+        return _timestamp_ticks(value, t, path)
+    if types.is_decimal128(t):
+        if isinstance(value, bool) or not isinstance(value, (decimal.Decimal, int)):
+            raise _Mismatch(path, value)
+        return _decimal_exact(value, t, path)
+    if types.is_list(t) or types.is_large_list(t):
+        if not isinstance(value, (list, tuple)):
+            raise _Mismatch(path, value)
+        item = t.value_type
+        return [_convert(v, item, "%s[%d]" % (path, i), types) for i, v in enumerate(value)]
+    if types.is_struct(t):
+        return _convert_struct(value, t, path, types)
+    raise _Mismatch(path, value)
+
+
+def _convert_struct(value, t, path, types):
+    """The dict of the dict or dataclass instance `value` for the struct type `t`; its keys are exactly the fields."""
+    if isinstance(value, dict):
+        given = value
+    elif dataclasses.is_dataclass(value) and not isinstance(value, type):
+        given = {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
+    else:
+        raise _Mismatch(path, value)
+    fields = [t[i] for i in range(t.num_fields)]
+    names = [f.name for f in fields]
+    for name in names:
+        if name not in given:
+            raise _Mismatch(path, value, "the field %r is missing" % (name,))
+    for key in given:
+        if key not in names:
+            raise _Mismatch(path, value, "the key %r is not a field" % (key,))
+    return {f.name: _convert(given[f.name], f.type, "%s[%r]" % (path, f.name), types) for f in fields}
+
+
+def _check_value(value, rtype, row):
+    """Return `value` as an exact member of `rtype` (or None), else raise ERR_RETURN_TYPE."""
+    import pyarrow as pa
+
+    try:
+        return _convert(value, rtype, "", pa.types)
+    except _Mismatch as m:
+        message = "row %d returned %s %r, which is not %s without loss" % (row, type(value).__name__, value, rtype)
+        detail = m.detail()
+        if detail:
+            message += ": " + detail
+        raise _Fail(wire.ERR_RETURN_TYPE, message, row) from None
 
 
 def _run_values(fn, batch, rtype, cancel, call_id):
@@ -162,7 +320,10 @@ def _run_values(fn, batch, rtype, cancel, call_id):
         except BaseException as e:  # user code may raise anything, SystemExit included
             raise _raised(e, i) from None
         out.append(_check_value(value, rtype, i))
-    return pa.array(out, type=rtype)
+    try:
+        return pa.array(out, type=rtype)
+    except (pa.ArrowInvalid, pa.ArrowTypeError, OverflowError) as e:
+        raise _Fail(wire.ERR_RETURN_TYPE, "the returned values do not fit %s: %s" % (rtype, e)) from None
 
 
 def _run_arrow(fn, batch, rtype):
@@ -181,6 +342,8 @@ def _run_arrow(fn, batch, rtype):
         raise _Fail(wire.ERR_RETURN_TYPE, "returned %s, not a pyarrow Array" % type(result).__name__)
     if result.type != rtype:
         lossy = _Fail(wire.ERR_RETURN_TYPE, "returned %s, which is not %s without loss" % (result.type, rtype))
+        if pa.types.is_timestamp(result.type) and pa.types.is_timestamp(rtype) and result.type.tz != rtype.tz:
+            raise lossy
         try:
             cast = pc.cast(result, rtype, safe=True)
             back = pc.cast(cast, result.type, safe=True)

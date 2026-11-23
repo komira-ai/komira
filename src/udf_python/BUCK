@@ -8,7 +8,9 @@ c_shared_lib(
     srcs = [
         "descriptor.c",
         "ipc.c",
+        "ipc_read.c",
         "runtime.c",
+        "types.c",
         "wire.c",
         "worker.c",
         "zygote.c",

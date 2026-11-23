@@ -273,8 +273,8 @@ Payloads are Arrow IPC encapsulated messages with 64-byte aligned bodies, after 
 decodes them with `pyarrow.ipc.read_record_batch` against the schema it bound at `LOAD` and encodes its result
 with `pyarrow`, which the SDK depends on. The library encodes `args` in C and decodes results in C, then validates the
 layout against the bound schema before it hands the array to the engine (IF §4.4); the prototype's encoder and
-validating decoder (`proxy/ipc.c`) carry 64-bit integers, 32-bit integers and doubles, and P4 extends them to
-every type in IF §6.2's table.
+validating decoder (`proxy/ipc.c`) carried 64-bit integers, 32-bit integers and doubles; `src/udf_python` now carries the types of its
+README's "Types" section, nested columns included, and the `PANDAS`, `NUMPY` and `POLARS` formats are still to land (P4).
 
 ### 4.2 Calls
 

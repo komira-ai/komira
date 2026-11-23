@@ -279,10 +279,11 @@ static int32_t t_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_ud
   if (rt->forked) return udfpy_fail(err, KOMIRA_UDF_ERR_INSTANCE_LOST, -1, "komira/python: %s", UDFPY_FORKED_WHY);
   udfpy_udf* u = (udfpy_udf*)calloc(1, sizeof(*u));
   if (u == NULL) return udfpy_fail(err, KOMIRA_UDF_ERR_OUT_OF_MEMORY, -1, "no memory for a udf");
-  const char* why = NULL;
+  char why[1400];
+  why[0] = 0;
   u->entry = strdup(s->entry);
-  if (u->entry == NULL || udfpy_schema_read(s->args, &u->args, &why) != 0 ||
-      udfpy_schema_read(s->result, &u->result, &why) != 0) {
+  if (u->entry == NULL || udfpy_schema_read(s->args, 1, &u->args, why, sizeof(why)) != 0 ||
+      udfpy_schema_read(s->result, 0, &u->result, why, sizeof(why)) != 0) {
     rc = u->entry == NULL ? udfpy_fail(err, KOMIRA_UDF_ERR_OUT_OF_MEMORY, -1, "no memory for a udf")
                           : udfpy_fail(err, KOMIRA_UDF_ERR_UNSUPPORTED, -1, "%s", why);
     udf_free(u);

@@ -30,7 +30,32 @@ from komira._ops._expr import UdfCall, UdfSpec
 
 from fixtures.udfs import future, rows, scalars
 
-CARRIED = "int32, int64, float64"
+CARRIED = (
+    "bool, int8, int16, int32, int64, float32, float64, string, large_string, binary, large_binary, "
+    "date32[day], timestamp[s|ms|us|ns] with an optional tz, decimal128(p, s), list<item: T>, "
+    "large_list<item: T> and struct<name: T, ...>, where a list item or struct field is not a list, "
+    "a struct, a decimal or a zoned timestamp"
+)
+# A list item or struct field a column cannot hold as a child, as return_dtype=
+# and schema= word the refusal, and as a return hint does.
+NESTS = (
+    "UDF_RETURN_TYPE_UNMAPPABLE: {what} {value!r} nests {child} in a list or struct, "
+    "which a komira column cannot hold; the carried types are {carried}"
+)
+NESTED_HINT = (
+    "UDF_RETURN_TYPE_UNMAPPABLE: the return hint `{shown}` of `{name}()` nests {child} in a list or struct, "
+    "which a komira column cannot hold; the carried types are {carried}"
+)
+# What the refusal of an unmappable return hint says the hints are.
+HINTS_NOTE = (
+    "the hints int, float, bool, str, bytes, datetime.date, datetime.datetime, list[T], "
+    "and a TypedDict or dataclass of them map to carried types"
+)
+# A decimal.Decimal return hint has no precision or scale.
+DECIMAL_HINT = (
+    "UDF_RETURN_TYPE_UNMAPPABLE: the return hint `{shown}` of `{name}()` is a decimal.Decimal, "
+    "which carries no precision or scale. Pass return_dtype=\"decimal128(p, s)\" to udf"
+)
 
 
 def raised(call):
@@ -157,20 +182,71 @@ def test_the_decorator_refuses_wrong_arguments():
     refuses(lambda: udf(kind="x")(scalars.plain), ValueError, "kind must be one of map_batches_column, map_batches_frame, row, scalar, not 'x'")
 
 
+# Every carried type as a user may spell it, and the spelling the spec keeps.
+CARRIED_DTYPES = [
+    ("bool", "bool"), ("int8", "int8"), ("int16", "int16"), ("int32", "int32"), ("int64", "int64"),
+    ("float32", "float32"), ("float64", "float64"), ("string", "string"), ("utf8", "string"),
+    ("large_string", "large_string"), ("large_utf8", "large_string"), ("binary", "binary"),
+    ("large_binary", "large_binary"), ("date32", "date32[day]"), ("date32[day]", "date32[day]"),
+    ("timestamp[s]", "timestamp[s]"), ("timestamp[ms]", "timestamp[ms]"), ("timestamp[us]", "timestamp[us]"),
+    ("timestamp[ns]", "timestamp[ns]"), ("timestamp[us,tz=UTC]", "timestamp[us, tz=UTC]"),
+    ("timestamp[ns, tz=Europe/Paris]", "timestamp[ns, tz=Europe/Paris]"),
+    ("decimal128(10,2)", "decimal128(10, 2)"), ("decimal128(38, 0)", "decimal128(38, 0)"),
+    ("list<int64>", "list<item: int64>"), ("list<item: utf8>", "list<item: string>"),
+    ("large_list<timestamp[ns]>", "large_list<item: timestamp[ns]>"),
+    ("struct<a:int64,b:utf8>", "struct<a: int64, b: string>"), ("struct<a: date32>", "struct<a: date32[day]>"),
+]
+
+
 def test_dtypes_outside_the_carried_types_are_refused_by_name():
-    refuses(
-        lambda: udf(return_dtype="utf8"),
-        UnsupportedOperation,
-        f"UDF_RETURN_TYPE_UNMAPPABLE: return_dtype= 'utf8' is not a type komira/python carries; the carried types are {CARRIED}",
-    )
+    for dtype in ("float16", "uint8", "map<string, int64>"):
+        refuses(
+            lambda: udf(return_dtype=dtype),
+            UnsupportedOperation,
+            f"UDF_RETURN_TYPE_UNMAPPABLE: return_dtype= {dtype!r} is not a type komira/python carries; the carried types are {CARRIED}",
+        )
+        refuses(
+            lambda: udf(kind="map_batches_frame", schema={"a": dtype}),
+            UnsupportedOperation,
+            f"UDF_RETURN_TYPE_UNMAPPABLE: schema= column 'a' {dtype!r} is not a type komira/python carries; the carried types are {CARRIED}",
+        )
     refuses(lambda: udf(return_dtype=5), TypeError, "return_dtype= must be a dtype name (str), not int")
-    refuses(
-        lambda: udf(kind="map_batches_frame", schema={"a": "utf8"}),
-        UnsupportedOperation,
-        f"UDF_RETURN_TYPE_UNMAPPABLE: schema= column 'a' 'utf8' is not a type komira/python carries; the carried types are {CARRIED}",
-    )
-    for dtype in ("int32", "int64", "float64"):
-        assert udf(scalars.plain, return_dtype=dtype).spec().return_type == dtype
+
+
+def test_a_list_item_or_struct_field_that_is_not_flat_is_refused_by_name():
+    for dtype, child in (
+        ("list<item: decimal128(5, 2)>", "decimal128(5, 2)"),
+        ("list<list<int64>>", "list<item: int64>"),
+        ("struct<a: timestamp[us, tz=UTC]>", "timestamp[us, tz=UTC]"),
+        ("struct<a: int64, b: list<item: string>>", "list<item: string>"),
+    ):
+        refuses(
+            lambda: udf(return_dtype=dtype),
+            UnsupportedOperation,
+            NESTS.format(what="return_dtype=", value=dtype, child=child, carried=CARRIED),
+        )
+        refuses(
+            lambda: udf(kind="map_batches_frame", schema={"a": dtype}),
+            UnsupportedOperation,
+            NESTS.format(what="schema= column 'a'", value=dtype, child=child, carried=CARRIED),
+        )
+
+
+def test_return_dtype_accepts_each_carried_type_and_stores_its_canonical_spelling():
+    for given, canonical in CARRIED_DTYPES:
+        assert udf(scalars.plain, return_dtype=given).spec().return_type == canonical, given
+        assert udf(return_dtype=given)(scalars.plain).spec().return_type == canonical, given
+        batch = udf(scalars.plain, kind="map_batches_column", return_dtype=given)
+        assert batch.spec().return_type == canonical, given
+
+
+def test_schema_accepts_each_carried_type_and_stores_its_canonical_spelling():
+    frame = dict(kind="map_batches_frame", columns=["a"])
+    for given, canonical in CARRIED_DTYPES:
+        as_dict = udf(scalars.plain, schema={"c": given}, **frame)
+        assert as_dict.spec().return_type == (("c", canonical),), given
+        as_pairs = udf(scalars.plain, schema=[("c", given), ("d", "int64")], **frame)
+        assert as_pairs.spec().return_type == (("c", canonical), ("d", "int64")), given
 
 
 def test_schema_forms_and_refusals():
@@ -305,21 +381,109 @@ def test_missing_return_types_are_refused():
 def unmappable(name, shown):
     return (
         f"UDF_RETURN_TYPE_UNMAPPABLE: the return hint `{shown}` of `{name}()` names no type komira/python carries. "
-        f"Pass return_dtype= to udf; the carried types are {CARRIED} (the hints int and float map to int64 and float64)"
+        f"Pass return_dtype= to udf; the carried types are {CARRIED} ({HINTS_NOTE})"
     )
+
+
+HINTS_HEADER = """\
+import dataclasses
+import datetime
+import decimal
+import typing
+from typing import Optional, TypedDict
+
+from komira._capture import udf
+
+
+class Pair(TypedDict):
+    a: int
+    b: Optional[str]
+
+
+@dataclasses.dataclass
+class Point:
+    x: int
+    y: Optional[float]
+    when: datetime.datetime
+
+
+"""
+
+# (function name, return hint as written, the dtype the spec gets)
+HINT_DTYPES = [
+    ("h_int", "int", "int64"), ("h_float", "float", "float64"), ("h_opt_int", "Optional[int]", "int64"),
+    ("h_str", "str", "large_string"), ("h_bytes", "bytes", "large_binary"), ("h_bool", "bool", "bool"),
+    ("h_date", "datetime.date", "date32[day]"), ("h_datetime", "datetime.datetime", "timestamp[us]"),
+    ("h_list_int", "list[int]", "large_list<item: int64>"),
+    ("h_list_str_or_none", "list[str | None]", "large_list<item: large_string>"),
+    ("h_typing_list", "typing.List[float]", "large_list<item: float64>"),
+    ("h_list_datetime", "list[datetime.datetime]", "large_list<item: timestamp[us]>"),
+    ("h_typed_dict", "Pair", "struct<a: int64, b: large_string>"),
+    ("h_dataclass", "Point", "struct<x: int64, y: float64, when: timestamp[us]>"),
+    ("h_opt_str", "Optional[str]", "large_string"), ("h_opt_pipe_date", "datetime.date | None", "date32[day]"),
+    ("h_opt_list", "Optional[list[int]]", "large_list<item: int64>"),
+    ("h_opt_item", "list[Optional[int]]", "large_list<item: int64>"),
+    ("h_opt_both", "Optional[list[Optional[str]]]", "large_list<item: large_string>"),
+    ("h_opt_typed_dict", "Optional[Pair]", "struct<a: int64, b: large_string>"),
+    ("h_opt_dataclass", "Point | None", "struct<x: int64, y: float64, when: timestamp[us]>"),
+]
+
+# (function name, return hint as written, the hint as a refusal shows it)
+UNMAPPABLE_HINTS = [("u_dict", "dict[str, int]", "dict[str, int]"), ("u_set", "set[int]", "set[int]"), ("u_object", "object", "object")]
+
+# (function name, return hint as written, the hint as a refusal shows it, the child it nests)
+NESTED_HINTS = [
+    ("n_list_list", "list[list[int]]", "list[list[int]]", "large_list<item: int64>"),
+    ("n_opt_list_list", "Optional[list[list[int]]]", "list[list[int]] | None", "large_list<item: int64>"),
+    ("n_list_dataclass", "list[Point]", "list[capt_hints.Point]", "struct<x: int64, y: float64, when: timestamp[us]>"),
+]
+
+DECIMAL_HINTS = [
+    ("d_decimal", "decimal.Decimal", "<class 'decimal.Decimal'>"),
+    ("d_opt_decimal", "Optional[decimal.Decimal]", "<class 'decimal.Decimal'> | None"),
+]
+
+
+def hints_module():
+    body = HINTS_HEADER
+    for name, hint, *_ in HINT_DTYPES + UNMAPPABLE_HINTS + NESTED_HINTS + DECIMAL_HINTS:
+        body += f"\n@udf\ndef {name}(x) -> {hint}:\n    return x\n\n"
+    return body
+
+
+def test_return_hints_map_to_their_dtypes():
+    with project({"capt_hints.py": hints_module()}, ["capt_hints"]):
+        module = importlib.import_module("capt_hints")
+        for name, hint, dtype in HINT_DTYPES:
+            assert getattr(module, name).spec().return_type == dtype, hint
 
 
 def test_unmappable_return_hints_are_refused_by_name():
     for u, shown in (
-        (scalars.hint_str, "str"),
-        (scalars.hint_bool, "bool"),
         (scalars.hint_union, "int | float"),
         (scalars.hint_optional_union, "int | float | None"),
         (scalars.hint_any, "typing.Any"),
-        (scalars.hint_list, "list[int]"),
         (scalars.hint_none, "None"),
     ):
         spec_refuses(u, unmappable(u.__name__, shown))
+    with project({"capt_hints.py": hints_module()}, ["capt_hints"]):
+        module = importlib.import_module("capt_hints")
+        for name, _, shown in UNMAPPABLE_HINTS:
+            spec_refuses(getattr(module, name), unmappable(name, shown))
+
+
+def test_a_decimal_return_hint_is_refused_by_name():
+    with project({"capt_hints.py": hints_module()}, ["capt_hints"]):
+        module = importlib.import_module("capt_hints")
+        for name, _, shown in DECIMAL_HINTS:
+            spec_refuses(getattr(module, name), DECIMAL_HINT.format(shown=shown, name=name))
+
+
+def test_a_return_hint_with_a_child_a_column_cannot_hold_is_refused_by_name():
+    with project({"capt_hints.py": hints_module()}, ["capt_hints"]):
+        module = importlib.import_module("capt_hints")
+        for name, _, shown, child in NESTED_HINTS:
+            spec_refuses(getattr(module, name), NESTED_HINT.format(shown=shown, name=name, child=child, carried=CARRIED))
 
 
 def test_unresolvable_hints_are_refused():
@@ -332,7 +496,7 @@ def test_unresolvable_hints_are_refused():
 
 def test_return_dtype_wins_over_a_hint():
     """return_dtype= is used when the function has no hint, and in place of a
-    hint that maps to no carried type."""
+    hint of another type."""
     assert scalars.narrow.spec().return_type == "int32"
     assert scalars.declared_over_str.spec().return_type == "int64"
 

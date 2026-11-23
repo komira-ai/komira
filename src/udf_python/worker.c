@@ -436,17 +436,15 @@ static int32_t encode_struct(const struct ArrowArray* a, const udfpy_schema* s, 
                       "the host passed a struct of %lld children at offset %lld%s; the bound schema has %d",
                       (long long)a->n_children, (long long)a->offset,
                       a->n_buffers > 0 && a->buffers != NULL && a->buffers[0] != NULL ? " with a bitmap" : "", s->n);
-  char fmts[UDFPY_MAX_FIELDS];
-  for (int i = 0; i < s->n; i++) fmts[i] = s->f[i].fmt;
   const char* why = NULL;
-  if (udfpy_ipc_batch(b, a->length, s->n, (const struct ArrowArray* const*)a->children, fmts, &why) != 0)
+  if (udfpy_ipc_batch(b, a->length, s, (const struct ArrowArray* const*)a->children, &why) != 0)
     return udfpy_fail(err, b->oom ? KOMIRA_UDF_ERR_OUT_OF_MEMORY : KOMIRA_UDF_ERR_INTERNAL, -1, "%s", why);
   return KOMIRA_UDF_OK;
 }
 
 /* The worker's OK payload as the host's `out`: one column, checked against
- * the bound result field. */
-static int32_t take_output(const komira_udf_host* host, udfpy_msg* r, const udfpy_field* want,
+ * the bound result type. */
+static int32_t take_output(const komira_udf_host* host, udfpy_msg* r, const udfpy_schema* want,
                            struct ArrowDeviceArray* out, komira_udf_error* err) {
   if (host->mem_reserve != NULL && host->mem_reserve(host->host_data, (int64_t)r->len) != KOMIRA_UDF_OK) {
     size_t n = r->len;
@@ -463,7 +461,7 @@ static int32_t take_output(const komira_udf_host* host, udfpy_msg* r, const udfp
   struct ArrowArray col;
   int64_t length = 0;
   const char* why = NULL;
-  if (udfpy_ipc_decode(hold->payload, hold->bytes, want, 1, &length, hold, &col, &why) != 0) {
+  if (udfpy_ipc_decode(hold->payload, hold->bytes, want, &length, hold, &col, &why) != 0) {
     udfpy_hold_drop(hold);
     return udfpy_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "the worker's output failed validation: %s", why);
   }
@@ -501,7 +499,7 @@ int32_t udfpy_call_batch(udfpy_inst* in, const komira_udf_call* call, struct Arr
     watch w;
     rc = request(c, UDFPY_OP_CALL_BATCH, in->id, call, b.p, b.n, &rep, &w, err);
     if (rc == KOMIRA_UDF_OK && rep.op == UDFPY_OP_OK) {
-      rc = take_output(host, &rep, &in->udf->result.f[0], out, err);
+      rc = take_output(host, &rep, &in->udf->result, out, err);
     } else if (rc == KOMIRA_UDF_OK) {
       komira_udf_error e;
       memset(&e, 0, sizeof(e));
