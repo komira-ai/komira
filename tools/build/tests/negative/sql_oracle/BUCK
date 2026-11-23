@@ -153,6 +153,9 @@ sql_oracle(
     "parquet",
     "csv",
     "tsv",
+    "json",
+    "gz",
+    "zst",
 ]]
 
 # REFUSED: an output name with a glob character, second: the name pattern,
