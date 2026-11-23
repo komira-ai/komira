@@ -454,15 +454,22 @@ tests, which no pull request builds. The rest of this section is about `release-
   execution platform, a rule that fails at analysis) is found in the pull request that
   causes it, even when the change reaches no library of the set: the last buck2 step of `pr.yml` runs
   `bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check`,
-  which configures `//release:mopm_darwin_libs` for darwin-arm64 and analyses it, with its
-  whole closure, as the release's build would. Configuring and analysing run no action, so
+  which configures `//release:mopm_darwin_libs` and the macOS Python harness tests
+  (`DARWIN_PYTHON_HARNESS` of `release/darwin_libs.bzl`, the targets of the workflow's second build
+  step) for darwin-arm64 and analyses them, with their whole closure, as the release's build would.
+  It also refuses a Zig tool that an action of the closure runs and that is built for another
+  platform than the one the action runs on (`release/exec_tools.bzl`): a Linux tool configured for
+  the macOS execution platform analyses fine and fails only on the worker, with "cannot execute
+  binary file". Configuring and analysing run no action, so
   nothing is built for macOS and no macOS worker is asked for anything; the config file
   registers the macOS execution platform with a property set that names no worker, which
-  configuration needs and nothing uses. The step fails with buck2's own message, naming the
+  configuration needs and nothing uses. The step fails with buck2's own message (or, for a
+  Zig tool built for the wrong platform, with the tool, its triple and its platform), naming the
   target and the dependency. A failure that only a build shows (a compile, a welded test)
   is seen by the macOS part, for the libraries the change reaches. `//:release_macos_cases` holds that this
-  step is in `pr.yml` once, through the `buck2-farm` action with its assertion, and that it
-  is the only line of a pull request workflow that names the macOS set.
+  step is in `pr.yml` once, through the `buck2-farm` action with its assertion, that it and the
+  lines of `pr.yml`'s macOS part are the only lines of a pull request workflow that name the macOS
+  set, and that the workflow's harness step builds exactly `DARWIN_PYTHON_HARNESS`.
 - **On the farm's Macs, not a hosted runner.** The job runs on the same ubuntu
   runner as the others and asks the farm: `farm-connect` with the macOS worker set
   and hosts (the repository variables above), then

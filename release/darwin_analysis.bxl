@@ -1,5 +1,6 @@
-# The macOS set analyses: //release:mopm_darwin_libs, configured for darwin-arm64 and analysed,
-# with every target of its closure, as release-macos.yml's build would configure and analyse it.
+# The macOS set analyses: //release:mopm_darwin_libs and the macOS Python harness tests
+# (DARWIN_PYTHON_HARNESS, darwin_libs.bzl), configured for darwin-arm64 and analysed, with every
+# target of their closure, as release-macos.yml's two build steps would configure and analyse them.
 #
 #   ./buck2 bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check
 #
@@ -16,24 +17,77 @@
 # It fails, with buck2's own message naming the target and the dependency, when the set cannot be
 # configured or analysed; and it fails, naming the set, when buck2 hands back no configured target
 # or one not configured for darwin-arm64, so the check never passes over a set it did not analyse.
+#
+# It also fails when a Zig tool an action of the closure runs is built for another platform than
+# the one the action runs on (exec_tools.bzl): every exec dep of every target of the closure that
+# states its triple (ZigExeInfo) is compared with the execution platform it is configured for. A
+# Linux tool configured for the macOS execution platform analyses fine and fails only on the
+# worker, with "cannot execute binary file".
+
+load(":darwin_libs.bzl", "DARWIN_PYTHON_HARNESS")
+load(":exec_tools.bzl", "exec_tool_refusal")
+load("@komira//tools/build/mojo:providers.bzl", "ZigExeInfo")
 
 DARWIN_ARM64 = "komira//tools/build/platforms:darwin-arm64"
 DARWIN_SET = "komira//release:mopm_darwin_libs"
 
-def _check(ctx):
-    targets = ctx.configured_targets([DARWIN_SET], target_platform = DARWIN_ARM64)
+# A tool the closure must run, so a walk that stopped reaching exec deps fails instead of
+# passing over them: the check of mojo_shared_lib's exports, which a harness test's library runs.
+MUST_CHECK = "komira//tools/build/mojo:so_exports"
+
+def _configured(ctx, label):
+    targets = ctx.configured_targets([label], target_platform = DARWIN_ARM64)
     labels = [str(t.label) for t in targets]
-    if len(labels) != 1 or not labels[0].startswith(DARWIN_SET + " (" + DARWIN_ARM64 + "#"):
+    if len(labels) != 1 or not labels[0].startswith(label + " (" + DARWIN_ARM64 + "#"):
         fail("darwin_analysis: {} configured for {} came back as {}, not as the one target: the set was not analysed".format(
-            DARWIN_SET,
+            label,
             DARWIN_ARM64,
             labels,
         ))
-    analysis = ctx.analysis(list(targets)[0])
+    return list(targets)[0]
+
+def _check(ctx):
+    target = _configured(ctx, DARWIN_SET)
+    analysis = ctx.analysis(target)
     layout = analysis.providers()[DefaultInfo].sub_targets["layout"][DefaultInfo].default_outputs
     if len(layout) != 1:
         fail("darwin_analysis: {} has no `[layout]` output: its rule changed shape".format(DARWIN_SET))
-    ctx.output.print("darwin_analysis: {} configured and analysed".format(labels[0]))
+    ctx.output.print("darwin_analysis: {} configured and analysed".format(target.label))
+    roots = [target]
+    for label in DARWIN_PYTHON_HARNESS:
+        t = _configured(ctx, label)
+        ctx.analysis(t)
+        ctx.output.print("darwin_analysis: {} configured and analysed".format(t.label))
+        roots.append(t)
+
+    # The exec deps of every target of the closure, each once.
+    q = ctx.cquery()
+    tools = {}
+    for node in q.deps([t.label for t in roots]):
+        for dep in q.deps(node.label, 1, "exec_deps()"):
+            if dep.label != node.label:
+                tools[str(dep.label)] = dep
+    refusals = []
+    checked = 0
+    if not [n for n in tools if n.startswith(MUST_CHECK + " (")]:
+        fail("darwin_analysis: the exec deps of the closure do not include {}: the tool check did not reach the tools the actions run".format(MUST_CHECK))
+    for name in sorted(tools):
+        info = ctx.analysis(tools[name]).providers().get(ZigExeInfo)
+        if info == None:
+            continue
+        checked += 1
+        refusal = exec_tool_refusal(name, info.target)
+        if refusal:
+            refusals.append(refusal)
+    if refusals:
+        fail("darwin_analysis: {} of the {} Zig tools the closure runs cannot run where their actions run:\n  {}".format(
+            len(refusals),
+            checked,
+            "\n  ".join(refusals),
+        ))
+    if checked == 0:
+        fail("darwin_analysis: the closure runs no Zig tool that states its triple (ZigExeInfo): the tool check checked nothing")
+    ctx.output.print("darwin_analysis: the {} Zig tools the closure runs are built for the platform each runs on".format(checked))
 
 check = bxl_main(
     impl = _check,

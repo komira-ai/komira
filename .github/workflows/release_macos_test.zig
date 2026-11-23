@@ -57,10 +57,17 @@
 //!    macOS runner;
 //!  - the macOS set is the packages of packages.bzl without the excluded ones, in one place: the
 //!    set's definition builds each member's `:lib`, and each excluded package is a package.
+//!  - the step `build the macOS Python harness tests` builds DARWIN_PYTHON_HARNESS of darwin_libs.bzl, the
+//!    list pr.yml analyses with the set (release_macos_harness_test.zig).
 //! Every defect above is written into the real text and must be refused with its message.
 
 const std = @import("std");
 const t = std.testing;
+
+// The harness step builds the list pr.yml analyses (release_macos_harness_test.zig says what each case catches).
+test {
+    _ = @import("release_macos_harness_test.zig");
+}
 
 const JOB = "release-macos";
 const BUILD_ARGS = "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs";

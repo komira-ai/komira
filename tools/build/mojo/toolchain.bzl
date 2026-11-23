@@ -10,12 +10,39 @@ load(":providers.bzl", "MojoToolchainInfo", "ZigExeInfo")
 load(":test_runtime.bzl", "RUNNER_ENV", "data_map")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/platforms:defs.bzl", "tool_unpack_triple")
+load("@komira//tools/build/platforms:table.bzl", "registered_names", "row", "setting_name")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 # The zig target of a tool built to run in an action: the unpack triple of the
 # row the build tools run on (`x86_64-linux-musl`; `aarch64-macos` for a build
 # that runs every action on a Mac). See platforms/defs.bzl, `tool_exec_name`.
 _TOOL_TRIPLE = tool_unpack_triple()
+
+def exec_tool_triple(name):
+    """The zig target of a tool that runs in an action on the execution platform of row `name`.
+
+    Linux: the row's `unpack_triple`, a static musl executable
+    (`x86_64-linux-musl`, the triple every Linux tool always had). macOS: the
+    row's `zig_triple`, which carries its os floor (`aarch64-macos.11.0`, as
+    `act_darwin` and the macOS compile wrapper are built).
+    """
+    r = row(name)
+    return r["unpack_triple"] if r["os"] == "linux" else r["zig_triple"]
+
+def exec_tool_target():
+    """For a `zig_exe`'s `target` when rules take it as an `attrs.exec_dep`: the triple of the platform it is configured for.
+
+    An exec_dep is configured for the execution platform of the action that
+    runs it, so on a darwin-arm64 Mojo target it is configured for the macOS
+    execution platform and must be a macOS executable (a Linux one fails on
+    the worker with "cannot execute binary file"). zig still runs on
+    `TOOL_EXEC` and cross-compiles. A configuration of no registered row
+    keeps `_TOOL_TRIPLE`, the triple the default `target` gives.
+    """
+    return select(dict(
+        {"komira//tools/build/toolchains:" + setting_name(n): exec_tool_triple(n) for n in registered_names()},
+        DEFAULT = _TOOL_TRIPLE,
+    ))
 
 def busybox_sh(busybox, script, *args):
     """argv running `script` under the declared busybox shell.

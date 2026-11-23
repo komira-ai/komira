@@ -223,6 +223,7 @@ zig_test(
     name = "release_macos_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/workflows/release_macos_test.zig",
+    imports = [".github/workflows/release_macos_harness_test.zig"],
     data = dict(
         {
             "packages.bzl": "//release/readme_e2e:packages.bzl",
