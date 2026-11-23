@@ -505,3 +505,165 @@ int32_t komira_fs_test_set_nofile_soft(int64_t soft) {
     }
     return 0;
 }
+
+// =============================================================================
+// The all-or-nothing write's primitives (atomic_write.mojo). Each returns 0 or
+// the errno read immediately after the failing call, so the Mojo side names
+// the errno and never spells one. Every pointer is the caller's, valid for the
+// synchronous call only; nothing is allocated or retained here.
+// =============================================================================
+
+#if defined(__APPLE__)
+// arc4random_buf is in <stdlib.h> on macOS.
+#else
+#include <sys/random.h>
+#endif
+
+// The one failure the test seam injects (KOMIRA_FS_INJECT_*), or 0 for none.
+// Set only by `komira_fs_test_inject_write_failure`; no library code sets it.
+#define KOMIRA_FS_INJECT_CREATE 1
+#define KOMIRA_FS_INJECT_WRITE 2
+#define KOMIRA_FS_INJECT_FSYNC 3
+#define KOMIRA_FS_INJECT_CLOSE 4
+#define KOMIRA_FS_INJECT_RENAME 5
+#define KOMIRA_FS_INJECT_FSYNC_DIR 6
+#define KOMIRA_FS_INJECT_RANDOM 7
+static int32_t komira_fs_injected_failure = 0;
+
+// The errno an injected failure of `op` answers: a write fails as a full
+// disk, every other step as an I/O error.
+static int _inject(int32_t op) {
+    if (komira_fs_injected_failure != op) {
+        return 0;
+    }
+    return op == KOMIRA_FS_INJECT_WRITE ? ENOSPC : EIO;
+}
+
+// Eight random bytes for a temporary file's name.
+int32_t komira_fs_random_u64(uint64_t *out) {
+    *out = 0;
+    int e = _inject(KOMIRA_FS_INJECT_RANDOM);
+    if (e != 0) {
+        return (int32_t)e;
+    }
+#if defined(__APPLE__)
+    arc4random_buf(out, sizeof(*out));
+    return 0;
+#else
+    size_t got = 0;
+    while (got < sizeof(*out)) {
+        ssize_t n = getrandom((uint8_t *)out + got, sizeof(*out) - got, 0);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return (int32_t)errno;
+        }
+        got += (size_t)n;
+    }
+    return 0;
+#endif
+}
+
+// Create `path` for writing; it must not exist (O_EXCL). Mode 0666 before the
+// process umask, as any new file. Writes the descriptor into `*out_fd`.
+int32_t komira_fs_create_exclusive(const char *path, int32_t *out_fd) {
+    *out_fd = -1;
+    int e = _inject(KOMIRA_FS_INJECT_CREATE);
+    if (e != 0) {
+        return (int32_t)e;
+    }
+    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+    if (fd < 0) {
+        return (int32_t)errno;
+    }
+    *out_fd = (int32_t)fd;
+    return 0;
+}
+
+// Write all `len` bytes of `buf` to `fd`, retrying short writes and EINTR.
+// An injected failure writes the first half of the bytes, then fails, so the
+// file is left partial as a full disk leaves it.
+int32_t komira_fs_write_all(int32_t fd, const uint8_t *buf, int64_t len) {
+    int64_t limit = len;
+    int e = _inject(KOMIRA_FS_INJECT_WRITE);
+    if (e != 0) {
+        limit = len / 2;
+    }
+    int64_t done = 0;
+    while (done < limit) {
+        ssize_t n = write(fd, buf + done, (size_t)(limit - done));
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return (int32_t)errno;
+        }
+        done += (int64_t)n;
+    }
+    return (int32_t)e;
+}
+
+// fsync(2) `fd`.
+int32_t komira_fs_fsync_fd(int32_t fd) {
+    int e = _inject(KOMIRA_FS_INJECT_FSYNC);
+    if (e != 0) {
+        return (int32_t)e;
+    }
+    if (fsync(fd) != 0) {
+        return (int32_t)errno;
+    }
+    return 0;
+}
+
+// close(2) `fd`. The descriptor is released even when an injected failure is
+// reported, as close(2) releases it on every error.
+int32_t komira_fs_close_fd(int32_t fd) {
+    int rc = close(fd);
+    int e = _inject(KOMIRA_FS_INJECT_CLOSE);
+    if (e != 0) {
+        return (int32_t)e;
+    }
+    if (rc != 0) {
+        return (int32_t)errno;
+    }
+    return 0;
+}
+
+// rename(2) `src` over `dst`.
+int32_t komira_fs_rename(const char *src, const char *dst) {
+    int e = _inject(KOMIRA_FS_INJECT_RENAME);
+    if (e != 0) {
+        return (int32_t)e;
+    }
+    if (rename(src, dst) != 0) {
+        return (int32_t)errno;
+    }
+    return 0;
+}
+
+// fsync(2) the directory `dir`, which makes a rename inside it durable.
+int32_t komira_fs_fsync_dir(const char *dir) {
+    int e = _inject(KOMIRA_FS_INJECT_FSYNC_DIR);
+    if (e != 0) {
+        return (int32_t)e;
+    }
+    int fd = open(dir, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        return (int32_t)errno;
+    }
+    int rc = fsync(fd);
+    int saved = errno;
+    close(fd);
+    if (rc != 0) {
+        return (int32_t)saved;
+    }
+    return 0;
+}
+
+// TEST SEAM (the atomic-write tests only). Makes step `op` (a
+// KOMIRA_FS_INJECT_* value) of every later write fail, or none when `op` is 0.
+// Not called by any library code.
+void komira_fs_test_inject_write_failure(int32_t op) {
+    komira_fs_injected_failure = op;
+}

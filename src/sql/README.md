@@ -47,6 +47,13 @@ the same FROM is therefore refused by name (`INNER_ON_BEFORE_OUTER_REFUSAL`),
 because the folded predicate would drop the rows that join pads with NULL. A
 LEFT, SEMI or ANTI join after it keeps the same answer and is parsed.
 
+A `COPY ... TO` with no `FORMAT` takes its format from the destination's
+extension, as DuckDB does (`sql.sql_copy_format`): `.parquet`, `.csv`, and
+`.json`, `.jsonl` or `.ndjson`, after one `.gz` or `.zst` suffix is removed.
+Any other extension is refused with `COPY_FORMAT_NOT_INFERRED` instead of
+being written as Parquet. With no `COMPRESSION`, Parquet is snappy and CSV and
+JSON take gzip from `.gz`, zstd from `.zst`, and none otherwise.
+
 `sql.sql_catalog` holds the tables and user functions a query may
 name. `SqlCatalog` registers an in-memory `Table` or `RecordBatch`
 (`add_in_memory`) or a parquet path with its schema (`add_parquet`, which
@@ -168,7 +175,7 @@ call and returns the `BoundStatement` (a query, a COPY or a CREATE TABLE AS).
 `output_schema` is the result's schema (names, Arrow types and nullability, as
 the binder derives them), and refuses a COPY or CREATE TABLE AS with an
 `Error` starting `STATEMENT_NOT_A_QUERY`; `query_plan(bound)` is that refusal
-over a statement already bound, which `sdk_exec`'s `run_sql` uses too. Every
+over a statement already bound (`sdk_exec`'s `run_sql` runs a COPY itself). Every
 other failure is the tokenizer's, parser's or binder's own `Error`, unchanged.
 Nothing is optimized, lowered or run.
 
@@ -343,6 +350,18 @@ var copy = statement_from_sql(
     "COPY (SELECT k FROM t) TO 'out.csv' (FORMAT csv)", fcat, NoParquetFooters()
 )
 assert_equal(Int(copy.kind), Int(STMT_COPY))
+```
+
+The format a COPY takes from its destination:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from arrow.write_target import WCOMP_GZIP, WFMT_CSV, WFMT_PARQUET
+from sql.sql_copy_format import copy_codec_from_path, copy_format_from_path
+
+assert_equal(Int(copy_format_from_path("out/sales.parquet")), Int(WFMT_PARQUET))
+assert_equal(Int(copy_format_from_path("rows.csv.gz")), Int(WFMT_CSV))
+assert_equal(Int(copy_codec_from_path(WFMT_CSV, "rows.csv.gz")), Int(WCOMP_GZIP))
 ```
 
 A multi-file parquet relation, built in memory (no file is opened), registered in
