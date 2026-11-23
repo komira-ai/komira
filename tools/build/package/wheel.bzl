@@ -82,7 +82,8 @@ Requires-Dist of a distribution in `runtime_dists`. The runtime is the
 toolchain's (`toolchains//:mojo`), or the directory `runtime` names (a
 `mojo_runtime`: a macOS wheel's check runs on Linux, and the darwin toolchain
 executes on macOS). Beside the wheel it reads only those names and the
-runtime libraries, nothing else the rule that wrote the wheel was given. The output, `<name>.libs`, lists the libraries `entry` loads, in
+runtime libraries, nothing else the rule that wrote the wheel was given.
+The output, `<name>.libs`, lists the libraries `entry` loads, in
 load order; with `expect_refusal`, it exists only if the wheel is refused with
 exactly that line (and says `refused: <line>`). Building the target is running
 the check.

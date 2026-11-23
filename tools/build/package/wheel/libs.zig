@@ -2,9 +2,9 @@
 //! unless the libraries in it load the way an install of it would load them:
 //! from the wheel, through each library's own run path, with the Mojo runtime
 //! inside it and nothing else beside it. The entry's format picks the walk:
-//! an ELF entry is walked as ld.so walks it, a Mach-O entry as dyld does. It reads the wheel, the few names
-//! of `Policy` and the toolchain's copies of the runtime libraries, and no
-//! other input of the rule that wrote the wheel. The zip is read as zip.zig
+//! an ELF entry is walked as ld.so walks it, a Mach-O entry as dyld does. It
+//! reads the wheel, the few names of `Policy` and the runtime's copies of the
+//! runtime libraries, and no other input of the rule that wrote the wheel. The zip is read as zip.zig
 //! reads it (a zip that writer wrote: the build's wheel, or the same bytes as
 //! an index serves them).
 //!

@@ -217,3 +217,46 @@ test "the command reads both wheels and writes the marker; a missing flag is ref
     try t.expectError(error.Refused, compare.command(a, &d, &.{ "--wheel", "mac.whl", "--out", "same.txt" }, files));
     try t.expectEqualStrings("missing --like", d.msg);
 }
+
+test "a member twice, two dist-info directories, no WHEEL, a WHEEL of two Tags or a Tag without its platform part is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const linux = try members(a, try linuxInput(a, &.{}));
+    const mac = try members(a, try macInput(a, &.{init_py}));
+    const twice = try std.mem.concat(a, zip.Read, &.{ mac, mac[0..1] });
+    const want_twice = try std.fmt.allocPrint(a, "members: the wheel holds {s} twice", .{mac[0].name});
+    try t.expectEqualStrings(want_twice, try refusal(a, twice, linux, &mac_own, &linux_own));
+    var other = mac[0];
+    other.name = "other-0.1.dist-info/METADATA";
+    const two_info = try std.mem.concat(a, zip.Read, &.{ mac, &.{other} });
+    try t.expectEqualStrings("dist-info: the wheel has two .dist-info directories, komira-0.1.57.dist-info and other-0.1.dist-info", try refusal(a, two_info, linux, &mac_own, &linux_own));
+    var no_wheel = std.ArrayList(zip.Read).empty;
+    for (mac) |m| if (!std.mem.endsWith(u8, m.name, "/WHEEL")) try no_wheel.append(a, m);
+    try t.expectEqualStrings("WHEEL: the wheel has no komira-0.1.57.dist-info/WHEEL", try refusal(a, no_wheel.items, linux, &mac_own, &linux_own));
+    const two_tags = try swapped(a, mac, "/WHEEL", "Wheel-Version: 1.0\nTag: py3-none-macosx_11_0_arm64\nTag: py3-none-macosx_12_0_arm64\n");
+    try t.expectEqualStrings("WHEEL: the wheel has 2 Tag lines, not one", try refusal(a, two_tags, linux, &mac_own, &linux_own));
+    const one_part = try swapped(a, mac, "/WHEEL", "Wheel-Version: 1.0\nGenerator: komira_wheel\nRoot-Is-Purelib: false\nTag: py3\n");
+    try t.expectEqualStrings("WHEEL: the wheel has the Tag `py3`, which is not <python>-<abi>-<platform>", try refusal(a, one_part, linux, &mac_own, &linux_own));
+    const two_parts = try swapped(a, mac, "/WHEEL", "Wheel-Version: 1.0\nGenerator: komira_wheel\nRoot-Is-Purelib: false\nTag: py3-none\n");
+    try t.expectEqualStrings("WHEEL: the wheel has the Tag `py3-none`, which is not <python>-<abi>-<platform>", try refusal(a, two_parts, linux, &mac_own, &linux_own));
+}
+
+test "the command refuses a missing --wheel or --out" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const Files = struct {
+        data: []const u8,
+        pub fn read(f: @This(), _: Alloc, _: *diag.Diag, _: []const u8) diag.Refused![]const u8 {
+            return f.data;
+        }
+    };
+    var e = diag.Diag{};
+    const files = Files{ .data = try wheel.build(a, &e, try linuxInput(a, &.{}), try dateOf(a)) };
+    var d = diag.Diag{};
+    try t.expectError(error.Refused, compare.command(a, &d, &.{ "--like", "l.whl", "--out", "o" }, files));
+    try t.expectEqualStrings("missing --wheel", d.msg);
+    try t.expectError(error.Refused, compare.command(a, &d, &.{ "--wheel", "w.whl", "--like", "l.whl" }, files));
+    try t.expectEqualStrings("missing --out", d.msg);
+}

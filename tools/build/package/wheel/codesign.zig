@@ -14,10 +14,11 @@
 //!   * its hash type is SHA-1, SHA-256, SHA-256 truncated to 20 bytes or
 //!     SHA-384, and its hash size is that type's;
 //!   * every page of the file hashes to its code slot;
-//!   * every special slot that names a blob of the signature (requirements,
-//!     entitlements) holds that blob's hash, and every other special slot is
-//!     zero: a library in a wheel has no bundle, so a slot for an Info.plist or
-//!     a resource directory names a file it cannot have.
+//!   * every blob of the signature other than a CodeDirectory or a CMS blob
+//!     (requirements, entitlements) has a special slot, holding its hash, and
+//!     every special slot naming no blob is zero: a library in a wheel has no
+//!     bundle, so a slot for an Info.plist or a resource directory names a
+//!     file it cannot have.
 //!
 //! A CMS blob (a Developer ID signature, slot 0x10000) is not verified: the
 //! hashes above are what binds the code to the signature, ad hoc or not.
@@ -38,6 +39,7 @@ pub const SLOT_ENTITLEMENTS: u32 = 5;
 pub const SLOT_DER_ENTITLEMENTS: u32 = 7;
 pub const SLOT_ALTERNATE_FIRST: u32 = 0x1000;
 pub const SLOT_ALTERNATE_LAST: u32 = 0x1004;
+pub const SLOT_CMS: u32 = 0x10000;
 pub const HASH_SHA1: u8 = 1;
 pub const HASH_SHA256: u8 = 2;
 pub const HASH_SHA256_TRUNCATED: u8 = 3;
@@ -109,7 +111,8 @@ fn slotName(t: u32) []const u8 {
     };
 }
 
-/// One CodeDirectory, `cd` (its bytes as the SuperBlob's length bounds them),
+/// One CodeDirectory, `cd` (its bytes up to the SuperBlob's end; its own
+/// length field is bounded against them),
 /// against the file `data` and the SuperBlob `sb` its special slots name.
 fn checkDirectory(alloc: Alloc, d: *Diag, name: []const u8, data: []const u8, sig_off: u32, sb: []const u8, cd: []const u8) Refused!void {
     if (cd.len < 44) return refuse(d, alloc, "signature: {s}: a CodeDirectory shorter than its 44-byte header", .{name});
@@ -127,10 +130,11 @@ fn checkDirectory(alloc: Alloc, d: *Diag, name: []const u8, data: []const u8, si
     if (hsize != want_size) return refuse(d, alloc, "signature: {s}: a CodeDirectory of hash type {d} with {d}-byte hashes, not {d}", .{ name, kind, hsize, want_size });
     if (code_limit != sig_off) return refuse(d, alloc, "signature: {s}: the CodeDirectory covers {d} bytes, and the signature starts at {d}", .{ name, code_limit, sig_off });
     if (page_shift > 30) return refuse(d, alloc, "signature: {s}: a CodeDirectory page size of 2^{d}", .{ name, page_shift });
+    // code_limit is the signature's offset, past the file's 32-byte header (check).
     const page: usize = if (page_shift == 0) code_limit else @as(usize, 1) << @intCast(page_shift);
-    const pages: usize = if (code_limit == 0) 0 else (code_limit + page - 1) / page;
+    const pages: usize = (code_limit + page - 1) / page;
     if (n_code != pages) return refuse(d, alloc, "signature: {s}: the CodeDirectory has {d} code slots for {d} pages", .{ name, n_code, pages });
-    if (hash_off < @as(usize, n_special) * hsize or hash_off + @as(usize, n_code) * hsize > c.len)
+    if (hash_off < 44 + @as(usize, n_special) * hsize or hash_off + @as(usize, n_code) * hsize > c.len)
         return refuse(d, alloc, "signature: {s}: the CodeDirectory's hash slots lie outside it", .{name});
 
     var buf: [48]u8 = undefined;
@@ -171,12 +175,13 @@ fn blobOf(sb: []const u8, t: u32) ?[]const u8 {
     return null;
 }
 
-/// Refuses the Mach-O file `data` (named `name`, its load commands already
-/// read by macho.zig) unless its code signature is present and matches it.
+/// Refuses the Mach-O file `data` (named `name`) unless its code signature is
+/// present and matches it. Precondition: macho.read accepted `data`, so its
+/// header and load commands lie inside it.
 pub fn check(alloc: Alloc, d: *Diag, name: []const u8, data: []const u8) Refused!void {
     const r = signatureRange(data) orelse
         return refuse(d, alloc, "signature: {s} has no code signature (no LC_CODE_SIGNATURE): macOS on arm64 refuses to load unsigned code", .{name});
-    if (@as(usize, r.off) + r.size > data.len or r.size < 12)
+    if (r.off < 32 or @as(usize, r.off) + r.size > data.len or r.size < 12)
         return refuse(d, alloc, "signature: {s}: the code signature lies outside the file", .{name});
     const sb = data[r.off .. r.off + r.size];
     if (be(sb, 0) != SUPERBLOB_MAGIC) return refuse(d, alloc, "signature: {s}: the code signature is not an embedded-signature SuperBlob", .{name});
@@ -200,4 +205,17 @@ pub fn check(alloc: Alloc, d: *Diag, name: []const u8, data: []const u8) Refused
         directories += 1;
     }
     if (directories == 0) return refuse(d, alloc, "signature: {s}: the code signature holds no CodeDirectory", .{name});
+    // A blob no special slot names is bound to nothing: each CodeDirectory must hash it.
+    i = 0;
+    while (i < count) : (i += 1) {
+        const t = be(sb, 12 + i * 8);
+        if (t == SLOT_CODEDIRECTORY or (t >= SLOT_ALTERNATE_FIRST and t <= SLOT_ALTERNATE_LAST) or t == SLOT_CMS) continue;
+        var j: usize = 0;
+        while (j < count) : (j += 1) {
+            const ct = be(sb, 12 + j * 8);
+            if (ct != SLOT_CODEDIRECTORY and (ct < SLOT_ALTERNATE_FIRST or ct > SLOT_ALTERNATE_LAST)) continue;
+            if (t > be(sb, be(sb, 16 + j * 8) + 24))
+                return refuse(d, alloc, "signature: {s}: the signature carries {s} (slot {d}), which no special slot of a CodeDirectory hashes", .{ name, slotName(t), t });
+        }
+    }
 }

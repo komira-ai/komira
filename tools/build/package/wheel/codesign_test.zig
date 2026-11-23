@@ -197,3 +197,101 @@ test "a signature, an index or a blob outside its bounds is refused" {
     put32be(none, sigOff(none) + 12, codesign.SLOT_ENTITLEMENTS);
     try t.expectEqualStrings("signature: libx.dylib: the code signature holds no CodeDirectory", try refusal(a, none));
 }
+
+test "an LC_CODE_SIGNATURE too short, a signature before the code or too short for its header is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const good = try fixture.goodDylib(a);
+    const cmd = 32 + get32le(good, 20) - 16;
+    const short_cmd = try a.dupe(u8, good);
+    put32le(short_cmd, cmd + 4, 8);
+    try t.expectEqualStrings("signature: libx.dylib has no code signature (no LC_CODE_SIGNATURE): macOS on arm64 refuses to load unsigned code", try refusal(a, short_cmd));
+    const early = try a.dupe(u8, good);
+    put32le(early, cmd + 8, 16);
+    try t.expectEqualStrings("signature: libx.dylib: the code signature lies outside the file", try refusal(a, early));
+    const tiny = try a.dupe(u8, good);
+    put32le(tiny, cmd + 12, 8);
+    try t.expectEqualStrings("signature: libx.dylib: the code signature lies outside the file", try refusal(a, tiny));
+}
+
+test "a CodeDirectory too short, of a page size past 2^30, or whose hashes overlap its header is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const good = try fixture.goodDylib(a);
+    const len = try a.dupe(u8, good);
+    put32be(len, cdOff(len) + 4, 40);
+    try t.expectEqualStrings("signature: libx.dylib: a CodeDirectory whose length lies outside the signature", try refusal(a, len));
+    // The CodeDirectory's index entry moved to the signature's last 8 bytes, a CodeDirectory magic there.
+    const cut = try a.dupe(u8, good);
+    const sb = sigOff(cut);
+    const sb_len = get32be(cut, sb + 4);
+    put32be(cut, sb + 8, 1); // the index holds the CodeDirectory alone
+    put32be(cut, sb + 16, sb_len - 8);
+    put32be(cut, sb + sb_len - 8, codesign.CODEDIRECTORY_MAGIC);
+    put32be(cut, sb + sb_len - 4, 8);
+    try t.expectEqualStrings("signature: libx.dylib: a CodeDirectory shorter than its 44-byte header", try refusal(a, cut));
+    const shift = try a.dupe(u8, good);
+    shift[cdOff(shift) + 39] = 31;
+    try t.expectEqualStrings("signature: libx.dylib: a CodeDirectory page size of 2^31", try refusal(a, shift));
+    const overlap = try a.dupe(u8, good);
+    put32be(overlap, cdOff(overlap) + 16, 44);
+    try t.expectEqualStrings("signature: libx.dylib: the CodeDirectory's hash slots lie outside it", try refusal(a, overlap));
+}
+
+test "an index entry inside the index, or a blob shorter than its own header, is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const good = try fixture.goodDylib(a);
+    const inside = try a.dupe(u8, good);
+    put32be(inside, sigOff(inside) + 16, 12);
+    try t.expectEqualStrings("signature: libx.dylib: a blob of the SuperBlob lies outside it", try refusal(a, inside));
+    const short = try a.dupe(u8, good);
+    const req = sigOff(short) + get32be(short, sigOff(short) + 24);
+    put32be(short, req + 4, 4);
+    try t.expectEqualStrings("signature: libx.dylib: a blob of the SuperBlob lies outside it", try refusal(a, short));
+}
+
+test "an alternate CodeDirectory is checked as the primary one is" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const alt = try signed(a, 2, codesign.HASH_SHA256);
+    put32be(alt, sigOff(alt) + 12, codesign.SLOT_ALTERNATE_FIRST);
+    try passes(a, alt);
+    const last = try a.dupe(u8, alt);
+    put32be(last, sigOff(last) + 12, codesign.SLOT_ALTERNATE_LAST);
+    last[100] ^= 0xff;
+    try t.expectEqualStrings("signature: libx.dylib: page 0 (bytes 0 to 4096) does not match its hash in the CodeDirectory: the file changed after it was signed", try refusal(a, last));
+}
+
+test "a blob no special slot hashes is refused, each kind by its name" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const good = try fixture.goodDylib(a);
+    const cd = cdOff(good);
+    const hash_off = get32be(good, cd + 16);
+    // The requirements blob renumbered past the CodeDirectory's two special slots (its slot-2 hash zeroed).
+    for ([_]struct { slot: u32, want: []const u8 }{
+        .{ .slot = 3, .want = "a resource directory" },
+        .{ .slot = 4, .want = "application data" },
+        .{ .slot = 5, .want = "entitlements" },
+        .{ .slot = 6, .want = "a representation" },
+        .{ .slot = 7, .want = "DER entitlements" },
+        .{ .slot = 9, .want = "a special slot" },
+    }) |c| {
+        const b = try a.dupe(u8, good);
+        @memset(b[cd + hash_off - 64 .. cd + hash_off - 32], 0);
+        put32be(b, sigOff(b) + 20, c.slot);
+        const want = try std.fmt.allocPrint(a, "signature: libx.dylib: the signature carries {s} (slot {d}), which no special slot of a CodeDirectory hashes", .{ c.want, c.slot });
+        try t.expectEqualStrings(want, try refusal(a, b));
+    }
+    // A CMS blob is not hashed by a special slot, and is not refused for it.
+    const cms = try a.dupe(u8, good);
+    @memset(cms[cd + hash_off - 64 .. cd + hash_off - 32], 0);
+    put32be(cms, sigOff(cms) + 20, codesign.SLOT_CMS);
+    try passes(a, cms);
+}

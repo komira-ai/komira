@@ -3,6 +3,8 @@
 //! bytes, and refused unless they are the same package apart from each
 //! platform's native libraries:
 //!
+//!   members    no member name is in a wheel twice (a second copy could
+//!              differ unseen);
 //!   dist-info  both have one `.dist-info` directory, of the same name (the
 //!              same distribution at the same version);
 //!   members    every member but RECORD and WHEEL is in both, with the same
@@ -15,7 +17,7 @@
 //!   RECORD     not compared: it lists the members' hashes, and the members
 //!              are compared themselves.
 //!
-//! The marker lists the members alike and each wheel's own, by its tag, so
+//! The marker counts the members alike and lists each wheel's own, by its tag, so
 //! a reader sees exactly what differs.
 
 const std = @import("std");
@@ -55,6 +57,10 @@ fn topDir(path: []const u8) []const u8 {
 /// `members`' one `.dist-info` directory and the one Tag of its WHEEL;
 /// `label` names the wheel in a refusal.
 fn side(alloc: Alloc, d: *Diag, label: []const u8, members: []const zip.Read) Refused!Side {
+    for (members, 0..) |m, i| {
+        for (members[0..i]) |o| if (std.mem.eql(u8, o.name, m.name))
+            return refuse(d, alloc, "members: {s} holds {s} twice", .{ label, m.name });
+    }
     var info: ?[]const u8 = null;
     for (members) |m| {
         const top = topDir(m.name);
@@ -68,19 +74,19 @@ fn side(alloc: Alloc, d: *Diag, label: []const u8, members: []const zip.Read) Re
         return refuse(d, alloc, "WHEEL: {s} has no {s}/WHEEL", .{ label, dir });
     const tags = try check_mod.headerValues(alloc, wheel_file.data, "Tag");
     if (tags.len != 1) return refuse(d, alloc, "WHEEL: {s} has {d} Tag lines, not one", .{ label, tags.len });
+    if (std.mem.count(u8, tags[0], "-") != 2) return refuse(d, alloc, "WHEEL: {s} has the Tag `{s}`, which is not <python>-<abi>-<platform>", .{ label, tags[0] });
     return .{ .members = members, .info = dir, .tag = tags[0] };
 }
 
-/// `tag` without its platform part: `py3-none` of `py3-none-macosx_11_0_arm64`.
+/// `tag` (three parts, `side` checked) without its platform part: `py3-none`
+/// of `py3-none-macosx_11_0_arm64`.
 fn pythonAbi(tag: []const u8) []const u8 {
-    const second = std.mem.indexOfScalarPos(u8, tag, (std.mem.indexOfScalar(u8, tag, '-') orelse return tag) + 1, '-') orelse return tag;
-    return tag[0..second];
+    return tag[0..std.mem.lastIndexOfScalar(u8, tag, '-').?];
 }
 
 /// `tag`'s platform part: `macosx_11_0_arm64` of `py3-none-macosx_11_0_arm64`.
 fn platformOf(tag: []const u8) []const u8 {
-    const abi = pythonAbi(tag);
-    return if (abi.len < tag.len) tag[abi.len + 1 ..] else tag;
+    return tag[std.mem.lastIndexOfScalar(u8, tag, '-').? + 1 ..];
 }
 
 /// WHEEL's lines but the Tag line.
