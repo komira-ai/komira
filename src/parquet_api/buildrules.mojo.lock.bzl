@@ -36,7 +36,7 @@ GRAPH_JSON = r'''{
       "srcs": [
         {"path": "src/parquet_api/src/parquet_api/__init__.mojo", "sha256": "73a55f1df1e288475c0a25a9897766142b9fe6f784093b78c980a068da43ca04"},
         {"path": "src/parquet_api/src/parquet_api/hll_footer.mojo", "sha256": "41e5feb7c66f28734b8ef4befa0cc1dd05d6ab1fe10d95dbdf9d16bfe92f6e29"},
-        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "cb6efac7f29d12de7290ac75aeff2179c04ef61fa54572f5fa89eb31057f399a"},
+        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "d19fe3b5fd2245536f49a93f4b373cd8439eb857983a131e058c4b0abab19196"},
         {"path": "src/parquet_api/src/parquet_api/types.mojo", "sha256": "5c961b33b41c0b6328f47aa6c31e1eb5f1917d4af6fe028c561e796257a67391"}
       ],
       "deps": [],
@@ -112,7 +112,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "efcae023d184a5dbd090984801febbf4d5038e483d5167acd935164a1cc550e8"}
+        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "78ae782ed1e2e5b190c83c1f67ffaef6a3c1e8e7d9aace29893a5199fe4e44bf"}
       ],
       "deps": ["komira-ai/parquet_api@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -166,7 +166,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "srcs": [
         {"path": "src/parquet_api/src/parquet_api/__init__.mojo", "sha256": "73a55f1df1e288475c0a25a9897766142b9fe6f784093b78c980a068da43ca04"},
         {"path": "src/parquet_api/src/parquet_api/hll_footer.mojo", "sha256": "41e5feb7c66f28734b8ef4befa0cc1dd05d6ab1fe10d95dbdf9d16bfe92f6e29"},
-        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "cb6efac7f29d12de7290ac75aeff2179c04ef61fa54572f5fa89eb31057f399a"},
+        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "d19fe3b5fd2245536f49a93f4b373cd8439eb857983a131e058c4b0abab19196"},
         {"path": "src/parquet_api/src/parquet_api/types.mojo", "sha256": "5c961b33b41c0b6328f47aa6c31e1eb5f1917d4af6fe028c561e796257a67391"}
       ],
       "deps": [],
@@ -242,7 +242,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "efcae023d184a5dbd090984801febbf4d5038e483d5167acd935164a1cc550e8"}
+        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "78ae782ed1e2e5b190c83c1f67ffaef6a3c1e8e7d9aace29893a5199fe4e44bf"}
       ],
       "deps": ["komira-ai/parquet_api@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -293,7 +293,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "srcs": [
         {"path": "src/parquet_api/src/parquet_api/__init__.mojo", "sha256": "73a55f1df1e288475c0a25a9897766142b9fe6f784093b78c980a068da43ca04"},
         {"path": "src/parquet_api/src/parquet_api/hll_footer.mojo", "sha256": "41e5feb7c66f28734b8ef4befa0cc1dd05d6ab1fe10d95dbdf9d16bfe92f6e29"},
-        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "cb6efac7f29d12de7290ac75aeff2179c04ef61fa54572f5fa89eb31057f399a"},
+        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "d19fe3b5fd2245536f49a93f4b373cd8439eb857983a131e058c4b0abab19196"},
         {"path": "src/parquet_api/src/parquet_api/types.mojo", "sha256": "5c961b33b41c0b6328f47aa6c31e1eb5f1917d4af6fe028c561e796257a67391"}
       ],
       "deps": [],
@@ -369,7 +369,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "efcae023d184a5dbd090984801febbf4d5038e483d5167acd935164a1cc550e8"}
+        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "78ae782ed1e2e5b190c83c1f67ffaef6a3c1e8e7d9aace29893a5199fe4e44bf"}
       ],
       "deps": ["komira-ai/parquet_api@0.1.0#mojo1.0.0/lib"],
       "natives": [],
