@@ -35,7 +35,7 @@ GRAPH_JSON = r'''{
       "root": "src/atomic_alias/src/atomic_alias",
       "srcs": [
         {"path": "src/atomic_alias/src/atomic_alias/__init__.mojo", "sha256": "4d541f33e45b57ac74d8b017745d73c00328d0fbd9d9af7b7095d2e7c2a29b62"},
-        {"path": "src/atomic_alias/src/atomic_alias/atypes.mojo", "sha256": "886dc2859e80055d9b3a1811536050327ddd8a2d40a9f8f16c859214c30b1ab6"}
+        {"path": "src/atomic_alias/src/atomic_alias/atypes.mojo", "sha256": "4a8e3b614347e24e1a1d3206dd57614d98028f229b24ce78d844066790af514d"}
       ],
       "deps": [],
       "natives": [],
@@ -88,7 +88,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "root": "src/atomic_alias/src/atomic_alias",
       "srcs": [
         {"path": "src/atomic_alias/src/atomic_alias/__init__.mojo", "sha256": "4d541f33e45b57ac74d8b017745d73c00328d0fbd9d9af7b7095d2e7c2a29b62"},
-        {"path": "src/atomic_alias/src/atomic_alias/atypes.mojo", "sha256": "886dc2859e80055d9b3a1811536050327ddd8a2d40a9f8f16c859214c30b1ab6"}
+        {"path": "src/atomic_alias/src/atomic_alias/atypes.mojo", "sha256": "4a8e3b614347e24e1a1d3206dd57614d98028f229b24ce78d844066790af514d"}
       ],
       "deps": [],
       "natives": [],
@@ -138,7 +138,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "root": "src/atomic_alias/src/atomic_alias",
       "srcs": [
         {"path": "src/atomic_alias/src/atomic_alias/__init__.mojo", "sha256": "4d541f33e45b57ac74d8b017745d73c00328d0fbd9d9af7b7095d2e7c2a29b62"},
-        {"path": "src/atomic_alias/src/atomic_alias/atypes.mojo", "sha256": "886dc2859e80055d9b3a1811536050327ddd8a2d40a9f8f16c859214c30b1ab6"}
+        {"path": "src/atomic_alias/src/atomic_alias/atypes.mojo", "sha256": "4a8e3b614347e24e1a1d3206dd57614d98028f229b24ce78d844066790af514d"}
       ],
       "deps": [],
       "natives": [],
