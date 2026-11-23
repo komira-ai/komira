@@ -10,6 +10,14 @@
 # (komira_plan_harness: the TSV read at the engine's schema, compare_canon).
 # Row order is compared only where the query states one.
 #
+# What the fixture leaves out, and why:
+#   * An integer key holding both negative and non-negative values: the pinned
+#     DuckDB's read_json gives that column HUGEINT, while the binder here
+#     infers BIGINT (values equal, type not). An inference difference
+#     (src/jsonl, the SQL binder), not of the scan.
+#   * A grouped MAX of a DOUBLE: the grouped aggregation sink refuses a float
+#     MIN/MAX by name; GROUP BY here folds integers.
+#
 #   * test_the_columns_and_their_types_are_duckdbs: the names, order and types
 #     of `SELECT *` are the ones DuckDB's read_json gives (types.tsv).
 #   * test_<case>_is_duckdbs, one per case of the BUCK list (every row and
@@ -44,9 +52,9 @@ def _read(name: String) raises -> String:
     return text^
 
 
-def _query(case: String) raises -> String:
-    """The query of oracle/<case>.sql, reading rows.jsonl by its path here."""
-    var lines = _read(case + ".sql").split("\n")
+def _query(name: String) raises -> String:
+    """The query of oracle/<name>.sql, reading rows.jsonl by its path here."""
+    var lines = _read(name + ".sql").split("\n")
     var out = String()
     var inside = False
     for i in range(len(lines)):
@@ -57,25 +65,25 @@ def _query(case: String) raises -> String:
             out += line + "\n"
         if line == "COPY (":
             inside = True
-    assert_true(out.byte_length() > 0, case + ".sql holds no query")
+    assert_true(out.byte_length() > 0, name + ".sql holds no query")
     return out.replace("'rows.jsonl'", "'" + data_path("rows.jsonl") + "'")
 
 
-def _run(mut ctx: EngineContext, case: String) raises -> RecordBatch:
-    var outcome = run_sql(ctx, _query(case))
+def _run(mut ctx: EngineContext, name: String) raises -> RecordBatch:
+    var outcome = run_sql(ctx, _query(name))
     if outcome.refusal:
         ref r = outcome.refusal.value()
-        raise Error(case + ": refused at " + r.step + ": " + r.reason)
-    assert_equal(len(outcome.batches), 1, case + ": one batch")
+        raise Error(name + ": refused at " + r.step + ": " + r.reason)
+    assert_equal(len(outcome.batches), 1, name + ": one batch")
     return outcome.batches.pop()
 
 
-def _check(mut ctx: EngineContext, case: String, var policy: CanonPolicy) raises:
-    var got = render_batch(_run(ctx, case), policy^)
-    var expected = duckdb_tsv_canon(parse_duckdb_tsv(_read(case + ".tsv")), got)
+def _check(mut ctx: EngineContext, name: String, var policy: CanonPolicy) raises:
+    var got = render_batch(_run(ctx, name), policy^)
+    var expected = duckdb_tsv_canon(parse_duckdb_tsv(_read(name + ".tsv")), got)
     var report = compare_canon(expected, got)
     if not report.ok():
-        raise Error(case + ": the result is not DuckDB's: " + String(report))
+        raise Error(name + ": the result is not DuckDB's: " + String(report))
 
 
 def _duckdb_type(t: ArrowType) raises -> String:
