@@ -1,7 +1,7 @@
 # lowering
 
 Lowering: a bound `LogicalPlan`, a `HostProfile` and the resolved inputs go in;
-the physical plan (`physical_plan`, IR version 20) and the `ParamTable`
+the physical plan (`physical_plan`, IR version 21) and the `ParamTable`
 its segments index come out. It is pure. `lower` opens no file, reads no clock
 and no environment variable and touches no global, so equal arguments give a
 `LoweredPlan` that renders byte-equal.
@@ -13,8 +13,8 @@ and no environment variable and touches no global, so equal arguments give a
 - `lowered_plan`: `LoweringInputs` (one `ScanFacts` per scan in scan
   pre-order: the footers' statistics and the columns every row group stores
   dictionary encoded, and for an Iceberg table scan the files the host planned
-  (`add_iceberg_scan`); and the plan's `UdfRef` list), `ParamTable` (which
-  carries that list whole, as `udfs`), `LoweredPlan` and the seven refusal
+  (`add_iceberg_scan`); and the plan's `UdfRef` list), `ParamTable` (`agg`, `sort`, `topn`, `batches`, and the
+  `UdfRef` list whole, as `udfs`), `LoweredPlan` and the seven refusal
   tokens.
 - `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, whose
   spec lists the files when there are several; `SOURCE_BATCH` for an in-memory
@@ -35,7 +35,14 @@ and no environment variable and touches no global, so equal arguments give a
   (`SOURCE_UDF_STEP`, see User functions). A filter, a projection, a limit and
   an ungrouped frame fuse into it.
   An aggregation, a distinct or a sort ends it in a sink and opens a pipeline
-  that reads that segment's output over an `E3` edge. A distinct is a
+  that reads that segment's output over an `E3` edge. A top-n, and a limit
+  that reaches a sort or a top-n through only projections (without a UDF) and
+  other limits, is cut as one `SINK_TOPN` segment that keeps the composed range
+  of rows `[offset, offset + n)` of the sort's order (a limit of `n` after
+  `offset` over a range `(start, count)` keeps `(start + offset, min(n, count -
+  offset))`, at least zero rows, with offsets saturating at the largest
+  integer); the projections between are fused, bottom up, onto the pipeline
+  that reads that segment. A distinct is a
   `SINK_AGG` grouped by every column, in order, with no aggregate, so its
   sink row is the one an aggregation with those group keys gets. A union
   (`UNION ALL`) ends each branch in a segment of its own (a `SINK_COLLECT`
@@ -50,7 +57,7 @@ and no environment variable and touches no global, so equal arguments give a
   `cut_walk` is the dispatch on the node's tag and the resolution of shared
   subplans around it (below); each arm is its own module (`cut_scan` and
   its JSON arm `cut_scan_jsonl`, `cut_filter`, `cut_project`, `cut_limit`,
-  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_union`, `cut_join`,
+  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_topn`, `cut_union`, `cut_join`,
   `cut_shared`), and `cut_state` holds
   what they share: the open pipeline, the cutter's segments and ParamTable,
   the shared subplans cut so far, and the close and reopen of a breaker. A new
@@ -68,8 +75,8 @@ and no environment variable and touches no global, so equal arguments give a
   branch does, and the canonical position and every reference read that
   segment over an `E3` edge (a union that holds two references names the
   segment twice in its `SOURCE_CONCAT`); the engine hands each reader the
-  same rows. A reader of a sort's output is a sorted input, as the sort's own
-  reader is. One that is only scans, filters, projections and unions of them
+  same rows. A reader of a sort's or a top-n's output is a sorted input, as
+  the sort's own reader is. One that is only scans, filters, projections and unions of them
   is cut again at every reference, over the same scans: the references take
   no `ScanFacts` of their own, and the recut keeps the scans' statistics,
   dictionary-encoded keys and parallel read.
@@ -130,8 +137,7 @@ outside its set is refused when the code runs, by its runtime
 Lowering refuses by name and never replaces what it cannot lower with another
 shape:
 
-- `LOWERING_UNCUTTABLE_NODE`, naming the node: a top-n,
-  window, view reference, cast to string or exchange node (the cutter has no
+- `LOWERING_UNCUTTABLE_NODE`, naming the node: window, view reference, cast to string or exchange node (the cutter has no
   arm for any of them, so an exchange is refused rather than elided on one
   host; a view reference is resolved before lowering, which has no view
   registry); a shared-subplan reference reached before its canonical subtree
@@ -139,8 +145,12 @@ shape:
   (column count, and per column the name, Arrow type, decimal precision and
   scale and timezone); a filter, projection or aggregation that carries a
   UDF of the registered kind (`has_udf`), an aggregate function that is a UDF
-  (`AGG_UDF`); a limit with an offset or a
-  negative count; a limit above a sort (see Order); a partial or final
+  (`AGG_UDF`); a limit with a negative
+  count or a negative offset, or a top-n with a negative count; a limit with
+  an offset that does not reach a sort (only a sort's output has an order to
+  skip rows of); a limit over a sorted stream that is not one range of its
+  sort (a filter stands between them, or the sort or a node between is a
+  shared subplan other readers read whole; see Order); a partial or final
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
   than Parquet, in memory, CSV, JSON or an Iceberg table; a JSON scan whose
@@ -239,10 +249,14 @@ other segment is `ORDER_NONE`: an integer, `DECIMAL`, `COUNT`, `MIN` or `MAX`
 fold is exact in any order, and the grouped sinks fold no float argument. A
 sort's output keeps the sort's order through filters,
 projections and the final collect only as far as the engine's sink-output
-source keeps it; lowering does not state more. A limit above a sort is
-refused, because the rows it keeps would depend on that order, and a limit
-above an aggregation that reads a sort is cut: the aggregation ends the sorted
-stream.
+source keeps it; lowering does not state more. A limit that reaches a
+sort through projections and limits is cut as a `SINK_TOPN` segment, which
+answers rows of the sort's order, ties kept in the collected order. A limit
+above a sort with a filter between them is refused, because the rows it keeps
+would depend on an order no segment records; so is a limit whose sort, or a
+node between them, is a shared subplan other readers read whole (a sort that
+only reads a shared subplan's segment is still one range), and a limit above an aggregation
+that reads a sort is cut: the aggregation ends the sorted stream.
 
 ## Dependencies
 

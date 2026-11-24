@@ -51,6 +51,7 @@ from plan_ir.logical_plan import (
     PLAN_PROJECT,
     PLAN_SCAN,
     PLAN_SORT,
+    PLAN_TOPN,
     PLAN_UNION,
 )
 from scan_source.source_variant import (
@@ -126,6 +127,8 @@ def _collect(
         _collect(inputs, node.distinct_data_ref().child[], ctx)
     elif tag == PLAN_SORT:
         _collect(inputs, node.sort_data_ref().child[], ctx)
+    elif tag == PLAN_TOPN:
+        _collect(inputs, node.topn_data_ref().child[], ctx)
     elif tag == PLAN_JOIN:
         _collect(inputs, node.join_data_ref().left[], ctx)
         _collect(inputs, node.join_data_ref().right[], ctx)

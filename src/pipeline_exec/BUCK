@@ -25,8 +25,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # written to disk by hash partition when the pool refuses them: `group_spill`),
 # `sink_string_group_agg` (the same keyed by
 # strings, over `string_keys`' intern table; `string_harness` is its test table), `sink_sort`
-# (the in-memory sort, over `sort_nulls` and `op_sort`; `sort_harness` is its
-# test table and oracle), and
+# (the in-memory sort and the top-N's range of its order, over `sort_nulls`,
+# `sort_range` and `op_sort`; `sort_harness` is its test table and oracle), and
 # `real_builder` that constructs them from a segment descriptor; the join is two
 # segments, a build side ending in `sink_collect` as SINK_HASH_BUILD and a probe
 # side whose chain carries `op_hash_probe` (`join_harness` writes join plans by
@@ -225,6 +225,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 too small.
 # test_sort_plan_concurrent       the same sort on threads, run after run, on a
 #                                 runtime stopped and started again.
+# test_sink_topn                  SINK_TOPN by hand: a range of the sort's order cut
+#                                 through ties and NULLs, one to three keys, every
+#                                 worker count and dealing equal to one worker, a
+#                                 large input cut many times in bounded memory,
+#                                 masks, columns named like the hidden ones,
+#                                 refusals by name, the pool's charge and return.
+# test_topn_plan                  hand-built plans into SINK_TOPN: a resident batch,
+#                                 a Parquet scan, a segment's output, no row, a pool
+#                                 too small, data refused by name.
 # test_tpch_q6                    Q6 over Parquet, end to end, against an
 #                                 oracle and a hand-computed answer.
 # test_tpch_q6_concurrent         Q6 on threads, run after run.
@@ -363,6 +372,7 @@ mojo_library(
         "tests/test_sink_int_sum_decimal.mojo",
         "tests/test_sink_sort.mojo",
         "tests/test_sink_string_group_agg.mojo",
+        "tests/test_sink_topn.mojo",
         "tests/test_sort_keys.mojo",
         "tests/test_sort_plan.mojo",
         "tests/test_sort_plan_concurrent.mojo",
@@ -372,6 +382,7 @@ mojo_library(
         "tests/test_sources.mojo",
         "tests/test_string_group_memory.mojo",
         "tests/test_string_keys.mojo",
+        "tests/test_topn_plan.mojo",
         "tests/test_tpch_q1.mojo",
         "tests/test_tpch_q1_concurrent.mojo",
         "tests/test_tpch_q6.mojo",
