@@ -132,7 +132,7 @@ def main(argv):
     assert os.path.realpath(os.path.dirname(os.path.dirname(komira.__file__))) == site, "komira is imported from {}, not from {}".format(komira.__file__, site)
     cmp = load_compare(opts["compare"])
     answers = cmp.parse_answers(opts["answers"])
-    assert sorted(answers, key=lambda q: int(q[1:])) == QUERIES, "the answers hold {}, not q1 .. q22".format(sorted(answers))
+    assert sorted(answers) == sorted("tpch/" + q for q in QUERIES), "the answers hold {}, not tpch/q1 .. tpch/q22".format(sorted(answers))
 
     texts = {}
     for q in QUERIES:
@@ -146,7 +146,7 @@ def main(argv):
         for table in TABLES:
             session.register_parquet(table, os.path.join(opts["data"], "tpch", "sf1", table + ".parquet"))
         for q in QUERIES:
-            rows.append((q,) + run_query(session, cmp, answers[q], texts[q]))
+            rows.append((q,) + run_query(session, cmp, answers["tpch/" + q], texts[q]))
 
     print("TPC-H sf1 through the installed wheel against DuckDB (derived from TPC-H; not comparable to published TPC-H results)")
     print("query   result     detail")

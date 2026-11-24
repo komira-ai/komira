@@ -87,7 +87,7 @@ def test_text_extremes_follow_utf8_byte_order():
 
 def test_doubles_agree_within_the_relative_tolerance_and_not_beyond():
     expected = sig(["DOUBLE"], [R(1000.0)])
-    check(reasons_of(sig(["DOUBLE"], [R(1000.0 * (1 + 5e-10))]), expected) == [], "within 1e-9")
+    check(reasons_of(sig(["DOUBLE"], [R(1000.0 * (1 + 2e-10))]), expected) == [], "within the tolerance (the sum of squares moves twice as far)")
     expect_reason(sig(["DOUBLE"], [R(1000.0 * (1 + 1e-7))]), expected, "sum differs")
 
 
