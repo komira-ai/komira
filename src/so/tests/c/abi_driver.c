@@ -341,7 +341,9 @@ static int write_file(const char *tmp, const char *name, const char *text, char 
     return 0;
 }
 
-/* Run `sql` on `ctx` and read its answer into `a`; 0, or -1 after printing why. */
+/* Run `sql` on `ctx` and read its answer into `a`; 0, or -1 after printing why.
+   Every -1 is counted as a failure here, so a caller that skips its value
+   checks on -1 still makes the driver exit non-zero. */
 static int query(komira_handle ctx, const char *sql, struct answer *a) {
     struct ArrowArrayStream out;
     memset(&out, 0, sizeof out);
@@ -352,7 +354,12 @@ static int query(komira_handle ctx, const char *sql, struct answer *a) {
         failures++;
         return -1;
     }
-    return read_answer(&out, a);
+    if (read_answer(&out, a) != 0) {
+        fprintf(stderr, "FAIL: the answer of %s could not be read\n", sql);
+        failures++;
+        return -1;
+    }
+    return 0;
 }
 
 /* The CSV and JSON tables of komira_register_csv and komira_register_json:
