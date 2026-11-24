@@ -52,6 +52,14 @@ def native_soname(import_name):
     """
     return "libkomira_{}_native.so.1".format(import_name)
 
+def native_dylib(import_name):
+    """The file name of a library's own shared library on macOS (shared.bzl writes it): `libkomira_<import name>_native.1.dylib`.
+
+    Its install name is `@rpath/` and this name: dyld finds it through a run path, as the loader finds
+    the ELF library by its SONAME (`native_soname`). The version `.1` comes before `.dylib`, as macOS
+    spells it."""
+    return "libkomira_{}_native.1.dylib".format(import_name)
+
 def _c_deps(deps):
     return [d for d in deps if MojoInfo not in d and MergedLinkInfo in d]
 

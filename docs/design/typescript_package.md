@@ -46,13 +46,15 @@ Fixed before this design, and not reopened here:
 
 ### The addon
 
-- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (511 lines) is a Node-API addon in C.
+- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (516 lines) is a Node-API addon in C, with
+  its Arrow import in [node/arrow_import.c](../../node/arrow_import.c).
   - It defines `NAPI_VERSION 8` and uses `NAPI_MODULE_INIT`, so it is context-aware. Its function
     table is process-wide, and a worker thread shares it (the comment at the table). No test loads
     this addon in a worker. `src/tests/helpers/komira_test_node` shows the pattern with its own
     test addon, loaded in a main thread and two workers.
-  - It exports eight functions: `load`, `abiVersion`, `newSession`, `freeSession`,
-    `registerParquet`, `parquetSchema`, `planRender` and `sessionStats`.
+  - It exports twelve functions: `load`, `abiVersion`, `newSession`, `freeSession`,
+    `registerParquet`, `parquetSchema`, `planRender`, `sessionStats`, and the Arrow import's
+    `importArrowStream`, `arrowSchema`, `arrowNextBatch` and `arrowClose` (below).
 - **How it binds libkomira.** `load(path)` opens the library with `dlopen(RTLD_NOW | RTLD_LOCAL)`
   and requires `komira_abi_version()` major 1. It then resolves seven symbols by name, and a
   missing one is named in a `KOMIRA_MISSING_SYMBOL` error.
@@ -73,10 +75,19 @@ Fixed before this design, and not reopened here:
   `KOMIRA_LOADED`.
 - **Calls it does not bind.** `komira_csv_binding` and `komira_json_binding` have no function in
   the addon. Nothing in it runs a query.
+- **EXISTS** The Arrow import of [Arrow: from the C stream to
+  JavaScript](#arrow-from-the-c-stream-to-javascript), steps 1 to 3, over a stream handed to
+  `importArrowStream` as a capsule (an N-API external tagged as an Arrow C stream,
+  [node/arrow_c.h](../../node/arrow_c.h)) rather than one `komira_sql_stream` fills. It drains on
+  the JavaScript thread: the session thread does not exist yet. The private module is
+  [node/src/arrow_import.mts](../../node/src/arrow_import.mts) (`readArrowStream`), with
+  `KomiraError` and `UnsupportedOperation` in [node/src/errors.ts](../../node/src/errors.ts), the package's one errors module.
+  [node/package.json](../../node/package.json) is private and declares the `apache-arrow` peer
+  dependency at `^21.2.0` (part 3 completes it).
 
 ### Tests and CI
 
-- **EXISTS** [node/BUCK](../../node/BUCK) has two `node_binding_test` targets.
+- **EXISTS** [node/BUCK](../../node/BUCK) has three `node_binding_test` targets.
   - `:load_test` runs [load.test.mjs](../../node/load.test.mjs) and
     [capacity.test.mjs](../../node/capacity.test.mjs). They cover the load refusals, using
     stand-ins built from [tests/fake_libkomira.c](../../node/tests/fake_libkomira.c): ABI 2.0,
@@ -85,7 +96,12 @@ Fixed before this design, and not reopened here:
   - `:session_test` runs [session.test.mjs](../../node/session.test.mjs). It covers errors with
     their last error, the frozen schema bytes of `two_columns.parquet`, plan text, wrong-kind
     arguments, a foreign external, double free, and finalizers counted with `gc()` with no clock.
-- **EXISTS** Both tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
+  - `:arrow_test` runs [arrow_stream.test.mts](../../node/arrow_stream.test.mts) and
+    [arrow_import.test.mts](../../node/arrow_import.test.mts) over streams of a stand-in producer
+    ([tests/arrow_stand_in.c](../../node/tests/arrow_stand_in.c)) that counts each release: the
+    round trip of every type of the exporter's set, with nulls, offsets and a dictionary, an empty
+    stream, failing callbacks, a misaligned buffer, malformed arrays and unmapped formats.
+- **EXISTS** The three tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
   - `node_binding_test` runs `node --test` as a build action, under `env -i`, with no network.
   - It passes only if TAP reports tests, all passed, and none skipped
     ([tools/build/node/README.md](../../tools/build/node/README.md)).
@@ -126,9 +142,10 @@ Fixed before this design, and not reopened here:
 
 - **Nothing is released.** **EXISTS** The package of part 3 (below, "Where the work lands"):
   `node/package.json` (`"private": true`, named by D1's option A as a placeholder), the TypeScript
-  sources in `node/src/`, and the `.js` and `.d.ts` files `//node:dist` compiles from them. No
-  platform package is built and nothing is published. No workflow mentions npm publishing. The only
-  use of npm in a workflow is the pin check in `kpin-update.yml`.
+  sources in `node/src/`, and the `.js` and `.d.ts` files `//node:dist` compiles from them. The
+  private Arrow import of part 2 (`node/src/arrow_import.mts`) is beside them, outside `dist/` until
+  `Result` uses it. No platform package is built and nothing is published. No workflow mentions npm
+  publishing. The only use of npm in a workflow is the pin check in `kpin-update.yml`.
 
 ### The library under it
 
@@ -571,8 +588,8 @@ one publishes by hand otherwise.
 
 All tests are hermetic: no network, no clock, no fixed port (rule T12). The behaviour tests are
 written in TypeScript (rule T11) and run with the pinned Node, which strips types itself, so they
-need no build step. `node_binding_test` takes `.mjs`, `.js` and `.ts` files (**EXISTS**).
-`tsc_check` checks the tests' types.
+need no build step. `node_binding_test` takes `.mjs`, `.js`, `.ts` and `.mts` files (**EXISTS**).
+`tsc_check` checks the package's tests' types (`//node:typecheck`).
 
 ### The package's own tests
 

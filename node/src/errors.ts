@@ -2,7 +2,8 @@
 // "Errors a user can act on"). Every one is a KomiraError, so `instanceof
 // KomiraError` catches komira's errors and nothing else. A wrong argument is
 // JavaScript's own TypeError or RangeError instead, raised before the library
-// is called.
+// is called. The private Arrow import (arrow_import.mts) raises
+// UnsupportedOperation for a format it does not map.
 
 /** The step of a query an engine error came from. */
 export type Step = "parse" | "bind" | "optimize" | "lower" | "execute";

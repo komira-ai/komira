@@ -310,7 +310,7 @@ def _node_binding_test_impl(ctx):
 
 _node_binding_test = rule(
     impl = _node_binding_test_impl,
-    doc = "Runs the test files `srcs` (`.mjs`, `.js` or `.ts` using `node:test`; node strips a `.ts` file's types) with the pinned `node --test` as a build action; the output (`<name>.pass`) exists only if node exited 0 and its TAP summary reports tests that all passed with none skipped or todo. `covered_srcs` are the sources the tests import, staged at their package paths beside them and measured: every one must be loaded, and their lines and branches together must each be at least 99% covered. `data` ({dest: source}, a build output allowed, a built `.node` addon for one) is staged at `dest` and the closure of the npm packages in `deps` under `node_modules/<package>`.",
+    doc = "Runs the test files `srcs` (`.mjs`, `.js`, `.ts` or `.mts` using `node:test`; node strips a TypeScript file's types) with the pinned `node --test` as a build action; the output (`<name>.pass`) exists only if node exited 0 and its TAP summary reports tests that all passed with none skipped or todo. `covered_srcs` are the sources the tests import, staged at their package paths beside them and measured: every one must be loaded, and their lines and branches together must each be at least 99% covered. `data` ({dest: source}, a build output allowed, a built `.node` addon for one) is staged at `dest` and the closure of the npm packages in `deps` under `node_modules/<package>`.",
     attrs = {
         "covered_srcs": attrs.list(attrs.source(), default = []),
         "data": attrs.dict(attrs.string(), attrs.source(), default = {}),

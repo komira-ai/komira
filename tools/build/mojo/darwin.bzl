@@ -17,6 +17,8 @@ mojo_binary and mojo_test are unchanged; what differs is what each field holds:
   cc_target the deployment target (MACOSX_DEPLOYMENT_TARGET).
   wrapper   komira//tools/build/mojo:mojo_compile_darwin, the Zig compile wrapper
             (tools/build/mojo/tools/mojo_compile_macos.zig) built for macOS arm64.
+            Its `link` mode links C with the host's cc after the same host
+            check: a library's shared library (tools/build/native/shared.bzl).
   gate      komira//tools/build/run:gate_darwin, the gate built for macOS
             (it sets DYLD_LIBRARY_PATH beside LD_LIBRARY_PATH for the test).
   act       komira//tools/build/mojo:act_darwin, the same tool built for macOS;

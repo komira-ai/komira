@@ -216,11 +216,14 @@ Every item is something the shell does today, with the test (see "Tests") that p
 | `modular_cfg.zig` | render, token check, macOS `shared_libs` check and rewrite | yes |
 | `proc_tree.zig` | `/proc` parse (Linux), `libproc` read (macOS), tree selection, idle arithmetic, kill | parse and selection pure; read and kill not |
 | `host_identity.zig` | field collection, the value, `--fields` | value pure; collection not |
+| `macos_link.zig` | the `link` mode's options, the host C driver's environment and argv | yes |
 | `mojo_compile.zig` | `main`: mode dispatch, scratch, environment, spawn, watchdog loop, signals, output checks | no |
 
 The mode comes from `argv[0]`'s basename: `cc`, `c++`, `gcc`, `g++`, `clang`, `clang++` run the shim;
 anything else runs the wrapper, whose first argument may be `host-identity [--fields]` (macOS only, for a
-person filling `darwin_macos_hosts`, and what `DEVELOPMENT.md` will tell them to run). The wrapper puts
+person filling `darwin_macos_hosts`, and what `DEVELOPMENT.md` will tell them to run) or
+`link --deployment-target=<v> --macos-host=<id>... -- <cc arguments>` (macOS only: the host's
+`/usr/bin/cc` after the same host check, for a library's shared library, `tools/build/native/shared.bzl`). The wrapper puts
 symlinks with those six names in `<scratch>/cc/`, all pointing to its own executable path.
 
 ### Command line
