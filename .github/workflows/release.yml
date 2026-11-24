@@ -55,7 +55,8 @@
 #                   the plan; on a difference it prints the command a human runs
 #                   to yank the group. It yanks nothing.
 #     prod-add      (needs prod-commit and prod-smoke; no environment, no identity)
-#                   what a user gets: in a fresh project, the pinned mopm runs
+#                   what a user gets: in a fresh project set to the Mojo this
+#                   release was built for, the pinned mopm runs
 #                   `mopm add komira-ai/<name> --registry prod` for json, uuid
 #                   and libc, then `mopm sync`; the lock must record full names
 #                   under https://conda.mopm.dev/komira-ai/ at this run's version,

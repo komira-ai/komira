@@ -88,6 +88,8 @@ mojo_library(
         "tests/test_tcp_nodelay_parity.mojo",
         "tests/test_traits_compile.mojo",
     ],
+    # The resident set test_L1_tls_cert_chain_freed bounds, on Linux and on macOS.
+    test_deps = ["//src/tests/helpers/komira_test_rss:komira_test_rss"],
     test_data = {
         "tests/test_L1_tls_buffered_plaintext_lost_wakeup.mojo": [
             "tests/fixtures/tls/leaf_cert.pem",

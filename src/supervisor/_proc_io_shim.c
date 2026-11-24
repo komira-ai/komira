@@ -9,6 +9,7 @@
 #define _GNU_SOURCE
 #endif
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
@@ -27,8 +28,30 @@
 //   the same window is indistinguishable and may be consumed too; one that
 //   was already pending is left alone). If the signal cannot be blocked
 //   nothing is written and the error is returned.
+//   On macOS the kernel raises that SIGPIPE for the process, not the writing
+//   thread, so it may land on a thread that does not block it; there the
+//   descriptor is marked F_SETNOSIGPIPE instead, and the write returns -EPIPE
+//   with no signal raised at all. If the mark cannot be set nothing is
+//   written and the error is returned.
 // -----------------------------------------------------------------------------
+static long proc_write_all(int fd, const uint8_t *buf, long len) {
+    long done = 0;
+    while (done < len) {
+        ssize_t n = write(fd, buf + done, (size_t)(len - done));
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return -errno;
+        }
+        done += (long)n;
+    }
+    return done;
+}
+
 long komira_proc_write(int fd, const uint8_t *buf, long len) {
+#ifdef __APPLE__
+    if (fcntl(fd, F_SETNOSIGPIPE, 1) == -1) return -errno;
+    return proc_write_all(fd, buf, len);
+#else
     sigset_t pipe_set, old_set, pending;
     sigemptyset(&pipe_set);
     sigaddset(&pipe_set, SIGPIPE);
@@ -36,18 +59,7 @@ long komira_proc_write(int fd, const uint8_t *buf, long len) {
     if (rc != 0) return -rc;
     int was_pending = 0;
     if (sigpending(&pending) == 0) was_pending = sigismember(&pending, SIGPIPE);
-    long done = 0;
-    long result = 0;
-    while (done < len) {
-        ssize_t n = write(fd, buf + done, (size_t)(len - done));
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            result = -errno;
-            break;
-        }
-        done += (long)n;
-    }
-    if (result == 0) result = done;
+    long result = proc_write_all(fd, buf, len);
     if (result == -EPIPE && !was_pending && sigpending(&pending) == 0 &&
         sigismember(&pending, SIGPIPE)) {
         int sig = 0;
@@ -55,6 +67,7 @@ long komira_proc_write(int fd, const uint8_t *buf, long len) {
     }
     pthread_sigmask(SIG_SETMASK, &old_set, NULL);
     return result;
+#endif
 }
 
 // -----------------------------------------------------------------------------

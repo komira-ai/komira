@@ -39,6 +39,7 @@ from std.time import perf_counter_ns
 from objectstore.local_fs_conditional_store import (
     LocalFsConditionalStore,
     _mkdir_one,
+    _suffix_from,
 )
 from objectstore.local_fs_file_read import (
     _STAGE_CLOSE,
@@ -73,7 +74,7 @@ def _scratch(tag: String) raises -> String:
 
 def _rename_error_store_text(msg: String, final_path: String) raises -> String:
     """The text of an atomic-rename error that the store composes, with both
-    quoted paths cut out. The message is `... ('<final>.tmp.<16 hex>' ->
+    quoted paths cut out. The message is `... ('<final>.tmp.<suffix>' ->
     '<final>', rc=N)`: the caller's root (clock digits, and here a planted
     "412") and the temp's random hex suffix can each spell "412", so a status
     check over the raw message is flaky. With the paths cut, the rest is fixed
@@ -84,9 +85,10 @@ def _rename_error_store_text(msg: String, final_path: String) raises -> String:
     var tmp_close = String("' -> '") + final_path + "'"
     var end = msg.find(tmp_close, start)
     assert_true(end >= 0, msg)
-    # The suffix between `.tmp.` and the closing quote is 16 hex digits.
+    # The suffix between `.tmp.` and the closing quote is the mixed clock, the
+    # pid and the thread id: 16, 8 and 16 hex digits joined by dashes.
     var suffix_len = end - (start + tmp_open.byte_length())
-    assert_equal(suffix_len, 16, msg)
+    assert_equal(suffix_len, 16 + 1 + 8 + 1 + 16, msg)
     return (
         String(msg[byte=0:start])
         + "('<tmp>' -> '<final>'"
@@ -286,6 +288,29 @@ def test_short_read_is_an_error() raises:
     assert_false(msg.find("not_found") >= 0, msg)
 
 
+def test_temp_suffix_differs_by_thread_and_process_at_one_clock_reading() raises:
+    """Writers that read the clock at the same tick still get distinct temp
+    names: the suffix differs when only the thread or only the pid differs,
+    and is the same for the same three inputs."""
+    var clock = UInt64(1_000_000_000)
+    var base = _suffix_from(clock, UInt32(41), UInt64(7))
+    assert_equal(base, _suffix_from(clock, UInt32(41), UInt64(7)))
+    assert_true(base != _suffix_from(clock, UInt32(41), UInt64(8)), base)
+    assert_true(base != _suffix_from(clock, UInt32(42), UInt64(7)), base)
+    assert_true(base != _suffix_from(clock + UInt64(1), UInt32(41), UInt64(7)), base)
+    # The thread and pid parts are written in full, so ids that share their
+    # low bits stay apart too: a thread id above 32 bits, the largest pid.
+    assert_true(
+        _suffix_from(clock, UInt32(41), UInt64(0x1_0000_0007)) != base, base
+    )
+    assert_true(
+        _suffix_from(clock, UInt32(0xFFFF_FFFF), UInt64(7))
+        != _suffix_from(clock, UInt32(0x7FFF_FFFF), UInt64(7)),
+        base,
+    )
+    assert_equal(base.byte_length(), 16 + 1 + 8 + 1 + 16)
+
+
 def main() raises:
     test_root_under_a_regular_file_is_refused()
     test_put_over_a_directory_fails_loud()
@@ -295,4 +320,5 @@ def main() raises:
     test_stage_names()
     test_mkdir_one_of_empty_path_is_a_noop()
     test_short_read_is_an_error()
+    test_temp_suffix_differs_by_thread_and_process_at_one_clock_reading()
     print("[test_cov_local_fs] PASS")

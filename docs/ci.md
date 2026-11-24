@@ -529,24 +529,28 @@ tests, which no pull request builds. The rest of this section is about `release-
 Not built yet. `//release:mopm_darwin_libs` covers the mopm packages only. Most of `//src` is
 not a mopm package, so a change that breaks one of those libraries on macOS is seen by nobody.
 Measured: a `uquery` of `kind(...)` for the library rules (`mojo_library`, gated, shared,
-system, native and `cxx_library`) over the `src` directory lists 415 targets. One
+system, native and `cxx_library`) over the `src` directory lists 411 targets. One
 `build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going
---skip-incompatible-targets` of that list on the farm built 156 and stopped on 259. Every
-target that stopped has an open issue, one per cause. The counts in this table are from that
-build's report:
+--skip-incompatible-targets` of that list on the farm (`Commands: 1204 (cached: 1, remote: 1203,
+local: 0)`) built 278, skipped 4 as incompatible (the connect, git pack, git protocol and HTTP
+conformance suites) and stopped on 129. Every target that stopped has an open issue, one per
+cause. A target is counted under the first failing action its build report names:
 
 | Cause | Targets | Issue |
 | --- | --- | --- |
-| aws-lc and s2n-tls had no darwin-arm64 build. Since komira-ai/komira#2203 all 133 configure for darwin-arm64 (a `cquery` of them); they have not been built for it again | 133 | komira-ai/komira#2196 |
-| a library's native shared library is ELF only | 9 | komira-ai/komira#2197 |
-| `so_exports` is the Linux binary on a macOS executor | the UDF spike helpers, `arrow_c_abi_probe` | komira-ai/komira#2198 |
-| the UDF spike helpers' C uses Linux-only APIs | 5 | komira-ai/komira#2199 |
-| `phase_timers` drops a join tail on the fork's clock tick | 1 | komira-ai/komira#2200 |
-| `http_core` and `host_probe` tests still read `/proc/self/status` (found in the sources; the sweep did not reach them) | not reached | komira-ai/komira#2201 |
+| `http_core`'s s2n shim test expects `ECONNRESET` where macOS reads end of stream | 106 (`http_core` and what depends on it) | komira-ai/komira#2206 |
+| `http_core`'s partial-send test never sees a partial send on macOS (hidden behind the test above in the same package) | the same 106 | komira-ai/komira#2207 |
+| a library's native shared library is ELF only | 13 | komira-ai/komira#2197 |
+| the UDF spike helpers' C uses Linux-only APIs | 7 | komira-ai/komira#2199 |
+| `bench_data`'s h2o join tables `x` and `big` hash differently on macOS | 3 | komira-ai/komira#2208 |
 
-The rest of the 259 were stopped by three of our own failures, now fixed. Two tests read
-`/proc/self/status` and now use `//src/tests/helpers/komira_test_rss`. The int64 column sum
-depended on the SIMD lane count. A test wrote a fixed `/tmp` path.
+No target stopped on aws-lc and s2n-tls (komira-ai/komira#2196), on `so_exports`
+(komira-ai/komira#2198), on `phase_timers` (komira-ai/komira#2200, which built in both sweeps
+since and so is intermittent) or on a read of `/proc/self/status` (komira-ai/komira#2201).
+Seven more causes were ours and are fixed: tests that assumed Linux's `PATH_MAX`, a
+`SIGPIPE` that macOS raises for the whole process, BSD `yes`, the epoll backend, the
+`libc.so.6` name, a temporary-file name that two threads could draw alike on macOS's coarser
+clock, and an NFD file name that APFS treats as the same file as its NFC form.
 
 The proposal keeps this set built, in the same way as the mopm set:
 
@@ -656,7 +660,7 @@ steps (a documentation-only push does not start the workflow, so it publishes no
 | `prod-commit` | after `prod-test`, on a push to `main` | in the environment `prod`, with `contents: read` and `id-token: write`. The same command without `--no-commit`, on the same directory with its `state.json`, after a fresh OIDC exchange: the same group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-prod-committed-<sha>`. |
 | `prod-abort` | after `prod-stage`, `prod-test` and `prod-commit`, when one of them failed or the run was cancelled, on a push to `main` and with a `prod-stage` that was not skipped | in the environment `prod`, same permissions: `mopm publish --staged S --registry prod --oidc --abort` ends the open group and gives its place back. |
 | `prod-smoke` | after `prod-commit`, on a push to `main` | no environment, no identity, no secret, no farm: `release_staged_verify smoke` downloads the published files from the prod channel and compares each with the plan. On a difference it prints the `mopm yank --group <id> ...` command for a human and fails; it yanks nothing. |
-| `prod-add` | after `prod-commit` and `prod-smoke`, on a push to `main` | no environment, no identity, no secret, no farm (a farm action has no network): `release_staged_verify add` makes a fresh project with the mopm `mopm-stage` built, runs `mopm add komira-ai/<name> --registry prod` for `json`, `uuid` and `libc` and then `mopm sync`, and checks the lock and the installed files against the plan. It yanks nothing. |
+| `prod-add` | after `prod-commit` and `prod-smoke`, on a push to `main` | no environment, no identity, no secret, no farm (a farm action has no network): `release_staged_verify add` makes a fresh project with the mopm `mopm-stage` built, sets its Mojo to the one this release was built for, runs `mopm add komira-ai/<name> --registry prod` for `json`, `uuid` and `libc` and then `mopm sync`, and checks the lock and the installed files against the plan. It yanks nothing. |
 
 **Why `mopm stage` is a step of the job and not a build action.** It asks the
 registry which versions exist, and an action is offline. So the farm takes the
@@ -743,13 +747,18 @@ would be handed two files for one name.
    ([source](../tools/build/ci/release_beta_fetch/prod_add.zig)) does what a user does, with the mopm that
    staged and committed the set (`toolchains//:mopm_0_0_135`), in a directory it makes on the runner (both
    paths absolute):
-   `mopm init --name release-check/prod_add`, then `mopm add komira-ai/<name> --registry prod` for three
+   `mopm init --name release-check/prod_add`; then it sets `[toolchain] mojo` of the `mopm.toml` that init
+   wrote to the Mojo this release was built for, the `<mojo>` of the build string `mojo<mojo>_<n>` of the
+   plan's files (init writes mopm's own default, and `mopm add` resolves the newest version built for the
+   project's Mojo, so a project left at that default would get the last release built for it); a plan that
+   names two Mojo versions, or a `mopm.toml` without exactly one such line, is refused before `mopm add` runs.
+   Then `mopm add komira-ai/<name> --registry prod` for three
    packages of [`packages.bzl`](../release/readme_e2e/packages.bzl), a library with no dependency (`json`),
    one with dependencies (`uuid`: `atomic_alias`, `awslc`, `clock`) and one that ships a native library
    (`libc`), then `mopm sync --registry prod --cache <its own directory>`. A command that exits other than 0
    fails the job with that command and the first line of its stderr. Then it reads `mopm.lock` and refuses,
    listing every difference: a `lock_version` other than 3, a `channels` other than exactly
-   `https://conda.mopm.dev/`, an entry with a flat name, with a channel other than its namespace's
+   `https://conda.mopm.dev/`, a `mojo` other than exactly the release's Mojo, an entry with a flat name, with a channel other than its namespace's
    (`https://conda.mopm.dev/komira-ai/`), that is not a member of the plan or is at another version than
    this run's, an artifact whose URL, sha256 or size is not the plan's file, and an added package the lock
    does not hold. For each locked file of the runner's subdir it checks what `sync` installed: the file

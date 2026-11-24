@@ -421,21 +421,40 @@ def _remove_best_effort(path: String):
     _ = external_call["remove", Int32](p.as_c_string_slice().unsafe_ptr())
 
 
-def _unique_suffix() -> String:
-    """A per-call unique temp-file suffix (high-res-clock-derived, mixed by the
-    same dependency-free xorshift `cas_manifest.mojo` uses). Single-threaded
-    use; only needs intra-process uniqueness so two writes
-    in the same directory never collide on a temp filename."""
-    var x = UInt64(perf_counter_ns())
+def _hex(v: UInt64, digits: Int) -> String:
+    """The low `digits` hex digits of `v`, lowercase."""
+    var out = String("")
+    var shift = 4 * (digits - 1)
+    while shift >= 0:
+        out += _hex_nibble(Int((v >> UInt64(shift)) & UInt64(0xF)))
+        shift -= 4
+    return out^
+
+
+def _suffix_from(clock_ns: UInt64, pid: UInt32, thread: UInt64) -> String:
+    """The temp-file suffix `<mixed clock>-<pid>-<thread>` (16, 8 and 16 hex
+    digits: a pid is 32 bits, a thread id 64). The clock part
+    (mixed by the same dependency-free xorshift `cas_manifest.mojo` uses)
+    alone is not unique: threads that read a coarse clock (macOS arm64) at
+    once get the same value. The pid differs for every live process and the
+    thread id for every live thread of one, so two writers that run at the
+    same time never share a temp name."""
+    var x = clock_ns
     x ^= x >> UInt64(33)
     x *= UInt64(0xFF51AFD7ED558CCD)
     x ^= x >> UInt64(33)
-    var out = String("")
-    var shift = 60
-    while shift >= 0:
-        out += _hex_nibble(Int((x >> UInt64(shift)) & UInt64(0xF)))
-        shift -= 4
-    return out^
+    return _hex(x, 16) + "-" + _hex(UInt64(pid), 8) + "-" + _hex(thread, 16)
+
+
+def _unique_suffix() -> String:
+    """A temp-file suffix that differs between threads and processes even at
+    one clock reading, so two writers running at once in the same directory
+    never collide on a temp filename. Two calls from one thread may repeat on a
+    coarse clock; a thread finishes one write (rename or remove) before it
+    starts the next."""
+    var pid = UInt32(external_call["getpid", Int32]())
+    var thread = external_call["pthread_self", UInt64]()
+    return _suffix_from(UInt64(perf_counter_ns()), pid, thread)
 
 
 def _list_dir_fnames(dir: String) raises -> List[String]:
