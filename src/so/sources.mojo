@@ -20,9 +20,15 @@ error. Nothing here holds a pointer.
   batches checked to cross the Arrow C Stream Interface; in its second form,
   under a caller's `RunControl`, whose cancel refuses the run with the named
   error `QUERY_CANCELLED` (`is_cancelled_error`).
+
+Every operation but `plan_render_text` first calls `probe_codec_libraries`
+(libzstd, libz, liblz4), so a codec library missing from the host is a raise
+`compression: cannot load <soname>: <loader error>` before anything is read,
+and not an abort of the process when a codec first opens it.
 """
 
 from byte_buffer.file_identity import FileIdentity
+from compression.codec_libraries import probe_codec_libraries
 from csv.csv_options import QUOTE_STYLE_TAG_RFC4180
 from plan_wire import binding_to_bytes, plan_from_bytes, schema_to_bytes
 from scan_source.csv_source import CsvSource
@@ -53,7 +59,12 @@ def register_parquet(mut session: Session, name: String, path: String) raises:
     table is in the catalog a query on the session binds against. A flat
     schema only: a nested or repeated column is refused, as are files whose
     schemas differ and a glob that matches nothing.
+
+    Raises:
+        Error `compression: cannot load <soname>: <loader error>` when a codec
+        library cannot be loaded, before anything is read.
     """
+    probe_codec_libraries()
     engine_register_parquet(session.engine, name, path)
 
 
@@ -81,8 +92,10 @@ def register_csv(
         `TABLE_NAME_EMPTY` for an empty `name`; `TABLE_ALREADY_REGISTERED`
         when the session already holds a table of that name (of any kind);
         the inference's own error for a file that is missing, unreadable or
-        has no column. Nothing is registered then.
+        has no column; `compression: cannot load <soname>: <loader error>`
+        when a codec library cannot be loaded. Nothing is registered then.
     """
+    probe_codec_libraries()
     _check_name_free(session, name)
     session.engine.catalog.add_source(
         name, _csv_source(path, delimiter, has_header, all_varchar)
@@ -100,9 +113,11 @@ def register_json(mut session: Session, name: String, path: String) raises:
 
     Raises:
         As `register_csv`, with the JSON inference's own error for a file
-        that is missing, unreadable or holds no object. Nothing is registered
-        then.
+        that is missing, unreadable or holds no object, and `compression:
+        cannot load <soname>: <loader error>` when a codec library cannot be
+        loaded. Nothing is registered then.
     """
+    probe_codec_libraries()
     _check_name_free(session, name)
     session.engine.catalog.add_source(name, _json_source(path))
 
@@ -161,7 +176,12 @@ def parquet_schema_bytes(path: String) raises -> List[UInt8]:
     """The Arrow schema of the Parquet file at `path`, as `WireSchema` bytes.
 
     Read from the footer alone; no data page is touched.
+
+    Raises:
+        Error `compression: cannot load <soname>: <loader error>` when a codec
+        library cannot be loaded, before anything is read.
     """
+    probe_codec_libraries()
     var footer = read_parquet_footer(path)
     var schema = footer.take_schema()
     return schema_to_bytes(schema)
@@ -177,7 +197,12 @@ def csv_binding_bytes(
     `all_varchar` change what the cells mean, so they are inputs: the first
     two enter the binding's identity, and `all_varchar` makes every column a
     string.
+
+    Raises:
+        Error `compression: cannot load <soname>: <loader error>` when a codec
+        library cannot be loaded, before anything is read.
     """
+    probe_codec_libraries()
     # The binding is taken from the source variant, which owns the parameter
     # set that is the scan's identity.
     var variant = _csv_source(path, delimiter, has_header, all_varchar)
@@ -189,7 +214,12 @@ def json_binding_bytes(path: String) raises -> List[UInt8]:
 
     The schema is inferred from the leading records (a bounded prefix, cut at
     the last complete line).
+
+    Raises:
+        Error `compression: cannot load <soname>: <loader error>` when a codec
+        library cannot be loaded, before anything is read.
     """
+    probe_codec_libraries()
     var variant = _json_source(path)
     return binding_to_bytes(variant.binding_ref(), variant.tag)
 
@@ -218,6 +248,9 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
     session, which may be dropped first.
 
     Raises:
+        Error `compression: cannot load <soname>: <loader error>` when a codec
+        library cannot be loaded, before the statement is parsed.
+
         Error `<step>: <reason>` when `run_sql` refuses, where `<step>` is the
         step that refused (`parse`, `bind`, `optimize`, `lower` or
         `execute`) and `<reason>` its own message, unchanged; and the export
@@ -234,6 +267,9 @@ def sql_result(
     and counts its segments into the control's progress.
 
     Raises:
+        Error `compression: cannot load <soname>: <loader error>` when a codec
+        library cannot be loaded, before the statement is parsed.
+
         Error `QUERY_CANCELLED: execute: <reason>` when the run is refused at
         step `execute` and the control is cancelled (the cancel stopped the
         run, or came while it failed for a reason of its own); a cancel that
@@ -241,6 +277,7 @@ def sql_result(
         statement refused before its plan runs raises `<step>: <reason>` as
         without a control, and so does every other refusal.
     """
+    probe_codec_libraries()
     var outcome = run_sql(session.engine, sql, control)
     if outcome.refusal:
         ref refusal = outcome.refusal.value()

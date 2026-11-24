@@ -147,6 +147,11 @@ answer's schema is read; neither on `import komira`.
 - Cancelling a query. A query cannot be interrupted while it runs: Ctrl-C
   during `Session.sql` raises `KeyboardInterrupt` when the engine has finished
   the query. The answer is freed, and the session runs the next query.
+- Surviving a crash inside the engine. An error the engine reports raises
+  `KomiraError`, but an abort, a fault, running out of stack or running out of
+  memory inside it ends the Python process. Inputs known to cause one are
+  refused with `KomiraError` first, for example a statement nested more than
+  100 levels deep.
 - The DataFrame APIs: one shaped like pandas and one shaped like polars.
 - Iceberg tables: reading one, and writing to one by its name in a catalog.
 
