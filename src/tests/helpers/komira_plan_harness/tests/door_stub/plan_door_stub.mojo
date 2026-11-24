@@ -44,10 +44,11 @@
 # would send the wrong bytes and get the MALFORMED refusal.
 #
 # THE ASYNC RUNTIME. komira_ctx_new starts a async_rt
-# PerCoreAsyncRuntime (four epoll workers, pthreads) inside this library and
-# komira_ctx_free shuts it down and joins them. The `id` column of the table
-# is computed by a fork-join wave on that runtime (fork_join_shared over the
-# runtime's LocalDispatcher, one chunk per row), and each chunk records the
+# PerCoreAsyncRuntime (four reactor workers, epoll on Linux and kqueue on
+# macOS, pthreads) inside this library and komira_ctx_free shuts it down and
+# joins them. The `id` column of the table is computed by a fork-join wave on
+# that runtime (fork_join_shared over the runtime's LocalDispatcher, one chunk
+# per row), and each chunk records the
 # thread it ran on: komira_plan_door_stub_pool_threads returns how many of
 # them were not the caller's thread. So a table that matches proves a Mojo
 # process dlopened a Mojo library whose own runtime ran work on its own
@@ -76,6 +77,7 @@
 
 from std.ffi import external_call
 from std.memory import alloc, unsafe_memcpy
+from std.sys.info import CompilationTarget
 
 from arrow.arrow_types import ArrowType
 from arrow.column import Column
@@ -95,7 +97,7 @@ from arrow_ipc.ipc_encoder_dispatch import (
     encode_schema_message,
 )
 from async_rt.ops.waker_sink import NoopSink
-from async_rt.reactor.reactor import BACKEND_EPOLL
+from async_rt.reactor.reactor import BACKEND_EPOLL, BACKEND_KQUEUE
 from async_rt.runtime.local_dispatcher import LocalDispatcher
 from async_rt.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
 from async_rt.runtime.sched_trace import SITE_GENERIC_FORK_JOIN
@@ -501,7 +503,11 @@ def komira_ctx_new() abi("C") -> _VoidPtr:
     p.unsafe_write(_Session())
     try:
         # Started in place: the runtime is not moved after its threads run.
-        p[].rt.attach_workers(_WORKERS, _noop_sink, BACKEND_EPOLL)
+        # The reactor backend is the host's: kqueue on macOS, epoll elsewhere.
+        comptime if CompilationTarget.is_macos():
+            p[].rt.attach_workers(_WORKERS, _noop_sink, BACKEND_KQUEUE)
+        else:
+            p[].rt.attach_workers(_WORKERS, _noop_sink, BACKEND_EPOLL)
         p[].rt.start()
     except e:
         print("plan_door_stub: komira_ctx_new: " + String(e))

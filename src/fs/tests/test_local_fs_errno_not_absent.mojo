@@ -35,12 +35,14 @@
 #     any assertion runs.
 #   * ENAMETOOLONG ON AN ENTRY BELOW THE ROOT (forceable for any user, root
 #     included): a directory chain whose absolute path is just under PATH_MAX
-#     (4096) holds an entry, sized from the chain's actual length so the
-#     joined path is past PATH_MAX whatever the test root's length, created
-#     relative to it (a shell `cd` then `touch`), so opendir of the deepest directory succeeds and the walk's
-#     lstat of `<deepest>/<entry>` fails with ENAMETOOLONG. The walk must
-#     raise `walk of '<root>' failed at '<path>': errno N (ENAMETOOLONG)`
-#     with the path truncated to the 4095 bytes the error buffer holds,
+#     (4096 on Linux, 1024 on macOS) holds an entry, sized from the
+#     chain's actual length so the joined path is past PATH_MAX whatever the
+#     test root's length, created relative to it (a shell `cd` then `touch`),
+#     so opendir of the deepest directory succeeds and the walk's lstat of
+#     `<deepest>/<entry>` fails with ENAMETOOLONG. The walk must raise
+#     `walk of '<root>' failed at '<path>': errno N (ENAMETOOLONG)`
+#     with the path truncated to the 4095 bytes the error buffer holds
+#     (only reached on Linux; on macOS the joined path is whole),
 #     instead of skipping the entry. The entry is removed the same relative
 #     way before the tree is deleted.
 #   * EACCES (mode 000 directory, and a mode 000 subdirectory inside a walked
@@ -52,6 +54,7 @@
 # =============================================================================
 
 from std.ffi import external_call
+from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_true
 
 from runtime_paths import test_tmpdir
@@ -248,6 +251,14 @@ def _repeat_x(n: Int) -> String:
     return s
 
 
+def _path_max() -> Int:
+    """PATH_MAX of the platform: 1024 on macOS, 4096 on Linux."""
+    comptime if CompilationTarget.is_macos():
+        return 1024
+    else:
+        return 4096
+
+
 def _walk_entry_lstat_enametoolong_under(pad: Int) raises:
     """The ENAMETOOLONG case with the test root nested `pad` bytes deeper
     (one extra directory component of `pad - 1` bytes plus its slash). The
@@ -258,27 +269,32 @@ def _walk_entry_lstat_enametoolong_under(pad: Int) raises:
     if pad > 0:
         root = base + "/" + _repeat_x(pad - 1)
         _sh(String("mkdir -p '") + root + String("'"))
-    # Grow `deep` with 200-byte components into (3840, 4041]: each step adds
-    # 201 bytes, so the stop lands in that 201-byte window whatever the
-    # root's length, and every mkdir names an absolute path under 4096 bytes.
+    # Grow `deep` with 200-byte components into (pmax - 256, pmax - 55]: each
+    # step adds 201 bytes, so the stop lands in that 201-byte window whatever
+    # the root's length, and every mkdir names an absolute path under pmax.
+    var pmax = _path_max()
+    var lo = pmax - 256
+    var hi = pmax - 55
     assert_true(
-        root.byte_length() <= 3840,
+        root.byte_length() <= lo,
         "test root too long: " + String(root.byte_length()),
     )
     var comp = _repeat_x(200)
     var deep = root
-    while deep.byte_length() + 1 + 200 <= 4041:
+    while deep.byte_length() + 1 + 200 <= hi:
         deep += "/" + comp
     assert_true(
-        deep.byte_length() > 3840 and deep.byte_length() <= 4041,
-        "chain outside (3840, 4041]: " + String(deep.byte_length()),
+        deep.byte_length() > lo and deep.byte_length() <= hi,
+        "chain outside (" + String(lo) + ", " + String(hi) + "]: "
+        + String(deep.byte_length()),
     )
     _sh(String("mkdir -p '") + deep + String("'"))
     # The entry is sized from `deep`'s actual length so `<deep>/<entry>` is
-    # 4097 bytes, past PATH_MAX (4096 with the NUL); with `deep` in
-    # (3840, 4041] the name is 55 to 255 bytes, within NAME_MAX. Create it
-    # relative to `deep` in a child shell, which is the only way to name it.
-    var entry = _repeat_x(4096 - deep.byte_length())
+    # pmax + 1 bytes, past PATH_MAX (pmax with the NUL); with `deep` in
+    # (pmax - 256, pmax - 55] the name is 55 to 255 bytes, within NAME_MAX.
+    # Create it relative to `deep` in a child shell, which is the only way to
+    # name it.
+    var entry = _repeat_x(pmax - deep.byte_length())
     var rel = String("cd '") + deep + String("' && ")
     _sh(rel + String("touch ") + entry)
     var msg = _err_walk(root)
@@ -286,9 +302,11 @@ def _walk_entry_lstat_enametoolong_under(pad: Int) raises:
     # assertion cannot leave an over-PATH_MAX path behind.
     _sh(rel + String("rm ") + entry)
     _sh(String("rm -rf '") + base + String("'"))
-    # The error buffer holds 4095 bytes: the reported path is `<deep>/` plus
-    # as much of the entry name as fits, immediately followed by "': errno".
-    var shown = deep + "/" + _repeat_x(4095 - deep.byte_length() - 1)
+    # The error buffer holds 4095 bytes: the reported path is the joined path
+    # (pmax + 1 bytes) cut to that, immediately followed by "': errno". On
+    # Linux it is cut inside the entry name; on macOS it is whole.
+    var shown_len = min(pmax + 1, 4095)
+    var shown = deep + "/" + _repeat_x(shown_len - deep.byte_length() - 1)
     var want = (
         String("walk of '") + root + "' failed at '" + shown + "': errno "
     )
