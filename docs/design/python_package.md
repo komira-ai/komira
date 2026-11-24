@@ -170,7 +170,8 @@ Behaviour each later pull request implements, fixed here so they agree:
   on, whether or not its consumer reads it. A `requested_schema` other than `None` raises
   `UnsupportedOperation`; casting on request is a later, additive decision.
 - **pandas and polars are optional.** `to_pandas` and `to_polars` import them when called; when one is
-  missing, the `ImportError` names the extra that installs it (`pip install komira[pandas]`).
+  missing, the `ImportError` names the extra that installs it (`pip install komira[pandas]`). Until the
+  wheel declares the extras, it names the distribution (`pip install pandas`).
 - **A closed session refuses every call** with `KomiraError`, and closing a session while a `Result` of
   it is unread never crashes the interpreter. Whether that unread result then still reads, or refuses, is
   the session pull request's choice, held by a test of each case it allows.

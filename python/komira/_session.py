@@ -4,14 +4,15 @@ and `Result`, the answer of one `Session.sql` call.
 A session registers Parquet files, runs SQL over them (`komira_sql_stream`:
 the library turns the text into a logical plan; this package builds no SQL)
 and is closed. A `Result` holds the query's Arrow C stream, already handed to
-pyarrow, and is read once, by `to_arrow`, `to_reader`, `to_pandas`, `to_polars` or
-`__arrow_c_stream__`. The stream needs neither
-the session nor its context, so a result still reads after its session is
-closed or collected (docs/design/python_package.md, decision 3).
+pyarrow, and is read once, by `to_arrow`, `to_reader`, `to_pandas`,
+`to_polars` or `__arrow_c_stream__`. The stream needs neither the session nor
+its context, so a result still reads after its session is closed or collected
+(docs/design/python_package.md, decision 3).
 """
 
 from __future__ import annotations
 
+import importlib
 import os
 import weakref
 from types import ModuleType, TracebackType
@@ -152,9 +153,8 @@ class Result:
     It holds the query's Arrow C stream inside a `pyarrow.RecordBatchReader`
     whose schema is already read. The first of `to_arrow()`, `to_reader()`,
     `to_pandas()`, `to_polars()` and `__arrow_c_stream__()` takes the stream;
-    any of them called again raises
-    `KomiraError`, since keeping a copy would make a large answer's memory
-    depend on which was called first. Run the query again to read it again. A
+    any of them called again raises `KomiraError`, since keeping a copy would
+    make a large answer's memory depend on which was called first. Run the query again to read it again. A
     result that is never read releases its stream when it is collected.
     Reading does not need the session: a result still reads after its session
     is closed.
@@ -197,10 +197,12 @@ class Result:
     def to_pandas(self) -> pandas.DataFrame:
         """The whole answer as a `pandas.DataFrame`, converted from the Arrow
         table `to_arrow()` returns by pyarrow's `Table.to_pandas()` with its
-        default dtype mapping. pandas is optional: when it cannot be imported
-        this raises `ImportError` naming the distribution to install, and the
-        result stays unread. A failure while a batch is read raises
-        `KomiraError` with the engine's message."""
+        default dtype mapping; the table and the frame are both held while it
+        converts. pandas is optional: when it cannot be imported this raises
+        `ImportError` naming the distribution to install, and the result
+        stays unread. A failure while a batch is read raises `KomiraError`
+        with the engine's message; a failure of the conversion raises
+        pyarrow's own error. Either way the result has been read."""
         # pyarrow's conversion imports pandas itself; importing it first is
         # what leaves the result unread when it is missing.
         _import_optional("pandas", "to_pandas")
@@ -211,7 +213,9 @@ class Result:
         table `to_arrow()` returns by `polars.from_arrow`. polars is optional:
         when it cannot be imported this raises `ImportError` naming the
         distribution to install, and the result stays unread. A failure while
-        a batch is read raises `KomiraError` with the engine's message."""
+        a batch is read raises `KomiraError` with the engine's message; a
+        failure of the conversion raises polars' own error. Either way the
+        result has been read."""
         polars = _import_optional("polars", "to_polars")
         return polars.from_arrow(self._read_all())
 
@@ -236,8 +240,6 @@ def _import_optional(name: str, terminal: str) -> ModuleType:
     """The module `name`, imported for the terminal `terminal`. When it
     cannot be imported, an `ImportError` that says which distribution to
     install, chained to the import's own error."""
-    import importlib
-
     try:
         return importlib.import_module(name)
     except ImportError as e:

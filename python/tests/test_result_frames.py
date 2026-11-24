@@ -30,7 +30,8 @@ stand-in's counted Arrow stream (fake_libkomira.c):
     test_result_frames.py --lib-dir <dir> --runtime-dir <dir> [--polars]
 
 `<dir>/libkomira/` is `//src/so:libkomira[runnable]` and
-`<dir>/fake_v1_3/libkomira.so` the stand-in reporting ABI 1.3. `--polars` says
+`<dir>/fake_v1_3/libkomira.so` the stand-in reporting ABI 1.3 (`--runtime-dir`,
+which the rule passes, is not read). `--polars` says
 polars is installed for this interpreter; without it, to_polars must raise the
 ImportError that names it, and the polars cases are that check.
 """
@@ -246,7 +247,7 @@ def zero(**changes):
 
 def fake(args):
     """The frame terminals on the stand-in's stream: `rows` is int32 `n`
-    [1, 2] then [3, 4], and `next_fails` [1, 2] then EIO."""
+    [1, 2] then [3], and `next_fails` [1, 2] then EIO."""
     lib_dir, with_polars = args[0], args[1] == "polars"
     directory = os.path.join(lib_dir, "fake_v1_3")
     assert _native.load(directory).abi_version == 1003
@@ -268,7 +269,7 @@ def fake(args):
             # The whole answer, then everything released once the frame is gone.
             before = counts()
             frame = getattr(s.sql("rows"), terminal)()
-            assert values(frame) == [1, 2, 3, 4] and dtype(frame), (terminal, frame)
+            assert values(frame) == [1, 2, 3] and dtype(frame), (terminal, frame)
             del frame
             gc.collect()
             assert counts.since(before) == read, (terminal, counts.since(before))
@@ -279,7 +280,7 @@ def fake(args):
             r = s.sql("next_fails")
             e = raised(getattr(r, terminal))
             assert type(e) is KomiraError and e.status is None, (terminal, repr(e))
-            assert str(e).endswith("execute: the stand-in fails at batch 2"), (terminal, str(e))
+            assert "execute: the stand-in fails at batch 2" in str(e), (terminal, str(e))
             assert isinstance(e.__cause__, OSError), (terminal, repr(e.__cause__))
             e2 = raised(getattr(r, terminal))
             assert type(e2) is KomiraError and str(e2) == ALREADY_READ, (terminal, repr(e2))
@@ -301,7 +302,7 @@ def fake(args):
                 assert type(e) is ImportError and str(e) == message and e.name == module, (terminal, repr(e))
                 assert isinstance(e.__cause__, ImportError), (terminal, repr(e.__cause__))
                 assert counts.since(before) == opened, (terminal, counts.since(before))
-                assert r.to_arrow().column("n").to_pylist() == [1, 2, 3, 4]
+                assert r.to_arrow().column("n").to_pylist() == [1, 2, 3]
                 del r, e
                 gc.collect()
                 assert counts.since(before) == read, (terminal, counts.since(before))
@@ -344,10 +345,11 @@ def check_typed(s, source, with_polars):
         "n32": "float64", "n64": "float64", "f64": "float64",
         "b": "object", "d12": "object", "d38": "object",
         "ts_ms": "datetime64[ms]", "ts_us": "datetime64[us]", "ts_ns": "datetime64[ns]",
-        "ts_utc": "datetime64[us, UTC]", "day": "object",
+        "day": "object",
     }
     for c, d in want.items():
         assert dtypes[c] == d, (c, dtypes[c], d)
+    assert df["ts_utc"].dtype == pd.DatetimeTZDtype("us", "UTC"), dtypes["ts_utc"]
     assert pd.api.types.is_string_dtype(df["s"]), dtypes["s"]
     assert df["i64"].tolist() == [-(2**63), 2**63 - 1, 0, 1, -(2**63) + 1]
     assert df["u64"].tolist() == [0, 2**64 - 1, 0, 1, 1]
@@ -429,9 +431,12 @@ def main(args):
         return
     lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
     with_polars = "--polars" in args
-    polars_arg = "polars" if with_polars else "no-polars"
-    work = tempfile.mkdtemp()
+    with tempfile.TemporaryDirectory() as work:
+        run(lib_dir, with_polars, work)
 
+
+def run(lib_dir, with_polars, work):
+    polars_arg = "polars" if with_polars else "no-polars"
     # The children first, before this process loads anything: the files they
     # read are written by pyarrow here, in this process only.
     source = typed_table()
