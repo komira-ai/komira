@@ -157,8 +157,9 @@ alone.
 How the loader behaves:
 
 - **Where it looks.** `_native.load` opens `<lib_dir>/libkomira.so`
-  (`libkomira.dylib` on macOS). With no directory, it opens the package's own
-  `_lib/` copy. No environment
+  (`libkomira.dylib` on macOS), or, when the directory holds a `VARIANTS`
+  manifest, the CPU-level variant `_native._select_variant` picks (below).
+  With no directory, it opens the package's own `_lib/` copy. No environment
   variable and no search of the working directory picks the library. It opens
   the file with `RTLD_LOCAL`. libkomira's run path (`$ORIGIN/lib:$ORIGIN` on Linux,
   `@loader_path/lib` on macOS) finds the native owner libraries (Linux only:
@@ -166,9 +167,19 @@ How the loader behaves:
   runtime libraries there too. A file of the package that
   is missing is a `LibraryLoadError` with the loader's message, which names
   the file.
-- **What runs before the library opens.** `load` first calls
-  `_native._check_cpu()`, then `_runtime.check_loaded_runtime(<lib_dir>/lib)`. An error raised
-  by either stops the load.
+- **What runs before the library opens.** `load` first checks the CPU, with
+  `_native._select_variant(<lib_dir>)` when the directory holds a `VARIANTS`
+  manifest and `_native._check_cpu()` when it does not, then calls
+  `_runtime.check_loaded_runtime(<lib_dir>/lib)`. An error raised by either
+  stops the load.
+  - From a directory with a manifest (docs/design/isa_variants.md, decision
+    5), the loader opens the last line, the highest level, whose features the
+    `flags` (x86_64) or `Features` (aarch64) lines of `/proc/cpuinfo` list on
+    every processor. A CPU without the features of the first line, the floor,
+    raises `UnsupportedCpuError` naming them. A manifest it cannot read or
+    parse, an unreadable cpuinfo, or a missing chosen file raises
+    `LibraryLoadError`; a lower level is never loaded in place of a missing
+    one. The wheel carries no manifest yet.
   - On Linux x86_64, `_check_cpu` reads the `flags` lines of `/proc/cpuinfo`
     and requires every flag of x86-64-v3, the level the library is compiled
     for there, on every processor: `pni` (SSE3), `ssse3`, `cx16`, `sse4_1`,

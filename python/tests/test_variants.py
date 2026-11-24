@@ -20,6 +20,7 @@ directory. A process holds one library, so the cases that load come last.
 import ctypes
 import os
 import pathlib
+import platform
 import shutil
 import sys
 import tempfile
@@ -59,7 +60,7 @@ def main(args):
             f.write(content)
         return path
 
-    def planted_dir(name, manifest, files=None):
+    def native_dir_with(name, manifest, files=None):
         """A directory `name` with `manifest` as its VARIANTS and an empty file
         at each path a line names, except where `files` lists the paths to
         create instead."""
@@ -98,7 +99,7 @@ def main(args):
         name: read(os.path.join(fixtures, "VARIANTS_" + name))
         for name in ("shipped", "x86_64_v4", "aarch64", "macos")
     }
-    dirs = {name: planted_dir("m_" + name, text) for name, text in manifests.items()}
+    dirs = {name: native_dir_with("m_" + name, text) for name, text in manifests.items()}
     # The table's manifest column names a fixture file; `shipped` is the row's.
     dirs["VARIANTS_x86_64_v4"], dirs["VARIANTS_aarch64"], dirs["VARIANTS_macos"] = (
         dirs["x86_64_v4"],
@@ -192,14 +193,17 @@ def main(args):
     # ---- The manifest's own shape --------------------------------------------
     # The last line the CPU satisfies wins, whatever is between: a manifest is
     # read as written, not re-sorted.
-    order = planted_dir("order", "low\tlow.so\t\nhigh\thigh.so\tavx2\n")
+    order = native_dir_with("order", "low\tlow.so\t\nhigh\thigh.so\tavx2\n")
     assert x86(order, fixture("cpuinfo_x86_64_v3.txt")) == os.path.join(order, "high.so")
     # A field after the third is ignored, so the manifest can grow.
-    extra = planted_dir("extra", "x86-64-v2\tlibkomira.so\tpni\tsize=1\tmore\n")
+    extra = native_dir_with("extra", "x86-64-v2\tlibkomira.so\tpni\tsize=1\tmore\n")
     assert x86(extra, fixture("cpuinfo_x86_64_v3.txt")) == os.path.join(extra, "libkomira.so")
     # A last line without a newline is a line.
-    no_newline = planted_dir("no_newline", "x86-64-v2\tlibkomira.so\tpni\nx86-64-v3\tv3.so\tavx2")
+    no_newline = native_dir_with("no_newline", "x86-64-v2\tlibkomira.so\tpni\nx86-64-v3\tv3.so\tavx2")
     assert x86(no_newline, fixture("cpuinfo_x86_64_v3.txt")) == os.path.join(no_newline, "v3.so")
+    # Lines ended by CR LF: the CR is whitespace at the end of the features.
+    crlf = native_dir_with("crlf", "x86-64-v2\tlibkomira.so\tpni\r\nx86-64-v3\tv3.so\tavx2\r\n")
+    assert x86(crlf, fixture("cpuinfo_x86_64_v3.txt")) == os.path.join(crlf, "v3.so")
     # A directory may be an os.PathLike, and so may the cpuinfo.
     got = _native._select_variant(
         pathlib.Path(shipped_dir), pathlib.Path(fixture("cpuinfo_x86_64_v3.txt")), system="linux", machine="x86_64"
@@ -213,6 +217,31 @@ def main(args):
         assert x86(".", fixture("cpuinfo_x86_64_v3.txt")) == want
     finally:
         os.chdir(here)
+
+    # With no cpuinfo, system or machine given, the selector reads
+    # _native._CPUINFO on this interpreter's platform. The default path is
+    # pointed at the x86-64-v3 fixture, so the real /proc/cpuinfo is never read.
+    default_cpuinfo = _native._CPUINFO
+    assert default_cpuinfo == "/proc/cpuinfo"
+    _native._CPUINFO = fixture("cpuinfo_x86_64_v3.txt")
+    try:
+        if sys.platform == "linux" and platform.machine() == "x86_64":
+            assert _native._select_variant(shipped_dir) == v3_file
+        elif sys.platform == "linux" and platform.machine() == "aarch64":
+            got = refused(lambda: _native._select_variant(shipped_dir), UnsupportedCpuError)
+            want = unsupported(shipped_dir, "x86-64-v2", shipped[0][2].split(), _native._CPUINFO, "Features")
+            assert got == want, got
+        else:
+            got = refused(lambda: _native._select_variant(shipped_dir), LibraryLoadError)
+            want = (
+                "the variant manifest {} lists CPU features, which are read from /proc/cpuinfo only on Linux "
+                "x86_64 and aarch64, and this is {} {}".format(
+                    os.path.join(shipped_dir, "VARIANTS"), sys.platform, platform.machine()
+                )
+            )
+            assert got == want, got
+    finally:
+        _native._CPUINFO = default_cpuinfo
 
     # With no line listing features nothing is read: the cpuinfo does not
     # exist, and on Linux, macOS or a machine with no feature key the one line
@@ -252,7 +281,7 @@ def main(args):
     assert refused(lambda: x86(bare, fixture("cpuinfo_x86_64_v3.txt")), LibraryLoadError) == want
 
     def manifest_refusal(name, manifest):
-        d = planted_dir(name, manifest, files=[])
+        d = native_dir_with(name, manifest, files=[])
         return d, refused(lambda: x86(d, fixture("cpuinfo_x86_64_v3.txt")), LibraryLoadError)
 
     # A manifest that is not UTF-8.
@@ -296,7 +325,7 @@ def main(args):
     # The picked file missing is refused, naming it; the floor beside it is not
     # loaded in its place. A missing file of a level the CPU does not run is
     # not looked at.
-    no_v3 = planted_dir("no_v3", manifests["shipped"], files=["libkomira.so"])
+    no_v3 = native_dir_with("no_v3", manifests["shipped"], files=["libkomira.so"])
     want = (
         "the variant manifest {} names {} for x86-64-v3, the variant this CPU runs, and there is no such file; "
         "no lower variant is loaded in its place".format(
@@ -306,9 +335,32 @@ def main(args):
     assert refused(lambda: x86(no_v3, fixture("cpuinfo_x86_64_v3.txt")), LibraryLoadError) == want
     assert x86(no_v3, fixture("cpuinfo_x86_64_westmere.txt")) == os.path.join(no_v3, "libkomira.so")
     # A directory at the picked path is not a library file either.
-    dir_v3 = planted_dir("dir_v3", manifests["shipped"], files=["libkomira.so", "variants/x86-64-v3/libkomira.so/x"])
+    dir_v3 = native_dir_with("dir_v3", manifests["shipped"], files=["libkomira.so", "variants/x86-64-v3/libkomira.so/x"])
     got = refused(lambda: x86(dir_v3, fixture("cpuinfo_x86_64_v3.txt")), LibraryLoadError)
-    assert got.startswith("the variant manifest {} names ".format(os.path.join(dir_v3, "VARIANTS"))), got
+    want = (
+        "the variant manifest {} names {} for x86-64-v3, the variant this CPU runs, and there is no such file; "
+        "no lower variant is loaded in its place".format(
+            os.path.join(dir_v3, "VARIANTS"), os.path.join(dir_v3, "variants", "x86-64-v3", "libkomira.so")
+        )
+    )
+    assert got == want, got
+
+    # A VARIANTS that is a directory, or a link to nothing, still means the
+    # directory is one of variants: the load is refused naming the manifest,
+    # and the single library's path is not tried.
+    as_dir = os.path.join(scratch, "variants_is_dir")
+    os.makedirs(os.path.join(as_dir, "VARIANTS"))
+    write(os.path.join(as_dir, "libkomira.so"), "")
+    manifest = os.path.join(as_dir, "VARIANTS")
+    got = refused(lambda: _native._library_path(as_dir), LibraryLoadError)
+    assert got == "cannot read the variant manifest {0}: [Errno 21] Is a directory: '{0}'".format(manifest), got
+    dangling = os.path.join(scratch, "variants_dangling")
+    os.makedirs(dangling)
+    write(os.path.join(dangling, "libkomira.so"), "")
+    manifest = os.path.join(dangling, "VARIANTS")
+    os.symlink(os.path.join(dangling, "gone"), manifest)
+    got = refused(lambda: _native._library_path(dangling), LibraryLoadError)
+    assert got == "cannot read the variant manifest {0}: [Errno 2] No such file or directory: '{0}'".format(manifest), got
 
     # ---- Through load --------------------------------------------------------
     # The x86-64-v2 file is the ABI 2.0 stand-in, which the loader refuses once
