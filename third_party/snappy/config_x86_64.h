@@ -1,8 +1,9 @@
 /* snappy configuration for the x86_64 platforms (BUCK selects it by cpu):
- * what CMake writes for a compile at x86-64-v3, the target_cpu of the
- * linux-x86_64 row of tools/build/platforms/table.bzl (SSSE3, SSE4.2 CRC32
- * and BMI2 present; no NEON, and no RISC-V vector extension, so neither
- * SNAPPY_RVV_1 nor SNAPPY_RVV_0_7). */
+ * what CMake writes for a compile at x86-64-v2, the floor of the
+ * linux-x86_64 row's isa_variants in tools/build/platforms/table.bzl and the
+ * CPU every C object of that row is compiled for (SSSE3 and SSE4.2 CRC32
+ * present; no BMI2, which is x86-64-v3; no NEON, and no RISC-V vector
+ * extension, so neither SNAPPY_RVV_1 nor SNAPPY_RVV_0_7). */
 #ifndef THIRD_PARTY_SNAPPY_CONFIG_H_
 #define THIRD_PARTY_SNAPPY_CONFIG_H_
 
@@ -23,7 +24,7 @@
 #define HAVE_WINDOWS_H 0
 #define SNAPPY_HAVE_SSSE3 1
 #define SNAPPY_HAVE_X86_CRC32 1
-#define SNAPPY_HAVE_BMI2 1
+#define SNAPPY_HAVE_BMI2 0
 #define SNAPPY_HAVE_NEON 0
 #define SNAPPY_HAVE_NEON_CRC32 0
 #define SNAPPY_IS_BIG_ENDIAN 0

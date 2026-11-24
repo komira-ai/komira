@@ -122,6 +122,11 @@ comptime _SO_SNDBUF: Int32 = Int32(0x1001)
 comptime _SO_RCVBUF: Int32 = Int32(0x1002)
 
 
+# Bytes freed per iteration in bug1: larger than one TLS record (16 KB plus
+# overhead) so a send always makes progress, far smaller than the payload.
+comptime _DRAIN_STEP = 32768
+
+
 def _sol_socket() -> Int32:
     comptime if CompilationTarget.is_linux():
         return _SOL_SOCKET_LINUX
@@ -179,25 +184,55 @@ def _set_sockbuf(fd: Int32, opt: Int32, size: Int32):
     )
 
 
-def _drain_socket(fd: Int32) -> Int:
-    """Non-blocking read+discard from the RAW kernel socket fd (the receiver
-    side of the socketpair). Returns bytes discarded this call. Used to make
-    room in the receiver's buffer so a blocked sender can flush the next
-    record — WITHOUT decrypting (we only care about unblocking the sender's
+# FFI-BOUNDARY: `_fill_socket` and `_drain_socket` call libc `send` and `recv`
+# on the raw socketpair fd. Each helper owns its stack-local buffer and lends
+# it to libc only for the duration of the call; libc neither retains nor frees
+# it. The fd is owned by the test and closed by it, never by these helpers.
+def _fill_socket(fd: Int32) -> Int:
+    """Non-blocking write of raw filler bytes to `fd` until the kernel refuses
+    more (the send buffer and the peer's receive buffer are both full).
+    Returns the bytes queued. Used by bug1 so the congestion does not depend
+    on how large the OS's default socketpair buffers are: whatever their size,
+    they are full afterwards. The peer never decrypts in bug1, so the filler is
+    discarded by `_drain_socket` and never reaches a TLS record parser."""
+    var chunk = Array[UInt8, 4096](fill=UInt8(0xA5))
+    var total = 0
+    # Bounded so a platform that never reports a full buffer cannot spin.
+    while total < 67108864:
+        # SAFETY: `chunk` is stack-local, 4096 bytes long, and outlives the
+        # call; `send` only reads from it and keeps no pointer.
+        var n = external_call["send", Int64](
+            fd, chunk.unsafe_ptr(), Int64(4096), Int32(0),
+        )
+        if n <= Int64(0):
+            break
+        total += Int(n)
+    return total
+
+
+def _drain_socket(fd: Int32, max_bytes: Int) -> Int:
+    """Non-blocking read+discard of AT MOST `max_bytes` from the RAW kernel
+    socket fd (the receiver side of the socketpair). Returns bytes discarded
+    this call. Used to make a bounded amount of room in the receiver's buffer
+    so a blocked sender can flush a few more records but not the whole
+    payload — WITHOUT decrypting (we only care about unblocking the sender's
     write path; the payload correctness is verified by the peer TlsConnection
     in bug3)."""
     var scratch = Array[UInt8, 65536](fill=UInt8(0))
-    var scratch_ptr = UnsafePointer(to=scratch).unsafe_origin_cast[
-        MutUntrackedOrigin
-    ]().bitcast[UInt8]()
     var total = 0
     # Use `recv` (flags=0), NOT `read`: the stdlib's file.read() already
     # declares an `external_call["read", ...]` with a conflicting signature
     # in this TU, and a second decl fails legalization (the documented
     # nanosleep/read-conflict gotcha). `recv` is a distinct symbol.
-    while True:
+    while total < max_bytes:
+        var want = max_bytes - total
+        if want > 65536:
+            want = 65536
+        # SAFETY: `scratch` is stack-local, 65536 bytes long, and `want` never
+        # exceeds that; the kernel writes at most `want` bytes and keeps no
+        # pointer.
         var n = external_call["recv", Int64](
-            fd, scratch_ptr, Int64(65536), Int32(0),
+            fd, scratch.unsafe_ptr(), Int64(want), Int32(0),
         )
         if n <= Int64(0):
             break
@@ -318,7 +353,7 @@ def test_bug1_partial_send_surfaces_consumed_count() raises:
     start — re-transmit / mis-frame / S2N_ERR_SEND_SIZE. Measured against the
     pre-fix HEAD.
 
-    THE FIXED CONTRACT this asserts: against a congested (~8KB) socket, a
+    THE FIXED CONTRACT this asserts: against a congested socket, a
     `send` of a large payload returns (DONE, n) with 0 < n <= len — a genuine
     CONSUMABLE partial the caller advances by. The load-bearing checks:
       (1) When s2n consumes bytes, the outcome is DONE (advanceable), never a
@@ -353,11 +388,16 @@ def test_bug1_partial_send_surfaces_consumed_count() raises:
                 + _outcome_str(outcomes[1])
             )
 
-        # A payload far larger than the ~8KB socket buffer — the send is
-        # GUARANTEED to block mid-payload, producing positive partials.
+        # A payload far larger than the socket buffers and the drain step:
+        # the send blocks mid-payload, producing positive partials.
         var payload_len = 262144  # 256 KB
         var payload = _make_payload(payload_len, 7)
 
+        # Fill both socket buffers so the first sends block whatever the OS's
+        # default buffer size is, then free only a bounded `_DRAIN_STEP` per
+        # iteration so a send can flush a few records but never the whole
+        # payload: every successful send is a partial.
+        var _filled = _fill_socket(server_fd)
         var saw_positive_partial = False
         var iters = 0
         var off = 0
@@ -408,7 +448,7 @@ def test_bug1_partial_send_surfaces_consumed_count() raises:
                         + " != 0 — a blocked send must consume 0 bytes"
                     )
             # Drain the receiver (raw discard) so the next send can flush more.
-            var _d = _drain_socket(client_fd)
+            var _d = _drain_socket(client_fd, _DRAIN_STEP)
 
         # Monotone progress landed EXACTLY at payload_len (proof: no
         # re-transmission, no over/under-advance).
@@ -424,7 +464,7 @@ def test_bug1_partial_send_surfaces_consumed_count() raises:
                 "never observed a positive PARTIAL (DONE with 0 < n < slice)"
                 + " — the congested-socket partial-write path was not"
                 + " exercised; the pre-fix hidden-partial bug cannot be"
-                + " falsified. Shrink the buffer / grow the payload."
+                + " falsified. Lower _DRAIN_STEP / grow the payload."
             )
         _ = server_conn^
         _ = client_conn^

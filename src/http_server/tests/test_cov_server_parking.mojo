@@ -46,6 +46,7 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from async_rt.ops.waker_sink import NoopSink, WakerSink
 from async_rt.reactor.reactor import Reactor
+from async_rt.reactor.socket_setup import set_so_sndbuf
 from async_rt.runtime.blocking_runtime import BlockingRuntime
 from async_rt.runtime.runtime_trait import Runtime
 from async_rt.runtime.shared_erasure import (
@@ -234,6 +235,14 @@ def _small_server(var server: HttpServer[NoopGrpcDispatch]) raises -> HttpServer
     """`server` with a 4 KiB send buffer on its listener (SO_SNDBUF)."""
     _sockopt(server.listen_fd(), Int32(7), Int32(0x1001), Int32(4096), Int32(0), 1)
     return server^
+
+
+def _shrink_accepted(server: HttpServer[NoopGrpcDispatch]) raises:
+    """Give the accepted connection its own 4 KiB send buffer. Linux's
+    accepted socket inherits the listener's; Darwin's does not reliably keep
+    it (the loopback buffer autotunes up), so the response burst would fit
+    unparked. Setting the option on the connection itself pins it on both."""
+    set_so_sndbuf(server._conns[0].fd(), Int32(4096))
 
 
 def _assert_parked(server: HttpServer[NoopGrpcDispatch]) raises:
@@ -598,6 +607,7 @@ def _run_burst(
         if server.live_conn_count() == 1:
             break
     assert_equal(server.live_conn_count(), 1)
+    _shrink_accepted(server)
     _send_burst(fd)
     if half_close:
         _ = external_call["shutdown", Int32](fd, Int32(1))
@@ -699,6 +709,7 @@ def test_canned_loop_drops_a_reset_peer_with_a_parked_response() raises:
         _ = server.serve_for_iterations(1, Int32(20_000))
         if server.live_conn_count() == 1:
             break
+    _shrink_accepted(server)
     _send_burst(fd)
     _ = server.serve_for_iterations(2, Int32(20_000))
     _assert_parked(server)

@@ -23,7 +23,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #   following every field, edited and malformed locks refused, a lock built only
 #   from a usable report, one lock file per dataset and scale written once, a
 #   cache directory verified against a lock.
-# - test_h2o_golden: the SHA-256 of small generated tables, pinned.
+# - test_h2o_golden: the SHA-256 of small generated tables, pinned: the
+#   uncompressed bytes once for every cpu, the Snappy bytes per cpu.
 # - test_h2o_groupby: the number source, the same bytes for the same seed and
 #   size, the decoded rows against the stream, ranges, batch independence.
 # - test_h2o_join: the same for x, small, medium and big, and the keys that join.
