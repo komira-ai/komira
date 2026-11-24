@@ -14,7 +14,9 @@
 //                      komira_last_error on the context enters gate k first
 //   signal             raise SIGUSR1 in the calling thread, then succeed
 //   anything else      succeed
-// komira_credential_set and komira_credential_seal always succeed.
+// komira_credential_set and komira_credential_seal always succeed. The four
+// output calls of ABI 1.1 (schema, bindings, plan render), which the loader
+// requires of a 1.3 library and these tests never make, answer nothing.
 // komira_sql_stream answers, on success, a stream of the schema
 // `n: int64` and no batch.
 //
@@ -155,6 +157,34 @@ EXPORT int32_t komira_last_error(void *ctx, uint8_t *b, uint64_t cap, uint64_t *
 EXPORT int32_t komira_register_parquet(void *ctx, const char *name, const char *path) {
   (void)path;
   return run(ctx, "register", name);
+}
+
+// The output calls of ABI 1.1: an empty answer through the two-call protocol.
+static int32_t nothing(uint64_t *n) {
+  *n = 0;
+  return 0;
+}
+
+EXPORT int32_t komira_parquet_schema(void *ctx, const char *path, uint8_t *b, uint64_t cap, uint64_t *n) {
+  (void)ctx, (void)path, (void)b, (void)cap;
+  return nothing(n);
+}
+
+EXPORT int32_t komira_csv_binding(void *ctx, const char *path, uint8_t delimiter, int32_t has_header,
+                                  int32_t all_varchar, uint8_t *b, uint64_t cap, uint64_t *n) {
+  (void)ctx, (void)path, (void)delimiter, (void)has_header, (void)all_varchar, (void)b, (void)cap;
+  return nothing(n);
+}
+
+EXPORT int32_t komira_json_binding(void *ctx, const char *path, uint8_t *b, uint64_t cap, uint64_t *n) {
+  (void)ctx, (void)path, (void)b, (void)cap;
+  return nothing(n);
+}
+
+EXPORT int32_t komira_plan_render(void *ctx, const char *plan, uint64_t len, uint8_t *b, uint64_t cap,
+                                  uint64_t *n) {
+  (void)ctx, (void)plan, (void)len, (void)b, (void)cap;
+  return nothing(n);
 }
 
 EXPORT int32_t komira_credential_add(void *ctx, int32_t kind, const char *name, int32_t *out_id) {

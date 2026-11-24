@@ -175,6 +175,9 @@ class Session:
         itself: a signal handler or a finalizer that runs inside a call and
         calls the session again gets a `KomiraError`. Another thread's
         `_owner` is never this thread's id, so only that thread is refused.
+        A handler that runs in the few bytecodes between taking the lock and
+        setting `_owner`, or between clearing it and letting go of the lock,
+        is not seen and waits; Python code cannot close that window.
         """
         me = threading.get_ident()
         if self._owner == me:
@@ -183,12 +186,11 @@ class Session:
                 "(from a signal handler or a finalizer): make it after that call returns"
             )
         with self._lock:
-            self._owner = me
             try:
+                self._owner = me
                 yield
             finally:
                 self._owner = None
-
 
 
 class Result:
