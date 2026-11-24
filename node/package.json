@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "peerDependencies": {
+    "apache-arrow": "^21.2.0"
+  }
+}
