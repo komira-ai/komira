@@ -13,7 +13,7 @@ Nothing is compiled on the runner.
 | event | runs |
 |---|---|
 | push to `main` | [`release.yml`](#releaseyml-the-release): builds the release set and publishes the mopm packages to the prod registry, on every push (no schedule, no switch); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert). And, when the push changes more than documentation, the TestPyPI half of [`pypi.yml`](#pypiyml-publishing-the-python-package): builds the `komira` wheel on the farm, installs the wheel file on a fresh runner per supported Python, uploads it to TestPyPI, installs it from there per supported Python and runs the quickstart, and records the version when all of that passed. And, on the same pushes, [`pypi-macos-arm64.yml`](#pypi-macos-arm64yml-the-macos-arm64-wheel): the same for the macOS arm64 wheel of the same version, in a run of its own |
-| pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
+| pull request from a branch of this repository | `pr / check`, whose [macOS part](#the-macos-part-of-the-check) builds the libraries of the macOS set the change reaches on the farm's Macs; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | merge group of the [merge queue](#the-merge-queue) (`merge_group`) | `pr / check` on the group's head commit, which is what `main` becomes; `coverage` does not run |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | [`release.yml`](#releaseyml-the-release), on the chosen ref, with a reason |
@@ -123,7 +123,11 @@ It does three things, in this order:
    inputs add the rest: `darwin-properties` with `darwin-macos-hosts` (both or
    neither) write `darwin_arm64_properties` and `darwin_macos_hosts`;
    `macos-library-dirs` (only with `darwin-properties`; absolute directories
-   separated by `:` or spaces) writes `macos_library_dirs`; `tls`
+   separated by `:` or spaces) writes `macos_library_dirs`; `darwin-config-file`
+   (only with `darwin-properties`; an absolute path on the runner) writes those
+   macOS keys to that file instead of the machine buckconfig, so only a command
+   that names it with `--config-file` configures the macOS platform (`pr.yml`,
+   [The macOS part of the check](#the-macos-part-of-the-check)); `tls`
    (`false` by default) and `tls-ca-certs`, the absolute path of a PEM CA file
    on the runner, only with `tls: true`, write `tls` and `tls_ca_certs`.
    A user buckconfig is read before the repository's own, so a key the
@@ -132,7 +136,8 @@ It does three things, in this order:
 
 Every input is checked before the tailnet is joined: an empty required
 input, a value holding a line break, half of the macOS pair, a macOS set equal
-to the linux one, `tls` other than `true` or `false`, and a CA file that is not
+to the linux one, a macOS config file without a macOS set, relative or holding
+`$`, `tls` other than `true` or `false`, and a CA file that is not
 an absolute path to a readable file are refused. `//:farm_connect_cases` runs
 those checks and the writer from `action.yml`'s own scripts and compares the
 buckconfig written whole. It also reads every workflow and holds each step
@@ -156,7 +161,7 @@ repository variables (Settings > Secrets and variables > Actions > Variables):
 | `FARM_ADDRESS` | the remote-execution service as a URL with its port |
 | `FARM_INSTANCE` | its instance name |
 | `FARM_LINUX_X86_64_PROPERTIES` | the worker property set of the linux x86_64 actions |
-| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml` and by the job `build-macos-arm64` of `pypi-macos-arm64.yml`, and by no other job |
+| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml`, by the job `build-macos-arm64` of `pypi-macos-arm64.yml` and by the job `check` of `pr.yml` (which also passes `darwin-config-file`, so that only its step `build for macOS` sees them: [The macOS part of the check](#the-macos-part-of-the-check)), and by no other job |
 | `FARM_TLS` | `true` when the service serves REAPI over TLS; unset or empty means `false`. Each workflow passes it as farm-connect's `tls`, so the address and its transport change together |
 
 Variables are not masked, and a job's logs are public. The action masks the
@@ -356,49 +361,123 @@ change (one under `tools/build/`, say) selects, and `pr.yml` runs the
 package's graph checks with their BXL script. The analysis-time refusals, where targets execute and the
 unconfigured query through the prelude's select moved there.
 
+## The macOS part of the check
+
+`pr / check` builds the libraries of the macOS set (`//release:mopm_darwin_libs`) that the change
+reaches, for darwin-arm64, on the farm's macOS workers, after its Linux part and under the same check
+name, for a pull request and for a merge group alike. Building a library runs its package's welded tests
+on a Mac. This is the one macOS build before the merge; the release workflows below build the whole set
+and the macOS wheel after it.
+
+- **What it builds.** The step `select the macOS targets` runs
+  [`tools/build/ci/darwin.bxl:select`](../tools/build/ci/darwin.bxl) over the list the selector printed
+  (`targets.txt`); [`darwin.bzl`](../tools/build/ci/darwin.bzl) says what it picks. When the change is
+  built as the aggregate (`//ci:pr` or `//ci:pr_default`: it touches the build system, or a file the
+  selector cannot map), the whole set. Otherwise the `:lib` of each package of the set the change
+  reaches (`DARWIN_PACKAGES` of [`release/darwin_libs.bzl`](../release/darwin_libs.bzl), the list
+  `release-macos.yml` builds, so the two never disagree); the `:lib` of each package it depends on is
+  built first. A change that reaches none skips the build. A line of `targets.txt` that is not a target
+  label fails the step, so a selector whose output changed shape never reads as "nothing to build". No
+  standalone test (`mojo_test`) is run for macOS, and the macOS wheel and the Python harness tests stay in
+  their release workflows. The step `the macOS targets to build` runs
+  [`//tools/build/ci:darwin_targets`](../tools/build/ci/darwin_targets/darwin_targets.zig) over the
+  selection's log: it writes the labels to `darwin_targets.txt` and sets the step output `any` when there
+  is one, and it fails when the log holds no verdict of the selection, or a verdict that disagrees with
+  the labels. The cases are in `cases.bxl` (`darwin_cases.bzl`, including what the command prints and
+  whether it fails) and in `//tools/build/ci:darwin_targets_unit` and `:darwin_targets_cli_cases`, over
+  recorded runs of `darwin.bxl:select`; the self-test scenario `//tools/build/selftest:darwin_select` runs
+  the command itself, as pr.yml does, over five lists, and checks its exit status, stdout and verdict.
+- **Only that step sees the Macs.** `farm-connect` gets the macOS worker set and
+  `darwin-config-file: ${{ runner.temp }}/darwin.buckconfig`: the macOS keys go to that file and not to
+  the machine buckconfig, and the step `build for macOS` names it with `--config-file`. Every other step
+  configures no macOS platform, exactly as before the macOS part existed. Registering the platform for the
+  whole job would change what the Linux part's checks see: `cases.bxl` configures every adopted library
+  for darwin-arm64 when that platform is registered, and `//src/crypto:crypto` reaches
+  `//third_party/aws-lc:crypto_prefixed`, which is x86_64 only. The build runs through the `buck2-farm`
+  action, which fails the step when an action ran on the runner.
+- **The Linux part never waits on a Mac.** The macOS part runs after the step `test` and before the
+  analysis of the set; it is skipped when an earlier step failed, so a red check takes no Mac time. Its
+  actions queue at priority `ci` (`pr.yml` passes no `farm-qos`), ahead of the `batch` actions of
+  `release-macos.yml`.
+- **Pending while the Macs are busy, for at most 60 minutes.** When every Mac slot is taken the farm
+  queues the actions and the step waits: `pr / check` is in progress (pending), not failed. The step's
+  `timeout-minutes: 60` bounds that: past it the step fails and the check is red, which takes a queued
+  pull request out of the merge queue (it is queued again after a re-run). So the macOS part holds a merge
+  at most 60 minutes past the Linux part, and never past the job's own bound of 330 minutes, which ends
+  the check red before the queue's 360. The bounds of the three long steps add up to 300 minutes (build
+  150, test 90, macOS 60); the other steps are seconds each.
+- **How much it costs.** Measured on the farm (four Mac Studios, 32 cores each, 27 of them booked per Mac
+  by the farm's pool: 108 Mac action slots), with `./buck2 build --target-platforms
+  komira//tools/build/platforms:darwin-arm64` from a checkout of `main`:
+
+  | what was built | libraries | Commands | time |
+  |---|---|---|---|
+  | the whole set, nothing changed since `main` was built | 66 (the set) | `573 (cached: 573, remote: 0, local: 0)` | 2 s |
+  | a comment added to `src/atomic_alias` (its library's output does not change) | 16 | `1350 (cached: 1349, remote: 1, local: 0)` | 16 s |
+  | a function added to `src/encoding` (its library and the 16 that depend on it rebuild and rerun their tests) | 17 | `179 (cached: 0, remote: 179, local: 0)` | 8 min 32 s |
+  | the whole set, half of it new (`release-macos.yml`, run 45247838989, step `build the macOS set`) | 66 | `1957 (cached: 936, remote: 1021, local: 0)` | 13 min 43 s |
+
+  The load: `pr.yml` ran 587 times from 2026-11-15 to 2026-11-23, at most 13 at once and 2 to 3 at once
+  in a typical minute when any ran (the runs' start and end times, from the Actions API). The limit is a
+  whole-set build whose actions are new, such as a change to the Mojo rules or toolchains: one takes the
+  Macs about 14 minutes, and checks of different commits do not share its actions, so about four of them
+  at once reach the 60-minute bound (inferred from the measures above, not measured). A change under
+  `tools/build/` that leaves every Mac action's inputs as they were builds the whole set from the cache, in
+  seconds.
+
 ## The macOS build of the release
 
-macOS builds run only in release workflows, never in a pull request. There are two. The macOS
+The release workflows build macOS after the merge. There are two. The macOS
 (darwin-arm64) set of the mopm packages is its own workflow,
 [`release-macos.yml`](../.github/workflows/release-macos.yml) (one job, `release-macos`), once per release.
 The other is the macOS arm64 wheel of the Python package: the job `build-macos-arm64` of
 [`pypi-macos-arm64.yml`](../.github/workflows/pypi-macos-arm64.yml), at most once per version and only when that
 version's macOS file is missing from TestPyPI
-([below](#pypi-macos-arm64yml-the-macos-arm64-wheel)). `release.yml` holds no macOS job. The farm has far more Linux cores than
-Mac ones, so a macOS leg in the pull request check would queue every change
-behind the scarcest machines; the macOS platform is built in the release workflows
-instead. The rest of this section is about `release-macos.yml`.
+([below](#pypi-macos-arm64yml-the-macos-arm64-wheel)). `release.yml` holds no macOS job. Before the
+merge, only [the macOS part of the check](#the-macos-part-of-the-check) builds for macOS: the libraries of
+the set the change reaches. A merge group's check builds them for the commit `main` becomes, so the build
+of the set in `release-macos.yml` finds those actions in the cache; it still builds the whole set, since a
+commit can reach `main` without a merge group (a manual run builds the chosen ref), and the Python harness
+tests, which no pull request builds. The rest of this section is about `release-macos.yml`.
 
-- **Not in a pull request.** `pr.yml` (and `coverage.yml`, the other workflow that
-  runs on a pull request) pass no macOS worker set to the farm connection and name
-  no darwin platform or runner (beyond the analysis below, which builds nothing), and
-  `//ci:pr` is built for the client's own platform
+- **No other macOS build in a pull request.** `coverage.yml`, the other workflow that runs on a pull
+  request, passes no macOS worker set and names no darwin platform or runner, and `pr.yml` names them
+  only in its macOS part and in the analysis below. `//ci:pr` is built for the client's own platform
   only: none of the targets it reaches has a macOS execution platform. A
   `cquery` of `attrregexfilter(exec_compatible_with, "macos", deps(//ci:pr))` is
   empty, and the same query for `--target-platforms
   komira//tools/build/platforms:darwin-arm64` over a library is not.
-  `//:release_macos_cases` holds the workflows and the shards of `ci/targets/` to it, and holds
-  `pypi.yml` and `pypi-macos-arm64.yml` to not running on a pull request or a merge group. The three targets of the macOS wheel
+  `//:release_macos_cases` holds the workflows and the shards of `ci/targets/` to it (the lines of
+  `pr.yml`'s macOS part, `PR_MACOS_PART`, exactly as written, and where each stands), and holds
+  `pypi.yml` and `pypi-macos-arm64.yml` to not running on a pull request or a merge group. The five targets of the macOS wheel
   (`//python:komira_wheel_macos_arm64`, `//python:wheel_install_test_macos_arm64`,
+  `//python:wheel_libs_macos_arm64`, `//python:wheel_same_macos_arm64`,
   `//python/smoke:pypi_smoke_macos_arm64`) stay out of the check twice: each has an `EXCLUDED` row in
   `tools/build/ci/rules.bzl`, so the pull-request selector never picks it, and each has
   `target_compatible_with = DARWIN_ARM64` (limit `pypi-wheel-macos-arm64` in
   `tools/build/platforms/limits.tsv`), so it builds only with `--target-platforms
   komira//tools/build/platforms:darwin-arm64`, which only `pypi-macos-arm64.yml` passes.
-- **Analysed in every pull request, built in none.** What fails before anything is built
+- **Analysed in every pull request.** What fails before anything is built
   (a target of the set's closure incompatible with darwin-arm64, a toolchain with no
   execution platform, a rule that fails at analysis) is found in the pull request that
-  causes it: the last buck2 step of `pr.yml` runs
+  causes it, even when the change reaches no library of the set: the last buck2 step of `pr.yml` runs
   `bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check`,
-  which configures `//release:mopm_darwin_libs` for darwin-arm64 and analyses it, with its
-  whole closure, as the release's build would. Configuring and analysing run no action, so
+  which configures `//release:mopm_darwin_libs` and the macOS Python harness tests
+  (`DARWIN_PYTHON_HARNESS` of `release/darwin_libs.bzl`, the targets of the workflow's second build
+  step) for darwin-arm64 and analyses them, with their whole closure, as the release's build would.
+  It also refuses a Zig tool that an action of the closure runs and that is built for another
+  platform than the one the action runs on (`release/exec_tools.bzl`): a Linux tool configured for
+  the macOS execution platform analyses fine and fails only on the worker, with "cannot execute
+  binary file". Configuring and analysing run no action, so
   nothing is built for macOS and no macOS worker is asked for anything; the config file
   registers the macOS execution platform with a property set that names no worker, which
-  configuration needs and nothing uses. The step fails with buck2's own message, naming the
+  configuration needs and nothing uses. The step fails with buck2's own message (or, for a
+  Zig tool built for the wrong platform, with the tool, its triple and its platform), naming the
   target and the dependency. A failure that only a build shows (a compile, a welded test)
-  is still seen first by `release-macos.yml`. `//:release_macos_cases` holds that this
-  step is in `pr.yml` once, through the `buck2-farm` action with its assertion, and that it
-  is the only line of a pull request workflow that names the macOS set.
+  is seen by the macOS part, for the libraries the change reaches. `//:release_macos_cases` holds that this
+  step is in `pr.yml` once, through the `buck2-farm` action with its assertion, that it and the
+  lines of `pr.yml`'s macOS part are the only lines of a pull request workflow that name the macOS
+  set, and that the workflow's harness step builds exactly `DARWIN_PYTHON_HARNESS`.
 - **On the farm's Macs, not a hosted runner.** The job runs on the same ubuntu
   runner as the others and asks the farm: `farm-connect` with the macOS worker set
   and hosts (the repository variables above), then
@@ -444,6 +523,58 @@ instead. The rest of this section is about `release-macos.yml`.
   not wait on a platform the release does not ship. When the set is green over several runs,
   move the job back into `release.yml` as a `needs` of `prod-commit` (or keep the workflow
   and have the publish wait on it).
+
+### Proposed: the macOS build of every `//src` library
+
+Not built yet. `//release:mopm_darwin_libs` covers the mopm packages only. Most of `//src` is
+not a mopm package, so a change that breaks one of those libraries on macOS is seen by nobody.
+Measured: a `uquery` of `kind(...)` for the library rules (`mojo_library`, gated, shared,
+system, native and `cxx_library`) over the `src` directory lists 415 targets. One
+`build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going
+--skip-incompatible-targets` of that list on the farm built 156 and stopped on 259. Every
+target that stopped has an open issue, one per cause. The counts in this table are from that
+build's report:
+
+| Cause | Targets | Issue |
+| --- | --- | --- |
+| aws-lc and s2n-tls had no darwin-arm64 build. Since komira-ai/komira#2203 all 133 configure for darwin-arm64 (a `cquery` of them); they have not been built for it again | 133 | komira-ai/komira#2196 |
+| a library's native shared library is ELF only | 9 | komira-ai/komira#2197 |
+| `so_exports` is the Linux binary on a macOS executor | the UDF spike helpers, `arrow_c_abi_probe` | komira-ai/komira#2198 |
+| the UDF spike helpers' C uses Linux-only APIs | 5 | komira-ai/komira#2199 |
+| `phase_timers` drops a join tail on the fork's clock tick | 1 | komira-ai/komira#2200 |
+| `http_core` and `host_probe` tests still read `/proc/self/status` (found in the sources; the sweep did not reach them) | not reached | komira-ai/komira#2201 |
+
+The rest of the 259 were stopped by three of our own failures, now fixed. Two tests read
+`/proc/self/status` and now use `//src/tests/helpers/komira_test_rss`. The int64 column sum
+depended on the SIMD lane count. A test wrote a fixed `/tmp` path.
+
+The proposal keeps this set built, in the same way as the mopm set:
+
+- **One named target, generated.** `//release:darwin_src_libs` is a generated list, like the
+  shards of `ci/targets/`, with a guard that fails when the list is stale. It holds every
+  library target of `//src` except a `DARWIN_SRC_EXCLUDED` table. Each row of that table names
+  a target and the issue above that keeps it out. A row is deleted in the pull request that
+  closes its issue. When a new library is added under `//src`, it joins the set when the list
+  is regenerated, with no second edit. No step names a pattern target. `//ci:pr`
+  leaves the target out (`EXCLUDED` of `tools/build/ci/rules.bzl`), as it does
+  `mopm_darwin_libs`.
+- **After merge, on main, through the farm.** A second build step in `release-macos.yml`,
+  after the mopm set:
+  `build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:darwin_src_libs`.
+  It runs through the `buck2-farm` action and its assertion, so the summary reads `local: 0`.
+  It has the same triggers, concurrency group and `farm-qos: batch` as the job above. It is
+  never in a pull request.
+- **Reported, not blocking.** `release-macos-result` reports it the way it reports the mopm
+  set, and nothing in `release.yml` waits on it. It becomes blocking with the mopm set, once
+  it has been green over several runs.
+
+How it fits with the pull request side. No macOS build runs in a pull request. In a pull
+request, macOS is only analysed, by the `darwin_analysis.bxl` step above, which builds nothing.
+That step can analyse `//release:darwin_src_libs` as well as the mopm set, so a dependency that
+is incompatible with darwin-arm64 is caught in the pull request that adds it, under the same
+exclusion table. What only a build shows (a compile, a welded test) is caught by this job after
+merge. So are the changes no selection reaches: a toolchain change, a change to the Mac hosts,
+or a change outside `src` that breaks a library no pull request touched.
 
 ## release.yml: the release
 
@@ -1152,7 +1283,7 @@ uploads, its smokes and its verdict jobs are the ones `pypi.yml` held, under the
 
 | job | half | environment | permissions | what it does |
 |---|---|---|---|---|
-| `build-macos-arm64` | push | `build` | `contents: read`, `id-token: write` (the tailnet only) | on an ubuntu runner that only asks the farm, whose Macs are the workers (`farm-connect` with the macOS worker set and hosts, `farm-qos: batch`): takes the stamp, builds the Linux driver and `//python:supported_pythons[macos-arm64]` and runs `pypi_smoke matrix --platform macos-arm64` (its output `matrix`), builds `//python:komira_wheel_macos_arm64[file_name]` (the wheel's file name, written at analysis) and asks TestPyPI whether it lists that file (`pypi_smoke present`). Only if it does not, it builds `//python:komira_wheel_macos_arm64[release]`, `//python:wheel_install_test_macos_arm64` and `//python/smoke:pypi_smoke_macos_arm64` for `--target-platforms komira//tools/build/platforms:darwin-arm64`, runs `pypi_smoke dist` with its record, copies the quickstart files, and keeps `pypi-<version>-macos-arm64-dist` and `pypi-<version>-macos-arm64-smoke` (both drivers, the quickstart files, `pythons.json`, `built.txt`). Its output `version` is empty when nothing was built. No upload step. |
+| `build-macos-arm64` | push | `build` | `contents: read`, `id-token: write` (the tailnet only) | on an ubuntu runner that only asks the farm, whose Macs are the workers (`farm-connect` with the macOS worker set and hosts, `farm-qos: batch`): takes the stamp, builds the Linux driver and `//python:supported_pythons[macos-arm64]` and runs `pypi_smoke matrix --platform macos-arm64` (its output `matrix`), builds `//python:komira_wheel_macos_arm64[file_name]` (the wheel's file name, written at analysis) and asks TestPyPI whether it lists that file (`pypi_smoke present`). Only if it does not, it builds `//python:komira_wheel_macos_arm64[release]`, `//python:wheel_install_test_macos_arm64`, the wheel read back (`//python:wheel_libs_macos_arm64` and `//python:wheel_same_macos_arm64`, one step) and `//python/smoke:pypi_smoke_macos_arm64` for `--target-platforms komira//tools/build/platforms:darwin-arm64`, runs `pypi_smoke dist` with its record, copies the quickstart files, and keeps `pypi-<version>-macos-arm64-dist` and `pypi-<version>-macos-arm64-smoke` (both drivers, the quickstart files, `pythons.json`, `built.txt`). Its output `version` is empty when nothing was built. No upload step. |
 | `testpypi-macos-arm64`, `testpypi-smoke-macos-arm64`, `testpypi-passed-macos-arm64`, `result-testpypi-macos-arm64` | push | as their twins in `pypi.yml` | as their twins in `pypi.yml` | the same as `pypi.yml`'s `testpypi`, `testpypi-smoke`, `testpypi-passed` and `result-testpypi` on the macOS dist, when the build made a wheel: the upload with the Linux driver (no storage steps), the smoke on the hosted runner `macos-15` (Apple silicon) with the macOS driver, the record under `pypi-passed-macos-arm64-<version>`, the verdict. |
 | `promote-macos-arm64`, `pypi-macos-arm64`, `pypi-smoke-macos-arm64`, `result-pypi-macos-arm64` | promotion | as their twins in `pypi.yml` | as their twins in `pypi.yml` | the same as `pypi.yml`'s promotion from the newest macOS record (the prefix `pypi-passed-macos-arm64-`), with the Linux driver on ubuntu and the macOS driver on `macos-15`; no storage steps. |
 
@@ -1184,6 +1315,23 @@ the order, the exact gate on each Mac build, that the file-name build alone is u
 `build-macos-arm64` runs on the ubuntu runner with the macOS worker set, hosts and the `tls` literal, that the
 macOS smoke jobs run the macOS driver, that each macOS job is in its half, and that `pypi.yml` holds none of
 them.
+
+**What the macOS wheel holds, read back.** Before anything is uploaded, the build holds the wheel to what a
+Mac loads (python/BUCK, "The macOS wheel, read back"). The wheel rule refuses, on every member
+(`tools/build/package/wheel/policy.zig`, `codesign.zig`): an ELF file (a Linux library), a Mach-O file for a
+CPU other than arm64 or a universal one, a minimum macOS (LC_BUILD_VERSION) above the tag's `macosx_11_0`,
+an install name that is not `@rpath/<file>`, a run path that is not `@loader_path`-relative, a load that is
+neither a member nor under `/usr/lib` or `/System/Library`, and a code signature that is missing or whose
+CodeDirectory hashes do not match the file (macOS on arm64 maps no unsigned code). The step `the macOS
+wheel read back` builds two checks of the finished file: `//python:wheel_libs_macos_arm64` walks the
+loads from `komira/_lib/libkomira.dylib` as dyld does, through each library's own LC_RPATH, so every
+`@rpath` and `@loader_path` load is a member of the wheel and every Mach-O member is loaded (nothing
+points at a build path, a home directory, Homebrew or conda), and the three Mojo runtime dylibs carry the
+darwin toolchain's bytes; `//python:wheel_same_macos_arm64` holds it to the Linux wheel of the same stamp:
+the same Python files, METADATA (so the same Requires-Python and classifiers) and licence files byte for
+byte, WHEEL differing only in its Tag's platform part (both `py3-none`), and the files only one wheel has
+are its native libraries: `libkomira.dylib` and the three runtime dylibs on macOS; `libkomira.so`, the
+eight native owner libraries and the three runtime `.so` files on Linux.
 
 
 ### Which run to look at
@@ -1260,7 +1408,7 @@ not run kci (retired).
 | job | the one job `check`, for every merge group and for a pull request only from a branch of this repository (`github.event_name == 'merge_group' \|\| github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here; a merge group's event has no `pull_request`, and without its own term the job would be skipped there, which counts as passed), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
 | runner | `runs-on: ubuntu-24.04`, written as that plain scalar: a GitHub-hosted machine, fresh per job. A self-hosted label, label list, runner group, expression (`${{ vars.X }}`) or quoted value is refused, so a pull request's code never reaches a runner that keeps state between jobs |
 | permissions | its own `permissions:` mapping, `contents: read` and `id-token: write` (for the farm connection, [farm-connect](#how-it-reaches-the-farm), only); no environment, no secret (no value of the job, nor of the workflow-level `env:`, names `secrets` other than `secrets.GITHUB_TOKEN`), no publish step |
-| steps | the pinned full-history checkout of the merge commit (a merge group: its head commit), `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change, written by `//tools/build/ci:change` (built on the farm like the assertion, run on the runner in the checkout, with the event, the merge group's `base_sha` and the output directory as flags; `tools/build/ci/change/change.zig` says what it runs and refuses, and its cases run its choice of base against a fake git): `git diff --name-only <base>...HEAD` and the coverage holds of both sides. A pull request's base is HEAD^1, the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. A merge group's base is its `merge_group.base_sha`, the commit the group's head was built on (the step stops when it is not an ancestor of HEAD); the head is a squash commit on top of it, not a merge commit. Any other event stops the step. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system; the heavy checks of `HEAVY` in `tools/build/ci/rules.bzl`, today none since only `komira_base` reaches them, only when the change touches paths that row owns, so a change that owns none builds `//ci:pr_default` in place of `//ci:pr`), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, `default_guard.bxl:check` that `//ci:pr_default` is `//ci:pr` without the roots of `HEAVY` and nothing else, `lock_graphs.bxl:check` that each package's `buildrules.mojo.lock.bzl` holds a unit graph for every platform subdir its `mopm.lock` records and that a package which loads a native shared library pins it in `system_libs` of that lock, `cases.bxl:run`, and `readme_e2e/cases.bxl:run`, the cases of the README e2e's completeness guard), and `test` of the list's targets that are not of the tests cell. A pull request that adds or deletes a package needs no edit to any release file; adding a target to the check set means regenerating `ci/targets.bzl` and its shards `ci/targets/shard_<n>.bzl` in one step (the guard fails, naming the command, when they are out of date or a shard nears the 1000-line limit). Nothing ships. |
+| steps | the pinned full-history checkout of the merge commit (a merge group: its head commit), `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change, written by `//tools/build/ci:change` (built on the farm like the assertion, run on the runner in the checkout, with the event, the merge group's `base_sha` and the output directory as flags; `tools/build/ci/change/change.zig` says what it runs and refuses, and its cases run its choice of base against a fake git): `git diff --name-only <base>...HEAD` and the coverage holds of both sides. A pull request's base is HEAD^1, the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. A merge group's base is its `merge_group.base_sha`, the commit the group's head was built on (the step stops when it is not an ancestor of HEAD); the head is a squash commit on top of it, not a merge commit. Any other event stops the step. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system; the heavy checks of `HEAVY` in `tools/build/ci/rules.bzl`, today none since only `komira_base` reaches them, only when the change touches paths that row owns, so a change that owns none builds `//ci:pr_default` in place of `//ci:pr`), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, `default_guard.bxl:check` that `//ci:pr_default` is `//ci:pr` without the roots of `HEAVY` and nothing else, `lock_graphs.bxl:check` that each package's `buildrules.mojo.lock.bzl` holds a unit graph for every platform subdir its `mopm.lock` records and that a package which loads a native shared library pins it in `system_libs` of that lock, `cases.bxl:run`, and `readme_e2e/cases.bxl:run`, the cases of the README e2e's completeness guard), and `test` of the list's targets that are not of the tests cell. Then [the macOS part](#the-macos-part-of-the-check): `tools/build/ci/darwin.bxl:select` over that list, its labels written by `//tools/build/ci:darwin_targets` (built on the farm like the change tool), and, when there is one, `build --config-file $RUNNER_TEMP/darwin.buckconfig --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going` of its labels (bounded at 60 minutes), skipped when an earlier step failed. Last, the analysis of the whole macOS set (`release/darwin_analysis.bxl:check`). A pull request that adds or deletes a package needs no edit to any release file; adding a target to the check set means regenerating `ci/targets.bzl` and its shards `ci/targets/shard_<n>.bzl` in one step (the guard fails, naming the command, when they are out of date or a shard nears the 1000-line limit). Nothing ships. |
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.
@@ -1325,9 +1473,10 @@ PR_TITLE` and `squash_merge_commit_message: BLANK`. Why each:
   `check_response_timeout_minutes` (360, the most GitHub allows) counts as
   failed; `pr / check` ends at its `timeout-minutes` of 330 first, so the queue
   sees a red check, not a silence.
-- **The macOS build stays in the release workflows.** A merge group runs
-  `pr.yml` alone, which builds no macOS target; the macOS set builds in
-  `release-macos.yml` on the push to `main`, as before
+- **A merge group builds for macOS too.** Its `pr / check` has the same
+  [macOS part](#the-macos-part-of-the-check): the libraries of the set the group's change reaches are
+  built for darwin-arm64 on the farm's Macs before `main` moves. The whole set builds again in
+  `release-macos.yml` on the push to `main`
   ([The macOS build of the release](#the-macos-build-of-the-release)).
 - **`coverage` does not run on a merge group.** It reports on a pull request's
   "Files changed" view and is not required, so the queue does not wait for it.

@@ -93,6 +93,7 @@ TARGETS = [
     "komira//tools/build/selftest:analysis_refusals_zig_rules",
     "komira//tools/build/selftest:bench_salt",
     "komira//tools/build/selftest:config_refusals",
+    "komira//tools/build/selftest:darwin_select",
     "komira//tools/build/selftest:exec_platforms",
     "komira//tools/build/selftest:graph_check_refusals",
     "komira//tools/build/selftest:inner",

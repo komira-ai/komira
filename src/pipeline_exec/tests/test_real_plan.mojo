@@ -363,10 +363,10 @@ def test_what_the_builder_does_not_serve_is_refused_by_name() raises:
     var dispatch = InlineDispatch()
 
     var unknown = SegmentDescPod(
-        0, UInt8(7), SourceSpecPod(), Slab[MorselOp](), SINK_COLLECT, KEY_DTYPE_NONE,
+        0, UInt8(200), SourceSpecPod(), Slab[MorselOp](), SINK_COLLECT, KEY_DTYPE_NONE,
         SINK_ORIENT_COLUMNAR, -1, 0, List[Int](), List[UInt8](),
     )
-    with assert_raises(contains="source kind 7 of segment 0 is not served"):
+    with assert_raises(contains="source kind 200 of segment 0 is not served"):
         _ = run_plan(_one(unknown^), builder, dispatch, 1, CancellationToken.new())
 
     var concat = SegmentDescPod(

@@ -7,6 +7,7 @@ TARGETS = [
     "komira//python:beside_modular_loaded_first",
     "komira//python:beside_other_mojo_loaded_after",
     "komira//python:beside_other_mojo_loaded_first",
+    "komira//python:komira_wheel_linux_x86_64",
     "komira//python:refuses_classifiers_not_the_supported_pythons",
     "komira//python:refuses_downgrade",
     "komira//python:refuses_missing_libkomira",

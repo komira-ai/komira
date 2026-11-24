@@ -162,7 +162,7 @@ test "the README is the description as it is, and a readme preface flag is unkno
     try t.expectEqualStrings("unknown argument --readme-preface", d.msg);
 }
 
-test "the commands are write, check and libs; another name, runtime-record among them, is refused with the usage line" {
+test "the commands are write, check, libs and same; another name, runtime-record among them, is refused with the usage line" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -170,9 +170,10 @@ test "the commands are write, check and libs; another name, runtime-record among
     try t.expectEqual(cli.Command.write, try cli.subcommand(a, &d, "write"));
     try t.expectEqual(cli.Command.check, try cli.subcommand(a, &d, "check"));
     try t.expectEqual(cli.Command.libs, try cli.subcommand(a, &d, "libs"));
+    try t.expectEqual(cli.Command.same, try cli.subcommand(a, &d, "same"));
     for ([_][]const u8{ "runtime-record", "", "Write", "libs " }) |name| {
         d = diag.Diag{};
         try t.expectError(error.Refused, cli.subcommand(a, &d, name));
-        try t.expectEqualStrings("usage: komira_wheel write|check|libs --flag value ...", d.msg);
+        try t.expectEqualStrings("usage: komira_wheel write|check|libs|same --flag value ...", d.msg);
     }
 }

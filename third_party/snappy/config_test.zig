@@ -2,10 +2,11 @@
 //! build action. The subjects are the two headers, snappy's own cmake/config.h.in (the list of macros
 //! CMake writes) and the BUCK file's select (the zig_test's `data`, under KOMIRA_TEST_WORK).
 //!
-//! Why a test and not only a build: the macOS platform is not in the pull request check (the check set
-//! holds no macOS build), so a config.h that switched x86 intrinsics on for an arm64 compile, which is a
-//! compile error on that platform (`emmintrin.h: This header is only meant to be used on x86`), would
-//! pass every Linux build. These cases read the headers instead.
+//! Why a test and not only a build: the pull request check builds for macOS only the libraries of the
+//! macOS set a change reaches (the check set holds no macOS build), so a config.h that switched x86
+//! intrinsics on for an arm64 compile, which is a compile error on that platform (`emmintrin.h: This
+//! header is only meant to be used on x86`), would pass every Linux build of a change that reaches none.
+//! These cases read the headers instead.
 //! What the cases catch:
 //!  - a macro of config.h.in missing from a config (an undefined macro is 0 in an `#if`, so a missing
 //!    feature macro silently turns the feature off), or a macro in a config that config.h.in does not have

@@ -36,6 +36,7 @@ SRC_C_LIBRARIES = [
     "//src/scan_source:komira_scan_source_inmem_id",
     "//src/supervisor:komira_supervisor_proc",
     "//src/tests/helpers/komira_test_arrow_c_consumer:komira_test_arrow_c_consumer_c",
+    "//src/tests/helpers/komira_test_rss:komira_test_rss_c",
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c",
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo",
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo_broken",

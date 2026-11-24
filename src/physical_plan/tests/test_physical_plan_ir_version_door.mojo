@@ -208,12 +208,13 @@ def test_door_refuses_an_empty_plan_rather_than_passing_it() raises:
 
 
 def test_door_refuses_a_segment_stamped_by_the_previous_release() raises:
-    """IR version 18 added the store of a Parquet source (`parquet_fs`) and 17
-    the user-function arms (OP_UDF_APPLY, OP_UDF_FRAME, SOURCE_UDF_STEP); a
-    segment stamped 17, 16 or 15 lacks a field of the current layout and is
-    refused by name."""
-    assert_equal(PHYSICAL_PLAN_IR_VERSION, 18)
-    for stamped in range(15, 18):
+    """IR version 20 added the JSONL source (`SOURCE_JSONL`, `jsonl_path`,
+    `jsonl_schema`), 19 the Iceberg source (SOURCE_ICEBERG, `iceberg_spec`)
+    and 18 the store of a Parquet source (`parquet_fs`); a segment stamped 19,
+    18, 17, 16 or 15 lacks a field of the current layout and is refused by
+    name."""
+    assert_equal(PHYSICAL_PLAN_IR_VERSION, 20)
+    for stamped in range(15, 20):
         var segs = List[SegmentDescPod]()
         segs.append(_seg_at_version(0, stamped))
         var msg = _refusal_message(segs^)

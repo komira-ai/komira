@@ -97,6 +97,7 @@ from plan_ir.plan_decisions import (
     SCAN_UNBOUNDED,
 )
 from plan_ir.plan_decisions import AGG_MODE_PARTIAL, AGG_MODE_SINGLE, AGG_MODE_UNSET
+from scan_source.avro_source import AvroSource
 from scan_source.parquet_source import ParquetSource
 from scan_source.source_variant import SourceVariant
 
@@ -194,12 +195,16 @@ def test_a_partial_aggregate_is_refused_and_a_single_one_is_cut() raises:
     assert_equal(_message(_count_by(_scan(), List[String](), AGG_MODE_SINGLE), _inputs()), "")
 
 
-def test_a_source_other_than_parquet_memory_or_csv_is_refused() raises:
-    var json = LogicalPlan.scan(String("t.jsonl"), SOURCE_NDJSON, _schema())
-    _refused_with(_message(json, _inputs()), LOWERING_UNCUTTABLE_NODE, "json")
-    # The same scan of a CSV file lowers.
+def test_a_source_other_than_parquet_memory_csv_or_json_is_refused() raises:
+    var avro = LogicalPlan.scan_from_source(
+        SourceVariant(AvroSource(String("t.avro"), _schema())), _schema()
+    )
+    _refused_with(_message(avro, _inputs()), LOWERING_UNCUTTABLE_NODE, "avro")
+    # The same scan of a CSV file and of a JSON Lines file lowers.
     var csv = LogicalPlan.scan(String("t.csv"), SOURCE_CSV, _schema())
     assert_equal(_message(csv, _inputs()), "")
+    var json = LogicalPlan.scan(String("t.jsonl"), SOURCE_NDJSON, _schema())
+    assert_equal(_message(json, _inputs()), "")
 
 
 def _parquet_scan(var source: ParquetSource) raises -> LogicalPlan:

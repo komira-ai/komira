@@ -48,6 +48,32 @@ holds them to the paths that must always widen. The mapping itself is
 `cases.bxl` answers it from tables and from the real graph of
 the fixture package (`fixture/`).
 
+## The macOS targets: `darwin.bxl`
+
+```sh
+./buck2 bxl komira//tools/build/ci/darwin.bxl:select @tools/build/ci/darwin_affected.args @targets.txt
+```
+
+`targets.txt` is what `affected.bxl` printed. It prints the targets of `pr.yml`'s macOS part
+([docs/ci.md](../../../docs/ci.md#the-macos-part-of-the-check)), which builds them with
+`--target-platforms komira//tools/build/platforms:darwin-arm64` on the farm's macOS workers;
+[`darwin.bzl`](darwin.bzl) is the rule and `darwin_cases.bzl` its cases (run by `cases.bxl`):
+`darwin_answer` is everything the command prints and its failure, and its cases hold those lines for
+the lists of the recorded runs in `darwin_targets/fixtures`. The self-test scenario
+[`darwin_select`](../selftest/darwin_select.zig) runs the command itself over five lists and checks
+its exit status, stdout and verdict line. The step after it, `the macOS targets to
+build`, runs `//tools/build/ci:darwin_targets` over the run's log
+([`darwin_targets.zig`](darwin_targets/darwin_targets.zig)): the labels go to `darwin_targets.txt`,
+`any=true` to the step's output when there is one, and a log with no verdict, two, or a verdict that
+disagrees with the labels fails the step.
+
+| The selector's answer | The macOS targets |
+|---|---|
+| `komira//ci:pr` or `komira//ci:pr_default` | `komira//release:mopm_darwin_libs`, the whole macOS set |
+| labels that hold the `:lib` of packages of the set (`DARWIN_PACKAGES` of `release/darwin_libs.bzl`) | those `:lib`s, in the order of the list |
+| labels that hold no such `:lib` (another target of a set package, a package outside the set, the tests cell) | nothing: the build step is skipped |
+| a line that is not a target label | fails: `BROKEN` |
+
 ## The aggregate: `//ci:pr`
 
 `ci/BUCK` declares one target that builds every check:

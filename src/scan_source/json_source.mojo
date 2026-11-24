@@ -14,9 +14,11 @@
 #      SOURCE_KIND_ROW scan's source.
 #
 # The columnar materializer
-# (`json.columnar_materializer.materialize_jsonl_to_batch`) is a direct
-# byte-level API; the plan path that uses it decodes and then RE-ROOTS the plan
-# at an `InMemorySource`. There is no columnar JSON scan arm.
+# (`jsonl.columnar_materializer.materialize_jsonl_to_batch`) is a direct
+# byte-level API. Lowering cuts a scan of this source into a SOURCE_JSONL
+# segment (`lowering.cut_scan_jsonl`), which reads the file with it at the
+# plan's schema (`pipeline_exec.source_jsonl`); the declared orientation is
+# unchanged.
 #
 # The orientation is DECLARED once, on the `komira.json` `ScanBinding`
 # (`source_variant._json_binding`), and `ScanData.__init__` reads the

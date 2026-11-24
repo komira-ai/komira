@@ -438,7 +438,16 @@ out. For a macOS wheel `max_glibcxx` and `max_cxxabi` have nothing to bound and
   `@loader_path/<path>` of a member of the wheel (by file name), an
   `@rpath/<file>` in `external_needed`, or an operating system library, an
   absolute path under `/usr/lib/` or `/System/Library/`. Any other absolute
-  path, `@executable_path` and an `@rpath` name nobody provides are refused.
+  path, `@executable_path` and an `@rpath` name nobody provides are refused;
+- `signature`: the member has a code signature (`LC_CODE_SIGNATURE`) that
+  matches it, as `codesign --verify` checks one ([`wheel/codesign.zig`](wheel/codesign.zig)):
+  every CodeDirectory covers the file up to the signature, its hash type is
+  SHA-1, SHA-256 or SHA-384, every page hashes to its slot, every special slot
+  naming a blob of the signature (requirements, entitlements) holds that blob's
+  hash and every other one is zero. macOS on arm64 maps no unsigned code, and a
+  file changed after it was signed (an install name rewritten, a strip) no
+  longer matches. A CMS blob (a Developer ID signature) is not verified; ad hoc
+  signing, which the linker does, is enough.
 
 `size` and `external` apply to a Mach-O member as to any other.
 
@@ -453,31 +462,50 @@ after an upload. Where `needed` above asks only that a name be a member somewher
 check walks the libraries as the loader would load them from an install: from
 the entry library, each DT_NEEDED is a manylinux system library, a library
 already loaded, or the member at one of the needing library's own run path
-entries with `$ORIGIN` its directory. A refusal names its check:
+entries with `$ORIGIN` its directory. For a Mach-O entry (a macOS wheel) the
+walk is dyld's: each load command names an operating system library (under
+`/usr/lib/` or `/System/Library/`), a library already loaded, an
+`@rpath/<file>` that one of the loading library's own `LC_RPATH` entries
+reaches with `@loader_path` its directory, or an `@loader_path/<path>` member;
+anything else (another absolute path such as Homebrew's or conda's, a home
+directory, `@executable_path`, a bare name) is refused. The runtime's copies
+come from the toolchain, or from a `mojo_runtime` directory named by `runtime`
+(the darwin toolchain executes on macOS, and the check on Linux). A refusal
+names its check:
 
 - `path`: every member is a relative path of plain components (no `/` first,
   no `\`, no empty, `.` or `..` part);
 - `layout`: every member is under the import package (the entry's top
   directory) or the one `.dist-info`, so no `modular/` beside it;
-- `entry`: the entry is a member and an ELF file;
+- `entry`: the entry is a member and an ELF or a Mach-O file;
 - `runtime`: each Mojo runtime library is in the wheel exactly once, with the
   bytes of the toolchain's runtime: a second copy, one of another build, or none
   is refused;
-- `runpath`: every run path entry of a loaded library is `$ORIGIN`-relative and
-  stays inside the import package;
+- `runpath`: every run path entry of a loaded library is `$ORIGIN`-relative
+  (`@loader_path`-relative for Mach-O) and stays inside the import package;
 - `needed`: every DT_NEEDED of a loaded library resolves as above (a name
   holding `/`, which the loader opens as a path, is refused), and a refusal
   says where in the wheel the library is when the run path misses it;
-- `stray`: every ELF member is one the entry loads;
+- `stray`: every ELF and Mach-O member is one the entry loads;
 - `licence`: each runtime licence file is a non-empty `.dist-info/licenses/`
   member and a `License-File` of METADATA;
 - `requires`: no Requires-Dist names a distribution that carries the runtime.
 
 The output lists the loaded libraries in load order; with `expect_refusal` the
 target builds only while the wheel is refused with exactly that line.
-python/BUCK runs it on komira's wheel (`:wheel_libs`) and on four wheels it
-refuses: a second libKGENCompilerRTShared.so beside libkomira, the owners off
-libkomira's run path, a runtime library missing, and libkomira missing.
+python/BUCK runs it on komira's wheel (`:wheel_libs`), on the macOS wheel
+(`:wheel_libs_macos_arm64`), and on four wheels it refuses: a second
+libKGENCompilerRTShared.so beside libkomira, the owners off libkomira's run
+path, a runtime library missing, and libkomira missing.
+
+`wheel_same_check` ([`wheel.bzl`](wheel.bzl)) reads two finished wheels of one
+package for two platforms with `komira_wheel same`
+([`wheel/compare.zig`](wheel/compare.zig)): one `.dist-info` of the same name in
+both, every member but RECORD and WHEEL in both with the same bytes and mode,
+apart from the members named as each wheel's own, each in its wheel alone and
+each a native library (Mach-O or ELF), and WHEEL the same but for the platform
+part of its Tag. python/BUCK holds the macOS wheel to the Linux wheel of the
+same stamp with it (`:wheel_same_macos_arm64`).
 
 Sub-targets: `[default]` is the wheel, copied only after `[check]` passed;
 `[check]` reads it back ([`wheel/check.zig`](wheel/check.zig)). That covers the
@@ -492,8 +520,9 @@ number `<N>` (version `0.1.<N>`) and the same test commit and commit time, for a
 build that needs wheels of two versions of one package, such as an upgrade test.
 
 The tests: the Zig scenarios `:wheel_zip_unit`, `:wheel_elf_unit`,
-`:wheel_policy_unit`, `:wheel_build_unit`, `:wheel_check_unit`,
-`:wheel_cli_unit` and `:wheel_libs_unit` in
+`:wheel_macho_unit`, `:wheel_codesign_unit`, `:wheel_policy_unit`,
+`:wheel_build_unit`, `:wheel_check_unit`, `:wheel_cli_unit`,
+`:wheel_libs_unit` and `:wheel_compare_unit` in
 [`BUCK`](BUCK), on synthetic files and ELF libraries
 ([`wheel/testing.zig`](wheel/testing.zig)). The rule on fixtures: `:wheel_fixture`
 (a linux-x86_64 wheel holding the example Mojo shared library `plain`, with the

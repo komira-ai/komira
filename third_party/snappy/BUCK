@@ -116,8 +116,9 @@ archive_files(
 )
 
 # The two headers read as text (config_test.zig says what it catches). The
-# macOS arm64 build is not in the pull request check, so this is the check
-# that an arm64 config switches no x86 intrinsic on.
+# pull request check builds for macOS arm64 only the libraries of the macOS
+# set a change reaches, so this is the check that an arm64 config switches no
+# x86 intrinsic on.
 zig_test(
     name = "config_cases",
     exec_compatible_with = LINUX_X86_64,

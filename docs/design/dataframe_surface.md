@@ -579,7 +579,7 @@ package design). D4 to D18 are this design's own.
   polars-shaped skin leaves 2 of its 52 cells empty by decision, and the pandas-shaped skin leaves 3
   (counted from the verbs document's table).
 - The early engine refuses at `lower` most of what the skins can build: joins, windows, top-n,
-  a distinct over an explicit column list, and sources other than Parquet; a whole-row distinct runs only
+  a distinct over an explicit column list, and sources other than Parquet or one JSON Lines file; a whole-row distinct runs only
   over one fixed-width or string column, or several dictionary-encoded string columns. These plans raise at the terminal with the engine's code
   until the engine runs them.
 

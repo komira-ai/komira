@@ -1,7 +1,7 @@
 load("@komira//tools/build/platforms:defs.bzl", "TOOL_EXEC")
 load("@komira//tools/build/platforms:table.bzl", "row")
 load(":adopt.bzl", "cxx_link_facts")
-load(":toolchain.bzl", "zig_bootstrap_exe", "zig_exe", "zig_module", "zig_test")
+load(":toolchain.bzl", "exec_tool_target", "zig_bootstrap_exe", "zig_exe", "zig_module", "zig_test")
 
 # Scripts and tool sources used by the Mojo rules.
 # The compile wrapper (tools/mojo_compile.zig; docs/design/zig_compile_wrapper.md):
@@ -177,7 +177,7 @@ zig_test(
 )
 
 # so_exports (tools/so_exports.zig): the C-ABI exports of a Mojo source, and
-# the check of mojo_shared_lib's `exports` against them (defs.bzl). Built behind
+# the check of mojo_shared_lib's `exports` against them (shared_lib.bzl). Built behind
 # its unit tests; the cases are tests//negative/shared_lib:exports_*.
 zig_test(
     name = "so_exports_unit",
@@ -198,10 +198,18 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
+# so_exports: mojo_shared_lib takes it as an exec_dep, so it is configured for the execution
+# platform of the check's action: on a darwin-arm64 library that is the macOS
+# one, whose workers cannot run a Linux executable. It is built for the
+# platform it is configured for (`exec_tool_target`; zig still runs on TOOL_EXEC
+# and cross-compiles); on linux x86_64 the triple is the one it always had, so
+# linux action keys are unchanged. release/darwin_analysis.bxl refuses a Zig
+# tool built for another platform than the action that runs it.
 zig_exe(
     name = "so_exports",
     exec_compatible_with = TOOL_EXEC,
     src = "tools/so_exports.zig",
+    target = exec_tool_target(),
     unit_tests = [":so_exports_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",

@@ -1,7 +1,7 @@
 load("@komira//python:install_test.bzl", "picked_files", "python_versions", "wheel_install_test")
 load("@komira//python:pythons.bzl", "CLASSIFIERS", "HOSTED", "PYTHONS", "REQUIRES_PYTHON")
 load("@komira//third_party/modular:pins.bzl", "OTHER_MOJO", "TOOLCHAIN_MOJO", "is_newer", "modular_wheel")
-load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_file_at_stamp", "wheel_libs_check", "wheel_version")
+load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_file_at_stamp", "wheel_libs_check", "wheel_same_check", "wheel_version")
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
 load("@komira//tools/build/python:defs.bzl", "python_proto", "python_source_package")
 
@@ -86,7 +86,9 @@ python_versions(
 # tested only by pypi-macos-arm64.yml, on the farm's macOS workers, never in a
 # pull request (tools/build/ci/rules.bzl, EXCLUDED); its targets name
 # `--target-platforms komira//tools/build/platforms:darwin-arm64`. On macOS the
-# wheel rule refuses a Mach-O member that needs a newer macOS than the tag's.
+# wheel rule refuses a Mach-O member that needs a newer macOS than the tag's,
+# and one whose code signature is missing or does not match it; "The macOS
+# wheel, read back" below holds the finished file.
 
 _PLATFORM = "linux-x86_64"
 
@@ -531,6 +533,68 @@ wheel_file(
         "entry: the wheel has no komira/_lib/libkomira.so",
     ),
 ]]
+
+# ---- The macOS wheel, read back ----------------------------------------------
+#
+# What the macOS arm64 wheel holds, each held by a check that reads the
+# finished wheel; built by pypi-macos-arm64.yml's build-macos-arm64 beside the
+# wheel, never in a pull request (tools/build/ci/rules.bzl, EXCLUDED). The
+# wheel rule itself already refuses, on every member: an ELF file (a Linux
+# library), a Mach-O file for a CPU other than arm64 or a universal one, a
+# minimum macOS above the tag's, an install name that is not @rpath/<file>, a
+# run path that is not @loader_path-relative, a load that is neither a member,
+# nor under /usr/lib or /System/Library, and a code signature that is missing
+# or does not match the file's pages (wheel/policy.zig, wheel/codesign.zig).
+#
+# `:wheel_libs_macos_arm64`: from komira/_lib/libkomira.dylib, the library
+# _native.load opens on macOS, every load command resolves to a member through
+# the loading library's own run path, or to a macOS system library, and every
+# Mach-O member is one libkomira loads; the three Mojo runtime dylibs are in
+# the wheel once each with the bytes of the toolchain's runtime, with their
+# licence texts (wheel/libs.zig).
+#
+# `:wheel_same_macos_arm64`: the macOS wheel and the Linux wheel of the same
+# build are the same package: every Python file, METADATA and the licence
+# files are in both with the same bytes and modes, WHEEL differs only in the
+# platform part of its Tag (both `py3-none`, so the same Pythons), and the
+# files only one of them has are its native libraries, listed here
+# (wheel/compare.zig).
+
+_RUNTIME_MACOS = [
+    "libKGENCompilerRTShared.dylib",
+    "libAsyncRTRuntimeGlobals.dylib",
+    "libMSupportGlobals.dylib",
+]
+
+wheel_libs_check(
+    name = "wheel_libs_macos_arm64",
+    wheel = ":komira_wheel_macos_arm64",
+    entry = "komira/_lib/libkomira.dylib",
+    # The darwin toolchain's runtime directory itself: that toolchain executes
+    # on macOS and this check on Linux, so it is not reached through it.
+    runtime = "komira//tools/build/toolchains/darwin:mojo_runtime",
+    runtime_dists = _LIBS_CHECK["runtime_dists"],
+    runtime_libs = _RUNTIME_MACOS,
+    runtime_licenses = _LIBS_CHECK["runtime_licenses"],
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
+)
+
+# The Linux wheel of the same build, configured for linux-x86_64 whatever the
+# platform of the target that reads it.
+configured_alias(
+    name = "komira_wheel_linux_x86_64",
+    actual = ":komira_wheel",
+    platform = "komira//tools/build/platforms:linux-x86_64",
+)
+
+wheel_same_check(
+    name = "wheel_same_macos_arm64",
+    wheel = ":komira_wheel_macos_arm64",
+    like = ":komira_wheel_linux_x86_64",
+    only_in_wheel = ["komira/_lib/libkomira.dylib"] + ["komira/_lib/lib/" + n for n in _RUNTIME_MACOS],
+    only_in_like = ["komira/_lib/libkomira.so"] + ["komira/_lib/lib/" + n for n in _OWNERS + _RUNTIME],
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
+)
 
 # ---- Upgrading from the previous release ----------------------------------
 #
