@@ -197,11 +197,11 @@ libkomira_variants(
 )
 
 # The directory's VARIANTS alone, written from the row without linking a
-# variant: what the Python loader's selector test (python/tests) reads as the
-# shipped manifest.
+# variant: what the selector tests of the Python loader (python/tests) and of
+# the Node package (node) read as the shipped manifest.
 libkomira_variants_manifest(
     name = "libkomira_variants_manifest",
-    visibility = ["//python/tests:"],
+    visibility = ["//node:", "//python/tests:"],
 )
 
 staged_files(

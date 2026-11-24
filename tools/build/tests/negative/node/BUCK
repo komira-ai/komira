@@ -535,6 +535,31 @@ node_binding_test(
     data = {"answer.node": ":wrong_answer"},
 )
 
+# RED "the line coverage of the covered sources is": the lines of `unused` in
+# the covered source never run, though every test passes.
+node_binding_test(
+    name = "binding_under_covered_lines",
+    srcs = ["binding_cover_lines.test.mjs"],
+    covered_srcs = ["binding_cover_lib.mjs"],
+)
+
+# RED "the branch coverage of the covered sources is": every line of the
+# covered source runs, and one arm of `pick` does not.
+node_binding_test(
+    name = "binding_under_covered_branches",
+    srcs = ["binding_cover_branches.test.mjs"],
+    covered_srcs = ["binding_cover_lib.mjs"],
+)
+
+# RED "binding_cover_unloaded.mjs is to be covered, and no test loaded it": a
+# covered source no test imports has no coverage record, which is not 100%.
+# The two tests together cover every line and branch of the other source.
+node_binding_test(
+    name = "binding_cover_not_loaded",
+    srcs = ["binding_cover_branches.test.mjs", "binding_cover_lines.test.mjs"],
+    covered_srcs = ["binding_cover_lib.mjs", "binding_cover_unloaded.mjs"],
+)
+
 # RED "srcs is empty": a binding test of no file.
 node_binding_test(
     name = "binding_no_srcs",

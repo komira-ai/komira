@@ -1,0 +1,10 @@
+{
+  "name": "komira-node-devtools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The TypeScript compiler and Node.js types that check and compile the komira Node.js package; never published.",
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@komira-ai/komira-linux-x64-gnu",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The linux-x64 native files of @komira-ai/komira, as the tests lay them out.",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "libc": ["glibc"]
+}

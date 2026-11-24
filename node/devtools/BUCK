@@ -1,0 +1,14 @@
+load("@komira//tools/build/node:modules.bzl", "npm_modules")
+load(":pins.lock.bzl", "NPM")
+
+# The TypeScript compiler and Node.js's types that check and compile the
+# Node.js package (//node:typecheck, //node:dist), laid out from
+# package-lock.json as kpin pinned it (pins.lock.bzl; pins.toml is empty:
+# there is no tool to pin but npm's). Only the build runs them; nothing here
+# is shipped.
+npm_modules(
+    name = "modules",
+    lockfile = "package-lock.json",
+    npm = NPM,
+    visibility = ["//node:"],
+)
