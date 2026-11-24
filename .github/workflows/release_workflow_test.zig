@@ -458,7 +458,9 @@ fn checkProd(ar: std.mem.Allocator, text: []const u8, stage_job: []const []const
 
 /// Null if every upload of a staged artifact (STAGED_ARTIFACTS) keeps it from STAGED_RETENTION_MIN to
 /// STAGED_RETENTION_MAX days and each is uploaded, else the refusal. A step is the `upload-artifact` line
-/// and the lines after it indented deeper than the step's dash; comment and blank lines are skipped.
+/// and the lines after it indented deeper than the step's dash; comment and blank lines are skipped. The
+/// artifact's name and retention are the `with:` keys; an upload step whose `uses:` is not its first line is
+/// not read (release.yml writes none).
 fn checkStagedRetention(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     var uploads = [_]usize{0} ** STAGED_ARTIFACTS.len;
     var lines = std.ArrayList([]const u8).empty;
@@ -475,7 +477,10 @@ fn checkStagedRetention(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
         var retention: ?[]const u8 = null;
         var j = i + 1;
         while (j < lines.items.len and std.mem.startsWith(u8, lines.items[j], "        ")) : (j += 1) {
-            const field = std.mem.trim(u8, lines.items[j], " ");
+            // the keys of `with:` (ten spaces), never the step's own `name:` (eight)
+            const l = lines.items[j];
+            if (!std.mem.startsWith(u8, l, "          ") or l.len > 10 and l[10] == ' ') continue;
+            const field = l[10..];
             if (std.mem.startsWith(u8, field, "name:")) name = std.mem.trim(u8, field["name:".len..], " '\"");
             if (std.mem.startsWith(u8, field, "retention-days:")) retention = std.mem.trim(u8, field["retention-days:".len..], " '\"");
         }
@@ -871,6 +876,11 @@ test "a workflow with no upload of either staged artifact is refused by name" {
     try t.expectEqualStrings("no upload-artifact step uploads mopm-staged-<sha>", (try checkStagedRetention(ar, "jobs:\n  a:\n    steps:\n      - run: true\n")) orelse return error.Accepted);
     const only_set = "      - uses: actions/upload-artifact@x\n        with:\n          name: mopm-staged-1\n          retention-days: 7\n";
     try t.expectEqualStrings("no upload-artifact step uploads mopm-prod-staged-<sha>", (try checkStagedRetention(ar, only_set)) orelse return error.Accepted);
+    // the step's own name is not the artifact's
+    const step_named = "      - uses: actions/upload-artifact@x\n        name: mopm-staged-step\n        with:\n          name: other-1\n" ++ only_set;
+    try t.expectEqualStrings("no upload-artifact step uploads mopm-prod-staged-<sha>", (try checkStagedRetention(ar, step_named)) orelse return error.Accepted);
+    const step_named_bad = "      - uses: actions/upload-artifact@x\n        name: keep the set\n        with:\n          name: mopm-staged-3\n          retention-days: 1\n";
+    try t.expectEqualStrings("the upload of mopm-staged-3 has retention-days 1, not 7 to 14: a rerun of a failed prod job on a later day must still download it", (try checkStagedRetention(ar, step_named_bad)) orelse return error.Accepted);
     // a step with no name is not a staged upload; the next step's dash ends a step
     const both = "      - uses: actions/upload-artifact@x\n        with:\n          path: y\n      - name: other\n        with:\n          name: mopm-staged-2\n" ++ only_set ++
         "      - uses: actions/upload-artifact@x\n        with:\n          name: \"mopm-prod-staged-1\"\n          retention-days: '14'\n";
