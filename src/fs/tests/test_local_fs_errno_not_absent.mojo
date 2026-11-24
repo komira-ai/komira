@@ -53,7 +53,6 @@
 # =============================================================================
 
 from std.ffi import external_call
-from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_true
 
 from runtime_paths import test_tmpdir
@@ -243,9 +242,15 @@ def test_walk_subdir_emfile_raises() raises:
 # -----------------------------------------------------------------------------
 # ENAMETOOLONG below the root: the walk must not skip an entry it cannot lstat.
 # -----------------------------------------------------------------------------
-# The host's PATH_MAX, NUL included: a path of this many bytes or more is
-# refused with ENAMETOOLONG.
-comptime _PATH_MAX = 1024 if CompilationTarget.is_macos() else 4096
+# FFI-BOUNDARY: `komira_fs_test_path_max` (fs/_fs_shim.c) takes no argument and
+# returns a C int64_t; no pointer crosses, so nothing is owned or freed.
+def _path_max() -> Int:
+    """The host's PATH_MAX, NUL included (4096 on Linux, 1024 on macOS), from
+    <limits.h> through the fs shim: a path of this many bytes or more is
+    refused with ENAMETOOLONG."""
+    return Int(external_call["komira_fs_test_path_max", Int64]())
+
+
 # The bytes of the failed path the walk's error buffer holds (local_fs.mojo).
 comptime _ERR_PATH_BYTES = 4095
 
@@ -262,6 +267,7 @@ def _walk_entry_lstat_enametoolong_under(pad: Int) raises:
     (one extra directory component of `pad - 1` bytes plus its slash). The
     pad stands in for a longer exec root: the sizing must reach PATH_MAX
     whatever the root's length."""
+    var path_max = _path_max()
     var base = _disk_root(String("nametoolong"))
     var root = base
     if pad > 0:
@@ -271,8 +277,8 @@ def _walk_entry_lstat_enametoolong_under(pad: Int) raises:
     # PATH_MAX - 55] ((3840, 4041] on Linux, (768, 969] on macOS): each step
     # adds 201 bytes, so the stop lands in that 201-byte window whatever the
     # root's length, and every mkdir names an absolute path under PATH_MAX.
-    var lo = _PATH_MAX - 256
-    var hi = _PATH_MAX - 55
+    var lo = path_max - 256
+    var hi = path_max - 55
     assert_true(
         root.byte_length() <= lo,
         "test root too long: " + String(root.byte_length()),
@@ -292,7 +298,7 @@ def _walk_entry_lstat_enametoolong_under(pad: Int) raises:
     # (PATH_MAX - 256, PATH_MAX - 55] the name is 55 to 255 bytes, within
     # NAME_MAX. Create it relative to `deep` in a child shell, which is the
     # only way to name it.
-    var entry = _repeat_x(_PATH_MAX - deep.byte_length())
+    var entry = _repeat_x(path_max - deep.byte_length())
     var rel = String("cd '") + deep + String("' && ")
     _sh(rel + String("touch ") + entry)
     var msg = _err_walk(root)
@@ -303,7 +309,7 @@ def _walk_entry_lstat_enametoolong_under(pad: Int) raises:
     # The error buffer holds 4095 bytes: the reported path is `<deep>/` plus
     # as much of the entry name as fits (all of it on macOS), immediately
     # followed by "': errno".
-    var shown_len = min(_PATH_MAX + 1, _ERR_PATH_BYTES)
+    var shown_len = min(path_max + 1, _ERR_PATH_BYTES)
     var shown = deep + "/" + _repeat_x(shown_len - deep.byte_length() - 1)
     var want = (
         String("walk of '") + root + "' failed at '" + shown + "': errno "

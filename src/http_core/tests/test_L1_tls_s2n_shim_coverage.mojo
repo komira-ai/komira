@@ -29,8 +29,9 @@ error below is an I/O, closed or usage error, which s2n does not blind
     update refusals and one update; a send into a full socket blocks with
     nothing accepted, an empty send then makes no s2n call (s2n's would
     flush, and block), and every byte still arrives intact; a peer that
-    closes with unread bytes makes `recv` an ERROR (I/O) and the next send
-    too.
+    closes with unread bytes makes `recv` an ERROR (I/O) on Linux and EOF
+    (CLOSED) on macOS, which does not reset an AF_UNIX peer, and the next
+    send an ERROR (I/O) on both.
   * test_abrupt_close_is_eof: a peer that closes without close_notify is
     EOF on `recv_into_span` and `recv` (CLOSED), not an error and not a block.
 """
@@ -38,6 +39,7 @@ error below is an I/O, closed or usage error, which s2n does not blind
 from std.ffi import external_call
 from std.memory import ArcPointer
 from std.pathlib import Path
+from std.sys.info import CompilationTarget
 
 from async_rt.reactor.socket_setup import set_so_sndbuf, so_sndbuf
 from http_core.tls import (
@@ -533,7 +535,8 @@ def test_tls13_blocked_send_and_reset() raises:
                 raise Error("byte " + String(i) + " differs after the blocked send")
         _expect_eq(server.key_update_counts().received, 1, "server key updates received")
 
-        # The server closes with a record unread: ECONNRESET on the client.
+        # The server closes with a record unread: on Linux, ECONNRESET on the
+        # client.
         # That holds only while the unread record exists: Linux resets the
         # peer when an AF_UNIX stream socket closes with data in its receive
         # queue; with the queue empty the client sees EOF instead
@@ -541,10 +544,17 @@ def test_tls13_blocked_send_and_reset() raises:
         _expect_pair(client.send(Span[UInt8](payload)[0:100].as_imm()), TLS_OUTCOME_DONE, 100, "send left unread")
         _close_fd(server_fd)
         server_fd = Int32(-1)
-        _expect_pair(client.recv_into_span(Span[UInt8](scratch)), TLS_OUTCOME_ERROR, -1, "recv after a reset")
-        _expect_err_type(S2N_ERR_T_IO, "recv after a reset")
-        _expect_pair(client.send(Span[UInt8](payload)[0:100].as_imm()), TLS_OUTCOME_ERROR, -1, "send after a reset")
-        _expect_err_type(S2N_ERR_T_IO, "send after a reset")
+        comptime if CompilationTarget.is_linux():
+            _expect_pair(client.recv_into_span(Span[UInt8](scratch)), TLS_OUTCOME_ERROR, -1, "recv after a reset")
+            _expect_err_type(S2N_ERR_T_IO, "recv after a reset")
+        else:
+            # macOS does not reset an AF_UNIX stream peer that closes with
+            # data unread: the client reads a plain EOF, the same answer as
+            # test_abrupt_close_is_eof. The write below still fails with EPIPE.
+            _expect_pair(client.recv_into_span(Span[UInt8](scratch)), TLS_OUTCOME_DONE, 0, "recv after a close with data unread")
+            _expect_err_type(S2N_ERR_T_CLOSED, "recv after a close with data unread")
+        _expect_pair(client.send(Span[UInt8](payload)[0:100].as_imm()), TLS_OUTCOME_ERROR, -1, "send after the peer closed")
+        _expect_err_type(S2N_ERR_T_IO, "send after the peer closed")
     finally:
         _close_fd(server_fd)
         _close_fd(fds[1])

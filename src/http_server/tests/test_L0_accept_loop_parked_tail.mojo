@@ -142,16 +142,30 @@ def _send(fd: Int32, s: String) raises:
 
 
 def _fill(fd: Int32) raises -> Int:
-    """Write filler from `fd` until the kernel answers EAGAIN; its length."""
+    """Write filler from `fd` until a write of any size would block; its
+    length."""
     var junk = List[UInt8](length=512, fill=UInt8(0x2E))
     var total = 0
     while True:
         var r = try_io_write(fd, Span(junk))
         if r.is_would_block():
-            return total
+            break
         if not r.is_ready():
             raise Error("the fill failed")
         total += Int(r.value())
+    comptime if CompilationTarget.is_macos():
+        # On Darwin a 512-byte write can see EAGAIN while fewer bytes of space
+        # remain, so a shorter response would still fit; take the last bytes
+        # one at a time so the next write of any size blocks.
+        var one = List[UInt8](length=1, fill=UInt8(0x2E))
+        while True:
+            var r = try_io_write(fd, Span(one))
+            if r.is_would_block():
+                break
+            if not r.is_ready():
+                raise Error("the fill failed")
+            total += Int(r.value())
+    return total
 
 
 def _read_all(fd: Int32) raises -> List[UInt8]:

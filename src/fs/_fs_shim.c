@@ -55,6 +55,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -490,6 +491,12 @@ int32_t komira_fs_test_allow_one_more_fd(int64_t *old_soft) {
         return (int32_t)errno;
     }
     return 0;
+}
+
+// The platform's PATH_MAX from <limits.h> (4096 on Linux, 1024 on macOS), so
+// the ENAMETOOLONG walk test sizes its tree from the header's value.
+int64_t komira_fs_test_path_max(void) {
+    return (int64_t)PATH_MAX;
 }
 
 // Restore the soft RLIMIT_NOFILE to `soft` (a value the caller read before).
