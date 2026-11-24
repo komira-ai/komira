@@ -20,6 +20,12 @@
 #   * A plan with an edge the driver has no policy for is refused before any
 #     segment is built.
 #   * A token cancelled before the run starts no segment.
+#   * Progress: a run that finishes counts every segment done of every segment
+#     (4 of 4 for the diamond, 0 of 0 before it starts); a cancel inside the
+#     second of three segments leaves 1 of 3; a token cancelled before the run
+#     leaves 0 of 1; a plan refused by the check counts nothing (0 of 0); and
+#     two runs given handles on one counter sum into it (4 of 4 after two runs
+#     of two segments, read through the other handle).
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -35,10 +41,12 @@ from pipeline_exec.fake_builder import (
     FROM_DEP,
     TO_COUNT,
     FakeBuilder,
+    FakeOpSpec,
     FakeScript,
     fake_desc,
 )
 from pipeline_exec.fake_dispatch import InlineDispatch
+from pipeline_exec.fake_members import OP_CANCEL_AT
 from pipeline_exec.fake_support import (
     SLOT_COMBINES,
     SLOT_CONSUMED_MORSELS,
@@ -47,6 +55,7 @@ from pipeline_exec.fake_support import (
     batch_values,
 )
 from pipeline_exec.run_plan import run_plan
+from pipeline_exec.run_progress import RunProgress
 
 
 def _desc(id: Int, dep: Int = -1, tag: UInt8 = EDGE_E3_PUBLISH_WAIT) -> SegmentDescPod:
@@ -204,6 +213,106 @@ def test_a_token_cancelled_before_the_run_starts_no_segment() raises:
     _order_is(b, List[Int]())
 
 
+def _progress_is(p: RunProgress, done: Int, total: Int) raises:
+    var s = p.snapshot()
+    assert_equal(s.done, done)
+    assert_equal(s.total, total)
+
+
+def test_a_finished_run_counts_every_segment_done() raises:
+    var descs = List[SegmentDescPod]()
+    descs.append(_desc(0))
+    descs.append(_desc(1, 0))
+    descs.append(_desc(2, 0))
+    descs.append(_desc_two(3, 1, 2))
+    var b = FakeBuilder()
+    _ = b.add(FakeScript(FROM_CURSOR, n_morsels=4, rows=3))
+    _ = b.add(FakeScript(FROM_DEP, rows=5, dep=0, to_kind=TO_COUNT))
+    _ = b.add(FakeScript(FROM_CURSOR, n_morsels=1, rows=1))
+    _ = b.add(FakeScript(FROM_CURSOR, n_morsels=2, rows=1))
+    var d = InlineDispatch()
+    var progress = RunProgress()
+    _progress_is(progress, 0, 0)
+    _ = run_plan(descs, b, d, 2, CancellationToken.new(), progress)
+    _progress_is(progress, 4, 4)
+
+
+def test_a_cancel_inside_a_segment_leaves_the_rest_not_done() raises:
+    var descs = List[SegmentDescPod]()
+    descs.append(_desc(0))
+    descs.append(_desc(1))
+    descs.append(_desc(2))
+    var ops = List[FakeOpSpec]()
+    ops.append(FakeOpSpec(OP_CANCEL_AT, 1))
+    var b = FakeBuilder()
+    _ = b.add(FakeScript(FROM_CURSOR, n_morsels=2, rows=1))
+    _ = b.add(FakeScript(FROM_CURSOR, n_morsels=2, rows=1, ops=ops^))
+    _ = b.add(FakeScript(FROM_CURSOR, n_morsels=2, rows=1))
+    var token = CancellationToken.new()
+    b.cancel_token = Optional[CancellationToken](token.clone())
+    var d = InlineDispatch()
+    var progress = RunProgress()
+    try:
+        _ = run_plan(descs, b, d, 1, token, progress)
+        assert_true(False, "the plan must be cancelled")
+    except e:
+        assert_true(
+            "the query was cancelled: fake operator cancelled" in String(e),
+            String(e),
+        )
+    _order_is(b, [0, 1])
+    _progress_is(progress, 1, 3)
+
+
+def test_a_token_cancelled_before_the_run_counts_nothing_done() raises:
+    var descs = List[SegmentDescPod]()
+    descs.append(_desc(0))
+    var b = FakeBuilder()
+    _ = b.add(FakeScript(FROM_CURSOR, n_morsels=1, rows=1))
+    var token = CancellationToken.new()
+    token.cancel(String("stop"))
+    var d = InlineDispatch()
+    var progress = RunProgress()
+    try:
+        _ = run_plan(descs, b, d, 2, token, progress)
+        assert_true(False, "the plan must be cancelled")
+    except e:
+        assert_true("the query was cancelled: stop" in String(e), String(e))
+    _progress_is(progress, 0, 1)
+
+
+def test_a_refused_plan_counts_nothing() raises:
+    var descs = List[SegmentDescPod]()
+    descs.append(_desc(0))
+    descs.append(_desc(1, 0, EDGE_E4_PARTITION_WISE))
+    var b = FakeBuilder()
+    _ = b.add(FakeScript(FROM_CURSOR, n_morsels=1, rows=1))
+    _ = b.add(FakeScript(FROM_CURSOR, n_morsels=1, rows=1))
+    var d = InlineDispatch()
+    var progress = RunProgress()
+    try:
+        _ = run_plan(descs, b, d, 2, CancellationToken.new(), progress)
+        assert_true(False, "the plan must be refused")
+    except e:
+        assert_true("E4_PARTITION_WISE" in String(e), String(e))
+    _progress_is(progress, 0, 0)
+
+
+def test_runs_given_one_counter_sum_into_it() raises:
+    var progress = RunProgress()
+    var other = progress.share()
+    for _ in range(2):
+        var descs = List[SegmentDescPod]()
+        descs.append(_desc(0))
+        descs.append(_desc(1, 0))
+        var b = FakeBuilder()
+        _ = b.add(FakeScript(FROM_CURSOR, n_morsels=2, rows=1))
+        _ = b.add(FakeScript(FROM_DEP, rows=5, dep=0, to_kind=TO_COUNT))
+        var d = InlineDispatch()
+        _ = run_plan(descs, b, d, 2, CancellationToken.new(), progress)
+    _progress_is(other, 4, 4)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_a_diamond_starts_in_dependency_order]()
@@ -213,4 +322,9 @@ def main() raises:
     suite.test[test_a_failing_segment_ends_the_run]()
     suite.test[test_a_plan_with_no_policy_for_an_edge_builds_nothing]()
     suite.test[test_a_token_cancelled_before_the_run_starts_no_segment]()
+    suite.test[test_a_finished_run_counts_every_segment_done]()
+    suite.test[test_a_cancel_inside_a_segment_leaves_the_rest_not_done]()
+    suite.test[test_a_token_cancelled_before_the_run_counts_nothing_done]()
+    suite.test[test_a_refused_plan_counts_nothing]()
+    suite.test[test_runs_given_one_counter_sum_into_it]()
     suite^.run()

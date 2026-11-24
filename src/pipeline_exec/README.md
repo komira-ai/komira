@@ -13,6 +13,14 @@ Import each module by name; the package root exports nothing.
   the plan, then repeats: take the ready set, start its lowest segment id,
   publish its output. It returns the outputs no dependent took, by segment id.
   A segment that raises ends the run and the segments not started do not start.
+  `run_plan(descs, builder, dispatch, num_workers, token, progress)` also
+  counts into a `RunProgress`: the plan's segment count once `check_plan`
+  passed, then one per finished segment.
+- `run_progress`: `RunProgress`, two atomic counts behind a shared handle
+  (`share()`): the segments counted by the runs given it (`start`) and those
+  finished (`finish_segment`). `snapshot()` reads `done` before `total`, so a
+  reading on another thread never shows more done than counted; a cancelled or
+  failed run leaves done below total.
 - `run_segment`: build the members, size the sink for the workers, run one
   `SegmentTask` per worker, then combine once, finalize and take the output. A
   recorded error, or a cancellation by the caller's `CancellationToken`, is

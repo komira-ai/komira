@@ -1,6 +1,6 @@
 # The status codes, the ABI version and the two-call buffer test.
 #
-# Rows: the six codes have the values the C header documents (0, -1 .. -5),
+# Rows: the seven codes have the values the C header documents (0, -1 .. -6),
 # the version is major * 1000 + minor and decodes back to the two parts, and
 # buffer_status is TOO_SMALL exactly when the capacity is below the length
 # (zero capacity for a non-empty text, one byte short) and OK at the length,
@@ -13,6 +13,7 @@ from so import (
     ABI_MAJOR,
     ABI_MINOR,
     KOMIRA_ERR_BUFFER_TOO_SMALL,
+    KOMIRA_ERR_CANCELLED,
     KOMIRA_ERR_ENGINE,
     KOMIRA_ERR_NULL_ARG,
     KOMIRA_ERR_NULL_CTX,
@@ -32,11 +33,12 @@ def test_code_values() raises:
     assert_equal(KOMIRA_ERR_ENGINE, Int32(-3))
     assert_equal(KOMIRA_ERR_BUFFER_TOO_SMALL, Int32(-4))
     assert_equal(KOMIRA_ERR_TOO_LARGE, Int32(-5))
+    assert_equal(KOMIRA_ERR_CANCELLED, Int32(-6))
 
 
 def test_version_scheme() raises:
     var v = abi_version()
-    assert_equal(v, Int32(1005))
+    assert_equal(v, Int32(1006))
     assert_equal(v // Int32(1000), ABI_MAJOR)
     assert_equal(v % Int32(1000), ABI_MINOR)
 

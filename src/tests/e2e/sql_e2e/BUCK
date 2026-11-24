@@ -4,8 +4,10 @@ load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 # Test-only: komira's SQL surface held end to end to the pinned DuckDB.
 #
 # A case is cases/<case>.sql: comment lines, then one SELECT over
-# komira_test_oracle's datasets (types, nulls, join_left, join_right), whose
-# outermost ORDER BY is total. Its expected answer is the sql_oracle target
+# komira_test_oracle's datasets (types, nulls, join_left, join_right) or
+# the regression tables below, whose outermost ORDER BY is total. A
+# regression case (regress_*) says in its comment which engine defect it
+# catches. Its expected answer is the sql_oracle target
 # :oracle/<case>: the pinned DuckDB reads the same Parquet files
 # (sql/tables.sql), komira_test_oracle's discipline refuses a case whose
 # answer could depend on the order DuckDB happened to produce, and its
@@ -42,6 +44,51 @@ _TABLES = {
     d + ".parquet": "//src/tests/helpers/komira_test_oracle:datasets[" + d + ".parquet]"
     for d in _DATASETS
 }
+
+# The small tables the regression cases (cases/regress_*.sql) read, written
+# by the pinned DuckDB from sql/regression_tables.sql: each is shaped so one
+# engine defect (a NULL-padded row lost in an outer or anti join, a
+# string-key join, a join fan-out, a correlated IN, a distinct count across
+# a cross join, ...) changes a case's answer.
+_REGRESSION_TABLES = [
+    "agg_scalar",
+    "count_groups",
+    "lj_customer",
+    "lj_orders",
+    "distinct_pairs",
+    "cross_a",
+    "cross_b",
+    "skey_probe",
+    "skey_build",
+    "derived_l",
+    "derived_r",
+    "profit_lineitem",
+    "profit_partsupp",
+    "profit_supplier",
+    "pad_probe",
+    "pad_build",
+    "fan_probe",
+    "fan_build",
+    "full_l",
+    "full_r",
+    "in_outer",
+    "in_inner",
+    "in_supplier",
+    "in_partsupp",
+    "in_part",
+    "floats",
+]
+
+sql_oracle(
+    name = "regression_tables",
+    srcs = "sql/regression_tables.sql",
+    outputs = [t + ".parquet" for t in _REGRESSION_TABLES],
+)
+
+_TABLES.update({
+    t + ".parquet": ":regression_tables[" + t + ".parquet]"
+    for t in _REGRESSION_TABLES
+})
 
 _ORACLE = "//src/tests/helpers/komira_test_oracle:"
 

@@ -1,7 +1,8 @@
 """`Session`: one engine context of libkomira and the tables registered on it,
 and `Result`, the answer of one `Session.sql` call.
 
-A session registers Parquet files, runs SQL over them (`komira_sql_stream`:
+A session registers Parquet, CSV and newline-delimited JSON files as tables,
+runs SQL over them (`komira_sql_stream`:
 the library turns the text into a logical plan; this package builds no SQL)
 and is closed. A `Result` holds the query's Arrow C stream, already handed to
 pyarrow, and is read once, by `to_arrow`, `to_reader`, `to_pandas`,
@@ -82,17 +83,62 @@ class Session:
         against the working directory and `~` is expanded. Registering a name
         again replaces it; a `Result` already returned keeps the answer it has.
         """
-        if not isinstance(name, str):
-            raise TypeError("name must be a str, not {}".format(type(name).__name__))
-        if not name:
-            raise ValueError("name is empty")
-        if isinstance(path, os.PathLike):
-            path = os.fspath(path)
-        if not isinstance(path, str):
-            raise TypeError("path must be a str or os.PathLike[str], not {}".format(type(path).__name__))
-        path = os.path.abspath(os.path.expanduser(path))
+        _check_name(name)
+        path = _local_path(path)
         with self._held():
             self._native.register_parquet(self._live(), name, path)
+
+    def register_csv(
+        self,
+        name: str,
+        path: str | os.PathLike[str],
+        *,
+        delimiter: str = ",",
+        header: bool = True,
+        all_varchar: bool = False,
+    ) -> None:
+        """Registers the local CSV file at `path` as the table `name`, the
+        table SQL's `read_csv` makes of the same file with the same options.
+
+        The engine infers the column names and types now, from the start of
+        the file, and every later query reads the file with them. `delimiter`
+        is the one ASCII character between fields; `header` says whether the
+        first line holds the column names; `all_varchar=True` makes every
+        column a string. A query on a table registered with `header=False`
+        raises `KomiraError` naming `header=false`, as `read_csv(...,
+        header=false)` does: the engine does not yet name the columns of a
+        file without a header.
+
+        A missing, empty or unreadable file, or a `name` the session already
+        has a table under (of any kind, in any case), raises `KomiraError`
+        with the engine's message, status -3, and registers nothing. A
+        relative `path` is resolved against the working directory now and `~`
+        is expanded. An argument of the wrong type is a `TypeError`, and an
+        empty `name` or a `delimiter` that is not one ASCII character a
+        `ValueError`, both raised before the library is called. Needs
+        libkomira ABI 1.5.
+        """
+        _check_name(name)
+        path = _local_path(path)
+        with self._held():
+            self._native.register_csv(
+                self._live(), name, path, delimiter=delimiter, header=header, all_varchar=all_varchar
+            )
+
+    def register_json(self, name: str, path: str | os.PathLike[str]) -> None:
+        """Registers the local newline-delimited JSON file at `path` (one
+        object per line) as the table `name`, the table SQL's `read_json`
+        makes of the same file.
+
+        The engine infers the column names and types now, from the leading
+        records, and every later query reads the file with them; a key a
+        record lacks is NULL. Failures, paths and argument checks are those
+        of `register_csv`. Needs libkomira ABI 1.5.
+        """
+        _check_name(name)
+        path = _local_path(path)
+        with self._held():
+            self._native.register_json(self._live(), name, path)
 
     def sql(self, query: str) -> Result:
         """Runs the one SQL statement `query` over the session's tables and
@@ -201,6 +247,25 @@ class Session:
                 yield
             finally:
                 self._owner = None
+
+
+def _check_name(name: object) -> None:
+    """Refuses a table name that is not a non-empty `str`."""
+    if not isinstance(name, str):
+        raise TypeError("name must be a str, not {}".format(type(name).__name__))
+    if not name:
+        raise ValueError("name is empty")
+
+
+def _local_path(path: object) -> str:
+    """`path`, a `str` or `os.PathLike[str]`, with `~` expanded and made
+    absolute against the working directory, so the engine, which reads the
+    file again at each query, finds it after the working directory changes."""
+    if isinstance(path, os.PathLike):
+        path = os.fspath(path)
+    if not isinstance(path, str):
+        raise TypeError("path must be a str or os.PathLike[str], not {}".format(type(path).__name__))
+    return os.path.abspath(os.path.expanduser(path))
 
 
 class Result:

@@ -44,7 +44,7 @@ Save this as `quickstart.py`:
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1005 is 1.5
+print(komira.abi_version())   # the engine's C ABI version: 1006 is 1.6
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
@@ -65,7 +65,7 @@ Then `python quickstart.py` prints:
 
 ```text
 0.1.1512
-1005
+1006
 [{'n': 1}]
 [{'n': 5, 'total': 152.5}]
 True
@@ -91,7 +91,9 @@ What each call does:
   it. `close()` can be called again; any other call on a closed session raises `komira.KomiraError`.
 - `register_parquet(name, path)` reads the Parquet file's footer and registers the file as the table
   `name`. `path` is a `str` or a `pathlib.Path`; a relative path is resolved against the working
-  directory and `~` is expanded.
+  directory and `~` is expanded. `register_csv(name, path)` and `register_json(name, path)` register
+  a CSV file and a newline-delimited JSON file the same way, with the column names and types the
+  engine infers from the file.
 - `s.sql(query)` runs one SQL statement over the session's tables and returns a `komira.Result`. A
   syntax error, an unknown table or column, or a construct the engine does not run yet raises
   `komira.KomiraError` from `sql`, with the engine's message.
@@ -108,7 +110,6 @@ The package's [README](../python/README.md), which is also its PyPI description,
   session runs the next query.
 - **One session from two threads at once.** Use a session per thread.
 - **The DataFrame APIs**, pandas-shaped and polars-shaped.
-- **CSV and JSON files.** Only Parquet files can be registered.
 - **Python UDFs.**
 - **Other platforms**: Linux on arm64, macOS, Windows, and Linux with musl (Alpine) have no wheel.
 - **Older systems**: glibc older than 2.35, CPUs older than x86-64-v3 and Python older than 3.11.
@@ -128,8 +129,9 @@ The package's [README](../python/README.md), which is also its PyPI description,
   and the reason. A file of the package that is missing (`pip install --force-reinstall komira` puts it
   back), or a Mojo runtime of another build already loaded in the process (by Mojo code built with
   another Mojo version: one process holds one Mojo runtime), are the usual causes.
-- **`komira.KomiraError`** from `register_parquet`: the file is missing or is not a Parquet file the
-  engine can read. The message is the engine's.
+- **`komira.KomiraError`** from `register_parquet`, `register_csv` or `register_json`: the file is
+  missing, empty, or not a file of that format the engine can read, or (for CSV and JSON) the
+  session already has a table of that name. The message is the engine's.
 
 `komira.KomiraError` is the base class of every error komira raises on purpose, so `except
 komira.KomiraError` catches all three. Anything else is a bug:

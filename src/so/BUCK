@@ -156,6 +156,7 @@ mojo_library(
         "tests/test_register_text.mojo",
         "tests/test_session.mojo",
         "tests/test_sources.mojo",
+        "tests/test_sql_cancel.mojo",
         "tests/test_status.mojo",
     ],
     test_deps = [
@@ -170,14 +171,17 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): sixteen exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): twenty-one exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). Every context it creates owns
 # an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
 # komira_sql_stream runs SQL on that engine and answers an Arrow C stream; the
 # C driver below (c_abi_check) reads those streams through komira.h.
+# komira_sql_stream_run is that call under a run handle (komira_run_new), whose
+# komira_run_cancel and komira_run_progress another thread may call while the
+# run is in flight.
 # It is published only if every gate driver passes, each of which dlopens it
 # with RTLD_NOW and calls it as a foreign host would:
-#   gate_version       the version is 1005 (1.5);
+#   gate_version       the version is 1006 (1.6);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op, and a context (with its
 #                      engine's workers) is created and freed again;
@@ -240,6 +244,11 @@ _LIBKOMIRA = dict(
         "komira_sql_stream",
         "komira_register_csv",
         "komira_register_json",
+        "komira_run_new",
+        "komira_run_free",
+        "komira_run_cancel",
+        "komira_run_progress",
+        "komira_sql_stream_run",
     ],
     exports_exact = True,
     gate_srcs = [
@@ -345,6 +354,9 @@ cxx_binary(
     srcs = [":c_driver_files[tests/c/abi_driver.c]"],
     headers = {"komira.h": ":komira_abi"},
     header_namespace = "",
+    # The run-handle cases call komira_run_cancel and komira_run_progress from
+    # a second thread.
+    linker_flags = ["-lpthread"],
 )
 
 # Runs abi_driver against libkomira: it dlopens the library, binds each function
@@ -369,6 +381,14 @@ cxx_binary(
 # own, and a file registered with no header is refused at lower when
 # queried; a taken name, an empty one and a missing file are refused with
 # the named last error, and the first table keeps answering.
+# Then the run handle: a run cancelled before the
+# call is -6 with the QUERY_CANCELLED last error word for word and *out
+# untouched, its progress done 0 of a total above 0, and the context answers
+# the next query; a run nobody cancels answers with done equal to total; a
+# second thread reads the progress of a run in flight and every reading is
+# at least the one before with done at most total; a cancel from a second
+# thread while the run is in flight gives 0 or -6 and the context answers
+# after it; NULL run, done or total pointers are -2.
 komira_c_abi_check(
     name = "c_abi_check",
     driver = ":abi_driver",

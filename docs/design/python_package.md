@@ -9,8 +9,11 @@ owners and the Mojo runtime libraries in one directory (decision 6), so `pip ins
 Modular's. `Session.sql` and `Result` are built, with `to_arrow`, `to_reader`, `to_pandas`, `to_polars` and
 `__arrow_c_stream__` (a result still reads after its session is closed), and the wheel requires pyarrow;
 the wheel declares no `pandas` or `polars` extra yet (its rule writes no `Provides-Extra`), so the
-`ImportError` of a missing one names the distribution (`pip install pandas`) until it does; the default
-session, the per-session lock and the fork hook are not built, and
+`ImportError` of a missing one names the distribution (`pip install pandas`) until it does.
+`Session.register_csv(name, path, *, delimiter=",", header=True, all_varchar=False)` and
+`Session.register_json(name, path)` are built (`komira_register_csv` and `komira_register_json`,
+ABI 1.5): decision 4's CSV and NDJSON registration, from the engine's own schema. The default session,
+the per-session lock and the fork hook are not built, and
 `UnsupportedOperation` is not public yet; the linux-arm64 and macos-arm64
 wheels are not built.
 
@@ -203,7 +206,7 @@ a pandas-shaped and a polars-shaped DataFrame surface. What happens to each part
 | `Session`: context manager, `close`, one context per session | yes | | the `plan_wire` argument (below) |
 | `Session.sql` | yes, as the official door returning a `Result` | | its status as "escape hatch, goes away with the scaffolding": SQL is now the first release's whole query surface |
 | default session and module-level calls | yes, for `sql` and `register_parquet` (and `add_sql_binding` when it lands) | the DataFrame readers | the public `session()` accessor: a second way to reach the same object |
-| table registration | `register_parquet(name, path)`, with the name required | CSV and NDJSON registration, from the engine's own schema | automatic names (`t1`, `t2`, ...): SQL needs the name the user wrote |
+| table registration | `register_parquet(name, path)`, with the name required; CSV and NDJSON registration, from the engine's own schema (`register_csv(name, path, *, delimiter, header, all_varchar)`, `register_json(name, path)`) | | automatic names (`t1`, `t2`, ...): SQL needs the name the user wrote |
 | `KomiraError` with the engine's status and message | yes, with the fields of decision 9 | | the `PLAN_ENDPOINT_<NAME>(<code>):` message prefix and its generated code table: libkomira's status codes and error text replace them |
 | `UnsupportedOperation` | yes, now a `KomiraError` (it was a `TypeError`) | | |
 | pandas-shaped `DataFrame`, `Column`, `Expr`, `GroupBy`, `MaterializedFrame`; the shared plan builder `Query`; the protobuf plan encoder | | with the DataFrame surface, through the plan door (`komira_plan_stream`) | |
