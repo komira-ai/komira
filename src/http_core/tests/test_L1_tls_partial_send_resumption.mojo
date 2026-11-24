@@ -72,7 +72,7 @@ carried errno 469762106 = 0x1c00003a = (7<<26)|58 (err_type 7 =
 S2N_ERR_T_USAGE, code 58 = S2N_ERR_SEND_SIZE). Reproducing that EXACT errno
 needs s2n to hold a partially-flushed LARGE record (`current_user_data_consumed`
 > the mis-advanced total) — a state a real congested TCP socket to Firestore
-produces but a local ~8 KB AF_UNIX socketpair does not (s2n's blocked-partial
+produces but a local AF_UNIX socketpair does not (s2n's blocked-partial
 DECREMENT keeps `consumed` small under the tiny buffer, so the socketpair
 re-transmits rather than tripping the ENSURE). So the exact-errno + the
 truncated-frame Mode-2 stall need a real congested link; bug1/bug3 give the deterministic offline falsifiers for the same root
@@ -117,8 +117,9 @@ comptime _SOCK_STREAM: Int32 = 1
 # err_type 7 == S2N_ERR_T_USAGE, code 58 == S2N_ERR_SEND_SIZE.
 comptime _S2N_ERR_SEND_SIZE_ERRNO: Int = 469762106  # 0x1c00003a
 
-# Bytes the reader frees per block in bug1: less than one TLS record (s2n
-# writes records of about 8 KB), so a drain never makes room for the rest of
+# Bytes the reader frees per block in bug1: less than one TLS record (s2n's
+# application-data records here carry 8087 plaintext bytes, measured on Linux
+# and macOS arm64), so a drain never makes room for the rest of
 # the payload; the send that completes the pending record blocks on the next
 # one and returns the records it flushed, a positive partial.
 comptime _DRAIN_STEP = 4096
@@ -286,8 +287,9 @@ def _payload_len_for(server_fd: Int32, client_fd: Int32) raises -> Int:
     the sender's SO_SNDBUF plus the receiver's SO_RCVBUF, read back with the
     per-OS checked getsockopt (`so_sndbuf` / `so_rcvbuf` raise on failure),
     and at least `_MIN_PAYLOAD`. Linux bounds an AF_UNIX stream by the
-    sender's buffer, macOS by the receiver's; the sum covers both. A write of
-    this much with nothing read must block before the end."""
+    sender's buffer; macOS accounts the receiver's as well. Twice the sum
+    covers either. A write of this much with nothing read must block before
+    the end; bug1 raises a PRECONDITION if it does not."""
     var snd = Int(so_sndbuf(server_fd))
     var rcv = Int(so_rcvbuf(client_fd))
     if snd <= 0 or rcv <= 0:
