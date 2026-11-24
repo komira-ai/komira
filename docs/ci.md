@@ -547,7 +547,7 @@ cause. A target is counted under the first failing action its build report names
 | --- | --- | --- |
 | `http_core`'s s2n shim test expects `ECONNRESET` where macOS reads end of stream | 106 (`http_core` and what depends on it) | komira-ai/komira#2206 |
 | `http_core`'s partial-send test never sees a partial send on macOS (hidden behind the test above in the same package) | the same 106 | komira-ai/komira#2207 |
-| a library's native shared library is ELF only | 13 | komira-ai/komira#2197 |
+| a library's native shared library was ELF only; fixed: `native_shared_library` links a Mach-O `.dylib` for darwin-arm64 (tools/build/native/README.md, "On macOS (Mach-O)"), and a farm build of the nine `_native` targets for darwin-arm64 built all nine with checks 1 to 7 green (measured: `build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going --skip-incompatible-targets` of the nine, `Commands: 1405 (cached: 858, remote: 547, local: 0)`); the other 4 of the 13 counted here were dependents of those nine (inferred, not rebuilt for this row) | 13 | komira-ai/komira#2197 |
 | the UDF spike helpers' C uses Linux-only APIs | 7 | komira-ai/komira#2199 |
 | `bench_data`'s h2o join tables `x` and `big` hash differently on macOS | 3 | komira-ai/komira#2208 |
 

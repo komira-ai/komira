@@ -349,9 +349,9 @@ build without that patch would not need it (INFERRED).
   name it (`tools/build/platforms/table.bzl`).
 - **C++ code:** compiled today (snappy), with zig's libc++ linked statically
   (`tools/build/toolchains/BUCK`, `libcxx`; [mojo_rules_and_toolchain.md](mojo_rules_and_toolchain.md)).
-- **macOS:** C and C++ compile and link on darwin workers, not cross-compiled. The shared-library
-  rule `native_shared_library` is ELF only (`tools/build/native/shared.bzl`: "Mach-O is a later
-  design"), so no komira target links a `.dylib` yet.
+- **macOS:** C and C++ objects and archives are compiled by zig on Linux for the macOS target;
+  every link (Mojo programs, and the `.dylib` of each owner's `native_shared_library`,
+  `tools/build/native/shared.bzl`) runs on darwin workers with the host's `cc` and ld.
 - **LLVM:** none pinned as source, headers or static libraries. The only LLVM pins are the
   conda-forge LLVM 23 binaries of the coverage tools, linux-x86_64 only
   (`tools/build/toolchains/llvm_branch/`).

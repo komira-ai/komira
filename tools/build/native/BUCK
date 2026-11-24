@@ -1,8 +1,8 @@
 # Symbol prefixing of the vendored C libraries (README.md): the tool of the
 # rules in defs.bzl, and the shared-library tools of shared.bzl.
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load(":shared.bzl", "glibc_floor_test")
+load("@komira//tools/build/mojo:toolchain.bzl", "exec_tool_target", "zig_exe", "zig_module", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64", "TOOL_EXEC")
+load(":shared.bzl", "glibc_floor_test", "shared_form_test")
 
 # Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
 # that the pin is that release.
@@ -35,11 +35,18 @@ zig_test(
 )
 
 # Built behind its unit tests: no shared library is checked unless they pass.
+# native_shared_library takes it as an exec_dep, so it is configured for the
+# execution platform of the library's actions: on darwin-arm64 the macOS one
+# (the Mojo toolchain's), whose workers cannot run a Linux executable. It is
+# built for the platform it is configured for (`exec_tool_target`; zig still
+# runs on TOOL_EXEC and cross-compiles); on linux x86_64 the triple is the one
+# it always had, so linux action keys are unchanged.
 zig_exe(
     name = "native_so",
-    exec_compatible_with = LINUX_X86_64,
+    exec_compatible_with = TOOL_EXEC,
     imports = _NATIVE_SO,
     src = "native_so.zig",
+    target = exec_tool_target(),
     unit_tests = [":native_so_unit", _ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
@@ -130,4 +137,89 @@ glibc_floor_test(
     name = "glibc_floor_fixture_row",
     expect = "2.17",
     os_floor = "glibc-2.17",
+)
+
+# The two forms of a library's shared library (shared.bzl, `shared_names` and
+# `macho_link_args`): each fails at analysis unless the names, and on darwin
+# the ld64 arguments of the link, are exactly these. darwin with an owner and
+# a C++ archive: the install name @rpath/<file>, the exported symbols list,
+# each archive force-loaded, the system libc++, the owner and the one run path
+# @loader_path; without them, neither -lc++ nor a run path; linux: the names
+# the ELF link has always had.
+shared_form_test(
+    name = "shared_form_darwin",
+    archives = ["liba.a", "libb.a"],
+    cxx_runtime = True,
+    expect_link_args = [
+        "-arch",
+        "arm64",
+        "-mmacosx-version-min=11.0",
+        "-dynamiclib",
+        "-o",
+        "out.dylib",
+        "-Wl,-install_name,@rpath/libkomira_t_native.1.dylib",
+        "-Wl,-exported_symbols_list,exported_symbols.txt",
+        "-Wl,-dead_strip",
+        "-Wl,-undefined,error",
+        "-Wl,-S",
+        "-Wl,-force_load,liba.a",
+        "-Wl,-force_load,libb.a",
+        "-lc++",
+        "libkomira_o_native.1.dylib",
+        "-Wl,-rpath,@loader_path",
+    ],
+    expect_names = {
+        "file": "libkomira_t_native.1.dylib",
+        "format": "macho",
+        "link": "libkomira_t_native.dylib",
+        "name": "@rpath/libkomira_t_native.1.dylib",
+        "script": "exported_symbols.txt",
+        "script_sub": "exported_symbols_list",
+    },
+    library = "t",
+    os = "darwin",
+    owners = ["libkomira_o_native.1.dylib"],
+)
+
+shared_form_test(
+    name = "shared_form_darwin_alone",
+    archives = ["liba.a"],
+    expect_link_args = [
+        "-arch",
+        "arm64",
+        "-mmacosx-version-min=11.0",
+        "-dynamiclib",
+        "-o",
+        "out.dylib",
+        "-Wl,-install_name,@rpath/libkomira_t_native.1.dylib",
+        "-Wl,-exported_symbols_list,exported_symbols.txt",
+        "-Wl,-dead_strip",
+        "-Wl,-undefined,error",
+        "-Wl,-S",
+        "-Wl,-force_load,liba.a",
+    ],
+    expect_names = {
+        "file": "libkomira_t_native.1.dylib",
+        "format": "macho",
+        "link": "libkomira_t_native.dylib",
+        "name": "@rpath/libkomira_t_native.1.dylib",
+        "script": "exported_symbols.txt",
+        "script_sub": "exported_symbols_list",
+    },
+    library = "t",
+    os = "darwin",
+)
+
+shared_form_test(
+    name = "shared_form_linux",
+    expect_names = {
+        "file": "libkomira_t_native.so.1",
+        "format": "elf",
+        "link": "libkomira_t_native.so",
+        "name": "libkomira_t_native.so.1",
+        "script": "libkomira_t_native.so.1.map",
+        "script_sub": "version_script",
+    },
+    library = "t",
+    os = "linux",
 )
