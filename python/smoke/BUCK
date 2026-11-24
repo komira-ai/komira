@@ -39,7 +39,7 @@ load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 #                  komira alone with --no-deps), for PyPI and for a dist directory (requirements from PyPI,
 #                  then komira with --no-deps, --no-index and --find-links), each failing step named with its command, status
 #                  and stderr, only the komira install tried again, `pip check` and the installed version held, `pip freeze`
-#                  held to komira alone and a `modular` package refused (also when the probe or freeze fails),
+#                  held to komira once plus only the wheel's requirements (names normalised, any version) and a `modular` package refused (also when the probe or freeze fails),
 #                  the example's output held to the expected file with the version and the ABI version put in,
 #                  a malformed ABI table or a work directory that is not empty refused before any command;
 #   storage_unit   the storage step: an unknown project holds zero; the sum over every file of every release with

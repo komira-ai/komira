@@ -1,6 +1,7 @@
 // A stand-in for libkomira with the calls of ABI 1.1 that the Python loader
 // binds, and, when FAKE_VERSION is 1.2 or later, the three credential calls of
-// ABI 1.2 over a fake store (below). The tests load it to reach what the real
+// ABI 1.2 over a fake store, and when it is 1.3 or later, komira_sql_stream
+// answering a stand-in Arrow C stream (both below). The tests load it to reach what the real
 // library never does:
 //
 // - FAKE_VERSION sets the ABI version it reports (default 1001, which is 1.1):
@@ -50,8 +51,8 @@ static int32_t copy_out(const char *text, uint64_t len, uint8_t *b, uint64_t cap
   return 0;
 }
 
-// The last error of a credential call (below); empty when the last one had
-// none.
+// The last error of a credential call or of komira_sql_stream (below);
+// empty when the last one had none.
 static char cred_error[256];
 
 // The last error, by mode:
@@ -258,5 +259,200 @@ EXPORT int32_t komira_fake_store(uint8_t *b, uint64_t cap, uint64_t *n) {
   }
   return status;
 }
+
+#endif
+
+#if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 3
+
+// komira_sql_stream of ABI 1.3, answering by its SQL text (the whole text):
+//   "rows"          a stream of the struct schema {n: int32, nullable} with
+//                   two batches, [1, 2] and [3];
+//   "no_rows"       that schema and no batch;
+//   "schema_fails"  get_schema fails with EINVAL and the error
+//                   "lower: the stand-in has no schema";
+//   "next_fails"    the batch [1, 2], then get_next fails with EIO and the
+//                   error "execute: the stand-in fails at batch 2";
+//   "too_large"     -5 and the last error "komira_sql_stream: the stand-in
+//                   takes no text this long";
+//   anything else   -3 and the last error "bind: the stand-in runs no query
+//                   <text>", so a test sees the bytes that arrived.
+// A refusal leaves *out as it was given. komira_fake_stream_counts (not part
+// of the ABI) writes the streams made and released, the schemas made and
+// released and the batches made and released since the library was loaded,
+// so a test sees that each is released exactly once.
+#include <errno.h>
+#include <stdlib.h>
+
+struct ArrowSchema {
+  const char *format;
+  const char *name;
+  const char *metadata;
+  int64_t flags;
+  int64_t n_children;
+  struct ArrowSchema **children;
+  struct ArrowSchema *dictionary;
+  void (*release)(struct ArrowSchema *);
+  void *private_data;
+};
+
+struct ArrowArray {
+  int64_t length;
+  int64_t null_count;
+  int64_t offset;
+  int64_t n_buffers;
+  int64_t n_children;
+  const void **buffers;
+  struct ArrowArray **children;
+  struct ArrowArray *dictionary;
+  void (*release)(struct ArrowArray *);
+  void *private_data;
+};
+
+struct ArrowArrayStream {
+  int (*get_schema)(struct ArrowArrayStream *, struct ArrowSchema *);
+  int (*get_next)(struct ArrowArrayStream *, struct ArrowArray *);
+  const char *(*get_last_error)(struct ArrowArrayStream *);
+  void (*release)(struct ArrowArrayStream *);
+  void *private_data;
+};
+
+enum { ROWS, NO_ROWS, SCHEMA_FAILS, NEXT_FAILS };
+
+static int64_t counts[6];  // streams made, released; schemas made, released; batches made, released
+
+// A child's memory belongs to its parent; releasing it only marks it.
+static void release_child_schema(struct ArrowSchema *s) { s->release = NULL; }
+
+static void release_child_array(struct ArrowArray *a) { a->release = NULL; }
+
+typedef struct {
+  struct ArrowSchema child;
+  struct ArrowSchema *children[1];
+} SchemaData;
+
+static void release_schema(struct ArrowSchema *s) {
+  SchemaData *d = s->private_data;
+  if (d->child.release) d->child.release(&d->child);
+  free(d);
+  s->release = NULL;
+  counts[3]++;
+}
+
+typedef struct {
+  int32_t values[2];  // first, so 16-byte aligned like calloc's block
+  struct ArrowArray child;
+  struct ArrowArray *children[1];
+  const void *top_buffers[1];
+  const void *child_buffers[2];
+} BatchData;
+
+static void release_batch(struct ArrowArray *a) {
+  BatchData *d = a->private_data;
+  if (d->child.release) d->child.release(&d->child);
+  free(d);
+  a->release = NULL;
+  counts[5]++;
+}
+
+typedef struct {
+  int mode;
+  int next;
+  char error[96];
+} StreamData;
+
+static int stream_get_schema(struct ArrowArrayStream *s, struct ArrowSchema *out) {
+  StreamData *p = s->private_data;
+  if (p->mode == SCHEMA_FAILS) {
+    snprintf(p->error, sizeof p->error, "lower: the stand-in has no schema");
+    return EINVAL;
+  }
+  SchemaData *d = calloc(1, sizeof *d);
+  if (!d) return ENOMEM;
+  d->child = (struct ArrowSchema){.format = "i", .name = "n", .flags = 2, .release = release_child_schema};
+  d->children[0] = &d->child;
+  *out = (struct ArrowSchema){
+      .format = "+s", .name = "", .n_children = 1, .children = d->children, .release = release_schema, .private_data = d};
+  counts[2]++;
+  return 0;
+}
+
+static int stream_get_next(struct ArrowArrayStream *s, struct ArrowArray *out) {
+  StreamData *p = s->private_data;
+  if (p->mode == NO_ROWS || p->next >= 2) {
+    out->release = NULL;  // the end of the stream
+    return 0;
+  }
+  if (p->mode == NEXT_FAILS && p->next == 1) {
+    snprintf(p->error, sizeof p->error, "execute: the stand-in fails at batch 2");
+    return EIO;
+  }
+  BatchData *d = calloc(1, sizeof *d);
+  if (!d) return ENOMEM;
+  int64_t n = p->next == 0 ? 2 : 1;
+  if (p->next == 0) {
+    d->values[0] = 1;
+    d->values[1] = 2;
+  } else {
+    d->values[0] = 3;
+  }
+  d->child_buffers[1] = d->values;
+  d->child = (struct ArrowArray){.length = n, .n_buffers = 2, .buffers = d->child_buffers, .release = release_child_array};
+  d->children[0] = &d->child;
+  *out = (struct ArrowArray){.length = n,
+                             .n_buffers = 1,
+                             .n_children = 1,
+                             .buffers = d->top_buffers,
+                             .children = d->children,
+                             .release = release_batch,
+                             .private_data = d};
+  p->next++;
+  counts[4]++;
+  return 0;
+}
+
+static const char *stream_last_error(struct ArrowArrayStream *s) {
+  StreamData *p = s->private_data;
+  return p->error[0] ? p->error : NULL;
+}
+
+static void stream_release(struct ArrowArrayStream *s) {
+  free(s->private_data);
+  s->release = NULL;
+  counts[1]++;
+}
+
+EXPORT int32_t komira_sql_stream(void *ctx, const char *sql, struct ArrowArrayStream *out) {
+  (void)ctx;
+  cred_error[0] = 0;
+  if (!sql || !out) return -2;
+  int m;
+  if (strcmp(sql, "rows") == 0) {
+    m = ROWS;
+  } else if (strcmp(sql, "no_rows") == 0) {
+    m = NO_ROWS;
+  } else if (strcmp(sql, "schema_fails") == 0) {
+    m = SCHEMA_FAILS;
+  } else if (strcmp(sql, "next_fails") == 0) {
+    m = NEXT_FAILS;
+  } else if (strcmp(sql, "too_large") == 0) {
+    snprintf(cred_error, sizeof cred_error, "komira_sql_stream: the stand-in takes no text this long");
+    return -5;
+  } else {
+    snprintf(cred_error, sizeof cred_error, "bind: the stand-in runs no query %s", sql);
+    return -3;
+  }
+  StreamData *p = calloc(1, sizeof *p);
+  if (!p) return -3;
+  p->mode = m;
+  *out = (struct ArrowArrayStream){.get_schema = stream_get_schema,
+                                   .get_next = stream_get_next,
+                                   .get_last_error = stream_last_error,
+                                   .release = stream_release,
+                                   .private_data = p};
+  counts[0]++;
+  return 0;
+}
+
+EXPORT void komira_fake_stream_counts(int64_t *out) { memcpy(out, counts, sizeof counts); }
 
 #endif

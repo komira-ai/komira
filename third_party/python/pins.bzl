@@ -7,7 +7,7 @@ wheel for CPython 3.13 on manylinux x86_64 (glibc 2.28 or older) or a
 pure-Python one, and every wheel of WHEELS_314 one for CPython 3.14 (`cp314`)
 or free-threaded 3.14 (`cp314t`), or a pure-Python one; there is no source
 distribution. CPython 3.10, 3.11 and 3.12 (PYTHON_310, PYTHON_311,
-PYTHON_312) have no closure here. `license` is the SPDX expression of the
+PYTHON_312) have no closure here; PYARROW_311_312 is their one pinned wheel. `license` is the SPDX expression of the
 distribution as recorded in README.md (Licences); `deps` are the
 distributions it requires on linux, by `name`.
 """
@@ -333,6 +333,31 @@ PROTOBUF_EDGES = [
         "BSD-3-Clause",
     ),
 ]
+
+# pyarrow 25.0.1, the version of WHEELS and WHEELS_314, for CPython 3.11 and
+# 3.12 (`cp311`, `cp312`; manylinux x86_64), by ABI tag: the Python package
+# requires pyarrow (`PYARROW_REQUIREMENT`, python/dependencies.bzl), so its
+# tests and its wheel's install tests on those minors install it. They are not
+# in WHEELS, whose wheels are for 3.13: python/tests/BUCK declares their
+# downloads and installed targets (`:pyarrow-cp311`, `:pyarrow-cp312`).
+PYARROW_311_312 = {
+    "cp311": _wheel(
+        "pyarrow",
+        "25.0.1",
+        _PYPI + "c8/6e/d3fafc41f378b2c65be43b827798c0fae42049a641c8526633ed3eb573e2/pyarrow-25.0.1-cp311-cp311-manylinux_2_28_x86_64.whl",
+        "25f8720bf6387d5dc2ebd2622112de630760419e4b66134405dd24110d15f37e",
+        50065507,
+        "Apache-2.0",
+    ),
+    "cp312": _wheel(
+        "pyarrow",
+        "25.0.1",
+        _PYPI + "60/c9/711ca85d79f1ec98f29a5eae2b051e25b4ecec5de3e3c0e2d5c5dcb15664/pyarrow-25.0.1-cp312-cp312-manylinux_2_28_x86_64.whl",
+        "5389cdf79447ed1515c9e31620e6e1e2302249564d603f2ad727d4f6d313e4c3",
+        50102437,
+        "Apache-2.0",
+    ),
+}
 
 # The macOS arm64 file of each WHEELS distribution that has a binary build: the
 # same version as the linux wheel, a CPython 3.13 (`cp313`) or abi3 wheel tagged
