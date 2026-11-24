@@ -370,7 +370,7 @@ static void options_cases(void) {
         CHECK(tiny != NULL);
         if (tiny == NULL) continue;
         CHECK(p_komira_register_parquet(tiny, "three", parquet) == KOMIRA_OK);
-        expect_refused(tiny, sum, KOMIRA_ERR_ENGINE, "execute: pipeline_exec: the ", 0);
+        expect_refused(tiny, sum, KOMIRA_ERR_ENGINE, "execute: [Processor] pipeline_exec: the ", 0);
         CHECK(p_komira_sql_stream(tiny, sum, &out) == KOMIRA_ERR_ENGINE);
         const char *got = last_error_text(tiny, text, sizeof text);
         int named = strstr(got, " sink of segment ") != NULL && strstr(got, " was denied ") != NULL &&
