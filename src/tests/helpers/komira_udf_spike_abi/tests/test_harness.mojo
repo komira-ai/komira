@@ -49,6 +49,7 @@
 # `devices == 0`: red on gpu_only.
 
 from std.os import setenv, unsetenv
+from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_udf_spike_abi.cases import Case, parse_case
@@ -556,8 +557,11 @@ def _open_refusals() raises:
         msg = String(e)
     assert_true(msg.startswith("UDF_RUNTIME_OPEN_FAILED"), msg)
     msg = String()
+    # A real shared library that exports none of the runtime's symbols: the
+    # C library, by its name on each host.
+    comptime libc = "/usr/lib/libSystem.B.dylib" if CompilationTarget.is_macos() else "libc.so.6"
     try:
-        _ = UdfRuntime.open("libc.so.6")
+        _ = UdfRuntime.open(libc)
     except e:
         msg = String(e)
     assert_true(msg.startswith("UDF_RUNTIME_MISSING_SYMBOL"), msg)
