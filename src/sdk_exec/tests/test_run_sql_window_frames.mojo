@@ -286,8 +286,8 @@ def test_frames_duckdb_refuses_fail_at_bind() raises:
         "SELECT id, sum(v) OVER (ORDER BY id ROWS BETWEEN 1 FOLLOWING AND"
         " CURRENT ROW) AS n_sum" + frames,
         String(STEP_BIND),
-        "SQL syntax error: frame starting from following row cannot end with"
-        " current row",
+        "SQL syntax error: frame starting from following row cannot have"
+        " preceding rows",
     )
     _fails(
         "SELECT id, sum(v) OVER (ORDER BY k, id RANGE BETWEEN 1 PRECEDING AND"

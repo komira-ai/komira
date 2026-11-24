@@ -23,7 +23,7 @@
 #      a key that does not ask gets the derived default.
 #   5. LIMIT / OFFSET bind one limit node; OFFSET without LIMIT is refused.
 #   6. A written frame DuckDB refuses raises DuckDB's error, for every
-#      function: the five frame shapes its parser refuses, a RANGE offset
+#      function: the frame shapes its parser refuses, a RANGE offset
 #      without exactly one ORDER BY key, and a RANGE offset over a VARCHAR or
 #      BOOLEAN key; the frames it allows bind.
 
@@ -330,8 +330,14 @@ def test_written_frames_duckdb_refuses_raise_its_error() raises:
         syntax + "frame starting from following row cannot have preceding rows",
     )
     _check(
+        "SELECT count(*) OVER (ORDER BY k ROWS BETWEEN 2 FOLLOWING AND CURRENT ROW) FROM t",
+        syntax + "frame starting from following row cannot have preceding rows",
+    )
+    # The shorthand stands for `BETWEEN 2 FOLLOWING AND CURRENT ROW` and gets
+    # its sentence.
+    _check(
         "SELECT count(*) OVER (ORDER BY k RANGE 2 FOLLOWING) FROM t",
-        syntax + "frame starting from following row cannot end with current row",
+        syntax + "frame starting from following row cannot have preceding rows",
     )
     _check(
         "SELECT first_value(v) OVER (ORDER BY k RANGE BETWEEN CURRENT ROW AND 1 PRECEDING) FROM t",
@@ -351,11 +357,19 @@ def test_written_frames_duckdb_refuses_raise_its_error() raises:
         " from the ORDER BY key, and 's' is VARCHAR, which has no `-` (DuckDB:"
         " no function matches '-(VARCHAR, INTEGER_LITERAL)')",
     )
+    # DuckDB names the operator of the first bound with an offset: FOLLOWING
+    # adds, and DESC turns PRECEDING into an addition.
     _check(
         "SELECT sum(v) OVER (ORDER BY b RANGE BETWEEN CURRENT ROW AND 1 FOLLOWING) FROM t",
-        "ERR: SQL bind error: a RANGE frame with an offset subtracts the offset"
-        " from the ORDER BY key, and 'b' is BOOLEAN, which has no `-` (DuckDB:"
-        " no function matches '-(BOOLEAN, INTEGER_LITERAL)')",
+        "ERR: SQL bind error: a RANGE frame with an offset adds the offset to"
+        " the ORDER BY key, and 'b' is BOOLEAN, which has no `+` (DuckDB:"
+        " no function matches '+(BOOLEAN, INTEGER_LITERAL)')",
+    )
+    _check(
+        "SELECT sum(v) OVER (ORDER BY b DESC RANGE BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM t",
+        "ERR: SQL bind error: a RANGE frame with an offset adds the offset to"
+        " the ORDER BY key, and 'b' is BOOLEAN, which has no `+` (DuckDB:"
+        " no function matches '+(BOOLEAN, INTEGER_LITERAL)')",
     )
     # What DuckDB allows binds: RANGE without an offset over two keys or a
     # VARCHAR key, a RANGE offset over one numeric or temporal key, and ROWS

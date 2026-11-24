@@ -111,7 +111,8 @@ def _clamped(offset: Int64) -> Int:
 
 def _rows_offset(tag: UInt8, offset: Int64) -> Int:
     """A ROWS bound as a row offset from the current row. A negative offset
-    looks the other way (`-1 PRECEDING` is the row after), as in DuckDB."""
+    looks the other way (`-1 PRECEDING` is the row after). Lowering refuses a
+    negative offset (`cut_window`), so a SQL frame never brings one here."""
     if tag == FRAME_BOUND_UNBOUNDED_PRECEDING:
         return _UNBOUNDED_NEG
     elif tag == FRAME_BOUND_PRECEDING:
@@ -304,6 +305,36 @@ def _non_null_end(key_col: Column[HeapRegion], seg_start: Int, seg_end: Int) -> 
     return e
 
 
+def _check_bounds[
+    dt: DType, wide: DType
+](
+    key_col: Column[HeapRegion],
+    key: String,
+    bounds: List[Int],
+    ends: List[Int],
+    nullable: Bool,
+    tag: UInt8,
+    offset: Int64,
+    desc: Bool,
+) raises:
+    """Compute one bound of every row whose key is not NULL, so that a bound
+    that leaves the key's type raises before any frame is built. DuckDB
+    computes every start bound before any end bound, so the row its error
+    names is the first start bound that overflows, else the first end bound:
+    `RANGE BETWEEN 1 FOLLOWING AND 10 FOLLOWING` over INTEGER keys 2147483642
+    and 2147483647 names `2147483647 + 1`, not `2147483642 + 10`."""
+    if tag != FRAME_BOUND_PRECEDING and tag != FRAME_BOUND_FOLLOWING:
+        return
+    for p in range(len(bounds)):
+        var nn_end = ends[p]
+        if nullable:
+            nn_end = _non_null_end(key_col, bounds[p], ends[p])
+        for row in range(bounds[p], nn_end):
+            _ = _bound_value[dt, wide](
+                _key_at[dt, wide](key_col, row), tag, offset, desc, key
+            )
+
+
 def _range_value_fill[
     dt: DType, wide: DType
 ](
@@ -319,9 +350,19 @@ def _range_value_fill[
     in `wide` (INT64 for an integer key, FLOAT64 for a float one): an INT64
     key is never routed through FLOAT64, where a key above 2^53 would lose its
     low bits and move a frame edge."""
+    var nullable = column_has_nulls(key_col)
+    # A float bound cannot overflow: NaN and the infinities absorb an offset.
+    comptime if not wide.is_floating_point():
+        _check_bounds[dt, wide](
+            key_col, key, bounds, ends, nullable,
+            frame.start_tag, frame.start_offset, desc,
+        )
+        _check_bounds[dt, wide](
+            key_col, key, bounds, ends, nullable,
+            frame.end_tag, frame.end_offset, desc,
+        )
     var lo = _zeros(n)
     var hi = _zeros(n)
-    var nullable = column_has_nulls(key_col)
     for p in range(len(bounds)):
         var seg_start = bounds[p]
         var seg_end = ends[p]

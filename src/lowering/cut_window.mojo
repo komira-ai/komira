@@ -44,6 +44,8 @@
 #          FOLLOWING, an end of UNBOUNDED PRECEDING, a FOLLOWING start whose
 #          end is CURRENT ROW or PRECEDING, a CURRENT ROW start whose end is
 #          PRECEDING;
+#        - an offset below 0 (SQL here cannot write one; DuckDB's frames for
+#          a large negative offset wrap around, so none is served);
 #        - a RANGE frame with an offset (n PRECEDING or n FOLLOWING) over a
 #          window whose ORDER BY is not one key, or whose key is not INT64,
 #          INT32 or FLOAT64 (the types `op_window` measures an offset on).
@@ -181,11 +183,13 @@ def _shape_refusal(f: PartitionFrame) -> String:
         return "frame start cannot be UNBOUNDED FOLLOWING"
     if f.end_tag == FRAME_BOUND_UNBOUNDED_PRECEDING:
         return "frame end cannot be UNBOUNDED PRECEDING"
-    if f.start_tag == FRAME_BOUND_FOLLOWING:
-        if f.end_tag == FRAME_BOUND_PRECEDING:
-            return "frame starting from following row cannot have preceding rows"
-        if f.end_tag == FRAME_BOUND_CURRENT_ROW:
-            return "frame starting from following row cannot end with current row"
+    # DuckDB says "cannot have preceding rows" for an explicit `n FOLLOWING
+    # AND CURRENT ROW` too; its "cannot end with current row" is the
+    # shorthand `ROWS n FOLLOWING`'s, which a plan cannot tell apart.
+    if f.start_tag == FRAME_BOUND_FOLLOWING and (
+        f.end_tag == FRAME_BOUND_PRECEDING or f.end_tag == FRAME_BOUND_CURRENT_ROW
+    ):
+        return "frame starting from following row cannot have preceding rows"
     if f.start_tag == FRAME_BOUND_CURRENT_ROW and f.end_tag == FRAME_BOUND_PRECEDING:
         return "frame starting from current row cannot have preceding rows"
     return ""
@@ -210,6 +214,10 @@ def _check_frame(
     var shape = _shape_refusal(f)
     if shape != "":
         raise _unserved(head + ", which SQL does not allow: " + shape)
+    if (_is_offset_bound(f.start_tag) and f.start_offset < 0) or (
+        _is_offset_bound(f.end_tag) and f.end_offset < 0
+    ):
+        raise _unserved(head + "; an offset below 0 is not served")
     if f.units == FRAME_UNITS_ROWS:
         return
     if not (_is_offset_bound(f.start_tag) or _is_offset_bound(f.end_tag)):
@@ -235,22 +243,13 @@ def _check_frame(
 
 
 def _holds_current_row(f: PartitionFrame) -> Bool:
-    """True iff every row's frame holds the row itself, so it is never empty:
-    the start is at or before the row and the end at or after it, in ROWS
-    and in RANGE units alike (a RANGE bound `n PRECEDING` with n >= 0 is at
-    or before the current row's key, NaN and infinities included)."""
-    var start_ok = (
-        f.start_tag == FRAME_BOUND_UNBOUNDED_PRECEDING
-        or f.start_tag == FRAME_BOUND_CURRENT_ROW
-        or (f.start_tag == FRAME_BOUND_PRECEDING and f.start_offset >= 0)
-        or (f.start_tag == FRAME_BOUND_FOLLOWING and f.start_offset <= 0)
-    )
-    var end_ok = (
-        f.end_tag == FRAME_BOUND_UNBOUNDED_FOLLOWING
-        or f.end_tag == FRAME_BOUND_CURRENT_ROW
-        or (f.end_tag == FRAME_BOUND_FOLLOWING and f.end_offset >= 0)
-        or (f.end_tag == FRAME_BOUND_PRECEDING and f.end_offset <= 0)
-    )
+    """True iff every row's frame holds the row itself, so it is never empty.
+    Offsets are not negative here (`_check_frame` refused them), so only a
+    start of `n FOLLOWING` or an end of `n PRECEDING` with n above 0 can
+    leave the row out, in ROWS and in RANGE units alike (a RANGE bound
+    `0 FOLLOWING` is the current key, NaN and infinities included)."""
+    var start_ok = f.start_tag != FRAME_BOUND_FOLLOWING or f.start_offset == 0
+    var end_ok = f.end_tag != FRAME_BOUND_PRECEDING or f.end_offset == 0
     return start_ok and end_ok
 
 

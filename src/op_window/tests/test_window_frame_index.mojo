@@ -10,7 +10,8 @@
 #
 #   test_rows_offsets_past_the_partition_frame_the_whole_partition
 #                     9223372036854775807 PRECEDING .. FOLLOWING is the whole
-#                     partition, and a negative offset looks the other way.
+#                     partition; offsets are clamped, so the lowest one cannot
+#                     overflow either.
 #   test_range_offsets_over_a_bigint_key_with_null_keys
 #                     a NULL key frames over the NULL group, an UNBOUNDED bound
 #                     stays the partition's edge, offset bounds of a non-NULL
@@ -24,11 +25,13 @@
 #                     an offset past 32 bits is measured in 64 bits.
 #   test_range_bounds_that_leave_the_keys_type_raise_duckdbs_overflow_error
 #                     INT64 subtraction and addition, INT32 for an offset that
-#                     fits in 32 bits, INT64 for an INT32 key and a wide one.
+#                     fits in 32 bits, INT64 for an INT32 key and a wide one;
+#                     every start bound is checked before any end bound, so
+#                     the row named is the one DuckDB names.
 #   test_range_offsets_over_an_unmeasurable_key_or_key_count_raise
 #   test_nth_value_past_int64s_top_is_null
-#                     NTH_VALUE with n = 9223372036854775807 over a whole
-#                     partition answers NULL rather than a row.
+#                     NTH_VALUE with n = 9223372036854775807 over frames that
+#                     start past row 1 answers NULL rather than a row.
 # =============================================================================
 
 from std.math import inf, nan
@@ -162,13 +165,15 @@ def test_rows_offsets_past_the_partition_frame_the_whole_partition() raises:
         _rows(FRAME_BOUND_PRECEDING, top, FRAME_BOUND_FOLLOWING, top),
         [0, 0, 0, 0, 0], [5, 5, 5, 5, 5], "rows, widest offsets",
     )
-    # `-1 PRECEDING` is the row after: the frame starts past its end, and is
-    # empty (DuckDB: NULL on every row).
+    # The kernel takes a negative offset the other way round (lowering
+    # refuses one, so no SQL frame brings it here): `-1 PRECEDING` is the row
+    # after, a frame that starts past its end and is empty.
     _expect(
         batch, [0], False,
         _rows(FRAME_BOUND_PRECEDING, -1, FRAME_BOUND_CURRENT_ROW, 0),
         [1, 2, 3, 4, 5], [1, 2, 3, 4, 5], "rows, -1 PRECEDING",
     )
+    # The lowest offset is clamped too, so nothing overflows.
     _expect(
         batch, [0], False,
         _rows(FRAME_BOUND_PRECEDING, Int64.MIN, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0),
@@ -358,6 +363,20 @@ def test_range_bounds_that_leave_the_keys_type_raise_duckdbs_overflow_error() ra
         _range(FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_FOLLOWING, 1),
         head + "addition of INT32 (2147483647 + 1" + tail,
     )
+    # Start bounds first: 2147483642 + 10 would overflow as an end bound, but
+    # DuckDB names the start bound 2147483647 + 1 of the row after it.
+    var late = _one_column("k", _i32([Int32.MAX - 5, Int32.MAX]))
+    _raises(
+        late, _keys("k"), False,
+        _range(FRAME_BOUND_FOLLOWING, 1, FRAME_BOUND_FOLLOWING, 10),
+        head + "addition of INT32 (2147483647 + 1" + tail,
+    )
+    var late64 = _one_column("k", _i64([Int64.MAX - 10, Int64.MAX], _all_valid(2)))
+    _raises(
+        late64, _keys("k"), False,
+        _range(FRAME_BOUND_FOLLOWING, 1, FRAME_BOUND_FOLLOWING, 20),
+        head + "addition of INT64 (9223372036854775807 + 1" + tail,
+    )
     _raises(
         i32, _keys("k"), False,
         _range(FRAME_BOUND_PRECEDING, Int64.MAX, FRAME_BOUND_CURRENT_ROW, 0),
@@ -368,8 +387,9 @@ def test_range_bounds_that_leave_the_keys_type_raise_duckdbs_overflow_error() ra
         _range(FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_FOLLOWING, Int64.MAX),
         head + "addition of INT64 (2147483646 + 9223372036854775807" + tail,
     )
-    # A negative offset moves a bound the other way; DuckDB still names the
-    # operation the bound's direction asks for.
+    # A negative offset moves a bound the other way, and DuckDB names the
+    # operation the bound's direction asks for (lowering refuses negative
+    # offsets; this is the kernel's arithmetic).
     _raises(
         high, _keys("k"), False,
         _range(FRAME_BOUND_PRECEDING, -1, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0),
@@ -407,13 +427,14 @@ def test_range_offsets_over_an_unmeasurable_key_or_key_count_raise() raises:
 
 
 def test_nth_value_past_int64s_top_is_null() raises:
-    # DuckDB: nth_value(x, 9223372036854775807) over the whole partition is
-    # NULL on every row.
-    var batch = _one_column("k", _i64([1, 2, 3], _all_valid(3)))
+    # DuckDB: nth_value(k, 9223372036854775807) OVER (ORDER BY k ROWS BETWEEN
+    # CURRENT ROW AND UNBOUNDED FOLLOWING) is NULL on every row. The frames
+    # start at rows 0 to 3, so `start + n - 1` leaves INT64 from row 2 on.
+    var batch = _one_column("k", _i64([1, 2, 3, 4], _all_valid(4)))
     var exprs = List[PartitionExpr]()
     exprs.append(
         PartitionExpr.nth_value("k", Int(Int64.MAX)).with_frame(
-            PartitionFrame.default_unordered()
+            _rows(FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0)
         )
     )
     var out_sb = SchemaBuilder()
@@ -423,7 +444,7 @@ def test_nth_value_past_int64s_top_is_null() raises:
         List[String](), _keys("k"), _dirs(False), exprs^, out_sb.build()
     )
     var out = _execute_partition_by_sink(batch^, spec)
-    for r in range(3):
+    for r in range(4):
         assert_true(out.column_at(1).is_null_at(r), "row " + String(r))
 
 

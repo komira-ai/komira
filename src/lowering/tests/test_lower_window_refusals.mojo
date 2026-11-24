@@ -21,6 +21,7 @@
 #   test_every_frame_sql_allows_is_cut_for_each_function_that_reads_it
 #   test_a_frame_shape_sql_refuses_is_refused_with_duckdbs_reason
 #   test_a_range_offset_needs_one_order_key_of_a_type_it_measures
+#   test_a_negative_offset_is_refused
 #   test_frame_units_that_are_neither_rows_nor_range_are_refused
 #   test_ranking_and_offset_functions_ignore_their_frame
 #   test_the_whole_partition_frame_is_cut_in_rows_and_in_range_units
@@ -373,7 +374,7 @@ def test_a_frame_shape_sql_refuses_is_refused_with_duckdbs_reason() raises:
         _message(_over(PartitionExpr.running_max("k").with_frame(_frame(
             FRAME_UNITS_ROWS, FRAME_BOUND_FOLLOWING, 2, FRAME_BOUND_CURRENT_ROW, 0)))),
         _unserved("MAX(k) has the frame ROWS BETWEEN 2 FOLLOWING AND CURRENT ROW"
-            + tail + "frame starting from following row cannot end with current row"),
+            + tail + "frame starting from following row cannot have preceding rows"),
     )
     assert_equal(
         _message(_over(PartitionExpr.nth_value("k", 2).with_frame(_frame(
@@ -415,6 +416,26 @@ def test_a_range_offset_needs_one_order_key_of_a_type_it_measures() raises:
     var rows = _one(PartitionExpr.agg_with_frame(PF_SUM, "k", _frame(
         FRAME_UNITS_ROWS, FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)))
     assert_equal(_message(_window(_names("g"), _names(), rows^, _scan())), "")
+
+
+def test_a_negative_offset_is_refused() raises:
+    var tail = "; an offset below 0 is not served"
+    assert_equal(
+        _message(_over(PartitionExpr.agg_with_frame(PF_SUM, "k", _frame(
+            FRAME_UNITS_ROWS, FRAME_BOUND_PRECEDING, -1, FRAME_BOUND_CURRENT_ROW, 0)))),
+        _unserved("SUM(k) has the frame ROWS BETWEEN -1 PRECEDING AND CURRENT ROW" + tail),
+    )
+    assert_equal(
+        _message(_over(PartitionExpr.last_value("k").with_frame(_frame(
+            FRAME_UNITS_RANGE, FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_FOLLOWING, -3)))),
+        _unserved("LAST_VALUE(k) has the frame RANGE BETWEEN CURRENT ROW AND -3 FOLLOWING" + tail),
+    )
+    # 0 is an offset like any other.
+    assert_equal(
+        _message(_over(PartitionExpr.agg_with_frame(PF_SUM, "k", _frame(
+            FRAME_UNITS_ROWS, FRAME_BOUND_PRECEDING, 0, FRAME_BOUND_FOLLOWING, 0)))),
+        "",
+    )
 
 
 def test_frame_units_that_are_neither_rows_nor_range_are_refused() raises:

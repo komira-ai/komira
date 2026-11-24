@@ -118,7 +118,7 @@ def _win_col_name(name: String, qual: String, scope: BindScope) raises -> String
 
 
 def _check_written_frame(
-    frame: PartitionFrame, okeys: List[String], schema: Schema
+    frame: PartitionFrame, okeys: List[String], desc: List[Bool], schema: Schema
 ) raises:
     """Raise DuckDB's error for a written frame DuckDB refuses, whatever the
     function (a ranking function ignores its frame, and DuckDB still checks
@@ -128,10 +128,8 @@ def _check_written_frame(
                                                   UNBOUNDED FOLLOWING
       `... AND UNBOUNDED PRECEDING`               frame end cannot be
                                                   UNBOUNDED PRECEDING
-      `1 FOLLOWING AND 1 PRECEDING`               frame starting from following
-                                                  row cannot have preceding rows
-      `1 FOLLOWING AND CURRENT ROW`,              frame starting from following
-      `ROWS 1 FOLLOWING`                          row cannot end with current row
+      `1 FOLLOWING AND 1 PRECEDING`,              frame starting from following
+      `1 FOLLOWING AND CURRENT ROW`               row cannot have preceding rows
       `CURRENT ROW AND 1 PRECEDING`               frame starting from current
                                                   row cannot have preceding rows
       `RANGE 1 PRECEDING` with no ORDER BY, or    Binder Error: RANGE frames
@@ -140,16 +138,23 @@ def _check_written_frame(
       `RANGE 1 PRECEDING` over a VARCHAR or       Binder Error: no `-` for
       BOOLEAN key                                 (VARCHAR, INTEGER_LITERAL)
 
-    The first five are DuckDB parser errors, hence `SQL syntax error`."""
+    The shape errors are DuckDB parser errors, hence `SQL syntax error`. The
+    shorthand `ROWS 1 FOLLOWING` gets the sentence of the BETWEEN form it
+    stands for; DuckDB words that one "cannot end with current row", and the
+    parsed window does not record which spelling was written.
+
+    The operator DuckDB names is the one its first bound with an offset
+    applies to the key: `n PRECEDING` subtracts and `n FOLLOWING` adds, the
+    other way round under DESC."""
     var shape = String("")
     if frame.start_tag == FRAME_BOUND_UNBOUNDED_FOLLOWING:
         shape = "frame start cannot be UNBOUNDED FOLLOWING"
     elif frame.end_tag == FRAME_BOUND_UNBOUNDED_PRECEDING:
         shape = "frame end cannot be UNBOUNDED PRECEDING"
-    elif frame.start_tag == FRAME_BOUND_FOLLOWING and frame.end_tag == FRAME_BOUND_PRECEDING:
+    elif frame.start_tag == FRAME_BOUND_FOLLOWING and (
+        frame.end_tag == FRAME_BOUND_PRECEDING or frame.end_tag == FRAME_BOUND_CURRENT_ROW
+    ):
         shape = "frame starting from following row cannot have preceding rows"
-    elif frame.start_tag == FRAME_BOUND_FOLLOWING and frame.end_tag == FRAME_BOUND_CURRENT_ROW:
-        shape = "frame starting from following row cannot end with current row"
     elif frame.start_tag == FRAME_BOUND_CURRENT_ROW and frame.end_tag == FRAME_BOUND_PRECEDING:
         shape = "frame starting from current row cannot have preceding rows"
     if shape != "":
@@ -175,11 +180,17 @@ def _check_written_frame(
     elif t == ArrowType.BOOL:
         sql_type = "BOOLEAN"
     if sql_type != "":
+        var tag = frame.start_tag
+        if tag != FRAME_BOUND_PRECEDING and tag != FRAME_BOUND_FOLLOWING:
+            tag = frame.end_tag
+        var adds = (tag == FRAME_BOUND_FOLLOWING) != desc[0]
+        var op = String("+") if adds else String("-")
+        var verb = String("adds the offset to") if adds else String("subtracts the offset from")
         raise Error(
-            "SQL bind error: a RANGE frame with an offset subtracts the offset"
-            " from the ORDER BY key, and '" + okeys[0] + "' is " + sql_type
-            + ", which has no `-` (DuckDB: no function matches '-(" + sql_type
-            + ", INTEGER_LITERAL)')"
+            "SQL bind error: a RANGE frame with an offset " + verb + " the"
+            " ORDER BY key, and '" + okeys[0] + "' is " + sql_type
+            + ", which has no `" + op + "` (DuckDB: no function matches '" + op
+            + "(" + sql_type + ", INTEGER_LITERAL)')"
         )
 
 
@@ -241,7 +252,7 @@ def _apply_window(sx: SqlExpr, schema: Schema, scope: BindScope, out_name: Strin
         frame = PartitionFrame(
             w.frame_units, w.frame_start_tag, w.frame_start_offset, w.frame_end_tag, w.frame_end_offset
         )
-        _check_written_frame(frame, okeys, schema)
+        _check_written_frame(frame, okeys, desc, schema)
     elif len(okeys) == 0:
         # The default frame is conditional on ORDER BY. SQL:2003 7.11: with no
         # ORDER BY the rows of a partition have no defined order, so the frame

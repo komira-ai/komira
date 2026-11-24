@@ -424,16 +424,16 @@ def test_a_frame_that_can_be_empty_makes_its_column_nullable() raises:
     exprs.append(PartitionExpr.last_value("x").with_frame(
         _range(FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_FOLLOWING, 3)).with_alias("e"))
     exprs.append(PartitionExpr.agg_with_frame(PF_COUNT, "x", following.copy()).with_alias("f"))
-    # `-1 PRECEDING` is the row after: the frame starts past the current row.
     exprs.append(PartitionExpr.agg_with_frame(
-        PF_MAX, "x", _rows(FRAME_BOUND_PRECEDING, -1, FRAME_BOUND_CURRENT_ROW, 0)).with_alias("g2"))
-    # `0 FOLLOWING` as a start and `0 PRECEDING` as an end hold the current row.
+        PF_MAX, "x", _rows(FRAME_BOUND_FOLLOWING, 0, FRAME_BOUND_FOLLOWING, 2)).with_alias("g2"))
+    # `0 FOLLOWING` as a start and `0 PRECEDING` as an end hold the current
+    # row.
     exprs.append(PartitionExpr.agg_with_frame(
         PF_AVG, "x", _range(FRAME_BOUND_FOLLOWING, 0, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0)).with_alias("h"))
     exprs.append(PartitionExpr.agg_with_frame(
         PF_SUM, "x", _rows(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_PRECEDING, 0)).with_alias("i"))
     exprs.append(PartitionExpr.agg_with_frame(
-        PF_SUM, "x", _rows(FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_FOLLOWING, -1)).with_alias("j"))
+        PF_SUM, "x", _range(FRAME_BOUND_PRECEDING, 3, FRAME_BOUND_PRECEDING, 1)).with_alias("j"))
     var plan = _window(_names("g"), _names("o"), _flags(False), exprs^, _scan())
     for c in range(4, 15):
         assert_false(plan.output_schema.field_nullable(c), "the logical column " + String(c))
@@ -449,10 +449,10 @@ def test_a_frame_that_can_be_empty_makes_its_column_nullable() raises:
         True,   # FIRST_VALUE, 2 PRECEDING AND 1 PRECEDING
         False,  # LAST_VALUE, RANGE CURRENT ROW AND 3 FOLLOWING
         False,  # COUNT, 1 FOLLOWING AND 2 FOLLOWING
-        True,   # MAX, -1 PRECEDING AND CURRENT ROW
+        False,  # MAX, 0 FOLLOWING AND 2 FOLLOWING
         False,  # AVG, RANGE 0 FOLLOWING AND UNBOUNDED FOLLOWING
         False,  # SUM, UNBOUNDED PRECEDING AND 0 PRECEDING
-        True,   # SUM, CURRENT ROW AND -1 FOLLOWING
+        True,   # SUM, RANGE 3 PRECEDING AND 1 PRECEDING
     ]
     for j in range(len(want)):
         assert_equal(declared.field_nullable(4 + j), want[j], declared.field_name(4 + j))

@@ -183,7 +183,8 @@ shape:
   compute; and, for a value function or aggregate, a frame SQL refuses (a
   start of `UNBOUNDED FOLLOWING`, an end of `UNBOUNDED PRECEDING`, a
   `FOLLOWING` start ending at `CURRENT ROW` or `PRECEDING`, a `CURRENT ROW`
-  start ending `PRECEDING`, each with DuckDB's reason), frame units that are
+  start ending `PRECEDING`, each with DuckDB's reason), a negative offset,
+  frame units that are
   neither `ROWS` nor `RANGE`, and a `RANGE` frame with an offset over a
   window whose `ORDER BY` is not one key of type INT64, INT32 or FLOAT64.
   Every other `ROWS` or `RANGE` frame is served. The sink declares a `SUM`,
