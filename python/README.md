@@ -51,7 +51,7 @@ load fails. What each release changed is in the
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1003 is 1.3
+print(komira.abi_version())   # the engine's C ABI version: 1004 is 1.4
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")

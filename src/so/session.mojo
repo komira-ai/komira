@@ -7,7 +7,7 @@ from .credentials import SessionCredentials
 
 
 struct Session(Movable):
-    """What `komira_ctx_new` creates: the text of the last error, the
+    """What `komira_ctx_new` (and `komira_ctx_new_with_options`) creates: the text of the last error, the
     engine (`sdk_exec`'s `EngineContext`) the session's tables are registered
     on and its queries will run against, and the credentials defined on it.
 
@@ -57,14 +57,35 @@ struct Session(Movable):
         return self._last_error.copy()
 
 
+def session_options(
+    worker_count: Int64, memory_budget_bytes: Int64
+) -> EngineOptions:
+    """The engine options of `komira_ctx_new_with_options(worker_count,
+    memory_budget_bytes)`.
+
+    In the C call an option is a plain `int64_t`, so absence has a value: 0
+    is absent, and the engine then uses the host profile's own worker count
+    or memory budget (what `komira_ctx_new` uses). Any other value is passed
+    on as given, so the engine refuses a negative one
+    (`ENGINE_OPTIONS_INVALID`) and accepts any positive one: there is no
+    upper bound.
+    """
+    var options = EngineOptions()
+    if worker_count != 0:
+        options.worker_count = Int(worker_count)
+    if memory_budget_bytes != 0:
+        options.memory_budget_bytes = Int(memory_budget_bytes)
+    return options^
+
+
 def try_new_session(
     options: EngineOptions = EngineOptions(),
 ) -> Optional[Session]:
     """A new `Session` over an engine started with `options`, or None when
     the engine does not start; nothing raises.
 
-    This is what `komira_ctx_new` does before it hands the session out: a
-    None becomes the NULL handle. The engine's message is dropped, because
+    This is what `komira_ctx_new` and `komira_ctx_new_with_options` do
+    before they hand the session out: a None becomes the NULL handle. The engine's message is dropped, because
     there is no context to hold it.
     """
     try:
