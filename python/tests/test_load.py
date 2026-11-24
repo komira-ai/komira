@@ -37,8 +37,8 @@ def refused(call):
 def engine_error(call, ctx, native, step=None):
     """The KomiraError of an engine refusal: status -3, and the context's last
     error, which is not empty, as the message. Its code and step are the
-    context's (None from a library older than 1.5); `step` is the step the
-    refusal reports from a 1.5 library, a BindError for "bind"."""
+    context's (None from a library older than 1.6); `step` is the step the
+    refusal reports from a 1.6 library, a BindError for "bind"."""
     try:
         call()
     except LibraryLoadError as e:
@@ -48,7 +48,7 @@ def engine_error(call, ctx, native, step=None):
         assert str(e) != "", "the engine gave no message"
         assert str(e) == native.last_error(ctx), (str(e), native.last_error(ctx))
         assert e.code == native.last_error_code(ctx) and e.step == native.last_error_step(ctx), (e.code, e.step)
-        if native.abi_version >= 1005:
+        if native.abi_version >= 1006:
             assert e.step == step, (e.step, step)
             assert type(e) is (komira.BindError if step == "bind" else KomiraError), repr(e)
         else:

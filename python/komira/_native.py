@@ -2,10 +2,10 @@
 
 `load` opens the library from a directory, once per process, checks that its
 ABI major version is the one this package was written for, and binds the
-calls of ABI 1.5; every failure is a `LibraryLoadError` that says which
+calls of ABI 1.6; every failure is a `LibraryLoadError` that says which
 library and why. `Native` holds the bound calls and turns their status codes
 into `KomiraError`, with the context's last error, read with the two-call
-protocol, as the message, and, from ABI 1.5, its code and step as the error's
+protocol, as the message, and, from ABI 1.6, its code and step as the error's
 `code` and `step`; `_errors.error_class` picks the subclass from them.
 
 Before the library is opened, `load` picks the file and checks the CPU, then
@@ -105,8 +105,8 @@ _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
     "komira_ctx_new": (0, ctypes.c_void_p, []),
     "komira_ctx_free": (0, None, [ctypes.c_void_p]),
     "komira_last_error": (0, ctypes.c_int32, [ctypes.c_void_p] + _Out),
-    "komira_last_error_code": (5, ctypes.c_int32, [ctypes.c_void_p] + _Out),
-    "komira_last_error_step": (5, ctypes.c_int32, [ctypes.c_void_p]),
+    "komira_last_error_code": (6, ctypes.c_int32, [ctypes.c_void_p] + _Out),
+    "komira_last_error_step": (6, ctypes.c_int32, [ctypes.c_void_p]),
     "komira_register_parquet": (1, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]),
     "komira_parquet_schema": (1, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p] + _Out),
     "komira_csv_binding": (
@@ -458,7 +458,7 @@ class Native:
 
     def last_error_code(self, ctx: int) -> str | None:
         """The named code of the context's last error, or None when it has
-        none, there is no error, or the library is older than ABI 1.5."""
+        none, there is no error, or the library is older than ABI 1.6."""
         if self._functions["komira_last_error_code"] is None:
             return None
         fn = self._fn("komira_last_error_code")
@@ -470,7 +470,7 @@ class Native:
     def last_error_step(self, ctx: int) -> str | None:
         """The step ("parse", "bind", "optimize", "lower" or "execute") of the
         context's last error, or None when it has none, a number this package
-        does not know, or the library is older than ABI 1.5."""
+        does not know, or the library is older than ABI 1.6."""
         fn = self._functions["komira_last_error_step"]
         if fn is None:
             return None

@@ -455,7 +455,7 @@ decided here.** Each is settled by its own change:
   pull requests;
 - credentials, by [credentials_and_writes.md](credentials_and_writes.md). The credential calls
   (ABI 1.2) and the structured error calls `komira_last_error_code` and `komira_last_error_step`
-  (ABI 1.5, built) have landed; neither is part of this port.
+  (ABI 1.6, built) have landed; neither is part of this port.
 
 What earlier drafts of this document proposed is kept as input for those
 changes:

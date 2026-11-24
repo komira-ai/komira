@@ -84,6 +84,12 @@ class Session:
         query, when the answer's schema is read. A `query` that is not a
         `str` is a `TypeError`, and one holding a NUL byte or a lone surrogate
         a `ValueError`, both raised before the library is called.
+
+        A query cannot be interrupted while it runs: the engine computes the
+        answer before the call returns, and Python runs a signal's handler
+        only once the call has returned. So Ctrl-C during `sql` raises
+        `KeyboardInterrupt` then, the answer is released, and the session
+        answers the next call.
         """
         if not isinstance(query, str):
             raise TypeError("query must be a str, not {}".format(type(query).__name__))

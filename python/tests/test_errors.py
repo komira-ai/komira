@@ -1,6 +1,6 @@
 """The exception table (komira/_errors.py) on the stand-ins of fake_libkomira.c:
 
-- on an ABI 1.5 stand-in, whose komira_sql_stream answers
+- on an ABI 1.6 stand-in, whose komira_sql_stream answers
   `refuse <status> <step> [<code>]` with that status, step number and code:
   - every code of the table raises its class, with `status` -3, `code`, the
     message unchanged and `step` None when the refusal names no step;
@@ -22,7 +22,7 @@
 
     test_errors.py --lib-dir <dir> --runtime-dir <dir>
 
-`<dir>/fake_v1_5/libkomira.so` and `<dir>/fake_v1_3/libkomira.so` are the
+`<dir>/fake_v1_6/libkomira.so` and `<dir>/fake_v1_3/libkomira.so` are the
 stand-ins (`--runtime-dir`, which the rule passes, is not read). A process
 holds one library, so the test clears the loader's record of the first before
 it loads the second.
@@ -112,8 +112,8 @@ def check_classes():
     assert (e.status, e.code, e.step) == (None, None, None)
 
 
-def check_v1_5(native):
-    assert native.abi_version == 1005, native.abi_version
+def check_v1_6(native):
+    assert native.abi_version == 1006, native.abi_version
     ctx = native.ctx_new()
 
     # No error held: no code, no step.
@@ -205,7 +205,7 @@ def check_v1_3(native):
 def main(args):
     lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
     check_classes()
-    for fake, check in (("fake_v1_5", check_v1_5), ("fake_v1_3", check_v1_3)):
+    for fake, check in (("fake_v1_6", check_v1_6), ("fake_v1_3", check_v1_3)):
         _native._loaded = None
         _native._loaded_dir = None
         check(_native.load(os.path.join(lib_dir, fake)))

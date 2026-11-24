@@ -1,7 +1,7 @@
 // A stand-in for libkomira with the calls of ABI 1.1 that the Python loader
 // binds, and, when FAKE_VERSION is 1.2 or later, the three credential calls of
 // ABI 1.2 over a fake store, when it is 1.3 or later, komira_sql_stream
-// answering a stand-in Arrow C stream, and when it is 1.5 or later,
+// answering a stand-in Arrow C stream, and when it is 1.6 or later,
 // komira_last_error_code and komira_last_error_step (all below). The tests load it to reach what the real
 // library never does:
 //
@@ -57,7 +57,7 @@ static int32_t copy_out(const char *text, uint64_t len, uint8_t *b, uint64_t cap
 static char cred_error[256];
 
 // The code and step of that error, which komira_last_error_code and
-// komira_last_error_step (ABI 1.5, below) answer: empty and 0 when it has
+// komira_last_error_step (ABI 1.6, below) answer: empty and 0 when it has
 // none. Every call that sets or clears cred_error sets or clears them too.
 static char err_code[64];
 static int32_t err_step;
@@ -295,16 +295,19 @@ EXPORT int32_t komira_fake_store(uint8_t *b, uint64_t cap, uint64_t *n) {
 //                   takes no text this long";
 //   "refuse <status> <step> [<code>]"
 //                   <status> (a number) and the last error "stand-in refusal
-//                   status <status> step <step> code <code>"; with ABI 1.5 the
+//                   status <status> step <step> code <code>"; with ABI 1.6 the
 //                   last error's step is the number <step> and its code the
 //                   word <code>, empty when it is left out;
 //   anything else   -3 and the last error "bind: the stand-in runs no query
 //                   <text>", so a test sees the bytes that arrived.
+// A text that starts "interrupted:" first raises SIGINT in the calling thread,
+// as a Ctrl-C during a query does, and then answers as the rest of the text.
 // A refusal leaves *out as it was given. komira_fake_stream_counts (not part
 // of the ABI) writes the streams made and released, the schemas made and
 // released and the batches made and released since the library was loaded,
 // so a test sees that each is released exactly once.
 #include <errno.h>
+#include <signal.h>
 #include <stdlib.h>
 
 struct ArrowSchema {
@@ -449,6 +452,11 @@ EXPORT int32_t komira_sql_stream(void *ctx, const char *sql, struct ArrowArraySt
   (void)ctx;
   clear_error();
   if (!sql || !out) return -2;
+  static const char interrupted[] = "interrupted:";
+  if (strncmp(sql, interrupted, sizeof interrupted - 1) == 0) {
+    raise(SIGINT);
+    sql += sizeof interrupted - 1;
+  }
   int m;
   if (strcmp(sql, "rows") == 0) {
     m = ROWS;
@@ -491,9 +499,9 @@ EXPORT void komira_fake_stream_counts(int64_t *out) { memcpy(out, counts, sizeof
 
 #endif
 
-#if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 5
+#if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 6
 
-// ABI 1.5: the last error's code, by the two-call protocol (empty when there
+// ABI 1.6: the last error's code, by the two-call protocol (empty when there
 // is none), and its step number. A mode of komira_last_error's own (set by
 // komira_register_parquet) has no code and no step.
 EXPORT int32_t komira_last_error_code(void *ctx, uint8_t *b, uint64_t cap, uint64_t *n) {

@@ -18,6 +18,10 @@
  * of one byte refuses a query at step `execute` with the sink's named denial,
  * the same query answers under the host's own budget, and a negative option
  * is a NULL context.
+ * It also registers CSV and newline-delimited JSON files it writes under
+ * $TEST_TMPDIR with komira_register_csv and komira_register_json and queries
+ * each table by name through komira_sql_stream; every answer is checked
+ * against the rows the driver wrote.
  *
  * Exit 0 only if every check holds; each failure prints one line. */
 #include <dlfcn.h>
@@ -55,6 +59,8 @@ DECLARE(komira_credential_add);
 DECLARE(komira_credential_set);
 DECLARE(komira_credential_seal);
 DECLARE(komira_sql_stream);
+DECLARE(komira_register_csv);
+DECLARE(komira_register_json);
 
 static int bind_all(void *lib) {
     int missing = 0;
@@ -83,6 +89,8 @@ static int bind_all(void *lib) {
     BIND(komira_credential_set);
     BIND(komira_credential_seal);
     BIND(komira_sql_stream);
+    BIND(komira_register_csv);
+    BIND(komira_register_json);
 #undef BIND
     return missing;
 }
@@ -372,6 +380,138 @@ static void sql_stream_cases(void) {
     CHECK(a.rows == 3 && a.n_values == 3 && a.values[0] == 1 && a.values[1] == 2 && a.values[2] == 3);
 }
 
+/* Write `text` to `<tmp>/<name>` and leave the path in `path`. */
+static int write_file(const char *tmp, const char *name, const char *text, char *path, size_t cap) {
+    snprintf(path, cap, "%s/%s", tmp, name);
+    FILE *f = fopen(path, "w");
+    if (f == NULL) {
+        fprintf(stderr, "FAIL: cannot write %s\n", path);
+        failures++;
+        return -1;
+    }
+    fputs(text, f);
+    fclose(f);
+    return 0;
+}
+
+/* Run `sql` on `ctx` and read its answer into `a`; 0, or -1 after printing why.
+   Every -1 is counted as a failure here, so a caller that skips its value
+   checks on -1 still makes the driver exit non-zero. */
+static int query(komira_handle ctx, const char *sql, struct answer *a) {
+    struct ArrowArrayStream out;
+    memset(&out, 0, sizeof out);
+    int32_t rc = p_komira_sql_stream(ctx, sql, &out);
+    if (rc != KOMIRA_OK) {
+        char text[512];
+        fprintf(stderr, "FAIL: %s returned %d: %s\n", sql, rc, last_error_text(ctx, text, sizeof text));
+        failures++;
+        return -1;
+    }
+    if (read_answer(&out, a) != 0) {
+        fprintf(stderr, "FAIL: the answer of %s could not be read\n", sql);
+        failures++;
+        return -1;
+    }
+    return 0;
+}
+
+/* The CSV and JSON tables of komira_register_csv and komira_register_json:
+   registered by name, queried by that name, and the answers are the rows of
+   the files. */
+static void text_source_cases(void) {
+    const char *tmp = getenv("TEST_TMPDIR");
+    CHECK(tmp != NULL && tmp[0] != 0);
+    if (tmp == NULL) return;
+    komira_handle ctx = p_komira_ctx_new();
+    CHECK(ctx != NULL);
+    if (ctx == NULL) return;
+    struct answer a;
+    char text[512];
+    char people[512], piped[512], bare[512], events[512], missing[512];
+    if (write_file(tmp, "people.csv", "id,name,score\n1,ann,10\n2,bob,20\n3,cy,30\n", people, sizeof people) != 0) return;
+    if (write_file(tmp, "piped.csv", "id|name\n4|dee\n5|eve\n", piped, sizeof piped) != 0) return;
+    if (write_file(tmp, "bare.csv", "7,8\n9,10\n", bare, sizeof bare) != 0) return;
+    if (write_file(tmp, "events.jsonl", "{\"id\":1,\"v\":\"x\"}\n{\"id\":2,\"v\":\"y\"}\n{\"id\":3,\"v\":\"y\"}\n", events, sizeof events) != 0) return;
+    snprintf(missing, sizeof missing, "%s/no_such_file.csv", tmp);
+
+    /* A CSV file with a header: a filter, a sort and a string comparison. */
+    CHECK(p_komira_register_csv(ctx, "people", people, ',', 1, 0) == KOMIRA_OK);
+    uint64_t len = 99;
+    CHECK(p_komira_last_error(ctx, NULL, 0, &len) == KOMIRA_OK && len == 0);
+    if (query(ctx, "SELECT id FROM people WHERE score >= 20 ORDER BY id", &a) == 0) {
+        CHECK(a.n_fields == 1 && strcmp(a.names[0], "id") == 0 && strcmp(a.formats[0], "l") == 0);
+        CHECK(a.rows == 2 && a.n_values == 2 && a.values[0] == 2 && a.values[1] == 3);
+    }
+    if (query(ctx, "SELECT id FROM PEOPLE WHERE name = 'cy'", &a) == 0) {
+        CHECK(a.rows == 1 && a.n_values == 1 && a.values[0] == 3);
+    }
+    if (query(ctx, "SELECT max(score) AS m FROM people", &a) == 0) {
+        CHECK(a.rows == 1 && a.n_values == 1 && a.values[0] == 30);
+    }
+
+    /* Another delimiter, no header, and every column a string. */
+    CHECK(p_komira_register_csv(ctx, "piped", piped, '|', 1, 0) == KOMIRA_OK);
+    if (query(ctx, "SELECT id, name FROM piped ORDER BY id", &a) == 0) {
+        CHECK(a.n_fields == 2 && strcmp(a.names[1], "name") == 0 && strcmp(a.formats[1], "u") == 0);
+        CHECK(a.rows == 2 && a.n_values == 2 && a.values[0] == 4 && a.values[1] == 5);
+    }
+    /* No header: the table registers, and a query on it is refused by name
+       at lower (as read_csv(..., header=false) is), *out left as written. */
+    CHECK(p_komira_register_csv(ctx, "bare", bare, ',', 0, 0) == KOMIRA_OK);
+    {
+        struct ArrowArrayStream untouched;
+        memset(&untouched, 0, sizeof untouched);
+        CHECK(p_komira_sql_stream(ctx, "SELECT count(*) AS n FROM bare", &untouched) == KOMIRA_ERR_ENGINE);
+        CHECK(untouched.release == NULL);
+        const char *why = last_error_text(ctx, text, sizeof text);
+        CHECK(starts_with(why, "lower: ") && strstr(why, "header=false") != NULL);
+    }
+    CHECK(p_komira_register_csv(ctx, "people_text", people, ',', 1, 1) == KOMIRA_OK);
+    if (query(ctx, "SELECT id, score FROM people_text", &a) == 0) {
+        CHECK(a.n_fields == 2 && strcmp(a.formats[0], "u") == 0 && strcmp(a.formats[1], "u") == 0);
+        CHECK(a.rows == 3);
+    }
+
+    /* A newline-delimited JSON file. */
+    CHECK(p_komira_register_json(ctx, "events", events) == KOMIRA_OK);
+    if (query(ctx, "SELECT id FROM events WHERE v = 'y' ORDER BY id", &a) == 0) {
+        CHECK(a.n_fields == 1 && strcmp(a.names[0], "id") == 0 && strcmp(a.formats[0], "l") == 0);
+        CHECK(a.rows == 2 && a.n_values == 2 && a.values[0] == 2 && a.values[1] == 3);
+    }
+
+    /* Refusals, each with its named last error; the first table under a
+       taken name keeps answering with its own rows. */
+    CHECK(p_komira_register_csv(ctx, "Events", people, ',', 1, 0) == KOMIRA_ERR_ENGINE);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text),
+                 "TABLE_ALREADY_REGISTERED: the session already has a table named 'Events'") == 0);
+    CHECK(p_komira_register_json(ctx, "people", events) == KOMIRA_ERR_ENGINE);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text),
+                 "TABLE_ALREADY_REGISTERED: the session already has a table named 'people'") == 0);
+    CHECK(p_komira_register_csv(ctx, "", people, ',', 1, 0) == KOMIRA_ERR_ENGINE);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text), "TABLE_NAME_EMPTY: a table name must not be empty") == 0);
+    CHECK(p_komira_register_json(ctx, "", events) == KOMIRA_ERR_ENGINE);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text), "TABLE_NAME_EMPTY: a table name must not be empty") == 0);
+    CHECK(p_komira_register_csv(ctx, "gone", missing, ',', 1, 0) == KOMIRA_ERR_ENGINE);
+    CHECK(last_error_text(ctx, text, sizeof text)[0] != 0);
+    CHECK(p_komira_register_json(ctx, "gone", missing) == KOMIRA_ERR_ENGINE);
+    CHECK(last_error_text(ctx, text, sizeof text)[0] != 0);
+    CHECK(p_komira_register_csv(NULL, "t", people, ',', 1, 0) == KOMIRA_ERR_NULL_CTX);
+    CHECK(p_komira_register_json(NULL, "t", events) == KOMIRA_ERR_NULL_CTX);
+    CHECK(p_komira_register_csv(ctx, NULL, people, ',', 1, 0) == KOMIRA_ERR_NULL_ARG);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text), "komira_register_csv: name or path is NULL") == 0);
+    CHECK(p_komira_register_json(ctx, "t", NULL) == KOMIRA_ERR_NULL_ARG);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text), "komira_register_json: name or path is NULL") == 0);
+    if (query(ctx, "SELECT count(*) AS n FROM events", &a) == 0) {
+        CHECK(a.rows == 1 && a.n_values == 1 && a.values[0] == 3);
+    }
+    if (query(ctx, "SELECT count(*) AS n FROM people", &a) == 0) {
+        CHECK(a.rows == 1 && a.n_values == 1 && a.values[0] == 3);
+    }
+    /* A refused name stays free. */
+    CHECK(p_komira_register_csv(ctx, "gone", people, ',', 1, 0) == KOMIRA_OK);
+    p_komira_ctx_free(ctx);
+}
+
 /* The session options of komira_ctx_new_with_options, over three.parquet
    (k = 1, 2, 3), which sql_stream_cases wrote under $TEST_TMPDIR. */
 static void options_cases(void) {
@@ -546,6 +686,7 @@ int main(void) {
     p_komira_ctx_free(NULL);
 
     sql_stream_cases();
+    text_source_cases();
     options_cases();
     return failures == 0 ? 0 : 1;
 }
