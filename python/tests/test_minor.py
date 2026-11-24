@@ -1,7 +1,9 @@
 """Any minor version of ABI major 1 loads: a 1.0 library, which lacks the
 calls 1.1, 1.2 and 1.3 added, and a 1.3 library, which has the credential
 calls of 1.2 and komira_sql_stream. A call the library's minor does not
-include raises when it is used, never at load.
+include raises when it is used, never at load: on both, the registration
+calls of 1.5 (komira_register_csv and komira_register_json) raise, naming
+the call and both versions.
 
     test_minor.py --lib-dir <dir> --runtime-dir <dir> --fake <name> --version <n>
 
@@ -31,6 +33,8 @@ def main(args):
     assert native.abi_version == version, native.abi_version
     assert komira.abi_version() == version
     assert _native._FUNCTIONS["komira_sql_stream"][0] == 3
+    assert _native._FUNCTIONS["komira_register_csv"][0] == 5
+    assert _native._FUNCTIONS["komira_register_json"][0] == 5
 
     with komira.Session() as s:
         if version % 1000 == 0:
@@ -83,6 +87,21 @@ def main(args):
             assert stream.release and stream.get_next
             _arrow._Release(stream.release)(ctypes.addressof(stream))
             assert not stream.release
+        # Neither stand-in has the registration calls of 1.5: each raises
+        # when it is used, naming the call and both versions, with no status.
+        path = os.path.join(directory, "libkomira.so")
+        have = "{}.{}".format(*divmod(version, 1000))
+        for op, call in (
+            ("komira_register_csv", lambda: s.register_csv("c", "c.csv")),
+            ("komira_register_json", lambda: s.register_json("j", "j.jsonl")),
+        ):
+            want = "{} needs libkomira ABI version 1.5; the library at {} is {}".format(op, path, have)
+            try:
+                call()
+            except KomiraError as e:
+                assert type(e) is KomiraError and str(e) == want and e.status is None, repr(e)
+            else:
+                raise AssertionError("a {} library ran {}".format(have, op))
     print("minor: libkomira {} loaded".format(version))
 
 
