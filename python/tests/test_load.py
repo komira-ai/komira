@@ -67,13 +67,16 @@ def main(args):
     want = [
         "KomiraError",
         "LibraryLoadError",
+        "Result",
         "Session",
         "UnsupportedCpuError",
+        "UnsupportedOperation",
         "__version__",
         "abi_version",
     ]
     assert komira.__all__ == want, komira.__all__
     assert issubclass(LibraryLoadError, KomiraError) and issubclass(KomiraError, Exception)
+    assert issubclass(komira.UnsupportedOperation, KomiraError)
     assert komira.__version__ == "0.0.0", komira.__version__
     assert _native._loaded is None
 

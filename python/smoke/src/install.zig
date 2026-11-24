@@ -10,8 +10,10 @@
 //!     directory. The komira install from an index is repeated like `verify` (an index lags an upload); the
 //!     requirements are not, and the command line gives a dist directory one attempt.
 //!  2. `pip check` must exit 0, `pip show komira` must report the version that was published, and the
-//!     environment must hold nothing else: `pip freeze` lists komira alone (no `mojo-compiler`, no other
-//!     distribution) and no `modular` package is importable (the wheel carries the Mojo
+//!     environment must hold nothing else: `pip freeze` lists `komira==<version>` once and, besides it, only
+//!     distributions the wheel's `Requires-Dist` lines name (any version: pip chose it from the requirement's
+//!     range and `pip check` holds the range; names compared as PEP 503 normalises them), no `mojo-compiler`
+//!     and no other distribution, and no `modular` package is importable (the wheel carries the Mojo
 //!     runtime itself).
 //!  3. The example and its data files are copied (by base name) into `<work>/run` and the example is run there
 //!     by `<work>/venv/bin/python -I`. It must exit 0 and print exactly the text of the expected file, in which
@@ -169,6 +171,39 @@ fn shownVersion(text: []const u8) ?[]const u8 {
     return null;
 }
 
+/// The name a requirement line (`pyarrow>=25.0.1`, `Foo[bar] ; python_version < "3.12"`) starts with: the text
+/// before its version, extras, marker or space.
+fn requirementName(req: []const u8) []const u8 {
+    const t = std.mem.trim(u8, req, " \t");
+    return t[0 .. std.mem.indexOfAny(u8, t, "<>=!~;[( \t") orelse t.len];
+}
+
+/// Whether `frozen` (`pip freeze` output) holds `<name>==<version>` once and, besides it, only lines whose
+/// distribution is one of `required` (requirement names, any version). Names are compared normalised; a line
+/// that is not `<name>==<version>` is not allowed. A requirement that is not in the output is not refused here.
+fn freezeHolds(a: Allocator, name: []const u8, version: []const u8, required: []const []const u8, frozen: []const u8) Error!bool {
+    const own = try meta.normalizeName(a, name);
+    var own_lines: usize = 0;
+    var lines = std.mem.splitScalar(u8, frozen, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trimRight(u8, raw, "\r");
+        if (line.len == 0) continue;
+        const eq = std.mem.indexOf(u8, line, "==") orelse return false;
+        const dist = try meta.normalizeName(a, line[0..eq]);
+        if (std.mem.eql(u8, dist, own)) {
+            if (!std.mem.eql(u8, line[eq + 2 ..], version)) return false;
+            own_lines += 1;
+            continue;
+        }
+        var wanted = false;
+        for (required) |r| {
+            if (std.mem.eql(u8, try meta.normalizeName(a, r), dist)) wanted = true;
+        }
+        if (!wanted) return false;
+    }
+    return own_lines == 1;
+}
+
 /// `install` (header). `wheel` is the dist wheel: it names the package and its version and its requirements.
 pub fn run(a: Allocator, why: *[]const u8, runner: Runner, opts: Options, wheel: meta.Wheel, log: *std.Io.Writer) !void {
     try common.requireFreeDir(a, why, "--work", opts.work);
@@ -221,9 +256,18 @@ pub fn run(a: Allocator, why: *[]const u8, runner: Runner, opts: Options, wheel:
         return refuse(a, why, "pip show {s} reports version {s}, not {s}", .{ wheel.name, installed, wheel.version });
 
     const frozen = try step(a, why, runner, "list the installed distributions", try join(a, &pip, &.{"freeze"}), opts.work, log);
-    const only = try std.fmt.allocPrint(a, "{s}=={s}\n", .{ wheel.name, wheel.version });
-    if (!std.mem.eql(u8, frozen.stdout, only))
-        return refuse(a, why, "the environment holds other distributions than {s}\nexpected:\n{s}installed:\n{s}", .{ wheel.name, only, frozen.stdout });
+    const required = try a.alloc([]const u8, wheel.requires_dist.len);
+    for (wheel.requires_dist, required) |req, *slot| slot.* = requirementName(req);
+    if (!try freezeHolds(a, wheel.name, wheel.version, required, frozen.stdout)) {
+        var want = std.ArrayList(u8).empty;
+        try want.appendSlice(a, try std.fmt.allocPrint(a, "{s}=={s}\n", .{ wheel.name, wheel.version }));
+        for (required) |r| try want.appendSlice(a, try std.fmt.allocPrint(a, "{s}==<any version>\n", .{r}));
+        const holders = if (required.len == 0)
+            wheel.name
+        else
+            try std.fmt.allocPrint(a, "{s} and its requirements ({s})", .{ wheel.name, try std.mem.join(a, ", ", required) });
+        return refuse(a, why, "the environment holds other distributions than {s}\nexpected:\n{s}installed:\n{s}", .{ holders, want.items, frozen.stdout });
+    }
     const probe = try step(a, why, runner, "look for a modular package", &.{ venv_python, "-I", "-c", modular_probe }, opts.work, log);
     if (!std.mem.eql(u8, probe.stdout, "none\n"))
         return refuse(a, why, "a modular package is importable in the environment: {s}", .{std.mem.trimRight(u8, probe.stdout, "\n")});

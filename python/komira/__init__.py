@@ -1,7 +1,7 @@
 """komira: SQL over local files, with libkomira, the komira query engine, in process.
 
-This is an early release: it loads libkomira and registers Parquet files on a
-`Session`; nothing runs a query yet. The public names are exactly `__all__`;
+This is an early release: a `Session` registers Parquet files and runs SQL over
+them, and each `Result` reads as Arrow (pyarrow). The public names are exactly `__all__`;
 every other module is private (docs/design/python_package.md). Importing the
 package does not load the library: the first `Session()` or `abi_version()`
 does.
@@ -10,8 +10,8 @@ does.
 from importlib import metadata as _metadata
 
 from . import _native
-from ._errors import KomiraError, LibraryLoadError, UnsupportedCpuError
-from ._session import Session
+from ._errors import KomiraError, LibraryLoadError, UnsupportedCpuError, UnsupportedOperation
+from ._session import Result, Session
 
 try:
     __version__: str = _metadata.version("komira")
@@ -30,8 +30,10 @@ def abi_version() -> int:
 __all__ = [
     "KomiraError",
     "LibraryLoadError",
+    "Result",
     "Session",
     "UnsupportedCpuError",
+    "UnsupportedOperation",
     "__version__",
     "abi_version",
 ]
