@@ -14,8 +14,9 @@ const fake = (name) => path.join(here, 'fake', name);
 
 test('the addon exposes exactly its calls', () => {
   assert.deepEqual(Object.keys(addon).sort(), [
-    'abiVersion', 'freeSession', 'load', 'newSession', 'parquetSchema',
-    'planRender', 'registerParquet', 'sessionStats',
+    'abiVersion', 'arrowClose', 'arrowNextBatch', 'arrowSchema', 'freeSession',
+    'importArrowStream', 'load', 'newSession', 'parquetSchema', 'planRender',
+    'registerParquet', 'sessionStats',
   ]);
 });
 

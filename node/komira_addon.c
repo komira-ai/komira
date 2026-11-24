@@ -11,6 +11,8 @@
 //   parquetSchema(session, path)       Buffer: the file's schema as komira.plan.v1 WireSchema bytes
 //   planRender(session, bytes)         string: the text of a serialized plan; the plan is not run
 //   sessionStats()                     { created, freed }: komira_ctx_new and komira_ctx_free calls made here
+//   importArrowStream(capsule), arrowSchema(result), arrowNextBatch(result), arrowClose(result)
+//                                      an Arrow C stream drained and described (arrow_import.c)
 //
 // Why the library is opened with dlopen at `load`, and is not a NEEDED
 // dependency with a run path. libkomira is a Mojo shared library: it needs the
@@ -43,6 +45,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "arrow_import.h"
 
 #define KOMIRA_OK 0
 #define KOMIRA_ERR_NULL_CTX (-1)
@@ -503,7 +507,8 @@ NAPI_MODULE_INIT() {
       !export_fn(env, exports, "registerParquet", js_register_parquet) ||
       !export_fn(env, exports, "parquetSchema", js_parquet_schema) ||
       !export_fn(env, exports, "planRender", js_plan_render) ||
-      !export_fn(env, exports, "sessionStats", js_session_stats)) {
+      !export_fn(env, exports, "sessionStats", js_session_stats) ||
+      !arrow_import_export(env, exports)) {
     napi_throw_error(env, NULL, "komira_addon: cannot export its functions");
     return NULL;
   }
