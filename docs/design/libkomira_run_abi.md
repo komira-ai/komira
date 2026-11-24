@@ -467,17 +467,28 @@ changes:
   - Rejected alternatives: an options struct (its layout would become ABI),
     string key and value pairs, a constructor with arguments, and environment
     variables (rule S2).
-- **Cancel and progress.** The engine has a `CancellationToken`, but the token is
-  local to `run_lowered_plan` today. The engine has no progress counter. The
-  proposal:
-  - `komira_cancel(ctx)` and `komira_progress(ctx, uint64_t *done, uint64_t *total)`,
-    callable from another thread while a run is in flight.
-  - Both go through one atomic control block that is allocated with the context
-    and never replaced. They do not touch the last error.
-  - A cancel with no run in flight does nothing.
-  - A cancelled run returns a new status code (-6) and leaves `*out` untouched.
-    An incrementally read stream would return `ECANCELED`.
-  - Progress is polled, never called back into the host.
+- **Cancel and progress** (decided and built in ABI 1.4; [src/so/README.md](../../src/so/README.md),
+  "Cancel and progress"). The earlier proposal here was `komira_cancel(ctx)` and
+  `komira_progress(ctx, ...)` on one control block per context, where a cancel with no
+  run in flight did nothing. What was built is a run handle the caller creates and
+  passes to the run instead:
+  - `komira_run_new`, `komira_run_free`, `komira_run_cancel(run)`,
+    `komira_run_progress(run, uint64_t *done, uint64_t *total)` and
+    `komira_sql_stream_run(ctx, sql, run, out)`. Cancel and progress are callable
+    from another thread while the run is in flight, and touch no context and no
+    last error.
+  - Why a handle and not the context: a cancel belongs to the run the caller chose.
+    A Ctrl-C that lands just as one query returns cancels that query's handle, which
+    no later run is given, so it cannot reach the next query. And a cancel that comes
+    before the call reaches the run, so a test cancels without racing the engine.
+  - A cancelled run returns `KOMIRA_ERR_CANCELLED` (-6), leaves `*out` untouched, and
+    sets the last error `QUERY_CANCELLED: execute: <reason>`. A cancel is observed
+    only while the plan runs (before each segment and at each morsel boundary); a
+    statement refused earlier keeps its own refusal.
+  - Progress counts the plan's segments: the total when the plan is checked, and the
+    done count as each segment finishes. It is polled, never called back into the
+    host.
+  - An incrementally read stream, when one exists, would return `ECANCELED`.
 - **Credentials** (decided in [credentials_and_writes.md](credentials_and_writes.md)).
   Constraints from the repository rules that design starts from:
   - Configuration comes as explicit calls. The provider-standard environment

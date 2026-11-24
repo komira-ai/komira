@@ -65,7 +65,7 @@ review.
 | [`name_registry`](../src/name_registry/) | interned names: a compile-time FNV-1a id for a string literal (and the same id computed at run time), and a fixed-capacity table that maps an id back to its name. |
 | [`spsc_ring`](../src/spsc_ring/) | one bounded single-producer / single-consumer ring, `SpscRing[T]`. |
 | [`fork_join`](../src/fork_join/) | run one body on `n` real threads and return only after every thread has exited. |
-| [`so`](../src/so/) | the C ABI of komira's one shared library, `libkomira`: the status codes, the ABI version (`major * 1000 + minor`), the context handle's `Session` (the last error text, the registered tables and the credentials) and the exports: the version, the context, `komira_last_error` (a two-call buffer protocol), the source and render calls, `komira_credential_add`, `_set` and `_seal`, which hold a credential's values in the session's `SecretStore`, and `komira_sql_stream`, which runs SQL text on the session's engine and answers an Arrow C stream (ABI 1.3). |
+| [`so`](../src/so/) | the C ABI of komira's one shared library, `libkomira`: the status codes, the ABI version (`major * 1000 + minor`), the context handle's `Session` (the last error text, the registered tables and the credentials) and the exports: the version, the context, `komira_last_error` (a two-call buffer protocol), the source and render calls, `komira_credential_add`, `_set` and `_seal`, which hold a credential's values in the session's `SecretStore`, `komira_sql_stream`, which runs SQL text on the session's engine and answers an Arrow C stream (ABI 1.3), and the run handle of `komira_sql_stream_run`, which another thread cancels and reads the segment progress of (ABI 1.4). |
 
 ### Engine
 

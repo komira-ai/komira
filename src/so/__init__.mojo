@@ -1,7 +1,7 @@
 """`so` -- the C ABI of komira's one shared library, `libkomira`.
 
 - `status.mojo`: the status codes every fallible call returns (`KOMIRA_OK`
-  and the five negative `KOMIRA_ERR_*` codes), the credential kinds, fields
+  and the six negative `KOMIRA_ERR_*` codes), the credential kinds, fields
   and scope (`KOMIRA_CRED_*`, `KOMIRA_FIELD_*`, `KOMIRA_BIND_SESSION`), the
   ABI version
   (`abi_version`, `ABI_MAJOR`, `ABI_MINOR`), `buffer_status`, the test the
@@ -22,7 +22,8 @@
 
 `_c_abi.mojo` is the library's C surface (`komira_abi_version`,
 `komira_ctx_new`, `komira_ctx_free`, `komira_last_error`, the source and
-render calls, the three credential calls and `komira_sql_stream`). It is the one file that holds pointers and is not part of this
+render calls, the three credential calls, `komira_sql_stream`, the four
+run-control calls and `komira_sql_stream_run`). It is the one file that holds pointers and is not part of this
 Mojo package; `libkomira` is built from it by the `libkomira` target.
 """
 
@@ -34,7 +35,9 @@ from .credentials import (
 )
 from .session import Session, try_new_session
 from .sources import (
+    QUERY_CANCELLED,
     csv_binding_bytes,
+    is_cancelled_error,
     json_binding_bytes,
     parquet_schema_bytes,
     plan_render_text,
@@ -54,6 +57,7 @@ from .status import (
     KOMIRA_CRED_GCP_TOKEN,
     KOMIRA_CRED_OAUTH2_CLIENT,
     KOMIRA_ERR_BUFFER_TOO_SMALL,
+    KOMIRA_ERR_CANCELLED,
     KOMIRA_ERR_ENGINE,
     KOMIRA_ERR_NULL_ARG,
     KOMIRA_ERR_NULL_CTX,
