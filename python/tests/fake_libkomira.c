@@ -1,7 +1,8 @@
 // A stand-in for libkomira with the calls of ABI 1.1 that the Python loader
 // binds, and, when FAKE_VERSION is 1.2 or later, the three credential calls of
 // ABI 1.2 over a fake store, when it is 1.3 or later, komira_sql_stream
-// answering a stand-in Arrow C stream, and when it is 1.7 or later,
+// answering a stand-in Arrow C stream, when it is 1.5 or later,
+// komira_register_csv and komira_register_json, and when it is 1.7 or later,
 // komira_last_error_code and komira_last_error_step (all below). The tests load it to reach what the real
 // library never does:
 //
@@ -497,6 +498,28 @@ EXPORT int32_t komira_sql_stream(void *ctx, const char *sql, struct ArrowArraySt
 
 EXPORT void komira_fake_stream_counts(int64_t *out) { memcpy(out, counts, sizeof counts); }
 
+#endif
+
+#if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 5
+// ABI 1.5: komira_register_csv and komira_register_json, which a loader of
+// that minor requires; like komira_register_parquet, the name sets the mode.
+EXPORT int32_t komira_register_csv(void *ctx, const char *name, const char *path, uint8_t delimiter,
+                                   int32_t has_header, int32_t all_varchar) {
+  (void)ctx;
+  (void)path;
+  (void)delimiter;
+  (void)has_header;
+  (void)all_varchar;
+  snprintf(mode, sizeof mode, "%s", name);
+  return mode_status();
+}
+
+EXPORT int32_t komira_register_json(void *ctx, const char *name, const char *path) {
+  (void)ctx;
+  (void)path;
+  snprintf(mode, sizeof mode, "%s", name);
+  return mode_status();
+}
 #endif
 
 #if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 7
