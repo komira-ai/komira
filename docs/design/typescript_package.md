@@ -679,8 +679,8 @@ holds `tables.sql`, `<case>.sql` and the committed DuckDB answer `<case>.tsv`
 ([README](../../src/tests/conformance/komira_sql_conformance/README.md)). Nothing runs komira on
 them yet. A Python end-to-end runner over them is planned but not built. The Mojo package
 `src/tests/e2e/sql_e2e` holds komira's SQL to DuckDB through `so.sql_result` over a corpus of its
-own, on `komira_test_oracle`'s datasets; no matrix cell names one of its targets yet. The Node
-runner reads **the same files through Buck2 targets**,
+own, on `komira_test_oracle`'s datasets and its own regression tables; no matrix cell names one
+of its targets yet. The Node runner reads **the same files through Buck2 targets**,
 and copies none of them.
 - **Tables.** Both runners register the same Parquet export of each corpus's `tables.sql`, built
   once by DuckDB as a target beside the corpus. Neither runner executes `CREATE TABLE`.

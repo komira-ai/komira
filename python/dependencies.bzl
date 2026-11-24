@@ -49,3 +49,9 @@ PYARROW_WHEELS = {
 }
 
 PYARROW_MACOS = MACOS_WHEELS["pyarrow"] | {"file": MACOS_WHEELS["pyarrow"]["url"].rsplit("/", 1)[1]}
+
+# The pinned DuckDB wheel (CPython 3.13, linux x86_64), which the analysis job
+# test (python/BUCK, `analysis_job_test`) installs beside komira's wheel to
+# compare its answers with DuckDB's. It is a test input: the komira wheel does
+# not require it. python/tests/BUCK declares its download.
+DUCKDB_WHEEL = [w for w in WHEELS if w["name"] == "duckdb"][0]
