@@ -75,17 +75,15 @@ def interrupted(call):
 
 
 def check_interrupted_query(s, counts):
-    """An interrupted query raises KeyboardInterrupt, and the one stream the
-    call made is released, with every schema pyarrow took (none or one,
-    depending on where the interpreter raised) and no batch."""
+    """An interrupted query raises KeyboardInterrupt before pyarrow reads the
+    stream, and the one stream the call made is released, with no schema or
+    batch ever taken from it."""
     before = counts()
     e = interrupted(lambda: s.sql("interrupted:rows"))
     assert type(e) is KeyboardInterrupt, repr(e)
     del e
     gc.collect()
-    got = counts.since(before)
-    assert got["streams"] == 1 and got["streams_released"] == 1, got
-    assert got["schemas"] == got["schemas_released"] and got["batches"] == 0, got
+    assert counts.since(before) == zero(streams=1, streams_released=1), counts.since(before)
 
 
 def check_answers(s, counts):

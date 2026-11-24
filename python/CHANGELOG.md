@@ -20,8 +20,8 @@ install page shows names it.
   schema on `__arrow_c_stream__` raises a `KomiraError`.
 - **Ctrl-C.** A query cannot be interrupted while it runs: Ctrl-C during `Session.sql` raises
   `KeyboardInterrupt` once the engine has finished the query, and the session runs the next query. The
-  answer that query computed is freed; it was kept until the process exited when the interrupt was raised
-  before pyarrow took it.
+  answer that query computed is freed; before, it was never freed when the interrupt was raised before
+  pyarrow took it.
 - **pyarrow.** The wheel requires `pyarrow>=25.0.1`, so `pip install komira` installs it; it had no
   requirement.
 - **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its
