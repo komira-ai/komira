@@ -152,7 +152,7 @@ def test_a_distinct_over_an_integer_column_is_one_aggregate_segment_with_that_ke
     expected += "  deps: none\n"
     expected += "  order: ORDER_NONE partitions=1\n"
     expected += "  estimates: morsel_rows=" + String(m) + " card_rows=6000 mem_bytes=0\n"
-    expected += "params: agg=1 sort=0 topn=0 batches=0\n"
+    expected += "params: agg=1 sort=0 topn=0 window=0 batches=0\n"
     expected += "  agg 0: group_by=[" + String(_col("k")) + "] aggs=[]\n"
     expected += "result: segment 0\n"
     assert_equal(render_lowered_plan(lp), expected)
@@ -225,7 +225,7 @@ def test_a_sort_over_a_distinct_is_two_segments_joined_by_an_e3_edge() raises:
     expected += "  deps: 0/E3\n"
     expected += "  order: ORDER_NONE partitions=1\n"
     expected += "  estimates: morsel_rows=" + String(policy.default_morsel_rows(distinct_schema)) + " card_rows=0 mem_bytes=0\n"
-    expected += "params: agg=1 sort=1 topn=0 batches=0\n"
+    expected += "params: agg=1 sort=1 topn=0 window=0 batches=0\n"
     expected += "  agg 0: group_by=[" + String(_col("k")) + "] aggs=[]\n"
     expected += "  sort 0: keys=k asc nulls_last\n"
     expected += "result: segment 1\n"
@@ -272,7 +272,7 @@ def test_a_distinct_over_a_filter_carries_the_filter_in_its_segment() raises:
     expected += "  deps: none\n"
     expected += "  order: ORDER_NONE partitions=1\n"
     expected += "  estimates: morsel_rows=" + String(policy.agg_morsel_rows(_int_schema())) + " card_rows=6000 mem_bytes=0\n"
-    expected += "params: agg=1 sort=0 topn=0 batches=0\n"
+    expected += "params: agg=1 sort=0 topn=0 window=0 batches=0\n"
     expected += "  agg 0: group_by=[" + String(_col("k")) + "] aggs=[]\n"
     expected += "result: segment 0\n"
     assert_equal(render_lowered_plan(lp), expected)

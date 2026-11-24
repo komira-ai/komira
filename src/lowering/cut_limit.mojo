@@ -20,8 +20,8 @@
 # a negative count or a negative offset, and a limit with an offset that does
 # not reach a sort (the rows it would skip are in no stated order). Refused
 # after the child is walked: a limit over a sorted stream that is not such a
-# chain (a filter stands between it and the sort, or it reads a shared sort
-# through a reference), and a chain one of whose nodes below the limit is a
+# chain (a filter stands between it and the sort, it reads a shared sort
+# through a reference, or the stream is a keyed window's output), and a chain one of whose nodes below the limit is a
 # shared subplan other readers read whole (`cut_walk._range_holds_shared`): a
 # segment records no order, so the rows the limit would keep are not defined.
 # =============================================================================
@@ -115,8 +115,8 @@ def _sorted_stream_refusal(node: LogicalPlan) -> Error:
     return _uncuttable(
         node,
         "a limit over a sorted stream that is not one range of its sort (a"
-        " filter or a shared subplan stands between them); no order is"
-        " recorded on a segment",
+        " filter or a shared subplan stands between them, or the stream is a"
+        " window's output); no order is recorded on a segment",
     )
 
 

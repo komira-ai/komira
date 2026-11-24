@@ -83,7 +83,8 @@ struct _Pipe(Movable):
     var has_project: Bool
     var sorted_input: Bool
     """True while the rows the pipeline delivers are a sort's output in that
-    sort's order: set when the pipeline opens on a sort, kept by every
+    sort's order: set when the pipeline opens on a sort or on a window with a
+    partition or order key (its rows come out in key order), kept by every
     operator fused onto it, and false when it opens on an aggregation."""
     var broken_by: Int
     """The segment whose output this pipeline is, while no operator has been
@@ -178,6 +179,11 @@ struct _Cutter(Movable):
     var shared_segs: List[Int]
     """The segment whose output the subtree is, or -1 for a streaming subtree,
     which is cut again at every reference."""
+    var shared_read_schemas: List[Schema]
+    """The schema the segment of a materialized subtree writes, which its
+    readers take: the subtree's declared schema with what its breaker
+    declares (a windowed SUM over a nullable column is nullable). A streaming
+    subtree has no segment; its entry is its declared schema, never read."""
     var shared_sorted: List[Bool]
     var shared_first_scan: List[Int]
     """The pre-order index of the subtree's first scan."""
@@ -199,6 +205,7 @@ struct _Cutter(Movable):
         self.shared_hashes = List[UInt64]()
         self.shared_schemas = List[Schema]()
         self.shared_segs = List[Int]()
+        self.shared_read_schemas = List[Schema]()
         self.shared_sorted = List[Bool]()
         self.shared_first_scan = List[Int]()
         self.shared_plans = Slab[LogicalPlan]()

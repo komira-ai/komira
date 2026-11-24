@@ -54,8 +54,9 @@ Import each module by name; the package root exports nothing.
   output when no morsel reaches it needs it).
 - `source_variant`, `op_variant`, `pipeline_sink`: the closed variants. Each
   holds one of its member types, fixed where the variant is named (three for a
-  source and a sink, four for an operator: the fourth slot defaults to
-  `NoOperator` and is read as `fourth()` under `OP_TAG_FOURTH`), and a tag;
+  source, four for an operator and for a sink: the fourth slot defaults to
+  `NoOperator` or `NoSink` and is read as `fourth()` under `OP_TAG_FOURTH` or
+  `SINK_TAG_FOURTH`), and a tag;
   its trait methods test the tag and call the member. `unused_members` fills
   the slots a list leaves empty with members that refuse to run.
 - `source_parquet`, `source_batch`, `source_sink_output`, `source_csv`,
@@ -324,6 +325,26 @@ Import each module by name; the package root exports nothing.
   no row under the input's schema; a negative count or offset is refused by name
   when the sink is built. The top-N has no memory budget of its own and draws on
   the segment pool alone, as each batch is about to exist.
+- `sink_window`: the window functions `(SINK_PARTITION_BY, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)`, from a `PartitionBySinkData` (partition keys, order
+  keys, directions, window expressions and the output schema). It collects with
+  a `CollectSink` (morsels in source position order), then runs `op_window`'s
+  `_execute_partition_by_sink` on the one batch: sorted by the partition and
+  order keys (NULLs last in both directions), the sorted input columns followed
+  by one column per expression under the plan's output schema. The sort is
+  stable over the collected order, so rows tied on every key come out in source
+  position order and ROW_NUMBER over them is the same on every worker count
+  (`op_window`'s own `PartitionBySink` folds in worker order, so it is not
+  used). The kernel runs on the calling thread in `combine`: the sink trait
+  gives `combine` no dispatcher for `op_window`'s parallel driver. No input
+  gives a batch of no rows under the output schema. Memory: the sink draws, as
+  each exists, the morsels it keeps, the concatenation, then an estimate of
+  what the kernel adds (a sorted copy, 16 bytes per row per expression and the
+  argument column of a STRING value function), from the segment pool; when the
+  kernel is done it draws the output's bytes and holds them until the output is
+  taken. A denied draw fails by name; there is no spill. Refused when built: a
+  direction list that does not match the order keys, an output schema with
+  fewer columns than expressions. A kernel refusal surfaces from `combine`.
 - `spike/intern_spike.mojo` (target `intern_spike`, not part of the library): the
   dictionary-interning spike of the string group-by. A standalone program that times
   interned dictionary codes, hashing every row, the fragment merge and the string-table
@@ -348,10 +369,11 @@ Import each module by name; the package root exports nothing.
   the grouped rows I64, I32, F64, F32, DATE32, BOOL and DECIMAL128,
   `(SINK_AGG, KEY_DTYPE_STRING, SINK_ORIENT_DICT_ENCODED)`, `(SINK_AGG, KEY_DTYPE_STRING,
   SINK_ORIENT_COLUMNAR)`, `(SINK_AGG, KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR)`,
-  `(SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)` and `(SINK_TOPN, KEY_DTYPE_NONE,
-  SINK_ORIENT_COLUMNAR)`, and refuses every other kind by name. It keeps the
+  `(SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR)`, `(SINK_TOPN, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)` and `(SINK_PARTITION_BY, KEY_DTYPE_NONE,
+  SINK_ORIENT_COLUMNAR)` (a `WindowSink`), and refuses every other kind by name. It keeps the
   resident batches (`add_resident`), the aggregation sink data a descriptor's
-  `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`), the top-N data (`add_topn_sink`) and the segment pool
+  `sink_param_id` indexes (`add_agg_sink`), the sort sink data (`add_sort_sink`), the top-N data (`add_topn_sink`), the window sink data (`add_window_sink`) and the segment pool
   (`set_memory_budget`, unbounded until set) and the spill directory of the
   fixed-width grouped sinks (`set_spill_directory`, none until set), shares one set of operator parts among the
   workers of a segment run, and derives the empty-output schema by running the

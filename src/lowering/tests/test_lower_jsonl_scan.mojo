@@ -148,7 +148,7 @@ def test_a_json_scan_reads_its_projection_at_the_bound_types() raises:
     expected += "  deps: none\n"
     expected += "  order: ORDER_NONE partitions=1\n"
     expected += "  estimates: morsel_rows=" + String(seg.morsel_rows) + " card_rows=0 mem_bytes=0\n"
-    expected += "params: agg=0 sort=0 topn=0 batches=0\n"
+    expected += "params: agg=0 sort=0 topn=0 window=0 batches=0\n"
     expected += "result: segment 0\n"
     assert_equal(render_lowered_plan(lp), expected)
 

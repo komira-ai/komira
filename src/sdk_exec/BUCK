@@ -528,6 +528,55 @@ _SET_OPS_TEST_DATA.update({f + ".parquet": ":set_ops_oracle[" + f + ".parquet]" 
 
 _SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in _SET_OPS_CASES})
 
+# DuckDB's table and answers for test_run_sql_window: tests/window/data.sql
+# writes win.parquet, and each line of tests/window/cases.sql runs one window
+# query over it and writes its answer.
+_WINDOW_CASES = [
+    "row_number_g",
+    "row_number_s_desc",
+    "rank_dense_rank",
+    "percent_rank_cume_dist",
+    "ntile4",
+    "lag_lead_v",
+    "lag_lead_default",
+    "lag_lead_t",
+    "lag_f_default",
+    "running_sum_v",
+    "running_aggs_peers",
+    "running_sum_f",
+    "whole_partition_aggs",
+    "whole_partition_f",
+    "value_functions",
+    "last_value_whole_frame",
+    "no_partition",
+    "two_keys",
+    "several_windows",
+    "over_where",
+    "ordered_output",
+    "no_row",
+    "cte_window_twice",
+    "cte_window_split",
+    "cte_window_over_group",
+    "cte_window_over_union",
+    "cte_window_join_shared",
+]
+
+sql_oracle(
+    name = "window_oracle",
+    srcs = [
+        "tests/window/data.sql",
+        "tests/window/cases.sql",
+    ],
+    outputs = ["win.parquet"] + [c + ".tsv" for c in _WINDOW_CASES],
+)
+
+_WINDOW_TEST_DATA = {
+    "cases.sql": "tests/window/cases.sql",
+    "win.parquet": ":window_oracle[win.parquet]",
+}
+
+_WINDOW_TEST_DATA.update({c + ".tsv": ":window_oracle[" + c + ".tsv]" for c in _WINDOW_CASES})
+
 # The engine-execution layer of the SDK: twelve modules (ten leaves plus the
 # plan gate modules) and the engine context with its SQL door (see README.md). Each module's header says what it is for.
 #
@@ -727,6 +776,22 @@ _SET_OPS_TEST_DATA.update({c + ".tsv": ":set_ops_oracle[" + c + ".tsv]" for c in
 #   lowered to one aggregation segment both branches read, a subquery holding
 #   a repeat written twice to one aggregation segment, and a filtered scan read
 #   twice to two scans.
+# - test_run_sql_window: run_sql over a Parquet table DuckDB wrote (the
+#   :window_oracle action above) answers what the pinned DuckDB answers for
+#   each case of tests/window/cases.sql: row_number, rank, dense_rank,
+#   percent_rank, cume_dist, ntile, lag and lead (offsets, defaults, BIGINT,
+#   DOUBLE and VARCHAR), running sums over the default RANGE frame and over a
+#   unique key, running min, max, avg and count over tied keys, whole-partition sum, count, avg, min and max, first_value,
+#   last_value and nth_value, no PARTITION BY, two partition keys, several
+#   windows in one SELECT, a WHERE, an outer ORDER BY and no row, a CTE holding
+#   a window read twice, a window over a CTE aggregation read twice (and over a
+#   union of the reads) and a join with a window on its left side beside a CTE
+#   read twice, with NULL
+#   keys, tied order keys and the empty string, on one and three workers, each
+#   column of the right type; every case is run; a sum over an INTEGER, a DATE
+#   partition key, a DECIMAL order key, an explicit ROWS frame and a float
+#   default over a BIGINT lag are LOWERING_WINDOW_UNSERVED refusals at step
+#   lower.
 # - test_run_sql_set_ops: INTERSECT and EXCEPT through run_sql answer what the
 #   pinned DuckDB answers (the :set_ops_oracle action above) for each case of
 #   tests/set_ops/cases.sql, on one worker and on three: NULL rows equal, an
@@ -796,6 +861,7 @@ mojo_library(
         "//src/op_sort:op_sort",
         "//src/op_sources:op_sources",
         "//src/op_spill_rows:op_spill_rows",
+        "//src/op_window:op_window",
         "//src/operator_api:operator_api",
         "//src/optimizer:optimizer",
         "//src/parquet:parquet",
@@ -864,6 +930,7 @@ mojo_library(
         "tests/test_run_sql_timers_off.mojo",
         "tests/test_run_sql_topn.mojo",
         "tests/test_run_sql_union_all.mojo",
+        "tests/test_run_sql_window.mojo",
         "tests/test_secret_capability_reveal.mojo",
     ],
     test_deps = [
@@ -885,6 +952,7 @@ mojo_library(
         "tests/test_run_sql_cte.mojo": _CTE_TEST_DATA,
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,
         "tests/test_run_sql_topn.mojo": _TOPN_TEST_DATA,
+        "tests/test_run_sql_window.mojo": _WINDOW_TEST_DATA,
         "tests/test_run_sql_join_kinds.mojo": _JOIN_KINDS_TEST_DATA,
         "tests/test_run_sql_subquery.mojo": _SUBQUERY_TEST_DATA,
         "tests/test_run_sql_set_ops.mojo": _SET_OPS_TEST_DATA,

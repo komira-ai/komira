@@ -13,10 +13,10 @@
 #             ungrouped frame, OP_UDF_FRAME): appended to the open pipeline's
 #             `ops`; a projection column that is a user-function call adds an
 #             OP_UDF_APPLY before its OP_PROJECT (`cut_project`);
-#   breaker   PLAN_AGGREGATE, PLAN_DISTINCT, PLAN_SORT, PLAN_TOPN: ends the
-#             open pipeline in a sink and opens a pipeline whose source is
-#             that segment's output (SOURCE_SINK_OUTPUT), joined by an E3
-#             edge.
+#   breaker   PLAN_AGGREGATE, PLAN_DISTINCT, PLAN_SORT, PLAN_TOPN,
+#             PLAN_PARTITION_BY (a window): ends the open pipeline in a sink
+#             and opens a pipeline whose source is that segment's output
+#             (SOURCE_SINK_OUTPUT), joined by an E3 edge.
 #   range     a PLAN_LIMIT that reaches a PLAN_SORT or a PLAN_TOPN through
 #             only projections and limits: the chain is one range of the
 #             sort's order, cut as a PLAN_TOPN is (`_walk_range`), with the
@@ -41,16 +41,17 @@
 # This module is the dispatch on the node's tag (`_walk_node`) and, around it,
 # the resolution of shared subplans (`_walk`, `_resolve`). Each arm is its own
 # module: `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
-# `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_topn`, `cut_union`,
-# `cut_join`, `cut_map_batches`, `cut_step` and `cut_shared`; what they share
-# (the open pipeline, the cutter's state and the close and reopen of a breaker)
-# is `cut_state`, and what a user-function call is held to is `udf_check`. The
-# filter, project, limit, top-n, aggregate, distinct, frame and join arms have
-# two halves: the first holds every check that refuses the node itself and runs
-# before the child (or the children) is walked; the second fuses onto, or
-# closes, the child's pipeline. The sort arm has only the second. The union arm
-# checks its branches' schemas before it walks them, walks them in order, ends
-# each in a segment and opens the concatenation.
+# `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_topn`, `cut_window`,
+# `cut_union`, `cut_join`, `cut_map_batches`, `cut_step` and `cut_shared`; what
+# they share (the open pipeline, the cutter's state and the close and reopen of
+# a breaker) is `cut_state`, and what a user-function call is held to is
+# `udf_check`. The filter, project, limit, top-n, aggregate, distinct, frame,
+# join and window arms have two halves: the first holds every check that
+# refuses the node itself and runs before the child (or the children) is
+# walked; the second fuses onto, or closes, the child's pipeline. The sort arm
+# has only the second. The union arm checks its branches' schemas before it
+# walks them, walks them in order, ends each in a segment and opens the
+# concatenation.
 #
 # The root is a SINK_COLLECT segment, unless the plan's top node is a breaker:
 # then that breaker's segment is the result and nothing is appended.
@@ -90,6 +91,7 @@ from lowering.cut_step import _open_step
 from lowering.cut_state import CutResult, _Cutter, _Pipe, _uncuttable
 from lowering.cut_topn import _check_topn, _close_topn
 from lowering.cut_union import _check_union, _end_branch, _open_concat
+from lowering.cut_window import _window_data, _close_window
 from lowering.lowered_plan import (
     LoweringInputs,
     LOWERING_INPUTS_SCAN_COUNT,
@@ -107,6 +109,7 @@ from plan_ir.logical_plan import (
     PLAN_TOPN,
     PLAN_JOIN,
     PLAN_UNION,
+    PLAN_PARTITION_BY,
     PLAN_CSE_REF,
     PLAN_VIEW_REF,
     PLAN_MAP_BATCHES,
@@ -210,6 +213,10 @@ def _walk_node(
     if tag == PLAN_SORT:
         var pipe = _walk(cutter, node.sort_data_ref().child[], inputs)
         return _close_sort(cutter, node, pipe^, inputs)
+    if tag == PLAN_PARTITION_BY:
+        var data = _window_data(node)
+        var pipe = _walk(cutter, node.partition_by_data_ref().child[], inputs)
+        return _close_window(cutter, node, pipe^, data^, inputs)
     if tag == PLAN_TOPN:
         return _walk_range(cutter, node, RowRange.every_row(), inputs)
     if tag == PLAN_JOIN:

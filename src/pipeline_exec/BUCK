@@ -26,7 +26,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # `sink_string_group_agg` (the same keyed by
 # strings, over `string_keys`' intern table; `string_harness` is its test table), `sink_sort`
 # (the in-memory sort and the top-N's range of its order, over `sort_nulls`,
-# `sort_range` and `op_sort`; `sort_harness` is its test table and oracle), and
+# `sort_range` and `op_sort`; `sort_harness` is its test table and oracle),
+# `sink_window` (window functions: the rows sorted by the partition and order keys
+# with one column per expression, over `op_window`'s kernel) and
 # `real_builder` that constructs them from a segment descriptor; the join is two
 # segments, a build side ending in `sink_collect` as SINK_HASH_BUILD and a probe
 # side whose chain carries `op_hash_probe` (`join_harness` writes join plans by
@@ -46,7 +48,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 resident batch, 1e16, 1, -1e16, 1 exactly 1.0,
 #                                 the cursor-grain route's refusal.
 # test_variants                   each variant slot forwards to its member, the
-#                                 fourth operator slot included.
+#                                 fourth operator and sink slots included.
 # test_run_segment                every row once, the end of input once per
 #                                 worker, the operator chain, combine once
 #                                 after every worker, a worker count of one to
@@ -234,6 +236,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # test_topn_plan                  hand-built plans into SINK_TOPN: a resident batch,
 #                                 a Parquet scan, a segment's output, no row, a pool
 #                                 too small, data refused by name.
+# test_sink_window                SINK_PARTITION_BY by hand: ROW_NUMBER, RANK, LAG and
+#                                 LEAD, running and whole-partition aggregates against
+#                                 a plain-loop oracle with NULL keys and values, one
+#                                 worker and four dealt in reverse equal bit for bit
+#                                 (rows tied on every key numbered in source order), no
+#                                 input, refusals by exact message, the pool charged,
+#                                 returned and refused by name.
+# test_window_plan                hand-built plans into SINK_PARTITION_BY: a resident
+#                                 batch, a window read by a filtered collect segment on
+#                                 1 to 4 workers, two chained windows, a param the
+#                                 builder does not hold, a plan run twice.
 # test_tpch_q6                    Q6 over Parquet, end to end, against an
 #                                 oracle and a hand-computed answer.
 # test_tpch_q6_concurrent         Q6 on threads, run after run.
@@ -303,6 +316,7 @@ mojo_library(
         "//src/name_registry:name_registry",
         "//src/objectstore:objectstore",
         "//src/op_sort:op_sort",
+        "//src/op_window:op_window",
         "//src/op_join_probe:op_join_probe",
         "//src/op_sources:op_sources",
         "//src/op_spill_rows:op_spill_rows",
@@ -373,6 +387,7 @@ mojo_library(
         "tests/test_sink_sort.mojo",
         "tests/test_sink_string_group_agg.mojo",
         "tests/test_sink_topn.mojo",
+        "tests/test_sink_window.mojo",
         "tests/test_sort_keys.mojo",
         "tests/test_sort_plan.mojo",
         "tests/test_sort_plan_concurrent.mojo",
@@ -388,6 +403,7 @@ mojo_library(
         "tests/test_tpch_q6.mojo",
         "tests/test_tpch_q6_concurrent.mojo",
         "tests/test_variants.mojo",
+        "tests/test_window_plan.mojo",
     ],
     # Declared data is staged at the path given, and the test opens it by that
     # path: DuckDB's answer to each case of the agg_float_ungrouped corpus.

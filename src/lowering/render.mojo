@@ -319,6 +319,8 @@ def render_lowered_plan(plan: LoweredPlan) -> String:
         + String(len(p.sort))
         + " topn="
         + String(len(p.topn))
+        + " window="
+        + String(len(p.window))
         + " batches="
         + String(len(p.batches))
         + "\n"
@@ -356,6 +358,21 @@ def render_lowered_plan(plan: LoweredPlan) -> String:
             out += " desc" if t.descending[k] else " asc"
             out += " nulls_first" if t.nulls_first[k] else " nulls_last"
         out += " offset=" + String(t.offset) + " n=" + String(t.n) + "\n"
+    for i in range(len(p.window)):
+        ref w = p.window[i]
+        out += "  window " + String(i) + ": partition=" + _names(w.partition_keys)
+        out += " order=["
+        for k in range(len(w.order_keys)):
+            if k > 0:
+                out += ", "
+            out += w.order_keys[k]
+            out += " desc" if w.descending[k] else " asc"
+        out += "] exprs=["
+        for k in range(len(w.partition_exprs)):
+            if k > 0:
+                out += ", "
+            out += String(w.partition_exprs[k])
+        out += "]\n"
     for i in range(len(p.udfs)):
         ref u = p.udfs[i]
         out += (

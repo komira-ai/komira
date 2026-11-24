@@ -224,7 +224,7 @@ def _header() -> String:
     return String("ir_version ") + String(PHYSICAL_PLAN_IR_VERSION) + "\n"
 
 
-comptime _PARAMS = "params: agg=0 sort=0 topn=0 batches=0\n"
+comptime _PARAMS = "params: agg=0 sort=0 topn=0 window=0 batches=0\n"
 comptime _T_SOURCE = "SOURCE_PARQUET path=t.parquet total=True"
 
 

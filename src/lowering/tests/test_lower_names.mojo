@@ -223,7 +223,7 @@ def test_render_names_every_source_edge_order_and_operator() raises:
     expected += "  deps: 1/E3\n"
     expected += "  order: ORDER_ROW_RANGE partitions=1\n"
     expected += "  estimates: morsel_rows=0 card_rows=0 mem_bytes=0\n"
-    expected += "params: agg=0 sort=0 topn=0 batches=0\n"
+    expected += "params: agg=0 sort=0 topn=0 window=0 batches=0\n"
     expected += "result: segment 2\n"
     assert_equal(render_lowered_plan(plan), expected)
 
@@ -259,7 +259,7 @@ def test_render_prints_the_number_of_a_tag_it_has_no_name_for() raises:
     expected += "  deps: 5/E9\n"
     expected += "  order: ORDER_6 partitions=1\n"
     expected += "  estimates: morsel_rows=0 card_rows=0 mem_bytes=0\n"
-    expected += "params: agg=0 sort=0 topn=0 batches=0\n"
+    expected += "params: agg=0 sort=0 topn=0 window=0 batches=0\n"
     expected += "result: segment 0\n"
     assert_equal(render_lowered_plan(plan), expected)
 

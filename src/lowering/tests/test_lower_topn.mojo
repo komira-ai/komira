@@ -205,7 +205,7 @@ def test_a_topn_over_a_scan_is_one_result_segment() raises:
     expected += "  deps: none\n"
     expected += "  order: ORDER_NONE partitions=1\n"
     expected += "  estimates: morsel_rows=" + String(m) + " card_rows=6000 mem_bytes=0\n"
-    expected += "params: agg=0 sort=0 topn=1 batches=0\n"
+    expected += "params: agg=0 sort=0 topn=1 window=0 batches=0\n"
     expected += "  topn 0: keys=qty asc nulls_first, flag desc nulls_last offset=0 n=3\n"
     expected += "result: segment 0\n"
     assert_equal(render_lowered_plan(_lowered(plan)), expected)

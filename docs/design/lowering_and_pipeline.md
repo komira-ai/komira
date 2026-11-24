@@ -225,7 +225,7 @@ first slices set `ORDER_NONE` only; step 9 sets `ORDER_ROW_RANGE` on the ungroup
 asks of the driver is in §3.3 and open point O1, and what step 9 built is after the table of §7.3.
 
 **What the cutter refuses.** An `ASOF` join (`SINK_ASOF_JOIN`), a sort-merge join (`SINK_SMJ_BUILD`), the IR's
-`SINK_JOIN_PROBE` (a second, sink-form probe the cutter does not emit; the probe is `OP_JOIN_PROBE`, §3.6), a view reference and
+`SINK_JOIN_PROBE` (a second, sink-form probe the cutter does not emit; the probe is `OP_JOIN_PROBE`, §3.6), a view reference, a partition top-n (`PLAN_PARTITION_TOPN`) and
 a cast to string in a pipeline's spine are not cut yet: the IR has the tags and the cutter does not emit them. A union is cut: each branch ends in a
 segment of its own and the union's pipeline reads their outputs through a `SOURCE_CONCAT` in branch order (src/lowering/README.md). A shared-subplan
 reference (`PLAN_CSE_REF`) is cut: a canonical subtree with a breaker or a limit ends in a segment of its own that every reference reads over an `E3`
@@ -262,7 +262,8 @@ bit-reproducible across worker counts; a grouped one is not served yet.
 `LOWERING_SINK_UNSERVED`, naming the triple. The alternative, to turn that segment into a generic collect and
 compute the sink another way, changes what runs without changing what the plan says; the plan's author sees a slow
 or different answer and no refusal. The same applies to the Parquet arm that is not total (§2.2) and to a join the
-probe operator cannot take: `LOWERING_JOIN_UNSERVED`, naming the reason (the join type, the build side, the algorithm hint or the key types).
+probe operator cannot take: `LOWERING_JOIN_UNSERVED`, naming the reason (the join type, the build side, the algorithm hint or the key types),
+and to a window the window sink cannot compute: `LOWERING_WINDOW_UNSERVED`, naming the key, function or frame.
 
 A host that has to re-optimize to lower is a bug in the optimizer, not a thing for lowering to do. If a plan reaches
 `lower` in a form the cutter cannot cut, the fix is a rewrite in `optimizer`, run before `lower`.
@@ -275,7 +276,7 @@ A host that has to re-optimize to lower is a bug in the optimizer, not a thing f
 | `lowered_plan` | `LoweredPlan`, `LoweringInputs`, `ParamTable` and the refusal tokens |
 | `cut_walk` | the three-role walk of §2.3: the dispatch on the node's tag, one branch per arm |
 | `cut_state` | what the arms share: the open pipeline, the cutter's segments and `ParamTable`, the close of a pipeline in a sink and the reopen over an `E3` edge |
-| `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_sort`, `cut_join` | one arm each: the checks that refuse the node, run before its child is walked, and the fuse or close onto the child's pipeline |
+| `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`, `cut_aggregate`, `cut_sort`, `cut_window`, `cut_join` | one arm each: the checks that refuse the node, run before its child is walked, and the fuse or close onto the child's pipeline |
 | `sink_capability` | the table of sink triples a host serves (§4.2): data, no operator |
 | `render` | the deterministic text render of a `LoweredPlan` the corpus compares |
 
@@ -965,6 +966,18 @@ the morsel sink trait carry only batches, and the index is built once and serial
 from DuckDB, by name: the kernel stands for a NULL key by the INT64 value 9221120237041090561, so a non-NULL INT64 key
 holding it is refused (`JOIN_KEY_RESERVED`) instead of matching; a validity bit beside the key slot would lift it. Not built: a parallel build in the build segment's finalize, runtime filters, build-side memory accounting and
 spill, chunking of a large equi-join probe output (a morsel gives one batch; a CROSS join emits chunks of 65536 rows), and DATE and DECIMAL keys.
+**What step 4 built, against the row above (window functions).** `lowering.cut_window` cuts a `PLAN_PARTITION_BY` node
+(one node carries every function of one `OVER` clause). Its child's pipeline ends in a `SINK_PARTITION_BY` segment (key
+`NONE`, orientation `COLUMNAR`) whose `sink_param_id` indexes `ParamTable.window`, one `PartitionBySinkData` per window node in cut
+order, and a pipeline opens that reads it over an `E3` edge. The rows come out ordered by the partition keys and then the
+order keys, so the reopened pipeline is marked as a sorted stream and a `LIMIT` above it is refused as one above a sort
+is. `lower` refuses with `LOWERING_WINDOW_UNSERVED`, before it walks the child: a key that is not a column of the child or
+whose type is not INT64, INT32, FLOAT64, BOOL or STRING, a function or argument type the sink does not compute (the
+ranking functions, `NTILE`, `LAG`, `LEAD`, `FIRST_VALUE`, `LAST_VALUE`, `NTH_VALUE`, `SUM`, `AVG`, `MIN`, `MAX` and
+`COUNT` are served), a `LAG` or `LEAD` default the column cannot hold unchanged, and a frame other than `RANGE`
+`UNBOUNDED PRECEDING` to `CURRENT ROW` or the whole partition. The schema the sink declares marks a `SUM`, `AVG`, `MIN`
+or `MAX` column nullable when its argument column is. Not built: explicit sliding frames, a partition top-n and a parallel
+window sink.
 **What step 9 built, against the row above.** The ungrouped sink, the only one that folds a float argument, is
 reproducible; neither 9a nor `GrainSourceImpl` was built, because the sources already stamp a position on every morsel:
 the Parquet source's partition id is its flat row group times 2^20 plus the morsel's index in that row group (the

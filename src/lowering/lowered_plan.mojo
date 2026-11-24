@@ -16,6 +16,7 @@ from physical_plan.physical_plan import (
     AggSinkData,
     SortSinkData,
     TopNSinkData,
+    PartitionBySinkData,
 )
 from containers.slab import Slab
 from plan_ir.udf_ref import UdfRef
@@ -39,6 +40,10 @@ comptime LOWERING_JOIN_UNSERVED = "LOWERING_JOIN_UNSERVED"
 """Refusal: a join the hash join does not serve (a join type the IR does not
 define, a SEMI or ANTI join that builds its left side, a CROSS join with a key,
 its keys, key types, residual, algorithm hint, build side or output names)."""
+
+comptime LOWERING_WINDOW_UNSERVED = "LOWERING_WINDOW_UNSERVED"
+"""Refusal: a window node the window sink does not serve (a key or argument
+type, a function's arguments, a frame, or a column that is not the child's)."""
 
 comptime LOWERING_UDF_UNDECLARED_READ = "LOWERING_UDF_UNDECLARED_READ"
 """Refusal: a user function would receive a column its read set does not
@@ -122,8 +127,10 @@ struct ParamTable(Movable):
     cut order, so equal inputs give equal indices.
 
     `SINK_AGG` segments index `agg` by `sink_param_id`, `SINK_SORT` segments
-    index `sort`, `SINK_TOPN` segments index `topn`; a `SINK_COLLECT` or `SINK_HASH_BUILD` segment indexes nothing
-    (`sink_param_id` is -1): a join's keys are on its OP_JOIN_PROBE. `SOURCE_BATCH` segments index `batches` by
+    index `sort`, `SINK_TOPN` segments index `topn`, `SINK_PARTITION_BY`
+    segments index `window`; a `SINK_COLLECT` or `SINK_HASH_BUILD` segment
+    indexes nothing (`sink_param_id` is -1): a join's keys are on its
+    OP_JOIN_PROBE. `SOURCE_BATCH` segments index `batches` by
     `source_spec.batch_handle_id`. Every user-function call (an
     OP_UDF_APPLY, an OP_UDF_FRAME, a SOURCE_UDF_STEP) indexes `udfs` by its
     `udf_index`: the inputs' `UdfRef` list, whole and in its order.
@@ -132,6 +139,7 @@ struct ParamTable(Movable):
     var agg: List[AggSinkData]
     var sort: List[SortSinkData]
     var topn: List[TopNSinkData]
+    var window: List[PartitionBySinkData]
     var batches: List[InMemorySource]
     var udfs: Slab[UdfRef]
 
@@ -139,6 +147,7 @@ struct ParamTable(Movable):
         self.agg = List[AggSinkData]()
         self.sort = List[SortSinkData]()
         self.topn = List[TopNSinkData]()
+        self.window = List[PartitionBySinkData]()
         self.batches = List[InMemorySource]()
         self.udfs = Slab[UdfRef]()
 

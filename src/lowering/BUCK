@@ -98,7 +98,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        reference found by its hash before folding, a join's
 #                        right child walked first (a self-join, scan facts
 #                        kept, a shared join), one of scans, filters, projections
-#                        and unions cut again over the same scan facts, and
+#                        and unions cut again over the same scan facts, a
+#                        window read twice cut once, one with a reference
+#                        under it or holding one, a window as a join's left
+#                        child keeping its scan facts, and
 #                        the refusal of a reference with no canonical subtree,
 #                        before it or of another layout, and of a view
 #                        reference.
@@ -106,6 +109,20 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        integer sum, is lowered to SUM(<integer>) with its
 #                        declared DECIMAL(38, 0) output kept; every other shape
 #                        of cast, argument type and aggregate is left alone.
+# test_lower_window      the rendered physical plan of window nodes: a
+#                        scan, a filter and projection, a projection above, two
+#                        stacked windows, a node of two functions, a window
+#                        over a join and over an aggregation; the declared
+#                        schema's nullability, which every reader of a shared
+#                        window takes; a limit above a window with keys
+#                        refused and one above a window with none cut.
+# test_lower_window_refusals
+#                        every reason a window is refused with
+#                        LOWERING_WINDOW_UNSERVED (the descending list, key
+#                        columns and types, function arguments and defaults,
+#                        frames, an unknown function), each by its exact text,
+#                        the refusal coming before the child is walked and in a
+#                        fixed order, and the windows that lower beside each.
 # test_sink_capability   the capability table's rows, which triples are not
 #                        served, and admission of hand-built segments.
 # test_lower_udf_nodes   the rendered physical plan of user-function plans: an
@@ -171,6 +188,8 @@ mojo_library(
         "tests/test_lower_sum_fuse.mojo",
         "tests/test_lower_topn.mojo",
         "tests/test_lower_union.mojo",
+        "tests/test_lower_window.mojo",
+        "tests/test_lower_window_refusals.mojo",
         "tests/test_lower_udf_nodes.mojo",
         "tests/test_lower_udf_refusals.mojo",
         "tests/test_sink_capability.mojo",

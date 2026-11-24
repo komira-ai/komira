@@ -742,7 +742,7 @@ The type of every result column is in [the result-type table](query_semantics_ty
 
 - **Rule.** ROW_NUMBER numbers the rows of a partition 1 to n. Peers are rows whose order keys compare equal on every key, with NULL equal to NULL (§9.7) and floats under §2.6. RANK gives peers the row number of the first peer, leaving gaps. DENSE_RANK numbers peer groups 1, 2, 3 without gaps; PERCENT_RANK and CUME_DIST are computed over the same peer groups. Ranking functions ignore the frame, so this peer definition applies to them whatever the frame says.
 - **DuckDB.** rank is "same as row_number of its first peer"; dense_rank "counts peer groups" (DuckDB documentation, "window functions").
-- **Current behaviour.** Declared at `src/plan_expr/partition_expr.mojo:44-46`; the window operator is not here.
+- **Current behaviour.** Declared at `src/plan_expr/partition_expr.mojo:44-46`. `run_sql` serves them: lowering cuts a PARTITION_BY node into a SINK_PARTITION_BY segment, and `src/pipeline_exec/sink_window.mojo` runs `op_window`'s kernel over the collected rows; `src/sdk_exec/tests/test_run_sql_window.mojo` compares row_number, rank, dense_rank, percent_rank, cume_dist and ntile with DuckDB's answers.
 - **Mark.** MATCHES.
 
 ### 9.3 ROW_NUMBER among peers
@@ -777,28 +777,28 @@ The type of every result column is in [the result-type table](query_semantics_ty
 
 - **Rule.** Rows whose order key is NULL are peers of one another: they form one peer group, placed by §4.1. This holds for the ranking functions whatever the frame (§9.2), so NULL-keyed rows tie in RANK, DENSE_RANK, PERCENT_RANK and CUME_DIST; and under a RANGE frame they also get the same running value. Under a ROWS frame, frame bounds count physical rows, but ranking still treats them as peers.
 - **DuckDB.** The same: NULLs compare equal for peer detection, so NULL-keyed rows tie in the ranking functions and share a RANGE frame (the oracle confirms).
-- **Current behaviour.** No window operator here.
+- **Current behaviour.** Served through `run_sql` as in §9.2: rank, dense_rank and the default running RANGE aggregate give NULL-keyed rows one value, as `test_run_sql_window` compares with DuckDB.
 - **Mark.** MATCHES.
 
 ### 9.8 RANGE frames with offsets
 
 - **Rule.** As DuckDB. `RANGE BETWEEN n PRECEDING AND m FOLLOWING` needs exactly one numeric or temporal order key. The frames of NULL and NaN order keys are DuckDB's, measured by the oracle before a case relies on them; the expected answer is that a NULL-keyed row's frame is the NULL peer group and NaN keys are peers of each other, sorting per §4.3. The plan's offsets are INT64 (`src/plan_expr/partition_frame.mojo:51-58`); a fractional offset over a float key and an interval offset over a temporal key are refused by name until the plan carries them ([komira#1228](https://github.com/komira-ai/komira/issues/1228)).
 - **DuckDB.** Accepts fractional offsets over float keys; its frame for a NULL or NaN key is not documented and the oracle measures it.
-- **Current behaviour.** No window operator here.
+- **Current behaviour.** Lowering serves only the frames RANGE UNBOUNDED PRECEDING to CURRENT ROW and UNBOUNDED PRECEDING to UNBOUNDED FOLLOWING; a frame with an offset is refused by name (`LOWERING_WINDOW_UNSERVED`, step `lower`), so no frame with offsets runs yet.
 - **Mark.** MATCHES (its non-integer offsets are a parity gap).
 
 ### 9.9 NULL partition keys
 
 - **Rule.** For PARTITION BY (windows and PARTITION_TOPN), NULL equals NULL: all rows whose partition key is NULL form one partition, as in grouping (§2.4). Multi-column keys compare column by column under the same rule, and float keys follow §2.6.
 - **DuckDB.** PARTITION BY groups rows like GROUP BY, NULLs together (DuckDB documentation, "window functions"; the oracle confirms).
-- **Current behaviour.** No window operator here.
+- **Current behaviour.** Served through `run_sql` for INT64, INT32, FLOAT64, BOOL and STRING partition keys; a NULL key is one partition (`test_run_sql_window` compares an INTEGER and a VARCHAR key with NULLs against DuckDB). Another key type (DATE, DECIMAL, timestamps, 8 and 16-bit integers) is refused by name at `lower`.
 - **Mark.** MATCHES.
 
 ### 9.10 FIRST_VALUE, LAST_VALUE and NTH_VALUE over NULLs
 
 - **Rule.** These functions respect NULLs: FIRST_VALUE is the value of the frame's first row and LAST_VALUE of its last row, NULL if that row's value is NULL. NTH_VALUE(x, n) is the value of the n-th row of the frame, counting from 1 and counting rows whose value is NULL; it is NULL when the frame has fewer than n rows. All three are NULL over an empty frame. Skipping NULLs (`IGNORE NULLS`) is §9.5.
 - **DuckDB.** RESPECT NULLS is the default, with IGNORE NULLS as an option; `nth_value` evaluates "at the nth row (counting from 1) of the window frame" (DuckDB documentation, "window functions").
-- **Current behaviour.** `PartitionExpr` carries no IGNORE NULLS field, and the value functions read their frame (`src/plan_expr/partition_expr.mojo:51-54`, `:226-255`); no window operator is in this repository.
+- **Current behaviour.** `PartitionExpr` carries no IGNORE NULLS field, and the value functions read their frame (`src/plan_expr/partition_expr.mojo:51-54`, `:226-255`). `run_sql` serves them over BIGINT, DOUBLE and VARCHAR arguments under the default running frame or a whole-partition frame (`test_run_sql_window`).
 - **Mark.** MATCHES.
 
 ## 10. Reserved

@@ -25,6 +25,10 @@
 #     scans keep their facts (under a left child of every kind the cutter
 #     cuts, a top-n and a nested join included), and a shared join is cut
 #     once.
+#   * A window is a breaker like a sort: one read twice is cut once and its
+#     readers are sorted inputs, a reference under one is found, a left child
+#     that is one keeps its scans' facts, and a canonical subtree holding one
+#     over a reference is found by its unfolded hash.
 #   * References under every node kind the cutter cuts are found; a shared
 #     subtree holding a reference, and a second inline subtree of a named hash,
 #     are cut as the rules say.
@@ -55,6 +59,7 @@ from physical_plan.physical_plan import (
     SINK_COLLECT,
     SINK_HASH_BUILD,
     SINK_ORIENT_DICT_ENCODED,
+    SINK_PARTITION_BY,
     SINK_SORT,
     SINK_TOPN,
     SOURCE_CONCAT,
@@ -63,6 +68,7 @@ from physical_plan.physical_plan import (
 )
 from plan_expr.agg_expr import AggExpr, AGG_COUNT
 from plan_expr.expr import Expr, BIN_GT
+from plan_expr.partition_expr import PartitionExpr, PartitionFrame
 from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import (
     LogicalPlan,
@@ -157,6 +163,38 @@ def _ascending() -> List[Bool]:
 
 def _sorted(var child: LogicalPlan) -> LogicalPlan:
     return LogicalPlan.sort(_keys("k"), _ascending(), child^)
+
+
+def _windowed(var child: LogicalPlan) raises -> LogicalPlan:
+    """ROW_NUMBER() OVER (PARTITION BY s ORDER BY k) AS rn over `child`, which
+    has the columns k and s."""
+    var exprs = List[PartitionExpr]()
+    exprs.append(
+        PartitionExpr.row_number()
+        .with_frame(PartitionFrame.running_range())
+        .with_alias("rn")
+    )
+    var order = List[Bool]()
+    order.append(False)
+    return LogicalPlan.partition_by(
+        _keys("s"), _keys("k"), order^, exprs^, child^
+    )
+
+
+def _windowed_by_k(var child: LogicalPlan) raises -> LogicalPlan:
+    """ROW_NUMBER() OVER (ORDER BY k) AS rn over `child`, whose columns are k
+    and one more."""
+    var exprs = List[PartitionExpr]()
+    exprs.append(
+        PartitionExpr.row_number()
+        .with_frame(PartitionFrame.running_range())
+        .with_alias("rn")
+    )
+    var order = List[Bool]()
+    order.append(False)
+    return LogicalPlan.partition_by(
+        List[String](), _keys("k"), order^, exprs^, child^
+    )
 
 
 def _stats(rows: Int) -> TableStats:
@@ -847,6 +885,104 @@ def test_a_shared_join_is_cut_once() raises:
     assert_equal(lp.segments[0].sink_kind, SINK_HASH_BUILD)
     assert_equal(lp.segments[1].source_spec.parquet_path, "a.parquet")
     assert_equal(lp.segments[1].sink_kind, SINK_COLLECT)
+    _expect_concat(lp, 2, _ids(1, 1))
+
+
+# =============================================================================
+# A window in a shared subplan
+# =============================================================================
+
+
+def test_a_window_read_twice_is_cut_once_and_a_keyed_window_is_a_sorted_input() raises:
+    var canonical = _windowed(_scan())
+    var plan = _union(_two(canonical.copy(), _ref_to(canonical)))
+    var lp = _lowered(plan, _inputs(1))
+    assert_equal(len(lp.segments), 2)
+    assert_equal(lp.segments[0].sink_kind, SINK_PARTITION_BY)
+    _expect_concat(lp, 1, _ids(0, 0))
+    assert_equal(len(lp.params.window), 1)
+    var text = render_lowered_plan(lp)
+    assert_true("  source: SOURCE_CONCAT from=0,0\n" in text, text)
+    assert_true("  deps: 0/E3 0/E3\n" in text, text)
+    # The reader of a keyed window's output is a sorted input, as a sort's is.
+    var limited = _union(
+        _two(canonical.copy(), LogicalPlan.limit(2, _ref_to(canonical)))
+    )
+    _refused_with(
+        _message(limited, _inputs(1)),
+        LOWERING_UNCUTTABLE_NODE,
+        "a limit over a sorted stream",
+    )
+
+
+def test_a_reference_below_a_window_is_found_and_read_over_e3() raises:
+    # count by k over a (columns k, n), UNION ALL (k and n of ROW_NUMBER()
+    # OVER (ORDER BY k) over a reference to that count).
+    var canonical = _count_by(_scan())
+    var kept = ExprArray()
+    kept.append(Expr.col_ref("k"))
+    kept.append(Expr.col_ref("n"))
+    var plan = _union(
+        _two(
+            canonical.copy(),
+            LogicalPlan.project(kept^, _windowed_by_k(_ref_to(canonical))),
+        )
+    )
+    var lp = _lowered(plan, _inputs(1))
+    # 0: the count. 1: the window sink over 0's output. 2: the projection
+    # over 1's output, collected as the union's branch. 3: 0 and 2.
+    assert_equal(len(lp.segments), 4)
+    assert_equal(lp.segments[0].sink_kind, SINK_AGG)
+    assert_equal(lp.segments[1].sink_kind, SINK_PARTITION_BY)
+    _expect_reads(lp, 1, 0)
+    assert_equal(lp.segments[2].sink_kind, SINK_COLLECT)
+    _expect_reads(lp, 2, 1)
+    _expect_concat(lp, 3, _ids(0, 2))
+
+
+def test_a_left_child_that_is_a_window_keeps_its_scans_facts_beside_a_reference() raises:
+    # Left: a window over l (scan 0). Right: X UNION ALL ref(X) (scan 1). The
+    # right child is walked first, from scan 1, so the window's scan is
+    # counted when the left child's scans are skipped.
+    var x = _scan("x.parquet")
+    var plan = _inner_join(
+        _windowed(_scan("l.parquet")), _union(_two(x.copy(), _ref_to(x)))
+    )
+    var inputs = LoweringInputs()
+    inputs.add_scan(Optional[TableStats](_stats(10)))
+    inputs.add_scan(Optional[TableStats](_stats(99)))
+    var lp = _lowered(plan, inputs)
+    var paths = List[String]()
+    paths.append("l.parquet")
+    paths.append("x.parquet")
+    var rows = List[Int]()
+    rows.append(10)
+    rows.append(99)
+    _expect_parquet_cards(lp, paths, rows)
+    var windows = 0
+    for i in range(len(lp.segments)):
+        if lp.segments[i].sink_kind == SINK_PARTITION_BY:
+            windows += 1
+            assert_equal(lp.segments[i].source_spec.parquet_path, "l.parquet")
+    assert_equal(windows, 1)
+
+
+def test_a_shared_subtree_that_holds_a_window_over_a_reference_is_found_by_its_unfolded_hash() raises:
+    # The producer saw inner = count by k and W = ROW_NUMBER() OVER (ORDER BY
+    # k) over inner UNION ALL inner, and the plan W UNION ALL W. It keeps the
+    # first W, folds the second inner inside it and the second W, each
+    # reference carrying the hash of the subtree as it stood before folding.
+    var inner = _count_by(_scan())
+    var seen = _windowed_by_k(_union(_two(inner.copy(), inner.copy())))
+    var kept = _windowed_by_k(_union(_two(inner.copy(), _ref_to(inner))))
+    var plan = _union(_two(kept^, _ref_to(seen)))
+    var lp = _lowered(plan, _inputs(1))
+    # 0: the count. 1: the two reads of it, concatenated into the window
+    # sink. 2: the window's output twice.
+    assert_equal(len(lp.segments), 3)
+    assert_equal(lp.segments[0].sink_kind, SINK_AGG)
+    _expect_concat(lp, 1, _ids(0, 0))
+    assert_equal(lp.segments[1].sink_kind, SINK_PARTITION_BY)
     _expect_concat(lp, 2, _ids(1, 1))
 
 

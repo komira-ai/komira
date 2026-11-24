@@ -13,8 +13,8 @@ and no environment variable and touches no global, so equal arguments give a
 - `lowered_plan`: `LoweringInputs` (one `ScanFacts` per scan in scan
   pre-order: the footers' statistics and the columns every row group stores
   dictionary encoded, and for an Iceberg table scan the files the host planned
-  (`add_iceberg_scan`); and the plan's `UdfRef` list), `ParamTable` (`agg`, `sort`, `topn`, `batches`, and the
-  `UdfRef` list whole, as `udfs`), `LoweredPlan` and the seven refusal
+  (`add_iceberg_scan`); and the plan's `UdfRef` list), `ParamTable` (`agg`, `sort`, `topn`, `window`, `batches`, and the
+  `UdfRef` list whole, as `udfs`), `LoweredPlan` and the eight refusal
   tokens.
 - `cut_walk`: the cutter. A scan opens a pipeline (`SOURCE_PARQUET`, whose
   spec lists the files when there are several; `SOURCE_BATCH` for an in-memory
@@ -34,7 +34,7 @@ and no environment variable and touches no global, so equal arguments give a
   by the partition columns). A step, a user function run once, opens one too
   (`SOURCE_UDF_STEP`, see User functions). A filter, a projection, a limit and
   an ungrouped frame fuse into it.
-  An aggregation, a distinct or a sort ends it in a sink and opens a pipeline
+  An aggregation, a distinct, a sort or a window ends it in a sink and opens a pipeline
   that reads that segment's output over an `E3` edge. A top-n, and a limit
   that reaches a sort or a top-n through only projections (without a UDF) and
   other limits, is cut as one `SINK_TOPN` segment that keeps the composed range
@@ -52,12 +52,17 @@ and no environment variable and touches no global, so equal arguments give a
   the union fuses onto or closes that pipeline. A join
   (`cut_join`: INNER, LEFT, RIGHT, FULL, SEMI, ANTI and CROSS) ends its build
   child in a `SINK_HASH_BUILD` segment and fuses an `OP_JOIN_PROBE` into the
-  probe child's pipeline, with an `E3` edge to the build segment. The root is a `SINK_COLLECT`
+  probe child's pipeline, with an `E3` edge to the build segment. A window (`cut_window`, one node
+  with every function of one `OVER` clause) ends its child in a
+  `SINK_PARTITION_BY` segment whose `sink_param_id` indexes
+  `ParamTable.window`, opens a pipeline that reads it, and marks that
+  pipeline as a sorted stream when the node has a key. The root is a `SINK_COLLECT`
   segment unless the top node is a breaker, which is then the result.
   `cut_walk` is the dispatch on the node's tag and the resolution of shared
   subplans around it (below); each arm is its own module (`cut_scan` and
   its JSON arm `cut_scan_jsonl`, `cut_filter`, `cut_project`, `cut_limit`,
-  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_topn`, `cut_union`, `cut_join`,
+  `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_topn`, `cut_window`,
+  `cut_union`, `cut_join`,
   `cut_shared`), and `cut_state` holds
   what they share: the open pipeline, the cutter's segments and ParamTable,
   the shared subplans cut so far, and the close and reopen of a breaker. A new
@@ -71,12 +76,12 @@ and no environment variable and touches no global, so equal arguments give a
   a reference a join's right child before its left, the producer's order; the
   scan count is set for each child of the join, so the scans keep their
   pre-order indices). One that holds an aggregation, a distinct, a sort, a
-  limit or a join is cut once: it ends in a segment of its own, as a union
-  branch does, and the canonical position and every reference read that
-  segment over an `E3` edge (a union that holds two references names the
+  window, a limit or a join is cut once: it ends in a segment of its own, as
+  a union branch does, and the canonical position and every reference read
+  that segment over an `E3` edge (a union that holds two references names the
   segment twice in its `SOURCE_CONCAT`); the engine hands each reader the
-  same rows. A reader of a sort's or a top-n's output is a sorted input, as
-  the sort's own reader is. One that is only scans, filters, projections and unions of them
+  same rows. A reader of a sort's, a top-n's or a keyed window's output is a
+  sorted input, as the breaker's own reader is. One that is only scans, filters, projections and unions of them
   is cut again at every reference, over the same scans: the references take
   no `ScanFacts` of their own, and the recut keeps the scans' statistics,
   dictionary-encoded keys and parallel read.
@@ -94,7 +99,9 @@ and no environment variable and touches no global, so equal arguments give a
   column keeping its own (a distinct's columns are its group keys, so a
   distinct over several columns gets the same row). The last row is
   `(SINK_HASH_BUILD, NONE, COLUMNAR)`, a join's build segment; it indexes no
-  ParamTable row, so its `sink_param_id` is -1.
+  ParamTable row, so its `sink_param_id` is -1. `(SINK_PARTITION_BY, NONE,
+  COLUMNAR)`, after the sort row, is a window's segment; it indexes
+  `ParamTable.window`.
 - `udf_check`: what a user-function call is held to before it is cut (see
   User functions).
 - `render`: the deterministic text of a `LoweredPlan`.
@@ -137,7 +144,8 @@ outside its set is refused when the code runs, by its runtime
 Lowering refuses by name and never replaces what it cannot lower with another
 shape:
 
-- `LOWERING_UNCUTTABLE_NODE`, naming the node: window, view reference, cast to string or exchange node (the cutter has no
+- `LOWERING_UNCUTTABLE_NODE`, naming the node: a partition top-n,
+  view reference, cast to string or exchange node (the cutter has no
   arm for any of them, so an exchange is refused rather than elided on one
   host; a view reference is resolved before lowering, which has no view
   registry); a shared-subplan reference reached before its canonical subtree
@@ -150,7 +158,8 @@ shape:
   an offset that does not reach a sort (only a sort's output has an order to
   skip rows of); a limit over a sorted stream that is not one range of its
   sort (a filter stands between them, or the sort or a node between is a
-  shared subplan other readers read whole; see Order); a partial or final
+  shared subplan other readers read whole, or the stream is the output of a
+  window with a partition or order key; see Order); a partial or final
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
   than Parquet, in memory, CSV, JSON or an Iceberg table; a JSON scan whose
@@ -161,6 +170,21 @@ shape:
   type, decimal precision and scale and timezone; the concatenation reads
   every branch by position in the union's layout, so the producer casts and
   renames the branches first).
+- `LOWERING_WINDOW_UNSERVED`, naming the reason, raised before the child of
+  the window is walked: a descending list whose length is not the order keys';
+  a partition or order key that is not a column of the child or whose type is
+  not INT64, INT32, FLOAT64, BOOL or STRING; an `NTILE` bucket count or an
+  `NTH_VALUE` n that is not above 0; a `LAG`, `LEAD`, `FIRST_VALUE`,
+  `LAST_VALUE` or `NTH_VALUE` argument that is not an INT64, FLOAT64 or STRING
+  column; a `SUM`, `AVG`, `MIN` or `MAX` argument that is not an INT64 or
+  FLOAT64 column; an argument that is not a column of the child; a `LAG` or
+  `LEAD` default the column would change (a float over INT64, a string over a
+  number, anything but a string over STRING); a function the sink does not
+  compute; and a frame of a value function or aggregate other than `RANGE`
+  `UNBOUNDED PRECEDING` to `CURRENT ROW` (SQL's default with an order) and
+  `UNBOUNDED PRECEDING` to `UNBOUNDED FOLLOWING` in `ROWS` or `RANGE` units.
+  The sink declares a `SUM`, `AVG`, `MIN` or `MAX` column nullable when its
+  argument is.
 - `LOWERING_JOIN_UNSERVED`, naming the reason, raised before either child of
   the join is walked: a join type the plan IR does not define, a SEMI or ANTI
   join that builds its left side, a CROSS join that names a key, an equi-join
@@ -255,8 +279,10 @@ answers rows of the sort's order, ties kept in the collected order. A limit
 above a sort with a filter between them is refused, because the rows it keeps
 would depend on an order no segment records; so is a limit whose sort, or a
 node between them, is a shared subplan other readers read whole (a sort that
-only reads a shared subplan's segment is still one range), and a limit above an aggregation
-that reads a sort is cut: the aggregation ends the sorted stream.
+only reads a shared subplan's segment is still one range), and a limit above a
+window with a partition or order key (its rows come out in key order). A limit
+above an aggregation that reads a sort is cut: the aggregation ends the sorted
+stream.
 
 ## Dependencies
 

@@ -13,8 +13,9 @@
 #
 # `with_agg_sink` turns a segment into an ungrouped aggregation and
 # `ungrouped_agg_data` builds the sink data the builder keeps for it;
-# `with_sort_sink` turns one into the in-memory sort and `with_topn_sink` into
-# the sort that keeps a range of its order.
+# `with_sort_sink` turns one into the in-memory sort, `with_topn_sink` into
+# the sort that keeps a range of its order and `with_window_sink` into the
+# window functions.
 #
 # The sample batch has three columns:
 #   a  INT64, no NULL, row r holds r
@@ -45,6 +46,7 @@ from physical_plan.physical_plan import (
     SegmentDescPod,
     SINK_AGG,
     SINK_COLLECT,
+    SINK_PARTITION_BY,
     SINK_ORIENT_COLUMNAR,
     SINK_ORIENT_DICT_ENCODED,
     SINK_SORT,
@@ -368,3 +370,13 @@ def column_names(ref batch: RecordBatch) raises -> List[String]:
     for i in range(batch.num_columns()):
         out.append(batch.schema.field_name(i))
     return out^
+
+
+def with_window_sink(var desc: SegmentDescPod, param_id: Int) -> SegmentDescPod:
+    """`desc` with its sink changed to the window functions whose data the
+    builder holds as `param_id` (`RealBuilder.add_window_sink`)."""
+    desc.sink_kind = SINK_PARTITION_BY
+    desc.sink_key_dtype = KEY_DTYPE_NONE
+    desc.sink_orientation = SINK_ORIENT_COLUMNAR
+    desc.sink_param_id = param_id
+    return desc^

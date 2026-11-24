@@ -38,7 +38,7 @@ do is a free function in a module of its own.
 | `engine_catalog` | `register_parquet(ctx, name, path)`: the table's schema is its file's footer |
 | `engine_iceberg` | `register_iceberg_table(ctx, name, catalog, namespace, table, allow_moved_paths)`: asks an `iceberg_catalog.IcebergCatalog` where the table's current `metadata.json` is (a bare local path or a `file:///` URI; any other scheme is `ICEBERG_PATH_UNSUPPORTED`), reads the table's columns and current snapshot from it and registers it as `name` (not in `ctx.tables`, which lists Parquet tables) |
 | `engine_lower` | `lowering_inputs` (the facts of each scan, from `ctx.footers`, in the cutter's scan order; a registered table's scan is checked against its registered schema; a scan of an S3 or GCS bucket or an Azure container has no facts, since `ctx.footers` reads the local file system only; an Iceberg scan is planned by `iceberg_scan.scan_planner.plan_iceberg_scan`, which reads its manifests, prunes by the pushed filter and matches the delete files) and `lower_for_context` |
-| `engine_execute` | `run_lowered_plan_with(ctx, lowered, opener)`: a `RealBuilder` over a per-run metadata cache (keyed per file system) and expression pool, reading a Parquet scan of a bucket through the file system the `ScanFsOpener` opens on it (`objectstore_s3.S3ScanFs` for S3, `objectstore_gcs.GcsScanFs` for GCS, `azure_blob.AzureScanFs` for Azure; one opener, so one remote store kind, per run), the segment pool sized from the memory budget, the context's spill directory (when it has one) on the builder, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation and sort sink data (`params.agg`, `params.sort`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch. `run_lowered_plan(ctx, lowered)` is that with `LocalOnlyScanFs`, which refuses a scan of a bucket with `SCAN_FS_UNSERVED` |
+| `engine_execute` | `run_lowered_plan_with(ctx, lowered, opener)`: a `RealBuilder` over a per-run metadata cache (keyed per file system) and expression pool, reading a Parquet scan of a bucket through the file system the `ScanFsOpener` opens on it (`objectstore_s3.S3ScanFs` for S3, `objectstore_gcs.GcsScanFs` for GCS, `azure_blob.AzureScanFs` for Azure; one opener, so one remote store kind, per run), the segment pool sized from the memory budget, the context's spill directory (when it has one) on the builder, each in-memory source of the plan (`params.batches`) as one resident batch in plan order, the aggregation, sort and window sink data (`params.agg`, `params.sort`, `params.window`) in plan order, `run_plan` on `ctx.runtime` with the host profile's thread count; returns the result segment's batch. `run_lowered_plan(ctx, lowered)` is that with `LocalOnlyScanFs`, which refuses a scan of a bucket with `SCAN_FS_UNSERVED` |
 | `engine_write` | `write_copy_result(batch, dest, fmt, codec)`: the result batch as a file at the local path `dest` in the format `fmt`, through `fs.atomic_write.write_file_atomic` (all or nothing), returning the rows written; `write_parquet_result(batch, dest, codec)` and `write_text_result(batch, dest, fmt, codec)` (CSV or JSON), which it calls; `count_result(rows)`, the one-row BIGINT `Count` batch a COPY answers; `check_copy_target(dest, fmt, codec)`, the refusals of a URL and of lz4 for CSV or JSON |
 | `engine_write_text` | `encode_csv(batch)` and `encode_ndjson(batch)`: the bytes DuckDB's COPY writes for a result as CSV and as newline-delimited JSON; `compress_text(bytes, codec)`, the whole file as gzip or zstd; `text_writable(type)`; and the cell texts they are made of, `csv_double_text`, `json_double_text`, `date_text`, `decimal_text` |
 | `engine_sql` | `run_sql(ctx, text) -> SqlOutcome`: tokenize and parse, `bind_statement`, `optimize_for_run`, lower, run, and for a `COPY ... TO` write the file and answer `Count`. `optimize_for_run(plan)` is `optimize` (refusing a plan that needs a scalar subquery executed first, `OPTIMIZE_UNRESOLVED_SCALAR`) and then `plan_cse_eliminate`, which holds each subtree the plan repeats once (a CTE read twice, two equal UNION ALL branches) so lowering cuts it once and every reference reads it (`lowering.cut_shared`). Nothing raises: `SqlOutcome.refusal` holds the step (`parse`, `bind`, `optimize`, `lower`, `execute`) and that step's own message. `run_sql_with(ctx, text, opener)` runs with the opener a scan of a bucket is read through |
@@ -208,11 +208,13 @@ budget (unless it spills, see Spill below), a sum outside its declared type and 
 `execute`); and whatever lowering, the binder or the parser refuses (INNER, LEFT, RIGHT, FULL, SEMI, ANTI and CROSS joins are served, a scalar
 subquery being a CROSS join against its one-row aggregate; a join with a
 residual predicate, a SEMI or ANTI join that builds its left side and a join
-on keys the probe does not compare are `LOWERING_JOIN_UNSERVED` at `lower`).
+on keys the probe does not compare are `LOWERING_JOIN_UNSERVED` at `lower`;
+a window function of a kind, type or frame the window sink does not serve is
+`LOWERING_WINDOW_UNSERVED` at `lower`).
 Lowering given fewer scan facts than
 the plan has scans refuses by name (`LOWERING_INPUTS_SCAN_COUNT`);
 `lowering_inputs` descends only scan, filter, project, limit, aggregate,
-distinct, sort, union and join nodes (a union's branches in order; a join's
+distinct, sort, window (PARTITION_BY), union and join nodes (a union's branches in order; a join's
 left child, then its right, for every join, so a join the cutter refuses has
 its scans' facts read first) and gives a facts entry per scan it reaches; the
 cutter refuses any other node by name before it asks for the scans below it.
@@ -345,6 +347,15 @@ The tests run when the package is built.
   grouped and ungrouped aggregates and `all_varchar`, each over the committed
   file and over a gzip copy; a missing file is refused at bind and
   `header=false` at lowering.
+- `test_run_sql_window`: `run_sql` over a Parquet table DuckDB wrote (the
+  `:window_oracle` build action) answers what the pinned DuckDB answers for
+  every case of `tests/window/cases.sql`: ranking functions, `lag` and `lead`,
+  running and whole-partition aggregates, `first_value`, `last_value` and
+  `nth_value`, with no, one or two partition keys, several windows in one
+  SELECT, a WHERE and an outer ORDER BY, on one and three workers, each column
+  of its documented type; a sum over an INTEGER, a DATE partition key, a
+  DECIMAL order key, an explicit ROWS frame and a float default over a BIGINT
+  lag are `LOWERING_WINDOW_UNSERVED` refusals at `lower`.
 - `test_run_sql_s3`: catalog tables whose `ParquetSource` names an S3 bucket,
   read by `run_sql_with` through `S3ScanFs` over the fake S3, answer what the
   same files answer locally through `run_sql`: a filter and a projection, a
@@ -521,7 +532,11 @@ the columns `col_0`, `col_1`, ... where DuckDB names them `column0`,
 `column1`, ...), the one-row relation a SELECT with no FROM reads (an integer
 literal of the result's SELECT list or of a UNION ALL branch's is INT32 when it fits, as in DuckDB; an
 integer literal anywhere else, `1 + 1` included, is still INT64), filter,
-projection, limit (with or without an offset), aggregation, distinct, sort and top-n, and UNION ALL, the
+projection, limit (with or without an offset), aggregation, distinct, sort and
+top-n, window functions (ranking, LAG and LEAD, FIRST/LAST/NTH_VALUE and SUM,
+COUNT, AVG, MIN and MAX over the default running RANGE frame or a whole
+partition, with INT64, INT32, FLOAT64, BOOL or STRING partition and order keys)
+and UNION ALL, the
 concatenation of its branches. The post-rewrite gate and
 the plan validation gate are not called from `run_sql`.
 

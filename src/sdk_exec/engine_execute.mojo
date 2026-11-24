@@ -36,7 +36,12 @@ from phase_timers.phase_timers import (
     pt_now,
     pt_record,
 )
-from physical_plan.physical_plan import AggSinkData, SortSinkData, TopNSinkData
+from physical_plan.physical_plan import (
+    AggSinkData,
+    PartitionBySinkData,
+    SortSinkData,
+    TopNSinkData,
+)
 from fs.scan_fs import ScanFsOpener
 from pipeline_exec.real_builder import RealBuilder
 from pipeline_exec.run_plan import run_plan
@@ -117,6 +122,13 @@ def run_lowered_plan_with[
         reversed_topns.append(lowered.params.topn.pop())
     while len(reversed_topns) > 0:
         _ = builder.add_topn_sink(reversed_topns.pop())
+    # And for the window sinks, which SINK_PARTITION_BY segments index apart
+    # from the others.
+    var reversed_windows = List[PartitionBySinkData]()
+    while len(lowered.params.window) > 0:
+        reversed_windows.append(lowered.params.window.pop())
+    while len(reversed_windows) > 0:
+        _ = builder.add_window_sink(reversed_windows.pop())
     var token = CancellationToken.new()
     ref dispatch = ctx.runtime.dispatcher()
     pt_record[PH_EXEC_SETUP](t_setup)
