@@ -63,6 +63,7 @@ zig_exe(
 # macOS workers (tests//functional/watchdog:cases_darwin).
 _MOJO_COMPILE_MACOS_SRCS = _MOJO_COMPILE_SRCS + [
     "tools/host_identity.zig",
+    "tools/macos_link.zig",
     "tools/mojo_compile_macos.zig",
     "tools/proc_tree_macos.zig",
 ]

@@ -50,7 +50,8 @@ library (bound at load), so the library defines none of them either way.
   undefined. Putting the owners after the archives embeds the C and keeps
   the NEEDED entry, which is why the gate reads the symbol table;
 - stages the owner and its own NEEDED owners in the gate's `lib/`;
-- is refused on macOS (a library's shared library is ELF only).
+- is refused on macOS: an owner's shared library builds there
+  (`libkomira_<library>_native.1.dylib`), but `mojo_shared_lib` does not link or stage one there yet.
 
 ## What is not done
 

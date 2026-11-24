@@ -7,6 +7,7 @@
 //!                [--runpath=<$ORIGIN*>] [--source-root=<dir>] [--link-tail=<arg>]...
 //!                [--watchdog-idle-secs=<n>] [--watchdog-sample-secs=<n>] -- <mojo arguments...>
 //!   mojo_compile host-identity [--fields] [--output=<file>]
+//!   mojo_compile link --deployment-target=<v> --macos-host=<id>... -- <cc arguments...>
 //!
 //! Started as `cc`, `c++`, `gcc`, `g++`, `clang` or `clang++` (the links in
 //! <scratch>/cc/), it is the link shim: the host's /usr/bin/cc, which links
@@ -52,6 +53,13 @@
 //! `[komira_re] darwin_macos_hosts`; with `--fields`, the six lines it is a
 //! digest of; with `--output=<file>`, into that file (the census actions,
 //! tests//functional/darwin:host_census). Exit 2 when a field cannot be read.
+//!
+//! `link` runs the host's /usr/bin/cc on the arguments after `--`, after the
+//! same host check as a compile, with an environment built from nothing
+//! (macos_link.zig); the output is checked as a compile's is (it must exist
+//! and not hold the action's working directory). A komira library's own
+//! shared library is linked this way on darwin-arm64
+//! (tools/build/native/shared.bzl).
 
 const std = @import("std");
 const posix = std.posix;
@@ -64,6 +72,7 @@ const modular_cfg = @import("modular_cfg.zig");
 const proc_tree = @import("proc_tree.zig");
 const proc_tree_macos = @import("proc_tree_macos.zig");
 const host_identity = @import("host_identity.zig");
+const macos_link = @import("macos_link.zig");
 
 test {
     _ = @import("compile_args.zig");
@@ -72,6 +81,7 @@ test {
     _ = @import("proc_tree.zig");
     _ = @import("proc_tree_macos.zig");
     _ = @import("host_identity.zig");
+    _ = @import("macos_link.zig");
 }
 
 const Argv = common.Argv;
@@ -82,8 +92,9 @@ const oom = common.oom;
 const refuse = common.refuse;
 const say = common.say;
 
-/// The host's C driver: the shim's exec (cc_shim.execLineMacos).
-const host_cc = "/usr/bin/cc";
+/// The host's C driver: the shim's exec (cc_shim.execLineMacos), and the
+/// `link` mode's (macos_link.zig).
+const host_cc = macos_link.host_cc;
 
 extern "c" fn setsid() c_int;
 
@@ -98,6 +109,7 @@ pub fn main() void {
     for (argv, 0..) |a, i| args[i] = a;
     if (args.len > 0 and cc_shim.isShimName(std.fs.path.basename(args[0]))) shimMain(arena, args[1..]);
     if (args.len > 1 and std.mem.eql(u8, args[1], "host-identity")) hostIdentityMain(arena, args[2..]);
+    if (args.len > 1 and std.mem.eql(u8, args[1], "link")) linkMain(arena, args[2..]);
     wrapperMain(arena, if (args.len > 0) args[1..] else args);
 }
 
@@ -226,6 +238,35 @@ fn checkHost(arena: std.mem.Allocator, hosts: []const []const u8) void {
     finish(2);
 }
 
+// ---- link --------------------------------------------------------------------------
+
+/// The private scratch directory of this action, as a compile's (mojo_compile.zig).
+fn scratchDir(arena: std.mem.Allocator, pwd: []const u8) []const u8 {
+    const bsp = posix.getenv("BUCK_SCRATCH_PATH") orelse "";
+    if (bsp.len == 0) return join(arena, pwd, ".komira_action");
+    if (bsp[0] == '/') return join(arena, bsp, "komira");
+    return join(arena, join(arena, pwd, bsp), "komira");
+}
+
+/// `link`: the host's C driver on the given arguments (macos_link.zig).
+fn linkMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
+    const pwd = common.shellPwd(arena);
+    var diag = compile_args.Diag{};
+    const o = macos_link.parse(arena, args, &diag) catch |e| switch (e) {
+        error.Refused => refuse("{s}", .{diag.msg}),
+        error.OutOfMemory => oom(),
+    };
+    const t = scratchDir(arena, pwd);
+    common.scratch = t;
+    for ([_][]const u8{ "home", "tmp" }) |sub| {
+        std.fs.cwd().makePath(join(arena, t, sub)) catch |e| refuse("cannot make {s}/{s}: {s}", .{ t, sub, @errorName(e) });
+    }
+    checkHost(arena, o.macos_hosts);
+    const envp = common.toArgv(arena, macos_link.env(arena, o, t) catch oom()) catch oom();
+    const argv = common.toArgv(arena, macos_link.argv(arena, o) catch oom()) catch oom();
+    finish(common.postCheck(arena, runPlain(macos_link.host_cc, argv, envp), o.output, pwd));
+}
+
 // ---- the wrapper -----------------------------------------------------------------
 
 fn wrapperMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
@@ -238,12 +279,7 @@ fn wrapperMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
 
     // Private scratch, as on Linux (mojo_compile.zig).
     const bsp = posix.getenv("BUCK_SCRATCH_PATH") orelse "";
-    const t = if (bsp.len == 0)
-        join(arena, pwd, ".komira_action")
-    else if (bsp[0] == '/')
-        join(arena, bsp, "komira")
-    else
-        join(arena, join(arena, pwd, bsp), "komira");
+    const t = scratchDir(arena, pwd);
     common.scratch = t;
     for ([_][]const u8{ "cc", "home", "tmp", "cache", "modular" }) |sub| {
         std.fs.cwd().makePath(join(arena, t, sub)) catch |e| refuse("cannot make {s}/{s}: {s}", .{ t, sub, @errorName(e) });

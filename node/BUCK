@@ -2,10 +2,11 @@ load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "node_addon", "node_b
 
 # The Node-API addon over libkomira, built with the pinned zig against the
 # headers of the pinned node. README.md says what it exposes and why it opens
-# the library with dlopen.
+# the library with dlopen; arrow_import.c is its import of an Arrow C stream.
 node_addon(
     name = "komira_addon",
-    srcs = ["komira_addon.c"],
+    srcs = ["komira_addon.c", "arrow_import.c"],
+    headers = ["arrow_c.h", "arrow_import.h"],
 )
 
 # libkomira with the Mojo runtime and its native owners in lib/ beside it: the
@@ -104,4 +105,31 @@ node_binding_test(
         "fake_control.node": ":fake_control",
         "fake/libkomira_fake_latch.so": ":fake_latch",
     },
+)
+
+# A stand-in Arrow C stream producer: an addon of the tests that builds a
+# stream from a description and counts the releases of its structs.
+node_addon(
+    name = "arrow_stand_in",
+    srcs = ["tests/arrow_stand_in.c"],
+    headers = ["arrow_c.h"],
+)
+
+# The Arrow import: the addon's drain and descriptions (arrow_stream.test.mts)
+# and the apache-arrow Table the private module builds from them
+# (arrow_import.test.mts), over streams of the stand-in. The tests run the
+# pinned apache-arrow, the version package.json's peer range names.
+node_binding_test(
+    name = "arrow_test",
+    srcs = ["arrow_stream.test.mts", "arrow_import.test.mts"],
+    data = {
+        "arrow_stand_in.node": ":arrow_stand_in",
+        "foreign_external.node": ":foreign_external",
+        "komira_addon.node": ":komira_addon",
+        "package.json": "package.json",
+        "src/arrow_import.mts": "src/arrow_import.mts",
+        "src/errors.mts": "src/errors.mts",
+        "tests/arrow_specs.mts": "tests/arrow_specs.mts",
+    },
+    deps = ["//third_party/node:apache-arrow"],
 )
