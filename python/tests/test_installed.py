@@ -9,6 +9,7 @@ on Linux x86_64 and, for the macOS wheel, on macOS arm64).
         --modular-license <LICENSE> --modular-notices <Third-Party-Notices>
         --aws-lc-license <LICENSE> --s2n-tls-license <LICENSE>
         --parquet <file.parquet> --plan-hex <file.hex>
+        --readings <readings.parquet> --requires-dist <requirement>...
 
 Run by wheel_install_run.py, which installed the wheels into `--site` and
 starts this from an empty working directory outside the checkout. Each
@@ -20,11 +21,13 @@ Then, in order:
 - no library path is set: LD_LIBRARY_PATH and LD_PRELOAD are empty (on
   macOS, DYLD_LIBRARY_PATH, DYLD_FALLBACK_LIBRARY_PATH and
   DYLD_INSERT_LIBRARIES);
-- the environment holds the distribution komira and no other, and no
-  `modular/` directory: nothing of Modular's;
+- the environment holds the distribution komira, the distributions its
+  `--requires-dist` lines name (pyarrow) and no other, and no `modular/`
+  directory: nothing of Modular's;
 - `import komira` is the package installed in `--site`, not a source tree;
 - the installed distribution is `--version`, and `komira.__version__` is it;
-- its metadata has no `Requires-Dist`, its `License-Expression` is the
+- its `Requires-Dist` lines are the `--requires-dist` values, in that order
+  and no other, its `License-Expression` is the
   given one, its `Requires-Python` is `--requires-python`, and its
   `Classifier` lines are the `--classifier` values, in that order and no
   other; `.dist-info/licenses/` holds LICENSE and NOTICE, byte for byte the
@@ -36,6 +39,9 @@ Then, in order:
 - `komira.abi_version()` is the `version` line of the ABI golden;
 - `Session().register_parquet` registers the Parquet fixture, and a missing
   file raises `KomiraError` with the engine's status;
+- `Session.sql("SELECT 1 AS n").to_arrow()` is one row, `n` INT32 holding 1,
+  and an aggregate over `--readings` (`id` 1 to 5, `value` 10.5 to 50.5) is
+  its one row of count, sum, min and max, read with the installed pyarrow;
 - `komira._native.plan_render` of the serialized plan returns its text;
 - the process maps libkomira (`libkomira.so`, `libkomira.dylib` on macOS) from
   `<site>/komira/_lib`, and its native owner libraries and the three Mojo
@@ -96,18 +102,19 @@ _VALUED = (
     "--parquet",
     "--plan-hex",
     "--requires-python",
+    "--readings",
 )
 
 
 def parse(argv):
-    opts = {"host_lib": [], "classifier": []}
+    opts = {"host_lib": [], "classifier": [], "requires_dist": []}
     i = 0
     while i < len(argv):
         flag = argv[i]
         if i + 1 >= len(argv):
             raise SystemExit("test_installed: flag {} needs a value".format(flag))
         value = argv[i + 1]
-        if flag in ("--host-lib", "--classifier"):
+        if flag in ("--host-lib", "--classifier", "--requires-dist"):
             opts[flag[2:].replace("-", "_")].append(value)
         elif flag in _VALUED:
             opts[flag[2:].replace("-", "_")] = value
@@ -162,15 +169,20 @@ def mapped_files():
     return out
 
 
+def normalize(name):
+    """The PEP 503 normalized form of a distribution name."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
 def under(path, directory):
     return os.path.dirname(path) == os.path.realpath(directory)
 
 
 def check_metadata(dist, opts):
-    """The installed distribution's metadata: no requirement, the Pythons it
+    """The installed distribution's metadata: its requirements, the Pythons it
     claims, the licence expression and files, and the description."""
-    got = list(dist.requires or [])
-    assert not got, "the wheel's Requires-Dist is {}".format(got)
+    got = dist.metadata.get_all("Requires-Dist") or []
+    assert got == opts["requires_dist"], "the wheel's Requires-Dist is {}, not {}".format(got, opts["requires_dist"])
 
     requires_python = dist.metadata["Requires-Python"]
     assert requires_python == opts["requires_python"], "the wheel's Requires-Python is {}, not {}".format(requires_python, opts["requires_python"])
@@ -212,9 +224,10 @@ def main(argv):
 
     site = os.path.realpath(opts["site"])
 
-    # `pip install komira` installed komira and nothing else.
-    names = sorted({re.sub(r"[-_.]+", "-", d.metadata["Name"]).lower() for d in metadata.distributions(path=[site])})
-    others = [n for n in names if n != "komira"]
+    # `pip install komira` installed komira, its requirements and nothing else.
+    names = sorted({normalize(d.metadata["Name"]) for d in metadata.distributions(path=[site])})
+    required = {normalize(re.match(r"[A-Za-z0-9._-]+", r).group(0)) for r in opts["requires_dist"]}
+    others = [n for n in names if n != "komira" and n not in required]
     assert "komira" in names, "komira is not installed: {}".format(names)
     assert not others, "the environment holds komira and also {}".format(", ".join(others))
     assert not os.path.exists(os.path.join(site, "modular")), "the environment has a modular/ directory"
@@ -245,6 +258,15 @@ def main(argv):
             assert str(e), "a missing file raised KomiraError with no message"
         else:
             raise AssertionError("register_parquet of {} did not raise".format(missing))
+
+        # SQL, read as Arrow by the installed pyarrow.
+        one = s.sql("SELECT 1 AS n").to_arrow()
+        assert one.schema.names == ["n"] and str(one.schema.field("n").type) == "int32", one.schema
+        assert one.to_pylist() == [{"n": 1}], one.to_pylist()
+        s.register_parquet("readings", opts["readings"])
+        agg = s.sql("SELECT count(*) AS n, sum(value) AS total, min(id) AS lo, max(id) AS hi FROM readings").to_arrow()
+        want = [{"n": 5, "total": 152.5, "lo": 1, "hi": 5}]
+        assert agg.to_pylist() == want, "the aggregate over {} is {}, not {}".format(opts["readings"], agg.to_pylist(), want)
 
     with open(opts["plan_hex"], encoding="utf-8") as f:
         plan = bytes.fromhex(f.read().strip())

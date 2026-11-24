@@ -12,6 +12,14 @@ install page shows names it.
 
 ## Unreleased
 
+- **SQL.** `Session.sql(query)` runs one SQL statement over the session's registered tables and returns
+  a `Result`, read once as a pyarrow `Table` (`to_arrow()`), a `RecordBatchReader` (`to_reader()`) or
+  through the Arrow PyCapsule interface (`__arrow_c_stream__`, so `pyarrow.table(result)` reads it). A
+  syntax error, an unknown table or a refused construct raises `KomiraError` from `sql` itself, with the
+  engine's message. A result still reads after its session is closed. `komira.Result` is a new public name; a requested
+  schema on `__arrow_c_stream__` raises a `KomiraError`.
+- **pyarrow.** The wheel requires `pyarrow>=25.0.1`, so `pip install komira` installs it; it had no
+  requirement.
 - **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its
   `Requires-Python` is `>=3.11` (it was `>=3.13`), and its classifiers name the four. The package's
   tests and the install of each release run on all four.

@@ -67,6 +67,7 @@ def main(args):
     want = [
         "KomiraError",
         "LibraryLoadError",
+        "Result",
         "Session",
         "UnsupportedCpuError",
         "__version__",
