@@ -178,10 +178,13 @@ Behaviour each later pull request implements, fixed here so they agree:
   it is unread never crashes the interpreter. Whether that unread result then still reads, or refuses, is
   the session pull request's choice, held by a test of each case it allows.
 - **One session, any thread.** A `Session` may be used from several threads; it holds a lock around each
-  call into the library, its `Result`s' batch reads included, so one context never runs two calls at
-  once. With call bindings ([credentials_and_writes.md](credentials_and_writes.md) decision 8), the
-  lock is held from the first staged call binding through the `komira_sql_stream` that consumes it (a thread reading a large result holds up a `sql` call on the same session between batches, not
-  for the whole read). Sessions are independent of one another. The lock goes when the ABI design states
+  call into the library, the read of a failed call's last error included, so one context never runs two
+  calls at once. A `Result`'s batch reads take no lock: the stream needs neither the session nor its
+  context ([src/so/README.md](../../src/so/README.md), Running SQL), so a thread reading a result never
+  holds up a call on its session. A call made on the thread that holds the lock (from a signal handler or
+  a finalizer) raises `KomiraError` rather than waiting for itself. With call bindings
+  ([credentials_and_writes.md](credentials_and_writes.md) decision 8), the lock is held from the first
+  staged call binding through the `komira_sql_stream` that consumes it. Sessions are independent of one another. The lock goes when the ABI design states
   that a context is safe to share.
 - **Fork.** A child process made by `os.fork` must not use a session of its parent: the package
   registers an `os.register_at_fork` hook that marks every session of the parent closed in the child, so
