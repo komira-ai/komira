@@ -51,7 +51,7 @@ from plan_expr.partition_expr import (
     PF_ROW_NUMBER,
 )
 from plan_expr.scalar_value import ScalarValue
-from plan_ir.logical_plan import LogicalPlan, SOURCE_PARQUET, PLAN_TOPN, plan_tag_name
+from plan_ir.logical_plan import LogicalPlan, SOURCE_PARQUET, PLAN_LIMIT, plan_tag_name
 
 
 def _schema() raises -> Schema:
@@ -361,10 +361,10 @@ def test_count_star_and_a_count_of_any_type_are_cut() raises:
 
 
 def test_the_refusal_comes_before_the_child_is_walked() raises:
-    # The child is a top-n, which lowering refuses on its own account; the
-    # window's refusal is the one reported.
-    var topn = LogicalPlan.topn(_names("k"), _flags(1), 5, _scan())
-    var plan = _window(_names("d"), _names(), _one(PartitionExpr.row_number()), topn^)
+    # The child is a limit with a negative count, which lowering refuses on
+    # its own account; the window's refusal is the one reported.
+    var refused = LogicalPlan.limit(-1, _scan())
+    var plan = _window(_names("d"), _names(), _one(PartitionExpr.row_number()), refused^)
     assert_equal(
         _message(plan),
         _unserved("the PARTITION BY key 'd' has type date32, which the window's sort does not order"),
@@ -372,11 +372,11 @@ def test_the_refusal_comes_before_the_child_is_walked() raises:
     # With nothing the window refuses, the child's refusal is reported.
     var served = _window(
         _names("g"), _names(), _one(PartitionExpr.row_number()),
-        LogicalPlan.topn(_names("k"), _flags(1), 5, _scan()),
+        LogicalPlan.limit(-1, _scan()),
     )
     assert_equal(
         _message(served),
-        String(LOWERING_UNCUTTABLE_NODE) + ": " + plan_tag_name(PLAN_TOPN) + " (no cutter arm for this node) is not cut",
+        String(LOWERING_UNCUTTABLE_NODE) + ": " + plan_tag_name(PLAN_LIMIT) + " (a limit with a negative count) is not cut",
     )
 
 
