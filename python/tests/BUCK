@@ -369,6 +369,38 @@ _PYARROW = {
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# {suffix: the pandas and polars of that minor}: third_party/python pins
+# pandas for CPython 3.13 and 3.14 and polars for 3.13 only, and neither for
+# 3.11 or 3.12, whose to_arrow is held by sql_test above.
+_FRAMES = {
+    "": ["komira//third_party/python:pandas", "komira//third_party/python:polars"],
+    "_py314": ["komira//third_party/python:pandas-cp314"],
+}
+
+# Result.to_pandas and to_polars (test_result_frames.py): on the real library,
+# a pyarrow-written file of every integer width at its edges, nullable
+# integers, strings, a bool, decimals, timestamps (ms, us, ns, UTC) and a
+# date, equal to pyarrow's and polars' own conversion of the file's table,
+# values and dtypes; two million rows over sixteen row groups; no rows; read
+# once against every other terminal; read after the session closed. In new
+# interpreters: the library loaded before pyarrow, pandas or polars is
+# imported, then an engine string column converted (the load-order case);
+# and on the stand-in, every stream released once after a frame, a failing
+# batch raised as KomiraError, and a missing pandas or polars raised as an
+# ImportError that leaves the result unread. `--polars` where polars is
+# installed; elsewhere to_polars must raise that ImportError.
+[python_binding_test(
+    name = "result_frames_test" + p["suffix"],
+    src = "test_result_frames.py",
+    args = ["--polars"] if p["suffix"] == "" else [],
+    data = {
+        "fake_v1_3/libkomira.so": ":fake_v1_3",
+        "libkomira": LIBKOMIRA,
+    },
+    deps = ["//python:komira", _PYARROW[p["suffix"]]] + _FRAMES[p["suffix"]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS if p["suffix"] in _FRAMES]
+
 # The protobuf runtimes the tests below load the generated plan modules under:
 # 7.36.2, the range's upper edge (third_party/python's `:protobuf`), 5.29.1,
 # the lower edge, and 5.28.3, the release below the range
