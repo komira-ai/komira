@@ -111,7 +111,8 @@ zig_test(
 
 # The cases of the mopm jobs of release.yml: the continuous prod publish (each prod job's
 # gate, needs, environment and permissions, the commands), no beta job, no schedule, the
-# release-main concurrency group, no secret and the version of every run
+# release-main concurrency group, no secret, the version of every run, and that the staged set
+# (mopm-staged-<sha>, mopm-prod-staged-<sha>) is kept 7 to 14 days for a rerun on a later day
 # (.github/workflows/release_workflow_test.zig says what each catches), and no wheel stage (no
 # wheel job, no setup-python, no wheel target, no smoke driver: pypi.yml tests the wheel). A build
 # action.
