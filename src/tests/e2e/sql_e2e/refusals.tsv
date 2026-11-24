@@ -1,0 +1,4 @@
+# The cases komira refuses by name, each with the refusal it must give, word
+# for word: <case> TAB <step>: <reason>, the text sql_result raises (the last
+# error komira_sql_stream leaves). A case listed here that komira answers, or
+# refuses with other text, is a failure; so is a refused case not listed.

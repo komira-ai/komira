@@ -1,0 +1,2 @@
+-- UNION ALL of TINYINT and BIGINT: the common type is BIGINT.
+SELECT i8 AS x FROM types WHERE id < 6 UNION ALL SELECT i64 FROM types WHERE id < 6 ORDER BY x ASC NULLS FIRST
