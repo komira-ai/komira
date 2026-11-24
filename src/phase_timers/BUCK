@@ -21,7 +21,7 @@ mojo_library(
 #
 # - test_phase_timers_on: sums, the longest interval and the call count of a
 #   phase, a stamp, the wake latency, the join tails split at the fork on any
-#   clock resolution, and a reset that keeps
+#   clock resolution and with no fork since the reset, and a reset that keeps
 #   the thread's lane; the per-thread usage of a phase (context switches and
 #   page faults of the calling thread between a begin and an end).
 mojo_library(
