@@ -60,7 +60,9 @@ there), Brotli `//third_party/brotli`, aws-lc `//third_party/aws-lc`, s2n-tls
   from `so` down): it holds `http_client`, `http_core`, `net`, `objectstore`,
   `iceberg_catalog` and `crypto`, and no `aws_*`, `gcp_*` or `azure_*`
   package. aws-lc and s2n-tls are carried, in the crypto and http_core owner
-  libraries above (Linux; on macOS arm64 there are no owner libraries). A
+  libraries above (Linux; on macOS arm64 there are no owner libraries, and
+  libkomira.dylib links the same archives statically, under the same
+  notices). A
   change that adds a third-party library to the closure changes the table of
   `libkomira_elf_report` and must update this page and `NOTICE` in the same
   pull request.

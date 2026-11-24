@@ -106,7 +106,8 @@ assert_equal(abi_version(), Int32(1002))
 
 **The handle.** `komira_ctx_new` returns a context the caller owns until it
 passes it to `komira_ctx_free`, or NULL when the context's engine does not
-start (the host probe or the start of its workers fails). A handle is not safe to use from two threads at
+start (the host probe or the start of its workers fails); with no context
+there is no last error, so the engine's message is not available. A handle is not safe to use from two threads at
 once, freeing one twice or using it after the free is undefined (as for
 `free(3)`), and `komira_ctx_free(NULL)` does nothing. A context holds a
 `Session`: the text of the last error, empty on a fresh one, and an engine

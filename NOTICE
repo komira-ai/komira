@@ -405,8 +405,9 @@ the C++ runtime the Mojo runtime libraries need (libstdc++.so.6, libgcc_s.so.1),
 not the system's glibc (`libc.so.6`, `libpthread.so.0`), and not the codec
 libraries libz, liblz4, libzstd, libbz2 and liblzma, which komira opens by name
 from the host when a file uses that codec. The macOS arm64 wheel carries no
-owner library: its libkomira.dylib links the C archives of its closure
-statically, and only the objects it calls.
+owner library: its libkomira.dylib links the C archives of its closure (the
+four libraries above among them) statically, so whatever of that third-party
+code it calls is inside libkomira.dylib, under the same notices.
 
 The Mojo runtime: Modular's libraries, carried in the bundled wheel
 -------------------------------------------------------------------

@@ -34,7 +34,7 @@
 # engine, whose workers start here) in an `OwnedPointer`, relinquishes the
 # pointer's own free (`unsafe_leak`) and hands the address to the caller as
 # `void *`. When the engine does not start it returns NULL and allocates
-# nothing. The caller owns that handle until it passes it to
+# nothing; with no context to hold it, the engine's message is dropped. The caller owns that handle until it passes it to
 # `komira_ctx_free`, which rebuilds the one `OwnedPointer` over the same
 # allocation and destroys the session, stopping its workers. Freeing a handle twice, or using one
 # after `komira_ctx_free`, is undefined, as for `free(3)`; `komira_ctx_free`

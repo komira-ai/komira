@@ -156,9 +156,8 @@ mojo_library(
 # libkomira.so (libkomira.dylib on macOS arm64): twelve exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). Every context it creates owns
 # an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
-# It is published only if every
-# gate driver passes, each of which dlopens it with RTLD_NOW and calls it as a
-# foreign host would:
+# It is published only if every gate driver passes, each of which dlopens it
+# with RTLD_NOW and calls it as a foreign host would:
 #   gate_version       the version is 1002 (1.2);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op, and a context (with its

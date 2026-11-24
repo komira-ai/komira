@@ -193,10 +193,12 @@ def test_glob_matching_nothing_is_refused() raises:
 
 def test_unregistered_table_is_refused_at_bind() raises:
     var s = Session()
+    var raised = False
     try:
-        register_parquet(s, String("gone"), String("/no/such/file.parquet"))
+        register_parquet(s, String("gone"), test_tmpdir() + "/absent.parquet")
     except:
-        pass
+        raised = True
+    assert_true(raised, "a missing file was registered")
     for name in [String("gone"), String("other")]:
         var out = run_sql(s.engine, String("select count(*) from ") + name)
         assert_false(out.ok(), "a query named the unregistered table " + name)
