@@ -80,7 +80,7 @@
 
 from std.memory import OwnedPointer, unsafe_memcpy
 
-from so.session import Session
+from so.session import Session, try_new_session
 from so.sources import (
     csv_binding_bytes,
     json_binding_bytes,
@@ -153,10 +153,10 @@ def komira_abi_version() abi("C") -> Int32:
 def komira_ctx_new() abi("C") -> Handle:
     """Create a session and return its handle. The caller frees it with
     `komira_ctx_free`. NULL when the session's engine does not start."""
-    try:
-        return _leak_session(Session())
-    except:
+    var session = try_new_session()
+    if not session:
         return _null_handle()
+    return _leak_session(session.take())
 
 
 def _leak_session(var session: Session) -> Handle:

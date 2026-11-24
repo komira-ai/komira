@@ -15,7 +15,9 @@ runs a query yet.
   kinds, fields and scope, `abi_version`, `buffer_status`, `input_length_status`.
 - `session.mojo`: `Session`, the state a context handle stands for: the last
   error, the engine (`sdk_exec`'s `EngineContext`), whose catalog holds the
-  registered tables, and the credentials.
+  registered tables, and the credentials. `try_new_session` is the session
+  `komira_ctx_new` hands out, or None when the engine does not start (the
+  export returns that as NULL).
 - `credentials.mojo`: `SessionCredentials`, the credential calls on values (a
   kind, a name, a field's bytes in; an id out, or a raise with a named error).
 - `credential_store.mojo`: `SessionSecretStore`, the `SecretStore` the values
@@ -116,7 +118,8 @@ name. The engine's workers (the host's compute thread count) start in
 `komira_ctx_new` and stop in `komira_ctx_free`.
 
 ```mojo
-from so import Session
+from sdk_exec.engine_options import EngineOptions
+from so import Session, try_new_session
 from std.testing import assert_equal, assert_false, assert_true
 
 var session = Session()
@@ -129,6 +132,9 @@ assert_equal(session.last_error(), String(""))
 # The engine started with the host's own worker count and holds no table yet.
 assert_true(session.engine.host_profile.thread_count >= 1)
 assert_false(session.engine.catalog.has("t"))
+# komira_ctx_new's session: None (the NULL handle) when the engine does not
+# start, here because it refuses a worker count of 0; nothing raises.
+assert_false(Bool(try_new_session(EngineOptions(worker_count=0))))
 ```
 
 **The two-call output protocol.** A call that returns bytes takes

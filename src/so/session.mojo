@@ -1,6 +1,7 @@
 """The state behind a context handle."""
 
 from sdk_exec.engine_context import EngineContext
+from sdk_exec.engine_options import EngineOptions
 
 from .credentials import SessionCredentials
 
@@ -25,16 +26,18 @@ struct Session(Movable):
     `_set`, `_seal`), by name; their values are wiped when the session is
     dropped."""
 
-    def __init__(out self) raises:
+    def __init__(out self, options: EngineOptions = EngineOptions()) raises:
         """A session with no error, no table and no credential, over an engine
-        with the host profile's own worker count and memory budget.
+        started with `options` (by default the host profile's own worker
+        count and memory budget, which is what `komira_ctx_new` uses).
 
         Raises:
-            Error with the engine's message when the engine does not start
-            (the host probe or the worker start fails).
+            Error with the engine's message when the engine does not start:
+            `options` is refused (`ENGINE_OPTIONS_INVALID`), or the host probe
+            or the worker start fails.
         """
         self._last_error = String()
-        self.engine = EngineContext()
+        self.engine = EngineContext(options)
         self.credentials = SessionCredentials()
 
     def set_error(mut self, var message: String):
@@ -52,3 +55,19 @@ struct Session(Movable):
     def last_error(self) -> String:
         """A copy of the last error text; empty when there is none."""
         return self._last_error.copy()
+
+
+def try_new_session(
+    options: EngineOptions = EngineOptions(),
+) -> Optional[Session]:
+    """A new `Session` over an engine started with `options`, or None when
+    the engine does not start; nothing raises.
+
+    This is what `komira_ctx_new` does before it hands the session out: a
+    None becomes the NULL handle. The engine's message is dropped, because
+    there is no context to hold it.
+    """
+    try:
+        return Session(options)
+    except:
+        return None

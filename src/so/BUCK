@@ -31,7 +31,9 @@ NATIVE_OWNERS = [
 #
 # test_status holds the six codes, the input-length bound, the version scheme (major * 1000 + minor)
 # and buffer_status, the two-call protocol's capacity test; test_session holds
-# the last-error text of a Session (fresh, set, replaced, cleared, moved);
+# the last-error text of a Session (fresh, set, replaced, cleared, moved)
+# and try_new_session, komira_ctx_new's session (None, the NULL handle, for
+# each option the engine refuses; a session for good options);
 # test_sources holds the operations on values: a Parquet file registered and
 # its schema bytes, a registered table queried through the session's engine
 # (and an unregistered one refused at bind), the CSV and JSON bindings, and a
