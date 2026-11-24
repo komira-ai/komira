@@ -45,6 +45,7 @@ mojo_library(
         "tests/test_window_ranking_aggregates.mojo",
         "tests/test_window_value_fns.mojo",
         "tests/test_window_avg_is_long_double.mojo",
+        "tests/test_window_frame_index.mojo",
     ],
     test_deps = [
         "//src/eval:eval",

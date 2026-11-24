@@ -354,8 +354,18 @@ The tests run when the package is built.
   `nth_value`, with no, one or two partition keys, several windows in one
   SELECT, a WHERE and an outer ORDER BY, on one and three workers, each column
   of its documented type; a sum over an INTEGER, a DATE partition key, a
-  DECIMAL order key, an explicit ROWS frame and a float default over a BIGINT
-  lag are `LOWERING_WINDOW_UNSERVED` refusals at `lower`.
+  DECIMAL order key and a float default over a BIGINT lag are
+  `LOWERING_WINDOW_UNSERVED` refusals at `lower`.
+- `test_run_sql_window_frames`: `run_sql` over two Parquet tables DuckDB wrote
+  (the `:window_frames_oracle` build action) answers what the pinned DuckDB
+  answers for every case of `tests/window_frames/cases.sql`, on one and three
+  workers: `ROWS` frames (sliding, empty at a partition's edge, running and
+  tail, descending, offsets past the partition) and `RANGE` frames with
+  offsets over a BIGINT key with ties and NULLs, an INTEGER key and a DOUBLE
+  key with NaN, infinities, -0.0 and NULL, with keys at the ends of BIGINT and
+  INTEGER; a `RANGE` bound that leaves the key's type fails at `execute` with
+  DuckDB's overflow error, and a frame DuckDB refuses fails at `bind` with
+  DuckDB's reason.
 - `test_run_sql_s3`: catalog tables whose `ParquetSource` names an S3 bucket,
   read by `run_sql_with` through `S3ScanFs` over the fake S3, answer what the
   same files answer locally through `run_sql`: a filter and a projection, a
@@ -534,8 +544,9 @@ literal of the result's SELECT list or of a UNION ALL branch's is INT32 when it 
 integer literal anywhere else, `1 + 1` included, is still INT64), filter,
 projection, limit (with or without an offset), aggregation, distinct, sort and
 top-n, window functions (ranking, LAG and LEAD, FIRST/LAST/NTH_VALUE and SUM,
-COUNT, AVG, MIN and MAX over the default running RANGE frame or a whole
-partition, with INT64, INT32, FLOAT64, BOOL or STRING partition and order keys)
+COUNT, AVG, MIN and MAX over any `ROWS` or `RANGE` frame SQL allows, a
+`RANGE` offset over one INT64, INT32 or FLOAT64 order key, with INT64, INT32,
+FLOAT64, BOOL or STRING partition and order keys)
 and UNION ALL, the
 concatenation of its branches. The post-rewrite gate and
 the plan validation gate are not called from `run_sql`.

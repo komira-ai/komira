@@ -14,7 +14,8 @@ load(":defs.bzl", "udf_bench")
 #                 one request per call to a worker process (proxy.c), the
 #                 channel and the worker's life (channel.c), Arrow IPC
 #                 encode and validated decode (ipc.c), and the inits with
-#                 the `node` launcher (node_launcher.c)
+#                 the `node` launcher (node_launcher.c); and the probe of the
+#                 channel that test_channel reads (channel_probe.c)
 #   refrt/        each runtime library's one export, forwarded to its C init
 #   worker/       the worker, in JavaScript: komira-test/node, one context
 #                 per process, apache-arrow from node_modules
@@ -64,6 +65,14 @@ load(":defs.bzl", "udf_bench")
 #                 process had already loaded, beside its node.
 #   test_threads  4 engine threads, 4 workers: values, calls == batches,
 #                 releases, and the CPU/wall parallelism case.
+#   test_engine_barrier
+#                 the engine loop's CPU count and its barrier (pthreads on
+#                 Linux, a mutex and condition variable on macOS) at 1 to 64
+#                 threads over many rounds, with no worker.
+#   test_channel  the channel a worker is given, with no worker: every
+#                 descriptor close-on-exec, the cancel file's size, no name
+#                 and word handoff, a request round trip, a closed worker
+#                 end and a failed start leaving no descriptor open.
 
 _ABI = "//src/tests/helpers/komira_udf_spike_abi"
 
@@ -100,12 +109,15 @@ mojo_library(
     srcs = glob(["*.mojo"]),
     conda = False,
     deps = [
+        ":komira_udf_node_worker_channel_probe",
         ":komira_udf_spike_node_worker_engine",
         "//src/json:json",
         _ABI + ":komira_udf_spike_abi",
     ],
     test_srcs = [
+        "tests/test_channel.mojo",
         "tests/test_conform_node_worker.mojo",
+        "tests/test_engine_barrier.mojo",
         "tests/test_no_node.mojo",
         "tests/test_node_worker.mojo",
         "tests/test_proxy_edges.mojo",
@@ -136,6 +148,7 @@ staged_files(
     srcs = [
         "native/engine_loop.c",
         "proxy/channel.c",
+        "proxy/channel_probe.c",
         "proxy/ipc.c",
         "proxy/kudfw.h",
         "proxy/node_launcher.c",
@@ -167,6 +180,21 @@ cxx_library(
     header_namespace = "",
     compiler_flags = ["-O2"],
     deps = [_ABI + ":komira_udf_spike_c"],
+    visibility = ["PUBLIC"],
+)
+
+# The probe of the channel a worker is given (proxy/channel_probe.c), for
+# the welded test test_channel. No runtime library links it.
+cxx_library(
+    name = "komira_udf_node_worker_channel_probe",
+    srcs = [":c_files[proxy/channel_probe.c]"],
+    headers = {"kudfw.h": ":c_files[proxy/kudfw.h]"},
+    header_namespace = "",
+    compiler_flags = ["-O2"],
+    deps = [
+        ":komira_udf_node_worker_proxy",
+        _ABI + ":komira_udf_spike_c",
+    ],
     visibility = ["PUBLIC"],
 )
 

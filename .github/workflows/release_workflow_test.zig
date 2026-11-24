@@ -39,6 +39,12 @@
 //!    directory), the order of the test's steps, that the test, the smoke and the add
 //!    never name a registry-writing verb or the OIDC exchange, and that the smoke and the
 //!    add never join the farm (the test joins it for the README e2e).
+//!  - the staged set outlives a rerun: every upload of `mopm-staged-<sha>` (the set `mopm-stage`
+//!    hands to `prod-stage`, `prod-smoke` and `prod-add`) and of `mopm-prod-staged-<sha>` (the
+//!    directory `prod-stage` hands to `prod-test`, `prod-commit` and `prod-abort`) names
+//!    `retention-days` from 7 to 14, so `gh run rerun --failed` of a prod job on a later day still
+//!    downloads it; an upload of either with no `retention-days`, a value that is not a number, or
+//!    one outside that range is red, and an artifact of neither name is not held to it;
 //!  - one mopm: every `build toolchains//:mopm_*` label of release.yml and every such label of
 //!    docs/ci.md equals `MOPM` of release/readme_e2e/packages.bzl (the mopm the README e2e installs
 //!    with is the one the release stages and publishes with), so a bump of one that forgets
@@ -87,6 +93,13 @@ const STAGE_BUILD_VERIFY = "          args: build //tools/build/ci:release_stage
 const STAGE_UPLOAD_VERIFY = "            ${{ runner.temp }}/mopm-publish/release_staged_verify";
 const E2E_FARM_CONNECT = "      - uses: ./.github/actions/farm-connect";
 const E2E_ASSERT = "          assert-remote: ${{ steps.assert.outputs.path }}";
+// The artifacts a prod job downloads from an earlier job of the same run. A rerun of a failed prod job (after
+// a registry 429 near the start of a UTC day, say) downloads them again, so each is kept long enough for a
+// rerun on a later day, and no longer than the release set itself (14 days).
+const STAGED_ARTIFACTS = [_][]const u8{ "mopm-staged-", "mopm-prod-staged-" };
+const UPLOAD_STEP = "      - uses: actions/upload-artifact@";
+const STAGED_RETENTION_MIN: u32 = 7;
+const STAGED_RETENTION_MAX: u32 = 14;
 
 /// The lines of the job `name` of the `jobs:` map (a key at two spaces of
 /// indent), without comment lines and blank lines, or null if there is no such
@@ -216,6 +229,7 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (stage_e2e_at < prod_stage_at) return "mopm-stage runs the e2e before it stages";
 
     if (try checkProd(ar, text, prod_stage)) |why| return why;
+    if (try checkStagedRetention(ar, text)) |why| return why;
 
     // top-level permissions and the triggers
     var tp: usize = 0;
@@ -439,6 +453,50 @@ fn checkProd(ar: std.mem.Allocator, text: []const u8, stage_job: []const []const
         add_runs += 1;
     };
     if (add_runs != 1) return "prod-add runs release_staged_verify more than once";
+    return null;
+}
+
+/// Null if every upload of a staged artifact (STAGED_ARTIFACTS) keeps it from STAGED_RETENTION_MIN to
+/// STAGED_RETENTION_MAX days and each is uploaded, else the refusal. A step is the `upload-artifact` line
+/// and the lines after it indented deeper than the step's dash; comment and blank lines are skipped. The
+/// artifact's name and retention are the `with:` keys; an upload step whose `uses:` is not its first line is
+/// not read (release.yml writes none).
+fn checkStagedRetention(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
+    var uploads = [_]usize{0} ** STAGED_ARTIFACTS.len;
+    var lines = std.ArrayList([]const u8).empty;
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |l| {
+        const code = std.mem.trim(u8, l, " ");
+        if (code.len == 0 or code[0] == '#') continue;
+        try lines.append(ar, l);
+    }
+    var i: usize = 0;
+    while (i < lines.items.len) : (i += 1) {
+        if (!std.mem.startsWith(u8, lines.items[i], UPLOAD_STEP)) continue;
+        var name: ?[]const u8 = null;
+        var retention: ?[]const u8 = null;
+        var j = i + 1;
+        while (j < lines.items.len and std.mem.startsWith(u8, lines.items[j], "        ")) : (j += 1) {
+            // the keys of `with:` (ten spaces), never the step's own `name:` (eight)
+            const l = lines.items[j];
+            if (!std.mem.startsWith(u8, l, "          ") or l.len > 10 and l[10] == ' ') continue;
+            const field = l[10..];
+            if (std.mem.startsWith(u8, field, "name:")) name = std.mem.trim(u8, field["name:".len..], " '\"");
+            if (std.mem.startsWith(u8, field, "retention-days:")) retention = std.mem.trim(u8, field["retention-days:".len..], " '\"");
+        }
+        const n = name orelse continue;
+        for (STAGED_ARTIFACTS, 0..) |prefix, k| {
+            if (!std.mem.startsWith(u8, n, prefix)) continue;
+            uploads[k] += 1;
+            const r = retention orelse return try std.fmt.allocPrint(ar, "the upload of {s} names no retention-days: it is kept 90 days, not {d} to {d}", .{ n, STAGED_RETENTION_MIN, STAGED_RETENTION_MAX });
+            const days = std.fmt.parseInt(u32, r, 10) catch return try std.fmt.allocPrint(ar, "the upload of {s} has retention-days {s}, not a number of days", .{ n, r });
+            if (days < STAGED_RETENTION_MIN or days > STAGED_RETENTION_MAX)
+                return try std.fmt.allocPrint(ar, "the upload of {s} has retention-days {d}, not {d} to {d}: a rerun of a failed prod job on a later day must still download it", .{ n, days, STAGED_RETENTION_MIN, STAGED_RETENTION_MAX });
+        }
+    }
+    for (STAGED_ARTIFACTS, 0..) |prefix, k| {
+        if (uploads[k] == 0) return try std.fmt.allocPrint(ar, "no upload-artifact step uploads {s}<sha>", .{prefix});
+    }
     return null;
 }
 
@@ -757,6 +815,76 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     const add_dl = "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n          name: mopm-prod-committed-${{ github.sha }}\n          path: ${{ runner.temp }}/prod-add/committed\n";
     try expectRefused(ar, try replaced(ar, text, add_dl, "      - name: early\n" ++ PROD_ADD_RUN ++ nl ++ add_dl), "adds before it has the committed directory");
     try expectRefused(ar, try replaced(ar, text, "          name: mopm-prod-committed-${{ github.sha }}\n          path: ${{ runner.temp }}/prod-add/committed\n", "          name: mopm-prod-staged-${{ github.sha }}\n          path: ${{ runner.temp }}/prod-add/committed\n"), "prod-add does not download the committed directory");
+}
+
+test "an upload of the staged set kept fewer than 7 or more than 14 days, or with no number, is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try readWorkflow(ar);
+    // the upload of mopm-stage (the set) and of prod-stage (the directory with state.json); each anchor is
+    // the one upload of that artifact in release.yml
+    const set_keep = "          retention-days: 7\n      - name: Stop buck2\n";
+    const dir_keep = "          retention-days: 7\n          overwrite: true\n";
+    const Case = struct { anchor: []const u8, name: []const u8, rest: []const u8 };
+    const cases = [_]Case{
+        .{ .anchor = set_keep, .name = "mopm-staged-", .rest = "      - name: Stop buck2\n" },
+        .{ .anchor = dir_keep, .name = "mopm-prod-staged-", .rest = "          overwrite: true\n" },
+    };
+    for (cases) |c| {
+        // the boundaries are kept
+        for ([_][]const u8{ "7", "14" }) |days| {
+            const edited = try replaced(ar, text, c.anchor, try std.fmt.allocPrint(ar, "          retention-days: {s}\n{s}", .{ days, c.rest }));
+            if (try check(ar, edited)) |why| {
+                std.debug.print("{s} kept {s} days was refused: {s}\n", .{ c.name, days, why });
+                return error.Refused;
+            }
+        }
+        // one day (the value before), one below the floor, zero, one above the ceiling, and the default 90
+        for ([_][]const u8{ "1", "6", "0", "15", "90" }) |days| {
+            const edited = try replaced(ar, text, c.anchor, try std.fmt.allocPrint(ar, "          retention-days: {s}\n{s}", .{ days, c.rest }));
+            const want = try std.fmt.allocPrint(ar, "the upload of {s}${{{{ github.sha }}}} has retention-days {s}, not 7 to 14: a rerun of a failed prod job on a later day must still download it", .{ c.name, days });
+            try t.expectEqualStrings(want, (try check(ar, edited)) orelse return error.Accepted);
+        }
+        // no retention-days: GitHub keeps it 90 days
+        try t.expectEqualStrings(
+            try std.fmt.allocPrint(ar, "the upload of {s}${{{{ github.sha }}}} names no retention-days: it is kept 90 days, not 7 to 14", .{c.name}),
+            (try check(ar, try replaced(ar, text, c.anchor, c.rest))) orelse return error.Accepted,
+        );
+        // an expression or a word is not a number of days
+        try t.expectEqualStrings(
+            try std.fmt.allocPrint(ar, "the upload of {s}${{{{ github.sha }}}} has retention-days ${{{{ vars.KEEP }}}}, not a number of days", .{c.name}),
+            (try check(ar, try replaced(ar, text, c.anchor, try std.fmt.allocPrint(ar, "          retention-days: ${{{{ vars.KEEP }}}}\n{s}", .{c.rest})))) orelse return error.Accepted,
+        );
+        // a comment between the fields does not end the step
+        const commented = try replaced(ar, text, c.anchor, try std.fmt.allocPrint(ar, "          # kept for a rerun\n          retention-days: 1\n{s}", .{c.rest}));
+        try expectRefused(ar, commented, "has retention-days 1, not 7 to 14");
+    }
+    // a second upload of the set, by another ref of the action and with the default retention, is refused
+    const second = "      - uses: actions/upload-artifact@v7\n        with:\n          name: mopm-staged-${{ github.sha }}-again\n          path: x\n";
+    try expectRefused(ar, try replaced(ar, text, "      - name: Stop buck2\n        if: always()\n        run: ./buck2 kill || true\n\n  # THE PROD PUBLISH", second ++ "      - name: Stop buck2\n        if: always()\n        run: ./buck2 kill || true\n\n  # THE PROD PUBLISH"), "names no retention-days");
+    // an upload of neither name is not held to the range: the release set and the committed directory keep 14
+    // days, and either at 1 is accepted
+    try t.expect((try check(ar, try replaced(ar, text, "          name: release-${{ github.sha }}\n          path: ${{ runner.temp }}/release\n          if-no-files-found: error\n          retention-days: 14\n", "          name: release-${{ github.sha }}\n          path: ${{ runner.temp }}/release\n          if-no-files-found: error\n          retention-days: 1\n"))) == null);
+    try t.expect((try check(ar, try replaced(ar, text, "          retention-days: 14\n          overwrite: true\n", "          retention-days: 1\n          overwrite: true\n"))) == null);
+}
+
+test "a workflow with no upload of either staged artifact is refused by name" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    try t.expectEqualStrings("no upload-artifact step uploads mopm-staged-<sha>", (try checkStagedRetention(ar, "jobs:\n  a:\n    steps:\n      - run: true\n")) orelse return error.Accepted);
+    const only_set = "      - uses: actions/upload-artifact@x\n        with:\n          name: mopm-staged-1\n          retention-days: 7\n";
+    try t.expectEqualStrings("no upload-artifact step uploads mopm-prod-staged-<sha>", (try checkStagedRetention(ar, only_set)) orelse return error.Accepted);
+    // the step's own name is not the artifact's
+    const step_named = "      - uses: actions/upload-artifact@x\n        name: mopm-staged-step\n        with:\n          name: other-1\n" ++ only_set;
+    try t.expectEqualStrings("no upload-artifact step uploads mopm-prod-staged-<sha>", (try checkStagedRetention(ar, step_named)) orelse return error.Accepted);
+    const step_named_bad = "      - uses: actions/upload-artifact@x\n        name: keep the set\n        with:\n          name: mopm-staged-3\n          retention-days: 1\n";
+    try t.expectEqualStrings("the upload of mopm-staged-3 has retention-days 1, not 7 to 14: a rerun of a failed prod job on a later day must still download it", (try checkStagedRetention(ar, step_named_bad)) orelse return error.Accepted);
+    // a step with no name is not a staged upload; the next step's dash ends a step
+    const both = "      - uses: actions/upload-artifact@x\n        with:\n          path: y\n      - name: other\n        with:\n          name: mopm-staged-2\n" ++ only_set ++
+        "      - uses: actions/upload-artifact@x\n        with:\n          name: \"mopm-prod-staged-1\"\n          retention-days: '14'\n";
+    try t.expect((try checkStagedRetention(ar, both)) == null);
 }
 
 test "a comment naming MOPM_TOKEN does not count, a line does" {

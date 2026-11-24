@@ -34,8 +34,10 @@ Modules:
   value of the group's last row.
 - `partition_frame_index`: every row's frame as row indices: ROWS bounds,
   RANGE bounds without an offset (peer groups, any key type), and RANGE
-  offsets on one INT64 / FLOAT64 key with no NULL and no NaN (other RANGE
-  offsets raise).
+  offsets on one INT64, INT32 or FLOAT64 key as DuckDB answers them (a NULL
+  key frames over the NULL group, NaN compares above +inf, a bound that
+  leaves the key's type raises DuckDB's overflow error; other RANGE offsets
+  raise).
 - `partition_sliding_frame`: COUNT and INT64 SUM / AVG over a bounded frame
   on a two-pointer window; FLOAT64 SUM / AVG on a sum tree, so each frame is
   summed from its own values alone (subtracting a value that leaves would

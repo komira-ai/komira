@@ -18,7 +18,12 @@
 #   test_an_argument_that_is_not_a_column_is_refused
 #   test_a_lag_or_lead_default_the_column_would_change_is_refused
 #   test_a_lag_or_lead_default_the_column_holds_is_cut
-#   test_a_frame_other_than_the_two_served_is_refused_for_each_function_that_reads_it
+#   test_every_frame_sql_allows_is_cut_for_each_function_that_reads_it
+#   test_a_frame_shape_sql_refuses_is_refused_with_duckdbs_reason
+#   test_a_range_offset_needs_one_order_key_of_a_type_it_measures
+#   test_a_negative_offset_is_refused
+#   test_frame_units_that_are_neither_rows_nor_range_are_refused
+#   test_ranking_and_offset_functions_ignore_their_frame
 #   test_the_whole_partition_frame_is_cut_in_rows_and_in_range_units
 #   test_a_function_tag_the_sink_does_not_compute_is_refused_by_name
 #   test_count_star_and_a_count_of_any_type_are_cut
@@ -288,51 +293,174 @@ def _frame(units: UInt8, start: UInt8, start_offset: Int64, end: UInt8, end_offs
     return PartitionFrame(units, start, start_offset, end, end_offset)
 
 
-def test_a_frame_other_than_the_two_served_is_refused_for_each_function_that_reads_it() raises:
-    var tail = "; only RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW and the whole partition are served"
-    var rows_running = PartitionFrame.default_ordered()
+def _framed(frame: PartitionFrame) -> List[PartitionExpr]:
+    """Every function that reads its frame, over `frame`."""
+    var out = List[PartitionExpr]()
+    out.append(PartitionExpr.agg_with_frame(PF_SUM, "k", frame.copy()))
+    out.append(PartitionExpr.running_avg("f").with_frame(frame.copy()))
+    out.append(PartitionExpr.running_min("v").with_frame(frame.copy()))
+    out.append(PartitionExpr.running_max("f").with_frame(frame.copy()))
+    out.append(PartitionExpr.running_count("g").with_frame(frame.copy()))
+    out.append(PartitionExpr.running_count().with_frame(frame.copy()))
+    out.append(PartitionExpr.first_value("g").with_frame(frame.copy()))
+    out.append(PartitionExpr.last_value("k").with_frame(frame.copy()))
+    out.append(PartitionExpr.nth_value("f", 2).with_frame(frame.copy()))
+    return out^
+
+
+def _allowed_frames() -> List[PartitionFrame]:
+    """A frame of each bound pair SQL allows, in ROWS and RANGE units."""
+    var pairs = List[PartitionFrame]()
+    for units in range(2):
+        var u = UInt8(units)
+        pairs.append(_frame(u, FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_PRECEDING, 1))
+        pairs.append(_frame(u, FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_CURRENT_ROW, 0))
+        pairs.append(_frame(u, FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_FOLLOWING, 2))
+        pairs.append(_frame(u, FRAME_BOUND_PRECEDING, 3, FRAME_BOUND_PRECEDING, 1))
+        pairs.append(_frame(u, FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0))
+        pairs.append(_frame(u, FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_FOLLOWING, 1))
+        pairs.append(_frame(u, FRAME_BOUND_PRECEDING, 2, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0))
+        pairs.append(_frame(u, FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_CURRENT_ROW, 0))
+        pairs.append(_frame(u, FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_FOLLOWING, 4))
+        pairs.append(_frame(u, FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0))
+        pairs.append(_frame(u, FRAME_BOUND_FOLLOWING, 1, FRAME_BOUND_FOLLOWING, 3))
+        pairs.append(_frame(u, FRAME_BOUND_FOLLOWING, 1, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0))
+    return pairs^
+
+
+def test_every_frame_sql_allows_is_cut_for_each_function_that_reads_it() raises:
+    var frames = _allowed_frames()
+    for i in range(len(frames)):
+        var plan = _window(_names("g"), _names("k"), _framed(frames[i]), _scan())
+        assert_equal(_message(plan), "", "frame " + String(frames[i]))
+    # A RANGE offset over an INT32 and a FLOAT64 key, descending too.
+    var offset = _frame(FRAME_UNITS_RANGE, FRAME_BOUND_PRECEDING, 2, FRAME_BOUND_FOLLOWING, 1)
+    assert_equal(_message(_window(_names("g"), _names("i32"), _framed(offset), _scan())), "")
+    assert_equal(_message(_window(_names("g"), _names("f"), _framed(offset), _scan())), "")
+    var desc = List[Bool]()
+    desc.append(True)
+    var descending = LogicalPlan.partition_by(
+        _names("g"), _names("k"), desc^, _framed(offset), _scan()
+    )
+    assert_equal(_message(descending), "")
+    # A RANGE frame without an offset reads peers, so it takes any number of
+    # order keys of any sortable type.
+    var peers = _frame(FRAME_UNITS_RANGE, FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0)
+    assert_equal(_message(_window(_names(), _names("g", "b"), _framed(peers), _scan())), "")
+    assert_equal(_message(_window(_names("g"), _names(), _framed(peers), _scan())), "")
+
+
+def test_a_frame_shape_sql_refuses_is_refused_with_duckdbs_reason() raises:
+    var tail = ", which SQL does not allow: "
     assert_equal(
-        _message(_over(PartitionExpr.running_sum("k"))),
-        _unserved("SUM(k) has the frame ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW" + tail),
+        _message(_over(PartitionExpr.agg_with_frame(PF_SUM, "k", _frame(
+            FRAME_UNITS_ROWS, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0)))),
+        _unserved("SUM(k) has the frame ROWS BETWEEN UNBOUNDED FOLLOWING AND UNBOUNDED FOLLOWING"
+            + tail + "frame start cannot be UNBOUNDED FOLLOWING"),
     )
     assert_equal(
-        _message(_over(PartitionExpr.running_avg("f").with_frame(rows_running.copy()))),
-        _unserved("AVG(f) has the frame ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW" + tail),
+        _message(_over(PartitionExpr.first_value("k").with_frame(_frame(
+            FRAME_UNITS_RANGE, FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_UNBOUNDED_PRECEDING, 0)))),
+        _unserved("FIRST_VALUE(k) has the frame RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED PRECEDING"
+            + tail + "frame end cannot be UNBOUNDED PRECEDING"),
     )
     assert_equal(
-        _message(_over(PartitionExpr.running_min("k").with_frame(
-            _frame(FRAME_UNITS_ROWS, FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)))),
-        _unserved("MIN(k) has the frame ROWS BETWEEN 1 PRECEDING AND CURRENT ROW" + tail),
+        _message(_over(PartitionExpr.running_count().with_frame(_frame(
+            FRAME_UNITS_ROWS, FRAME_BOUND_FOLLOWING, 1, FRAME_BOUND_PRECEDING, 1)))),
+        _unserved("COUNT() has the frame ROWS BETWEEN 1 FOLLOWING AND 1 PRECEDING"
+            + tail + "frame starting from following row cannot have preceding rows"),
     )
     assert_equal(
-        _message(_over(PartitionExpr.running_max("k").with_frame(
-            _frame(FRAME_UNITS_RANGE, FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_FOLLOWING, 2)))),
-        _unserved("MAX(k) has the frame RANGE BETWEEN UNBOUNDED PRECEDING AND 2 FOLLOWING" + tail),
+        _message(_over(PartitionExpr.running_max("k").with_frame(_frame(
+            FRAME_UNITS_ROWS, FRAME_BOUND_FOLLOWING, 2, FRAME_BOUND_CURRENT_ROW, 0)))),
+        _unserved("MAX(k) has the frame ROWS BETWEEN 2 FOLLOWING AND CURRENT ROW"
+            + tail + "frame starting from following row cannot have preceding rows"),
     )
     assert_equal(
-        _message(_over(PartitionExpr.running_count("k").with_frame(
-            _frame(FRAME_UNITS_ROWS, FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0)))),
-        _unserved("COUNT(k) has the frame ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING" + tail),
+        _message(_over(PartitionExpr.nth_value("k", 2).with_frame(_frame(
+            FRAME_UNITS_RANGE, FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_PRECEDING, 1)))),
+        _unserved("NTH_VALUE(k) has the frame RANGE BETWEEN CURRENT ROW AND 1 PRECEDING"
+            + tail + "frame starting from current row cannot have preceding rows"),
+    )
+
+
+def test_a_range_offset_needs_one_order_key_of_a_type_it_measures() raises:
+    var offset = _frame(FRAME_UNITS_RANGE, FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)
+    var head = "SUM(k) has the frame RANGE BETWEEN 1 PRECEDING AND CURRENT ROW; a RANGE frame with an offset needs "
+    var sum = _one(PartitionExpr.agg_with_frame(PF_SUM, "k", offset.copy()))
+    assert_equal(
+        _message(_window(_names("g"), _names(), sum.copy(), _scan())),
+        _unserved(head + "exactly one ORDER BY key, and the window has 0"),
     )
     assert_equal(
-        _message(_over(PartitionExpr.first_value("k").with_frame(rows_running.copy()))),
-        _unserved("FIRST_VALUE(k) has the frame ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW" + tail),
+        _message(_window(_names("g"), _names("k", "f"), sum.copy(), _scan())),
+        _unserved(head + "exactly one ORDER BY key, and the window has 2"),
     )
     assert_equal(
-        _message(_over(PartitionExpr.last_value("k").with_frame(rows_running.copy()))),
-        _unserved("LAST_VALUE(k) has the frame ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW" + tail),
+        _message(_window(_names(), _names("g"), sum.copy(), _scan())),
+        _unserved(head + "an INT64, INT32 or FLOAT64 ORDER BY key, and 'g' has type string"),
     )
     assert_equal(
-        _message(_over(PartitionExpr.nth_value("k", 2).with_frame(rows_running.copy()))),
-        _unserved("NTH_VALUE(k) has the frame ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW" + tail),
+        _message(_window(_names(), _names("b"), sum.copy(), _scan())),
+        _unserved(head + "an INT64, INT32 or FLOAT64 ORDER BY key, and 'b' has type bool"),
     )
-    # The default frame of an ordered window is served, and ranking and
-    # offset functions ignore the frame.
+    # The end bound alone carries the offset.
+    var end_only = _one(PartitionExpr.running_count().with_frame(_frame(
+        FRAME_UNITS_RANGE, FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_FOLLOWING, 2)))
+    assert_equal(
+        _message(_window(_names("g"), _names(), end_only^, _scan())),
+        _unserved("COUNT() has the frame RANGE BETWEEN CURRENT ROW AND 2 FOLLOWING;"
+            " a RANGE frame with an offset needs exactly one ORDER BY key, and the window has 0"),
+    )
+    # The same frame in ROWS units counts rows, and needs no key.
+    var rows = _one(PartitionExpr.agg_with_frame(PF_SUM, "k", _frame(
+        FRAME_UNITS_ROWS, FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)))
+    assert_equal(_message(_window(_names("g"), _names(), rows^, _scan())), "")
+
+
+def test_a_negative_offset_is_refused() raises:
+    var tail = "; an offset below 0 is not served"
+    assert_equal(
+        _message(_over(PartitionExpr.agg_with_frame(PF_SUM, "k", _frame(
+            FRAME_UNITS_ROWS, FRAME_BOUND_PRECEDING, -1, FRAME_BOUND_CURRENT_ROW, 0)))),
+        _unserved("SUM(k) has the frame ROWS BETWEEN -1 PRECEDING AND CURRENT ROW" + tail),
+    )
+    assert_equal(
+        _message(_over(PartitionExpr.last_value("k").with_frame(_frame(
+            FRAME_UNITS_RANGE, FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_FOLLOWING, -3)))),
+        _unserved("LAST_VALUE(k) has the frame RANGE BETWEEN CURRENT ROW AND -3 FOLLOWING" + tail),
+    )
+    # 0 is an offset like any other.
+    assert_equal(
+        _message(_over(PartitionExpr.agg_with_frame(PF_SUM, "k", _frame(
+            FRAME_UNITS_ROWS, FRAME_BOUND_PRECEDING, 0, FRAME_BOUND_FOLLOWING, 0)))),
+        "",
+    )
+
+
+def test_frame_units_that_are_neither_rows_nor_range_are_refused() raises:
+    assert_equal(
+        _message(_over(PartitionExpr.agg_with_frame(PF_SUM, "k", _frame(
+            UInt8(2), FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)))),
+        _unserved("SUM(k) has the frame units 2, which are neither ROWS nor RANGE"),
+    )
+
+
+def test_ranking_and_offset_functions_ignore_their_frame() raises:
+    # A frame SQL would refuse, and a RANGE offset over two keys: the ranking
+    # and offset functions do not read it.
+    var shape = _frame(FRAME_UNITS_ROWS, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0, FRAME_BOUND_PRECEDING, 1)
+    var keys = _frame(FRAME_UNITS_RANGE, FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)
+    assert_equal(_message(_over(PartitionExpr.row_number().with_frame(shape.copy()))), "")
+    assert_equal(_message(_over(PartitionExpr.ntile(2).with_frame(shape.copy()))), "")
+    assert_equal(_message(_over(PartitionExpr.lag("k").with_frame(shape.copy()))), "")
+    assert_equal(
+        _message(_window(_names("g"), _names("k", "f"), _one(PartitionExpr.lead("k").with_frame(keys.copy())), _scan())),
+        "",
+    )
+    # The default frame of an ordered window is served.
     assert_equal(_message(_over(PartitionExpr.running_sum("k").with_frame(_range_running()))), "")
     assert_equal(_message(_over(PartitionExpr.first_value("k"))), "")
-    assert_equal(_message(_over(PartitionExpr.row_number().with_frame(rows_running.copy()))), "")
-    assert_equal(_message(_over(PartitionExpr.lag("k").with_frame(
-        _frame(FRAME_UNITS_ROWS, FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)))), "")
 
 
 def test_the_whole_partition_frame_is_cut_in_rows_and_in_range_units() raises:

@@ -36,15 +36,26 @@
 #          frame;
 #        COUNT: a column of any type, or "" for COUNT(*), and a served frame;
 #        any other function: refused by name.
-#      Served frames: RANGE from UNBOUNDED PRECEDING to CURRENT ROW (SQL's
-#      default frame with an ORDER BY) and UNBOUNDED PRECEDING to UNBOUNDED
-#      FOLLOWING in ROWS or RANGE units (the whole partition). Every other
-#      frame is refused and its reason spells it.
+#      Served frames: every ROWS or RANGE frame SQL allows, with the bounds
+#      UNBOUNDED PRECEDING, n PRECEDING, CURRENT ROW, n FOLLOWING and
+#      UNBOUNDED FOLLOWING. Refused, in this order, with the frame spelled:
+#        - frame units that are neither ROWS nor RANGE;
+#        - a shape SQL refuses, with DuckDB's reason: a start of UNBOUNDED
+#          FOLLOWING, an end of UNBOUNDED PRECEDING, a FOLLOWING start whose
+#          end is CURRENT ROW or PRECEDING, a CURRENT ROW start whose end is
+#          PRECEDING;
+#        - an offset below 0 (SQL here cannot write one; DuckDB's frames for
+#          a large negative offset wrap around, so none is served);
+#        - a RANGE frame with an offset (n PRECEDING or n FOLLOWING) over a
+#          window whose ORDER BY is not one key, or whose key is not INT64,
+#          INT32 or FLOAT64 (the types `op_window` measures an offset on).
 #
 # The schema the sink declares is the node's, except that a SUM, AVG, MIN or
-# MAX column is nullable when its argument column is: the served frames hold
-# the current row, so a NULL result comes only from a frame whose values are
-# all NULL. The reopened pipeline carries that schema.
+# MAX column is nullable when its argument column is, and a SUM, AVG, MIN,
+# MAX, FIRST_VALUE or LAST_VALUE column is nullable when its frame can be
+# empty: a frame that does not hold the current row (`1 FOLLOWING AND 2
+# FOLLOWING`) is empty at a partition's edge, and its answer there is NULL.
+# The reopened pipeline carries that schema.
 # =============================================================================
 
 from arrow.arrow_types import ArrowType
@@ -52,6 +63,7 @@ from arrow.schema import Schema, SchemaBuilder
 from lowering.cut_state import _Cutter, _Pipe
 from lowering.lowered_plan import LoweringInputs, LOWERING_WINDOW_UNSERVED
 from plan_expr.partition_expr import (
+    FRAME_UNITS_ROWS,
     PartitionExpr,
     partition_fn_name,
     value_fn_has_default,
@@ -134,23 +146,6 @@ def _fn_text(expr: PartitionExpr) -> String:
     return partition_fn_name(expr.func) + "(" + expr.column + ")"
 
 
-def _is_running_range(expr: PartitionExpr) -> Bool:
-    ref f = expr.frame
-    return (
-        f.units == FRAME_UNITS_RANGE
-        and f.start_tag == FRAME_BOUND_UNBOUNDED_PRECEDING
-        and f.end_tag == FRAME_BOUND_CURRENT_ROW
-    )
-
-
-def _is_whole_partition(expr: PartitionExpr) -> Bool:
-    ref f = expr.frame
-    return (
-        f.start_tag == FRAME_BOUND_UNBOUNDED_PRECEDING
-        and f.end_tag == FRAME_BOUND_UNBOUNDED_FOLLOWING
-    )
-
-
 def _bound_sql(tag: UInt8, offset: Int64) -> String:
     """One frame bound as SQL spells it (the five FRAME_BOUND_* tags; the
     binder emits no other)."""
@@ -177,16 +172,85 @@ def _frame_sql(f: PartitionFrame) -> String:
     )
 
 
-def _check_frame(expr: PartitionExpr) raises:
-    if _is_running_range(expr) or _is_whole_partition(expr):
+def _is_offset_bound(tag: UInt8) -> Bool:
+    return tag == FRAME_BOUND_PRECEDING or tag == FRAME_BOUND_FOLLOWING
+
+
+def _shape_refusal(f: PartitionFrame) -> String:
+    """DuckDB's reason for a frame shape SQL refuses, or "" for a shape it
+    allows (its parser's sentences, measured on v1.5.6)."""
+    if f.start_tag == FRAME_BOUND_UNBOUNDED_FOLLOWING:
+        return "frame start cannot be UNBOUNDED FOLLOWING"
+    if f.end_tag == FRAME_BOUND_UNBOUNDED_PRECEDING:
+        return "frame end cannot be UNBOUNDED PRECEDING"
+    # DuckDB says "cannot have preceding rows" for an explicit `n FOLLOWING
+    # AND CURRENT ROW` too; its "cannot end with current row" is the
+    # shorthand `ROWS n FOLLOWING`'s, which a plan cannot tell apart.
+    if f.start_tag == FRAME_BOUND_FOLLOWING and (
+        f.end_tag == FRAME_BOUND_PRECEDING or f.end_tag == FRAME_BOUND_CURRENT_ROW
+    ):
+        return "frame starting from following row cannot have preceding rows"
+    if f.start_tag == FRAME_BOUND_CURRENT_ROW and f.end_tag == FRAME_BOUND_PRECEDING:
+        return "frame starting from current row cannot have preceding rows"
+    return ""
+
+
+def _is_range_offset_key(t: ArrowType) -> Bool:
+    return t == ArrowType.INT64 or t == ArrowType.INT32 or t == ArrowType.FLOAT64
+
+
+def _check_frame(
+    expr: PartitionExpr, order_keys: List[String], schema: Schema
+) raises:
+    ref f = expr.frame
+    if f.units != FRAME_UNITS_ROWS and f.units != FRAME_UNITS_RANGE:
+        raise _unserved(
+            _fn_text(expr)
+            + " has the frame units "
+            + String(Int(f.units))
+            + ", which are neither ROWS nor RANGE"
+        )
+    var head = _fn_text(expr) + " has the frame " + _frame_sql(f)
+    var shape = _shape_refusal(f)
+    if shape != "":
+        raise _unserved(head + ", which SQL does not allow: " + shape)
+    if (_is_offset_bound(f.start_tag) and f.start_offset < 0) or (
+        _is_offset_bound(f.end_tag) and f.end_offset < 0
+    ):
+        raise _unserved(head + "; an offset below 0 is not served")
+    if f.units == FRAME_UNITS_ROWS:
         return
-    raise _unserved(
-        _fn_text(expr)
-        + " has the frame "
-        + _frame_sql(expr.frame)
-        + "; only RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW and the"
-        " whole partition are served"
-    )
+    if not (_is_offset_bound(f.start_tag) or _is_offset_bound(f.end_tag)):
+        return
+    if len(order_keys) != 1:
+        raise _unserved(
+            head
+            + "; a RANGE frame with an offset needs exactly one ORDER BY key,"
+            " and the window has "
+            + String(len(order_keys))
+        )
+    # The key is a column of the child: `_check_keys` ran first.
+    var t = schema.field_arrow_type(_column_index(schema, order_keys[0]))
+    if not _is_range_offset_key(t):
+        raise _unserved(
+            head
+            + "; a RANGE frame with an offset needs an INT64, INT32 or FLOAT64"
+            " ORDER BY key, and '"
+            + order_keys[0]
+            + "' has type "
+            + String(t)
+        )
+
+
+def _holds_current_row(f: PartitionFrame) -> Bool:
+    """True iff every row's frame holds the row itself, so it is never empty.
+    Offsets are not negative here (`_check_frame` refused them), so only a
+    start of `n FOLLOWING` or an end of `n PRECEDING` with n above 0 can
+    leave the row out, in ROWS and in RANGE units alike (a RANGE bound
+    `0 FOLLOWING` is the current key, NaN and infinities included)."""
+    var start_ok = f.start_tag != FRAME_BOUND_FOLLOWING or f.start_offset == 0
+    var end_ok = f.end_tag != FRAME_BOUND_PRECEDING or f.end_offset == 0
+    return start_ok and end_ok
 
 
 def _argument_type(expr: PartitionExpr, schema: Schema) raises -> ArrowType:
@@ -240,7 +304,9 @@ def _check_default(expr: PartitionExpr, t: ArrowType) raises:
         )
 
 
-def _check_expr(expr: PartitionExpr, schema: Schema) raises:
+def _check_expr(
+    expr: PartitionExpr, order_keys: List[String], schema: Schema
+) raises:
     var f = expr.func
     if (
         f == PF_ROW_NUMBER
@@ -271,16 +337,16 @@ def _check_expr(expr: PartitionExpr, schema: Schema) raises:
                 + "; an n above 0 is required"
             )
         _require_type(expr, _argument_type(expr, schema), True)
-        _check_frame(expr)
+        _check_frame(expr, order_keys, schema)
         return
     if f == PF_SUM or f == PF_AVG or f == PF_MIN or f == PF_MAX:
         _require_type(expr, _argument_type(expr, schema), False)
-        _check_frame(expr)
+        _check_frame(expr, order_keys, schema)
         return
     if f == PF_COUNT:
         if expr.column != "":
             _ = _argument_type(expr, schema)
-        _check_frame(expr)
+        _check_frame(expr, order_keys, schema)
         return
     raise _unserved(partition_fn_name(f) + " is not a window function the sink computes")
 
@@ -289,21 +355,23 @@ def _declared_schema(
     node: LogicalPlan, exprs: List[PartitionExpr], child: Schema
 ) -> Schema:
     """The node's output schema, with a SUM, AVG, MIN or MAX column nullable
-    when its argument column is."""
+    when its argument column is, and a SUM, AVG, MIN, MAX, FIRST_VALUE or
+    LAST_VALUE column nullable when its frame can be empty."""
     ref declared = node.output_schema
     var first = declared.num_columns() - len(exprs)
     var changed = List[Bool]()
     var any_changed = False
     for j in range(len(exprs)):
         var f = exprs[j].func
-        var flip = False
+        var nullable = False
         if f == PF_SUM or f == PF_AVG or f == PF_MIN or f == PF_MAX:
             var at = _column_index(child, exprs[j].column)
-            flip = (
-                at >= 0
-                and child.field_nullable(at)
-                and not declared.field_nullable(first + j)
+            nullable = (at >= 0 and child.field_nullable(at)) or not (
+                _holds_current_row(exprs[j].frame)
             )
+        elif f == PF_FIRST_VALUE or f == PF_LAST_VALUE:
+            nullable = not _holds_current_row(exprs[j].frame)
+        var flip = nullable and not declared.field_nullable(first + j)
         changed.append(flip)
         any_changed = any_changed or flip
     if not any_changed:
@@ -333,7 +401,7 @@ def _window_data(node: LogicalPlan) raises -> PartitionBySinkData:
     _check_keys(child, pd.partition_keys, "PARTITION BY")
     _check_keys(child, pd.order_keys, "ORDER BY")
     for i in range(len(pd.partition_exprs)):
-        _check_expr(pd.partition_exprs[i], child)
+        _check_expr(pd.partition_exprs[i], pd.order_keys, child)
     return PartitionBySinkData(
         pd.partition_keys.copy(),
         pd.order_keys.copy(),

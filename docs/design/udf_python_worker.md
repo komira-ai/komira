@@ -142,7 +142,7 @@ The library starts it with `posix_spawn`, never `fork`, because the engine is mu
   of a call. A run is cancelled through the cancel flag (§5.2), never by a signal from the terminal.
 - **Signals:** an empty mask (`POSIX_SPAWN_SETSIGMASK`) and every signal at its default disposition
   (`POSIX_SPAWN_SETSIGDEF` with a full set), so a signal the user's process ignores is not ignored by the zygote, as
-  the prototype did (`src/tests/helpers/komira_udf_spike_node_worker/proxy/channel.c:410-416`).
+  the prototype did (`src/tests/helpers/komira_udf_spike_node_worker/proxy/channel.c:479-492`).
 - **No signal handler in the engine's process.** The library installs none and never changes `SIGCHLD`: the
   engine's process may be the user's Python, which owns its handlers. It waits for the zygote by its pid only
   (`waitpid(pid)`, after a pidfd on Linux or `EVFILT_PROC` on macOS reports the exit), never `waitpid(-1)`. If
@@ -526,7 +526,7 @@ from them, and none of them ships:
 | Prototype | Taken | Changed |
 |---|---|---|
 | `komira_udf_spike_abi` | `komira_udf_runtime.h`, `komira_udf_wire.h`, the Mojo mirror, the engine-side harness, the case files, the `komira-test/echo` runtime | Moved to `src/udf_abi/` at P0; the header gains the runtime options and `ERR_BAD_OPTION` (§2.2), the wire version becomes 3 (§4.1) |
-| `komira_udf_spike_node_worker` | The engine-side proxy table (`proxy/proxy.c`), the channel (`proxy/channel.c`: spawn, framing, the grace-period kill), the IPC codec (`proxy/ipc.c`), the cancel word holding a call id (`kudfw.h:38-41`) | Spawns one zygote instead of one process per worker; the cancel word is a `shm_open` object on macOS, which lacks the prototype's `memfd` (`channel.c:395`); kills go through a pidfd on Linux; exits come from the zygote's `EXIT` report instead of the proxy's own `waitpid` |
+| `komira_udf_spike_node_worker` | The engine-side proxy table (`proxy/proxy.c`), the channel (`proxy/channel.c`: spawn, framing, the grace-period kill), the IPC codec (`proxy/ipc.c`), the cancel word holding a call id (`kudfw.h:38-41`) | Spawns one zygote instead of one process per worker; the cancel word is a `shm_open` object on macOS, which lacks the prototype's Linux `memfd` (`channel.c:155`); kills go through a pidfd on Linux; exits come from the zygote's `EXIT` report instead of the proxy's own `waitpid` |
 | `komira_udf_spike_native` | The sha256 check before use | — |
 
 ## 9. Decisions this document makes

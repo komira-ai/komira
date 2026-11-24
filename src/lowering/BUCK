@@ -114,15 +114,20 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        stacked windows, a node of two functions, a window
 #                        over a join and over an aggregation; the declared
 #                        schema's nullability, which every reader of a shared
-#                        window takes; a limit above a window with keys
+#                        window takes, and a column whose frame can be empty
+#                        nullable; a limit above a window with keys
 #                        refused and one above a window with none cut.
 # test_lower_window_refusals
 #                        every reason a window is refused with
 #                        LOWERING_WINDOW_UNSERVED (the descending list, key
 #                        columns and types, function arguments and defaults,
-#                        frames, an unknown function), each by its exact text,
-#                        the refusal coming before the child is walked and in a
-#                        fixed order, and the windows that lower beside each.
+#                        frame shapes SQL refuses, frame units, a RANGE offset
+#                        without one INT64, INT32 or FLOAT64 order key, an
+#                        unknown function), each by its exact text, the
+#                        refusal coming before the child is walked and in a
+#                        fixed order, and the windows that lower beside each:
+#                        every frame SQL allows, for every function that reads
+#                        it.
 # test_sink_capability   the capability table's rows, which triples are not
 #                        served, and admission of hand-built segments.
 # test_lower_udf_nodes   the rendered physical plan of user-function plans: an
