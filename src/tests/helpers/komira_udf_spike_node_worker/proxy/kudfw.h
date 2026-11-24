@@ -151,6 +151,12 @@ typedef struct kudfw_reply {
   size_t len;
 } kudfw_reply;
 
+/* The control channel's socket pair (`sv[0]` the engine's end, `sv[1]` the
+ * worker's) and the cancel word's file, 4096 zero bytes with no name, every
+ * descriptor close-on-exec. 0, or -1 with errno set, nothing left open, and
+ * `*what` naming the step that failed. */
+int kudfw_channel_open(int sv[2], int* cancel_fd, const char** what);
+
 /* Start a worker and exchange HELLO. 0, or a status with `err` filled.
  * The worker exits at end of file on its channel (worker/wire.mjs), which is
  * how it ends when the engine process dies without sending SHUTDOWN: the

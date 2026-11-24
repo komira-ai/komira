@@ -125,7 +125,7 @@ Decisions this document makes that go beyond the language rulings it implements:
 - Missing:
   - import of a foreign array without a copy, with validation of its layout;
   - the Arrow C Device structs;
-  - any shared-memory channel (`git grep -E 'memfd|shm_open' origin/main -- src` finds only the prototypes' memory files: the native prototype's verified library, `src/tests/helpers/komira_udf_spike_native/`, and the Node worker prototype's cancel word, `src/tests/helpers/komira_udf_spike_node_worker/proxy/channel.c:395`);
+  - any shared-memory channel (`git grep -E 'memfd|shm_open' origin/main -- src` finds only the prototypes' memory files: the native prototype's verified library, `src/tests/helpers/komira_udf_spike_native/`, and the Node worker prototype's cancel word, `src/tests/helpers/komira_udf_spike_node_worker/proxy/channel.c:155`);
   - a UDF executor;
   - a UDF operator in the physical plan. `src/physical_plan/physical_plan.mojo:209-212` lists only `OP_FILTER/PROJECT/LIMIT/JOIN_PROBE`. Today the SDK walks the expression and evaluates UDF calls itself, because of a package cycle (`src/plan_ir/expr_udf_sites.mojo:1-30`).
 

@@ -548,16 +548,26 @@ cause. A target is counted under the first failing action its build report names
 | `http_core`'s s2n shim test expects `ECONNRESET` where macOS reads end of stream | 106 (`http_core` and what depends on it) | komira-ai/komira#2206 |
 | `http_core`'s partial-send test never sees a partial send on macOS (hidden behind the test above in the same package) | the same 106 | komira-ai/komira#2207 |
 | a library's native shared library is ELF only | 13 | komira-ai/komira#2197 |
-| the UDF spike helpers' C uses Linux-only APIs | 7 | komira-ai/komira#2199 |
+| the UDF spike helpers' C used Linux-only APIs; since it was ported (below), their welded tests stop instead: the native runtime has no macOS rule for loading a verified library, and the node worker's tests need a darwin-arm64 `node` and read `/proc` | 7 in the sweep; 2 since the port (`komira_udf_spike_native`, `komira_udf_spike_node_worker`) | komira-ai/komira#2199 |
 | `bench_data`'s h2o join tables `x` and `big` hash differently on macOS | 3 | komira-ai/komira#2208 |
 
 No target stopped on aws-lc and s2n-tls (komira-ai/komira#2196), on `so_exports`
 (komira-ai/komira#2198), on `phase_timers` (komira-ai/komira#2200, which built in both sweeps
 since and so is intermittent) or on a read of `/proc/self/status` (komira-ai/komira#2201).
-Seven more causes were ours and are fixed: tests that assumed Linux's `PATH_MAX`, a
-`SIGPIPE` that macOS raises for the whole process, BSD `yes`, the epoll backend, the
-`libc.so.6` name, a temporary-file name that two threads could draw alike on macOS's coarser
-clock, and an NFD file name that APFS treats as the same file as its NFC form.
+The UDF spike helpers' C (`probe.c`, `channel.c`, `engine_loop.c`) has a macOS branch for each
+Linux-only API it used (`dl_iterate_phdr` and `mallinfo2`, `SOCK_CLOEXEC` and `memfd_create`,
+`sched_getaffinity` and `pthread_barrier_t`). Measured: a `build --target-platforms
+komira//tools/build/platforms:darwin-arm64 --keep-going` on the farm of the two helper libraries,
+their C libraries and their runtime shared libraries (`native`, `native_c`, `node_worker`,
+`node_worker_corrupt`): every C library and shared library built, the welded tests `test_probe`,
+`test_channel`, `test_engine_barrier` and `test_no_node` passed on a farm Mac, and the other 13
+welded tests stopped on the two gaps in that row (`test_native_io` also on its 4095-byte path,
+longer than macOS allows): `Commands: 1244 (cached: 1204, remote: 40, local: 0)`, and the 13 are
+the `mojo_gated_test` actions its build report lists as failed. Seven more causes were ours and
+are fixed: tests that assumed Linux's `PATH_MAX`, a `SIGPIPE` that macOS raises for the whole
+process, BSD `yes`, the epoll backend, the `libc.so.6` name, a temporary-file name that two
+threads could draw alike on macOS's coarser clock, and an NFD file name that APFS treats as the
+same file as its NFC form.
 
 The proposal keeps this set built, in the same way as the mopm set:
 

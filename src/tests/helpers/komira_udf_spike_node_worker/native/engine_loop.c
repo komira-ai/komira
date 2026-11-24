@@ -20,6 +20,14 @@
  * close_context, the worker's own counters; both go into the report. CPU is
  * the scheduler's ns (schedstat) of the engine thread and of every thread of
  * the worker process named by the log, memory from /proc/<pid>/smaps_rollup.
+ * Where /proc is missing (macOS) those figures are -1.
+ *
+ * Two things differ by system: the CPU count (Linux: the CPUs this process
+ * may run on, sched_getaffinity; macOS, which has no affinity masks: the
+ * active CPUs, sysctl hw.activecpu) and the barrier the threads meet at
+ * (Linux: pthread_barrier_t; macOS has none, so a mutex, a condition
+ * variable and a generation count). kudfw_engine_cpus and
+ * kudfw_engine_barrier_check give the engine's tests both.
  */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -32,6 +40,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h> /* RUSAGE_SELF: the engine process */
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 #include <time.h>
 #include <unistd.h>
 
@@ -180,6 +191,70 @@ static void leaf(struct ArrowSchema* s, const char* fmt, const char* name) {
   s->release = noop_schema_release;
 }
 
+/* ---- the CPU count and the barrier --------------------------------------------- */
+
+/* The CPUs the engine's threads can run on, or -1. */
+static int engine_cpus(void) {
+#ifdef __APPLE__
+  int n = 0;
+  size_t len = sizeof(n);
+  return sysctlbyname("hw.activecpu", &n, &len, NULL, 0) == 0 && n > 0 ? n : -1;
+#else
+  cpu_set_t set;
+  return sched_getaffinity(0, sizeof(set), &set) == 0 ? CPU_COUNT(&set) : -1;
+#endif
+}
+
+#ifdef __APPLE__
+/* A barrier of `need` threads, reusable: the last thread to arrive starts a
+ * new generation and wakes the others; a waiter leaves only when the
+ * generation it arrived in has ended, so a spurious wakeup, or a fast thread
+ * already waiting in the next round, never lets anyone through early. */
+typedef struct engine_barrier {
+  pthread_mutex_t mu;
+  pthread_cond_t cv;
+  unsigned need, waiting;
+  unsigned long generation;
+} engine_barrier;
+
+static int barrier_init(engine_barrier* b, unsigned need) {
+  if (need == 0) return -1;
+  if (pthread_mutex_init(&b->mu, NULL) != 0) return -1;
+  if (pthread_cond_init(&b->cv, NULL) != 0) {
+    pthread_mutex_destroy(&b->mu);
+    return -1;
+  }
+  b->need = need;
+  b->waiting = 0;
+  b->generation = 0;
+  return 0;
+}
+
+static void barrier_wait(engine_barrier* b) {
+  pthread_mutex_lock(&b->mu);
+  unsigned long gen = b->generation;
+  if (++b->waiting == b->need) {
+    b->waiting = 0;
+    b->generation++;
+    pthread_cond_broadcast(&b->cv);
+  } else {
+    while (gen == b->generation) pthread_cond_wait(&b->cv, &b->mu);
+  }
+  pthread_mutex_unlock(&b->mu);
+}
+
+static void barrier_destroy(engine_barrier* b) {
+  pthread_cond_destroy(&b->cv);
+  pthread_mutex_destroy(&b->mu);
+}
+#else
+typedef pthread_barrier_t engine_barrier;
+
+static int barrier_init(engine_barrier* b, unsigned need) { return pthread_barrier_init(b, NULL, need); }
+static void barrier_wait(engine_barrier* b) { pthread_barrier_wait(b); }
+static void barrier_destroy(engine_barrier* b) { pthread_barrier_destroy(b); }
+#endif
+
 /* ---- one run ------------------------------------------------------------------- */
 
 typedef struct run run_t;
@@ -211,7 +286,7 @@ struct run {
   int64_t min_ns; /* the measured phase runs at least this long, and at least `samples` calls */
   double a, b;
   int threads;
-  pthread_barrier_t warm, done;
+  engine_barrier warm, done;
   thread_rep rep[MAX_THREADS];
 };
 
@@ -371,7 +446,7 @@ static void* thread_main(void* arg) {
       if ((double)hi <= 1.02 * (double)lo) break;
     }
   }
-  pthread_barrier_wait(&r->warm);
+  barrier_wait(&r->warm);
   tr->t_start = mono_ns();
   int64_t c0 = thread_cpu_ns(), p0 = proc_cpu_ns(tr->pid);
   for (int k = 0; tr->status == KOMIRA_UDF_OK && k < tr->cap_samples; k++) {
@@ -384,7 +459,7 @@ static void* thread_main(void* arg) {
   int64_t p1 = proc_cpu_ns(tr->pid);
   tr->worker_cpu_ns = p0 >= 0 && p1 >= 0 ? p1 - p0 : -1;
   smaps(tr->pid, &tr->rss_kb, &tr->pss_kb, &tr->uss_kb);
-  pthread_barrier_wait(&r->done);
+  barrier_wait(&r->done);
   if (inst != NULL) r->t->close_instance(inst);
   if (ctx != NULL) r->t->close_context(ctx);
   snprintf(tr->close_line, sizeof(tr->close_line), "%s", t_close_line);
@@ -519,16 +594,15 @@ __attribute__((visibility("default"))) char* kudfw_engine_run(const char* lib_pa
   r->a = a;
   r->b = b;
   r->threads = (int)threads;
-  pthread_barrier_init(&r->warm, NULL, (unsigned)threads);
-  pthread_barrier_init(&r->done, NULL, (unsigned)threads);
+  barrier_init(&r->warm, (unsigned)threads);
+  barrier_init(&r->done, (unsigned)threads);
   char cpu_max[128], load0[128], load1[128], model[256];
   read_file("/sys/fs/cgroup/cpu.max", cpu_max, sizeof(cpu_max));
   read_file("/proc/loadavg", load0, sizeof(load0));
   cpu_model(model, sizeof(model));
   long long thr0, thr_us0, thr1, thr_us1;
   cgroup_stat(&thr0, &thr_us0);
-  cpu_set_t set;
-  int cpus = sched_getaffinity(0, sizeof(set), &set) == 0 ? CPU_COUNT(&set) : -1;
+  int cpus = engine_cpus();
   struct rusage pu0, pu1;
   getrusage(RUSAGE_SELF, &pu0);
   long exp0 = atomic_load(&exported), rel0 = atomic_load(&released);
@@ -611,10 +685,73 @@ __attribute__((visibility("default"))) char* kudfw_engine_run(const char* lib_pa
     free(tr->samples);
   }
   jput(&j, "]}");
-  pthread_barrier_destroy(&r->warm);
-  pthread_barrier_destroy(&r->done);
+  barrier_destroy(&r->warm);
+  barrier_destroy(&r->done);
   free(r);
   return j.p;
 }
 
 __attribute__((visibility("default"))) void kudfw_engine_free(char* p) { free(p); }
+
+/* ---- for the engine's tests ---------------------------------------------------- */
+
+/* The CPU count the run reports as `cpus`. */
+__attribute__((visibility("default"))) int64_t kudfw_engine_cpus(void) { return engine_cpus(); }
+
+typedef struct barrier_check {
+  engine_barrier b;
+  int threads, rounds;
+  atomic_long arrived; /* every arrival of every round so far */
+  atomic_long early;   /* reads after a wait that saw a round not yet full */
+} barrier_check;
+
+typedef struct barrier_arg {
+  barrier_check* c;
+  int index;
+} barrier_arg;
+
+static void* barrier_thread(void* p) {
+  barrier_arg* a = (barrier_arg*)p;
+  barrier_check* c = a->c;
+  for (long round = 0; round < c->rounds; round++) {
+    long full = (round + 1) * c->threads;
+    /* Thread 0 arrives last in every round: only after every other thread
+     * has arrived, so a barrier that lets the others through before it
+     * arrives shows up as a read below `full`. */
+    if (a->index == 0)
+      while (atomic_load(&c->arrived) < full - 1) sched_yield();
+    atomic_fetch_add(&c->arrived, 1);
+    barrier_wait(&c->b);
+    if (atomic_load(&c->arrived) < full) atomic_fetch_add(&c->early, 1);
+  }
+  return NULL;
+}
+
+/* `threads` threads (1 to MAX_THREADS) meet `rounds` times at one barrier
+ * of the engine's kind, each adding itself to the arrivals before it waits
+ * and reading them after. Returns the number of reads that saw fewer than
+ * every thread's arrival for that round (0 when the barrier holds every
+ * thread until the last arrives), or -1 for bad arguments or a barrier that
+ * could not be made. A thread that cannot be started aborts the process (the
+ * ones already started would wait for it forever), and a barrier that never
+ * lets the threads go hangs here; the test's alarm ends it. */
+__attribute__((visibility("default"))) int64_t kudfw_engine_barrier_check(int64_t threads, int64_t rounds) {
+  if (threads < 1 || threads > MAX_THREADS || rounds < 1) return -1;
+  barrier_check c;
+  memset(&c, 0, sizeof(c));
+  c.threads = (int)threads;
+  c.rounds = (int)rounds;
+  atomic_init(&c.arrived, 0);
+  atomic_init(&c.early, 0);
+  if (barrier_init(&c.b, (unsigned)threads) != 0) return -1;
+  pthread_t th[MAX_THREADS];
+  barrier_arg args[MAX_THREADS];
+  for (int i = 0; i < c.threads; i++) {
+    args[i].c = &c;
+    args[i].index = i;
+    if (pthread_create(&th[i], NULL, barrier_thread, &args[i]) != 0) abort();
+  }
+  for (int i = 0; i < c.threads; i++) pthread_join(th[i], NULL);
+  barrier_destroy(&c.b);
+  return atomic_load(&c.early);
+}
