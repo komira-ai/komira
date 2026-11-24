@@ -276,11 +276,14 @@ EXPORT int32_t komira_fake_store(uint8_t *b, uint64_t cap, uint64_t *n) {
 //                   takes no text this long";
 //   anything else   -3 and the last error "bind: the stand-in runs no query
 //                   <text>", so a test sees the bytes that arrived.
+// A text that starts "interrupted:" first raises SIGINT in the calling thread,
+// as a Ctrl-C during a query does, and then answers as the rest of the text.
 // A refusal leaves *out as it was given. komira_fake_stream_counts (not part
 // of the ABI) writes the streams made and released, the schemas made and
 // released and the batches made and released since the library was loaded,
 // so a test sees that each is released exactly once.
 #include <errno.h>
+#include <signal.h>
 #include <stdlib.h>
 
 struct ArrowSchema {
@@ -425,6 +428,11 @@ EXPORT int32_t komira_sql_stream(void *ctx, const char *sql, struct ArrowArraySt
   (void)ctx;
   cred_error[0] = 0;
   if (!sql || !out) return -2;
+  static const char interrupted[] = "interrupted:";
+  if (strncmp(sql, interrupted, sizeof interrupted - 1) == 0) {
+    raise(SIGINT);
+    sql += sizeof interrupted - 1;
+  }
   int m;
   if (strcmp(sql, "rows") == 0) {
     m = ROWS;
