@@ -20,8 +20,10 @@
 # a negative count or a negative offset, and a limit with an offset that does
 # not reach a sort (the rows it would skip are in no stated order). Refused
 # after the child is walked: a limit over a sorted stream that is not such a
-# chain (a filter stands between it and the sort): a segment records no order,
-# so the rows the limit would keep are not defined.
+# chain (a filter stands between it and the sort, or it reads a shared sort
+# through a reference), and a chain one of whose nodes below the limit is a
+# shared subplan other readers read whole (`cut_walk._range_holds_shared`): a
+# segment records no order, so the rows the limit would keep are not defined.
 # =============================================================================
 
 from lowering.cut_state import _Pipe, _uncuttable
@@ -107,13 +109,20 @@ def _limit_op(node: LogicalPlan) raises -> MorselOp:
     return MorselOp.limit(ld.n)
 
 
+def _sorted_stream_refusal(node: LogicalPlan) -> Error:
+    """The refusal of limit `node` over a sorted stream it cannot keep a
+    range of."""
+    return _uncuttable(
+        node,
+        "a limit over a sorted stream that is not one range of its sort (a"
+        " filter or a shared subplan stands between them); no order is"
+        " recorded on a segment",
+    )
+
+
 def _fuse_limit(mut pipe: _Pipe, node: LogicalPlan, var op: MorselOp) raises:
     """Fuse the limit's operator onto its child's pipeline, or refuse a limit
     over a sorted stream."""
     if pipe.sorted_input:
-        raise _uncuttable(
-            node,
-            "a limit over a sorted stream with a filter between them; no order"
-            " is recorded on a segment",
-        )
+        raise _sorted_stream_refusal(node)
     pipe.append_op(op^)

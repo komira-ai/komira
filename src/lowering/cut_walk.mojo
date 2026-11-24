@@ -71,6 +71,7 @@ from lowering.cut_limit import (
     _fuse_limit,
     _limit_op,
     _reaches_sort,
+    _sorted_stream_refusal,
 )
 from lowering.cut_map_batches import _map_batches_op, _fuse_map_batches
 from lowering.cut_project import _project_op, _fuse_project
@@ -186,7 +187,14 @@ def _walk_node(
         return _open_step(node, inputs)
     if tag == PLAN_LIMIT:
         if _reaches_sort(node):
-            return _walk_range(cutter, node, RowRange.every_row(), inputs)
+            var pipe = _walk_range(cutter, node, RowRange.every_row(), inputs)
+            # A shared sort, or a shared node above it, is read whole by its
+            # other readers, so its rows are a sorted stream to this limit.
+            if len(cutter.referenced) > 0 and _range_holds_shared(
+                cutter, node.limit_data_ref().child[]
+            ):
+                raise _sorted_stream_refusal(node)
+            return pipe^
         var op = _limit_op(node)
         var pipe = _walk(cutter, node.limit_data_ref().child[], inputs)
         _fuse_limit(pipe, node, op^)
@@ -235,6 +243,25 @@ def _walk_node(
             node, "a view reference; views are resolved before lowering"
         )
     raise _uncuttable(node, "no cutter arm for this node")
+
+
+def _range_holds_shared(cutter: _Cutter, node: LogicalPlan) -> Bool:
+    """True when `node`, a node of a range's chain below its top limit (a
+    projection, a limit, or the sort or top-n that ends the chain), or a node
+    of the chain below it, is a canonical subtree: its hash is one a reference
+    names and no node of that hash was cut before. `_walk_range` cuts these
+    nodes without `_walk`, so such a node would be neither recorded nor read
+    whole by its other readers. Called after the range is cut, when every
+    reference under `node` names a subtree cut already, so its expanded form
+    is the one its producer hashed (`cut_shared._expanded`)."""
+    var h = _expanded(cutter, node).structural_hash()
+    if _names(cutter.referenced, h) and cutter._shared_at(h) < 0:
+        return True
+    if node.tag == PLAN_LIMIT:
+        return _range_holds_shared(cutter, node.limit_data_ref().child[])
+    if node.tag == PLAN_PROJECT:
+        return _range_holds_shared(cutter, node.project_data_ref().child[])
+    return False
 
 
 def _walk_range(

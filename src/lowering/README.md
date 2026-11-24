@@ -75,8 +75,8 @@ and no environment variable and touches no global, so equal arguments give a
   branch does, and the canonical position and every reference read that
   segment over an `E3` edge (a union that holds two references names the
   segment twice in its `SOURCE_CONCAT`); the engine hands each reader the
-  same rows. A reader of a sort's output is a sorted input, as the sort's own
-  reader is. One that is only scans, filters, projections and unions of them
+  same rows. A reader of a sort's or a top-n's output is a sorted input, as
+  the sort's own reader is. One that is only scans, filters, projections and unions of them
   is cut again at every reference, over the same scans: the references take
   no `ScanFacts` of their own, and the recut keeps the scans' statistics,
   dictionary-encoded keys and parallel read.
@@ -148,8 +148,9 @@ shape:
   (`AGG_UDF`); a limit with a negative
   count or a negative offset, or a top-n with a negative count; a limit with
   an offset that does not reach a sort (only a sort's output has an order to
-  skip rows of); a limit over a sorted stream with a filter between them (see
-  Order); a partial or final
+  skip rows of); a limit over a sorted stream that is not one range of its
+  sort (a filter stands between them, or the sort or a node between is a
+  shared subplan other readers read whole; see Order); a partial or final
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
   than Parquet, in memory, CSV, JSON or an Iceberg table; a JSON scan whose
@@ -252,7 +253,9 @@ source keeps it; lowering does not state more. A limit that reaches a
 sort through projections and limits is cut as a `SINK_TOPN` segment, which
 answers rows of the sort's order, ties kept in the collected order. A limit
 above a sort with a filter between them is refused, because the rows it keeps
-would depend on an order no segment records, and a limit above an aggregation
+would depend on an order no segment records; so is a limit whose sort, or a
+node between them, is a shared subplan other readers read whole (a sort that
+only reads a shared subplan's segment is still one range), and a limit above an aggregation
 that reads a sort is cut: the aggregation ends the sorted stream.
 
 ## Dependencies

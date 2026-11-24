@@ -530,8 +530,9 @@ def test_a_limit_over_a_filtered_sort_is_refused_and_a_limit_over_a_sort_is_cut(
     assert_equal(
         _message(LogicalPlan.limit(5, filtered^), _inputs()),
         _not_cut(
-            "Limit (a limit over a sorted stream with a filter between them;"
-            " no order is recorded on a segment)"
+            "Limit (a limit over a sorted stream that is not one range of its"
+            " sort (a filter or a shared subplan stands between them); no order"
+            " is recorded on a segment)"
         ),
     )
     var filtered_projection = LogicalPlan.filter(

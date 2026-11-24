@@ -91,7 +91,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_lower_shared      a shared subplan (a PLAN_CSE_REF and its canonical
 #                        subtree): one with a breaker or a limit cut once and
 #                        read by every reference over E3 edges, a sort's
-#                        readers sorted, a canonical subtree holding a
+#                        and a top-n's readers sorted, a limit over an
+#                        unshared sort still a range (also when the sort
+#                        reads a reference) and over a shared one refused,
+#                        a canonical subtree holding a
 #                        reference found by its hash before folding, a join's
 #                        right child walked first (a self-join, scan facts
 #                        kept, a shared join), one of scans, filters, projections
