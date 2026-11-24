@@ -155,12 +155,14 @@ Fixed before this design, and not reopened here:
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.4, with eighteen exports
+- **EXISTS** `libkomira` is at ABI 1.5, with nineteen exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
   - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream.
-    `komira_sql_stream_run` (1.4) runs it under a run handle that another thread cancels
+    `komira_sql_stream_run` (1.5) runs it under a run handle that another thread cancels
     (`komira_run_cancel`, status -6) and reads the progress of (`komira_run_progress`). The plan call,
     `komira_plan_stream`, is designed but not built; it takes the next minor.
+  - `komira_ctx_new_with_options` (1.4) creates a context with the engine's worker count and
+    memory budget as arguments (0 is the host's own value).
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,
@@ -193,7 +195,7 @@ The package exports these names and nothing else. The test `exports_test` holds 
 
 | name | what it is |
 |---|---|
-| `new Session(options?)` | one engine context (`komira_ctx_new`) and its tables. The options are `{ threads?: number, memoryLimit?: number }`, both settable once the session-options calls of the ABI land. A later option, `caFile?: string`, adds trusted roots for `https://` reads, as Python's `ca_file=` ([credentials_and_writes.md](credentials_and_writes.md) decision 9). `memoryLimit` is in bytes, and an omitted option takes the engine's default. Options are arguments, never environment variables (rule S2) |
+| `new Session(options?)` | one engine context (`komira_ctx_new`) and its tables. The options are `{ threads?: number, memoryLimit?: number }`, both settable once the addon binds `komira_ctx_new_with_options` (ABI 1.4), which takes them as arguments; the addon does not bind it yet. A later option, `caFile?: string`, adds trusted roots for `https://` reads, as Python's `ca_file=` ([credentials_and_writes.md](credentials_and_writes.md) decision 9). `memoryLimit` is in bytes, and an omitted option takes the engine's default. Options are arguments, never environment variables (rule S2) |
 | `session.registerParquet(name, path): Promise<void>` | `komira_register_parquet`. `path` is a `string` or a `file:` `URL`. A relative path resolves against the working directory when the call is made, as Node's `fs` does, and `~` is not expanded. Registering a name again replaces it |
 | `session.registerCsv(name, path, options?)`, `session.registerNdjson(name, path)` | CSV and newline-delimited JSON. They arrive with libkomira calls that register those formats by name. No design has those calls yet: [libkomira_run_abi.md](libkomira_run_abi.md) §7 says only "the later source calls", and today's `komira_csv_binding` and `komira_json_binding` return bindings, not registrations. The CSV options are the ones `komira_csv_binding` takes: `{ delimiter?: string, header?: boolean, allVarchar?: boolean }` |
 | `session.sql(query): Promise<Result>` | runs one SQL statement through `komira_sql_stream`. **The official door of the first release**. A later second argument, `sql(query, bindings?)`, binds sources for one statement ([credentials_and_writes.md](credentials_and_writes.md) decision 12) |
@@ -322,7 +324,7 @@ every buffer, and it would put an IPC writer in C beside the engine's own.
 
 ### Cancellation
 
-The first release has no cancel, and its README says so. libkomira has one since ABI 1.4: a run
+The first release has no cancel, and its README says so. libkomira has one since ABI 1.5: a run
 handle passed to `komira_sql_stream_run`, cancelled by `komira_run_cancel` from any thread, and a
 cancelled run returns `KOMIRA_ERR_CANCELLED` (-6) ([libkomira_run_abi.md](libkomira_run_abi.md)
 §10). The addon does not bind it yet.
