@@ -72,31 +72,35 @@ SELECT * FROM (VALUES
     ('', 0, 0)
 ) AS t(rname, region_id, priority);
 
--- Aggregates over computed columns, before and after joins; three rows per
--- k, b not a linear function of a, so corr(a, b) is not 1.
+-- Aggregates over computed columns, before and after joins, all BIGINT (a
+-- grouped SUM folds integers; the case is the computed input, not the
+-- type); three rows per k, b not a linear function of a, so corr(a, b) is
+-- not 1.
 CREATE TABLE derived_l AS
 SELECT * FROM (VALUES
-    (CAST(1 AS BIGINT), 1.0::DOUBLE, 10.0::DOUBLE),
-    (2, 2.0, 20.0),
-    (1, 3.0, 30.0),
-    (2, 4.0, 40.0),
-    (1, 5.0, 10.0),
-    (2, 1.0, 50.0)
+    (CAST(1 AS BIGINT), CAST(1 AS BIGINT), CAST(10 AS BIGINT)),
+    (2, 2, 20),
+    (1, 3, 30),
+    (2, 4, 40),
+    (1, 5, 10),
+    (2, 1, 50)
 ) AS t(k, a, b);
 CREATE TABLE derived_r AS
-SELECT * FROM (VALUES (CAST(1 AS BIGINT), 100.0::DOUBLE), (2, 200.0)) AS t(k, c);
+SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(100 AS BIGINT)), (2, 200)) AS t(k, c);
+-- A profit chain: a line's price less its discount (in percent) less its
+-- supply cost times its quantity, in cents.
 CREATE TABLE profit_lineitem AS
 SELECT * FROM (VALUES
-    (CAST(1 AS BIGINT), CAST(10 AS BIGINT), 100.0::DOUBLE, 0.25::DOUBLE, 5.0::DOUBLE),
-    (2, 20, 200.0, 0.5, 5.0),
-    (1, 10, 300.0, 0.25, 10.0),
-    (2, 20, 400.0, 0.5, 10.0)
-) AS t(li_part, li_supp, li_price, li_discount, li_quantity);
+    (CAST(1 AS BIGINT), CAST(10 AS BIGINT), CAST(100 AS BIGINT), CAST(25 AS BIGINT), CAST(5 AS BIGINT)),
+    (2, 20, 200, 50, 5),
+    (1, 10, 300, 25, 10),
+    (2, 20, 400, 50, 10)
+) AS t(li_part, li_supp, li_price, li_pct, li_quantity);
 CREATE TABLE profit_partsupp AS
 SELECT * FROM (VALUES
-    (CAST(1 AS BIGINT), CAST(10 AS BIGINT), 3.0::DOUBLE),
-    (2, 20, 7.0),
-    (1, 20, 1000.0)
+    (CAST(1 AS BIGINT), CAST(10 AS BIGINT), CAST(3 AS BIGINT)),
+    (2, 20, 7),
+    (1, 20, 1000)
 ) AS t(ps_part, ps_supp, ps_cost);
 CREATE TABLE profit_supplier AS
 SELECT * FROM (VALUES (CAST(10 AS BIGINT), CAST(1995 AS BIGINT)), (20, 1996)) AS t(s_supp, s_year);
