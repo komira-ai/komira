@@ -5,16 +5,15 @@
 // The calls that take a table are asynchronous, as the design fixes: they
 // return promises, and every error, an argument's included, is a rejection.
 // Arguments are checked before the library is called: a wrong type is a
-// TypeError and a wrong value of the right type a RangeError. The addon's
-// calls are synchronous today, so a call runs on the JavaScript thread before
-// its promise settles; the session thread of the design's first part moves
-// them off it without changing this module's signatures.
+// TypeError and a wrong value of the right type a RangeError. The addon runs
+// each session's library calls in order on a native thread of the session's
+// own, so the event loop never waits on the engine.
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { KomiraError, UnsupportedOperation } from "./errors.ts";
-import { call, load, type Handle, type Native } from "./native.ts";
+import { call, callAsync, load, type Handle, type Native } from "./native.ts";
 
 /**
  * The options of a session. Neither is settable yet: libkomira has no call
@@ -139,6 +138,8 @@ function noRegistration(method: string, what: string): UnsupportedOperation {
 export class Session {
   #native: Native;
   #handle: Handle | null;
+  /** The addon's free of the context, once `close` has asked for it. */
+  #freed: Promise<void> | undefined;
 
   /**
    * A new session. Loads libkomira on the first session or call of this
@@ -170,14 +171,15 @@ export class Session {
   }
 
   /**
-   * Frees the session's context and refuses every later call. Calling it
+   * Refuses every later call at once, and frees the session's context once
+   * the calls already made have run: never under a running call. Calling it
    * again does nothing.
    */
   close(): void {
     const handle = this.#handle;
     if (handle !== null) {
       this.#handle = null;
-      this.#native.addon.freeSession(handle);
+      this.#freed = this.#native.addon.freeSession(handle);
     }
   }
 
@@ -200,7 +202,7 @@ export class Session {
     const file = filePath(path);
     const handle = this.#open();
     const native = this.#native;
-    call(() => native.addon.registerParquet(handle, table, file));
+    await callAsync(() => native.addon.registerParquet(handle, table, file));
   }
 
   /**
@@ -243,9 +245,10 @@ export class Session {
     this.close();
   }
 
-  /** `close()`, for `await using`. */
+  /** `close()`, for `await using`, settled once the context is freed. */
   async [Symbol.asyncDispose](): Promise<void> {
     this.close();
+    await this.#freed;
   }
 }
 

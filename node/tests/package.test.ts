@@ -35,7 +35,7 @@ test("the real library accepts a Parquet file by its path and by its file: URL, 
   await s.registerParquet("t", PARQUET);
   await s.registerParquet("t", pathToFileURL(PARQUET));
   await s.registerParquet("u", PARQUET);
-  s.close();
+  await s[Symbol.asyncDispose]();
 });
 
 test("a relative path is resolved against the working directory when the call is made", async () => {
@@ -50,7 +50,7 @@ test("a relative path is resolved against the working directory when the call is
     assert.equal(e.status, -3);
   } finally {
     process.chdir(here);
-    s.close();
+    await s[Symbol.asyncDispose]();
   }
 });
 
@@ -66,7 +66,7 @@ test("the engine refusing a missing file is a KomiraError with status -3, its co
   assert.doesNotMatch(e.message, /komira_register_parquet failed/);
   // The session is still usable after a refusal.
   await s.registerParquet("t", PARQUET);
-  s.close();
+  await s[Symbol.asyncDispose]();
 });
 
 test("the module-level registerParquet uses one default session, made at the first call and never closed", async () => {

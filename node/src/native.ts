@@ -12,7 +12,9 @@
 // cannot be unloaded), and the next call tries again.
 //
 // The addon's own error codes (KOMIRA_ARG, KOMIRA_LOAD_FAILED, ...) stay in
-// this module: `fromAddon` turns an error the addon threw into a KomiraError.
+// this module: `fromAddon` turns an error the addon threw, or a session call's
+// rejection, into a KomiraError. A session's calls run on a native thread of
+// its own (node/README.md, "The session thread") and return Promises.
 
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -29,8 +31,10 @@ export interface Addon {
   load(path: string): void;
   abiVersion(): number;
   newSession(): Handle;
-  freeSession(session: Handle): void;
-  registerParquet(session: Handle, name: string, path: string): void;
+  /** Refuses later calls at once; the Promise settles once the context is freed, after the calls made before it. */
+  freeSession(session: Handle): Promise<void>;
+  /** Runs on the session's own thread; the Promise rejects with the call's status. */
+  registerParquet(session: Handle, name: string, path: string): Promise<void>;
   sessionStats(): { created: number; freed: number };
 }
 
@@ -143,6 +147,19 @@ export function fromAddon(e: unknown): KomiraError {
 export function call<T>(f: () => T): T {
   try {
     return f();
+  } catch (e) {
+    throw fromAddon(e);
+  }
+}
+
+/**
+ * The value of the addon's Promise `f()`, with what it throws (a misuse,
+ * before anything is queued) or rejects with (a failed C call, from the
+ * session's thread) turned into a KomiraError.
+ */
+export async function callAsync<T>(f: () => Promise<T>): Promise<T> {
+  try {
+    return await f();
   } catch (e) {
     throw fromAddon(e);
   }

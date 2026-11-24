@@ -212,6 +212,35 @@ node_binding_test(
     },
 )
 
+# The session thread's stand-in (tests/fake_latch.c): its own context per
+# session, a journal of every call with its context and thread, gates that
+# hold a call until the test opens them, and refusals of a call on the
+# JavaScript thread, two at once on one context, or from a second thread.
+c_shared_lib(
+    name = "fake_latch",
+    srcs = ["tests/fake_latch.c"],
+    out = "libkomira_fake_latch.so",
+)
+
+# An addon of the tests that opens and reads the stand-in's gates and journal.
+node_addon(
+    name = "fake_control",
+    srcs = ["tests/fake_control.c"],
+)
+
+# The session thread: calls in order on one thread per session, two sessions
+# at once, freeSession while a call is held, the finalizer of a session with a
+# pending call, and sessions in worker threads.
+node_binding_test(
+    name = "thread_test",
+    srcs = ["thread.test.mjs"],
+    data = {
+        "komira_addon.node": ":komira_addon",
+        "fake_control.node": ":fake_control",
+        "fake/libkomira_fake_latch.so": ":fake_latch",
+    },
+)
+
 # A stand-in Arrow C stream producer: an addon of the tests that builds a
 # stream from a description and counts the releases of its structs.
 node_addon(

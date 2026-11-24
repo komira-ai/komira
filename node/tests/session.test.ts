@@ -65,7 +65,7 @@ test("the stand-in loads, and an engine refusal carries its status, code and tex
   assert.deepEqual([before.message, before.status, before.code, before.step], [FAKE_ENGINE_TEXT, -3, "KOMIRA_ERR_ENGINE", null]);
   // Options left out, or given as undefined, are the engine's defaults.
   new Session({ threads: undefined, memoryLimit: undefined }).close();
-  s.close();
+  await s[Symbol.asyncDispose]();
 });
 
 test("registerParquet: a wrong argument is a TypeError or RangeError, and the library is not called", async () => {
@@ -96,7 +96,7 @@ test("registerParquet: a wrong argument is a TypeError or RangeError, and the li
   for (const file of [pathToFileURL("/nonexistent/t.parquet"), "t.parquet", path.join("..", "t.parquet")]) {
     assert.equal(await rejected(s.registerParquet("t", file), KomiraError), FAKE_ENGINE_TEXT);
   }
-  s.close();
+  await s[Symbol.asyncDispose]();
 });
 
 test("registerCsv and registerNdjson check their arguments, then are refused by name", async () => {
@@ -135,7 +135,7 @@ test("registerCsv and registerNdjson check their arguments, then are refused by 
   }
   assert.equal(await rejected(s.registerNdjson("", "/x.ndjson"), RangeError), "the table name is empty");
   assert.equal(await rejected(s.registerNdjson("t", ""), RangeError), "the path is empty");
-  s.close();
+  await s[Symbol.asyncDispose]();
 });
 
 test("close frees the context once, and a closed session refuses every call", async () => {
@@ -183,4 +183,29 @@ test("Symbol.dispose and Symbol.asyncDispose close the session, and so do using 
     d = s;
   }
   assert.equal(d.closed, true);
+});
+
+test("a call made before close still runs and settles; close refuses later calls at once", async () => {
+  const stats = (): { created: number; freed: number } => load().addon.sessionStats();
+  const s = new Session();
+  const before = stats();
+  // Queued on the session's thread before close: it runs, and the stand-in refuses it.
+  const queued = s.registerParquet("t", "/nonexistent/t.parquet");
+  s.close();
+  assert.equal(s.closed, true);
+  assert.equal(await rejected(s.registerParquet("u", "/nonexistent/u.parquet"), KomiraError), "the session is closed");
+  assert.equal(await rejected(queued, KomiraError), FAKE_ENGINE_TEXT);
+  // await using settles only once the context is freed, after its calls.
+  let pending: Promise<void>;
+  {
+    await using u = new Session();
+    pending = u.registerParquet("t", "/nonexistent/t.parquet");
+    pending.catch(() => undefined);
+  }
+  assert.equal(await rejected(pending, KomiraError), FAKE_ENGINE_TEXT);
+  // Disposing s again closes nothing and settles once its context is freed.
+  await s[Symbol.asyncDispose]();
+  const after = stats();
+  assert.equal(after.created - before.created, 1);
+  assert.equal(after.freed - before.freed, 2);
 });

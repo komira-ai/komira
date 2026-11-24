@@ -18,15 +18,15 @@ const words = (result) => {
   return [view.getBigUint64(0, true), view.getBigUint64(8, true)];
 };
 
-test('parquetSchema passes the reported length as the capacity', () => {
-  const buf = addon.parquetSchema(addon.newSession(), 'any.parquet');
+test('parquetSchema passes the reported length as the capacity', async () => {
+  const buf = await addon.parquetSchema(addon.newSession(), 'any.parquet');
   assert.equal(buf.length, 16);
   assert.deepEqual(words(buf), [16n, 16n]);
 });
 
-test('planRender passes the reported length as the capacity', () => {
-  // planRender returns text; the stand-in's bytes are all below 0x80.
-  const text = addon.planRender(addon.newSession(), new Uint8Array([1, 2, 3]));
+test('planRender passes the reported length as the capacity', async () => {
+  // planRender resolves to text; the stand-in's bytes are all below 0x80.
+  const text = await addon.planRender(addon.newSession(), new Uint8Array([1, 2, 3]));
   assert.equal(text.length, 16);
   assert.deepEqual(words(text), [16n, 16n]);
 });
