@@ -31,13 +31,13 @@
 #   small, arrives whole and in order (a loop that drops or repeats the
 #   unwritten part of a short write fails).
 
-from std.ffi import external_call
 from std.testing import assert_equal, assert_false, assert_true
 
 from async_rt.reactor.socket_setup import (
     inet_loopback_be,
     set_so_rcvbuf,
     set_so_sndbuf,
+    wait_readable,
 )
 from http_core.tls import TlsConfig
 from mail_auth import TestAuthVerifier
@@ -159,20 +159,12 @@ def _noop(mut rig: _Rig, mut peer: Peer) raises:
     _ = _run(rig, peer, String("n1 NOOP"), String("n1 OK NOOP completed\r\n"))
 
 
-def _server_has_input(mut rig: _Rig) -> Bool:
-    """True when any accepted socket has bytes (or an end) waiting to be read.
-    poll(2) with a zero timeout; `struct pollfd` is {int fd; short events;
-    short revents}, two int32 on a little-endian host, `revents` the high half
-    of the second, and POLLIN is 1 on Linux and macOS."""
+def _server_has_input(mut rig: _Rig) raises -> Bool:
+    """True when any accepted socket has bytes (or an end) waiting to be read:
+    async_rt's `wait_readable` with a zero timeout, over each one."""
     var ids = rig.reg.all_conn_ids()
     for i in range(len(ids)):
-        var pfd = List[Int32]()
-        pfd.append(rig.reg.fd_of(ids[i]))
-        pfd.append(Int32(1))
-        # SAFETY: poll(2) reads and writes this local list's two int32 during
-        # the call only.
-        var rc = external_call["poll", Int32](pfd.unsafe_ptr(), UInt64(1), Int32(0))
-        if rc > Int32(0) and ((pfd[1] >> 16) & Int32(1)) != Int32(0):
+        if wait_readable(rig.reg.fd_of(ids[i]), Int32(-1), 0):
             return True
     return False
 

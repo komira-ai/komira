@@ -30,14 +30,14 @@
 #   in order (a loop that drops or repeats the unwritten part of a short write
 #   fails).
 
-from std.ffi import external_call
-from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_true
 
 from async_rt.reactor.socket_setup import (
     inet_loopback_be,
     set_so_rcvbuf,
     set_so_sndbuf,
+    socket_unsent_bytes,
+    wait_readable,
 )
 from http_core.tls import TlsConfig
 from mail_auth import TestAuthVerifier
@@ -142,45 +142,14 @@ def _noop(mut rig: _Rig, mut peer: Peer) raises:
     _ = peer.take_through(String("250 2.0.0"))
 
 
-def _server_has_input(mut rig: _Rig) -> Bool:
-    """True when any accepted socket has bytes (or an end) waiting to be read.
-    poll(2) with a zero timeout; `struct pollfd` is {int fd; short events;
-    short revents}, two int32 on a little-endian host, `revents` the high half
-    of the second, and POLLIN is 1 on Linux and macOS."""
+def _server_has_input(mut rig: _Rig) raises -> Bool:
+    """True when any accepted socket has bytes (or an end) waiting to be read:
+    async_rt's `wait_readable` with a zero timeout, over each one."""
     var ids = rig.reg.all_conn_ids()
     for i in range(len(ids)):
-        var pfd = List[Int32]()
-        pfd.append(rig.reg.fd_of(ids[i]))
-        pfd.append(Int32(1))
-        # SAFETY: poll(2) reads and writes this local list's two int32 during
-        # the call only.
-        var rc = external_call["poll", Int32](pfd.unsafe_ptr(), UInt64(1), Int32(0))
-        if rc > Int32(0) and ((pfd[1] >> 16) & Int32(1)) != Int32(0):
+        if wait_readable(rig.reg.fd_of(ids[i]), Int32(-1), 0):
             return True
     return False
-
-
-def _peer_unsent(fd: Int32) raises -> Int:
-    """The bytes the peer's socket has sent that the server end has not yet
-    taken: Linux's ioctl SIOCOUTQ (0x5411), macOS's getsockopt SO_NWRITE
-    (SOL_SOCKET 0xffff, 0x1024). Zero means nothing is in flight to the
-    server."""
-    var n = Array[Int32, 1](fill=Int32(0))
-    var rc: Int32
-    comptime if CompilationTarget.is_macos():
-        var optlen = Array[UInt32, 1](fill=UInt32(4))
-        # SAFETY: `n` and `optlen` are locals that outlive the synchronous call,
-        # which writes 4 bytes to `n` and its length to `optlen`.
-        rc = external_call["getsockopt", Int32](
-            fd, Int32(0xFFFF), Int32(0x1024), n.unsafe_ptr(), optlen.unsafe_ptr()
-        )
-    else:
-        # SAFETY: `n` is a local int that outlives the synchronous call, which
-        # writes 4 bytes to it.
-        rc = external_call["ioctl", Int32](fd, UInt64(0x5411), n.unsafe_ptr())
-    if rc < Int32(0):
-        raise Error("reading the peer's send queue failed")
-    return Int(n[0])
 
 
 def _noop_at(mut rig: _Rig, mut peer: Peer, now_ms: Int) raises:
@@ -369,7 +338,7 @@ def test_expiry_with_a_full_send_window_drops_on_the_next_step() raises:
     # The peer sends no more. Bytes still on their way to the server would
     # be read by the step at the deadline and make the connection active
     # again, so the server reads until the peer's send queue is empty.
-    while _peer_unsent(p.fd) > 0 or _server_has_input(rig):
+    while socket_unsent_bytes(p.fd) > 0 or _server_has_input(rig):
         rig.step()
         yield_cpu()
     assert_true(rig.reg.tx_len(cid) > 0)

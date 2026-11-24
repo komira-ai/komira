@@ -40,13 +40,17 @@ What each test holds:
      is readable at EOF and writable) or -1 (the park returns without waiting), so the loop runs out.
 """
 
-from std.ffi import external_call
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true, assert_false
 
 from async_rt.ops.waker_sink import NoopSink
 from async_rt.runtime.blocking_runtime import BlockingRuntime
-from async_rt.reactor.socket_setup import close_fd, set_so_rcvbuf, set_so_sndbuf
+from async_rt.reactor.socket_setup import (
+    close_fd,
+    set_so_rcvbuf,
+    set_so_sndbuf,
+    wait_readable,
+)
 from async_rt.runtime.tcp_stream import TcpListener, TcpStream
 from http_core.tls import (
     TLS_OUTCOME_BLOCKED_ON_READ,
@@ -127,26 +131,6 @@ def _client_config() raises -> TlsConfig:
     return c^
 
 
-def _wait_readable(fd_a: Int32, fd_b: Int32) raises:
-    """Wait, without a timeout, until `fd_a` or `fd_b` (-1: not watched) is
-    readable or has an error. TCP loopback delivers a segment to the peer
-    asynchronously to the call that sent it."""
-    # Two struct pollfd {int fd; short events; short revents}, as int32 pairs
-    # on a little-endian host: the first word is the fd, the second holds
-    # events (POLLIN, 1 on Linux and macOS) in its low half and revents (0)
-    # in its high half. poll(2) skips an entry with a negative fd.
-    var pfd = Array[Int32, 4](fill=Int32(0))
-    pfd[0] = fd_a
-    pfd[1] = Int32(1)
-    pfd[2] = fd_b
-    pfd[3] = Int32(1)
-    # SAFETY: the pointer's origin is `pfd`, two struct pollfd on the stack
-    # alive across the synchronous call, which writes only their revents and
-    # keeps no pointer.
-    if external_call["poll", Int32](pfd.unsafe_ptr(), UInt64(2), Int32(-1)) < 1:
-        raise Error("poll() did not report a socket ready")
-
-
 def _handshake(mut server: TlsConnection, mut client: TlsConnection) raises:
     """Alternate the two handshakes until both are DONE. A side blocked on
     read waits in poll for the peer's flight, so 256 rounds bounds protocol
@@ -177,7 +161,7 @@ def _handshake(mut server: TlsConnection, mut client: TlsConnection) raises:
         if sv_done and cl_done:
             return
         if (sv_done or sv_wait >= 0) and (cl_done or cl_wait >= 0):
-            _wait_readable(sv_wait, cl_wait)
+            _ = wait_readable(sv_wait, cl_wait, -1)
     assert_true(False, "handshake did not finish in 256 rounds")
 
 
