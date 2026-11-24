@@ -4,9 +4,10 @@ The C ABI of komira's one shared library, `libkomira` (`libkomira.so` on Linux,
 `libkomira.dylib` on macOS arm64). Every language binding links against that
 one library and its flat C surface: no Mojo type crosses it. This package holds
 the surface's skeleton (the status codes, the version, the context handle and
-the last-error call) and the source and render calls: registering a Parquet,
-CSV or newline-delimited JSON file as a table, the schema and scan bindings of
-Parquet, CSV and JSON files, and a plan rendered as text; the credential calls, which define a credential on the
+the last-error call), the session options (the engine's worker count and
+memory budget, as arguments of `komira_ctx_new_with_options`) and the source and render calls: registering a Parquet,
+CSV or newline-delimited JSON file as a table, the schema and scan bindings of Parquet, CSV and JSON files, and a plan
+rendered as text; the credential calls, which define a credential on the
 session by name and hold its values in the session's secret store; and
 `komira_sql_stream`, which runs one SQL statement on the session and hands its
 answer over as an Arrow C stream.
@@ -18,7 +19,8 @@ answer over as an Arrow C stream.
   error, the engine (`sdk_exec`'s `EngineContext`), whose catalog holds the
   registered tables, and the credentials. `try_new_session` is the session
   `komira_ctx_new` hands out, or None when the engine does not start (the
-  export returns that as NULL).
+  export returns that as NULL). `session_options` turns the two `int64_t`
+  arguments of `komira_ctx_new_with_options` into the engine's options.
 - `credentials.mojo`: `SessionCredentials`, the credential calls on values (a
   kind, a name, a field's bytes in; an id out, or a raise with a named error).
 - `credential_store.mojo`: `SessionSecretStore`, the `SecretStore` the values
@@ -35,6 +37,8 @@ answer over as an Arrow C stream.
 ```text
 int32_t  komira_abi_version(void);
 void    *komira_ctx_new(void);
+void    *komira_ctx_new_with_options(int64_t worker_count,
+                                     int64_t memory_budget_bytes);
 void     komira_ctx_free(void *ctx);
 int32_t  komira_last_error(void *ctx, uint8_t *out_buf, uint64_t out_cap,
                            uint64_t *out_len);
@@ -113,7 +117,7 @@ from so import ABI_MAJOR, ABI_MINOR, abi_version
 from std.testing import assert_equal
 
 assert_equal(abi_version(), ABI_MAJOR * 1000 + ABI_MINOR)
-assert_equal(abi_version(), Int32(1004))
+assert_equal(abi_version(), Int32(1005))
 ```
 
 **The handle.** `komira_ctx_new` returns a context the caller owns until it
@@ -127,9 +131,24 @@ once, freeing one twice or using it after the free is undefined (as for
 name. The engine's workers (the host's compute thread count) start in
 `komira_ctx_new` and stop in `komira_ctx_free`.
 
+**Session options.** `komira_ctx_new_with_options(worker_count,
+memory_budget_bytes)` is `komira_ctx_new` with the engine's options as
+arguments; nothing is read from the environment. `worker_count` is the number
+of compute workers; `memory_budget_bytes` is the bytes the sinks of one query
+may reserve in total (the segment pool). 0 for either is the host's own value
+(the hardware probe's compute thread count, and 70% of the available memory),
+which is what `komira_ctx_new` uses for both. A negative value is refused:
+the call returns NULL, as it does when the engine cannot start. A positive
+value has no upper bound. The options are fixed for the life of the context.
+A query whose aggregation, sort or window state needs more than the budget is
+refused at step `execute`: `komira_sql_stream` returns `KOMIRA_ERR_ENGINE`
+with a last error of the form `execute: [Processor] pipeline_exec: the
+aggregation sink of segment <n> was denied <bytes> bytes of the segment's memory pool (budget
+<budget>, granted <bytes>)`, and the context answers the next query.
+
 ```mojo
 from sdk_exec.engine_options import EngineOptions
-from so import Session, try_new_session
+from so import Session, session_options, try_new_session
 from std.testing import assert_equal, assert_false, assert_true
 
 var session = Session()
@@ -145,6 +164,15 @@ assert_false(session.engine.catalog.has("t"))
 # komira_ctx_new's session: None (the NULL handle) when the engine does not
 # start, here because it refuses a worker count of 0; nothing raises.
 assert_false(Bool(try_new_session(EngineOptions(worker_count=0))))
+# komira_ctx_new_with_options(2, 1 << 20): two workers within 1 MiB. A 0 is
+# the host's own value; a negative value is the NULL handle.
+var made = try_new_session(session_options(2, 1 << 20))
+assert_true(Bool(made))
+var small = made.take()
+assert_equal(small.engine.host_profile.thread_count, 2)
+assert_equal(small.engine.host_profile.memory_budget_bytes, 1 << 20)
+assert_false(Bool(session_options(0, 0).worker_count))
+assert_false(Bool(try_new_session(session_options(-1, 0))))
 ```
 
 **The two-call output protocol.** A call that returns bytes takes
@@ -351,9 +379,9 @@ length of that one call.
 
 The library is published only if the gate passes: the exports check, then
 sixteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
-foreign host would. Seven cover the skeleton: the version (1004, which is 1.4),
+foreign host would. Seven cover the skeleton: the version (1005, which is 1.5),
 create and free (distinct handles, separate sessions), no symbol beyond the
-fifteen, a fresh session's empty error, the two-call protocol (zero capacity, one
+sixteen, a fresh session's empty error, the two-call protocol (zero capacity, one
 byte short, exact, larger), a NULL context, and a NULL `out_len`. One driver per
 new call writes its input file under `$TEST_TMPDIR` and checks a good input,
 NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
@@ -367,7 +395,7 @@ CSV driver once for each dialect argument), and check a taken name (in any
 case, and taken by the other call) and an empty one word for word, the NULL
 cases, a missing and an empty file and a path that is not UTF-8, and that a
 refused name stays free.
-`exports_exact` makes the fifteen names above the whole dynamic symbol table.
+`exports_exact` makes the sixteen names above the whole dynamic symbol table.
 On Linux the eleven C owners in the library's closure (async, async_api,
 compression, crypto, fs, http_core, libc, metrics, objectstore, parquet_codec,
 scan_source) are linked as their own shared libraries (`native_owners`), not
@@ -516,7 +544,7 @@ the extra `$ORIGIN/../../lib` finds the one `lib/` of the variants directory fro
 
 ## The header and the golden
 
-`abi/komira.tsv` is the golden of the ABI: the version (1.4), one row per export
+`abi/komira.tsv` is the golden of the ABI: the version (1.5), one row per export
 with its return type, argument types and the version that added it, and one row
 per status code, limit and credential kind, field and scope (`constant`). `komira_abi_golden` checks it on every
 build against the `@export abi("C")` functions of `_c_abi.mojo` (names, return and
@@ -540,7 +568,7 @@ headers. The golden does not check that its version was raised when
 a row changed: that compares with the previous release.
 
 `tests/c/abi_driver.c` is a C program that includes `komira.h` and nothing of
-ours. It opens `./libkomira.so`, binds each of the fifteen functions to a pointer
+ours. It opens `./libkomira.so`, binds each of the sixteen functions to a pointer
 declared with the header's own prototype, and checks the version in the header
 against `komira_abi_version()`, the status codes, the input bound
 (`KOMIRA_MAX_INPUT_BYTES` plus one is -5), and the last-error round trip (NULL
@@ -557,7 +585,12 @@ three-row Parquet file it writes with `COPY` from a CSV file under
 leaving `*out` byte for byte as written and followed by a good query on the
 same context; a text of exactly `KOMIRA_MAX_INPUT_BYTES` bytes that runs and
 one of a byte more that is -5; and a stream read whole after its context was
-freed. It registers files it writes under `$TEST_TMPDIR` with
+freed. Then it creates contexts with `komira_ctx_new_with_options`: under a
+budget of one byte (with one worker, and with the host's count) a `sum` over
+the three-row file is -3 with the sink's denial naming `budget 1` at step
+`execute`, `*out` untouched and the context still answering; the same `sum`
+answers with 0 and 0 and with one worker; and a negative worker count or
+budget (-1, `INT64_MIN`) is NULL. It also registers files it writes under `$TEST_TMPDIR` with
 `komira_register_csv` (a file with a header, a `|` file and one with
 `all_varchar`) and `komira_register_json`, and holds each query by name to the
 rows it wrote; a file registered with no header is refused at `lower` when
@@ -576,8 +609,8 @@ packaging change that lists it.
 
 No release-over-release version check and no packaged header yet; the session
 holds an engine, and `komira_sql_stream` runs SQL on it, but no call runs a plan
-(`komira_plan_stream`) or a UDF yet; no session
-options (the engine takes the host profile's worker count and memory budget); the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).
+(`komira_plan_stream`) or a UDF yet; of the engine's options only the worker
+count and the memory budget are session options (no spill directory); the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).
 The calls that run a query, ported from the earlier SDK, their result as an Arrow
 C stream, and what an abort does at the boundary (not contained yet: an abort
 inside the library ends the host process) are described in

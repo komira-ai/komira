@@ -2,10 +2,12 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of so that holds
 # pointers.
 # =============================================================================
-# Fifteen `@export abi("C")` functions are the library's whole surface today:
+# Sixteen `@export abi("C")` functions are the library's whole surface today:
 #
 #   int32_t  komira_abi_version(void);
 #   void    *komira_ctx_new(void);
+#   void    *komira_ctx_new_with_options(int64_t worker_count,
+#                                        int64_t memory_budget_bytes);
 #   void     komira_ctx_free(void *ctx);
 #   int32_t  komira_last_error(void *ctx, uint8_t *out_buf, uint64_t out_cap,
 #                              uint64_t *out_len);
@@ -37,8 +39,16 @@
 #   int32_t  komira_register_json(void *ctx, const char *name,
 #                                 const char *path);
 #
-# Ownership. `komira_ctx_new` creates a `Session` (the last error and the
-# engine, whose workers start here) in an `OwnedPointer`, relinquishes the
+# Session options. `komira_ctx_new_with_options` is `komira_ctx_new` with the
+# engine's worker count and memory budget (the bytes the sinks of one query
+# may reserve in total) as arguments; nothing is read from the environment.
+# 0 is the host's own value, which is what `komira_ctx_new` uses for both; a
+# negative value is refused (NULL); a positive one has no upper bound. The
+# options are fixed for the life of the context.
+#
+# Ownership. `komira_ctx_new` (and `komira_ctx_new_with_options`) creates a
+# `Session` (the last error and the engine, whose workers start here) in an
+# `OwnedPointer`, relinquishes the
 # pointer's own free (`unsafe_leak`) and hands the address to the caller as
 # `void *`. When the engine does not start it returns NULL and allocates
 # nothing; with no context to hold it, the engine's message is dropped. The caller owns that handle until it passes it to
@@ -102,7 +112,7 @@ from std.memory import OwnedPointer, unsafe_memcpy
 
 from arrow_ipc.c_data_stream import CArrowArrayStream, build_record_batch_stream
 
-from so.session import Session, try_new_session
+from so.session import Session, session_options, try_new_session
 from so.sources import (
     csv_binding_bytes,
     json_binding_bytes,
@@ -185,6 +195,28 @@ def komira_ctx_new() abi("C") -> Handle:
     """Create a session and return its handle. The caller frees it with
     `komira_ctx_free`. NULL when the session's engine does not start."""
     var session = try_new_session()
+    if not session:
+        return _null_handle()
+    return _leak_session(session.take())
+
+
+@export
+def komira_ctx_new_with_options(
+    worker_count: Int64, memory_budget_bytes: Int64
+) abi("C") -> Handle:
+    """Create a session whose engine runs `worker_count` workers within
+    `memory_budget_bytes`, and return its handle; the caller frees it with
+    `komira_ctx_free`.
+
+    0 for either is the host's own value (`komira_ctx_new` is both 0). NULL
+    when the engine does not start: a negative worker count or budget is
+    refused, and so is a host the engine cannot start on. A query whose sinks
+    need more than the budget is refused at step `execute`, naming the sink
+    and the budget, as `komira_sql_stream`'s `KOMIRA_ERR_ENGINE`.
+    """
+    var session = try_new_session(
+        session_options(worker_count, memory_budget_bytes)
+    )
     if not session:
         return _null_handle()
     return _leak_session(session.take())

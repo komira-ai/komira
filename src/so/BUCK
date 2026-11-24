@@ -36,7 +36,10 @@ NATIVE_OWNERS = [
 # and buffer_status, the two-call protocol's capacity test; test_session holds
 # the last-error text of a Session (fresh, set, replaced, cleared, moved)
 # and try_new_session, komira_ctx_new's session (None, the NULL handle, for
-# each option the engine refuses; a session for good options);
+# each option the engine refuses; a session for good options), and
+# session_options, komira_ctx_new_with_options's two int64_t arguments (0 is
+# the host's own value, any other value passed on as given; a session over
+# them has that worker count and budget, a negative one gives none);
 # test_sources holds the operations on values: a Parquet file registered and
 # its schema bytes, a registered table queried through the session's engine
 # (and an unregistered one refused at bind), the CSV and JSON bindings, a
@@ -167,14 +170,14 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): fifteen exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): sixteen exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). Every context it creates owns
 # an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
 # komira_sql_stream runs SQL on that engine and answers an Arrow C stream; the
 # C driver below (c_abi_check) reads those streams through komira.h.
 # It is published only if every gate driver passes, each of which dlopens it
 # with RTLD_NOW and calls it as a foreign host would:
-#   gate_version       the version is 1004 (1.4);
+#   gate_version       the version is 1005 (1.5);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op, and a context (with its
 #                      engine's workers) is created and freed again;
@@ -223,6 +226,7 @@ _LIBKOMIRA = dict(
     exports = [
         "komira_abi_version",
         "komira_ctx_new",
+        "komira_ctx_new_with_options",
         "komira_ctx_free",
         "komira_last_error",
         "komira_register_parquet",
@@ -353,11 +357,18 @@ cxx_binary(
 # COPY into $TEST_TMPDIR, registers and queries; each refusal (NULL ctx, sql or
 # out, a parse and a bind error, a text one byte over the bound) leaves *out as
 # the driver wrote it, and a good query follows each on the same context; a
-# stream outlives komira_ctx_free. And it registers files it writes into
+# stream outlives komira_ctx_free. Then the session options of
+# komira_ctx_new_with_options: with a memory budget of one byte (one worker,
+# and the host's count) a sum over that file is refused at step `execute`
+# with the aggregation sink's denial naming the budget, *out untouched and
+# the context still answering; the same sum answers with 0 and 0 (the host's
+# own values) and with one worker; a negative worker count or budget
+# (-1, INT64_MIN) is NULL. And it registers files it writes into
 # $TEST_TMPDIR with komira_register_csv (a `|` file, one with all_varchar)
 # and komira_register_json and queries each by name: the rows are the files'
-# own, and a file registered with no header is refused at lower when queried; a taken name, an empty one and a missing file are
-# refused with the named last error, and the first table keeps answering.
+# own, and a file registered with no header is refused at lower when
+# queried; a taken name, an empty one and a missing file are refused with
+# the named last error, and the first table keeps answering.
 komira_c_abi_check(
     name = "c_abi_check",
     driver = ":abi_driver",
