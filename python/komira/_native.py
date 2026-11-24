@@ -7,21 +7,35 @@ library and why. `Native` holds the bound calls and turns their status codes
 into `KomiraError`, with the context's last error, read with the two-call
 protocol, as the message.
 
-Before the library is opened, `load` calls two hooks: `_check_cpu()` here and
-`_runtime.check_loaded_runtime(<directory>/lib)` (Linux only; it does nothing
-on macOS); an error either raises stops the load before the library is mapped.
-`_check_cpu` refuses, on Linux x86_64, a CPU without the flags of x86-64-v3,
-the level libkomira is compiled for there, with `UnsupportedCpuError`: an older
-CPU would otherwise die of an illegal instruction inside the library. The
-runtime check refuses a Mojo runtime already in the process that is another
-build than the one in `lib/` beside the library.
+Before the library is opened, `load` picks the file and checks the CPU, then
+calls `_runtime.check_loaded_runtime(<directory>/lib)` (Linux only; it does
+nothing on macOS); an error either raises stops the load before the library is
+mapped. How the file is picked depends on the directory:
+
+- A directory with a `VARIANTS` manifest holds libkomira at more than one CPU
+  level (docs/design/isa_variants.md, decision 5). `_select_variant` reads the
+  manifest, reads the CPU's features from /proc/cpuinfo when a line lists any,
+  and picks the last line, the highest level, whose features the CPU all has;
+  a CPU without the features of the first line, the floor, is refused with
+  `UnsupportedCpuError`. A listed file that is missing is a
+  `LibraryLoadError`, never a load of a lower level in its place.
+- A directory without one holds a single `libkomira.so` (`libkomira.dylib`
+  on macOS), built for the row's own CPU. `_check_cpu` refuses, on Linux
+  x86_64, a CPU without the flags of x86-64-v3, the level that library is
+  compiled for, with `UnsupportedCpuError`.
+
+Either way an older CPU is refused before it could die of an illegal
+instruction inside the library. The runtime check refuses a Mojo runtime
+already in the process that is another build than the one in `lib/` of the
+directory.
 
 The library is found only where `load` is told: the directory a test passes
 (`--lib-dir` of a `python_binding_test`), or, with no directory, the
 package's own `_lib/`, where a wheel stages it (`libkomira.so`, or
 `libkomira.dylib` on macOS) with its native owners (Linux only) and the Mojo
 runtime in `_lib/lib/`. The library's own run path (`$ORIGIN/lib` on Linux,
-`@loader_path/lib` on macOS) finds those. No environment variable and no
+`@loader_path/lib` on macOS; a variant under `variants/<level>/` also has
+`$ORIGIN/../../lib`) finds those. No environment variable and no
 search of the working directory picks it (docs/design/python_package.md,
 decision 6).
 It is opened with `RTLD_LOCAL`, so neither it nor the runtime it brings joins
@@ -106,6 +120,8 @@ _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
 
 _lock = threading.Lock()
 _loaded: Native | None = None
+# The absolute directory `_loaded` was loaded from.
+_loaded_dir: str | None = None
 
 
 # The CPU flags of x86-64-v3, the level linux-x86_64 libkomira is compiled
@@ -134,18 +150,32 @@ _X86_64_V3_FLAGS = (
     "movbe",
 )
 
-# Where `_check_cpu` reads the flags unless it is given a file.
+# Where `_check_cpu` and `_select_variant` read the CPU's features unless
+# they are given a file.
 _CPUINFO = "/proc/cpuinfo"
 
+# The manifest of a directory with more than one CPU level of libkomira: one
+# line per level, lowest first, of three tab-separated fields: the level's
+# name, its file's path relative to the directory, and the space-separated
+# /proc/cpuinfo features it needs. Fields after the third are ignored. The
+# build writes it from the platform row
+# (tools/build/platforms/isa_variants.bzl, `variants_manifest`).
+_MANIFEST = "VARIANTS"
 
-def _cpu_flags(text: str) -> set[str]:
-    """The flags every processor of /proc/cpuinfo text lists on its `flags`
-    line: a thread may run on any of them. Other lines, `vmx flags` among
-    them, are not read. No `flags` line is no flags."""
+# The /proc/cpuinfo key whose words are a processor's features, by
+# `platform.machine()` on Linux: `flags` on x86_64, `Features` on aarch64.
+_FEATURE_KEYS = {"x86_64": "flags", "aarch64": "Features"}
+
+
+def _cpu_flags(text: str, key: str = "flags") -> set[str]:
+    """The features every processor of /proc/cpuinfo text lists on its `key`
+    line (`flags` on x86, `Features` on arm64): a thread may run on any of
+    them. Other lines, `vmx flags` among them, are not read. No `key` line is
+    no features."""
     common: set[str] | None = None
     for line in text.splitlines():
-        key, sep, value = line.partition(":")
-        if not sep or key.strip() != "flags":
+        name, sep, value = line.partition(":")
+        if not sep or name.strip() != key:
             continue
         flags = set(value.split())
         common = flags if common is None else common & flags
@@ -185,6 +215,123 @@ def _check_cpu(
             "libkomira for Linux x86_64 needs an x86-64-v3 CPU (Haswell or newer); "
             "this CPU lacks {} (the flags {} lists)".format(", ".join(missing), path)
         )
+
+
+def _read_manifest(directory: str) -> list[tuple[str, str, list[str]]]:
+    """The lines of `<directory>/VARIANTS` as (name, path, features), in the
+    file's order. A manifest that cannot be read, is not UTF-8, has no line,
+    or has a line without a name, a path inside the directory and a features
+    field is a `LibraryLoadError` naming the file (and the line)."""
+    path = os.path.join(directory, _MANIFEST)
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError as e:
+        raise LibraryLoadError("cannot read the variant manifest {}: {}".format(path, e)) from None
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise LibraryLoadError("the variant manifest {} is not UTF-8: {}".format(path, e)) from None
+    lines = text.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    if not lines:
+        raise LibraryLoadError("the variant manifest {} names no variant".format(path))
+    variants = []
+    for number, line in enumerate(lines, 1):
+        fields = line.split("\t")
+        if len(fields) < 3 or not fields[0] or not fields[1]:
+            raise LibraryLoadError(
+                "line {} of the variant manifest {} is not `<name><TAB><path><TAB><features>`: {!r}".format(
+                    number, path, line
+                )
+            )
+        if os.path.isabs(fields[1]) or ".." in fields[1].split("/"):
+            raise LibraryLoadError(
+                "line {} of the variant manifest {} names {!r}, which is not a path inside its directory".format(
+                    number, path, fields[1]
+                )
+            )
+        variants.append((fields[0], fields[1], fields[2].split()))
+    return variants
+
+
+def _select_variant(
+    directory: str | os.PathLike[str],
+    cpuinfo: str | os.PathLike[str] | None = None,
+    *,
+    system: str | None = None,
+    machine: str | None = None,
+) -> str:
+    """The absolute path of the variant of libkomira in `directory` that this
+    CPU runs fastest: the last line of `<directory>/VARIANTS` whose features
+    the CPU all has (docs/design/isa_variants.md, decision 5).
+
+    The CPU's features are read only when a line lists any: from `cpuinfo`
+    (/proc/cpuinfo when None; tests pass a file), the words of the key
+    `_FEATURE_KEYS` names for `machine` that every processor lists. `system`
+    and `machine` are `sys.platform` and `platform.machine()` when None.
+
+    Raises `LibraryLoadError` when the manifest is missing or malformed (see
+    `_read_manifest`), when it lists features and this is not Linux on x86_64
+    or aarch64, when `cpuinfo` cannot be read, and when the picked line's file
+    is missing: a lower variant is never loaded in its place. Raises
+    `UnsupportedCpuError`, naming the floor (the first line) and the features
+    of it the CPU lacks, when the CPU has the features of no line.
+    """
+    directory = os.path.abspath(os.fspath(directory))
+    manifest = os.path.join(directory, _MANIFEST)
+    variants = _read_manifest(directory)
+    have: set[str] = set()
+    path = key = ""
+    if any(features for _, _, features in variants):
+        system = sys.platform if system is None else system
+        machine = platform.machine() if machine is None else machine
+        key = _FEATURE_KEYS.get(machine, "") if system == "linux" else ""
+        if not key:
+            raise LibraryLoadError(
+                "the variant manifest {} lists CPU features, which are read from /proc/cpuinfo only on Linux "
+                "x86_64 and aarch64, and this is {} {}".format(manifest, system, machine)
+            )
+        path = _CPUINFO if cpuinfo is None else os.fspath(cpuinfo)
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError as e:
+            raise LibraryLoadError(
+                "cannot read the CPU features from {}, so it is not known which variant of libkomira in {} "
+                "this CPU runs: {}".format(path, directory, e)
+            ) from None
+        have = _cpu_flags(text, key)
+    chosen = None
+    for name, rel, features in variants:
+        if all(f in have for f in features):
+            chosen = (name, rel)
+    if chosen is None:
+        floor, _, features = variants[0]
+        raise UnsupportedCpuError(
+            "this CPU runs no variant of libkomira in {}: the lowest, {}, needs {}, which the `{}` lines of {} "
+            "do not all list".format(directory, floor, ", ".join(f for f in features if f not in have), key, path)
+        )
+    name, rel = chosen
+    file = os.path.join(directory, rel)
+    if not os.path.isfile(file):
+        raise LibraryLoadError(
+            "the variant manifest {} names {} for {}, the variant this CPU runs, and there is no such file; "
+            "no lower variant is loaded in its place".format(manifest, file, name)
+        )
+    return file
+
+
+def _library_path(directory: str) -> str:
+    """The file `load` opens from `directory` (absolute), once the CPU has
+    been checked: the variant `_select_variant` picks when the directory
+    holds a VARIANTS manifest, else `<directory>/libkomira.so` after
+    `_check_cpu`."""
+    if os.path.lexists(os.path.join(directory, _MANIFEST)):
+        return _select_variant(directory)
+    _check_cpu()
+    return os.path.join(directory, _LIB_NAME)
 
 
 def _two_call(op: str, call: Callable[[object, int, object], int]) -> tuple[int, bytes]:
@@ -411,31 +558,35 @@ def _bind(lib: ctypes.CDLL, path: str) -> Native:
 def load(lib_dir: str | os.PathLike[str] | None = None) -> Native:
     """The process's libkomira.
 
-    With `lib_dir`, the library is `<lib_dir>/libkomira.so` (`libkomira.dylib`
-    on macOS); with None, it is the one already loaded, or else the package's
-    `_lib/` copy. The first load that succeeds is kept: a later call naming
-    the same file returns the same `Native`, and one naming another file is
-    refused, since a process holds one library. A refused load leaves nothing
-    loaded. A file
-    missing from the directory is a `LibraryLoadError` that names it.
+    With `lib_dir`, the library is the one in that directory: the variant
+    `_select_variant` picks for this CPU when it holds a VARIANTS manifest,
+    else `<lib_dir>/libkomira.so` (`libkomira.dylib` on macOS). With None, it
+    is the one already loaded, or else the one in the package's `_lib/`. The
+    first load that succeeds is kept: a later call naming the same directory
+    returns the same `Native`, without reading the CPU again, and one naming
+    another directory is refused, since a process holds one library. A
+    refused load leaves nothing loaded. A file missing from the directory is
+    a `LibraryLoadError` that names it.
     """
-    global _loaded
+    global _loaded, _loaded_dir
     with _lock:
         if lib_dir is None and _loaded is not None:
             return _loaded
-        directory = _PACKAGE_LIB_DIR if lib_dir is None else os.fspath(lib_dir)
-        path = os.path.abspath(os.path.join(directory, _LIB_NAME))
+        directory = os.path.abspath(_PACKAGE_LIB_DIR if lib_dir is None else os.fspath(lib_dir))
         if _loaded is not None:
-            if _loaded.path == path:
+            if _loaded_dir == directory:
                 return _loaded
             raise LibraryLoadError(
-                "libkomira is already loaded from {}; it cannot also be loaded from {}".format(_loaded.path, path)
+                "libkomira is already loaded from {}; it cannot also be loaded from {}".format(
+                    _loaded.path, os.path.join(directory, _LIB_NAME)
+                )
             )
-        _check_cpu()
-        _runtime.check_loaded_runtime(os.path.join(os.path.dirname(path), "lib"))
+        path = _library_path(directory)
+        _runtime.check_loaded_runtime(os.path.join(directory, "lib"))
         try:
             lib = ctypes.CDLL(path, mode=ctypes.RTLD_LOCAL)
         except OSError as e:
             raise LibraryLoadError("cannot load libkomira from {}: {}".format(path, e)) from None
         _loaded = _bind(lib, path)
+        _loaded_dir = directory
         return _loaded

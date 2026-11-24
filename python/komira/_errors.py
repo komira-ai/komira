@@ -34,8 +34,9 @@ class LibraryLoadError(KomiraError):
 
 class UnsupportedCpuError(LibraryLoadError):
     """The CPU lacks an instruction set extension libkomira was compiled to
-    use, so the library is not opened: on Linux x86_64 it is built for
-    x86-64-v3. The message names the missing flags."""
+    use, so the library is not opened: on Linux x86_64 a single library is
+    built for x86-64-v3, and a directory of CPU-level variants needs at least
+    the features of its lowest one. The message names the missing flags."""
 
 
 class UnsupportedOperation(KomiraError):

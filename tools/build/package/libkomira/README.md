@@ -60,6 +60,9 @@ C API (`src/so`), and the check that installs it.
 
   The manifest is written from the platform row ([`variants.bzl`](variants.bzl)). The
   host's C++ runtime (`libstdc++.so.6`, `libgcc_s.so.1`) is not in it.
+  `libkomira_variants_manifest` is that `VARIANTS` file alone, with no variant linked: the
+  Python loader's selector test (`//python/tests:variants_test`) reads it as the shipped
+  manifest.
 - `libkomira_variants_load_x86_64_v2` and `libkomira_variants_load_x86_64_v3` copy
   that directory to another path and load the level they name by its VARIANTS line,
   from a C caller (`variants_load.c`) with no library path: it answers

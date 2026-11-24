@@ -149,7 +149,7 @@ The whole public surface of the first release is these names in `komira.__all__`
 | `KomiraError` | the base class of every error the package raises on purpose (decision 9) |
 | `UnsupportedOperation` | a `KomiraError`: komira refused a construct by name (an SQL feature the engine does not run yet, an option it does not take) |
 | `LibraryLoadError` | a `KomiraError`: `libkomira` or a library it needs could not be loaded, or its ABI major version is not the one this package was written for. That includes a file missing from the package (the message is the loader's and names the file) and a Mojo runtime of another build already loaded in the process (decision 6) |
-| `UnsupportedCpuError` | a `LibraryLoadError`: on Linux x86_64 the CPU lacks a flag of x86-64-v3, the level `libkomira` is compiled for there, so the library is not opened; the message names the missing flags |
+| `UnsupportedCpuError` | a `LibraryLoadError`: on Linux x86_64 the CPU lacks a flag of x86-64-v3, the level `libkomira` is compiled for there (or, from a directory of CPU-level variants, a flag of its lowest variant, [isa_variants.md](isa_variants.md)), so the library is not opened; the message names the missing flags |
 | `__version__` | the installed distribution's version, read with `importlib.metadata.version("komira")` (the distribution's name) |
 
 Behaviour each later pull request implements, fixed here so they agree:
