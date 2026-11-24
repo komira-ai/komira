@@ -5,7 +5,8 @@ load(":tpch_data.bzl", "tpch_sf1_data")
 # recorded signatures, and the farm target that stages the data and records
 # them (`tpch_sf1`). The library verifies and locks the staged files, runs the
 # 22 queries in the pinned DuckDB through bench_duckdb's session, checks each
-# result against the query's ORDER BY keys and writes the answers and the lock.
+# result against the query's ORDER BY keys and writes the answers, the lock
+# and the query texts.
 # See __init__.mojo and README.md.
 #
 # The welded tests (each file's header says what each case proves):
@@ -46,8 +47,8 @@ mojo_binary(
 )
 
 # TPC-H scale factor 1 and its recorded answers, built once on the farm and
-# cached. Consumers name `:tpch_sf1[data]`, `:tpch_sf1[answers.txt]` and
-# `:tpch_sf1[lock]`:
+# cached. Consumers name `:tpch_sf1[data]`, `:tpch_sf1[answers.txt]`,
+# `:tpch_sf1[lock]` and `:tpch_sf1[queries]` (the query texts):
 #
 #   ./buck2 build komira//src/tpch_answers:tpch_sf1
 #   ./buck2 build komira//src/tpch_answers:tpch_sf1[answers.txt] --show-output
