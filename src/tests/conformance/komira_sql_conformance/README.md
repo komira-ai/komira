@@ -8,8 +8,8 @@ committed beside it. Komira's answer to a query is DuckDB's answer
 engine to. Each case is run again by the pinned DuckDB as a `sql_oracle`
 build action ([tools/build/sql](../../../../tools/build/sql/README.md)), and
 the action fails unless its answer equals the committed one byte for byte.
-Test-only data: nothing here is Mojo or Python, and nothing komira builds is an
-input. Two corpora are run through komira: pipeline_exec's
+Test-only data: the corpora are SQL and TSV, and nothing komira builds is an
+input except by the function coverage test below. Two corpora are run through komira: pipeline_exec's
 `tests/test_sink_float_agg_duckdb.mojo` holds the ungrouped aggregation
 sink to the answers of `agg_float_ungrouped`, and sdk_exec's
 `tests/test_run_sql_topn.mojo` holds `run_sql` to the answers of each
@@ -132,3 +132,36 @@ query calling a function DuckDB does not have.
 | `:corpus` | every case's answer, run again by the pinned DuckDB, equals its committed answer byte for byte | a committed answer DuckDB does not give; a DuckDB bump that changes an answer; a case or table edited without its answer |
 | `:compare_check` | `first_difference` over planted pairs (equal, a changed cell, a changed header, a missing or an extra row, a missing or an extra final LF, a CR, an empty cell for `""`, nothing written, `-0.0` for `0.0`), each against the exact report it must give | a comparison that misses a difference or reports the wrong line |
 | `tests//negative/sql_oracle:corpus_answer_differs`, `:corpus_unordered` (the self-test scenario `sql_oracle`) | the runner fails a case whose committed answer is wrong, and a case whose first line names no row order, each with its message | a runner that stopped comparing, or ran a case with no row order |
+
+## Function coverage
+
+`function_coverage.tsv` says, for every name of `sql.sql_fn_table`'s scalar
+function table and for a list of common analysis functions, what running it
+measured. A count of the table's lines or rows says none of this: a row can
+bind and never run, or run and answer another value than DuckDB.
+`tests/test_function_coverage.mojo` writes the table by running the
+`scalar_fn` cases through `run_sql` over the corpus's table T (written as
+Parquet by the pinned DuckDB, `:scalar_fn_t`) and fails unless the text equals
+the committed file; the failure message holds the measured table, which is
+what to copy over the file after a change. Its rows come from the source text
+of `sql_scalar_fn_spec`, so a row added to the table is a line here.
+
+Columns: `name`; `row`, the lowering kind of the name's row (`FNK_*`),
+`NO_ROW` when the table has none; `detail`, a refusal's reason family;
+`common`, `yes` for a name on the common-analysis list; `cases`, how many
+`scalar_fn` cases call the name; `outcome`:
+
+| outcome | what it measured |
+|---|---|
+| `equal:n` | n cases ran and their rows are DuckDB's committed answer (same values, same row order when the case has ORDER BY); floats compared bit for bit |
+| `equal_within_4_ulps:n` | n cases ran and differ from DuckDB only in floats, by at most 4 ulps |
+| `differs:n` | n cases ran and an answer differs from DuckDB's |
+| `refused_<step>:n` | n cases ended at that `run_sql` step (parse, bind, optimize, lower, execute) with a refusal: at bind the name does not bind, at a later step it bound and could not run |
+| `no_case` | the row lowers, and no case calls the name: bound by the table, never run by this measurement |
+| `probe:refused_bind` | a refusal row or a name with no row: `SELECT name(k) FROM T` is refused at bind, as the table says |
+| `probe:ok` | the same probe ran: a name the table refuses, or has no row for, that nevertheless executes |
+| `internal` | a row keyed by a constant (`cast`, `try_cast`, the `IN` position form), not a function a user types |
+
+A case's column names are not compared (the header of DuckDB's answer is
+replaced by the engine's own): the table measures values and types, not how a
+column is named.

@@ -1,4 +1,5 @@
 load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 
 # The SQL conformance corpus (README.md): cases, each one SELECT over the
@@ -103,3 +104,122 @@ sql_oracle(
     "sql/check.sql",
     "sql/compare.sql",
 ]]
+
+# Which scalar functions run, and which only bind (coverage/README.md). The
+# test runs every scalar_fn case through run_sql over the corpus's table T
+# (scalar_fn_t, written as Parquet by the pinned DuckDB from tables.sql) and
+# holds the result of each function row of src/sql/sql_fn_table.mojo to the
+# committed function_coverage.tsv.
+sql_oracle(
+    name = "scalar_fn_t",
+    srcs = [
+        "cases/scalar_fn/tables.sql",
+        "sql/write_scalar_fn_t.sql",
+    ],
+    outputs = ["scalar_fn_t.parquet"],
+)
+
+_COVERAGE_DATA = {
+    "scalar_fn_t.parquet": ":scalar_fn_t[scalar_fn_t.parquet]",
+    "sql_fn_table.mojo": "//src/sql:sql_fn_table_source",
+    "function_coverage.tsv": "function_coverage.tsv",
+}
+
+_COVERAGE_DATA.update({
+    "sql/" + c[len("scalar_fn/"):] + ".sql": "cases/" + c + ".sql"
+    for c in _CASES
+    if c.split("/")[0] == "scalar_fn"
+})
+
+_COVERAGE_DATA.update({
+    "duckdb/" + c[len("scalar_fn/"):] + ".tsv": "cases/" + c + ".tsv"
+    for c in _CASES
+    if c.split("/")[0] == "scalar_fn"
+})
+
+mojo_library(
+    name = "komira_sql_conformance",
+    srcs = glob(["*.mojo"]),
+    deps = [
+        "//src/agg:agg",
+        "//src/agg_api:agg_api",
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_api:async_api",
+        "//src/async_rt:async_rt",
+        "//src/atomic_alias:atomic_alias",
+        "//src/avro:avro",
+        "//src/batch_eval:batch_eval",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/containers:containers",
+        "//src/counters:counters",
+        "//src/crypto:crypto",
+        "//src/csv:csv",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/encoding:encoding",
+        "//src/engine_runtime:engine_runtime",
+        "//src/exec_types:exec_types",
+        "//src/expr:expr",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/host_profile:host_profile",
+        "//src/join_assembly:join_assembly",
+        "//src/json:json",
+        "//src/json_index:json_index",
+        "//src/jsonl:jsonl",
+        "//src/kernels:kernels",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/lowering:lowering",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/morsel:morsel",
+        "//src/name_registry:name_registry",
+        "//src/objectstore:objectstore",
+        "//src/op_agg_state:op_agg_state",
+        "//src/op_sources:op_sources",
+        "//src/operator_api:operator_api",
+        "//src/optimizer:optimizer",
+        "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_footers:parquet_footers",
+        "//src/parquet_scan:parquet_scan",
+        "//src/physical_plan:physical_plan",
+        "//src/pipeline_exec:pipeline_exec",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_proto:plan_proto",
+        "//src/plan_stats:plan_stats",
+        "//src/plan_wire:plan_wire",
+        "//src/proto_codec:proto_codec",
+        "//src/protobuf:protobuf",
+        "//src/row_format:row_format",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_planning:scan_planning",
+        "//src/scan_source:scan_source",
+        "//src/sdk:sdk",
+        "//src/sdk_exec:sdk_exec",
+        "//src/secret_registry:secret_registry",
+        "//src/secret_store:secret_store",
+        "//src/shuffle:shuffle",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/sql:sql",
+        "//src/sync:sync",
+        "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
+        "//src/trace:trace",
+        "//src/udf:udf",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    conda = False,
+    test_srcs = ["tests/test_function_coverage.mojo"],
+    test_data = {"tests/test_function_coverage.mojo": _COVERAGE_DATA},
+    visibility = ["//src/tests/..."],
+)
