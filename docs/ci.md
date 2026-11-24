@@ -161,7 +161,7 @@ repository variables (Settings > Secrets and variables > Actions > Variables):
 | `FARM_ADDRESS` | the remote-execution service as a URL with its port |
 | `FARM_INSTANCE` | its instance name |
 | `FARM_LINUX_X86_64_PROPERTIES` | the worker property set of the linux x86_64 actions |
-| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml`, by the job `build-macos-arm64` of `pypi-macos-arm64.yml` and by the job `check` of `pr.yml` (which also passes `darwin-config-file`, so that only its step `build for macOS` sees them: [The macOS part of the check](#the-macos-part-of-the-check)), and by no other job |
+| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml`, by the job `build-macos-arm64` of `pypi-macos-arm64.yml` and by the job `check` of `pr.yml` (which also passes `darwin-config-file`, so that only its step `build for macOS` sees them: [The macOS part of the check](#the-macos-part-of-the-check)), and by the job `mopm-stage` of `release.yml` (which also passes `darwin-config-file`, so that only its step `build the packages`, the build of `//release:mopm_release_artifacts`, sees them: [the mopm jobs](#the-mopm-jobs)), and by no other job |
 | `FARM_TLS` | `true` when the service serves REAPI over TLS; unset or empty means `false`. Each workflow passes it as farm-connect's `tls`, so the address and its transport change together |
 
 Variables are not masked, and a job's logs are public. The action masks the
@@ -433,7 +433,9 @@ The release workflows build macOS after the merge. There are two. The macOS
 The other is the macOS arm64 wheel of the Python package: the job `build-macos-arm64` of
 [`pypi-macos-arm64.yml`](../.github/workflows/pypi-macos-arm64.yml), at most once per version and only when that
 version's macOS file is missing from TestPyPI
-([below](#pypi-macos-arm64yml-the-macos-arm64-wheel)). `release.yml` holds no macOS job. Before the
+([below](#pypi-macos-arm64yml-the-macos-arm64-wheel)). `release.yml` holds no macOS job, and its job
+`mopm-stage` builds the macOS set again as the osx-arm64 half of the packages it publishes, in the same
+configuration, so it finds this workflow's actions in the cache ([the mopm jobs](#the-mopm-jobs)). Before the
 merge, only [the macOS part of the check](#the-macos-part-of-the-check) builds for macOS: the libraries of
 the set the change reaches. A merge group's check builds them for the commit `main` becomes, so the build
 of the set in `release-macos.yml` finds those actions in the cache; it still builds the whole set, since a
@@ -498,9 +500,9 @@ tests, which no pull request builds. The rest of this section is about `release-
   parallel with the Linux jobs; nothing in `release.yml` `needs` it or reads its result.
   It is a separate workflow with its own concurrency group, `release-macos-<ref>`, and
   `cancel-in-progress: true`: `release.yml` is one group in which a running release is
-  never cancelled, so a macOS job inside it that stalled would hold the next push's
-  release, the Linux prod publish included. Here a newer push cancels the running macOS
-  build and starts its own, and a macOS build never queues a release. The trigger is
+  never cancelled. Here a newer push cancels the running macOS build and starts its own,
+  and this workflow never queues a release; the macOS build inside `release.yml`, the
+  osx-arm64 half of the packages it publishes, does (below, "The publish waits on macOS"). The trigger is
   `push` plus `workflow_dispatch` rather than `workflow_run` after `release.yml`: it
   needs no ordering with the release (nothing waits on it), and `workflow_run` would
   start it only after the whole release finished, build the default branch's head
@@ -519,10 +521,15 @@ tests, which no pull request builds. The rest of this section is about `release-
   (also written to the run's summary);
   when an earlier step failed, the message names it. The farm connection refuses when a
   repository variable is empty (for the macOS set, `FARM_DARWIN_ARM64_PROPERTIES` and
-  `FARM_DARWIN_MACOS_HOSTS` go together), and that is a failed run too. The set has not yet been measured on the macOS workers, and the publish must
-  not wait on a platform the release does not ship. When the set is green over several runs,
-  move the job back into `release.yml` as a `needs` of `prod-commit` (or keep the workflow
-  and have the publish wait on it).
+  `FARM_DARWIN_MACOS_HOSTS` go together), and that is a failed run too.
+- **The publish waits on macOS.** The set was green on the runs of this workflow before the
+  release shipped osx-arm64, and the release now ships it: `release.yml`'s `mopm-stage` builds
+  `//release:mopm_release_artifacts`, whose osx-arm64 half is this set (with each package's native
+  archives) configured for darwin-arm64, so a macOS build that does not pass fails `mopm-stage`,
+  nothing is staged in prod for either platform, and `main_red.yml` sees a failed release. This
+  workflow is unchanged and still reported, not blocking: it builds the Python harness tests too,
+  and its own red run says which step failed. The cost is the one the separate workflow avoided: a
+  stalled Mac build now holds the release, bounded by `mopm-stage`'s `timeout-minutes: 120`.
 
 ### Proposed: the macOS build of every `//src` library
 
@@ -645,16 +652,23 @@ three steps (stage, test, commit). There is no beta publish from this workflow, 
 variable that switches the publish on or off. The list is
 [`packages.bzl`](../release/readme_e2e/packages.bzl), which
 `//:readme_e2e_complete` holds to the `src/` directories that have a
-`mopm.toml`, in both directions; [`//release:mopm_artifacts`](../release/mopm_artifacts.bzl)
+`mopm.toml`, in both directions. Each package is published for two platforms, linux-64 and
+osx-arm64, in the same group and at the same version: a member of the plan has one `.conda` per
+platform. [`//release:mopm_artifacts`](../release/mopm_artifacts.bzl)
 builds each package's `:lib` (the `.mojoc`, which exists only once the tests
 passed) into `linux-64/komira-ai/<name>.mojoc`, and each declared native's
-archive into `linux-64/komira-ai/<name>.native/lib<id>.a`: the layout mopm
-reads, which requires the namespace directory. Seven jobs of `release.yml` carry the
+archive into `linux-64/komira-ai/<name>.native/lib<id>.a`;
+[`//release:mopm_darwin_libs`](../release/darwin_libs.bzl) does the same under `osx-arm64/`, built
+for darwin-arm64; and `//release:mopm_release_artifacts` merges the two into one directory (its rule
+configures the macOS half for darwin-arm64 through a transition, so one build of it, for Linux,
+builds both). That is the layout mopm reads, which requires the namespace directory: `mopm stage`
+packs one `.conda` per subdir that holds a member's library, and refuses a member that declares a
+native with no archive for one of them. Seven jobs of `release.yml` carry the
 steps (a documentation-only push does not start the workflow, so it publishes nothing):
 
 | job | when | what it does |
 |---|---|---|
-| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_135`, `MOPM` of `packages.bzl`) and `//release:mopm_artifacts`. **Version:** `release_beta_version --workspace-root src --version 0.1.<run number>` gives every member the version of this run (below, "The version of every release"). **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.1.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)). Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
+| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_135`, `MOPM` of `packages.bzl`) and `//release:mopm_release_artifacts`, the packages of both platforms: its osx-arm64 half compiles and runs its welded tests on the farm's macOS workers. The job's farm connection writes the macOS keys to a buckconfig of their own (`darwin-config-file`), which this build alone names with `--config-file`, so no other step of the job configures a macOS platform; it also passes `-c komira_release.mac_tree=true`, without which the target is incompatible (release/BUCK, limit `release-mac-tree`), so that a Linux graph query of `//...` skips it; a red macOS build fails the step, and nothing is staged. **Version:** `release_beta_version --workspace-root src --version 0.1.<run number>` gives every member the version of this run (below, "The version of every release"). **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.1.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)); every locked file of both platforms is checked against the plan, and the linux-64 ones, the farm's, are installed and run. Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
 | `prod-stage` | after `release` and `mopm-stage`, **only on a push to `main`** (a manual run skips all six prod jobs before they start; there is no other switch) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, even when the step failed. |
 | `prod-test` | after `prod-stage`, on a push to `main` | in the environment `build` (the farm's; `id-token: write` for the tailnet join only), with **no registry identity and no secret**. It downloads the directory `prod-stage` kept, checks every file against `plan.json` (`release_staged_verify verify`: sha256 and size), writes `release/staged_set` from the files that matched and from nothing else, and runs `-c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm. |
 | `prod-commit` | after `prod-test`, on a push to `main` | in the environment `prod`, with `contents: read` and `id-token: write`. The same command without `--no-commit`, on the same directory with its `state.json`, after a fresh OIDC exchange: the same group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-prod-committed-<sha>`. |
@@ -761,7 +775,8 @@ would be handed two files for one name.
    `https://conda.mopm.dev/`, a `mojo` other than exactly the release's Mojo, an entry with a flat name, with a channel other than its namespace's
    (`https://conda.mopm.dev/komira-ai/`), that is not a member of the plan or is at another version than
    this run's, an artifact whose URL, sha256 or size is not the plan's file, and an added package the lock
-   does not hold. For each locked file of the runner's subdir it checks what `sync` installed: the file
+   does not hold; the osx-arm64 entries are checked like the others. For each locked file of the runner's
+   subdir (linux-64) it checks what `sync` installed: the file
    kept in `.mopm/pkgs` has the plan's sha256 and size, the environment's `conda-meta` record names that
    sha256, and the package's `lib/mojo/<name>.mopm.json` is there. It yanks nothing; a failure says what a
    user would get, and a person decides what to do. Its cases (`//tools/build/ci:release_staged_verify_unit`)
@@ -1559,7 +1574,9 @@ a replacement push workflow is added to both in its own pull request. It names
 two: `release`, and `pypi`, whose push run builds the Python wheel and installs it from its file
 and from TestPyPI (its scheduled and manual runs are not push runs and are never read). The two macOS
 workflows, `release-macos` and `pypi-macos-arm64`, are not named: a Mac build is reported, not blocking
-([The macOS build of the release](#the-macos-build-of-the-release)), so its red run opens no issue. A green run of
+([The macOS build of the release](#the-macos-build-of-the-release)), so its red run opens no issue; the
+macOS packages the release publishes are built by `release`'s own `mopm-stage`, so a macOS build of them
+that fails there is a red `release` run. A green run of
 either closes the open issues whose heads it contains, so an issue opened for a red `pypi` run can be
 closed by a green `release` run of a later commit; the next red `pypi` run opens or comments again. It acts
 only on a run of a named workflow started by a push to `main`:

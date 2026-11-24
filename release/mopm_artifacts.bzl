@@ -10,8 +10,12 @@ A package is a library built with buildrules' `mojo_package` (its BUCK file has
 `:lib`, the `.mojoc` that exists only once its tests passed). The output is one
 directory in the layout `mopm stage --artifacts` reads,
 `linux-64/<namespace>/<name>.mojoc` with the namespace of
-//release/readme_e2e:packages.bzl (`komira-ai`; the farm builds for linux-64), so
-what is packed and published is the library the tests passed, not a rebuild. mopm
+//release/readme_e2e:packages.bzl (`komira-ai`; this rule is the linux-64 tree, built for the target
+platform of the build), so what is packed and published is the library the tests passed, not a rebuild.
+The osx-arm64 tree is //release:mopm_darwin_libs (darwin_libs.bzl), and `mopm_release_artifacts` (below)
+merges the two, its macOS half configured for darwin-arm64 by a transition, into the one directory
+release.yml's `mopm-stage` stages: `mopm stage` packs one `.conda` per subdir a member has a library in,
+the two in the same group at the same version. mopm
 reads no other layout: a `.mojoc` without the namespace directory is a member with
 "no build artifact".
 
@@ -49,6 +53,11 @@ def native_path(subdir, package, native_id):
     """The path of `package`'s `[native.<native_id>]` archive in the `mopm stage --artifacts` directory for `subdir`."""
     return "{}/{}/{}.native/lib{}.a".format(subdir, NAMESPACE, package, native_id)
 
+# The files of one subdir of the `mopm stage --artifacts` directory: `subdir` (`linux-64`, `osx-arm64`) and
+# `tree`, `{path: artifact}` with every path under `<subdir>/`. :mopm_artifacts and :mopm_darwin_libs give it,
+# and mopm_release_artifacts merges the two into the one directory the release stages.
+MopmTreeInfo = provider(fields = ["subdir", "tree"])
+
 def _impl(ctx):
     tree = {}
     for name, lib in zip(ctx.attrs.names, ctx.attrs.libs):
@@ -56,7 +65,7 @@ def _impl(ctx):
     for package, archives in ctx.attrs.natives.items():
         for native_id, archive in archives.items():
             tree[native_path("linux-64", package, native_id)] = archive[DefaultInfo].default_outputs[0]
-    return [DefaultInfo(default_output = ctx.actions.copied_dir("mopm_artifacts", tree))]
+    return [DefaultInfo(default_output = ctx.actions.copied_dir("mopm_artifacts", tree)), MopmTreeInfo(subdir = "linux-64", tree = tree)]
 
 _mopm_artifacts = rule(
     impl = _impl,
@@ -117,3 +126,82 @@ def _native_ids_json_impl(ctx):
 # `NATIVE_IDS` (mopm_native_ids.bzl) as JSON, `{package: [id, ...]}`: what //release:native_ids_cases
 # holds to the `[native.<id>]` tables of each package's `mopm.toml`.
 native_ids_json = rule(impl = _native_ids_json_impl, attrs = {})
+
+# The subdirs of a release, in the order their trees are merged: the platforms the release publishes.
+RELEASE_SUBDIRS = ["linux-64", "osx-arm64"]
+
+def merge_trees(parts, subdirs = RELEASE_SUBDIRS):
+    """Merges `parts`, a list of `(subdir, {path: value})`, into one `{path: value}`.
+
+    Returns `(merged, None)`, or `(None, reason)` when the parts are not exactly one non-empty tree for each
+    subdir of `subdirs`, in that order, each path under its own subdir: a release that would stage a platform
+    twice, leave one out, or put a file of one platform under another's directory is refused at analysis.
+    """
+    got = [subdir for subdir, _ in parts]
+    if got != subdirs:
+        return (None, "the trees are for the subdirs {}; a release stages exactly {}, in that order".format(got, subdirs))
+    merged = {}
+    for subdir, tree in parts:
+        if not tree:
+            return (None, "the {} tree has no file: that platform would be staged with no package".format(subdir))
+        for path in sorted(tree):
+            if not path.startswith(subdir + "/"):
+                return (None, "{} is in the {} tree but not under {}/".format(path, subdir, subdir))
+            merged[path] = tree[path]
+    return (merged, None)
+
+# The cases of merge_trees: (name, parts, the reason wanted, or None for a merge).
+_MERGE_CASES = [
+    ("both platforms merge", [("linux-64", {"linux-64/ns/a.mojoc": 1}), ("osx-arm64", {"osx-arm64/ns/a.mojoc": 2})], None),
+    ("the macOS tree is missing", [("linux-64", {"linux-64/ns/a.mojoc": 1})], "the trees are for the subdirs [\"linux-64\"]; a release stages exactly [\"linux-64\", \"osx-arm64\"], in that order"),
+    ("a platform twice", [("linux-64", {"linux-64/ns/a.mojoc": 1}), ("linux-64", {"linux-64/ns/b.mojoc": 2})], "the trees are for the subdirs [\"linux-64\", \"linux-64\"]; a release stages exactly [\"linux-64\", \"osx-arm64\"], in that order"),
+    ("the order swapped", [("osx-arm64", {"osx-arm64/ns/a.mojoc": 2}), ("linux-64", {"linux-64/ns/a.mojoc": 1})], "the trees are for the subdirs [\"osx-arm64\", \"linux-64\"]; a release stages exactly [\"linux-64\", \"osx-arm64\"], in that order"),
+    ("an empty macOS tree", [("linux-64", {"linux-64/ns/a.mojoc": 1}), ("osx-arm64", {})], "the osx-arm64 tree has no file: that platform would be staged with no package"),
+    ("a Linux file in the macOS tree", [("linux-64", {"linux-64/ns/a.mojoc": 1}), ("osx-arm64", {"linux-64/ns/b.mojoc": 2})], "linux-64/ns/b.mojoc is in the osx-arm64 tree but not under osx-arm64/"),
+    ("a subdir name as a prefix of a file name", [("linux-64", {"linux-64x/ns/a.mojoc": 1}), ("osx-arm64", {"osx-arm64/ns/a.mojoc": 2})], "linux-64x/ns/a.mojoc is in the linux-64 tree but not under linux-64/"),
+]
+
+def merge_tree_cases():
+    """Fails loading the package when merge_trees gets a case of _MERGE_CASES wrong, naming the case."""
+    for name, parts, want in _MERGE_CASES:
+        merged, why = merge_trees(parts)
+        if why != want:
+            fail("merge_trees, case '{}': the reason is {}, want {}".format(name, repr(why), repr(want)))
+        if want == None:
+            paths = []
+            for _, tree in parts:
+                paths += tree.keys()
+            if sorted(merged.keys()) != sorted(paths):
+                fail("merge_trees, case '{}': merged {}, want every path of the parts {}".format(name, sorted(merged.keys()), sorted(paths)))
+
+def _darwin_arm64_impl(platform, refs):
+    # the platform `--target-platforms komira//tools/build/platforms:darwin-arm64` names, unchanged: the libraries
+    # are configured exactly as release-macos.yml and pr.yml's macOS part configure them, so their actions are the
+    # same actions (and the same cache entries); `platform`, the dependent's, is not read
+    _ = platform
+    return refs.darwin_arm64[PlatformInfo]
+
+_DARWIN_ARM64 = transition(impl = _darwin_arm64_impl, refs = {"darwin_arm64": "komira//tools/build/platforms:darwin-arm64"})
+
+def _release_impl(ctx):
+    linux = ctx.attrs.linux[MopmTreeInfo]
+    mac = ctx.attrs.mac[MopmTreeInfo]
+    merged, why = merge_trees([(linux.subdir, linux.tree), (mac.subdir, mac.tree)])
+    if why:
+        fail("{}: {}".format(ctx.label, why))
+    layout = ctx.actions.write_json("mopm_release_artifacts.layout.json", sorted(merged.keys()))
+    return [DefaultInfo(
+        default_output = ctx.actions.copied_dir("mopm_release_artifacts", merged),
+        sub_targets = {"layout": [DefaultInfo(default_output = layout)]},
+    )]
+
+# The directory `mopm stage --artifacts` reads in release.yml's `mopm-stage`: the linux-64 tree of `linux` (built for
+# the target platform of the build, linux-x86_64) and the osx-arm64 tree of `mac`, configured for darwin-arm64 by
+# the transition, so its libraries compile and run their welded tests on the farm's macOS workers.
+mopm_release_artifacts = rule(
+    impl = _release_impl,
+    attrs = {
+        "linux": attrs.dep(providers = [MopmTreeInfo]),
+        "mac": attrs.transition_dep(cfg = _DARWIN_ARM64, providers = [MopmTreeInfo]),
+    },
+)

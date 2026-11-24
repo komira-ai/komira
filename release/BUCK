@@ -10,7 +10,7 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":darwin_libs.bzl", "DARWIN_PACKAGES", "mopm_darwin_libs")
 load(":exec_tools.bzl", "exec_tool_cases")
-load(":mopm_artifacts.bzl", "mopm_artifacts", "native_ids_json")
+load(":mopm_artifacts.bzl", "merge_tree_cases", "mopm_artifacts", "mopm_release_artifacts", "native_ids_json")
 load(":release_set.bzl", "release_set")
 load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
 
@@ -19,25 +19,36 @@ load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
 # runs on) gets any of its cases wrong.
 exec_tool_cases()
 
+# Fails loading this package if `merge_trees` (mopm_artifacts.bzl: the two platforms' trees of the directory the
+# release stages, one per subdir, each path under its own) gets any of its cases wrong.
+merge_tree_cases()
+
+# The `[native.<id>]` archive of each package that declares one, `{package: {id: archive target}}`: the target its
+# `mojo_conda` passes to `--native`, so the archive staged is the one linked into its tests. One table for both
+# platforms: //release:mopm_artifacts takes it for linux-64 and //release:mopm_darwin_libs for osx-arm64, and each
+# holds it to the packages' manifests (mopm_artifacts.bzl's `check_natives`).
+RELEASE_NATIVES = {
+    "async_api": {"komira_concurrency_pool_depth": "//src/async_api:native_komira_concurrency_pool_depth"},
+    "awslc": {"awslc": "//src/awslc:awslc_native"},
+    "compression": {"snappy": "//third_party/snappy:snappy_native"},
+    "crypto": {"komira_crypto_sha256_hw": "//src/crypto:native_komira_crypto_sha256_hw"},
+    "libc": {"komira_libc_posix": "//src/libc:native_komira_libc_posix"},
+    "log": {"komira_log_holder": "//src/log:native_komira_log_holder"},
+    "metrics": {"komira_metrics_ea_flag": "//src/metrics:native_komira_metrics_ea_flag"},
+}
+
 # The build artifacts of the libraries moved to mopm (mopm_artifacts.bzl): each
 # package's `:lib`, as `linux-64/komira-ai/<name>.mojoc`, and each package's native archive as
 # `linux-64/komira-ai/<name>.native/lib<id>.a`, the directory `mopm stage
 # --artifacts` packs. The list is //release/readme_e2e:packages.bzl's, which
 # //:readme_e2e_complete holds to the src/ packages that have a mopm.toml.
-# release.yml's `mopm-stage` job builds it, stages it, tries the README
-# examples against the staged set and dry-runs the publish on every push to
-# main; the `prod-*` jobs publish the set, only when enabled (docs/ci.md).
+# release.yml's `mopm-stage` job builds it, as the linux-64 half of
+# :mopm_release_artifacts (below), stages it, tries the README examples against the
+# staged set and dry-runs the publish on every push to main; the `prod-*` jobs publish
+# the set (docs/ci.md).
 mopm_artifacts(
     name = "mopm_artifacts",
-    natives = {
-        "async_api": {"komira_concurrency_pool_depth": "//src/async_api:native_komira_concurrency_pool_depth"},
-        "awslc": {"awslc": "//src/awslc:awslc_native"},
-        "compression": {"snappy": "//third_party/snappy:snappy_native"},
-        "crypto": {"komira_crypto_sha256_hw": "//src/crypto:native_komira_crypto_sha256_hw"},
-        "libc": {"komira_libc_posix": "//src/libc:native_komira_libc_posix"},
-        "log": {"komira_log_holder": "//src/log:native_komira_log_holder"},
-        "metrics": {"komira_metrics_ea_flag": "//src/metrics:native_komira_metrics_ea_flag"},
-    },
+    natives = RELEASE_NATIVES,
     packages = sorted(README_E2E_PACKAGES.keys()),
     visibility = ["PUBLIC"],
 )
@@ -228,8 +239,10 @@ zig_test(
 )
 
 # The macOS arm64 build set (darwin_libs.bzl): the library of every mopm package that builds for
-# macOS, built with `--target-platforms komira//tools/build/platforms:darwin-arm64` by release-macos.yml's
-# `release-macos` job on the farm's macOS workers, once per release. //ci:pr builds for the client's
+# macOS, and each declared native's archive, built with `--target-platforms
+# komira//tools/build/platforms:darwin-arm64` by release-macos.yml's `release-macos` job on the farm's
+# macOS workers, once per release, and as the osx-arm64 half of :mopm_release_artifacts by release.yml's
+# `mopm-stage`, which publishes it. //ci:pr builds for the client's
 # platform only; pr.yml's macOS part builds this set (or the libraries of it the change reaches,
 # tools/build/ci/darwin.bxl) for darwin-arm64, and its last step configures and analyses it, running
 # no action (darwin_analysis.bxl). The zig case //:release_macos_cases holds that no other line of a
@@ -249,6 +262,38 @@ export_file(
 
 mopm_darwin_libs(
     name = "mopm_darwin_libs",
+    natives = RELEASE_NATIVES,
     packages = DARWIN_PACKAGES,
+    visibility = ["PUBLIC"],
+)
+
+# The gate of :mopm_release_artifacts: it is compatible only under `-c komira_release.mac_tree=true`, which the two
+# places that register the macOS execution platform pass (release.yml's step `build the packages`, and
+# darwin_analysis.buckconfig for pr.yml's analysis). Anywhere else (a Linux graph query of `//...`, the pull request
+# check) it is incompatible and skipped, since its macOS half cannot be configured without that platform.
+config_setting(
+    name = "mac_tree",
+    values = {"komira_release.mac_tree": "true"},
+)
+
+constraint_setting(name = "mac_tree_setting")
+
+# No platform has it: a target that requires it is incompatible everywhere.
+constraint_value(
+    name = "mac_tree_off",
+    constraint_setting = ":mac_tree_setting",
+)
+
+# The directory release.yml's `mopm-stage` stages and publishes (mopm_artifacts.bzl, `mopm_release_artifacts`):
+# :mopm_artifacts (linux-64) and :mopm_darwin_libs (osx-arm64, configured for darwin-arm64 by the rule's
+# transition, so it is built on the farm's macOS workers), merged into one `mopm stage --artifacts` directory. Built
+# only with the macOS execution platform registered (`mopm-stage` names the file of the macOS keys for this one
+# step), so //ci:pr leaves it out (EXCLUDED of tools/build/ci/rules.bzl); pr.yml's last step configures and
+# analyses it (darwin_analysis.bxl), running no action.
+mopm_release_artifacts(
+    name = "mopm_release_artifacts",
+    linux = ":mopm_artifacts",
+    mac = ":mopm_darwin_libs",
+    target_compatible_with = select({":mac_tree": [], "DEFAULT": [":mac_tree_off"]}),  # komira-limit:release-mac-tree
     visibility = ["PUBLIC"],
 )

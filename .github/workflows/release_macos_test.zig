@@ -14,15 +14,21 @@
 //!  - the workflow release-macos.yml exists, runs on push to main and workflow_dispatch only (never
 //!    pull_request, pull_request_target or merge_group, never a schedule), its concurrency group is not
 //!    release.yml's and it cancels a running build in favour of a newer push;
-//!  - release.yml holds no macOS job: no job `release-macos`, no job `needs` it or reads its result,
-//!    and no non-comment line naming a macOS platform, worker set or runner;
+//!  - release.yml holds no macOS job: no job `release-macos`, no job `needs` it or reads its result;
+//!    the one place it names macOS is its job `mopm-stage`, which publishes the packages of both platforms:
+//!    the lines of MOPM_STAGE_MACOS, exactly as written, each once in the file and all in that job (the macOS
+//!    keys passed to farm-connect in a buckconfig of their own, and the one build that names that file and
+//!    builds //release:mopm_release_artifacts, whose transition configures the macOS set for darwin-arm64);
+//!    any other non-comment line naming a macOS platform, worker set or runner (a `--target-platforms`, a
+//!    macOS runner, the keys in another job) is refused;
 //!  - the job `release-macos` of release-macos.yml exists once and builds the macOS set on the farm: it runs on
 //!    the ubuntu runner (a macOS runner is refused), joins the farm with the macOS worker set and
 //!    hosts and `farm-qos: batch`, passes `--target-platforms komira//tools/build/platforms:darwin-arm64`
 //!    to `//release:mopm_darwin_libs` through the buck2-farm action (which fails a step that ran
 //!    anything locally), and says in its buckconfig step that the macOS worker keys must be set;
 //!  - it does not hold up the Linux path: it `needs` nothing (nothing in release.yml `needs` it, so the prod
-//!    publish never waits on it), and it is bounded (`timeout-minutes` at most 120, the longest of the other jobs);
+//!    publish never waits on this workflow; the publish waits on its own build of the macOS packages, in
+//!    mopm-stage), and it is bounded (`timeout-minutes` at most 120, the longest of the other jobs);
 //!  - a failed or skipped macOS build ends the run failed: the job is not `continue-on-error`, and a last job
 //!    `release-macos-result` (`needs: release-macos`, `if: always()`) fails with "the macOS build did not run"
 //!    when the build's result is skipped, so a run whose build never ran is not green;
@@ -77,6 +83,14 @@ const ASSERT = "          assert-remote: ${{ steps.assert.outputs.path }}";
 const DARWIN_PROPS = "          darwin-properties: ${{ vars.FARM_DARWIN_ARM64_PROPERTIES }}";
 const DARWIN_HOSTS = "          darwin-macos-hosts: ${{ vars.FARM_DARWIN_MACOS_HOSTS }}";
 const QOS = "          farm-qos: batch";
+const MACOS_LIBS = "          macos-library-dirs: ${{ vars.FARM_MACOS_LIBRARY_DIRS }}";
+const MAC_CONFIG_INPUT = "          darwin-config-file: ${{ runner.temp }}/darwin.buckconfig";
+const PACKAGES_BUILD = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts";
+/// The job of release.yml that stages and publishes the packages of both platforms, and the only lines of release.yml
+/// that may name macOS: its farm connection's macOS keys, written to a buckconfig of their own, and the build of the
+/// packages, the one step that names that file.
+const MOPM_STAGE = "mopm-stage";
+const MOPM_STAGE_MACOS = [_][]const u8{ DARWIN_PROPS, DARWIN_HOSTS, MACOS_LIBS, MAC_CONFIG_INPUT, PACKAGES_BUILD };
 const BOUND = "    timeout-minutes: 90";
 const CONTINUE_ON_ERROR = "    continue-on-error: true";
 const RESULT_JOB = "release-macos-result";
@@ -220,8 +234,18 @@ fn checkRelease(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     }
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |line| {
-        if (isComment(line)) continue;
-        if (namesMacos(line)) return "release.yml names a macOS platform, worker set or runner: it holds none (the macOS builds are release-macos.yml and pypi-macos-arm64.yml)";
+        if (isComment(line) or !namesMacos(line)) continue;
+        var allowed = false;
+        for (MOPM_STAGE_MACOS) |l| allowed = allowed or std.mem.eql(u8, line, l);
+        if (!allowed) return try std.fmt.allocPrint(ar, "release.yml names a macOS platform, worker set or runner outside mopm-stage's macOS keys and its build of the packages: {s}", .{std.mem.trim(u8, line, " ")});
+    }
+    // each of those lines once in the file, in mopm-stage: the keys reach no other job, and the packages are built
+    // for both platforms (without the keys the osx-arm64 half has no worker to build on)
+    var m: usize = 0;
+    const stage = (try jobLines(ar, text, MOPM_STAGE, &m)) orelse return "release.yml has no job mopm-stage";
+    for (MOPM_STAGE_MACOS) |l| {
+        if (!has(stage, l)) return try std.fmt.allocPrint(ar, "mopm-stage does not hold `{s}`: the osx-arm64 packages are not built for the release", .{std.mem.trim(u8, l, " ")});
+        if (std.mem.count(u8, text, l) != 1) return try std.fmt.allocPrint(ar, "release.yml has {d} lines `{s}`: it is mopm-stage's, once", .{ std.mem.count(u8, text, l), std.mem.trim(u8, l, " ") });
     }
     return null;
 }
@@ -821,8 +845,17 @@ test "each edit of the real workflows that breaks the macOS build's separation i
     try expectRefusedRelease(ar, try replaced(ar, rel, "    needs: [release, mopm-stage]\n", "    needs: [release, mopm-stage, release-macos]\n"), "needs release-macos");
     try expectRefusedRelease(ar, try replaced(ar, rel, "    needs: prod-commit\n", "    needs: [prod-commit, release-macos]\n"), "needs release-macos");
     try expectRefusedRelease(ar, try replaced(ar, rel, "    needs: prod-stage\n", "    needs: prod-stage\n    if: needs.release-macos.result == 'success'\n"), "reads the result of release-macos");
-    try expectRefusedRelease(ar, try replaced(ar, rel, "          args: build //release/ci:check_release_ref --out", "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 //release/ci:check_release_ref --out"), "it holds none");
-    try expectRefusedRelease(ar, try replaced(ar, rel, "  mopm-stage:\n    runs-on: ubuntu-24.04\n", "  mopm-stage:\n    runs-on: macos-15\n"), "it holds none");
+    try expectRefusedRelease(ar, try replaced(ar, rel, "          args: build //release/ci:check_release_ref --out", "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 //release/ci:check_release_ref --out"), "outside mopm-stage's macOS keys");
+    try expectRefusedRelease(ar, try replaced(ar, rel, "  mopm-stage:\n    runs-on: ubuntu-24.04\n", "  mopm-stage:\n    runs-on: macos-15\n"), "its build of the packages: runs-on: macos-15");
+    // the build of the packages, spelled another way (a --target-platforms of the whole build), is not mopm-stage's line
+    try expectRefusedRelease(ar, try replaced(ar, rel, PACKAGES_BUILD, PACKAGES_BUILD ++ " --target-platforms komira//tools/build/platforms:darwin-arm64"), "outside mopm-stage's macOS keys");
+    // the macOS keys in another job, or twice, or missing from mopm-stage
+    try expectRefusedRelease(ar, try replaced(ar, rel, "  prod-test:\n", "  prod-test:\n    env:\n" ++ DARWIN_PROPS ++ "\n"), "is mopm-stage's, once");
+    try expectRefusedRelease(ar, try replaced(ar, rel, DARWIN_HOSTS ++ "\n", ""), "mopm-stage does not hold `darwin-macos-hosts");
+    try expectRefusedRelease(ar, try replaced(ar, rel, PACKAGES_BUILD ++ "\n", ""), "mopm-stage does not hold `args: build --config-file");
+    // what mopm-stage holds is accepted, and every line of it is needed
+    try t.expect((try checkRelease(ar, rel)) == null);
+    inline for (MOPM_STAGE_MACOS) |l| try expectRefusedRelease(ar, try replaced(ar, rel, l ++ "\n", ""), "mopm-stage does not hold");
     // a comment in release.yml may speak of the macOS build
     try t.expect((try checkRelease(ar, try std.fmt.allocPrint(ar, "{s}\n# the macOS build is release-macos.yml\n", .{rel}))) == null);
 }
