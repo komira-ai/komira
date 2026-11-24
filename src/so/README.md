@@ -186,7 +186,7 @@ refused (-3, with a last error) before it is used.
 | `komira_parquet_schema(ctx, path, out_buf, out_cap, out_len)` | the file's Arrow schema as `komira.plan.v1` `WireSchema` bytes, for a plan author to splice into a Parquet scan | NULL `path` or `out_len`: -2. A file that cannot be read: -3 |
 | `komira_csv_binding(ctx, path, delimiter, has_header, all_varchar, out_buf, out_cap, out_len)` | the whole `WireScanBinding` of a CSV file, schema inferred from a bounded prefix of an uncompressed file (a compressed file is read whole). `has_header` and `all_varchar` are `int32_t`; any non-zero value is true | as `komira_parquet_schema` |
 | `komira_json_binding(ctx, path, out_buf, out_cap, out_len)` | the same for a newline-delimited JSON file; the schema comes from the leading records | as `komira_parquet_schema` |
-| `komira_register_csv(ctx, name, path, delimiter, has_header, all_varchar)` | infers the schema of the CSV file at `path` now (a bounded prefix of an uncompressed file; a compressed file is read whole) and binds the file into the engine's catalog as the table `name` (found without regard to case). The table is the scan `read_csv` builds for the same file and dialect: `delimiter` and `has_header` are what the file is read with, `all_varchar` makes every column a string; `has_header` and `all_varchar` are `int32_t`, any non-zero value is true. Every later query reads the file at the schema inferred here | NULL `name` or `path`: -2. A file that cannot be read or has no column: -3. An empty name: -3, `TABLE_NAME_EMPTY: a table name must not be empty`. A name the session already holds, of any kind and in any case: -3, `TABLE_ALREADY_REGISTERED: the session already has a table named '<name>'`. Nothing is registered on a refusal |
+| `komira_register_csv(ctx, name, path, delimiter, has_header, all_varchar)` | infers the schema of the CSV file at `path` now (a bounded prefix of an uncompressed file; a compressed file is read whole) and binds the file into the engine's catalog as the table `name` (found without regard to case). The table is the scan `read_csv` builds for the same file and dialect: `delimiter` and `has_header` are what the file is read with, `all_varchar` makes every column a string; `has_header` and `all_varchar` are `int32_t`, any non-zero value is true. Every later query reads the file at the schema inferred here. A table registered with `has_header` 0 is refused when a query reads it, at `lower`, naming `header=false`, as `read_csv(..., header=false)` is, until the reader names the columns as DuckDB does | NULL `name` or `path`: -2. A file that cannot be read or has no column: -3. An empty name: -3, `TABLE_NAME_EMPTY: a table name must not be empty`. A name the session already holds, of any kind and in any case: -3, `TABLE_ALREADY_REGISTERED: the session already has a table named '<name>'`. Nothing is registered on a refusal |
 | `komira_register_json(ctx, name, path)` | the same for a newline-delimited JSON file, the scan `read_json` builds; the schema comes from the leading records | as `komira_register_csv` |
 | `komira_plan_render(ctx, plan, plan_len, out_buf, out_cap, out_len)` | decodes the serialized plan `plan[0..plan_len]` (a `WirePlanEnvelope`) and writes its text as authored, before any optimizer rule; the plan is not run | NULL `plan` or `out_len`: -2. `plan_len` above 64 MiB (`KOMIRA_MAX_INPUT_BYTES`): -5, checked before the plan is read or anything is allocated; exactly 64 MiB is accepted. Bytes that are not an admissible plan: -3 |
 
@@ -558,9 +558,10 @@ leaving `*out` byte for byte as written and followed by a good query on the
 same context; a text of exactly `KOMIRA_MAX_INPUT_BYTES` bytes that runs and
 one of a byte more that is -5; and a stream read whole after its context was
 freed. It registers files it writes under `$TEST_TMPDIR` with
-`komira_register_csv` (a file with a header, a `|` file, one with no header and
-one with `all_varchar`) and `komira_register_json`, and holds each query by
-name to the rows it wrote; a taken name, an empty one, a missing file and the
+`komira_register_csv` (a file with a header, a `|` file and one with
+`all_varchar`) and `komira_register_json`, and holds each query by name to the
+rows it wrote; a file registered with no header is refused at `lower` when
+queried, naming `header=false`; a taken name, an empty one, a missing file and the
 NULL cases are refused with their named last error, and the tables first
 registered keep answering. It is built by zig cc and run against the published library:
 

@@ -4,9 +4,11 @@
 # Rows: a registered CSV file answers a filter, a sort, a string comparison
 # and an aggregate with the file's values, under its name in any case; each
 # dialect argument is the one the file is read with (a `|` file has its three
-# columns, a file with no header keeps its first row as data, all_varchar
-# makes every column a string), and for each the registered table has the
-# schema and answer of `read_csv` with the same options; a registered JSON
+# columns, a file with a header loses its first line to the names,
+# all_varchar makes every column a string), and for each the registered
+# table has the schema and answer of `read_csv` with the same options; a file
+# registered with no header is a table whose queries are refused at lower
+# naming header=false, as `read_csv(..., header=false)` is; a registered JSON
 # file answers the same way and equals `read_json`; a missing file and an
 # empty file are refused by both with nothing registered; an empty name is
 # refused as TABLE_NAME_EMPTY; a name the session already holds (from either
@@ -71,6 +73,15 @@ def _assert_same_answer(mut s: Session, registered: String, tvf: String) raises:
     assert_equal(_rows(a), _rows(b))
 
 
+def _message_of_sql(mut s: Session, sql: String) -> String:
+    """The message `sql_result` raises for `sql`, or empty when it answers."""
+    try:
+        _ = sql_result(s, sql)
+    except e:
+        return String(e)
+    return String()
+
+
 def _message_of_csv(mut s: Session, name: String, path: String) -> String:
     """The message `register_csv` raises, or empty when it registers."""
     try:
@@ -120,10 +131,18 @@ def test_csv_dialect_is_the_one_read_csv_reads() raises:
     assert_equal(cols.schema.field_name(2), String("score"))
     _assert_same_answer(s, String("piped"), "read_csv('" + piped + "', delim='|')")
 
-    # No header: the first line is a row, so both lines are counted.
+    # No header: the table registers, and a query on it is refused at lower
+    # by name, as `read_csv(..., header=false)` is, until the reader names
+    # the columns as DuckDB does.
     register_csv(s, String("bare"), bare, COMMA, False, False)
-    assert_equal(_ints(sql_result(s, String("select count(*) from bare")))[0], Int64(2))
-    _assert_same_answer(s, String("bare"), "read_csv('" + bare + "', header=false)")
+    assert_true(s.engine.catalog.has("bare"))
+    for q in [
+        String("select count(*) from bare"),
+        "select count(*) from read_csv('" + bare + "', header=false)",
+    ]:
+        var refused = _message_of_sql(s, q)
+        assert_true(refused.startswith("lower: "), "header=false was not refused at lower: " + refused)
+        assert_true("header=false" in refused, "the refusal does not name header=false: " + refused)
     # The same file with a header has one row.
     register_csv(s, String("headed"), bare, COMMA, True, False)
     assert_equal(_ints(sql_result(s, String("select count(*) from headed")))[0], Int64(1))

@@ -44,8 +44,9 @@ NATIVE_OWNERS = [
 # no rows with the schema, a result that outlives its session, and refusals as
 # `<step>: <reason>`); test_register_text holds register_csv and
 # register_json: a CSV or JSON file registered by name and queried through
-# the session's engine, each CSV dialect argument equal to read_csv's and the
-# JSON table equal to read_json's, an unreadable file, an empty name and a
+# the session's engine, each CSV dialect argument equal to read_csv's (a
+# header-less table refused at lower as read_csv's is) and the JSON table
+# equal to read_json's, an unreadable file, an empty name and a
 # taken name refused with nothing registered; test_credentials holds the three steps of a definition, each
 # kind's fields and every named refusal, word for word, and the generations of
 # a name; test_credentials_reveal reads sealed values through sdk_exec's
@@ -353,9 +354,9 @@ cxx_binary(
 # out, a parse and a bind error, a text one byte over the bound) leaves *out as
 # the driver wrote it, and a good query follows each on the same context; a
 # stream outlives komira_ctx_free. And it registers files it writes into
-# $TEST_TMPDIR with komira_register_csv (a `|` file, one with no header, one
-# with all_varchar) and komira_register_json and queries each by name: the
-# rows are the files' own; a taken name, an empty one and a missing file are
+# $TEST_TMPDIR with komira_register_csv (a `|` file, one with all_varchar)
+# and komira_register_json and queries each by name: the rows are the files'
+# own, and a file registered with no header is refused at lower when queried; a taken name, an empty one and a missing file are
 # refused with the named last error, and the first table keeps answering.
 komira_c_abi_check(
     name = "c_abi_check",

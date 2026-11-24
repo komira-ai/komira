@@ -67,6 +67,8 @@ def register_csv(
     with, and `all_varchar` makes every column a string. A query on the
     session then reads it by name, found without regard to case. The schema
     is the one inferred here: the file is read at it by every later query.
+    A query on a table registered with `has_header` False is refused at
+    `lower`, naming `header=false`, as one on `read_csv(..., header=false)` is.
 
     Raises:
         `TABLE_NAME_EMPTY` for an empty `name`; `TABLE_ALREADY_REGISTERED`
