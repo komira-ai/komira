@@ -438,11 +438,21 @@ def pt_stamp[phase: Int]():
 
 
 def _mark_fork() raises:
+    # The fork is the first clock reading after the one taken on entry: a stamp
+    # taken before this call reads at most the entry reading, so less than the
+    # fork, and a stamp taken after it reads at least the fork. `_join_tails`
+    # relies on that split, which holds whatever the clock's resolution (on
+    # macOS two readings microseconds apart can be equal). The wait is at most
+    # one tick of the clock.
+    var entry = Int64(perf_counter_ns())
+    var fork = Int64(perf_counter_ns())
+    while fork == entry:
+        fork = Int64(perf_counter_ns())
     # SAFETY: `_SLAB` outlives the process's use; index _W_FORK is a header word
     # inside the slab; the pointer does not leave this function.
     var g = _SLAB.get_or_create_ptr()
     var base = UnsafePointer(to=g[][])
-    (base + _W_FORK)[].store(Int64(perf_counter_ns()))
+    (base + _W_FORK)[].store(fork)
 
 
 @always_inline
@@ -484,7 +494,9 @@ def _join_tails() raises:
     var tails = List[Int]()
     for i in range(used):
         var end = Int((base + _lane_word(i, PH_END_STAMP, FIELD_SUM))[].load())
-        if end > fork:
+        # A task of this fork stamped its end at or after the fork
+        # (`_mark_fork`); 0 is a lane that has not stamped since the reset.
+        if end != 0 and end >= fork:
             tails.append(now - end)
     for i in range(len(tails)):
         _record_interval(PH_JOIN_TAIL, tails[i], False)

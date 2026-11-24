@@ -2,6 +2,9 @@ load("@komira//tools/build/mojo:abi_golden.bzl", "komira_abi_golden")
 load("@komira//tools/build/mojo:c_abi_check.bzl", "komira_c_abi_check")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
+load("@komira//tools/build/platforms:isa_variants.bzl", "floor_variant", "variant_label_name")
+load("@komira//tools/build/platforms:table.bzl", "row")
+load("@komira//tools/build/toolchains:defs.bzl", "variant_toolchain")
 
 # The shared libraries of the C code the library owns; libkomira links each as
 # NEEDED, and the C driver below stages the same ones beside it.
@@ -153,8 +156,7 @@ mojo_library(
 #                      -3 with the named error word for word; NULL ctx -1,
 #                      NULL name, out_id or value (length non-zero) -2 with
 #                      the id slot untouched; value_len 64 MiB plus one -5.
-mojo_shared_lib(
-    name = "libkomira",
+_LIBKOMIRA = dict(
     srcs = ["_c_abi.mojo"],
     out_name = "libkomira",
     exports = [
@@ -200,8 +202,34 @@ mojo_shared_lib(
         "DEFAULT": NATIVE_OWNERS,
         "prelude//os/constraints:macos": [],
     }),
-    visibility = ["komira//ci:", "komira//tools/build/package/libkomira:", "//node:", "//python:", "//python/tests:"],
 )
+
+mojo_shared_lib(
+    name = "libkomira",
+    visibility = ["komira//ci:", "komira//tools/build/package/libkomira:", "//node:", "//python:", "//python/tests:"],
+    **_LIBKOMIRA
+)
+
+# One more link of the same library per CPU level linux x86_64 ships it at
+# (`isa_variants` of the platform row, tools/build/platforms/isa_variants.bzl):
+# `:libkomira_x86_64_v2` and `:libkomira_x86_64_v3`, each behind the same gate
+# as `:libkomira`, its drivers built for that level. Each names its toolchain,
+# whose CPU is the level's; the `.mojoc` of `:so` and its closure are the ones
+# every other target reads (a `.mojoc` holds no machine code). The floor is
+# installed at the plain path of the native directory and keeps the run path of
+# `:libkomira`; every other level is installed at `variants/<level>/` and also
+# looks in `$ORIGIN/../../lib`, the directory's one lib/
+# (//tools/build/package/libkomira:libkomira_variants).
+[
+    mojo_shared_lib(
+        name = "libkomira_" + variant_label_name(v),
+        toolchain = variant_toolchain(v),
+        extra_runpath = [] if v == floor_variant(row("linux-x86_64")) else ["$ORIGIN/../../lib"],
+        visibility = ["komira//tools/build/package/libkomira:"],
+        **_LIBKOMIRA
+    )
+    for v in row("linux-x86_64")["isa_variants"]
+]
 
 # The Parquet file the C-ABI gates and the Node and Python bindings' tests read.
 export_file(
