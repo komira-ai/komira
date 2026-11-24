@@ -44,9 +44,17 @@ The targets the aggregate leaves out on purpose (`rules.bzl` `EXCLUDED`) are dro
 The reason for a widening and the warnings go to the log. The rows are
 data in `rules.bzl` (a BXL script cannot read a text file), and `cases.bxl`
 holds them to the paths that must always widen. The mapping itself is
-`affected.bzl`, a pure function over a graph facade, so
-`cases.bxl` answers it from tables and from the real graph of
-the fixture package (`fixture/`).
+buildrules' selector library, `rules/affected` of the commit `.buckconfig`
+pins (its `README.md` is the reference: the configuration, the command line,
+the output and the failures); `affected.bxl` passes it the rows of `rules.bzl`
+as one configuration value and keeps the command line above. The library
+holds its own cases over table graphs; `cases.bxl` runs it from this cell over
+the real graph of the fixture package (`fixture/`), and holds the log and
+failure text of `affected.bxl`'s configuration.
+
+`--format json` prints one line instead of the labels: the verdict
+(`AFFECTED` or `WIDENED`), its reason, the labels, the notes, the warnings
+and the number of files. `pr.yml` reads the labels, the default.
 
 ## The macOS targets: `darwin.bxl`
 
