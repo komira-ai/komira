@@ -106,6 +106,7 @@ _TESTS = [
     "tests/load.test.ts",
     "tests/package.test.ts",
     "tests/platform.test.ts",
+    "tests/register_args.test.ts",
     "tests/session.test.ts",
     "tests/unknown_status.test.ts",
     "tests/variants.test.ts",
@@ -147,6 +148,15 @@ c_shared_lib(
     out = "libkomira_fake_engine_error.so",
 )
 
+# A stand-in that answers each komira_register_parquet with -3 and the
+# arguments it received as the last error: what the package passed the C call.
+c_shared_lib(
+    name = "fake_echo_register",
+    srcs = ["tests/fake_libkomira.c"],
+    copts = ["-DFAKE_ECHO_REGISTER"],
+    out = "libkomira_fake_echo_register.so",
+)
+
 c_shared_lib(
     name = "fake_unknown_status",
     srcs = ["tests/fake_libkomira.c"],
@@ -180,6 +190,7 @@ node_binding_test(
     covered_srcs = _SRCS,
     data = {
         "dist": ":dist",
+        "fake/echo_register/libkomira.so": ":fake_echo_register",
         "fake/engine_error/libkomira.so": ":fake_engine_error",
         "fake/unknown_status/libkomira.so": ":fake_unknown_status",
         "fake/v1_1/libkomira.so": ":fake_v1_1",

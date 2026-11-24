@@ -29,7 +29,8 @@ test("the first call loads libkomira from the platform package's native director
   ]);
 });
 
-test("a session registers a Parquet file by its path or its file: URL, again under the same name", async () => {
+test("the real library accepts a Parquet file by its path and by its file: URL, and the same name twice", async () => {
+  // What each call passes the library is held by register_args.test.ts; here the real engine opens the file.
   const s = new Session();
   await s.registerParquet("t", PARQUET);
   await s.registerParquet("t", pathToFileURL(PARQUET));
