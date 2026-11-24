@@ -1,0 +1,188 @@
+-- The small tables the regression cases (cases/regress_*.sql) read, each
+-- written by the pinned DuckDB as one Parquet file and registered under its
+-- file name by both engines (sql/tables.sql here, runner.mojo's
+-- open_session in komira). Every value is a literal or a function of a
+-- range() row number: no random() and no clock. Each table is shaped so
+-- that one engine defect changes the answer; the case that reads it says
+-- which.
+
+-- A global aggregate over a scan: v = 0..95, f = v + 0.5.
+CREATE TABLE agg_scalar AS
+SELECT CAST(i AS BIGINT) AS v, CAST(i AS DOUBLE) + 0.5 AS f FROM range(96) AS r(i);
+
+-- Groups for count(<column>): group 1 holds 0, 1, 2; group 2 a NULL and 7;
+-- groups 3 and 5 only NULLs (count 0, never a dropped group).
+CREATE TABLE count_groups AS
+SELECT * FROM (VALUES
+    (CAST(1 AS BIGINT), CAST(0 AS BIGINT)), (1, 1), (1, 2),
+    (2, NULL), (2, 7),
+    (3, NULL),
+    (5, NULL), (5, NULL), (5, NULL)
+) AS t(id, val);
+
+-- A LEFT JOIN pair: customers, and orders of some of them (customer 4 has
+-- none, customer 6 only an order whose comment filters it out).
+CREATE TABLE lj_customer AS
+SELECT CAST(i AS BIGINT) AS c_id FROM range(1, 7) AS r(i);
+CREATE TABLE lj_orders AS
+SELECT * FROM (VALUES
+    (CAST(100 AS BIGINT), CAST(1 AS BIGINT), 'plain'),
+    (101, 1, 'plain'),
+    (102, 2, 'plain'),
+    (103, 3, 'plain'),
+    (104, 3, 'plain'),
+    (105, 3, 'special requests'),
+    (106, 5, 'plain'),
+    (107, 6, 'special requests')
+) AS t(o_id, o_cust, o_comment);
+
+-- count(DISTINCT) per group: duplicates, a NULL beside values, a group of
+-- one value repeated, and a group of NULLs only.
+CREATE TABLE distinct_pairs AS
+SELECT * FROM (VALUES
+    (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (1, 10), (1, 20),
+    (2, 30), (2, 30), (2, NULL),
+    (3, 5), (3, 5), (3, 5),
+    (4, NULL), (4, NULL)
+) AS t(key, val);
+
+-- The two sides of a cross join: a = 1, 2, 3 and b = 10, 20 (and 20 twice,
+-- so a distinct count across the join is less than the row count).
+CREATE TABLE cross_a AS
+SELECT * FROM (VALUES (CAST(1 AS BIGINT)), (2), (3)) AS t(a);
+CREATE TABLE cross_b AS
+SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (2, 20), (3, 20)) AS t(bid, b);
+
+-- A string-key join pair: alice twice on the probe side, bob and a NULL
+-- name with no match, '' on both sides, dave only on the build side.
+CREATE TABLE skey_probe AS
+SELECT * FROM (VALUES
+    ('alice', CAST(100 AS BIGINT)),
+    ('bob', 200),
+    ('charlie', 300),
+    ('alice', 150),
+    ('', 50),
+    (NULL, 400)
+) AS t(name, amount);
+CREATE TABLE skey_build AS
+SELECT * FROM (VALUES
+    ('alice', CAST(10 AS BIGINT), CAST(1 AS BIGINT)),
+    ('charlie', 30, 3),
+    ('dave', 40, 4),
+    ('', 0, 0)
+) AS t(rname, region_id, priority);
+
+-- Aggregates over computed columns, before and after joins.
+CREATE TABLE derived_l AS
+SELECT * FROM (VALUES
+    (CAST(1 AS BIGINT), 1.0::DOUBLE, 10.0::DOUBLE),
+    (2, 2.0, 20.0),
+    (1, 3.0, 30.0),
+    (2, 4.0, 40.0)
+) AS t(k, a, b);
+CREATE TABLE derived_r AS
+SELECT * FROM (VALUES (CAST(1 AS BIGINT), 100.0::DOUBLE), (2, 200.0)) AS t(k, c);
+CREATE TABLE profit_lineitem AS
+SELECT * FROM (VALUES
+    (CAST(1 AS BIGINT), CAST(10 AS BIGINT), 100.0::DOUBLE, 0.25::DOUBLE, 5.0::DOUBLE),
+    (2, 20, 200.0, 0.5, 5.0),
+    (1, 10, 300.0, 0.25, 10.0),
+    (2, 20, 400.0, 0.5, 10.0)
+) AS t(l_partkey, l_suppkey, l_extendedprice, l_discount, l_quantity);
+CREATE TABLE profit_partsupp AS
+SELECT * FROM (VALUES
+    (CAST(1 AS BIGINT), CAST(10 AS BIGINT), 3.0::DOUBLE),
+    (2, 20, 7.0),
+    (1, 20, 1000.0)
+) AS t(ps_partkey, ps_suppkey, ps_supplycost);
+CREATE TABLE profit_supplier AS
+SELECT * FROM (VALUES (CAST(10 AS BIGINT), CAST(1995 AS BIGINT)), (20, 1996)) AS t(s_suppkey, s_year);
+
+-- LEFT and anti joins over INT64 keys: probe keys 0..7, build keys 0..3.
+CREATE TABLE pad_probe AS
+SELECT CAST(i AS BIGINT) AS key, CAST(i * 100 AS BIGINT) AS left_val FROM range(8) AS r(i);
+CREATE TABLE pad_build AS
+SELECT CAST(i AS BIGINT) AS key, CAST(i * 1000 + 7 AS BIGINT) AS right_val FROM range(4) AS r(i);
+
+-- Many-to-many fan-out: 100 probe rows per key against 10 build rows per
+-- key, ten keys; every payload distinct, so each output row names one
+-- probe row and one build row.
+CREATE TABLE fan_probe AS
+SELECT CAST(i // 100 AS BIGINT) AS jkey, CAST(i AS BIGINT) AS left_val FROM range(1000) AS r(i);
+CREATE TABLE fan_build AS
+SELECT CAST(i // 10 AS BIGINT) AS jkey, CAST(i AS BIGINT) AS right_val FROM range(100) AS r(i);
+
+-- FULL JOIN: keys on both sides, on the left only (4), on the right only
+-- (3, 5), and a left key matching two right rows (1).
+CREATE TABLE full_l AS
+SELECT * FROM (VALUES (CAST(1 AS BIGINT), CAST(10 AS BIGINT)), (2, 20), (4, 40)) AS t(lk, lv);
+CREATE TABLE full_r AS
+SELECT * FROM (VALUES
+    (CAST(1 AS BIGINT), CAST(101 AS BIGINT)), (1, 102), (2, 200), (3, 300), (5, 500)
+) AS t(rk, rv);
+
+-- IN (subquery), correlated and nested: an outer table whose rows each
+-- fail the correlated IN a different way, and a supplier/partsupp/part
+-- chain for the nested form.
+CREATE TABLE in_outer AS
+SELECT * FROM (VALUES
+    (CAST(10 AS BIGINT), CAST(1 AS BIGINT)),
+    (20, 1),
+    (30, 2),
+    (40, 9),
+    (99, 2),
+    (10, 2)
+) AS t(k, c);
+CREATE TABLE in_inner AS
+SELECT * FROM (VALUES (CAST(10 AS BIGINT), CAST(1 AS BIGINT)), (99, 2)) AS t(i, j);
+CREATE TABLE in_supplier AS
+SELECT CAST(i AS BIGINT) AS s_suppkey FROM range(1, 5) AS r(i);
+CREATE TABLE in_partsupp AS
+SELECT * FROM (VALUES
+    (CAST(10 AS BIGINT), CAST(1 AS BIGINT)), (20, 2), (30, 3), (30, 1)
+) AS t(ps_partkey, ps_suppkey);
+CREATE TABLE in_part AS
+SELECT * FROM (VALUES (CAST(10 AS BIGINT)), (30)) AS t(p_partkey);
+
+-- Floats across row groups (6000 rows, groups of 2048 rows): f64 and f32
+-- distinct per row (so the writer stores them PLAIN), the first rows NaN,
+-- +inf, -inf, -0.0 and 0.0; f64_dict and f32_dict with 11 and 7 values
+-- (so the writer dictionary-encodes them).
+CREATE TABLE floats AS
+SELECT
+    CAST(i AS BIGINT) AS i,
+    CAST(i % 50 AS BIGINT) AS c0,
+    CASE WHEN i < 5 THEN CAST(['nan', 'inf', '-inf', '-0.0', '0.0'][i + 1] AS DOUBLE)
+         ELSE CAST(i AS DOUBLE) * 1.5 + 0.25 END AS f64,
+    CASE WHEN i < 5 THEN CAST(['nan', 'inf', '-inf', '-0.0', '0.0'][i + 1] AS FLOAT)
+         ELSE CAST(CAST(i AS DOUBLE) * 0.25 - 3.0 AS FLOAT) END AS f32,
+    CAST(i % 11 AS DOUBLE) + 0.5 AS f64_dict,
+    CAST(CAST(i % 7 AS DOUBLE) - 2.5 AS FLOAT) AS f32_dict
+FROM range(6000) AS r(i);
+
+COPY agg_scalar TO 'agg_scalar.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY count_groups TO 'count_groups.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY lj_customer TO 'lj_customer.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY lj_orders TO 'lj_orders.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY distinct_pairs TO 'distinct_pairs.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY cross_a TO 'cross_a.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY cross_b TO 'cross_b.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY skey_probe TO 'skey_probe.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY skey_build TO 'skey_build.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY derived_l TO 'derived_l.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY derived_r TO 'derived_r.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY profit_lineitem TO 'profit_lineitem.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY profit_partsupp TO 'profit_partsupp.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY profit_supplier TO 'profit_supplier.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY pad_probe TO 'pad_probe.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY pad_build TO 'pad_build.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY fan_probe TO 'fan_probe.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY fan_build TO 'fan_build.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY full_l TO 'full_l.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY full_r TO 'full_r.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY in_outer TO 'in_outer.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY in_inner TO 'in_inner.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY in_supplier TO 'in_supplier.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY in_partsupp TO 'in_partsupp.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY in_part TO 'in_part.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY (SELECT * FROM floats ORDER BY i ASC) TO 'floats.parquet' (FORMAT parquet, COMPRESSION snappy, ROW_GROUP_SIZE 2048);

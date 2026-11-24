@@ -1,6 +1,6 @@
 # The corpus run end to end: every case of cases/ through komira's SQL
 # surface (so.sql_result, what komira_sql_stream runs) over
-# komira_test_oracle's datasets, held to the pinned DuckDB's answer by value
+# komira_test_oracle's datasets and the regression tables, held to the pinned DuckDB's answer by value
 # and in row order, or refused with exactly the text refusals.tsv lists.
 #
 # Catches: komira answering a case otherwise than DuckDB (a wrong value, a
@@ -16,7 +16,7 @@ from sql_e2e import check_corpus, load_corpus, open_session
 
 # `ls src/tests/e2e/sql_e2e/cases/*.sql | wc -l`; BUCK stages each with its
 # answer, so a case lost on the way fails here.
-comptime _CASES = 85
+comptime _CASES = 118
 
 # A case whose answer is one row starting with count(*) of `nulls`, 5000.
 comptime _COUNTS_CASE = "aggregate_counts"
