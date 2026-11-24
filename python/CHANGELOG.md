@@ -18,6 +18,10 @@ install page shows names it.
   syntax error, an unknown table or a refused construct raises `KomiraError` from `sql` itself, with the
   engine's message. A result still reads after its session is closed. `komira.Result` is a new public name; a requested
   schema on `__arrow_c_stream__` raises a `KomiraError`.
+- **pandas and polars.** `Result.to_pandas()` and `Result.to_polars()` read the answer as a pandas or
+  polars `DataFrame`, converted through Arrow by pyarrow's `Table.to_pandas()` and `polars.from_arrow`.
+  Neither library is a requirement of the wheel: when one is missing the call raises `ImportError`
+  naming it, and the result stays unread.
 - **pyarrow.** The wheel requires `pyarrow>=25.0.1`, so `pip install komira` installs it; it had no
   requirement.
 - **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its

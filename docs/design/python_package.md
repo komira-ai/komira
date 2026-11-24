@@ -6,9 +6,11 @@ Release 1's surface is built ([python/README.md](../../python/README.md)): the l
 `register_parquet` and `close`, `abi_version()`, `__version__`, `KomiraError`, `LibraryLoadError`
 and `UnsupportedCpuError`, and their tests. The linux-x86_64 wheel is built and carries `libkomira`, its native
 owners and the Mojo runtime libraries in one directory (decision 6), so `pip install komira` needs no package of
-Modular's. `Session.sql` and `Result` are built, with `to_arrow`, `to_reader` and `__arrow_c_stream__`
-(a result still reads after its session is closed), and the wheel requires pyarrow; `to_pandas`,
-`to_polars`, the default session, the per-session lock and the fork hook are not built, and
+Modular's. `Session.sql` and `Result` are built, with `to_arrow`, `to_reader`, `to_pandas`, `to_polars` and
+`__arrow_c_stream__` (a result still reads after its session is closed), and the wheel requires pyarrow;
+the wheel declares no `pandas` or `polars` extra yet (its rule writes no `Provides-Extra`), so the
+`ImportError` of a missing one names the distribution (`pip install pandas`) until it does; the default
+session, the per-session lock and the fork hook are not built, and
 `UnsupportedOperation` is not public yet; the linux-arm64 and macos-arm64
 wheels are not built.
 
@@ -480,8 +482,9 @@ and `_py311`, `_py312` and `_py314` on the other supported minors), alone: the e
   read `PYTHON_SURFACE` instead of a row per file is a question for that lint.
 - Free-threaded CPython (3.14t): the package is not claimed for it in the first release. ctypes works
   there, but no test runs the package on it.
-- `Result.to_polars` and `to_pandas` convert through Arrow; their dtype mapping is the Arrow terminals
-  pull request's tests.
+- `Result.to_polars` and `to_pandas` convert through Arrow, with pyarrow's `Table.to_pandas()` and
+  `polars.from_arrow` and no options of their own; `python/tests/test_result_frames.py` holds the dtype
+  each Arrow type the engine answers becomes.
 
 ## Where is the code?
 
