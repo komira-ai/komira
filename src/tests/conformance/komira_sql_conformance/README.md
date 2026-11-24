@@ -184,7 +184,7 @@ Counts of the names in `function_coverage.tsv` (731 names), each from
 | 538 | refusal rows; every one is refused at bind by `SELECT name(k) FROM T` |
 | 2 | common names with no row at all (`initcap`, `current_timestamp`), refused at bind |
 
-So the rows that execute and are checked against DuckDB are 124 of the 189
+So the rows that execute and are checked against DuckDB are 124 of the 188
 lowering-row names (the first two lines); 14 execute or bind without a
 verified answer; 50 are unmeasured. The gap list of common analysis
 functions is the `common = yes` lines whose `row` is `FNK_REFUSED` or
