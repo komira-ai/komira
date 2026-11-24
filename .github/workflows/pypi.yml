@@ -17,7 +17,7 @@
 #
 # The version is 0.1.<N>, N the build number of `release_json stamp`, so each code commit is a new
 # version; the Linux wheel is komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl. The wheel carries the
-# Mojo runtime libraries and requires no other distribution.
+# Mojo runtime libraries and requires no distribution of Modular's; its one requirement is pyarrow.
 #
 # THE RECORD. The build writes `built.txt` (the wheel's file name, sha256 and size, `pypi_smoke dist
 # --record`) beside the driver, the quickstart, its expected output, its data, the ABI table and the

@@ -2,7 +2,7 @@
 
 `load` opens the library from a directory, once per process, checks that its
 ABI major version is the one this package was written for, and binds the
-calls of ABI 1.2; every failure is a `LibraryLoadError` that says which
+calls of ABI 1.3; every failure is a `LibraryLoadError` that says which
 library and why. `Native` holds the bound calls and turns their status codes
 into `KomiraError`, with the context's last error, read with the two-call
 protocol, as the message.
@@ -50,7 +50,10 @@ Python type yet and no stability promise. So are the three credential calls
 (`credential_add`, `credential_set`, `credential_seal`), which
 `Session._seal_credential` makes; the engine refusing one of them
 (`KOMIRA_ERR_ENGINE`, which the library answers only with
-`CREDENTIALS_INVALID`) raises `CredentialsError`.
+`CREDENTIALS_INVALID`) raises `CredentialsError`. `sql_stream` runs one SQL
+statement and returns its filled `_arrow.ArrowArrayStream`, which
+`Session.sql` hands to pyarrow (`_arrow.import_stream`) and wraps in a
+`Result`.
 """
 
 from __future__ import annotations
@@ -62,7 +65,7 @@ import sys
 import threading
 from collections.abc import Callable
 
-from . import _runtime
+from . import _arrow, _runtime
 from ._errors import CredentialsError, KomiraError, LibraryLoadError, UnsupportedCpuError
 
 # The ABI major version this package calls: komira_abi_version() is
@@ -116,6 +119,11 @@ _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
         [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_char_p, ctypes.c_uint64],
     ),
     "komira_credential_seal": (2, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32]),
+    "komira_sql_stream": (
+        3,
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(_arrow.ArrowArrayStream)],
+    ),
 }
 
 _lock = threading.Lock()
@@ -487,6 +495,18 @@ class Native:
         op = "komira_credential_seal"
         fn = self._fn(op)
         self._check(op, ctx, fn(ctx, cred_id, scope), CredentialsError)
+
+    def sql_stream(self, ctx: int, query: str) -> _arrow.ArrowArrayStream:
+        """Runs the SQL statement `query` on the context and returns its
+        answer, the Arrow C stream the library filled; the caller releases
+        it. A refusal raises KomiraError before any stream exists: the
+        library leaves the struct as it was given, zeroed, on failure."""
+        op = "komira_sql_stream"
+        fn = self._fn(op)
+        text = _c_string("query", query)
+        stream = _arrow.ArrowArrayStream()
+        self._check(op, ctx, fn(ctx, text, ctypes.byref(stream)))
+        return stream
 
     def _out(self, op: str, ctx: int, call: Callable[[ctypes._CFuncPtr, object, int, object], int]) -> bytes:
         """The bytes of the two-call `op`, or its KomiraError."""

@@ -391,7 +391,7 @@ What the rule fixes, so no BUCK file states it:
   [packaging/conda/README.md](../../../packaging/conda/README.md), which would
   call komira 1.0 and tie its version to the Mojo compiler's: the wheel is
   komira's own release, and it carries the Mojo runtime it was built with
-  instead of requiring one (it has no `Requires-Dist`).
+  instead of requiring one (its one `Requires-Dist` is pyarrow).
 - **Reproducible bytes**: members sorted bytewise, then the dist-info's METADATA,
   WHEEL, licences and RECORD (sha256 in urlsafe base64 without padding, RECORD
   last); every member dated with the commit time (1980-01-01 unstamped); modes
