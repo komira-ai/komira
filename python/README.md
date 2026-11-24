@@ -81,6 +81,32 @@ against the published package.
   `sql` returns, so a syntax error, an unknown table or column, or a construct
   the engine does not run yet raises `KomiraError` from `sql`, with the
   engine's `<step>: <reason>` message.
+- Ctrl-C while `Session.sql` runs cancels the query: the engine stops at its
+  next check, `sql` raises `KeyboardInterrupt`, nothing the query computed is
+  kept, and the session runs the next query. A second Ctrl-C while the query
+  stops is not raised again. The query runs on a helper thread while the
+  thread that called `sql` waits for it, which is what lets Python run the
+  Ctrl-C handler during the query.
+- `Session.sql(query, progress=callback)` calls `callback(done, total)` on the
+  calling thread with the plan segments the query has finished and the
+  segments its plan has, each time that changes, and once more with `done`
+  equal to `total` when the query has answered. The readings only grow. A
+  query refused before its plan is checked never calls it. An exception the
+  callback raises cancels the query and is raised from `sql`, and calling the
+  session from the callback raises `KomiraError`. For example, a line that
+  rewrites itself:
+
+  ```python
+  def show(done, total):
+      print("\r{}/{} segments".format(done, total), end="", flush=True)
+
+  table = s.sql("SELECT count(*) AS n FROM readings", progress=show).to_arrow()
+  ```
+- komira logs to the standard `logging` logger `"komira"`: at `DEBUG` the
+  library it loaded and the plan segments of each query that answered, at
+  `INFO` a query stopped by an exception, such as the `KeyboardInterrupt` of a
+  Ctrl-C. It never logs query text. Nothing is printed unless the application
+  configures logging, for example with `logging.basicConfig(level=logging.DEBUG)`.
 - A `Result` is read once, by one of:
   - `to_arrow()`, the whole answer as a `pyarrow.Table`;
   - `to_reader()`, a `pyarrow.RecordBatchReader` that reads batches as they
@@ -99,7 +125,8 @@ against the published package.
   call made while another thread's call runs on the same session waits for it
   to return. `close()` waits too, so a session is never freed under a running
   call. Two sessions run their calls at once, so a session per thread is how
-  to run queries in parallel. A call made from a signal handler or a finalizer
+  to run queries in parallel. A call made from a signal handler, a finalizer
+  or a `progress` callback
   while a call of the same thread is running on that session raises
   `KomiraError` instead of waiting for itself. A `Result` reads without the
   session, so reading one never waits for a call on its session; of two
@@ -129,9 +156,6 @@ answer's schema is read; neither on `import komira`.
 - Results as pandas or polars frames (`to_pandas`, `to_polars`).
 - The module-level `komira.sql` and `komira.register_parquet` on a default
   session.
-- Cancelling a query. A query cannot be interrupted while it runs: Ctrl-C
-  during `Session.sql` raises `KeyboardInterrupt` when the engine has finished
-  the query. The answer is freed, and the session runs the next query.
 - The DataFrame APIs: one shaped like pandas and one shaped like polars.
 - Registering CSV and JSON files.
 - Iceberg tables: reading one, and writing to one by its name in a catalog.
@@ -272,6 +296,7 @@ The tests below run on Linux x86_64 as build actions, with
 `//python/tests:credentials_test`, `//python/tests:credentials_lib_test`,
 `//python/tests:iceberg_test`, `//python/tests:sql_test`,
 `//python/tests:sql_fake_test`, `//python/tests:sql_interrupt_test`,
+`//python/tests:sql_cancel_test`, `//python/tests:sql_run_test`,
 `//python/tests:threads_test`,
 `//python/tests:runtime_test` and `//python/tests:cpu_test`:
 
@@ -282,7 +307,9 @@ The tests below run on Linux x86_64 as build actions, with
 | `minor0_test`, `minor3_test` | stand-ins of ABI 1.0 and 1.3: a 1.0 library refuses `sql` by the ABI version it needs |
 | `sql_test` | `Session.sql` on the real library: `SELECT 1 AS n`, a GROUP BY over a checked-in Parquet file, an aggregate, an answer of no rows, each terminal, the engine's refusals, and a result read after its session was closed or collected |
 | `sql_fake_test` | `Session.sql` on a stand-in Arrow stream that counts releases: a result read once, each stream, schema and batch released exactly once whoever ends it, a requested schema refused, a schema error raised from `sql` and a batch error from the terminal, the argument checks, and results left unread at exit |
-| `sql_interrupt_test` | Ctrl-C during `Session.sql`, on a stand-in whose `komira_sql_stream` raises SIGINT in the calling thread: `KeyboardInterrupt` once the call returns, the stream it filled released exactly once, the session answering the next query (also after a refusal SIGINT came during), a handler that does not raise running once while `sql` returns the answer, and an ignored SIGINT changing nothing |
+| `sql_interrupt_test` | Ctrl-C during `Session.sql`, on a stand-in whose `komira_sql_stream` raises SIGINT in the calling thread: `KeyboardInterrupt` once the call returns, the stream it filled released exactly once, the session answering the next query (also after a refusal SIGINT came during), a handler that does not raise running once while `sql` returns the answer, and an ignored SIGINT changing nothing, and a `progress` refused by the ABI version it needs |
+| `sql_cancel_test` | Ctrl-C and progress on a stand-in of ABI 1.6 that holds a run at a gate: Ctrl-C cancels the query's run handle and `sql` raises `KeyboardInterrupt`, the handle freed after the call, the session answering after; a second Ctrl-C while it stops not raised; an answer that stood after the cancel, and a refusal during Ctrl-C, dropped; a handler that does not raise leaving the query running; each progress reading given on the calling thread, from the main thread or another; the callback's exception and its call into the session cancelling the query; refusals with their message; the log lines |
+| `sql_run_test` | progress and Ctrl-C on the real library: the readings of a GROUP BY grow and end at done equal to total, a Ctrl-C and an exception from the callback are raised from `sql` and the session answers after, a refusal never calls the callback |
 | `threads_test` | a session used from several threads, on a stand-in that journals each call and holds one at a gate: a call waits for the call running on its session, each thread gets its own error message, `close` waits for the running call, two sessions run at once, a signal handler calling the session inside a call is refused, a `Result` reads while its session is busy, and of two threads reading one `Result` one reads it |
 | `two_call_test` | the error path, the two-call protocol and the arguments of each call, on a stand-in |
 | `credentials_test` | the credential objects, and what sealing each sends the library, on a stand-in's fake store that records every credential call |

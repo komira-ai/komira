@@ -105,9 +105,6 @@ The package's [README](../python/README.md), which is also its PyPI description,
 
 - **pandas and polars results.** A result reads as pyarrow only; `pyarrow.Table.to_pandas()` and
   `polars.from_arrow()` convert it.
-- **Cancelling a query.** A query cannot be interrupted while it runs: Ctrl-C during `Session.sql`
-  raises `KeyboardInterrupt` when the engine has finished the query. The answer is freed, and the
-  session runs the next query.
 - **One session from two threads at once.** Use a session per thread.
 - **The DataFrame APIs**, pandas-shaped and polars-shaped.
 - **CSV and JSON files.** Only Parquet files can be registered.

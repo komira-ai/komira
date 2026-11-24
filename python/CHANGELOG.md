@@ -20,13 +20,20 @@ install page shows names it.
   schema on `__arrow_c_stream__` raises a `KomiraError`.
 - **Threads.** A `Session` may be used from several threads: its calls run one at a time, a call waiting
   for the one running on the same session, and `close()` waits for a running call. Two sessions run at
-  once. A call from a signal handler or a finalizer made inside a running call of the same thread raises
+  once. A call from a signal handler, a finalizer or a `progress` callback made inside a running call of the same thread raises
   `KomiraError`. Of two threads reading one `Result`, one reads it and the other gets `KomiraError`. Using
   one session from two threads at once was not supported.
-- **Ctrl-C.** A query cannot be interrupted while it runs: Ctrl-C during `Session.sql` raises
-  `KeyboardInterrupt` once the engine has finished the query, and the session runs the next query. The
-  answer that query computed is freed; before, it was never freed when the interrupt was raised before
-  pyarrow took it.
+- **Ctrl-C.** Ctrl-C during `Session.sql` cancels the query: the engine stops at its next check,
+  `sql` raises `KeyboardInterrupt`, and the session runs the next query. Before, a query could not be
+  interrupted: the `KeyboardInterrupt` came only once the engine had finished it. The query now runs on
+  a helper thread while the calling thread waits for it. Nothing a cancelled query computed is kept.
+- **Progress.** `Session.sql(query, progress=callback)` calls `callback(done, total)` on the calling
+  thread with the plan segments the query has finished and the segments its plan has, each time that
+  changes and once more when the query has answered. An exception the callback raises cancels the
+  query and is raised from `sql`.
+- **Logging.** komira logs to the `logging` logger `"komira"`, which has a `NullHandler`: at `DEBUG`
+  the library it loaded and each answered query's plan segments, at `INFO` a query stopped by an
+  exception. It logs no query text.
 - **pyarrow.** The wheel requires `pyarrow>=25.0.1`, so `pip install komira` installs it; it had no
   requirement.
 - **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its
