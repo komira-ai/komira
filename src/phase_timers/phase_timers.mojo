@@ -39,6 +39,8 @@
 # not to be trusted. Every path that takes a lane counts the same way: the
 # interval records, and the two ends of a resource-usage interval (each end
 # that finds no lane adds 1, and so does an end whose begin sample is missing).
+# A target with no per-thread usage (not Linux) takes no sample, so there a
+# usage interval that has a lane records nothing and adds nothing.
 # The probe also refuses a thread list that cannot fit.
 #
 # One query at a time: the slab is process-global because the sites sit in

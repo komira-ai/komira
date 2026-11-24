@@ -31,6 +31,7 @@
 #   fails).
 
 from std.ffi import external_call
+from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_true
 
 from async_rt.reactor.socket_setup import (
@@ -157,6 +158,29 @@ def _server_has_input(mut rig: _Rig) -> Bool:
         if rc > Int32(0) and ((pfd[1] >> 16) & Int32(1)) != Int32(0):
             return True
     return False
+
+
+def _peer_unsent(fd: Int32) raises -> Int:
+    """The bytes the peer's socket has sent that the server end has not yet
+    taken: Linux's ioctl SIOCOUTQ (0x5411), macOS's getsockopt SO_NWRITE
+    (SOL_SOCKET 0xffff, 0x1024). Zero means nothing is in flight to the
+    server."""
+    var n = Array[Int32, 1](fill=Int32(0))
+    var rc: Int32
+    comptime if CompilationTarget.is_macos():
+        var optlen = Array[UInt32, 1](fill=UInt32(4))
+        # SAFETY: `n` and `optlen` are locals that outlive the synchronous call,
+        # which writes 4 bytes to `n` and its length to `optlen`.
+        rc = external_call["getsockopt", Int32](
+            fd, Int32(0xFFFF), Int32(0x1024), n.unsafe_ptr(), optlen.unsafe_ptr()
+        )
+    else:
+        # SAFETY: `n` is a local int that outlives the synchronous call, which
+        # writes 4 bytes to it.
+        rc = external_call["ioctl", Int32](fd, UInt64(0x5411), n.unsafe_ptr())
+    if rc < Int32(0):
+        raise Error("reading the peer's send queue failed")
+    return Int(n[0])
 
 
 def _noop_at(mut rig: _Rig, mut peer: Peer, now_ms: Int) raises:
@@ -325,6 +349,8 @@ def test_expiry_with_a_full_send_window_drops_on_the_next_step() raises:
         batch += "EHLO c.test\r\nNOOP\r\nVRFY x\r\n"
     var bytes = batch.as_bytes()
     while rig.reg.tx_len(cid) == 0:
+        if rig.reg.conn_count() == 0:
+            raise Error("the server closed the connection before a reply waited")
         var sent = 0
         while sent < len(bytes):
             var end = sent + 2000
@@ -340,6 +366,12 @@ def test_expiry_with_a_full_send_window_drops_on_the_next_step() raises:
         while rig.reg.tx_len(cid) == 0 and _server_has_input(rig):
             rig.step()
             yield_cpu()
+    # The peer sends no more. Bytes still on their way to the server would
+    # be read by the step at the deadline and make the connection active
+    # again, so the server reads until the peer's send queue is empty.
+    while _peer_unsent(p.fd) > 0 or _server_has_input(rig):
+        rig.step()
+        yield_cpu()
     assert_true(rig.reg.tx_len(cid) > 0)
     assert_equal(rig.expired, 0)
 

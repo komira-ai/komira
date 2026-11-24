@@ -540,8 +540,8 @@ system, native and `cxx_library`) over the `src` directory lists 425 targets. On
 --keep-going --skip-incompatible-targets` of that list on the farm, on main after the `http_core`
 macOS test fixes and the Mach-O native shared library (`Commands: 18849 (cached: 16445, remote:
 2404, local: 0)`), built 405, skipped 4 as incompatible (the connect, git pack, git protocol and
-HTTP conformance suites) and stopped on 16. With the fixes below the same build builds 412, skips
-7 and stops on 6. A target is counted under the first failing action its build report names:
+HTTP conformance suites) and stopped on 16. With the fixes below the same build builds 415, skips
+7 and stops on 3. A target is counted under the first failing action its build report names:
 
 | Cause | Targets on main | After the fixes | Issue |
 | --- | --- | --- | --- |
