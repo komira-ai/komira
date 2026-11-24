@@ -3,18 +3,31 @@
 # written down, so they also notice bytes that differ between processes or
 # machines, and a change in parquet_writer.
 #
-#   * test_the_groupby_bytes_have_the_pinned_digest: the group-by table of 1000
-#     rows and 10 groups for the default seed, Snappy, in one batch.
-#   * test_the_join_bytes_have_the_pinned_digests: the four join tables of an x
-#     table of 2000 rows for the default seed, Snappy, in one batch.
+#   * test_the_uncompressed_bytes_have_one_digest_on_every_cpu: the group-by
+#     table of 1000 rows and 10 groups and the four join tables of an x table
+#     of 2000 rows, for the default seed, uncompressed, in one batch. One pin
+#     for every cpu: the generator and the writer give the same bytes
+#     everywhere.
+#   * test_the_groupby_bytes_have_the_pinned_digest: the group-by table,
+#     Snappy, against the pin of the cpu it runs on.
+#   * test_the_join_bytes_have_the_pinned_digests: the four join tables,
+#     Snappy, against the pins of the cpu it runs on.
+#
+# Snappy's compressed bytes differ by cpu: its match finder hashes with CRC32C
+# on x86_64 and with a multiply on arm64 (third_party/snappy/config_arm64.h).
+# Both streams decode to the same bytes, which the uncompressed pins hold, so
+# the Snappy pins are kept per cpu. Where the two cpus give the same digest, the
+# two pins are equal.
 #
 # The digests cover the writer as well as the generator. A change to either that
 # alters these bytes must bump H2O_GENERATOR_VERSION and update the pins here in
 # the same commit: every recorded checksum of a generated dataset changes with
 # them.
+from std.sys.info import CompilationTarget
 from std.testing import assert_equal
 
 from crypto import sha256, hex_lower_array_32
+from parquet_api.types import CompressionCodec
 
 from bench_data import (
     H2O_DEFAULT_SEED,
@@ -23,35 +36,74 @@ from bench_data import (
     h2o_join_table_names,
 )
 
-comptime _GROUPBY: String = "c97ea073e5902aa2d8936bac488adbd40d53df9d0807d0747491e4d6e77f820f"
-comptime _JOIN_X: String = "f3d42d6e6b0812416e2a081ef5d50f583eaf7ec0c04d1ebde53e5dcf27aea24f"
-comptime _JOIN_SMALL: String = "772f307607efb014d98c7da6edea25f997a75760adfb416f79a5dd2fd0e4c85d"
-comptime _JOIN_MEDIUM: String = "e5f3bd32691d47194f397260f33177b53a2e400ff75ce6eeeaa6aabb5ab7c929"
-comptime _JOIN_BIG: String = "9c8d3cf77bc0cda96ef575eaf61059a71ca065dd2a5093851cf082fb944fe2cf"
+# Uncompressed: the same on every cpu.
+comptime _PLAIN_GROUPBY: String = "33a3670ebddec211c00e8aa18eeea03af1651b6632bd7ed30ea2bf61a9c4f79a"
+comptime _PLAIN_JOIN_X: String = "c2de227a9af671e9bed860ac7f99f30917bca4c283d862b44e36020243ec7aee"
+comptime _PLAIN_JOIN_SMALL: String = "487e54637c97c330f2bdb9c34e5280c50bdb9f6ed6093bad2e121e24d4b3bb06"
+comptime _PLAIN_JOIN_MEDIUM: String = "9cc25b1c5f2b2926961913de553ae21aca7e06c6d5af34154b86129ca64a4b0f"
+comptime _PLAIN_JOIN_BIG: String = "995167d45373a2ff5f3a978a995d5d47be270806b3271f2ac91a44244f309ece"
+
+# Snappy on x86_64.
+comptime _X86_GROUPBY: String = "c97ea073e5902aa2d8936bac488adbd40d53df9d0807d0747491e4d6e77f820f"
+comptime _X86_JOIN_X: String = "f3d42d6e6b0812416e2a081ef5d50f583eaf7ec0c04d1ebde53e5dcf27aea24f"
+comptime _X86_JOIN_SMALL: String = "772f307607efb014d98c7da6edea25f997a75760adfb416f79a5dd2fd0e4c85d"
+comptime _X86_JOIN_MEDIUM: String = "e5f3bd32691d47194f397260f33177b53a2e400ff75ce6eeeaa6aabb5ab7c929"
+comptime _X86_JOIN_BIG: String = "9c8d3cf77bc0cda96ef575eaf61059a71ca065dd2a5093851cf082fb944fe2cf"
+
+# Snappy on arm64.
+comptime _ARM64_GROUPBY: String = "c97ea073e5902aa2d8936bac488adbd40d53df9d0807d0747491e4d6e77f820f"
+comptime _ARM64_JOIN_X: String = "3e8204254f1473d6752d17979616836e1ad627326493fdc02734db8242d720ff"
+comptime _ARM64_JOIN_SMALL: String = "772f307607efb014d98c7da6edea25f997a75760adfb416f79a5dd2fd0e4c85d"
+comptime _ARM64_JOIN_MEDIUM: String = "e5f3bd32691d47194f397260f33177b53a2e400ff75ce6eeeaa6aabb5ab7c929"
+comptime _ARM64_JOIN_BIG: String = "7bd5602254bde191893fc7ded9c30d53438bae9d8e9098ef3de37cbe11c14c8c"
+
+comptime _X86: Bool = CompilationTarget.is_x86()
 
 
 def _hex(data: List[UInt8]) -> String:
     return hex_lower_array_32(sha256(Span(data)))
 
 
-def test_the_groupby_bytes_have_the_pinned_digest() raises:
-    var bytes = h2o_groupby_parquet(1000, 10, H2O_DEFAULT_SEED)
-    assert_equal(_hex(bytes), _GROUPBY, "groupby len=" + String(len(bytes)))
-
-
-def test_the_join_bytes_have_the_pinned_digests() raises:
+def _join_digests(codec: CompressionCodec) raises -> String:
+    """`<table> <sha256>` for each join table, one line each."""
     var tables = h2o_join_table_names()
     assert_equal(len(tables), 4)
     var got = String()
     for i in range(4):
-        got += tables[i] + " " + _hex(h2o_join_parquet(tables[i], 2000, H2O_DEFAULT_SEED)) + "\n"
-    var want = (
-        String("x ") + _JOIN_X + "\nsmall " + _JOIN_SMALL + "\nmedium " + _JOIN_MEDIUM + "\nbig " + _JOIN_BIG + "\n"
+        got += tables[i] + " " + _hex(h2o_join_parquet(tables[i], 2000, H2O_DEFAULT_SEED, codec=codec)) + "\n"
+    return got^
+
+
+def _join_lines(x: String, small: String, medium: String, big: String) -> String:
+    return String("x ") + x + "\nsmall " + small + "\nmedium " + medium + "\nbig " + big + "\n"
+
+
+def test_the_uncompressed_bytes_have_one_digest_on_every_cpu() raises:
+    var groupby = h2o_groupby_parquet(1000, 10, H2O_DEFAULT_SEED, codec=CompressionCodec.UNCOMPRESSED)
+    assert_equal(_hex(groupby), _PLAIN_GROUPBY, "uncompressed groupby len=" + String(len(groupby)))
+    assert_equal(
+        _join_digests(CompressionCodec.UNCOMPRESSED),
+        _join_lines(_PLAIN_JOIN_X, _PLAIN_JOIN_SMALL, _PLAIN_JOIN_MEDIUM, _PLAIN_JOIN_BIG),
     )
-    assert_equal(got, want)
+
+
+def test_the_groupby_bytes_have_the_pinned_digest() raises:
+    var bytes = h2o_groupby_parquet(1000, 10, H2O_DEFAULT_SEED)
+    var want = _X86_GROUPBY if _X86 else _ARM64_GROUPBY
+    assert_equal(_hex(bytes), want, "groupby len=" + String(len(bytes)))
+
+
+def test_the_join_bytes_have_the_pinned_digests() raises:
+    var want = (
+        _join_lines(_X86_JOIN_X, _X86_JOIN_SMALL, _X86_JOIN_MEDIUM, _X86_JOIN_BIG) if _X86 else _join_lines(
+            _ARM64_JOIN_X, _ARM64_JOIN_SMALL, _ARM64_JOIN_MEDIUM, _ARM64_JOIN_BIG
+        )
+    )
+    assert_equal(_join_digests(CompressionCodec.SNAPPY), want)
 
 
 def main() raises:
+    test_the_uncompressed_bytes_have_one_digest_on_every_cpu()
     test_the_groupby_bytes_have_the_pinned_digest()
     test_the_join_bytes_have_the_pinned_digests()
     print("OK")
