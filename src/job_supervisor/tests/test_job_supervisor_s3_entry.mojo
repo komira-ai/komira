@@ -51,12 +51,21 @@ struct Recorder(HeartbeatReporter):
         return HeartbeatOutcome(True, False, 200)
 
 
+def _exit_zero_argv() -> List[String]:
+    """`sh -c "exit 0"`: a job that succeeds, with no dependence on where the
+    platform keeps `true` (/bin on Linux, /usr/bin on macOS)."""
+    var argv = List[String]()
+    argv.append(String("-c"))
+    argv.append(String("exit 0"))
+    return argv^
+
+
 def _true_job(var name: String) -> JobSupervisorConfig:
     return JobSupervisorConfig(
         name^,
         String("instance-1"),
-        String("/bin/true"),
-        List[String](),
+        String("/bin/sh"),
+        _exit_zero_argv(),
         String("http://127.0.0.1:1/beat"),
         heartbeat_interval_secs=1,
     )

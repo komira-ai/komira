@@ -310,6 +310,10 @@ def _ru_fold(phase: Int, begin: Bool) raises:
     var lane = _find_lane(_my_thread())
     if lane < 0:
         return
+    # A target without per-thread usage has nothing to sample: that is not a
+    # failed sample, so it records nothing and counts no drop.
+    comptime if not CompilationTarget.is_linux():
+        return
     var sampled = _ru_sample(lane)
     # The word `_RU_ARMED` of the phase says that the begin sample was taken
     # and has not been used yet. An end without it (the begin sample failed,
