@@ -7,7 +7,7 @@ isolated mode, from an empty directory:
 
     python3 -I test_tpch_installed.py --site <site directory>
         --compare <tpch_compare.py> --data <dir> --answers <answers.txt>
-        --queries <dir>
+        --queries <dir> [--host-lib <library>]...
 
 `--data` holds `tpch/sf1/<table>.parquet` for the eight tables, `--answers` is
 DuckDB's recorded answers to the 22 queries over those files and `--queries`
@@ -36,6 +36,7 @@ The derived-from-TPC-H notice applies: this is not a TPC-H result and is not
 comparable to published TPC-H results.
 """
 
+import ctypes
 import hashlib
 import importlib.util
 import os
@@ -49,12 +50,15 @@ TABLES = ("customer", "lineitem", "nation", "orders", "part", "partsupp", "regio
 
 
 def parse(argv):
-    opts = {}
+    opts = {"host-lib": []}
     for i in range(0, len(argv), 2):
         flag = argv[i]
-        if flag not in _VALUED or i + 1 >= len(argv):
+        if (flag not in _VALUED and flag != "--host-lib") or i + 1 >= len(argv):
             raise SystemExit("test_tpch_installed: bad flag {}".format(flag))
-        opts[flag[2:]] = argv[i + 1]
+        if flag == "--host-lib":
+            opts["host-lib"].append(argv[i + 1])
+        else:
+            opts[flag[2:]] = argv[i + 1]
     for flag in _VALUED:
         if flag[2:] not in opts:
             raise SystemExit("test_tpch_installed: {} is required".format(flag))
@@ -98,14 +102,19 @@ def run_query(session, cmp, answer, sql):
         table = session.sql(sql).to_arrow()
     except komira.KomiraError as e:
         return "REFUSED", "{} ({})".format(token_of(str(e)), str(e).replace("\n", " "))
+    except Exception as e:  # reading the answer failed: named, and the other queries still run
+        return "ERROR", "{}: {}".format(type(e).__name__, str(e).replace("\n", " "))
     try:
         result = cmp.result_of_table(table)
     except cmp.Refused as e:
         return "REFUSED", str(e)
-    reasons, _departures = cmp.compare(cmp.signature_of(result), answer.signature)
-    if reasons:
-        return "DIVERGENT", reasons[0]
-    bad = cmp.check_order(result, answer.order)
+    try:
+        reasons, _departures = cmp.compare(cmp.signature_of(result), answer.signature)
+        if reasons:
+            return "DIVERGENT", reasons[0]
+        bad = cmp.check_order(result, answer.order)
+    except ValueError as e:
+        return "ERROR", "ValueError: {}".format(e)
     if bad:
         return "ORDER", bad
     return "PASS", ""
@@ -113,6 +122,10 @@ def run_query(session, cmp, answer, sql):
 
 def main(argv):
     opts = parse(argv)
+    # The C++ runtime of the interpreter's host, which the action passes as
+    # --host-lib; the environment has no library path.
+    for lib in opts["host-lib"]:
+        ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
     site = os.path.realpath(opts["site"])
     import komira
 
@@ -123,8 +136,8 @@ def main(argv):
 
     texts = {}
     for q in QUERIES:
-        with open(os.path.join(opts["queries"], q + ".sql"), encoding="utf-8") as f:
-            texts[q] = f.read()
+        with open(os.path.join(opts["queries"], q + ".sql"), "rb") as f:
+            texts[q] = f.read().decode("utf-8")
     recorded = recorded_suite_digest(opts["answers"])
     assert suite_digest(texts) == recorded, "the query texts hash to {}, the answers were recorded for {}".format(suite_digest(texts), recorded)
 

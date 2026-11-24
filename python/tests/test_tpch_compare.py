@@ -11,9 +11,8 @@ test does from a pyarrow table and the answers file.
 
 import datetime
 import decimal
-import os
+import io
 import sys
-import tempfile
 
 import pyarrow as pa
 
@@ -205,25 +204,16 @@ def test_recorded_answers_read_back_as_the_signature_of_the_rows_they_describe()
             "",
         ]
     )
-    with tempfile.TemporaryDirectory() as d:
-        path = os.path.join(d, "answers.txt")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text)
-        answers = t.parse_answers(path)
-        answer = answers["q99"]
-        check(answer.order == [(0, True, False), (1, False, True)], answer.order)
-        check(answer.signature.rows == 2 and answer.signature.types == ["BIGINT", "VARCHAR", "DECIMAL(15,2)"], "rows and types")
-        check(reasons_of(actual, answer.signature) == [], reasons_of(actual, answer.signature))
-        changed = sig(["BIGINT", "VARCHAR", "DECIMAL(15,2)"], [I(3), T("ab"), D("1.25")], [I(5), T("c"), D("0.76")])
-        expect_reason(changed, answer.signature, "column 2 sum differs")
+    answer = _parse_text(text)["q99"]
+    check(answer.order == [(0, True, False), (1, False, True)], answer.order)
+    check(answer.signature.rows == 2 and answer.signature.types == ["BIGINT", "VARCHAR", "DECIMAL(15,2)"], "rows and types")
+    check(reasons_of(actual, answer.signature) == [], reasons_of(actual, answer.signature))
+    changed = sig(["BIGINT", "VARCHAR", "DECIMAL(15,2)"], [I(3), T("ab"), D("1.25")], [I(5), T("c"), D("0.76")])
+    expect_reason(changed, answer.signature, "column 2 sum differs")
 
 
 def _parse_text(text):
-    with tempfile.TemporaryDirectory() as d:
-        path = os.path.join(d, "answers.txt")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text)
-        return t.parse_answers(path)
+    return t.parse_answers(io.StringIO(text))
 
 
 def test_answers_that_are_malformed_or_of_another_format_are_refused():

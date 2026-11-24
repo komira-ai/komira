@@ -542,13 +542,15 @@ def _column_of(tokens):
 
 
 def parse_answers(path):
-    """The recorded answers of the file at `path`, by query id (`q1` ..).
-    Reads `format 3` only and raises on anything it does not know."""
+    """The recorded answers of `source`, a path or an open text file, by query
+    id (`q1` ..). Reads `format 3` only and raises on anything it does not
+    know."""
     answers = {}
     current = None
     have_format = False
     have_rows = False
-    with open(path, encoding="utf-8") as f:
+    f = open(path, encoding="utf-8") if isinstance(path, str) else path
+    with f:
         for line in f:
             tokens = line.split()
             if not tokens or tokens[0].startswith("#"):

@@ -26,7 +26,8 @@
 #   naming the query, because such an answer records no columns and would check
 #   nothing.
 # - test_the_run_writes_the_answers_and_the_lock_and_names_one_in_the_other: the
-#   answers file and the lock file exist, the file's header holds the lock's
+#   answers file, the lock file and the 22 query texts (byte for byte the
+#   corpus's) exist, the file's header holds the lock's
 #   fingerprint, DuckDB was started on one thread with the memory limit asked
 #   for and every file of the manifest is a view.
 # - test_unusable_data_stops_before_duckdb_is_asked_anything: a missing table
