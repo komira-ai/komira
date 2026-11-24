@@ -25,6 +25,10 @@ install page shows names it.
   syntax error, an unknown table or a refused construct raises `KomiraError` from `sql` itself, with the
   engine's message. A result still reads after its session is closed. `komira.Result` is a new public name; a requested
   schema on `__arrow_c_stream__` raises a `KomiraError`.
+- **pandas and polars.** `Result.to_pandas()` and `Result.to_polars()` read the answer as a pandas or
+  polars `DataFrame`, converted through Arrow by pyarrow's `Table.to_pandas()` and `polars.from_arrow`.
+  Neither library is a requirement of the wheel: when one is missing the call raises `ImportError`
+  naming it, and the result stays unread.
 - **Threads.** A `Session` may be used from several threads: its calls run one at a time, a call waiting
   for the one running on the same session, and `close()` waits for a running call. Two sessions run at
   once. A call from a signal handler or a finalizer made inside a running call of the same thread raises

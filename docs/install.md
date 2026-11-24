@@ -5,7 +5,7 @@ program, what it does not do yet, and what to do when something goes wrong. To b
 instead, see [getting started](getting-started.md).
 
 > **This is an early release.** It registers Parquet files as tables and runs SQL over them, with each
-> answer read as pyarrow. A DataFrame API shaped like pandas and one shaped like polars come in later
+> answer read as pyarrow, or as a pandas or polars frame. A DataFrame API shaped like pandas and one shaped like polars come in later
 > releases of this same package. This page changes when they do.
 
 ## Install
@@ -105,8 +105,6 @@ The package's [README](../python/README.md), which is also its PyPI description,
 
 ## What does not work yet
 
-- **pandas and polars results.** A result reads as pyarrow only; `pyarrow.Table.to_pandas()` and
-  `polars.from_arrow()` convert it.
 - **Cancelling a query.** A query cannot be interrupted while it runs: Ctrl-C during `Session.sql`
   raises `KeyboardInterrupt` when the engine has finished the query. The answer is freed, and the
   session runs the next query.

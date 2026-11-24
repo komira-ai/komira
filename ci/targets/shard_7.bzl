@@ -139,6 +139,8 @@ TARGETS = [
     "komira//python/tests:register_text_test_py311",
     "komira//python/tests:register_text_test_py312",
     "komira//python/tests:register_text_test_py314",
+    "komira//python/tests:result_frames_test",
+    "komira//python/tests:result_frames_test_py314",
     "komira//python/tests:runtime_test",
     "komira//python/tests:runtime_test_py311",
     "komira//python/tests:runtime_test_py312",
