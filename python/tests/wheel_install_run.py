@@ -16,7 +16,8 @@ prefix. In order:
    `bin/python3.<minor>` a link to it, and nothing in
    `lib/python3.<minor>/site-packages/`, its one site directory.
 2. Each wheel's tag must be one this interpreter installs: a Python tag `py3`,
-   `py3<minor>` or `cp3<minor>`, the ABI tag `none`, and the platform `any`
+   `py3<minor>` or `cp3<minor>`, the ABI tag `none`, or `cp3<minor>` (an
+   extension module built for this minor alone, pyarrow's), and the platform `any`
    or `manylinux_2_<n>_<machine>` (or `manylinux2014_<machine>`) with this
    machine and <n> at most the C library's minor version, or, on macOS,
    `macosx_<major>_<minor>_<machine>` with this machine (`arm64`) and a
@@ -27,7 +28,8 @@ prefix. In order:
    `platlib/` merged in. Its distribution and version are read from its file
    name, and the installer holds its `.dist-info` to them. With `--upgrade`,
    the wheels are the releases of one distribution in the order they are
-   installed, and each replaces the one installed before it as `pip install`
+   installed (a release's requirements may come first), and each replaces the
+   one installed before it as `pip install`
    of a newer version does: first every file the installed release's RECORD
    lists is deleted, and the directories that leave empty, then the new
    release is installed. Without it, an installed distribution is not
@@ -183,7 +185,7 @@ def supported(tag, minor, machine, glibc, system="linux", macos=(0, 0)):
     pys, abis, plats = (p.split(".") for p in parts)
     if not set(pys) & {"py3", "py3{}".format(minor), "cp3{}".format(minor)}:
         return False
-    if "none" not in abis:
+    if not set(abis) & {"none", "cp3{}".format(minor)}:
         return False
     for plat in plats:
         if plat == "any":

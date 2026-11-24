@@ -46,13 +46,14 @@ Fixed before this design, and not reopened here:
 
 ### The addon
 
-- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (511 lines) is a Node-API addon in C.
+- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (904 lines) is a Node-API addon in C, with
+  its Arrow import in [node/arrow_import.c](../../node/arrow_import.c).
   - It defines `NAPI_VERSION 8` and uses `NAPI_MODULE_INIT`, so it is context-aware. Its function
-    table is process-wide, and a worker thread shares it (the comment at the table). No test loads
-    this addon in a worker. `src/tests/helpers/komira_test_node` shows the pattern with its own
-    test addon, loaded in a main thread and two workers.
-  - It exports eight functions: `load`, `abiVersion`, `newSession`, `freeSession`,
-    `registerParquet`, `parquetSchema`, `planRender` and `sessionStats`.
+    table is process-wide, and a worker thread shares it (the comment at the table). `:thread_test`
+    loads it in worker threads.
+  - It exports twelve functions: `load`, `abiVersion`, `newSession`, `freeSession`,
+    `registerParquet`, `parquetSchema`, `planRender`, `sessionStats`, and the Arrow import's
+    `importArrowStream`, `arrowSchema`, `arrowNextBatch` and `arrowClose` (below).
 - **How it binds libkomira.** `load(path)` opens the library with `dlopen(RTLD_NOW | RTLD_LOCAL)`
   and requires `komira_abi_version()` major 1. It then resolves seven symbols by name, and a
   missing one is named in a `KOMIRA_MISSING_SYMBOL` error.
@@ -66,17 +67,33 @@ Fixed before this design, and not reopened here:
 - **Sessions.** A session is an N-API external over a heap box holding the `komira_handle`. Its
   type tag makes the addon refuse another addon's externals. The finalizer frees the context if
   `freeSession` did not, so a context is freed once.
-- **Errors.** A non-zero status throws an `Error` that carries `status`, `code` (the
+  - Each session owns one native thread, started by its first call, which runs the session's
+    calls in call order. `registerParquet`, `parquetSchema`, `planRender` and `freeSession`
+    return Promises, settled through a thread-safe function that is referenced only while a call
+    is pending.
+  - `freeSession` refuses new calls at once and frees the context after the calls made before it.
+    A pending call holds its session, so the finalizer never runs under a call, and it joins the
+    thread before it frees the context.
+- **Errors.** A non-zero status rejects with an `Error` that carries `status`, `code` (the
   `KOMIRA_ERR_*` name) and `lastError` (read with the two-call protocol). Misuse of the addon
   throws an error with a `code` and no `status`: `KOMIRA_ARG`, `KOMIRA_NOT_LOADED`,
   `KOMIRA_SESSION_FREED`, `KOMIRA_LOAD_FAILED`, `KOMIRA_ABI_MISMATCH`, `KOMIRA_MISSING_SYMBOL` and
   `KOMIRA_LOADED`.
 - **Calls it does not bind.** `komira_csv_binding` and `komira_json_binding` have no function in
   the addon. Nothing in it runs a query.
+- **EXISTS** The Arrow import of [Arrow: from the C stream to
+  JavaScript](#arrow-from-the-c-stream-to-javascript), steps 1 to 3, over a stream handed to
+  `importArrowStream` as a capsule (an N-API external tagged as an Arrow C stream,
+  [node/arrow_c.h](../../node/arrow_c.h)) rather than one `komira_sql_stream` fills. It drains on
+  the JavaScript thread: the session thread does not exist yet. The private module is
+  [node/src/arrow_import.mts](../../node/src/arrow_import.mts) (`readArrowStream`), with
+  `KomiraError` and `UnsupportedOperation` in [node/src/errors.mts](../../node/src/errors.mts).
+  [node/package.json](../../node/package.json) is private and declares the `apache-arrow` peer
+  dependency at `^21.2.0`.
 
 ### Tests and CI
 
-- **EXISTS** [node/BUCK](../../node/BUCK) has two `node_binding_test` targets.
+- **EXISTS** [node/BUCK](../../node/BUCK) has four `node_binding_test` targets.
   - `:load_test` runs [load.test.mjs](../../node/load.test.mjs) and
     [capacity.test.mjs](../../node/capacity.test.mjs). They cover the load refusals, using
     stand-ins built from [tests/fake_libkomira.c](../../node/tests/fake_libkomira.c): ABI 2.0,
@@ -85,7 +102,17 @@ Fixed before this design, and not reopened here:
   - `:session_test` runs [session.test.mjs](../../node/session.test.mjs). It covers errors with
     their last error, the frozen schema bytes of `two_columns.parquet`, plan text, wrong-kind
     arguments, a foreign external, double free, and finalizers counted with `gc()` with no clock.
-- **EXISTS** Both tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
+  - `:thread_test` runs [thread.test.mjs](../../node/thread.test.mjs) against a stand-in
+    ([tests/fake_latch.c](../../node/tests/fake_latch.c)) that journals each call's context and
+    thread and holds a call at a gate. It covers call order on one thread per session, two
+    sessions at once, `freeSession` while a call is held, the finalizer of a session with a
+    pending call, and sessions in worker threads.
+  - `:arrow_test` runs [arrow_stream.test.mts](../../node/arrow_stream.test.mts) and
+    [arrow_import.test.mts](../../node/arrow_import.test.mts) over streams of a stand-in producer
+    ([tests/arrow_stand_in.c](../../node/tests/arrow_stand_in.c)) that counts each release: the
+    round trip of every type of the exporter's set, with nulls, offsets and a dictionary, an empty
+    stream, failing callbacks, a misaligned buffer, malformed arrays and unmapped formats.
+- **EXISTS** The four tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
   - `node_binding_test` runs `node --test` as a build action, under `env -i`, with no network.
   - It passes only if TAP reports tests, all passed, and none skipped
     ([tools/build/node/README.md](../../tools/build/node/README.md)).
@@ -120,16 +147,20 @@ Fixed before this design, and not reopened here:
 
 ### Release state
 
-- **Nothing is released.** The SDK has no `package.json`, no TypeScript source, no `.d.ts`, and no
-  npm name. The only `.ts` files in the repository are test fixtures under `src/tests/helpers` and
-  `tools/build/tests/negative`. No workflow mentions npm publishing. The only use of npm in a workflow is the
+- **Nothing is released.** The SDK has no npm name, no `.d.ts` and no public TypeScript. Its
+  `package.json` is private, and its only TypeScript is the private Arrow import under
+  `node/src/` and the tests beside it. The other `.ts` files in the repository are test fixtures
+  under `src/tests/helpers` and `tools/build/tests/negative`. No workflow mentions npm publishing. The only use of npm in a workflow is the
   pin check in `kpin-update.yml`.
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.2, with twelve exports
+- **EXISTS** `libkomira` is at ABI 1.4, with fourteen exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
-  - It runs no query. The run calls are designed but not built; they take the next minor.
+  - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream. The plan call,
+    `komira_plan_stream`, is designed but not built; it takes the next minor.
+  - `komira_ctx_new_with_options` (1.4) creates a context with the engine's worker count and
+    memory budget as arguments (0 is the host's own value).
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,
@@ -162,7 +193,7 @@ The package exports these names and nothing else. The test `exports_test` holds 
 
 | name | what it is |
 |---|---|
-| `new Session(options?)` | one engine context (`komira_ctx_new`) and its tables. The options are `{ threads?: number, memoryLimit?: number }`, both settable once the session-options calls of the ABI land. A later option, `caFile?: string`, adds trusted roots for `https://` reads, as Python's `ca_file=` ([credentials_and_writes.md](credentials_and_writes.md) decision 9). `memoryLimit` is in bytes, and an omitted option takes the engine's default. Options are arguments, never environment variables (rule S2) |
+| `new Session(options?)` | one engine context (`komira_ctx_new`) and its tables. The options are `{ threads?: number, memoryLimit?: number }`, both settable once the addon binds `komira_ctx_new_with_options` (ABI 1.4), which takes them as arguments; the addon does not bind it yet. A later option, `caFile?: string`, adds trusted roots for `https://` reads, as Python's `ca_file=` ([credentials_and_writes.md](credentials_and_writes.md) decision 9). `memoryLimit` is in bytes, and an omitted option takes the engine's default. Options are arguments, never environment variables (rule S2) |
 | `session.registerParquet(name, path): Promise<void>` | `komira_register_parquet`. `path` is a `string` or a `file:` `URL`. A relative path resolves against the working directory when the call is made, as Node's `fs` does, and `~` is not expanded. Registering a name again replaces it |
 | `session.registerCsv(name, path, options?)`, `session.registerNdjson(name, path)` | CSV and newline-delimited JSON. They arrive with libkomira calls that register those formats by name. No design has those calls yet: [libkomira_run_abi.md](libkomira_run_abi.md) §7 says only "the later source calls", and today's `komira_csv_binding` and `komira_json_binding` return bindings, not registrations. The CSV options are the ones `komira_csv_binding` takes: `{ delimiter?: string, header?: boolean, allVarchar?: boolean }` |
 | `session.sql(query): Promise<Result>` | runs one SQL statement through `komira_sql_stream`. **The official door of the first release**. A later second argument, `sql(query, bindings?)`, binds sources for one statement ([credentials_and_writes.md](credentials_and_writes.md) decision 12) |
@@ -564,8 +595,9 @@ one publishes by hand otherwise.
 
 All tests are hermetic: no network, no clock, no fixed port (rule T12). The behaviour tests are
 written in TypeScript (rule T11) and run with the pinned Node, which strips types itself, so they
-need no build step. `node_binding_test` takes `.mjs` and `.js` today, and it gains `.ts`.
-`tsc_check` checks the tests' types.
+need no build step. `node_binding_test` runs `.mts` files today (the Arrow import's tests), and
+`.mjs` and `.js`. `tsc_check` checks the tests' types, once `//node` has a lockfile with
+`typescript`.
 
 ### The package's own tests
 

@@ -7,21 +7,24 @@
   (`abi_version`, `ABI_MAJOR`, `ABI_MINOR`), `buffer_status`, the test the
   two-call output protocol applies to a caller's buffer, and
   `input_length_status`, the bound on a byte input (`KOMIRA_MAX_INPUT_BYTES`).
-- `session.mojo`: `Session`, the state behind a context handle, and
-  `try_new_session`, the session `komira_ctx_new` hands out or None: the text of
-  the last error, the engine (`sdk_exec`'s `EngineContext`) whose catalog
-  holds the registered tables, and the credentials.
+- `session.mojo`: `Session`, the state behind a context handle,
+  `try_new_session`, the session `komira_ctx_new` hands out or None, and
+  `session_options`, the engine options of `komira_ctx_new_with_options`'s
+  two `int64_t` arguments (0 is the host's own value). A session holds the
+  text of the last error, the engine (`sdk_exec`'s `EngineContext`) whose
+  catalog holds the registered tables, and the credentials.
 - `credentials.mojo`: `SessionCredentials`, a session's credentials by name:
   defined in three steps (`add`, `set`, `seal`), held in a
   `SessionSecretStore` (`credential_store.mojo`) and read back only through a
   reveal of `secret_bindings` over `secret_store`.
 - `sources.mojo`: what the source and render exports do on values:
   `register_parquet`, `parquet_schema_bytes`, `csv_binding_bytes`,
-  `json_binding_bytes` and `plan_render_text`.
+  `json_binding_bytes`, `plan_render_text` and `sql_result`, the answer of
+  one SQL statement as batches ready for the Arrow C stream.
 
 `_c_abi.mojo` is the library's C surface (`komira_abi_version`,
-`komira_ctx_new`, `komira_ctx_free`, `komira_last_error`, the source and
-render calls and the three credential calls). It is the one file that holds pointers and is not part of this
+`komira_ctx_new`, `komira_ctx_new_with_options`, `komira_ctx_free`, `komira_last_error`, the source and
+render calls, the three credential calls and `komira_sql_stream`). It is the one file that holds pointers and is not part of this
 Mojo package; `libkomira` is built from it by the `libkomira` target.
 """
 
@@ -31,13 +34,14 @@ from .credentials import (
     CREDENTIAL_UNBOUND,
     SessionCredentials,
 )
-from .session import Session, try_new_session
+from .session import Session, session_options, try_new_session
 from .sources import (
     csv_binding_bytes,
     json_binding_bytes,
     parquet_schema_bytes,
     plan_render_text,
     register_parquet,
+    sql_result,
 )
 from .status import (
     ABI_MAJOR,

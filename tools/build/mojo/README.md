@@ -21,7 +21,7 @@ where to read the environment the compiler sees) and
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, c_exports, unlisted_exports, exports_exact, gate_srcs, force_load, native_owners, extra_runpath, optimization_level, toolchain)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK), [`spike_native`](../examples/shared_lib_native/README.md) |
 | `komira_abi_golden(src, golden, header_name, constants_src)` ([`abi_golden.bzl`](abi_golden.bzl)) | `<header_name>` (default `<name>.h`): the C header of a golden list of C-ABI symbols and constants, built only if the `@export abi("C")` functions of `src` are exactly its rows, with the same types, and the constants match `constants_src` (see [The ABI golden and the C header](#the-abi-golden-and-the-c-header)). | [`abi_header`](../examples/abi_golden/BUCK) |
-| `komira_c_abi_check(driver, lib, native_owners)` ([`c_abi_check.bzl`](c_abi_check.bzl)) | `<name>.passed`: the marker of a C program (`driver`, a `cxx_binary` that includes the generated header) run against the `mojo_shared_lib` `lib` from a staged tree; it exists only if the program exited 0. | [`c_abi_check`](../../../src/so/BUCK) |
+| `komira_c_abi_check(driver, lib, native_owners, data)` ([`c_abi_check.bzl`](c_abi_check.bzl)) | `<name>.passed`: the marker of a C program (`driver`, a `cxx_binary` that includes the generated header) run against the `mojo_shared_lib` `lib` from a staged tree, with the `data` files beside it; it exists only if the program exited 0. | [`c_abi_check`](../../../src/so/BUCK) |
 | `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](doc.md)). | [`hellopkg_doc`](../examples/BUCK) |
 
 ## Libraries and the `test_srcs` gate
@@ -1025,6 +1025,8 @@ abi_touch	Int32	OpaquePointer	1.1
   (`T *`). `CStr` (`const char *`) and `ConstBytes` (`const uint8_t *`) are named types like `Handle`, with one
   difference: a source that uses one must declare it at the top level as `comptime CStr = UnsafePointer[UInt8, ...]`,
   and a declaration of any other type is a finding, so the `const` cannot hide a pointer to something else.
+  `ArrowStream` (`struct ArrowArrayStream *`) is a named type of the same kind: the source declares it as
+  `comptime ArrowStream = UnsafePointer[CArrowArrayStream, ...]`, the Mojo struct of the Arrow C stream's layout.
   Anything else, `Bool` and an alias such as `comptime Ptr = ...` included, is refused. Other pointers are emitted
   without `const`.
 - **Constants.** A row `constant<TAB>NAME<TAB>VALUE<TAB>since` (NAME starts `KOMIRA_`, VALUE a decimal integer from
@@ -1035,16 +1037,20 @@ abi_touch	Int32	OpaquePointer	1.1
   finding: nothing would hold them to a source.
 - **The header** is the target's one output, `<header_name>` (default `<name>.h`): an include guard from the file
   name, `<stddef.h>` and `<stdint.h>`, `extern "C"` for C++, `KOMIRA_ABI_VERSION_MAJOR` and
-  `KOMIRA_ABI_VERSION_MINOR`, one `#define` per constant, `typedef struct komira_handle_s *komira_handle;`, and one
+  `KOMIRA_ABI_VERSION_MINOR`, one `#define` per constant (after one comment: a caller treats a negative status the
+  header does not name as a failure), `typedef struct komira_handle_s *komira_handle;`, when a row uses `ArrowStream`
+  the Arrow C Data and C Stream interfaces' `ArrowSchema`, `ArrowArray` and `ArrowArrayStream` as the specification
+  gives them (inside its `ARROW_C_DATA_INTERFACE` and `ARROW_C_STREAM_INTERFACE` guards), and one
   prototype per row in the golden's order, each after a `since` comment. Parameters are unnamed: the golden holds types only.
   The header is made only when the check has no finding.
 - **The example** ([`examples/abi_golden`](../examples/abi_golden/BUCK)) has the golden, a C driver that includes
   the generated header and defines each function it declares (so a prototype that is not C, or one that
   disagrees with its definition, fails the compile), and the `mojo_shared_lib` of the same source.
-- **The C check.** `komira_c_abi_check(name, driver, lib, native_owners)` ([`c_abi_check.bzl`](c_abi_check.bzl)) runs a
+- **The C check.** `komira_c_abi_check(name, driver, lib, native_owners, data)` ([`c_abi_check.bzl`](c_abi_check.bzl)) runs a
   C program built against the generated header against the library: the program (a `cxx_binary` over the header)
   opens `./<library file>`, binds each function with `__typeof__` of the header's prototype and calls it. It is staged
-  like a Mojo gate driver, with the library and the `native_owners` it needs beside it, and its marker exists only if
+  like a Mojo gate driver, with the library and the `native_owners` it needs beside it, each `data` entry
+  (`{dest: file}`) at `share/<dest>` (its current directory) and `$TEST_TMPDIR` to write in, and its marker exists only if
   it exited 0, so a header that disagrees with the binary (version, a status code, an argument type that changes a
   call) is red there. The example is [`src/so`](../../../src/so/README.md#the-header-and-the-golden).
 - **Not checked here:** that the golden version was raised when a row changed. That compares with the previous

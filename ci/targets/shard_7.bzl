@@ -3,8 +3,10 @@
 # `guard.bxl:check` fails the pull request check when this file is out of date.
 
 TARGETS = [
+    "komira//node:arrow_test",
     "komira//node:load_test",
     "komira//node:session_test",
+    "komira//node:thread_test",
     "komira//python/smoke:pypi_smoke",
     "komira//python/tests:capture_test",
     "komira//python/tests:capture_test_py311",
@@ -137,6 +139,14 @@ TARGETS = [
     "komira//python/tests:session_test_py311",
     "komira//python/tests:session_test_py312",
     "komira//python/tests:session_test_py314",
+    "komira//python/tests:sql_fake_test",
+    "komira//python/tests:sql_fake_test_py311",
+    "komira//python/tests:sql_fake_test_py312",
+    "komira//python/tests:sql_fake_test_py314",
+    "komira//python/tests:sql_test",
+    "komira//python/tests:sql_test_py311",
+    "komira//python/tests:sql_test_py312",
+    "komira//python/tests:sql_test_py314",
     "komira//python/tests:two_call_test",
     "komira//python/tests:two_call_test_py311",
     "komira//python/tests:two_call_test_py312",

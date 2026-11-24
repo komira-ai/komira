@@ -1,8 +1,9 @@
-load("@komira//python:dependencies.bzl", "PROTOBUF_REQUIREMENT")
+load("@komira//python:dependencies.bzl", "PROTOBUF_REQUIREMENT", "PYARROW_MACOS", "PYARROW_WHEELS")
 load("@komira//python:pythons.bzl", "PYTHONS")
 load("@komira//third_party/python:pins.bzl", "PROTOBUF_EDGES", "WHEELS")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/node:defs.bzl", "c_shared_lib")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
 load("@komira//tools/build/python:defs.bzl", "py_test", "python_binding_test", "python_wheel")
 
 # libkomira with the Mojo runtime and its native owners in lib/ beside it: the
@@ -219,8 +220,8 @@ _ISA_FIXTURES = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
-# Any minor of ABI 1 loads: 1.0, whose 1.1 and 1.2 calls raise when used, and
-# 1.3, which seals a credential.
+# Any minor of ABI 1 loads: 1.0, whose 1.1, 1.2 and 1.3 calls raise when used,
+# and 1.3, which seals a credential and fills a stand-in stream.
 [python_binding_test(
     name = "minor0_test" + p["suffix"],
     src = "test_minor.py",
@@ -286,6 +287,85 @@ _ISA_FIXTURES = [
     src = "test_credentials_lib.py",
     data = {"libkomira": LIBKOMIRA},
     deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# ---- pyarrow, which a Result reads as -------------------------------------
+#
+# The pinned pyarrow 25.0.1 wheel of each supported minor
+# (python/dependencies.bzl, PYARROW_WHEELS) and the macOS arm64 one of CPython
+# 3.13, downloaded here for the wheel's install tests (python/BUCK), which
+# install the file beside komira's wheel; and the installed target of each
+# minor for the tests below: third_party/python's `:pyarrow` (3.13) and
+# `:pyarrow-cp314`, and `:pyarrow-cp311` and `:pyarrow-cp312` here.
+[pinned_file(
+    name = w["file"],
+    url = w["url"],
+    sha256 = w["sha256"],
+    size_bytes = w["size"],
+    visibility = ["komira//python:"],
+) for w in PYARROW_WHEELS.values()]
+
+# Read only by the macOS wheel's install test, which runs from
+# pypi-macos-arm64.yml alone, never in a pull request.
+pinned_file(
+    name = PYARROW_MACOS["file"],
+    url = PYARROW_MACOS["url"],
+    sha256 = PYARROW_MACOS["sha256"],
+    size_bytes = PYARROW_MACOS["size"],
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
+    visibility = ["komira//python:"],
+)
+
+[python_wheel(
+    name = "pyarrow-" + PYARROW_WHEELS[p["suffix"]]["file"].split("-")[2],
+    distribution = "pyarrow",
+    version = PYARROW_WHEELS[p["suffix"]]["version"],
+    wheel = ":" + PYARROW_WHEELS[p["suffix"]]["file"],
+    python = p["python"],
+) for p in PYTHONS if p["suffix"] in ("_py311", "_py312")]
+
+# {suffix: the installed pyarrow of that minor}
+_PYARROW = {
+    "": "komira//third_party/python:pyarrow",
+    "_py311": ":pyarrow-cp311",
+    "_py312": ":pyarrow-cp312",
+    "_py314": "komira//third_party/python:pyarrow-cp314",
+}
+
+# Session.sql on the stand-in's stream (fake_libkomira.c, ABI 1.3): a Result
+# reads once, by to_arrow, to_reader or __arrow_c_stream__; a result never
+# read, a capsule never consumed and a stream pyarrow consumed are each
+# released exactly once, and every batch too; a requested schema is refused
+# with UnsupportedOperation and leaves the result unread; an engine refusal (-3)
+# and a text too long (-5) raise KomiraError with the library's message and
+# make no stream; a failing get_schema raises KomiraError from sql and a
+# failing get_next from to_arrow (pyarrow's OSError from a reader); the
+# argument checks and a closed session make no call; results left unread at
+# interpreter exit are released without a crash.
+[python_binding_test(
+    name = "sql_fake_test" + p["suffix"],
+    src = "test_sql_fake.py",
+    data = {"fake_v1_3/libkomira.so": ":fake_v1_3"},
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Session.sql on the real library: SELECT 1 AS n, a GROUP BY over a checked-in
+# Parquet file (3000 rows, five labels, six row groups), an aggregate over the
+# quickstart's readings.parquet, an answer of no rows, each terminal, an engine
+# refusal with its message and the session answering after it, and a result
+# read after its session was closed or collected (the stream needs neither),
+# or never read at all, without a crash.
+[python_binding_test(
+    name = "sql_test" + p["suffix"],
+    src = "test_sql.py",
+    data = {
+        "labels.parquet": "komira//src/parquet_codec:pyarrow_multi_dict_page.parquet",
+        "libkomira": LIBKOMIRA,
+        "readings.parquet": "komira//python:examples/readings.parquet",
+    },
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 

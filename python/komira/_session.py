@@ -1,7 +1,12 @@
-"""`Session`: one engine context of libkomira and the tables registered on it.
+"""`Session`: one engine context of libkomira and the tables registered on it,
+and `Result`, the answer of one `Session.sql` call.
 
-Release 1 has no query call: a session registers Parquet files and is closed.
-`Session.sql` arrives with the library's run call.
+A session registers Parquet files, runs SQL over them (`komira_sql_stream`:
+the library turns the text into a logical plan; this package builds no SQL)
+and is closed. A `Result` holds the query's Arrow C stream, already handed to
+pyarrow, and is read once, by `to_arrow`, `to_reader` or `__arrow_c_stream__`. The stream needs neither
+the session nor its context, so a result still reads after its session is
+closed or collected (docs/design/python_package.md, decision 3).
 """
 
 from __future__ import annotations
@@ -9,10 +14,14 @@ from __future__ import annotations
 import os
 import weakref
 from types import TracebackType
+from typing import TYPE_CHECKING
 
-from . import _native
+from . import _arrow, _native
 from ._credentials import _BuiltIn, _Credential
-from ._errors import KomiraError
+from ._errors import KomiraError, UnsupportedOperation
+
+if TYPE_CHECKING:
+    import pyarrow
 
 
 class Session:
@@ -47,7 +56,7 @@ class Session:
         The file's footer is read now; a missing or unreadable file raises
         `KomiraError` with the engine's message. A relative `path` is resolved
         against the working directory and `~` is expanded. Registering a name
-        again replaces it. Nothing can query the table yet in this release.
+        again replaces it; a `Result` already returned keeps the answer it has.
         """
         if not isinstance(name, str):
             raise TypeError("name must be a str, not {}".format(type(name).__name__))
@@ -59,6 +68,29 @@ class Session:
             raise TypeError("path must be a str or os.PathLike[str], not {}".format(type(path).__name__))
         ctx = self._live()
         self._native.register_parquet(ctx, name, os.path.abspath(os.path.expanduser(path)))
+
+    def sql(self, query: str) -> Result:
+        """Runs the one SQL statement `query` over the session's tables and
+        returns its answer as a `Result`, unread.
+
+        The statement is parsed, bound, optimized and lowered, and the
+        answer's schema read, before this returns, so a syntax error, an
+        unknown table or column, or a construct the engine refuses raises
+        `KomiraError` here, with the engine's `<step>: <reason>` message and
+        `status` -3 (a stream whose schema cannot be read raises it with no
+        `status`). pyarrow is imported the first time the engine accepts a
+        query, when the answer's schema is read. A `query` that is not a
+        `str` is a `TypeError`, and one holding a NUL byte or a lone surrogate
+        a `ValueError`, both raised before the library is called.
+        """
+        if not isinstance(query, str):
+            raise TypeError("query must be a str, not {}".format(type(query).__name__))
+        ctx = self._live()
+        stream = self._native.sql_stream(ctx, query)
+        try:
+            return Result(_arrow.import_stream(stream))
+        except _arrow.stream_errors() as e:
+            raise KomiraError(str(e)) from e
 
     def _seal_credential(self, credential: _Credential | _BuiltIn) -> None:
         """Makes `credential` the session's value of its name, replacing any
@@ -108,3 +140,65 @@ class Session:
         if self._ctx is None:
             raise KomiraError("the session is closed")
         return self._ctx
+
+
+
+class Result:
+    """The answer of one `Session.sql` call, read once.
+
+    It holds the query's Arrow C stream inside a `pyarrow.RecordBatchReader`
+    whose schema is already read. The first of `to_arrow()`, `to_reader()` and
+    `__arrow_c_stream__()` takes the stream; any of them called again raises
+    `KomiraError`, since keeping a copy would make a large answer's memory
+    depend on which was called first. Run the query again to read it again. A
+    result that is never read releases its stream when it is collected.
+    Reading does not need the session: a result still reads after its session
+    is closed.
+    """
+
+    def __init__(self, reader: pyarrow.RecordBatchReader) -> None:
+        # None once a terminal took it.
+        self._reader: pyarrow.RecordBatchReader | None = reader
+
+    def __arrow_c_stream__(self, requested_schema: object | None = None) -> object:
+        """The Arrow PyCapsule interface: a PyCapsule named
+        "arrow_array_stream" that owns the stream, so that
+        `pyarrow.RecordBatchReader.from_stream`, `pyarrow.table`, polars and
+        DuckDB read it with no copy. The capsule is pyarrow's: it takes the
+        stream whether or not it is consumed, and one never consumed releases
+        it when collected.
+
+        A `requested_schema` other than None raises `UnsupportedOperation`
+        (a `KomiraError`; the class is not public yet) and leaves the result
+        unread: komira does not cast an answer.
+        """
+        if requested_schema is not None:
+            raise UnsupportedOperation(
+                "komira does not cast a result to a requested schema: read it with requested_schema=None "
+                "and cast the Arrow data"
+            )
+        return self._take().__arrow_c_stream__()
+
+    def to_reader(self) -> pyarrow.RecordBatchReader:
+        """The answer as a `pyarrow.RecordBatchReader`, which reads its
+        batches as they are asked for. A failure while a batch is read raises
+        pyarrow's error from the reader."""
+        return self._take()
+
+    def to_arrow(self) -> pyarrow.Table:
+        """The whole answer as a `pyarrow.Table`. A failure while a batch is
+        read raises `KomiraError` with the engine's message."""
+        reader = self._take()
+        try:
+            return reader.read_all()
+        except _arrow.stream_errors() as e:
+            raise KomiraError(str(e)) from e
+        finally:
+            reader.close()
+
+    def _take(self) -> pyarrow.RecordBatchReader:
+        reader = self._reader
+        if reader is None:
+            raise KomiraError("the result was already read: run the query again to read it again")
+        self._reader = None
+        return reader

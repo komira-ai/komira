@@ -4,9 +4,9 @@ komira's Python package is `komira` on PyPI. This page covers installing it, wha
 program, what it does not do yet, and what to do when something goes wrong. To build komira from a clone
 instead, see [getting started](getting-started.md).
 
-> **This is an early release.** Version 0.1.x installs, loads the engine and registers Parquet files
-> as tables. **It runs no query yet**: SQL arrives in a later release of this same package, followed
-> by a DataFrame API shaped like pandas and one shaped like polars. This page changes when they do.
+> **This is an early release.** It registers Parquet files as tables and runs SQL over them, with each
+> answer read as pyarrow. A DataFrame API shaped like pandas and one shaped like polars come in later
+> releases of this same package. This page changes when they do.
 
 ## Install
 
@@ -18,8 +18,8 @@ python3 -m venv .venv
 pip install komira
 ```
 
-That is the whole install. The wheel is about 2.4 MB, and nothing else is installed with it: `pip show
-komira` lists no `Requires:`.
+That is the whole install. The wheel is about 2.4 MB, and `pip` installs one other package with it,
+pyarrow (`pip show komira` lists `Requires: pyarrow`), which a query's answer is read as.
 
 ## What it needs
 
@@ -44,16 +44,18 @@ Save this as `quickstart.py`:
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1002 is 1.2
+print(komira.abi_version())   # the engine's C ABI version: 1004 is 1.4
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
-    print("registered readings")
+    print(s.sql("SELECT 1 AS n").to_arrow().to_pylist())
+    result = s.sql("SELECT count(*) AS n, sum(value) AS total FROM readings")
+    print(result.to_arrow().to_pylist())   # a pyarrow Table, as Python rows
 print(s.closed)               # True: the session is freed
 ```
 
-and put a Parquet file named `readings.parquet` beside it: any Parquet file will do, or the five-row
-one the release checks use:
+and put the five-row Parquet file the release checks use beside it as `readings.parquet` (the query
+reads its column `value`):
 
 ```sh
 curl -LO https://raw.githubusercontent.com/komira-ai/komira/main/python/examples/readings.parquet
@@ -63,8 +65,9 @@ Then `python quickstart.py` prints:
 
 ```text
 0.1.1512
-1002
-registered readings
+1004
+[{'n': 1}]
+[{'n': 5, 'total': 152.5}]
 True
 ```
 
@@ -88,14 +91,22 @@ What each call does:
   it. `close()` can be called again; any other call on a closed session raises `komira.KomiraError`.
 - `register_parquet(name, path)` reads the Parquet file's footer and registers the file as the table
   `name`. `path` is a `str` or a `pathlib.Path`; a relative path is resolved against the working
-  directory and `~` is expanded. Nothing can query the table yet.
+  directory and `~` is expanded.
+- `s.sql(query)` runs one SQL statement over the session's tables and returns a `komira.Result`. A
+  syntax error, an unknown table or column, or a construct the engine does not run yet raises
+  `komira.KomiraError` from `sql`, with the engine's message.
+- `to_arrow()` reads the whole answer as a `pyarrow.Table`. A result is read once; `to_reader()` reads
+  it batch by batch instead, and `pyarrow.table(result)` takes it through the Arrow PyCapsule
+  interface. `to_pylist()` is pyarrow's, turning the table into Python rows.
 
 The package's [README](../python/README.md), which is also its PyPI description, has the rest.
 
 ## What does not work yet
 
-- **Queries.** No SQL and no query of any kind runs in 0.1.x: there is no `Session.sql` yet.
-- **Results.** No Arrow tables, pandas frames or polars frames.
+- **pandas and polars results.** A result reads as pyarrow only; `pyarrow.Table.to_pandas()` and
+  `polars.from_arrow()` convert it.
+- **Cancelling a query.** Ctrl-C is delivered when the query returns.
+- **One session from two threads at once.** Use a session per thread.
 - **The DataFrame APIs**, pandas-shaped and polars-shaped.
 - **CSV and JSON files.** Only Parquet files can be registered.
 - **Python UDFs.**

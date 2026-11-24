@@ -1,7 +1,8 @@
 # Port: the libkomira calls that run a query (C ABI 1.3)
 
-Status: port document, not built. **EXISTS** names code on `main`; **PROPOSED** is
-new. Statements the author deduced rather than read are marked *(inferred)*.
+Status: port document. `komira_sql_stream` is built (ABI 1.3, with the `ArrowStream`
+golden type and the header's Arrow structs); `komira_plan_stream` and the abort
+containment are not. **EXISTS** names code on `main`; **PROPOSED** is new. Statements the author deduced rather than read are marked *(inferred)*.
 
 `libkomira` is komira's one shared library and its flat C ABI
 ([src/so](../../src/so/README.md)). ABI 1.1 registers and describes sources and
@@ -450,22 +451,24 @@ The earlier golden's 23 rows, and where each one goes:
 
 The earlier golden has no row for any of the items below. **None of them is
 decided here.** Each is settled by its own change:
-- session options, cancel and progress by their feature pull requests;
+- session options (now built, below), cancel and progress by their feature
+  pull requests;
 - credentials, and the structured error calls `komira_last_error_code` and
   `komira_last_error_step`, by [credentials_and_writes.md](credentials_and_writes.md).
 
 What earlier drafts of this document proposed is kept as input for those
 changes:
 
-- **Session options** (worker count, memory budget). `EngineOptions` already has
-  `worker_count` and `memory_budget_bytes`. The proposal:
-  - Typed setters, one per option: `komira_set_worker_count(ctx, int64)` and
-    `komira_set_memory_budget(ctx, int64)`.
-  - Each setter is accepted until the session's engine is built (§7). Building the
-    engine fixes its options.
-  - Rejected alternatives: an options struct (its layout would become ABI),
-    string key and value pairs, a constructor with arguments, and environment
-    variables (rule S2).
+- **Session options** (worker count, memory budget). **EXISTS**, ABI 1.4:
+  `komira_ctx_new_with_options(int64_t worker_count, int64_t memory_budget_bytes)`,
+  a constructor with arguments ([src/so/README.md](../../src/so/README.md),
+  "Session options"). 0 is the host's own value, a negative value is the NULL
+  handle, and the options are fixed for the life of the context. An earlier
+  draft proposed typed setters accepted until the session's engine is built
+  (§7); the engine is now built in `komira_ctx_new` itself, so there is no
+  window in which a setter could still change it, and the constructor is what
+  remains. Still rejected: an options struct (its layout would become ABI),
+  string key and value pairs, and environment variables (rule S2).
 - **Cancel and progress.** The engine has a `CancellationToken`, but the token is
   local to `run_lowered_plan` today. The engine has no progress counter. The
   proposal:
