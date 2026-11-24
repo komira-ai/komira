@@ -14,6 +14,11 @@
  * `i64` and a string column `s`, no row), and files it writes under
  * $TEST_TMPDIR.
  *
+ * Then it creates contexts with komira_ctx_new_with_options: a memory budget
+ * of one byte refuses a query at step `execute` with the sink's named denial,
+ * the same query answers under the host's own budget, and a negative option
+ * is a NULL context.
+ *
  * Exit 0 only if every check holds; each failure prints one line. */
 #include <dlfcn.h>
 #include <stdio.h>
@@ -36,6 +41,7 @@ static int failures = 0;
 
 DECLARE(komira_abi_version);
 DECLARE(komira_ctx_new);
+DECLARE(komira_ctx_new_with_options);
 DECLARE(komira_ctx_free);
 DECLARE(komira_last_error);
 DECLARE(komira_register_parquet);
@@ -61,6 +67,7 @@ static int bind_all(void *lib) {
     } while (0)
     BIND(komira_abi_version);
     BIND(komira_ctx_new);
+    BIND(komira_ctx_new_with_options);
     BIND(komira_ctx_free);
     BIND(komira_last_error);
     BIND(komira_register_parquet);
@@ -318,6 +325,68 @@ static void sql_stream_cases(void) {
     CHECK(a.rows == 3 && a.n_values == 3 && a.values[0] == 1 && a.values[1] == 2 && a.values[2] == 3);
 }
 
+/* The session options of komira_ctx_new_with_options, over three.parquet
+   (k = 1, 2, 3), which sql_stream_cases wrote under $TEST_TMPDIR. */
+static void options_cases(void) {
+    const char *tmp = getenv("TEST_TMPDIR");
+    if (tmp == NULL) return; /* sql_stream_cases has already failed on it */
+    char parquet[512];
+    snprintf(parquet, sizeof parquet, "%s/three.parquet", tmp);
+    static const char sum[] = "SELECT sum(k) AS s FROM three";
+    struct ArrowArrayStream out;
+    struct answer a;
+    char text[512];
+
+    /* 0 and 0 are the host's own worker count and budget: a context that
+       answers, with no error. */
+    komira_handle host = p_komira_ctx_new_with_options(0, 0);
+    CHECK(host != NULL);
+    if (host != NULL) {
+        uint64_t len = 99;
+        CHECK(p_komira_last_error(host, NULL, 0, &len) == KOMIRA_OK && len == 0);
+        CHECK(p_komira_register_parquet(host, "three", parquet) == KOMIRA_OK);
+        CHECK(p_komira_sql_stream(host, sum, &out) == KOMIRA_OK);
+        CHECK(read_answer(&out, &a) == 0 && a.rows == 1 && a.n_fields == 1 && strcmp(a.names[0], "s") == 0);
+        p_komira_ctx_free(host);
+    }
+
+    /* One worker and the host's budget: the same query answers. */
+    komira_handle one = p_komira_ctx_new_with_options(1, 0);
+    CHECK(one != NULL);
+    if (one != NULL) {
+        CHECK(p_komira_register_parquet(one, "three", parquet) == KOMIRA_OK);
+        CHECK(p_komira_sql_stream(one, sum, &out) == KOMIRA_OK);
+        CHECK(read_answer(&out, &a) == 0 && a.rows == 1);
+        p_komira_ctx_free(one);
+    }
+
+    /* A budget of one byte, with one worker and with the host's count: the
+       aggregation sink is denied its state, a refusal at step `execute` that
+       names the budget; *out is untouched and the context answers a query
+       that reserves nothing. */
+    static const int64_t workers[2] = {1, 0};
+    for (int i = 0; i < 2; i++) {
+        komira_handle tiny = p_komira_ctx_new_with_options(workers[i], 1);
+        CHECK(tiny != NULL);
+        if (tiny == NULL) continue;
+        CHECK(p_komira_register_parquet(tiny, "three", parquet) == KOMIRA_OK);
+        expect_refused(tiny, sum, KOMIRA_ERR_ENGINE, "execute: [Processor] pipeline_exec: the ", 0);
+        CHECK(p_komira_sql_stream(tiny, sum, &out) == KOMIRA_ERR_ENGINE);
+        const char *got = last_error_text(tiny, text, sizeof text);
+        int named = strstr(got, " sink of segment ") != NULL && strstr(got, " was denied ") != NULL &&
+                    strstr(got, " bytes of the segment's memory pool") != NULL && strstr(got, "(budget 1, granted ") != NULL;
+        if (!named) fprintf(stderr, "FAIL: last error '%s' does not name the sink's denial under a budget of 1\n", got);
+        CHECK(named);
+        p_komira_ctx_free(tiny);
+    }
+
+    /* A negative worker count or budget is refused: NULL, nothing to free. */
+    CHECK(p_komira_ctx_new_with_options(-1, 0) == NULL);
+    CHECK(p_komira_ctx_new_with_options(0, -1) == NULL);
+    CHECK(p_komira_ctx_new_with_options(INT64_MIN, 0) == NULL);
+    CHECK(p_komira_ctx_new_with_options(0, INT64_MIN) == NULL);
+}
+
 int main(void) {
     void *lib = dlopen("./libkomira.so", RTLD_NOW);
     if (lib == NULL) {
@@ -403,5 +472,6 @@ int main(void) {
     p_komira_ctx_free(NULL);
 
     sql_stream_cases();
+    options_cases();
     return failures == 0 ? 0 : 1;
 }
