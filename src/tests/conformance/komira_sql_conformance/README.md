@@ -9,7 +9,7 @@ engine to. Each case is run again by the pinned DuckDB as a `sql_oracle`
 build action ([tools/build/sql](../../../../tools/build/sql/README.md)), and
 the action fails unless its answer equals the committed one byte for byte.
 Test-only data: the corpora are SQL and TSV, and nothing komira builds is an
-input except by the function coverage test below. Two corpora are run through komira: pipeline_exec's
+input except by the function coverage test below. Three corpora are run through komira (the third, `scalar_fn`, by the function coverage test below): pipeline_exec's
 `tests/test_sink_float_agg_duckdb.mojo` holds the ungrouped aggregation
 sink to the answers of `agg_float_ungrouped`, and sdk_exec's
 `tests/test_run_sql_topn.mojo` holds `run_sql` to the answers of each
@@ -158,11 +158,13 @@ Columns: `name`; `row`, the lowering kind of the name's row (`FNK_*`),
 | `differs:n` | n cases ran and an answer differs from DuckDB's |
 | `refused_<step>:n` | n cases ended at that `run_sql` step (parse, bind, optimize, lower, execute) with a refusal: at bind the name does not bind, at a later step it bound and could not run |
 | `batches_n` | the case ran but answered n result batches, not one |
-| `unreadable:n` | n cases ran and answered one batch, and the comparison could not read the answer (a type the answer parser does not read, such as a list or a timestamp): the function executes, its values are not yet compared |
+| `unreadable:n` | n cases ran and answered one batch, and the comparison raised (any raise lands here; today it is an answer type the answer parser does not read, such as a list or a timestamp): the function executes, its values are not yet compared |
 | `no_case` | the row lowers, and no case calls the name: bound by the table, never run by this measurement |
-| `probe:refused_bind` | a refusal row or a name with no row: `SELECT name(k) FROM T` is refused at bind, as the table says |
+| `probe:refused_bind` | a refusal row or a name with no row: the call `SELECT name(k) FROM T` (one BIGINT argument) is refused at bind; for a refusal row this is the row's refusal, for a name with no row it only says that this call does not bind (a wrong arity or type would be refused too) |
 | `probe:ok` | the same probe ran: a name the table refuses, or has no row for, that nevertheless executes |
 | `internal` | a row keyed by a constant (`cast`, `try_cast`, the `IN` position form), not a function a user types |
+
+A case is credited to every function it calls, so `equal:n` and `refused_bind:n` count cases, not calls of that one function; `refused_bind` says a case containing the name did not bind. A line other than `equal` is a known gap, not a pass: the test holds the file to the engine, so a regression and a fix both show as a changed line to review.
 
 A case's column names are not compared (the header of DuckDB's answer is
 replaced by the engine's own): the table measures values and types, not how a
@@ -171,7 +173,7 @@ column is named.
 ### What the committed table says
 
 Counts of the names in `function_coverage.tsv` (731 names), each from
-`awk -F'\t' 'NR>2 { ... }'` over the `row` and `outcome` columns:
+`awk -F'\t' 'NR>2 { if ($2=="FNK_REFUSED") r++; else if ($2=="NO_ROW") n++; else if ($6=="no_case") nc++; else if ($6=="internal") i++; else if ($6 ~ /unreadable/) u++; else if ($6 ~ /refused_/) rb++; else if ($6 ~ /within/) w++; else if ($6 ~ /^equal:/) e++ }'` over the committed file (r, n, nc, i, u, rb, w, e are the rows below from the last):
 
 | names | what was measured |
 |---|---|
@@ -194,3 +196,12 @@ functions is the `common = yes` lines whose `row` is `FNK_REFUSED` or
 `position`, `format` and `printf`, `chr`, `initcap`, `current_timestamp`;
 each carries its reason family in `detail`. The 50 unmeasured names are the
 next measurement: a `scalar_fn` case each, with DuckDB's committed answer.
+
+### Layout of the function coverage files
+
+| path | what it holds |
+|---|---|
+| `function_coverage.mojo` | the measurement: reads the rows of `sql_scalar_fn_spec`, runs the cases, writes the table |
+| `function_coverage.tsv` | the committed table |
+| `tests/test_function_coverage.mojo` | the gated test; `./buck2 test` on `:komira_sql_conformance` runs it |
+| `sql/write_scalar_fn_t.sql` | writes the corpus table T as Parquet (`:scalar_fn_t`) |

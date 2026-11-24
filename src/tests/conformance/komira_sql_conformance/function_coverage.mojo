@@ -17,7 +17,11 @@ table (or its rows) says none of them:
     working as written; `probe:ok` would be a refused name that runs);
   * a name with no row at all (`NO_ROW`), probed the same way.
 
-`measure_table` returns the table as text, one line per name; the test holds
+Two limits of what a line says. A case is credited to every function it
+calls (`called_names` reads every identifier before a parenthesis), so a count
+is per case, not per function. `unreadable` is any raise of the comparison
+(render, parse or compare), which today is a result type the answer parser
+does not read. `measure_table` returns the table as text, one line per name; the test holds
 it to the committed file, so the file cannot say more or less than the engine
 does. The rows are read from the table's source text, not from a list kept
 beside it: a row added to the table is a new line here and fails the test
@@ -25,8 +29,6 @@ until the committed file has it.
 """
 
 from std.os import listdir
-from std.testing import assert_true
-
 from arrow.schema import RecordBatch
 from komira_plan_harness import (
     CanonPolicy,
@@ -243,7 +245,7 @@ def _outcome(mut ctx: EngineContext, sql: String, tsv: String, ordered: Bool) ->
         if compare_answer(out.batches[0], tsv, ordered, 4) == "":
             return String("equal_within_4_ulps")
         return String("differs")
-    except e:
+    except:
         return String("unreadable")
 
 
