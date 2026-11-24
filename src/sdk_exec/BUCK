@@ -975,6 +975,7 @@ mojo_library(
         "tests/test_run_sql_multifile.mojo",
         "tests/test_run_sql_s3.mojo",
         "tests/test_run_sql_no_from.mojo",
+        "tests/test_run_sql_refusal_position.mojo",
         "tests/test_run_sql_q6.mojo",
         "tests/test_run_sql_set_ops.mojo",
         "tests/test_run_sql_spill.mojo",

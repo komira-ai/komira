@@ -9,7 +9,9 @@ on Linux x86_64 and, for the macOS wheel, on macOS arm64).
         --modular-license <LICENSE> --modular-notices <Third-Party-Notices>
         --aws-lc-license <LICENSE> --s2n-tls-license <LICENSE>
         --parquet <file.parquet> --plan-hex <file.hex>
-        --readings <readings.parquet> --requires-dist <requirement>...
+        --readings <readings.parquet> --readme <README.md>
+        --quickstart <quickstart.py> --quickstart-expected <quickstart.expected>
+        --requires-dist <requirement>...
 
 Run by wheel_install_run.py, which installed the wheels into `--site` and
 starts this from an empty working directory outside the checkout. Each
@@ -34,14 +36,22 @@ Then, in order:
   repository's, `AWS_LC_LICENSE` and `S2N_TLS_LICENSE`, byte for byte the
   pinned aws-lc and s2n-tls archives' LICENSE files, and `MODULAR_LICENSE`
   and `MODULAR_THIRD_PARTY_NOTICES`, byte for byte the pinned compiler
-  package's, and no other; its description is
-  README.md, which starts with the line `# komira`;
+  package's, and no other; its description (the body of METADATA, what PyPI shows)
+  is `--readme`, README.md, byte for byte;
 - `komira.abi_version()` is the `version` line of the ABI golden;
 - `Session().register_parquet` registers the Parquet fixture, and a missing
   file raises `KomiraError` with the engine's status;
 - `Session.sql("SELECT 1 AS n").to_arrow()` is one row, `n` INT32 holding 1,
   and an aggregate over `--readings` (`id` 1 to 5, `value` 10.5 to 50.5) is
   its one row of count, sum, min and max, read with the installed pyarrow;
+- the quickstart (`--quickstart`, python/examples/quickstart.py) runs in
+  this process (the host libraries are open in it, which a child interpreter
+  would not have) from a new empty directory under the working directory, and
+  what it prints is `--quickstart-expected` with `<version>` the installed
+  version, `<abi_version>` the ABI golden's number and `<cwd>` the real path
+  of that directory; the directory then holds weather.parquet, the file the
+  quickstart wrote, and nothing else. On a difference the two texts go to
+  stderr and the failure line names the first differing line;
 - `komira._native.plan_render` of the serialized plan returns its text;
 - the process maps libkomira (`libkomira.so`, `libkomira.dylib` on macOS) from
   `<site>/komira/_lib`, and its native owner libraries and the three Mojo
@@ -54,9 +64,12 @@ Any failure raises; its last traceback line is what a refusing case of
 wheel_install_test names.
 """
 
+import contextlib
 import ctypes
+import io
 import os
 import re
+import runpy
 import sys
 from importlib import metadata
 
@@ -103,6 +116,9 @@ _VALUED = (
     "--plan-hex",
     "--requires-python",
     "--readings",
+    "--readme",
+    "--quickstart",
+    "--quickstart-expected",
 )
 
 
@@ -209,8 +225,41 @@ def check_metadata(dist, opts):
 
     text = dist.read_text("METADATA")
     body = text.split("\n\n", 1)[1] if "\n\n" in text else ""
-    first = body.split("\n", 1)[0]
-    assert first == "# komira", "the wheel's description starts {!r}, not with README.md's first line".format(first)
+    with open(opts["readme"], encoding="utf-8") as f:
+        readme = f.read()
+    if body != readme:
+        at = next((i for i, (a, b) in enumerate(zip(body, readme)) if a != b), min(len(body), len(readme)))
+        raise AssertionError("the wheel's description is not README.md byte for byte: it differs at offset {} (description {} characters, README.md {})".format(at, len(body), len(readme)))
+
+
+def run_quickstart(opts, abi):
+    """Runs the quickstart in a new empty directory under the working
+    directory and compares what it prints with the expected text."""
+    home = os.getcwd()
+    run_dir = os.path.join(home, "quickstart")
+    os.mkdir(run_dir)
+    os.chdir(run_dir)
+    out = io.StringIO()
+    try:
+        cwd = os.getcwd()
+        with contextlib.redirect_stdout(out):
+            runpy.run_path(opts["quickstart"], run_name="__main__")
+    finally:
+        os.chdir(home)
+    with open(opts["quickstart_expected"], encoding="utf-8") as f:
+        want = f.read().replace("<version>", opts["version"]).replace("<abi_version>", str(abi)).replace("<cwd>", cwd)
+    got = out.getvalue()
+    if got != want:
+        sys.stderr.write("--- expected ---\n{}--- printed ---\n{}--- end ---\n".format(want, got))
+        have, wanted = got.split("\n"), want.split("\n")
+        n = next(i for i in range(max(len(have), len(wanted))) if (have[i] if i < len(have) else None) != (wanted[i] if i < len(wanted) else None))
+        raise AssertionError(
+            "the quickstart printed other text than quickstart.expected says: line {} is {}, expected {}".format(
+                n + 1, repr(have[n]) if n < len(have) else "missing", repr(wanted[n]) if n < len(wanted) else "missing"
+            )
+        )
+    held = sorted(os.listdir(run_dir))
+    assert held == ["weather.parquet"], "the quickstart left {} in its directory, not exactly weather.parquet".format(held)
 
 
 def main(argv):
@@ -267,6 +316,8 @@ def main(argv):
         agg = s.sql("SELECT count(*) AS n, sum(value) AS total, min(id) AS lo, max(id) AS hi FROM readings").to_arrow()
         want = [{"n": 5, "total": 152.5, "lo": 1, "hi": 5}]
         assert agg.to_pylist() == want, "the aggregate over {} is {}, not {}".format(opts["readings"], agg.to_pylist(), want)
+
+    run_quickstart(opts, want_abi)
 
     with open(opts["plan_hex"], encoding="utf-8") as f:
         plan = bytes.fromhex(f.read().strip())

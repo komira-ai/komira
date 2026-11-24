@@ -947,7 +947,7 @@ workflow.
 
 | job | half | environment | permissions | what it does |
 |---|---|---|---|---|
-| `build` | push | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds the wheel and its install test (`//python:komira_wheel[release]` and `//python:wheel_install_test`) with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`), `//python/smoke:pypi_smoke` and `//python:supported_pythons[linux-x86_64]` (the exact versions of [python/pythons.bzl](../python/pythons.bzl) as a JSON list, `pythons.json`); runs `pypi_smoke dist`, which makes the dist directory and writes `built.txt`, the record of the wheel's file name, sha256 and size; copies the quickstart, its expected output, its data and the ABI table beside the driver; runs `pypi_smoke matrix` (its output `matrix`, one entry per Python). Keeps `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver, those four files, `pythons.json` and `built.txt`) for 14 days. No upload step. |
+| `build` | push | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds the wheel and its install test (`//python:komira_wheel[release]` and `//python:wheel_install_test`) with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`), `//python/smoke:pypi_smoke` and `//python:supported_pythons[linux-x86_64]` (the exact versions of [python/pythons.bzl](../python/pythons.bzl) as a JSON list, `pythons.json`); runs `pypi_smoke dist`, which makes the dist directory and writes `built.txt`, the record of the wheel's file name, sha256 and size; copies the quickstart, its expected output and the ABI table beside the driver; runs `pypi_smoke matrix` (its output `matrix`, one entry per Python). Keeps `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver, those three files, `pythons.json` and `built.txt`) for 14 days. No upload step. |
 | `wheel-user-test` | push | none | none | [the user test of the wheel file](#the-user-test-of-the-wheel-file): one job per Python of the list, on a fresh runner with no checkout, `pypi_smoke install --index dist`. |
 | `testpypi` | push | `testpypi` | `id-token: write` | after `wheel-user-test`; no farm, no checkout, no buck2. Downloads the two artifacts, prints the size of the project on TestPyPI and on PyPI ([storage](#storage-on-the-indexes)), runs `pypi_smoke state --index testpypi`, and uploads the wheel to TestPyPI only when the state is `absent`. |
 | `testpypi-smoke` | push | none | none | one job per entry of `build`'s `matrix` (`fail-fast: false`, so every Python reports): `pypi_smoke verify --index testpypi`, then `pypi_smoke install --index testpypi` with the quickstart files of the smoke artifact, on a runner with that exact version from `actions/setup-python`. Skipped when the state is `differs`. |
@@ -1029,8 +1029,9 @@ and nothing else; no `modular` package is importable; and
 the quickstart, the program the README and the install page show (held byte for byte by
 `//python/smoke:readme_shows_quickstart` and `//python/smoke:install_page_shows_quickstart`), runs and must
 print exactly what `python/examples/quickstart.expected` says. Today that is import, the version, the
-engine's ABI version, and `SELECT 1 AS n` and an aggregate over a registered Parquet file, each printed as
-rows through pyarrow. When the quickstart grows (a pandas result, say),
+engine's ABI version, a Parquet file the program writes itself, an aggregate and a GROUP BY with an ORDER BY
+over it read as rows, a pyarrow Table, a reader and the PyCapsule interface, and the two `KomiraError` messages
+of a missing file and a SQL syntax error. When the quickstart grows (a pandas result, say),
 this job and the index smokes run the new program with no change here. A local directory does not lag, so
 the install is tried once (`--attempts` and `--delay` are refused with `--index dist`).
 
@@ -1198,7 +1199,7 @@ exit status is 0 for success, 1 for a refusal or a failure (the last line printe
 | `state` | `--index <testpypi\|pypi> --dist <dir> --github-output <file>` | `--dist` holds exactly one wheel and nothing else. One request for the version's JSON on the index, no retry. Appends `state=absent`, `same` or `differs` (below). Any other answer than a 404 or a 200 with the expected shape fails. |
 | `present` | `--index <testpypi\|pypi> --name-file <file> --github-output <file>` | reads the one-line file name (`komira-<version>-<tag>.whl`) from `--name-file`, asks the index's JSON for that release (as `state` does) and appends `present=true` (the release lists a file of exactly that name) or `present=false`. It needs no wheel, so it runs before anything is built. An index error is a refusal and appends nothing. |
 | `verify` | `--index <testpypi\|pypi> --dist <dir> [--attempts <1..20>] [--delay <0..300>]` | asks the index for the file it serves and compares it with the built one (below). A refused attempt is tried again up to `--attempts` times (default 5), `--delay` seconds apart (default 30), because an index can lag an upload. |
-| `install` | `--index <testpypi\|pypi\|dist> --dist <dir> --python <exe> --example <quickstart.py> --expect <quickstart.expected> --data <file>... --abi-table <komira.tsv> --work <dir> [--attempts <n>] [--delay <s>]` | installs the published wheel into an empty environment and runs the example (below); with `--index dist`, the wheel of `--dist` itself ([the user test](#the-user-test-of-the-wheel-file)). `--attempts` and `--delay` as for `verify`, for the install of `komira` only; refused with `--index dist`, which installs once. |
+| `install` | `--index <testpypi\|pypi\|dist> --dist <dir> --python <exe> --example <quickstart.py> --expect <quickstart.expected> --abi-table <komira.tsv> --work <dir> [--attempts <n>] [--delay <s>]` | installs the published wheel into an empty environment and runs the example (below); with `--index dist`, the wheel of `--dist` itself ([the user test](#the-user-test-of-the-wheel-file)). `--attempts` and `--delay` as for `verify`, for the install of `komira` only; refused with `--index dist`, which installs once. |
 | `matrix` | `--pythons <list> --platform <name> --github-output <file>` | reads the list of supported Pythons ([above](#the-user-test-of-the-wheel-file)) and appends `matrix=<JSON>`, the `include` list of a job matrix with the platform, the Python and the hosted runner of every entry. A malformed list is a refusal and appends nothing. |
 | `storage` | `--index <testpypi\|pypi> --project <name> --limit-gib <1..1000> --over-percent <1..100> --summary <file> --github-output <file>` | one request for the project's JSON; sums the size of every file of every release; appends the summary line and `over=true\|false` and `bytes=<total>` ([above](#storage-on-the-indexes)). Over the threshold is an `::error` line, not a failure. A 404 is 0 bytes; any other answer that is not a project's JSON with sizes is a refusal and appends nothing. |
 | `promote` | `--record <file> --out <dir> --github-output <file>` | [the promotion](#the-promotion)'s choice and download: the record's file from TestPyPI, held to the record; newer TestPyPI versions of the same tag named as skipped; refused when PyPI's newest is newer. Any refusal appends nothing and writes nothing into `--out`. |
@@ -1238,10 +1239,11 @@ and make no network request; the live indexes are reached only by a run of this 
    `pip freeze` must list `komira==<version>` once and otherwise only the distributions the wheel's
    `Requires-Dist` names, at any version (pyarrow; the wheel carries the Mojo runtime, so no `mojo-compiler`
    and no other distribution is installed), no package named `modular` may be importable, and
-   the quickstart runs with `python -I` in a directory holding only the example and its data file: it
-   must exit 0 and print what `python/examples/quickstart.expected` says, compared exactly, with `<version>`
-   replaced by the version and `<abi_version>` by the ABI version of the `--abi-table` file
-   (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.4` is 1004). A failed step names the command, its exit
+   the quickstart runs with `python -I` in a directory holding only the example (it writes its own Parquet
+   file there, so no data file is passed): it must exit 0 and print what `python/examples/quickstart.expected`
+   says, compared exactly, with `<version>` replaced by the version, `<abi_version>` by the ABI version of the
+   `--abi-table` file (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.4` is 1004) and `<cwd>` by the real
+   path (symlinks resolved) of that directory, which the missing-file message names. A failed step names the command, its exit
    status and the last lines of its stderr.
 
 The user test of the wheel file is the first gate: `testpypi` `needs` `wheel-user-test`, so a wheel that does
@@ -1249,10 +1251,15 @@ not install and run from its own file is uploaded nowhere. The TestPyPI smoke is
 version whose TestPyPI smoke passed on every Python gets a record, and only a record is promoted to PyPI.
 
 The quickstart is [`python/examples/quickstart.py`](../python/examples/README.md). Today it asserts the
-version, the engine's C ABI version, and the rows of `SELECT 1 AS n` and of an aggregate over
-`readings.parquet` (its row count and the sum of `value`), read through pyarrow, and that the session
-closes. The README's block under "What works"
-is the same text, held byte for byte by `//python/smoke:readme_shows_quickstart`. The install page,
+version and the engine's C ABI version; that it writes a small Parquet file with pyarrow, registers it and runs an
+aggregate and a GROUP BY with an aggregate and an ORDER BY; that the answers read as rows, as a pyarrow Table with
+its schema, with `to_reader()` and through the Arrow PyCapsule interface; that a missing file and a SQL syntax
+error raise `KomiraError` with messages naming the file's absolute path and the line and column; and that the
+session closes. The README's block under "What works"
+is the same text, and the README's output block is `quickstart.expected`, both held byte for byte by
+`//python/smoke:readme_shows_quickstart`. The pull request check runs the same quickstart against the installed
+wheel on the farm, `//python:wheel_install_test` (`python/tests/test_installed.py`), which compares its stdout with
+`quickstart.expected` and uploads nothing. The install page,
 [docs/install.md](install.md), shows the same program and what it prints, `quickstart.expected` with the
 newest release of [python/CHANGELOG.md](../python/CHANGELOG.md) and the ABI version put in, held by
 `//python/smoke:install_page_shows_quickstart`.
@@ -1261,7 +1268,8 @@ newest release of [python/CHANGELOG.md](../python/CHANGELOG.md) and the ABI vers
 GitHub-hosted runner `macos-15` (Apple silicon, free for public repositories), once per supported CPython from
 `actions/setup-python` (3.11.9 and 3.12.10 for 3.11 and 3.12: their newer patch releases have no macOS build there), the macOS driver (`//python/smoke:pypi_smoke_macos_arm64`, cross-compiled on the farm for
 `aarch64-macos`) checks that the index serves the bytes that were built and that `pip install komira==<version>` into an
-empty environment gives a package that imports, reports the version and the ABI version, and runs the quickstart.
+empty environment gives a package that imports, reports the version and the ABI version, and runs the quickstart (the same program and expected output, with `<cwd>`
+substituted, and no data file).
 The wheel is self-contained: `komira/_lib/libkomira.dylib` and, in `komira/_lib/lib/`, the three Mojo runtime
 libraries (`libAsyncRTRuntimeGlobals.dylib`, `libKGENCompilerRTShared.dylib`, `libMSupportGlobals.dylib`); it depends on
 no package of Modular's.

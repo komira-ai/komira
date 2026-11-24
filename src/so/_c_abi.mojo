@@ -671,7 +671,8 @@ def komira_sql_stream(ctx: Handle, sql: CStr, out_stream: ArrowStream) abi("C") 
     its first `KOMIRA_MAX_INPUT_BYTES + 1` bytes (nothing past that is read),
     and `KOMIRA_ERR_ENGINE` for a text that is not UTF-8 and for every engine
     refusal, with the last error `<step>: <reason>` (`parse`, `bind`,
-    `optimize`, `lower` or `execute`) or the export's error naming a column
+    `optimize`, `lower` or `execute`; for `parse`, `<reason> at line <L>,
+    column <C>`, both from 1, where the text stopped parsing) or the export's error naming a column
     the stream cannot carry. The session stays usable after any refusal.
     """
     if Int(ctx) == 0:

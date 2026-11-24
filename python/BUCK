@@ -233,8 +233,12 @@ wheel_file(
 # and the runtime's licence texts and the Requires-Dist `--requires-dist`;
 # libkomira loads at the ABI version of src/so/abi/komira.tsv, a Parquet file
 # registers and a missing one raises KomiraError, `SELECT 1 AS n` and an
-# aggregate over readings.parquet answer their rows as pyarrow, a serialized
-# plan renders, and libkomira, its native
+# aggregate over tests/fixtures/readings.parquet answer their rows as pyarrow,
+# the quickstart (examples/quickstart.py) runs from the installed package in a
+# new empty directory and prints what examples/quickstart.expected holds, and
+# leaves weather.parquet there and nothing else, the METADATA description is
+# README.md byte for byte (the wheel rule writes the README as the body of
+# METADATA), a serialized plan renders, and libkomira, its native
 # owners and the three Mojo runtime libraries are mapped from
 # <site>/komira/_lib and nothing else of theirs is. One test per supported
 # minor (pythons.bzl), on its pinned interpreter: `:wheel_install_test` on
@@ -253,7 +257,10 @@ _TEST_FILES = {
     "--notice": "komira//:NOTICE",
     "--parquet": "komira//src/so:tests/fixtures/two_columns.parquet",
     "--plan-hex": "komira//python/tests:fixtures/scan_plan.hex",
-    "--readings": "examples/readings.parquet",
+    "--quickstart": ":examples/quickstart.py",
+    "--quickstart-expected": ":examples/quickstart.expected",
+    "--readings": "komira//python/tests:fixtures/readings.parquet",
+    "--readme": ":README.md",
     "--s2n-tls-license": _THIRD_PARTY_LICENSE_FILES["S2N_TLS_LICENSE"],
 }
 
@@ -869,17 +876,6 @@ export_file(
     name = "examples/quickstart.expected",
     src = "examples/quickstart.expected",
     visibility = ["//python/smoke:"],
-)
-
-# The quickstart's data: the aggregate of the install test (`--readings`
-# above) and of python/tests' sql_test.
-export_file(
-    name = "examples/readings.parquet",
-    src = "examples/readings.parquet",
-    visibility = [
-        "//python/smoke:",
-        "//python/tests:",
-    ],
 )
 
 export_file(

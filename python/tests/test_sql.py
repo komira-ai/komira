@@ -10,7 +10,8 @@
 - each terminal reads it: to_arrow, to_reader and the PyCapsule interface;
 - an unknown table and a syntax error raise KomiraError with the engine's
   message, its last error, and status -3, and the session answers the next
-  query;
+  query; a syntax error names the line and column where the text stopped
+  parsing, in the message word for word;
 - a result reads after its session was closed, after its session was
   collected without a close, and half read before the close; results never
   read are dropped after their session was freed, and one is left for the
@@ -106,6 +107,14 @@ def main(args):
             assert type(e) is KomiraError and e.status == -3 and str(e), repr(e)
             assert str(e) == _native.load().last_error(s._ctx), (str(e), query)
         assert str(raised(lambda: s.sql("SELECT * FROM nosuch"))).startswith("bind: ")
+        assert s.sql("SELECT 1 AS n").to_arrow().to_pylist() == ONE
+
+        # A syntax error says where the text stopped parsing.
+        e = raised(lambda: s.sql("SELECT label, count(*) FROM labels GROUP label"))
+        assert type(e) is KomiraError and e.status == -3, repr(e)
+        assert str(e) == "parse: SQL syntax error: expected keyword 'by' at line 1, column 42", str(e)
+        e = raised(lambda: s.sql("SELECT label\nFROM labels GROUP label"))
+        assert str(e) == "parse: SQL syntax error: expected keyword 'by' at line 2, column 19", str(e)
         assert s.sql("SELECT 1 AS n").to_arrow().to_pylist() == ONE
 
     # A result read after its session was closed: the stream needs neither the

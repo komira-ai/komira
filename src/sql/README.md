@@ -203,6 +203,14 @@ of one name are refused, since the grouping names its columns, and so is a
 column named as one of the helper columns (`#set_side`, `#set_lo`, `#set_hi`),
 which only a file's column can be.
 
+`sql.sql_position` says where a text stopped parsing. `tokenize(sql, starts)`
+also appends each token's start byte (the EOF token's being the text's byte
+length); `parse_sql_text(text, stopped_at)` is `parse_sql(tokenize(text))` that,
+before it raises the tokenizer's or parser's own `Error` unchanged, sets
+`stopped_at` (a `SqlPosition`, `line` and `column` from 1, the column counting
+characters) to the start of the token the tokenizer was lexing or the parser was
+looking at; `position_of(text, offset)` is that mapping from a byte offset.
+
 `sql.sql_frontend` is the text entry over the three steps.
 `statement_from_sql(sql, catalog, footers)` tokenizes, parses and binds in one
 call and returns the `BoundStatement` (a query, a COPY or a CREATE TABLE AS).

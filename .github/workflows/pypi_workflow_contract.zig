@@ -162,7 +162,7 @@ pub const BUILD_INSTALL_TEST = "          args: build " ++ STAMP_FLAGS ++ " //py
 pub const BUILD_DRIVER = "          args: build " ++ STAMP_FLAGS ++ " //python/smoke:pypi_smoke --out ${{ runner.temp }}/pypi/smoke/pypi_smoke";
 pub const BUILD_PYTHONS = "          args: build //python:supported_pythons[linux-x86_64] --out ${{ runner.temp }}/pypi/smoke/pythons.json";
 pub const BUILD_DIST = "        run: '\"$RUNNER_TEMP/pypi/smoke/pypi_smoke\" dist --wheel \"$RUNNER_TEMP/pypi/built/komira.whl\" --out \"$RUNNER_TEMP/pypi/dist\" --record \"$RUNNER_TEMP/pypi/smoke/built.txt\" --github-output \"$GITHUB_OUTPUT\"'";
-pub const BUILD_COPY = "        run: cp python/examples/quickstart.py python/examples/quickstart.expected python/examples/readings.parquet src/so/abi/komira.tsv \"$RUNNER_TEMP/pypi/smoke/\"";
+pub const BUILD_COPY = "        run: cp python/examples/quickstart.py python/examples/quickstart.expected src/so/abi/komira.tsv \"$RUNNER_TEMP/pypi/smoke/\"";
 pub const BUILD_MATRIX = "        run: '\"$RUNNER_TEMP/pypi/smoke/pypi_smoke\" matrix --pythons \"$RUNNER_TEMP/pypi/smoke/pythons.json\" --platform linux-x86_64 --github-output \"$GITHUB_OUTPUT\"'";
 pub const BUILD_MATRIX_OUTPUT = "      matrix: ${{ steps.matrix.outputs.matrix }}";
 const BUILD_LINES = [_][]const u8{
@@ -235,7 +235,7 @@ fn indexSpec(comptime idx: []const u8, comptime title: []const u8, comptime repo
         .verify_step = "      - name: " ++ title ++ " serves the wheel as built",
         .verify_run = "        run: '\"$RUNNER_TEMP/pypi/smoke/pypi_smoke\" verify --index " ++ idx ++ " --dist dist --attempts 5 --delay 30'",
         .install_step = "      - name: pip installs komira from " ++ title ++ " and the quickstart prints what it should",
-        .install_run = "        run: '\"$RUNNER_TEMP/pypi/smoke/pypi_smoke\" install --index " ++ idx ++ " --dist dist --python \"$PYTHON\" --example " ++ smoke ++ "quickstart.py\" --expect " ++ smoke ++ "quickstart.expected\" --data " ++ smoke ++ "readings.parquet\" --abi-table " ++ smoke ++ "komira.tsv\" --work \"$RUNNER_TEMP/pypi/install\" --attempts 5 --delay 30'",
+        .install_run = "        run: '\"$RUNNER_TEMP/pypi/smoke/pypi_smoke\" install --index " ++ idx ++ " --dist dist --python \"$PYTHON\" --example " ++ smoke ++ "quickstart.py\" --expect " ++ smoke ++ "quickstart.expected\" --abi-table " ++ smoke ++ "komira.tsv\" --work \"$RUNNER_TEMP/pypi/install\" --attempts 5 --delay 30'",
     };
 }
 

@@ -20,7 +20,7 @@
 # Mojo runtime libraries and requires no distribution of Modular's; its one requirement is pyarrow.
 #
 # THE RECORD. The build writes `built.txt` (the wheel's file name, sha256 and size, `pypi_smoke dist
-# --record`) beside the driver, the quickstart, its expected output, its data, the ABI table and the
+# --record`) beside the driver, the quickstart, its expected output, the ABI table and the
 # list of the supported Pythons; that directory is the smoke artifact. When every TestPyPI smoke job
 # of the version passed, `testpypi-passed` saves it in the Actions cache of main under the key
 # `pypi-passed-linux-x86_64-<version>` (a cache key is written once; a run on a pull request cannot
@@ -95,12 +95,23 @@
 # delete the `schedule:` entry in a pull request (docs/ci.md, "The promotion").
 #
 # WHAT THE SMOKE PROVES: the index serves the bytes that were built, with the METADATA that was built,
-# and `pip install komira==<version>` into an empty environment (the dependencies from the real PyPI,
-# komira from the index under test, nothing else) gives a package that imports, reports its version and
-# the engine's ABI version, and registers a Parquet file in a session and closes it: on Linux x86_64,
-# on every supported CPython (python/pythons.bzl holds the exact versions). WHAT IT DOES NOT PROVE: any
-# query result, another platform (the macOS arm64 wheel is pypi-macos-arm64.yml's), or a patch release
-# of a supported Python other than the one its job installs.
+# and after `pip install komira==<version>` into an empty environment (the dependencies from the real
+# PyPI, komira from the index under test or, in `wheel-user-test`, from the dist directory, nothing
+# else) the README's quickstart runs from the installed package only (`python -I` in a directory
+# holding only the program). It imports, reports its version and the engine's ABI version, writes a
+# small Parquet file with the installed pyarrow, registers it, runs an aggregate and a GROUP BY with an
+# aggregate and an ORDER BY, reads answers as rows, as a pyarrow Table with its schema, with
+# `to_reader()` and through the Arrow PyCapsule interface, and every printed value equals
+# quickstart.expected. A missing file and a SQL syntax error raise KomiraError with messages naming the
+# file (its absolute path, resolved against the working directory) and the line and column; the session
+# closes. On Linux x86_64, on every supported CPython (python/pythons.bzl holds the exact versions).
+# WHAT IT DOES NOT PROVE: another platform (the macOS arm64 wheel is pypi-macos-arm64.yml's), a patch
+# release of a supported Python other than the one its job installs, pandas or polars results (the
+# package has none), queries beyond the quickstart's, or performance.
+#
+# THE SAME QUICKSTART runs in two earlier places. The pull request check runs it against the installed
+# wheel on the farm (//python:wheel_install_test, python/tests/test_installed.py) without any upload,
+# and the per-merge `wheel-user-test` runs it with pip on the wheel file before any upload.
 name: pypi
 
 # The push filter is release.yml's: a push of documentation alone starts no run (the stamp does not
@@ -214,8 +225,8 @@ jobs:
         run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" dist --wheel "$RUNNER_TEMP/pypi/built/komira.whl" --out "$RUNNER_TEMP/pypi/dist" --record "$RUNNER_TEMP/pypi/smoke/built.txt" --github-output "$GITHUB_OUTPUT"'
       # What the user test and the smoke jobs run and hold the output to, beside the driver: those jobs
       # have no checkout, and the promotion of this version runs the same files.
-      - name: the quickstart, its expected output, its data and the ABI table
-        run: cp python/examples/quickstart.py python/examples/quickstart.expected python/examples/readings.parquet src/so/abi/komira.tsv "$RUNNER_TEMP/pypi/smoke/"
+      - name: the quickstart, its expected output and the ABI table
+        run: cp python/examples/quickstart.py python/examples/quickstart.expected src/so/abi/komira.tsv "$RUNNER_TEMP/pypi/smoke/"
       # One entry of `wheel-user-test` and of the TestPyPI smoke per supported Python.
       - name: the Pythons of the user test and the smoke
         id: matrix
@@ -268,7 +279,7 @@ jobs:
       - name: pip installs the wheel file into an empty environment and the quickstart prints what it should
         env:
           PYTHON: ${{ steps.python.outputs.python-path }}
-        run: '"$RUNNER_TEMP/wheel/smoke/pypi_smoke" install --index dist --dist "$RUNNER_TEMP/wheel/dist" --python "$PYTHON" --example "$RUNNER_TEMP/wheel/smoke/quickstart.py" --expect "$RUNNER_TEMP/wheel/smoke/quickstart.expected" --data "$RUNNER_TEMP/wheel/smoke/readings.parquet" --abi-table "$RUNNER_TEMP/wheel/smoke/komira.tsv" --work "$RUNNER_TEMP/wheel/install"'
+        run: '"$RUNNER_TEMP/wheel/smoke/pypi_smoke" install --index dist --dist "$RUNNER_TEMP/wheel/dist" --python "$PYTHON" --example "$RUNNER_TEMP/wheel/smoke/quickstart.py" --expect "$RUNNER_TEMP/wheel/smoke/quickstart.expected" --abi-table "$RUNNER_TEMP/wheel/smoke/komira.tsv" --work "$RUNNER_TEMP/wheel/install"'
 
   # TestPyPI: prints the size of the project on both indexes, asks which state the version is in and
   # uploads for `absent`. The job holds the `id-token: write` that TestPyPI exchanges for an upload
@@ -320,7 +331,7 @@ jobs:
           packages-dir: dist
 
   # The smoke on TestPyPI, on a fresh runner with the Python a user has, one job per supported Python.
-  # The quickstart, its data and the ABI table are the record's (the smoke artifact); the wheel it
+  # The quickstart and the ABI table are the record's (the smoke artifact); the wheel it
   # installs comes from the index, never from the artifact. No checkout, no identity, no permission.
   testpypi-smoke:
     needs: [build, testpypi]
@@ -352,7 +363,7 @@ jobs:
       - name: pip installs komira from TestPyPI and the quickstart prints what it should
         env:
           PYTHON: ${{ steps.python.outputs.python-path }}
-        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" install --index testpypi --dist dist --python "$PYTHON" --example "$RUNNER_TEMP/pypi/smoke/quickstart.py" --expect "$RUNNER_TEMP/pypi/smoke/quickstart.expected" --data "$RUNNER_TEMP/pypi/smoke/readings.parquet" --abi-table "$RUNNER_TEMP/pypi/smoke/komira.tsv" --work "$RUNNER_TEMP/pypi/install" --attempts 5 --delay 30'
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" install --index testpypi --dist dist --python "$PYTHON" --example "$RUNNER_TEMP/pypi/smoke/quickstart.py" --expect "$RUNNER_TEMP/pypi/smoke/quickstart.expected" --abi-table "$RUNNER_TEMP/pypi/smoke/komira.tsv" --work "$RUNNER_TEMP/pypi/install" --attempts 5 --delay 30'
 
   # The record that this version passed: it runs only when every TestPyPI smoke job succeeded (a
   # matrix job succeeds when each of its entries did), and saves the smoke artifact, which holds
@@ -532,7 +543,7 @@ jobs:
       - name: pip installs komira from PyPI and the quickstart prints what it should
         env:
           PYTHON: ${{ steps.python.outputs.python-path }}
-        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" install --index pypi --dist dist --python "$PYTHON" --example "$RUNNER_TEMP/pypi/smoke/quickstart.py" --expect "$RUNNER_TEMP/pypi/smoke/quickstart.expected" --data "$RUNNER_TEMP/pypi/smoke/readings.parquet" --abi-table "$RUNNER_TEMP/pypi/smoke/komira.tsv" --work "$RUNNER_TEMP/pypi/install" --attempts 5 --delay 30'
+        run: '"$RUNNER_TEMP/pypi/smoke/pypi_smoke" install --index pypi --dist dist --python "$PYTHON" --example "$RUNNER_TEMP/pypi/smoke/quickstart.py" --expect "$RUNNER_TEMP/pypi/smoke/quickstart.expected" --abi-table "$RUNNER_TEMP/pypi/smoke/komira.tsv" --work "$RUNNER_TEMP/pypi/install" --attempts 5 --delay 30'
 
   # The promotion's verdict, as result-testpypi is the push run's. The notices come first, the
   # failures after them, and the notice `already published` last, so it prints only when nothing failed.

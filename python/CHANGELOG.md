@@ -18,6 +18,14 @@ install page shows names it.
   syntax error, an unknown table or a refused construct raises `KomiraError` from `sql` itself, with the
   engine's message. A result still reads after its session is closed. `komira.Result` is a new public name; a requested
   schema on `__arrow_c_stream__` raises a `KomiraError`.
+- **Where a syntax error is.** A statement the engine cannot parse raises `KomiraError` from `sql`
+  with a message that ends with where it stopped parsing, `at line <L>, column <C>`:
+  `parse: SQL syntax error: expected keyword 'by' at line 1, column 42`.
+- **The quickstart.** The README and the install page show a new first program that needs no file
+  beside it: it writes a small Parquet file with pyarrow, runs an aggregate and a GROUP BY, reads the
+  answers as rows, as a pyarrow Table, with `to_reader()` and with `pyarrow.table(result)`, and shows
+  the message of a missing file and of a syntax error. Both pages show what it prints. The
+  `readings.parquet` the earlier program downloaded is no longer needed.
 - **pyarrow.** The wheel requires `pyarrow>=25.0.1`, so `pip install komira` installs it; it had no
   requirement.
 - **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its

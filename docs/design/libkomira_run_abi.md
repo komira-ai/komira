@@ -169,7 +169,8 @@ to every later run on the context.
   list ([credentials_and_writes.md](credentials_and_writes.md#10-writes)).
 - **The error text.** **PROPOSED:** the last error text is `<step>: <reason>`,
   where the step is the one that refused (parse, bind, optimize, lower or
-  execute). That text is for people, and bindings do not parse it (§6).
+  execute). A refusal of the parse step ends with ` at line <L>, column <C>`, where
+  the text stopped parsing. That text is for people, and bindings do not parse it (§6).
 
 ### What `komira_plan_stream` runs: the plan door
 

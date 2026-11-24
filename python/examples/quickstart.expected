@@ -1,5 +1,15 @@
 <version>
 <abi_version>
-[{'n': 1}]
-[{'n': 5, 'total': 152.5}]
+[{'days': 6, 'rain': 9.5}]
+city: string
+days: int64 not null
+mean: double
+hottest: int64
+{'city': 'Lima', 'days': 2, 'mean': 19.0, 'hottest': 20}
+{'city': 'Oslo', 'days': 3, 'mean': 3.0, 'hottest': 5}
+{'city': 'Pune', 'days': 1, 'mean': 31.0, 'hottest': 31}
+[{'city': 'Pune', 'temp': 31}, {'city': 'Lima', 'temp': 20}, {'city': 'Lima', 'temp': 18}]
+['Pune', 'Lima', 'Lima']
+parquet footer '<cwd>/no_such_file.parquet': no such file, or it cannot be read
+parse: SQL syntax error: expected keyword 'by' at line 1, column 42
 True

@@ -49,8 +49,9 @@
 # false, so a macOS run never waits behind, replaces or is replaced by a pypi.yml run. To stop the macOS
 # promotion: disable this workflow (Actions > pypi-macos-arm64 > Disable workflow).
 #
-# WHAT THE SMOKE PROVES: as pypi.yml's, for macOS arm64 on the hosted runner's macOS, on every supported
-# CPython. WHAT IT DOES NOT PROVE: a macOS older than the runner's (the wheel claims 11.0).
+# WHAT THE SMOKE PROVES: as pypi.yml's (the quickstart, which writes its own Parquet file and needs no
+# data file, runs from the installed package and prints quickstart.expected), for macOS arm64 on the
+# hosted runner's macOS, on every supported CPython. WHAT IT DOES NOT PROVE: a macOS older than the runner's (the wheel claims 11.0).
 name: pypi-macos-arm64
 
 # The push filter is pypi.yml's, which is release.yml's.
@@ -197,9 +198,9 @@ jobs:
         if: steps.testpypi_file.outputs.present != 'true'
         run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke" dist --wheel "$RUNNER_TEMP/pypi-macos-arm64/built/komira.whl" --out "$RUNNER_TEMP/pypi-macos-arm64/dist" --record "$RUNNER_TEMP/pypi-macos-arm64/smoke/built.txt" --github-output "$GITHUB_OUTPUT"'
       # What the macOS smoke jobs run and hold the output to, beside the drivers: they have no checkout.
-      - name: the quickstart, its expected output, its data and the ABI table
+      - name: the quickstart, its expected output and the ABI table
         if: steps.testpypi_file.outputs.present != 'true'
-        run: cp python/examples/quickstart.py python/examples/quickstart.expected python/examples/readings.parquet src/so/abi/komira.tsv "$RUNNER_TEMP/pypi-macos-arm64/smoke/"
+        run: cp python/examples/quickstart.py python/examples/quickstart.expected src/so/abi/komira.tsv "$RUNNER_TEMP/pypi-macos-arm64/smoke/"
       - name: keep the dist directory
         if: steps.testpypi_file.outputs.present != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -290,7 +291,7 @@ jobs:
       - name: pip installs komira from TestPyPI on macOS and the quickstart prints what it should
         env:
           PYTHON: ${{ steps.python.outputs.python-path }}
-        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64" install --index testpypi --dist dist --python "$PYTHON" --example "$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.py" --expect "$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.expected" --data "$RUNNER_TEMP/pypi-macos-arm64/smoke/readings.parquet" --abi-table "$RUNNER_TEMP/pypi-macos-arm64/smoke/komira.tsv" --work "$RUNNER_TEMP/pypi-macos-arm64/install" --attempts 5 --delay 30'
+        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64" install --index testpypi --dist dist --python "$PYTHON" --example "$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.py" --expect "$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.expected" --abi-table "$RUNNER_TEMP/pypi-macos-arm64/smoke/komira.tsv" --work "$RUNNER_TEMP/pypi-macos-arm64/install" --attempts 5 --delay 30'
 
   # The record that this version's macOS wheel passed, as pypi.yml's `testpypi-passed` is the Linux one's.
   testpypi-passed-macos-arm64:
@@ -455,7 +456,7 @@ jobs:
       - name: pip installs komira from PyPI on macOS and the quickstart prints what it should
         env:
           PYTHON: ${{ steps.python.outputs.python-path }}
-        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64" install --index pypi --dist dist --python "$PYTHON" --example "$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.py" --expect "$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.expected" --data "$RUNNER_TEMP/pypi-macos-arm64/smoke/readings.parquet" --abi-table "$RUNNER_TEMP/pypi-macos-arm64/smoke/komira.tsv" --work "$RUNNER_TEMP/pypi-macos-arm64/install" --attempts 5 --delay 30'
+        run: '"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64" install --index pypi --dist dist --python "$PYTHON" --example "$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.py" --expect "$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.expected" --abi-table "$RUNNER_TEMP/pypi-macos-arm64/smoke/komira.tsv" --work "$RUNNER_TEMP/pypi-macos-arm64/install" --attempts 5 --delay 30'
 
   # The verdict of the macOS promotion, as pypi.yml's `result-pypi` is the Linux one's.
   result-pypi-macos-arm64:

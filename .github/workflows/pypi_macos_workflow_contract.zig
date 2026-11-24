@@ -107,7 +107,7 @@ pub const MAC_TESTPYPI_SMOKE_LINES = [_][]const u8{
     "      - name: pip installs komira from TestPyPI on macOS and the quickstart prints what it should",
     "        env:",
     "          PYTHON: ${{ steps.python.outputs.python-path }}",
-    "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64\" install --index testpypi --dist dist --python \"$PYTHON\" --example \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.py\" --expect \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.expected\" --data \"$RUNNER_TEMP/pypi-macos-arm64/smoke/readings.parquet\" --abi-table \"$RUNNER_TEMP/pypi-macos-arm64/smoke/komira.tsv\" --work \"$RUNNER_TEMP/pypi-macos-arm64/install\" --attempts 5 --delay 30'",
+    "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64\" install --index testpypi --dist dist --python \"$PYTHON\" --example \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.py\" --expect \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.expected\" --abi-table \"$RUNNER_TEMP/pypi-macos-arm64/smoke/komira.tsv\" --work \"$RUNNER_TEMP/pypi-macos-arm64/install\" --attempts 5 --delay 30'",
 };
 pub const MAC_PASSED_LINES = [_][]const u8{
     "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
@@ -219,7 +219,7 @@ pub const MAC_PYPI_SMOKE_LINES = [_][]const u8{
     "      - name: pip installs komira from PyPI on macOS and the quickstart prints what it should",
     "        env:",
     "          PYTHON: ${{ steps.python.outputs.python-path }}",
-    "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64\" install --index pypi --dist dist --python \"$PYTHON\" --example \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.py\" --expect \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.expected\" --data \"$RUNNER_TEMP/pypi-macos-arm64/smoke/readings.parquet\" --abi-table \"$RUNNER_TEMP/pypi-macos-arm64/smoke/komira.tsv\" --work \"$RUNNER_TEMP/pypi-macos-arm64/install\" --attempts 5 --delay 30'",
+    "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_smoke_macos_arm64\" install --index pypi --dist dist --python \"$PYTHON\" --example \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.py\" --expect \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.expected\" --abi-table \"$RUNNER_TEMP/pypi-macos-arm64/smoke/komira.tsv\" --work \"$RUNNER_TEMP/pypi-macos-arm64/install\" --attempts 5 --delay 30'",
 };
 pub const MAC_RESULT_PYPI_LINES = [_][]const u8{
     "      - name: the newer macOS wheels on TestPyPI that were not promoted",
