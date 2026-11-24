@@ -54,6 +54,9 @@
 #                                 several columns of mixed types
 #            SINK_SORT, key NONE  `SortSink` (`sink_sort`), from the `SortSinkData`
 #                                 the descriptor's `sink_param_id` names
+#            SINK_TOPN, key NONE  `SortSink` keeping a range of its order, from
+#                                 the `TopNSinkData` the descriptor's
+#                                 `sink_param_id` names
 #            SINK_PARTITION_BY,   `WindowSink` (`sink_window`), from the
 #            key NONE             `PartitionBySinkData` the descriptor's
 #                                 `sink_param_id` names: the rows sorted by the
@@ -151,7 +154,9 @@ from physical_plan.physical_plan import (
     SINK_HASH_BUILD,
     SINK_PARTITION_BY,
     SINK_SORT,
+    SINK_TOPN,
     SortSinkData,
+    TopNSinkData,
     PartitionBySinkData,
     SINK_ORIENT_COLUMNAR,
     SINK_ORIENT_DICT_ENCODED,
@@ -282,6 +287,7 @@ struct RealBuilder[
     var _parts: List[_OpParts]
     var _agg_sinks: List[AggSinkData]
     var _sort_sinks: List[SortSinkData]
+    var _topn_sinks: List[TopNSinkData]
     var _window_sinks: List[PartitionBySinkData]
     var _segment_pool: SegmentPool
     var _opener: Optional[Self.R]
@@ -299,6 +305,7 @@ struct RealBuilder[
         self._parts = List[_OpParts]()
         self._agg_sinks = List[AggSinkData]()
         self._sort_sinks = List[SortSinkData]()
+        self._topn_sinks = List[TopNSinkData]()
         self._window_sinks = List[PartitionBySinkData]()
         self._segment_pool = SegmentPool()
         self._opener = None
@@ -327,6 +334,11 @@ struct RealBuilder[
         self._sort_sinks.append(data^)
         return len(self._sort_sinks) - 1
 
+    def add_topn_sink(mut self, var data: TopNSinkData) -> Int:
+        """Keep `data` for SINK_TOPN segments; returns the id their
+        `sink_param_id` names."""
+        self._topn_sinks.append(data^)
+        return len(self._topn_sinks) - 1
     def add_window_sink(mut self, var data: PartitionBySinkData) -> Int:
         """Keep `data` for SINK_PARTITION_BY segments; returns the id their
         `sink_param_id` names."""
@@ -685,6 +697,26 @@ struct RealBuilder[
                         rows_schema^,
                     )
                 )
+            if desc.sink_kind == SINK_TOPN and key == KEY_DTYPE_NONE:
+                var id = desc.sink_param_id
+                if id < 0 or id >= len(self._topn_sinks):
+                    raise Error(
+                        "pipeline_exec: segment "
+                        + String(desc.seg_id)
+                        + " names top-n sink data "
+                        + String(id)
+                        + ", and the builder holds "
+                        + String(len(self._topn_sinks))
+                    )
+                var rows_schema = self._result_schema(desc, source_schema)
+                return Self.Sink.third(
+                    SortSink(
+                        self._topn_sinks[id],
+                        self._segment_pool.share(),
+                        desc.seg_id,
+                        rows_schema^,
+                    )
+                )
             if desc.sink_kind == SINK_PARTITION_BY and key == KEY_DTYPE_NONE:
                 var id = desc.sink_param_id
                 if id < 0 or id >= len(self._window_sinks):
@@ -713,6 +745,7 @@ struct RealBuilder[
             " SINK_ORIENT_COLUMNAR or SINK_ORIENT_DICT_ENCODED),"
             " (SINK_AGG, KEY_DTYPE_COMPOSITE, SINK_ORIENT_COLUMNAR),"
             " (SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR),"
+            " (SINK_TOPN, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR),"
             " (SINK_PARTITION_BY, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) and"
             " (SINK_HASH_BUILD, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR) are"
         )

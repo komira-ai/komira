@@ -12,7 +12,10 @@
 #   * A subtree with a breaker or a limit is cut once: the canonical position
 #     and every reference read its segment over an E3 edge, a union naming it
 #     once per branch; operators fused after the breaker end it in a collect;
-#     a sort's readers are sorted inputs, so a limit above one is refused.
+#     a sort's and a top-n's readers are sorted inputs, so a limit above one
+#     is refused; a limit over a sort that is not itself shared (it may
+#     read a reference) is still one range of it (SINK_TOPN), and one whose
+#     sort is shared is refused.
 #   * A subtree of scans, filters, projections and unions is cut again at
 #     every reference over the same scan facts (statistics and dictionary
 #     encoded keys), also when it holds a reference itself, and the
@@ -20,7 +23,8 @@
 #   * In a join the right child is walked first, as the producer visits it:
 #     a self-join cuts the right scan and recuts it on the left, each child's
 #     scans keep their facts (under a left child of every kind the cutter
-#     cuts, a nested join included), and a shared join is cut once.
+#     cuts, a top-n and a nested join included), and a shared join is cut
+#     once.
 #   * A window is a breaker like a sort: one read twice is cut once and its
 #     readers are sorted inputs, a reference under one is found, a left child
 #     that is one keeps its scans' facts, and a canonical subtree holding one
@@ -57,6 +61,7 @@ from physical_plan.physical_plan import (
     SINK_ORIENT_DICT_ENCODED,
     SINK_PARTITION_BY,
     SINK_SORT,
+    SINK_TOPN,
     SOURCE_CONCAT,
     SOURCE_PARQUET as SEG_SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
@@ -383,6 +388,138 @@ def test_a_shared_sort_is_a_sorted_input_for_every_reader() raises:
         LOWERING_UNCUTTABLE_NODE,
         "a limit over a sorted stream",
     )
+
+
+def _top3(var child: LogicalPlan) -> LogicalPlan:
+    return LogicalPlan.topn(_keys("k"), _ascending(), 3, child^)
+
+
+def _count_sinks(lp: LoweredPlan, kind: UInt8) -> Int:
+    var n = 0
+    for i in range(len(lp.segments)):
+        if lp.segments[i].sink_kind == kind:
+            n += 1
+    return n
+
+
+def test_a_shared_top_n_is_cut_once_and_read_by_both_branches() raises:
+    var canonical = _top3(_scan())
+    var plan = _union(_two(canonical.copy(), _ref_to(canonical)))
+    var lp = _lowered(plan, _inputs(1))
+    assert_equal(len(lp.segments), 2)
+    assert_equal(lp.segments[0].sink_kind, SINK_TOPN)
+    assert_equal(len(lp.params.topn), 1)
+    assert_equal(lp.params.topn[0].n, 3)
+    assert_equal(lp.params.topn[0].offset, 0)
+    _expect_concat(lp, 1, _ids(0, 0))
+    # Its readers are sorted inputs, as a shared sort's are: a limit above
+    # the reference, or above the canonical position, is refused, and the
+    # top-n is still the segment both read.
+    var limited = _union(
+        _two(canonical.copy(), LogicalPlan.limit(2, _ref_to(canonical)))
+    )
+    _refused_with(
+        _message(limited, _inputs(1)),
+        LOWERING_UNCUTTABLE_NODE,
+        "a limit over a sorted stream",
+    )
+    var first_limited = _union(
+        _two(LogicalPlan.limit(2, canonical.copy(), 1), _ref_to(canonical))
+    )
+    _refused_with(
+        _message(first_limited, _inputs(1)),
+        LOWERING_UNCUTTABLE_NODE,
+        "a limit over a sorted stream",
+    )
+
+
+def test_a_limit_over_a_sort_beside_a_shared_subtree_is_still_a_range() raises:
+    # The plan shares a sort over b; the limit with an offset over the sort
+    # of a is no shared subtree, so it is a range.
+    var shared = _sorted(_scan("b.parquet"))
+    var branches = List[LogicalPlan]()
+    branches.append(LogicalPlan.limit(2, _sorted(_scan("a.parquet")), 1))
+    branches.append(shared.copy())
+    branches.append(_ref_to(shared))
+    var lp = _lowered(_union(branches^), _inputs(2))
+    assert_equal(_count_sinks(lp, SINK_TOPN), 1)
+    assert_equal(_count_sinks(lp, SINK_SORT), 1)
+    assert_equal(len(lp.params.topn), 1)
+    assert_equal(lp.params.topn[0].n, 2)
+    assert_equal(lp.params.topn[0].offset, 1)
+
+
+def _kn(var child: LogicalPlan) -> LogicalPlan:
+    """`child`'s columns k and n, as a projection over it."""
+    var exprs = ExprArray()
+    exprs.append(Expr.col_ref("k"))
+    exprs.append(Expr.col_ref("n"))
+    return LogicalPlan.project(exprs^, child^)
+
+
+def test_a_limit_over_a_sort_that_holds_a_reference_is_a_range() raises:
+    # X = count by k, shared. The sort reads a reference to X, but neither it
+    # nor the projection and the limit above it is itself shared, so the
+    # chain is one range: (offset 1, 2 rows) of the inner limit's 5.
+    var x = _count_by(_scan("x.parquet"))
+    var chain = LogicalPlan.limit(
+        2, _kn(LogicalPlan.limit(5, _sorted(_ref_to(x)))), 1
+    )
+    var plan = _union(_two(_union(_two(x.copy(), _ref_to(x))), chain^))
+    var lp = _lowered(plan, _inputs(1))
+    assert_equal(_count_sinks(lp, SINK_TOPN), 1)
+    assert_equal(_count_sinks(lp, SINK_SORT), 0)
+    assert_equal(len(lp.params.topn), 1)
+    assert_equal(lp.params.topn[0].n, 2)
+    assert_equal(lp.params.topn[0].offset, 1)
+
+
+def test_a_limit_over_a_shared_sort_that_holds_a_reference_is_refused() raises:
+    # The sort over a reference to X is itself shared: its reference carries
+    # the hash of the sort over X, as the producer saw it before folding X.
+    # Its other reader reads it whole, so a limit over it, directly or
+    # through a projection, keeps rows of a sorted stream and is refused.
+    var x = _count_by(_scan("x.parquet"))
+    var shared_sort = _sorted(_ref_to(x))
+    var limits = List[LogicalPlan]()
+    limits.append(LogicalPlan.limit(2, shared_sort.copy(), 1))
+    limits.append(LogicalPlan.limit(2, _kn(shared_sort.copy())))
+    for i in range(len(limits)):
+        var branches = List[LogicalPlan]()
+        branches.append(_union(_two(x.copy(), _ref_to(x))))
+        branches.append(limits[i].copy())
+        branches.append(_ref_to(_sorted(x.copy())))
+        _refused_with(
+            _message(_union(branches^), _inputs(1)),
+            LOWERING_UNCUTTABLE_NODE,
+            "a limit over a sorted stream that is not one range of its sort",
+        )
+
+
+def test_a_left_child_with_a_top_n_keeps_its_scans_facts() raises:
+    # Left: a top-n over l0 (scan 0) and a limit with an offset over a sort
+    # of l1 (scan 1). Right: X UNION ALL ref(X) (scan 2), walked first from
+    # scan 2, which counts the top-n's scan.
+    var branches = List[LogicalPlan]()
+    branches.append(_top3(_scan("l0.parquet")))
+    branches.append(LogicalPlan.limit(2, _sorted(_scan("l1.parquet")), 1))
+    var x = _scan("x.parquet")
+    var plan = _inner_join(_union(branches^), _union(_two(x.copy(), _ref_to(x))))
+    var inputs = LoweringInputs()
+    inputs.add_scan(Optional[TableStats](_stats(1)))
+    inputs.add_scan(Optional[TableStats](_stats(2)))
+    inputs.add_scan(Optional[TableStats](_stats(99)))
+    var lp = _lowered(plan, inputs)
+    var paths = List[String]()
+    paths.append("l0.parquet")
+    paths.append("l1.parquet")
+    paths.append("x.parquet")
+    var rows = List[Int]()
+    rows.append(1)
+    rows.append(2)
+    rows.append(99)
+    _expect_parquet_cards(lp, paths, rows)
+    assert_equal(_count_sinks(lp, SINK_TOPN), 2)
 
 
 def test_a_shared_subtree_that_holds_a_reference_is_cut_once() raises:

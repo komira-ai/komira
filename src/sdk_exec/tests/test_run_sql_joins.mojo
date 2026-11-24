@@ -10,8 +10,8 @@
 # have no partner on the other side, so a NULL key that wrongly matched, or a
 # lost row, changes an answer.
 #
-# The full texts of Q3, Q5 and Q10 are not served (an ORDER BY ... LIMIT, a
-# multi-column group key). The queries here keep their FROM lists, their join
+# The full texts of Q3, Q5 and Q10 are not served (an ORDER BY over a DECIMAL
+# or DATE32 key, which the sort sink does not order). The queries here keep their FROM lists, their join
 # predicates written as comma joins in WHERE, and their filters, with an
 # aggregate the engine serves: a revenue sum grouped by one column.
 # The expected answers are computed in this file, row by row, with nested
@@ -38,8 +38,8 @@
 #     INT32 = INT32, INT64 = INT64, INT32 = INT64 and a key with repeated,
 #     NULL and unmatched values count the pairs of equal non-NULL keys.
 #   * test_a_refused_tpch_text_stays_a_named_refusal: the unedited text of Q3
-#     is a refusal at step `lower` whose reason starts with LOWERING_, and the
-#     context answers a join afterwards.
+#     is a refusal at step `execute` that names its DECIMAL revenue sort key,
+#     and the context answers a join afterwards.
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
@@ -63,7 +63,7 @@ from scalar_arithmetic.decimal_arith import I128
 from sdk_exec.engine_catalog import register_parquet
 from sdk_exec.engine_context import EngineContext
 from sdk_exec.engine_options import EngineOptions
-from sdk_exec.engine_sql import STEP_LOWER, SqlOutcome, run_sql
+from sdk_exec.engine_sql import STEP_EXECUTE, SqlOutcome, run_sql
 
 
 # Day numbers (days since the epoch) of the dates the queries name.
@@ -725,11 +725,13 @@ def test_a_refused_tpch_text_stays_a_named_refusal() raises:
     _register_all(ctx, t, "sql_joins_refused")
     var out = run_sql(ctx, find_query(String("tpch/q3")).text)
     assert_false(out.ok(), "the unedited Q3 is expected to stay refused")
-    assert_equal(out.refusal.value().step, String(STEP_LOWER))
+    # Its ORDER BY ... LIMIT is cut as a top-n, whose first key, the
+    # DECIMAL(38, 4) revenue, is a type the sort sink does not order.
+    assert_equal(out.refusal.value().step, String(STEP_EXECUTE))
     var reason = out.refusal.value().reason
     assert_true(
-        reason.startswith("LOWERING_"),
-        "reason '" + reason + "' does not start with 'LOWERING_'",
+        "sorts by 'revenue', of unsupported sort key type" in reason,
+        "reason '" + reason + "' does not name the revenue sort key",
     )
     assert_equal(len(out.batches), 0)
     # The refusal leaves the context answering joins.

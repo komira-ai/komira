@@ -154,7 +154,7 @@ def _plan_text(segments: String, params: String, result: Int) -> String:
 
 
 def _no_params() -> String:
-    return String("params: agg=0 sort=0 window=0 batches=0\n")
+    return String("params: agg=0 sort=0 topn=0 window=0 batches=0\n")
 
 
 def _ops(a: String, b: String = "") -> List[String]:
@@ -284,7 +284,7 @@ def test_a_join_under_an_aggregate_ends_the_probe_pipeline_in_the_aggregate() ra
         1, "SOURCE_PARQUET path=l.parquet total=True", _ops("JOIN_PROBE build_seg=0 on=[k=k2]"),
         "(SINK_AGG, STRING, COLUMNAR)", 0, "0/E3", _policy().join_probe_morsel_rows(join_schema), 0,
     )
-    var params = String("params: agg=1 sort=0 window=0 batches=0\n")
+    var params = String("params: agg=1 sort=0 topn=0 window=0 batches=0\n")
     params += "  agg 0: group_by=[" + String(_col("s")) + "] aggs=["
     params += String(AggExpr(AGG_COUNT, Optional[Expr](), Optional[String]("n"))) + "]\n"
     var expected = _plan_text(segments, params, 1)
@@ -358,7 +358,7 @@ def test_a_build_child_that_is_an_aggregate_adds_a_segment_before_the_build() ra
         2, "SOURCE_PARQUET path=l.parquet total=True", _ops("JOIN_PROBE build_seg=1 on=[k=k2]"),
         _COLLECT, -1, "1/E3", _policy().join_probe_morsel_rows(out_schema), 0,
     )
-    var params = String("params: agg=1 sort=0 window=0 batches=0\n")
+    var params = String("params: agg=1 sort=0 topn=0 window=0 batches=0\n")
     params += "  agg 0: group_by=[" + String(_col("k2")) + "] aggs=["
     params += String(AggExpr(AGG_COUNT, Optional[Expr](), Optional[String]("n"))) + "]\n"
     var expected = _plan_text(segments, params, 2)

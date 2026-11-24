@@ -13,10 +13,14 @@
 #             ungrouped frame, OP_UDF_FRAME): appended to the open pipeline's
 #             `ops`; a projection column that is a user-function call adds an
 #             OP_UDF_APPLY before its OP_PROJECT (`cut_project`);
-#   breaker   PLAN_AGGREGATE, PLAN_DISTINCT, PLAN_SORT, PLAN_PARTITION_BY (a
-#             window): ends the open pipeline in a sink and opens a pipeline
-#             whose source is that segment's output (SOURCE_SINK_OUTPUT),
-#             joined by an E3 edge.
+#   breaker   PLAN_AGGREGATE, PLAN_DISTINCT, PLAN_SORT, PLAN_TOPN,
+#             PLAN_PARTITION_BY (a window): ends the open pipeline in a sink
+#             and opens a pipeline whose source is that segment's output
+#             (SOURCE_SINK_OUTPUT), joined by an E3 edge.
+#   range     a PLAN_LIMIT that reaches a PLAN_SORT or a PLAN_TOPN through
+#             only projections and limits: the chain is one range of the
+#             sort's order, cut as a PLAN_TOPN is (`_walk_range`), with the
+#             projections fused above it.
 #   union     PLAN_UNION: each branch ends in a segment of its own, and a
 #             pipeline opens whose source is the concatenation of their
 #             outputs in branch order (SOURCE_CONCAT), joined by an E3 edge to
@@ -37,16 +41,16 @@
 # This module is the dispatch on the node's tag (`_walk_node`) and, around it,
 # the resolution of shared subplans (`_walk`, `_resolve`). Each arm is its own
 # module: `cut_scan`, `cut_filter`, `cut_project`, `cut_limit`,
-# `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_window`, `cut_union`,
-# `cut_join`, `cut_map_batches`, `cut_step` and `cut_shared`; what they share
-# (the open pipeline, the cutter's state and the close and reopen of a
-# breaker) is `cut_state`, and what a user-function call is held to is
-# `udf_check`. The filter, project, limit, aggregate, distinct, frame, join
-# and window arms have two halves: the first holds every check that refuses
-# the node itself and runs before the child (or the children) is walked; the
-# second fuses onto, or closes, the child's pipeline. The sort arm has only
-# the second. The union arm checks its branches' schemas before it walks
-# them, walks them in order, ends each in a segment and opens the
+# `cut_aggregate`, `cut_distinct`, `cut_sort`, `cut_topn`, `cut_window`,
+# `cut_union`, `cut_join`, `cut_map_batches`, `cut_step` and `cut_shared`; what
+# they share (the open pipeline, the cutter's state and the close and reopen of
+# a breaker) is `cut_state`, and what a user-function call is held to is
+# `udf_check`. The filter, project, limit, top-n, aggregate, distinct, frame,
+# join and window arms have two halves: the first holds every check that
+# refuses the node itself and runs before the child (or the children) is
+# walked; the second fuses onto, or closes, the child's pipeline. The sort arm
+# has only the second. The union arm checks its branches' schemas before it
+# walks them, walks them in order, ends each in a segment and opens the
 # concatenation.
 #
 # The root is a SINK_COLLECT segment, unless the plan's top node is a breaker:
@@ -62,7 +66,14 @@ from lowering.cut_aggregate import _aggregate_exprs, _close_aggregate
 from lowering.cut_distinct import _distinct_keys, _close_distinct
 from lowering.cut_filter import _filter_op, _fuse_filter
 from lowering.cut_join import join_shape, _close_join
-from lowering.cut_limit import _limit_op, _fuse_limit
+from lowering.cut_limit import (
+    RowRange,
+    _check_limit,
+    _fuse_limit,
+    _limit_op,
+    _reaches_sort,
+    _sorted_stream_refusal,
+)
 from lowering.cut_map_batches import _map_batches_op, _fuse_map_batches
 from lowering.cut_project import _project_op, _fuse_project
 from lowering.cut_scan import _open_scan
@@ -78,6 +89,7 @@ from lowering.cut_shared import (
 from lowering.cut_sort import _close_sort
 from lowering.cut_step import _open_step
 from lowering.cut_state import CutResult, _Cutter, _Pipe, _uncuttable
+from lowering.cut_topn import _check_topn, _close_topn
 from lowering.cut_union import _check_union, _end_branch, _open_concat
 from lowering.cut_window import _window_data, _close_window
 from lowering.lowered_plan import (
@@ -94,6 +106,7 @@ from plan_ir.logical_plan import (
     PLAN_DISTINCT,
     PLAN_SORT,
     PLAN_LIMIT,
+    PLAN_TOPN,
     PLAN_JOIN,
     PLAN_UNION,
     PLAN_PARTITION_BY,
@@ -176,6 +189,15 @@ def _walk_node(
     if tag == PLAN_STEP:
         return _open_step(node, inputs)
     if tag == PLAN_LIMIT:
+        if _reaches_sort(node):
+            var pipe = _walk_range(cutter, node, RowRange.every_row(), inputs)
+            # A shared sort, or a shared node above it, is read whole by its
+            # other readers, so its rows are a sorted stream to this limit.
+            if len(cutter.referenced) > 0 and _range_holds_shared(
+                cutter, node.limit_data_ref().child[]
+            ):
+                raise _sorted_stream_refusal(node)
+            return pipe^
         var op = _limit_op(node)
         var pipe = _walk(cutter, node.limit_data_ref().child[], inputs)
         _fuse_limit(pipe, node, op^)
@@ -195,6 +217,8 @@ def _walk_node(
         var data = _window_data(node)
         var pipe = _walk(cutter, node.partition_by_data_ref().child[], inputs)
         return _close_window(cutter, node, pipe^, data^, inputs)
+    if tag == PLAN_TOPN:
+        return _walk_range(cutter, node, RowRange.every_row(), inputs)
     if tag == PLAN_JOIN:
         var shape = join_shape(node)
         ref jd = node.join_data_ref()
@@ -226,6 +250,79 @@ def _walk_node(
             node, "a view reference; views are resolved before lowering"
         )
     raise _uncuttable(node, "no cutter arm for this node")
+
+
+def _range_holds_shared(cutter: _Cutter, node: LogicalPlan) -> Bool:
+    """True when `node`, a node of a range's chain below its top limit (a
+    projection, a limit, or the sort or top-n that ends the chain), or a node
+    of the chain below it, is a canonical subtree: its hash is one a reference
+    names and no node of that hash was cut before. `_walk_range` cuts these
+    nodes without `_walk`, so such a node would be neither recorded nor read
+    whole by its other readers. Called after the range is cut, when every
+    reference under `node` names a subtree cut already, so its expanded form
+    is the one its producer hashed (`cut_shared._expanded`)."""
+    var h = _expanded(cutter, node).structural_hash()
+    if _names(cutter.referenced, h) and cutter._shared_at(h) < 0:
+        return True
+    if node.tag == PLAN_LIMIT:
+        return _range_holds_shared(cutter, node.limit_data_ref().child[])
+    if node.tag == PLAN_PROJECT:
+        return _range_holds_shared(cutter, node.project_data_ref().child[])
+    return False
+
+
+def _walk_range(
+    mut cutter: _Cutter,
+    node: LogicalPlan,
+    rows: RowRange,
+    inputs: LoweringInputs,
+) raises -> _Pipe:
+    """Cut `node`, a limit, projection, sort or top-n of a chain that ends
+    in a sort, keeping `rows` of its output: the range its ancestors in the
+    chain keep. A limit narrows the range and passes it on; a projection
+    passes it on and is fused above the range's segment; the sort or top-n
+    at the end closes its child in that segment."""
+    var tag = node.tag
+    if tag == PLAN_LIMIT:
+        _check_limit(node)
+        ref ld = node.limit_data_ref()
+        return _walk_range(
+            cutter, ld.child[], rows.under_limit(ld.n, ld.offset), inputs
+        )
+    if tag == PLAN_PROJECT:
+        var op = _project_op(node, inputs)
+        var pipe = _walk_range(
+            cutter, node.project_data_ref().child[], rows, inputs
+        )
+        _fuse_project(pipe, node, op^)
+        return pipe^
+    if tag == PLAN_TOPN:
+        _check_topn(node)
+        ref td = node.topn_data_ref()
+        # A top-n is the first `n` rows of its sort: a limit of `n`.
+        var pipe = _walk(cutter, td.child[], inputs)
+        return _close_topn(
+            cutter,
+            td.keys.copy(),
+            td.descending.copy(),
+            td.nulls_first.copy(),
+            rows.under_limit(td.n, 0),
+            pipe^,
+            node.output_schema,
+            inputs,
+        )
+    ref sd = node.sort_data_ref()
+    var pipe = _walk(cutter, sd.child[], inputs)
+    return _close_topn(
+        cutter,
+        sd.keys.copy(),
+        sd.descending.copy(),
+        sd.nulls_first.copy(),
+        rows,
+        pipe^,
+        node.output_schema,
+        inputs,
+    )
 
 
 def cut_plan(plan: LogicalPlan, inputs: LoweringInputs) raises -> CutResult:

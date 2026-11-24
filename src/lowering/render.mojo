@@ -304,8 +304,10 @@ def _segment_text(seg: SegmentDescPod) -> String:
 
 
 def render_lowered_plan(plan: LoweredPlan) -> String:
-    """The text of `plan`: its segments, its parameter table (a `udf` line
-    for each `UdfRef`, when the plan has any) and its result."""
+    """The text of `plan`: its segments, its parameter table (a `params:`
+    header counting the agg, sort, top-n and batch rows, then a line for each
+    aggregation, sort and top-n and a `udf` line for each `UdfRef`) and its
+    result."""
     var out = String("ir_version ") + String(plan.segments[0].ir_version) + "\n"
     for i in range(len(plan.segments)):
         out += _segment_text(plan.segments[i])
@@ -315,6 +317,8 @@ def render_lowered_plan(plan: LoweredPlan) -> String:
         + String(len(p.agg))
         + " sort="
         + String(len(p.sort))
+        + " topn="
+        + String(len(p.topn))
         + " window="
         + String(len(p.window))
         + " batches="
@@ -344,6 +348,16 @@ def render_lowered_plan(plan: LoweredPlan) -> String:
             out += " desc" if s.descending[k] else " asc"
             out += " nulls_first" if s.nulls_first[k] else " nulls_last"
         out += "\n"
+    for i in range(len(p.topn)):
+        ref t = p.topn[i]
+        out += "  topn " + String(i) + ": keys="
+        for k in range(len(t.sort_keys)):
+            if k > 0:
+                out += ", "
+            out += t.sort_keys[k]
+            out += " desc" if t.descending[k] else " asc"
+            out += " nulls_first" if t.nulls_first[k] else " nulls_last"
+        out += " offset=" + String(t.offset) + " n=" + String(t.n) + "\n"
     for i in range(len(p.window)):
         ref w = p.window[i]
         out += "  window " + String(i) + ": partition=" + _names(w.partition_keys)

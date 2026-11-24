@@ -42,8 +42,9 @@ _WRITE = read_config("komira_sql_conformance", "write", "false") == "true"
     ),
     outputs = ["answer.tsv"],
     # pipeline_exec's test_sink_float_agg_duckdb reads the answers of the
-    # agg_float_ungrouped corpus.
-    visibility = ["//src/tests/...", "//src/pipeline_exec/..."],
+    # agg_float_ungrouped corpus; sdk_exec's test_run_sql_topn those of the
+    # order_by_limit corpus.
+    visibility = ["//src/tests/...", "//src/pipeline_exec/...", "//src/sdk_exec/..."],
 ) for case in _CASES]
 
 # Each corpus's answers as one directory, <case>.tsv each: what
@@ -57,6 +58,15 @@ _WRITE = read_config("komira_sql_conformance", "write", "false") == "true"
     },
     visibility = ["//src/tests/..."],
 ) for corpus in _CORPORA]
+
+# The SELECT of each order_by_limit case as `:order_by_limit_sql/<case>`, for
+# sdk_exec's test_run_sql_topn (which runs the text through komira beside the
+# answer).
+[export_file(
+    name = "order_by_limit_sql/" + c[len("order_by_limit/"):],
+    src = "cases/" + c + ".sql",
+    visibility = ["//src/sdk_exec/..."],
+) for c in _CASES if c.split("/")[0] == "order_by_limit"]
 
 # `:<corpus>` builds every case of a corpus, `:corpus` every case. A
 # filegroup is a source to the check set's roots (tools/build/ci), so the

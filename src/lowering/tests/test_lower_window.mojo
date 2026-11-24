@@ -212,7 +212,7 @@ def test_a_scan_under_a_window_is_one_segment_that_is_the_result() raises:
         0, _PARQUET_T, _ops(), _WINDOW, 0, "none",
         _policy().default_morsel_rows(flow), 500,
     )
-    var params = String("params: agg=0 sort=0 window=1 batches=0\n")
+    var params = String("params: agg=0 sort=0 topn=0 window=1 batches=0\n")
     params += "  window 0: partition=[g] order=[o asc] exprs=[" + String(_rn()) + "]\n"
     assert_equal(
         render_lowered_plan(_lowered(plan, _inputs(500))),
@@ -239,7 +239,7 @@ def test_a_filter_and_a_projection_under_a_window_fuse_into_its_pipeline() raise
         _ops("FILTER " + String(predicate), project_text),
         _WINDOW, 0, "none", _policy().default_morsel_rows(flow), 500,
     )
-    var params = String("params: agg=0 sort=0 window=1 batches=0\n")
+    var params = String("params: agg=0 sort=0 topn=0 window=1 batches=0\n")
     params += "  window 0: partition=[g] order=[o desc, v asc] exprs=[" + String(_rn()) + "]\n"
     assert_equal(
         render_lowered_plan(_lowered(plan, _inputs(500))),
@@ -266,7 +266,7 @@ def test_a_projection_over_a_window_reads_the_window_segment() raises:
         1, "SOURCE_SINK_OUTPUT from=0", _ops(project_text), _COLLECT, -1, "0/E3",
         _policy().default_morsel_rows(flow), 0,
     )
-    var params = String("params: agg=0 sort=0 window=1 batches=0\n")
+    var params = String("params: agg=0 sort=0 topn=0 window=1 batches=0\n")
     params += "  window 0: partition=[g] order=[o asc] exprs=[" + String(_rn()) + "]\n"
     assert_equal(
         render_lowered_plan(_lowered(project, _inputs(500))),
@@ -289,7 +289,7 @@ def test_two_stacked_windows_are_two_chained_segments_with_params_in_cut_order()
         1, "SOURCE_SINK_OUTPUT from=0", _ops(), _WINDOW, 1, "0/E3",
         _policy().default_morsel_rows(first_schema), 0,
     )
-    var params = String("params: agg=0 sort=0 window=2 batches=0\n")
+    var params = String("params: agg=0 sort=0 topn=0 window=2 batches=0\n")
     params += "  window 0: partition=[g] order=[o asc] exprs=[" + String(_rn()) + "]\n"
     params += "  window 1: partition=[o] order=[rn desc] exprs=[" + String(rank) + "]\n"
     assert_equal(
@@ -308,7 +308,7 @@ def test_a_node_with_two_functions_is_one_segment_and_one_param_row() raises:
         0, _PARQUET_T, _ops(), _WINDOW, 0, "none",
         _policy().default_morsel_rows(flow), 500,
     )
-    var params = String("params: agg=0 sort=0 window=1 batches=0\n")
+    var params = String("params: agg=0 sort=0 topn=0 window=1 batches=0\n")
     params += "  window 0: partition=[g] order=[o asc] exprs=["
     params += String(exprs[0]) + ", " + String(exprs[1]) + "]\n"
     assert_equal(
@@ -397,7 +397,9 @@ def test_a_limit_above_a_window_with_keys_is_refused_and_one_with_no_key_is_cut(
         String(LOWERING_UNCUTTABLE_NODE)
         + ": "
         + plan_tag_name(PLAN_LIMIT)
-        + " (a limit over a sorted stream; no order is recorded on a segment) is not cut",
+        + " (a limit over a sorted stream that is not one range of its sort (a"
+        + " filter or a shared subplan stands between them, or the stream is a"
+        + " window's output); no order is recorded on a segment) is not cut",
     )
 
     var row_number = PartitionExpr.row_number().with_frame(
@@ -416,7 +418,7 @@ def test_a_limit_above_a_window_with_keys_is_refused_and_one_with_no_key_is_cut(
         1, "SOURCE_SINK_OUTPUT from=0", _ops("LIMIT 10"), _COLLECT, -1, "0/E3",
         _policy().default_morsel_rows(window_schema), 0,
     )
-    var params = String("params: agg=0 sort=0 window=1 batches=0\n")
+    var params = String("params: agg=0 sort=0 topn=0 window=1 batches=0\n")
     params += "  window 0: partition=[] order=[] exprs=[" + String(row_number) + "]\n"
     assert_equal(
         render_lowered_plan(_lowered(plan, _inputs(500))),
@@ -453,7 +455,7 @@ def test_a_window_over_a_join_ends_the_probe_pipeline_in_the_window_sink() raise
         1, "SOURCE_PARQUET path=l.parquet total=True", _ops("JOIN_PROBE build_seg=0 on=[k=k2]"),
         _WINDOW, 0, "0/E3", _policy().join_probe_morsel_rows(join_schema), 0,
     )
-    var params = String("params: agg=0 sort=0 window=1 batches=0\n")
+    var params = String("params: agg=0 sort=0 topn=0 window=1 batches=0\n")
     params += "  window 0: partition=[k] order=[k2 asc] exprs=[" + String(_rn()) + "]\n"
     assert_equal(
         render_lowered_plan(_lowered(plan, _inputs(111, 222))),
@@ -481,7 +483,7 @@ def test_a_window_over_an_aggregation_reads_the_aggregate_output() raises:
         1, "SOURCE_SINK_OUTPUT from=0", _ops(), _WINDOW, 0, "0/E3",
         _policy().default_morsel_rows(agg_schema), 0,
     )
-    var params = String("params: agg=1 sort=0 window=1 batches=0\n")
+    var params = String("params: agg=1 sort=0 topn=0 window=1 batches=0\n")
     params += "  agg 0: group_by=[" + String(_col("g")) + "] aggs=[" + String(count) + "]\n"
     params += "  window 0: partition=[] order=[n desc] exprs=[" + String(rank) + "]\n"
     assert_equal(

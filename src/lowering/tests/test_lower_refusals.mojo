@@ -8,11 +8,22 @@
 # detail lowers. A refused plan never produces a LoweredPlan.
 #
 # Tests, and the behaviour each asserts:
-#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a
-#     top-n, view reference, shared-subplan reference and cast to string are
-#     each refused by their tag name.
-#   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a top-n under an
-#     aggregate refuses the plan; the aggregate over a scan lowers.
+#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a view reference,
+#     shared-subplan reference and cast to string are each refused by their
+#     tag name.
+#   test_a_top_n_with_a_negative_count_is_refused_and_one_of_zero_is_cut: a
+#     top-n of -1 rows is refused with the exact text; top-n of 0 and 5 rows
+#     lower.
+#   test_a_limit_with_an_offset_over_no_sort_is_refused_and_a_plain_limit_is_cut:
+#     an offset over a scan, a filter or a filter over a sort is refused with
+#     the exact text, a negative count and a negative offset are refused; a
+#     plain limit over a scan and an offset over a sort lower.
+#   test_a_limit_over_a_filtered_sort_is_refused_and_a_limit_over_a_sort_is_cut:
+#     a filter between a limit and a sort is refused with the exact text; a
+#     limit directly over a sort, over a projection of one and over a top-n
+#     lowers, and so do the shapes over a sort that never were limits.
+#   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a cast to
+#     string under an aggregate refuses the plan; the aggregate over a scan lowers.
 #   test_a_distinct_over_a_column_list_is_refused_and_one_over_the_row_is_cut:
 #     a distinct that names columns is refused with the exact text; the same
 #     distinct over the whole row lowers.
@@ -79,11 +90,9 @@ from plan_ir.logical_plan import (
     SOURCE_NDJSON,
     SOURCE_KIND_UNSET,
     PLAN_DISTINCT,
-    PLAN_TOPN,
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
-    PLAN_LIMIT,
     PLAN_AGGREGATE,
     PLAN_EXCHANGE,
     plan_tag_name,
@@ -161,8 +170,6 @@ def _refused_with(message: String, token: String, why: String) raises:
 
 
 def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
-    var topn = LogicalPlan.topn(_names("k"), _bools(False), 5, _scan())
-    _refused_with(_message(topn, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_TOPN))
 
     var view = LogicalPlan.view_ref(String("v"), _schema())
     _refused_with(_message(view, _inputs(0)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_VIEW_REF))
@@ -175,17 +182,60 @@ def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
 
 
 def test_a_refused_node_below_a_breaker_refuses_the_whole_plan() raises:
-    var topn = LogicalPlan.topn(_names("k"), _bools(False), 5, _scan())
-    var plan = _count_by(topn^, List[String]())
-    _refused_with(_message(plan, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_TOPN))
+    var cast = LogicalPlan.cast_to_varchar(_scan())
+    var plan = _count_by(cast^, List[String]())
+    _refused_with(_message(plan, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_CAST_TO_VARCHAR))
     # The same aggregate over a scan lowers.
     assert_equal(_message(_count_by(_scan(), List[String]()), _inputs()), "")
 
 
-def test_a_limit_with_an_offset_is_refused_and_a_plain_limit_is_cut() raises:
-    _refused_with(_message(LogicalPlan.limit(5, _scan(), 2), _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_LIMIT))
-    _refused_with(_message(LogicalPlan.limit(-3, _scan()), _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_LIMIT))
+def _not_cut(node_and_why: String) -> String:
+    """The refusal of a node the cutter does not cut: its tag and why, as
+    `<tag> (<why>)`."""
+    return String(LOWERING_UNCUTTABLE_NODE) + ": " + node_and_why + " is not cut"
+
+
+def test_a_top_n_with_a_negative_count_is_refused_and_one_of_zero_is_cut() raises:
+    var negative = LogicalPlan.topn(_names("k"), _bools(False), -1, _scan())
+    assert_equal(
+        _message(negative, _inputs()),
+        _not_cut("TopN (a top-n with a negative count)"),
+    )
+    assert_equal(_message(LogicalPlan.topn(_names("k"), _bools(False), 0, _scan()), _inputs()), "")
+    assert_equal(_message(LogicalPlan.topn(_names("k"), _bools(False), 5, _scan()), _inputs()), "")
+
+
+def test_a_limit_with_an_offset_over_no_sort_is_refused_and_a_plain_limit_is_cut() raises:
+    var no_order = _not_cut(
+        "Limit (a limit with an offset over rows in no stated order; only a"
+        " sort's output can skip rows)"
+    )
+    assert_equal(_message(LogicalPlan.limit(5, _scan(), 2), _inputs()), no_order)
+    var filtered = LogicalPlan.filter(_v_greater_than_zero(), _scan())
+    assert_equal(_message(LogicalPlan.limit(5, filtered^, 2), _inputs()), no_order)
+    # A filter over a sort: the rows it passes are in no order a segment states.
+    var filtered_sort = LogicalPlan.filter(_v_greater_than_zero(), _sorted_scan())
+    assert_equal(_message(LogicalPlan.limit(5, filtered_sort^, 2), _inputs()), no_order)
+    # A projection with a UDF over a sort does not fold into a range: the
+    # offset is refused before the child, which a range would walk first.
+    var udf_sort = LogicalPlan.project_with_udf(
+        _v_only(), _sorted_scan(), _udf(UDF_KIND_MAP)
+    )
+    assert_equal(_message(LogicalPlan.limit(5, udf_sort^, 2), _inputs()), no_order)
+    assert_equal(
+        _message(LogicalPlan.limit(-3, _scan()), _inputs()),
+        _not_cut("Limit (a limit with a negative count)"),
+    )
+    assert_equal(
+        _message(LogicalPlan.limit(3, _sorted_scan(), -1), _inputs()),
+        _not_cut("Limit (a limit with a negative offset)"),
+    )
+    assert_equal(
+        _message(LogicalPlan.limit(3, _scan(), -1), _inputs()),
+        _not_cut("Limit (a limit with a negative offset)"),
+    )
     assert_equal(_message(LogicalPlan.limit(5, _scan()), _inputs()), "")
+    assert_equal(_message(LogicalPlan.limit(5, _sorted_scan(), 2), _inputs()), "")
 
 
 def test_a_partial_aggregate_is_refused_and_a_single_one_is_cut() raises:
@@ -470,13 +520,29 @@ def _sorted_scan() -> LogicalPlan:
     return LogicalPlan.sort(_names("k"), _bools(False), _scan())
 
 
-def test_a_limit_over_a_sorted_stream_is_refused_and_other_shapes_over_a_sort_are_cut() raises:
-    _refused_with(_message(LogicalPlan.limit(5, _sorted_scan()), _inputs()), LOWERING_UNCUTTABLE_NODE, "a limit over a sorted stream")
-    # Operators between the sort and the limit keep the stream sorted.
+def test_a_limit_over_a_filtered_sort_is_refused_and_a_limit_over_a_sort_is_cut() raises:
+    # A filter between the sort and the limit: the limit would keep rows of
+    # an order no segment records.
     var filtered = LogicalPlan.filter(_v_greater_than_zero(), _sorted_scan())
-    _refused_with(_message(LogicalPlan.limit(5, filtered^), _inputs()), LOWERING_UNCUTTABLE_NODE, "a limit over a sorted stream")
+    assert_equal(
+        _message(LogicalPlan.limit(5, filtered^), _inputs()),
+        _not_cut(
+            "Limit (a limit over a sorted stream that is not one range of its"
+            " sort (a filter or a shared subplan stands between them, or the"
+            " stream is a window's output); no order is recorded on a segment)"
+        ),
+    )
+    var filtered_projection = LogicalPlan.filter(
+        _v_greater_than_zero(), LogicalPlan.project(_v_only(), _sorted_scan())
+    )
+    _refused_with(_message(LogicalPlan.limit(5, filtered_projection^), _inputs()), LOWERING_UNCUTTABLE_NODE, "a limit over a sorted stream")
+    # A limit over a sort, over a projection of a sort and over a top-n keeps
+    # a range of the sort's order: cut.
+    assert_equal(_message(LogicalPlan.limit(5, _sorted_scan()), _inputs()), "")
     var projected = LogicalPlan.project(_v_only(), _sorted_scan())
-    _refused_with(_message(LogicalPlan.limit(5, projected^), _inputs()), LOWERING_UNCUTTABLE_NODE, "a limit over a sorted stream")
+    assert_equal(_message(LogicalPlan.limit(5, projected^), _inputs()), "")
+    var topn = LogicalPlan.topn(_names("k"), _bools(False), 5, _scan())
+    assert_equal(_message(LogicalPlan.limit(2, topn^, 1), _inputs()), "")
     # A filter over a sort, a sort alone, and a limit below a sort are cut.
     assert_equal(_message(LogicalPlan.filter(_v_greater_than_zero(), _sorted_scan()), _inputs()), "")
     assert_equal(_message(_sorted_scan(), _inputs()), "")

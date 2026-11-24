@@ -15,6 +15,7 @@ from physical_plan.physical_plan import (
     SegmentDescPod,
     AggSinkData,
     SortSinkData,
+    TopNSinkData,
     PartitionBySinkData,
 )
 from containers.slab import Slab
@@ -126,17 +127,18 @@ struct ParamTable(Movable):
     cut order, so equal inputs give equal indices.
 
     `SINK_AGG` segments index `agg` by `sink_param_id`, `SINK_SORT` segments
-    index `sort`, `SINK_PARTITION_BY` segments index `window`; a
-    `SINK_COLLECT` or `SINK_HASH_BUILD` segment indexes nothing
-    (`sink_param_id` is -1): a join's keys are on its OP_JOIN_PROBE.
-    `SOURCE_BATCH` segments index `batches` by `source_spec.batch_handle_id`.
-    Every user-function call (an OP_UDF_APPLY, an OP_UDF_FRAME, a
-    SOURCE_UDF_STEP) indexes `udfs` by its `udf_index`: the inputs' `UdfRef`
-    list, whole and in its order.
+    index `sort`, `SINK_TOPN` segments index `topn`, `SINK_PARTITION_BY`
+    segments index `window`; a `SINK_COLLECT` or `SINK_HASH_BUILD` segment
+    indexes nothing (`sink_param_id` is -1): a join's keys are on its
+    OP_JOIN_PROBE. `SOURCE_BATCH` segments index `batches` by
+    `source_spec.batch_handle_id`. Every user-function call (an
+    OP_UDF_APPLY, an OP_UDF_FRAME, a SOURCE_UDF_STEP) indexes `udfs` by its
+    `udf_index`: the inputs' `UdfRef` list, whole and in its order.
     """
 
     var agg: List[AggSinkData]
     var sort: List[SortSinkData]
+    var topn: List[TopNSinkData]
     var window: List[PartitionBySinkData]
     var batches: List[InMemorySource]
     var udfs: Slab[UdfRef]
@@ -144,6 +146,7 @@ struct ParamTable(Movable):
     def __init__(out self):
         self.agg = List[AggSinkData]()
         self.sort = List[SortSinkData]()
+        self.topn = List[TopNSinkData]()
         self.window = List[PartitionBySinkData]()
         self.batches = List[InMemorySource]()
         self.udfs = Slab[UdfRef]()
