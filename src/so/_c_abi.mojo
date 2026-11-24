@@ -625,17 +625,17 @@ def komira_credential_seal(ctx: Handle, id: Int32, scope: Int32) abi("C") -> Int
 
 
 @export
-def komira_sql_stream(ctx: Handle, sql: CStr, out: ArrowStream) abi("C") -> Int32:
+def komira_sql_stream(ctx: Handle, sql: CStr, out_stream: ArrowStream) abi("C") -> Int32:
     """Run the SQL statement `sql` on the session and fill the caller's
-    `struct ArrowArrayStream` at `out` with its answer.
+    `struct ArrowArrayStream` at `out_stream` with its answer.
 
     The statement reads the tables registered on the session; a `COPY ... TO`
     a local file answers one row, the BIGINT `Count`. The answer is computed
-    before the call returns. `*out` is written only on `KOMIRA_OK`, and the
+    before the call returns. `*out_stream` is written only on `KOMIRA_OK`, and the
     caller then owns the stream and releases it once; it needs neither the
     session nor the handle, so `komira_ctx_free` may come first. Returns
     `KOMIRA_ERR_NULL_CTX` for a NULL `ctx`, `KOMIRA_ERR_NULL_ARG` for a NULL
-    `sql` or `out`, `KOMIRA_ERR_TOO_LARGE` for a text whose NUL is not among
+    `sql` or `out_stream`, `KOMIRA_ERR_TOO_LARGE` for a text whose NUL is not among
     its first `KOMIRA_MAX_INPUT_BYTES + 1` bytes (nothing past that is read),
     and `KOMIRA_ERR_ENGINE` for a text that is not UTF-8 and for every engine
     refusal, with the last error `<step>: <reason>` (`parse`, `bind`,
@@ -646,7 +646,7 @@ def komira_sql_stream(ctx: Handle, sql: CStr, out: ArrowStream) abi("C") -> Int3
         return KOMIRA_ERR_NULL_CTX
     var session = _session(ctx)
     session[].clear_error()
-    if Int(sql) == 0 or Int(out) == 0:
+    if Int(sql) == 0 or Int(out_stream) == 0:
         session[].set_error(String("komira_sql_stream: sql or out is NULL"))
         return KOMIRA_ERR_NULL_ARG
     var n = _c_text_length(sql)
@@ -668,9 +668,9 @@ def komira_sql_stream(ctx: Handle, sql: CStr, out: ArrowStream) abi("C") -> Int3
         return KOMIRA_ERR_ENGINE
     try:
         var result = sql_result(session[], text)
-        # Nothing is written to `*out` before this call, and it writes the
+        # Nothing is written to `*out_stream` before this call, and it writes the
         # stream whole once its own checks have passed.
-        build_record_batch_stream(result.take_batches(), result.take_schema(), out)
+        build_record_batch_stream(result.take_batches(), result.take_schema(), out_stream)
         return KOMIRA_OK
     except e:
         session[].set_error(String(e))

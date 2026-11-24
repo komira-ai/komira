@@ -223,7 +223,7 @@ from std.testing import assert_equal, assert_true
 
 var session = Session()
 var answer = sql_result(session, "select 1 as n")
-assert_equal(answer.schema.field_name(0), "n")
+assert_equal(answer.schema.field_name(0), String("n"))
 assert_equal(answer.batches[0].num_rows(), 1)
 var refused = String()
 try:
