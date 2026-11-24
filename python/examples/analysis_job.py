@@ -62,11 +62,19 @@ def write_inputs(directory):
 # dropped, summed per customer.
 SPEND = """
     SELECT c.region AS region, c.name AS customer,
-           count(*) AS n_orders, CAST(sum(o.amount_cents) AS BIGINT) AS total_cents
+           count(*) AS n_orders, sum(o.amount_cents) AS sum_cents
     FROM orders o JOIN cust c ON o.customer_id = c.id
     WHERE o.quantity > 0
     GROUP BY c.region, c.name
 """
+
+# The sums as BIGINT: an integer SUM is DECIMAL(38, 0) in komira and HUGEINT in
+# DuckDB, and the cast is a step of its own because the engine does not serve a
+# call that wraps an aggregate.
+SPEND_CTES = (
+    "sums AS (" + SPEND + "), "
+    "spend AS (SELECT region, customer, n_orders, CAST(sum_cents AS BIGINT) AS total_cents FROM sums)"
+)
 
 # Each customer's place among its region's customers by total, and the
 # region's running total down that order.
@@ -80,7 +88,7 @@ RANKED = """
 # The top two customers of each region.
 TOP_PER_REGION = (
     "WITH cust AS (SELECT id, name, region FROM read_csv('{customers}')), "
-    "spend AS (" + SPEND + "), ranked AS (" + RANKED + ") "
+    + SPEND_CTES + ", ranked AS (" + RANKED + ") "
     "SELECT region, customer, n_orders, total_cents, place, running_total "
     "FROM ranked WHERE place <= 2 ORDER BY region, place"
 )
@@ -88,7 +96,7 @@ TOP_PER_REGION = (
 # The three customers that spent the most, over all regions.
 TOP_OVERALL = (
     "WITH cust AS (SELECT id, name, region FROM read_csv('{customers}')), "
-    "spend AS (" + SPEND + ") "
+    + SPEND_CTES + " "
     "SELECT customer, region, total_cents FROM spend ORDER BY total_cents DESC, customer LIMIT 3"
 )
 
