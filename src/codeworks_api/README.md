@@ -92,6 +92,6 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 
 `:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source, a test, or a manifest of this package, run `buildrules mojo sync`, commit what it writes, and build `komira//src/codeworks_api:lib` on the farm. A test file that the sync has not listed is not run: run the sync after adding one.
 
-`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package (`mojo-komira-ai.codeworks_api-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package (`mojo-komira-ai.codeworks_api-0.1.0-mojo1.1.0_0.conda`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
 
 `:codeworks_api` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not run again.

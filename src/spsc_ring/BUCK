@@ -34,7 +34,7 @@ mojo_adopted_library(
 )
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
-# (`mojo-komira-ai.spsc_ring-0.1.0-mojo1.0.0_0.conda`), which records atomic_alias and
+# (`mojo-komira-ai.spsc_ring-0.1.0-mojo1.1.0_0.conda`), which records atomic_alias and
 # containers as dependencies (`mojo-komira-ai.atomic_alias >=0.1,<0.2`,
 # `mojo-komira-ai.containers >=0.1,<0.2`) and holds those packages' files nowhere. `members` is the
 # manifests of the path dependencies of the closure, staged at their repository paths, because
@@ -51,8 +51,8 @@ mojo_conda(
         "../atomic_alias": "//src/atomic_alias:mopm.toml",
         "../containers": "//src/containers:mopm.toml",
     },
-    mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_113",
+    mojo = "1.1.0",
+    mopm = "toolchains//:mopm_0_0_135",
     package = "komira-ai/spsc_ring",
     version = "0.1.0",
     visibility = ["PUBLIC"],

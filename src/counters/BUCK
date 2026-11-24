@@ -43,7 +43,7 @@ mojo_adopted_library(
 )
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
-# (`mojo-komira-ai.counters-0.1.0-mojo1.0.0_0.conda`), which records atomic_alias as a
+# (`mojo-komira-ai.counters-0.1.0-mojo1.1.0_0.conda`), which records atomic_alias as a
 # dependency (`mojo-komira-ai.atomic_alias >=0.1,<0.2`) and holds that package's files nowhere.
 # `members` is the manifest of the path dependency, staged at its repository path, because
 # `mopm pack` reads the manifest of each beside the one it is given. `:lib` exists only once the
@@ -56,8 +56,8 @@ mojo_conda(
     lib = ":lib",
     manifest = "mopm.toml",
     members = {"../atomic_alias": "//src/atomic_alias:mopm.toml"},
-    mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_113",
+    mojo = "1.1.0",
+    mopm = "toolchains//:mopm_0_0_135",
     package = "komira-ai/counters",
     version = "0.1.0",
     visibility = ["PUBLIC"],

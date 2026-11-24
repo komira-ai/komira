@@ -94,7 +94,7 @@ source, a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrul
 writes, and build `komira//src/kg_mode:lib` on the farm. A test file that `buildrules mojo sync` has not
 listed is not run: run the sync after adding one.
 
-`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.kg_mode-0.1.0-mojo1.0.0_0.conda`): the `.mojoc`, which
+`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.kg_mode-0.1.0-mojo1.1.0_0.conda`): the `.mojoc`, which
 exists only once the tests have passed. `:kg_mode` is `:lib` as komira's Mojo rules take it
 (`mojo_adopted_library`); it also compiles and runs the README's examples above (`[tests][readme]`) against
 `:lib`, which `:lib` does not do.

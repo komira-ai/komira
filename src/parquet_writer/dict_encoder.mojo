@@ -16,7 +16,7 @@
 # write it. Numeric columns are `dict_encoder_numeric`.
 # =============================================================================
 
-from std.memory import memcmp
+from std.memory import unsafe_memcmp
 
 from arrow.primitive_array import PrimitiveArray
 from arrow.string_array import StringArray
@@ -197,7 +197,7 @@ struct _SpanDictTable[src_origin: Origin[mut=False]]:
         # SAFETY: both ranges lie within `_src`; the pointer has `_src`'s
         # concrete origin and does not outlive this call.
         var p = self._src.unsafe_ptr()
-        return memcmp(p + a_off, p + b_off, a_len) == 0
+        return unsafe_memcmp(p + a_off, p + b_off, a_len) == 0
 
     def get_or_insert(mut self, off: Int, length: Int, next_idx: Int) -> Int:
         """Return the dict index for the byte range, inserting if absent.

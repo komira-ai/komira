@@ -126,7 +126,8 @@ def _is_in_range_1_to_n_minus_1_384(a: Array[UInt8, 48]) -> Bool:
 # -----------------------------------------------------------------------------
 
 
-@always_inline
+# Not @always_inline: Mojo 1.1.0 miscompiles this function when it is inlined more
+# than once into one caller (every expansion after the first returns zeros).
 def _bits2octets_p384_bytes(
     hash_be: Span[UInt8, _],
 ) -> Array[UInt8, 48]:

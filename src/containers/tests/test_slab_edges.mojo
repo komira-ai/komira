@@ -166,7 +166,7 @@ def test_from_raw_parts() raises:
     # adopts and frees it.
     var data = alloc[Item](4)
     for i in range(3):
-        (data + i).init_pointee_move(Item(i + 1))
+        (data + i).unsafe_write(Item(i + 1))
     var s = Slab[Item].from_raw_parts[Item](
         data, 3, 4
     )
@@ -178,7 +178,7 @@ def test_from_raw_parts() raises:
     _assert_tags(s, 1, 4)
 
     var one = alloc[Item](2)
-    one.init_pointee_move(Item(9))
+    one.unsafe_write(Item(9))
     var t = Slab[Item].from_raw_parts[Item](
         one, 1, 2
     )

@@ -167,7 +167,7 @@ package, `atomic_alias`, a sibling directory (`[dependencies]` of `mopm.toml`: `
 after adding one.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-komira-ai.containers-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
+(`mojo-komira-ai.containers-0.1.0-mojo1.1.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
 which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a
 CI job that takes that file, not a build action.
 

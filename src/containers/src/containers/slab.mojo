@@ -360,7 +360,7 @@ struct Slab[T: Movable & Deinitable](Movable, Sized):
     def field_load_i64[
         field_accessor: def[o: MutOrigin] (ref [o] Self.T) thin -> ref [o] AtomicI64
     ](mut self, idx: Int) -> Int64:
-        """Load the Atomic[DType.int64] field selected by `field_accessor`.
+        """Load the Atomic[Int64] field selected by `field_accessor`.
 
         Takes `mut self` so `origin_of(self)` resolves to a concrete
         MutOrigin for the accessor to instantiate at.
@@ -393,7 +393,7 @@ struct Slab[T: Movable & Deinitable](Movable, Sized):
     def field_fetch_add_i64[
         field_accessor: def[o: MutOrigin] (ref [o] Self.T) thin -> ref [o] AtomicI64
     ](mut self, idx: Int, delta: Int64) -> Int64:
-        """Atomic fetch_add on the Atomic[DType.int64] field selected by `field_accessor`.
+        """Atomic fetch_add on the Atomic[Int64] field selected by `field_accessor`.
 
         PANICS if idx >= _len_t or idx < 0.
 

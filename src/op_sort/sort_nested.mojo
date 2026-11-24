@@ -35,7 +35,7 @@
 # the module boundary.
 # =============================================================================
 
-from std.memory import alloc, memcpy
+from std.memory import alloc, unsafe_memcpy
 from std.sys import size_of
 
 from arrow.column import Column

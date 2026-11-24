@@ -171,7 +171,7 @@ struct SortSinkGlobal(KeepAlive):
 
     var partitions: Slab[RecordBatch]
     var combined: Optional[RecordBatch]
-    var claim: Atomic[DType.int64]
+    var claim: Atomic[Int64]
     # True when combine chose the dense-rank counting sort: the per-worker
     # batches stay unfolded in `partitions`, `num_partitions` is 1 (no
     # per-partition sort), and finalize concatenates and counting-sorts them.
@@ -180,7 +180,7 @@ struct SortSinkGlobal(KeepAlive):
     def __init__(out self):
         self.partitions = Slab[RecordBatch]()
         self.combined = None
-        self.claim = Atomic[DType.int64](Int64(0))
+        self.claim = Atomic[Int64](Int64(0))
         self.string_dictrank = False
 
     def __keep_alive(mut self):

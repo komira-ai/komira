@@ -121,21 +121,21 @@ struct LogIndexHandoff(Deinitable):
     # `Slab[HandoffUnit]`, not a `List` (`List[T]` requires `T: Copyable`).
     var _queue: Slab[HandoffUnit]
     var _depth_cap: Int
-    var _lock: Atomic[DType.uint8]
+    var _lock: Atomic[UInt8]
     # Count-backpressure counter (distinct from the gate's byte rejection and
     # from the ring's overflow drop: three distinct pressure signals).
-    var _depth_rejections: Atomic[DType.int64]
+    var _depth_rejections: Atomic[Int64]
     # Total offered and polled units.
-    var _offered: Atomic[DType.int64]
-    var _polled: Atomic[DType.int64]
+    var _offered: Atomic[Int64]
+    var _polled: Atomic[Int64]
 
     def __init__(out self, depth_cap: Int = 256):
         self._queue = Self._fresh_queue(depth_cap)
         self._depth_cap = depth_cap
-        self._lock = Atomic[DType.uint8](UInt8(0))
-        self._depth_rejections = Atomic[DType.int64](Int64(0))
-        self._offered = Atomic[DType.int64](Int64(0))
-        self._polled = Atomic[DType.int64](Int64(0))
+        self._lock = Atomic[UInt8](UInt8(0))
+        self._depth_rejections = Atomic[Int64](Int64(0))
+        self._offered = Atomic[Int64](Int64(0))
+        self._polled = Atomic[Int64](Int64(0))
 
     @staticmethod
     def _fresh_queue(depth_cap: Int) -> Slab[HandoffUnit]:

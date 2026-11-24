@@ -198,12 +198,12 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
             # Where the standard library's sources are named: a String's
             # last-reference test is its code inlined at the branch.
             "--stdlib",
-            "oss/modular/",
+            "Mojo/stdlib/",
             # The standard library, the closure's other packages, anything
             # under buck-out/, the test itself and the compile unit with no
             # file are not measured.
             "--exclude",
-            "oss/modular/",
+            "Mojo/stdlib/",
             [["--exclude", d + "/"] for d in sorted(others)],
             "--exclude",
             "buck-out/",

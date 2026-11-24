@@ -54,7 +54,7 @@ pub const RESERVED: &[&str] = &["mopm", "mojo", "max", "modular", "std", "stdlib
 
 /// Every directory and file name (without `.mojo`) under `mojo/stdlib/std/` of Mojo 1.0.0, those
 /// starting with `_` left out: 173 names. Read from the 251 `.mojo` paths of the tag `mojo/v1.0.0`
-/// of modular/modular, which are the source paths the pinned `mojo-compiler` 1.0.0 package records
+/// of modular/modular, which are the source paths the `mojo-compiler` 1.0.0 package records
 /// in its `lib/mojo/std.mojoc` (mopm's design of owner namespaces, section 1.1). Sorted as bytes.
 pub const STD_NAMES: &[&str] = &[
     "address_space",

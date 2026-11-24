@@ -103,7 +103,7 @@ has passed. After any change to a source, a test, a manifest of this package or 
 `komira//src/uuid:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-komira-ai.uuid-0.1.0-mojo1.0.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
+(`mojo-komira-ai.uuid-0.1.0-mojo1.1.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
 which therefore exists only once the test has passed. Publishing it (`mopm publish`) uploads, so it is a step of a
 CI job that takes that file, not a build action.
 

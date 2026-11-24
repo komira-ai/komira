@@ -35,7 +35,7 @@
 //!
 //! What records a directory: the pinned Mojo writes no compilation directory
 //! and names its sources by relative paths (`tests`, `buck-out/...`,
-//! `oss/modular/...`), so its units hold no directory of the action. Zig's C
+//! `Mojo/stdlib/...`), so its units hold no directory of the action. Zig's C
 //! runtime objects (crt1, crti, crtn) record the working directory as
 //! DW_AT_comp_dir; those are what the relocation rewrites in a Mojo binary,
 //! and why a debug link that holds the working directory nowhere fails: the

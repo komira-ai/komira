@@ -47,7 +47,7 @@ mojo_adopted_library(
 )
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
-# (`mojo-komira-ai.calendar-0.1.0-mojo1.0.0_0.conda`), which records calendar_proto and
+# (`mojo-komira-ai.calendar-0.1.0-mojo1.1.0_0.conda`), which records calendar_proto and
 # datetime as dependencies (`mojo-komira-ai.calendar_proto >=0.1,<0.2` and `mojo-komira-ai.datetime
 # >=0.1,<0.2`) and holds those packages' files nowhere. `members` is the manifests of the path
 # dependencies, staged at their repository paths, because `mopm pack` reads the manifest of each
@@ -68,8 +68,8 @@ mojo_conda(
         "../protobuf": "//src/protobuf:mopm.toml",
         "../wkt": "//src/wkt:mopm.toml",
     },
-    mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_113",
+    mojo = "1.1.0",
+    mopm = "toolchains//:mopm_0_0_135",
     package = "komira-ai/calendar",
     version = "0.1.0",
     visibility = ["PUBLIC"],

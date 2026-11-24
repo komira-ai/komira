@@ -146,8 +146,8 @@ struct _ResidualMarkState(KeepAlive):
     var ht: List[Int64]
     var next_chain: List[Int64]
     var has_pass: List[UInt8]
-    var morsel_counter: OwnedPointer[Atomic[DType.int64]]
-    var workers_active: OwnedPointer[Atomic[DType.int64]]
+    var morsel_counter: OwnedPointer[Atomic[Int64]]
+    var workers_active: OwnedPointer[Atomic[Int64]]
 
     def __init__(
         out self,
@@ -180,14 +180,14 @@ struct _ResidualMarkState(KeepAlive):
         self.ht = ht^
         self.next_chain = next_chain^
         self.has_pass = has_pass^
-        var raw = alloc[Atomic[DType.int64]](1)
-        UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
-        self.morsel_counter = OwnedPointer[Atomic[DType.int64]](
+        var raw = alloc[Atomic[Int64]](1)
+        raw.unsafe_write(Atomic[Int64](Int64(0)))
+        self.morsel_counter = OwnedPointer[Atomic[Int64]](
             unsafe_from_raw_pointer=raw
         )
-        var raw2 = alloc[Atomic[DType.int64]](1)
-        UnsafePointer(to=raw2[].value).unsafe_write(Scalar[DType.int64](0))
-        self.workers_active = OwnedPointer[Atomic[DType.int64]](
+        var raw2 = alloc[Atomic[Int64]](1)
+        raw2.unsafe_write(Atomic[Int64](Int64(0)))
+        self.workers_active = OwnedPointer[Atomic[Int64]](
             unsafe_from_raw_pointer=raw2
         )
 
@@ -310,7 +310,7 @@ struct _ResidualBuildTask(Segment):
                 while True:
                     var old = Int64((ht_ptr + slot)[])
                     (nc_ptr + i)[] = old
-                    if Atomic[DType.int64].compare_exchange(
+                    if Atomic[Int64].compare_exchange(
                         ht_ptr + slot, old, Int64(i)
                     ):
                         break

@@ -23,7 +23,7 @@
 # Output row order is `indices` order. Validity is carried row by row.
 # =============================================================================
 
-from std.memory import memcpy
+from std.memory import unsafe_memcpy
 from std.sys import size_of
 
 from byte_buffer.owned_aligned_buffer import OwnedAlignedBuffer
@@ -385,8 +385,8 @@ def _gather_bool_column(
     var data_buf = OwnedAlignedBuffer(max(bm_bytes, 1))
     # Zero-initialize: MmapAlignedBuffer.create does NOT zero. Use memset
     # against the capacity span (origin tracks through `data_buf`).
-    from std.memory import memset
-    memset(data_buf.into_span_capacity().unsafe_ptr(), 0, max(bm_bytes, 1))
+    from std.memory import unsafe_memset
+    unsafe_memset(data_buf.into_span_capacity().unsafe_ptr(), 0, max(bm_bytes, 1))
     # PERF-CRITICAL: typed-byte pointer cache for the per-row bit-pack
     # write loop below. Origin tied to data_buf, identical codegen.
     # R3.2c.13: migrate off banned _typed_ptr_mut wildcard shim onto
