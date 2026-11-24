@@ -117,10 +117,15 @@ the handle is opened in an initializer that cannot raise. A caller that must
 not die (libkomira) probes libzstd, libz and liblz4 first; a missing one is a
 raise naming it:
 
-<!-- mojo-hidden from std.testing import assert_true -->
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
-from compression.codec_libraries import probe_codec_libraries, probe_libraries
+from compression.codec_libraries import (
+    codec_probe_sonames,
+    probe_codec_libraries,
+    probe_libraries,
+)
 
+assert_equal(len(codec_probe_sonames()), 3)  # libzstd, libz, liblz4
 probe_codec_libraries()
 var refused = String("")
 try:
