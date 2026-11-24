@@ -177,9 +177,8 @@ def _read_shared(mut cutter: _Cutter, at: Int, node: LogicalPlan) -> _Pipe:
     """A pipeline reading the segment of materialized shared subtree `at`
     for `node` (the canonical subtree or a reference to it), in the schema
     that segment writes."""
-    var pipe = cutter._reopen(
-        cutter.shared_segs[at], cutter.shared_read_schemas[at]
-    )
+    var schema = cutter.shared_read_schemas[at].copy()
+    var pipe = cutter._reopen(cutter.shared_segs[at], schema)
     pipe.sorted_input = cutter.shared_sorted[at]
     return pipe^
 
