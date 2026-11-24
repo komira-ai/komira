@@ -32,9 +32,9 @@ NATIVE_OWNERS = [
 # Mojo with no pointer in it; `_c_abi.mojo`, the one file that holds pointers,
 # is not part of it but the source of the `libkomira` target below.
 #
-# test_status holds the six codes, the input-length bound, the version scheme (major * 1000 + minor)
+# test_status holds the six codes, the six steps, the input-length bound, the version scheme (major * 1000 + minor)
 # and buffer_status, the two-call protocol's capacity test; test_session holds
-# the last-error text of a Session (fresh, set, replaced, cleared, moved)
+# the last error of a Session (text, step and code: fresh, set, replaced, cleared, moved), `error_code` and `step_number`
 # and try_new_session, komira_ctx_new's session (None, the NULL handle, for
 # each option the engine refuses; a session for good options), and
 # session_options, komira_ctx_new_with_options's two int64_t arguments (0 is
@@ -45,7 +45,7 @@ NATIVE_OWNERS = [
 # (and an unregistered one refused at bind), the CSV and JSON bindings, a
 # plan rendered, and sql_result, komira_sql_stream's answer on values (rows,
 # no rows with the schema, a result that outlives its session, and refusals as
-# `<step>: <reason>`); test_credentials holds the three steps of a definition, each
+# `<step>: <reason>` with the step and the code recorded on the session); test_credentials holds the three steps of a definition, each
 # kind's fields and every named refusal, word for word, and the generations of
 # a name; test_credentials_reveal reads sealed values through sdk_exec's
 # SecretCapability and reads an object of a fake S3 with them, where a wrong
@@ -163,20 +163,23 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): fourteen exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): sixteen exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). Every context it creates owns
 # an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
 # komira_sql_stream runs SQL on that engine and answers an Arrow C stream; the
 # C driver below (c_abi_check) reads those streams through komira.h.
 # It is published only if every gate driver passes, each of which dlopens it
 # with RTLD_NOW and calls it as a foreign host would:
-#   gate_version       the version is 1004 (1.4);
+#   gate_version       the version is 1005 (1.5);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op, and a context (with its
 #                      engine's workers) is created and freed again;
 #   gate_no_extra_exports  the linker's section markers and the Mojo helpers
 #                      are not in the symbol table;
 #   gate_fresh_error   a fresh session's error is empty, with or without a buffer;
+#   gate_error_code_step  komira_last_error_code and komira_last_error_step
+#                      exist: a fresh session has an empty code (OK, length 0)
+#                      and step 0, a NULL context is -1 and step 0;
 #   gate_two_call      capacity 0 and one byte short give -4 and the length, an
 #                      exact and a larger buffer give the text, nothing past it;
 #   gate_null_ctx      a NULL context is -1 and writes nothing;
@@ -213,6 +216,8 @@ _LIBKOMIRA = dict(
         "komira_ctx_new_with_options",
         "komira_ctx_free",
         "komira_last_error",
+        "komira_last_error_code",
+        "komira_last_error_step",
         "komira_register_parquet",
         "komira_parquet_schema",
         "komira_csv_binding",
@@ -232,6 +237,7 @@ _LIBKOMIRA = dict(
         "tests/gate/gate_null_ctx.mojo",
         "tests/gate/gate_null_out_len.mojo",
         "tests/gate/gate_csv_binding.mojo",
+        "tests/gate/gate_error_code_step.mojo",
         "tests/gate/gate_json_binding.mojo",
         "tests/gate/gate_parquet_schema.mojo",
         "tests/gate/gate_plan_render.mojo",
@@ -341,7 +347,8 @@ cxx_binary(
 # komira_ctx_new_with_options: with a memory budget of one byte (one worker,
 # and the host's count) a sum over that file is refused at step `execute`
 # with the aggregation sink's denial naming the budget, *out untouched and
-# the context still answering; the same sum answers with 0 and 0 (the host's
+# the context still answering; the last error's step and code (komira_last_error_step,
+# komira_last_error_code) after each kind of failure and after a success; the same sum answers with 0 and 0 (the host's
 # own values) and with one worker; a negative worker count or budget
 # (-1, INT64_MIN) is NULL.
 komira_c_abi_check(

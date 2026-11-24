@@ -44,6 +44,8 @@ DECLARE(komira_ctx_new);
 DECLARE(komira_ctx_new_with_options);
 DECLARE(komira_ctx_free);
 DECLARE(komira_last_error);
+DECLARE(komira_last_error_code);
+DECLARE(komira_last_error_step);
 DECLARE(komira_register_parquet);
 DECLARE(komira_parquet_schema);
 DECLARE(komira_csv_binding);
@@ -70,6 +72,8 @@ static int bind_all(void *lib) {
     BIND(komira_ctx_new_with_options);
     BIND(komira_ctx_free);
     BIND(komira_last_error);
+    BIND(komira_last_error_code);
+    BIND(komira_last_error_step);
     BIND(komira_register_parquet);
     BIND(komira_parquet_schema);
     BIND(komira_csv_binding);
@@ -90,6 +94,12 @@ _Static_assert(KOMIRA_ERR_NULL_ARG == -2, "KOMIRA_ERR_NULL_ARG");
 _Static_assert(KOMIRA_ERR_ENGINE == -3, "KOMIRA_ERR_ENGINE");
 _Static_assert(KOMIRA_ERR_BUFFER_TOO_SMALL == -4, "KOMIRA_ERR_BUFFER_TOO_SMALL");
 _Static_assert(KOMIRA_ERR_TOO_LARGE == -5, "KOMIRA_ERR_TOO_LARGE");
+_Static_assert(KOMIRA_STEP_NONE == 0, "KOMIRA_STEP_NONE");
+_Static_assert(KOMIRA_STEP_PARSE == 1, "KOMIRA_STEP_PARSE");
+_Static_assert(KOMIRA_STEP_BIND == 2, "KOMIRA_STEP_BIND");
+_Static_assert(KOMIRA_STEP_OPTIMIZE == 3, "KOMIRA_STEP_OPTIMIZE");
+_Static_assert(KOMIRA_STEP_LOWER == 4, "KOMIRA_STEP_LOWER");
+_Static_assert(KOMIRA_STEP_EXECUTE == 5, "KOMIRA_STEP_EXECUTE");
 _Static_assert(KOMIRA_MAX_INPUT_BYTES == 64 * 1024 * 1024, "KOMIRA_MAX_INPUT_BYTES");
 _Static_assert(KOMIRA_BIND_SESSION == 1, "KOMIRA_BIND_SESSION");
 _Static_assert(KOMIRA_CRED_AWS_KEYS == 1, "KOMIRA_CRED_AWS_KEYS");
@@ -195,14 +205,44 @@ static const char *last_error_text(komira_handle ctx, char *text, size_t cap) {
     return text;
 }
 
+/* The last error's step is `step` and its code is exactly `code` (empty for
+   none), the code read by the two-call protocol: a probe with capacity 0, a
+   buffer one byte short (-4, not written), and an exact buffer. Neither call
+   clears the error: the text read before and after is the same. */
+static void expect_error_step_code(komira_handle ctx, int32_t step, const char *code) {
+    char before[512], after[512];
+    last_error_text(ctx, before, sizeof before);
+    CHECK(p_komira_last_error_step(ctx) == step);
+    size_t want = strlen(code);
+    uint64_t n = 99;
+    if (want == 0) {
+        CHECK(p_komira_last_error_code(ctx, NULL, 0, &n) == KOMIRA_OK && n == 0);
+    } else {
+        uint8_t buf[128];
+        CHECK(want < sizeof buf);
+        CHECK(p_komira_last_error_code(ctx, NULL, 0, &n) == KOMIRA_ERR_BUFFER_TOO_SMALL);
+        CHECK(n == want);
+        memset(buf, 0xAB, sizeof buf);
+        n = 0;
+        CHECK(p_komira_last_error_code(ctx, buf, want - 1, &n) == KOMIRA_ERR_BUFFER_TOO_SMALL);
+        CHECK(n == want && buf[0] == 0xAB);
+        n = 0;
+        CHECK(p_komira_last_error_code(ctx, buf, want, &n) == KOMIRA_OK);
+        CHECK(n == want && memcmp(buf, code, want) == 0 && buf[want] == 0xAB);
+    }
+    last_error_text(ctx, after, sizeof after);
+    CHECK(strcmp(before, after) == 0);
+    CHECK(p_komira_last_error_step(ctx) == step);
+}
+
 static int starts_with(const char *text, const char *prefix) {
     return strncmp(text, prefix, strlen(prefix)) == 0;
 }
 
 /* `komira_sql_stream(ctx, sql, ...)` refused with `want`: *out is left as the
    driver wrote it, and the last error is `error` when `exact`, or starts with
-   it. Then a good query on the same context still answers. */
-static void expect_refused(komira_handle ctx, const char *sql, int32_t want, const char *error, int exact) {
+   it, with step `step` and code `code`. Then a good query on the same context still answers. */
+static void expect_refused(komira_handle ctx, const char *sql, int32_t want, const char *error, int exact, int32_t step, const char *code) {
     struct ArrowArrayStream out, before;
     memset(&out, 0xAB, sizeof out);
     memcpy(&before, &out, sizeof out);
@@ -215,6 +255,7 @@ static void expect_refused(komira_handle ctx, const char *sql, int32_t want, con
     int ok = exact ? strcmp(got, error) == 0 : starts_with(got, error);
     if (!ok) fprintf(stderr, "FAIL: last error '%s', want '%s'%s\n", got, error, exact ? "" : "...");
     CHECK(ok);
+    expect_error_step_code(ctx, step, code);
     struct answer a;
     CHECK(p_komira_sql_stream(ctx, "SELECT 1 AS n", &out) == KOMIRA_OK);
     CHECK(read_answer(&out, &a) == 0 && a.rows == 1 && a.n_values == 1 && a.values[0] == 1);
@@ -280,12 +321,18 @@ static void sql_stream_cases(void) {
 
     /* Refusals: *out untouched, the reason in the last error, and the context
        answers the next query. */
-    expect_refused(ctx, NULL, KOMIRA_ERR_NULL_ARG, "komira_sql_stream: sql or out is NULL", 1);
-    expect_refused(ctx, "SELEC 1", KOMIRA_ERR_ENGINE, "parse: ", 0);
+    expect_refused(ctx, NULL, KOMIRA_ERR_NULL_ARG, "komira_sql_stream: sql or out is NULL", 1, KOMIRA_STEP_NONE, "");
+    expect_refused(ctx, "SELEC 1", KOMIRA_ERR_ENGINE, "parse: SQL syntax error: ", 0, KOMIRA_STEP_PARSE, "SQL_SYNTAX_ERROR");
     CHECK(p_komira_sql_stream(ctx, "SELECT * FROM nosuch", &out) == KOMIRA_ERR_ENGINE);
     CHECK(strstr(last_error_text(ctx, text, sizeof text), "nosuch") != NULL);
-    expect_refused(ctx, "SELECT * FROM nosuch", KOMIRA_ERR_ENGINE, "bind: ", 0);
-    expect_refused(ctx, "SELECT '\xff' AS s", KOMIRA_ERR_ENGINE, "komira_sql_stream: the SQL text is not valid UTF-8", 1);
+    expect_refused(ctx, "SELECT * FROM nosuch", KOMIRA_ERR_ENGINE, "bind: SQL bind error: unknown table 'nosuch'", 1, KOMIRA_STEP_BIND, "SQL_BIND_ERROR");
+    expect_refused(ctx, "SELECT '\xff' AS s", KOMIRA_ERR_ENGINE, "komira_sql_stream: the SQL text is not valid UTF-8", 1, KOMIRA_STEP_NONE, "");
+    expect_refused(ctx, "SELECT k FROM three INTERSECT ALL SELECT k FROM three", KOMIRA_ERR_ENGINE, "parse: SQL not supported: INTERSECT ALL. ", 0, KOMIRA_STEP_PARSE, "SQL_NOT_SUPPORTED");
+    /* A success clears the previous error: step NONE, no code. */
+    CHECK(p_komira_sql_stream(ctx, "SELEC 1", &out) == KOMIRA_ERR_ENGINE);
+    CHECK(p_komira_sql_stream(ctx, "SELECT 1 AS n", &out) == KOMIRA_OK);
+    expect_error_step_code(ctx, KOMIRA_STEP_NONE, "");
+    CHECK(read_answer(&out, &a) == 0);
     struct ArrowArrayStream untouched;
     memset(&untouched, 0xAB, sizeof untouched);
     CHECK(p_komira_sql_stream(NULL, "SELECT 1 AS n", &untouched) == KOMIRA_ERR_NULL_CTX);
@@ -313,7 +360,7 @@ static void sql_stream_cases(void) {
         big[bound + 1] = 0;
         char msg[128];
         snprintf(msg, sizeof msg, "komira_sql_stream: sql is above %llu bytes", (unsigned long long)KOMIRA_MAX_INPUT_BYTES);
-        expect_refused(ctx, big, KOMIRA_ERR_TOO_LARGE, msg, 1);
+        expect_refused(ctx, big, KOMIRA_ERR_TOO_LARGE, msg, 1, KOMIRA_STEP_NONE, "");
         free(big);
     }
 
@@ -370,7 +417,7 @@ static void options_cases(void) {
         CHECK(tiny != NULL);
         if (tiny == NULL) continue;
         CHECK(p_komira_register_parquet(tiny, "three", parquet) == KOMIRA_OK);
-        expect_refused(tiny, sum, KOMIRA_ERR_ENGINE, "execute: [Processor] pipeline_exec: the ", 0);
+        expect_refused(tiny, sum, KOMIRA_ERR_ENGINE, "execute: [Processor] pipeline_exec: the ", 0, KOMIRA_STEP_EXECUTE, "");
         CHECK(p_komira_sql_stream(tiny, sum, &out) == KOMIRA_ERR_ENGINE);
         const char *got = last_error_text(tiny, text, sizeof text);
         int named = strstr(got, " sink of segment ") != NULL && strstr(got, " was denied ") != NULL &&
@@ -408,6 +455,12 @@ int main(void) {
     CHECK(p_komira_last_error(ctx, NULL, 0, &len) == KOMIRA_OK);
     CHECK(len == 0);
 
+    /* A fresh session: step NONE, no code. A NULL context is -1 for the code
+       and step NONE; a NULL out_len is -2. */
+    expect_error_step_code(ctx, KOMIRA_STEP_NONE, "");
+    CHECK(p_komira_last_error_step(NULL) == KOMIRA_STEP_NONE);
+    CHECK(p_komira_last_error_code(NULL, NULL, 0, &len) == KOMIRA_ERR_NULL_CTX);
+
     /* The statuses the header names are the ones the binary returns. */
     CHECK(p_komira_last_error(NULL, NULL, 0, &len) == KOMIRA_ERR_NULL_CTX);
     CHECK(p_komira_last_error(ctx, NULL, 0, NULL) == KOMIRA_ERR_NULL_ARG);
@@ -428,6 +481,18 @@ int main(void) {
     CHECK(again == len && text[0] != 0 && text[len] == 0);
     /* The other session saw none of it. */
     CHECK(p_komira_last_error(other, NULL, 0, &len) == KOMIRA_OK && len == 0);
+    expect_error_step_code(other, KOMIRA_STEP_NONE, "");
+    /* A failed registration is a bind failure with no code. */
+    expect_error_step_code(ctx, KOMIRA_STEP_BIND, "");
+    /* A NULL out_len of the code call is -2, stores its own refusal and, like
+       komira_last_error's, replaces the held error; a NULL out_buf with bytes
+       to write is -2 too. */
+    CHECK(p_komira_last_error_code(ctx, NULL, 0, NULL) == KOMIRA_ERR_NULL_ARG);
+    {
+        char refused[512];
+        CHECK(strcmp(last_error_text(ctx, refused, sizeof refused), "komira_last_error_code: out_len is NULL") == 0);
+    }
+    expect_error_step_code(ctx, KOMIRA_STEP_NONE, "");
 
     /* A path that is not a file is the engine's refusal for each source call. */
     uint8_t out[16];
@@ -454,6 +519,7 @@ int main(void) {
     CHECK(p_komira_credential_add(ctx, KOMIRA_CRED_AWS_KEYS, "raw-etl", &id) == KOMIRA_OK);
     CHECK(p_komira_credential_set(ctx, id, KOMIRA_FIELD_KEY_ID, (const uint8_t *)key_id, sizeof key_id - 1) == KOMIRA_OK);
     CHECK(p_komira_credential_seal(ctx, id, KOMIRA_BIND_SESSION) == KOMIRA_ERR_ENGINE);
+    expect_error_step_code(ctx, KOMIRA_STEP_BIND, "CREDENTIALS_INVALID");
     static const char named[] = "CREDENTIALS_INVALID: seal credential=raw-etl: AwsKeys needs secret=";
     memset(text, 0, sizeof text);
     CHECK(p_komira_last_error(ctx, text, sizeof text, &again) == KOMIRA_OK);
@@ -466,6 +532,14 @@ int main(void) {
     CHECK(p_komira_credential_set(ctx, 1, KOMIRA_FIELD_SECRET, NULL, 4) == KOMIRA_ERR_NULL_ARG);
     CHECK(p_komira_credential_set(ctx, 1, KOMIRA_FIELD_SECRET, plan, (uint64_t)KOMIRA_MAX_INPUT_BYTES + 1) == KOMIRA_ERR_TOO_LARGE);
     CHECK(p_komira_credential_seal(NULL, 1, KOMIRA_BIND_SESSION) == KOMIRA_ERR_NULL_CTX);
+    /* A refusal of a NULL argument has no step and no code. */
+    CHECK(p_komira_credential_add(ctx, KOMIRA_CRED_AWS_KEYS, "raw-etl", NULL) == KOMIRA_ERR_NULL_ARG);
+    expect_error_step_code(ctx, KOMIRA_STEP_NONE, "");
+    /* A NULL out_buf with a code to write is -2. */
+    CHECK(p_komira_register_parquet(ctx, "t", "no_such_file.parquet") == KOMIRA_ERR_ENGINE);
+    CHECK(p_komira_credential_seal(ctx, 99, KOMIRA_BIND_SESSION) == KOMIRA_ERR_ENGINE);
+    CHECK(p_komira_last_error_code(ctx, NULL, 19, &again) == KOMIRA_ERR_NULL_ARG);
+    CHECK(again == 19);
 
     p_komira_ctx_free(ctx);
     p_komira_ctx_free(other);

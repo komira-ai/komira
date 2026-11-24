@@ -74,6 +74,7 @@ python/tests/fixtures/udfs/runtime.py	the Python package's tests: the user funct
 python/tests/fixtures/udfs/scalars.py	the Python package's tests: the user functions the capture tests capture, which must be Python modules
 python/tests/test_credentials.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_credentials_lib.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_errors.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_iceberg.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_runtime.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_upgrade.py	the Python package's tests: the wheel upgraded from its previous release is tested in Python, by the interpreter it is installed for

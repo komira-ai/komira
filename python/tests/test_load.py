@@ -34,9 +34,11 @@ def refused(call):
     raise AssertionError("the load was not refused")
 
 
-def engine_error(call, ctx, native):
+def engine_error(call, ctx, native, step=None):
     """The KomiraError of an engine refusal: status -3, and the context's last
-    error, which is not empty, as the message."""
+    error, which is not empty, as the message. Its code and step are the
+    context's (None from a library older than 1.5); `step` is the step the
+    refusal reports from a 1.5 library, a BindError for "bind"."""
     try:
         call()
     except LibraryLoadError as e:
@@ -45,6 +47,12 @@ def engine_error(call, ctx, native):
         assert e.status == -3, e.status
         assert str(e) != "", "the engine gave no message"
         assert str(e) == native.last_error(ctx), (str(e), native.last_error(ctx))
+        assert e.code == native.last_error_code(ctx) and e.step == native.last_error_step(ctx), (e.code, e.step)
+        if native.abi_version >= 1005:
+            assert e.step == step, (e.step, step)
+            assert type(e) is (komira.BindError if step == "bind" else KomiraError), repr(e)
+        else:
+            assert (e.code, e.step) == (None, None), (e.code, e.step)
         return
     raise AssertionError("the call raised nothing")
 
@@ -65,11 +73,16 @@ def main(args):
 
     # The public names, and importing the package loaded no library.
     want = [
+        "BindError",
+        "CredentialsError",
         "KomiraError",
         "LibraryLoadError",
+        "ParseError",
         "Result",
         "Session",
+        "StorageError",
         "UnsupportedCpuError",
+        "UnsupportedOperation",
         "__version__",
         "abi_version",
     ]
@@ -188,7 +201,7 @@ def main(args):
     # error, read with the two-call protocol, as the message; it is the
     # first context's only.
     gone = os.path.join(lib_dir, "no_such_file.parquet")
-    engine_error(lambda: native.register_parquet(a, "gone", gone), a, native)
+    engine_error(lambda: native.register_parquet(a, "gone", gone), a, native, "bind")
     assert native.last_error(b) == "", native.last_error(b)
 
     # A good call clears the error; a path may be a pathlib.Path.
@@ -200,7 +213,7 @@ def main(args):
     # one it cannot.
     schema = native.parquet_schema(a, parquet)
     assert type(schema) is bytes and schema, schema
-    engine_error(lambda: native.parquet_schema(a, gone), a, native)
+    engine_error(lambda: native.parquet_schema(a, gone), a, native, "bind")
 
     scratch = tempfile.mkdtemp()
     csv = os.path.join(scratch, "rows.csv")
@@ -208,14 +221,14 @@ def main(args):
         f.write("n,s\n1,x\n2,y\n")
     binding = native.csv_binding(a, csv, delimiter=",", has_header=True, all_varchar=False)
     assert type(binding) is bytes and binding, binding
-    engine_error(lambda: native.csv_binding(a, gone, delimiter=",", has_header=True, all_varchar=False), a, native)
+    engine_error(lambda: native.csv_binding(a, gone, delimiter=",", has_header=True, all_varchar=False), a, native, "bind")
 
     ndjson = os.path.join(scratch, "rows.json")
     with open(ndjson, "w", encoding="utf-8") as f:
         f.write('{"n": 1}\n{"n": 2}\n')
     binding = native.json_binding(a, ndjson)
     assert type(binding) is bytes and binding, binding
-    engine_error(lambda: native.json_binding(a, gone), a, native)
+    engine_error(lambda: native.json_binding(a, gone), a, native, "bind")
 
     # Bytes that are not a plan are refused by the decoder.
     engine_error(lambda: native.plan_render(a, b"\xff\xff\xff"), a, native)

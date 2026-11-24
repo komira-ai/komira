@@ -14,7 +14,8 @@ error. Nothing here holds a pointer.
   CSV or newline-delimited JSON file, schema inferred from a bounded prefix.
 - `plan_render_text`: a serialized plan decoded and printed, not run.
 - `sql_result`: one SQL statement run on a session's engine, its answer as
-  batches checked to cross the Arrow C Stream Interface.
+  batches checked to cross the Arrow C Stream Interface. A refusal is
+  recorded on the session as its last error, with the step and the code.
 """
 
 from byte_buffer.file_identity import FileIdentity
@@ -126,7 +127,8 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
     session, which may be dropped first.
 
     Raises:
-        Error `<step>: <reason>` when `run_sql` refuses, where `<step>` is the
+        Error `<step>: <reason>` when `run_sql` refuses (the session records
+        it too, with its step and code: `Session.set_refusal`), where `<step>` is the
         step that refused (`parse`, `bind`, `optimize`, `lower` or
         `execute`) and `<reason>` its own message, unchanged; and the export
         check's error naming the column when a result column cannot cross the
@@ -135,5 +137,6 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
     var outcome = run_sql(session.engine, sql)
     if outcome.refusal:
         ref refusal = outcome.refusal.value()
-        raise Error(refusal.step + ": " + refusal.reason)
+        session.set_refusal(refusal.step, refusal.reason.copy())
+        raise Error(session.last_error())
     return arrow_result(outcome^)

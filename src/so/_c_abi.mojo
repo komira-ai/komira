@@ -2,7 +2,7 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of so that holds
 # pointers.
 # =============================================================================
-# Fourteen `@export abi("C")` functions are the library's whole surface today:
+# Sixteen `@export abi("C")` functions are the library's whole surface today:
 #
 #   int32_t  komira_abi_version(void);
 #   void    *komira_ctx_new(void);
@@ -11,6 +11,9 @@
 #   void     komira_ctx_free(void *ctx);
 #   int32_t  komira_last_error(void *ctx, uint8_t *out_buf, uint64_t out_cap,
 #                              uint64_t *out_len);
+#   int32_t  komira_last_error_code(void *ctx, uint8_t *out_buf,
+#                                   uint64_t out_cap, uint64_t *out_len);
+#   int32_t  komira_last_error_step(void *ctx);
 #   int32_t  komira_register_parquet(void *ctx, const char *name,
 #                                    const char *path);
 #   int32_t  komira_parquet_schema(void *ctx, const char *path,
@@ -71,6 +74,17 @@
 # error, and stores the engine's message when it returns `KOMIRA_ERR_ENGINE`.
 # `komira_last_error` does not clear what it reads.
 #
+# The error's code and step. Beside its text, the last error has a code, a
+# named word such as `SQL_SYNTAX_ERROR` or `LOWERING_WINDOW_UNSERVED` (empty
+# when the error has none), read by `komira_last_error_code` with the same
+# two-call protocol as the text, and a step, one of the `KOMIRA_STEP_*`
+# numbers, read by `komira_last_error_step`. Neither clears the error. An
+# engine refusal of `komira_sql_stream` has the step that refused; an
+# `KOMIRA_ERR_ENGINE` of a registration, a schema or binding read or a
+# credential call has `KOMIRA_STEP_BIND`; every other error has
+# `KOMIRA_STEP_NONE`. The code is derived from the reason by one function
+# (`error_code`, session.mojo), so the text stays the only record of the error.
+#
 # Strings and byte inputs. A `const char *` is NUL-terminated UTF-8 that the
 # caller keeps alive for the call; the library copies it before using it, and a
 # string that is not valid UTF-8 is refused as `KOMIRA_ERR_ENGINE` with a last
@@ -123,6 +137,8 @@ from so.status import (
     KOMIRA_ERR_TOO_LARGE,
     KOMIRA_MAX_INPUT_BYTES,
     KOMIRA_OK,
+    KOMIRA_STEP_BIND,
+    KOMIRA_STEP_NONE,
     abi_version,
     buffer_status,
     input_length_status,
@@ -279,6 +295,55 @@ def komira_last_error(
     return KOMIRA_OK
 
 
+@export
+def komira_last_error_code(
+    ctx: Handle,
+    out_buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    out_cap: UInt64,
+    out_len: UnsafePointer[UInt64, MutUntrackedOrigin],
+) abi("C") -> Int32:
+    """Copy the session's last error code into `out_buf` (two-call protocol).
+
+    The code is UTF-8, not NUL-terminated: a named word such as
+    `SQL_SYNTAX_ERROR`, or the empty text when the last error has none or
+    there is no error. Returns what `komira_last_error` returns for the same
+    arguments, and does not clear the error.
+    """
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    if Int(out_len) == 0:
+        session[].set_error(String("komira_last_error_code: out_len is NULL"))
+        return KOMIRA_ERR_NULL_ARG
+    var code = session[].last_error_code()
+    var n = code.byte_length()
+    # SAFETY: `out_len` is non-NULL (tested above) and is a caller-owned slot.
+    out_len[0] = UInt64(n)
+    var status = buffer_status(n, out_cap)
+    if status != KOMIRA_OK:
+        return status
+    if n == 0:
+        return KOMIRA_OK
+    if Int(out_buf) == 0:
+        session[].set_error(String("komira_last_error_code: out_buf is NULL"))
+        return KOMIRA_ERR_NULL_ARG
+    # SAFETY: `out_buf` holds at least `out_cap >= n` bytes by the caller's
+    # contract and `buffer_status` just confirmed it; `code` is alive for the
+    # copy and does not overlap the caller's buffer.
+    unsafe_memcpy(dest=out_buf, src=code.unsafe_ptr(), count=n)
+    return KOMIRA_OK
+
+
+@export
+def komira_last_error_step(ctx: Handle) abi("C") -> Int32:
+    """The `KOMIRA_STEP_*` of the session's last error. `KOMIRA_STEP_NONE`
+    for a NULL `ctx`, when there is no error and when the error has no step.
+    Never fails and does not clear the error."""
+    if Int(ctx) == 0:
+        return KOMIRA_STEP_NONE
+    return _session(ctx)[].last_error_step()
+
+
 def _c_string(text: CStr) raises -> String:
     """A copy of the NUL-terminated string at `text`; raises if the bytes are
     not valid UTF-8."""
@@ -386,7 +451,7 @@ def komira_register_parquet(
         register_parquet(session[], _c_string(name), _c_string(path))
         return KOMIRA_OK
     except e:
-        session[].set_error(String(e))
+        session[].set_error(String(e), KOMIRA_STEP_BIND)
         return KOMIRA_ERR_ENGINE
 
 
@@ -420,7 +485,7 @@ def komira_parquet_schema(
         var bytes = parquet_schema_bytes(_c_string(path))
         return _emit(session, Span(bytes), out_buf, out_cap, out_len)
     except e:
-        session[].set_error(String(e))
+        session[].set_error(String(e), KOMIRA_STEP_BIND)
         return KOMIRA_ERR_ENGINE
 
 
@@ -458,7 +523,7 @@ def komira_csv_binding(
         )
         return _emit(session, Span(bytes), out_buf, out_cap, out_len)
     except e:
-        session[].set_error(String(e))
+        session[].set_error(String(e), KOMIRA_STEP_BIND)
         return KOMIRA_ERR_ENGINE
 
 
@@ -486,7 +551,7 @@ def komira_json_binding(
         var bytes = json_binding_bytes(_c_string(path))
         return _emit(session, Span(bytes), out_buf, out_cap, out_len)
     except e:
-        session[].set_error(String(e))
+        session[].set_error(String(e), KOMIRA_STEP_BIND)
         return KOMIRA_ERR_ENGINE
 
 
@@ -564,7 +629,8 @@ def komira_credential_add(
         text = _c_string(name)
     except:
         session[].set_error(
-            String("CREDENTIALS_INVALID: add credential: the name is not UTF-8")
+            String("CREDENTIALS_INVALID: add credential: the name is not UTF-8"),
+            KOMIRA_STEP_BIND,
         )
         return KOMIRA_ERR_ENGINE
     try:
@@ -574,7 +640,7 @@ def komira_credential_add(
         out_id[0] = id
         return KOMIRA_OK
     except e:
-        session[].set_error(String(e))
+        session[].set_error(String(e), KOMIRA_STEP_BIND)
         return KOMIRA_ERR_ENGINE
 
 
@@ -630,7 +696,7 @@ def komira_credential_set(
             )
         return KOMIRA_OK
     except e:
-        session[].set_error(String(e))
+        session[].set_error(String(e), KOMIRA_STEP_BIND)
         return KOMIRA_ERR_ENGINE
 
 
@@ -652,7 +718,7 @@ def komira_credential_seal(ctx: Handle, id: Int32, scope: Int32) abi("C") -> Int
         session[].credentials.seal(id, scope)
         return KOMIRA_OK
     except e:
-        session[].set_error(String(e))
+        session[].set_error(String(e), KOMIRA_STEP_BIND)
         return KOMIRA_ERR_ENGINE
 
 
@@ -705,5 +771,9 @@ def komira_sql_stream(ctx: Handle, sql: CStr, out_stream: ArrowStream) abi("C") 
         build_record_batch_stream(result.take_batches(), result.take_schema(), out_stream)
         return KOMIRA_OK
     except e:
-        session[].set_error(String(e))
+        # `sql_result` records an engine refusal itself, with its step and
+        # code; the error that reaches here with nothing held is the export
+        # check's (it names a column), which has no step and no code.
+        if not session[].has_error():
+            session[].set_error(String(e))
         return KOMIRA_ERR_ENGINE

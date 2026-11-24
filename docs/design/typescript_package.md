@@ -155,12 +155,14 @@ Fixed before this design, and not reopened here:
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.4, with fourteen exports
+- **EXISTS** `libkomira` is at ABI 1.5, with sixteen exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
   - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream. The plan call,
     `komira_plan_stream`, is designed but not built; it takes the next minor.
   - `komira_ctx_new_with_options` (1.4) creates a context with the engine's worker count and
     memory budget as arguments (0 is the host's own value).
+  - `komira_last_error_code` and `komira_last_error_step` (1.5) answer the last error's named code and
+    the step that refused it. The addon does not bind them yet.
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,

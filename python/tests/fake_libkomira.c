@@ -1,7 +1,8 @@
 // A stand-in for libkomira with the calls of ABI 1.1 that the Python loader
 // binds, and, when FAKE_VERSION is 1.2 or later, the three credential calls of
-// ABI 1.2 over a fake store, and when it is 1.3 or later, komira_sql_stream
-// answering a stand-in Arrow C stream (both below). The tests load it to reach what the real
+// ABI 1.2 over a fake store, when it is 1.3 or later, komira_sql_stream
+// answering a stand-in Arrow C stream, and when it is 1.5 or later,
+// komira_last_error_code and komira_last_error_step (all below). The tests load it to reach what the real
 // library never does:
 //
 // - FAKE_VERSION sets the ABI version it reports (default 1001, which is 1.1):
@@ -54,6 +55,18 @@ static int32_t copy_out(const char *text, uint64_t len, uint8_t *b, uint64_t cap
 // The last error of a credential call or of komira_sql_stream (below);
 // empty when the last one had none.
 static char cred_error[256];
+
+// The code and step of that error, which komira_last_error_code and
+// komira_last_error_step (ABI 1.5, below) answer: empty and 0 when it has
+// none. Every call that sets or clears cred_error sets or clears them too.
+static char err_code[64];
+static int32_t err_step;
+
+__attribute__((unused)) static void clear_error(void) {
+  cred_error[0] = 0;
+  err_code[0] = 0;
+  err_step = 0;
+}
 
 // The last error, by mode:
 //   "capacity"    29 bytes of text naming the capacity the call was given
@@ -197,9 +210,11 @@ static const char *name_of(int32_t id) { return id >= 1 && id <= next_id ? names
 
 EXPORT int32_t komira_credential_add(void *ctx, int32_t kind, const char *name, int32_t *out_id) {
   (void)ctx;
-  cred_error[0] = 0;
+  clear_error();
   if (strcmp(name, "refuse_add") == 0) {
     snprintf(cred_error, sizeof cred_error, "CREDENTIALS_INVALID: add: the stand-in refuses kind %d", (int)kind);
+    snprintf(err_code, sizeof err_code, "CREDENTIALS_INVALID");
+    err_step = 2;
     return -3;
   }
   if (strcmp(name, "silent") == 0) return -3;
@@ -218,10 +233,12 @@ EXPORT int32_t komira_credential_add(void *ctx, int32_t kind, const char *name, 
 
 EXPORT int32_t komira_credential_set(void *ctx, int32_t id, int32_t field, const uint8_t *value, uint64_t value_len) {
   (void)ctx;
-  cred_error[0] = 0;
+  clear_error();
   if (value_len == 6 && memcmp(value, "refuse", 6) == 0) {
     snprintf(cred_error, sizeof cred_error, "CREDENTIALS_INVALID: set credential=%s: the stand-in refuses field %d",
              name_of(id), (int)field);
+    snprintf(err_code, sizeof err_code, "CREDENTIALS_INVALID");
+    err_step = 2;
     return -3;
   }
   char line[64];
@@ -238,9 +255,11 @@ EXPORT int32_t komira_credential_set(void *ctx, int32_t id, int32_t field, const
 
 EXPORT int32_t komira_credential_seal(void *ctx, int32_t id, int32_t scope) {
   (void)ctx;
-  cred_error[0] = 0;
+  clear_error();
   if (strcmp(name_of(id), "refuse_seal") == 0) {
     snprintf(cred_error, sizeof cred_error, "CREDENTIALS_INVALID: seal credential=refuse_seal: the stand-in refuses it");
+    snprintf(err_code, sizeof err_code, "CREDENTIALS_INVALID");
+    err_step = 2;
     return -3;
   }
   char line[64];
@@ -274,6 +293,11 @@ EXPORT int32_t komira_fake_store(uint8_t *b, uint64_t cap, uint64_t *n) {
 //                   error "execute: the stand-in fails at batch 2";
 //   "too_large"     -5 and the last error "komira_sql_stream: the stand-in
 //                   takes no text this long";
+//   "refuse <status> <step> [<code>]"
+//                   <status> (a number) and the last error "stand-in refusal
+//                   status <status> step <step> code <code>"; with ABI 1.5 the
+//                   last error's step is the number <step> and its code the
+//                   word <code>, empty when it is left out;
 //   anything else   -3 and the last error "bind: the stand-in runs no query
 //                   <text>", so a test sees the bytes that arrived.
 // A refusal leaves *out as it was given. komira_fake_stream_counts (not part
@@ -423,7 +447,7 @@ static void stream_release(struct ArrowArrayStream *s) {
 
 EXPORT int32_t komira_sql_stream(void *ctx, const char *sql, struct ArrowArrayStream *out) {
   (void)ctx;
-  cred_error[0] = 0;
+  clear_error();
   if (!sql || !out) return -2;
   int m;
   if (strcmp(sql, "rows") == 0) {
@@ -434,11 +458,21 @@ EXPORT int32_t komira_sql_stream(void *ctx, const char *sql, struct ArrowArraySt
     m = SCHEMA_FAILS;
   } else if (strcmp(sql, "next_fails") == 0) {
     m = NEXT_FAILS;
+  } else if (strncmp(sql, "refuse ", 7) == 0) {
+    int status = 0, step = 0;
+    char code[64] = "";
+    if (sscanf(sql + 7, "%d %d %63s", &status, &step, code) < 2) return -3;
+    snprintf(cred_error, sizeof cred_error, "stand-in refusal status %d step %d code %s", status, step, code);
+    snprintf(err_code, sizeof err_code, "%s", code);
+    err_step = step;
+    return status;
   } else if (strcmp(sql, "too_large") == 0) {
     snprintf(cred_error, sizeof cred_error, "komira_sql_stream: the stand-in takes no text this long");
     return -5;
   } else {
     snprintf(cred_error, sizeof cred_error, "bind: the stand-in runs no query %s", sql);
+    snprintf(err_code, sizeof err_code, "SQL_BIND_ERROR");
+    err_step = 2;
     return -3;
   }
   StreamData *p = calloc(1, sizeof *p);
@@ -454,5 +488,22 @@ EXPORT int32_t komira_sql_stream(void *ctx, const char *sql, struct ArrowArraySt
 }
 
 EXPORT void komira_fake_stream_counts(int64_t *out) { memcpy(out, counts, sizeof counts); }
+
+#endif
+
+#if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 5
+
+// ABI 1.5: the last error's code, by the two-call protocol (empty when there
+// is none), and its step number. A mode of komira_last_error's own (set by
+// komira_register_parquet) has no code and no step.
+EXPORT int32_t komira_last_error_code(void *ctx, uint8_t *b, uint64_t cap, uint64_t *n) {
+  (void)ctx;
+  return copy_out(err_code, strlen(err_code), b, cap, n);
+}
+
+EXPORT int32_t komira_last_error_step(void *ctx) {
+  (void)ctx;
+  return err_step;
+}
 
 #endif

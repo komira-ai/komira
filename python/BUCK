@@ -455,11 +455,14 @@ _PYARROW_313 = _PYARROW_WHL[""]
         _LOAD_ERROR + "libkomira_async_rt_native.so.1: cannot open shared object file: No such file or directory",
     ),
     # A wheel without libMSupportGlobals.so: libKGENCompilerRTShared.so, found
-    # in lib/, needs it, and the error names the missing file.
+    # in lib/, needs it. The error says the package is incomplete, names the
+    # missing file in lib/, and ends with the loader's own text.
     (
         "refuses_missing_runtime_library",
         [":komira_wheel_without_runtime_library", _PYARROW_313],
-        _LOAD_ERROR + "libMSupportGlobals.so: cannot open shared object file: No such file or directory",
+        _LOAD_ERROR + "the package is incomplete (reinstall komira), this file is missing: " +
+        "<site>/komira/_lib/lib/libMSupportGlobals.so; the loader says: " +
+        "libMSupportGlobals.so: cannot open shared object file: No such file or directory",
     ),
     # A wheel tagged for another platform is not installed.
     (
