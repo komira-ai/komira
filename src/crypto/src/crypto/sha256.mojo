@@ -6,8 +6,8 @@
 # sha2_oneshot[32].
 #
 # Public surface:
-#   * sha256(data) -> InlineArray[UInt8, 32]
-#   * sha256_string(s) -> InlineArray[UInt8, 32]
+#   * sha256(data) -> Array[UInt8, 32]
+#   * sha256_string(s) -> Array[UInt8, 32]
 # =============================================================================
 
 from crypto.internal.asm.sha256_ffi import sha2_oneshot

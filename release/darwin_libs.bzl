@@ -23,10 +23,11 @@ whose closure reaches one is added here with that reason, which is the answer of
 
     ./buck2 uquery 'rdeps(<every :lib of packages.bzl>, <the third_party archives>)'
 
-so such a package is a red `release-macos` job (not a red release: the job reports and does not
-block, release.yml says why) until it is added here. A package whose closure says so at configuration
-or analysis (a target or toolchain incompatible with darwin-arm64) fails earlier, in the pull request
-that adds it: pr.yml configures and analyses this set for darwin-arm64 (release/darwin_analysis.bxl),
+so such a package fails the macOS part of the pull request check that reaches it (pr.yml builds the
+`:lib` of each package of this list the change reaches, tools/build/ci/darwin.bzl), and the
+`release-macos` job, until it is added here. A package whose closure says so at configuration or
+analysis (a target or toolchain incompatible with darwin-arm64) fails in the pull request that adds it
+too: pr.yml configures and analyses this whole set for darwin-arm64 (release/darwin_analysis.bxl),
 building nothing.
 """
 
@@ -45,6 +46,17 @@ def darwin_packages(packages = README_E2E_PACKAGES, excluded = DARWIN_EXCLUDED):
     return [n for n in names if n not in excluded]
 
 DARWIN_PACKAGES = darwin_packages()
+
+# The macOS Python harness tests: release-macos.yml's step `build the macOS Python harness tests`
+# builds exactly these, after the set, for darwin-arm64 (//:release_macos_cases holds the step's
+# args to this list), and pr.yml's analysis of the set analyses them too (release/darwin_analysis.bxl),
+# so a target of their closure that cannot run on a macOS worker fails in its pull request.
+DARWIN_PYTHON_HARNESS = [
+    "komira//tools/build/examples/python_binding:hello",
+    "komira//tools/build/examples/python_binding:refuses_missing_lib",
+    "komira//tools/build/examples/python_binding:refuses_wrong_add",
+    "komira//tools/build/examples/python_binding:refuses_wrong_sum",
+]
 
 def _impl(ctx):
     tree = {}

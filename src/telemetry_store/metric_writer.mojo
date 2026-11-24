@@ -326,7 +326,7 @@ struct TelemetryMetricSegmentWriter[Storage: CloneableConditionalWriteStore](
     def rows_published(self) -> Int64:
         return self._rows_published
 
-    def _next_uuid(mut self) -> InlineArray[UInt8, TELEMETRY_UUID_BYTES]:
+    def _next_uuid(mut self) -> Array[UInt8, TELEMETRY_UUID_BYTES]:
         """Mint a per-writer segment uuid: worker discriminant, a 7-byte
         per-construction NONCE, and an 8-byte monotone counter. Identical
         construction to `log_writer._next_uuid`; see that docstring for why the
@@ -338,7 +338,7 @@ struct TelemetryMetricSegmentWriter[Storage: CloneableConditionalWriteStore](
         and the dataset segment separates those before a uuid is ever compared.
         """
         self._seq += Int64(1)
-        var u = InlineArray[UInt8, TELEMETRY_UUID_BYTES](fill=UInt8(0))
+        var u = Array[UInt8, TELEMETRY_UUID_BYTES](fill=UInt8(0))
         u[0] = self._worker_disc
         var nz = UInt64(self._nonce)
         for i in range(7):

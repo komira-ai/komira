@@ -62,7 +62,13 @@ from plan_expr.udf_data import (
     DTAG_I64,
 )
 from plan_expr.expr import Expr, BIN_GT
-from plan_expr.fs_descriptor_pod import FsDescriptorPod, FS_SCHEME_S3
+from plan_expr.fs_descriptor_pod import (
+    FsDescriptorPod,
+    FS_SCHEME_AZURE,
+    FS_SCHEME_FILE,
+    FS_SCHEME_GCS,
+    FS_SCHEME_S3,
+)
 from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import (
     LogicalPlan,
@@ -89,6 +95,7 @@ from plan_ir.plan_decisions import (
     SCAN_UNBOUNDED,
 )
 from plan_ir.plan_decisions import AGG_MODE_PARTIAL, AGG_MODE_SINGLE, AGG_MODE_UNSET
+from scan_source.avro_source import AvroSource
 from scan_source.parquet_source import ParquetSource
 from scan_source.source_variant import SourceVariant
 
@@ -186,25 +193,46 @@ def test_a_partial_aggregate_is_refused_and_a_single_one_is_cut() raises:
     assert_equal(_message(_count_by(_scan(), List[String](), AGG_MODE_SINGLE), _inputs()), "")
 
 
-def test_a_source_other_than_parquet_memory_or_csv_is_refused() raises:
-    var json = LogicalPlan.scan(String("t.jsonl"), SOURCE_NDJSON, _schema())
-    _refused_with(_message(json, _inputs()), LOWERING_UNCUTTABLE_NODE, "json")
-    # The same scan of a CSV file lowers.
+def test_a_source_other_than_parquet_memory_csv_or_json_is_refused() raises:
+    var avro = LogicalPlan.scan_from_source(
+        SourceVariant(AvroSource(String("t.avro"), _schema())), _schema()
+    )
+    _refused_with(_message(avro, _inputs()), LOWERING_UNCUTTABLE_NODE, "avro")
+    # The same scan of a CSV file and of a JSON Lines file lowers.
     var csv = LogicalPlan.scan(String("t.csv"), SOURCE_CSV, _schema())
     assert_equal(_message(csv, _inputs()), "")
+    var json = LogicalPlan.scan(String("t.jsonl"), SOURCE_NDJSON, _schema())
+    assert_equal(_message(json, _inputs()), "")
 
 
 def _parquet_scan(var source: ParquetSource) raises -> LogicalPlan:
     return LogicalPlan.scan_from_source(SourceVariant(source^), _schema())
 
 
+def _on(desc: FsDescriptorPod) raises -> LogicalPlan:
+    return _parquet_scan(ParquetSource(String("a.parquet"), _schema()).with_fs_descriptor(desc))
+
+
 def test_a_parquet_scan_the_segment_arm_cannot_carry_is_refused() raises:
-    var remote = _parquet_scan(
-        ParquetSource(String("a.parquet"), _schema()).with_fs_descriptor(
-            FsDescriptorPod.cloud(FS_SCHEME_S3, String("bucket"), 3)
-        )
+    # A scheme code that names no store the engine reads is refused, naming
+    # it by its number.
+    assert_equal(
+        _message(_on(FsDescriptorPod.cloud(UInt8(9), String("raw"), 3)), _inputs()),
+        "LOWERING_SCAN_NOT_TOTAL: a Parquet scan on scheme 9://raw; the"
+        " segment's Parquet arm reads the local file system, S3, GCS and Azure",
     )
-    _refused_with(_message(remote, _inputs()), LOWERING_SCAN_NOT_TOTAL, "local")
+    # A local scan with an explicit binding names a resolver the segment does
+    # not carry.
+    _refused_with(
+        _message(_on(FsDescriptorPod(scheme=FS_SCHEME_FILE, bucket=String(""), node_id=5)), _inputs()),
+        LOWERING_SCAN_NOT_TOTAL,
+        "file://",
+    )
+
+    # A scan of an S3 or GCS bucket, or of an Azure container, lowers.
+    assert_equal(_message(_on(FsDescriptorPod.cloud(FS_SCHEME_S3, String("lake"), 3)), _inputs()), "")
+    assert_equal(_message(_on(FsDescriptorPod.cloud(FS_SCHEME_GCS, String("raw"), 3)), _inputs()), "")
+    assert_equal(_message(_on(FsDescriptorPod.cloud(FS_SCHEME_AZURE, String("box"), 3)), _inputs()), "")
 
     # One local file lowers.
     assert_equal(_message(_parquet_scan(ParquetSource(String("a.parquet"), _schema())), _inputs()), "")

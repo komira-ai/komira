@@ -140,6 +140,7 @@ test "the macOS push builds the macOS wheel for darwin-arm64 from the stamp; a r
     const lines = try expanded(ar, text, .{ .event = "push" }, "build-macos-arm64");
     try t.expect(reader.has(lines, "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 " ++ stamp ++ " //python:komira_wheel_macos_arm64[release] --out <runner.temp>/pypi-macos-arm64/built/komira.whl"));
     try t.expect(reader.has(lines, "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 " ++ stamp ++ " //python:wheel_install_test_macos_arm64"));
+    try t.expect(reader.has(lines, "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 " ++ stamp ++ " //python:wheel_libs_macos_arm64 //python:wheel_same_macos_arm64"));
     try t.expectError(error.Unreadable, play(ar, try reader.inJob(ar, text, "build-macos-arm64", "    if: github.ref == 'refs/heads/main' && github.event_name == 'push'\n", "    if: github.ref == 'refs/heads/main' && (inputs.flavour || 'bundled') == 'bundled'\n"), .{ .event = "push", .ends = &.{MAC_NOTHING} }));
     // a case for a job of pypi.yml is a job this workflow does not have
     try t.expectError(error.Unreadable, play(ar, text, .{ .event = "push", .ends = &.{ MAC_NOTHING, BUILT } }));

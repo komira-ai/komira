@@ -76,7 +76,7 @@ def test_single_a_record_parses_to_expected_ip() raises:
     var node = Array[UInt8, _ADDRINFO_SIZE](fill=UInt8(0))
     var sa = Array[UInt8, _SOCKADDR_IN_SIZE](fill=UInt8(0))
 
-    # SAFETY: stack-local InlineArrays; the MutExternalOrigin pointers are the
+    # SAFETY: stack-local Arrays; the MutExternalOrigin pointers are the
     # parser's FFI ABI shape (the parser reads them read-only and frees
     # nothing). The buffers outlive the call (locals of this function).
     var node_p = node.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
@@ -103,7 +103,7 @@ def test_single_a_record_parses_to_expected_ip() raises:
     assert_equal(Int(out[0].v4_be), 0x04030201)
 
     # Keep the buffers alive across the parse (method-based keepalive — the
-    # InlineArrays' addresses were handed to the parser).
+    # Arrays' addresses were handed to the parser).
     _ = node
     _ = sa
 

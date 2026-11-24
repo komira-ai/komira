@@ -115,6 +115,51 @@ zig_exe(
     visibility = ["//tools/build/ci:change_cli_cases"],
 )
 
+# darwin_targets: writes the targets of the macOS part of the pull request's check (pr.yml, step
+# `the macOS targets to build`) from the log of darwin.bxl:select, and sets the step's output `any`
+# when there is one (darwin_targets/darwin_targets.zig says what it reads and refuses). The pull
+# request's check builds it on the farm and runs it on the runner. Its cases are recorded runs of
+# darwin.bxl:select (darwin_targets/fixtures); welded: the tool is built only when they pass.
+_DARWIN_TARGETS_FIXTURES = [
+    "darwin_targets/fixtures/select_broken.log",
+    "darwin_targets/fixtures/select_none.log",
+    "darwin_targets/fixtures/select_some.log",
+    "darwin_targets/fixtures/select_whole.log",
+]
+
+zig_test(
+    name = "darwin_targets_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "darwin_targets/darwin_targets_test.zig",
+    imports = ["darwin_targets/darwin_targets.zig"] + _DARWIN_TARGETS_FIXTURES,
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "darwin_targets",
+    exec_compatible_with = LINUX_X86_64,
+    src = "darwin_targets/darwin_targets.zig",
+    unit_tests = [":darwin_targets_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The cases of darwin_targets' executable (darwin_targets/darwin_targets_cli_test.zig says what
+# each catches): the built tool run with its flags, as pr.yml runs it, over the recorded logs, in a
+# directory of each case's own; each checks the exit code, stderr and the files written. A build
+# action.
+zig_test(
+    name = "darwin_targets_cli_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "darwin_targets/darwin_targets_cli_test.zig",
+    imports = _DARWIN_TARGETS_FIXTURES,
+    exec_tools = {"DARWIN_TARGETS": ":darwin_targets"},
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # The recorded buck2 output of assert_remote's cases, as a directory, for the
 # cases of the CI action that runs it (//:buck2_farm_cases).
 export_file(

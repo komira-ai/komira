@@ -491,6 +491,8 @@ Arrow is the only type in the plan; these tables are the `komira/python` and `ko
 | `npt.NDArray[np.<dtype>]` | that primitive type, as a batch |
 | `pa.Array`, `pl.Series`, `pd.Series` as a **parameter** | no type; chooses the Python descriptor's batch format: `ARROW`, `POLARS` or `PANDAS` |
 
+`decimal.Decimal` has no precision or scale, so a hint cannot give it a type and it takes `return_dtype=`. In the `komira/python` runtime a list item or a struct field is a flat type: no nested list or struct, no decimal and no timestamp with a time zone, because an output column holds one level of children with only a name, a type id and a nullability each. A `timestamp[ns]` argument cannot be taken by a `VALUES` function, since `datetime.datetime` holds microseconds.
+
 **TypeScript.** Types do not exist when TypeScript runs: the compiler and every type-stripping loader erase them, so
 an annotation can never reach the plan. The verb therefore takes the type as a **value**, `kt.Float64` or
 `kt.struct({...})`, and the static type is inferred from that value, so the compiler still rejects a function whose

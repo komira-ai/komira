@@ -1,4 +1,4 @@
-# Port: the libkomira calls that run a query (C ABI 1.2)
+# Port: the libkomira calls that run a query (C ABI 1.3)
 
 Status: port document, not built. **EXISTS** names code on `main`; **PROPOSED** is
 new. Statements the author deduced rather than read are marked *(inferred)*.
@@ -25,8 +25,8 @@ The callers are thin bindings over these calls: the Python package
 
 | item | port |
 |---|---|
-| run SQL | `komira_sql_stream(ctx, sql, out)`, from the earlier golden. ABI 1.2 |
-| run a plan | `komira_plan_stream(ctx, plan, plan_len, out)`, from the earlier golden. ABI 1.2. The bytes are an authored `WirePlanEnvelope`, the same input `komira_plan_render` takes. libkomira optimizes it in-process |
+| run SQL | `komira_sql_stream(ctx, sql, out)`, from the earlier golden. ABI 1.3 |
+| run a plan | `komira_plan_stream(ctx, plan, plan_len, out)`, from the earlier golden. ABI 1.3. The bytes are an authored `WirePlanEnvelope`, the same input `komira_plan_render` takes. libkomira optimizes it in-process |
 | result | an Arrow C stream (`struct ArrowArrayStream`), as in the earlier golden. The caller allocates it and libkomira fills it. The caller owns it after `KOMIRA_OK`. It does not depend on the context, which may be freed first |
 | status codes | the six of ABI 1.1. The port adds none. Every engine refusal is `KOMIRA_ERR_ENGINE` (-3), with the reason in the last error |
 | conventions | ABI 1.1's: the two-call `komira_last_error`, the 64 MiB input bound (-5), and `*out` untouched on any refusal |
@@ -34,15 +34,19 @@ The callers are thin bindings over these calls: the Python package
 | not carried | `komira_register_python_udf`, `komira_declare_sql_udf`, `komira_register_builtin_mojo_udf`, the seven `xl_*` calls, `komira_plan_bytes` and `komira_sql_render` (§9) |
 | new relative to the earlier ABI | session options, cancel, progress, a cancelled status code and credentials. Not decided here (§10) |
 
-The rows' `since` is 1.2 when they land together. Releases come from `main`
-automatically, so a row's `since` is the version of the first change that lands
-it on `main`. If `komira_sql_stream` lands alone, `komira_plan_stream` takes the
-next minor. The golden (`src/so/abi/komira.tsv`) holds whichever version is true.
+The rows' `since` is 1.3 when they land together: 1.2 is the credential calls
+(`komira_credential_add`, `_set`, `_seal`; [credentials_and_writes.md](credentials_and_writes.md)
+decision 8), which landed first. Releases come from `main` automatically, so a row's `since` is
+the version of the first change that lands it on `main`. If `komira_sql_stream` lands alone,
+`komira_plan_stream` takes the next minor. The golden (`src/so/abi/komira.tsv`) holds whichever
+version is true.
 
 ## 2. What exists today
 
 - **EXISTS** ABI 1.1: nine exports, six status codes and `KOMIRA_MAX_INPUT_BYTES`
   (64 MiB) in [komira.tsv](../../src/so/abi/komira.tsv).
+- **EXISTS** ABI 1.2: the three credential calls and their `constant` rows (kinds, fields and
+  `KOMIRA_BIND_SESSION`), twelve exports in all.
   - The 1.1 conventions: the two-call output protocol and a last error per
     context.
   - Each call that works on the context (register, schema, binding, render)
@@ -90,13 +94,13 @@ komira_plan_stream	c_int32	c_void_p,POINTER(c_ubyte),c_uint64,POINTER(ArrowArray
 ```
 
 The same calls as libkomira golden rows (`symbol<TAB>return<TAB>arguments<TAB>since`).
-The rows of 1.1 stay byte for byte. Only these two rows are added, and no type or
+The rows of 1.1 and 1.2 stay byte for byte. Only these two rows are added, and no type or
 constant changes:
 
 ```text
-version	1.2
-komira_sql_stream	Int32	Handle,CStr,ArrowStream	1.2
-komira_plan_stream	Int32	Handle,ConstBytes,UInt64,ArrowStream	1.2
+version	1.3
+komira_sql_stream	Int32	Handle,CStr,ArrowStream	1.3
+komira_plan_stream	Int32	Handle,ConstBytes,UInt64,ArrowStream	1.3
 ```
 
 The C prototypes in `komira.h`:
@@ -153,12 +157,14 @@ just before it, which apply to that run only and are dropped when it returns. A 
 to every later run on the context.
 - **The route.** It is `sdk_exec.run_sql` with the session's `EngineContext`. The
   library converts the SQL text to a logical plan by parsing and binding it.
-- **Statements that are not queries.** `run_sql` refuses them
+- **Statements that are not queries.** `run_sql` runs `COPY ... TO` a local
+  Parquet, CSV or newline-delimited JSON file and answers one row, the BIGINT `Count`
+  ([src/sdk_exec/README.md](../../src/sdk_exec/README.md)). It refuses
+  `CREATE TABLE ... AS` and the other statements that are not queries
   (`STATEMENT_NOT_A_QUERY` today; the write design renames it `SQL_STATEMENT_UNSUPPORTED`). The write
-  design lifts the refusal for `COPY ... TO` and, into a bound catalog, for `CREATE TABLE ... AS` and
-  `INSERT`, which answer what DuckDB returns: a one-row `Count` stream, or no rows for `CREATE TABLE`
-  with a column list
-  ([credentials_and_writes.md](credentials_and_writes.md#10-writes)).
+  design also lifts the refusal, into a bound catalog, for `CREATE TABLE ... AS` and `INSERT`, which
+  answer what DuckDB returns: a one-row `Count` stream, or no rows for `CREATE TABLE` with a column
+  list ([credentials_and_writes.md](credentials_and_writes.md#10-writes)).
 - **The error text.** **PROPOSED:** the last error text is `<step>: <reason>`,
   where the step is the one that refused (parse, bind, optimize, lower or
   execute). That text is for people, and bindings do not parse it (§6).
@@ -321,7 +327,7 @@ The earlier SDK carried a second code space inside the message text: a
 It is not carried. The status code is the machine-readable part, and the text is
 for people.
 
-**PROPOSED:** the 1.2 change writes into the README and the header that a binding
+**PROPOSED:** the 1.3 change writes into the README and the header that a binding
 treats any negative code it does not know as a failure. That keeps a later code
 additive. Today the README says only that every failure is negative.
 
@@ -512,7 +518,7 @@ Each part below is its own change, and each adds its rows and its tests together
 2. libkomira links `sdk_exec`. The session gets one catalog and a lazy
    `EngineContext` (§7).
 3. `komira_sql_stream` and `komira_plan_stream`, with the `ArrowStream` golden
-   type, the gate drivers, the C driver and the 1.2 rows (§3).
+   type, the gate drivers, the C driver and the 1.3 rows (§3).
 4. Abort containment (§8, items 3 and 4).
 
 The items of §10 follow in their own changes.
@@ -531,7 +537,7 @@ The items of §10 follow in their own changes.
   puts a second way to choose behaviour inside an integer argument. Two named calls
   are clearer and are typed in the header, and they are the earlier golden's
   shape.
-- **`OptimizedPlan` bytes as the plan door's input.** Rejected for 1.2 (§3):
+- **`OptimizedPlan` bytes as the plan door's input.** Rejected for 1.3 (§3):
   - it would move the optimizer out of the run;
   - it would need a codec that is not built yet;
   - it mixes the job-manager path into the in-process session.

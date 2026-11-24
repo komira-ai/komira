@@ -12,6 +12,9 @@ scan's path.
 and `expr_field` the output field the engine derives for it. An input schema
 is a sequence of `WireField`.
 
+A call of a user function and a `MapBatches` node name a `UdfRef` by its index in
+`WirePlanEnvelope.udfs` (komira/_plan/_udf.py).
+
 Nothing here writes or reads SQL text: a plan is built as nodes and sent as
 nodes.
 

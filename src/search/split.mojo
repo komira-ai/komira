@@ -36,7 +36,7 @@
 #     List[UInt8] and returns Spans tied to the INNER field
 #     (origin_of(self._bytes)) — the same idiom as FinalizedIndex /
 #     TermDictionary. NO Slab, NO heap-owning slab element, NO wildcard origin.
-#     split_uuid is InlineArray[UInt8, 16]: no heap, no move-corruption
+#     split_uuid is Array[UInt8, 16]: no heap, no move-corruption
 #     surface.
 # =============================================================================
 

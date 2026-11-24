@@ -26,8 +26,9 @@
 # THE JOBS (a job that fails stops every job that needs it):
 #   push: `build-macos-arm64` (on an ubuntu runner that only asks the farm; the Macs are farm workers):
 #   builds the wheel's file name, asks TestPyPI whether it lists that file (`pypi_smoke present`), and
-#   only when it does not builds the wheel, its install test and the macOS driver on the Macs; its output
-#   `version` is empty when nothing was built. `testpypi-macos-arm64` (the state and the upload, with the
+#   only when it does not builds the wheel, its install test, its read-back checks and the macOS driver on
+#   the Macs; its output `version` is empty when nothing was built. `testpypi-macos-arm64` (the state and
+#   the upload, with the
 #   Linux driver), `testpypi-smoke-macos-arm64` (on the hosted runner macos-15, with the macOS driver),
 #   `testpypi-passed-macos-arm64` (the record), `result-testpypi-macos-arm64` (the verdict).
 #   schedule and manual run: `promote-macos-arm64`, `pypi-macos-arm64`, `pypi-smoke-macos-arm64` (on
@@ -172,6 +173,16 @@ jobs:
         with:
           args: build --target-platforms komira//tools/build/platforms:darwin-arm64 -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:wheel_install_test_macos_arm64
           assert-remote: ${{ steps.assert.outputs.path }}
+      # The macOS wheel read back (python/BUCK, "The macOS wheel, read back"), the same stamp so the same
+      # wheel: every load command of its libraries resolves inside it or to a macOS system library, and it
+      # is the Linux wheel's package (the same Python files, metadata and Python tags), its native libraries
+      # aside. Each Mach-O member's architecture, minimum macOS and code signature the wheel rule holds.
+      - name: the macOS wheel read back
+        if: steps.testpypi_file.outputs.present != 'true'
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //python:wheel_libs_macos_arm64 //python:wheel_same_macos_arm64
+          assert-remote: ${{ steps.assert.outputs.path }}
       # The driver the macOS smoke jobs run: cross-compiled on the farm, run on a hosted macOS runner.
       - name: build the macOS smoke driver
         if: steps.testpypi_file.outputs.present != 'true'
@@ -248,6 +259,7 @@ jobs:
   # The smoke on TestPyPI for the macOS wheel, on a hosted Apple-silicon runner with the Python a user
   # has. The driver is the macOS build, the quickstart files the record's. The wheel it installs comes
   # from the index, never from the artifact.
+  # Hosted, not on a farm Mac: a farm action has no network, and the install from TestPyPI is the test.
   testpypi-smoke-macos-arm64:
     needs: [build-macos-arm64, testpypi-macos-arm64]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.testpypi-macos-arm64.outputs.state != 'differs'
@@ -412,6 +424,7 @@ jobs:
 
   # The smoke on PyPI for the macOS wheel: the same as testpypi-smoke-macos-arm64, against the real
   # index. It is the last proof that a macOS user's `pip install komira` works.
+  # Hosted, not on a farm Mac: a farm action has no network, and the install from PyPI is the test.
   pypi-smoke-macos-arm64:
     needs: [promote-macos-arm64, pypi-macos-arm64]
     if: github.ref == 'refs/heads/main' && github.event_name != 'push' && needs.pypi-macos-arm64.outputs.state != 'differs'

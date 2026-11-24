@@ -208,16 +208,20 @@ def test_door_refuses_an_empty_plan_rather_than_passing_it() raises:
 
 
 def test_door_refuses_a_segment_stamped_by_the_previous_release() raises:
-    """IR version 16 added the Parquet file list; a segment stamped 15 has no
-    such field and is refused by name."""
-    assert_equal(PHYSICAL_PLAN_IR_VERSION, 16)
-    var segs = List[SegmentDescPod]()
-    segs.append(_seg_at_version(0, 15))
-    var msg = _refusal_message(segs^)
-    assert_true(
-        String("PHYSICAL_PLAN_IR_VERSION_MISMATCH") in msg,
-        "a segment stamped 15 must be refused; got: " + msg,
-    )
+    """IR version 20 added the JSONL source (`SOURCE_JSONL`, `jsonl_path`,
+    `jsonl_schema`), 19 the Iceberg source (SOURCE_ICEBERG, `iceberg_spec`)
+    and 18 the store of a Parquet source (`parquet_fs`); a segment stamped 19,
+    18, 17, 16 or 15 lacks a field of the current layout and is refused by
+    name."""
+    assert_equal(PHYSICAL_PLAN_IR_VERSION, 20)
+    for stamped in range(15, 20):
+        var segs = List[SegmentDescPod]()
+        segs.append(_seg_at_version(0, stamped))
+        var msg = _refusal_message(segs^)
+        assert_true(
+            String("PHYSICAL_PLAN_IR_VERSION_MISMATCH") in msg,
+            "a segment stamped " + String(stamped) + " must be refused; got: " + msg,
+        )
 
 
 def main() raises:

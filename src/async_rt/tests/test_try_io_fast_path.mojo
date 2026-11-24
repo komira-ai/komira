@@ -132,7 +132,7 @@ def test_try_io_read_empty_buf_short_circuits() raises:
 
     Construct a 1-element backing array but materialize the Span over a
     zero-length slice (Span has no native zero-cap empty constructor in
-    Mojo 0.26.3 — InlineArray of size 0 fails the stdlib constraint).
+    Mojo 0.26.3 — Array of size 0 fails the stdlib constraint).
     The short-circuit guard in try_recv (and therefore try_io_read) fires
     on len(buf)==0 BEFORE the recv syscall is issued; we test that path
     via the slice form.
@@ -282,7 +282,7 @@ def test_try_io_connect_bad_addr_returns_error() raises:
     """try_io_connect with empty addr short-circuits to
     Error(EINVAL=22). Verifies the early guard fires before any syscall.
 
-    Materialize an empty Span via slicing (InlineArray[_, 0] is rejected
+    Materialize an empty Span via slicing (Array[_, 0] is rejected
     by the stdlib constraint).
     """
     var backing = Array[UInt8, 1](fill=UInt8(0))

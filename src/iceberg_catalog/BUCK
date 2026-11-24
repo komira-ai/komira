@@ -1,4 +1,6 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+load(":iceberg_write_cases.bzl", "iceberg_write_files")
 
 # The Iceberg catalog client: resolves `namespace.table` through the
 # IcebergCatalog seam (a storage-based resolver with no network, and a REST
@@ -11,13 +13,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
 # network and no sockets.
 mojo_library(
     name = "iceberg_catalog",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "iceberg_write_runner/**/*.mojo"]),
     deps = [
+        "//src/arrow:arrow",
         "//src/async_rt:async_rt",
         "//src/clock:clock",
+        "//src/containers:containers",
         "//src/http_client:http_client",
         "//src/http_core:http_core",
+        "//src/iceberg:iceberg",
         "//src/json:json",
+        "//src/objectstore:objectstore",
+        "//src/parquet_api:parquet_api",
         "//src/uuid:uuid",
     ],
     test_srcs = [
@@ -25,6 +32,7 @@ mojo_library(
         "tests/test_iceberg_commit_append.mojo",
         "tests/test_iceberg_commit_base_checks.mojo",
         "tests/test_iceberg_commit_budget.mojo",
+        "tests/test_iceberg_commit_overwrite.mojo",
         "tests/test_iceberg_commit_reload_failures.mojo",
         "tests/test_iceberg_commit_unknown.mojo",
         "tests/test_iceberg_metadata_apply.mojo",
@@ -36,8 +44,13 @@ mojo_library(
         "tests/test_iceberg_rest_test_catalog.mojo",
         "tests/test_iceberg_rest_test_catalog_scripting.mojo",
         "tests/test_iceberg_rest_write.mojo",
+        "tests/test_iceberg_store_writer.mojo",
         "tests/test_iceberg_table_changes.mojo",
+        "tests/test_iceberg_table_files.mojo",
         "tests/test_iceberg_table_metadata.mojo",
+        "tests/test_iceberg_write_sink.mojo",
+        "tests/test_iceberg_write_sink_commit.mojo",
+        "tests/test_iceberg_write_sink_refusals.mojo",
         "tests/test_storage_based_catalog.mojo",
     ],
     visibility = ["PUBLIC"],
@@ -62,4 +75,94 @@ mojo_test(
         "//src/tests/e2e/komira_http_tls_e2e:komira_http_tls_e2e",
         "//src/json:json",
     ],
+)
+
+# =============================================================================
+# The pinned DuckDB's iceberg extension reading what the write sink wrote
+# =============================================================================
+#
+# `iceberg_write_runner` (iceberg_write_runner/main.mojo) writes three tables
+# (db.appended, db.overwritten, db.emptied) through write_table with
+# deterministic ids; `:iceberg_write_komira` is that run as one build action,
+# and every file it writes (each table's metadata JSON, manifest lists,
+# manifests and Parquet files) is a sub-target. `:iceberg_readback_oracle` runs
+# tests/readback.sql in the pinned DuckDB with the avro and iceberg extensions
+# loaded (third_party/duckdb), which scans each table with allow_moved_paths
+# and writes `<table>.check.tsv`; test_iceberg_foreign_readback asserts them.
+# The names below are the ones the runner's header derives from its ids: write
+# k has the uuid number 2k - 1 for its files and the snapshot id 100 + k, and
+# the write that empties db.emptied (write 6) writes a manifest list and no
+# manifest or data file.
+_ICEBERG_P = "00000000-0000-7000-8000-"
+
+# (table, uuid number, snapshot id) of each write that wrote a data file.
+_ICEBERG_FILED = [
+    ("appended", "000000000001", "101"),
+    ("appended", "000000000003", "102"),
+    ("overwritten", "000000000005", "103"),
+    ("overwritten", "000000000007", "104"),
+    ("emptied", "000000000009", "105"),
+]
+
+# The write that emptied db.emptied: a manifest list only.
+_ICEBERG_LIST_ONLY = [("emptied", "000000000011", "106")]
+
+_ICEBERG_TABLES = ["appended", "overwritten", "emptied"]
+
+_ICEBERG_FILES = (
+    ["db/%s/metadata/v3.metadata.json" % t for t in _ICEBERG_TABLES] +
+    ["db/%s/data/%s%s-0.parquet" % (t, _ICEBERG_P, u) for t, u, _ in _ICEBERG_FILED] +
+    ["db/%s/metadata/%s%s-m0.avro" % (t, _ICEBERG_P, u) for t, u, _ in _ICEBERG_FILED] +
+    ["db/%s/metadata/snap-%s-0-%s%s.avro" % (t, s, _ICEBERG_P, u) for t, u, s in _ICEBERG_FILED + _ICEBERG_LIST_ONLY]
+)
+
+mojo_binary(
+    name = "iceberg_write_runner",
+    srcs = ["iceberg_write_runner/main.mojo"],
+    main = "iceberg_write_runner/main.mojo",
+    deps = [
+        ":iceberg_catalog",
+        "//src/arrow:arrow",
+        "//src/containers:containers",
+        "//src/fs:fs",
+        "//src/json:json",
+        "//src/objectstore:objectstore",
+    ],
+)
+
+iceberg_write_files(
+    name = "iceberg_write_komira",
+    outputs = {p.replace("/", "__"): p for p in _ICEBERG_FILES},
+    runner = ":iceberg_write_runner",
+)
+
+# The avro extension comes first: the iceberg extension reads manifests
+# through it.
+sql_oracle(
+    name = "iceberg_readback_oracle",
+    srcs = ["tests/readback.sql"],
+    extensions = [
+        "//third_party/duckdb:avro_extension[avro.duckdb_extension]",
+        "//third_party/duckdb:iceberg_extension[iceberg.duckdb_extension]",
+    ],
+    inputs = {p: ":iceberg_write_komira[" + p.replace("/", "__") + "]" for p in _ICEBERG_FILES},
+    outputs = [t + ".check.tsv" for t in _ICEBERG_TABLES],
+)
+
+# What each table of tests/readback.sql's answer must be: the pinned DuckDB
+# reads the same rows, columns, types and Parquet field ids the sink wrote.
+# Standalone, not in `test_srcs`: its data is built by a program that
+# depends on this library.
+# - test_the_appended_table_reads_back_as_written: both appends' five rows,
+#   and the field ids of both files.
+# - test_the_overwritten_table_holds_only_the_overwrite: the overwrite's two
+#   rows, and the field ids of the old and the new file.
+# - test_the_emptied_table_reads_back_empty: no rows, the table's columns.
+# - test_the_check_files_are_read_by_column_name: the TSV reader's
+#   boundaries.
+mojo_test(
+    name = "test_iceberg_foreign_readback",
+    srcs = ["tests/test_iceberg_foreign_readback.mojo"],
+    data = {t + ".check.tsv": ":iceberg_readback_oracle[" + t + ".check.tsv]" for t in _ICEBERG_TABLES},
+    deps = ["//tools/build/mojo/runtime_paths:runtime_paths"],
 )

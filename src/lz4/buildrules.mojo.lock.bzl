@@ -38,14 +38,14 @@ GRAPH_JSON = r'''{
       "root": "src/lz4/src/lz4",
       "srcs": [
         {"path": "src/lz4/src/lz4/__init__.mojo", "sha256": "3eae14e1871d06bbe8d16b730c2e118bf4f760a0ac85bdd38e9466094de2793c"},
-        {"path": "src/lz4/src/lz4/codec.mojo", "sha256": "fc9140209a224e2c478919ff72c782506a8740bd7aab8d154bfedf314ca3b185"},
-        {"path": "src/lz4/src/lz4/frame.mojo", "sha256": "a17db9fe96259c6db2c7d5d7fe743af79f35a9d6c3352f6d3aa66dc026e65dbc"}
+        {"path": "src/lz4/src/lz4/codec.mojo", "sha256": "111b60b52c445ed42ac5a96fd420dbd21ff3e1c3525e0f435b446747307de357"},
+        {"path": "src/lz4/src/lz4/frame.mojo", "sha256": "3f8bb003af6f16ea02c00670254e713599f6cf1c09ee23781bea138c9216d5c0"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["lz4.mojoc"],
-      "key": "c62c2dfcedeceae9671fa009b68a71f851e837708826696eee8bcdf675d80f48"
+      "key": "6fe11d236e21f0f325e21e3ed21f1d9233d7f6e484dfb502eee15df43e200b63"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.0.0/test:src/lz4/tests/test_codec.mojo",
@@ -61,7 +61,7 @@ GRAPH_JSON = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec.pass"],
-      "key": "2fc3abea3af9f7be9c0d4591767523963102372c63a0eb142e51084b23b9bfbd"
+      "key": "6207e96c7e833e65b092001d78fae7e03888ed0c5971af772420c43d32c18f81"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.0.0/test:src/lz4/tests/test_codec_into.mojo",
@@ -77,7 +77,7 @@ GRAPH_JSON = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec_into.pass"],
-      "key": "00b91a3bc2ca90f5630032b01b9b67869c11da21cec123b63ca771fdab974cad"
+      "key": "4f8be7f13803a0d7befefddbf058ed425c710221ceea792109100094014477e5"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.0.0/test:src/lz4/tests/test_frame.mojo",
@@ -93,7 +93,7 @@ GRAPH_JSON = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_frame.pass"],
-      "key": "411fc0768d50519c45ae25d838af74fdff2254e615146a1fc8ba3c5633e9e594"
+      "key": "bed55003c9eeaa74d271170abd5f26dfc8393812527401aae024fbcf42442a85"
     }
   ]
 }
@@ -128,14 +128,14 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "root": "src/lz4/src/lz4",
       "srcs": [
         {"path": "src/lz4/src/lz4/__init__.mojo", "sha256": "3eae14e1871d06bbe8d16b730c2e118bf4f760a0ac85bdd38e9466094de2793c"},
-        {"path": "src/lz4/src/lz4/codec.mojo", "sha256": "fc9140209a224e2c478919ff72c782506a8740bd7aab8d154bfedf314ca3b185"},
-        {"path": "src/lz4/src/lz4/frame.mojo", "sha256": "a17db9fe96259c6db2c7d5d7fe743af79f35a9d6c3352f6d3aa66dc026e65dbc"}
+        {"path": "src/lz4/src/lz4/codec.mojo", "sha256": "111b60b52c445ed42ac5a96fd420dbd21ff3e1c3525e0f435b446747307de357"},
+        {"path": "src/lz4/src/lz4/frame.mojo", "sha256": "3f8bb003af6f16ea02c00670254e713599f6cf1c09ee23781bea138c9216d5c0"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["lz4.mojoc"],
-      "key": "f286af7c144d1a30f2fd1f5102c3ce4c2d27cbcad858b2e5005db2e1febea023"
+      "key": "f04026c3d2f1d443328c9909b892047db6d675906c908a4837b9ddb21118cb92"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.0.0/test:src/lz4/tests/test_codec.mojo",
@@ -151,7 +151,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec.pass"],
-      "key": "e407877d81268c69b5c8de774e2aa2b3d5722251469dd0ffe4e229b158aa0638"
+      "key": "503efa031096fff010cdf3a2ddbf5e3f269c62a97268a2a054012cb4371f927d"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.0.0/test:src/lz4/tests/test_codec_into.mojo",
@@ -167,7 +167,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec_into.pass"],
-      "key": "93e14a99e057621e539177f7e40959a7d615e95c94f66e3930637660384b3623"
+      "key": "a84e8d5264e1fbf584db1262959a5eabfe235e54a500f264b29480130f75da6a"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.0.0/test:src/lz4/tests/test_frame.mojo",
@@ -183,7 +183,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_frame.pass"],
-      "key": "d2928544df2ee2cedac7ec75b3ee1b0e62bbf03f12a028468df373950c010d3f"
+      "key": "2ef7106ed34021dbecba374eae7d468baa685fb020387f90f396da64261c527a"
     }
   ]
 }
@@ -215,14 +215,14 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "root": "src/lz4/src/lz4",
       "srcs": [
         {"path": "src/lz4/src/lz4/__init__.mojo", "sha256": "3eae14e1871d06bbe8d16b730c2e118bf4f760a0ac85bdd38e9466094de2793c"},
-        {"path": "src/lz4/src/lz4/codec.mojo", "sha256": "fc9140209a224e2c478919ff72c782506a8740bd7aab8d154bfedf314ca3b185"},
-        {"path": "src/lz4/src/lz4/frame.mojo", "sha256": "a17db9fe96259c6db2c7d5d7fe743af79f35a9d6c3352f6d3aa66dc026e65dbc"}
+        {"path": "src/lz4/src/lz4/codec.mojo", "sha256": "111b60b52c445ed42ac5a96fd420dbd21ff3e1c3525e0f435b446747307de357"},
+        {"path": "src/lz4/src/lz4/frame.mojo", "sha256": "3f8bb003af6f16ea02c00670254e713599f6cf1c09ee23781bea138c9216d5c0"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["lz4.mojoc"],
-      "key": "d6b28c4c854ef6641ae9b469a6e2f941bf0df27522edbf2e41fef04d1dc166ab"
+      "key": "c8114bde88201aa5a201f5b1d86b37a3d4fcf5d20245fa48d439ebc202dd4a95"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.0.0/test:src/lz4/tests/test_codec.mojo",
@@ -238,7 +238,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec.pass"],
-      "key": "1020a92b9bcff054aed056fee9f46dc0b8a03e34809353c7f1ae71801b1ef89a"
+      "key": "946724a8d67637fd695d202469e9c8666043d2298e347020e112438146e317f6"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.0.0/test:src/lz4/tests/test_codec_into.mojo",
@@ -254,7 +254,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec_into.pass"],
-      "key": "a864c234e2813099f67fc3cd94da8f97e95e5137d7409bac6d102c57624a060f"
+      "key": "0e6cfd9973cfd2eb526f0f8a9915f0d85acdc03cab260946f741f3fe33a3b1f8"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.0.0/test:src/lz4/tests/test_frame.mojo",
@@ -270,7 +270,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_frame.pass"],
-      "key": "41a01ebfc835f6cf0ab88beb8646bcde629bd360e28dde50c13431fba3c97d20"
+      "key": "9be5c3cab2336a2edc0bc4f95d93f51ab04b8504ed1299d4fa808d96da24e1e1"
     }
   ]
 }

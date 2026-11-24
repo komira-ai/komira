@@ -14,7 +14,8 @@ metadata file, so concurrent writers never overwrite each other.
 | `iceberg_bounds` | single-value serialization (table spec Appendix D) and the min/max scan of an Arrow column, null and NaN aware |
 | `iceberg_partition` | `PartitionSpec` with the `identity` and `bucket[N]` transforms, the murmur3 bucket hash, per-row partition values, a path-safe partition key, routing rows to partitions |
 | `iceberg_metadata_json` | the table `metadata.json`, the schema and partition-spec documents, snapshot objects and the `schema.name-mapping.default` property |
-| `iceberg_avro_manifest`, `iceberg_avro_manifest_read` | the manifest list and manifest file (Avro) encoders with the spec's field ids, and decoders for the manifests this package writes |
+| `iceberg_avro_manifest`, `iceberg_avro_manifest_read` | the manifest list and manifest file (Avro) encoders with the spec's field ids (`build_manifest_file` from an `IcebergSchema`, `build_data_manifest` from a catalog's schema JSON and id, with inherited sequence numbers), and decoders for the manifests this package writes; `is_komira_manifest_list` tells a list this package wrote from another writer's |
+| `iceberg_arrow_data_file` | an Arrow `RecordBatch` as one data file: the Iceberg type of each column (`iceberg_type_of_arrow`), the Parquet bytes with the table's field ids and required flags, and the `DataFileInfo` with a bound per column (`encode_iceberg_data_file`); `ICEBERG_TYPE_UNSUPPORTED` and `ICEBERG_NULL_IN_REQUIRED_COLUMN` |
 | `iceberg_parquet_data` | typed rows to a Parquet data file (bytes in memory, no file opened) and back, in file-absolute row order |
 | `iceberg_delete_writer` | the equality-delete and position-delete files (Avro) and their decoders |
 | `iceberg_reader` | the merge-on-read reader: current metadata version -> manifest list -> manifests -> data and delete files, equality deletes by key and position deletes by (path, position) honoring sequence numbers |
@@ -87,6 +88,21 @@ Checked against the Apache Iceberg table spec, format version 2:
 - A manifest header carries `schema`, `schema-id`, `partition-spec` (the fields
   array), `partition-spec-id`, `format-version` and `content`.
 - Bounds are the spec's single-value bytes; a NaN is never a bound.
+- A manifest entry whose commit-wide and own sequence numbers are both
+  `ICE_SEQ_INHERIT` writes null `sequence_number` and `file_sequence_number`
+  (v2 inheritance): the reader takes the sequence number of the manifest list
+  that names the manifest, so one manifest can be listed by several commit
+  attempts. `read_manifest_entries` reports such an entry's sequence number
+  as 0.
+- `encode_iceberg_data_file` writes the Parquet footer with a field id on every
+  column (Parquet `SchemaElement` field 9), so an engine binds columns by id.
+  It takes the table's required flags: a required column is written REQUIRED
+  whatever the batch's own nullable flags say, and a null in one is refused
+  with `ICEBERG_NULL_IN_REQUIRED_COLUMN` before a file is built. Supported
+  Arrow types are bool, int32, int64, float32, float64, date32 and utf8 (plain,
+  large, or a dictionary of strings); any other is `ICEBERG_TYPE_UNSUPPORTED`.
+  Its bounds are min, max, null count and value count for every type but
+  string, where only the counts are written.
 - `bucket[N]` is `(murmur3_x86_32(bytes) & 0x7FFFFFFF) % N`, with an int hashed
   as a long.
 
@@ -121,9 +137,9 @@ Where it does not follow the spec, or does less:
   schema is the spec's (`file_path` id 2147483546, `pos` id 2147483545), but an
   engine that reads only Parquet delete files will not apply them. Equality
   delete files carry the table's field ids with the column named `f<id>`.
-- Data files carry no `PARQUET:field_id` column metadata: a reader binds the
-  columns to field ids through the `schema.name-mapping.default` table
-  property.
+- Data files built by `build_parquet_data_file` carry no field ids: a reader
+  binds the columns to field ids through the `schema.name-mapping.default`
+  table property. Files from `encode_iceberg_data_file` carry them.
 - `total-delete-files`, `total-position-deletes`, `total-equality-deletes` and
   `total-files-size` are not in the summary; its delete counters are the
   `added-*` ones of the commit.

@@ -184,7 +184,7 @@ def _kevent_call(
     """Single FFI thunk over kevent(2) — combined submit + retrieve.
     Internal-to-this-module helper; never escapes a typed boundary.
 
-    SAFETY: caller passes pointers to stack-local InlineArray buffers OR
+    SAFETY: caller passes pointers to stack-local Array buffers OR
     a NULL sentinel for timeout / changelist / eventlist (constructed
     via `_null_ptr[T, MutExternalOrigin]()`). The kernel
     reads from changelist and writes up to `nevents` into eventlist;
@@ -215,9 +215,9 @@ def _kevent_call(
 # -----------------------------------------------------------------------------
 # Encoding / decoding of struct kevent — confined to this module.
 #
-# We use InlineArray[UInt8, 32] for each kevent slot (struct kevent is exactly
+# We use Array[UInt8, 32] for each kevent slot (struct kevent is exactly
 # 32 bytes on Darwin LP64). This mirrors epoll_subsystem.mojo's pattern
-# (InlineArray[UInt8, 12] for struct epoll_event); the kernel reads/writes
+# (Array[UInt8, 12] for struct epoll_event); the kernel reads/writes
 # bytes, we encode/decode at the boundary.
 # -----------------------------------------------------------------------------
 
@@ -318,7 +318,7 @@ def kevent_register(
             _null_ptr[UInt8, MutUntrackedOrigin](),
         )
         # Anchor lifetimes past the syscall (MutExternalOrigin defeats
-        # the lifetime tracker; without these reads the InlineArrays
+        # the lifetime tracker; without these reads the Arrays
         # could be freed before the kernel reads/writes them).
         _ = change[0]
         _ = ack_buf[0]
@@ -367,7 +367,7 @@ def kevent_register_proc_exit(
             _null_ptr[UInt8, MutUntrackedOrigin](),
         )
         # Anchor lifetimes past the syscall (MutExternalOrigin defeats the
-        # lifetime tracker; without these reads the InlineArrays could be
+        # lifetime tracker; without these reads the Arrays could be
         # freed before the kernel reads/writes them).
         _ = change[0]
         _ = ack_buf[0]
@@ -425,7 +425,7 @@ def kevent_register_timer(
             _null_ptr[UInt8, MutUntrackedOrigin](),
         )
         # Anchor lifetimes past the syscall (MutExternalOrigin defeats the
-        # lifetime tracker; without these reads the InlineArrays could be
+        # lifetime tracker; without these reads the Arrays could be
         # freed before the kernel reads/writes them).
         _ = change[0]
         _ = ack_buf[0]
@@ -602,18 +602,18 @@ def kevent_wait_decode(
         )
         # struct timespec = {tv_sec: int64, tv_nsec: int64} = 16 bytes.
         # the previous implementation built
-        # `ts_ptr` outside the syscall scope and let the InlineArray
+        # `ts_ptr` outside the syscall scope and let the Array
         # `ts_buf` go out of scope while the pointer was still in use —
         # `MutExternalOrigin` defeats lifetime tracking, so the
-        # InlineArray's storage was freed before the kernel read it,
+        # Array's storage was freed before the kernel read it,
         # producing EINVAL (errno 22) at every kevent_wait. The fix
         # makes the syscall in TWO branches (NULL vs zero/non-zero
-        # timespec) so the InlineArray + the syscall live in the same
+        # timespec) so the Array + the syscall live in the same
         # scope and the borrow checker keeps `ts_buf` alive through
         # the call.
         var n: Int32
         if timeout_us < Int64(0):
-            # NULL timespec → block forever. No InlineArray needed.
+            # NULL timespec → block forever. No Array needed.
             n = _kevent_call(
                 kq_fd,
                 _null_ptr[UInt8, MutUntrackedOrigin](),
@@ -698,7 +698,7 @@ def kevent_register_user_wake(
         var change = Array[UInt8, 32](fill=UInt8(0))
         # SAFETY: stack-local. keep buffers alive across
         # the syscall by keeping all uses in this scope and anchoring
-        # the InlineArrays after the call (MutExternalOrigin defeats
+        # the Arrays after the call (MutExternalOrigin defeats
         # the lifetime tracker).
         _encode_kevent(
             change, ident, EVFILT_USER, EV_ADD | EV_CLEAR | EV_RECEIPT,

@@ -349,6 +349,21 @@ trait FileSystem(Movable, Deinitable):
         ParquetReaderFactory directory scans)."""
         ...
 
+    # ---- Cache key namespace ----
+    # Two file systems can each hold a file at one path: a local
+    # `data.parquet` and the object `data.parquet` of an S3 bucket, or one key
+    # in two buckets. A cache shared by several file systems
+    # (`parquet.ParquetMetadataCache`, one per run) keys an entry by this
+    # prefix followed by the path, so their entries never meet. Empty by
+    # default, so the local file system's keys are its paths; an object store
+    # returns its URL prefix (`S3Fs`: `s3://<bucket>/`, `GcsFs`:
+    # `gs://<bucket>/`, `AzureFs`: `az://<container>/`).
+    def key_prefix(self) -> String:
+        """The text a shared cache puts before a path of this file system:
+        empty for the local file system, the store's URL prefix for an
+        object store."""
+        return String("")
+
     # ---- Sync metadata ops (small, cheap; OK to block briefly) ----
     def list(self, prefix: String) raises -> List[String]:
         """List file paths matching `prefix`. Returns absolute paths.

@@ -6,7 +6,7 @@
 # Not a guess: tests//functional/s2n_probes compiles the probe of each name
 # here (third_party/s2n-tls/BUCK refuses a name with no probe at load), and
 # tools/build/tests/c_libs_tests.sh requires every other probe to fail
-# (tests//negative/s2n_probes).
+# (tests//negative/s2n_probes). macOS arm64's list is features_macos.bzl.
 S2N_FEATURES = [
     "S2N_ATOMIC_SUPPORTED",
     "S2N_CLOEXEC_SUPPORTED",

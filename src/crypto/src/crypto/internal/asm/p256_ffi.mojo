@@ -62,7 +62,7 @@
 #
 # Public API:
 #   * 3 free functions (p256_sign_with_nonce / p256_verify /
-#     p256_pubkey_from_priv). Take Span[UInt8, _] + InlineArray
+#     p256_pubkey_from_priv). Take Span[UInt8, _] + Array
 #     outputs. ZERO UnsafePointer in public signatures.
 #
 # Internal FFI:
@@ -98,7 +98,7 @@ from std.memory import UnsafePointer
 # lifetime is not expressible in Mojo's origin system. Opaque AWS-LC heap
 # handles (EC_KEY*, BIGNUM*, ECDSA_SIG*, EC_POINT*) are passed BY VALUE to
 # `external_call` and never written through Mojo-side, so an immutable
-# static origin is sound. Data-buffer pointers (Span/InlineArray bytes) are
+# static origin is sound. Data-buffer pointers (Span/Array bytes) are
 # coerced to the same origin in the `_*_ptr_ffi` helpers; the SAFETY
 # contract is that the caller holds the buffer's real origin in scope across
 # the synchronous external_call (AWS-LC retains no pointer past the call).
@@ -135,7 +135,7 @@ comptime POINT_CONVERSION_UNCOMPRESSED: Int = 4
 
 
 # -----------------------------------------------------------------------------
-# Coercion helpers — Span / InlineArray -> FFI byte ptr (_FFI_ORIGIN).
+# Coercion helpers — Span / Array -> FFI byte ptr (_FFI_ORIGIN).
 #
 # Mirror of `aes_gcm_ffi.mojo:_span_ptr_mut`.
 # The _FFI_ORIGIN
@@ -167,7 +167,7 @@ def _span_ptr_mut(s: Span[UInt8, _]) -> _FfiByte:
 def _inline32_ptr_mut(
     mut a: Array[UInt8, 32],
 ) -> _FfiByte:
-    """Coerce InlineArray[UInt8, 32] -> FFI byte ptr (_FFI_ORIGIN).
+    """Coerce Array[UInt8, 32] -> FFI byte ptr (_FFI_ORIGIN).
 
     # SAFETY: a is caller-owned local in this fn's scope (held in scope
     # across the external_call site). AWS-LC writes exactly the documented
@@ -184,7 +184,7 @@ def _inline32_ptr_mut(
 def _inline65_ptr_mut(
     mut a: Array[UInt8, 65],
 ) -> _FfiByte:
-    """Coerce InlineArray[UInt8, 65] -> FFI byte ptr (_FFI_ORIGIN) (point2oct).
+    """Coerce Array[UInt8, 65] -> FFI byte ptr (_FFI_ORIGIN) (point2oct).
 
     # SAFETY: a is caller-owned local. AWS-LC's EC_POINT_point2oct writes
     # exactly `len` bytes (65 for uncompressed P-256 = format||x||y).

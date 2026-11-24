@@ -39,7 +39,10 @@
 #   process with the same verdicts each pass: a double free that corrupts
 #   the heap crashes or changes a later verdict (a small leak is not seen).
 # Both: no file grows the peak resident size by `_HWM_CEILING_KIB` or the
-#   peak virtual size by `_VM_PEAK_CEILING_KIB`, in every pass.
+#   peak virtual size by `_VM_PEAK_CEILING_KIB`, in every pass. The sizes
+#   come from komira_test_rss: VmHWM and VmPeak on Linux; on macOS the peak
+#   resident size from task_info, and no peak virtual size (macOS keeps none),
+#   so there the resident ceiling is the one that binds.
 # =============================================================================
 
 from std.io import FileHandle
@@ -53,6 +56,7 @@ from byte_buffer.heap_region import HeapRegion
 from byte_buffer.mmap_region import MmapRegion
 from byte_buffer.shared_aligned_buffer import SharedAlignedBuffer
 from containers.slab import Slab
+from komira_test_rss.rss import peak_resident_kib, peak_virtual_kib
 from compression.compression_codecs import Lz4Frame, Zstd
 from arrow_ipc.ipc_body_compression import (
     decompress_dictionary_batch_frame,
@@ -767,25 +771,10 @@ def _corpus() raises -> List[String]:
     return out^
 
 
-def _kib(text: String, key: String) raises -> Int:
-    """The `<key> <n> kB` value of a /proc/self/status text."""
-    var i = text.find(key)
-    if i < 0:
-        raise Error("/proc/self/status has no " + key)
-    var b = text.as_bytes()
-    var j = i + key.byte_length()
-    while j < len(b) and (b[j] == 32 or b[j] == 9):
-        j += 1
-    var v = 0
-    while j < len(b) and b[j] >= 48 and b[j] <= 57:
-        v = v * 10 + Int(b[j] - 48)
-        j += 1
-    return v
-
-
-def _vm_kib(key: String) raises -> Int:
-    with open("/proc/self/status", "r") as f:
-        return _kib(f.read(), key)
+def _vm_peak_kib() raises -> Int:
+    """The peak virtual size (Linux VmPeak). macOS keeps no such peak, so it
+    reads 0 there and only the peak resident ceiling binds on macOS."""
+    return peak_virtual_kib().or_else(0)
 
 
 def _load_corpus(names: List[String]) raises -> Slab[SharedAlignedBuffer[HeapRegion]]:
@@ -806,13 +795,13 @@ def _run_corpus(
     growth when 1 MiB or more. Both memory ceilings hold for every file in
     every pass, loud or not."""
     var out = List[_Verdict]()
-    var base = _vm_kib("VmPeak:")
-    var base_hwm = _vm_kib("VmHWM:")
+    var base = _vm_peak_kib()
+    var base_hwm = peak_resident_kib()
     for k in range(len(names)):
         ref rel = names[k]
         ref buf = bufs[k]
-        var before = _vm_kib("VmPeak:")
-        var before_hwm = _vm_kib("VmHWM:")
+        var before = _vm_peak_kib()
+        var before_hwm = peak_resident_kib()
         var letters = String("")
         var shown = -1
         for m in range(N_MODES):
@@ -821,8 +810,8 @@ def _run_corpus(
             if shown < 0 and v.code != V_NA:
                 shown = len(out)
             out.append(v^)
-        var grew = _vm_kib("VmPeak:") - before
-        var grew_hwm = _vm_kib("VmHWM:") - before_hwm
+        var grew = _vm_peak_kib() - before
+        var grew_hwm = peak_resident_kib() - before_hwm
         if grew >= _VM_PEAK_CEILING_KIB or grew_hwm >= _HWM_CEILING_KIB:
             raise Error(
                 rel + " grew VmPeak by " + String(grew) + " KiB and VmHWM by "
@@ -845,8 +834,8 @@ def _run_corpus(
         print(line + ": " + d, flush=True)
     if loud:
         print(
-            "VmPeak", base, "->", _vm_kib("VmPeak:"), "KiB; VmHWM", base_hwm,
-            "->", _vm_kib("VmHWM:"), "KiB", flush=True,
+            "VmPeak", base, "->", _vm_peak_kib(), "KiB; VmHWM", base_hwm,
+            "->", peak_resident_kib(), "KiB", flush=True,
         )
     return out^
 

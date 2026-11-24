@@ -627,9 +627,12 @@ def test_having() raises:
         "    Aggregate(group_by=[ColRef(k)], aggs=[SUM(ColRef(v)).alias(\"sum(v)\")])\n"
         "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
+    # This harness binds one SELECT with nothing pre-bound, so the HAVING's
+    # subquery index names no bound subquery; through `bind_statement` it
+    # binds (test_sql_bind_in_body).
     _check(
         "SELECT k, sum(v) FROM t GROUP BY k HAVING sum(v) = (SELECT max(w) FROM u)",
-        "ERR: SQL bind error: unsupported expression"
+        "ERR: SQL bind error: dangling scalar-subquery index"
     )
     _check(
         "SELECT 1 AS one, count(*) FROM t GROUP BY one HAVING one = 1",

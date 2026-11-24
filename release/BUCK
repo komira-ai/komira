@@ -9,9 +9,15 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":darwin_libs.bzl", "DARWIN_PACKAGES", "mopm_darwin_libs")
+load(":exec_tools.bzl", "exec_tool_cases")
 load(":mopm_artifacts.bzl", "mopm_artifacts", "native_ids_json")
 load(":release_set.bzl", "release_set")
 load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
+
+# Fails loading this package if `exec_tool_refusal` (exec_tools.bzl, the check of
+# darwin_analysis.bxl that every Zig tool an action runs is built for the platform the action
+# runs on) gets any of its cases wrong.
+exec_tool_cases()
 
 # The build artifacts of the libraries moved to mopm (mopm_artifacts.bzl): each
 # package's `:lib`, as `linux-64/komira-ai/<name>.mojoc`, and each package's native archive as
@@ -223,11 +229,11 @@ zig_test(
 
 # The macOS arm64 build set (darwin_libs.bzl): the library of every mopm package that builds for
 # macOS, built with `--target-platforms komira//tools/build/platforms:darwin-arm64` by release-macos.yml's
-# `release-macos` job on the farm's macOS workers, once per release. No pull request builds it:
-# //ci:pr builds for the client's platform only, and the zig case //:release_macos_cases holds
-# that no workflow that runs on a pull request names it or a macOS platform, except pr.yml's one
-# step that configures and analyses it for darwin-arm64 and runs no action
-# (darwin_analysis.bxl).
+# `release-macos` job on the farm's macOS workers, once per release. //ci:pr builds for the client's
+# platform only; pr.yml's macOS part builds this set (or the libraries of it the change reaches,
+# tools/build/ci/darwin.bxl) for darwin-arm64, and its last step configures and analyses it, running
+# no action (darwin_analysis.bxl). The zig case //:release_macos_cases holds that no other line of a
+# workflow that runs on a pull request names it or a macOS platform.
 # The set's definition and this file, for the zig cases that hold the set to one list
 # (//:release_macos_cases).
 export_file(

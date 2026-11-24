@@ -2,7 +2,7 @@
 
 `load` opens the library from a directory, once per process, checks that its
 ABI major version is the one this package was written for, and binds the
-calls of ABI 1.1; every failure is a `LibraryLoadError` that says which
+calls of ABI 1.2; every failure is a `LibraryLoadError` that says which
 library and why. `Native` holds the bound calls and turns their status codes
 into `KomiraError`, with the context's last error, read with the two-call
 protocol, as the message.
@@ -32,7 +32,11 @@ never closes one.
 
 The calls that return protobuf bytes or plan text (`parquet_schema`,
 `csv_binding`, `json_binding`, `plan_render`) are private: they have no
-Python type yet and no stability promise.
+Python type yet and no stability promise. So are the three credential calls
+(`credential_add`, `credential_set`, `credential_seal`), which
+`Session._seal_credential` makes; the engine refusing one of them
+(`KOMIRA_ERR_ENGINE`, which the library answers only with
+`CREDENTIALS_INVALID`) raises `CredentialsError`.
 """
 
 from __future__ import annotations
@@ -45,7 +49,7 @@ import threading
 from collections.abc import Callable
 
 from . import _runtime
-from ._errors import KomiraError, LibraryLoadError, UnsupportedCpuError
+from ._errors import CredentialsError, KomiraError, LibraryLoadError, UnsupportedCpuError
 
 # The ABI major version this package calls: komira_abi_version() is
 # major * 1000 + minor, and a library of another major is refused. Any minor
@@ -55,7 +59,11 @@ ABI_MAJOR = 1
 # The two status codes the loader itself tells apart; every other one is a
 # failure the caller reports.
 KOMIRA_OK = 0
+KOMIRA_ERR_ENGINE = -3
 KOMIRA_ERR_BUFFER_TOO_SMALL = -4
+
+# The scope a credential is sealed in: the session (src/so/abi/komira.tsv).
+KOMIRA_BIND_SESSION = 1
 
 _LIB_NAME = "libkomira.dylib" if sys.platform == "darwin" else "libkomira.so"
 
@@ -83,6 +91,17 @@ _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
     ),
     "komira_json_binding": (1, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p] + _Out),
     "komira_plan_render": (1, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64] + _Out),
+    "komira_credential_add": (
+        2,
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_int32, ctypes.c_char_p, ctypes.POINTER(ctypes.c_int32)],
+    ),
+    "komira_credential_set": (
+        2,
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_char_p, ctypes.c_uint64],
+    ),
+    "komira_credential_seal": (2, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32]),
 }
 
 _lock = threading.Lock()
@@ -298,6 +317,30 @@ class Native:
         out = self._out("komira_plan_render", ctx, lambda fn, b, c, n: fn(ctx, data, len(data), b, c, n))
         return out.decode("utf-8", "replace")
 
+    def credential_add(self, ctx: int, kind: int, name: str) -> int:
+        """Opens the definition of a credential of `kind` (a `KOMIRA_CRED_*`)
+        named `name`, and returns its id."""
+        op = "komira_credential_add"
+        fn = self._fn(op)
+        out_id = ctypes.c_int32(0)
+        self._check(op, ctx, fn(ctx, kind, _c_string("name", name), ctypes.byref(out_id)), CredentialsError)
+        return out_id.value
+
+    def credential_set(self, ctx: int, cred_id: int, field: int, value: bytes) -> None:
+        """Sets the field `field` (a `KOMIRA_FIELD_*`) of the open definition
+        `cred_id` to the bytes `value`, which may hold NUL bytes."""
+        op = "komira_credential_set"
+        fn = self._fn(op)
+        if not isinstance(value, bytes):
+            raise TypeError("value must be bytes, not {}".format(type(value).__name__))
+        self._check(op, ctx, fn(ctx, cred_id, field, value, len(value)), CredentialsError)
+
+    def credential_seal(self, ctx: int, cred_id: int, scope: int = KOMIRA_BIND_SESSION) -> None:
+        """Makes the definition `cred_id` the value of its name in `scope`."""
+        op = "komira_credential_seal"
+        fn = self._fn(op)
+        self._check(op, ctx, fn(ctx, cred_id, scope), CredentialsError)
+
     def _out(self, op: str, ctx: int, call: Callable[[ctypes._CFuncPtr, object, int, object], int]) -> bytes:
         """The bytes of the two-call `op`, or its KomiraError."""
         fn = self._fn(op)
@@ -305,9 +348,12 @@ class Native:
         self._check(op, ctx, status)
         return data
 
-    def _check(self, op: str, ctx: int, status: int) -> None:
+    def _check(self, op: str, ctx: int, status: int, refused: type[KomiraError] = KomiraError) -> None:
         """Raises the KomiraError of a call `op` on `ctx` that returned `status`,
-        unless it is KOMIRA_OK. The message is the context's last error."""
+        unless it is KOMIRA_OK. The message is the context's last error. When
+        the engine refused (KOMIRA_ERR_ENGINE) and the context holds that
+        message, the error is a `refused`, the subclass the call's refusals
+        have; every other failure is a plain KomiraError."""
         if status == KOMIRA_OK:
             return
         try:
@@ -319,7 +365,7 @@ class Native:
             ) from e
         if not text:
             raise KomiraError("{} failed with status {} and no message".format(op, status), status=status)
-        raise KomiraError(text, status=status)
+        raise (refused if status == KOMIRA_ERR_ENGINE else KomiraError)(text, status=status)
 
 
 def _resolve(lib: ctypes.CDLL, name: str) -> ctypes._CFuncPtr | None:

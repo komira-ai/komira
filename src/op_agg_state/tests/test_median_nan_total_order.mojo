@@ -64,7 +64,7 @@
 # ⛔ WHAT THIS FILE DELIBERATELY DOES **NOT** ASSERT, AND WHY IT IS NOT A
 #    WEAKENED ASSERTION: DuckDB parity ABOVE 64 CONTRIBUTING VALUES.
 # `MedianState` is a FIXED-capacity 520-byte POD (Int32 count + Int32 pad +
-# InlineArray[Float64, 64]) and both bodies drop everything after the first 64
+# Array[Float64, 64]) and both bodies drop everything after the first 64
 # (FIRST-64 retention). Past 64 the answer is the median of an arbitrary
 # 64-row SAMPLE, which no NaN rule can repair — the missing primitive is
 # VARIABLE-CAPACITY PER-GROUP STATE IN A POD BYTE-SLAB, the same gap6

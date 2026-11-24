@@ -70,12 +70,12 @@ pub const common_flags = [_][]const u8{
 /// `argv` (after the command) as pairs, every flag in `common_flags` or
 /// `extra`.
 /// The commands of `komira_wheel`, by their first argument.
-pub const Command = enum { write, check, libs };
+pub const Command = enum { write, check, libs, same };
 
 /// The command `name` names; any other name, an empty one among them, is
 /// refused with the usage line.
 pub fn subcommand(alloc: Alloc, d: *Diag, name: []const u8) Refused!Command {
-    return std.meta.stringToEnum(Command, name) orelse refuse(d, alloc, "usage: komira_wheel write|check|libs --flag value ...", .{});
+    return std.meta.stringToEnum(Command, name) orelse refuse(d, alloc, "usage: komira_wheel write|check|libs|same --flag value ...", .{});
 }
 
 pub fn parse(alloc: Alloc, d: *Diag, argv: []const []const u8, extra: []const []const u8) Refused!Args {

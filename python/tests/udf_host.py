@@ -85,6 +85,13 @@ class CArray(Structure):
     ]
 
 
+_RELEASE = CFUNCTYPE(None, POINTER(CArray))
+
+
+def _mark_released(array):
+    array.contents.release = None
+
+
 class CDeviceArray(Structure):
     _fields_ = [
         ("array", CArray), ("device_id", c_int64), ("device_type", c_int32),
@@ -293,17 +300,20 @@ def runtime_sys_path():
 
 
 def process_gone(pid):
+    """True once the process has ended, reaped or not: a zombie has ended."""
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+        with open("/proc/%d/stat" % pid, encoding="ascii", errors="replace") as f:
+            stat = f.read()
+    except (FileNotFoundError, ProcessLookupError):
         return True
-    return False
+    return stat.rpartition(")")[2].split()[0] in ("Z", "X")
 
 
 class Env:
     """A fresh scratch tree: code_root, the runtime's scratch, a trace file."""
 
-    def __init__(self, lib_dir):
+    def __init__(self, lib_dir, check_leaks=True):
+        self.check_leaks = check_leaks
         self.lib = os.path.join(os.path.abspath(lib_dir), "libkomira_udf_python.so")
         self.dir = os.path.realpath(tempfile.mkdtemp(prefix="udf-"))
         self.code_root = self._mk("code")
@@ -350,16 +360,24 @@ class Env:
         spec.hex = hexd
         return spec
 
-    def close(self):
+    def leaked(self):
+        """The zygotes and workers the trace names that are still running."""
+        pids = self.trace.pids("spawn") + self.trace.pids("fork")
+        return [pid for pid in pids if not process_gone(pid)]
+
+    def close(self, check=False):
         for rt in self.runtimes:
             rt.shutdown()
+        leaked = self.leaked() if check else []
         shutil.rmtree(self.dir, ignore_errors=True)
+        assert not leaked, "processes of the runtime outlived its shutdown: %s" % leaked
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
-        self.close()
+    def __exit__(self, kind, *rest):
+        # A case that already failed keeps its own error: a leak is reported after a pass only.
+        self.close(check=self.check_leaks and kind is None)
 
 
 # ---- the spec and the runtime ----------------------------------------------
@@ -589,6 +607,11 @@ class Instance:
         args = CDeviceArray()
         pa.StructArray.from_arrays(list(columns), names=names)._export_to_c(addressof(args))
         args.device_id, args.device_type = 0, 1
+        return self.call_raw(args, deadline_ns, cancel)
+
+    def call_raw(self, args, deadline_ns=0, cancel=0):
+        """Call with the argument struct `args`, a CDeviceArray the caller built
+        (HandArray.device_array() builds one by hand); a Result."""
         out, err = CDeviceArray(), _new_error()
         self.cancel.value = cancel
         c = CCall()
@@ -611,3 +634,40 @@ class Instance:
 
     def close(self):
         self.rt.table.close_instance(self.handle)
+
+
+class HandArray:
+    """A C ArrowArray built field by field, for a call whose argument breaks the
+    Arrow C data layout in a way pyarrow will not export. `buffers` holds one
+    entry per buffer: bytes, or None for a NULL buffer. `children` are
+    HandArrays. `released=True` gives the array a NULL release callback, as a
+    child already released would have. Every buffer and child array stays
+    alive as long as this object does."""
+
+    def __init__(self, length, buffers, children=(), released=False, offset=0):
+        self._bufs = [None if b is None else (c_uint8 * max(len(b), 1)).from_buffer_copy(b or b"\0")
+                      for b in buffers]
+        self._buffer_ptrs = (c_void_p * max(len(buffers), 1))(
+            *[None if b is None else addressof(b) for b in self._bufs])
+        self.children = list(children)
+        self._child_ptrs = (c_void_p * max(len(self.children), 1))(
+            *[addressof(c.c) for c in self.children])
+        self._release = _RELEASE(_mark_released)
+        self.c = CArray()
+        self.c.length, self.c.null_count, self.c.offset = length, 0, offset
+        self.c.n_buffers, self.c.n_children = len(buffers), len(self.children)
+        self.c.buffers = addressof(self._buffer_ptrs)
+        self.c.children = addressof(self._child_ptrs) if self.children else None
+        self.c.dictionary = None
+        self.c.release = None if released else ctypes.cast(self._release, c_void_p).value
+        self.c.private_data = None
+
+    def device_array(self):
+        """A CPU CDeviceArray whose array is a copy of this one's fields."""
+        dev = CDeviceArray()
+        dev.array = self.c
+        dev.device_id, dev.device_type = 0, 1
+        # The copy points at this object's buffers, child pointers and release
+        # callback: it keeps this object alive for as long as it lives.
+        dev._owner = self
+        return dev

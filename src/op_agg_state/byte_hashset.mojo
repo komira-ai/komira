@@ -23,7 +23,7 @@
 #   - `n_used: Int`.
 #
 # Caller (SDK lowering or driver) emits per-row typed serializer that
-# writes the row's bytes into a stack-allocated `InlineArray[UInt8, ROW_WIDTH]`
+# writes the row's bytes into a stack-allocated `Array[UInt8, ROW_WIDTH]`
 # (fixed-width keys) or a heap `List[UInt8]` (variable-width keys), then
 # calls `insert_serialized(hash, row_bytes_span)` / `contains_serialized(...)`.
 #

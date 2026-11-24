@@ -35,7 +35,7 @@
 #
 # Public API:
 #   * `hmac_oneshot[N]` free function takes 2x `Span[UInt8, _]` + returns
-#     `InlineArray[UInt8, N]`. ZERO UnsafePointer in public signature.
+#     `Array[UInt8, N]`. ZERO UnsafePointer in public signature.
 #   * `HmacFfiCtx[OUTPUT_SIZE]` struct: opaque wrapper around AWS-LC's
 #     HMAC_CTX*. Private `_ctx` field is the FFI-OPAQUE-HANDLE carve-out
 #     (same shape as AesGcmCtx._ctx and Sha2Hasher._ctx).
@@ -68,7 +68,7 @@ from crypto.internal.asm.sha256_ffi import (
 # lifetime is not expressible in Mojo's origin system. Opaque AWS-LC heap
 # handles are passed BY VALUE to `external_call` and never written through
 # Mojo-side, so an immutable static origin is sound. Data-buffer pointers
-# (Span/InlineArray/scalar out-params) carry the same origin; the SAFETY
+# (Span/Array/scalar out-params) carry the same origin; the SAFETY
 # contract is that the caller holds the buffer's real origin in scope across
 # the synchronous external_call (AWS-LC retains no pointer past the call).
 # -----------------------------------------------------------------------------

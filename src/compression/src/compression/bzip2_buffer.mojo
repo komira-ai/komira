@@ -40,7 +40,7 @@ comptime _UINT_MAX: Int = 4294967295
 
 @always_inline
 def _ptr(
-    s: Span[UInt8, _], ref scratch: InlineArray[UInt8, 1]
+    s: Span[UInt8, _], ref scratch: Array[UInt8, 1]
 ) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     """The address libbz2 uses for `s`: the Span's own, or `scratch` when `s`
     is empty (an empty Span may carry a null pointer)."""
@@ -87,8 +87,8 @@ def bzip2_compress_into[
     var n = len(src)
     var cap = min(len(dst), _UINT_MAX)
     _check_source("bzip2_compress_into", n)
-    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
-    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var src_scratch = Array[UInt8, 1](fill=UInt8(0))
+    var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
     var dest_len = UInt32(cap)
     var handle_ptr = _bz2_handle()
     # SAFETY: libbz2 reads `n` bytes at the source address and writes at most
@@ -125,8 +125,8 @@ def bzip2_decompress_into[
     var n = len(src)
     var cap = min(len(dst), _UINT_MAX)
     _check_source("bzip2_decompress_into", n)
-    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
-    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var src_scratch = Array[UInt8, 1](fill=UInt8(0))
+    var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
     var dest_len = UInt32(cap)
     var handle_ptr = _bz2_handle()
     # SAFETY: as `bzip2_compress_into`: libbz2 reads `n` bytes, writes at

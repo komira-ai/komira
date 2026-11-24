@@ -4,7 +4,7 @@
 #
 # Wraps `SharedAlignedBuffer[K]` (the Arc-wrapped K-parametric buffer) with
 # a comptime `Copyable` trait conformance so the resulting struct can be
-# stored in `InlineArray[T, N]` and forwarded through `Tuple[*Pack]` /
+# stored in `Array[T, N]` and forwarded through `Tuple[*Pack]` /
 # `Optional[Tuple[*Pack]].take()`.
 #
 # A wrapper around a heap-owning, Movable-only buffer would have to abort on

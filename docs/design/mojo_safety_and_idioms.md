@@ -57,7 +57,7 @@ The toolchain pins Mojo `1.0.0` (the `mojo-compiler` packages in `tools/build/to
 | You write | 1.0.0 wants | Choosing |
 |---|---|---|
 | `len(s)` on a `String` or `StringSlice` | `s.byte_length()`, `len(s.codepoints())` or `len(s.graphemes())` | Bytes for buffers and offsets, code points or graphemes for text shown to people. |
-| an implicit copy of an `InlineArray[T, N]` | `x^` or `x.copy()` | `^` when the value is dead afterwards (a `return` or a hand-off); `.copy()` when it is read later, with a comment naming that read. |
+| an implicit copy of an `Array[T, N]` | `x^` or `x.copy()` | `^` when the value is dead afterwards (a `return` or a hand-off); `.copy()` when it is read later, with a comment naming that read. |
 | an implicit `Int` to `UInt8` (or other sized integer) conversion at a call | an explicit `UInt8(x)`, `Int(x)` | The conversion is removed in both directions. |
 | `x = String(x[byte=0:n])`, a value rebound to a slice of itself | an owned temporary: `var t = String(x[byte=0:n])`, then `x = t^` | The compiler refuses to borrow a value and construct into it in one call; the temporary adds no allocation. |
 | `mut self: Slab[_T]` to refine a method's receiver | `where conforms_to(Self.T, Movable)` after the signature | The diagnostic names a `where` clause but not this spelling. |

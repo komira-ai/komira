@@ -24,7 +24,8 @@
 # that expanded form:
 #
 #   materialized  the subtree holds an aggregation, a distinct, a sort, a
-#                 window or a limit: it ends in a segment of its own (the
+#                 window, a limit or a user function (a frame or a step,
+#                 whose calls run once): it ends in a segment of its own (the
 #                 breaker's, or a SINK_COLLECT one, as a union branch does),
 #                 and the canonical position and every reference read that
 #                 segment's output over an E3 edge (SOURCE_SINK_OUTPUT). Each
@@ -73,6 +74,7 @@ from plan_ir.logical_plan import (
     PLAN_UNION,
     PLAN_JOIN,
     PLAN_CSE_REF,
+    PLAN_MAP_BATCHES,
 )
 
 
@@ -99,6 +101,8 @@ def _referenced_hashes(plan: LogicalPlan, mut out: List[UInt64]):
         _referenced_hashes(plan.sort_data_ref().child[], out)
     elif tag == PLAN_PARTITION_BY:
         _referenced_hashes(plan.partition_by_data_ref().child[], out)
+    elif tag == PLAN_MAP_BATCHES:
+        _referenced_hashes(plan.map_batches_data_ref().child[], out)
     elif tag == PLAN_UNION:
         ref ud = plan.union_data_ref()
         for i in range(len(ud.children)):
@@ -129,6 +133,8 @@ def _scan_count(plan: LogicalPlan) -> Int:
         return _scan_count(plan.sort_data_ref().child[])
     if tag == PLAN_PARTITION_BY:
         return _scan_count(plan.partition_by_data_ref().child[])
+    if tag == PLAN_MAP_BATCHES:
+        return _scan_count(plan.map_batches_data_ref().child[])
     if tag == PLAN_UNION:
         ref ud = plan.union_data_ref()
         var n = 0
@@ -198,6 +204,8 @@ def _expand_inplace(mut plan: LogicalPlan, cutter: _Cutter):
         _expand_inplace(plan._sort.value()[].child[], cutter)
     elif tag == PLAN_PARTITION_BY:
         _expand_inplace(plan._partition_by.value()[].child[], cutter)
+    elif tag == PLAN_MAP_BATCHES:
+        _expand_inplace(plan._map_batches.value()[].child[], cutter)
     elif tag == PLAN_UNION:
         var n = len(plan._union.value()[].children)
         for i in range(n):

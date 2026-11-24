@@ -16,7 +16,8 @@
 #     write the manifest list for parent `P` = `main` and sequence number
 #     `n` = last-sequence-number + 1; POST requirements `assert-table-uuid`,
 #     `assert-ref-snapshot-id(main, P)`, `assert-current-schema-id` and
-#     updates `add-snapshot` (operation `append`), `set-snapshot-ref(main,
+#     updates `add-snapshot` (operation `append`, or `overwrite` when the
+#     statement replaces every row of the table), `set-snapshot-ref(main,
 #     S)`. The snapshot's timestamp is the clock's time, or one more than the
 #     parent's when that is later.
 #   * Each answer:
@@ -38,6 +39,9 @@
 #         up its commit first.
 #   * A tainted statement whose 409 ends it fails with
 #     `ICEBERG_COMMIT_STATE_UNKNOWN`, not `ICEBERG_COMMIT_CONFLICT`.
+#   * An overwrite (`AppendCommit.overwrite`) shares all of this. Only the
+#     snapshot's operation and summary differ, and with no files it still
+#     commits when `main` exists, so the table becomes empty.
 #
 # Cleanup is the caller's, from the outcome: `delete_statement_files` says
 # whether this statement's data files and manifest may be deleted (only after
@@ -58,9 +62,10 @@
 # `CommitClock` and `CommitIds` have production conformers here, with test
 # ones (`ManualCommitClock`, `SequenceCommitIds`); the writer is the caller's.
 #
-# Not here yet: the staged-create and replace commits, `Retry-After`, and the
-# write sink's `AppendSnapshotWriter` (docs/design/iceberg_tables.md, "Order of
-# work").
+# Not here yet: the staged-create and replace commits and `Retry-After`
+# (docs/design/iceberg_tables.md, "Order of work"). The write sink's
+# `AppendSnapshotWriter` is `StoreSnapshotWriter` (iceberg_store_writer.mojo),
+# driven by `write_table` (iceberg_write_sink.mojo).
 # =============================================================================
 
 from std.time import sleep
@@ -68,6 +73,7 @@ from std.time import sleep
 from clock import now_unix_ms
 from uuid import generate_uuidv7
 
+from .iceberg_commit_summary import snapshot_summary
 from .iceberg_rest_catalog_client import (
     CatalogCredentialProvider,
     COMMIT_APPLIED,
@@ -215,10 +221,13 @@ struct SequenceCommitIds(CommitIds, Movable):
 
 
 trait AppendSnapshotWriter(Movable):
-    """Writes one attempt's manifest list: every manifest of `base`'s `main`
-    snapshot, then the statement's new manifest with sequence number
-    `sequence_number`, under the table's metadata path as
-    `snap-<snapshot_id>-<attempt>-<uuid>.avro`. Returns its location."""
+    """Writes one attempt's manifest list: the manifests the attempt's
+    snapshot keeps, under the table's metadata path as
+    `snap-<snapshot_id>-<attempt>-<uuid>.avro`, and returns its location. An
+    append keeps every manifest of `base`'s `main` snapshot, then the
+    statement's new manifest with sequence number `sequence_number`; an
+    overwrite keeps only the new manifest, and none when the statement has no
+    files."""
 
     def write_manifest_list(
         mut self,
@@ -247,7 +256,11 @@ struct AppendCommit(Copyable, Movable):
         (its plan's pins on the same table uuid); non-empty means the
         statement read its target, so a 409 is a conflict, never a rebase.
       * `added_data_files`, `added_records`, `added_files_size`: the summary's
-        added counts. Zero files sends no commit."""
+        added counts. Zero files sends no commit, except an overwrite of a
+        table that has a `main` snapshot, which commits an empty table.
+      * `overwrite`: the statement replaces every row of `main` (operation
+        `overwrite`, with `deleted-*` and `removed-*` counters) instead of
+        adding to it."""
 
     var namespace: String
     var table: String
@@ -257,6 +270,7 @@ struct AppendCommit(Copyable, Movable):
     var added_data_files: Int64
     var added_records: Int64
     var added_files_size: Int64
+    var overwrite: Bool
 
     def __init__(
         out self,
@@ -268,6 +282,7 @@ struct AppendCommit(Copyable, Movable):
         added_data_files: Int64,
         added_records: Int64,
         added_files_size: Int64,
+        overwrite: Bool = False,
     ):
         self.namespace = namespace^
         self.table = table^
@@ -277,6 +292,7 @@ struct AppendCommit(Copyable, Movable):
         self.added_data_files = added_data_files
         self.added_records = added_records
         self.added_files_size = added_files_size
+        self.overwrite = overwrite
 
 
 struct AppendCommitOutcome(Copyable, Movable):
@@ -581,33 +597,35 @@ def append_snapshot(
 ) -> NewSnapshot:
     """The snapshot of one attempt on `base`: parent `main`, sequence number
     last + 1, the timestamp `now_ms` or one more than the parent's when that
-    is later, the current schema, and an `append` summary. The totals are the
-    parent's plus the added counts; a total the parent's summary lacks is
-    omitted (a table with no parent starts them at the added counts and at 0
+    is later, the current schema, and the summary of
+    `iceberg_commit_summary.mojo`: an `append`'s, or an `overwrite`'s when
+    `commit.overwrite`. A counter the parent's summary lacks is omitted (a
+    table with no parent starts the totals at the added counts and at 0
     deletes)."""
     var parent = base.main_snapshot_id
     var ts = now_ms
-    var names = List[String]()
-    var values = List[String]()
-    names.append(String("added-data-files"))
-    values.append(String(commit.added_data_files))
-    names.append(String("added-records"))
-    values.append(String(commit.added_records))
-    names.append(String("added-files-size"))
-    values.append(String(commit.added_files_size))
     var pi = -1
     if parent:
         pi = base.snapshot_index(parent.value())
         if pi >= 0 and base.snapshots[pi].timestamp_ms >= ts:
             ts = base.snapshots[pi].timestamp_ms + 1
-    _total(base, pi, names, values, String("total-data-files"), commit.added_data_files)
-    _total(base, pi, names, values, String("total-records"), commit.added_records)
-    _total(base, pi, names, values, String("total-files-size"), commit.added_files_size)
-    _total(base, pi, names, values, String("total-delete-files"), 0)
-    _total(base, pi, names, values, String("total-position-deletes"), 0)
-    _total(base, pi, names, values, String("total-equality-deletes"), 0)
+    var names = List[String]()
+    var values = List[String]()
+    snapshot_summary(
+        base,
+        pi,
+        commit.overwrite,
+        commit.added_data_files,
+        commit.added_records,
+        commit.added_files_size,
+        names,
+        values,
+    )
     names.append(String(COMMIT_ID_SUMMARY_KEY))
     values.append(String(commit_id))
+    var operation = String("append")
+    if commit.overwrite:
+        operation = String("overwrite")
     return NewSnapshot(
         snapshot_id,
         parent,
@@ -615,38 +633,10 @@ def append_snapshot(
         ts,
         base.current_schema_id,
         String(manifest_list),
-        String("append"),
+        operation^,
         names^,
         values^,
     )
-
-
-def _total(
-    base: TableMetadata,
-    parent_index: Int,
-    mut names: List[String],
-    mut values: List[String],
-    name: String,
-    added: Int64,
-):
-    """Append `name` = parent's `name` + `added`; with no parent snapshot,
-    `added`; omitted when the parent's summary lacks it or it is not an
-    integer."""
-    if parent_index < 0:
-        if base.main_snapshot_id:
-            return  # main names a snapshot the table no longer lists
-        names.append(name)
-        values.append(String(added))
-        return
-    var prev = base.snapshots[parent_index].summary(name)
-    if not prev:
-        return
-    try:
-        var n = Int64(Int(prev.value()))
-        names.append(name)
-        values.append(String(n + added))
-    except:
-        return
 
 
 def append_commit_body(
@@ -704,7 +694,9 @@ def commit_append[
     var check = check_append_base(commit, base.metadata)
     if check.byte_length() > 0:
         return _fail(out^, check^, True, written^)
-    if commit.added_data_files == 0:
+    if commit.added_data_files == 0 and not (
+        commit.overwrite and Bool(base.metadata.main_snapshot_id)
+    ):
         out.committed = True
         return out^
 

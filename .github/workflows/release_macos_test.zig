@@ -3,8 +3,9 @@
 //! KOMIRA_TEST_WORK/workflows/<name>.yml), the shards of the pull request's check set
 //! (ci_targets/shard_<n>.bzl) and the macOS set's own definition (darwin_libs.bzl).
 //!
-//! The decision these hold: the macOS platform is not in the pull request check (the farm has far more
-//! Linux cores than Mac ones), and macOS builds run only in release workflows, never in a pull request:
+//! The decision these hold: before the merge, macOS is built only by pr.yml's macOS part (the libraries of
+//! the macOS set a change reaches, on the farm's Macs, through a config file no other step names, bounded),
+//! and the release workflows build it after the merge:
 //! release-macos.yml once per release (a push to main, a manual run), in a concurrency group of its own
 //! so that a stalled Mac build never holds the next release, and pypi-macos-arm64.yml's build-macos-arm64 on
 //! a push to main, building only when TestPyPI lacks that version's macOS wheel; the daily promotion builds
@@ -27,9 +28,15 @@
 //!    when the build's result is skipped, so a run whose build never ran is not green;
 //!  - it is not triggered on a pull request: neither macOS-naming workflow's `on:` names one, and no
 //!    workflow that runs on a pull request (pr.yml, coverage.yml) has a non-comment line naming darwin,
-//!    macOS, osx or `--target-platforms`, and none passes the macOS worker set to farm-connect, with ONE
-//!    exception: the line of pr.yml that analyses the macOS set (ANALYSIS_ARGS, a `bxl` of
-//!    release/darwin_analysis.bxl, which configures and analyses and runs no action), exactly as written;
+//!    macOS, osx or `--target-platforms`, with two exceptions, both in pr.yml and exactly as written: the
+//!    lines of its macOS part (PR_MACOS_PART) and the line that analyses the macOS set (ANALYSIS_ARGS, a
+//!    `bxl` of release/darwin_analysis.bxl, which configures and analyses and runs no action); the same
+//!    lines in coverage.yml are refused;
+//!  - pr.yml's macOS part holds its contract: each of its lines once; the macOS keys passed to
+//!    farm-connect with `darwin-config-file`, so they reach no step but the build, which names the file;
+//!    the targets chosen by darwin.bxl from the linux part's list; the build of darwin-arm64 through the
+//!    buck2-farm action with its remote assertion, only when there is a target, bounded at 60 minutes,
+//!    never with --no-remote-cache; and the part after the step `test` and before the analysis;
 //!  - pr.yml does analyse the macOS set: that line is there once, in a buck2-farm step with its remote
 //!    assertion, so a change that makes the set unanalysable fails its own pull request;
 //!  - pypi-macos-arm64.yml, the other release workflow with a macOS build (the macOS wheel), and pypi.yml,
@@ -45,15 +52,22 @@
 //!    the macOS driver, read the quickstart from the smoke artifact (no checkout) and are one job per entry
 //!    of their chain's matrix (promote-macos-arm64's for the PyPI one); promote-macos-arm64 and
 //!    pypi-macos-arm64 run the Linux driver on ubuntu;
-//!  - the pull request's check set (ci/targets shards) names neither the macOS set, the three macOS targets
-//!    of the wheel (komira_wheel_macos_arm64, wheel_install_test_macos_arm64, pypi_smoke_macos_arm64) nor a
-//!    macOS runner;
+//!  - the pull request's check set (ci/targets shards) names neither the macOS set, the five macOS targets
+//!    of the wheel (komira_wheel_macos_arm64, wheel_install_test_macos_arm64, wheel_libs_macos_arm64,
+//!    wheel_same_macos_arm64, pypi_smoke_macos_arm64) nor a macOS runner;
 //!  - the macOS set is the packages of packages.bzl without the excluded ones, in one place: the
 //!    set's definition builds each member's `:lib`, and each excluded package is a package.
+//!  - the step `build the macOS Python harness tests` builds DARWIN_PYTHON_HARNESS of darwin_libs.bzl, the
+//!    list pr.yml analyses with the set (release_macos_harness_test.zig).
 //! Every defect above is written into the real text and must be refused with its message.
 
 const std = @import("std");
 const t = std.testing;
+
+// The harness step builds the list pr.yml analyses (release_macos_harness_test.zig says what each case catches).
+test {
+    _ = @import("release_macos_harness_test.zig");
+}
 
 const JOB = "release-macos";
 const BUILD_ARGS = "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs";
@@ -295,18 +309,137 @@ fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     return null;
 }
 
-/// Null if a workflow that runs on a pull request holds no macOS build, else the refusal. A workflow that
-/// does not run on a pull request is not read here (null).
-fn checkPullRequestWorkflow(text: []const u8) ?[]const u8 {
+/// Null if a workflow that runs on a pull request names macOS nowhere but where it may, else the refusal.
+/// A workflow that does not run on a pull request is not read here (null). `name` is the file's name: the
+/// lines of pr.yml's macOS part (PR_MACOS_PART, exactly as written) are pr.yml's alone, and the analysis
+/// line (ANALYSIS_ARGS) builds nothing; any other line naming darwin, macOS, osx or `--target-platforms`
+/// is refused, in coverage.yml or any other pull request workflow too.
+fn checkPullRequestWorkflow(name: []const u8, text: []const u8) ?[]const u8 {
     if (!runsOnPullRequest(text)) return null;
+    const is_pr = std.mem.eql(u8, name, "pr.yml");
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |line| {
         if (isComment(line)) continue;
         // the analysis of the macOS set runs no action: the one line that may name it, as written
         if (std.mem.eql(u8, line, ANALYSIS_ARGS)) continue;
-        if (namesMacos(line)) return "a workflow that runs on a pull request names a macOS platform, worker set or runner (the macOS builds are in release workflows)";
+        if (is_pr and isMacosPartLine(line)) continue;
+        if (namesMacos(line)) return "a workflow that runs on a pull request names a macOS platform, worker set or runner outside pr.yml's macOS part (its lines are PR_MACOS_PART, as written)";
     }
     return null;
+}
+
+/// The non-comment lines of pr.yml that name macOS: the job's macOS part (docs/ci.md, "The macOS part of
+/// the check"), each exactly as written. checkMacosPart holds where they stand and what surrounds them.
+const PR_MACOS_PART = [_][]const u8{
+    DARWIN_PROPS,
+    DARWIN_HOSTS,
+    "          macos-library-dirs: ${{ vars.FARM_MACOS_LIBRARY_DIRS }}",
+    DARWIN_FILE,
+    SELECT_NAME,
+    SELECT_ARGS,
+    TOOL_NAME,
+    TOOL_ID,
+    TOOL_RUN,
+    TARGETS_NAME,
+    TARGETS_ID,
+    TARGETS_ENV,
+    TARGETS_RUN,
+    PR_BUILD_NAME,
+    PR_BUILD_IF,
+    PR_BUILD_ARGS,
+};
+const DARWIN_FILE = "          darwin-config-file: ${{ runner.temp }}/darwin.buckconfig";
+const SELECT_NAME = "      - name: select the macOS targets";
+const SELECT_ARGS = "          args: bxl komira//tools/build/ci/darwin.bxl:select @tools/build/ci/darwin_affected.args @${{ runner.temp }}/targets.txt";
+const TARGETS_NAME = "      - name: the macOS targets to build";
+const TARGETS_ID = "        id: darwin";
+const TARGETS_ENV = "          DARWIN_TARGETS: ${{ steps.darwin_tool.outputs.path }}";
+const TARGETS_RUN = "        run: '\"$DARWIN_TARGETS\" --log \"$RUNNER_TEMP/buck2-farm.log\" --out \"$RUNNER_TEMP/darwin_targets.txt\" --github-output \"$GITHUB_OUTPUT\"'";
+const TOOL_NAME = "      - name: build the macOS targets tool";
+const TOOL_ID = "        id: darwin_tool";
+const TOOL_RUN = "        run: echo \"path=$(./buck2 build komira//tools/build/ci:darwin_targets --show-full-simple-output)\" >> \"$GITHUB_OUTPUT\"";
+const PR_BUILD_NAME = "      - name: build for macOS";
+const PR_BUILD_IF = "        if: steps.darwin.outputs.any == 'true'";
+const PR_BUILD_BOUND = "        timeout-minutes: 60";
+const PR_BUILD_ARGS = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going @${{ runner.temp }}/darwin_targets.txt";
+const PR_TEST_NAME = "      - name: test";
+
+fn isMacosPartLine(line: []const u8) bool {
+    for (PR_MACOS_PART) |l| if (std.mem.eql(u8, line, l)) return true;
+    return false;
+}
+
+/// Null if pr.yml's macOS part holds its contract, else the refusal: every line of it is there once; the
+/// macOS keys go to farm-connect as a file of their own (so no other step configures a macOS platform);
+/// the targets are chosen by darwin.bxl from the linux part's list; the build names that file, the
+/// darwin-arm64 platform and that list, runs through the buck2-farm action with its remote assertion,
+/// only when there is a target, and is bounded at 60 minutes; and it comes after the linux part's test
+/// step and before the analysis of the set (whose own config file replaces the macOS keys).
+fn checkMacosPart(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
+    var lines = std.ArrayList([]const u8).empty;
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |l| if (!isComment(l)) try lines.append(ar, l);
+    const ls = lines.items;
+    for (PR_MACOS_PART) |want| {
+        var n: usize = 0;
+        for (ls) |l| if (std.mem.eql(u8, l, want)) {
+            n += 1;
+        };
+        if (n != 1) return try std.fmt.allocPrint(ar, "pr.yml holds {d} times, not once, the line of its macOS part: {s}", .{ n, std.mem.trim(u8, want, " ") });
+    }
+    if (mentions(ls, "--no-remote-cache")) return "pr.yml builds with --no-remote-cache";
+    // the macOS keys are farm-connect's inputs, the file among them
+    const connect = lineAt(ls, FARM_CONNECT) orelse return "pr.yml does not join the farm";
+    for ([_][]const u8{ DARWIN_PROPS, DARWIN_HOSTS, DARWIN_FILE }) |want| {
+        const at = lineAt(ls, want).?;
+        if (at < connect or stepStartBetween(ls, connect, at)) return try std.fmt.allocPrint(ar, "pr.yml passes `{s}` outside its farm-connect step", .{std.mem.trim(u8, want, " ")});
+    }
+    // the selection: a buck2-farm step over the linux part's list
+    const sel = lineAt(ls, SELECT_ARGS).?;
+    if (!stepIs(ls, sel, SELECT_NAME, &.{})) return "pr.yml selects the macOS targets outside its buck2-farm step `select the macOS targets` (a step that ran an action locally would pass)";
+    // the tool that reads the selection, built on the farm and its path the step's output
+    const tool = lineAt(ls, TOOL_ID).?;
+    if (!consecutive(ls, tool, &.{ TOOL_NAME, TOOL_ID, TOOL_RUN }))
+        return "pr.yml's step `build the macOS targets tool` is not its name, `id: darwin_tool` and the build of //tools/build/ci:darwin_targets";
+    // the targets: that tool over the selection's log, writing the labels and whether there is any
+    const ids = lineAt(ls, TARGETS_ID).?;
+    if (!consecutive(ls, ids, &.{ TARGETS_NAME, TARGETS_ID, "        env:", TARGETS_ENV, TARGETS_RUN }))
+        return "pr.yml's step `the macOS targets to build` is not its name, `id: darwin`, the tool's path and the one command that writes darwin_targets.txt";
+    // the build
+    const build = lineAt(ls, PR_BUILD_ARGS).?;
+    if (!stepIs(ls, build, PR_BUILD_NAME, &.{ PR_BUILD_IF, PR_BUILD_BOUND }))
+        return "pr.yml's step `build for macOS` is not: its name, `if: steps.darwin.outputs.any == 'true'`, `timeout-minutes: 60`, the buck2-farm action with the build and its remote assertion";
+    // the order: after the linux part's test step, before the analysis of the set
+    const tst = lineAt(ls, PR_TEST_NAME) orelse return "pr.yml has no step `test`";
+    const analysis = lineAt(ls, ANALYSIS_ARGS) orelse return "pr.yml does not analyse the release's macOS set";
+    if (!(tst < sel and sel < ids and ids < build and build < analysis))
+        return "pr.yml's macOS part is not after the step `test` and before the analysis of the macOS set, in the order select, targets, build";
+    if (!(tool < ids)) return "pr.yml builds the macOS targets tool after the step that runs it";
+    return null;
+}
+
+/// Whether `want` are lines of `ls`, one after the other, with `want[1]` at `at`.
+fn consecutive(ls: []const []const u8, at: usize, want: []const []const u8) bool {
+    if (at == 0 or at - 1 + want.len > ls.len) return false;
+    for (want, 0..) |w, i| if (!std.mem.eql(u8, ls[at - 1 + i], w)) return false;
+    return true;
+}
+
+/// Whether a step starts (`      - `) after line `from` and up to line `to`.
+fn stepStartBetween(ls: []const []const u8, from: usize, to: usize) bool {
+    var i = from + 1;
+    while (i <= to) : (i += 1) if (std.mem.startsWith(u8, ls[i], "      - ")) return true;
+    return false;
+}
+
+/// Whether the `args:` line at `at` is the step `name`, then `between` in that order, then the buck2-farm
+/// action, `with:`, the line itself and the remote assertion, with nothing else in between.
+fn stepIs(ls: []const []const u8, at: usize, name: []const u8, between: []const []const u8) bool {
+    const first = at -| (3 + between.len);
+    if (at < 3 + between.len or !std.mem.eql(u8, ls[first], name)) return false;
+    for (between, 0..) |want, i| if (!std.mem.eql(u8, ls[first + 1 + i], want)) return false;
+    if (!std.mem.eql(u8, ls[at - 2], BUCK2_FARM) or !std.mem.eql(u8, ls[at - 1], "        with:")) return false;
+    return at + 1 < ls.len and std.mem.eql(u8, ls[at + 1], ASSERT);
 }
 
 /// The args line of pr.yml's step that configures and analyses the release's macOS set for its platform
@@ -378,7 +511,7 @@ const PYTHONS_RUN = "        run: '\"$RUNNER_TEMP/pypi-macos-arm64/smoke/pypi_sm
 fn smokeMatrix(ar: std.mem.Allocator, producer: []const u8) ![4][]const u8 {
     return .{ "    strategy:", "      fail-fast: false", try std.fmt.allocPrint(ar, "      matrix: ${{{{ fromJSON(needs.{s}.outputs.matrix) }}}}", .{producer}), "          python-version: ${{ matrix.python }}" };
 }
-const MACOS_TARGETS = [_][]const u8{ "//python:komira_wheel_macos_arm64[release]", "//python:wheel_install_test_macos_arm64", "//python/smoke:pypi_smoke_macos_arm64" };
+const MACOS_TARGETS = [_][]const u8{ "//python:komira_wheel_macos_arm64[release]", "//python:wheel_install_test_macos_arm64", "//python:wheel_libs_macos_arm64", "//python:wheel_same_macos_arm64", "//python/smoke:pypi_smoke_macos_arm64" };
 
 /// Whether the `needs:` line names the job `job` (as one of its list items).
 fn needsJob(line: []const u8, job: []const u8) bool {
@@ -528,13 +661,13 @@ fn checkPypiMacos(ar: std.mem.Allocator, linux_text: []const u8, text: []const u
                 known = true;
             }
         }
-        if (!known) return "build-macos-arm64 builds a target for macOS that is not the wheel, its install test, its driver or the wheel's file name";
+        if (!known) return "build-macos-arm64 builds a target for macOS that is not the wheel, its install test, its read-back checks, its driver or the wheel's file name";
         if (first_mac_build == null) first_mac_build = i;
     }
     const tp_at = present_testpypi orelse return "build-macos-arm64 does not ask TestPyPI whether it lists the macOS wheel (pypi_smoke present --index testpypi)";
     const name_at = file_name_at orelse return "build-macos-arm64 does not build the macOS wheel's file name before it asks TestPyPI";
     if (name_at > tp_at) return "build-macos-arm64 asks the indexes before it has built the wheel's file name";
-    for (seen) |k| if (k != 1) return "build-macos-arm64 does not build each of the macOS wheel, its install test and its driver exactly once";
+    for (seen) |k| if (k != 1) return "build-macos-arm64 does not build each of the macOS wheel, its install test, its read-back checks and its driver exactly once";
     if (first_mac_build.? < tp_at) return "build-macos-arm64 starts a Mac build before the present step";
     for (steps) |step| {
         if (isDarwinBuild(step) and !mentions(step, "[file_name]") and !has(step, PRESENT_GATE)) return "a Mac build of build-macos-arm64 does not carry the present gate";
@@ -769,7 +902,7 @@ test "a workflow that runs on a pull request holds no macOS build, and the real 
     var on_pr: usize = 0;
     for (try listDir(ar, "workflows")) |name| {
         const text = try readData(ar, &.{ "workflows", name });
-        if (checkPullRequestWorkflow(text)) |why| {
+        if (checkPullRequestWorkflow(name, text)) |why| {
             std.debug.print("{s}: {s}\n", .{ name, why });
             return error.MacosInPullRequest;
         }
@@ -790,12 +923,16 @@ test "the reader of pull request workflows sees each macOS line added to the rea
     const ar = arena.allocator();
     const pr = try readData(ar, &.{ "workflows", "pr.yml" });
     try t.expect(runsOnPullRequest(pr));
-    try t.expect(checkPullRequestWorkflow(pr) == null);
+    try t.expect(checkPullRequestWorkflow("pr.yml", pr) == null);
     const added = [_][]const u8{
+        // a build for macOS spelled other than the macOS part's own line: without its config file, over
+        // another list, or with a cold cache
         "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 @targets.txt",
-        "          darwin-properties: ${{ vars.FARM_DARWIN_ARM64_PROPERTIES }}",
-        "          darwin-macos-hosts: ${{ vars.FARM_DARWIN_MACOS_HOSTS }}",
+        "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going @${{ runner.temp }}/darwin_targets.txt",
+        PR_BUILD_ARGS ++ " --no-remote-cache",
         "          args: build //release:mopm_darwin_libs",
+        // the macOS keys under another input name than the part's
+        "          darwin-config: ${{ runner.temp }}/darwin.buckconfig",
         "    runs-on: macos-15",
         "          args: build komira//tools/build/mojo:act_darwin",
         "          args: build toolchains//:mojo_compiler_1.0.0_osx-arm64",
@@ -808,15 +945,24 @@ test "the reader of pull request workflows sees each macOS line added to the rea
     };
     for (added) |line| {
         const bad = try std.fmt.allocPrint(ar, "{s}\n{s}\n", .{ pr, line });
-        if (checkPullRequestWorkflow(bad) == null) {
+        if (checkPullRequestWorkflow("pr.yml", bad) == null) {
             std.debug.print("a pull request workflow with this line was accepted: {s}\n", .{line});
             return error.Accepted;
         }
     }
     // a comment may speak of it, and a workflow that is not run by a pull request may name it
-    try t.expect(checkPullRequestWorkflow(try std.fmt.allocPrint(ar, "{s}\n# the macOS build is the workflow release-macos.yml\n", .{pr})) == null);
+    try t.expect(checkPullRequestWorkflow("pr.yml", try std.fmt.allocPrint(ar, "{s}\n# the macOS build is the workflow release-macos.yml\n", .{pr})) == null);
+    // the lines of pr.yml's macOS part are pr.yml's alone: in coverage.yml each is refused
+    const coverage = try readData(ar, &.{ "workflows", "coverage.yml" });
+    try t.expect(checkPullRequestWorkflow("coverage.yml", coverage) == null);
+    for (PR_MACOS_PART) |line| {
+        if (checkPullRequestWorkflow("coverage.yml", try std.fmt.allocPrint(ar, "{s}\n{s}\n", .{ coverage, line })) == null) {
+            std.debug.print("coverage.yml with a line of pr.yml's macOS part was accepted: {s}\n", .{line});
+            return error.Accepted;
+        }
+    }
     const release = try readData(ar, &.{ "workflows", "release.yml" });
-    try t.expect(checkPullRequestWorkflow(release) == null);
+    try t.expect(checkPullRequestWorkflow("release.yml", release) == null);
     // every spelling of the trigger is seen
     try t.expect(runsOnPullRequest("name: x\non: pull_request\njobs:\n"));
     try t.expect(runsOnPullRequest("name: x\non: [push, pull_request]\njobs:\n"));
@@ -1005,7 +1151,13 @@ test "an edit of the real pypi-macos-arm64.yml that lets a Mac build start befor
     // the present step that is gone, or asks before the file name exists
     try expectRefusedPypi(ar, w.linux, try replaced(ar, text, "      - name: the macOS wheel on TestPyPI\n        id: testpypi_file\n" ++ PRESENT_TESTPYPI_RUN ++ "\n", ""), "does not ask TestPyPI");
     try expectRefusedPypi(ar, w.linux, try replaced(ar, try replaced(ar, text, PRESENT_STEPS, ""), "      - name: build the file name of the macOS wheel\n", PRESENT_STEPS ++ "      - name: build the file name of the macOS wheel\n"), "asks the indexes before it has built the wheel's file name");
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, "//python:wheel_install_test_macos_arm64\n", "//python:wheel_install_test\n"), "not the wheel, its install test, its driver or the wheel's file name");
+    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, "//python:wheel_install_test_macos_arm64\n", "//python:wheel_install_test\n"), "not the wheel, its install test, its read-back checks, its driver or the wheel's file name");
+    // the read-back checks dropped from their step, or built twice
+    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, " //python:wheel_libs_macos_arm64 //python:wheel_same_macos_arm64\n", " //python:wheel_libs_macos_arm64\n"), "exactly once");
+    const read_back = "      - name: the macOS wheel read back\n";
+    const read_back_step = text[std.mem.indexOf(u8, text, read_back).?..std.mem.indexOf(u8, text, "      - name: build the macOS smoke driver\n").?];
+    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, read_back_step, try std.mem.concat(ar, u8, &.{ read_back_step, read_back_step })), "exactly once");
+    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      - name: the macOS wheel read back\n" ++ PRESENT_GATE ++ "\n", "      - name: the macOS wheel read back\n"), "a Mac build of build-macos-arm64 does not carry the present gate");
     try expectRefusedPypi(ar, w.linux, try replaced(ar, text, "//python/smoke:pypi_smoke_macos_arm64 --out", "//python:komira_wheel_macos_arm64[release] --out"), "exactly once");
     try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      version: ${{ steps.dist.outputs.version }}\n", "      version: 0.1.0\n"), "does not publish the version");
 }
@@ -1033,6 +1185,74 @@ test "pr.yml analyses the macOS set once, through the buck2-farm action, and eac
     for (cases) |c| try expectMsg(try checkAnalysisStep(ar, try replaced(ar, pr, c.from, c.to)), c.want);
 }
 
+test "pr.yml's macOS part holds its contract, and each edit that breaks it is refused with its message" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const pr = try readData(ar, &.{ "workflows", "pr.yml" });
+    try t.expect((try checkMacosPart(ar, pr)) == null);
+    const build_step = PR_BUILD_NAME ++ "\n" ++ PR_BUILD_IF ++ "\n" ++ PR_BUILD_BOUND ++ "\n" ++ BUCK2_FARM ++ "\n        with:\n" ++ PR_BUILD_ARGS ++ "\n" ++ ASSERT ++ "\n";
+    const select_step = SELECT_NAME ++ "\n" ++ BUCK2_FARM ++ "\n        with:\n" ++ SELECT_ARGS ++ "\n" ++ ASSERT ++ "\n";
+    const cases = [_]struct { from: []const u8, to: []const u8, want: []const u8 }{
+        // a line of the part lost, or written twice
+        .{ .from = DARWIN_FILE ++ "\n", .to = "", .want = "0 times, not once, the line of its macOS part: darwin-config-file" },
+        .{ .from = build_step, .to = "", .want = "0 times, not once, the line of its macOS part: - name: build for macOS" },
+        .{ .from = build_step, .to = build_step ++ build_step, .want = "2 times, not once" },
+        // the build unguarded (it would run with an empty list), unbounded, or bounded otherwise
+        .{ .from = PR_BUILD_IF ++ "\n", .to = "", .want = "0 times, not once, the line of its macOS part: if: steps.darwin.outputs.any" },
+        .{ .from = PR_BUILD_NAME ++ "\n" ++ PR_BUILD_IF ++ "\n" ++ PR_BUILD_BOUND ++ "\n", .to = PR_BUILD_NAME ++ "\n" ++ PR_BUILD_IF ++ "\n", .want = "is not: its name, `if: steps.darwin.outputs.any == 'true'`, `timeout-minutes: 60`" },
+        .{ .from = PR_BUILD_BOUND ++ "\n", .to = "        timeout-minutes: 300\n", .want = "`timeout-minutes: 60`" },
+        // the build run directly, where a local action would not be caught, or not asserted remote
+        .{ .from = PR_BUILD_BOUND ++ "\n" ++ BUCK2_FARM, .to = PR_BUILD_BOUND ++ "\n        run: ./buck2 build @darwin_targets.txt", .want = "the buck2-farm action with the build and its remote assertion" },
+        .{ .from = PR_BUILD_ARGS ++ "\n" ++ ASSERT, .to = PR_BUILD_ARGS, .want = "the buck2-farm action with the build and its remote assertion" },
+        .{ .from = SELECT_ARGS ++ "\n" ++ ASSERT, .to = SELECT_ARGS, .want = "outside its buck2-farm step `select the macOS targets`" },
+        // the macOS file dropped from farm-connect (its keys would go into the machine buckconfig, and
+        // every step would configure macOS)
+        .{ .from = DARWIN_FILE ++ "\n", .to = "", .want = "the line of its macOS part: darwin-config-file" },
+        // the targets written otherwise
+        .{ .from = TARGETS_ENV ++ "\n" ++ TARGETS_RUN, .to = TARGETS_RUN ++ "\n" ++ TARGETS_ENV, .want = "is not its name, `id: darwin`, the tool's path and the one command" },
+        .{ .from = TARGETS_RUN ++ "\n", .to = "        run: grep -E '^[a-z_]+//[^ ]+$' \"$RUNNER_TEMP/buck2-farm.log\" > \"$RUNNER_TEMP/darwin_targets.txt\"\n", .want = "0 times, not once, the line of its macOS part: run: '\"$DARWIN_TARGETS\" --log" },
+        // the tool not built, or built otherwise
+        .{ .from = TOOL_NAME ++ "\n" ++ TOOL_ID ++ "\n" ++ TOOL_RUN ++ "\n", .to = "", .want = "0 times, not once, the line of its macOS part: - name: build the macOS targets tool" },
+        .{ .from = TOOL_ID ++ "\n" ++ TOOL_RUN, .to = TOOL_RUN ++ "\n" ++ TOOL_ID, .want = "is not its name, `id: darwin_tool` and the build" },
+        // the selection removed, or the linux test step renamed
+        .{ .from = select_step, .to = "", .want = "0 times" },
+        .{ .from = PR_TEST_NAME ++ "\n", .to = "      - name: tests\n", .want = "has no step `test`" },
+        // a cold cache
+        .{ .from = "      - name: Stop buck2\n", .to = "      - name: cold\n        run: ./buck2 build --no-remote-cache //x:y\n      - name: Stop buck2\n", .want = "--no-remote-cache" },
+    };
+    for (cases) |c| try expectMsg(try checkMacosPart(ar, try replacedPr(ar, pr, c.from, c.to)), c.want);
+    // the macOS file passed to a step other than farm-connect's
+    const elsewhere = try replacedPr(ar, try replacedPr(ar, pr, DARWIN_FILE ++ "\n", ""), "      - name: the buckconfig names the farm\n", "      - name: the buckconfig names the farm\n        with:\n" ++ DARWIN_FILE ++ "\n");
+    try expectMsg(try checkMacosPart(ar, elsewhere), "passes `darwin-config-file: ${{ runner.temp }}/darwin.buckconfig` outside its farm-connect step");
+    // the order: the whole part moved after the analysis step, or the build before the selection
+    const analysis_step = BUCK2_FARM ++ "\n        with:\n" ++ ANALYSIS_ARGS ++ "\n" ++ ASSERT ++ "\n";
+    const moved = try replacedPr(ar, try replacedPr(ar, pr, build_step, ""), analysis_step, analysis_step ++ build_step);
+    try expectMsg(try checkMacosPart(ar, moved), "is not after the step `test` and before the analysis of the macOS set");
+    const early = try replacedPr(ar, try replacedPr(ar, pr, build_step, ""), select_step, build_step ++ select_step);
+    try expectMsg(try checkMacosPart(ar, early), "in the order select, targets, build");
+    // the selection moved before the linux test step (it would read the list before `test` ran, and the
+    // macOS part would no longer follow the whole linux part)
+    const before_test = try replacedPr(ar, try replacedPr(ar, pr, select_step, ""), PR_TEST_NAME ++ "\n", select_step ++ PR_TEST_NAME ++ "\n");
+    try expectMsg(try checkMacosPart(ar, before_test), "is not after the step `test`");
+    // the targets step moved before the selection (it would read the log of another step)
+    const targets_step = TARGETS_NAME ++ "\n" ++ TARGETS_ID ++ "\n        env:\n" ++ TARGETS_ENV ++ "\n" ++ TARGETS_RUN ++ "\n";
+    const targets_first = try replacedPr(ar, try replacedPr(ar, pr, targets_step, ""), select_step, targets_step ++ select_step);
+    try expectMsg(try checkMacosPart(ar, targets_first), "in the order select, targets, build");
+    // the tool built after the step that runs it (that step would run an empty path)
+    const tool_step = TOOL_NAME ++ "\n" ++ TOOL_ID ++ "\n" ++ TOOL_RUN ++ "\n";
+    const tool_late = try replacedPr(ar, try replacedPr(ar, pr, tool_step, ""), PR_BUILD_NAME ++ "\n", tool_step ++ PR_BUILD_NAME ++ "\n");
+    try expectMsg(try checkMacosPart(ar, tool_late), "builds the macOS targets tool after the step that runs it");
+}
+
+fn replacedPr(ar: std.mem.Allocator, text: []const u8, from: []const u8, to: []const u8) ![]const u8 {
+    if (std.mem.indexOf(u8, text, from) == null) {
+        std.debug.print("the case's anchor is not in pr.yml: {s}\n", .{from});
+        return error.NoAnchor;
+    }
+    return std.mem.replaceOwned(u8, ar, text, from, to);
+}
+
 test "the pull request's check set names neither the macOS set, the macOS wheel's targets nor a macOS runner" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
@@ -1047,7 +1267,7 @@ test "the pull request's check set names neither the macOS set, the macOS wheel'
             std.debug.print("{s} names the macOS set\n", .{name});
             return error.MacosSetInCheck;
         }
-        for ([_][]const u8{ "komira_wheel_macos_arm64", "wheel_install_test_macos_arm64", "pypi_smoke_macos_arm64" }) |target| {
+        for ([_][]const u8{ "komira_wheel_macos_arm64", "wheel_install_test_macos_arm64", "wheel_libs_macos_arm64", "wheel_same_macos_arm64", "pypi_smoke_macos_arm64" }) |target| {
             if (std.mem.indexOf(u8, text, target) != null) {
                 std.debug.print("{s} names the macOS wheel target {s}\n", .{ name, target });
                 return error.MacosSetInCheck;

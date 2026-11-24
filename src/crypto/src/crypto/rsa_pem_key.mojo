@@ -72,7 +72,7 @@ RFC 7468 labels of encoding."""
 comptime _FN: StaticString = "rsa_pkcs8_der_from_pem: "
 
 comptime _RSA_ENCRYPTION_OID_LEN = 9
-comptime _RSA_ENCRYPTION_OID: InlineArray[UInt8, _RSA_ENCRYPTION_OID_LEN] = [
+comptime _RSA_ENCRYPTION_OID: Array[UInt8, _RSA_ENCRYPTION_OID_LEN] = [
     0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01
 ]
 """The content octets of the rsaEncryption OID, 1.2.840.113549.1.1.1

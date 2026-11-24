@@ -320,7 +320,7 @@ struct HyperLogLog(Movable, Copyable):
         A register set above q + 1 through `set_register` counts as q + 1.
         """
         var m = HLL_NUM_REGISTERS
-        var counts = InlineArray[Int, HLL_MAX_REGISTER + 1](fill=0)
+        var counts = Array[Int, HLL_MAX_REGISTER + 1](fill=0)
         for i in range(m):
             counts[min(Int(self._registers[i]), HLL_MAX_REGISTER)] += 1
 

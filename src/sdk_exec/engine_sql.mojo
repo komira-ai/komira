@@ -4,7 +4,12 @@
 #
 # In order: tokenize and parse; bind against the context's catalog and footers;
 # optimize, then hold each subtree the optimized plan repeats once
-# (`optimize_for_run`); lower with inputs from the same footers; run. A step that refuses
+# (`optimize_for_run`); lower with inputs from the same footers; run. A
+# `COPY ... TO` runs its query the same way and then writes the result as a
+# local Parquet, CSV or newline-delimited JSON file (`engine_write`, still
+# step `execute`), answering one row with the BIGINT column `Count`; its
+# destination and compression are checked at step `bind`, so a refused COPY
+# touches no file. A step that refuses
 # ends the call, and the outcome says which step and the step's own message
 # unchanged; the door retries nothing and keeps no second route. Nothing here
 # raises: a failure of any step is a value.
@@ -12,6 +17,14 @@
 # The footer cache is pinned to the call (`EngineContext.begin_query`), so the
 # binder and lowering read each file's footer once and the next call reads
 # again.
+#
+# `run_sql_with` takes the `ScanFsOpener` the run reads a remote store
+# through: a catalog table whose `ParquetSource` names an S3 or GCS bucket or
+# an Azure container is bound
+# from the catalog's schema, lowered with no footer facts, and read through
+# the file system the opener opens on the bucket. `run_sql` is `run_sql_with`
+# and `LocalOnlyScanFs`, which refuses such a scan at step `execute` with
+# `SCAN_FS_UNSERVED`.
 #
 # Parse and bind are the steps `sql.sql_frontend.plan_from_sql` composes; they
 # are called one by one here so a refusal names the step that refused.
@@ -32,17 +45,20 @@ from phase_timers.phase_timers import (
     pt_now,
     pt_record,
 )
+from sql.sql_ast import STMT_COPY, STMT_QUERY
 from sql.sql_binder import bind_statement
 from sql.sql_frontend import (
     STATEMENT_NOT_A_QUERY as _SQL_STATEMENT_NOT_A_QUERY,
-    query_plan,
 )
 from sql.sql_parser import parse_sql
 from sql.sql_token import tokenize
+from fs.scan_fs import ScanFsOpener
+from pipeline_exec.source_parquet import LocalOnlyScanFs
 
 from .engine_context import EngineContext
-from .engine_execute import run_lowered_plan
+from .engine_execute import run_lowered_plan_with
 from .engine_lower import lower_for_context
+from .engine_write import check_copy_target, count_result, write_copy_result
 
 comptime STEP_PARSE = "parse"
 comptime STEP_BIND = "bind"
@@ -51,8 +67,9 @@ comptime STEP_LOWER = "lower"
 comptime STEP_EXECUTE = "execute"
 
 comptime STATEMENT_NOT_A_QUERY = _SQL_STATEMENT_NOT_A_QUERY
-"""Refusal (step `bind`): COPY and CREATE TABLE AS wait for a writes slice.
-The same name `sql.sql_frontend.plan_from_sql` refuses them with."""
+"""Refusal (step `bind`): CREATE TABLE AS, which writes into a catalog table,
+and no catalog is bound. The same name `sql.sql_frontend.plan_from_sql`
+refuses a write with."""
 
 comptime OPTIMIZE_UNRESOLVED_SCALAR = "OPTIMIZE_UNRESOLVED_SCALAR"
 """Refusal (step `optimize`): the plan needs a scalar subquery executed first,
@@ -112,7 +129,19 @@ def optimize_for_run(var plan: LogicalPlan) raises -> LogicalPlan:
 
 
 def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
-    """Run the SQL query `text` against `ctx`."""
+    """Run the SQL statement `text` against `ctx` (a query, or a `COPY ... TO`
+    a local Parquet, CSV or JSON file), reading the local file system only (`run_sql_with`
+    and `LocalOnlyScanFs`)."""
+    return run_sql_with(ctx, text, LocalOnlyScanFs())
+
+
+def run_sql_with[
+    R: ScanFsOpener
+](mut ctx: EngineContext, text: String, var opener: R) -> SqlOutcome:
+    """Run the SQL statement `text` against `ctx`: a query, or a `COPY ... TO`
+    a local Parquet, CSV or JSON file. A Parquet scan of a remote store (a catalog table
+    whose source names a bucket) reads through the file system `opener` opens
+    on the bucket."""
     ctx.begin_query()
     var step = String(STEP_PARSE)
     try:
@@ -123,9 +152,16 @@ def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
         var t_bind = pt_now()
         var bound = bind_statement(stmt, ctx.catalog, ctx.footers)
         pt_record[PH_BIND](t_bind)
-        # COPY and CREATE TABLE AS wait for a writes slice: refused here with
-        # `sql.sql_frontend`'s STATEMENT_NOT_A_QUERY, at step `bind`.
-        var plan = query_plan(bound^)
+        if bound.kind == STMT_COPY:
+            check_copy_target(bound.dest_path, bound.fmt, bound.codec)
+        elif bound.kind != STMT_QUERY:
+            raise Error(
+                String(STATEMENT_NOT_A_QUERY)
+                + ": CREATE TABLE AS writes into a catalog table, and no"
+                " catalog is bound; write COPY (<query>) TO '<file>.parquet'"
+                " to write a file"
+            )
+        var plan = bound.take_plan()
         step = String(STEP_OPTIMIZE)
         var t_optimize = pt_now()
         var optimized = optimize_for_run(plan^)
@@ -135,9 +171,15 @@ def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
         var lowered = lower_for_context(optimized, ctx)
         pt_record[PH_LOWER](t_lower)
         step = String(STEP_EXECUTE)
-        var batch = run_lowered_plan(ctx, lowered^)
+        var batch = run_lowered_plan_with(ctx, lowered^, opener^)
         var outcome = SqlOutcome()
-        outcome.batches.append(batch^)
+        if bound.kind == STMT_COPY:
+            var rows = write_copy_result(
+                batch^, bound.dest_path, bound.fmt, bound.codec
+            )
+            outcome.batches.append(count_result(rows))
+        else:
+            outcome.batches.append(batch^)
         return outcome^
     except e:
         return SqlOutcome(step^, String(e))

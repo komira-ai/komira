@@ -36,14 +36,14 @@ GRAPH_JSON = r'''{
       "srcs": [
         {"path": "src/parquet_api/src/parquet_api/__init__.mojo", "sha256": "73a55f1df1e288475c0a25a9897766142b9fe6f784093b78c980a068da43ca04"},
         {"path": "src/parquet_api/src/parquet_api/hll_footer.mojo", "sha256": "41e5feb7c66f28734b8ef4befa0cc1dd05d6ab1fe10d95dbdf9d16bfe92f6e29"},
-        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "cb6efac7f29d12de7290ac75aeff2179c04ef61fa54572f5fa89eb31057f399a"},
+        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "80e8ddde87264ade71147a0827cfc6b182292c5a455664d48e3968ab7c9f6a8b"},
         {"path": "src/parquet_api/src/parquet_api/types.mojo", "sha256": "5c961b33b41c0b6328f47aa6c31e1eb5f1917d4af6fe028c561e796257a67391"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["parquet_api.mojoc"],
-      "key": "055aa8f56c3e4dff325fcfe7250bc1b661d6e5b2f692c7246beaa6a933e88971"
+      "key": "84b5cd9e0fcf43c16e14e6884efb28c91d054fdbe05d934eb32589aec7190895"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_enum_ne_operator.mojo",
@@ -58,7 +58,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_enum_ne_operator.pass"],
-      "key": "dec4ad227b623198c1b7b4800f5707add61108e2564bba6073f6f2d23c219a36"
+      "key": "70cae6b0dbc16c477242a2b9c4a1910d6144bc0ff200babdc5ed6a9831e0c493"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_enum_unknown_values.mojo",
@@ -73,7 +73,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_enum_unknown_values.pass"],
-      "key": "38a54657a6fba36f7710cd478603001d6d65ef16b5ad8f3bfe91ba17e98a2e65"
+      "key": "71c9e133cc3ef8840118faad95626f00d7706de3b58c7caa7929b79055325eee"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_hll_footer.mojo",
@@ -88,7 +88,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_hll_footer.pass"],
-      "key": "7a506bbcfb2484f848b8c4cf9c914433cf4555cbf71ff8a21d13c5c54bbe9211"
+      "key": "28cafe37acc6d366de3cd1cafc8aa38b926dcc30ca0450d58a9a6dac3993f1ea"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_no_env_reads.mojo",
@@ -103,7 +103,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_no_env_reads.pass"],
-      "key": "f93899814f2ee4d16f53a830810e1118d90794fa1e1d52909a39ac528c72fce8"
+      "key": "b61ce5ef90fccb5e9b3f7678d126a8910319021476691c3b76baf536654bacfc"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_parquet_types.mojo",
@@ -112,13 +112,13 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "efcae023d184a5dbd090984801febbf4d5038e483d5167acd935164a1cc550e8"}
+        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "0ad438c8c0cd7480d9f117a9881f8343927a800de3795196ad9ff4dc96f07e02"}
       ],
       "deps": ["komira-ai/parquet_api@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_parquet_types.pass"],
-      "key": "ed83515a2726504d88fa70c25c558008df8273567ca087a5764d19a4b02b44b8"
+      "key": "a47024d9d2a28f7971bdad0b95d82dc8d4e38d0d399da509709486b74bb3f0fe"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_values_match_parquet_thrift.mojo",
@@ -133,7 +133,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_values_match_parquet_thrift.pass"],
-      "key": "2650d7b8bd9df8b0d3a4b23031106b5f0b43a1ad3d3bbface17202500575ee0c"
+      "key": "38656f23032abf76de8e9d0e34446bbf01adf85980486b15cfe86c00d25e16a3"
     }
   ]
 }
@@ -166,14 +166,14 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "srcs": [
         {"path": "src/parquet_api/src/parquet_api/__init__.mojo", "sha256": "73a55f1df1e288475c0a25a9897766142b9fe6f784093b78c980a068da43ca04"},
         {"path": "src/parquet_api/src/parquet_api/hll_footer.mojo", "sha256": "41e5feb7c66f28734b8ef4befa0cc1dd05d6ab1fe10d95dbdf9d16bfe92f6e29"},
-        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "cb6efac7f29d12de7290ac75aeff2179c04ef61fa54572f5fa89eb31057f399a"},
+        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "80e8ddde87264ade71147a0827cfc6b182292c5a455664d48e3968ab7c9f6a8b"},
         {"path": "src/parquet_api/src/parquet_api/types.mojo", "sha256": "5c961b33b41c0b6328f47aa6c31e1eb5f1917d4af6fe028c561e796257a67391"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["parquet_api.mojoc"],
-      "key": "8a25e2229bdc6f674bf2428eeabd7035c7d0c26026faf8582a4ec4319da5136e"
+      "key": "a837816e76965322ede9d2077c5b0f27c96c8fe40bbd546dbfd9abbed429ce12"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_enum_ne_operator.mojo",
@@ -188,7 +188,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_enum_ne_operator.pass"],
-      "key": "de99df18ede4608adeaf1025e53149e78636a1ff865cc564b89f0ea858b5a9f7"
+      "key": "49e49294b6d1c4483a5c03d04583a3f30b327f0aaf1af265804f2fbf273a7146"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_enum_unknown_values.mojo",
@@ -203,7 +203,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_enum_unknown_values.pass"],
-      "key": "6d688355375c8effbb7bb74510fbc1a8c7829d52434b6d5068ad13617f6dd4bb"
+      "key": "476bad84be42c82b490c1aa2881c76452c2703faae8466d7663ffdf46c723cf3"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_hll_footer.mojo",
@@ -218,7 +218,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_hll_footer.pass"],
-      "key": "053fe430079fc14622abad7f5207dd21efc30fae2e4951db07f1b2ff8c9cf6bd"
+      "key": "01065ae347c76581b3507c33302b2664296c0a1ce55400f2db8e85fe30f06438"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_no_env_reads.mojo",
@@ -233,7 +233,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_no_env_reads.pass"],
-      "key": "54b72ae7c12866c934175b716fe35194863c65eb29a708accbf46c18b62c0335"
+      "key": "3472cc4753ade7155d59013eb0501829c508e22a215c27eeb6c11b58df57f889"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_parquet_types.mojo",
@@ -242,13 +242,13 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "efcae023d184a5dbd090984801febbf4d5038e483d5167acd935164a1cc550e8"}
+        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "0ad438c8c0cd7480d9f117a9881f8343927a800de3795196ad9ff4dc96f07e02"}
       ],
       "deps": ["komira-ai/parquet_api@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_parquet_types.pass"],
-      "key": "6669a622c6e7a5689d22d15f731e12c374fc597fa2b42ccb18ded7de4fc345c0"
+      "key": "03de09eff69f299574eaa88e6e64c643509f6fc865f4af81b9f1ed6da74dee7d"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_values_match_parquet_thrift.mojo",
@@ -263,7 +263,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_values_match_parquet_thrift.pass"],
-      "key": "791c03eeefd65532951165605cc24363e4f9f07f7dff98358d7ad5eecb0ed28f"
+      "key": "0f51d5152b28c05b294f118035cd5cf19dca70761fcef49bd1286d1c3097fad2"
     }
   ]
 }
@@ -293,14 +293,14 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "srcs": [
         {"path": "src/parquet_api/src/parquet_api/__init__.mojo", "sha256": "73a55f1df1e288475c0a25a9897766142b9fe6f784093b78c980a068da43ca04"},
         {"path": "src/parquet_api/src/parquet_api/hll_footer.mojo", "sha256": "41e5feb7c66f28734b8ef4befa0cc1dd05d6ab1fe10d95dbdf9d16bfe92f6e29"},
-        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "cb6efac7f29d12de7290ac75aeff2179c04ef61fa54572f5fa89eb31057f399a"},
+        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "80e8ddde87264ade71147a0827cfc6b182292c5a455664d48e3968ab7c9f6a8b"},
         {"path": "src/parquet_api/src/parquet_api/types.mojo", "sha256": "5c961b33b41c0b6328f47aa6c31e1eb5f1917d4af6fe028c561e796257a67391"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["parquet_api.mojoc"],
-      "key": "d9185dc848372f1243aa898e5e7e8767faca5b0a3273bf54648d943a74c636f7"
+      "key": "800787085e86f6df7badff9e2c2b7eda4861cfd705acef7611bb20118258214c"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_enum_ne_operator.mojo",
@@ -315,7 +315,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_enum_ne_operator.pass"],
-      "key": "482e8078c41d14c44ae7adcb834a2bb0f34f9fc3cf9812740fe26b6b03e1a565"
+      "key": "553e5147fba5b4a91aac22e8994d272f8e0baa15dbe814e72904b13bfe036726"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_enum_unknown_values.mojo",
@@ -330,7 +330,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_enum_unknown_values.pass"],
-      "key": "373fbae39b954b34f4bca927b0a4331779ce7409a0976eb62af5f700477990a7"
+      "key": "a65876e2fb4778ea41d40f01c09e1bb75fcf3f1b2ba07f0254cfee053a16c7eb"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_hll_footer.mojo",
@@ -345,7 +345,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_hll_footer.pass"],
-      "key": "213ec8c81166903c6cd5562d97ea4d2fdaa598743d6aed65a6836271f33594bc"
+      "key": "8a6e88b035c568badb697bdd5c0bc9c994fe5a08efb53dc4a4ead2ea4ce3faf1"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_no_env_reads.mojo",
@@ -360,7 +360,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_no_env_reads.pass"],
-      "key": "6b8a80a1f4caab8c889d6398bd8e694b054b7d2bf263b038d9a9a68f56549f4e"
+      "key": "2a2d6efdc14ab2386130cc0a2d0b102f5978281650215c7fdcdb5577c3024ca7"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_parquet_types.mojo",
@@ -369,13 +369,13 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "efcae023d184a5dbd090984801febbf4d5038e483d5167acd935164a1cc550e8"}
+        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "0ad438c8c0cd7480d9f117a9881f8343927a800de3795196ad9ff4dc96f07e02"}
       ],
       "deps": ["komira-ai/parquet_api@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_parquet_types.pass"],
-      "key": "7db8401bc6bebe764bde2f0f1b9261b031227ce221dd40a7b7cee228a78b6e5c"
+      "key": "fcb1610203e5027875e0dd81ff1c6d0c4e1b7217f5901937c20c8c9c052f4258"
     },
     {
       "id": "komira-ai/parquet_api@0.1.0#mojo1.0.0/test:src/parquet_api/tests/test_values_match_parquet_thrift.mojo",
@@ -390,7 +390,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_values_match_parquet_thrift.pass"],
-      "key": "9d7b30d7a3342d8b71b2a4ce9142c6851acd200391c0293594fe4a2b66b977f8"
+      "key": "900b99062ba67e8ba361e4223c6badca116cf616f0e689696325e0ffe2b76c1c"
     }
   ]
 }

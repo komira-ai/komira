@@ -314,10 +314,12 @@ def test_everything_else_stays_float() raises:
         _selected("select dc * 0.5 from t"),
         "BinaryOp(MUL, ColRef(dc), Literal(ScalarValue(float64, 0.5)))",
     )
-    # A constant that holds a column is not a constant.
+    # A constant that holds a column is not a constant: the literal stays a
+    # float, and the DECIMAL compared with that DOUBLE is cast to it, as
+    # DuckDB compares them.
     assert_equal(
         _bound(_w("dc < 0.5 + v")),
-        "BinaryOp(LT, ColRef(dc), BinaryOp(ADD, Literal(ScalarValue(float64,"
+        "BinaryOp(LT, Cast(ColRef(dc), float64), BinaryOp(ADD, Literal(ScalarValue(float64,"
         " 0.5)), ColRef(v)))",
     )
     # A division is DOUBLE in DuckDB: it stays float.

@@ -44,7 +44,7 @@ from sql.sql_frontend import (
 
 comptime _NOT_A_QUERY = (
     "STATEMENT_NOT_A_QUERY: only a query has a query plan; COPY and CREATE"
-    " TABLE AS bind to a write, which is not served yet"
+    " TABLE AS bind to a write"
 )
 comptime _SCAN_T = "Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
 

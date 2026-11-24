@@ -716,7 +716,7 @@ def serve_read_round_tls(
             break
 
         # Copy the decrypted bytes into the io_buf scratch (the parser
-        # consumes an InlineArray-backed Span).
+        # consumes an Array-backed Span).
         var copy_n = got
         if copy_n > room:
             copy_n = room

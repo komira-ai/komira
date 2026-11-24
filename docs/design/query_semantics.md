@@ -243,7 +243,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
   So a single NULL in the subquery's result removes every row. A frontend builds this from an ANTI join plus the two NULL conditions; the plan has no separate null-aware anti join.
 - **DuckDB.** Follows from §1.5 and the ANTI-join note in §3.2.
-- **Current behaviour.** The SQL AST names the null-aware construction (`src/sql/sql_ast.mojo:116`); the binder that builds it is not in this repository.
+- **Current behaviour.** The binder builds the null-aware construction (`src/sql/sql_bind_subquery.mojo`, `_bind_null_aware_not_in` and, for a body with GROUP BY, DISTINCT, a join or an expression, `_bind_uncorrelated_in_body`), and `run_sql` answers it as DuckDB does (`src/sdk_exec/tests/test_run_sql_join_kinds.mojo`, `test_run_sql_subquery.mojo`).
 - **Mark.** MATCHES.
 
 ### 3.4 Outer-join padding
@@ -823,10 +823,10 @@ Excel semantics are not part of the plan; they belong to the Excel surface, whic
 
 ### 11.3 INTERSECT and EXCEPT
 
-- **Rule.** As DuckDB: INTERSECT and EXCEPT compare whole rows with NULLs equal, like DISTINCT, not with `=`. Without ALL they return distinct rows. With ALL they are bag operations: a row appearing `m` times on the left and `n` on the right appears `min(m, n)` times in INTERSECT ALL and `max(m - n, 0)` times in EXCEPT ALL. The plan has no node for them yet, so frontends refuse them by name until it does.
+- **Rule.** As DuckDB: INTERSECT and EXCEPT compare whole rows with NULLs equal, like DISTINCT, not with `=`. Without ALL they return distinct rows. With ALL they are bag operations: a row appearing `m` times on the left and `n` on the right appears `min(m, n)` times in INTERSECT ALL and `max(m - n, 0)` times in EXCEPT ALL. INTERSECT binds tighter than UNION and EXCEPT, which fold left to right. The plan has no node for them: a frontend builds the set forms from plan nodes it has (below), and refuses the ALL forms by name until the plan can number or repeat rows.
 - **DuckDB.** Both forms, set and bag (DuckDB documentation, "set operations"); NULL handling is not documented there and the oracle measures it.
-- **Current behaviour.** The plan has no set-operation node for them. A SEMI or ANTI join on `=` is **not** a lowering of them: it drops rows with a NULL in any column (§3.1), where INTERSECT and EXCEPT keep them.
-- **Mark.** PARITY GAP ([komira#1229](https://github.com/komira-ai/komira/issues/1229)).
+- **Current behaviour.** The SQL frontend (`src/sql/sql_bind_set_op.mojo`) binds `a INTERSECT b` and `a EXCEPT b` to a UNION ALL of the two inputs, each with a constant side column (0 for `a`, 1 for `b`), under an aggregation grouped by every column with MIN and MAX of the side, a filter (INTERSECT: MIN 0 and MAX 1; EXCEPT: MAX 0) and a projection back to the columns. The grouping puts NULLs in one group, every NaN in one and 0.0 with -0.0 in one, as DISTINCT does (§11.2). A SEMI or ANTI join on `=` is **not** a lowering of them: it drops rows with a NULL in any column (§3.1), where INTERSECT and EXCEPT keep them. INTERSECT ALL and EXCEPT ALL are refused by name. `src/sdk_exec/tests/test_run_sql_set_ops.mojo` holds the set forms to the pinned oracle.
+- **Mark.** MATCHES for INTERSECT and EXCEPT; PARITY GAP for INTERSECT ALL and EXCEPT ALL ([komira#1229](https://github.com/komira-ai/komira/issues/1229)).
 
 ### 11.4 Column types across set-operation inputs
 

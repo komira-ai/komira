@@ -89,7 +89,7 @@ def _put_word(mut data: List[UInt8], pos: Int, v: UInt32):
 
 def _check_case(
     mut rng: _Rng,
-    w: InlineArray[UInt32, 80],
+    w: Array[UInt32, 80],
     dv: Int,
     use_ubc: Bool,
     what: String,
@@ -104,8 +104,8 @@ def _check_case(
     var theirs = CSha1dc()
     theirs.set_use_ubc(use_ubc)
     theirs.update(Span(data))
-    var ihv2 = InlineArray[UInt32, 5](fill=0)
-    var m2 = InlineArray[UInt32, 80](fill=0)
+    var ihv2 = Array[UInt32, 5](fill=0)
+    var m2 = Array[UInt32, 80](fill=0)
     theirs.last_recompression(ihv2, m2)
     for t in range(80):
         if (m2[t] ^ w[t]) != c_dv_word(dv, t):
@@ -129,9 +129,9 @@ def _check_case(
 
 def test_last_dv_every_dv() raises:
     var rng = _Rng(0xD15C0DE5)
-    var hits = InlineArray[Int, _DV_COUNT](fill=0)
+    var hits = Array[Int, _DV_COUNT](fill=0)
     var covered = 0
-    var w = InlineArray[UInt32, 80](fill=0)
+    var w = Array[UInt32, 80](fill=0)
     var trial = 0
     while covered < _DV_COUNT and trial < _MAX_TRIALS:
         trial += 1
@@ -217,7 +217,7 @@ struct _AffineSet(Movable):
         self.pivot = List[Int]()
 
     def add(mut self, a: Int, pa: Int, c: Int, pc: Int, v: Int) raises:
-        var row = InlineArray[UInt64, _LIMBS](fill=0)
+        var row = Array[UInt64, _LIMBS](fill=0)
         for l in range(_LIMBS):
             row[l] = (
                 self.forms[_LIMBS * (32 * a + pa) + l]
@@ -264,10 +264,10 @@ struct _AffineSet(Movable):
         self.rhs.append(r)
         self.pivot.append(p)
 
-    def sample(self, mut rng: _Rng, mut w: InlineArray[UInt32, 80]):
+    def sample(self, mut rng: _Rng, mut w: Array[UInt32, 80]):
         """A random block meeting every condition, its 16 words in w[0:16]:
         random bits, then each row's pivot bit flipped if the row fails."""
-        var x = InlineArray[UInt64, _LIMBS](fill=0)
+        var x = Array[UInt64, _LIMBS](fill=0)
         for l in range(_LIMBS):
             x[l] = (UInt64(rng.next()) << 32) | UInt64(rng.next())
         for i in range(len(self.pivot)):
@@ -370,9 +370,9 @@ def _ubc_conditions(dv: Int) raises -> _AffineSet:
 
 def test_every_dv_below_a_higher_one() raises:
     var rng = _Rng(0x10E5B175)
-    var hits = InlineArray[Int, _DV_COUNT](fill=0)
+    var hits = Array[Int, _DV_COUNT](fill=0)
     var covered = 0
-    var w = InlineArray[UInt32, 80](fill=0)
+    var w = Array[UInt32, 80](fill=0)
     var sample = 0
     for top in [31, 30, 29, 28, 27]:
         var meets = _ubc_conditions(top)
@@ -421,7 +421,7 @@ def test_every_dv_below_a_higher_one() raises:
 
 def test_filter_off_checks_every_dv() raises:
     var rng = _Rng(0x0FF0FF0F)
-    var w = InlineArray[UInt32, 80](fill=0)
+    var w = Array[UInt32, 80](fill=0)
     for n in range(_FILTER_OFF_CASES):
         for t in range(16):
             w[t] = rng.next()

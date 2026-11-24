@@ -16,6 +16,7 @@ from komira._ops._expr import (
     Node,
     StringFnN,
     StructField,
+    UdfCall,
     When,
 )
 
@@ -39,7 +40,7 @@ def children(node) -> tuple[Node, ...]:
             out.append(result)
         out.append(node.default)
         return tuple(out)
-    if isinstance(node, StringFnN):
+    if isinstance(node, (StringFnN, UdfCall)):
         return node.args
     if isinstance(node, StructField):
         return (node.parent,)
@@ -70,7 +71,7 @@ def _rebuild(node, new):
     if isinstance(node, When):
         pairs = tuple((new[i], new[i + 1]) for i in range(0, len(new) - 1, 2))
         return When(pairs, new[-1])
-    if isinstance(node, StringFnN):
+    if isinstance(node, (StringFnN, UdfCall)):
         return dataclasses.replace(node, args=new)
     if isinstance(node, StructField):
         return dataclasses.replace(node, parent=new[0])

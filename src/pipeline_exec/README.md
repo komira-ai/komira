@@ -59,7 +59,8 @@ Import each module by name; the package root exports nothing.
   `SINK_TAG_FOURTH`), and a tag;
   its trait methods test the tag and call the member. `unused_members` fills
   the slots a list leaves empty with members that refuse to run.
-- `source_parquet`, `source_batch`, `source_sink_output`, `source_csv`: the
+- `source_parquet`, `source_batch`, `source_sink_output`, `source_csv`,
+  `source_iceberg`: the
   sources of a plan. `build_parquet_source` makes a `parquet_scan` `ParquetSource` on
   the local file system from the Parquet arm of a `SourceSpecPod`: it refuses a
   spec that is not total, resolves the projection names through the footer of
@@ -70,7 +71,13 @@ Import each module by name; the package root exports nothing.
   and installs the filter as the decode filter (every conjunct is applied; a row
   whose predicate is UNKNOWN is dropped) and as the pushed predicate that
   row-group statistics are checked against. The source borrows the caller's
-  footer cache and expression pool. `BatchSource` serves a copy of a resident
+  footer cache and expression pool. `build_parquet_source_on` is the same over
+  any file system: a spec whose store (`parquet_fs`) is a bucket is read
+  through the file system the builder's `ScanFsOpener` (fs) opens on it, its
+  paths object keys and its one path never listed; `build_parquet_source`
+  refuses such a spec, and so does a builder made without an opener, with
+  `SCAN_FS_UNSERVED` naming the store (`LocalOnlyScanFs`, the default opener,
+  opens nothing). `BatchSource` serves a copy of a resident
   batch and `SinkOutputSource` the batch a finished segment published, each as
   morsels claimed from one shared cursor. `build_csv_source` reads the file
   of the CSV arm of a `SourceSpecPod` (a `.csv.gz`, `.csv.zst` or `.csv.lz4`
@@ -78,7 +85,19 @@ Import each module by name; the package root exports nothing.
   column types the plan bound it at (no second inference), refuses a file whose
   column names are not the bound ones (`CSV_SOURCE_SCHEMA_MISMATCH`) and serves
   the decoded file as a `BatchSource`; the whole file is decoded before the
-  first morsel.
+  first morsel. `build_iceberg_source` reads the Iceberg arm of a
+  `SourceSpecPod` with `iceberg_scan.scan_reader.read_iceberg_scan`: every data
+  file the spec lists, in that order, at the spec's bound columns, minus the
+  rows the position and equality deletes that apply to the file remove; it
+  serves the result as a `BatchSource`, and the files are read before the first
+  morsel. The scan's filter and projection are operators of the segment.
+- `source_jsonl`: `build_jsonl_source` reads the newline-delimited JSON file a
+  SOURCE_JSONL spec names, at the spec's schema (the keys it names, in its
+  order, at its types; a missing key is NULL, a key it does not name is
+  skipped), through `jsonl`: a plain file in chunks of whole lines, one batch
+  each, a `.jsonl.gz`/`.zst`/`.lz4` (and `.ndjson`, `.json`) file decompressed
+  whole. The batches are served as a `BatchSource`; a file of no row is one
+  empty batch at the schema. A read that fails names the file.
 - `op_filter`, `op_project`, `op_limit`: the operators. A filter evaluates its
   predicate and records the rows it keeps as the batch's selection mask instead
   of gathering them; all rows kept leaves no mask, none kept is FILTERED_EMPTY,
@@ -318,7 +337,7 @@ Import each module by name; the package root exports nothing.
   they decided are in `docs/design/lowering_and_pipeline.md` (section 4.3).
 - `real_builder`: `RealBuilder`, the `SegmentBuilder` over these members. It
   serves SOURCE_PARQUET, SOURCE_BATCH, SOURCE_SINK_OUTPUT, SOURCE_CSV,
-  SOURCE_CONCAT (a UNION ALL: it takes the output of every producer the spec
+  SOURCE_ICEBERG, SOURCE_JSONL, SOURCE_CONCAT (a UNION ALL: it takes the output of every producer the spec
   names, after checking each is a dependency, and concatenates them in the
   spec's order into one batch it serves as a `SinkOutputSource`, with each
   column nullable when any producer's is; a concatenation of no segment is
@@ -345,7 +364,11 @@ Import each module by name; the package root exports nothing.
   workers of a segment run, and derives the empty-output schema by running the
   chain's projections over a batch of no rows. Three origins name the borrows of
   the Parquet source (the footer cache, the expression pool, an absent dynamic
-  filter).
+  filter), and a fourth parameter `R` the `ScanFsOpener` of the remote store a
+  Parquet spec may name (`LocalOnlyScanFs` by default): a builder made with an
+  opener (`RealBuilder(cache, pool, opener)`) reads a spec on a bucket through
+  the file system the opener opens on it, beside the local ones, with one
+  footer cache keyed per file system.
 - `op_hash_probe`: `HashProbeShared` and `HashProbeOp`, OP_JOIN_PROBE for
   INNER, LEFT, RIGHT, FULL, SEMI, ANTI and CROSS joins, the join type being the
   probe's view (probe left, build right; `lowering` exchanges LEFT and RIGHT
@@ -532,4 +555,52 @@ try:
 except e:
     refused = String(e)
 assert_equal(refused, "pipeline_exec: a SOURCE_CSV spec names no file")
+```
+
+A SOURCE_ICEBERG spec through `source_iceberg` and `plan_harness`; reading the
+files is in the welded tests (`test_source_iceberg`):
+
+```mojo
+from std.testing import assert_equal, assert_true
+
+from arrow.arrow_types import ArrowType
+from physical_plan.iceberg_scan_spec import (
+    IcebergDataFileSpec,
+    IcebergDeleteSpec,
+    IcebergScanSpec,
+)
+from physical_plan.physical_plan import SOURCE_ICEBERG, SourceSpecPod
+from pipeline_exec.plan_harness import iceberg_segment
+from pipeline_exec.source_iceberg import build_iceberg_source
+
+var names = List[String]()
+names.append("id")
+var types = List[ArrowType]()
+types.append(ArrowType.INT64)
+var ids = List[Int]()
+ids.append(1)
+var files = List[IcebergDataFileSpec]()
+files.append(
+    IcebergDataFileSpec(
+        "no_such_dir/a.parquet",
+        "file:///warehouse/orders/a.parquet",
+        List[Int](),
+        List[Int](),
+    )
+)
+var spec = SourceSpecPod.iceberg(
+    IcebergScanSpec(
+        names^, types^, ids^, files^, List[IcebergDeleteSpec]()
+    )
+)
+# A file the spec lists that cannot be opened is the source's error.
+var failed = False
+try:
+    _ = build_iceberg_source(spec, 1024)
+except e:
+    failed = String(e).byte_length() > 0
+assert_true(failed)
+# A segment that reads the files and collects (plan_harness).
+var seg = iceberg_segment(0, spec^)
+assert_equal(seg.source_kind, SOURCE_ICEBERG)
 ```

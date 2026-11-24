@@ -313,6 +313,141 @@ def a_package_entry_imports_from_the_sys_path_options(env):
     assert rt.open_context_ok().open_instance_ok(udf).call_ok([ints(4)]).to_pylist() == [5]
 
 
+COUNTER = """COUNT = 0
+
+
+def bump(x):
+    global COUNT
+    COUNT += 1
+    return COUNT
+"""
+
+
+def a_module_global_written_in_one_context_is_not_seen_by_the_next(env):
+    rt = env.runtime()
+    udf = rt.load_ok(env.bundle_spec({"counter.py": COUNTER}, "counter:bump"))
+    first = rt.open_context_ok()
+    inst = first.open_instance_ok(udf)
+    assert [inst.call_ok([ints(0)]).to_pylist() for _ in range(2)] == [[1], [2]]
+    inst.close()
+    first.close()
+    second = rt.open_context_ok()
+    assert second.open_instance_ok(udf).call_ok([ints(0)]).to_pylist() == [1]
+
+
+def the_check_for_processes_that_outlive_a_shutdown_names_a_running_one(env):
+    import subprocess
+    stray = subprocess.Popen([sys.executable, "-I", "-c", "import sys; sys.stdin.read()"],
+                             stdin=subprocess.PIPE)
+    try:
+        assert env.leaked() == []
+        with open(env.trace.path, "a", encoding="utf-8") as f:
+            f.write("fork ctx=1 pid=%d\n" % stray.pid)
+        assert env.leaked() == [stray.pid]
+    finally:
+        stray.stdin.close()
+        stray.wait()
+    assert env.leaked() == []
+
+
+def a_runtime_that_ran_calls_leaves_no_process_after_its_shutdown(env):
+    rt = env.runtime()
+    udf = rt.load_ok(env.bundle_spec({"who.py": WHO}, "who:who"))
+    for _ in range(2):
+        rt.open_context_ok().open_instance_ok(udf).call_ok([ints(0)])
+    assert len(env.trace.pids("spawn") + env.trace.pids("fork")) == 3
+    rt.shutdown()
+    env.runtimes.remove(rt)
+    assert env.leaked() == []
+
+
+def the_wire_codec_decodes_what_it_encodes_and_refuses_a_broken_stream(env):
+    import socket
+    from komira._udf import wire as w
+
+    assert w.split_request(w.pack_head(7, -5, 9) + b"body") == (7, -5, 9, b"body")
+    message = "r\u00e9sum\u00e9 failed"
+    assert w.unpack_error(w.pack_error(w.ERR_RAISED, message, 3, 4, "trace")) == (
+        w.ERR_RAISED, 3, 4, message, "trace")
+    a, b = socket.socketpair()
+    try:
+        pipe_r, pipe_w = os.pipe()
+        w.send_message(a, w.OP_CALL_BATCH, 41, b"payload", fds=[pipe_r])
+        os.close(pipe_r)
+        got = w.recv_message(b)
+        assert (got.op, got.request_id, got.flags, got.payload) == (w.OP_CALL_BATCH, 41, w.FLAG_INLINE, b"payload")
+        (passed,) = got.fds
+        os.write(pipe_w, b"x")
+        assert os.read(passed, 1) == b"x"
+        os.close(passed)
+        os.close(pipe_w)
+        w.send_message(a, w.OP_OK, 42)
+        assert w.recv_message(b)[:4] == (w.OP_OK, 42, 0, b"")
+        a.sendall(b"\0" * w.HEADER_SIZE)
+        try:
+            w.recv_message(b)
+        except w.WireError as e:
+            assert str(e) == "bad magic 0x00000000", e
+        else:
+            raise AssertionError("a header with another magic was read")
+        a.sendall(w.HEADER.pack(w.MAGIC, w.OP_OK, 1, 0, 0, 0, 10) + b"short")
+        a.shutdown(socket.SHUT_WR)
+        try:
+            w.recv_message(b)
+        except w.WireError as e:
+            assert str(e) == "end of stream after 5 of 10 payload bytes", e
+        else:
+            raise AssertionError("a payload cut short was read")
+        assert w.recv_message(b) is None
+    finally:
+        a.close()
+        b.close()
+
+
+def a_hello_of_another_wire_version_is_refused_by_the_zygote(env):
+    import importlib.util
+    import struct
+    import types
+    from komira._udf import wire as w
+
+    spec = importlib.util.spec_from_file_location("zygote_under_test", h.zygote_path())
+    zygote = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(zygote)
+    here = types.SimpleNamespace(wire=w, wire_version=w.WIRE_VERSION, pid=1)
+    body = struct.pack("<III", w.WIRE_VERSION + 1, 0, 0)
+    try:
+        zygote.Zygote._hello(here, body)
+    except zygote._Refusal as r:
+        assert (r.code, r.message) == (
+            w.ERR_ABI, "wire version %d requested, this zygote speaks %d" % (w.WIRE_VERSION + 1, w.WIRE_VERSION)), r
+    else:
+        raise AssertionError("a HELLO of another wire version was answered")
+    assert zygote.Zygote._hello(here, struct.pack("<III", w.WIRE_VERSION, 0, 0)).startswith(
+        struct.pack("<III", w.WIRE_VERSION, 1, 0))
+
+
+def a_result_that_is_not_exactly_the_declared_type_is_refused_with_its_row(env):
+    import pyarrow as pa
+    from komira._udf import worker
+
+    def refused(value, rtype, row):
+        try:
+            worker._check_value(value, rtype, row)
+        except worker._Fail as f:
+            return f.code, f.row, f.message
+        raise AssertionError("%r was accepted as %s" % (value, rtype))
+
+    w = worker.wire
+    assert refused(1 << 63, pa.int64(), 3) == (
+        w.ERR_RETURN_TYPE, 3, "row 3 returned int 9223372036854775808, which is not int64 without loss")
+    assert refused(True, pa.int64(), 0)[0] == w.ERR_RETURN_TYPE
+    assert refused(1.5, pa.int64(), 0)[0] == w.ERR_RETURN_TYPE
+    assert refused((1 << 53) + 1, pa.float64(), 2)[0] == w.ERR_RETURN_TYPE
+    assert worker._check_value((1 << 63) - 1, pa.int64(), 0) == (1 << 63) - 1
+    assert worker._check_value(1 << 53, pa.float64(), 0) == float(1 << 53)
+    assert worker._check_value(None, pa.int64(), 0) is None
+
+
 def main(args):
     lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
     me = sys.modules["__main__"]

@@ -52,10 +52,16 @@ there), Brotli `//third_party/brotli` (same). The archive's `COPYING` and
   `compression: cannot load <soname>`; other codecs and Parquet files that do
   not use it are unaffected.
 - **aws-lc, s2n-tls and the AWS, Google and Azure clients**: not in the
-  wheel. The Mojo closure of the `so` package (53 packages, read from the
-  `deps` of each `BUCK` file from `so` down) holds no `awslc`, `crypto`,
-  `http`, `connect`, `aws_*`, `gcp_*` or `azure_*` package, and the `DT_NEEDED`
-  list above holds no TLS library. `awslc` and `s2n-tls` stay build and
+  wheel. The Mojo closure of the `so` package (read from the `deps` of each
+  `BUCK` file from `so` down) holds no `http`, `connect`, `aws_*`, `gcp_*` or
+  `azure_*` package, and the `DT_NEEDED` list above holds no TLS library. It
+  holds `crypto` (with `encoding`), through `secret_store`, the store a
+  session's credentials live in: the one function of `crypto` it calls is the
+  wipe of a secret's bytes, which calls the C library's `explicit_bzero`. No
+  object of aws-lc, which `crypto` builds on, is linked: the undefined symbols
+  of `libkomira.so` name no aws-lc function (`explicit_bzero` is the only one
+  `crypto` adds), its `DT_NEEDED` list is unchanged, and it holds no aws-lc
+  string (read with `readelf -sW` and `strings` on the farm-built library). `awslc` and `s2n-tls` stay build and
   test inputs of other packages (see `NOTICE`, opening paragraph). A change
   that adds one to the closure changes the table of `libkomira_elf_report` and
   must update this page and `NOTICE` in the same pull request.
@@ -66,16 +72,16 @@ there), Brotli `//third_party/brotli` (same). The archive's `COPYING` and
 
 Verified by reading, not by running anything on a developer machine:
 
-- `libkomira`'s dynamic symbol table is exactly the nine `komira_*` exports
+- `libkomira`'s dynamic symbol table is exactly the twelve `komira_*` exports
   (`exports_exact` gate in `src/so/tests/gate/`). None takes a URL, host or
-  socket: they take a local file path or the bytes of a plan, and return
-  bytes, text or a status.
+  socket: they take a local file path, the bytes of a plan, or a credential's
+  kind, name and field values, and return bytes, text, an id or a status.
 - Outside `async_rt`, no package of the closure has code that names a socket,
   a host-name lookup, a reactor or an `http(s)://` literal (searched with
   `grep` over each package's `.mojo` and `.c` files, tests excluded; the hits
   are comments). `async_rt` holds the reactor and socket primitives and is
   compiled into the library, as other packages import its file and morsel
-  parts; no export of the nine starts a reactor or opens a socket.
+  parts; no export of the twelve starts a reactor or opens a socket.
 - Nothing is sent anywhere. `docs/design/logging_and_telemetry.md` records
   that spans and metrics go to in-process rings and that "nothing exports".
   The closure reads the environment through one primitive
