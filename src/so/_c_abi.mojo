@@ -2,10 +2,12 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of so that holds
 # pointers.
 # =============================================================================
-# Thirteen `@export abi("C")` functions are the library's whole surface today:
+# Sixteen `@export abi("C")` functions are the library's whole surface today:
 #
 #   int32_t  komira_abi_version(void);
 #   void    *komira_ctx_new(void);
+#   void    *komira_ctx_new_with_options(int64_t worker_count,
+#                                        int64_t memory_budget_bytes);
 #   void     komira_ctx_free(void *ctx);
 #   int32_t  komira_last_error(void *ctx, uint8_t *out_buf, uint64_t out_cap,
 #                              uint64_t *out_len);
@@ -31,9 +33,22 @@
 #   int32_t  komira_credential_seal(void *ctx, int32_t id, int32_t scope);
 #   int32_t  komira_sql_stream(void *ctx, const char *sql,
 #                              struct ArrowArrayStream *out);
+#   int32_t  komira_register_csv(void *ctx, const char *name,
+#                                const char *path, uint8_t delimiter,
+#                                int32_t has_header, int32_t all_varchar);
+#   int32_t  komira_register_json(void *ctx, const char *name,
+#                                 const char *path);
 #
-# Ownership. `komira_ctx_new` creates a `Session` (the last error and the
-# engine, whose workers start here) in an `OwnedPointer`, relinquishes the
+# Session options. `komira_ctx_new_with_options` is `komira_ctx_new` with the
+# engine's worker count and memory budget (the bytes the sinks of one query
+# may reserve in total) as arguments; nothing is read from the environment.
+# 0 is the host's own value, which is what `komira_ctx_new` uses for both; a
+# negative value is refused (NULL); a positive one has no upper bound. The
+# options are fixed for the life of the context.
+#
+# Ownership. `komira_ctx_new` (and `komira_ctx_new_with_options`) creates a
+# `Session` (the last error and the engine, whose workers start here) in an
+# `OwnedPointer`, relinquishes the
 # pointer's own free (`unsafe_leak`) and hands the address to the caller as
 # `void *`. When the engine does not start it returns NULL and allocates
 # nothing; with no context to hold it, the engine's message is dropped. The caller owns that handle until it passes it to
@@ -97,12 +112,14 @@ from std.memory import OwnedPointer, unsafe_memcpy
 
 from arrow_ipc.c_data_stream import CArrowArrayStream, build_record_batch_stream
 
-from so.session import Session, try_new_session
+from so.session import Session, session_options, try_new_session
 from so.sources import (
     csv_binding_bytes,
     json_binding_bytes,
     parquet_schema_bytes,
     plan_render_text,
+    register_csv,
+    register_json,
     register_parquet,
     sql_result,
 )
@@ -178,6 +195,28 @@ def komira_ctx_new() abi("C") -> Handle:
     """Create a session and return its handle. The caller frees it with
     `komira_ctx_free`. NULL when the session's engine does not start."""
     var session = try_new_session()
+    if not session:
+        return _null_handle()
+    return _leak_session(session.take())
+
+
+@export
+def komira_ctx_new_with_options(
+    worker_count: Int64, memory_budget_bytes: Int64
+) abi("C") -> Handle:
+    """Create a session whose engine runs `worker_count` workers within
+    `memory_budget_bytes`, and return its handle; the caller frees it with
+    `komira_ctx_free`.
+
+    0 for either is the host's own value (`komira_ctx_new` is both 0). NULL
+    when the engine does not start: a negative worker count or budget is
+    refused, and so is a host the engine cannot start on. A query whose sinks
+    need more than the budget is refused at step `execute`, naming the sink
+    and the budget, as `komira_sql_stream`'s `KOMIRA_ERR_ENGINE`.
+    """
+    var session = try_new_session(
+        session_options(worker_count, memory_budget_bytes)
+    )
     if not session:
         return _null_handle()
     return _leak_session(session.take())
@@ -671,6 +710,73 @@ def komira_sql_stream(ctx: Handle, sql: CStr, out_stream: ArrowStream) abi("C") 
         # Nothing is written to `*out_stream` before this call, and it writes the
         # stream whole once its own checks have passed.
         build_record_batch_stream(result.take_batches(), result.take_schema(), out_stream)
+        return KOMIRA_OK
+    except e:
+        session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+
+
+@export
+def komira_register_csv(
+    ctx: Handle,
+    name: CStr,
+    path: CStr,
+    delimiter: UInt8,
+    has_header: Int32,
+    all_varchar: Int32,
+) abi("C") -> Int32:
+    """Register the CSV file at `path` in the session as the table `name`.
+
+    The table is what `read_csv` reads for the same file and dialect: its
+    schema is inferred here from a bounded prefix of an uncompressed file (a
+    compressed file is read whole), and every later query reads the file at
+    that schema. `has_header` and `all_varchar` are `int32_t`; any non-zero
+    value is true. Returns `KOMIRA_ERR_NULL_CTX` for a NULL `ctx`,
+    `KOMIRA_ERR_NULL_ARG` for a NULL `name` or `path`, and `KOMIRA_ERR_ENGINE`
+    with a last error for a file that cannot be read or inferred, an empty
+    name (`TABLE_NAME_EMPTY`) and a name the session already holds
+    (`TABLE_ALREADY_REGISTERED`); nothing is registered then.
+    """
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(name) == 0 or Int(path) == 0:
+        session[].set_error(String("komira_register_csv: name or path is NULL"))
+        return KOMIRA_ERR_NULL_ARG
+    try:
+        register_csv(
+            session[],
+            _c_string(name),
+            _c_string(path),
+            delimiter,
+            Int(has_header) != 0,
+            Int(all_varchar) != 0,
+        )
+        return KOMIRA_OK
+    except e:
+        session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+
+
+@export
+def komira_register_json(ctx: Handle, name: CStr, path: CStr) abi("C") -> Int32:
+    """Register the newline-delimited JSON file at `path` in the session as
+    the table `name`.
+
+    The table is what `read_json` reads for the same file: its schema is
+    inferred here from the leading records. Errors are those of
+    `komira_register_csv`.
+    """
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(name) == 0 or Int(path) == 0:
+        session[].set_error(String("komira_register_json: name or path is NULL"))
+        return KOMIRA_ERR_NULL_ARG
+    try:
+        register_json(session[], _c_string(name), _c_string(path))
         return KOMIRA_OK
     except e:
         session[].set_error(String(e))

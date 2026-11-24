@@ -155,10 +155,14 @@ Fixed before this design, and not reopened here:
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.3, with thirteen exports
+- **EXISTS** `libkomira` is at ABI 1.5, with sixteen exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
   - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream. The plan call,
     `komira_plan_stream`, is designed but not built; it takes the next minor.
+  - `komira_ctx_new_with_options` (1.4) creates a context with the engine's worker count and
+    memory budget as arguments (0 is the host's own value).
+  - `komira_register_csv` and `komira_register_json` (1.5) bind a CSV or newline-delimited JSON
+    file to the session as a table that SQL reads by name.
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,
@@ -191,7 +195,7 @@ The package exports these names and nothing else. The test `exports_test` holds 
 
 | name | what it is |
 |---|---|
-| `new Session(options?)` | one engine context (`komira_ctx_new`) and its tables. The options are `{ threads?: number, memoryLimit?: number }`, both settable once the session-options calls of the ABI land. A later option, `caFile?: string`, adds trusted roots for `https://` reads, as Python's `ca_file=` ([credentials_and_writes.md](credentials_and_writes.md) decision 9). `memoryLimit` is in bytes, and an omitted option takes the engine's default. Options are arguments, never environment variables (rule S2) |
+| `new Session(options?)` | one engine context (`komira_ctx_new`) and its tables. The options are `{ threads?: number, memoryLimit?: number }`, both settable once the addon binds `komira_ctx_new_with_options` (ABI 1.4), which takes them as arguments; the addon does not bind it yet. A later option, `caFile?: string`, adds trusted roots for `https://` reads, as Python's `ca_file=` ([credentials_and_writes.md](credentials_and_writes.md) decision 9). `memoryLimit` is in bytes, and an omitted option takes the engine's default. Options are arguments, never environment variables (rule S2) |
 | `session.registerParquet(name, path): Promise<void>` | `komira_register_parquet`. `path` is a `string` or a `file:` `URL`. A relative path resolves against the working directory when the call is made, as Node's `fs` does, and `~` is not expanded. Registering a name again replaces it |
 | `session.registerCsv(name, path, options?)`, `session.registerNdjson(name, path)` | CSV and newline-delimited JSON. They arrive with libkomira calls that register those formats by name. No design has those calls yet: [libkomira_run_abi.md](libkomira_run_abi.md) §7 says only "the later source calls", and today's `komira_csv_binding` and `komira_json_binding` return bindings, not registrations. The CSV options are the ones `komira_csv_binding` takes: `{ delimiter?: string, header?: boolean, allVarchar?: boolean }` |
 | `session.sql(query): Promise<Result>` | runs one SQL statement through `komira_sql_stream`. **The official door of the first release**. A later second argument, `sql(query, bindings?)`, binds sources for one statement ([credentials_and_writes.md](credentials_and_writes.md) decision 12) |
@@ -671,8 +675,10 @@ the one build action that runs npm.
 The SQL cases are data already: `src/tests/conformance/komira_sql_conformance/cases/<corpus>/`
 holds `tables.sql`, `<case>.sql` and the committed DuckDB answer `<case>.tsv`
 ([README](../../src/tests/conformance/komira_sql_conformance/README.md)). Nothing runs komira on
-them yet. A Python end-to-end runner over them is planned but not built (the matrix's `sql` cells
-read "no sql_e2e package yet"). The Node runner reads **the same files through Buck2 targets**,
+them yet. A Python end-to-end runner over them is planned but not built. The Mojo package
+`src/tests/e2e/sql_e2e` holds komira's SQL to DuckDB through `so.sql_result` over a corpus of its
+own, on `komira_test_oracle`'s datasets; no matrix cell names one of its targets yet. The Node
+runner reads **the same files through Buck2 targets**,
 and copies none of them.
 - **Tables.** Both runners register the same Parquet export of each corpus's `tables.sql`, built
   once by DuckDB as a target beside the corpus. Neither runner executes `CREATE TABLE`.

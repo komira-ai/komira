@@ -1,0 +1,2 @@
+-- INTERSECT ALL keeps duplicates.
+SELECT k FROM join_left INTERSECT ALL SELECT k FROM join_right ORDER BY k ASC NULLS FIRST
