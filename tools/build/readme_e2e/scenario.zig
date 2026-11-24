@@ -313,6 +313,80 @@ fn changedFile(env: Env) void {
     expectText(r, "is not a file of the staged plan");
 }
 
+/// What `mopm stage` writes for a release built for two platforms: each member of the staged set also gets an
+/// osx-arm64 build, a package of the same name, version and dependencies holding `mojoc of <name> for macOS`,
+/// at `set/osx-arm64/<file>`, with its sha256 and size in the plan. With `keep_host` false the member's
+/// linux-64 file is dropped from the plan, so the set holds no build for the host. `deps` gives each import
+/// name's dependencies (import names).
+fn addMacBuilds(env: Env, mojo: []const u8, deps: []const struct { []const u8, []const []const u8 }, keep_host: bool) void {
+    var why: []const u8 = "";
+    const plan = plan_mod.parsePlan(env.a, env.get("set/plan.json").?, &why) catch die("plan.json: {s}", .{why});
+    const build = std.fmt.allocPrint(env.a, "mojo{s}_0", .{mojo}) catch die("out of memory", .{});
+    var members: std.ArrayList(plan_mod.Member) = .empty;
+    for (plan.members) |m| {
+        const import = plan_mod.importName(m.name);
+        var full_deps: std.ArrayList([]const u8) = .empty;
+        for (deps) |d| if (std.mem.eql(u8, d[0], import)) for (d[1]) |n| full_deps.append(env.a, fullName(env.a, n)) catch die("out of memory", .{});
+        const mojoc = std.fmt.allocPrint(env.a, "mojoc of {s} for macOS", .{import}) catch die("out of memory", .{});
+        const bytes = fix.package(env.a, m.name, m.version, build, mojoc, full_deps.items) catch die("cannot build the macOS fixture of {s}", .{m.name});
+        const filename = m.files[0].filename;
+        env.put(lineText(env, "set/osx-arm64/{s}", .{filename}), bytes);
+        var files: std.ArrayList(plan_mod.PlanFile) = .empty;
+        if (keep_host) files.appendSlice(env.a, m.files) catch die("out of memory", .{});
+        files.append(env.a, .{ .subdir = "osx-arm64", .filename = filename, .sha256 = env.a.dupe(u8, &plan_mod.sha256Hex(bytes)) catch die("out of memory", .{}), .size = bytes.len }) catch die("out of memory", .{});
+        var with = m;
+        with.files = files.items;
+        members.append(env.a, with) catch die("out of memory", .{});
+    }
+    const text = plan_mod.renderPlan(env.a, .{ .version = plan.version, .members = members.items }) catch die("cannot write plan.json", .{});
+    env.put("set/plan.json", text);
+}
+
+fn twoPlatforms(env: Env) void {
+    // a release staged for linux-64 and osx-arm64: mopm locks each package once per subdir, the e2e checks
+    // every locked file against the plan and unpacks the host's alone (the macOS build would land on the same
+    // paths of the prefix)
+    const z = Pkg{ .name = "zlib", .readme = readmeOf(env, "zlib", &.{"from zlib import value\nprint(value())"}) };
+    const app = Pkg{ .name = "app", .deps = &.{"zlib"}, .readme = readmeOf(env, "app", &.{"from app import run\nfrom zlib import value\nprint(run(value()))"}) };
+    expectCode(env.stage(&.{ app, z }, "1.0.0"), 0, "stage");
+    addMacBuilds(env, "1.0.0", &.{.{ "app", &.{"zlib"} }}, true);
+    const r = env.verify("app", "1.2.3", "1.0.0", "mopm");
+    expectCode(r, 0, "verify");
+    expectText(r, "install: 2 package(s) locked and unpacked");
+    expectText(r, "PASS example/app 1.2.3");
+    const lock = env.get("run/project/mopm.lock") orelse die("no lock written", .{});
+    if (std.mem.count(u8, lock, "/osx-arm64/") != 2 or std.mem.count(u8, lock, "/linux-64/") != 2) die("the lock does not hold both platforms' builds of both packages: {s}", .{lock});
+    for ([_][]const u8{ "app", "zlib" }) |n| {
+        const got = env.get(lineText(env, "run/prefix/lib/mojo/{s}.mojoc", .{n})) orelse die("{s} was not unpacked", .{n});
+        if (!std.mem.eql(u8, got, lineText(env, "mojoc of {s}", .{n}))) die("the installed {s}.mojoc is `{s}`, not the linux-64 build", .{ n, got });
+    }
+}
+
+fn otherPlatformTampered(env: Env) void {
+    // the osx-arm64 file in the set is not the one the plan names: the lock (from the registry's index) pins the
+    // plan's hash, and the file the e2e never unpacks is still held to it
+    expectCode(env.stage(&.{goodReadme(env, &.{good_use})}, "1.0.0"), 0, "stage");
+    addMacBuilds(env, "1.0.0", &.{}, true);
+    const other = fix.package(env.a, "example/good", "1.2.3", "mojo1.0.0_0", "mojoc of something else", &.{}) catch die("fixture", .{});
+    env.put("set/osx-arm64/mojo-example.good-1.2.3-mojo1.0.0_0.conda", other);
+    const r = env.verify("good", "1.2.3", "1.0.0", "mopm_registry");
+    expectCode(r, 1, "verify");
+    expectText(r, "FAIL install: example/good: osx-arm64/mojo-example.good-1.2.3-mojo1.0.0_0.conda is not the file the lock pins");
+    expectNoText(r, "PASS example/good");
+    if (env.exists("run.marker")) die("a marker was written for a set with a file that is not the plan's", .{});
+}
+
+fn otherPlatformOnly(env: Env) void {
+    // a member built for osx-arm64 alone: nothing of it can be installed on the host, and the e2e says so at
+    // install, not at the compile of an empty prefix
+    expectCode(env.stage(&.{goodReadme(env, &.{good_use})}, "1.0.0"), 0, "stage");
+    addMacBuilds(env, "1.0.0", &.{}, false);
+    const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
+    expectCode(r, 1, "verify");
+    expectText(r, "FAIL install: example/good: the lock pins no file for linux-64 (or noarch): nothing would be installed on this host");
+    if (env.exists("run/prefix/lib/mojo/good.mojoc")) die("the macOS build was unpacked on the host", .{});
+}
+
 /// A set whose `app` needs `ghost` and does not hold it: both are staged (the tool refuses a
 /// set with a hole), then `ghost` is taken out of the plan and the set, as a release whose
 /// staging missed a member would be.
@@ -607,6 +681,9 @@ const table = [_]Scenario{
     .{ .name = "native_unlinked", .run = nativeUnlinked },
     .{ .name = "native_undefined_symbol", .run = nativeUndefinedSymbol },
     .{ .name = "usage", .run = usageError },
+    .{ .name = "two_platforms", .run = twoPlatforms },
+    .{ .name = "other_platform_tampered", .run = otherPlatformTampered },
+    .{ .name = "other_platform_only", .run = otherPlatformOnly },
 };
 
 pub fn main() !void {

@@ -19,6 +19,10 @@
 //!    version 0.1.<run number> with the version tool, once, before the stage, from
 //!    `github.run_number`, and the README e2e of `mopm-stage` and `prod-test` is given that same
 //!    number, so every release is a new version and prod publishes what the e2e passed on;
+//!  - the packages of both platforms: `mopm-stage` builds //release:mopm_release_artifacts exactly once,
+//!    before the version rewrite (which edits the manifests the build reads), with the macOS keys in the
+//!    buckconfig farm-connect writes (`darwin-config-file`) and that this build alone names, so no other
+//!    step of the job configures a macOS platform;
 //!  - no secret: no line outside a comment names `MOPM_TOKEN` or `secrets`;
 //!  - the workflow's top-level `permissions` is `{}` (a job holds only what it names);
 //!  - the prod publish, six jobs under one gate (`prod-stage`, `prod-test`,
@@ -74,6 +78,11 @@ const PROD_REWRITE_NAME = "      - name: every member gets the version of this r
 const PROD_MOPM_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.1.0 --out release/staged_set --registry prod'";
 const PROD_SMOKE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" smoke --staged \"$RUNNER_TEMP/prod-smoke/committed\" --config-url https://api.mopm.dev/index/config.json --attempts 5 --delay 30'";
 const PROD_ADD_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" add --staged \"$RUNNER_TEMP/prod-add/committed\" --mopm \"$RUNNER_TEMP/mopm-publish/mopm\" --work \"$RUNNER_TEMP/prod-add/work\"'";
+// The packages of both platforms in the one directory `mopm stage --artifacts` reads; the only step that names the
+// buckconfig of the macOS keys (MAC_CONFIG_INPUT writes it), so no other step of mopm-stage configures a macOS platform.
+const PACKAGES_BUILD = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts";
+const MAC_CONFIG_INPUT = "          darwin-config-file: ${{ runner.temp }}/darwin.buckconfig";
+const MAC_CONFIG_FILE = "darwin.buckconfig";
 const STAGE_BUILD_VERIFY = "          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/mopm-publish/release_staged_verify";
 const STAGE_UPLOAD_VERIFY = "            ${{ runner.temp }}/mopm-publish/release_staged_verify";
 const E2E_FARM_CONNECT = "      - uses: ./.github/actions/farm-connect";
@@ -191,6 +200,18 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     }
     if (prod_tool_runs != 1) return "mopm-stage runs release_beta_version more than once";
     if (mentions(prod_stage, "git push") or mentions(prod_stage, "git commit")) return "mopm-stage commits or pushes what it rewrote";
+    // the packages of both platforms, built once, before the rewrite edits the manifests the build reads, with the
+    // macOS keys in a file of their own that only this step names
+    var package_builds: usize = 0;
+    var config_lines: usize = 0;
+    for (prod_stage) |l| {
+        if (std.mem.eql(u8, l, PACKAGES_BUILD)) package_builds += 1;
+        if (std.mem.indexOf(u8, l, MAC_CONFIG_FILE) != null) config_lines += 1;
+    }
+    if (package_builds != 1) return "mopm-stage does not build the packages of both platforms (//release:mopm_release_artifacts, with the macOS keys' buckconfig) exactly once";
+    if (lineAt(prod_stage, PACKAGES_BUILD).? > prod_rewrite_at) return "mopm-stage builds the packages after it rewrites their versions: the build would read the rewritten manifests";
+    if (lineAt(prod_stage, MAC_CONFIG_INPUT) == null) return "mopm-stage's farm connection writes the macOS keys into the machine buckconfig (no darwin-config-file): every step of the job would configure a macOS platform";
+    if (config_lines != 2) return "a step of mopm-stage other than `build the packages` names the macOS keys' buckconfig: only that build configures a macOS platform";
     const stage_e2e_at = lineAt(prod_stage, STAGE_E2E_RUN) orelse return "mopm-stage does not run the e2e on the staged set at this run's version (staged=stage, beta_version=0.1.<run number>)";
     if (stage_e2e_at < prod_stage_at) return "mopm-stage runs the e2e before it stages";
 
@@ -715,6 +736,16 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     try expectRefused(ar, try replaced(ar, text, add_head ++ "    permissions:\n      contents: read\n", add_head ++ "    permissions:\n      contents: read\n      id-token: write\n"), "prod-add: id-token: write is held");
     try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" add --staged \"$RUNNER_TEMP/mopm-publish/staged\" --mopm \"$RUNNER_TEMP/mopm-publish/mopm\" --work \"$RUNNER_TEMP/prod-add/work\"'"), "prod-add does not run");
     try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" add --staged \"$RUNNER_TEMP/prod-add/committed\" --mopm mopm --work \"$RUNNER_TEMP/prod-add/work\"'"), "prod-add does not run");
+
+    // mopm-stage builds the packages of both platforms, before the rewrite, with the macOS keys in a file of their own
+    const linux_only = "          args: build //release:mopm_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts";
+    try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD, linux_only), "does not build the packages of both platforms");
+    try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD, "          args: build //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts"), "does not build the packages of both platforms");
+    try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD, PACKAGES_BUILD ++ nl ++ PACKAGES_BUILD), "does not build the packages of both platforms");
+    try expectRefused(ar, try replaced(ar, text, MAC_CONFIG_INPUT ++ nl, ""), "no darwin-config-file");
+    try expectRefused(ar, try replaced(ar, text, STAGE_E2E_RUN, "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all"), "names the macOS keys' buckconfig");
+    const rewrite_step = PROD_REWRITE_NAME ++ "\n        env:\n" ++ REWRITE_ENV ++ "\n" ++ PROD_REWRITE_RUN ++ "\n";
+    try expectRefused(ar, try replaced(ar, try replaced(ar, text, rewrite_step, ""), "      - name: build the packages\n", rewrite_step ++ "      - name: build the packages\n"), "the packages after it rewrites");
     try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ " || true"), "prod-add ignores a failure");
     try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ "\n        continue-on-error: true"), "prod-add ignores a failure");
     try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ "\n      - run: ./mopm publish --staged x --registry prod --oidc"), "it only adds and installs");

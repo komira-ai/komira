@@ -11,7 +11,8 @@ and nothing more; the earlier conda channels on prefix.dev are no longer
 published to, and publishing will move to mopm. (The libraries that
 already moved to mopm are the exception: every push to `main` publishes them to the mopm
 registry `prod`, as one group at the version `0.1.<run number>`, through the jobs
-`mopm-stage` and `prod-*` of the same workflow; [docs/ci.md](ci.md#the-mopm-jobs).) Two checks that the retired build stage made are not
+`mopm-stage` and `prod-*` of the same workflow, each package built for linux-64 and osx-arm64;
+[docs/ci.md](ci.md#the-mopm-jobs).) Two checks that the retired build stage made are not
 made by this build and are not enforced until mopm's publish path re-creates
 them: that every package's requirements are inside the set (requirement
 closure), and the refusal of a duplicate key in a JSON file; the header of
@@ -103,8 +104,9 @@ These parts of a release machine's publish step are not described here
 because the libraries that implement them are not part of this repository
 yet:
 
-- The upload of conda packages, their other platforms (linux-aarch64 and
-  macOS) and Python wheels of the Mojo libraries.
+- The upload of conda packages of the release set, their other platforms (linux-aarch64 and
+  macOS) and Python wheels of the Mojo libraries. (The mopm packages above are published for
+  linux-64 and osx-arm64; linux-aarch64 is not built for them.)
 - Package channels, and the rules for which writers each channel admits.
 - Copying and promoting a container image between registries by digest.
 - A release version shared by every artifact, and the procedure for cutting

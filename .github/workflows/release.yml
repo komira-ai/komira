@@ -10,8 +10,10 @@
 # credential and no channel.
 #
 # THE MOPM JOBS. The libraries moved to mopm (every src/<name> that has a
-# mopm.toml; //release:mopm_artifacts builds them) are published to the mopm
-# registry as one group, apart from the release set. The publish is CONTINUOUS:
+# mopm.toml) are published to the mopm registry as one group, apart from the
+# release set, each built for linux-64 and osx-arm64 (//release:mopm_release_artifacts:
+# //release:mopm_artifacts and the macOS set, built on the farm's macOS workers), the two
+# files of a package in the same group at the same version. The publish is CONTINUOUS:
 # EVERY push to main runs it, to the registry `prod`, in seven jobs: build and
 # stage, stage in prod, test the staged bytes, commit, smoke, add from prod, and
 # (when one of them failed or the run was cancelled) abort. This workflow publishes to no other
@@ -88,9 +90,13 @@
 #      release.json: a package whose bytes, name, platform or metadata are not
 #      what its manifest says, or that is not stamped, is a red build.
 #
-# NO macOS HERE. The macOS arm64 build is its own workflow, release-macos.yml, in its own
-# concurrency group, so a slow or stalled macOS build never holds this workflow's next run. No job of
-# this file names a macOS platform, worker set or runner (//:release_macos_cases says so).
+# macOS HERE: ONE BUILD. The macOS arm64 set is also built, reported and not blocking, by its own
+# workflow, release-macos.yml. The only lines of this file that name macOS are mopm-stage's: the macOS
+# keys its farm connection writes to a buckconfig of their own, and the step `build the packages`, the
+# one that names that file, whose //release:mopm_release_artifacts builds the osx-arm64 half of the
+# packages this workflow publishes on the farm's macOS workers (//:release_macos_cases holds exactly
+# those lines). That build is in this workflow's group, so a stalled Mac build holds the next run and
+# the prod publish of both platforms, bounded by mopm-stage's timeout-minutes.
 #
 # Triggers: a push to main (not one that touches only documentation:
 # `paths-ignore`, the same documentation the stamp does not count, so a
@@ -257,6 +263,13 @@ jobs:
           farm-address: ${{ vars.FARM_ADDRESS }}
           farm-instance: ${{ vars.FARM_INSTANCE }}
           farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          # The macOS worker set, for the osx-arm64 half of the packages only: written to a
+          # buckconfig of its own, which the step `build the packages` alone names, so every
+          # other step of the job (the README e2e included) configures no macOS platform.
+          darwin-properties: ${{ vars.FARM_DARWIN_ARM64_PROPERTIES }}
+          darwin-macos-hosts: ${{ vars.FARM_DARWIN_MACOS_HOSTS }}
+          macos-library-dirs: ${{ vars.FARM_MACOS_LIBRARY_DIRS }}
+          darwin-config-file: ${{ runner.temp }}/darwin.buckconfig
           tls: ${{ vars.FARM_TLS || 'false' }}
           # main's release work queues behind the pull-request checks when the farm is full
           farm-qos: batch
@@ -268,17 +281,11 @@ jobs:
         run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
       # The mopm that stages and publishes: the pin the README e2e installs with
       # (MOPM in release/readme_e2e/packages.bzl; it must be a release that has
-      # `stage` and `publish --staged`), and the packages: each `.mojoc` exists
-      # only once its library's tests passed.
+      # `stage` and `publish --staged`).
       - name: build the pinned mopm
         uses: ./.github/actions/buck2-farm
         with:
           args: build toolchains//:mopm_0_0_135 --out ${{ runner.temp }}/mopm-publish/mopm
-          assert-remote: ${{ steps.assert.outputs.path }}
-      - name: build the packages
-        uses: ./.github/actions/buck2-farm
-        with:
-          args: build //release:mopm_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts
           assert-remote: ${{ steps.assert.outputs.path }}
       # Built here and run here, once (the version of this run, below).
       - name: build the version tool
@@ -292,6 +299,18 @@ jobs:
         uses: ./.github/actions/buck2-farm
         with:
           args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/mopm-publish/release_staged_verify
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The packages, for both platforms the release publishes, in the one directory `mopm
+      # stage --artifacts` reads (//release:mopm_release_artifacts): the linux-64 tree, and
+      # the osx-arm64 tree built for darwin-arm64 on the farm's macOS workers. Each `.mojoc`
+      # exists only once its library's welded tests passed on that platform, so a red macOS
+      # build stops the release before anything is staged. The last build before the version
+      # rewrite below (which edits the manifests the build reads), and the only step that
+      # names the file of the macOS keys.
+      - name: build the packages
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --config-file ${{ runner.temp }}/darwin.buckconfig //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts
           assert-remote: ${{ steps.assert.outputs.path }}
       # THE VERSION OF THIS RUN. A (name, version) pair can be created once on a registry, and a
       # mopm version is exactly MAJOR.MINOR.PATCH, so every release carries new versions: every
