@@ -23,6 +23,10 @@ install page shows names it.
   once. A call from a signal handler or a finalizer made inside a running call of the same thread raises
   `KomiraError`. Of two threads reading one `Result`, one reads it and the other gets `KomiraError`. Using
   one session from two threads at once was not supported.
+- **Ctrl-C.** A query cannot be interrupted while it runs: Ctrl-C during `Session.sql` raises
+  `KeyboardInterrupt` once the engine has finished the query, and the session runs the next query. The
+  answer that query computed is freed; before, it was never freed when the interrupt was raised before
+  pyarrow took it.
 - **pyarrow.** The wheel requires `pyarrow>=25.0.1`, so `pip install komira` installs it; it had no
   requirement.
 - **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its
