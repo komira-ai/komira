@@ -132,14 +132,14 @@ def write_proto3_json_f32(mut buf: List[UInt8], v: Float32):
     else:
         f = frac | UInt64(0x800000)
         e = field_exp - 150
-    var digits = InlineArray[UInt8, 20](fill=UInt8(0))
+    var digits = Array[UInt8, 20](fill=UInt8(0))
     var k = 0
     var n = _shortest_digits(f, e, digits, k)
     _layout(buf, digits, n, k)
 
 
 comptime _LIMBS = 8  # the writer's largest intermediate is under 2^180
-comptime _Big = InlineArray[UInt32, _LIMBS]
+comptime _Big = Array[UInt32, _LIMBS]
 
 
 def _high_reached(r: _Big, m_plus: _Big, s: _Big, closed: Bool) -> Bool:
@@ -150,7 +150,7 @@ def _high_reached(r: _Big, m_plus: _Big, s: _Big, closed: Bool) -> Bool:
 
 
 def _shortest_digits(
-    f: UInt64, e: Int, mut digits: InlineArray[UInt8, 20], mut k: Int
+    f: UInt64, e: Int, mut digits: Array[UInt8, 20], mut k: Int
 ) -> Int:
     """Burger-Dybvig free-format digits of v = f * 2^e (f > 0): fills
     `digits` with d1..dn (values 0..9) and sets `k` so that
@@ -250,7 +250,7 @@ def _shortest_digits(
 
 
 def _layout(
-    mut buf: List[UInt8], digits: InlineArray[UInt8, 20], n: Int, k: Int
+    mut buf: List[UInt8], digits: Array[UInt8, 20], n: Int, k: Int
 ):
     """Write 0.d1..dn * 10^k in the float64 writer's layout."""
     var exp10 = k - 1  # the decimal exponent of d1

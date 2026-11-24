@@ -41,7 +41,7 @@
 # ENCAPSULATION + gap6 (safety gate): ZERO UnsafePointer in any signature;
 # ZERO wildcard origins (every Span is origin_of(local) — a concrete origin, NOT
 # wildcard widening); ZERO unsafe_from_address; ZERO take_pointee. gap6 N/A: the
-# ratchet state is an `InlineArray[UInt8, 128]` — inline-stored bytes, no
+# ratchet state is an `Array[UInt8, 128]` — inline-stored bytes, no
 # heap-owning inner field, never an element of a byte-Slab under a wildcard cast.
 # The struct is Movable (NOT Copyable — copying secret ratchet bytes is a leak);
 # `__del__` zeroizes the state via crypto.zeroize_inline_array. def-based
@@ -93,15 +93,15 @@ struct DerivedMessageKeys(Movable, Deinitable):
     with the LE message index to form the per-message nonce (see session.mojo)
     so two messages from the same ratchet snapshot never reuse a nonce.
 
-    gap6 N/A: both fields are inline `InlineArray[UInt8, N]` (no heap)."""
+    gap6 N/A: both fields are inline `Array[UInt8, N]` (no heap)."""
 
-    var aead_key: InlineArray[UInt8, AEAD_KEY_SIZE]
-    var nonce_seed: InlineArray[UInt8, NONCE_SEED_SIZE]
+    var aead_key: Array[UInt8, AEAD_KEY_SIZE]
+    var nonce_seed: Array[UInt8, NONCE_SEED_SIZE]
 
     def __init__(out self):
         """Construct zeroed key material (filled by derive_message_keys)."""
-        self.aead_key = InlineArray[UInt8, AEAD_KEY_SIZE](fill=UInt8(0))
-        self.nonce_seed = InlineArray[UInt8, NONCE_SEED_SIZE](fill=UInt8(0))
+        self.aead_key = Array[UInt8, AEAD_KEY_SIZE](fill=UInt8(0))
+        self.nonce_seed = Array[UInt8, NONCE_SEED_SIZE](fill=UInt8(0))
 
     def __deinit__(deinit self):
         """Zeroize derived key material on drop (no-elide secure-zero)."""
@@ -129,11 +129,11 @@ struct GroupRatchet(Movable, Deinitable):
 
     `__del__` zeroizes the 128-byte state.
 
-    gap6 N/A: `_state` is `InlineArray[UInt8, 128]` (inline, no heap field);
+    gap6 N/A: `_state` is `Array[UInt8, 128]` (inline, no heap field);
     `_index` is a scalar. The struct is never a byte-Slab element under a
     wildcard cast."""
 
-    var _state: InlineArray[UInt8, RATCHET_SIZE]
+    var _state: Array[UInt8, RATCHET_SIZE]
     """The 4 ratchet parts R[0]||R[1]||R[2]||R[3], 128 bytes."""
 
     var _index: UInt32
@@ -163,12 +163,12 @@ struct GroupRatchet(Movable, Deinitable):
                 + String(len(seed))
                 + ")"
             )
-        self._state = InlineArray[UInt8, RATCHET_SIZE](fill=UInt8(0))
+        self._state = Array[UInt8, RATCHET_SIZE](fill=UInt8(0))
         for i in range(RATCHET_SIZE):
             self._state[i] = seed[i]
         self._index = index
 
-    def __init__(out self, *, var _state: InlineArray[UInt8, RATCHET_SIZE], _index: UInt32):
+    def __init__(out self, *, var _state: Array[UInt8, RATCHET_SIZE], _index: UInt32):
         """Private full-field ctor (used by clone_at)."""
         self._state = _state^
         self._index = _index
@@ -185,9 +185,9 @@ struct GroupRatchet(Movable, Deinitable):
         """The current message index."""
         return self._index
 
-    def export_state(self) -> InlineArray[UInt8, RATCHET_SIZE]:
+    def export_state(self) -> Array[UInt8, RATCHET_SIZE]:
         """Copy the 128-byte ratchet state out (for session-key export /
-        clone). Returns an owned InlineArray (no pointer escape). The CALLER
+        clone). Returns an owned Array (no pointer escape). The CALLER
         is responsible for treating the result as SECRET (it is the full
         decryption capability from `index` forward) and zeroizing it.
 
@@ -195,7 +195,7 @@ struct GroupRatchet(Movable, Deinitable):
         by the session export path (which immediately X25519-seals the bytes
         for a single recipient) and by clone_at. It never returns a reference
         or pointer into `_state`."""
-        var out = InlineArray[UInt8, RATCHET_SIZE](fill=UInt8(0))
+        var out = Array[UInt8, RATCHET_SIZE](fill=UInt8(0))
         for i in range(RATCHET_SIZE):
             out[i] = self._state[i]
         return out^
@@ -209,7 +209,7 @@ struct GroupRatchet(Movable, Deinitable):
         the deliberate, audited stand-in for an implicit copy ctor — the struct
         is intentionally non-Copyable so every ratchet duplication is visible at
         the call site."""
-        var st = InlineArray[UInt8, RATCHET_SIZE](fill=UInt8(0))
+        var st = Array[UInt8, RATCHET_SIZE](fill=UInt8(0))
         for i in range(RATCHET_SIZE):
             st[i] = self._state[i]
         return Self(_state=st^, _index=self._index)
@@ -221,16 +221,16 @@ struct GroupRatchet(Movable, Deinitable):
     @staticmethod
     def _hmac_part(
         part_key: Span[UInt8, _], discriminator: UInt8
-    ) raises -> InlineArray[UInt8, RATCHET_PART_SIZE]:
+    ) raises -> Array[UInt8, RATCHET_PART_SIZE]:
         """H_j(A) = HMAC-SHA-256(key=A, data=[j]) per the Megolm specification.
 
         The single-byte `discriminator` IS the exact Megolm H_j constant
         (0x00 / 0x01 / 0x02 / 0x03). Output is the 32-byte HMAC tag = the new
         ratchet part. Constant-time: HMAC-SHA-256 is data-oblivious."""
         var mac = Hmac[Sha256](part_key)
-        var data = InlineArray[UInt8, 1](fill=discriminator)
+        var data = Array[UInt8, 1](fill=discriminator)
         mac.update(Span[UInt8, origin_of(data)](data))
-        var out = InlineArray[UInt8, RATCHET_PART_SIZE](fill=UInt8(0))
+        var out = Array[UInt8, RATCHET_PART_SIZE](fill=UInt8(0))
         mac.finalize_into(Span[UInt8, origin_of(out)](out))
         return out^
 
@@ -247,7 +247,7 @@ struct GroupRatchet(Movable, Deinitable):
         ]
 
     @always_inline
-    def _set_part(mut self, part: Int, src: InlineArray[UInt8, RATCHET_PART_SIZE]):
+    def _set_part(mut self, part: Int, src: Array[UInt8, RATCHET_PART_SIZE]):
         """Copy a 32-byte part value into `_state` at slot `part`."""
         var base = part * RATCHET_PART_SIZE
         for i in range(RATCHET_PART_SIZE):
@@ -347,7 +347,7 @@ struct GroupRatchet(Movable, Deinitable):
             Span[UInt8, origin_of(empty_salt)](empty_salt), ikm
         )
 
-        var material = InlineArray[UInt8, MSG_KEY_MATERIAL_SIZE](fill=UInt8(0))
+        var material = Array[UInt8, MSG_KEY_MATERIAL_SIZE](fill=UInt8(0))
         Hkdf[Sha256].expand(
             Span[UInt8, origin_of(prk)](prk),
             KEY_SCHEDULE_INFO.as_bytes(),
@@ -364,7 +364,7 @@ struct GroupRatchet(Movable, Deinitable):
         # MIGRATION FIX (1.0.0): this read `var prk_copy = prk` +
         # `zeroize(prk_copy)`, which wiped a COPY and left the real PRK live on
         # the stack -- i.e. the zeroize this comment promises never happened.
-        # b2's implicit InlineArray copy hid it; 1.0.0 refuses the copy and made
+        # b2's implicit Array copy hid it; 1.0.0 refuses the copy and made
         # it visible. `prk` is a `var` local and `zeroize_inline_array` takes
         # `mut`, so the direct call is what was meant all along.
         zeroize_inline_array[MSG_KEY_MATERIAL_SIZE](material)

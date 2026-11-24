@@ -364,7 +364,7 @@ struct _Vocab(WireDecoder):
         pass
 
 
-def _vocabulary[M: Serializable & ImplicitlyDestructible]() raises -> _Shape:
+def _vocabulary[M: Serializable & Deinitable]() raises -> _Shape:
     var d = _Vocab(True)
     _ = M.decode[_Vocab](d)
     if d.accepted.byte_length() == 0:

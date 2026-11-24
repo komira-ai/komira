@@ -22,8 +22,14 @@
 #     started again between rounds.
 #   * With a memory budget the group tables outgrow (one group per row), the
 #     run fails by name instead of allocating, and the pool is whole again.
+#   * With a budget the tables outgrow, the run is refused without a spill
+#     directory and, with one set on the builder, spills and returns every
+#     kept row's group once, with its count; the spill directory is empty
+#     afterwards and the pool is whole.
 
 from std.collections import Dict
+from std.os import listdir
+from std.os.path import exists
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
 from arrow.arrow_types import ArrowType
@@ -259,6 +265,48 @@ def test_a_budget_the_groups_outgrow_fails_the_run_by_name() raises:
     assert_equal(builder.pool_granted(), 0)
 
 
+def test_with_a_spill_directory_the_same_budget_spills_and_answers() raises:
+    var path = _write("group_plan_spill")
+    var spill_dir = test_tmpdir() + "/group_plan_spill_dir"
+    var cache = ParquetMetadataCache()
+    var pool = ExprPool()
+    var nf = 0
+    var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
+        cache, pool
+    )
+    # One table of the 2,900 groups needs about 364 KB; the partition tables
+    # and the output rows of a spilled run fit in this budget.
+    builder.set_memory_budget(200_000)
+    var id = builder.add_agg_sink(_ids_data())
+    var dispatch = InlineDispatch()
+    with assert_raises(contains="memory pool for its group table"):
+        _ = run_plan(
+            _plan(path, id, 64), builder, dispatch, 3, CancellationToken.new()
+        )
+    assert_equal(builder.pool_granted(), 0)
+    assert_true(not exists(spill_dir))
+    builder.set_spill_directory(spill_dir)
+    var out = run_plan(
+        _plan(path, id, 64), builder, dispatch, 3, CancellationToken.new()
+    )
+    var batch = out.take(0)
+    assert_equal(batch.num_rows(), ROWS - FIRST)
+    var seen = List[Bool](length=ROWS, fill=False)
+    var ids = batch.column_at(0).as_primitive[DType.int64]()
+    var counts = batch.column_at(1).as_primitive[DType.int64]()
+    for i in range(batch.num_rows()):
+        var r = Int(ids.get(i))
+        assert_true(r >= FIRST and r < ROWS, "unexpected id " + String(r))
+        assert_true(not seen[r], "id " + String(r) + " twice")
+        seen[r] = True
+        assert_equal(Int(counts.get(i)), 1)
+    assert_equal(builder.pool_granted(), 0)
+    # The run wrote under the directory (a run that did not spill never
+    # creates it) and deleted what it wrote.
+    assert_true(exists(spill_dir), "the run did not spill")
+    assert_equal(len(listdir(spill_dir)), 0)
+
+
 # --- threads ----------------------------------------------------------------
 
 comptime WORKERS = 4
@@ -319,6 +367,7 @@ def main() raises:
     var suite = TestSuite()
     suite.test[test_the_plan_matches_the_oracle_on_any_worker_count_and_morsel_size]()
     suite.test[test_a_budget_the_groups_outgrow_fails_the_run_by_name]()
+    suite.test[test_with_a_spill_directory_the_same_budget_spills_and_answers]()
     suite.test[test_threads_fold_into_their_own_tables_run_after_run]()
     suite.test[test_the_runtime_can_be_stopped_and_started_between_group_runs]()
     suite^.run()

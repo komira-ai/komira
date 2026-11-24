@@ -21,6 +21,7 @@ import re
 
 import komira
 from komira import _ops
+from komira._ops import _dtype
 from komira._ops import (
     EXPR_NODES,
     PLAN_NODES,
@@ -40,6 +41,7 @@ from komira._ops import (
     Join,
     Limit,
     Lit,
+    MapBatches,
     MathFn,
     MathFn2,
     Project,
@@ -53,6 +55,8 @@ from komira._ops import (
     StructField,
     Substring,
     TopN,
+    UdfCall,
+    UdfSpec,
     Unary,
     Union,
     When,
@@ -125,6 +129,10 @@ A = ColRef("a")
 B = ColRef("b")
 P = Compare("gt", A, Lit(1))
 LEFT = Scan("left.parquet", "parquet", (Field("a", "int64"), Field("b", "string")))
+SCALAR = UdfSpec("m.g", "scalar", "package", "m:g", (), "int64", "immutable", "propagate", "values")
+FRAME = UdfSpec(
+    "m.f", "map_batches_frame", "package", "m:f", (), (("x", "int64"),), "stable", "propagate", "values", ("a",)
+)
 RIGHT = Scan("right.parquet", "parquet", (Field("c", "int64"),))
 
 EXPR_INSTANCES = [
@@ -146,6 +154,7 @@ EXPR_INSTANCES = [
     Extract("year", A),
     StructField(A, "f"),
     Alias(A, "n"),
+    UdfCall(SCALAR, (A,)),
 ]
 
 PLAN_INSTANCES = [
@@ -160,6 +169,7 @@ PLAN_INSTANCES = [
     Join(LEFT, RIGHT, "inner", ("a",), ("c",)),
     Union((LEFT, LEFT)),
     Write(LEFT, WriteTarget("out.parquet", "parquet")),
+    MapBatches(LEFT, FRAME),
 ]
 
 SUPPORT_INSTANCES = [
@@ -169,6 +179,8 @@ SUPPORT_INSTANCES = [
     Frame("rows", "unbounded_preceding", "current_row"),
     WindowExpr("sum", arg="a"),
     WriteTarget("out.parquet", "parquet"),
+    SCALAR,
+    _dtype.parse("struct<a: int64, b: timestamp[us]>"),
 ]
 
 
@@ -282,6 +294,7 @@ def test_the_search_finds_the_modules_and_classes_it_must_look_at():
         "komira._ops",
         "komira._ops._build",
         "komira._ops._columns",
+        "komira._ops._dtype",
         "komira._ops._expr",
         "komira._ops._rel",
         "komira._ops._vocab",
@@ -381,6 +394,7 @@ def test_the_source_scan_reads_every_file_of_the_ops_package():
         "__init__.py",
         "_build.py",
         "_columns.py",
+        "_dtype.py",
         "_expr.py",
         "_rel.py",
         "_vocab.py",

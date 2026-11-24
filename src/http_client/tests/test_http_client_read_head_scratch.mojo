@@ -8,7 +8,7 @@
 # architectural invariant of the fix:
 #
 #   * HttpClient[C] owns a long-lived `_read_head_scratch` field of type
-#     `Optional[OwnedPointer[InlineArray[UInt8, 4096]]]`. This field is
+#     `Optional[OwnedPointer[Array[UInt8, 4096]]]`. This field is
 #     allocated LAZILY on the first send-buffered call and is REUSED
 #     across all subsequent send-buffered calls (no per-request alloc).
 #

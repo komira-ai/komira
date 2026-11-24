@@ -28,6 +28,8 @@ from komira._ops import (
     StringOp,
     StructField,
     Substring,
+    UdfCall,
+    UdfSpec,
     Unary,
     When,
     children,
@@ -51,6 +53,7 @@ A = ColRef("a")
 B = ColRef("b")
 C = ColRef("c")
 ONE = Lit(1)
+SCALAR = UdfSpec("m.g", "scalar", "package", "m:g", (), "int64", "immutable", "propagate", "values")
 
 
 def one_of_each():
@@ -75,6 +78,7 @@ def one_of_each():
         Extract: Extract("year", A),
         StructField: StructField(A, "f"),
         Alias: Alias(A, "out"),
+        UdfCall: UdfCall(SCALAR, (A, B)),
     }
 
 

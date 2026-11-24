@@ -3,13 +3,14 @@
 # every mopm package that builds for macOS, each with its welded tests) for `--target-platforms
 # komira//tools/build/platforms:darwin-arm64`: the compiles and the tests run on the farm's macOS
 # workers through the farm connection, never on a GitHub-hosted macOS runner (the job runs on an ubuntu
-# runner and only asks the farm). The macOS workers are few and the Linux ones many, so this build is in
-# the release and never in a pull request's check (the macOS Python harness tests are in it too): this workflow has no pull_request,
-# pull_request_target or merge_group trigger, and pr.yml and every workflow that runs on a pull request
-# hold no macOS worker set and build nothing for macOS (//:release_macos_cases says so). The one
-# exception is analysis, not a build: pr.yml's last step configures and analyses the same set for
-# darwin-arm64 on its Linux runner, running no action (release/darwin_analysis.bxl), so what fails
-# before anything is built is found in the pull request that causes it.
+# runner and only asks the farm). The whole set is built here, after the merge (the macOS Python harness
+# tests are in it too): this workflow has no pull_request, pull_request_target or merge_group trigger.
+# Before the merge, pr.yml's macOS part builds only the libraries of the set a change reaches (docs/ci.md,
+# "The macOS part of the check"), so a merge group's commit leaves this build those actions in the cache;
+# no other workflow that runs on a pull request names the macOS worker set (//:release_macos_cases says
+# so). pr.yml's last step also configures and analyses the whole set and the Python harness tests for
+# darwin-arm64, running no action
+# (release/darwin_analysis.bxl).
 #
 # ITS OWN WORKFLOW, so it cannot slow a release. release.yml is one concurrency group in which a running
 # release is never cancelled; a macOS job inside it that stalled for 90 minutes would hold the next
@@ -113,6 +114,8 @@ jobs:
       # worker and the hello binding test (pyarrow, and a Mojo shared library loaded by path) runs
       # there, with its three twins that must fail the way they name. Release only: no pull request
       # runs a macOS action.
+      # The targets are DARWIN_PYTHON_HARNESS of release/darwin_libs.bzl, which pr.yml analyses for
+      # darwin-arm64 (//:release_macos_cases holds the two to one list).
       - name: build the macOS Python harness tests
         id: python
         uses: ./.github/actions/buck2-farm

@@ -5,14 +5,14 @@
 # The generated DbStorable structs carry UUID columns as a
 # typed `Uuid` field. The canonical UUID type is the shared core
 # primitive `uuid.uuid.Uuid`. The
-# DB codegen needs a `Uuid(InlineArray[UInt8,16])` constructor (which core
+# DB codegen needs a `Uuid(Array[UInt8,16])` constructor (which core
 # provides) AND a `.bytes()` accessor returning the 16 big-endian bytes (which
 # the generated `to_row()` calls as `self.id.bytes()`). Core exposes the same
 # 16 bytes via `as_bytes()`; this module re-surfaces the core type with the
 # `bytes()` name the codegen emits, delegating storage + parsing to core.
 #
 # Inline 16-byte POD wrapping the core Uuid — no heap, no pointer (trivially relocation-safe,
-# same as the underlying core InlineArray storage). NO UnsafePointer crosses
+# same as the underlying core Array storage). NO UnsafePointer crosses
 # this module's boundary.
 # =============================================================================
 

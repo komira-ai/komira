@@ -49,6 +49,7 @@ from arrow.arrow_types import ArrowType
 from arrow.schema import Field, Schema, SchemaBuilder
 from plan_expr.expr import Expr, ScalarValue, BIN_EQ
 from byte_buffer.file_identity import set_file_mtime_ns
+from libc.posix import _read_env
 from plan_ir.logical_plan import (
     LogicalPlan,
     derive_source_layout,
@@ -748,6 +749,18 @@ def test_the_legacy_csv_factory_no_longer_states_a_source_kind() raises:
     assert_equal(pq_sd.source_kind, SOURCE_KIND_COLUMNAR)
 
 
+def _scratch_dir() raises -> String:
+    """The directory this test action may write into: `TEST_TMPDIR`, else
+    `TMPDIR`. A fixed `/tmp` path is shared by every action on a worker, and a
+    macOS worker's sandbox refuses it."""
+    var d = _read_env("TEST_TMPDIR")
+    if d.byte_length() == 0:
+        d = _read_env("TMPDIR")
+    if d.byte_length() == 0:
+        raise Error("neither TEST_TMPDIR nor TMPDIR is set: no scratch directory")
+    return d
+
+
 def test_the_legacy_csv_factory_pins_the_file_mtime_as_its_snapshot() raises:
     """`komira.csv` declares SNAPSHOT_PINNED with the mtime AS the token, so a
     leaf built with `mtime_ns=0` over a real file claims a pin it does not have.
@@ -755,7 +768,7 @@ def test_the_legacy_csv_factory_pins_the_file_mtime_as_its_snapshot() raises:
     Writes the file, then rewrites it with a DIFFERENT mtime, and asserts the
     two plans do not share a cache key: both plans must carry the file's
     mtime."""
-    var p = String("/tmp/csvarm_mtime_probe.csv")
+    var p = _scratch_dir() + "/csvarm_mtime_probe.csv"
     with open(p, "w") as f:
         f.write(String("a,b,c\n1,2,x\n"))
     _ = set_file_mtime_ns(p, 1_500_000_000_000_000_000)

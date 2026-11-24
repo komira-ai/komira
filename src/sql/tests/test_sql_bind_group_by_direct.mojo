@@ -549,9 +549,12 @@ def test_unknown_group_key() raises:
         "          Filter(predicate=BinaryOp(GT, ColRef(k), Literal(ScalarValue(int64, 0))))\n"
         "            Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
+    # `_select` binds one SELECT with nothing pre-bound, so the HAVING's
+    # subquery index names no bound subquery; through `bind_statement` it
+    # binds (test_sql_bind_in_body).
     _check(
         "SELECT k, sum(v) FROM t GROUP BY k HAVING k > 0 AND sum(v) > (SELECT max(w) FROM u)",
-        "ERR: SQL bind error: unsupported expression"
+        "ERR: SQL bind error: dangling scalar-subquery index"
     )
 
 

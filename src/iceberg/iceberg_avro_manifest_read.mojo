@@ -7,6 +7,7 @@
 # `build_manifest_list` / `build_manifest_file` write.
 
 from avro.ocf_block_scan import scan_ocf_blocks
+from avro.ocf_header import decode_ocf_header, AVRO_CODEC_NULL
 from avro.varint_decode_scalar import AvroByteReader
 from avro.varint_encode import (
     encode_long,
@@ -25,7 +26,10 @@ from .iceberg_types import (
     ICE_T_DOUBLE,
     ICE_T_STRING,
 )
-from .iceberg_avro_manifest import ManifestFileEntry
+from .iceberg_avro_manifest import (
+    ManifestFileEntry,
+    manifest_file_schema_json,
+)
 from .iceberg_row_value import read_checked_string
 
 
@@ -100,6 +104,26 @@ def read_manifest_list(bytes: List[UInt8]) raises -> List[ManifestFileEntry]:
             )
             rec += 1
     return out^
+
+
+def is_komira_manifest_list(bytes: List[UInt8]) -> Bool:
+    """True iff `bytes` is a NULL-codec Avro OCF whose header schema is exactly
+    the `manifest_file` schema this package writes
+    (`manifest_file_schema_json`).
+
+    `read_manifest_list` decodes positionally by that schema and does not
+    resolve another one, so a list written by another engine (different field
+    order, optional fields or codec) must be refused before it is read. Bytes
+    that are not an OCF at all are not a komira list either: False, no
+    error."""
+    try:
+        var header = decode_ocf_header(Span(bytes))
+        return (
+            header.codec_tag == AVRO_CODEC_NULL
+            and header.schema_json == manifest_file_schema_json()
+        )
+    except _:
+        return False
 
 
 # =============================================================================

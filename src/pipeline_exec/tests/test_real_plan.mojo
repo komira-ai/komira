@@ -364,10 +364,10 @@ def test_what_the_builder_does_not_serve_is_refused_by_name() raises:
     var dispatch = InlineDispatch()
 
     var unknown = SegmentDescPod(
-        0, UInt8(7), SourceSpecPod(), Slab[MorselOp](), SINK_COLLECT, KEY_DTYPE_NONE,
+        0, UInt8(200), SourceSpecPod(), Slab[MorselOp](), SINK_COLLECT, KEY_DTYPE_NONE,
         SINK_ORIENT_COLUMNAR, -1, 0, List[Int](), List[UInt8](),
     )
-    with assert_raises(contains="source kind 7 of segment 0 is not served"):
+    with assert_raises(contains="source kind 200 of segment 0 is not served"):
         _ = run_plan(_one(unknown^), builder, dispatch, 1, CancellationToken.new())
 
     var concat = SegmentDescPod(
@@ -377,10 +377,19 @@ def test_what_the_builder_does_not_serve_is_refused_by_name() raises:
     with assert_raises(contains="segment 0 concatenates the outputs of no segment"):
         _ = run_plan(_one(concat^), builder, dispatch, 1, CancellationToken.new())
 
+    # Every operator tag of the IR is served; a tag outside it is not.
+    var unknown_op = batch_segment(0, handle, chain(MorselOp(tag=14)))
+    with assert_raises(contains="operator tag 14 of segment 0 is not served"):
+        _ = run_plan(_one(unknown_op^), builder, dispatch, 1, CancellationToken.new())
+
+    # A join probe whose build segment is not among its dependencies.
     var probe = batch_segment(
         0, handle, chain(MorselOp.join_probe(1, _names("a"), _names("a"), 0))
     )
-    with assert_raises(contains="operator tag 3 of segment 0 is not served"):
+    with assert_raises(
+        contains="the join probe of segment 0 reads the build side of"
+        " segment 1, which is not among its dependencies"
+    ):
         _ = run_plan(_one(probe^), builder, dispatch, 1, CancellationToken.new())
 
     var windowed = SegmentDescPod(

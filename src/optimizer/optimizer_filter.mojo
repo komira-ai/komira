@@ -51,6 +51,7 @@ from plan_ir.logical_plan import (
 )
 from plan_stats.table_stats import TableStats
 from .optimizer_project_merge_guard import predicate_below_project
+from .scalar_subquery_decorrelate import always_exactly_one_row
 from .optimizer_udf_carry import project_like
 from .optimizer_udf_opacity import udf_project_passes_predicate
 from std.memory import OwnedPointer
@@ -947,7 +948,8 @@ def eliminate_cross_join_inplace(mut plan: LogicalPlan) raises:
     Recurses children IN PLACE. Two cases fire:
 
     1. **Filter-above-Cross-Join** (original behavior): convert CROSS to
-       INNER by extracting equi-keys from the Filter predicate.
+       INNER by extracting equi-keys from the Filter predicate, unless the
+       right side is always one row (a decorrelated scalar), kept a filter.
     2. **Filter-above-Inner-Join** (bench-shape feature 1B): fold any
        equi-conjuncts from the Filter predicate that bridge the two
        sides into the existing INNER join's `left_on` / `right_on`,
@@ -963,7 +965,8 @@ def eliminate_cross_join_inplace(mut plan: LogicalPlan) raises:
     if plan.tag == PLAN_FILTER:
         eliminate_cross_join_inplace(plan._filter.value()[].child[])
 
-        if plan._filter.value()[].child[].tag == PLAN_JOIN and plan._filter.value()[].child[]._join.value()[].join_type == JOIN_CROSS:
+        if plan._filter.value()[].child[].tag == PLAN_JOIN and plan._filter.value()[].child[]._join.value()[].join_type == JOIN_CROSS \
+                and not always_exactly_one_row(plan._filter.value()[].child[]._join.value()[].right[]):
             # MOJO 1.0.0: every ref used together must be projected out of
             # ONE interior-reference walk. Re-walking `plan._filter...`
             # forms a second origin over the same storage and invalidates the

@@ -36,7 +36,7 @@
 # full, which is the fail-closed behaviour a collapse builds on top of. It does
 # not silently reuse a slot.
 #
-# Encapsulation: `InlineArray` of POD entries + one Atomic. No
+# Encapsulation: `Array` of POD entries + one Atomic. No
 # `UnsafePointer`, no wildcard origin, no heap-owning field.
 # =============================================================================
 

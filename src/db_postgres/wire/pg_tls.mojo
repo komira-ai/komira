@@ -39,7 +39,7 @@
 #
 # PARK-BUFFER SAFETY: on a reactor park the pg `_rbuf` is LIVE across the
 # yield. `recv_some` here OWNS its decrypt into a stack-local scratch
-# `InlineArray` and copies the produced plaintext into the caller's
+# `Array` and copies the produced plaintext into the caller's
 # `List[UInt8]` BEFORE returning — NO borrowed slice of any caller buffer is
 # held across the `poll_completions` park. The handshake loop holds NO
 # application bytes at all. See `connection.mojo`'s `_read_one_message` for
@@ -220,7 +220,7 @@ struct PgReactorStream(Movable, Deinitable):
         and re-parks on the reactor itself (no in-method park).
 
         PARK-BUFFER SAFETY (the load-bearing park-buffer sign-off): the decrypt
-        target is a stack-local `scratch` InlineArray OWNED by `try_recv_some`'s
+        target is a stack-local `scratch` Array OWNED by `try_recv_some`'s
         frame. The reactor park (`_park` → `poll_completions(-1)`) here happens
         while NO borrowed slice of `into` (the caller's `_rbuf`) is live — the
         prior `try_recv_some` call has fully returned (its scratch is dead and
@@ -272,7 +272,7 @@ struct PgReactorStream(Movable, Deinitable):
         signals would-block; the reactor park is the CALLER's job here).
 
         PARK-BUFFER SAFETY: the decrypt target is a stack-local `scratch`
-        InlineArray OWNED by this frame; s2n writes into it via a Span and does
+        Array OWNED by this frame; s2n writes into it via a Span and does
         not retain the pointer. The produced plaintext is copied into `into`
         BEFORE this method returns. No borrowed slice of `into` escapes. Because
         this method NEVER parks, `into` (the caller's `_rbuf`) is never live
@@ -462,7 +462,7 @@ def _read_one_byte[
     RT: Runtime,
 ](mut stream: TcpStream, mut reactor: Reactor[RT.Sink]) raises -> UInt8:
     """Read exactly one cleartext byte (the SSLRequest 'S'/'N' reply). The
-    decrypt target is a stack-local InlineArray owned by this frame; no
+    decrypt target is a stack-local Array owned by this frame; no
     borrowed slice escapes the reactor park inside TcpStream.read."""
     var b = Array[UInt8, 1](fill=0)
     var got = stream.read[RT.Sink](reactor, Span[UInt8](b)[0:1])

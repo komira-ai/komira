@@ -25,12 +25,21 @@
 # NULL-free. A null count the reader cannot give (it raises, or returns None) is
 # recorded as unknown, which makes the binder keep the run-time NULL checks.
 # A relation the reader cannot give raises, as the binder would have.
+#
+# An `iceberg_scan('path', ...)` relation is asked of the reader the same way
+# (`SqlParquetFooters.iceberg_relation`), once per (path text, `allow_moved_paths`,
+# `snapshot_from_id`), and held as the `SourceVariant` the reader returned: its
+# files are not named by a footer but by the table's metadata, so no
+# `ParquetSource` describes it. The reader's source says its own schema. The
+# kind is not a parquet kind (`is_parquet_tvf_kind` is False for it), and a null
+# count is never asked of its files.
 
 from arrow.schema import Schema
 from scan_source.parquet_source import ParquetSource
-from scan_source.source_variant import SOURCE_VARIANT_PARQUET
+from scan_source.source_variant import SOURCE_VARIANT_PARQUET, SourceVariant
 from sql.sql_ast import (
-    SelectStmt, SqlStatement, TVF_AVRO, TVF_CSV, TVF_JSON, SUBQ_NOT_IN,
+    SelectStmt, SqlStatement, TVF_AVRO, TVF_CSV, TVF_ICEBERG, TVF_JSON,
+    SUBQ_NOT_IN,
 )
 from sql.sql_catalog import SqlCatalog, catalog_relation_schema
 
@@ -54,6 +63,25 @@ trait SqlParquetFooters:
         names (a file or a glob, listed and sorted) and their Hive partition
         columns per `hive_partitioning` (a `HIVE_PARTITIONING_*` mode)."""
         ...
+
+    def iceberg_relation(
+        self,
+        path: String,
+        allow_moved_paths: Bool,
+        snapshot_id: Optional[Int64],
+    ) raises -> SourceVariant:
+        """The source an `iceberg_scan(path, ...)` relation scans: the Iceberg
+        table at `path` (a `*.metadata.json` file, or a table directory),
+        pinned to snapshot `snapshot_id` or, when None, the current one, with
+        stored file paths rewritten under the table's root when
+        `allow_moved_paths`. The source's own schema is the relation's schema.
+
+        A reader that does not read Iceberg tables need not override this: the
+        default refuses by name."""
+        raise Error(
+            "SQL bind error: iceberg_scan('" + path + "') needs a binder that"
+            " reads Iceberg tables"
+        )
 
 
 @fieldwise_init
@@ -86,8 +114,14 @@ def path_has_glob(path: String) -> Bool:
 
 def is_parquet_tvf_kind(kind: UInt8) -> Bool:
     """A TVF of kind `kind` is read through a parquet footer: every kind but the
-    CSV, JSON and Avro readers (whose schemas `sql_tvf_bind` infers)."""
-    return kind != TVF_CSV and kind != TVF_JSON and kind != TVF_AVRO
+    CSV, JSON and Avro readers (whose schemas `sql_tvf_bind` infers) and
+    `iceberg_scan` (whose files the table's metadata names)."""
+    return (
+        kind != TVF_CSV
+        and kind != TVF_JSON
+        and kind != TVF_AVRO
+        and kind != TVF_ICEBERG
+    )
 
 
 def parquet_relation_schema(source: ParquetSource) -> Schema:
@@ -106,6 +140,10 @@ struct ParquetFacts(Movable):
     var _count_paths: List[String]
     var _count_columns: List[String]
     var _counts: List[Optional[Int]]
+    var _ice_paths: List[String]
+    var _ice_moved: List[Bool]
+    var _ice_snapshots: List[Optional[Int64]]
+    var _ice_sources: List[SourceVariant]
 
     def __init__(out self):
         self._rel_paths = List[String]()
@@ -114,6 +152,10 @@ struct ParquetFacts(Movable):
         self._count_paths = List[String]()
         self._count_columns = List[String]()
         self._counts = List[Optional[Int]]()
+        self._ice_paths = List[String]()
+        self._ice_moved = List[Bool]()
+        self._ice_snapshots = List[Optional[Int64]]()
+        self._ice_sources = List[SourceVariant]()
 
     def has_relation(self, path: String, mode: UInt8) -> Bool:
         for i in range(len(self._rel_paths)):
@@ -144,6 +186,53 @@ struct ParquetFacts(Movable):
         """The scan schema (`parquet_relation_schema`) of the source recorded
         for `path` under `mode`. Raises when none was recorded."""
         return parquet_relation_schema(self.source_of(path, mode))
+
+    def _iceberg_index(
+        self, path: String, moved: Bool, snapshot: Optional[Int64]
+    ) -> Int:
+        """The index of the Iceberg relation recorded for the key, or -1."""
+        for i in range(len(self._ice_paths)):
+            if self._ice_paths[i] != path or self._ice_moved[i] != moved:
+                continue
+            ref held = self._ice_snapshots[i]
+            if not held and not snapshot:
+                return i
+            if held and snapshot and held.value() == snapshot.value():
+                return i
+        return -1
+
+    def has_iceberg(
+        self, path: String, moved: Bool, snapshot: Optional[Int64]
+    ) -> Bool:
+        return self._iceberg_index(path, moved, snapshot) >= 0
+
+    def add_iceberg(
+        mut self,
+        path: String,
+        moved: Bool,
+        snapshot: Optional[Int64],
+        var source: SourceVariant,
+    ):
+        """Record the source of the Iceberg relation `(path, moved, snapshot)`;
+        a key already recorded keeps its first."""
+        if self.has_iceberg(path, moved, snapshot):
+            return
+        self._ice_paths.append(path)
+        self._ice_moved.append(moved)
+        self._ice_snapshots.append(snapshot)
+        self._ice_sources.append(source^)
+
+    def iceberg_source_of(
+        self, path: String, moved: Bool, snapshot: Optional[Int64]
+    ) raises -> SourceVariant:
+        """A copy of the source recorded for the Iceberg relation `(path,
+        moved, snapshot)`. Raises when none was recorded."""
+        var i = self._iceberg_index(path, moved, snapshot)
+        if i < 0:
+            raise Error(
+                "SQL bind error: no Iceberg table was read for '" + path + "'"
+            )
+        return self._ice_sources[i].copy()
 
     def has_null_count(self, path: String, column: String) -> Bool:
         for i in range(len(self._count_paths)):
@@ -208,6 +297,18 @@ def _collect_select[P: SqlParquetFooters](
     for i in range(len(stmt.from_tables)):
         ref rel = stmt.from_tables[i]
         if rel.tvf_path:
+            if rel.tvf_kind == TVF_ICEBERG:
+                var ice_path = rel.tvf_path.value()
+                var moved = rel.tvf_opts.allow_moved_paths
+                var snapshot = rel.tvf_opts.snapshot_from_id
+                if not facts.has_iceberg(ice_path, moved, snapshot):
+                    facts.add_iceberg(
+                        ice_path,
+                        moved,
+                        snapshot,
+                        footers.iceberg_relation(ice_path, moved, snapshot),
+                    )
+                continue
             if not is_parquet_tvf_kind(rel.tvf_kind):
                 continue
             var path = rel.tvf_path.value()
@@ -228,6 +329,10 @@ def _collect_select[P: SqlParquetFooters](
             if t.source.tag != SOURCE_VARIANT_PARQUET:
                 continue
             ref ps = t.source._parquet.value()
+            if not ps.fs_descriptor.is_local():
+                # The footers read the local file system only: an object key
+                # of a bucket is not a local path, so its counts stay unknown.
+                continue
             var file_schema = ps.schema()
             for p in range(len(ps.paths)):
                 _record_counts(facts, String(ps.paths[p]), file_schema, footers)
@@ -243,7 +348,8 @@ def collect_parquet_facts[P: SqlParquetFooters](
     stmt: SqlStatement, catalog: SqlCatalog, footers: P
 ) raises -> ParquetFacts:
     """Every parquet fact binding `stmt` against `catalog` reads: the resolved
-    source of each `read_parquet` relation under its mode, and, when `stmt`
+    source of each `read_parquet` relation under its mode, the source of each
+    `iceberg_scan` relation under its options, and, when `stmt`
     holds a NOT IN subquery, each data column's null count in every file of
     each parquet relation (a `read_parquet` relation's files or a catalog
     table's paths whose source is parquet)."""

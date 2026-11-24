@@ -8,9 +8,9 @@
 # detail lowers. A refused plan never produces a LoweredPlan.
 #
 # Tests, and the behaviour each asserts:
-#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a join, view
-#     reference, shared-subplan reference and cast to string are each refused
-#     by their tag name.
+#   test_nodes_the_cutter_does_not_cut_are_refused_by_tag: a view reference,
+#     shared-subplan reference and cast to string are each refused by their
+#     tag name.
 #   test_a_top_n_with_a_negative_count_is_refused_and_one_of_zero_is_cut: a
 #     top-n of -1 rows is refused with the exact text; top-n of 0 and 5 rows
 #     lower.
@@ -22,8 +22,8 @@
 #     a filter between a limit and a sort is refused with the exact text; a
 #     limit directly over a sort, over a projection of one and over a top-n
 #     lowers, and so do the shapes over a sort that never were limits.
-#   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a join under an
-#     aggregate refuses the plan; the aggregate over a scan lowers.
+#   test_a_refused_node_below_a_breaker_refuses_the_whole_plan: a cast to
+#     string under an aggregate refuses the plan; the aggregate over a scan lowers.
 #   test_a_distinct_over_a_column_list_is_refused_and_one_over_the_row_is_cut:
 #     a distinct that names columns is refused with the exact text; the same
 #     distinct over the whole row lowers.
@@ -61,6 +61,7 @@ from lowering.lowered_plan import (
     LOWERING_SINK_UNSERVED,
     LOWERING_SCAN_NOT_TOTAL,
     LOWERING_INPUTS_SCAN_COUNT,
+    LOWERING_JOIN_UNSERVED,
 )
 from plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_UDF
 from plan_expr.partition_expr import PartitionExpr
@@ -73,7 +74,13 @@ from plan_expr.udf_data import (
     DTAG_I64,
 )
 from plan_expr.expr import Expr, BIN_GT
-from plan_expr.fs_descriptor_pod import FsDescriptorPod, FS_SCHEME_S3
+from plan_expr.fs_descriptor_pod import (
+    FsDescriptorPod,
+    FS_SCHEME_AZURE,
+    FS_SCHEME_FILE,
+    FS_SCHEME_GCS,
+    FS_SCHEME_S3,
+)
 from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import (
     LogicalPlan,
@@ -83,8 +90,6 @@ from plan_ir.logical_plan import (
     SOURCE_CSV,
     SOURCE_NDJSON,
     SOURCE_KIND_UNSET,
-    JOIN_INNER,
-    PLAN_JOIN,
     PLAN_DISTINCT,
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
@@ -101,6 +106,7 @@ from plan_ir.plan_decisions import (
     SCAN_UNBOUNDED,
 )
 from plan_ir.plan_decisions import AGG_MODE_PARTIAL, AGG_MODE_SINGLE, AGG_MODE_UNSET
+from scan_source.avro_source import AvroSource
 from scan_source.parquet_source import ParquetSource
 from scan_source.source_variant import SourceVariant
 
@@ -166,9 +172,6 @@ def _refused_with(message: String, token: String, why: String) raises:
 
 
 def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
-    var join = LogicalPlan.join(_scan(), _scan(), _names("k"), _names("k"), JOIN_INNER)
-    _refused_with(_message(join, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_JOIN))
-
 
     var view = LogicalPlan.view_ref(String("v"), _schema())
     _refused_with(_message(view, _inputs(0)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_VIEW_REF))
@@ -181,9 +184,9 @@ def test_nodes_the_cutter_does_not_cut_are_refused_by_tag() raises:
 
 
 def test_a_refused_node_below_a_breaker_refuses_the_whole_plan() raises:
-    var join = LogicalPlan.join(_scan(), _scan(), _names("k"), _names("k"), JOIN_INNER)
-    var plan = _count_by(join^, List[String]())
-    _refused_with(_message(plan, _inputs(2)), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_JOIN))
+    var cast = LogicalPlan.cast_to_varchar(_scan())
+    var plan = _count_by(cast^, List[String]())
+    _refused_with(_message(plan, _inputs()), LOWERING_UNCUTTABLE_NODE, plan_tag_name(PLAN_CAST_TO_VARCHAR))
     # The same aggregate over a scan lowers.
     assert_equal(_message(_count_by(_scan(), List[String]()), _inputs()), "")
 
@@ -236,25 +239,46 @@ def test_a_partial_aggregate_is_refused_and_a_single_one_is_cut() raises:
     assert_equal(_message(_count_by(_scan(), List[String](), AGG_MODE_SINGLE), _inputs()), "")
 
 
-def test_a_source_other_than_parquet_memory_or_csv_is_refused() raises:
-    var json = LogicalPlan.scan(String("t.jsonl"), SOURCE_NDJSON, _schema())
-    _refused_with(_message(json, _inputs()), LOWERING_UNCUTTABLE_NODE, "json")
-    # The same scan of a CSV file lowers.
+def test_a_source_other_than_parquet_memory_csv_or_json_is_refused() raises:
+    var avro = LogicalPlan.scan_from_source(
+        SourceVariant(AvroSource(String("t.avro"), _schema())), _schema()
+    )
+    _refused_with(_message(avro, _inputs()), LOWERING_UNCUTTABLE_NODE, "avro")
+    # The same scan of a CSV file and of a JSON Lines file lowers.
     var csv = LogicalPlan.scan(String("t.csv"), SOURCE_CSV, _schema())
     assert_equal(_message(csv, _inputs()), "")
+    var json = LogicalPlan.scan(String("t.jsonl"), SOURCE_NDJSON, _schema())
+    assert_equal(_message(json, _inputs()), "")
 
 
 def _parquet_scan(var source: ParquetSource) raises -> LogicalPlan:
     return LogicalPlan.scan_from_source(SourceVariant(source^), _schema())
 
 
+def _on(desc: FsDescriptorPod) raises -> LogicalPlan:
+    return _parquet_scan(ParquetSource(String("a.parquet"), _schema()).with_fs_descriptor(desc))
+
+
 def test_a_parquet_scan_the_segment_arm_cannot_carry_is_refused() raises:
-    var remote = _parquet_scan(
-        ParquetSource(String("a.parquet"), _schema()).with_fs_descriptor(
-            FsDescriptorPod.cloud(FS_SCHEME_S3, String("bucket"), 3)
-        )
+    # A scheme code that names no store the engine reads is refused, naming
+    # it by its number.
+    assert_equal(
+        _message(_on(FsDescriptorPod.cloud(UInt8(9), String("raw"), 3)), _inputs()),
+        "LOWERING_SCAN_NOT_TOTAL: a Parquet scan on scheme 9://raw; the"
+        " segment's Parquet arm reads the local file system, S3, GCS and Azure",
     )
-    _refused_with(_message(remote, _inputs()), LOWERING_SCAN_NOT_TOTAL, "local")
+    # A local scan with an explicit binding names a resolver the segment does
+    # not carry.
+    _refused_with(
+        _message(_on(FsDescriptorPod(scheme=FS_SCHEME_FILE, bucket=String(""), node_id=5)), _inputs()),
+        LOWERING_SCAN_NOT_TOTAL,
+        "file://",
+    )
+
+    # A scan of an S3 or GCS bucket, or of an Azure container, lowers.
+    assert_equal(_message(_on(FsDescriptorPod.cloud(FS_SCHEME_S3, String("lake"), 3)), _inputs()), "")
+    assert_equal(_message(_on(FsDescriptorPod.cloud(FS_SCHEME_GCS, String("raw"), 3)), _inputs()), "")
+    assert_equal(_message(_on(FsDescriptorPod.cloud(FS_SCHEME_AZURE, String("box"), 3)), _inputs()), "")
 
     # One local file lowers.
     assert_equal(_message(_parquet_scan(ParquetSource(String("a.parquet"), _schema())), _inputs()), "")
@@ -558,12 +582,13 @@ def test_inputs_must_hold_one_entry_per_scan() raises:
     assert_equal(_message(_scan(), _inputs(1)), "")
 
 
-def test_the_refusal_tokens_are_four_distinct_names() raises:
+def test_the_refusal_tokens_are_five_distinct_names() raises:
     var tokens = List[String]()
     tokens.append(String(LOWERING_UNCUTTABLE_NODE))
     tokens.append(String(LOWERING_SINK_UNSERVED))
     tokens.append(String(LOWERING_SCAN_NOT_TOTAL))
     tokens.append(String(LOWERING_INPUTS_SCAN_COUNT))
+    tokens.append(String(LOWERING_JOIN_UNSERVED))
     for i in range(len(tokens)):
         for j in range(i + 1, len(tokens)):
             assert_true(tokens[i] != tokens[j])

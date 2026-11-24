@@ -6,7 +6,7 @@
 
 from arrow.arrow_types import ArrowType
 from arrow.schema import (
-    Schema, SchemaBuilder,
+    Field, Schema, SchemaBuilder,
 )
 from column_kernels.unicode_case import unicode_lower_bytes
 from plan_expr.agg_expr import (
@@ -15,7 +15,8 @@ from plan_expr.agg_expr import (
 from plan_expr.col_expr_division import true_divide
 from plan_expr.expr import (
     BIN_ADD, BIN_AND, BIN_DIV, BIN_EQ, BIN_GE, BIN_GT, BIN_LE, BIN_LT, BIN_MOD, BIN_MUL,
-    BIN_NE, BIN_OR, BIN_SUB, EXPR_LITERAL, Expr, MATH2_POW, STRFN_LOWER, STR_LIKE,
+    BIN_NE, BIN_OR, BIN_SUB, EXPR_BINARY_OP, EXPR_CAST,
+    EXPR_CORRELATED_SUBQUERY, EXPR_LITERAL, EXPR_UNARY_OP, Expr, MATH2_POW, STRFN_LOWER, STR_LIKE,
     STR_STARTS_WITH, UN_ABS, UN_IS_NOT_NULL, UN_IS_NULL, UN_NEGATE, UN_NOT,
     WhenCaseData,
 )
@@ -23,6 +24,7 @@ from plan_expr.expr_walk import (
     PlanColRefFields, walk_expr_field,
 )
 from plan_expr.scalar_value import ScalarValue
+from plan_ir.corr_subquery import corr_data_inner_plan_ref
 from plan_ir.logical_plan import (
     AggExprArray, _infer_agg_field,
 )
@@ -306,7 +308,100 @@ def _bind_sql_operator(op: UInt8, var lhs: Expr, var rhs: Expr, typing: Schema) 
         )
     if op == SXOP_CONCAT:
         raise Error(_CONCAT_OP_REFUSAL)
+    if (
+        op == SXOP_EQ or op == SXOP_NE or op == SXOP_LT or op == SXOP_LE
+        or op == SXOP_GT or op == SXOP_GE
+    ):
+        return _bind_comparison(_map_binop(op), lhs^, rhs^, typing)
     return Expr.binary(_map_binop(op), lhs^, rhs^)
+
+
+# =============================================================================
+# A DECIMAL compared with a float
+# =============================================================================
+#
+# DuckDB compares a DECIMAL with a FLOAT or DOUBLE in the float's own type: it
+# casts the DECIMAL (MEASURED v1.5.3: `0.1::DECIMAL(2,1) = 0.1::DOUBLE` is
+# true, `l_quantity < 0.2 * avg(l_quantity)` in TPC-H Q17 compares a DECIMAL
+# column with the DOUBLE `avg` gives). The plan's comparison refuses that pair
+# (`batch_eval`: frontends disagree on it), so the SQL binder writes DuckDB's
+# cast. A scalar subquery operand is typed by its body's one output column,
+# which `walk_expr_field` does not see into.
+
+
+def _subquery_free(e: Expr, mut fields: List[Field]) raises -> Expr:
+    """`e` with each scalar subquery replaced by a column `__sq<i>`, its
+    output field appended to `fields`, through binary, unary and CAST nodes,
+    so `walk_expr_field` can type the result."""
+    if e.tag == EXPR_CORRELATED_SUBQUERY:
+        var f = corr_data_inner_plan_ref(e._corr_subq.value()[]).output_schema.field_at_unchecked(0)
+        f.name = "__sq" + String(len(fields))
+        var ref_ = Expr.col_ref(f.name)
+        fields.append(f^)
+        return ref_^
+    if e.tag == EXPR_BINARY_OP:
+        var l = _subquery_free(e.binary_left_ref(), fields)
+        var r = _subquery_free(e.binary_right_ref(), fields)
+        return Expr.binary_with_division_intent(
+            e.binary_op(), l^, r^, e.binary_division_intent()
+        )
+    if e.tag == EXPR_UNARY_OP:
+        return Expr.unary(e.unary_op(), _subquery_free(e.unary_child_ref(), fields))
+    if e.tag == EXPR_CAST:
+        return Expr.cast_preserving_arrow(_subquery_free(e.cast_child_ref(), fields), e)
+    return e.copy()
+
+
+def _operand_type(e: Expr, typing: Schema) raises -> ArrowType:
+    """The Arrow type of `e` over `typing`, a scalar subquery operand typed by
+    its body; NULL when it cannot be typed."""
+    var fields = List[Field]()
+    var free = _subquery_free(e, fields)
+    var sb = SchemaBuilder()
+    for i in range(typing.num_columns()):
+        sb.add_field(typing.field_at_unchecked(i))
+    for i in range(len(fields)):
+        sb.add_field(fields[i].copy())
+    var missing = String("")
+    var t = walk_expr_field[PlanColRefFields](free, sb.build(), missing).arrow_type
+    if missing.byte_length() != 0:
+        return ArrowType.NULL
+    return t
+
+
+def _is_constant(e: Expr) -> Bool:
+    """Whether `e` is literals under binary, unary and CAST nodes only."""
+    if e.tag == EXPR_LITERAL:
+        return True
+    if e.tag == EXPR_BINARY_OP:
+        return _is_constant(e.binary_left_ref()) and _is_constant(e.binary_right_ref())
+    if e.tag == EXPR_UNARY_OP:
+        return _is_constant(e.unary_child_ref())
+    if e.tag == EXPR_CAST:
+        return _is_constant(e.cast_child_ref())
+    return False
+
+
+def _float_dtype(t: ArrowType) -> DType:
+    """The DType of float Arrow type `t` (FLOAT32 is float32, any other
+    float64)."""
+    if t == ArrowType.FLOAT32:
+        return DType.float32
+    return DType.float64
+
+
+def _bind_comparison(op: UInt8, var lhs: Expr, var rhs: Expr, typing: Schema) raises -> Expr:
+    """`lhs <op> rhs`, the DECIMAL side cast to the float's type when the other
+    side is a float that is not a constant (see the section header)."""
+    var lt = _operand_type(lhs, typing)
+    var rt = _operand_type(rhs, typing)
+    # A float constant is left as it is: the optimizer folds it to a literal,
+    # and the comparison kernels serve a DECIMAL against a float literal.
+    if lt == ArrowType.DECIMAL128 and rt.is_floating() and not _is_constant(rhs):
+        lhs = Expr.cast(lhs^, _float_dtype(rt))
+    elif rt == ArrowType.DECIMAL128 and lt.is_floating() and not _is_constant(lhs):
+        rhs = Expr.cast(rhs^, _float_dtype(lt))
+    return Expr.binary(op, lhs^, rhs^)
 
 
 def _bind_like(sx: SqlExpr, var child: Expr) -> Expr:

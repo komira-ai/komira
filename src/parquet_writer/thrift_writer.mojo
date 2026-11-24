@@ -293,6 +293,7 @@ struct ThriftCompactWriter(Movable):
         self.write_optional_i32_field(6, elem.converted_type)
         self.write_optional_i32_field(7, elem.scale)
         self.write_optional_i32_field(8, elem.precision)
+        self.write_optional_i32_field(9, elem.field_id)
         self.pop_list_element_struct()
 
     def write_statistics(mut self, stats: Statistics):

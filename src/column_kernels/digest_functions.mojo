@@ -159,9 +159,9 @@ rotation amounts are written as a comptime ternary inside each of the four
 unrolled phases (`7/12/17/22`, `5/9/14/20`, `4/11/16/23`, `6/10/15/21`, cycling
 on `i % 4`), so each becomes a CONSTANT shift in the emitted code.
 
-⚠ A TABLE HERE DOES NOT COMPILE, WHICH IS WHY. A `comptime InlineArray`
+⚠ A TABLE HERE DOES NOT COMPILE, WHICH IS WHY. A `comptime Array`
 subscripted from a function body — with a comptime index too — makes the
-compiler materialize the whole array into the runtime frame, and `InlineArray`
+compiler materialize the whole array into the runtime frame, and `Array`
 is not `ImplicitlyCopyable`, so it REFUSES ("cannot materialize comptime value
 of type 'Array[Int, Int(64)]'"). `_MD5_K` and `_SHA256_K` solve the same
 problem the other way, as `SIMD` — which IS `ImplicitlyCopyable` — because
@@ -226,14 +226,14 @@ def md5_hex_bytes(s: String) -> List[UInt8]:
         # The branch is on a comptime value in every phase, so unrolling costs
         # nothing and removes it.
         #
-        # ⚠ AND `_MD5_K` IS A `SIMD`, NOT AN `InlineArray`, WHICH IS THE PART
-        # THAT IS FORCED. A `comptime InlineArray` subscripted from a function
+        # ⚠ AND `_MD5_K` IS A `SIMD`, NOT AN `Array`, WHICH IS THE PART
+        # THAT IS FORCED. A `comptime Array` subscripted from a function
         # body makes the compiler materialize the whole array into the runtime
-        # frame, and `InlineArray` is not `ImplicitlyCopyable`, so it REFUSES:
+        # frame, and `Array` is not `ImplicitlyCopyable`, so it REFUSES:
         # "cannot materialize comptime value of type 'Array[UInt32, Int(64)]'".
         #
         # ⛔ AND UNROLLING DOES NOT FIX THAT. A COMPTIME index into a
-        # `comptime InlineArray`
+        # `comptime Array`
         # materializes it just the same; the refusal is about the array's
         # type, not about when the index is known. `SIMD` IS
         # `ImplicitlyCopyable`, so it is indexable from either world, and the

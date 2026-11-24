@@ -75,6 +75,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   codecs, DATE32 and DECIMAL128 types kept, row-group cutting with a page
 #   index, several batches with and without the concat-free path, nullability
 #   per field or per data, refusals.
+# - test_field_ids: Parquet field ids (SchemaElement field 9) through the
+#   Thrift writer and the footer parser, the `field_ids` argument of both
+#   record-batch entry points (no ids writes the old bytes; a wrong count is
+#   refused).
 # - test_no_env_reads: the package's sources read no environment, hold no
 #   raw pointer in a public signature, and import only these deps. It is
 #   staged every source `srcs` compiles.
@@ -110,6 +114,7 @@ mojo_library(
         "tests/test_decimal_encode_direct.mojo",
         "tests/test_dict_encoder_direct.mojo",
         "tests/test_encoded_column.mojo",
+        "tests/test_field_ids.mojo",
         "tests/test_file_decode_roundtrip.mojo",
         "tests/test_file_writer_errors.mojo",
         "tests/test_file_writer_roundtrip.mojo",

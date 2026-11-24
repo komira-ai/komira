@@ -79,7 +79,7 @@ GRAPH_JSON = r'''{
       "srcs": [
         {"path": "src/crypto/src/crypto/__init__.mojo", "sha256": "d5a14f6c5ab62dc23d7263cee1fcc8bdb197155888782e965b052e595404b7dc"},
         {"path": "src/crypto/src/crypto/aead.mojo", "sha256": "0d1939f57349af254e6632fc4a01542855971a17ac0d433596e44a338f2522d2"},
-        {"path": "src/crypto/src/crypto/aes_gcm.mojo", "sha256": "54e8705a1e82ecb42d52456253146bc8c042ea6f7eb984f5fdb3c870a32ea000"},
+        {"path": "src/crypto/src/crypto/aes_gcm.mojo", "sha256": "d8e200994c4c49d0daa407004170d267cf5b6845d9348bbdb9ca23d55d858360"},
         {"path": "src/crypto/src/crypto/cert/__init__.mojo", "sha256": "5305cf56fa6975cd7c7129ffa319dc69d1f43f9d3055dac26bf0802448232164"},
         {"path": "src/crypto/src/crypto/cert/asn1.mojo", "sha256": "4340e5faad20c6fa6dbaf602e3776f009415f6400d12eebd59094eec84255793"},
         {"path": "src/crypto/src/crypto/cert/chain.mojo", "sha256": "4d35d08454ab8de9df1930f06b06c8b0c8f311ddb2766ea2dfe9920433d2b430"},
@@ -87,42 +87,42 @@ GRAPH_JSON = r'''{
         {"path": "src/crypto/src/crypto/cert/root_store.mojo", "sha256": "8179f811ad424446e257c54d22ac0f5484d9210da173a6ccec4dde8bb00b232a"},
         {"path": "src/crypto/src/crypto/cert/root_store_data.mojo", "sha256": "f338e258e81111987f084a74c37c3a0f0c55b30864e8742e07bf76a261398275"},
         {"path": "src/crypto/src/crypto/cert/x509.mojo", "sha256": "0e07938959ce82cda92b6a4c83c67afa68e6842acb4a0d3cf49a0c444202f333"},
-        {"path": "src/crypto/src/crypto/chacha20_poly1305.mojo", "sha256": "79f78a0f00e0c772ac4c7d8e5720b4a07f8c0e05f62394a6d399606f33b5f4af"},
+        {"path": "src/crypto/src/crypto/chacha20_poly1305.mojo", "sha256": "8f6ce0ea9adbbc4979d655547f3498cbacac112a2aca5f41a8fafb13870ce722"},
         {"path": "src/crypto/src/crypto/ecdh_p256.mojo", "sha256": "91bf5f0a574ef0427a165347e57fe2b650bfc30171aa49a485bb06e52857d5ad"},
         {"path": "src/crypto/src/crypto/ecdsa_p256.mojo", "sha256": "c7bcc49581eccf1592f9a41afb14dc9f5d898bfd96b8f8061685d20fa1946cf8"},
         {"path": "src/crypto/src/crypto/ecdsa_p384.mojo", "sha256": "6117c4127b11640a4c4e4653ed01be8d2afc96fb435b647434641ca5ac743ce4"},
-        {"path": "src/crypto/src/crypto/ed25519.mojo", "sha256": "24607f2e6532a759366c9f4308a4e3d37fcd5ba68f44dbaeeb7400ca56ba963a"},
-        {"path": "src/crypto/src/crypto/hash.mojo", "sha256": "9aa90c7b8614d618d59e934eecc383c55c62f13b5f0fe48277d3bcd2b280d036"},
+        {"path": "src/crypto/src/crypto/ed25519.mojo", "sha256": "e2cec95c2ead75eb673ea9f2aff64b39d7efff1c58cfb685af557cc21657af36"},
+        {"path": "src/crypto/src/crypto/hash.mojo", "sha256": "b3c396fb4e7a30ee1042e9c50ea6e8d005e4ed31f451e2856cd55be3f98c5559"},
         {"path": "src/crypto/src/crypto/hex.mojo", "sha256": "640bb00c7e8cfea9f685086ec4c97a586ff08b65073573c1249f1e0e90674ae3"},
-        {"path": "src/crypto/src/crypto/hkdf.mojo", "sha256": "5dc7225c736456ecc15b4091783075f38a44d8ae90606dadef32bcd924150e20"},
-        {"path": "src/crypto/src/crypto/hmac.mojo", "sha256": "54cd03f73a69a614cdfd63294c56ee89c11bd0184722b8c24d9b5e3463bfa646"},
+        {"path": "src/crypto/src/crypto/hkdf.mojo", "sha256": "6ccd473702a897ac51a076627d9a0ccb3472cabf399e03d59e5b07c075331fef"},
+        {"path": "src/crypto/src/crypto/hmac.mojo", "sha256": "cdb9074f8570c62b74afd5370d2df91206667908c5c822c95b3d33b5d7f1f558"},
         {"path": "src/crypto/src/crypto/hmac_streaming.mojo", "sha256": "b750a8072923c2151362c5559fb145dc27aeedf0122c600ca3e4c7e65b9ab821"},
         {"path": "src/crypto/src/crypto/internal/__init__.mojo", "sha256": "1951dac15c825d2df747c0ef9b34a82e3d5b9d44b489474cac3386b537e3c783"},
         {"path": "src/crypto/src/crypto/internal/asm/__init__.mojo", "sha256": "338523a0dcdf3ea174cbe022996d6373a346482912ca8d530d64b7db45e35149"},
-        {"path": "src/crypto/src/crypto/internal/asm/aes_gcm_ffi.mojo", "sha256": "e37b835522ea828694e7763cd8f8e178f952423bbceea7752f2206b1677f46f1"},
-        {"path": "src/crypto/src/crypto/internal/asm/chacha20_poly1305_ffi.mojo", "sha256": "871e5300aa6c72ac850b8931b071866b674a578499fff06c776ae8aacbc04ede"},
-        {"path": "src/crypto/src/crypto/internal/asm/ed25519_ffi.mojo", "sha256": "de33db195a6fae69a2d1017637dc8f169b8fd2df73d7c25442fb085857814486"},
-        {"path": "src/crypto/src/crypto/internal/asm/hkdf_ffi.mojo", "sha256": "660b00f3240bdb10068089e50ec3bf3589096341526257f04c4f0eb19b2f7355"},
-        {"path": "src/crypto/src/crypto/internal/asm/hmac_ffi.mojo", "sha256": "572e0ddb91cdec2d18a28e121293bf7efa7f50fd456d9b77bbf2ae44e7a004ad"},
+        {"path": "src/crypto/src/crypto/internal/asm/aes_gcm_ffi.mojo", "sha256": "e4a44c07fa6e63b7f9004e39c0ec6c5648e150169d0507612d8d7872e9aed8e1"},
+        {"path": "src/crypto/src/crypto/internal/asm/chacha20_poly1305_ffi.mojo", "sha256": "76ee565b96eaf8e17ecd4d856f2b8ce9b1176d2ba34b43675a2b648db0fcbd38"},
+        {"path": "src/crypto/src/crypto/internal/asm/ed25519_ffi.mojo", "sha256": "4455db7fcc0588e3910dc9b7a457ffe525baa4833c1230730313a004a30c7645"},
+        {"path": "src/crypto/src/crypto/internal/asm/hkdf_ffi.mojo", "sha256": "f6b0a771d831a9e4a9397d05a83fc654817a3c76f4ca9abfe6614a810f33b6a0"},
+        {"path": "src/crypto/src/crypto/internal/asm/hmac_ffi.mojo", "sha256": "0e82d5d02673226ba26db70ff65d211f826fca5f591b12d7ff148632c401ce22"},
         {"path": "src/crypto/src/crypto/internal/asm/p256_ecdh_ffi.mojo", "sha256": "d3ae50cbad65721ab3fa213f4e40c9b313ef73dfddf46b19c3e9eaf97ad75905"},
-        {"path": "src/crypto/src/crypto/internal/asm/p256_ffi.mojo", "sha256": "461141784eeb1189b7551019fb7fe3e3321caa8447e40c2dc0f3896939cf429b"},
-        {"path": "src/crypto/src/crypto/internal/asm/p384_ffi.mojo", "sha256": "c9bb318cd1fb635961159501189fa8bed8d88252a315d51cc0e396e113fde25d"},
-        {"path": "src/crypto/src/crypto/internal/asm/rng_ffi.mojo", "sha256": "6131502a69dbc931b740bc9e2c45459157e2f1d8213c1c240064da03662cb79c"},
-        {"path": "src/crypto/src/crypto/internal/asm/rsa_ffi.mojo", "sha256": "49fba5707846986bf5e06cabe34aa283379edbb3f49f0cd28f3147ac30ec28b6"},
-        {"path": "src/crypto/src/crypto/internal/asm/rsa_sign_ffi.mojo", "sha256": "b24da3b89e6b64f3ec9844a868c2b6d73cb82d7db2cc754b2ae92c39bff57fe9"},
+        {"path": "src/crypto/src/crypto/internal/asm/p256_ffi.mojo", "sha256": "ac886ac90a0a4075f34cbd439f604db1d6b33f26864ec6f746ec3f4bba79c98d"},
+        {"path": "src/crypto/src/crypto/internal/asm/p384_ffi.mojo", "sha256": "d2f1ed0d92c54edce67f424890e5333d2414c36707e4e3f3e9cdbee1ca64c041"},
+        {"path": "src/crypto/src/crypto/internal/asm/rng_ffi.mojo", "sha256": "c692d6d66dbe3fad60579959bf4e31ef068a065a27ceb1e579d9a64db99b732f"},
+        {"path": "src/crypto/src/crypto/internal/asm/rsa_ffi.mojo", "sha256": "79797ba098727ecce1d0000db913701f564e1cfa19f6a18c847ae29f1e994443"},
+        {"path": "src/crypto/src/crypto/internal/asm/rsa_sign_ffi.mojo", "sha256": "6d8dda68dbc8723c2c3ef49ca3ea422a3ae17c658a63fc7a015c5d2ab9cb5374"},
         {"path": "src/crypto/src/crypto/internal/asm/sha256_compress.mojo", "sha256": "05278ba39be61bc6370f6ccc58f0a434c09dd29f07cca328d428394eef319fe7"},
-        {"path": "src/crypto/src/crypto/internal/asm/sha256_ffi.mojo", "sha256": "617b2a7c49135ba5819523626ff82cde5d74d5039325f1c35758c36e2f46ab0f"},
-        {"path": "src/crypto/src/crypto/internal/asm/x25519_ffi.mojo", "sha256": "2f35f6a2ec32b2f6a5e36c4abe65cbadbc5026fb1edb20b284f8d396305466d8"},
-        {"path": "src/crypto/src/crypto/pbkdf2.mojo", "sha256": "0afc3fe9f15c3501418d96b1dc80301d6db3341128fe6b5eff7ede738c2f669f"},
+        {"path": "src/crypto/src/crypto/internal/asm/sha256_ffi.mojo", "sha256": "0bd3ec3c07efc50f261e7f802797c0be82bff7fc87f3d4abca06297a2c120836"},
+        {"path": "src/crypto/src/crypto/internal/asm/x25519_ffi.mojo", "sha256": "22d98a45f5559baf98ae1cc7f42333b11da688ccd76b97a3366db6fd76a2818e"},
+        {"path": "src/crypto/src/crypto/pbkdf2.mojo", "sha256": "49b35edea0f894abf5a9c8d6ac93a138fa08527160fcecc87f0dc32e6a54b0b0"},
         {"path": "src/crypto/src/crypto/rng.mojo", "sha256": "e62f6c4d4aa27eee28a5815d77a209befb65cad3afaaed87f6689a0320c33244"},
         {"path": "src/crypto/src/crypto/rsa.mojo", "sha256": "052b6f15ae52d90680cd1b4ac5249c4893595afa011607f98566bffd2ee14eaa"},
-        {"path": "src/crypto/src/crypto/rsa_pem_key.mojo", "sha256": "c2089a2ddb64257dc986ba2f0148800a33607cf8cc9c5c724afae75a463ff4f0"},
-        {"path": "src/crypto/src/crypto/rsa_pss.mojo", "sha256": "b2c6baa0fd0eab3ae839fd83f22ae02d51cb75b52935785eed859a0ad9e8446a"},
-        {"path": "src/crypto/src/crypto/sha256.mojo", "sha256": "a01c578ab53655ec481a10b4ce9e288c37aebfbd7ddcb2f32157b198908b9c33"},
-        {"path": "src/crypto/src/crypto/traits.mojo", "sha256": "4a32ff751d20d7da429d82ee799fb24a0c2af4a7dcfeadcb7ce13c48c84e594d"},
-        {"path": "src/crypto/src/crypto/x25519.mojo", "sha256": "86d06814ae36dffb0a7d87b524ed46aa45769b3f3de452d6883ebfda7094c8a9"},
+        {"path": "src/crypto/src/crypto/rsa_pem_key.mojo", "sha256": "31f2b7801a2f2ea8c3701e9be94c754e51d4d818f4c889edab9e7efd76b08c7f"},
+        {"path": "src/crypto/src/crypto/rsa_pss.mojo", "sha256": "15f53688719763f642793a831febbbefa7f8be5f0f7728dbd02683cfd23b7f2c"},
+        {"path": "src/crypto/src/crypto/sha256.mojo", "sha256": "4771cad0b8925c4ae9e8e7fc53fa2ac7ef9864dd18f3be60ccebf5099fa199e3"},
+        {"path": "src/crypto/src/crypto/traits.mojo", "sha256": "1f2d2f3f2c2331c34292969a82a0ce334fc41ab829d1daf04ecb41e6bd60b492"},
+        {"path": "src/crypto/src/crypto/x25519.mojo", "sha256": "bf2a43ba2ddaf4a2f2f06d1013d4197273775290d1202162d53356825bf94cd5"},
         {"path": "src/crypto/src/crypto/x25519_simd.mojo", "sha256": "f7984dff0328a122393ec019d6a507e7a5cc0d825ea0e79e779c1178ae285991"},
-        {"path": "src/crypto/src/crypto/zeroize.mojo", "sha256": "d7ec51d884a55946d4bc00ae931c9db3724f1a7bf2e0257df24b8bf8d0b9ab76"}
+        {"path": "src/crypto/src/crypto/zeroize.mojo", "sha256": "ed518e2ae03b824d7c1cc0392c527363efc62ca225cc715684bc8a02563320ae"}
       ],
       "deps": ["komira-ai/awslc@0.1.0#mojo1.0.0/lib", "komira-ai/encoding@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -156,7 +156,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/crypto/tests/test_aes_gcm_smoke.mojo", "sha256": "b8e042bbdc07104659234373bd1e8e9616c18665fd876624fb3648789f5398f6"}
+        {"path": "src/crypto/tests/test_aes_gcm_smoke.mojo", "sha256": "29aa15ccfe64080ddce638b3b0d48e23bb2dde50cf24158b21c36692448ac083"}
       ],
       "deps": ["komira-ai/crypto@0.1.0#mojo1.0.0/lib", "komira-ai/uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -615,7 +615,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/crypto/tests/test_ecdsa_p256_smoke.mojo", "sha256": "27710d22e7a802c1af31fd763d051b00bccc58da53e7bf3a7b8761496f68fdc9"}
+        {"path": "src/crypto/tests/test_ecdsa_p256_smoke.mojo", "sha256": "d8d9b43b8e0682e80933278d5cd1d312a234180d0ec5f86e655435f41ab4b040"}
       ],
       "deps": ["komira-ai/crypto@0.1.0#mojo1.0.0/lib", "komira-ai/uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -666,7 +666,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/crypto/tests/test_ecdsa_p384_smoke.mojo", "sha256": "515aeb4274d74e86f1d6881c67a3df5c2d8ed9f2b2a134b95bb1a958413c0d7f"}
+        {"path": "src/crypto/tests/test_ecdsa_p384_smoke.mojo", "sha256": "e777313d9b0be78df61a4032648a12d877b843bea33b7e4ac4bb922cf96ff5a6"}
       ],
       "deps": ["komira-ai/crypto@0.1.0#mojo1.0.0/lib", "komira-ai/uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -1380,7 +1380,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/crypto/tests/test_zeroize_on_drop.mojo", "sha256": "4c4a85cd440bec6c9b16f0279c47736a3948d5ee943e7ad3407f1fd46b9dc115"}
+        {"path": "src/crypto/tests/test_zeroize_on_drop.mojo", "sha256": "18fd85543d5fb601ebf52f3e0d236e0b3823f19f5f6a84a7c0fac8f516c4432b"}
       ],
       "deps": ["komira-ai/crypto@0.1.0#mojo1.0.0/lib", "komira-ai/uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -1516,7 +1516,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "srcs": [
         {"path": "src/crypto/src/crypto/__init__.mojo", "sha256": "d5a14f6c5ab62dc23d7263cee1fcc8bdb197155888782e965b052e595404b7dc"},
         {"path": "src/crypto/src/crypto/aead.mojo", "sha256": "0d1939f57349af254e6632fc4a01542855971a17ac0d433596e44a338f2522d2"},
-        {"path": "src/crypto/src/crypto/aes_gcm.mojo", "sha256": "54e8705a1e82ecb42d52456253146bc8c042ea6f7eb984f5fdb3c870a32ea000"},
+        {"path": "src/crypto/src/crypto/aes_gcm.mojo", "sha256": "d8e200994c4c49d0daa407004170d267cf5b6845d9348bbdb9ca23d55d858360"},
         {"path": "src/crypto/src/crypto/cert/__init__.mojo", "sha256": "5305cf56fa6975cd7c7129ffa319dc69d1f43f9d3055dac26bf0802448232164"},
         {"path": "src/crypto/src/crypto/cert/asn1.mojo", "sha256": "4340e5faad20c6fa6dbaf602e3776f009415f6400d12eebd59094eec84255793"},
         {"path": "src/crypto/src/crypto/cert/chain.mojo", "sha256": "4d35d08454ab8de9df1930f06b06c8b0c8f311ddb2766ea2dfe9920433d2b430"},
@@ -1524,42 +1524,42 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
         {"path": "src/crypto/src/crypto/cert/root_store.mojo", "sha256": "8179f811ad424446e257c54d22ac0f5484d9210da173a6ccec4dde8bb00b232a"},
         {"path": "src/crypto/src/crypto/cert/root_store_data.mojo", "sha256": "f338e258e81111987f084a74c37c3a0f0c55b30864e8742e07bf76a261398275"},
         {"path": "src/crypto/src/crypto/cert/x509.mojo", "sha256": "0e07938959ce82cda92b6a4c83c67afa68e6842acb4a0d3cf49a0c444202f333"},
-        {"path": "src/crypto/src/crypto/chacha20_poly1305.mojo", "sha256": "79f78a0f00e0c772ac4c7d8e5720b4a07f8c0e05f62394a6d399606f33b5f4af"},
+        {"path": "src/crypto/src/crypto/chacha20_poly1305.mojo", "sha256": "8f6ce0ea9adbbc4979d655547f3498cbacac112a2aca5f41a8fafb13870ce722"},
         {"path": "src/crypto/src/crypto/ecdh_p256.mojo", "sha256": "91bf5f0a574ef0427a165347e57fe2b650bfc30171aa49a485bb06e52857d5ad"},
         {"path": "src/crypto/src/crypto/ecdsa_p256.mojo", "sha256": "c7bcc49581eccf1592f9a41afb14dc9f5d898bfd96b8f8061685d20fa1946cf8"},
         {"path": "src/crypto/src/crypto/ecdsa_p384.mojo", "sha256": "6117c4127b11640a4c4e4653ed01be8d2afc96fb435b647434641ca5ac743ce4"},
-        {"path": "src/crypto/src/crypto/ed25519.mojo", "sha256": "24607f2e6532a759366c9f4308a4e3d37fcd5ba68f44dbaeeb7400ca56ba963a"},
-        {"path": "src/crypto/src/crypto/hash.mojo", "sha256": "9aa90c7b8614d618d59e934eecc383c55c62f13b5f0fe48277d3bcd2b280d036"},
+        {"path": "src/crypto/src/crypto/ed25519.mojo", "sha256": "e2cec95c2ead75eb673ea9f2aff64b39d7efff1c58cfb685af557cc21657af36"},
+        {"path": "src/crypto/src/crypto/hash.mojo", "sha256": "b3c396fb4e7a30ee1042e9c50ea6e8d005e4ed31f451e2856cd55be3f98c5559"},
         {"path": "src/crypto/src/crypto/hex.mojo", "sha256": "640bb00c7e8cfea9f685086ec4c97a586ff08b65073573c1249f1e0e90674ae3"},
-        {"path": "src/crypto/src/crypto/hkdf.mojo", "sha256": "5dc7225c736456ecc15b4091783075f38a44d8ae90606dadef32bcd924150e20"},
-        {"path": "src/crypto/src/crypto/hmac.mojo", "sha256": "54cd03f73a69a614cdfd63294c56ee89c11bd0184722b8c24d9b5e3463bfa646"},
+        {"path": "src/crypto/src/crypto/hkdf.mojo", "sha256": "6ccd473702a897ac51a076627d9a0ccb3472cabf399e03d59e5b07c075331fef"},
+        {"path": "src/crypto/src/crypto/hmac.mojo", "sha256": "cdb9074f8570c62b74afd5370d2df91206667908c5c822c95b3d33b5d7f1f558"},
         {"path": "src/crypto/src/crypto/hmac_streaming.mojo", "sha256": "b750a8072923c2151362c5559fb145dc27aeedf0122c600ca3e4c7e65b9ab821"},
         {"path": "src/crypto/src/crypto/internal/__init__.mojo", "sha256": "1951dac15c825d2df747c0ef9b34a82e3d5b9d44b489474cac3386b537e3c783"},
         {"path": "src/crypto/src/crypto/internal/asm/__init__.mojo", "sha256": "338523a0dcdf3ea174cbe022996d6373a346482912ca8d530d64b7db45e35149"},
-        {"path": "src/crypto/src/crypto/internal/asm/aes_gcm_ffi.mojo", "sha256": "e37b835522ea828694e7763cd8f8e178f952423bbceea7752f2206b1677f46f1"},
-        {"path": "src/crypto/src/crypto/internal/asm/chacha20_poly1305_ffi.mojo", "sha256": "871e5300aa6c72ac850b8931b071866b674a578499fff06c776ae8aacbc04ede"},
-        {"path": "src/crypto/src/crypto/internal/asm/ed25519_ffi.mojo", "sha256": "de33db195a6fae69a2d1017637dc8f169b8fd2df73d7c25442fb085857814486"},
-        {"path": "src/crypto/src/crypto/internal/asm/hkdf_ffi.mojo", "sha256": "660b00f3240bdb10068089e50ec3bf3589096341526257f04c4f0eb19b2f7355"},
-        {"path": "src/crypto/src/crypto/internal/asm/hmac_ffi.mojo", "sha256": "572e0ddb91cdec2d18a28e121293bf7efa7f50fd456d9b77bbf2ae44e7a004ad"},
+        {"path": "src/crypto/src/crypto/internal/asm/aes_gcm_ffi.mojo", "sha256": "e4a44c07fa6e63b7f9004e39c0ec6c5648e150169d0507612d8d7872e9aed8e1"},
+        {"path": "src/crypto/src/crypto/internal/asm/chacha20_poly1305_ffi.mojo", "sha256": "76ee565b96eaf8e17ecd4d856f2b8ce9b1176d2ba34b43675a2b648db0fcbd38"},
+        {"path": "src/crypto/src/crypto/internal/asm/ed25519_ffi.mojo", "sha256": "4455db7fcc0588e3910dc9b7a457ffe525baa4833c1230730313a004a30c7645"},
+        {"path": "src/crypto/src/crypto/internal/asm/hkdf_ffi.mojo", "sha256": "f6b0a771d831a9e4a9397d05a83fc654817a3c76f4ca9abfe6614a810f33b6a0"},
+        {"path": "src/crypto/src/crypto/internal/asm/hmac_ffi.mojo", "sha256": "0e82d5d02673226ba26db70ff65d211f826fca5f591b12d7ff148632c401ce22"},
         {"path": "src/crypto/src/crypto/internal/asm/p256_ecdh_ffi.mojo", "sha256": "d3ae50cbad65721ab3fa213f4e40c9b313ef73dfddf46b19c3e9eaf97ad75905"},
-        {"path": "src/crypto/src/crypto/internal/asm/p256_ffi.mojo", "sha256": "461141784eeb1189b7551019fb7fe3e3321caa8447e40c2dc0f3896939cf429b"},
-        {"path": "src/crypto/src/crypto/internal/asm/p384_ffi.mojo", "sha256": "c9bb318cd1fb635961159501189fa8bed8d88252a315d51cc0e396e113fde25d"},
-        {"path": "src/crypto/src/crypto/internal/asm/rng_ffi.mojo", "sha256": "6131502a69dbc931b740bc9e2c45459157e2f1d8213c1c240064da03662cb79c"},
-        {"path": "src/crypto/src/crypto/internal/asm/rsa_ffi.mojo", "sha256": "49fba5707846986bf5e06cabe34aa283379edbb3f49f0cd28f3147ac30ec28b6"},
-        {"path": "src/crypto/src/crypto/internal/asm/rsa_sign_ffi.mojo", "sha256": "b24da3b89e6b64f3ec9844a868c2b6d73cb82d7db2cc754b2ae92c39bff57fe9"},
+        {"path": "src/crypto/src/crypto/internal/asm/p256_ffi.mojo", "sha256": "ac886ac90a0a4075f34cbd439f604db1d6b33f26864ec6f746ec3f4bba79c98d"},
+        {"path": "src/crypto/src/crypto/internal/asm/p384_ffi.mojo", "sha256": "d2f1ed0d92c54edce67f424890e5333d2414c36707e4e3f3e9cdbee1ca64c041"},
+        {"path": "src/crypto/src/crypto/internal/asm/rng_ffi.mojo", "sha256": "c692d6d66dbe3fad60579959bf4e31ef068a065a27ceb1e579d9a64db99b732f"},
+        {"path": "src/crypto/src/crypto/internal/asm/rsa_ffi.mojo", "sha256": "79797ba098727ecce1d0000db913701f564e1cfa19f6a18c847ae29f1e994443"},
+        {"path": "src/crypto/src/crypto/internal/asm/rsa_sign_ffi.mojo", "sha256": "6d8dda68dbc8723c2c3ef49ca3ea422a3ae17c658a63fc7a015c5d2ab9cb5374"},
         {"path": "src/crypto/src/crypto/internal/asm/sha256_compress.mojo", "sha256": "05278ba39be61bc6370f6ccc58f0a434c09dd29f07cca328d428394eef319fe7"},
-        {"path": "src/crypto/src/crypto/internal/asm/sha256_ffi.mojo", "sha256": "617b2a7c49135ba5819523626ff82cde5d74d5039325f1c35758c36e2f46ab0f"},
-        {"path": "src/crypto/src/crypto/internal/asm/x25519_ffi.mojo", "sha256": "2f35f6a2ec32b2f6a5e36c4abe65cbadbc5026fb1edb20b284f8d396305466d8"},
-        {"path": "src/crypto/src/crypto/pbkdf2.mojo", "sha256": "0afc3fe9f15c3501418d96b1dc80301d6db3341128fe6b5eff7ede738c2f669f"},
+        {"path": "src/crypto/src/crypto/internal/asm/sha256_ffi.mojo", "sha256": "0bd3ec3c07efc50f261e7f802797c0be82bff7fc87f3d4abca06297a2c120836"},
+        {"path": "src/crypto/src/crypto/internal/asm/x25519_ffi.mojo", "sha256": "22d98a45f5559baf98ae1cc7f42333b11da688ccd76b97a3366db6fd76a2818e"},
+        {"path": "src/crypto/src/crypto/pbkdf2.mojo", "sha256": "49b35edea0f894abf5a9c8d6ac93a138fa08527160fcecc87f0dc32e6a54b0b0"},
         {"path": "src/crypto/src/crypto/rng.mojo", "sha256": "e62f6c4d4aa27eee28a5815d77a209befb65cad3afaaed87f6689a0320c33244"},
         {"path": "src/crypto/src/crypto/rsa.mojo", "sha256": "052b6f15ae52d90680cd1b4ac5249c4893595afa011607f98566bffd2ee14eaa"},
-        {"path": "src/crypto/src/crypto/rsa_pem_key.mojo", "sha256": "c2089a2ddb64257dc986ba2f0148800a33607cf8cc9c5c724afae75a463ff4f0"},
-        {"path": "src/crypto/src/crypto/rsa_pss.mojo", "sha256": "b2c6baa0fd0eab3ae839fd83f22ae02d51cb75b52935785eed859a0ad9e8446a"},
-        {"path": "src/crypto/src/crypto/sha256.mojo", "sha256": "a01c578ab53655ec481a10b4ce9e288c37aebfbd7ddcb2f32157b198908b9c33"},
-        {"path": "src/crypto/src/crypto/traits.mojo", "sha256": "4a32ff751d20d7da429d82ee799fb24a0c2af4a7dcfeadcb7ce13c48c84e594d"},
-        {"path": "src/crypto/src/crypto/x25519.mojo", "sha256": "86d06814ae36dffb0a7d87b524ed46aa45769b3f3de452d6883ebfda7094c8a9"},
+        {"path": "src/crypto/src/crypto/rsa_pem_key.mojo", "sha256": "31f2b7801a2f2ea8c3701e9be94c754e51d4d818f4c889edab9e7efd76b08c7f"},
+        {"path": "src/crypto/src/crypto/rsa_pss.mojo", "sha256": "15f53688719763f642793a831febbbefa7f8be5f0f7728dbd02683cfd23b7f2c"},
+        {"path": "src/crypto/src/crypto/sha256.mojo", "sha256": "4771cad0b8925c4ae9e8e7fc53fa2ac7ef9864dd18f3be60ccebf5099fa199e3"},
+        {"path": "src/crypto/src/crypto/traits.mojo", "sha256": "1f2d2f3f2c2331c34292969a82a0ce334fc41ab829d1daf04ecb41e6bd60b492"},
+        {"path": "src/crypto/src/crypto/x25519.mojo", "sha256": "bf2a43ba2ddaf4a2f2f06d1013d4197273775290d1202162d53356825bf94cd5"},
         {"path": "src/crypto/src/crypto/x25519_simd.mojo", "sha256": "f7984dff0328a122393ec019d6a507e7a5cc0d825ea0e79e779c1178ae285991"},
-        {"path": "src/crypto/src/crypto/zeroize.mojo", "sha256": "d7ec51d884a55946d4bc00ae931c9db3724f1a7bf2e0257df24b8bf8d0b9ab76"}
+        {"path": "src/crypto/src/crypto/zeroize.mojo", "sha256": "ed518e2ae03b824d7c1cc0392c527363efc62ca225cc715684bc8a02563320ae"}
       ],
       "deps": ["komira-ai/awslc@0.1.0#mojo1.0.0/lib", "komira-ai/encoding@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -1593,7 +1593,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/crypto/tests/test_aes_gcm_smoke.mojo", "sha256": "b8e042bbdc07104659234373bd1e8e9616c18665fd876624fb3648789f5398f6"}
+        {"path": "src/crypto/tests/test_aes_gcm_smoke.mojo", "sha256": "29aa15ccfe64080ddce638b3b0d48e23bb2dde50cf24158b21c36692448ac083"}
       ],
       "deps": ["komira-ai/crypto@0.1.0#mojo1.0.0/lib", "komira-ai/uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -2052,7 +2052,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/crypto/tests/test_ecdsa_p256_smoke.mojo", "sha256": "27710d22e7a802c1af31fd763d051b00bccc58da53e7bf3a7b8761496f68fdc9"}
+        {"path": "src/crypto/tests/test_ecdsa_p256_smoke.mojo", "sha256": "d8d9b43b8e0682e80933278d5cd1d312a234180d0ec5f86e655435f41ab4b040"}
       ],
       "deps": ["komira-ai/crypto@0.1.0#mojo1.0.0/lib", "komira-ai/uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -2103,7 +2103,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/crypto/tests/test_ecdsa_p384_smoke.mojo", "sha256": "515aeb4274d74e86f1d6881c67a3df5c2d8ed9f2b2a134b95bb1a958413c0d7f"}
+        {"path": "src/crypto/tests/test_ecdsa_p384_smoke.mojo", "sha256": "e777313d9b0be78df61a4032648a12d877b843bea33b7e4ac4bb922cf96ff5a6"}
       ],
       "deps": ["komira-ai/crypto@0.1.0#mojo1.0.0/lib", "komira-ai/uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -2817,7 +2817,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/crypto/tests/test_zeroize_on_drop.mojo", "sha256": "4c4a85cd440bec6c9b16f0279c47736a3948d5ee943e7ad3407f1fd46b9dc115"}
+        {"path": "src/crypto/tests/test_zeroize_on_drop.mojo", "sha256": "18fd85543d5fb601ebf52f3e0d236e0b3823f19f5f6a84a7c0fac8f516c4432b"}
       ],
       "deps": ["komira-ai/crypto@0.1.0#mojo1.0.0/lib", "komira-ai/uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -2950,7 +2950,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "srcs": [
         {"path": "src/crypto/src/crypto/__init__.mojo", "sha256": "d5a14f6c5ab62dc23d7263cee1fcc8bdb197155888782e965b052e595404b7dc"},
         {"path": "src/crypto/src/crypto/aead.mojo", "sha256": "0d1939f57349af254e6632fc4a01542855971a17ac0d433596e44a338f2522d2"},
-        {"path": "src/crypto/src/crypto/aes_gcm.mojo", "sha256": "54e8705a1e82ecb42d52456253146bc8c042ea6f7eb984f5fdb3c870a32ea000"},
+        {"path": "src/crypto/src/crypto/aes_gcm.mojo", "sha256": "d8e200994c4c49d0daa407004170d267cf5b6845d9348bbdb9ca23d55d858360"},
         {"path": "src/crypto/src/crypto/cert/__init__.mojo", "sha256": "5305cf56fa6975cd7c7129ffa319dc69d1f43f9d3055dac26bf0802448232164"},
         {"path": "src/crypto/src/crypto/cert/asn1.mojo", "sha256": "4340e5faad20c6fa6dbaf602e3776f009415f6400d12eebd59094eec84255793"},
         {"path": "src/crypto/src/crypto/cert/chain.mojo", "sha256": "4d35d08454ab8de9df1930f06b06c8b0c8f311ddb2766ea2dfe9920433d2b430"},
@@ -2958,42 +2958,42 @@ GRAPH_JSON_OSX_ARM64 = r'''{
         {"path": "src/crypto/src/crypto/cert/root_store.mojo", "sha256": "8179f811ad424446e257c54d22ac0f5484d9210da173a6ccec4dde8bb00b232a"},
         {"path": "src/crypto/src/crypto/cert/root_store_data.mojo", "sha256": "f338e258e81111987f084a74c37c3a0f0c55b30864e8742e07bf76a261398275"},
         {"path": "src/crypto/src/crypto/cert/x509.mojo", "sha256": "0e07938959ce82cda92b6a4c83c67afa68e6842acb4a0d3cf49a0c444202f333"},
-        {"path": "src/crypto/src/crypto/chacha20_poly1305.mojo", "sha256": "79f78a0f00e0c772ac4c7d8e5720b4a07f8c0e05f62394a6d399606f33b5f4af"},
+        {"path": "src/crypto/src/crypto/chacha20_poly1305.mojo", "sha256": "8f6ce0ea9adbbc4979d655547f3498cbacac112a2aca5f41a8fafb13870ce722"},
         {"path": "src/crypto/src/crypto/ecdh_p256.mojo", "sha256": "91bf5f0a574ef0427a165347e57fe2b650bfc30171aa49a485bb06e52857d5ad"},
         {"path": "src/crypto/src/crypto/ecdsa_p256.mojo", "sha256": "c7bcc49581eccf1592f9a41afb14dc9f5d898bfd96b8f8061685d20fa1946cf8"},
         {"path": "src/crypto/src/crypto/ecdsa_p384.mojo", "sha256": "6117c4127b11640a4c4e4653ed01be8d2afc96fb435b647434641ca5ac743ce4"},
-        {"path": "src/crypto/src/crypto/ed25519.mojo", "sha256": "24607f2e6532a759366c9f4308a4e3d37fcd5ba68f44dbaeeb7400ca56ba963a"},
-        {"path": "src/crypto/src/crypto/hash.mojo", "sha256": "9aa90c7b8614d618d59e934eecc383c55c62f13b5f0fe48277d3bcd2b280d036"},
+        {"path": "src/crypto/src/crypto/ed25519.mojo", "sha256": "e2cec95c2ead75eb673ea9f2aff64b39d7efff1c58cfb685af557cc21657af36"},
+        {"path": "src/crypto/src/crypto/hash.mojo", "sha256": "b3c396fb4e7a30ee1042e9c50ea6e8d005e4ed31f451e2856cd55be3f98c5559"},
         {"path": "src/crypto/src/crypto/hex.mojo", "sha256": "640bb00c7e8cfea9f685086ec4c97a586ff08b65073573c1249f1e0e90674ae3"},
-        {"path": "src/crypto/src/crypto/hkdf.mojo", "sha256": "5dc7225c736456ecc15b4091783075f38a44d8ae90606dadef32bcd924150e20"},
-        {"path": "src/crypto/src/crypto/hmac.mojo", "sha256": "54cd03f73a69a614cdfd63294c56ee89c11bd0184722b8c24d9b5e3463bfa646"},
+        {"path": "src/crypto/src/crypto/hkdf.mojo", "sha256": "6ccd473702a897ac51a076627d9a0ccb3472cabf399e03d59e5b07c075331fef"},
+        {"path": "src/crypto/src/crypto/hmac.mojo", "sha256": "cdb9074f8570c62b74afd5370d2df91206667908c5c822c95b3d33b5d7f1f558"},
         {"path": "src/crypto/src/crypto/hmac_streaming.mojo", "sha256": "b750a8072923c2151362c5559fb145dc27aeedf0122c600ca3e4c7e65b9ab821"},
         {"path": "src/crypto/src/crypto/internal/__init__.mojo", "sha256": "1951dac15c825d2df747c0ef9b34a82e3d5b9d44b489474cac3386b537e3c783"},
         {"path": "src/crypto/src/crypto/internal/asm/__init__.mojo", "sha256": "338523a0dcdf3ea174cbe022996d6373a346482912ca8d530d64b7db45e35149"},
-        {"path": "src/crypto/src/crypto/internal/asm/aes_gcm_ffi.mojo", "sha256": "e37b835522ea828694e7763cd8f8e178f952423bbceea7752f2206b1677f46f1"},
-        {"path": "src/crypto/src/crypto/internal/asm/chacha20_poly1305_ffi.mojo", "sha256": "871e5300aa6c72ac850b8931b071866b674a578499fff06c776ae8aacbc04ede"},
-        {"path": "src/crypto/src/crypto/internal/asm/ed25519_ffi.mojo", "sha256": "de33db195a6fae69a2d1017637dc8f169b8fd2df73d7c25442fb085857814486"},
-        {"path": "src/crypto/src/crypto/internal/asm/hkdf_ffi.mojo", "sha256": "660b00f3240bdb10068089e50ec3bf3589096341526257f04c4f0eb19b2f7355"},
-        {"path": "src/crypto/src/crypto/internal/asm/hmac_ffi.mojo", "sha256": "572e0ddb91cdec2d18a28e121293bf7efa7f50fd456d9b77bbf2ae44e7a004ad"},
+        {"path": "src/crypto/src/crypto/internal/asm/aes_gcm_ffi.mojo", "sha256": "e4a44c07fa6e63b7f9004e39c0ec6c5648e150169d0507612d8d7872e9aed8e1"},
+        {"path": "src/crypto/src/crypto/internal/asm/chacha20_poly1305_ffi.mojo", "sha256": "76ee565b96eaf8e17ecd4d856f2b8ce9b1176d2ba34b43675a2b648db0fcbd38"},
+        {"path": "src/crypto/src/crypto/internal/asm/ed25519_ffi.mojo", "sha256": "4455db7fcc0588e3910dc9b7a457ffe525baa4833c1230730313a004a30c7645"},
+        {"path": "src/crypto/src/crypto/internal/asm/hkdf_ffi.mojo", "sha256": "f6b0a771d831a9e4a9397d05a83fc654817a3c76f4ca9abfe6614a810f33b6a0"},
+        {"path": "src/crypto/src/crypto/internal/asm/hmac_ffi.mojo", "sha256": "0e82d5d02673226ba26db70ff65d211f826fca5f591b12d7ff148632c401ce22"},
         {"path": "src/crypto/src/crypto/internal/asm/p256_ecdh_ffi.mojo", "sha256": "d3ae50cbad65721ab3fa213f4e40c9b313ef73dfddf46b19c3e9eaf97ad75905"},
-        {"path": "src/crypto/src/crypto/internal/asm/p256_ffi.mojo", "sha256": "461141784eeb1189b7551019fb7fe3e3321caa8447e40c2dc0f3896939cf429b"},
-        {"path": "src/crypto/src/crypto/internal/asm/p384_ffi.mojo", "sha256": "c9bb318cd1fb635961159501189fa8bed8d88252a315d51cc0e396e113fde25d"},
-        {"path": "src/crypto/src/crypto/internal/asm/rng_ffi.mojo", "sha256": "6131502a69dbc931b740bc9e2c45459157e2f1d8213c1c240064da03662cb79c"},
-        {"path": "src/crypto/src/crypto/internal/asm/rsa_ffi.mojo", "sha256": "49fba5707846986bf5e06cabe34aa283379edbb3f49f0cd28f3147ac30ec28b6"},
-        {"path": "src/crypto/src/crypto/internal/asm/rsa_sign_ffi.mojo", "sha256": "b24da3b89e6b64f3ec9844a868c2b6d73cb82d7db2cc754b2ae92c39bff57fe9"},
+        {"path": "src/crypto/src/crypto/internal/asm/p256_ffi.mojo", "sha256": "ac886ac90a0a4075f34cbd439f604db1d6b33f26864ec6f746ec3f4bba79c98d"},
+        {"path": "src/crypto/src/crypto/internal/asm/p384_ffi.mojo", "sha256": "d2f1ed0d92c54edce67f424890e5333d2414c36707e4e3f3e9cdbee1ca64c041"},
+        {"path": "src/crypto/src/crypto/internal/asm/rng_ffi.mojo", "sha256": "c692d6d66dbe3fad60579959bf4e31ef068a065a27ceb1e579d9a64db99b732f"},
+        {"path": "src/crypto/src/crypto/internal/asm/rsa_ffi.mojo", "sha256": "79797ba098727ecce1d0000db913701f564e1cfa19f6a18c847ae29f1e994443"},
+        {"path": "src/crypto/src/crypto/internal/asm/rsa_sign_ffi.mojo", "sha256": "6d8dda68dbc8723c2c3ef49ca3ea422a3ae17c658a63fc7a015c5d2ab9cb5374"},
         {"path": "src/crypto/src/crypto/internal/asm/sha256_compress.mojo", "sha256": "05278ba39be61bc6370f6ccc58f0a434c09dd29f07cca328d428394eef319fe7"},
-        {"path": "src/crypto/src/crypto/internal/asm/sha256_ffi.mojo", "sha256": "617b2a7c49135ba5819523626ff82cde5d74d5039325f1c35758c36e2f46ab0f"},
-        {"path": "src/crypto/src/crypto/internal/asm/x25519_ffi.mojo", "sha256": "2f35f6a2ec32b2f6a5e36c4abe65cbadbc5026fb1edb20b284f8d396305466d8"},
-        {"path": "src/crypto/src/crypto/pbkdf2.mojo", "sha256": "0afc3fe9f15c3501418d96b1dc80301d6db3341128fe6b5eff7ede738c2f669f"},
+        {"path": "src/crypto/src/crypto/internal/asm/sha256_ffi.mojo", "sha256": "0bd3ec3c07efc50f261e7f802797c0be82bff7fc87f3d4abca06297a2c120836"},
+        {"path": "src/crypto/src/crypto/internal/asm/x25519_ffi.mojo", "sha256": "22d98a45f5559baf98ae1cc7f42333b11da688ccd76b97a3366db6fd76a2818e"},
+        {"path": "src/crypto/src/crypto/pbkdf2.mojo", "sha256": "49b35edea0f894abf5a9c8d6ac93a138fa08527160fcecc87f0dc32e6a54b0b0"},
         {"path": "src/crypto/src/crypto/rng.mojo", "sha256": "e62f6c4d4aa27eee28a5815d77a209befb65cad3afaaed87f6689a0320c33244"},
         {"path": "src/crypto/src/crypto/rsa.mojo", "sha256": "052b6f15ae52d90680cd1b4ac5249c4893595afa011607f98566bffd2ee14eaa"},
-        {"path": "src/crypto/src/crypto/rsa_pem_key.mojo", "sha256": "c2089a2ddb64257dc986ba2f0148800a33607cf8cc9c5c724afae75a463ff4f0"},
-        {"path": "src/crypto/src/crypto/rsa_pss.mojo", "sha256": "b2c6baa0fd0eab3ae839fd83f22ae02d51cb75b52935785eed859a0ad9e8446a"},
-        {"path": "src/crypto/src/crypto/sha256.mojo", "sha256": "a01c578ab53655ec481a10b4ce9e288c37aebfbd7ddcb2f32157b198908b9c33"},
-        {"path": "src/crypto/src/crypto/traits.mojo", "sha256": "4a32ff751d20d7da429d82ee799fb24a0c2af4a7dcfeadcb7ce13c48c84e594d"},
-        {"path": "src/crypto/src/crypto/x25519.mojo", "sha256": "86d06814ae36dffb0a7d87b524ed46aa45769b3f3de452d6883ebfda7094c8a9"},
+        {"path": "src/crypto/src/crypto/rsa_pem_key.mojo", "sha256": "31f2b7801a2f2ea8c3701e9be94c754e51d4d818f4c889edab9e7efd76b08c7f"},
+        {"path": "src/crypto/src/crypto/rsa_pss.mojo", "sha256": "15f53688719763f642793a831febbbefa7f8be5f0f7728dbd02683cfd23b7f2c"},
+        {"path": "src/crypto/src/crypto/sha256.mojo", "sha256": "4771cad0b8925c4ae9e8e7fc53fa2ac7ef9864dd18f3be60ccebf5099fa199e3"},
+        {"path": "src/crypto/src/crypto/traits.mojo", "sha256": "1f2d2f3f2c2331c34292969a82a0ce334fc41ab829d1daf04ecb41e6bd60b492"},
+        {"path": "src/crypto/src/crypto/x25519.mojo", "sha256": "bf2a43ba2ddaf4a2f2f06d1013d4197273775290d1202162d53356825bf94cd5"},
         {"path": "src/crypto/src/crypto/x25519_simd.mojo", "sha256": "f7984dff0328a122393ec019d6a507e7a5cc0d825ea0e79e779c1178ae285991"},
-        {"path": "src/crypto/src/crypto/zeroize.mojo", "sha256": "d7ec51d884a55946d4bc00ae931c9db3724f1a7bf2e0257df24b8bf8d0b9ab76"}
+        {"path": "src/crypto/src/crypto/zeroize.mojo", "sha256": "ed518e2ae03b824d7c1cc0392c527363efc62ca225cc715684bc8a02563320ae"}
       ],
       "deps": ["komira-ai/awslc@0.1.0#mojo1.0.0/lib", "komira-ai/encoding@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -3027,7 +3027,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/crypto/tests/test_aes_gcm_smoke.mojo", "sha256": "b8e042bbdc07104659234373bd1e8e9616c18665fd876624fb3648789f5398f6"}
+        {"path": "src/crypto/tests/test_aes_gcm_smoke.mojo", "sha256": "29aa15ccfe64080ddce638b3b0d48e23bb2dde50cf24158b21c36692448ac083"}
       ],
       "deps": ["komira-ai/crypto@0.1.0#mojo1.0.0/lib", "komira-ai/uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -3486,7 +3486,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/crypto/tests/test_ecdsa_p256_smoke.mojo", "sha256": "27710d22e7a802c1af31fd763d051b00bccc58da53e7bf3a7b8761496f68fdc9"}
+        {"path": "src/crypto/tests/test_ecdsa_p256_smoke.mojo", "sha256": "d8d9b43b8e0682e80933278d5cd1d312a234180d0ec5f86e655435f41ab4b040"}
       ],
       "deps": ["komira-ai/crypto@0.1.0#mojo1.0.0/lib", "komira-ai/uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -3537,7 +3537,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/crypto/tests/test_ecdsa_p384_smoke.mojo", "sha256": "515aeb4274d74e86f1d6881c67a3df5c2d8ed9f2b2a134b95bb1a958413c0d7f"}
+        {"path": "src/crypto/tests/test_ecdsa_p384_smoke.mojo", "sha256": "e777313d9b0be78df61a4032648a12d877b843bea33b7e4ac4bb922cf96ff5a6"}
       ],
       "deps": ["komira-ai/crypto@0.1.0#mojo1.0.0/lib", "komira-ai/uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -4251,7 +4251,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/crypto/tests/test_zeroize_on_drop.mojo", "sha256": "4c4a85cd440bec6c9b16f0279c47736a3948d5ee943e7ad3407f1fd46b9dc115"}
+        {"path": "src/crypto/tests/test_zeroize_on_drop.mojo", "sha256": "18fd85543d5fb601ebf52f3e0d236e0b3823f19f5f6a84a7c0fac8f516c4432b"}
       ],
       "deps": ["komira-ai/crypto@0.1.0#mojo1.0.0/lib", "komira-ai/uuid@0.1.0#mojo1.0.0/lib"],
       "natives": [

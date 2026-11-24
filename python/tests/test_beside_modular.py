@@ -3,7 +3,7 @@
 
     <prefix>/bin/python3.<minor> -I test_beside_modular.py --site <dir>
         [--host-lib <lib>]... --order modular-first|komira-first
-        --runtime same|other --modular-version <v>
+        --runtime same|newer|older --modular-version <v>
         --toolchain-mojo-version <v> --parquet <file.parquet>
 
 Run by wheel_install_run.py, which installed the komira wheel and Modular's
@@ -16,8 +16,9 @@ other libraries from beside it. komira's is loaded by its first call.
 
 What each case holds (docs/design/python_package.md, decision 6, says why):
 
-- the installed mojo-compiler is `--modular-version`, and with `--runtime
-  same` that is the toolchain's Mojo;
+- the installed mojo-compiler is `--modular-version`; with `--runtime same`
+  that is the toolchain's Mojo, and with `newer` or `older` (Modular's
+  version is a later or an earlier release than the toolchain's) it is not;
 - `same`, Modular's first: komira loads and answers, and every Mojo runtime
   library is mapped from <site>/modular/lib only: libkomira bound to Modular's
   runtime, and komira's copy was never opened;
@@ -25,11 +26,17 @@ What each case holds (docs/design/python_package.md, decision 6, says why):
   libKGENCompilerRTShared.so then loads as a second copy, from
   <site>/modular/lib, while the two other libraries are komira's only; komira
   still answers;
-- `other`, Modular's first: komira's first call raises the runtime check's
-  LibraryLoadError (the case states the line);
-- `other`, komira's first: komira loads and answers; Modular's library fails
+- `newer` or `older`, Modular's first: komira's first call raises the
+  runtime check's LibraryLoadError (the case states the line);
+- `newer`, komira's first: komira loads and answers; Modular's library fails
   to load with the loader's `undefined symbol` (its code needs symbols
-  komira's libraries lack), and komira still answers.
+  komira's older libraries lack), and komira still answers;
+- `older`, komira's first: komira loads and answers; Modular's
+  libKGENCompilerRTShared.so loads as a second copy, from <site>/modular/lib,
+  bound to komira's two other libraries (komira's newer ones define every
+  `M::` symbol it needs, read with `nm -D` for 1.0.0, 1.1.0 and 1.2.0; first
+  run when the toolchain is at a version newer than another table row), and
+  komira still answers.
 
 Any failure raises; its last traceback line is what a refusing case names.
 """
@@ -62,7 +69,7 @@ def parse(argv):
     for flag in _VALUED:
         if flag[2:].replace("-", "_") not in opts:
             raise SystemExit("test_beside_modular: {} is required".format(flag))
-    if opts["order"] not in ("modular-first", "komira-first") or opts["runtime"] not in ("same", "other"):
+    if opts["order"] not in ("modular-first", "komira-first") or opts["runtime"] not in ("same", "newer", "older"):
         raise SystemExit("test_beside_modular: --order or --runtime has no such value")
     return opts
 
@@ -105,6 +112,11 @@ def main(argv):
             "the same-version cases need Modular's runtime at the toolchain's Mojo: mojo-compiler {} is installed, "
             "the toolchain's is {}".format(installed, opts["toolchain_mojo_version"])
         )
+    else:
+        assert installed != opts["toolchain_mojo_version"], (
+            "the other-version cases need Modular's runtime at another Mojo than the toolchain's: mojo-compiler {} "
+            "is installed, the toolchain's is {}".format(installed, opts["toolchain_mojo_version"])
+        )
 
     import komira
 
@@ -115,7 +127,8 @@ def main(argv):
         load_modular()
         for name in _RUNTIME:
             assert mapped_dirs(name) == {modular}, "{} is mapped from {}".format(name, mapped_dirs(name))
-        # `other`: the runtime check refuses here, and that line is the case's.
+        # `newer` or `older`: the runtime check refuses here, and that line is
+        # the case's.
         answers(komira, opts["parquet"])
         for name in _RUNTIME:
             assert mapped_dirs(name) == {modular}, "after komira loaded, {} is mapped from {}".format(name, mapped_dirs(name))
@@ -125,14 +138,14 @@ def main(argv):
     answers(komira, opts["parquet"])
     for name in _RUNTIME:
         assert mapped_dirs(name) == {ours}, "{} is mapped from {}".format(name, mapped_dirs(name))
-    if opts["runtime"] == "same":
+    if opts["runtime"] in ("same", "older"):
         load_modular()
         kgen = mapped_dirs("libKGENCompilerRTShared.so")
         assert kgen == {ours, modular}, "libKGENCompilerRTShared.so is mapped from {}".format(kgen)
         for name in _RUNTIME[1:]:
             assert mapped_dirs(name) == {ours}, "{} is mapped from {}".format(name, mapped_dirs(name))
         answers(komira, opts["parquet"])
-        print("beside: komira's runtime first; Modular's libKGENCompilerRTShared.so a second copy on komira's two others")
+        print("beside: komira's runtime first; Modular's {} libKGENCompilerRTShared.so a second copy on komira's two others".format(installed))
         return
     try:
         load_modular()

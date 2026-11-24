@@ -35,14 +35,14 @@ the surface has no spelling, and the cell stays empty by decision.
 |---|---|---|---|---|
 | `scan_parquet` | `km.read_parquet(path)` | `kpl.scan_parquet(path)` | SCAN, `SOURCE_PARQUET`, local files (one file, a glob or a directory; Hive columns detected) | cut |
 | `scan_csv` | `km.read_csv(path, sep=",", header="infer")` | `kpl.scan_csv(path, separator=",", has_header=True)` | SCAN of the `komira.csv` binding, `source_kind` UNSET (the `read_csv` shape of `komira_pandas_door_e2e`) | refused at lower |
-| `scan_jsonl` | `km.read_json(path, lines=True)`; `lines=False` refused | `kpl.scan_ndjson(path)` | SCAN, `SOURCE_NDJSON` | refused at lower |
+| `scan_jsonl` | `km.read_json(path, lines=True)`; `lines=False` refused | `kpl.scan_ndjson(path)` | SCAN, `SOURCE_NDJSON` | cut (`SOURCE_JSONL`, one local file) |
 | `scan_orc` | `km.read_orc(path)` | `kpl.scan_orc(path)` (komira's verb; polars has none) | SCAN, `SOURCE_ORC` | refused at lower |
 | `scan_avro` | `km.read_avro(path)` (komira's verb; pandas has none) | `kpl.scan_avro(path)` (komira's verb; polars reads Avro only eagerly) | SCAN, `SOURCE_AVRO` | refused at lower |
 | `scan_arrow_ipc` | `km.read_feather(path)` | `kpl.scan_ipc(path)` | SCAN, `SOURCE_ARROW` | refused at lower |
 | `scan_in_memory` | `km.from_arrow(data)` | `kpl.from_arrow(data)` | SCAN of a table the session registered from the Arrow C stream (rules section 4) | not wired |
-| `scan_s3` | a reader given an `s3://` path | the same | SCAN with the `s3` scheme | refused at lower |
-| `scan_gs` | a reader given a `gs://` path | the same | SCAN with the `gcs` scheme | refused at lower |
-| `scan_az` | a reader given an `az://` path | the same | SCAN with the `azure` scheme | refused at lower |
+| `scan_s3` | a reader given an `s3://` path | the same | SCAN with the `s3` scheme | cut; read through the run's `S3ScanFs` |
+| `scan_gs` | a reader given a `gs://` path | the same | SCAN with the `gcs` scheme | cut; read through the run's `GcsScanFs` |
+| `scan_az` | a reader given an `az://` path | the same | SCAN with the `azure` scheme | cut; read through the run's `AzureScanFs` |
 | `filter` | `df[pred]`, where `pred` is a boolean `Series` of `df` | `lf.filter(pred)` | FILTER | cut |
 | `project` | `df[["a", "b"]]`, `df.rename(columns=...)`, `add_prefix`, `add_suffix` | `lf.select("a", "b")`, `lf.select(kpl.col("a").alias("b"))`, `lf.rename(...)` | PROJECT of column references and aliases | cut |
 | `computed_column` | `df.assign(x=...)`, `df["x"] = ...`; operators `+ - * / // % **`, comparisons, `& \| ~`; `abs()`, `round()`, `fillna`, `isna`, `notna` | `lf.with_columns(expr)`, `lf.select(expr)`; the same operators; `kpl.lit`, `abs`, `round`, `fill_null`, `fill_nan`, `is_null`, `is_nan` | PROJECT of literals, binary and unary ops (`build_with_columns_plan`) | cut |
@@ -68,13 +68,13 @@ the surface has no spelling, and the cell stays empty by decision.
 | `group_by` | `df.groupby(keys).agg(...)`, `.size()`, `.count()`, `.sum()`, `.mean()`, `.min()`, `.max()` and the others (rules section 8, ruling 4) | `lf.group_by(keys).agg(...)`, `.len()`, `.sum()` and the others | AGGREGATE; pandas adds a SORT above it (`sort=True`) and a FILTER of missing keys below it (`dropna=True`) | cut, for the group key types the sinks serve |
 | `window` | `df.groupby(k)[c].transform("sum")`; on an ordered frame `.cumsum()`, `.rolling(n, min_periods=1).mean()`; `.rank(method="min"\|"dense")`; a `Series` aggregate used inside `assign` | `expr.over(keys)`; with an order (`order_by=` or an ordered frame) `cum_sum`, `cum_count`, `cum_min`, `cum_max`, `rolling_sum`, `rolling_mean`, `rolling_min`, `rolling_max`; `rank(method="min"\|"dense")`; an aggregate beside a row-wise value in `select` or `with_columns` (a broadcast) | PARTITION_BY (`select_broadcasting_aggregates` for a broadcast); rules section 7 for the order | refused at lower |
 | `sort` | `df.sort_values(by, ascending=True, na_position="last")` | `lf.sort(by, descending=False, nulls_last=False)` | SORT, every key with an explicit `nulls_first` (rules section 8, ruling 5) | cut |
-| `topn` | `df.nlargest(n, columns)`, `df.nsmallest(n, columns)` | `lf.top_k(k, by=...)`, `lf.bottom_k(k, by=...)` | TOPN; ties at the boundary as in rules section 7 | refused at lower |
+| `topn` | `df.nlargest(n, columns)`, `df.nsmallest(n, columns)` | `lf.top_k(k, by=...)`, `lf.bottom_k(k, by=...)` | TOPN; ties at the boundary as in rules section 7 | cut (SINK_TOPN) |
 | `topn_per_group` | `df.sort_values(o).groupby(k).head(n)` | `lf.sort(o).group_by(k).head(n)` | PARTITION_TOPN | refused at lower |
-| `limit` | `df.head(n)` | `lf.head(n)`, `lf.limit(n)`; `lf.slice(offset, n)` on an ordered frame | LIMIT, offset 0 unless `slice` | cut, with no offset and not above a sort |
+| `limit` | `df.head(n)` | `lf.head(n)`, `lf.limit(n)`; `lf.slice(offset, n)` on an ordered frame | LIMIT, offset 0 unless `slice` | cut; a limit or an offset above a sort is cut as that range of the sort (SINK_TOPN), an offset over no sort is refused |
 | `distinct` | `df.drop_duplicates()`, `df.drop_duplicates(subset=...)` | `lf.unique()`, `lf.unique(subset=..., keep="any")` | DISTINCT, of whole rows or of `subset` | whole rows served by lowering for the key coverage of the grouped sinks; `subset` refused at lower |
 | `union` | `km.concat(frames)` | `kpl.concat(frames, how="vertical")` | UNION of one schema (`concat_schema_check`; rules section 8, ruling 15) | cut |
 | `subquery` | - | - | neither library has a subquery inside an expression; a broadcast aggregate is a window | - |
-| `view` | `km.register_view(name, df)`, then `km.sql(...)` | `km.register_view(name, lf)`, then `km.sql(...)` | VIEW_REF | not wired |
+| `view` | `km.add_sql_binding(name, df)`, then `km.sql(...)`; or `km.sql(..., name=df)` | `km.add_sql_binding(name, lf)`, then `km.sql(...)`; or `km.sql(..., name=lf)` | VIEW_REF | not wired |
 | `udf_map` | `s.map(f)`, `s.apply(f)`, `df.apply(f, axis=1)` | `expr.map_elements(f, return_dtype=...)`, `expr.map_batches(f, return_dtype=...)` | a `UdfRef` called by `WireUdfApply` | refused at lower; the verbs raise until UDF workers land |
 | `udf_filter` | `df[df["x"].map(f)]` | `lf.filter(expr.map_elements(f, return_dtype="bool"))` | a boolean `WireUdfApply` in a FILTER | as `udf_map` |
 | `udf_agg` | `df.groupby(k).agg(out=("c", f))` | `lf.group_by(k).agg(expr.agg_udf(f, return_dtype=...))` (komira's verb) | `AGG_UDF` over an AGGREGATE `UdfRef` | as `udf_map` |

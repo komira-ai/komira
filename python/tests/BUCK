@@ -21,9 +21,10 @@ _ON = {p["suffix"]: ({"python": p["python"]} if p["suffix"] else {}) for p in PY
 # Stand-ins for libkomira (fake_libkomira.c). The loader must refuse a library
 # of ABI major 2, of major 0 (version 0.999), one reporting -1, one without
 # komira_abi_version and a 1.1 one without komira_register_parquet; it must
-# load a 1.0 one (without the calls 1.1 added) and a 1.3 one. `fake_modes`
+# load a 1.0 one (without the calls 1.1 and 1.2 added) and a 1.3 one. `fake_modes`
 # (version 1.1) answers each call by the mode its register_parquet name set,
-# for the error path, the two-call protocol and the output calls.
+# for the error path, the two-call protocol and the output calls. `fake_store`
+# (version 1.2) records every credential call in its fake store.
 c_shared_lib(
     name = "fake_v2",
     srcs = ["fake_libkomira.c"],
@@ -80,6 +81,13 @@ c_shared_lib(
     name = "fake_modes",
     srcs = ["fake_libkomira.c"],
     out = "libkomira_fake_modes.so",
+)
+
+c_shared_lib(
+    name = "fake_store",
+    srcs = ["fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=1002"],
+    out = "libkomira_fake_store.so",
 )
 
 # Stand-ins for a Mojo runtime library (fake_runtime_lib.c), for the check of
@@ -177,7 +185,8 @@ _FAKE_RUNTIME = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
-# Any minor of ABI 1 loads: 1.0, whose 1.1 calls raise when used, and 1.3.
+# Any minor of ABI 1 loads: 1.0, whose 1.1 and 1.2 calls raise when used, and
+# 1.3, which seals a credential.
 [python_binding_test(
     name = "minor0_test" + p["suffix"],
     src = "test_minor.py",
@@ -215,6 +224,33 @@ _FAKE_RUNTIME = [
     name = "two_call_test" + p["suffix"],
     src = "test_two_call.py",
     data = {"fake_modes/libkomira.so": ":fake_modes"},
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Credential objects and sealing them on a session, on the stand-in's fake
+# store: the name grammar and reserved names, each field's type, emptiness,
+# UTF-8 and 4096-byte bound, repr with secrets as <set>, no pickle or copy;
+# the kind, name, field ids and exact value bytes each kind sends, in order,
+# in the session scope; nothing sent for AMBIENT and ANONYMOUS or on a closed
+# session; an engine refusal of add, set or seal as CredentialsError with the
+# library's message, and a -2 or a -3 with no message as KomiraError.
+[python_binding_test(
+    name = "credentials_test" + p["suffix"],
+    src = "test_credentials.py",
+    data = {"fake_store/libkomira.so": ":fake_store"},
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Credentials on the real library: every kind seals, the package's edges
+# (a 128-byte name, a 4096-byte value) are accepted, and each refusal of the
+# credential calls is a CredentialsError with the library's
+# CREDENTIALS_INVALID message; a value above 64 MiB is a KomiraError.
+[python_binding_test(
+    name = "credentials_lib_test" + p["suffix"],
+    src = "test_credentials_lib.py",
+    data = {"libkomira": LIBKOMIRA},
     deps = ["//python:komira"],
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
@@ -334,6 +370,10 @@ _CASES = [
 #   cases that add no node.
 # - ops_no_sql_test: no node, verb or module of komira._ops renders SQL text,
 #   with cases that show each check fails when one does.
+# - ops_udf_test: the user-function nodes (UdfSpec, UdfCall, MapBatches), their
+#   refusals, the walkers over a call and the map_batches verb.
+# - ops_dtype_test: the dtype spellings of a user function's return type, their
+#   canonical forms, and every refusal with its full message.
 [py_test(
     name = "ops_{}_test{}".format(area, p["suffix"]),
     src = "test_ops_{}.py".format(area),
@@ -346,7 +386,102 @@ _CASES = [
     "rel_join",
     "verbs",
     "no_sql",
+    "udf",
+    "dtype",
 ]]
+
+# The Iceberg catalog and table sources (komira._iceberg), with no library:
+# the catalog URI's scheme, host, user, password, query and fragment, the
+# warehouse, which credential fits a catalog with and without SigV4 signing,
+# access_delegation's two values, how a table name splits into namespace
+# levels and a table, repr with secrets as <set>, no pickle or copy, and that
+# building one loads no library.
+[py_test(
+    name = "iceberg_test" + p["suffix"],
+    src = "test_iceberg.py",
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Capture of a user function (komira._capture), with no library: the `@udf`
+# decorator, return types, the read set (columns=, annotations and the
+# bytecode scan), the package or bundle code form, the deterministic bundle
+# and the code root. The fixture functions are real modules, because capture
+# reads a function's source file.
+[py_test(
+    name = "capture_test" + p["suffix"],
+    src = "test_capture.py",
+    srcs = [
+        "fixtures/udfs/__init__.py",
+        "fixtures/udfs/future.py",
+        "fixtures/udfs/rows.py",
+        "fixtures/udfs/scalars.py",
+    ],
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# The plan encoder's expressions (komira/_plan), on each supported minor under
+# the newest protobuf the range admits, and on CPython 3.13 under the oldest:
+#
+# - plan_expr_test: each literal kind at its boundaries, column sides, the
+#   argument counts of the many-argument string functions, the arithmetic and
+#   cast result types, the CASE literal promotion, and every refusal with its
+#   full message.
+# - plan_expr_goldens_test: the projections of plan_wire's `expr_*` goldens,
+#   which the engine built (src/plan_wire/tests/test_plan_wire_expr_goldens*),
+#   encode to exactly each golden's `.canonical.hex`, which plan_wire's test
+#   decodes back to the engine's plan; and the check fails for an expression or
+#   a field that differs.
+_PLAN_EXPR_RUNTIMES = [
+    (p["suffix"], p, "7.36.2")
+    for p in PYTHONS
+] + [("_protobuf_lower_edge", [p for p in PYTHONS if not p["suffix"]][0], "5.29.1")]
+
+[py_test(
+    name = "plan_expr{}_test{}".format(area, suffix),
+    src = "test_plan_expr{}.py".format(area),
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    args = ["--golden", "$(location komira//src/plan_wire:golden_fixtures)"] if area else [],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES for area in ["", "_goldens"]]
+
+# The plan encoder's relational nodes (komira/_plan), on the same runtimes:
+#
+# - plan_rel_test: the scan sources and the checks of a scan's declared
+#   columns, the field each aggregate and window function derives over each
+#   input type that changes it, join nullability and renaming, a residual typed
+#   by side, the window stacking and its shadow names, and every refusal with
+#   its full message.
+# - plan_rel_goldens_test: the plans of plan_wire's `rel_*` goldens, which the
+#   engine built (src/plan_wire/tests/test_plan_wire_rel_goldens*), encode to
+#   exactly each golden's `.canonical.hex`; and the check fails, at the node
+#   that differs, for a sort key, an aggregate's type, a join kind or a window
+#   frame that differs.
+# - plan_no_sql_test: the encoder imports nothing that reaches libkomira or SQL,
+#   and names and holds no SQL text.
+# - plan_udf_test: the UdfRef of each kind of user function, the table that
+#   indexes them, the komira/python descriptor bytes, the output schema of a
+#   call and of a MapBatches node, and the refusal of an argument or read-set
+#   column type the runtime does not carry.
+# - plan_udf_goldens_test: the plans of plan_wire's `udf_*` goldens, which the
+#   engine built (src/plan_wire/tests/test_plan_wire_udf_goldens), encode to
+#   exactly each golden's `.canonical.hex`, UdfRefs included; and the check
+#   fails, at the node or the UdfRef that differs, for a read set, a stability, a
+#   null mode or a return type that differs.
+[py_test(
+    name = "plan_{}_test{}".format(area, suffix),
+    src = "test_plan_{}.py".format(area),
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    args = ["--golden", "$(location komira//src/plan_wire:golden_fixtures)"] if area in ["rel_goldens", "udf_goldens"] else [],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES for area in ["rel", "rel_goldens", "no_sql", "udf", "udf_goldens"]]
 
 # The clean-environment install tests of the wheel (python/BUCK,
 # wheel_install_test): the driver that installs the wheels into an empty
@@ -365,3 +500,53 @@ _CASES = [
     "fixtures/scan_plan.hex",
     "fixtures/previous_release_only.txt",
 ]]
+
+# The komira/python UDF runtime (src/udf_python) behind a ctypes host of its C
+# ABI (udf_host.py), on the two minors that have a pinned pyarrow: CPython 3.13
+# and 3.14. The library is staged as `libkomira_udf_python.so` in --lib-dir.
+_UDF_PYARROW = {
+    "": "komira//third_party/python:pyarrow",
+    "_py314": "komira//third_party/python:pyarrow-cp314",
+}
+
+[python_binding_test(
+    name = test[5:] + "_test" + p["suffix"],
+    src = test + ".py",
+    srcs = ["udf_host.py"],
+    data = {"libkomira_udf_python.so": "komira//src/udf_python:komira_udf_python"},
+    deps = ["//python:komira", _UDF_PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for test in [
+    "test_udf_contract",
+    "test_udf_process",
+    "test_udf_calls",
+    "test_udf_lifecycle",
+    "test_udf_cancel",
+    "test_udf_generations",
+    "test_udf_supervision",
+    "test_udf_engine_child",
+    "test_udf_types",
+    "test_udf_ipc",
+] for p in PYTHONS if p["suffix"] in _UDF_PYARROW]
+
+# A function the SDK captured and the plan encoder wrote, run in the same
+# runtime from nothing but the plan's UdfRef (test_udf_plan_run.py): the values
+# it gives, the refusal of a changed descriptor or code object, and of a row
+# function's descriptor. It reads the plan modules, so it takes the protobuf
+# runtime of each minor.
+[python_binding_test(
+    name = "udf_plan_run_test" + p["suffix"],
+    src = "test_udf_plan_run.py",
+    srcs = [
+        "udf_host.py",
+        "fixtures/udfs/__init__.py",
+        "fixtures/udfs/runtime.py",
+    ],
+    data = {"libkomira_udf_python.so": "komira//src/udf_python:komira_udf_python"},
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _UDF_PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS if p["suffix"] in _UDF_PYARROW]

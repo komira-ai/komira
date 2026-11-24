@@ -113,7 +113,7 @@ def _check_nt_copy(n: Int, dst_off: Int, src_off: Int) raises -> None:
     var src_total = n + src_off + PAD
     var src = _arena(src_total, 0)
     # `_pattern` has period 256: build one period, then tile it by memcpy.
-    var period = InlineArray[UInt8, 256](fill=0)
+    var period = Array[UInt8, 256](fill=0)
     for i in range(256):
         period[i] = _pattern(i)
     var filled = 0

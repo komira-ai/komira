@@ -73,7 +73,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/chat_proto/tests/test_chat_goldens.mojo", "sha256": "0b55e78719475211665d25e9c973bd39504bc604aa247ea8443ee34c147b90dd"}
+        {"path": "src/chat_proto/tests/test_chat_goldens.mojo", "sha256": "aa9034ebc223ce6c2aba9189fa50eff87ee5f37ace94f2b34ff4055b1dcbc906"}
       ],
       "deps": ["komira-ai/chat_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -192,7 +192,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/chat_proto/tests/test_chat_goldens.mojo", "sha256": "0b55e78719475211665d25e9c973bd39504bc604aa247ea8443ee34c147b90dd"}
+        {"path": "src/chat_proto/tests/test_chat_goldens.mojo", "sha256": "aa9034ebc223ce6c2aba9189fa50eff87ee5f37ace94f2b34ff4055b1dcbc906"}
       ],
       "deps": ["komira-ai/chat_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -308,7 +308,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/chat_proto/tests/test_chat_goldens.mojo", "sha256": "0b55e78719475211665d25e9c973bd39504bc604aa247ea8443ee34c147b90dd"}
+        {"path": "src/chat_proto/tests/test_chat_goldens.mojo", "sha256": "aa9034ebc223ce6c2aba9189fa50eff87ee5f37ace94f2b34ff4055b1dcbc906"}
       ],
       "deps": ["komira-ai/chat_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],

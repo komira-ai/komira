@@ -93,7 +93,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "79481aae56e4f5780ceaa4fcd93f5759dc15bc447b5fd53c75d11c9a08b117ee"}
+        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "5294336f21b35c39570eda3d793a518379f3d6e04307bc1e73e0f7474a0b94f2"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -107,7 +107,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "fcfcf09b7b1590612c1db1b7450035f21cea856696d1ab2aefd8004deed085b9"}
+        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "7dece02999b5af0f9642c3e1b8a56e66ea06bc3f883e55f995bed531c8651e8d"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -121,7 +121,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "62716d52d69fad6f7187616833a3fbc895059ef3208e2faaeffb63efe85a7a87"}
+        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "c64310777f4ea45d9a7e19b7f2f2f4abbb01cf5edf802e2d50f2d89f5bf08588"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -135,7 +135,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_enum_numbers_functions.mojo", "sha256": "e8438c5769aa887dfd96bf1af1d9bf8327a378e53f599ea97c0f643c21cbbf8e"}
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_functions.mojo", "sha256": "c8b866e643e3911f46a3b68440fa1690c71da0f495266aca6a0aad7abb106c21"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -149,7 +149,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "bab1db411a96d32066403b77772342933beac7a9f7ef62f245134ff3f24646ce"}
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "0c3a4c1c2b1a7924d093e1fb89e84e8c5dcfe2ada16c3958c77be09387fa74ab"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -205,7 +205,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_field_numbers_udf.mojo", "sha256": "014df8fec56826fdee24aa9c6524e5d8ed12a598def99add2d151e098d744f61"}
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_udf.mojo", "sha256": "2e2230d2947374dac8f6078fc430913d8a21c8af2fa1eef40e9c8b783671f013"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -334,7 +334,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "79481aae56e4f5780ceaa4fcd93f5759dc15bc447b5fd53c75d11c9a08b117ee"}
+        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "5294336f21b35c39570eda3d793a518379f3d6e04307bc1e73e0f7474a0b94f2"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -348,7 +348,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "fcfcf09b7b1590612c1db1b7450035f21cea856696d1ab2aefd8004deed085b9"}
+        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "7dece02999b5af0f9642c3e1b8a56e66ea06bc3f883e55f995bed531c8651e8d"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -362,7 +362,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "62716d52d69fad6f7187616833a3fbc895059ef3208e2faaeffb63efe85a7a87"}
+        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "c64310777f4ea45d9a7e19b7f2f2f4abbb01cf5edf802e2d50f2d89f5bf08588"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -376,7 +376,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_enum_numbers_functions.mojo", "sha256": "e8438c5769aa887dfd96bf1af1d9bf8327a378e53f599ea97c0f643c21cbbf8e"}
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_functions.mojo", "sha256": "c8b866e643e3911f46a3b68440fa1690c71da0f495266aca6a0aad7abb106c21"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -390,7 +390,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "bab1db411a96d32066403b77772342933beac7a9f7ef62f245134ff3f24646ce"}
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "0c3a4c1c2b1a7924d093e1fb89e84e8c5dcfe2ada16c3958c77be09387fa74ab"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -446,7 +446,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_field_numbers_udf.mojo", "sha256": "014df8fec56826fdee24aa9c6524e5d8ed12a598def99add2d151e098d744f61"}
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_udf.mojo", "sha256": "2e2230d2947374dac8f6078fc430913d8a21c8af2fa1eef40e9c8b783671f013"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -572,7 +572,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "79481aae56e4f5780ceaa4fcd93f5759dc15bc447b5fd53c75d11c9a08b117ee"}
+        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "5294336f21b35c39570eda3d793a518379f3d6e04307bc1e73e0f7474a0b94f2"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -586,7 +586,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "fcfcf09b7b1590612c1db1b7450035f21cea856696d1ab2aefd8004deed085b9"}
+        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "7dece02999b5af0f9642c3e1b8a56e66ea06bc3f883e55f995bed531c8651e8d"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -600,7 +600,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "62716d52d69fad6f7187616833a3fbc895059ef3208e2faaeffb63efe85a7a87"}
+        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "c64310777f4ea45d9a7e19b7f2f2f4abbb01cf5edf802e2d50f2d89f5bf08588"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -614,7 +614,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_enum_numbers_functions.mojo", "sha256": "e8438c5769aa887dfd96bf1af1d9bf8327a378e53f599ea97c0f643c21cbbf8e"}
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_functions.mojo", "sha256": "c8b866e643e3911f46a3b68440fa1690c71da0f495266aca6a0aad7abb106c21"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -628,7 +628,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "bab1db411a96d32066403b77772342933beac7a9f7ef62f245134ff3f24646ce"}
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "0c3a4c1c2b1a7924d093e1fb89e84e8c5dcfe2ada16c3958c77be09387fa74ab"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -684,7 +684,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_field_numbers_udf.mojo", "sha256": "014df8fec56826fdee24aa9c6524e5d8ed12a598def99add2d151e098d744f61"}
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_udf.mojo", "sha256": "2e2230d2947374dac8f6078fc430913d8a21c8af2fa1eef40e9c8b783671f013"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.0.0/lib"],
       "natives": [],

@@ -24,7 +24,8 @@
 #   9. Integers. A sum that wraps Int64 (in one SIMD lane, in a SIMD block
 #      before the last, in the lane fold, on the scalar path, downwards) is
 #      Absent; one that ends in range
-#      without wrapping is Exact. A UINT64 value above Int64.MAX: no
+#      without wrapping is Exact, also when a SIMD lane wraps but the rows in
+#      their order do not (the lanes hold every W-th row). A UINT64 value above Int64.MAX: no
 #      min/max/sum, NDV still exact.
 #  10. A saturated sketch on an overflowed column: the Inexact NDV is the
 #      non-null value count (nulls not counted), not 0.
@@ -479,6 +480,24 @@ def test_int64_sum_in_range_stays_exact() raises:
     var s = _stats1(_int_col[DType.int64](vals), ArrowType.INT64)
     assert_true(s.sum.is_exact())
     assert_equal(s.sum.value.value().int_val, Int64(-1))
+
+
+def test_int64_sum_whose_simd_lane_wraps_but_rows_do_not_is_exact() raises:
+    """Two SIMD blocks: MAX then MIN then zeros, then 1 then zeros. In row
+    order the sum is MAX + MIN = -1, then 0, and never wraps; lane 0 holds
+    MAX and 1, which wrap. The sum is exactly 0, as the row-at-a-time path
+    gives, for any lane count W."""
+    var vals = List[Int64]()
+    vals.append(Int64.MAX)
+    vals.append(Int64.MIN)
+    for _ in range(W - 2):
+        vals.append(Int64(0))
+    vals.append(Int64(1))
+    for _ in range(W - 1):
+        vals.append(Int64(0))
+    var s = _stats1(_int_col[DType.int64](vals), ArrowType.INT64)
+    assert_true(s.sum.is_exact())
+    assert_equal(s.sum.value.value().int_val, Int64(0))
 
 
 def test_uint64_above_int64_max_has_no_min_max_sum() raises:

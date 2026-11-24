@@ -374,6 +374,12 @@ struct S3Fs[
         out._test_clock = self._test_clock.copy()
         return out^
 
+    def key_prefix(self) -> String:
+        """`s3://<bucket>/`: a cache shared with other file systems keys this
+        bucket's objects apart from a local file, or another bucket's object,
+        at the same path."""
+        return "s3://" + self._bucket + "/"
+
     def _build_if_absent(self) raises:
         self._ensure_stores(1)
 

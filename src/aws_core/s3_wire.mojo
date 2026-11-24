@@ -136,7 +136,7 @@ comptime _CRC32_POLY: UInt32 = 0xEDB88320
 def s3_crc32(data: Span[UInt8, _]) -> UInt32:
     """The CRC-32 of `data` that S3 calls CRC32: CRC-32/ISO-HDLC, reflected
     polynomial 0xEDB88320, initial value and final XOR 0xFFFFFFFF."""
-    var table = InlineArray[UInt32, 256](fill=UInt32(0))
+    var table = Array[UInt32, 256](fill=UInt32(0))
     for i in range(256):
         var c = UInt32(i)
         for _ in range(8):

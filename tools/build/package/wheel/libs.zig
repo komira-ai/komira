@@ -1,9 +1,10 @@
 //! komira_wheel libs: a finished wheel read from its bytes alone, and refused
 //! unless the libraries in it load the way an install of it would load them:
 //! from the wheel, through each library's own run path, with the Mojo runtime
-//! inside it and nothing else beside it. It reads the wheel, the few names
-//! of `Policy` and the toolchain's copies of the runtime libraries, and no
-//! other input of the rule that wrote the wheel. The zip is read as zip.zig
+//! inside it and nothing else beside it. The entry's format picks the walk:
+//! an ELF entry is walked as ld.so walks it, a Mach-O entry as dyld does. It
+//! reads the wheel, the few names of `Policy` and the runtime's copies of the
+//! runtime libraries, and no other input of the rule that wrote the wheel. The zip is read as zip.zig
 //! reads it (a zip that writer wrote: the build's wheel, or the same bytes as
 //! an index serves them).
 //!
@@ -14,7 +15,7 @@
 //!            import package) or the one `.dist-info` directory: no second
 //!            top-level directory, so no `modular/` beside the package;
 //!   entry    the entry library (the one the package opens) is a member and an
-//!            ELF file;
+//!            ELF or a Mach-O file;
 //!   runtime  each Mojo runtime library is in the wheel exactly once, with the
 //!            toolchain's bytes (a process holds one Mojo runtime);
 //!   runpath  every run path entry of a library the entry loads is `$ORIGIN`
@@ -25,8 +26,10 @@
 //!            or a member at `<run path entry>/<name>` for one of that
 //!            library's run path entries, tried in order; a name holding `/`
 //!            (opened as a path, not looked up) is refused;
-//!   stray    every ELF member is loaded from the entry: a library nothing
-//!            loads is refused;
+//!   stray    every ELF and every Mach-O member is loaded from the entry: a
+//!            library nothing loads is refused, and so is a library of the
+//!            other format (a Linux `.so` in a macOS wheel is loaded by
+//!            nothing);
 //!   licence  each licence file of the runtime is a non-empty member of
 //!            `.dist-info/licenses/` and a `License-File` of METADATA;
 //!   requires no Requires-Dist of METADATA names a distribution of the
@@ -38,12 +41,30 @@
 //! of the library that needs it. It is stricter than the loader in one way:
 //! the DT_RPATH of the libraries that loaded a library is not searched, only
 //! the library's own run path (DT_RUNPATH and DT_RPATH as elf.zig reads them).
+//!
+//! The Mach-O walk (dyld(1)), for a Mach-O entry, holds the same `runpath`,
+//! `needed` and `stray` checks in Mach-O's terms:
+//!   runpath  every LC_RPATH entry of a library the entry loads is
+//!            `@loader_path` or under it, and stays inside the import package
+//!            once `@loader_path` is the library's own directory;
+//!   needed   every library a load command names (LC_LOAD_DYLIB and its weak,
+//!            re-export, lazy and upward forms) is an operating system library
+//!            (an absolute path under /usr/lib/ or /System/Library/, no `..`),
+//!            or `@rpath/<file>` that is a library already loaded or a Mach-O
+//!            member at `<run path entry>/<file>` for one of that library's
+//!            LC_RPATH entries, tried in order, or `@loader_path/<path>` that
+//!            is a Mach-O member inside the package; any other name (an
+//!            `@executable_path` name, a path of the build machine, of
+//!            Homebrew or of a conda prefix, a bare name) is refused.
+//! It is stricter than dyld in the same way: the LC_RPATH entries of the
+//! libraries that loaded a library are not searched, only its own.
 
 const std = @import("std");
 const check_mod = @import("check.zig");
 const cli = @import("cli.zig");
 const diag = @import("diag.zig");
 const elf = @import("elf.zig");
+const macho = @import("macho.zig");
 const policy = @import("policy.zig");
 const zip = @import("zip.zig");
 const Alloc = std.mem.Allocator;
@@ -102,6 +123,13 @@ fn runDir(alloc: Alloc, dir: []const u8, entry: []const u8) !?[]const u8 {
         entry["$ORIGIN".len..]
     else
         return null;
+    return underDir(alloc, dir, rest);
+}
+
+/// `dir` followed by `rest` (empty, or `/` and a relative path), with `.` and
+/// `..` resolved; null when `rest` is neither, `""` when it climbs to or above
+/// the wheel's root.
+fn underDir(alloc: Alloc, dir: []const u8, rest: []const u8) !?[]const u8 {
     if (rest.len != 0 and rest[0] != '/') return null;
     var parts = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, dir, '/');
@@ -169,7 +197,8 @@ pub fn check(alloc: Alloc, d: *Diag, p: Policy, members: []const policy.Member) 
     }
 
     const entry = find(members, p.entry) orelse return refuse(d, alloc, "entry: the wheel has no {s}", .{p.entry});
-    if (!elf.isElf(entry.data)) return refuse(d, alloc, "entry: {s} is not an ELF file", .{p.entry});
+    const is_macho = macho.isMachO(entry.data);
+    if (!is_macho and !elf.isElf(entry.data)) return refuse(d, alloc, "entry: {s} is neither an ELF nor a Mach-O file", .{p.entry});
 
     for (p.runtime) |r| {
         var count: usize = 0;
@@ -190,9 +219,20 @@ pub fn check(alloc: Alloc, d: *Diag, p: Policy, members: []const policy.Member) 
         }
     }
 
-    // The loader's walk.
+    const loaded = if (is_macho) try walkMachO(alloc, d, p.entry, package, members) else try walkElf(alloc, d, p.entry, package, members);
+
+    for (members) |m| {
+        if (!(elf.isElf(m.data) or macho.isMachO(m.data)) or has(loaded, m.name)) continue;
+        return refuse(d, alloc, "stray: {s} is a shared library that {s} does not load", .{ m.name, p.entry });
+    }
+    return finish(alloc, d, p, members, info, loaded);
+}
+
+/// ld.so's walk from the ELF library `entry`: the member paths loaded, in
+/// load order.
+fn walkElf(alloc: Alloc, d: *Diag, entry_path: []const u8, package: []const u8, members: []const policy.Member) Refused![]const []const u8 {
     var loaded = std.ArrayList([]const u8).empty;
-    try loaded.append(alloc, p.entry);
+    try loaded.append(alloc, entry_path);
     var i: usize = 0;
     while (i < loaded.items.len) : (i += 1) {
         const path = loaded.items[i];
@@ -228,12 +268,86 @@ pub fn check(alloc: Alloc, d: *Diag, p: Policy, members: []const policy.Member) 
             return refuse(d, alloc, "{s}, and it is not a manylinux system library", .{why});
         }
     }
+    return loaded.toOwnedSlice(alloc);
+}
 
-    for (members) |m| {
-        if (!elf.isElf(m.data) or has(loaded.items, m.name)) continue;
-        return refuse(d, alloc, "stray: {s} is a shared library that {s} does not load", .{ m.name, p.entry });
+/// dyld's walk from the Mach-O library `entry`: the member paths loaded, in
+/// load order.
+fn walkMachO(alloc: Alloc, d: *Diag, entry_path: []const u8, package: []const u8, members: []const policy.Member) Refused![]const []const u8 {
+    var loaded = std.ArrayList([]const u8).empty;
+    try loaded.append(alloc, entry_path);
+    var i: usize = 0;
+    while (i < loaded.items.len) : (i += 1) {
+        const path = loaded.items[i];
+        const lib = find(members, path).?;
+        const dir = path[0 .. std.mem.lastIndexOfScalar(u8, path, '/') orelse 0];
+        const got = try macho.read(alloc, d, path, lib.data);
+        var dirs = std.ArrayList([]const u8).empty;
+        for (got.rpaths) |r| {
+            const to = (try loaderDir(alloc, dir, r)) orelse
+                return refuse(d, alloc, "runpath: {s} has the run path entry `{s}`, which is not @loader_path-relative", .{ path, r });
+            if (to.len == 0 or !std.mem.eql(u8, topDir(to), package))
+                return refuse(d, alloc, "runpath: {s} has the run path entry `{s}`, which leads out of {s}/", .{ path, r, package });
+            try dirs.append(alloc, to);
+        }
+        next: for (got.loads) |n| {
+            if (systemLibrary(n)) continue;
+            if (std.mem.startsWith(u8, n, "@rpath/") and std.mem.indexOfScalar(u8, n["@rpath/".len..], '/') == null and n.len > "@rpath/".len) {
+                const file = n["@rpath/".len..];
+                for (loaded.items) |l| if (std.mem.eql(u8, diag.baseName(l), file)) continue :next;
+                for (dirs.items) |dr| {
+                    const cand = try std.fmt.allocPrint(alloc, "{s}/{s}", .{ dr, file });
+                    const m = find(members, cand) orelse continue;
+                    if (!macho.isMachO(m.data)) return refuse(d, alloc, "needed: {s} loads {s}, and its run path reaches {s}, which is not a Mach-O file", .{ path, n, cand });
+                    try loaded.append(alloc, cand);
+                    continue :next;
+                }
+                const why = if (got.rpaths.len == 0)
+                    try std.fmt.allocPrint(alloc, "needed: {s} loads {s}, and has no run path to find it in the wheel", .{ path, n })
+                else
+                    try std.fmt.allocPrint(alloc, "needed: {s} loads {s}, which its run path `{s}` does not reach in the wheel", .{ path, n, try std.mem.join(alloc, ":", got.rpaths) });
+                const elsewhere = try wherever(alloc, members, file);
+                if (elsewhere.len != 0) return refuse(d, alloc, "{s} (the wheel has it at {s})", .{ why, elsewhere });
+                return refuse(d, alloc, "{s}", .{why});
+            }
+            if (std.mem.startsWith(u8, n, "@loader_path/")) {
+                const to = (try underDir(alloc, dir, n["@loader_path".len..])) orelse "";
+                if (to.len != 0 and std.mem.eql(u8, topDir(to), package) and !std.mem.eql(u8, to, dir)) {
+                    for (loaded.items) |l| if (std.mem.eql(u8, l, to)) continue :next;
+                    if (find(members, to)) |m| {
+                        if (!macho.isMachO(m.data)) return refuse(d, alloc, "needed: {s} loads {s}, which is {s}, not a Mach-O file", .{ path, n, to });
+                        try loaded.append(alloc, to);
+                        continue :next;
+                    }
+                    return refuse(d, alloc, "needed: {s} loads {s}, and the wheel has no {s}", .{ path, n, to });
+                }
+                return refuse(d, alloc, "needed: {s} loads `{s}`, which leads out of {s}/", .{ path, n, package });
+            }
+            return refuse(d, alloc, "needed: {s} loads `{s}`, a path outside the wheel that is not a macOS system library", .{ path, n });
+        }
     }
+    return loaded.toOwnedSlice(alloc);
+}
 
+/// An operating system library: an absolute path under /usr/lib/ or
+/// /System/Library/, with no `..` step out of them (policy.zig's rule).
+fn systemLibrary(path: []const u8) bool {
+    if (!std.mem.startsWith(u8, path, "/usr/lib/") and !std.mem.startsWith(u8, path, "/System/Library/")) return false;
+    var parts = std.mem.splitScalar(u8, path, '/');
+    while (parts.next()) |x| if (std.mem.eql(u8, x, "..")) return false;
+    return true;
+}
+
+/// The directory an LC_RPATH entry names for a library in directory `dir`;
+/// null when the entry is not `@loader_path`-relative, `""` when it climbs to
+/// or above the wheel's root.
+fn loaderDir(alloc: Alloc, dir: []const u8, entry: []const u8) !?[]const u8 {
+    if (!std.mem.startsWith(u8, entry, "@loader_path")) return null;
+    return underDir(alloc, dir, entry["@loader_path".len..]);
+}
+
+/// The licence and requirement checks, after the walk; returns `loaded`.
+fn finish(alloc: Alloc, d: *Diag, p: Policy, members: []const policy.Member, info: []const u8, loaded: []const []const u8) Refused![]const []const u8 {
     const metadata = find(members, try std.fmt.allocPrint(alloc, "{s}/METADATA", .{info})) orelse
         return refuse(d, alloc, "licence: the wheel has no {s}/METADATA", .{info});
     const listed = try check_mod.headerValues(alloc, metadata.data, "License-File");
@@ -252,7 +366,7 @@ pub fn check(alloc: Alloc, d: *Diag, p: Policy, members: []const policy.Member) 
         if (!has(p.runtime_dists, name)) continue;
         return refuse(d, alloc, "requires: METADATA requires {s} (`Requires-Dist: {s}`), which carries a second Mojo runtime", .{ name, req });
     }
-    return loaded.toOwnedSlice(alloc);
+    return loaded;
 }
 
 pub const flags = [_][]const u8{ "--wheel", "--entry", "--runtime-lib", "--runtime-license", "--runtime-dist", "--expect-refusal", "--out" };

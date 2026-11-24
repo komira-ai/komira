@@ -1,22 +1,34 @@
 """`so` -- the C ABI of komira's one shared library, `libkomira`.
 
 - `status.mojo`: the status codes every fallible call returns (`KOMIRA_OK`
-  and the five negative `KOMIRA_ERR_*` codes), the ABI version
+  and the five negative `KOMIRA_ERR_*` codes), the credential kinds, fields
+  and scope (`KOMIRA_CRED_*`, `KOMIRA_FIELD_*`, `KOMIRA_BIND_SESSION`), the
+  ABI version
   (`abi_version`, `ABI_MAJOR`, `ABI_MINOR`), `buffer_status`, the test the
   two-call output protocol applies to a caller's buffer, and
   `input_length_status`, the bound on a byte input (`KOMIRA_MAX_INPUT_BYTES`).
 - `session.mojo`: `Session`, the state behind a context handle: the text of
-  the last error and the catalog of registered tables.
+  the last error, the catalog of registered tables and the credentials.
+- `credentials.mojo`: `SessionCredentials`, a session's credentials by name:
+  defined in three steps (`add`, `set`, `seal`), held in a
+  `SessionSecretStore` (`credential_store.mojo`) and read back only through a
+  reveal of `secret_bindings` over `secret_store`.
 - `sources.mojo`: what the source and render exports do on values:
   `register_parquet`, `parquet_schema_bytes`, `csv_binding_bytes`,
   `json_binding_bytes` and `plan_render_text`.
 
 `_c_abi.mojo` is the library's C surface (`komira_abi_version`,
-`komira_ctx_new`, `komira_ctx_free`, `komira_last_error` and the source and
-render calls). It is the one file that holds pointers and is not part of this
+`komira_ctx_new`, `komira_ctx_free`, `komira_last_error`, the source and
+render calls and the three credential calls). It is the one file that holds pointers and is not part of this
 Mojo package; `libkomira` is built from it by the `libkomira` target.
 """
 
+from .credential_store import SessionSecretStore
+from .credentials import (
+    CREDENTIALS_INVALID,
+    CREDENTIAL_UNBOUND,
+    SessionCredentials,
+)
 from .session import Session
 from .sources import (
     csv_binding_bytes,
@@ -28,11 +40,33 @@ from .sources import (
 from .status import (
     ABI_MAJOR,
     ABI_MINOR,
+    KOMIRA_BIND_SESSION,
+    KOMIRA_CRED_AWS_KEYS,
+    KOMIRA_CRED_AWS_PROFILE,
+    KOMIRA_CRED_AZURE_KEY,
+    KOMIRA_CRED_AZURE_SAS,
+    KOMIRA_CRED_BEARER,
+    KOMIRA_CRED_GCP_SERVICE_ACCOUNT,
+    KOMIRA_CRED_GCP_TOKEN,
+    KOMIRA_CRED_OAUTH2_CLIENT,
     KOMIRA_ERR_BUFFER_TOO_SMALL,
     KOMIRA_ERR_ENGINE,
     KOMIRA_ERR_NULL_ARG,
     KOMIRA_ERR_NULL_CTX,
     KOMIRA_ERR_TOO_LARGE,
+    KOMIRA_FIELD_ACCOUNT,
+    KOMIRA_FIELD_CLIENT_ID,
+    KOMIRA_FIELD_CLIENT_SECRET,
+    KOMIRA_FIELD_FILE,
+    KOMIRA_FIELD_KEY,
+    KOMIRA_FIELD_KEY_ID,
+    KOMIRA_FIELD_PROFILE,
+    KOMIRA_FIELD_SAS,
+    KOMIRA_FIELD_SCOPE,
+    KOMIRA_FIELD_SECRET,
+    KOMIRA_FIELD_SESSION_TOKEN,
+    KOMIRA_FIELD_TOKEN,
+    KOMIRA_FIELD_TOKEN_URL,
     KOMIRA_MAX_INPUT_BYTES,
     KOMIRA_OK,
     abi_version,

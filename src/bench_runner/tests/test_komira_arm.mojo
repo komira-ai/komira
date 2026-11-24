@@ -24,8 +24,8 @@
 #   last place of DuckDB's text does not, and neither is a double or a text,
 #   with the column named revenue. Catches a DECIMAL read as a text, rounded to
 #   a double, or divided as a float.
-# - test_a_join_is_refused_and_not_timed: a self-join is listed under
-#   "unserved" as UNSUPPORTED:lower.LOWERING_UNCUTTABLE_NODE, the stand-in ran
+# - test_a_refused_query_is_listed_as_unserved_and_not_timed: a LEFT JOIN whose ON holds a residual over both sides (not served) is listed under
+#   "unserved" as UNSUPPORTED:lower.LOWERING_JOIN_UNSERVED, the stand-in ran
 #   it once (for its answer) and never timed, and the arm kept the engine's
 #   whole message. Catches a refusal that is timed, hidden or recorded under a
 #   token the result refuses (a path).
@@ -54,7 +54,7 @@
 # - test_refusals_are_recorded_by_what_they_mean: against the real engine, an
 #   unknown column is BIND_FAIL, three INT64 values of 2^62 summed are answered
 #   (SQL integer sum() is DECIMAL(38, 0)), an INT64 multiplication that leaves
-#   the 64-bit range is EXEC_FAIL and a join is a refusal; outcome_of_refusal
+#   the 64-bit range is EXEC_FAIL and a LEFT JOIN with a residual over both sides is a refusal; outcome_of_refusal
 #   maps the messages of the other steps. Catches an engine fault read as a
 #   missing feature.
 # - test_conversion_of_unsigned_float_and_dictionary_columns: UINT64 at 2^63-1
@@ -494,7 +494,7 @@ def test_the_decimal_arrives_as_duckdb_prints_it() raises:
     arm.close()
 
 
-def test_a_join_is_refused_and_not_timed() raises:
+def test_a_refused_query_is_listed_as_unserved_and_not_timed() raises:
     var t = q6_table(50)
     _ = _write_fixture(t)
     var rig = Rig()
@@ -505,13 +505,13 @@ def test_a_join_is_refused_and_not_timed() raises:
     var dropper = NoCacheDropper()
     var queries = List[QuerySpec]()
     queries.append(
-        _q(String("j"), String("select count(*) as n from lineitem a join lineitem b on a.l_orderkey = b.l_orderkey"))
+        _q(String("j"), String("select count(*) as n from lineitem a left join lineitem b on a.l_orderkey = b.l_orderkey and a.l_quantity < b.l_quantity"))
     )
 
     var out = run_queries(session, arm, dropper, BenchClock.system(), queries, _inputs(t.rows()), _settings())
 
     ref c = out.warm.cells[0]
-    assert_equal(c.stage.text(), String("UNSUPPORTED:lower.LOWERING_UNCUTTABLE_NODE"))
+    assert_equal(c.stage.text(), String("UNSUPPORTED:lower.LOWERING_JOIN_UNSERVED"))
     assert_false(Bool(c.komira))
     assert_false(Bool(c.duckdb))
     assert_false(out.outcomes[0].timed)
@@ -519,14 +519,14 @@ def test_a_join_is_refused_and_not_timed() raises:
     var report = format_run(out)
     assert_true(
         report.find(
-            String("== unserved (refused by the komira arm) ==\ntpch/j  UNSUPPORTED:lower.LOWERING_UNCUTTABLE_NODE\n")
+            String("== unserved (refused by the komira arm) ==\ntpch/j  UNSUPPORTED:lower.LOWERING_JOIN_UNSERVED\n")
         )
         >= 0
     )
-    var join_text = String("select count(*) as n from lineitem a join lineitem b on a.l_orderkey = b.l_orderkey")
+    var join_text = String("select count(*) as n from lineitem a left join lineitem b on a.l_orderkey = b.l_orderkey and a.l_quantity < b.l_quantity")
     assert_equal(_runs(rig.sent_text(), join_text), 1)
     assert_equal(_count(rig.sent_text(), String("DESCRIBE ") + join_text), 1)
-    assert_true(arm.last_refusal.startswith(String("lower: LOWERING_UNCUTTABLE_NODE")))
+    assert_true(arm.last_refusal.startswith(String("lower: LOWERING_JOIN_UNSERVED")))
     arm.close()
 
 
@@ -883,10 +883,10 @@ def test_refusals_are_recorded_by_what_they_mean() raises:
     assert_true(overflow.detail.startswith(String("execute: ")))
 
     var join = arm.run(
-        _q(String("j"), String("select count(*) from lineitem a join lineitem b on a.l_orderkey = b.l_orderkey")), True
+        _q(String("j"), String("select count(*) from lineitem a left join lineitem b on a.l_orderkey = b.l_orderkey and a.l_quantity < b.l_quantity")), True
     )
     assert_equal(join.kind, ARM_REFUSED)
-    assert_equal(join.detail, String("lower.LOWERING_UNCUTTABLE_NODE"))
+    assert_equal(join.detail, String("lower.LOWERING_JOIN_UNSERVED"))
     arm.close()
 
     assert_equal(outcome_of_refusal(String("parse"), String("SQL syntax error: x")), OUTCOME_UNSUPPORTED)

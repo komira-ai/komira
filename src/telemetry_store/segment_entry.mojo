@@ -32,7 +32,7 @@
 # short read to a zero-valued entry publishes `[min_ts=0,max_ts=0]`, which
 # prunes IN for every query and OUT of every correct answer.
 #
-# NO POINTER CROSSES A MODULE BOUNDARY. POD + owned (`String` / `InlineArray` /
+# NO POINTER CROSSES A MODULE BOUNDARY. POD + owned (`String` / `Array` /
 # `List[UInt8]` / `Int64` / `Bool`).
 # =============================================================================
 
@@ -141,7 +141,7 @@ struct TelemetrySegmentEntry(Copyable, Movable, Deinitable):
     POD + owned; no pointers, no Slab, no heap-owning byte-slab element."""
 
     var version: UInt8
-    var segment_uuid: InlineArray[UInt8, TELEMETRY_UUID_BYTES]
+    var segment_uuid: Array[UInt8, TELEMETRY_UUID_BYTES]
     var object_key: String
     var min_ts_ns: Int64
     var max_ts_ns: Int64
@@ -194,7 +194,7 @@ def make_raw_segment_entry(
     max_ts_ns: Int64,
     row_count: Int64,
     byte_size: Int64,
-    segment_uuid: InlineArray[UInt8, TELEMETRY_UUID_BYTES],
+    segment_uuid: Array[UInt8, TELEMETRY_UUID_BYTES],
 ) raises -> TelemetrySegmentEntry:
     """A RAW (uncompacted) log entry with the key first and no sidecar flag.
 
@@ -214,7 +214,7 @@ def make_raw_segment_entry(
 
 
 def make_log_segment_entry(
-    var segment_uuid: InlineArray[UInt8, TELEMETRY_UUID_BYTES],
+    var segment_uuid: Array[UInt8, TELEMETRY_UUID_BYTES],
     var object_key: String,
     min_ts_ns: Int64,
     max_ts_ns: Int64,
@@ -260,7 +260,7 @@ def make_log_segment_entry(
 
 
 def make_metric_segment_entry(
-    var segment_uuid: InlineArray[UInt8, TELEMETRY_UUID_BYTES],
+    var segment_uuid: Array[UInt8, TELEMETRY_UUID_BYTES],
     var object_key: String,
     min_ts_ns: Int64,
     max_ts_ns: Int64,
@@ -393,7 +393,7 @@ def decode_telemetry_segment_entry(
     var off = 1
     if off + TELEMETRY_UUID_BYTES > len(body):
         raise Error("telemetry segment entry: truncated segment_uuid")
-    var uuid = InlineArray[UInt8, TELEMETRY_UUID_BYTES](fill=UInt8(0))
+    var uuid = Array[UInt8, TELEMETRY_UUID_BYTES](fill=UInt8(0))
     for i in range(TELEMETRY_UUID_BYTES):
         uuid[i] = body[off + i]
     off += TELEMETRY_UUID_BYTES
@@ -467,7 +467,7 @@ def decode_telemetry_segment_entry(
     )
 
 
-def uuid_in_flat(flat: List[UInt8], u: InlineArray[UInt8, TELEMETRY_UUID_BYTES]) -> Bool:
+def uuid_in_flat(flat: List[UInt8], u: Array[UInt8, TELEMETRY_UUID_BYTES]) -> Bool:
     """Is `u` one of the 16-byte groups in `flat`? The merge-input skip-set
     membership test."""
     var n = len(flat) // TELEMETRY_UUID_BYTES

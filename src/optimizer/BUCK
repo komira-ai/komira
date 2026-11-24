@@ -32,6 +32,7 @@ mojo_library(
         "tests/test_flatten_dependent_joins_branches.mojo",
         "tests/test_flatten_dependent_joins_name_hoist.mojo",
         "tests/test_flatten_dependent_joins_nested_exprs.mojo",
+        "tests/test_flatten_scalar.mojo",
         "tests/test_join_predicate_decompose.mojo",
         "tests/test_optimizer_absorb_into_aggregate_substitutes.mojo",
         "tests/test_optimizer_agg_cse.mojo",

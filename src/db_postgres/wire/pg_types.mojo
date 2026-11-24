@@ -15,7 +15,7 @@
 # bytes.
 #
 # Encapsulation: every public surface takes/returns String / typed scalars /
-# InlineArray / List — ZERO UnsafePointer crosses any boundary. PgRow holds the
+# Array / List — ZERO UnsafePointer crosses any boundary. PgRow holds the
 # raw column bytes in a FLAT single-level layout (one concatenated
 # `_data: List[UInt8]` + an `_offsets: List[Int]` table), NOT a doubly-nested
 # List[List[UInt8]]. This avoids a stale-heap hazard: a doubly-nested

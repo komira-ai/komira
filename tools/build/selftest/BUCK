@@ -140,4 +140,6 @@ selftest_scenario(name = "bench_salt")
 
 selftest_scenario(name = "graph_check_refusals")
 
+selftest_scenario(name = "darwin_select")
+
 selftest_scenario(name = "sql_oracle")

@@ -951,7 +951,8 @@ generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
   `exports` may not be empty. `[ungated]` is files only, for diagnosis.
 - **The exports check.** **`exports`** must be exactly the functions declared `@export` with
   `abi("C")` in the main source (`srcs`' one entry, or `main`), less **`unlisted_exports`**. The check
-  (`tools/so_exports.zig`, an action of the gate) reads the file's declarations, not the compiled library,
+  (`tools/so_exports.zig`, an action of the gate, built for the execution platform of that action: macOS
+  for a darwin-arm64 library) reads the file's declarations, not the compiled library,
   and fails the build naming every difference: a listed name with no such function, and an `@export`
   function the list omits. Comments and docstrings do not declare anything; an `@export` that takes
   arguments is refused. Only the main source is read: an `@export` in another file of `srcs` is not counted,
@@ -1103,7 +1104,10 @@ example). Memory or exceptions must not cross between C++ code and the Mojo
 runtime's C++ internals.
 
 `archive_files` ([`archive.bzl`](archive.bzl)) takes named files out of a
-pinned source archive, with CMake-style template substitution, for
+pinned source archive (`.tar.gz`, `.tgz`, `.tar`, `.tar.zst`, `.zip`,
+`.conda`, or a plain `.gz`, which is one gzip-compressed file extracting to
+one file named as the archive without `.gz`: `files = ["x.duckdb_extension"]`
+for `x.duckdb_extension.gz`), with CMake-style template substitution, for
 third-party code built from source: see
 [`third_party/snappy`](../../../third_party/snappy) (snappy 1.3.1, called from
 Mojo in [`../examples/snappy`](../examples/snappy)). With `one_tree = True`

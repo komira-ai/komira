@@ -15,6 +15,13 @@ install page shows names it.
 - **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its
   `Requires-Python` is `>=3.11` (it was `>=3.13`), and its classifiers name the four. The package's
   tests and the install of each release run on all four.
+- **UDF types.** A function captured for `komira/python` takes and returns `bool`, `int8` to `int64`, `float32`,
+  `float64`, `string`, `binary`, `date32`, `timestamp` (with or without a time zone), `decimal128`, `list` and
+  `struct`, with any number of arguments (it carried only `int32`, `int64` and `float64`). `decimal.Decimal` takes
+  `return_dtype=`; a list item or struct field is not a list, struct, decimal or zoned timestamp; a `timestamp[ns]`
+  argument is refused for a `VALUES` function. A dtype is the `str()` of the pyarrow type, except that the
+  floats are `float32` and `float64` (pyarrow's `float` and `double` are accepted and kept as those). A
+  `TypedDict` return hint with an optional key is refused: a struct's fields are all required.
 
 ## 0.1.1512
 

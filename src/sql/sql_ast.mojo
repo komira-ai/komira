@@ -146,6 +146,15 @@ comptime SUBQ_DERIVED: UInt8 = 5  # `FROM (SELECT ...) alias` derived table (bou
 # does. `SX_SUBQUERY` never points at one.
 comptime SUBQ_UNION_ALL: UInt8 = 6
 
+# A branch of a set-operation chain joined to the branches before it by
+# `INTERSECT` (7) or `EXCEPT` (8), the set forms (distinct rows; the ALL forms
+# are refused by the parser). Like `SUBQ_UNION_ALL` it is a branch, not an
+# operand: it binds to a plan, pushes a placeholder into `prebound`, and is
+# reached only through the chain's `union_all_idx` links
+# (`sql_bind_set_op._bind_set_chain`).
+comptime SUBQ_INTERSECT: UInt8 = 7
+comptime SUBQ_EXCEPT: UInt8 = 8
+
 # The qualifier the parser gives the derived table it wraps a whole UNION ALL in
 # when the last branch carries ORDER BY / LIMIT / OFFSET (the clauses belong to
 # the union, so the parser rewrites it to `SELECT * FROM (<union>) <alias>
@@ -1263,7 +1272,7 @@ struct SqlExpr(Movable):
 comptime FROM_LESS_RELATION: String = "from-less select"
 
 from .sql_tvf_options import (
-    TVF_NONE, TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO,
+    TVF_NONE, TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO, TVF_ICEBERG,
     HIVE_PARTITIONING_AUTO, HIVE_PARTITIONING_ON, HIVE_PARTITIONING_OFF,
     TvfOptions,
 )
@@ -1294,7 +1303,7 @@ struct FromRelation(Copyable, Movable):
 
     var name: String  # catalog/CTE/derived table name; "" when a pure TVF
     var tvf_path: Optional[String]  # Some(path) => a read_* TVF
-    var tvf_kind: UInt8  # TVF_{NONE,PARQUET,CSV,JSON,AVRO}
+    var tvf_kind: UInt8  # TVF_{NONE,PARQUET,CSV,JSON,AVRO,ICEBERG}
     var tvf_opts: TvfOptions  # the TVF call's semantics-bearing options
     var rel_alias: String  # AS alias ("" if none) — `alias` is a reserved word
 
@@ -1447,8 +1456,9 @@ struct SelectStmt(Movable):
     var ctes: Slab[CteDef]
     var subqueries: Slab[SubqueryDef]
     var distinct: Bool  # SELECT DISTINCT
-    # ★ UNION ALL: index into the TOP-LEVEL statement's `subqueries`
-    # side-table of this SELECT's `UNION ALL` right-hand branch, or -1.
+    # ★ Set operations: index into the TOP-LEVEL statement's `subqueries`
+    # side-table of this SELECT's right-hand branch (`UNION ALL`, `INTERSECT`
+    # or `EXCEPT`, the entry's `kind`), or -1.
     #
     # ⚠ THE INDEX IS INTO THE **TOP-LEVEL** TABLE, NOT THIS STATEMENT'S OWN.
     # `_finalize` moves every parsed subquery onto the top-level `SelectStmt`,
@@ -1515,6 +1525,9 @@ struct SubqueryDef(Movable):
       - SUBQ_DERIVED     -> the body is bound to a subplan and registered in the
                             per-query CTE scope under `alias` (a named derived
                             relation); no `prebound` Expr is referenced for it.
+      - SUBQ_UNION_ALL / SUBQ_INTERSECT / SUBQ_EXCEPT -> a branch of a
+                            set-operation chain, bound by the chain's head
+                            (`sql_bind_set_op`); it pushes a placeholder.
 
     The `Slab[SubqueryDef]` storage on `SelectStmt` is byte-backed (its inner
     `List[UInt8]` carries no direct `SubqueryDef` FIELD), which breaks the

@@ -95,7 +95,7 @@ def test_e2_trailing_characters_are_refused() raises:
 
 
 def _laid_out(digits: List[Int], k: Int) -> String:
-    var d = InlineArray[UInt8, 20](fill=UInt8(0))
+    var d = Array[UInt8, 20](fill=UInt8(0))
     for i in range(len(digits)):
         d[i] = UInt8(digits[i])
     var buf = List[UInt8]()

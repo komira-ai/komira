@@ -7,12 +7,34 @@
 # binder read, so the plan the binder saw and the plan that is lowered read one
 # version of each file. A scan of a file registered on the context is checked
 # against its registered schema (`add_catalog_table_scan`), for the files the scan holds only (a subset of
-# the table's files after partition pruning); any other Parquet scan reads the
-# facts of each of its files (`add_parquet_files_scan`). A node the cutter does
-# not cut is not descended into: the cutter refuses it by name before it asks
-# for any scan below, so no facts are read for a plan that cannot lower.
+# the table's files after partition pruning); any other Parquet scan of the
+# local file system reads the facts of each of its files
+# (`add_parquet_files_scan`). A scan of a remote store (an S3 or GCS bucket, an Azure container) has no
+# facts here: the context's footers read the local file system only, so its
+# segment records no row estimate, and its footers are first read when the
+# engine runs it. A join is descended
+# into left child first, then right, as the cutter walks it whichever side
+# builds; every join is, the ones the cutter then refuses included, so the
+# facts of a refused join's scans are read before the refusal. Any other node
+# the cutter does not cut is not descended into: the cutter refuses it by name
+# before it asks for any scan below, so no facts are read for a plan that
+# cannot lower. A shared-subplan reference (PLAN_CSE_REF) is a leaf with no
+# scan: the cutter reads the scans of the subplan it names where the canonical
+# subtree stands.
+#
+# An Iceberg table scan (a binding of kind `komira.iceberg.table`, from
+# `iceberg_scan(...)` or a table registered through `register_iceberg_table`)
+# is planned here: `plan_iceberg_scan` reads the table's metadata, manifest
+# list and manifests, prunes by the filter the optimizer pushed into the scan,
+# and matches the delete files to the data files that remain; the resulting
+# `IcebergScanSpec` is the scan's fact. It reads no Parquet footer and records
+# no row estimate. A table whose metadata cannot be planned (a delete form the
+# reader lacks, a path off the local file system) refuses here, at step
+# `lower`, naming the cause.
 
 from host_profile.host_profile import HostProfile
+from iceberg_scan.scan_planner import plan_iceberg_scan
+from iceberg_scan.table_ref import is_iceberg_binding
 from lowering.lower import lower
 from lowering.lowered_plan import LoweredPlan, LoweringInputs
 from parquet_footers.lowering_facts import (
@@ -24,6 +46,7 @@ from plan_ir.logical_plan import (
     PLAN_AGGREGATE,
     PLAN_DISTINCT,
     PLAN_FILTER,
+    PLAN_JOIN,
     PLAN_LIMIT,
     PLAN_PROJECT,
     PLAN_SCAN,
@@ -67,11 +90,20 @@ def _add_scan_facts(
     ref sd = node.scan_data_ref()
     if sd.source.tag == SOURCE_VARIANT_PARQUET:
         ref ps = sd.source._parquet.value()
+        if not ps.fs_descriptor.is_local():
+            # Checked first: a local table registered at a path that is also
+            # an object key is not this scan's table.
+            inputs.add_scan()
+            return
         var table = _table_of_paths(ps.paths, ctx)
         if table.byte_length() > 0:
             add_catalog_table_scan(inputs, ctx.catalog, table, ctx.footers, ps)
         else:
             add_parquet_files_scan(inputs, ctx.footers, ps)
+        return
+    if is_iceberg_binding(sd.source):
+        var planned = plan_iceberg_scan(sd.source.binding_ref(), sd.filter)
+        inputs.add_iceberg_scan(planned.spec.copy())
         return
     # An in-memory or CSV scan: no facts here; the cutter serves both.
     inputs.add_scan()
@@ -97,6 +129,9 @@ def _collect(
         _collect(inputs, node.sort_data_ref().child[], ctx)
     elif tag == PLAN_TOPN:
         _collect(inputs, node.topn_data_ref().child[], ctx)
+    elif tag == PLAN_JOIN:
+        _collect(inputs, node.join_data_ref().left[], ctx)
+        _collect(inputs, node.join_data_ref().right[], ctx)
     elif tag == PLAN_UNION:
         # Branch order is the cutter's order.
         ref ud = node.union_data_ref()

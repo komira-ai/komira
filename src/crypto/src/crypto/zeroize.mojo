@@ -65,7 +65,7 @@ from std.sys.info import CompilationTarget
 
 @always_inline
 def zeroize_inline_array[N: Int](mut a: Array[UInt8, N]):
-    """No-elide secure-zero for an `InlineArray[UInt8, N]`.
+    """No-elide secure-zero for an `Array[UInt8, N]`.
 
     The `llvm.memset.inline.p0+
     has_side_effect=True` pattern IS ELIDED at -O3 on Mojo 1.0.0b1.
@@ -83,7 +83,7 @@ def zeroize_inline_array[N: Int](mut a: Array[UInt8, N]):
     # origin). The pointer never crosses this function's boundary.
     # `memset_s`/`explicit_bzero` write exactly N bytes through it
     # before returning. No aliasing concern because `mut a:
-    # InlineArray[UInt8, N]` is the unique owner.
+    # Array[UInt8, N]` is the unique owner.
     """
     comptime if CompilationTarget.is_macos():
         # memset_s(ptr, smax, c, n) — C11 Annex K bounds-checked memset.
@@ -104,7 +104,7 @@ def zeroize_inline_array[N: Int](mut a: Array[UInt8, N]):
 
 @always_inline
 def zeroize_inline_array_u32[N: Int](mut a: Array[UInt32, N]):
-    """No-elide secure-zero for an `InlineArray[UInt32, N]`.
+    """No-elide secure-zero for an `Array[UInt32, N]`.
 
     For a buffer of 32-bit words (for example a SHA-256 state, 8 words).
     We bitcast to byte-pointer and zero N*4 bytes. No caller in this
@@ -128,7 +128,7 @@ def zeroize_inline_array_u32[N: Int](mut a: Array[UInt32, N]):
 
 @always_inline
 def zeroize_inline_array_u64[N: Int](mut a: Array[UInt64, N]):
-    """No-elide secure-zero for an `InlineArray[UInt64, N]`.
+    """No-elide secure-zero for an `Array[UInt64, N]`.
 
     For a buffer of 64-bit words (for example a SHA-384/512 state, 8
     words; FIPS 180-4 uses 64-bit state words for that family). We

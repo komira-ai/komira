@@ -96,6 +96,21 @@ zig_module(
 #                      order, run paths and the minimum macOS (from either
 #                      version command) read back, and a universal file, a
 #                      file that is not Mach-O or reads outside itself refused;
+#   wheel_codesign_unit  the code signature of a Mach-O file: an ad hoc
+#                      signature of each hash type passes, and a file with
+#                      none, a page or a requirements blob changed after
+#                      signing, a code limit short of the signature, a slot
+#                      count that is not the page count, an unknown hash type,
+#                      a hash for a bundle file and a SuperBlob or blob outside
+#                      its bounds are each refused by their exact message;
+#   wheel_compare_unit two wheels of one package for two platforms
+#                      (`komira_wheel same`): the macOS and Linux layouts pass
+#                      with their native libraries as each one's own, and a
+#                      Python file missing, added, changed or of another mode
+#                      on one side, a Python file named as one side's own, a
+#                      native file named but absent or on both sides, another
+#                      version, another Python tag and a WHEEL differing beyond
+#                      its Tag are each refused by their exact message;
 #   wheel_policy_unit  the library checks: GLIBC_2.38 under a 2.34 tag, a
 #                      GLIBCXX_ or CXXABI_ version over or without its bound,
 #                      an absolute run path, an unlisted DT_NEEDED, a bundled
@@ -105,7 +120,8 @@ zig_module(
 #                      wheel, a dylib needing a newer macOS than the tag (and
 #                      one with no minimum), another CPU, an install name that
 #                      is not @rpath/<file>, a run path that is not
-#                      @loader_path-relative and a load nobody provides;
+#                      @loader_path-relative, a load nobody provides and an
+#                      unsigned dylib;
 #   wheel_build_unit   the wheel: the same bytes twice and from inputs in
 #                      another order, the members, METADATA, WHEEL and RECORD,
 #                      the stamp's version (a half stamp refused), the tags
@@ -127,6 +143,8 @@ zig_module(
 _WHEEL_SRCS = [
     "wheel/check.zig",
     "wheel/cli.zig",
+    "wheel/codesign.zig",
+    "wheel/compare.zig",
     "wheel/diag.zig",
     "wheel/elf.zig",
     "wheel/libs.zig",
@@ -138,7 +156,7 @@ _WHEEL_SRCS = [
     "wheel/zip.zig",
 ]
 
-_WHEEL_SCENARIOS = ["build", "check", "cli", "elf", "libs", "macho", "policy", "zip"]
+_WHEEL_SCENARIOS = ["build", "check", "cli", "codesign", "compare", "elf", "libs", "macho", "policy", "zip"]
 
 [
     zig_test(

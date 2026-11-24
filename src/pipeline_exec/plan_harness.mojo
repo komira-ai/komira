@@ -51,6 +51,7 @@ from physical_plan.physical_plan import (
     SINK_TOPN,
     SOURCE_BATCH,
     SOURCE_CSV,
+    SOURCE_ICEBERG,
     SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
     SourceSpecPod,
@@ -134,6 +135,24 @@ def csv_segment(
     return _segment(
         seg_id,
         SOURCE_CSV,
+        spec^,
+        ops^,
+        morsel_rows,
+        List[Int](),
+        List[UInt8](),
+    )
+
+
+def iceberg_segment(
+    seg_id: Int,
+    var spec: SourceSpecPod,
+    var ops: Slab[MorselOp] = Slab[MorselOp](),
+    morsel_rows: Int = 0,
+) -> SegmentDescPod:
+    """A segment that reads the Iceberg files `spec` names and collects."""
+    return _segment(
+        seg_id,
+        SOURCE_ICEBERG,
         spec^,
         ops^,
         morsel_rows,

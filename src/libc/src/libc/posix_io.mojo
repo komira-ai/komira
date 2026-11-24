@@ -30,7 +30,7 @@
 #
 # - Public API takes / returns: `String`, `Span[UInt8, _]`, `Int`.
 # - `UnsafePointer` and the raw `_IoVec` POD layout stay INSIDE this
-#   module. The `_IoVec` storage is a stack-local `InlineArray[UInt8, 16
+#   module. The `_IoVec` storage is a stack-local `Array[UInt8, 16
 #   * N]` constructed inside `writev_spans` and never escapes.
 # - `_fd: Int32` field carries no origin; it's a small POD integer.
 # - No wildcard origins; no `unsafe_from_address=Int`; no FFI carve-out
@@ -578,7 +578,7 @@ struct RawWriteFd(Movable):
             )
         # Build the iovec array on the stack. Each iovec = 16 bytes
         # (8-byte pointer + 8-byte length on 64-bit POSIX).
-        # We use an `InlineArray[UInt8, 16 * IOV_MAX]` = 16 KiB stack;
+        # We use an `Array[UInt8, 16 * IOV_MAX]` = 16 KiB stack;
         # then bitcast to write the per-slot pointer + length.
         var iov_bytes = Array[UInt8, 16 * IOV_MAX](fill=UInt8(0))
         # Each iovec slot is 16 bytes; we write the pointer at offset +0 and

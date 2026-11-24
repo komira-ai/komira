@@ -663,7 +663,7 @@ struct CorrelationAggregator(
 # fixed-capacity inline reservoir of Float64 values. State layout:
 #   count: Int32                              # 4 bytes
 #   _pad:  Int32                              # 4 bytes alignment pad
-#   values: InlineArray[Float64, 64]          # 512 bytes
+#   values: Array[Float64, 64]          # 512 bytes
 # Total: 520 bytes per group.
 #
 # Why fixed-capacity inline (not heap List[Float64]):
@@ -673,7 +673,7 @@ struct CorrelationAggregator(
 #   an internal doc):
 #   wildcard-origin slab + heap-owning inner field defeats ASAP-destruction
 #   tracking and corrupts memory under destroy-recreate cycles. POD
-#   (InlineArray + scalars) is the only safe shape.
+#   (Array + scalars) is the only safe shape.
 #
 # Capacity choice — 64 values (Tier S Fix #3, v0.4 perf sweep):
 #   * State size 520B; 100K groups → ~52MB worst-case (acceptable).
@@ -707,7 +707,7 @@ case (fast on modern CPUs), half the cache footprint of the prior
 
 
 struct MedianState(
-    # Mojo 1.0.0: NOT ImplicitlyCopyable -- the InlineArray field makes the
+    # Mojo 1.0.0: NOT ImplicitlyCopyable -- the Array field makes the
     # implicit copy ctor unsynthesizable, and an O(N) copy should be visible.
     # Every copy of this state is now an explicit `.copy()`.
     Copyable, Movable, Deinitable
@@ -716,7 +716,7 @@ struct MedianState(
 
     Layout: 520 bytes total (count: Int32 + 4-byte pad + 64 × Float64).
     All POD scalar fields; gap6-safe by construction (no heap-owning
-    inner field). The `_pad` slot exists to keep the InlineArray
+    inner field). The `_pad` slot exists to keep the Array
     naturally 8-byte aligned.
 
     Copyable + ImplicitlyCopyable + Movable + Deinitable —
@@ -893,7 +893,7 @@ struct MedianAggregator(
     comptime OutputDType = DType.float64
     comptime STATE_BYTES = 520
     """Sizeof(MedianState) = 4 (Int32 count) + 4 (Int32 pad) +
-    64*8 (InlineArray[Float64, 64]) = 520.
+    64*8 (Array[Float64, 64]) = 520.
 
     Asserted at storage construction time against
     `sizeof[MedianState]()`. If the struct layout ever changes (cap
@@ -986,12 +986,12 @@ struct MedianAggregator(
 # K parameter is deferred until a second consumer needs it.
 #
 # State layout (24 bytes total; gap6-safe by construction — primitive
-# scalar fields and a fixed-size InlineArray of primitive Float64):
+# scalar fields and a fixed-size Array of primitive Float64):
 #   count: Int32                      # filled-slot count (0, 1, or 2)
 #   _pad:  Int32                      # alignment pad (Mojo packs to 8)
-#   heap:  InlineArray[Float64, 2]    # min-heap of K largest values seen
+#   heap:  Array[Float64, 2]    # min-heap of K largest values seen
 #
-# The 4-byte Int32 + 4-byte pad keeps the InlineArray Float64 8-byte
+# The 4-byte Int32 + 4-byte pad keeps the Array Float64 8-byte
 # aligned; total struct size = 8 + 16 = 24 bytes.
 #
 # Min-heap invariant: heap[0] is the SMALLEST of the K values currently
@@ -1009,7 +1009,7 @@ struct MedianAggregator(
 
 
 struct LargestKState(
-    # Mojo 1.0.0: NOT ImplicitlyCopyable -- the InlineArray field makes the
+    # Mojo 1.0.0: NOT ImplicitlyCopyable -- the Array field makes the
     # implicit copy ctor unsynthesizable, and an O(N) copy should be visible.
     # Every copy of this state is now an explicit `.copy()`.
     Copyable, Movable, Deinitable
@@ -1029,7 +1029,7 @@ struct LargestKState(
     def __init__(out self):
         """Zero-init: count=0, heap=[0.0, 0.0]. Identity for combine.
 
-        Mojo `InlineArray[T, N]` ctor takes `uninitialized=True`
+        Mojo `Array[T, N]` ctor takes `uninitialized=True`
         or `fill=...`; positional-args ctor not supported. Use `fill=`
         to zero both slots in one pass (Mojo expands to 2 stores).
         """
@@ -1082,7 +1082,7 @@ struct LargestKAggregator(
     comptime OutputDType = DType.float64
     comptime STATE_BYTES = 24
     """Sizeof(LargestKState) = 4 (Int32 count) + 4 (Int32 _pad) +
-    16 (InlineArray[Float64, 2]). The pad keeps the InlineArray 8-byte
+    16 (Array[Float64, 2]). The pad keeps the Array 8-byte
     aligned; total = 24 bytes."""
 
     def __init__(out self):

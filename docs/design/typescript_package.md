@@ -127,10 +127,10 @@ Fixed before this design, and not reopened here:
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.1, with nine exports
+- **EXISTS** `libkomira` is at ABI 1.2, with twelve exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
-  - It runs no query. The 1.2 run calls are designed but not built.
-  - On linux-x86_64 it is 3.5 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eight native owners
+  - It runs no query. The run calls are designed but not built; they take the next minor.
+  - On linux-x86_64 it is 3.6 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eight native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,
     `libAsyncRTRuntimeGlobals` and `libMSupportGlobals`
@@ -162,10 +162,10 @@ The package exports these names and nothing else. The test `exports_test` holds 
 
 | name | what it is |
 |---|---|
-| `new Session(options?)` | one engine context (`komira_ctx_new`) and its tables. The options are `{ threads?: number, memoryLimit?: number }`, both settable once the session-options calls of the ABI land. `memoryLimit` is in bytes, and an omitted option takes the engine's default. Options are arguments, never environment variables (rule S2) |
+| `new Session(options?)` | one engine context (`komira_ctx_new`) and its tables. The options are `{ threads?: number, memoryLimit?: number }`, both settable once the session-options calls of the ABI land. A later option, `caFile?: string`, adds trusted roots for `https://` reads, as Python's `ca_file=` ([credentials_and_writes.md](credentials_and_writes.md) decision 9). `memoryLimit` is in bytes, and an omitted option takes the engine's default. Options are arguments, never environment variables (rule S2) |
 | `session.registerParquet(name, path): Promise<void>` | `komira_register_parquet`. `path` is a `string` or a `file:` `URL`. A relative path resolves against the working directory when the call is made, as Node's `fs` does, and `~` is not expanded. Registering a name again replaces it |
 | `session.registerCsv(name, path, options?)`, `session.registerNdjson(name, path)` | CSV and newline-delimited JSON. They arrive with libkomira calls that register those formats by name. No design has those calls yet: [libkomira_run_abi.md](libkomira_run_abi.md) §7 says only "the later source calls", and today's `komira_csv_binding` and `komira_json_binding` return bindings, not registrations. The CSV options are the ones `komira_csv_binding` takes: `{ delimiter?: string, header?: boolean, allVarchar?: boolean }` |
-| `session.sql(query): Promise<Result>` | runs one SQL statement through `komira_sql_stream`. **The official door of the first release** |
+| `session.sql(query): Promise<Result>` | runs one SQL statement through `komira_sql_stream`. **The official door of the first release**. A later second argument, `sql(query, bindings?)`, binds sources for one statement ([credentials_and_writes.md](credentials_and_writes.md) decision 12) |
 | `session.close()`, `session.closed`, `session[Symbol.dispose]()`, `session[Symbol.asyncDispose]()` | closing is idempotent, and `using` / `await using` close the session |
 | `Result` | the answer of one `sql` call: `toArrow(): Promise<Table>`, and `[Symbol.asyncIterator]()`, which yields `apache-arrow` `RecordBatch`es |
 | `sql(query)`, `registerParquet(name, path)` | the same calls on a default session (below) |
@@ -313,8 +313,10 @@ session's thread, so it is not offered.
   isolate. The plan door refuses an envelope with UDFs by name until then.
 - **Remote jobs.** These submit an `OptimizedPlan` to a job manager, after its codec exists
   ([optimized_plan.md](optimized_plan.md)).
-- **Also later:** object stores and credentials; writes; progress; `explain()` through
-  `komira_plan_render`.
+- **Also later:** object stores and credentials, bound as in every SDK
+  (`s.addSqlBinding(name, source)`, and `s.sql(query, { orders_table })` for one statement,
+  [credentials_and_writes.md](credentials_and_writes.md) decision 12); writes; progress; `explain()`
+  through `komira_plan_render`.
 
 ## 3. Packaging
 

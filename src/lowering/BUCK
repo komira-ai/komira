@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Lowering: a bound LogicalPlan, a HostProfile and the resolved inputs to the
-# PhysicalPlan IR (version 17) and the ParamTable its segments index. Pure: the
+# PhysicalPlan IR (version 21) and the ParamTable its segments index. Pure: the
 # entry opens no file, reads no clock and no environment variable and touches
 # no global (README.md).
 #
@@ -16,6 +16,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        type and dictionary footer, the group keys in column
 #                        order, the sort, limit, filter, distinct and
 #                        aggregate it composes with.
+# test_lower_iceberg     a scan of an Iceberg table (a binding of kind
+#                        komira.iceberg.table) as a SOURCE_ICEBERG segment:
+#                        the spec the inputs carry (files, delete files,
+#                        bound columns and field ids), its filter and
+#                        projection as operators over the full schema, the
+#                        render line, the row estimate from the inputs, the
+#                        refusal of a scan whose files were not planned, and
+#                        a binding of another kind still not cut.
 # test_lower_names       the names a render and a refusal print for every
 #                        source, edge, order, operator and sink tag and for a
 #                        tag with no name, and the two group keys (over an
@@ -27,11 +35,46 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        picks, in-memory scans, the estimates, dense
 #                        parameter indices, equal arguments rendering equal
 #                        and a different host changing only the morsel size.
+# test_lower_join_refusals
+#                        every reason a join is refused with
+#                        LOWERING_JOIN_UNSERVED (a join type the IR does not
+#                        define, a SEMI or ANTI join that builds its left side,
+#                        a CROSS join that names a key, keys, residual, hint,
+#                        build side, key types, repeated output names), a join
+#                        that lowers beside each, the outer, semi, anti and
+#                        cross types lowering, and the refusal coming before
+#                        any scan is counted.
+# test_lower_join_kinds  LEFT, RIGHT, FULL, SEMI, ANTI and CROSS joins: the
+#                        build segment, the probe's join type (the plan's when
+#                        the right child builds; LEFT and RIGHT exchanged,
+#                        with a projection restoring the node's columns and
+#                        names, when the left child builds), the keys of each
+#                        side, the E3 edge, the columns a SEMI or ANTI join
+#                        keeps and a CROSS join's empty key lists.
+# test_lower_joins       the rendered physical plan of inner equi-joins: the
+#                        build segment and the fused probe for either build
+#                        side, the projection that restores the node's columns
+#                        after a left build, a three-table chain, a join under
+#                        an aggregate, a breaker below the build side, the
+#                        estimates and the scan order.
+# test_lower_jsonl_scan  a JSON scan is a SOURCE_JSONL segment whose spec reads
+#                        the projection at the bound types; a pushed filter
+#                        reads the whole file and becomes an operator; a
+#                        projection of a column the schema lacks and an
+#                        unbounded scan are refused; Avro is still refused.
 # test_lower_refusals    every refusal token, raised by the plan that should
 #                        raise it with the text that names why, and a plan
 #                        beside each that lowers (a distinct over a column
 #                        list, a repeated name, no column or a column no sink
 #                        row serves included).
+# test_lower_gcs_azure_scan
+#                        a Parquet scan of GCS objects and of Azure blobs: the
+#                        spec carries the bucket or container beside one key
+#                        and several, and the render line names the store.
+# test_lower_s3_scan     a Parquet scan of S3 objects: the spec carries the
+#                        bucket beside the keys for one key, several and Hive
+#                        partitioned keys, and the render line names the store
+#                        of a remote scan only.
 # test_lower_topn        a range of a sort's order cut as one SINK_TOPN segment: a
 #                        top-n over a scan, a limit with an offset over a sort,
 #                        the projections above it fused onto the reading
@@ -45,12 +88,39 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        each; operators and breakers above it; nested unions;
 #                        and the refusal of a branch of another layout, of a
 #                        union with no branch and of a refused node in a branch.
+# test_lower_shared      a shared subplan (a PLAN_CSE_REF and its canonical
+#                        subtree): one with a breaker or a limit cut once and
+#                        read by every reference over E3 edges, a sort's
+#                        readers sorted, a canonical subtree holding a
+#                        reference found by its hash before folding, a join's
+#                        right child walked first (a self-join, scan facts
+#                        kept, a shared join), one of scans, filters, projections
+#                        and unions cut again over the same scan facts, and
+#                        the refusal of a reference with no canonical subtree,
+#                        before it or of another layout, and of a view
+#                        reference.
 # test_lower_sum_fuse    SUM(CAST(<signed integer> AS DECIMAL(38, 0))), the SQL
 #                        integer sum, is lowered to SUM(<integer>) with its
 #                        declared DECIMAL(38, 0) output kept; every other shape
 #                        of cast, argument type and aggregate is left alone.
 # test_sink_capability   the capability table's rows, which triples are not
 #                        served, and admission of hand-built segments.
+# test_lower_udf_nodes   the rendered physical plan of user-function plans: an
+#                        ungrouped frame as an OP_UDF_FRAME over its read set,
+#                        a step as a SOURCE_UDF_STEP segment, a projection
+#                        column that is a call as an OP_UDF_APPLY before the
+#                        OP_PROJECT, the UdfRef list carried whole, and a
+#                        frame or step under a join, a union, an aggregation
+#                        and a shared subplan.
+# test_lower_udf_refusals
+#                        a read outside a declared read set refused with
+#                        LOWERING_UDF_UNDECLARED_READ naming the column (a ROW
+#                        call's argument, a frame's group key, a function that
+#                        declares no read set), and every LOWERING_UDF_UNSERVED
+#                        reason (index, kind, argument and literal counts, read
+#                        set columns, a grouped frame, a call inside an
+#                        expression, a filter or an aggregation), each beside a
+#                        plan that lowers.
 #
 # NO IMPURE PACKAGE IN THE CLOSURE. A lowering step must not reach a package
 # that opens files, talks to an object store, runs a worker pool, measures the
@@ -82,14 +152,24 @@ mojo_library(
         "sql",
     ],
     test_srcs = [
+        "tests/test_lower_join_refusals.mojo",
+        "tests/test_lower_join_kinds.mojo",
+        "tests/test_lower_joins.mojo",
         "tests/test_lower_csv.mojo",
         "tests/test_lower_distinct.mojo",
+        "tests/test_lower_gcs_azure_scan.mojo",
+        "tests/test_lower_iceberg.mojo",
+        "tests/test_lower_jsonl_scan.mojo",
         "tests/test_lower_names.mojo",
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",
+        "tests/test_lower_s3_scan.mojo",
+        "tests/test_lower_shared.mojo",
         "tests/test_lower_sum_fuse.mojo",
         "tests/test_lower_topn.mojo",
         "tests/test_lower_union.mojo",
+        "tests/test_lower_udf_nodes.mojo",
+        "tests/test_lower_udf_refusals.mojo",
         "tests/test_sink_capability.mojo",
     ],
     visibility = ["PUBLIC"],

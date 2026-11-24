@@ -4,7 +4,7 @@
 #
 # Originally a WSC PHASE-B deliverable (WSC-SPIKE-Q1 1.001× hand-fused gold)
 # that backed the single-Int64-key group-by hot path with a fixed-16
-# `InlineArray[Slot, MAX_GROUPS=16]` probe table.
+# `Array[Slot, MAX_GROUPS=16]` probe table.
 #
 # DENSE-HASH-AGG Phase 1 (per
 # an internal doc §6.2) replaced the fixed-16
@@ -71,7 +71,7 @@ historical reference for the bug this module fixed. The four agg tables below
 are now GROWING and unbounded-in-group-count (RFC §6.2)."""
 
 comptime EMPTY_KEY: Int64 = -1
-"""Legacy empty-slot sentinel from the fixed-16 InlineArray era. The dense
+"""Legacy empty-slot sentinel from the fixed-16 Array era. The dense
 tables no longer use a key sentinel (the salt-packed directory distinguishes
 empty slots), so a real key of -1 is now stored correctly. Kept as a
 re-exported alias for the `HashSetI64` distinct primitive + legacy drain

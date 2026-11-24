@@ -8,7 +8,10 @@
 # no row, so a plan whose sink nothing can run is refused at lowering and is
 # never turned into some other sink.
 #
-# `spillable` is False for every row: no row has a spill path yet.
+# `spillable` is False for every row: no sink spills when a spill arbitrator
+# asks it to. (The fixed-width grouped aggregation sink spills on its own
+# when its builder gives it a spill directory, `pipeline_exec.sink_group_agg`;
+# that does not change the plan.)
 # =============================================================================
 
 from physical_plan.physical_plan import (
@@ -70,6 +73,7 @@ def sink_capability() -> List[SinkRow]:
     rows.append(_row(SINK_SORT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR))
     rows.append(_row(SINK_TOPN, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR))
     rows.append(_row(SINK_COLLECT, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR))
+    rows.append(_row(SINK_HASH_BUILD, KEY_DTYPE_NONE, SINK_ORIENT_COLUMNAR))
     return rows^
 
 

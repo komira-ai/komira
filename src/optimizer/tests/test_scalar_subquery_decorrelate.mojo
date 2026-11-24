@@ -4,9 +4,12 @@
 #
 # An uncorrelated SCALAR subquery whose inner plan provably yields at most one
 # row and one column is lowered to `Join(CROSS, child, Project(v AS
-# __scalar_subq_N, inner))`, the subquery becomes `col_ref(__scalar_subq_N)`,
-# and a Filter is wrapped in an identity Project so its output schema does
-# not move. Anything else is left for the materialize-and-substitute pass.
+# __scalar_subq_N, inner))` (an inner plan that may be empty, a LIMIT, to
+# `Join(CROSS, child, Aggregate(max(v) AS __scalar_subq_N, inner))`), the
+# subquery becomes `col_ref(__scalar_subq_N)`, and a Filter is wrapped in an
+# identity Project so its output schema does not move. A scalar inside a
+# collected body is decorrelated in that body. Anything else is left for the
+# materialize-and-substitute pass.
 # =============================================================================
 
 from std.testing import (
@@ -42,7 +45,9 @@ from plan_ir.logical_plan import (
     CORR_KIND_SCALAR,
     JOIN_CROSS,
     JOIN_INNER,
+    PLAN_AGGREGATE,
     PLAN_FILTER,
+    PLAN_LIMIT,
     PLAN_PROJECT,
     PLAN_JOIN,
     PLAN_SCAN,
@@ -57,6 +62,7 @@ from optimizer.scalar_subquery_decorrelate import (
     _find_site_col_for_hash,
     _restore_schema,
     _is_uncorrelated_scalar_subquery,
+    always_exactly_one_row,
 )
 
 
@@ -202,14 +208,43 @@ def test_two_subqueries_chain_two_joins_left_deep() raises:
     assert_equal(p.binary_right_ref().binary_right_ref().col_ref_name(), _col(1))
 
 
+def _assert_limit_body_joined_through_max(imm node: LogicalPlan, n: Int) raises:
+    """`node` is Project(identity, Filter(..., Join(CROSS, customer,
+    Aggregate([], [max(o_total) AS __scalar_subq_0], Limit(n, orders)))))."""
+    assert_equal(node.tag, PLAN_PROJECT)
+    ref f = node.project_data_ref().child[]
+    assert_equal(f.tag, PLAN_FILTER)
+    ref j = f.filter_data_ref().child[]
+    assert_equal(Int(j.join_data_ref().join_type), Int(JOIN_CROSS))
+    ref r = j.join_data_ref().right[]
+    assert_equal(r.tag, PLAN_AGGREGATE)
+    assert_equal(len(r.aggregate_data_ref().group_by), 0)
+    assert_equal(len(r.aggregate_data_ref().agg_exprs), 1)
+    assert_equal(Int(r.aggregate_data_ref().agg_exprs[0].func), Int(AGG_MAX))
+    assert_equal(r.output_schema.num_columns(), 1)
+    assert_equal(r.output_schema.field_name(0), _col(0))
+    ref lim = r.aggregate_data_ref().child[]
+    assert_equal(lim.tag, PLAN_LIMIT)
+    assert_equal(lim.limit_data_ref().n, n)
+
+
 def test_single_row_proofs_through_limit_project_sort_distinct() raises:
-    # LIMIT 1 is single-row; Project / Sort / Distinct over a global aggregate
-    # are single-row. Catches: any of those arms answering False.
+    # LIMIT 1 and LIMIT 0 are at most one row and are joined through a global
+    # max, which is one row even when the body is empty; Project / Sort /
+    # Distinct over a global aggregate are single-row and joined as they are.
+    # Catches: any of those arms answering False, and a LIMIT body joined bare
+    # (a CROSS join with an empty side drops every outer row, where DuckDB
+    # keeps the row with a NULL).
     var lim1 = LogicalPlan.limit(1, _orders())
     var out1 = scalar_subquery_decorrelate(
         LogicalPlan.filter(_gt(_bal(), _subq_over(lim1^)), _customer())
     )
-    _assert_filter_decorrelated(out1)
+    _assert_limit_body_joined_through_max(out1, 1)
+    var lim0 = LogicalPlan.limit(0, _orders())
+    var out0 = scalar_subquery_decorrelate(
+        LogicalPlan.filter(_gt(_bal(), _subq_over(lim0^)), _customer())
+    )
+    _assert_limit_body_joined_through_max(out0, 0)
 
     var pe = ExprArray()
     pe.append(Expr.col_ref(String("v")))
@@ -320,11 +355,21 @@ def test_every_walked_container_is_seen_and_rewritten() raises:
     )
     assert_true(_expr_contains_decorrelatable_scalar(Expr.in_list_node(_subq(), vals.copy())))
     assert_true(_expr_contains_decorrelatable_scalar(Expr.agg_fn(AGG_MAX, _subq())))
-    # A column and a CASE body are not on the walk set.
+    # A CASE holds it in a condition, a result or the default.
+    var in_result = List[WhenCaseData]()
+    in_result.append(WhenCaseData(_gt(_bal(), _lit(0)), _subq()))
+    assert_true(_expr_contains_decorrelatable_scalar(Expr.when(in_result^, _lit(0))))
+    var in_condition = List[WhenCaseData]()
+    in_condition.append(WhenCaseData(_gt(_bal(), _subq()), _lit(1)))
+    assert_true(_expr_contains_decorrelatable_scalar(Expr.when(in_condition^, _lit(0))))
+    var in_default = List[WhenCaseData]()
+    in_default.append(WhenCaseData(_gt(_bal(), _lit(0)), _lit(1)))
+    assert_true(_expr_contains_decorrelatable_scalar(Expr.when(in_default^, _subq())))
+    var in_none = List[WhenCaseData]()
+    in_none.append(WhenCaseData(_gt(_bal(), _lit(0)), _lit(1)))
+    assert_false(_expr_contains_decorrelatable_scalar(Expr.when(in_none^, _lit(0))))
+    # A column is not.
     assert_false(_expr_contains_decorrelatable_scalar(_bal()))
-    var cases = List[WhenCaseData]()
-    cases.append(WhenCaseData(_gt(_bal(), _lit(0)), _subq()))
-    assert_false(_expr_contains_decorrelatable_scalar(Expr.when(cases^, _lit(0))))
 
     var e = _gt(_bal(), _subq())
     e = _and(e^, Expr.binary(BIN_EQ, Expr.unary(UN_NEGATE, _subq()), _lit(1)))
@@ -365,24 +410,28 @@ def test_every_walked_container_is_seen_and_rewritten() raises:
     assert_equal(r6.binary_left_ref().binary_right_ref().col_ref_name(), _col(0))
 
 
-def test_a_case_body_beside_a_rewritten_site_is_kept() raises:
-    # A predicate with one decorrelatable site AND a correlated subquery and a
-    # CASE holding a subquery. Catches: the rewriter replacing what the
-    # collector skipped (it would raise: hash not collected) or dropping them.
+def test_a_case_is_rewritten_and_a_correlated_subquery_kept() raises:
+    # A predicate with a decorrelatable site, a correlated subquery and a CASE
+    # holding the same subquery in its condition, its result and its default
+    # (`coalesce((SELECT ...), 0)` binds as such a CASE). Catches: a CASE arm
+    # missing from the collector (the rewrite would raise: hash not
+    # collected) or the rewriter (the subquery would survive), and a
+    # correlated subquery replaced.
     var refs = List[String]()
     refs.append(String("c_custkey"))
     var corr = Expr.correlated_subquery(_global_agg(AGG_MAX), refs^, CORR_KIND_SCALAR)
     var cases = List[WhenCaseData]()
-    cases.append(WhenCaseData(_gt(_bal(), _lit(0)), _subq(AGG_MAX)))
+    cases.append(WhenCaseData(_gt(_bal(), _subq()), _subq()))
     var e = _and(_gt(_bal(), _subq()), _gt(_bal(), corr^))
-    e = _and(e^, Expr.binary(BIN_EQ, Expr.when(cases^, _lit(0)), _lit(1)))
+    e = _and(e^, Expr.binary(BIN_EQ, Expr.when(cases^, _subq()), _lit(1)))
     var out = scalar_subquery_decorrelate(LogicalPlan.filter(e^, _customer()))
     _assert_filter_decorrelated(out)
     ref p = out.project_data_ref().child[].filter_data_ref().predicate
-    assert_equal(
-        p.binary_right_ref().binary_left_ref().when_case_result_ref(0).tag,
-        EXPR_CORRELATED_SUBQUERY,
-    )
+    ref w = p.binary_right_ref().binary_left_ref()
+    assert_equal(w.when_num_cases(), 1)
+    assert_equal(w.when_case_condition_ref(0).binary_right_ref().col_ref_name(), _col(0))
+    assert_equal(w.when_case_result_ref(0).col_ref_name(), _col(0))
+    assert_equal(w.when_default_ref().col_ref_name(), _col(0))
     assert_equal(
         p.binary_left_ref().binary_right_ref().binary_right_ref().tag,
         EXPR_CORRELATED_SUBQUERY,
@@ -390,6 +439,120 @@ def test_a_case_body_beside_a_rewritten_site_is_kept() raises:
     assert_equal(
         p.binary_left_ref().binary_left_ref().binary_right_ref().col_ref_name(), _col(0)
     )
+
+
+def _names_scan() -> LogicalPlan:
+    var b = SchemaBuilder()
+    b.add_field(Field(String("n_name"), ArrowType.STRING, True))
+    return LogicalPlan.scan(String("names.parquet"), SOURCE_PARQUET, b.build())
+
+
+def test_a_limit_body_of_a_type_max_does_not_carry_stays() raises:
+    # `(SELECT n_name FROM names LIMIT 1)`: a VARCHAR body that may be empty
+    # cannot be joined through a global max (the pipeline's max carries
+    # numbers, dates and decimals only), so it is left for the
+    # materialize-and-substitute path and the SQL door refuses it by name.
+    # Catches: joining it bare (an empty body would drop the outer rows) or
+    # through a max the pipeline refuses at execute.
+    var pe = ExprArray()
+    pe.append(Expr.alias(_subq_over(LogicalPlan.limit(1, _names_scan())), String("n")))
+    var plan = LogicalPlan.project(pe^, _customer())
+    var before = plan.structural_hash()
+    var out = scalar_subquery_decorrelate(plan^)
+    assert_equal(out.structural_hash(), before)
+
+
+def test_a_scalar_inside_a_scalar_body_is_joined_in_the_body() raises:
+    # `bal > (SELECT max(o_total) FROM orders WHERE o_total > (SELECT
+    # sum(o_total) FROM orders))`: the inner subquery is decorrelated inside
+    # the outer body before the body is joined. Catches: the body joined with
+    # its own subquery still in it (flattening would make it a join with no
+    # key, refused at lower).
+    var aggs = AggExprArray()
+    aggs.append(AggExpr(AGG_MAX, Optional(Expr.col_ref(String("o_total"))), Optional(String("v"))))
+    var body = LogicalPlan.aggregate(
+        ExprArray(),
+        aggs^,
+        LogicalPlan.filter(_gt(Expr.col_ref(String("o_total")), _subq()), _orders()),
+    )
+    var out = scalar_subquery_decorrelate(
+        LogicalPlan.filter(_gt(_bal(), _subq_over(body^)), _customer())
+    )
+    _assert_filter_decorrelated(out)
+    ref r = out.project_data_ref().child[].filter_data_ref().child[].join_data_ref().right[]
+    ref agg = r.project_data_ref().child[]
+    assert_equal(agg.tag, PLAN_AGGREGATE)
+    # Aggregate over the body's own decorrelated Filter: Project(identity,
+    # Filter(o_total > __scalar_subq_0, Join(CROSS, orders, ...))).
+    ref inner = agg.aggregate_data_ref().child[]
+    assert_equal(inner.tag, PLAN_PROJECT)
+    ref f = inner.project_data_ref().child[]
+    assert_equal(f.tag, PLAN_FILTER)
+    assert_equal(f.filter_data_ref().predicate.binary_right_ref().col_ref_name(), _col(0))
+    ref j = f.filter_data_ref().child[]
+    assert_equal(Int(j.join_data_ref().join_type), Int(JOIN_CROSS))
+
+
+def test_exactly_one_row_is_a_global_aggregate_under_project_sort_distinct() raises:
+    # Catches: a LIMIT or a grouped aggregate counted as always one row (the
+    # LIMIT body would skip its max, and `eliminate_cross_join` would keep a
+    # CROSS join against many rows as a filter).
+    assert_true(always_exactly_one_row(_global_agg()))
+    var pe = ExprArray()
+    pe.append(Expr.col_ref(String("v")))
+    var keys = List[String]()
+    keys.append(String("v"))
+    var desc = List[Bool]()
+    desc.append(False)
+    assert_true(
+        always_exactly_one_row(
+            LogicalPlan.project(
+                pe^, LogicalPlan.sort(keys^, desc^, LogicalPlan.distinct(None, _global_agg()))
+            )
+        )
+    )
+    assert_false(always_exactly_one_row(LogicalPlan.limit(1, _orders())))
+    assert_false(always_exactly_one_row(_grouped_agg()))
+    assert_false(always_exactly_one_row(_orders()))
+    # A global aggregate CROSS JOIN a global aggregate (a body whose own
+    # scalar was joined in) is one row; against a scan it is not.
+    var lk = List[String]()
+    var rk = List[String]()
+    assert_true(
+        always_exactly_one_row(
+            LogicalPlan.join(_global_agg(), _global_agg(AGG_MAX), lk.copy(), rk.copy(), JOIN_CROSS)
+        )
+    )
+    assert_false(
+        always_exactly_one_row(
+            LogicalPlan.join(_global_agg(), _orders(), lk.copy(), rk.copy(), JOIN_CROSS)
+        )
+    )
+    assert_false(
+        always_exactly_one_row(
+            LogicalPlan.join(_orders(), _global_agg(), lk^, rk^, JOIN_CROSS)
+        )
+    )
+
+
+def test_a_one_row_body_holding_a_scalar_is_not_joined_through_max() raises:
+    # `(SELECT max(o_total) - (SELECT sum(o_total) FROM orders) FROM orders)`:
+    # a Project over a global aggregate whose expression holds a scalar. Once
+    # that scalar is joined into the body, the body is a Project over a CROSS
+    # join of two one-row sides, still one row, so it is joined through its
+    # renaming Project and not a `max`. Catches: a body re-judged after its
+    # own decorrelation and wrapped in a `max` whose type was never checked.
+    var pe = ExprArray()
+    pe.append(Expr.alias(Expr.binary(BIN_EQ, Expr.col_ref(String("v")), _subq()), String("w")))
+    var body = LogicalPlan.project(pe^, _global_agg(AGG_MAX))
+    var out = scalar_subquery_decorrelate(
+        LogicalPlan.filter(_gt(_bal(), _subq_over(body^)), _customer())
+    )
+    _assert_filter_decorrelated(out)
+    ref r = out.project_data_ref().child[].filter_data_ref().child[].join_data_ref().right[]
+    ref inner = r.project_data_ref().child[]
+    assert_equal(inner.tag, PLAN_PROJECT)
+    assert_equal(inner.project_data_ref().child[].tag, PLAN_JOIN)
 
 
 # =============================================================================

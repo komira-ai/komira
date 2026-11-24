@@ -39,7 +39,7 @@
 #   * any TLS receive loop that appends only on DONE -> appends NOTHING
 #
 # ⚠ 4096 IS THE h1 CLIENT'S READ SCRATCH SIZE (`client.mojo:397`
-# `_read_head_scratch: InlineArray[UInt8, 4096]`; `state_machine.mojo:1318`
+# `_read_head_scratch: Array[UInt8, 4096]`; `state_machine.mojo:1318`
 # `scratch_size: Int = 4096`), and s2n's default outgoing fragment is 8087
 # bytes (`S2N_DEFAULT_RECORD_LENGTH 8092` − 5-byte header,
 # tls/s2n_tls_parameters.h:220). 4096 < 8087, so this is not an exotic edge —
@@ -124,7 +124,7 @@ comptime _AF_UNIX: Int32 = 1
 comptime _SOCK_STREAM: Int32 = 1
 
 # THE h1 CLIENT'S READ SCRATCH, not a number chosen to provoke anything.
-# `client.mojo:397` holds `InlineArray[UInt8, 4096]` for the response head and
+# `client.mojo:397` holds `Array[UInt8, 4096]` for the response head and
 # `state_machine.mojo:1318` allocates 4096 for the body. s2n's default outgoing
 # fragment is 8087 plaintext bytes, so this is smaller than a record and the
 # (rc>0, blocked=READ) shape is what an ordinary https GET produces.

@@ -39,8 +39,9 @@ mojo_watchdog_cases(
 # the session, tether and libproc tree of its watchdog, its exact
 # environment, the host-identity, shared-lib and modular.cfg refusals. Only
 # for `--target-platforms komira//tools/build/platforms:darwin-arm64`; the
-# pull-request check has no macOS leg, so a macOS change carries this
-# target's farm build as its proof.
+# pull-request check builds for macOS only the libraries of the macOS set
+# (docs/ci.md, "The macOS part of the check"), not this target, so a macOS
+# change carries this target's farm build as its proof.
 zig_exe(
     name = "standin_darwin",
     exec_compatible_with = LINUX_X86_64,

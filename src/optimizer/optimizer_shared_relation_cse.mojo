@@ -21,9 +21,8 @@
 # BOTH branches carry the identical `partsupp x supplier x nation[GERMANY]`
 # join, so executing the plan as written runs the base join TWICE. DuckDB
 # computes it once (the HAVING scalar is one aggregate over the same relation).
-# Subtree-level plan-CSE (`plan_cse_eliminate`, not in this tree) would fold
-# them, but its `PLAN_CSE_REF` output is a DAG edge, and this rewrite keeps the
-# plan a tree; and column pruning (a pass not in this tree) does not keep the
+# Subtree-level plan-CSE (`plan_cse_eliminate`) folds only equal subtrees, and
+# this rewrite also keeps the plan free of `PLAN_CSE_REF` references; and column pruning (a pass not in this tree) does not keep the
 # two germany-join subtrees structurally identical: it prunes them
 # DIFFERENTIALLY (the LEFT reads ps_partkey, the RIGHT does not) -> different
 # `structural_hash` -> nothing folds them.

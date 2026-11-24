@@ -7,7 +7,9 @@
 # (every segment whose waited-for dependencies finished), start the lowest id in
 # it, publish its output, mark it finished. The size of the ready set is what a
 # concurrent form would exploit; this form starts one segment at a time, so
-# the order is a function of the plan alone.
+# the order is a function of the plan alone. The published outputs count each
+# segment's readers from the plan, so a segment read by several others hands
+# each of them the same rows (`PublishedOutputs`).
 #
 # A segment that raises ends the run: segments that have not started do not
 # start, and the error is the one the failing segment recorded. The same holds
@@ -36,7 +38,7 @@ def run_plan[
     no dependent took, by segment id."""
     check_plan(descs)
     var n = len(descs)
-    var published = PublishedOutputs(n)
+    var published = PublishedOutputs(descs)
     var finished = List[Bool](length=n, fill=False)
     var remaining = n
     while remaining > 0:

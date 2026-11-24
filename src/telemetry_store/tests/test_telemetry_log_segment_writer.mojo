@@ -795,7 +795,7 @@ def test_10_the_ordering_probe_fires_on_an_entry_naming_an_absent_object() raise
         store, TELEMETRY_ROOT, TELEMETRY_DATASET_LOGS, String("20261001"),
         String("writer-10"),
     )
-    var u = InlineArray[UInt8, TELEMETRY_UUID_BYTES](fill=UInt8(0))
+    var u = Array[UInt8, TELEMETRY_UUID_BYTES](fill=UInt8(0))
     u[0] = UInt8(10)
     var e = make_log_segment_entry(
         u^,

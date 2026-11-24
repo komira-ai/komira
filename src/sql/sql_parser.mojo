@@ -26,6 +26,7 @@ from std.builtin.swap import swap
 
 from containers.slab import Slab
 
+from .sql_copy_format import copy_codec_from_path, copy_format_from_path
 from .sql_interval_parse import interval_literal_starts, parse_interval_literal
 from .sql_token import (
     Token,
@@ -38,7 +39,7 @@ from .sql_token import (
 from .sql_fn_table import CAST_DESUGAR_NAME as _CAST_DESUGAR_NAME, TRY_CAST_DESUGAR_NAME as _TRY_CAST_DESUGAR_NAME
 from .sql_fn_table import POSITION_IN_DESUGAR_NAME as _POSITION_IN_DESUGAR_NAME
 from .sql_tvf_options import (
-    TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO,
+    TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO, TVF_ICEBERG,
     hive_partitioning_value, _replacement_scan_kind, _file_stem,
 )
 from .sql_ast import (
@@ -48,7 +49,7 @@ from .sql_ast import (
     SXUN_NOT, SXUN_IS_NULL, SXUN_IS_NOT_NULL, SXUN_NEGATE, SXUN_ABS, SXLIKE_LIKE, SXLIKE_ILIKE,
     JK_CROSS, JK_LEFT, JK_RIGHT, JK_FULL, JK_SEMI, JK_ANTI,
     SUBQ_SCALAR, SUBQ_EXISTS, SUBQ_NOT_EXISTS, SUBQ_IN, SUBQ_NOT_IN, SUBQ_DERIVED,
-    SUBQ_UNION_ALL, _UNION_RESULT_ALIAS,
+    SUBQ_UNION_ALL, SUBQ_INTERSECT, SUBQ_EXCEPT, _UNION_RESULT_ALIAS,
     STMT_QUERY, STMT_COPY, STMT_CREATE_TABLE_AS,
     SXOP_EQ, SXOP_NE, SXOP_LT, SXOP_LE, SXOP_GT, SXOP_GE,
     SXOP_AND, SXOP_OR, SXOP_ADD, SXOP_SUB, SXOP_MUL, SXOP_DIV, SXOP_IDIV, SXOP_MOD,
@@ -74,6 +75,16 @@ from arrow.write_target import (
     WCOMP_SNAPPY, WCOMP_UNCOMPRESSED, WCOMP_ZSTD, WCOMP_GZIP, WCOMP_LZ4,
     write_format_name, write_codec_name, write_target_supported,
 )
+
+
+comptime INNER_ON_BEFORE_OUTER_REFUSAL = (
+    "SQL not supported: a RIGHT or FULL JOIN after an INNER JOIN ... ON in"
+    " one FROM. The INNER join's ON is applied as a WHERE over the whole FROM,"
+    " which would drop the rows the outer join pads with NULL. Write the"
+    " INNER join as a subquery in FROM, or put the outer join first."
+)
+"""The parser's refusal of an INNER `JOIN ... ON` followed by a RIGHT or
+FULL join in one FROM list."""
 
 
 struct _Parser(Movable):
@@ -177,33 +188,36 @@ struct _Parser(Movable):
         return stmt^
 
     def _parse_set_operator_tail(mut self, mut lhs: SelectStmt) raises:
-        """★ UNION ALL. `<select> UNION ALL <select>`.
+        """★ Set operators. `<select> UNION ALL | INTERSECT | EXCEPT <select>`.
 
         Without a set-operator production `_parse_select_stmt` would return
         after the first SELECT and `_finalize` would report the `UNION` keyword
         as "unexpected trailing tokens after query" — a message that names the
         symptom and not the missing clause.
 
-        ⭐ THE OPERATOR IS **NOT** A SEPARATE ENGINE CAPABILITY. `PLAN_UNION`
-        (tag 12) and `LogicalPlan.union` serve the untyped-Mojo door too; this
-        production is the SQL spelling of that node.
+        Each branch after the head is a subquery-table entry whose kind is the
+        operator joining it to the branches before it (`SUBQ_UNION_ALL`,
+        `SUBQ_INTERSECT`, `SUBQ_EXCEPT`). The chain is flat here; the binder
+        (`sql_bind_set_op`) applies DuckDB's precedence, INTERSECT before
+        UNION ALL and EXCEPT. `INTERSECT DISTINCT` / `EXCEPT DISTINCT` are the
+        set forms spelled out.
 
-        ⛔ BARE `UNION` IS REFUSED BY NAME AND MUST STAY REFUSED. `UNION`
-        without `ALL` DEDUPLICATES, and `PLAN_UNION` does not: binding it to
-        the same node would silently return duplicate rows for a query whose
-        whole point is that it does not. The refusal names the rewrite
+        ⛔ BARE `UNION` IS REFUSED BY NAME AND MUST STAY REFUSED UNTIL IT IS
+        BOUND TO A DEDUPLICATING PLAN. `UNION` without `ALL` DEDUPLICATES, and
+        `PLAN_UNION` does not: binding it to the same node would silently return
+        duplicate rows. The refusal names the rewrite
         (`SELECT DISTINCT * FROM (a UNION ALL b)`) rather than the node.
 
-        ⛔ `INTERSECT` / `EXCEPT` likewise — there is no set-difference or
-        set-intersection operator in this engine, and lowering either to a
-        UNION answers a strict superset of the right rows.
+        ⛔ `INTERSECT ALL` / `EXCEPT ALL` ARE REFUSED BY NAME. Their bag
+        results keep a row min(m, n) or max(m - n, 0) times, which needs the
+        rows numbered or repeated; no plan node here does either.
 
         ⚠ IT LOOPS, so `A UNION ALL B UNION ALL C` is three branches rather
         than a syntax error at the second `UNION`. Each branch is parsed by
         `_parse_select_stmt` — the SAME helper the first branch used — so a
         branch gets the whole SELECT grammar and cannot drift from it.
 
-        ⚠ ORDER BY / LIMIT / OFFSET BELONG TO THE WHOLE UNION, as in DuckDB.
+        ⚠ ORDER BY / LIMIT / OFFSET BELONG TO THE WHOLE CHAIN, as in DuckDB.
         On any branch before the last (the head included) they are a syntax
         error naming the clause. On the last branch they are moved off it by
         `_wrap_union_in_star_select`, which rewrites the query to
@@ -214,22 +228,13 @@ struct _Parser(Movable):
         while (
             self._is_kw("union") or self._is_kw("intersect") or self._is_kw("except")
         ):
-            if self._is_kw("intersect") or self._is_kw("except"):
-                var word = String(self.tokens[self.pos].text).upper()
-                raise Error(
-                    "SQL not supported: the " + word + " set operator. This"
-                    " engine's only set operator is UNION ALL (the PLAN_UNION"
-                    " node, which CONCATENATES branches); " + word + " needs a"
-                    " set-difference / set-intersection primitive that no plan"
-                    " node here computes, and lowering it to a concatenation"
-                    " would answer a strict SUPERSET of the right rows with a"
-                    " success code. Express it as a SEMI / ANTI join"
-                    " (`WHERE [NOT] EXISTS (...)`), which this engine does"
-                    " serve."
-                )
-            # ORDER BY / LIMIT / OFFSET apply to the whole union, so they may
-            # follow only the last branch. DuckDB refuses the same text with
-            # `Parser Error: syntax error at or near "union"`.
+            var word = String(self.tokens[self.pos].text).upper()
+            var op_name = word
+            if word == "UNION":
+                op_name = "UNION ALL"
+            # ORDER BY / LIMIT / OFFSET apply to the whole set operation, so
+            # they may follow only the last branch. DuckDB refuses the same
+            # text with `Parser Error: syntax error at or near "<operator>"`.
             var before = String("")
             if last < 0:
                 before = _tail_clause_name(lhs)
@@ -237,10 +242,29 @@ struct _Parser(Movable):
                 before = _tail_clause_name(self.subqueries[last].body)
             if before != "":
                 raise Error(
-                    "SQL syntax error: " + before + " before UNION ALL. ORDER BY,"
-                    " LIMIT and OFFSET apply to the whole UNION ALL, so they"
-                    " must follow its last branch."
+                    "SQL syntax error: " + before + " before " + op_name + "."
+                    " ORDER BY, LIMIT and OFFSET apply to the whole " + op_name
+                    + ", so they must follow its last branch."
                 )
+            var kind = SUBQ_UNION_ALL
+            if word != "UNION":
+                self._advance()  # 'intersect' / 'except'
+                if self._is_kw("all"):
+                    raise Error(
+                        "SQL not supported: " + word + " ALL. The bag form"
+                        " keeps a row min(m, n) (INTERSECT ALL) or"
+                        " max(m - n, 0) (EXCEPT ALL) times, which needs the"
+                        " rows of each side numbered or repeated, and no plan"
+                        " node here does either yet (komira-ai/komira#1229)."
+                        " " + word + " without ALL, which returns distinct"
+                        " rows, is served."
+                    )
+                if self._is_kw("distinct"):
+                    self._advance()  # 'distinct', the set form's default
+                kind = SUBQ_INTERSECT if word == "INTERSECT" else SUBQ_EXCEPT
+                self._append_set_branch(lhs, last, kind)
+                last = len(self.subqueries) - 1
+                continue
             self._advance()  # 'union'
             if not self._is_kw("all"):
                 raise Error(
@@ -253,23 +277,31 @@ struct _Parser(Movable):
                     " deduplicating form."
                 )
             self._advance()  # 'all'
-            var rhs = self._parse_select_stmt()
-            # ⚠ APPENDED **AFTER** THE BRANCH IS PARSED, so a nested subquery
-            # inside the branch takes a LOWER index than the branch itself —
-            # the same inner-before-outer ordering every other producer here
-            # maintains, which is what lets the query binder pre-bind by index.
-            var idx = len(self.subqueries)
-            self.subqueries.append(SubqueryDef(rhs^, SUBQ_UNION_ALL, String(""), String("")))
-            if last < 0:
-                lhs.union_all_idx = idx
-            else:
-                # Chain: hang each further branch off the PREVIOUS one, so the
-                # binder walks a single-linked list from the root and never has
-                # to recurse through a branch body.
-                self.subqueries[last].body.union_all_idx = idx
-            last = idx
+            self._append_set_branch(lhs, last, kind)
+            last = len(self.subqueries) - 1
         if last >= 0 and _tail_clause_name(self.subqueries[last].body) != "":
             self._wrap_union_in_star_select(lhs, last)
+
+    def _append_set_branch(mut self, mut lhs: SelectStmt, last: Int, kind: UInt8) raises:
+        """Parse the next branch of a set-operation chain and append it to the
+        subquery table with `kind`, the operator that joins it to the branches
+        before it (`SUBQ_UNION_ALL`, `SUBQ_INTERSECT` or `SUBQ_EXCEPT`). `last`
+        is the table index of the chain's previous branch, or -1 when `lhs`, the
+        head, is the only one so far."""
+        var rhs = self._parse_select_stmt()
+        # ⚠ APPENDED **AFTER** THE BRANCH IS PARSED, so a nested subquery
+        # inside the branch takes a LOWER index than the branch itself —
+        # the same inner-before-outer ordering every other producer here
+        # maintains, which is what lets the query binder pre-bind by index.
+        var idx = len(self.subqueries)
+        self.subqueries.append(SubqueryDef(rhs^, kind, String(""), String("")))
+        if last < 0:
+            lhs.union_all_idx = idx
+        else:
+            # Chain: hang each further branch off the PREVIOUS one, so the
+            # binder walks a single-linked list from the root and never has
+            # to recurse through a branch body.
+            self.subqueries[last].body.union_all_idx = idx
 
     def _wrap_union_in_star_select(mut self, mut lhs: SelectStmt, last: Int):
         """The last branch of the union starting at `lhs` carries ORDER BY /
@@ -298,8 +330,7 @@ struct _Parser(Movable):
         """Parse `COPY <source> TO '<path>' [ (<opt> [, <opt>]*) ]`.
         `<source>` is either a bare table name (synthesized to `SELECT * FROM
         <table>`) or a parenthesized query `(WITH? SELECT …)`. Binds to a
-        STMT_COPY statement the exec layer writes through the EXISTING
-        `SinkVariant` file arms (`sql_exec`) — no new writer."""
+        STMT_COPY statement, which `sdk_exec.engine_sql.run_sql` runs."""
         self._expect_kw("copy")
         var source: SelectStmt
         if self._kind() == TK_LPAREN:
@@ -323,16 +354,14 @@ struct _Parser(Movable):
             raise Error("SQL syntax error: COPY ... TO expects a string path")
         var dest = String(self.tokens[self.pos].text)
         self._advance()
-        var fmt = WFMT_PARQUET
-        var codec = WCOMP_SNAPPY
-        if self._kind() == TK_LPAREN:
-            var opts = self._parse_copy_options()
-            fmt = opts[0]
-            codec = opts[1]
-        return SqlStatement(STMT_COPY, source^, dest, String(""), fmt, codec, False)
+        var opts = self._parse_copy_options(dest)
+        return SqlStatement(STMT_COPY, source^, dest, String(""), opts[0], opts[1], False)
 
-    def _parse_copy_options(mut self) raises -> Tuple[UInt8, UInt8]:
-        """Parse the parenthesized COPY option list -> (fmt, codec).
+    def _parse_copy_options(mut self, dest: String) raises -> Tuple[UInt8, UInt8]:
+        """Parse the parenthesized COPY option list, if any -> (fmt, codec).
+        With no FORMAT the format comes from `dest`'s extension, and with no
+        COMPRESSION the codec from the format and `dest`
+        (`sql_copy_format`).
 
         Grammar (the subset the DuckDB parity corpus writes, and no more):
 
@@ -356,12 +385,13 @@ struct _Parser(Movable):
         JSONL sink is newline-delimited by construction), a COMPRESSION_LEVEL
         other than the one the wired sink is parameterized on — is a clean
         raise naming what we would have done instead."""
+        if self._kind() != TK_LPAREN:
+            var inferred = copy_format_from_path(dest)
+            return (inferred, copy_codec_from_path(inferred, dest))
         self._expect(TK_LPAREN, "'(' to open COPY options")
         # --- pass 1: collect ---------------------------------------------------
-        # No FORMAT clause => parquet (DuckDB would infer from the extension; the
-        # corpus always states it, and inferring silently is exactly the
-        # accepted-and-ignored failure mode this parser refuses).
         var fmt = WFMT_PARQUET
+        var saw_format = False
         var codec_word = String("")
         var saw_codec = False
         var level = 0
@@ -380,6 +410,7 @@ struct _Parser(Movable):
             self._advance()
             if opt == "format":
                 fmt = _format_word(self._copy_option_word())
+                saw_format = True
             elif opt == "compression" or opt == "codec":
                 codec_word = self._copy_option_word()
                 saw_codec = True
@@ -403,9 +434,9 @@ struct _Parser(Movable):
             break
         self._expect(TK_RPAREN, "')' to close COPY options")
         # --- pass 2: validate, now that FORMAT is known ------------------------
-        # Default codec is per-format: parquet's is snappy (DuckDB's default page
-        # codec), csv/json have no container so theirs is "no compression".
-        var codec = WCOMP_UNCOMPRESSED if fmt != WFMT_PARQUET else WCOMP_SNAPPY
+        if not saw_format:
+            fmt = copy_format_from_path(dest)
+        var codec = copy_codec_from_path(fmt, dest)
         if saw_codec:
             codec = _codec_word(codec_word)
         if not write_target_supported(fmt, codec):
@@ -672,6 +703,9 @@ struct _Parser(Movable):
         # SEMI / ANTI bind to JOIN_SEMI / JOIN_ANTI; ASOF / POSITIONAL are
         # refused BY NAME.
         var where_acc: Optional[SqlExpr] = None
+        # True once an INNER `JOIN ... ON` predicate has been folded into
+        # WHERE: a later RIGHT or FULL join would then be filtered by it.
+        var folded_inner_on = False
         if from_less:
             stmt.from_tables.append(FromRelation.named(String(FROM_LESS_RELATION)))
         else:
@@ -793,11 +827,19 @@ struct _Parser(Movable):
                     # INNER / CROSS / bare JOIN — ON folds into WHERE (as before).
                     if on_pred:
                         where_acc = _and_into(where_acc^, on_pred.take())
+                        folded_inner_on = True
                     stmt.joins.append(JoinClause(JK_CROSS, None))
                 else:
                     # LEFT / RIGHT / FULL — the ON stays on the OUTER-join node.
                     if not on_pred:
                         raise Error("SQL syntax error: OUTER JOIN requires an ON condition")
+                    # ⛔ An INNER ON folded into WHERE is applied above this
+                    # join. Above a LEFT join that is the same answer (the
+                    # rows it pads keep the earlier relations' columns), but
+                    # a RIGHT or FULL join pads the earlier relations with
+                    # NULL, and the folded predicate would drop those rows.
+                    if folded_inner_on and (jkind == JK_RIGHT or jkind == JK_FULL):
+                        raise Error(INNER_ON_BEFORE_OUTER_REFUSAL)
                     stmt.joins.append(JoinClause(jkind, on_pred^))
             else:
                 break
@@ -1014,7 +1056,7 @@ struct _Parser(Movable):
                 " `WHERE [NOT] EXISTS (...)`."
             )
         # Table-valued function: read_parquet('path') / read_csv / read_json /
-        # read_avro. The ident is lower-folded by the tokenizer, so compare
+        # read_avro / iceberg_scan. The ident is lower-folded by the tokenizer, so compare
         # directly.
         #
         # ⭐ `read_avro` is the SQL spelling of an Avro file.
@@ -1026,20 +1068,25 @@ struct _Parser(Movable):
         if (
             (name == "read_parquet" or name == "read_csv" or name == "read_json"
              or name == "read_ndjson" or name == "read_json_auto"
-             or name == "read_csv_auto" or name == "read_avro")
+             or name == "read_csv_auto" or name == "read_avro"
+             or name == "iceberg_scan")
             and self.pos + 1 < len(self.tokens)
             and self.tokens[self.pos + 1].kind == TK_LPAREN
         ):
-            # ⚠ THE AVRO TEST MUST PRECEDE THE `!= "read_parquet"` CATCH-ALL.
-            # That elif is a DEFAULT-TO-JSON, not a JSON test: adding a sixth
-            # spelling to the clause above without a branch here would bind
+            # ⚠ THE AVRO AND ICEBERG TESTS MUST PRECEDE THE
+            # `!= "read_parquet"` CATCH-ALL.
+            # That elif is a DEFAULT-TO-JSON, not a JSON test: adding a spelling
+            # to the clause above without a branch here would bind
             # `read_avro('f.avro')` as JSONL and hand the JSON prefix inferrer
-            # an OCF container header.
+            # an OCF container header (and `iceberg_scan('t')` as JSONL over a
+            # table directory).
             var kind: UInt8 = TVF_PARQUET
             if name == "read_csv" or name == "read_csv_auto":
                 kind = TVF_CSV
             elif name == "read_avro":
                 kind = TVF_AVRO
+            elif name == "iceberg_scan":
+                kind = TVF_ICEBERG
             elif name != "read_parquet":
                 kind = TVF_JSON
             self._advance()  # func name -> now at '('
@@ -1204,6 +1251,11 @@ struct _Parser(Movable):
                 " An Avro OCF carries its writer schema and its codec in the"
                 + " container header, so there is no dialect to steer."
             )
+        elif kind == TVF_ICEBERG:
+            why = (
+                " An Iceberg table's metadata names its schema and its files,"
+                + " so there is no dialect for this option to steer."
+            )
         raise Error(
             "SQL not supported: " + fname + " option '" + key + "' is a "
             + belongs_to + " option and means nothing here." + why
@@ -1215,14 +1267,15 @@ struct _Parser(Movable):
         mut self, fname: String, kind: UInt8,
     ) raises -> TvfOptions:
         """Parse the trailing `, name = value` option list of a `read_csv` /
-        `read_json` call, positioned just after the path literal and returning
+        `read_json` / `read_parquet` / `iceberg_scan` call, positioned just after the path literal and returning
         with the cursor on the closing `')'`.
 
         THE ALLOWLIST IS THE POINT. Three classes, and every option is in exactly
         one of them:
 
           1. SEMANTIC — it changes what the result IS (`all_varchar`, `header`,
-             `delim`, `hive_partitioning`). Recorded on `TvfOptions`; the binder honors it.
+             `delim`, `hive_partitioning`, and for `iceberg_scan`
+             `allow_moved_paths` and `snapshot_from_id`). Recorded on `TvfOptions`; the binder honors it.
           2. NEUTRAL-BY-VALUE — it changes only HOW the engine gets there
              (`parallel`, `auto_detect=true`), or it restates something our
              reader derives for itself and AGREES with (`compression=` matching
@@ -1360,6 +1413,26 @@ struct _Parser(Movable):
                 opts.hive_partitioning = hive_partitioning_value(
                     self._tvf_bool_arg(fname, key)
                 )
+            elif key == "allow_moved_paths":
+                if kind != TVF_ICEBERG:
+                    self._refuse_option_for_kind(
+                        fname, key, kind, "iceberg_scan"
+                    )
+                opts.allow_moved_paths = self._tvf_bool_arg(fname, key)
+            elif key == "snapshot_from_id":
+                if kind != TVF_ICEBERG:
+                    self._refuse_option_for_kind(
+                        fname, key, kind, "iceberg_scan"
+                    )
+                if self._kind() != TK_INT:
+                    raise Error(
+                        "SQL syntax error: " + fname + " option '" + key
+                        + "' expects an integer snapshot id"
+                    )
+                opts.snapshot_from_id = Optional[Int64](
+                    self._small_int_tok("snapshot_from_id")
+                )
+                self._advance()
             elif key == "format":
                 if kind != TVF_JSON:
                     raise Error(
@@ -2074,6 +2147,11 @@ struct _Parser(Movable):
         (`position(x IN (1, 2))` would still be the grammar form, as in DuckDB,
         whose parser commits on the keyword) is inside parentheses and so is
         not what makes the decision; only depth 1 counts."""
+        return self._top_level_keyword(lparen, "in")
+
+    def _top_level_keyword(self, lparen: Int, kw: String) -> Bool:
+        """The parenthesised list opening at `lparen` holds the keyword `kw`
+        at depth 1, before its first top-level `,` or its closing `)`."""
         var depth = 0
         var i = lparen
         while i < len(self.tokens):
@@ -2086,7 +2164,7 @@ struct _Parser(Movable):
                     return False
             elif depth == 1 and t.kind == TK_COMMA:
                 return False
-            elif depth == 1 and t.kind == TK_IDENT and t.text == "in":
+            elif depth == 1 and t.kind == TK_IDENT and t.text == kw:
                 return True
             elif t.kind == TK_EOF:
                 return False
@@ -2594,6 +2672,26 @@ struct _Parser(Movable):
                 pargs.append(hay^)
                 pargs.append(needle^)
                 return SqlExpr.call(String(_POSITION_IN_DESUGAR_NAME), pargs^)
+            # `SUBSTRING(s FROM start [FOR length])`, the standard form DuckDB
+            # reads as `substring(s, start[, length])`. A `FROM` at the top
+            # level of the parentheses decides it; `substring(a, b)` is a call.
+            if (
+                name == "substring"
+                and self.pos + 1 < len(self.tokens)
+                and self.tokens[self.pos + 1].kind == TK_LPAREN
+                and self._top_level_keyword(self.pos + 1, "from")
+            ):
+                self._advance()  # 'substring'
+                self._advance()  # '('
+                var sargs = Slab[SqlExpr]()
+                sargs.append(self._parse_op())
+                self._expect_kw("from")
+                sargs.append(self._parse_op())
+                if self._is_kw("for"):
+                    self._advance()  # 'for'
+                    sargs.append(self._parse_op())
+                self._expect(TK_RPAREN, "')' to close SUBSTRING(... FROM ...)")
+                return SqlExpr.call(String("substring"), sargs^)
             # ★★ `CAST(<expr> AS <type>)` / `TRY_CAST(<expr> AS <type>)`.
             #
             # A SEPARATE GRAMMAR ARM FOR THE SAME REASON `EXTRACT` HAS ONE:

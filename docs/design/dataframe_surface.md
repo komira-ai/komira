@@ -69,8 +69,11 @@ The public names of each module:
 
 | module | names it adds |
 |---|---|
-| `komira` | `DataFrame`, `Series`, `GroupBy`, `col` (pandas 3's `pd.col`), `concat`, `merge_asof`, `from_arrow`, `register_view`; the readers `read_parquet`, `read_csv`, `read_json`, `read_feather`, `read_orc`, `read_avro` |
+| `komira` | `DataFrame`, `Series`, `GroupBy`, `col` (pandas 3's `pd.col`), `concat`, `merge_asof`, `from_arrow`, `add_sql_binding`; the readers `read_parquet`, `read_csv`, `read_json`, `read_feather`, `read_orc`, `read_avro` |
 | `komira.pl` | `LazyFrame`, `LazyGroupBy`, `Expr`, `col`, `lit`, `when`, `len`, `concat`, `concat_str`, `from_arrow`; the readers `scan_parquet`, `scan_csv`, `scan_ndjson`, `scan_ipc`, `scan_orc`, `scan_avro` |
+
+The names `files`, `iceberg`, the credential classes, `AMBIENT`, `ANONYMOUS` and `read_table`'s catalog
+argument belong to [credentials_and_writes.md](credentials_and_writes.md), and are reserved here.
 
 - `komira.__all__` gains the names of the first row, and `komira.pl.__all__` holds the second. Every
   other module of the package stays private.
@@ -169,14 +172,17 @@ The frames are immutable, except for one pandas idiom:
   process's default session when `session` is `None`, as `km.sql` does. `Session` gains no reader
   methods, so there is one way to read a file.
 - **Frames of two sessions never meet.** A verb that combines them (`merge`, `join`, `concat`, `isin`)
-  raises `UnsupportedOperation`. So does `register_view` on a session that is not the frame's own.
+  raises `UnsupportedOperation`. So does adding a frame with `add_sql_binding`, or passing it to a `sql` call, on a session that is not the frame's own.
 - **`from_arrow(data, *, session=None)`** makes a frame of any object that exports the Arrow C stream
   (`__arrow_c_stream__`): a `pyarrow.Table`, a polars `DataFrame`, or a pandas `DataFrame`. The stream
   is read once, when `from_arrow` is called, and registered with the session. This needs the engine's
   in-memory table, which plan bytes do not carry. Until that lands, the scan raises at the terminal.
-- **`Session.register_view(name, frame)`** names a frame's plan, so that `sql()` can read it as a view
-  (the `view` capability). `km.register_view(name, frame)` does the same on the default session, as
-  `km.register_parquet` does.
+- **A frame is a source for SQL.** `Session.add_sql_binding(name, frame)`, or `s.sql(query, name=frame)`
+  for one statement, names a frame's plan so that the SQL reads it as a view (the `view` capability). `km.add_sql_binding(name, frame)` does the same on
+  the default session. This is the one SQL binding of every kind of source
+  ([credentials_and_writes.md decision 2](credentials_and_writes.md#2-binding-a-sql-name-on-the-session-or-for-one-call)),
+  and it replaces the `register_view` of earlier drafts. The readers take objects or paths directly and
+  read no SQL binding.
 
 ### 5. Attributes never fall through
 
@@ -528,7 +534,7 @@ package design). D4 to D18 are this design's own.
 | D14 | engine limits | some were checked in Python (NULL placement, `head(0)`) | refused by the engine at the terminal, with its step and code (section 6) | the Python checks went stale when the engine moved |
 | D15 | `len(df)` and `bool(df)` | ran the query | raise `UnsupportedOperation` naming the terminal (section 2) | no dunder runs a query |
 | D16 | ties chosen by row order | `drop_duplicates(subset=...)` was refused | the library's default is accepted and returns any tied row; an explicit order-dependent choice is refused (section 7) | the default asks a question the plan can answer, with a listed departure |
-| D17 | verbs the earlier SDK lacked | absent: `with_columns`/`assign` over the Mojo builder's rules, `rename`, `dropna`/`drop_nulls`, `concat`, `fillna`, `astype`/`cast`, `value_counts`, `nlargest`/`top_k`, `tail`, `merge_asof`/`join_asof`, `from_arrow`, `register_view` | carried from the Mojo builders where one exists (section 9), with rulings 14 and 15 | the Python skins lacked the verbs the Mojo surface has |
+| D17 | verbs the earlier SDK lacked | absent: `with_columns`/`assign` over the Mojo builder's rules, `rename`, `dropna`/`drop_nulls`, `concat`, `fillna`, `astype`/`cast`, `value_counts`, `nlargest`/`top_k`, `tail`, `merge_asof`/`join_asof`, `from_arrow`, binding a frame by name (`add_sql_binding`) | carried from the Mojo builders where one exists (section 9), with rulings 14 and 15 | the Python skins lacked the verbs the Mojo surface has |
 | D18 | where the matrix tests live | no matrix | `src/tests/e2e/pandas_e2e` and `polars_e2e` (section 10) | the matrix lint's package rule |
 
 ## What must always hold?
@@ -540,7 +546,8 @@ package design). D4 to D18 are this design's own.
 - A verb with a Mojo builder encodes that builder's plan, plus only the nodes of the ruling that names
   the difference.
 - Nothing on the DataFrame path writes SQL text, reads an environment variable, or imports pandas or
-  polars to compute.
+  polars to compute. (The library's credential chains read the providers' own variables when a remote
+  URL is read: [credentials_and_writes.md](credentials_and_writes.md#7-the-ambient-credential-and-the-only-environment-komira-reads).)
 - Every capability a skin reaches has a matrix row, and every verb names its capability in
   [dataframe_surface_verbs.md](dataframe_surface_verbs.md).
 
@@ -553,7 +560,8 @@ package design). D4 to D18 are this design's own.
 | which plans the engine runs today | [src/lowering/README.md](../../src/lowering/README.md), [src/sdk_exec/README.md](../../src/sdk_exec/README.md) |
 | the UDF verbs' `return_dtype`, null mode, code capture and workers | [optimized_plan_udfs.md](optimized_plan_udfs.md), [udf_runtime_interface.md](udf_runtime_interface.md) |
 | what each plan node returns | [query semantics](query_semantics.md) |
-| remote prefixes, credentials, catalogs and `read_table` | the object-store and catalog designs |
+| sources, credentials and binding them, remote prefixes, and a write terminal's `compression=` and what it returns | [credentials_and_writes.md](credentials_and_writes.md) |
+| catalogs and `read_table` | the catalog designs |
 
 ## What are the limits and open questions?
 
@@ -571,7 +579,7 @@ package design). D4 to D18 are this design's own.
   polars-shaped skin leaves 2 of its 52 cells empty by decision, and the pandas-shaped skin leaves 3
   (counted from the verbs document's table).
 - The early engine refuses at `lower` most of what the skins can build: joins, windows,
-  a distinct over an explicit column list, and sources other than Parquet; a whole-row distinct runs only
+  a distinct over an explicit column list, and sources other than Parquet or one JSON Lines file; a whole-row distinct runs only
   over one fixed-width or string column, or several dictionary-encoded string columns. These plans raise at the terminal with the engine's code
   until the engine runs them.
 

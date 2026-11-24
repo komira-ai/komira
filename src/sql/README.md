@@ -17,8 +17,9 @@ name tables that say which identifiers the grammar claims
 (`sql_agg_code`, `sql_call_is_aggregate`, `sql_name_claimed_by_grammar`).
 
 `sql.sql_tvf_options` holds what the nodes share about table functions: the reader
-kinds (`TVF_PARQUET`, `TVF_CSV`, `TVF_JSON`, `TVF_AVRO`), `TvfOptions` (the
-`all_varchar`, `header`, `delim` and `hive_partitioning` options of a `read_*` call
+kinds (`TVF_PARQUET`, `TVF_CSV`, `TVF_JSON`, `TVF_AVRO`, `TVF_ICEBERG`), `TvfOptions` (the
+`all_varchar`, `header`, `delim` and `hive_partitioning` options of a `read_*` call,
+the `allow_moved_paths` and `snapshot_from_id` options of `iceberg_scan`,
 and the `HIVE_PARTITIONING_*` modes), and the extension rules of the
 `FROM '<path>'` replacement scan (`_replacement_scan_kind`, `_file_stem`).
 `sql_ast` and `sql_parser` import them back, so the old import paths still work.
@@ -36,12 +37,26 @@ period tables; the function names and the specifier names are different sets.
 
 `sql.sql_parser` is a hand-written recursive-descent parser:
 `parse_sql(tokenize(sql))` returns a `SqlStatement`, a query (`WITH`,
-`SELECT`, `UNION ALL`), a `COPY ... TO` or a `CREATE TABLE ... AS`. Every
+`SELECT`, `UNION ALL`, `INTERSECT`, `EXCEPT`), a `COPY ... TO` or a `CREATE TABLE ... AS`. Every
 subquery body (scalar, `[NOT] EXISTS`, `[NOT] IN (SELECT ...)`, a derived
-table, a `UNION ALL` branch) is parked in the statement's flat `subqueries`
+table, a set-operation branch) is parked in the statement's flat `subqueries`
 table, and the expression node holds its index. Input the grammar has no
 production for raises an `Error` that names it (`SQL syntax error` or
-`SQL not supported`) instead of being read as something else.
+`SQL not supported`) instead of being read as something else. The ON of an
+INNER (or bare) `JOIN` is folded into WHERE; a RIGHT or FULL join later in
+the same FROM is therefore refused by name (`INNER_ON_BEFORE_OUTER_REFUSAL`),
+because the folded predicate would drop the rows that join pads with NULL. A
+LEFT, SEMI or ANTI join after it keeps the same answer and is parsed.
+
+`SUBSTRING(s FROM start [FOR length])`, the standard form TPC-H Q22 writes,
+parses as the call `substring(s, start[, length])`, as DuckDB reads it.
+
+A `COPY ... TO` with no `FORMAT` takes its format from the destination's
+extension, as DuckDB does (`sql.sql_copy_format`): `.parquet`, `.csv`, and
+`.json`, `.jsonl` or `.ndjson`, after one `.gz` or `.zst` suffix is removed.
+Any other extension is refused with `COPY_FORMAT_NOT_INFERRED` instead of
+being written as Parquet. With no `COMPRESSION`, Parquet is snappy and CSV and
+JSON take gzip from `.gz`, zstd from `.zst`, and none otherwise.
 
 `sql.sql_catalog` holds the tables and user functions a query may
 name. `SqlCatalog` registers an in-memory `Table` or `RecordBatch`
@@ -97,8 +112,13 @@ AS source), with the statement kind and a COPY's destination or a CTAS's
 table name. It resolves names case-insensitively against the catalog, the
 `WITH` definitions and derived tables; binds scalar and aggregate
 expressions, GROUP BY and HAVING, joins (inner, outer, NATURAL / USING, semi,
-anti), subqueries (scalar, `[NOT] EXISTS`, `[NOT] IN`, the last NULL-aware),
-window functions, ORDER BY, LIMIT / OFFSET, DISTINCT and UNION ALL; and
+anti), subqueries (scalar, also in a HAVING and in the SELECT list of a
+grouped query; a correlated scalar in a WHERE or the SELECT list of an
+ungrouped query, see below; `[NOT] EXISTS`; `[NOT] IN`, NULL-aware, its body
+either one table projecting one bare column or, uncorrelated, any query of
+one column),
+window functions, ORDER BY, LIMIT / OFFSET, DISTINCT, UNION ALL, INTERSECT
+and EXCEPT; and
 raises an `Error` starting `SQL bind error` or `SQL not supported`, naming
 the construct, for what it does not bind. The parquet facts a binding needs
 (the `ParquetSource` a `read_parquet('path')` relation scans, which may be
@@ -110,13 +130,41 @@ with no `read_parquet` relation. `read_parquet('path', hive_partitioning =
 true|false)` sets the mode the reader resolves the path under (no option is
 auto-detect); a column counts as NULL-free only when every file of the
 relation records no NULL and it is not a partition column.
-`SqlCatalog.add_parquet_source` registers such a resolved source as a table. A `read_csv`, `read_json` or `read_avro`
+`SqlCatalog.add_parquet_source` registers such a resolved source as a table.
+An `iceberg_scan('path' [, allow_moved_paths = true] [, snapshot_from_id = N])`
+relation is resolved the same way, by the reader's `iceberg_relation(path,
+allow_moved_paths, snapshot_id)`, which returns the `SourceVariant` the relation
+scans (its own schema is the relation's schema); a reader that does not
+override that method refuses with `SQL bind error: iceberg_scan('<path>') needs
+a binder that reads Iceberg tables`. `parquet_footers.ParquetFooters` reads
+Iceberg tables. Every other DuckDB `iceberg_scan` option (`version`,
+`version_name_format`, `mode`, `metadata_compression_codec`,
+`skip_schema_inference`, `snapshot_from_timestamp`) is refused by name, as is
+any CSV, JSON or Parquet option on `iceberg_scan`, and both Iceberg options on
+the other readers. `SqlCatalog.add_source` registers any resolved
+`SourceVariant` as a table under its own schema (an Iceberg table). A `read_csv`, `read_json` or `read_avro`
 relation gets its schema from `sql_tvf_bind`, which reads the file. The
 binder's code is split over the `sql_bind_*` modules (the FROM scope,
-operators, functions, casts and timestamps, subqueries, aggregates and
+operators, functions, casts and timestamps, subqueries, correlated scalar
+subqueries, aggregates and
 GROUP BY, output names, windows and ORDER BY, joins, parquet facts).
 
-`UNION ALL` (`sql.sql_bind_union`) binds the chain `a UNION ALL b UNION ALL c`
+A correlated scalar subquery (`sql.sql_bind_corr_scalar`), one whose WHERE
+names a column of the statement around it, as TPC-H Q2, Q17 and Q20 do, binds
+grouped by its correlation keys: `(SELECT f(aggs) FROM R WHERE p AND r = o)`
+is the group `o` of `SELECT r, aggs FROM R WHERE p GROUP BY r`, and over no
+row its value is `f` with every count 0 and every other aggregate NULL, as in
+DuckDB. The optimizer's `flatten_dependent_joins` makes it a LEFT join of the
+outer rows with that grouped body. Its WHERE may name outer columns only in
+`inner_column = outer_column` conjuncts, and its body must aggregate (sum,
+count, min, max, avg) over a FROM of comma or CROSS joins with no GROUP BY,
+HAVING, DISTINCT, ORDER BY, LIMIT or OFFSET; any other shape, an outer column
+in its SELECT list, and a correlated scalar in a HAVING or a grouped SELECT
+list are refused with `SQL not supported: a correlated scalar subquery ...`
+naming it. One under a CASE or a function call binds as an uncorrelated body.
+
+`UNION ALL` (`sql.sql_bind_set_op`, with the common types of
+`sql.sql_bind_union`) binds the chain `a UNION ALL b UNION ALL c`
 to one `PLAN_UNION` node with one child per branch, also as the body of a
 derived table (`FROM (a UNION ALL b) u`). Each column takes DuckDB's common
 type over the branches, folded left to right: the wider of two integers of one
@@ -136,7 +184,24 @@ refused. Bare integer literals of every branch are INT32 when they fit, so
 `OFFSET` after the last branch apply to the whole union: the parser rewrites the
 query to `SELECT * FROM (<union>) ORDER BY ... LIMIT ...`, so the sort and the
 row window bind above the union node. On any other branch they are a
-`SQL syntax error` naming the clause.
+`SQL syntax error` naming the clause and the operator after it.
+
+`INTERSECT` and `EXCEPT` (`sql.sql_bind_set_op`) are the set forms: whole rows compared with NULLs equal, each result
+row once. `INTERSECT DISTINCT` and `EXCEPT DISTINCT` spell the same;
+`INTERSECT ALL`, `EXCEPT ALL` and bare `UNION` are refused by name. A chain
+takes DuckDB's precedence: INTERSECT binds tighter than UNION ALL and EXCEPT,
+and each level folds left to right, so `a UNION ALL b INTERSECT c EXCEPT d` is
+`(a UNION ALL (b INTERSECT c)) EXCEPT d`; adjacent UNION ALL inputs stay one
+union node. The two inputs of an INTERSECT or EXCEPT take the common column
+types and the left input's names as UNION ALL's branches do (errors name the
+operator and the branch numbers as the query spells them), and the pair binds
+to plan nodes the engine already runs: a two-child union whose children add a
+constant side column `#set_side` (0 left, 1 right), an aggregation grouped by
+every column with `MIN` and `MAX` of the side, a filter (INTERSECT: min 0 and
+max 1; EXCEPT: max 0) and a projection back to the columns. Two result columns
+of one name are refused, since the grouping names its columns, and so is a
+column named as one of the helper columns (`#set_side`, `#set_lo`, `#set_hi`),
+which only a file's column can be.
 
 `sql.sql_frontend` is the text entry over the three steps.
 `statement_from_sql(sql, catalog, footers)` tokenizes, parses and binds in one
@@ -145,7 +210,7 @@ call and returns the `BoundStatement` (a query, a COPY or a CREATE TABLE AS).
 `output_schema` is the result's schema (names, Arrow types and nullability, as
 the binder derives them), and refuses a COPY or CREATE TABLE AS with an
 `Error` starting `STATEMENT_NOT_A_QUERY`; `query_plan(bound)` is that refusal
-over a statement already bound, which `sdk_exec`'s `run_sql` uses too. Every
+over a statement already bound (`sdk_exec`'s `run_sql` runs a COPY itself). Every
 other failure is the tokenizer's, parser's or binder's own `Error`, unchanged.
 Nothing is optimized, lowered or run.
 
@@ -320,6 +385,18 @@ var copy = statement_from_sql(
     "COPY (SELECT k FROM t) TO 'out.csv' (FORMAT csv)", fcat, NoParquetFooters()
 )
 assert_equal(Int(copy.kind), Int(STMT_COPY))
+```
+
+The format a COPY takes from its destination:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from arrow.write_target import WCOMP_GZIP, WFMT_CSV, WFMT_PARQUET
+from sql.sql_copy_format import copy_codec_from_path, copy_format_from_path
+
+assert_equal(Int(copy_format_from_path("out/sales.parquet")), Int(WFMT_PARQUET))
+assert_equal(Int(copy_format_from_path("rows.csv.gz")), Int(WFMT_CSV))
+assert_equal(Int(copy_codec_from_path(WFMT_CSV, "rows.csv.gz")), Int(WCOMP_GZIP))
 ```
 
 A multi-file parquet relation, built in memory (no file is opened), registered in
