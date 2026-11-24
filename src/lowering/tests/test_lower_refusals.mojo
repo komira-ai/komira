@@ -218,6 +218,12 @@ def test_a_limit_with_an_offset_over_no_sort_is_refused_and_a_plain_limit_is_cut
     # A filter over a sort: the rows it passes are in no order a segment states.
     var filtered_sort = LogicalPlan.filter(_v_greater_than_zero(), _sorted_scan())
     assert_equal(_message(LogicalPlan.limit(5, filtered_sort^, 2), _inputs()), no_order)
+    # A projection with a UDF over a sort does not fold into a range: the
+    # offset is refused before the child, which a range would walk first.
+    var udf_sort = LogicalPlan.project_with_udf(
+        _v_only(), _sorted_scan(), _udf(UDF_KIND_MAP)
+    )
+    assert_equal(_message(LogicalPlan.limit(5, udf_sort^, 2), _inputs()), no_order)
     assert_equal(
         _message(LogicalPlan.limit(-3, _scan()), _inputs()),
         _not_cut("Limit (a limit with a negative count)"),
