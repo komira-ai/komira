@@ -7,6 +7,7 @@ on Linux x86_64 and, for the macOS wheel, on macOS arm64).
         --requires-python <spec> --classifier <classifier>...
         --abi-table <komira.tsv> --license <LICENSE> --notice <NOTICE>
         --modular-license <LICENSE> --modular-notices <Third-Party-Notices>
+        --aws-lc-license <LICENSE> --s2n-tls-license <LICENSE>
         --parquet <file.parquet> --plan-hex <file.hex>
 
 Run by wheel_install_run.py, which installed the wheels into `--site` and
@@ -27,8 +28,10 @@ Then, in order:
   given one, its `Requires-Python` is `--requires-python`, and its
   `Classifier` lines are the `--classifier` values, in that order and no
   other; `.dist-info/licenses/` holds LICENSE and NOTICE, byte for byte the
-  repository's, and `MODULAR_LICENSE` and `MODULAR_THIRD_PARTY_NOTICES`, byte
-  for byte the pinned compiler package's, and no other; its description is
+  repository's, `AWS_LC_LICENSE` and `S2N_TLS_LICENSE`, byte for byte the
+  pinned aws-lc and s2n-tls archives' LICENSE files, and `MODULAR_LICENSE`
+  and `MODULAR_THIRD_PARTY_NOTICES`, byte for byte the pinned compiler
+  package's, and no other; its description is
   README.md, which starts with the line `# komira`;
 - `komira.abi_version()` is the `version` line of the ABI golden;
 - `Session().register_parquet` registers the Parquet fixture, and a missing
@@ -70,7 +73,14 @@ _LIBRARY_PATH_VARIABLES = (
 )
 
 # The licence files the wheel carries, in `.dist-info/licenses/`.
-_LICENCES = ("LICENSE", "NOTICE", "MODULAR_LICENSE", "MODULAR_THIRD_PARTY_NOTICES")
+_LICENCES = (
+    "LICENSE",
+    "NOTICE",
+    "AWS_LC_LICENSE",
+    "S2N_TLS_LICENSE",
+    "MODULAR_LICENSE",
+    "MODULAR_THIRD_PARTY_NOTICES",
+)
 
 _VALUED = (
     "--site",
@@ -81,6 +91,8 @@ _VALUED = (
     "--notice",
     "--modular-license",
     "--modular-notices",
+    "--aws-lc-license",
+    "--s2n-tls-license",
     "--parquet",
     "--plan-hex",
     "--requires-python",
@@ -170,6 +182,8 @@ def check_metadata(dist, opts):
     sources = {
         "LICENSE": opts["license"],
         "NOTICE": opts["notice"],
+        "AWS_LC_LICENSE": opts["aws_lc_license"],
+        "S2N_TLS_LICENSE": opts["s2n_tls_license"],
         "MODULAR_LICENSE": opts["modular_license"],
         "MODULAR_THIRD_PARTY_NOTICES": opts["modular_notices"],
     }

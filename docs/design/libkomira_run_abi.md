@@ -53,8 +53,9 @@ version is true.
     clears the last error when it starts. `komira_last_error` does not clear it.
   - An export catches a raise and returns `KOMIRA_ERR_ENGINE`
     (`src/so/_c_abi.mojo`).
-  - The `Session` behind a handle holds the last error and a `SqlCatalog`. It has
-    no engine.
+  - The `Session` behind a handle holds the last error, the credentials and an
+    engine (`sdk_exec`'s `EngineContext`, whose catalog holds the registered
+    tables); no call runs it yet.
 - **EXISTS** The engine's SQL door is
   `sdk_exec.run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome`
   (`src/sdk_exec/engine_sql.mojo`).

@@ -14,7 +14,10 @@ runs a query yet.
 - `status.mojo`: the six status codes, `KOMIRA_MAX_INPUT_BYTES`, the credential
   kinds, fields and scope, `abi_version`, `buffer_status`, `input_length_status`.
 - `session.mojo`: `Session`, the state a context handle stands for: the last
-  error, the catalog of registered tables and the credentials.
+  error, the engine (`sdk_exec`'s `EngineContext`), whose catalog holds the
+  registered tables, and the credentials. `try_new_session` is the session
+  `komira_ctx_new` hands out, or None when the engine does not start (the
+  export returns that as NULL).
 - `credentials.mojo`: `SessionCredentials`, the credential calls on values (a
   kind, a name, a field's bytes in; an id out, or a raise with a named error).
 - `credential_store.mojo`: `SessionSecretStore`, the `SecretStore` the values
@@ -104,14 +107,19 @@ assert_equal(abi_version(), Int32(1002))
 ```
 
 **The handle.** `komira_ctx_new` returns a context the caller owns until it
-passes it to `komira_ctx_free`. A handle is not safe to use from two threads at
+passes it to `komira_ctx_free`, or NULL when the context's engine does not
+start (the host probe or the start of its workers fails); with no context
+there is no last error, so the engine's message is not available. A handle is not safe to use from two threads at
 once, freeing one twice or using it after the free is undefined (as for
 `free(3)`), and `komira_ctx_free(NULL)` does nothing. A context holds a
-`Session`: the text of the last error, empty on a fresh one, and the tables
-registered by name.
+`Session`: the text of the last error, empty on a fresh one, and an engine
+(`sdk_exec`'s `EngineContext`) whose catalog holds the tables registered by
+name. The engine's workers (the host's compute thread count) start in
+`komira_ctx_new` and stop in `komira_ctx_free`.
 
 ```mojo
-from so import Session
+from sdk_exec.engine_options import EngineOptions
+from so import Session, try_new_session
 from std.testing import assert_equal, assert_false, assert_true
 
 var session = Session()
@@ -121,6 +129,12 @@ assert_true(session.has_error())
 assert_equal(session.last_error(), String("the file does not exist"))
 session.clear_error()
 assert_equal(session.last_error(), String(""))
+# The engine started with the host's own worker count and holds no table yet.
+assert_true(session.engine.host_profile.thread_count >= 1)
+assert_false(session.engine.catalog.has("t"))
+# komira_ctx_new's session: None (the NULL handle) when the engine does not
+# start, here because it refuses a worker count of 0; nothing raises.
+assert_false(Bool(try_new_session(EngineOptions(worker_count=0))))
 ```
 
 **The two-call output protocol.** A call that returns bytes takes
@@ -158,7 +172,7 @@ refused (-3, with a last error) before it is used.
 
 | call | what it does | refusals |
 |---|---|---|
-| `komira_register_parquet(ctx, name, path)` | reads the footer of the Parquet file at `path` and binds it into the session under `name` (found without regard to case) | NULL `name` or `path`: -2. A missing, unreadable or nested file: -3 |
+| `komira_register_parquet(ctx, name, path)` | reads the footers of the Parquet files at `path` (one file, a glob or a directory) through the engine's footer reader and binds them into the engine's catalog as the table `name` (found without regard to case) | NULL `name` or `path`: -2. A missing, unreadable or nested file, a glob that matches nothing, or files whose schemas differ: -3 |
 | `komira_parquet_schema(ctx, path, out_buf, out_cap, out_len)` | the file's Arrow schema as `komira.plan.v1` `WireSchema` bytes, for a plan author to splice into a Parquet scan | NULL `path` or `out_len`: -2. A file that cannot be read: -3 |
 | `komira_csv_binding(ctx, path, delimiter, has_header, all_varchar, out_buf, out_cap, out_len)` | the whole `WireScanBinding` of a CSV file, schema inferred from a bounded prefix of an uncompressed file (a compressed file is read whole). `has_header` and `all_varchar` are `int32_t`; any non-zero value is true | as `komira_parquet_schema` |
 | `komira_json_binding(ctx, path, out_buf, out_cap, out_len)` | the same for a newline-delimited JSON file; the schema comes from the leading records | as `komira_parquet_schema` |
@@ -260,12 +274,13 @@ two-call protocol; a good call after a refusal leaves no error.
 named refusal word for word, the NULL and length cases, and that `*out_id` is
 untouched on a refusal.
 `exports_exact` makes the twelve names above the whole dynamic symbol table.
-On Linux the eight C owners in the library's closure (async, async_api, compression, fs,
-libc, metrics, parquet_codec, scan_source) are linked as their own shared libraries
-(`native_owners`), not embedded; on macOS arm64 there are none, and the C archives are linked
+On Linux the eleven C owners in the library's closure (async, async_api,
+compression, crypto, fs, http_core, libc, metrics, objectstore, parquet_codec,
+scan_source) are linked as their own shared libraries (`native_owners`), not
+embedded; on macOS arm64 there are none, and the C archives are linked
 statically into `libkomira.dylib`. On Linux the fourteenth driver, `gate_native_owners`,
 reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
-the SONAME of each of the eight (`libkomira_<owner>_native.so.1`); an owner
+the SONAME of each of the eleven (`libkomira_<owner>_native.so.1`); an owner
 dropped from `native_owners` leaves its C embedded, and that driver fails.
 The plan driver also refuses a `plan_len` of 64 MiB plus one and of
 `UINT64_MAX` (-5, nothing written), and accepts exactly 64 MiB as a length;
@@ -282,8 +297,8 @@ The table is the output of `komira//tools/build/package/libkomira:libkomira_elf_
 (`tools/build/native/so_report.zig`, tested in `so_report_test.zig`) on the built
 `libkomira.so`, on each native owner's `.so.1`, and on the Mojo runtime libraries of
 the platform row's `runtime_libs`, and writes the table below; nothing is
-read by hand. It is a record of the library as it is while `so` depends on `sdk` and
-not on `sdk_exec`, not a gate: the gates above and `libkomira_install` hold the
+read by hand. It is a record of the library as it is now that `so` depends on
+`sdk_exec` (a session holds an engine), not a gate: the gates above and `libkomira_install` hold the
 exports, the owner SONAMEs, a version of at least 1000 and that every library is
 mapped from the prefix. Each `RUNPATH` or `RPATH` entry is one backticked
 item; an entry holding colons is one string the loader splits itself. The `RPATH` values of
@@ -291,30 +306,36 @@ the Mojo runtime libraries are the vendor's own.
 
 | file | role | size (bytes) | SONAME | RUNPATH | RPATH | highest GLIBC | highest GLIBCXX | highest CXXABI |
 |---|---|---|---|---|---|---|---|---|
-| `libkomira.so` | target | 3642072 | `libkomira.so` | `$ORIGIN/lib:$ORIGIN` | none | `GLIBC_2.34` | none | none |
+| `libkomira.so` | target | 3752832 | `libkomira.so` | `$ORIGIN/lib:$ORIGIN` | none | `GLIBC_2.34` | none | none |
 | `libkomira_async_api_native.so.1` | owner | 2760 | `libkomira_async_api_native.so.1` | none | none | none | none | none |
 | `libkomira_async_rt_native.so.1` | owner | 43992 | `libkomira_async_rt_native.so.1` | none | none | `GLIBC_2.17` | none | none |
 | `libkomira_compression_native.so.1` | owner | 244856 | `libkomira_compression_native.so.1` | none | none | `GLIBC_2.34` | none | none |
+| `libkomira_crypto_native.so.1` | owner | 3240416 | `libkomira_crypto_native.so.1` | none | none | `GLIBC_2.33` | none | none |
 | `libkomira_fs_native.so.1` | owner | 11192 | `libkomira_fs_native.so.1` | none | none | `GLIBC_2.33` | none | none |
+| `libkomira_http_core_native.so.1` | owner | 1180024 | `libkomira_http_core_native.so.1` | `$ORIGIN` | none | `GLIBC_2.33` | none | none |
 | `libkomira_libc_native.so.1` | owner | 11080 | `libkomira_libc_native.so.1` | none | none | `GLIBC_2.33` | none | none |
 | `libkomira_metrics_native.so.1` | owner | 2600 | `libkomira_metrics_native.so.1` | none | none | none | none | none |
+| `libkomira_objectstore_native.so.1` | owner | 8472 | `libkomira_objectstore_native.so.1` | none | none | `GLIBC_2.33` | none | none |
 | `libkomira_parquet_codec_native.so.1` | owner | 173736 | `libkomira_parquet_codec_native.so.1` | none | none | `GLIBC_2.14` | none | none |
 | `libkomira_scan_source_native.so.1` | owner | 2488 | `libkomira_scan_source_native.so.1` | none | none | none | none | none |
 | `libAsyncRTRuntimeGlobals.so` | runtime | 685176 | `libAsyncRTRuntimeGlobals.so` | none | `$ORIGIN:$ORIGIN/../lib:$ORIGIN/../_solib_k8/_USupport:$ORIGIN/libAsyncRTRuntimeGlobals.so.runfiles/_main/_solib_k8/_USupport` | `GLIBC_2.35` | `GLIBCXX_3.4.29` | `CXXABI_1.3.9` |
-| `libKGENCompilerRTShared.so` | runtime | 1222584 | `libKGENCompilerRTShared.so` | none | `$ORIGIN:$ORIGIN/../lib:$ORIGIN/../_solib_k8/_USupport:$ORIGIN/libKGENCompilerRTShared.so.runfiles/_main/_solib_k8/_USupport:$ORIGIN/../_solib_k8/_UAsyncRT:$ORIGIN/libKGENCompilerRTShared.so.runfiles/_main/_solib_k8/_UAsyncRT` | `GLIBC_2.34` | `GLIBCXX_3.4.30` | `CXXABI_1.3.11` |
-| `libMSupportGlobals.so` | runtime | 49200 | `libMSupportGlobals.so` | none | `$ORIGIN:$ORIGIN/../lib` | `GLIBC_2.34` | `GLIBCXX_3.4.14` | `CXXABI_1.3.11` |
+| `libKGENCompilerRTShared.so` | runtime | 1267976 | `libKGENCompilerRTShared.so` | none | `$ORIGIN:$ORIGIN/../lib:$ORIGIN/../_solib_k8/_USupport:$ORIGIN/libKGENCompilerRTShared.so.runfiles/_main/_solib_k8/_USupport:$ORIGIN/../_solib_k8/_UAsyncRT:$ORIGIN/libKGENCompilerRTShared.so.runfiles/_main/_solib_k8/_UAsyncRT` | `GLIBC_2.34` | `GLIBCXX_3.4.30` | `CXXABI_1.3.11` |
+| `libMSupportGlobals.so` | runtime | 49296 | `libMSupportGlobals.so` | none | `$ORIGIN:$ORIGIN/../lib` | `GLIBC_2.34` | `GLIBCXX_3.4.14` | `CXXABI_1.3.11` |
 | `libgcc_s.so.1` | runtime | 902392 | `libgcc_s.so.1` | none | `$ORIGIN/.` | `GLIBC_2.14` | none | none |
 | `libstdc++.so.6` | runtime | 21186008 | `libstdc++.so.6` | none | `$ORIGIN/.` | `GLIBC_2.17` | none | none |
 
 | file | DT_NEEDED, in order |
 |---|---|
-| `libkomira.so` | `libKGENCompilerRTShared.so`, `libkomira_async_rt_native.so.1`, `libkomira_async_api_native.so.1`, `libkomira_compression_native.so.1`, `libkomira_fs_native.so.1`, `libkomira_libc_native.so.1`, `libkomira_metrics_native.so.1`, `libkomira_parquet_codec_native.so.1`, `libkomira_scan_source_native.so.1`, `libpthread.so.0`, `libc.so.6` |
+| `libkomira.so` | `libKGENCompilerRTShared.so`, `libkomira_async_rt_native.so.1`, `libkomira_async_api_native.so.1`, `libkomira_compression_native.so.1`, `libkomira_crypto_native.so.1`, `libkomira_fs_native.so.1`, `libkomira_http_core_native.so.1`, `libkomira_libc_native.so.1`, `libkomira_metrics_native.so.1`, `libkomira_objectstore_native.so.1`, `libkomira_parquet_codec_native.so.1`, `libkomira_scan_source_native.so.1`, `libpthread.so.0`, `libc.so.6` |
 | `libkomira_async_api_native.so.1` | none |
 | `libkomira_async_rt_native.so.1` | `libpthread.so.0`, `libc.so.6`, `ld-linux-x86-64.so.2` |
 | `libkomira_compression_native.so.1` | `libpthread.so.0`, `libc.so.6` |
+| `libkomira_crypto_native.so.1` | `libpthread.so.0`, `libc.so.6` |
 | `libkomira_fs_native.so.1` | `libpthread.so.0`, `libc.so.6` |
+| `libkomira_http_core_native.so.1` | `libkomira_crypto_native.so.1`, `libpthread.so.0`, `libc.so.6`, `ld-linux-x86-64.so.2` |
 | `libkomira_libc_native.so.1` | `libpthread.so.0`, `libc.so.6` |
 | `libkomira_metrics_native.so.1` | none |
+| `libkomira_objectstore_native.so.1` | `libpthread.so.0`, `libc.so.6` |
 | `libkomira_parquet_codec_native.so.1` | `libc.so.6` |
 | `libkomira_scan_source_native.so.1` | none |
 | `libAsyncRTRuntimeGlobals.so` | `libm.so.6`, `libstdc++.so.6`, `libMSupportGlobals.so`, `libgcc_s.so.1`, `libc.so.6`, `ld-linux-x86-64.so.2` |
@@ -325,35 +346,41 @@ the Mojo runtime libraries are the vendor's own.
 
 | library | role | reached from the target | target's undefined symbols it defines |
 |---|---|---|---|
-| `libkomira_async_api_native.so.1` | owner | needed (direct) | 0 |
-| `libkomira_async_rt_native.so.1` | owner | needed (direct) | 0 |
+| `libkomira_async_api_native.so.1` | owner | needed (direct) | 1 |
+| `libkomira_async_rt_native.so.1` | owner | needed (direct) | 2 |
 | `libkomira_compression_native.so.1` | owner | needed (direct) | 1 |
-| `libkomira_fs_native.so.1` | owner | needed (direct) | 0 |
+| `libkomira_crypto_native.so.1` | owner | needed (direct) | 0 |
+| `libkomira_fs_native.so.1` | owner | needed (direct) | 5 |
+| `libkomira_http_core_native.so.1` | owner | needed (direct) | 0 |
 | `libkomira_libc_native.so.1` | owner | needed (direct) | 6 |
 | `libkomira_metrics_native.so.1` | owner | needed (direct) | 0 |
+| `libkomira_objectstore_native.so.1` | owner | needed (direct) | 0 |
 | `libkomira_parquet_codec_native.so.1` | owner | needed (direct) | 1 |
 | `libkomira_scan_source_native.so.1` | owner | needed (direct) | 0 |
 | `libAsyncRTRuntimeGlobals.so` | runtime | needed (through another library) | 0 |
-| `libKGENCompilerRTShared.so` | runtime | needed (direct) | 5 |
+| `libKGENCompilerRTShared.so` | runtime | needed (direct) | 6 |
 | `libMSupportGlobals.so` | runtime | needed (through another library) | 0 |
 | `libgcc_s.so.1` | runtime | needed (through another library) | 0 |
 | `libstdc++.so.6` | runtime | needed (through another library) | 0 |
 
-Owners needed: 8 of 8 (492704 bytes); declared only: 0.
+Owners needed: 11 of 11 (4921616 bytes); declared only: 0.
 
 Wheel tag: `manylinux_2_34` (highest GLIBC of the target and the owners: `GLIBC_2.34`).
 
 Reading it:
 
-- **Owners.** All eight are `DT_NEEDED` of libkomira (direct), none is embedded, and
-  together they weigh 492,704 bytes. They are needed at load time: the loader refuses
-  a library with a missing `DT_NEEDED`. Only three of the eight (libc, compression,
-  parquet_codec) define a symbol that libkomira's own undefined symbols name; the other five
-  (async_rt, async_api, fs, metrics, scan_source) are `DT_NEEDED` with no symbol bound to
-  them from libkomira itself, so today they are declared and loaded but not called through
+- **Owners.** All eleven are `DT_NEEDED` of libkomira (direct), none is embedded, and
+  together they weigh 4,921,616 bytes, of which crypto (aws-lc's libcrypto, 3,240,416)
+  and http_core (s2n-tls, 1,180,024; itself `DT_NEEDED` on crypto) are most. They are
+  needed at load time: the loader refuses a library with a missing `DT_NEEDED`. Six of
+  the eleven (async_api, async_rt, compression, fs, libc, parquet_codec) define a symbol
+  that libkomira's own undefined symbols name; the other five (crypto, http_core,
+  metrics, objectstore, scan_source) are `DT_NEEDED` with no symbol bound to them from
+  libkomira itself, so today they are declared and loaded but not called through
   libkomira's own symbol table. They stay in the package because each is a
-  `native_owners` entry the library's gate requires.
-- **glibc floor.** The highest `GLIBC_` version of libkomira and the eight owners is
+  `native_owners` entry of the library's closure that the gate requires; a call that
+  runs a query reaches them, and then their C is never embedded in libkomira.
+- **glibc floor.** The highest `GLIBC_` version of libkomira and the eleven owners is
   2.34 (libkomira and compression), so `manylinux_2_34` is honest for the files the package
   carries. No `GLIBCXX_` or `CXXABI_` version is needed by them. The Python wheel also
   carries the three Mojo runtime libraries (through `[dist]`); `libAsyncRTRuntimeGlobals.so`
@@ -365,12 +392,12 @@ Reading it:
   other two of the three, and those need `libstdc++.so.6` and `libgcc_s.so.1`. Each
   carries its own `RPATH` that includes `$ORIGIN`, so the three are found beside one
   another; libkomira finds them through its `RUNPATH` entry `$ORIGIN/lib`. The `[dist]`
-  directory of this target holds them in `lib/` beside the eight owners, and the Python
+  directory of this target holds them in `lib/` beside the eleven owners, and the Python
   wheel copies it whole; the C++ libraries are not in it, the host provides them.
 
 The `libkomira_install` check loads libkomira from an empty prefix with `RTLD_NOW`
 and the probe calls `komira_abi_version`; every library the loader mapped came from the
-prefix's `lib/`: the eight owners, `libKGENCompilerRTShared.so`, and the runtime's
+prefix's `lib/`: the eleven owners, `libKGENCompilerRTShared.so`, and the runtime's
 own dependencies of it (`libAsyncRTRuntimeGlobals.so`, `libMSupportGlobals.so`,
 `libgcc_s.so.1`, `libstdc++.so.6`).
 
@@ -431,8 +458,9 @@ packaging change that lists it.
 
 ## Not done
 
-No release-over-release version check and no packaged header yet; no plan execution, query
-or UDF call; no engine in the session; the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).
+No release-over-release version check and no packaged header yet; the session
+holds an engine, but no call runs a plan, a query or a UDF yet; no session
+options (the engine takes the host profile's worker count and memory budget); the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).
 The calls that run a query, ported from the earlier SDK, their result as an Arrow
 C stream, and what an abort does at the boundary are described in
 [docs/design/libkomira_run_abi.md](https://github.com/komira-ai/komira/blob/main/docs/design/libkomira_run_abi.md).

@@ -12,90 +12,131 @@ NATIVE_OWNERS = [
     "//src/async_rt:komira_async_native",
     "//src/async_api:komira_async_api_native",
     "//src/compression:komira_compression_native",
+    "//src/crypto:komira_crypto_native",
     "//src/fs:komira_fs_native",
+    "//src/http_core:komira_http_core_native",
     "//src/libc:komira_libc_native",
     "//src/metrics:komira_metrics_native",
+    "//src/objectstore:komira_objectstore_native",
     "//src/parquet_codec:komira_parquet_codec_native",
     "//src/scan_source:komira_scan_source_native",
 ]
 
 # The C ABI of komira's one shared library, libkomira: the status codes, the
-# ABI version, the session behind a context handle, the source and render
-# operations (`sources.mojo`) the C calls are made of, and the session's
-# credentials (`credentials.mojo`), held in a `SecretStore` (`secret_store`)
-# and bound for a reveal in a `SecretBindings` table (`secret_registry`);
-# `crypto` (and its `encoding`) wipes their values. The library is plain
+# ABI version, the session behind a context handle (the last error, an
+# `sdk_exec` EngineContext, so `deps` is sdk_exec's closure and sdk_exec, and
+# the credentials), the source and render operations (`sources.mojo`) the C
+# calls are made of, and the session's credentials (`credentials.mojo`), held
+# in a `SecretStore` (`secret_store`) and bound for a reveal in a
+# `SecretBindings` table (`secret_registry`). The library is plain
 # Mojo with no pointer in it; `_c_abi.mojo`, the one file that holds pointers,
 # is not part of it but the source of the `libkomira` target below.
 #
 # test_status holds the six codes, the input-length bound, the version scheme (major * 1000 + minor)
 # and buffer_status, the two-call protocol's capacity test; test_session holds
-# the last-error text of a Session (fresh, set, replaced, cleared, moved);
+# the last-error text of a Session (fresh, set, replaced, cleared, moved)
+# and try_new_session, komira_ctx_new's session (None, the NULL handle, for
+# each option the engine refuses; a session for good options);
 # test_sources holds the operations on values: a Parquet file registered and
-# its schema bytes, the CSV and JSON bindings, and a plan rendered;
-# test_credentials holds the three steps of a definition, each kind's fields
-# and every named refusal, word for word, and the generations of a name;
-# test_credentials_reveal reads sealed values through sdk_exec's
+# its schema bytes, a registered table queried through the session's engine
+# (and an unregistered one refused at bind), the CSV and JSON bindings, and a
+# plan rendered; test_credentials holds the three steps of a definition, each
+# kind's fields and every named refusal, word for word, and the generations of
+# a name; test_credentials_reveal reads sealed values through sdk_exec's
 # SecretCapability and reads an object of a fake S3 with them, where a wrong
-# key is refused by name (sdk_exec, the S3 store and the fake are test_deps:
-# they reach these tests, not the library).
+# key is refused by name (the S3 store and the fake are test_deps: they reach
+# these tests, not the library).
 mojo_library(
     name = "so",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "_c_abi.mojo"]),
     deps = [
         "//src/agg:agg",
+        "//src/agg_api:agg_api",
         "//src/arrow:arrow",
         "//src/arrow_ipc:arrow_ipc",
-        "//src/async_rt:async_rt",
         "//src/async_api:async_api",
+        "//src/async_rt:async_rt",
         "//src/atomic_alias:atomic_alias",
         "//src/avro:avro",
+        "//src/awslc:awslc",
+        "//src/batch_eval:batch_eval",
         "//src/byte_buffer:byte_buffer",
         "//src/clock:clock",
-        "//src/containers:containers",
+        "//src/column_format:column_format",
         "//src/column_kernels:column_kernels",
         "//src/compression:compression",
+        "//src/containers:containers",
         "//src/counters:counters",
         "//src/crypto:crypto",
         "//src/csv:csv",
         "//src/dynamic_filter:dynamic_filter",
         "//src/encoding:encoding",
+        "//src/engine_runtime:engine_runtime",
+        "//src/exec_types:exec_types",
         "//src/expr:expr",
         "//src/fork_join:fork_join",
         "//src/fs:fs",
         "//src/hashing:hashing",
         "//src/host_probe:host_probe",
+        "//src/host_profile:host_profile",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/iceberg_catalog:iceberg_catalog",
+        "//src/iceberg_scan:iceberg_scan",
         "//src/join_assembly:join_assembly",
+        "//src/json:json",
         "//src/json_index:json_index",
         "//src/jsonl:jsonl",
         "//src/kernels:kernels",
         "//src/libc:libc",
         "//src/log:log",
+        "//src/lowering:lowering",
         "//src/lz4:lz4",
         "//src/metrics:metrics",
+        "//src/morsel:morsel",
         "//src/name_registry:name_registry",
+        "//src/net:net",
+        "//src/objectstore:objectstore",
         "//src/op_agg_state:op_agg_state",
+        "//src/op_join_probe:op_join_probe",
+        "//src/op_sort:op_sort",
+        "//src/op_sources:op_sources",
+        "//src/op_spill_rows:op_spill_rows",
+        "//src/op_window:op_window",
+        "//src/operator_api:operator_api",
+        "//src/optimizer:optimizer",
         "//src/parquet:parquet",
         "//src/parquet_api:parquet_api",
         "//src/parquet_codec:parquet_codec",
+        "//src/parquet_footers:parquet_footers",
+        "//src/parquet_scan:parquet_scan",
+        "//src/parquet_writer:parquet_writer",
+        "//src/phase_timers:phase_timers",
+        "//src/physical_plan:physical_plan",
+        "//src/pipeline_exec:pipeline_exec",
         "//src/plan_expr:plan_expr",
         "//src/plan_ir:plan_ir",
         "//src/plan_proto:plan_proto",
         "//src/plan_stats:plan_stats",
         "//src/plan_wire:plan_wire",
         "//src/proto_codec:proto_codec",
+        "//src/protobuf:protobuf",
         "//src/row_format:row_format",
         "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_planning:scan_planning",
         "//src/scan_source:scan_source",
         "//src/sdk:sdk",
+        "//src/sdk_exec:sdk_exec",
         "//src/secret_registry:secret_registry",
         "//src/secret_store:secret_store",
+        "//src/shuffle:shuffle",
         "//src/simd_ops:simd_ops",
         "//src/spsc_ring:spsc_ring",
         "//src/sql:sql",
         "//src/sync:sync",
         "//src/trace:trace",
         "//src/udf:udf",
+        "//src/uuid:uuid",
         "//src/zlib:zlib",
         "//tools/build/mojo/runtime_paths:runtime_paths",
     ],
@@ -108,9 +149,7 @@ mojo_library(
     ],
     test_deps = [
         "//src/aws_core:aws_core",
-        "//src/http_client:http_client",
         "//src/objectstore_s3:objectstore_s3",
-        "//src/sdk_exec:sdk_exec",
         "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
     ],
     test_data = {
@@ -120,12 +159,14 @@ mojo_library(
 )
 
 # libkomira.so (libkomira.dylib on macOS arm64): twelve exports, and nothing else
-# in the dynamic symbol table (`exports_exact`). It is published only if every
-# gate driver passes, each of which dlopens it with RTLD_NOW and calls it as a
-# foreign host would:
+# in the dynamic symbol table (`exports_exact`). Every context it creates owns
+# an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
+# It is published only if every gate driver passes, each of which dlopens it
+# with RTLD_NOW and calls it as a foreign host would:
 #   gate_version       the version is 1002 (1.2);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
-#                      freeing NULL is a no-op;
+#                      freeing NULL is a no-op, and a context (with its
+#                      engine's workers) is created and freed again;
 #   gate_no_extra_exports  the linker's section markers and the Mojo helpers
 #                      are not in the symbol table;
 #   gate_fresh_error   a fresh session's error is empty, with or without a buffer;

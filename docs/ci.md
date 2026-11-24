@@ -1374,7 +1374,7 @@ darwin toolchain's bytes; `//python:wheel_same_macos_arm64` holds it to the Linu
 the same Python files, METADATA (so the same Requires-Python and classifiers) and licence files byte for
 byte, WHEEL differing only in its Tag's platform part (both `py3-none`), and the files only one wheel has
 are its native libraries: `libkomira.dylib` and the three runtime dylibs on macOS; `libkomira.so`, the
-eight native owner libraries and the three runtime `.so` files on Linux.
+eleven native owner libraries and the three runtime `.so` files on Linux.
 
 
 ### Which run to look at

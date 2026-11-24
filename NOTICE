@@ -59,8 +59,8 @@ are distributed here under the same license as the rest of komira.
 Third-party code inside the native files
 ----------------------------------------
 
-Two of the native owner libraries that libkomira links, and that the wheel
-carries, hold third-party code compiled in (docs/design/wheel_licence_audit.md
+Four of the native owner libraries that libkomira links, and that the Linux
+wheel carries, hold third-party code compiled in (docs/design/wheel_licence_audit.md
 lists every native file of the wheel). The other native files are komira's own
 code, except the three Mojo runtime libraries the bundled flavour carries,
 which are Modular's (the last section). Redistributed here in binary form, with the notices their licenses
@@ -137,12 +137,38 @@ require.
    4(b) and 4(d) of the License; it is recorded here regardless. The Apache
    License text is in LICENSE.
 
+4. aws-lc 1.39.0 (libcrypto), statically linked into
+   `libkomira_crypto_native.so.1` with its global symbols renamed
+   `komira_awslc_`. Apache-2.0 OR ISC for AWS-LC's own files; the OpenSSL
+   License, the original SSLeay License, ISC, MIT and BSD-3-Clause for the
+   parts it inherits, as its LICENSE states. Pinned in third_party/aws-lc/BUCK.
+   Its LICENSE, with every copyright notice, condition and disclaimer those
+   licenses require, is carried unmodified with the libraries as
+   AWS_LC_LICENSE (in the Python wheel, `.dist-info/licenses/AWS_LC_LICENSE`),
+   extracted from the pinned archive as `//third_party/aws-lc:src[LICENSE]`.
+   Its NOTICE file:
+
+       AWS-LC
+       Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+5. s2n-tls 1.5.6, statically linked into `libkomira_http_core_native.so.1`
+   with its symbols prefixed `komira_s2n_`; it calls the aws-lc above, in
+   `libkomira_crypto_native.so.1`. Apache License, Version 2.0, whose text is
+   in LICENSE; its LICENSE is carried unmodified as S2N_TLS_LICENSE
+   (`//third_party/s2n-tls:src[LICENSE]`). Pinned in
+   third_party/s2n-tls/BUCK. Its NOTICE file:
+
+       s2n
+       Copyright 2014-2015 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
 None of the other libraries the wheel's files need at run time is carried: not
 the C++ runtime the Mojo runtime libraries need (libstdc++.so.6, libgcc_s.so.1),
 not the system's glibc (`libc.so.6`, `libpthread.so.0`), and not the codec
 libraries libz, liblz4, libzstd, libbz2 and liblzma, which komira opens by name
-from the host when a file uses that codec. The libraries it does not carry
-include no aws-lc, s2n-tls or other TLS library: none is linked.
+from the host when a file uses that codec. The macOS arm64 wheel carries no
+owner library: its libkomira.dylib links the C archives of its closure (the
+four libraries above among them) statically, so whatever of that third-party
+code it calls is inside libkomira.dylib, under the same notices.
 
 The Mojo runtime: Modular's libraries, carried in the bundled wheel
 -------------------------------------------------------------------

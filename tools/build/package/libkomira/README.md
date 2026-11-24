@@ -55,7 +55,7 @@ C API (`src/so`), and the check that installs it.
   VARIANTS                          one line per level, lowest first: name, path, cpuinfo flags
   libkomira.so                      x86-64-v2, the floor: run path $ORIGIN/lib:$ORIGIN
   variants/x86-64-v3/libkomira.so   x86-64-v3, the build the tests run: run path also $ORIGIN/../../lib
-  lib/                              the eight native owners and the three Mojo runtime libraries, one copy
+  lib/                              the eleven native owners and the three Mojo runtime libraries, one copy
   ```
 
   The manifest is written from the platform row ([`variants.bzl`](variants.bzl)). The

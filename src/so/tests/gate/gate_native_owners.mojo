@@ -4,7 +4,7 @@
 # the archives stay on the link line, so an owner dropped from the list is
 # embedded silently and every other gate stays green. This driver reads the
 # library's own ELF64 dynamic section (little endian), collects its DT_NEEDED
-# names and requires the SONAME of each of the eight owners the BUCK file lists.
+# names and requires the SONAME of each of the eleven owners the BUCK file lists.
 #
 # A gate driver of //src/so:libkomira. It has no dependency and does not
 # load the library: it only reads the file "./libkomira.so" as bytes.
@@ -15,14 +15,17 @@ comptime DT_NEEDED = 1
 
 
 def _owners() -> List[String]:
-    """The SONAMEs of the eight owners the BUCK file lists."""
+    """The SONAMEs of the eleven owners the BUCK file lists."""
     return [
         "libkomira_async_rt_native.so.1",
         "libkomira_async_api_native.so.1",
         "libkomira_compression_native.so.1",
+        "libkomira_crypto_native.so.1",
         "libkomira_fs_native.so.1",
+        "libkomira_http_core_native.so.1",
         "libkomira_libc_native.so.1",
         "libkomira_metrics_native.so.1",
+        "libkomira_objectstore_native.so.1",
         "libkomira_parquet_codec_native.so.1",
         "libkomira_scan_source_native.so.1",
     ]

@@ -2,8 +2,9 @@
 
 The wheel carries `libkomira`, the native owner libraries `libkomira`
 links as `DT_NEEDED`, the three Mojo runtime libraries it needs, the Python
-package, `py.typed` and four licence files (`LICENSE`, `NOTICE`,
-`MODULAR_LICENSE`, `MODULAR_THIRD_PARTY_NOTICES`). This page lists every native file, the third-party code
+package, `py.typed` and six licence files (`LICENSE`, `NOTICE`,
+`AWS_LC_LICENSE`, `S2N_TLS_LICENSE`, `MODULAR_LICENSE`,
+`MODULAR_THIRD_PARTY_NOTICES`). This page lists every native file, the third-party code
 inside each, its licence, and where `NOTICE` reproduces the notice that
 licence requires. The file list is the measured table in
 [src/so/README.md](../../src/so/README.md) ("What the library links and
@@ -20,15 +21,19 @@ the built files; this page adds what each file contains.
 | `libkomira_fs_native.so.1` | none: komira's C | Apache-2.0 | none | (LICENSE) |
 | `libkomira_libc_native.so.1` | none: komira's C | Apache-2.0 | none | (LICENSE) |
 | `libkomira_metrics_native.so.1` | none: komira's C | Apache-2.0 | none | (LICENSE) |
+| `libkomira_objectstore_native.so.1` | none: komira's C | Apache-2.0 | none | (LICENSE) |
 | `libkomira_scan_source_native.so.1` | none: komira's C | Apache-2.0 | none | (LICENSE) |
 | `libkomira_compression_native.so.1` | snappy 1.3.1 (static); LLVM libc++ and libc++abi from the Zig toolchain (static, symbols local) | BSD-3-Clause; Apache-2.0 with LLVM exceptions | snappy: copyright notice, conditions and disclaimer reproduced for binary redistribution; libc++: none for object code (LLVM exception), recorded anyway | "Third-party code inside the native files" 1 and 3 |
 | `libkomira_parquet_codec_native.so.1` | Brotli decoder 1.1.0 (static, names prefixed `komira_brotli_`) | MIT | copyright notice and permission notice reproduced | same section, 2 |
+| `libkomira_crypto_native.so.1` | aws-lc 1.39.0 libcrypto (static, names prefixed `komira_awslc_`), with komira's SHA-256 C | Apache-2.0 OR ISC (AWS-LC's files); OpenSSL License and original SSLeay License, ISC, MIT, BSD-3-Clause (inherited parts, as its LICENSE states) | its NOTICE reproduced in `NOTICE`; its LICENSE (every notice, condition and disclaimer of those licences) carried unmodified as `.dist-info/licenses/AWS_LC_LICENSE` | same section, 4 |
+| `libkomira_http_core_native.so.1` | s2n-tls 1.5.6 (static, names prefixed `komira_s2n_`); `DT_NEEDED` on the crypto owner above | Apache-2.0 | its NOTICE reproduced in `NOTICE`; its LICENSE carried unmodified as `.dist-info/licenses/S2N_TLS_LICENSE` | same section, 5 |
 | `libKGENCompilerRTShared.so` | Modular's Mojo runtime: binary, unmodified from the pinned `mojo-compiler` conda package | Modular Community License Terms (`LicenseRef-Modular-Proprietary`) | the licence text displayed with the copies, which the wheel carries as `.dist-info/licenses/MODULAR_LICENSE`, and the package's `Third-Party-Notices` (`.dist-info/licenses/MODULAR_THIRD_PARTY_NOTICES`) | "The Mojo runtime: Modular's libraries, carried in the bundled wheel" |
 | `libAsyncRTRuntimeGlobals.so` | same | same | same | same |
 | `libMSupportGlobals.so` | same | same | same | same |
 
 Sources and pins: snappy `//third_party/snappy` (version and archive sha256
-there), Brotli `//third_party/brotli` (same). The archive's `COPYING` and
+there), Brotli `//third_party/brotli`, aws-lc `//third_party/aws-lc`, s2n-tls
+`//third_party/s2n-tls` (same). The archive's `COPYING` and
 `LICENSE` are extracted unmodified as that target's files.
 
 ## What the wheel does not carry
@@ -51,20 +56,17 @@ there), Brotli `//third_party/brotli` (same). The archive's `COPYING` and
   If one is absent, the first call of that codec aborts with
   `compression: cannot load <soname>`; other codecs and Parquet files that do
   not use it are unaffected.
-- **aws-lc, s2n-tls and the AWS, Google and Azure clients**: not in the
-  wheel. The Mojo closure of the `so` package (read from the `deps` of each
-  `BUCK` file from `so` down) holds no `http`, `connect`, `aws_*`, `gcp_*` or
-  `azure_*` package, and the `DT_NEEDED` list above holds no TLS library. It
-  holds `crypto` (with `encoding`), through `secret_store`, the store a
-  session's credentials live in: the one function of `crypto` it calls is the
-  wipe of a secret's bytes, which calls the C library's `explicit_bzero`. No
-  object of aws-lc, which `crypto` builds on, is linked: the undefined symbols
-  of `libkomira.so` name no aws-lc function (`explicit_bzero` is the only one
-  `crypto` adds), its `DT_NEEDED` list is unchanged, and it holds no aws-lc
-  string (read with `readelf -sW` and `strings` on the farm-built library). `awslc` and `s2n-tls` stay build and
-  test inputs of other packages (see `NOTICE`, opening paragraph). A change
-  that adds one to the closure changes the table of `libkomira_elf_report` and
-  must update this page and `NOTICE` in the same pull request.
+- **The AWS, Google and Azure clients**: not in the wheel. The Mojo closure of
+  the `so` package is `sdk_exec`'s (read from the `deps` of each `BUCK` file
+  from `so` down): it holds `http_client`, `http_core`, `net`, `objectstore`,
+  `iceberg_catalog` and `crypto`, and no `aws_*`, `gcp_*` or `azure_*`
+  package. aws-lc and s2n-tls are carried, in the crypto and http_core owner
+  libraries above (Linux; on macOS arm64 there are no owner libraries, and
+  libkomira.dylib links the same archives statically, under the same
+  notices). A
+  change that adds a third-party library to the closure changes the table of
+  `libkomira_elf_report` and must update this page and `NOTICE` in the same
+  pull request.
 - **Generated clients** (`NOTICE`, "Generated clients"): not in libkomira's
   closure, so no text derived from botocore or googleapis is in the wheel.
 
@@ -76,12 +78,13 @@ Verified by reading, not by running anything on a developer machine:
   (`exports_exact` gate in `src/so/tests/gate/`). None takes a URL, host or
   socket: they take a local file path, the bytes of a plan, or a credential's
   kind, name and field values, and return bytes, text, an id or a status.
-- Outside `async_rt`, no package of the closure has code that names a socket,
-  a host-name lookup, a reactor or an `http(s)://` literal (searched with
-  `grep` over each package's `.mojo` and `.c` files, tests excluded; the hits
-  are comments). `async_rt` holds the reactor and socket primitives and is
-  compiled into the library, as other packages import its file and morsel
-  parts; no export of the twelve starts a reactor or opens a socket.
+- The closure holds network code: `async_rt`'s reactor and socket primitives,
+  `net`, `http_core` (HTTP and TLS) and `http_client`, which the engine uses
+  to read object stores and to call an Iceberg REST catalog. No export of the
+  twelve reaches it: `komira_ctx_new` starts the engine's worker threads and
+  opens nothing, and `komira_register_parquet` lists and reads local files
+  only (`parquet_footers` reads through `LocalFs`); the other exports read a
+  local file or the bytes given. No export runs a query yet.
 - Nothing is sent anywhere. `docs/design/logging_and_telemetry.md` records
   that spans and metrics go to in-process rings and that "nothing exports".
   The closure reads the environment through one primitive

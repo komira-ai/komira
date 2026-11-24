@@ -7,8 +7,10 @@
   (`abi_version`, `ABI_MAJOR`, `ABI_MINOR`), `buffer_status`, the test the
   two-call output protocol applies to a caller's buffer, and
   `input_length_status`, the bound on a byte input (`KOMIRA_MAX_INPUT_BYTES`).
-- `session.mojo`: `Session`, the state behind a context handle: the text of
-  the last error, the catalog of registered tables and the credentials.
+- `session.mojo`: `Session`, the state behind a context handle, and
+  `try_new_session`, the session `komira_ctx_new` hands out or None: the text of
+  the last error, the engine (`sdk_exec`'s `EngineContext`) whose catalog
+  holds the registered tables, and the credentials.
 - `credentials.mojo`: `SessionCredentials`, a session's credentials by name:
   defined in three steps (`add`, `set`, `seal`), held in a
   `SessionSecretStore` (`credential_store.mojo`) and read back only through a
@@ -29,7 +31,7 @@ from .credentials import (
     CREDENTIAL_UNBOUND,
     SessionCredentials,
 )
-from .session import Session
+from .session import Session, try_new_session
 from .sources import (
     csv_binding_bytes,
     json_binding_bytes,

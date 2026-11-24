@@ -30,11 +30,13 @@
 #                                  const uint8_t *value, uint64_t value_len);
 #   int32_t  komira_credential_seal(void *ctx, int32_t id, int32_t scope);
 #
-# Ownership. `komira_ctx_new` creates a `Session` in an `OwnedPointer`,
-# relinquishes the pointer's own free (`unsafe_leak`) and hands the address to
-# the caller as `void *`. The caller owns that handle until it passes it to
+# Ownership. `komira_ctx_new` creates a `Session` (the last error and the
+# engine, whose workers start here) in an `OwnedPointer`, relinquishes the
+# pointer's own free (`unsafe_leak`) and hands the address to the caller as
+# `void *`. When the engine does not start it returns NULL and allocates
+# nothing; with no context to hold it, the engine's message is dropped. The caller owns that handle until it passes it to
 # `komira_ctx_free`, which rebuilds the one `OwnedPointer` over the same
-# allocation and destroys the session. Freeing a handle twice, or using one
+# allocation and destroys the session, stopping its workers. Freeing a handle twice, or using one
 # after `komira_ctx_free`, is undefined, as for `free(3)`; `komira_ctx_free`
 # of NULL does nothing. Every other pointer is the caller's: this library
 # reads or writes it during the call and keeps none.
@@ -78,7 +80,7 @@
 
 from std.memory import OwnedPointer, unsafe_memcpy
 
-from so.session import Session
+from so.session import Session, try_new_session
 from so.sources import (
     csv_binding_bytes,
     json_binding_bytes,
@@ -120,6 +122,19 @@ comptime ConstBytes = UnsafePointer[UInt8, MutUntrackedOrigin]
 
 
 @always_inline
+def _null_handle() -> Handle:
+    """The NULL context handle, what `komira_ctx_new` returns on failure."""
+    # SAFETY: the stdlib has no null pointer constructor and the tree bans
+    # `unsafe_from_address=`. `Optional[UnsafePointer[...]]` is
+    # layout-compatible with the bare pointer and `None` is the all-zero bit
+    # pattern, so reading the `None` slot as a `Handle` gives NULL. The origin
+    # is the handle's own (`MutUntrackedOrigin`, the host's `void *`); the
+    # value is only returned to the caller and never dereferenced.
+    var none: Optional[Handle] = None
+    return UnsafePointer(to=none).bitcast[Handle]()[]
+
+
+@always_inline
 def _session(ctx: Handle) -> UnsafePointer[Session, MutUntrackedOrigin]:
     """The session behind a non-NULL handle."""
     # SAFETY: `ctx` was returned by `komira_ctx_new` and has not been passed
@@ -137,8 +152,16 @@ def komira_abi_version() abi("C") -> Int32:
 @export
 def komira_ctx_new() abi("C") -> Handle:
     """Create a session and return its handle. The caller frees it with
-    `komira_ctx_free`."""
-    var owned = OwnedPointer[Session](Session())
+    `komira_ctx_free`. NULL when the session's engine does not start."""
+    var session = try_new_session()
+    if not session:
+        return _null_handle()
+    return _leak_session(session.take())
+
+
+def _leak_session(var session: Session) -> Handle:
+    """Move `session` to the heap and hand its address out as a handle."""
+    var owned = OwnedPointer[Session](session^)
     # SAFETY: `unsafe_leak` relinquishes the OwnedPointer's free, so the only
     # owner of the allocation from here on is whoever holds the returned
     # address; `komira_ctx_free` rebuilds the single OwnedPointer over it.

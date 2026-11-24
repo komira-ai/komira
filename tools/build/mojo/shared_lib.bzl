@@ -139,6 +139,16 @@ def _shared_lib_impl(ctx):
         # the two `-rpath` into one DT_RUNPATH.
         link_extra = cmd_args(link_extra, "-Wl,-rpath,$ORIGIN") if link_extra else cmd_args("-Wl,-rpath,$ORIGIN")
 
+        # DF_1_NODELETE: dlclose never unmaps the library. A stdlib `_Global`
+        # the library creates (host_probe's CPU snapshot, made by the first
+        # topology query) is registered with the Mojo runtime together with
+        # a destructor in the library's own code. A host that is itself a
+        # Mojo program keeps that runtime loaded after dlclose and destroys
+        # the globals at exit, which would call into an unmapped library
+        # (SIGSEGV after the host's last line). Kept mapped, the destructor
+        # runs at exit as in any Mojo program.
+        link_extra = cmd_args(link_extra, "-Wl,-z,nodelete")
+
     # `extra_runpath`, after any run path above: a variant of libkomira sits two
     # directories below the native directory's lib/ (`variants/<level>/`), and
     # reaches it as `$ORIGIN/../../lib`. Each entry is the platform's own
