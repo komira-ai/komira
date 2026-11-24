@@ -16,11 +16,13 @@
 #   test_two_stacked_windows_are_two_chained_segments_with_params_in_cut_order
 #   test_a_node_with_two_functions_is_one_segment_and_one_param_row
 #   test_the_declared_schema_marks_a_sum_over_a_nullable_column_nullable
+#   test_every_reader_of_a_shared_window_takes_its_nullable_sum
 #   test_a_limit_above_a_window_with_keys_is_refused_and_one_with_no_key_is_cut
 #   test_a_window_over_a_join_ends_the_probe_pipeline_in_the_window_sink
 #   test_a_window_over_an_aggregation_reads_the_aggregate_output
 # =============================================================================
 
+from std.memory import OwnedPointer
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
 from arrow.arrow_types import ArrowType
@@ -347,6 +349,38 @@ def test_the_declared_schema_marks_a_sum_over_a_nullable_column_nullable() raise
     assert_false(cut.flow_schemas[1].field_nullable(4))
     assert_false(cut.flow_schemas[1].field_nullable(6))
     assert_true(cut.flow_schemas[1].field_nullable(7))
+
+
+def _o_gt_zero(var child: LogicalPlan) -> LogicalPlan:
+    return LogicalPlan.filter(
+        Expr.binary(BIN_GT, _col("o"), Expr.literal(ScalarValue.from_int64(0))), child^
+    )
+
+
+def test_every_reader_of_a_shared_window_takes_its_nullable_sum() raises:
+    # (window over t) WHERE o > 0 UNION ALL (a reference to that window)
+    # WHERE o > 0: the window is a shared subplan, cut once and read twice.
+    var exprs = _exprs(_rn())
+    exprs.append(_running_sum("v", "sum_v"))
+    var window = _window(_names("g"), _names("o"), _flags(False), exprs^, _scan())
+    var ref_ = LogicalPlan.cse_ref(
+        window.structural_hash(), window.output_schema.copy()
+    )
+    var children = List[OwnedPointer[LogicalPlan]]()
+    children.append(OwnedPointer(_o_gt_zero(window.copy())))
+    children.append(OwnedPointer(_o_gt_zero(ref_^)))
+    var plan = LogicalPlan.union(children^, window.output_schema.copy())
+    # The logical node declares the sum not nullable.
+    assert_false(window.output_schema.field_nullable(5))
+
+    var cut = cut_plan(plan, _inputs(500))
+    # 0: the window sink. 1 and 2: each branch's filter over 0's output,
+    # collected. 3: the concatenation of 1 and 2.
+    assert_equal(len(cut.flow_schemas), 4)
+    for seg in range(1, 3):
+        assert_equal(cut.flow_schemas[seg].field_name(5), "sum_v")
+        assert_true(cut.flow_schemas[seg].field_nullable(5))
+        assert_false(cut.flow_schemas[seg].field_nullable(4))
 
 
 def test_a_limit_above_a_window_with_keys_is_refused_and_one_with_no_key_is_cut() raises:

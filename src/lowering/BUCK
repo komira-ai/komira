@@ -103,7 +103,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        scan, a filter and projection, a projection above, two
 #                        stacked windows, a node of two functions, a window
 #                        over a join and over an aggregation; the declared
-#                        schema's nullability; a limit above a window with keys
+#                        schema's nullability, which every reader of a shared
+#                        window takes; a limit above a window with keys
 #                        refused and one above a window with none cut.
 # test_lower_window_refusals
 #                        every reason a window is refused with

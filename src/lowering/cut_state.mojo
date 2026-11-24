@@ -179,6 +179,11 @@ struct _Cutter(Movable):
     var shared_segs: List[Int]
     """The segment whose output the subtree is, or -1 for a streaming subtree,
     which is cut again at every reference."""
+    var shared_read_schemas: List[Schema]
+    """The schema the segment of a materialized subtree writes, which its
+    readers take: the subtree's declared schema with what its breaker
+    declares (a windowed SUM over a nullable column is nullable). A streaming
+    subtree has no segment; its entry is its declared schema, never read."""
     var shared_sorted: List[Bool]
     var shared_first_scan: List[Int]
     """The pre-order index of the subtree's first scan."""
@@ -200,6 +205,7 @@ struct _Cutter(Movable):
         self.shared_hashes = List[UInt64]()
         self.shared_schemas = List[Schema]()
         self.shared_segs = List[Int]()
+        self.shared_read_schemas = List[Schema]()
         self.shared_sorted = List[Bool]()
         self.shared_first_scan = List[Int]()
         self.shared_plans = Slab[LogicalPlan]()

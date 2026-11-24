@@ -174,9 +174,12 @@ def _is_streaming(node: LogicalPlan) -> Bool:
 
 
 def _read_shared(mut cutter: _Cutter, at: Int, node: LogicalPlan) -> _Pipe:
-    """A pipeline reading the segment of materialized shared subtree `at`, in
-    the schema of `node` (the canonical subtree or a reference to it)."""
-    var pipe = cutter._reopen(cutter.shared_segs[at], node.output_schema)
+    """A pipeline reading the segment of materialized shared subtree `at`
+    for `node` (the canonical subtree or a reference to it), in the schema
+    that segment writes."""
+    var pipe = cutter._reopen(
+        cutter.shared_segs[at], cutter.shared_read_schemas[at]
+    )
     pipe.sorted_input = cutter.shared_sorted[at]
     return pipe^
 
@@ -248,9 +251,11 @@ def _end_canonical(
     cutter.shared_recuts.append(node.copy())
     if streaming:
         cutter.shared_segs.append(-1)
+        cutter.shared_read_schemas.append(node.output_schema.copy())
         cutter.shared_sorted.append(False)
         return pipe^
     var sorted = pipe.sorted_input
+    cutter.shared_read_schemas.append(pipe.schema.copy())
     var seg = _end_branch(cutter, pipe^, inputs)
     cutter.shared_segs.append(seg)
     cutter.shared_sorted.append(sorted)
