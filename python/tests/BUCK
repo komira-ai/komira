@@ -22,7 +22,7 @@ _ON = {p["suffix"]: ({"python": p["python"]} if p["suffix"] else {}) for p in PY
 # Stand-ins for libkomira (fake_libkomira.c). The loader must refuse a library
 # of ABI major 2, of major 0 (version 0.999), one reporting -1, one without
 # komira_abi_version and a 1.1 one without komira_register_parquet; it must
-# load a 1.0 one (without the calls 1.1 and 1.2 added), a 1.3 one and a 1.6 one
+# load a 1.0 one (without the calls 1.1 and 1.2 added), a 1.3 one and a 1.7 one
 # (which also answers the last error's code and step). `fake_modes`
 # (version 1.1) answers each call by the mode its register_parquet name set,
 # for the error path, the two-call protocol and the output calls. `fake_store`
@@ -80,10 +80,10 @@ c_shared_lib(
 )
 
 c_shared_lib(
-    name = "fake_v1_6",
+    name = "fake_v1_7",
     srcs = ["fake_libkomira.c"],
-    copts = ["-DFAKE_VERSION=1006"],
-    out = "libkomira_fake_v1_6.so",
+    copts = ["-DFAKE_VERSION=1007"],
+    out = "libkomira_fake_v1_7.so",
 )
 
 c_shared_lib(
@@ -165,7 +165,7 @@ _FAKE_RUNTIME = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
-# The exception table (komira/_errors.py) on the stand-ins of ABI 1.6 and 1.3:
+# The exception table (komira/_errors.py) on the stand-ins of ABI 1.7 and 1.3:
 # each class by its code, the code before the step, the step when there is no
 # code, a plain KomiraError for the steps with no class, an unknown code, an
 # unknown step number and any status but -3, and no code or step from a 1.3
@@ -175,7 +175,7 @@ _FAKE_RUNTIME = [
     src = "test_errors.py",
     data = {
         "fake_v1_3/libkomira.so": ":fake_v1_3",
-        "fake_v1_6/libkomira.so": ":fake_v1_6",
+        "fake_v1_7/libkomira.so": ":fake_v1_7",
     },
     deps = ["//python:komira"],
     **_ON[p["suffix"]]

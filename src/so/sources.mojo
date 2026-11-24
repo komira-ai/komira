@@ -17,7 +17,9 @@ error. Nothing here holds a pointer.
   CSV or newline-delimited JSON file, schema inferred from a bounded prefix.
 - `plan_render_text`: a serialized plan decoded and printed, not run.
 - `sql_result`: one SQL statement run on a session's engine, its answer as
-  batches checked to cross the Arrow C Stream Interface. A refusal is
+  batches checked to cross the Arrow C Stream Interface; in its second form,
+  under a caller's `RunControl`, whose cancel refuses the run with the named
+  error `QUERY_CANCELLED` (`is_cancelled_error`). A refusal is
   recorded on the session as its last error, with the step and the code.
 """
 
@@ -30,11 +32,16 @@ from scan_source.source_variant import SourceVariant
 from sdk.parquet_footer import read_parquet_footer
 from sdk_exec.arrow_result import ArrowResult, arrow_result
 from sdk_exec.engine_catalog import register_parquet as engine_register_parquet
-from sdk_exec.engine_sql import run_sql
+from sdk_exec.engine_sql import STEP_EXECUTE, run_sql
+from sdk_exec.run_control import RunControl
 from sql.sql_ast import TvfOptions
 from sql.sql_tvf_bind import csv_tvf_schema, json_tvf_schema
 
-from .session import Session
+from .session import Session, step_number
+
+comptime QUERY_CANCELLED = "QUERY_CANCELLED"
+"""The named error of a run its `RunControl` cancelled: `sql_result` raises
+`QUERY_CANCELLED: execute: <the engine's cancelled error>`."""
 
 
 def register_parquet(mut session: Session, name: String, path: String) raises:
@@ -219,9 +226,41 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
         check's error naming the column when a result column cannot cross the
         stream (`arrow_result`).
     """
-    var outcome = run_sql(session.engine, sql)
+    return sql_result(session, sql, RunControl())
+
+
+def sql_result(
+    mut session: Session, sql: String, control: RunControl
+) raises -> ArrowResult:
+    """`sql_result` under `control`: the run polls the control's cancel token
+    and counts its segments into the control's progress.
+
+    Raises:
+        Error `QUERY_CANCELLED: execute: <reason>` when the run is refused at
+        step `execute` and the control is cancelled (the cancel stopped the
+        run, or came while it failed for a reason of its own); a cancel that
+        comes after the run's last check leaves the answer standing. A
+        statement refused before its plan runs raises `<step>: <reason>` as
+        without a control, and so does every other refusal.
+    """
+    var outcome = run_sql(session.engine, sql, control)
     if outcome.refusal:
         ref refusal = outcome.refusal.value()
-        session.set_refusal(refusal.step, refusal.reason.copy())
+        if refusal.step == String(STEP_EXECUTE) and control.is_cancelled():
+            # The cancel's name leads the text, so `error_code` reads it as
+            # the code; the step stays `execute`.
+            session.set_error(
+                String(QUERY_CANCELLED) + ": " + refusal.step + ": " + refusal.reason,
+                step_number(refusal.step),
+            )
+        else:
+            session.set_refusal(refusal.step, refusal.reason.copy())
         raise Error(session.last_error())
     return arrow_result(outcome^)
+
+
+def is_cancelled_error(text: String) -> Bool:
+    """Whether `text` is the error `sql_result` raises for a cancelled run:
+    it starts with `QUERY_CANCELLED: `. No other error of `sql_result` does,
+    since those start with a step name or the export check's own words."""
+    return text.startswith(String(QUERY_CANCELLED) + ": ")

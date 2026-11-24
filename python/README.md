@@ -51,7 +51,7 @@ load fails. What each release changed is in the
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1006 is 1.6
+print(komira.abi_version())   # the engine's C ABI version: 1007 is 1.7
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
@@ -74,7 +74,7 @@ against the published package.
   - A relative path is resolved against the working directory, and `~` is
     expanded.
   - A missing or unreadable file raises `komira.BindError` with the engine's
-    message (a plain `KomiraError` from a library older than ABI 1.6).
+    message (a plain `KomiraError` from a library older than ABI 1.7).
   - Registering a name again replaces the table.
 - `Session.sql(query)` runs one SQL statement over the session's tables and
   returns a `komira.Result`. The engine turns the text into a plan before
@@ -170,7 +170,7 @@ The package's layout and API are designed in
 | `komira/_iceberg.py` | the Iceberg sources (private; nothing public takes one yet): `iceberg(uri, *, warehouse=None, credential=AMBIENT, signing=None, access_delegation="vended-credentials")`, an `IcebergCatalog`; `catalog.table(name)`, an `IcebergTable`, with `name` as `"namespace.table"` or a tuple of namespace levels and the table; and `SigV4(region, service)`. Each is checked when built (an http or https URI with a host and no user, password, query or fragment; a credential that fits the catalog: `AMBIENT` or `AwsKeys` with SigV4, and `AMBIENT`, `ANONYMOUS`, `BearerToken` or `OAuth2ClientCredentials` without; `access_delegation` `vended-credentials` or `none`), does no I/O and loads no library; a catalog or a table shows its credential's secrets as `<set>` and refuses pickle and copy ([docs/design/iceberg_tables.md](https://github.com/komira-ai/komira/blob/main/docs/design/iceberg_tables.md), "What the user sees") |
 | `komira/_arrow.py` | the Arrow C stream of a query: `ArrowArrayStream`, the C struct for `ctypes`, and `import_stream`, which hands a filled stream to pyarrow's public `RecordBatchReader.from_stream` through a PyCapsule with no destructor, and releases it itself if pyarrow did not take it |
 | `komira/_errors.py` | `KomiraError`, its subclasses, and `error_class`, which picks one from an engine refusal's code and step |
-| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls of ABI 1.6 (`sql_stream` and the last error's code and step among them) |
+| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls of ABI 1.7 (`sql_stream` and the last error's code and step among them) |
 | `komira/_plan/` | the plan encoder: `encode_plan`, a plan of `komira/_ops` as the `komira.plan.v1` `WirePlanEnvelope` the plan door takes, every node with the output schema the engine derives for it and every scan reading a source libkomira described (`parquet_source`, `binding_source`); calls of user functions (`UdfCall`, `MapBatches`) as `WireUdfApply` and `WireMapBatchesNode` over the envelope's `UdfRef` list, one per distinct function, each with the komira/python descriptor; `encode_expr`, an expression node as a `WireExpr`; and `expr_field`, the output field the engine derives for it. It writes no SQL text. It imports the generated plan modules, which the wheel does not ship yet, so `import komira` does not import it |
 | `komira/_runtime.py` | `check_loaded_runtime`, called before libkomira is opened: it compares the Mojo runtime libraries already loaded in the process with komira's copies by build id, and the GNU build id reader it uses |
 | `komira/_session.py` | `Session` with `sql`, `Result`, and the session's private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal` |
@@ -275,11 +275,11 @@ How the loader behaves:
 - **Call errors.** A failed call raises `KomiraError` with its status. The
   message is the context's last error, read with the two-call protocol: the
   first call learns the length, and the second passes a buffer of exactly that
-  length. From ABI 1.6 the error also carries `komira_last_error_code` and
+  length. From ABI 1.7 the error also carries `komira_last_error_code` and
   `komira_last_error_step`, and `_errors.error_class` picks the class of an
   engine refusal (-3) from them: by code first, then by step, then the call's
   own default (`CredentialsError` for the credential calls, which a library
-  older than 1.6 answers only with `CREDENTIALS_INVALID`). The package never
+  older than 1.7 answers only with `CREDENTIALS_INVALID`). The package never
   parses the message to choose the class.
 - **Private calls.** `parquet_schema`, `csv_binding`, `json_binding`,
   `plan_render`, `credential_add`, `credential_set` and `credential_seal`
@@ -305,7 +305,7 @@ The tests below run on Linux x86_64 as build actions, with
 | `sql_test` | `Session.sql` on the real library: `SELECT 1 AS n`, a GROUP BY over a checked-in Parquet file, an aggregate, an answer of no rows, each terminal, the engine's refusals, and a result read after its session was closed or collected |
 | `sql_fake_test` | `Session.sql` on a stand-in Arrow stream that counts releases: a result read once, each stream, schema and batch released exactly once whoever ends it, a requested schema refused, a schema error raised from `sql` and a batch error from the terminal, the argument checks, and results left unread at exit |
 | `sql_interrupt_test` | Ctrl-C during `Session.sql`, on a stand-in whose `komira_sql_stream` raises SIGINT in the calling thread: `KeyboardInterrupt` once the call returns, the stream it filled released exactly once, the session answering the next query (also after a refusal SIGINT came during), a handler that does not raise running once while `sql` returns the answer, and an ignored SIGINT changing nothing |
-| `errors_test` | the exception table on stand-ins of ABI 1.6 and 1.3: each class by its code, the code before the step, the step when there is no code, a plain `KomiraError` otherwise, and no code or step from a 1.3 library |
+| `errors_test` | the exception table on stand-ins of ABI 1.7 and 1.3: each class by its code, the code before the step, the step when there is no code, a plain `KomiraError` otherwise, and no code or step from a 1.3 library |
 | `threads_test` | a session used from several threads, on a stand-in that journals each call and holds one at a gate: a call waits for the call running on its session, each thread gets its own error message, `close` waits for the running call, two sessions run at once, a signal handler calling the session inside a call is refused, a `Result` reads while its session is busy, and of two threads reading one `Result` one reads it |
 | `two_call_test` | the error path, the two-call protocol and the arguments of each call, on a stand-in |
 | `credentials_test` | the credential objects, and what sealing each sends the library, on a stand-in's fake store that records every credential call |

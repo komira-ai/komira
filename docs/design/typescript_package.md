@@ -155,15 +155,17 @@ Fixed before this design, and not reopened here:
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.6, with eighteen exports
+- **EXISTS** `libkomira` is at ABI 1.7, with twenty-three exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
-  - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream. The plan call,
+  - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream.
+    `komira_sql_stream_run` (1.6) runs it under a run handle that another thread cancels
+    (`komira_run_cancel`, status -6) and reads the progress of (`komira_run_progress`). The plan call,
     `komira_plan_stream`, is designed but not built; it takes the next minor.
   - `komira_ctx_new_with_options` (1.4) creates a context with the engine's worker count and
     memory budget as arguments (0 is the host's own value).
   - `komira_register_csv` and `komira_register_json` (1.5) bind a CSV or newline-delimited JSON
     file to the session as a table that SQL reads by name.
-  - `komira_last_error_code` and `komira_last_error_step` (1.6) answer the last error's named code and
+  - `komira_last_error_code` and `komira_last_error_step` (1.7) answer the last error's named code and
     the step that refused it. The addon does not bind them yet.
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
@@ -326,13 +328,14 @@ every buffer, and it would put an IPC writer in C beside the engine's own.
 
 ### Cancellation
 
-The first release has no cancel, and its README says so. libkomira has no cancel call yet: it is
-proposed as `komira_cancel` with status -6 in [libkomira_run_abi.md](libkomira_run_abi.md) §10,
-and is not decided.
+The first release has no cancel, and its README says so. libkomira has one since ABI 1.6: a run
+handle passed to `komira_sql_stream_run`, cancelled by `komira_run_cancel` from any thread, and a
+cancelled run returns `KOMIRA_ERR_CANCELLED` (-6) ([libkomira_run_abi.md](libkomira_run_abi.md)
+§10). The addon does not bind it yet.
 
 An `AbortSignal` that only rejected the promise would leave the engine running and holding the
 session's thread, so it is not offered.
-- When the cancel call lands, `sql(query, { signal })` is added: an additive option.
+- When the addon binds the run handle, `sql(query, { signal })` is added: an additive option.
 - An aborted query then rejects with a `KomiraError` whose `status` is the cancelled code.
 - After it, the session stays usable.
 
@@ -794,7 +797,7 @@ The names and behaviour of §2:
 - ESM only, on Node 22.12 and later;
 - paths resolved as Node's `fs` resolves them, with no `~`;
 - `registerCsv` and `registerNdjson` as the names for CSV and NDJSON;
-- no cancel until libkomira has one.
+- no cancel until the addon binds libkomira's run handle.
 
 Recommendation: approve as written. The CSV and NDJSON names should be the Python package's too
 (`register_csv`, `register_ndjson`), which its registration change has not named yet.

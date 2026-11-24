@@ -781,7 +781,7 @@ read for identity A.
 ### 8. The C ABI
 
 The three credential rows **EXIST** at ABI 1.2, with session scope only, the eight kinds and the
-thirteen fields below, and the two error rows **EXIST** at ABI 1.6; the other row is **PROPOSED**,
+thirteen fields below, and the two error rows **EXIST** at ABI 1.7; the other row is **PROPOSED**,
 additive, in the first minor that lands it, in the golden's spelling ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)):
 
 ```text
@@ -789,8 +789,8 @@ komira_credential_add	Int32	Handle,Int32,CStr,UnsafePointer[Int32]	1.2
 komira_credential_set	Int32	Handle,Int32,Int32,ConstBytes,UInt64	1.2
 komira_credential_seal	Int32	Handle,Int32,Int32	1.2
 komira_add_sql_binding	Int32	Handle,CStr,ConstBytes,UInt64,Int32	1.x
-komira_last_error_code	Int32	Handle,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.6
-komira_last_error_step	Int32	Handle	1.6
+komira_last_error_code	Int32	Handle,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.7
+komira_last_error_step	Int32	Handle	1.7
 ```
 
 - **A credential is defined in three calls.** `komira_credential_add(ctx, kind, name, &id)` starts a
@@ -847,7 +847,7 @@ komira_last_error_step	Int32	Handle	1.6
     a staging call.
   - A source whose credential name has no sealed value, on the session or for the next call, is
     refused with `CREDENTIAL_UNBOUND`. `komira_plan_stream` does the same for a plan that names one.
-- **Errors come from two calls, not from parsing the text** (**EXISTS**, ABI 1.6).
+- **Errors come from two calls, not from parsing the text** (**EXISTS**, ABI 1.7).
   - `komira_last_error_code` returns the last error's named code (`BIND_NAME_UNBOUND`,
     `SQL_STATEMENT_UNSUPPORTED`), or the empty string when the refusal has none. It uses the
     two-call protocol of `komira_last_error`.
@@ -1059,7 +1059,7 @@ var result = session.sql("SELECT * FROM sales_catalog.sales.orders LIMIT 10")
 
 | milestone | what |
 |---|---|
-| first release (local only) | `COPY ... TO` a local Parquet, CSV or JSON file: `Count`, the all-or-nothing write, extension inference. `SQL_STATEMENT_UNSUPPORTED` for the refused statements. `komira_last_error_code` and `_step` (built, ABI 1.6). Every remote URL refused with `STORAGE_URL_REFUSED` |
+| first release (local only) | `COPY ... TO` a local Parquet, CSV or JSON file: `Count`, the all-or-nothing write, extension inference. `SQL_STATEMENT_UNSUPPORTED` for the refused statements. `komira_last_error_code` and `_step` (built, ABI 1.7). Every remote URL refused with `STORAGE_URL_REFUSED` |
 | bindings | `komira_add_sql_binding`, `Session.add_sql_binding`, `sql` with call bindings and the unnamed source, `komira.files` for local files and frames, `BIND_NAME_UNBOUND`. `register_parquet` becomes `add_sql_binding` underneath, which fixes its re-registration defect |
 | object stores | credentials and their ABI calls; `WireSourceAccess` on the wire; the S3 read arm with `ambient`; `https://` reads; the S3 write arm; GCS and Azure reads |
 | catalogs | `komira.iceberg` and the Iceberg statements ([the Iceberg design](#reconciling-with-the-iceberg-design)) |

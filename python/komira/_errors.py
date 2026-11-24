@@ -22,7 +22,7 @@ class KomiraError(Exception):
     `LOWERING_WINDOW_UNSERVED`, ...) and `step` the step of the query that
     refused: one of "parse", "bind", "optimize", "lower" or "execute". Each is
     `None` when the library gave none: the refusal has none, the library is
-    older than ABI 1.6, or no library call failed. `code` is never the empty
+    older than ABI 1.7, or no library call failed. `code` is never the empty
     string.
     """
 

@@ -9,7 +9,7 @@ owners and the Mojo runtime libraries in one directory (decision 6), so `pip ins
 Modular's. `Session.sql` and `Result` are built, with `to_arrow`, `to_reader` and `__arrow_c_stream__`
 (a result still reads after its session is closed), and the wheel requires pyarrow; `to_pandas`,
 `to_polars`, the default session, the per-session lock and the fork hook are not built. The error
-table of decision 9 is built: `KomiraError` carries `status`, `code` and `step` from `libkomira` ABI 1.6,
+table of decision 9 is built: `KomiraError` carries `status`, `code` and `step` from `libkomira` ABI 1.7,
 and `ParseError`, `BindError`, `UnsupportedOperation`, `CredentialsError` and `StorageError` are public;
 the linux-arm64 and macos-arm64 wheels are not built.
 
@@ -438,8 +438,8 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
   named code, `ENGINE_OPTIONS_INVALID` for example, or `None`), `step` (the step that refused it:
   `parse`, `bind`, `optimize`, `lower`, `execute`, or `None`) and the library's message as `str(e)`.
   `code` and `step` come from the library's `komira_last_error_code` and `komira_last_error_step`
-  (ABI 1.6), never from parsing the message. An empty code from the library is `None`. Against a
-  library older than 1.6, `code` and `step` are `None`.
+  (ABI 1.7), never from parsing the message. An empty code from the library is `None`. Against a
+  library older than 1.7, `code` and `step` are `None`.
 - **The table is built** (`python/komira/_errors.py`). A status other than -3 (the engine refused the
   call) raises `KomiraError`. For -3 the subclass is chosen by `code` first, then by `step`, then by
   the call's own default, then `KomiraError`:

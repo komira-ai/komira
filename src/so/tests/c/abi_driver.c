@@ -22,9 +22,18 @@
  * $TEST_TMPDIR with komira_register_csv and komira_register_json and queries
  * each table by name through komira_sql_stream; every answer is checked
  * against the rows the driver wrote.
+ * And it runs SQL through komira_sql_stream_run under a run handle: a handle
+ * cancelled before the call refuses the run with KOMIRA_ERR_CANCELLED and the
+ * QUERY_CANCELLED last error; a second thread reads the progress of a run in
+ * flight, and another cancels one in flight. No check depends on how long
+ * anything takes: a reading taken while a run is in flight is held only to
+ * what every reading must satisfy, and a cancel racing a run may land before
+ * or after its last check, so either outcome is accepted and each is checked
+ * whole.
  *
  * Exit 0 only if every check holds; each failure prints one line. */
 #include <dlfcn.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,6 +70,11 @@ DECLARE(komira_credential_seal);
 DECLARE(komira_sql_stream);
 DECLARE(komira_register_csv);
 DECLARE(komira_register_json);
+DECLARE(komira_run_new);
+DECLARE(komira_run_free);
+DECLARE(komira_run_cancel);
+DECLARE(komira_run_progress);
+DECLARE(komira_sql_stream_run);
 
 static int bind_all(void *lib) {
     int missing = 0;
@@ -91,6 +105,11 @@ static int bind_all(void *lib) {
     BIND(komira_sql_stream);
     BIND(komira_register_csv);
     BIND(komira_register_json);
+    BIND(komira_run_new);
+    BIND(komira_run_free);
+    BIND(komira_run_cancel);
+    BIND(komira_run_progress);
+    BIND(komira_sql_stream_run);
 #undef BIND
     return missing;
 }
@@ -102,6 +121,7 @@ _Static_assert(KOMIRA_ERR_NULL_ARG == -2, "KOMIRA_ERR_NULL_ARG");
 _Static_assert(KOMIRA_ERR_ENGINE == -3, "KOMIRA_ERR_ENGINE");
 _Static_assert(KOMIRA_ERR_BUFFER_TOO_SMALL == -4, "KOMIRA_ERR_BUFFER_TOO_SMALL");
 _Static_assert(KOMIRA_ERR_TOO_LARGE == -5, "KOMIRA_ERR_TOO_LARGE");
+_Static_assert(KOMIRA_ERR_CANCELLED == -6, "KOMIRA_ERR_CANCELLED");
 _Static_assert(KOMIRA_STEP_NONE == 0, "KOMIRA_STEP_NONE");
 _Static_assert(KOMIRA_STEP_PARSE == 1, "KOMIRA_STEP_PARSE");
 _Static_assert(KOMIRA_STEP_BIND == 2, "KOMIRA_STEP_BIND");
@@ -269,6 +289,179 @@ static void expect_refused(komira_handle ctx, const char *sql, int32_t want, con
     CHECK(read_answer(&out, &a) == 0 && a.rows == 1 && a.n_values == 1 && a.values[0] == 1);
 }
 
+/* The last error of a run its handle cancelled before the call. */
+static const char cancelled_text[] =
+    "QUERY_CANCELLED: execute: pipeline_exec: the query was cancelled: the caller cancelled the run";
+
+/* The progress of `run`, which the call must answer. */
+static void progress_of(komira_handle run, uint64_t *done, uint64_t *total) {
+    *done = 99;
+    *total = 0;
+    CHECK(p_komira_run_progress(run, done, total) == KOMIRA_OK);
+    CHECK(*done <= *total);
+}
+
+/* One komira_sql_stream_run on a thread of its own. */
+struct run_job {
+    komira_handle ctx;
+    komira_handle run;
+    const char *sql;
+    struct ArrowArrayStream out;
+    int32_t rc;
+    int finished;
+};
+
+static void *run_job_main(void *arg) {
+    struct run_job *j = arg;
+    j->rc = p_komira_sql_stream_run(j->ctx, j->sql, j->run, &j->out);
+    __atomic_store_n(&j->finished, 1, __ATOMIC_RELEASE);
+    return NULL;
+}
+
+static int start_job(struct run_job *j, pthread_t *thread, komira_handle ctx, komira_handle run, const char *sql) {
+    memset(j, 0, sizeof *j);
+    memset(&j->out, 0xAB, sizeof j->out);
+    j->ctx = ctx;
+    j->run = run;
+    j->sql = sql;
+    int started = pthread_create(thread, NULL, run_job_main, j) == 0;
+    CHECK(started);
+    return started;
+}
+
+/* The run handle: cancel and progress. `ctx` has the table `three` (k = 1, 2,
+   3) registered. */
+static void run_cases(komira_handle ctx) {
+    struct ArrowArrayStream out, before;
+    struct answer a;
+    char text[512];
+    uint64_t done = 0, total = 0;
+
+    /* NULL handles and slots are refused and nothing is written. */
+    komira_handle run = p_komira_run_new();
+    CHECK(run != NULL);
+    if (run == NULL) return;
+    CHECK(p_komira_run_cancel(NULL) == KOMIRA_ERR_NULL_ARG);
+    done = 7;
+    total = 7;
+    CHECK(p_komira_run_progress(NULL, &done, &total) == KOMIRA_ERR_NULL_ARG);
+    CHECK(p_komira_run_progress(run, NULL, &total) == KOMIRA_ERR_NULL_ARG);
+    CHECK(p_komira_run_progress(run, &done, NULL) == KOMIRA_ERR_NULL_ARG);
+    CHECK(done == 7 && total == 7);
+    memset(&out, 0xAB, sizeof out);
+    memcpy(&before, &out, sizeof out);
+    CHECK(p_komira_sql_stream_run(NULL, "SELECT 1 AS n", run, &out) == KOMIRA_ERR_NULL_CTX);
+    CHECK(p_komira_sql_stream_run(ctx, "SELECT 1 AS n", NULL, &out) == KOMIRA_ERR_NULL_ARG);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text), "komira_sql_stream_run: sql, run or out is NULL") == 0);
+    CHECK(p_komira_sql_stream_run(ctx, NULL, run, &out) == KOMIRA_ERR_NULL_ARG);
+    CHECK(p_komira_sql_stream_run(ctx, "SELECT 1 AS n", run, NULL) == KOMIRA_ERR_NULL_ARG);
+    CHECK(memcmp(&out, &before, sizeof out) == 0);
+
+    /* A fresh handle reads 0 of 0; a run nobody cancels answers, and leaves
+       every segment it counted done. */
+    progress_of(run, &done, &total);
+    CHECK(done == 0 && total == 0);
+    CHECK(p_komira_sql_stream_run(ctx, "SELECT k FROM three ORDER BY k", run, &out) == KOMIRA_OK);
+    CHECK(read_answer(&out, &a) == 0);
+    CHECK(a.rows == 3 && a.n_values == 3 && a.values[0] == 1 && a.values[2] == 3);
+    uint64_t len = 99;
+    CHECK(p_komira_last_error(ctx, NULL, 0, &len) == KOMIRA_OK && len == 0);
+    uint64_t first = 0;
+    progress_of(run, &done, &first);
+    CHECK(first > 0 && done == first);
+    /* A second run given the same handle adds to its counts. */
+    CHECK(p_komira_sql_stream_run(ctx, "SELECT k FROM three ORDER BY k", run, &out) == KOMIRA_OK);
+    CHECK(read_answer(&out, &a) == 0 && a.rows == 3);
+    progress_of(run, &done, &total);
+    CHECK(total == 2 * first && done == total);
+
+    /* Cancelled before the call: the run is refused with -6, *out untouched,
+       the named error word for word; it counted its segments and finished
+       none. A second cancel is accepted and changes nothing. */
+    CHECK(p_komira_run_cancel(run) == KOMIRA_OK);
+    CHECK(p_komira_run_cancel(run) == KOMIRA_OK);
+    uint64_t done_before = done, total_before = total;
+    memset(&out, 0xAB, sizeof out);
+    memcpy(&before, &out, sizeof out);
+    int32_t rc = p_komira_sql_stream_run(ctx, "SELECT k FROM three ORDER BY k", run, &out);
+    if (rc != KOMIRA_ERR_CANCELLED) fprintf(stderr, "FAIL: a cancelled run returned %d\n", rc);
+    CHECK(rc == KOMIRA_ERR_CANCELLED);
+    CHECK(memcmp(&out, &before, sizeof out) == 0);
+    const char *got = last_error_text(ctx, text, sizeof text);
+    if (strcmp(got, cancelled_text) != 0) fprintf(stderr, "FAIL: last error '%s'\n", got);
+    CHECK(strcmp(got, cancelled_text) == 0);
+    progress_of(run, &done, &total);
+    CHECK(done == done_before && total > total_before);
+    /* A statement refused before its plan runs keeps its own refusal. */
+    CHECK(p_komira_sql_stream_run(ctx, "SELECT * FROM nosuch", run, &out) == KOMIRA_ERR_ENGINE);
+    CHECK(starts_with(last_error_text(ctx, text, sizeof text), "bind: "));
+    /* The context answers the next query, with or without a handle. */
+    CHECK(p_komira_sql_stream(ctx, "SELECT 1 AS n", &out) == KOMIRA_OK);
+    CHECK(read_answer(&out, &a) == 0 && a.rows == 1 && a.values[0] == 1);
+    komira_handle fresh = p_komira_run_new();
+    CHECK(fresh != NULL && fresh != run);
+    CHECK(p_komira_sql_stream_run(ctx, "SELECT 1 AS n", fresh, &out) == KOMIRA_OK);
+    CHECK(read_answer(&out, &a) == 0 && a.rows == 1 && a.values[0] == 1);
+    p_komira_run_free(fresh);
+    p_komira_run_free(run);
+    p_komira_run_free(NULL);
+
+    /* Progress read from this thread while the run is in flight on another:
+       every reading has done at most total, and none is below the one before. */
+    struct run_job job;
+    pthread_t thread;
+    run = p_komira_run_new();
+    CHECK(run != NULL);
+    if (run == NULL) return;
+    if (start_job(&job, &thread, ctx, run, "SELECT k FROM three WHERE k >= 2 ORDER BY k")) {
+        uint64_t last_done = 0, last_total = 0;
+        long readings = 0;
+        int finished = 0;
+        do {
+            finished = __atomic_load_n(&job.finished, __ATOMIC_ACQUIRE);
+            progress_of(run, &done, &total);
+            CHECK(done >= last_done && total >= last_total);
+            last_done = done;
+            last_total = total;
+            readings++;
+        } while (!finished);
+        pthread_join(thread, NULL);
+        CHECK(readings > 0);
+        CHECK(job.rc == KOMIRA_OK);
+        if (job.rc == KOMIRA_OK) {
+            CHECK(read_answer(&job.out, &a) == 0);
+            CHECK(a.rows == 2 && a.n_values == 2 && a.values[0] == 2 && a.values[1] == 3);
+        }
+        /* The reading after the run's end is its last: every segment done. */
+        CHECK(done == total && total > 0);
+    }
+    p_komira_run_free(run);
+
+    /* A cancel from this thread while the run is in flight on another: it
+       lands before the run's last check (-6, *out untouched, the named error)
+       or after it (the answer). The context answers the next query either
+       way. */
+    run = p_komira_run_new();
+    CHECK(run != NULL);
+    if (run == NULL) return;
+    if (start_job(&job, &thread, ctx, run, "SELECT k FROM three ORDER BY k")) {
+        CHECK(p_komira_run_cancel(run) == KOMIRA_OK);
+        pthread_join(thread, NULL);
+        CHECK(job.rc == KOMIRA_OK || job.rc == KOMIRA_ERR_CANCELLED);
+        if (job.rc == KOMIRA_OK) {
+            CHECK(read_answer(&job.out, &a) == 0 && a.rows == 3);
+        } else {
+            uint8_t sentinel[sizeof job.out];
+            memset(sentinel, 0xAB, sizeof sentinel);
+            CHECK(memcmp(&job.out, sentinel, sizeof sentinel) == 0);
+            CHECK(starts_with(last_error_text(ctx, text, sizeof text), "QUERY_CANCELLED: execute: "));
+        }
+    }
+    p_komira_run_free(run);
+    CHECK(p_komira_sql_stream(ctx, "SELECT k FROM three ORDER BY k", &out) == KOMIRA_OK);
+    CHECK(read_answer(&out, &a) == 0 && a.rows == 3);
+}
+
 /* The SQL cases of komira_sql_stream. */
 static void sql_stream_cases(void) {
     const char *tmp = getenv("TEST_TMPDIR");
@@ -371,6 +564,8 @@ static void sql_stream_cases(void) {
         expect_refused(ctx, big, KOMIRA_ERR_TOO_LARGE, msg, 1, KOMIRA_STEP_NONE, "");
         free(big);
     }
+
+    run_cases(ctx);
 
     /* A stream outlives its context: the context is freed before the stream
        is read, and the stream and its chunks are released after. */
