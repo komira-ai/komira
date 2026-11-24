@@ -331,7 +331,9 @@ _OTHER_RUNTIME = "newer" if is_newer(_OTHER_MOJO, _TOOLCHAIN_MOJO) else "older"
 # signature equals DuckDB's (exact for integers, decimals and texts, within 1e-9
 # for doubles, the declared type of each column the same) and its rows are in
 # the order of its ORDER BY; the per-query table is the test's output and a
-# failing query is named with its refusal token. On CPython 3.13 only.
+# failing query is named with its refusal token. On CPython 3.13 only. A validation run, built on request and not in the pull request's check
+# set (tools/build/ci/rules.bzl, EXCLUDED); the answer check it uses is held
+# in the pull request by `//python/tests:tpch_compare_test`.
 # Derived from TPC-H; not comparable to published TPC-H results.
 wheel_install_test(
     name = "tpch_via_wheel_test",

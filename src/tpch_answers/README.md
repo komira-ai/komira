@@ -52,12 +52,16 @@ end
 
 ```mojo
 from std.testing import assert_equal
-from tpch_answers import DEFAULT_MEMORY_GIB, parse_answer_args, tpch_order_keys
+from tpch_answers import DEFAULT_MEMORY_GIB, QUERIES_DIR, parse_answer_args, tpch_order_keys
 
 var keys = tpch_order_keys("q3")
 assert_equal(len(keys), 2)
 assert_equal(keys[0].column, 1)          # revenue, descending
 assert_equal(len(tpch_order_keys("q6")), 0)
+
+# Query texts sit under QUERIES_DIR of an answers directory, one file per query.
+var q1_text_file = String("out/") + String(QUERIES_DIR) + String("/q1.sql")
+assert_equal(q1_text_file, "out/queries/q1.sql")
 
 # The flags of the answers program; the memory limit defaults to 8 GiB.
 var args = List[String]()
