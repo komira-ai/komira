@@ -38,14 +38,14 @@ GRAPH_JSON = r'''{
       "root": "src/lz4/src/lz4",
       "srcs": [
         {"path": "src/lz4/src/lz4/__init__.mojo", "sha256": "3eae14e1871d06bbe8d16b730c2e118bf4f760a0ac85bdd38e9466094de2793c"},
-        {"path": "src/lz4/src/lz4/codec.mojo", "sha256": "111b60b52c445ed42ac5a96fd420dbd21ff3e1c3525e0f435b446747307de357"},
+        {"path": "src/lz4/src/lz4/codec.mojo", "sha256": "8a8afaf5e63d335c573f8e9ef250e97ffdf70f92dcbc0bb2928ca7de4f740800"},
         {"path": "src/lz4/src/lz4/frame.mojo", "sha256": "3f8bb003af6f16ea02c00670254e713599f6cf1c09ee23781bea138c9216d5c0"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["lz4.mojoc"],
-      "key": "938b7e895d650d00b6c21afec864600689d7de57daa9065ba601aeb3520371fe"
+      "key": "9729f1e5758cdd52d63eb6a081fe144aee7f38a7dd3a4dc461b07a32b9e790f8"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.1.0/test:src/lz4/tests/test_codec.mojo",
@@ -61,7 +61,7 @@ GRAPH_JSON = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec.pass"],
-      "key": "908122ac310500ccc8d462360d9b15617e430ff9044159bac9525856ff499db0"
+      "key": "9b5eb967c353bd7a2fcf9b30b373118bdefa63b6e2659f8fe79e1a3cf8866323"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.1.0/test:src/lz4/tests/test_codec_into.mojo",
@@ -77,7 +77,7 @@ GRAPH_JSON = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec_into.pass"],
-      "key": "cd7c5d7fbd239093090a64c78e717d11376dbf462d25151c76fa87651ca56d79"
+      "key": "afa01992ed420907b854c9028540fef473a4b6ab63a5ab39fdab9817e031e432"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.1.0/test:src/lz4/tests/test_frame.mojo",
@@ -93,7 +93,7 @@ GRAPH_JSON = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_frame.pass"],
-      "key": "bb6d7b5ec36ad131f29c1508aa3574f70289902856d0817a794c6abe20bc5ce1"
+      "key": "03f690a246e1c2f63e516c74470762cd6d664c6b28f3a93cb93bd05f1324d4f3"
     }
   ]
 }
@@ -128,14 +128,14 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "root": "src/lz4/src/lz4",
       "srcs": [
         {"path": "src/lz4/src/lz4/__init__.mojo", "sha256": "3eae14e1871d06bbe8d16b730c2e118bf4f760a0ac85bdd38e9466094de2793c"},
-        {"path": "src/lz4/src/lz4/codec.mojo", "sha256": "111b60b52c445ed42ac5a96fd420dbd21ff3e1c3525e0f435b446747307de357"},
+        {"path": "src/lz4/src/lz4/codec.mojo", "sha256": "8a8afaf5e63d335c573f8e9ef250e97ffdf70f92dcbc0bb2928ca7de4f740800"},
         {"path": "src/lz4/src/lz4/frame.mojo", "sha256": "3f8bb003af6f16ea02c00670254e713599f6cf1c09ee23781bea138c9216d5c0"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["lz4.mojoc"],
-      "key": "685ca849f8d409eb730cdfcb0b89f4a157b015ef31ddcefd4c8a8906605f0acb"
+      "key": "bac0d153e8b8e1037092c9c4f719b3c1917295a8352cfba5e1e8aca2129e926a"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.1.0/test:src/lz4/tests/test_codec.mojo",
@@ -151,7 +151,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec.pass"],
-      "key": "70f0958d7a2a1e1474c76805d6f3ef0fa8d4854e6f89e2ae66dfeadc78ca5e71"
+      "key": "ae1554ccfa52318b1b08f2c547543112e575c48c1fe4ae3b5f5af5d7c8aa9696"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.1.0/test:src/lz4/tests/test_codec_into.mojo",
@@ -167,7 +167,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec_into.pass"],
-      "key": "e8788970ac43a55114c56962a67cf5e38c52b60807c34d18b61aba317018ae8d"
+      "key": "c99cc1621b2a811d1a39df9f83ddd1181444bd12fca7d07429409b836d07b78b"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.1.0/test:src/lz4/tests/test_frame.mojo",
@@ -183,7 +183,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_frame.pass"],
-      "key": "18af19481fccafa7c2e95adaa099b91555b4b28fa6999197ab277038757290af"
+      "key": "e14d1137da226a3b49c8cbca509c3f38dab2695ba3db6b9bffa3c374590c1ba9"
     }
   ]
 }
@@ -215,14 +215,14 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "root": "src/lz4/src/lz4",
       "srcs": [
         {"path": "src/lz4/src/lz4/__init__.mojo", "sha256": "3eae14e1871d06bbe8d16b730c2e118bf4f760a0ac85bdd38e9466094de2793c"},
-        {"path": "src/lz4/src/lz4/codec.mojo", "sha256": "111b60b52c445ed42ac5a96fd420dbd21ff3e1c3525e0f435b446747307de357"},
+        {"path": "src/lz4/src/lz4/codec.mojo", "sha256": "8a8afaf5e63d335c573f8e9ef250e97ffdf70f92dcbc0bb2928ca7de4f740800"},
         {"path": "src/lz4/src/lz4/frame.mojo", "sha256": "3f8bb003af6f16ea02c00670254e713599f6cf1c09ee23781bea138c9216d5c0"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["lz4.mojoc"],
-      "key": "785383aa691ce4f00530068c3049f01d964a80c4e801f26a9e5f4117512399fa"
+      "key": "2da3ed2e2c3052f16179bdc6f7c6cd6d2639c056c2abd2f43f82ed4d1fbde401"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.1.0/test:src/lz4/tests/test_codec.mojo",
@@ -238,7 +238,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec.pass"],
-      "key": "dfeb790252cde287cff89e2e5b197f0cb9a6949ca1452562e77e570fbb2872cc"
+      "key": "dcfd6cabac7ecab27486e86d9aaa5997c1882b6f46d78b0cc08f18dd9f630a3e"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.1.0/test:src/lz4/tests/test_codec_into.mojo",
@@ -254,7 +254,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec_into.pass"],
-      "key": "7eabf33fdbccfbaabdb2a7f2dba0f79122c343490114c64a15b078fd3c1388fa"
+      "key": "4c4d501c9f5a342ec910ee2e9195464d85dee277cb2b160175917c96fca03812"
     },
     {
       "id": "komira-ai/lz4@0.1.0#mojo1.1.0/test:src/lz4/tests/test_frame.mojo",
@@ -270,7 +270,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "loads": ["lz4-c"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_frame.pass"],
-      "key": "77b021ba0ee6e182b60a559f4fa7d8f7ba5d68a1a13f04e5149c136a46de67e6"
+      "key": "07aa9bfe3afb8c871093ff6539c1ba0bbe5dd7898b678b64200d4c6348619899"
     }
   ]
 }

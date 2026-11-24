@@ -1352,12 +1352,12 @@ and a NULL row is NOT length-checked (there is nothing to compare).
 """
 
 comptime STRING_FN_N_REPEAT_MAX_BYTES: Int = 64 * 1024 * 1024
-"""The `repeat` output ceiling, in BYTES, per ROW.
+"""The `repeat`, `lpad` and `rpad` output ceiling, in BYTES, per ROW.
 
 ⚠ A LIMIT AND NOT A CLAMP: exceeding it RAISES by name. A clamp would return a
 truncated string that differs from DuckDB with nothing saying so, which is the
-worse failure — and `repeat` is the one member whose output size is controlled
-by a DATA value rather than by the plan.
+worse failure — and those three are the members whose output size is
+controlled by a DATA value (their count) rather than by the plan.
 
 ⛔ IT IS **NOT** SPELLED `STRFNN_*`, AND THAT IS LOAD-BEARING RATHER THAN
 STYLISTIC. The plan-wire vocabulary generator derives the `StringFnN` wire

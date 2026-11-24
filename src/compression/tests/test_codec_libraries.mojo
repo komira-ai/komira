@@ -22,7 +22,11 @@ from compression.codec_libraries import (
     LIBLZMA_SONAME,
     LIBZSTD_SONAME,
     _open_codec_library,
+    probe_codec_libraries,
+    probe_libraries,
 )
+from lz4.codec import LIBLZ4_SONAME
+from zlib import LIBZ_SONAME
 
 
 def _loader_error(soname: String) -> String:
@@ -62,6 +66,44 @@ def test_a_missing_bzip2_library_is_named() raises:
 
 def test_a_missing_xz_library_is_named() raises:
     _check_missing(LIBLZMA_SONAME)
+
+
+def test_the_probe_opens_the_three_libraries() raises:
+    probe_codec_libraries()
+    var sonames = List[String]()
+    sonames.append(String(LIBZSTD_SONAME))
+    sonames.append(String(LIBZ_SONAME))
+    sonames.append(String(LIBLZ4_SONAME))
+    probe_libraries(sonames)
+
+
+def _probe_message(sonames: List[String]) -> String:
+    try:
+        probe_libraries(sonames)
+    except e:
+        return String(e)
+    return ""
+
+
+def test_the_probe_names_a_missing_library_after_present_ones() raises:
+    var absent = String(LIBLZ4_SONAME) + ".komira-absent"
+    var reason = _loader_error(absent)
+    assert_true(reason.byte_length() > 0, absent + " opened")
+    var sonames = List[String]()
+    sonames.append(String(LIBZSTD_SONAME))
+    sonames.append(String(LIBZ_SONAME))
+    sonames.append(absent)
+    assert_equal(
+        _probe_message(sonames),
+        "compression: cannot load " + absent + ": " + reason,
+    )
+    var first = List[String]()
+    first.append(absent)
+    first.append(String(LIBZSTD_SONAME))
+    assert_equal(
+        _probe_message(first),
+        "compression: cannot load " + absent + ": " + reason,
+    )
 
 
 def main() raises:

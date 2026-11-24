@@ -15,9 +15,15 @@ error. Nothing here holds a pointer.
 - `plan_render_text`: a serialized plan decoded and printed, not run.
 - `sql_result`: one SQL statement run on a session's engine, its answer as
   batches checked to cross the Arrow C Stream Interface.
+
+Every operation but `plan_render_text` first calls `probe_codec_libraries`
+(libzstd, libz, liblz4), so a codec library missing from the host is a raise
+`compression: cannot load <soname>: <loader error>` before anything is read,
+and not an abort of the process when a codec first opens it.
 """
 
 from byte_buffer.file_identity import FileIdentity
+from compression.codec_libraries import probe_codec_libraries
 from plan_wire import binding_to_bytes, plan_from_bytes, schema_to_bytes
 from scan_source.csv_source import CsvSource
 from scan_source.json_source import JsonSource
@@ -42,7 +48,12 @@ def register_parquet(mut session: Session, name: String, path: String) raises:
     table is in the catalog a query on the session binds against. A flat
     schema only: a nested or repeated column is refused, as are files whose
     schemas differ and a glob that matches nothing.
+
+    Raises:
+        Error `compression: cannot load <soname>: <loader error>` when a codec
+        library cannot be loaded, before anything is read.
     """
+    probe_codec_libraries()
     engine_register_parquet(session.engine, name, path)
 
 
@@ -50,7 +61,12 @@ def parquet_schema_bytes(path: String) raises -> List[UInt8]:
     """The Arrow schema of the Parquet file at `path`, as `WireSchema` bytes.
 
     Read from the footer alone; no data page is touched.
+
+    Raises:
+        Error `compression: cannot load <soname>: <loader error>` when a codec
+        library cannot be loaded, before anything is read.
     """
+    probe_codec_libraries()
     var footer = read_parquet_footer(path)
     var schema = footer.take_schema()
     return schema_to_bytes(schema)
@@ -66,7 +82,12 @@ def csv_binding_bytes(
     `all_varchar` change what the cells mean, so they are inputs: the first
     two enter the binding's identity, and `all_varchar` makes every column a
     string.
+
+    Raises:
+        Error `compression: cannot load <soname>: <loader error>` when a codec
+        library cannot be loaded, before anything is read.
     """
+    probe_codec_libraries()
     var opts = TvfOptions()
     opts.delimiter = delimiter
     opts.has_header = has_header
@@ -91,7 +112,12 @@ def json_binding_bytes(path: String) raises -> List[UInt8]:
 
     The schema is inferred from the leading records (a bounded prefix, cut at
     the last complete line).
+
+    Raises:
+        Error `compression: cannot load <soname>: <loader error>` when a codec
+        library cannot be loaded, before anything is read.
     """
+    probe_codec_libraries()
     var schema = json_tvf_schema(path)
     var source = JsonSource(
         String(path),
@@ -126,12 +152,16 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
     session, which may be dropped first.
 
     Raises:
+        Error `compression: cannot load <soname>: <loader error>` when a codec
+        library cannot be loaded, before the statement is parsed.
+
         Error `<step>: <reason>` when `run_sql` refuses, where `<step>` is the
         step that refused (`parse`, `bind`, `optimize`, `lower` or
         `execute`) and `<reason>` its own message, unchanged; and the export
         check's error naming the column when a result column cannot cross the
         stream (`arrow_result`).
     """
+    probe_codec_libraries()
     var outcome = run_sql(session.engine, sql)
     if outcome.refusal:
         ref refusal = outcome.refusal.value()

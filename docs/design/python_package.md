@@ -476,6 +476,10 @@ and `_py311`, `_py312` and `_py314` on the other supported minors), alone: the e
   read `PYTHON_SURFACE` instead of a row per file is a question for that lint.
 - Free-threaded CPython (3.14t): the package is not claimed for it in the first release. ctypes works
   there, but no test runs the package on it.
+- An abort inside libkomira ends the interpreter. A raise is a status and becomes a Python exception,
+  but an `abort()`, a fault, stack exhaustion or an out-of-memory kill cannot be caught in the process
+  ([libkomira_run_abi.md](libkomira_run_abi.md) §8 lists the inputs refused before they reach one, and
+  the ones that still do). The package README says so when `Session.sql` runs SQL.
 - `Result.to_polars` and `to_pandas` convert through Arrow; their dtype mapping is the Arrow terminals
   pull request's tests.
 

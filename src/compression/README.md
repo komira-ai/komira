@@ -112,6 +112,24 @@ for d in range(len(decoded)):
         assert_equal(decoded[d][i], src[i])
 ```
 
+A library missing from the host ends the process at its first use, because
+the handle is opened in an initializer that cannot raise. A caller that must
+not die (libkomira) probes libzstd, libz and liblz4 first; a missing one is a
+raise naming it:
+
+<!-- mojo-hidden from std.testing import assert_true -->
+```mojo
+from compression.codec_libraries import probe_codec_libraries, probe_libraries
+
+probe_codec_libraries()
+var refused = String("")
+try:
+    probe_libraries([String("libkomira-no-such-codec.so.0")])
+except e:
+    refused = String(e)
+assert_true(refused.startswith("compression: cannot load libkomira-no-such-codec.so.0: "))
+```
+
 ## Build files
 
 This package is built with buildrules' `mojo_package` and packaged for mopm as `compression`, version 0.1.0
