@@ -43,21 +43,25 @@ the bytes s2n consumed, matching s2n's own `consumed` advance, so no bytes are
 re-sent and the sanity check never trips.
 
 FALSIFIER SHAPE (real s2n loopback over a socketpair; no network): full
-client<->server TLS handshake to DONE over an ~8 KB-buffered AF_UNIX
-socketpair, then a 256 KB `send` that is GUARANTEED to block mid-payload and
-produce positive partials.
+client<->server TLS handshake to DONE over an AF_UNIX socketpair with the
+OS's default buffers (nothing is shrunk), then a payload larger than both
+kernel buffers together, so the send blocks mid-payload whatever their size.
 
 TWO TESTS (both deterministic on a local socketpair):
   * bug1_partial_send_surfaces_consumed_count — the fixed contract: a
     positive-partial-blocked `send` returns (DONE, n) with 0 < n <= len (a
     CONSUMABLE partial the caller advances by), NEVER a bare block that hides
-    `n`. Advancing an offset by exactly the returned `n` sums to EXACTLY the
-    payload length (monotone forward progress, no re-transmit, no
+    `n`. The congestion comes from the reader: it reads nothing until the
+    writer reports a block (the kernel buffers are full of the writer's own
+    records), then frees less than one TLS record per block, so every send
+    that completes a pending record blocks on the next one: a positive
+    partial. Advancing an offset by exactly the returned `n` sums to EXACTLY
+    the payload length (monotone forward progress, no re-transmit, no
     over/under-advance). FAILS ON CURRENT CODE (pre-fix): the positive
     partial came back as a discarded PENDING, so advancing by `n` was
     impossible and the loop re-transmitted / never summed to len.
   * bug3_same_buffer_resend_delivers_intact — the fix end-to-end: send a
-    256 KB payload over the congested socket via the canonical advance-by-n
+    payload larger than the kernel buffers via the canonical advance-by-n
     caller loop (decrypting from a real peer TlsConnection between blocks),
     and verify the whole payload arrives byte-intact across MANY partial
     sends, with ZERO error and ZERO corruption. On the pre-fix tree the
@@ -68,7 +72,7 @@ carried errno 469762106 = 0x1c00003a = (7<<26)|58 (err_type 7 =
 S2N_ERR_T_USAGE, code 58 = S2N_ERR_SEND_SIZE). Reproducing that EXACT errno
 needs s2n to hold a partially-flushed LARGE record (`current_user_data_consumed`
 > the mis-advanced total) — a state a real congested TCP socket to Firestore
-produces but a local ~8 KB AF_UNIX socketpair does not (s2n's blocked-partial
+produces but a local AF_UNIX socketpair does not (s2n's blocked-partial
 DECREMENT keeps `consumed` small under the tiny buffer, so the socketpair
 re-transmits rather than tripping the ENSURE). So the exact-errno + the
 truncated-frame Mode-2 stall need a real congested link; bug1/bug3 give the deterministic offline falsifiers for the same root
@@ -85,9 +89,8 @@ test_L1_tls_buffered_plaintext_lost_wakeup.mojo.
 """
 
 from std.ffi import external_call
-from std.sys.info import CompilationTarget
 
-
+from async_rt.reactor.socket_setup import so_rcvbuf, so_sndbuf
 from http_core.tls import (
     TLS_OUTCOME_BLOCKED_ON_READ,
     TLS_OUTCOME_BLOCKED_ON_WRITE,
@@ -114,23 +117,16 @@ comptime _SOCK_STREAM: Int32 = 1
 # err_type 7 == S2N_ERR_T_USAGE, code 58 == S2N_ERR_SEND_SIZE.
 comptime _S2N_ERR_SEND_SIZE_ERRNO: Int = 469762106  # 0x1c00003a
 
-# setsockopt levels/options — SOL_SOCKET differs by OS (sys/socket.h):
-# Linux = 1, Darwin = 0xffff. SO_SNDBUF/SO_RCVBUF are portable.
-comptime _SOL_SOCKET_LINUX: Int32 = Int32(1)
-comptime _SOL_SOCKET_MACOS: Int32 = Int32(0xFFFF)
-comptime _SO_SNDBUF: Int32 = Int32(0x1001)
-comptime _SO_RCVBUF: Int32 = Int32(0x1002)
+# Bytes the reader frees per block in bug1: less than one TLS record (s2n's
+# application-data records here carry 8087 plaintext bytes, measured on Linux
+# and macOS arm64), so a drain never makes room for the rest of
+# the payload; the send that completes the pending record blocks on the next
+# one and returns the records it flushed, a positive partial.
+comptime _DRAIN_STEP = 4096
 
-
-# Bytes freed per iteration in bug1: larger than one TLS record (16 KB plus
-# overhead) so a send always makes progress, far smaller than the payload.
-comptime _DRAIN_STEP = 32768
-
-
-def _sol_socket() -> Int32:
-    comptime if CompilationTarget.is_linux():
-        return _SOL_SOCKET_LINUX
-    return _SOL_SOCKET_MACOS
+# The smallest payload the tests send (256 KB); larger when the kernel
+# buffers are larger (`_payload_len_for`).
+comptime _MIN_PAYLOAD = 262144
 
 
 def _leaf_cert() raises -> String:
@@ -143,11 +139,10 @@ def _leaf_key() raises -> String:
 
 def _socketpair() raises -> Tuple[Int32, Int32]:
     var sv = Array[Int32, 2](fill=Int32(-1))
-    var sv_ptr = UnsafePointer(to=sv).unsafe_origin_cast[
-        MutUntrackedOrigin
-    ]().bitcast[Int32]()
+    # SAFETY: `sv` is stack-local and holds the two ints `socketpair` writes;
+    # it outlives the call, and libc keeps no pointer to it.
     var rc = external_call["socketpair", Int32](
-        _AF_UNIX, _SOCK_STREAM, Int32(0), sv_ptr,
+        _AF_UNIX, _SOCK_STREAM, Int32(0), sv.unsafe_ptr(),
     )
     if rc != Int32(0):
         raise Error("socketpair() returned " + String(Int(rc)))
@@ -166,50 +161,10 @@ def _set_nonblock(fd: Int32) raises:
         raise Error("_set_nonblock returned " + String(Int(rc)))
 
 
-def _set_sockbuf(fd: Int32, opt: Int32, size: Int32):
-    """BEST-EFFORT setsockopt(fd, SOL_SOCKET, opt, &size) to shrink SO_SNDBUF
-    / SO_RCVBUF. On Linux this shrinks the buffer further; on macOS AF_UNIX
-    socketpairs REJECT SO_SNDBUF/SO_RCVBUF (returns -1) — but the DEFAULT
-    macOS socketpair buffer is only ~8 KB, already far smaller than the
-    256 KB test payload, so the send blocks naturally regardless. Hence this
-    is intentionally NON-raising: the congestion precondition comes from the
-    small default buffer, and the shrink is just belt-and-suspenders on
-    platforms that honor it."""
-    var val = size
-    var val_ptr = UnsafePointer(to=val).unsafe_origin_cast[
-        MutUntrackedOrigin
-    ]().bitcast[UInt8]()
-    var _rc = external_call["setsockopt", Int32](
-        fd, _sol_socket(), opt, val_ptr, Int32(4),
-    )
-
-
-# FFI-BOUNDARY: `_fill_socket` and `_drain_socket` call libc `send` and `recv`
-# on the raw socketpair fd. Each helper owns its stack-local buffer and lends
-# it to libc only for the duration of the call; libc neither retains nor frees
-# it. The fd is owned by the test and closed by it, never by these helpers.
-def _fill_socket(fd: Int32) -> Int:
-    """Non-blocking write of raw filler bytes to `fd` until the kernel refuses
-    more (the send buffer and the peer's receive buffer are both full).
-    Returns the bytes queued. Used by bug1 so the congestion does not depend
-    on how large the OS's default socketpair buffers are: whatever their size,
-    they are full afterwards. The peer never decrypts in bug1, so the filler is
-    discarded by `_drain_socket` and never reaches a TLS record parser."""
-    var chunk = Array[UInt8, 4096](fill=UInt8(0xA5))
-    var total = 0
-    # Bounded so a platform that never reports a full buffer cannot spin.
-    while total < 67108864:
-        # SAFETY: `chunk` is stack-local, 4096 bytes long, and outlives the
-        # call; `send` only reads from it and keeps no pointer.
-        var n = external_call["send", Int64](
-            fd, chunk.unsafe_ptr(), Int64(4096), Int32(0),
-        )
-        if n <= Int64(0):
-            break
-        total += Int(n)
-    return total
-
-
+# FFI-BOUNDARY: `_drain_socket` calls libc `recv` on the raw socketpair fd.
+# It owns its stack-local buffer and lends it to libc only for the duration
+# of the call; libc neither retains nor frees it. The fd is owned by the test
+# and closed by it, never by this helper.
 def _drain_socket(fd: Int32, max_bytes: Int) -> Int:
     """Non-blocking read+discard of AT MOST `max_bytes` from the RAW kernel
     socket fd (the receiver side of the socketpair). Returns bytes discarded
@@ -217,7 +172,8 @@ def _drain_socket(fd: Int32, max_bytes: Int) -> Int:
     so a blocked sender can flush a few more records but not the whole
     payload — WITHOUT decrypting (we only care about unblocking the sender's
     write path; the payload correctness is verified by the peer TlsConnection
-    in bug3)."""
+    in bug3). Reads stop at the first `recv` that returns no bytes, so a
+    call on an empty nonblocking socket returns 0."""
     var scratch = Array[UInt8, 65536](fill=UInt8(0))
     var total = 0
     # Use `recv` (flags=0), NOT `read`: the stdlib's file.read() already
@@ -312,21 +268,40 @@ def _build_client_config() raises -> TlsConfig:
     return config^
 
 
-def _make_congested_pair() raises -> Tuple[Int32, Int32]:
-    """A socketpair with SHRUNKEN buffers so a large TLS send blocks
-    mid-payload. Server = fds[0] (the sender in these tests), client fd =
-    fds[1] (the receiver). Both nonblocking. Buffers shrunk to a few KB so a
-    ~256KB payload cannot flush in one shot."""
+def _make_pair() raises -> Tuple[Int32, Int32]:
+    """A nonblocking socketpair with the OS's default buffers. Server =
+    fds[0] (the sender in these tests), client = fds[1] (the receiver). The
+    buffers are not shrunk: the tests size the payload from them
+    (`_payload_len_for`) instead, so the send blocks mid-payload on any OS
+    and any default."""
     var fds = _socketpair()
     var server_fd = fds[0]
     var client_fd = fds[1]
     _set_nonblock(server_fd)
     _set_nonblock(client_fd)
-    # Shrink both directions. The kernel doubles + clamps the value; even a
-    # clamped ~16KB is far smaller than the 256KB payload, so the send blocks.
-    _set_sockbuf(server_fd, _SO_SNDBUF, Int32(2048))
-    _set_sockbuf(client_fd, _SO_RCVBUF, Int32(2048))
     return (server_fd, client_fd)
+
+
+def _payload_len_for(server_fd: Int32, client_fd: Int32) raises -> Int:
+    """A payload length the two kernel buffers cannot hold together: twice
+    the sender's SO_SNDBUF plus the receiver's SO_RCVBUF, read back with the
+    per-OS checked getsockopt (`so_sndbuf` / `so_rcvbuf` raise on failure),
+    and at least `_MIN_PAYLOAD`. Linux bounds an AF_UNIX stream by the
+    sender's buffer; macOS accounts the receiver's as well. Twice the sum
+    covers either. A write of this much with nothing read must block before
+    the end; bug1 raises a PRECONDITION if it does not."""
+    var snd = Int(so_sndbuf(server_fd))
+    var rcv = Int(so_rcvbuf(client_fd))
+    if snd <= 0 or rcv <= 0:
+        raise Error(
+            "PRECONDITION: socket buffers read back SO_SNDBUF="
+            + String(snd) + " SO_RCVBUF=" + String(rcv)
+            + " (expected both positive)"
+        )
+    var n = 2 * (snd + rcv)
+    if n < _MIN_PAYLOAD:
+        n = _MIN_PAYLOAD
+    return n
 
 
 def _make_payload(n: Int, salt: Int) -> List[UInt8]:
@@ -370,7 +345,7 @@ def test_bug1_partial_send_surfaces_consumed_count() raises:
     tls_init()
     var server_config = _build_server_config()
     var client_config = _build_client_config()
-    var pair = _make_congested_pair()
+    var pair = _make_pair()
     var server_fd = pair[0]
     var client_fd = pair[1]
     try:
@@ -388,16 +363,17 @@ def test_bug1_partial_send_surfaces_consumed_count() raises:
                 + _outcome_str(outcomes[1])
             )
 
-        # A payload far larger than the socket buffers and the drain step:
-        # the send blocks mid-payload, producing positive partials.
-        var payload_len = 262144  # 256 KB
+        # More than both kernel buffers hold: with nothing read, the send
+        # blocks before the end of the payload.
+        var payload_len = _payload_len_for(server_fd, client_fd)
         var payload = _make_payload(payload_len, 7)
 
-        # Fill both socket buffers so the first sends block whatever the OS's
-        # default buffer size is, then free only a bounded `_DRAIN_STEP` per
-        # iteration so a send can flush a few records but never the whole
-        # payload: every successful send is a partial.
-        var _filled = _fill_socket(server_fd)
+        # The reader reads nothing until the writer reports that the kernel
+        # buffers are full (a block, or a partial, which s2n returns only when
+        # it blocked). From then on it frees `_DRAIN_STEP` bytes after each
+        # send, less than one record, so a send that completes the pending
+        # record blocks on the next one: a positive partial.
+        var reader_started = False
         var saw_positive_partial = False
         var iters = 0
         var off = 0
@@ -429,6 +405,14 @@ def test_bug1_partial_send_surfaces_consumed_count() raises:
                     )
                 if n < len(slice):
                     saw_positive_partial = True
+                    reader_started = True
+                elif not reader_started:
+                    raise Error(
+                        "PRECONDITION: the first send took the whole "
+                        + String(len(slice)) + "-byte payload with nothing"
+                        + " read, so the socket never congested; the payload"
+                        + " must exceed the kernel buffers"
+                    )
                 # (2) Advance by EXACTLY n (matches s2n's internal consumed
                 # advance). Never advance past payload_len.
                 if off + n > payload_len:
@@ -447,8 +431,11 @@ def test_bug1_partial_send_surfaces_consumed_count() raises:
                         "send returned BLOCKED with n=" + String(n)
                         + " != 0 — a blocked send must consume 0 bytes"
                     )
-            # Drain the receiver (raw discard) so the next send can flush more.
-            var _d = _drain_socket(client_fd, _DRAIN_STEP)
+                reader_started = True
+            # Once the writer has reported a full socket, drain the receiver
+            # (raw discard) so the next send can flush more.
+            if reader_started:
+                var _d = _drain_socket(client_fd, _DRAIN_STEP)
 
         # Monotone progress landed EXACTLY at payload_len (proof: no
         # re-transmission, no over/under-advance).
@@ -464,7 +451,7 @@ def test_bug1_partial_send_surfaces_consumed_count() raises:
                 "never observed a positive PARTIAL (DONE with 0 < n < slice)"
                 + " — the congested-socket partial-write path was not"
                 + " exercised; the pre-fix hidden-partial bug cannot be"
-                + " falsified. Lower _DRAIN_STEP / grow the payload."
+                + " falsified."
             )
         _ = server_conn^
         _ = client_conn^
@@ -475,7 +462,8 @@ def test_bug1_partial_send_surfaces_consumed_count() raises:
     _ = client_config^
     print(
         "    OK — positive partials surfaced as consumable (DONE, n>0);"
-        " advance-by-n summed to EXACTLY 256KB (monotone, no re-transmit)"
+        " advance-by-n summed to EXACTLY the payload (monotone, no"
+        " re-transmit)"
     )
 
 
@@ -492,7 +480,6 @@ def test_bug3_same_buffer_resend_delivers_intact() raises:
     drive the FIXED contract: re-call `send` with the SAME buffer on every
     block, draining the receiver (a real TlsConnection) between blocks, and
     verify the WHOLE payload is received byte-intact with no error.
-    before the fix.
 
     This is the direct analogue of the live-Firestore fix: the ListenRequest
     HEADERS+DATA flush over a congested TLS socket now completes correctly
@@ -501,7 +488,7 @@ def test_bug3_same_buffer_resend_delivers_intact() raises:
     tls_init()
     var server_config = _build_server_config()
     var client_config = _build_client_config()
-    var pair = _make_congested_pair()
+    var pair = _make_pair()
     var server_fd = pair[0]
     var client_fd = pair[1]
     try:
@@ -519,7 +506,7 @@ def test_bug3_same_buffer_resend_delivers_intact() raises:
                 + _outcome_str(outcomes[1])
             )
 
-        var payload_len = 262144  # 256 KB
+        var payload_len = _payload_len_for(server_fd, client_fd)
         var payload = _make_payload(payload_len, 23)
 
         # Interleaved send/recv over the real TlsConnections. The send follows
@@ -616,7 +603,7 @@ def test_bug3_same_buffer_resend_delivers_intact() raises:
     _ = server_config^
     _ = client_config^
     print(
-        "    OK — 256KB payload delivered byte-intact across many partial"
+        "    OK — payload delivered byte-intact across many partial"
         " sends (advance-by-n); zero S2N_ERR_SEND_SIZE, zero corruption,"
         " zero re-transmit"
     )
