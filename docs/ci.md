@@ -1618,3 +1618,52 @@ The lints alone, without building the rest:
 ```
 
 A failing lint prints `Validation for <target> failed:` and its findings.
+
+## A cold build of the Linux check set
+
+How long the farm takes when nothing is cached: the Linux set that `pr / check` builds when a change
+is built as the aggregate (`//ci:pr`; `//ci:pr_default` is the same set while `HEAVY` is empty), and
+the smaller set of `//src/arrow:arrow` and `//src/bench:bench`. A cold measurement is a sanctioned
+use of `--no-remote-cache` (B2), never a step of CI. Run it from a fresh worktree at the commit to
+measure, when the farm's queue is quiet:
+
+```sh
+./buck2 kill && ./buck2 clean
+./buck2 cquery 'deps(//ci:pr)' > /dev/null
+./buck2 build --no-remote-cache --keep-going --console simple //ci:pr
+```
+
+`kill` gives the build a fresh daemon and `clean` drops the outputs of earlier builds in the
+worktree. The `cquery` does the analysis first, so the build's time is its execution. The summary
+must read `Commands: N (cached: 0, remote: N, local: 0)`. Without `--keep-going`, buck2 starts no
+new action after the first failure, so a failed build reports fewer commands than the set has.
+
+The measured builds. `main at` is the merge commit of that pull request on main. The wall times are
+`date -u` taken around the build command, except the first row's, which is the build's time from the
+record of that run; the `Commands:` lines and the exit codes are buck2's final summary:
+
+| main at | targets | flags | wall | buck2 summary | exit |
+|---|---|---|---|---|---|
+| komira-ai/komira#2106 | `//src/arrow:arrow //src/bench:bench` | `--no-remote-cache` | 4,818 s (20 Nov 2026) | `Commands: 341 (cached: 0, remote: 341, local: 0)` | 3 |
+| komira-ai/komira#2106 | `//src/arrow:arrow //src/bench:bench` | `--no-remote-cache` | 639 s (24 Nov 2026, 02:49:15Z to 02:59:54Z) | `Commands: 482 (cached: 0, remote: 482, local: 0)` | 0 |
+| komira-ai/komira#2194 | `//ci:pr` | `--no-remote-cache --keep-going` | 21,101 s (24 Nov 2026, 04:23:53Z to 10:15:34Z) | `Commands: 24028 (cached: 0, remote: 24028, local: 0)` | 2 |
+
+The first two rows build the same commit and targets. The 20 Nov build failed when its test action
+`test_codec_libraries` was killed (exit code 137) and it ran without `--keep-going`; either is a
+likely reason it reports 341 commands to the later build's 482 (inferred, not measured).
+
+The `//ci:pr` build at komira-ai/komira#2194 failed three actions; this list is of that commit only:
+
+- `buildrules//rules/coverage/branch:llvm23` (`llvm_branch_unpack`): a farm fault, not a build
+  defect. The farm answered `the task tool exited nonzero (exit code Some(-1))`, with no output from
+  the action.
+- `//src/trace:test_span_microbench__cov` (`mojo_cov_run`): the test failed its assertion
+  `one name, registered once` (2, expected 1) at `src/trace/tests/test_span_microbench.mojo:103`.
+- `//src/bench_q6_phases:bench_q6_phases` (`mojo_build_test test_probe_phases`): the link step
+  failed with `unable to find suitable c compiler for linking`.
+
+Each action's wait in the farm's queue, from `queue_time_us` in the build's event log
+(`./buck2 log show`): the second row's build waited 2.1 s at the median and 11.9 s at p90; the
+`//ci:pr` build waited 36.1 s at the median, 111.7 s at p90 and 589 s at most. In both builds the
+first 20 actions waited under 10 s, so the queue was quiet when each started; in the `//ci:pr` build
+the farm's capacity set the pace (inferred from the queue times).
