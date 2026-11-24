@@ -577,6 +577,47 @@ _WINDOW_TEST_DATA = {
 
 _WINDOW_TEST_DATA.update({c + ".tsv": ":window_oracle[" + c + ".tsv]" for c in _WINDOW_CASES})
 
+# DuckDB's tables and answers for test_run_sql_window_frames:
+# tests/window_frames/data.sql writes frames.parquet and edge.parquet, and
+# each line of tests/window_frames/cases.sql runs one framed window query over
+# one of them and writes its answer.
+_WINDOW_FRAMES_FILES = ["frames", "edge"]
+
+_WINDOW_FRAMES_CASES = [
+    "rows_sliding",
+    "rows_empty_edges",
+    "rows_running_and_tail",
+    "rows_value_fns",
+    "rows_desc",
+    "rows_wide_offsets",
+    "range_bigint",
+    "range_bigint_one_sided",
+    "range_bigint_desc",
+    "range_int32",
+    "range_double",
+    "no_partition",
+    "frame_ignored",
+    "over_where",
+    "no_row",
+    "edge_bigint_wide",
+    "edge_int32_wide",
+]
+
+sql_oracle(
+    name = "window_frames_oracle",
+    srcs = [
+        "tests/window_frames/data.sql",
+        "tests/window_frames/cases.sql",
+    ],
+    outputs = [f + ".parquet" for f in _WINDOW_FRAMES_FILES] + [c + ".tsv" for c in _WINDOW_FRAMES_CASES],
+)
+
+_WINDOW_FRAMES_TEST_DATA = {"cases.sql": "tests/window_frames/cases.sql"}
+
+_WINDOW_FRAMES_TEST_DATA.update({f + ".parquet": ":window_frames_oracle[" + f + ".parquet]" for f in _WINDOW_FRAMES_FILES})
+
+_WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".tsv]" for c in _WINDOW_FRAMES_CASES})
+
 # The engine-execution layer of the SDK: twelve modules (ten leaves plus the
 # plan gate modules) and the engine context with its SQL door (see README.md). Each module's header says what it is for.
 #
@@ -789,9 +830,20 @@ _WINDOW_TEST_DATA.update({c + ".tsv": ":window_oracle[" + c + ".tsv]" for c in _
 #   read twice, with NULL
 #   keys, tied order keys and the empty string, on one and three workers, each
 #   column of the right type; every case is run; a sum over an INTEGER, a DATE
-#   partition key, a DECIMAL order key, an explicit ROWS frame and a float
-#   default over a BIGINT lag are LOWERING_WINDOW_UNSERVED refusals at step
-#   lower.
+#   partition key, a DECIMAL order key and a float default over a BIGINT lag
+#   are LOWERING_WINDOW_UNSERVED refusals at step lower.
+# - test_run_sql_window_frames: run_sql over two Parquet tables DuckDB wrote
+#   (the :window_frames_oracle action above) answers what the pinned DuckDB
+#   answers for each case of tests/window_frames/cases.sql, on one and three
+#   workers: sliding, empty-at-the-edge, running and tail ROWS frames with
+#   sum, count, avg, min, max, first_value, last_value and nth_value, a
+#   descending order and offsets past the partition; RANGE frames with offsets
+#   over a BIGINT key with ties and NULLs, an INTEGER key with an offset past
+#   32 bits and a DOUBLE key with NaN, infinities, -0.0 and NULL; no PARTITION
+#   BY, ranking and LAG ignoring their frame, a WHERE and no row; BIGINT and
+#   INTEGER keys at the ends of their range; every case is run; a RANGE bound
+#   that leaves the key's type fails at step execute with DuckDB's overflow
+#   error, and a frame DuckDB refuses fails at step bind with its reason.
 # - test_run_sql_set_ops: INTERSECT and EXCEPT through run_sql answer what the
 #   pinned DuckDB answers (the :set_ops_oracle action above) for each case of
 #   tests/set_ops/cases.sql, on one worker and on three: NULL rows equal, an
@@ -931,6 +983,7 @@ mojo_library(
         "tests/test_run_sql_topn.mojo",
         "tests/test_run_sql_union_all.mojo",
         "tests/test_run_sql_window.mojo",
+        "tests/test_run_sql_window_frames.mojo",
         "tests/test_secret_capability_reveal.mojo",
     ],
     test_deps = [
@@ -953,6 +1006,7 @@ mojo_library(
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,
         "tests/test_run_sql_topn.mojo": _TOPN_TEST_DATA,
         "tests/test_run_sql_window.mojo": _WINDOW_TEST_DATA,
+        "tests/test_run_sql_window_frames.mojo": _WINDOW_FRAMES_TEST_DATA,
         "tests/test_run_sql_join_kinds.mojo": _JOIN_KINDS_TEST_DATA,
         "tests/test_run_sql_subquery.mojo": _SUBQUERY_TEST_DATA,
         "tests/test_run_sql_set_ops.mojo": _SET_OPS_TEST_DATA,

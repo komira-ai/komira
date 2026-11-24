@@ -17,6 +17,7 @@
 #   test_a_node_with_two_functions_is_one_segment_and_one_param_row
 #   test_the_declared_schema_marks_a_sum_over_a_nullable_column_nullable
 #   test_every_reader_of_a_shared_window_takes_its_nullable_sum
+#   test_a_frame_that_can_be_empty_makes_its_column_nullable
 #   test_a_limit_above_a_window_with_keys_is_refused_and_one_with_no_key_is_cut
 #   test_a_window_over_a_join_ends_the_probe_pipeline_in_the_window_sink
 #   test_a_window_over_an_aggregation_reads_the_aggregate_output
@@ -36,7 +37,22 @@ from lowering.render import render_lowered_plan
 from physical_plan.physical_plan import PHYSICAL_PLAN_IR_VERSION
 from plan_expr.agg_expr import AggExpr, AGG_COUNT
 from plan_expr.expr import Expr, BIN_GT
-from plan_expr.partition_expr import PartitionExpr, PartitionFrame
+from plan_expr.partition_expr import (
+    PartitionExpr,
+    PartitionFrame,
+    PF_AVG,
+    PF_COUNT,
+    PF_MAX,
+    PF_MIN,
+    PF_SUM,
+    FRAME_UNITS_ROWS,
+    FRAME_UNITS_RANGE,
+    FRAME_BOUND_UNBOUNDED_PRECEDING,
+    FRAME_BOUND_PRECEDING,
+    FRAME_BOUND_CURRENT_ROW,
+    FRAME_BOUND_FOLLOWING,
+    FRAME_BOUND_UNBOUNDED_FOLLOWING,
+)
 from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import (
     LogicalPlan,
@@ -381,6 +397,65 @@ def test_every_reader_of_a_shared_window_takes_its_nullable_sum() raises:
         assert_equal(cut.flow_schemas[seg].field_name(5), "sum_v")
         assert_true(cut.flow_schemas[seg].field_nullable(5))
         assert_false(cut.flow_schemas[seg].field_nullable(4))
+
+
+def _rows(start: UInt8, start_offset: Int64, end: UInt8, end_offset: Int64) -> PartitionFrame:
+    return PartitionFrame(FRAME_UNITS_ROWS, start, start_offset, end, end_offset)
+
+
+def _range(start: UInt8, start_offset: Int64, end: UInt8, end_offset: Int64) -> PartitionFrame:
+    return PartitionFrame(FRAME_UNITS_RANGE, start, start_offset, end, end_offset)
+
+
+def test_a_frame_that_can_be_empty_makes_its_column_nullable() raises:
+    # Every argument is the non-nullable x, so only the frame decides. A frame
+    # that does not hold the current row is empty at a partition's edge, where
+    # SUM, AVG, MIN, MAX, FIRST_VALUE and LAST_VALUE answer NULL; COUNT
+    # answers 0.
+    var following = _rows(FRAME_BOUND_FOLLOWING, 1, FRAME_BOUND_FOLLOWING, 2)
+    var exprs = _exprs(_rn())
+    exprs.append(PartitionExpr.agg_with_frame(PF_SUM, "x", following.copy()).with_alias("a"))
+    exprs.append(PartitionExpr.agg_with_frame(
+        PF_SUM, "x", _rows(FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_FOLLOWING, 1)).with_alias("b"))
+    exprs.append(PartitionExpr.agg_with_frame(
+        PF_MIN, "x", _range(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_PRECEDING, 1)).with_alias("c"))
+    exprs.append(PartitionExpr.first_value("x").with_frame(
+        _rows(FRAME_BOUND_PRECEDING, 2, FRAME_BOUND_PRECEDING, 1)).with_alias("d"))
+    exprs.append(PartitionExpr.last_value("x").with_frame(
+        _range(FRAME_BOUND_CURRENT_ROW, 0, FRAME_BOUND_FOLLOWING, 3)).with_alias("e"))
+    exprs.append(PartitionExpr.agg_with_frame(PF_COUNT, "x", following.copy()).with_alias("f"))
+    exprs.append(PartitionExpr.agg_with_frame(
+        PF_MAX, "x", _rows(FRAME_BOUND_FOLLOWING, 0, FRAME_BOUND_FOLLOWING, 2)).with_alias("g2"))
+    # `0 FOLLOWING` as a start and `0 PRECEDING` as an end hold the current
+    # row.
+    exprs.append(PartitionExpr.agg_with_frame(
+        PF_AVG, "x", _range(FRAME_BOUND_FOLLOWING, 0, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0)).with_alias("h"))
+    exprs.append(PartitionExpr.agg_with_frame(
+        PF_SUM, "x", _rows(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_PRECEDING, 0)).with_alias("i"))
+    exprs.append(PartitionExpr.agg_with_frame(
+        PF_SUM, "x", _range(FRAME_BOUND_PRECEDING, 3, FRAME_BOUND_PRECEDING, 1)).with_alias("j"))
+    var plan = _window(_names("g"), _names("o"), _flags(False), exprs^, _scan())
+    for c in range(4, 15):
+        assert_false(plan.output_schema.field_nullable(c), "the logical column " + String(c))
+
+    var lp = _lowered(plan, _inputs(500))
+    ref declared = lp.params.window[0].output_schema
+    assert_equal(declared.num_columns(), 15)
+    var want: List[Bool] = [
+        False,  # rn
+        True,   # SUM, 1 FOLLOWING AND 2 FOLLOWING
+        False,  # SUM, 1 PRECEDING AND 1 FOLLOWING
+        True,   # MIN, RANGE UNBOUNDED PRECEDING AND 1 PRECEDING
+        True,   # FIRST_VALUE, 2 PRECEDING AND 1 PRECEDING
+        False,  # LAST_VALUE, RANGE CURRENT ROW AND 3 FOLLOWING
+        False,  # COUNT, 1 FOLLOWING AND 2 FOLLOWING
+        False,  # MAX, 0 FOLLOWING AND 2 FOLLOWING
+        False,  # AVG, RANGE 0 FOLLOWING AND UNBOUNDED FOLLOWING
+        False,  # SUM, UNBOUNDED PRECEDING AND 0 PRECEDING
+        True,   # SUM, RANGE 3 PRECEDING AND 1 PRECEDING
+    ]
+    for j in range(len(want)):
+        assert_equal(declared.field_nullable(4 + j), want[j], declared.field_name(4 + j))
 
 
 def test_a_limit_above_a_window_with_keys_is_refused_and_one_with_no_key_is_cut() raises:

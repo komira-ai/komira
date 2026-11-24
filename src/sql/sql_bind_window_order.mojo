@@ -3,6 +3,7 @@
 #   Window functions and ORDER BY.
 # =============================================================================
 
+from arrow.arrow_types import ArrowType
 from arrow.schema import Schema
 from plan_expr.expr import Expr
 from plan_expr.null_order_policy import derived_nulls_first
@@ -10,6 +11,9 @@ from plan_expr.partition_expr import (
     PF_AVG, PF_COUNT, PF_CUME_DIST, PF_DENSE_RANK, PF_FIRST_VALUE, PF_LAG,
     PF_LAST_VALUE, PF_LEAD, PF_MAX, PF_MIN, PF_NTH_VALUE, PF_NTILE, PF_PERCENT_RANK,
     PF_RANK, PF_ROW_NUMBER, PF_SUM, PartitionExpr, PartitionFrame,
+    FRAME_UNITS_RANGE, FRAME_BOUND_UNBOUNDED_PRECEDING, FRAME_BOUND_PRECEDING,
+    FRAME_BOUND_CURRENT_ROW, FRAME_BOUND_FOLLOWING,
+    FRAME_BOUND_UNBOUNDED_FOLLOWING,
 )
 from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import (
@@ -113,6 +117,83 @@ def _win_col_name(name: String, qual: String, scope: BindScope) raises -> String
     return String(name)
 
 
+def _check_written_frame(
+    frame: PartitionFrame, okeys: List[String], desc: List[Bool], schema: Schema
+) raises:
+    """Raise DuckDB's error for a written frame DuckDB refuses, whatever the
+    function (a ranking function ignores its frame, and DuckDB still checks
+    it). Measured on DuckDB v1.5.6:
+
+      `ROWS BETWEEN UNBOUNDED FOLLOWING AND ...`  frame start cannot be
+                                                  UNBOUNDED FOLLOWING
+      `... AND UNBOUNDED PRECEDING`               frame end cannot be
+                                                  UNBOUNDED PRECEDING
+      `1 FOLLOWING AND 1 PRECEDING`,              frame starting from following
+      `1 FOLLOWING AND CURRENT ROW`               row cannot have preceding rows
+      `CURRENT ROW AND 1 PRECEDING`               frame starting from current
+                                                  row cannot have preceding rows
+      `RANGE 1 PRECEDING` with no ORDER BY, or    Binder Error: RANGE frames
+      with two ORDER BY keys                      must have only one ORDER BY
+                                                  expression
+      `RANGE 1 PRECEDING` over a VARCHAR or       Binder Error: no `-` for
+      BOOLEAN key                                 (VARCHAR, INTEGER_LITERAL)
+
+    The shape errors are DuckDB parser errors, hence `SQL syntax error`. The
+    shorthand `ROWS 1 FOLLOWING` gets the sentence of the BETWEEN form it
+    stands for; DuckDB words that one "cannot end with current row", and the
+    parsed window does not record which spelling was written.
+
+    The operator DuckDB names is the one its first bound with an offset
+    applies to the key: `n PRECEDING` subtracts and `n FOLLOWING` adds, the
+    other way round under DESC."""
+    var shape = String("")
+    if frame.start_tag == FRAME_BOUND_UNBOUNDED_FOLLOWING:
+        shape = "frame start cannot be UNBOUNDED FOLLOWING"
+    elif frame.end_tag == FRAME_BOUND_UNBOUNDED_PRECEDING:
+        shape = "frame end cannot be UNBOUNDED PRECEDING"
+    elif frame.start_tag == FRAME_BOUND_FOLLOWING and (
+        frame.end_tag == FRAME_BOUND_PRECEDING or frame.end_tag == FRAME_BOUND_CURRENT_ROW
+    ):
+        shape = "frame starting from following row cannot have preceding rows"
+    elif frame.start_tag == FRAME_BOUND_CURRENT_ROW and frame.end_tag == FRAME_BOUND_PRECEDING:
+        shape = "frame starting from current row cannot have preceding rows"
+    if shape != "":
+        raise Error("SQL syntax error: " + shape)
+    if frame.units != FRAME_UNITS_RANGE:
+        return
+    var has_offset = (
+        frame.start_tag == FRAME_BOUND_PRECEDING
+        or frame.start_tag == FRAME_BOUND_FOLLOWING
+        or frame.end_tag == FRAME_BOUND_PRECEDING
+        or frame.end_tag == FRAME_BOUND_FOLLOWING
+    )
+    if not has_offset:
+        return
+    if len(okeys) != 1:
+        raise Error(
+            "SQL bind error: RANGE frames must have only one ORDER BY expression"
+        )
+    var t = schema.field_arrow_type(schema.column_index(okeys[0]))
+    var sql_type = String("")
+    if t == ArrowType.STRING:
+        sql_type = "VARCHAR"
+    elif t == ArrowType.BOOL:
+        sql_type = "BOOLEAN"
+    if sql_type != "":
+        var tag = frame.start_tag
+        if tag != FRAME_BOUND_PRECEDING and tag != FRAME_BOUND_FOLLOWING:
+            tag = frame.end_tag
+        var adds = (tag == FRAME_BOUND_FOLLOWING) != desc[0]
+        var op = String("+") if adds else String("-")
+        var verb = String("adds the offset to") if adds else String("subtracts the offset from")
+        raise Error(
+            "SQL bind error: a RANGE frame with an offset " + verb + " the"
+            " ORDER BY key, and '" + okeys[0] + "' is " + sql_type
+            + ", which has no `" + op + "` (DuckDB: no function matches '" + op
+            + "(" + sql_type + ", INTEGER_LITERAL)')"
+        )
+
+
 def _apply_window(sx: SqlExpr, schema: Schema, scope: BindScope, out_name: String, var child: LogicalPlan) raises -> LogicalPlan:
     """Lower ONE SX_WINDOW node to a `LogicalPlan.partition_by` node over `child`,
     naming the appended window column `out_name`. Validates the partition / order /
@@ -171,6 +252,7 @@ def _apply_window(sx: SqlExpr, schema: Schema, scope: BindScope, out_name: Strin
         frame = PartitionFrame(
             w.frame_units, w.frame_start_tag, w.frame_start_offset, w.frame_end_tag, w.frame_end_offset
         )
+        _check_written_frame(frame, okeys, desc, schema)
     elif len(okeys) == 0:
         # The default frame is conditional on ORDER BY. SQL:2003 7.11: with no
         # ORDER BY the rows of a partition have no defined order, so the frame
