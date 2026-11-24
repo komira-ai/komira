@@ -4,10 +4,11 @@
 
 Status: plan, built in part (part of slice 9, #1391; slice 11, the beta wiring). Each item is marked **EXISTS** (with the
 path on `main` that does it) or **PROPOSED**. "On #NNN" means the code is on that open pull request and not on `main`. Scope:
-linux-64 (ELF) only; Mach-O (osx-arm64: install names, `@rpath`, exported-symbol lists, the two-level
-namespace) is a later design, except the checks: `native_so` reads a Mach-O library, its archives and
-objects, and holds it to the Mach-O form of checks 1 to 7 (**EXISTS:** `tools/build/native/native_macho.zig`;
-"Checks, per library" below), so the macOS link that follows is checked from its first build. Related: the staged pipeline (build once, then
+linux-64 (ELF) for packaging; on macOS (osx-arm64) each owner's shared library is linked and checked
+(**EXISTS:** the Mach-O form of `tools/build/native/shared.bzl`: install name `@rpath/<file>`, the
+exported symbols list from the same export list, the two-level namespace; `native_so` holds it to the
+Mach-O form of checks 1 to 7, `tools/build/native/native_macho.zig`, "Checks, per library" below), but no
+osx-arm64 conda package ships one yet. Related: the staged pipeline (build once, then
 beta, gamma and prod), gamma validation (its native rows point to this
 doc's checks), continuous publish (its slice S12 also plans an
 installed `.so` check in beta's install job; slice 11 below wires this doc's install checks into
@@ -214,7 +215,9 @@ slice 6):
    only, which checks 1 to 6 pass and the load fails at run time).
 
 **The same checks on a Mach-O library** (**EXISTS:** `native_macho.zig` and the `*MachO` functions of
-`native_checks.zig`; nothing links one yet). Checks 1 to 3 and the README check read the same names: Mach-O's
+`native_checks.zig`; `native_shared_library` links a darwin-arm64 target's library as
+`libkomira_<library>_native.1.dylib`, install name `@rpath/<file>`, with the host's `cc` on a Mac,
+tools/build/native/README.md, "On macOS (Mach-O)"). Checks 1 to 3 and the README check read the same names: Mach-O's
 leading `_` is dropped, the exported symbols list (`native_so exports --format macho`) stands for the
 version script, and an owner is named by its install name. Checks 4 to 7 hold the same properties
 through the load commands: 4, the install name (`LC_ID_DYLIB`) is the expected one, the loaded dylibs

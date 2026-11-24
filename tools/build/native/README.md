@@ -104,7 +104,8 @@ of the same C, one of each kind ([`src/testdata`](src/testdata/README.md)).
 ## Each library's shared library
 
 A Mojo library that owns C ships it as its own shared library,
-`libkomira_<library>_native.so.1`
+`libkomira_<library>_native.so.1` on Linux and
+`libkomira_<library>_native.1.dylib` on macOS
 ([the design](../../../docs/design/native_packaging.md)).
 `native_shared_library` ([`shared.bzl`](shared.bzl)) builds one from the
 C archives the library owns (`archives`), the Mojo libraries that call
@@ -112,8 +113,11 @@ them (`callers`), the dependent owners' archives that call them
 (`caller_archives`: crypto's lists s2n-tls, whose needs from aws-lc no
 Mojo library calls) and the owners whose C its own archives call
 (`needed_owners`: http_core's lists crypto's library). Every action runs a Zig-built tool: `native_so`
-([`native_so.zig`](native_so.zig)), or the Mojo toolchain's zig through
-`zig_cc_launcher` for the link.
+([`native_so.zig`](native_so.zig)), or for the link the Mojo toolchain's zig
+through `zig_cc_launcher` on Linux, and on macOS the macOS compile wrapper's
+`link` mode (below). Which form a target takes follows the operating system
+the Mojo toolchain of its target platform compiles for
+(`MojoToolchainInfo.os`).
 
 1. `native_so exports` reads every name a caller archive references and
    does not define, and every `external_call` name in the callers'
@@ -164,15 +168,55 @@ Mojo library calls) and the owners whose C its own archives call
    loaded"). The linked README programs cannot be read for this: `mojo
    build` strips their symbol tables.
 
+### On macOS (Mach-O)
+
+For a darwin-arm64 target the same rule links a Mach-O library, with the
+same export list, the same archives and the same checks; what differs:
+
+| | Linux (ELF) | macOS (Mach-O) |
+|---|---|---|
+| file | `libkomira_<library>_native.so.1` | `libkomira_<library>_native.1.dylib` |
+| its own name | SONAME, the file name | install name `@rpath/<file>` |
+| `[link]` | `libkomira_<library>_native.so` | `libkomira_<library>_native.dylib` |
+| export script | version script (`[version_script]`) | exported symbols list (`[exported_symbols_list]`, `native_so exports --format macho`), from the same export list |
+| link | zig: `-Bsymbolic`, `--gc-sections`, `-z defs`, `--strip-debug`, `--whole-archive` | the host's `/usr/bin/cc` and ld on a Mac: `-dead_strip`, `-undefined,error`, `-S`, `-force_load` each archive; no `-Bsymbolic` and no DT_FLAGS (a two-level namespace, check 6) |
+| C++ runtime (`cxx_runtime`) | zig's libc++ and libc++abi, static | the system's `/usr/lib/libc++.1.dylib` (`-lc++`), as every Mojo program linked on macOS |
+| an owner it needs | `NEEDED` its SONAME, `DT_RUNPATH` `$ORIGIN` | `LC_LOAD_DYLIB` its install name, `LC_RPATH` `@loader_path` |
+| check 5's floor | the linux-x86_64 row's glibc | the darwin-arm64 row's macOS (`11.0`), also the link's `-mmacosx-version-min` |
+| check 7's weak list | `weak_undefined` | `weak_undefined` without the ELF C runtime's `__gmon_start__` (`ELF_CRT_WEAK`) |
+
+The link runs on a Mac, like every other Mojo link there: `mojo_compile link`
+([`../mojo/tools/macos_link.zig`](../mojo/tools/macos_link.zig)), a mode of
+the macOS compile wrapper, refuses a host whose identity is not one of the
+toolchain's `--macos-host` values (so the result is never filed under a host
+toolchain the action key does not name), then runs `/usr/bin/cc` with an
+environment of `PATH=/usr/bin:/bin`, `MACOSX_DEPLOYMENT_TARGET` and a private
+`TMPDIR` and `HOME`, and checks that the output exists and does not hold the
+action's directory. Every other action runs `native_so`, built for the
+execution platform it is configured for (`exec_tool_target`), so on a Mac it
+is a macOS executable. `shared_names` and `macho_link_args` in
+[`shared.bzl`](shared.bzl) are the Mach-O names and arguments;
+`:shared_form_darwin`, `:shared_form_darwin_alone` and `:shared_form_linux`
+fail at analysis unless they are exactly the ones in [`BUCK`](BUCK).
+
+How the library is found at run time: by its install name, through a run
+path. A library that needs it carries `LC_RPATH @loader_path` and finds it in
+its own directory; a program or test that links it stages it in the `lib/`
+its own run path (`@loader_path/lib`) names, as on Linux. Nothing loads it by
+an absolute path or through `DYLD_LIBRARY_PATH`. No `mojo_shared_lib` links an
+owner's library on macOS yet (`native_owners` is refused there), and no conda
+package for osx-arm64 holds one: the conda packer builds linux-64 only.
+
 `native_so` reads Mach-O as well as ELF, by each file's magic: a `.dylib`,
 Mach-O objects, and BSD-layout archives of them (`#1/<n>` long names, a
 `__.SYMDEF` symbol table member), in
 [`native_macho.zig`](native_macho.zig). Only thin arm64 is read. A C name
 loses the `_` Mach-O prepends, an owner is named by its install name, and
 `native_so exports --format macho` writes the exported symbols list ld64
-takes in place of the version script (check 1 reads it back). Checks 4 to 7
-hold a Mach-O library to the same properties through its load commands; no
-rule links one yet:
+takes in place of the version script (check 1 reads it back from the
+built library's symbol table, so an export the link dropped or added is
+red). Checks 4 to 7 hold a Mach-O library to the same properties through its
+load commands:
 
 | check | fails when (Mach-O) |
 |---|---|
