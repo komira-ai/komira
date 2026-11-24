@@ -25,6 +25,7 @@ TARGETS = [
     "komira//python:refuses_unmet_requirement",
     "komira//python:refuses_upgrade_from_nothing",
     "komira//python:refuses_wheel_of_another_platform",
+    "komira//python:tpch_via_wheel_test",
     "komira//python:upgrade_test",
     "komira//python:upgrade_test_py311",
     "komira//python:upgrade_test_py312",

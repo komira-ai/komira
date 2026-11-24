@@ -517,6 +517,23 @@ _CASES = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# The answer check of the TPC-H run through the installed wheel
+# (tpch_compare.py, python/BUCK `tpch_via_wheel_test`): equal answers agree in
+# any row order, and each kind of difference (an integer, a decimal's last
+# digit, a text, a double past the tolerance, a count, a declared type, a
+# mixed column) is named; the HUGEINT departure holds only for equal values;
+# the order check follows directions and NULL placement; a pyarrow table
+# becomes cells and an unsupported Arrow type is refused by name; recorded
+# answers read back as the signature of the rows they describe and a
+# malformed or foreign-format file is refused.
+[py_test(
+    name = "tpch_compare_test" + p["suffix"],
+    src = "test_tpch_compare.py",
+    srcs = ["tpch_compare.py"],
+    deps = [_PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # Capture of a user function (komira._capture), with no library: the `@udf`
 # decorator, return types, the read set (columns=, annotations and the
 # bytecode scan), the package or bundle code form, the deterministic bundle
@@ -609,6 +626,8 @@ _PLAN_EXPR_RUNTIMES = [
 ) for f in [
     "wheel_install_run.py",
     "test_installed.py",
+    "test_tpch_installed.py",
+    "tpch_compare.py",
     "test_beside_modular.py",
     "test_upgrade.py",
     "fixtures/scan_plan.hex",

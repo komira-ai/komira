@@ -54,6 +54,7 @@ from runtime_paths import test_tmpdir
 
 from tpch_answers import (
     ANSWERS_FILE,
+    QUERIES_DIR,
     produce_tpch_sf1_answers,
     record_answers,
     register_tables,
@@ -362,6 +363,9 @@ def test_the_run_writes_the_answers_and_the_lock_and_names_one_in_the_other() ra
     assert_true(text.find(String("# duckdb v1.5.6\n")) >= 0)
     assert_equal(len(parse_references(text).answers), 22)
     assert_true(line.find(lock.fingerprint()) >= 0)
+    for i in range(len(corpus.queries)):
+        var file = out + "/" + String(QUERIES_DIR) + "/" + corpus.queries[i].id + ".sql"
+        assert_equal(Path(file).read_text(), corpus.queries[i].text)
     var all = String("")
     for i in range(len(sent[])):
         all += sent[][i]
