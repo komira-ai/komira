@@ -1,6 +1,8 @@
 # The macOS set analyses: //release:mopm_darwin_libs and the macOS Python harness tests
 # (DARWIN_PYTHON_HARNESS, darwin_libs.bzl), configured for darwin-arm64 and analysed, with every
-# target of their closure, as release-macos.yml's two build steps would configure and analyse them.
+# target of their closure, as release-macos.yml's two build steps would configure and analyse them;
+# and //release:mopm_release_artifacts, the directory release.yml's mopm-stage stages, configured for
+# linux-x86_64 as that job builds it (its transition configures the macOS set inside it for darwin-arm64).
 #
 #   ./buck2 bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check
 #
@@ -31,29 +33,43 @@ load("@komira//tools/build/mojo:providers.bzl", "ZigExeInfo")
 DARWIN_ARM64 = "komira//tools/build/platforms:darwin-arm64"
 DARWIN_SET = "komira//release:mopm_darwin_libs"
 
+# The directory release.yml's mopm-stage stages (mopm_artifacts.bzl, `mopm_release_artifacts`): configured for the
+# Linux platform, as that step builds it; its rule configures the macOS set for darwin-arm64 through a transition.
+RELEASE_SET = "komira//release:mopm_release_artifacts"
+LINUX_X86_64 = "komira//tools/build/platforms:linux-x86_64"
+
 # A tool the closure must run, so a walk that stopped reaching exec deps fails instead of
 # passing over them: the check of mojo_shared_lib's exports, which a harness test's library runs.
 MUST_CHECK = "komira//tools/build/mojo:so_exports"
 
-def _configured(ctx, label):
-    targets = ctx.configured_targets([label], target_platform = DARWIN_ARM64)
+def _configured(ctx, label, platform = DARWIN_ARM64):
+    targets = ctx.configured_targets([label], target_platform = platform)
     labels = [str(t.label) for t in targets]
-    if len(labels) != 1 or not labels[0].startswith(label + " (" + DARWIN_ARM64 + "#"):
+    if len(labels) != 1 or not labels[0].startswith(label + " (" + platform + "#"):
         fail("darwin_analysis: {} configured for {} came back as {}, not as the one target: the set was not analysed".format(
             label,
-            DARWIN_ARM64,
+            platform,
             labels,
         ))
     return list(targets)[0]
 
+def _layout_of(ctx, target, label):
+    layout = ctx.analysis(target).providers()[DefaultInfo].sub_targets["layout"][DefaultInfo].default_outputs
+    if len(layout) != 1:
+        fail("darwin_analysis: {} has no `[layout]` output: its rule changed shape".format(label))
+
 def _check(ctx):
     target = _configured(ctx, DARWIN_SET)
-    analysis = ctx.analysis(target)
-    layout = analysis.providers()[DefaultInfo].sub_targets["layout"][DefaultInfo].default_outputs
-    if len(layout) != 1:
-        fail("darwin_analysis: {} has no `[layout]` output: its rule changed shape".format(DARWIN_SET))
+    _layout_of(ctx, target, DARWIN_SET)
     ctx.output.print("darwin_analysis: {} configured and analysed".format(target.label))
     roots = [target]
+
+    # The release's directory, for Linux, with the macOS set inside it for darwin-arm64: its analysis merges the
+    # two trees (mopm_artifacts.bzl's `merge_trees` fails it, naming the path, on a tree it would stage wrong).
+    release = _configured(ctx, RELEASE_SET, LINUX_X86_64)
+    _layout_of(ctx, release, RELEASE_SET)
+    ctx.output.print("darwin_analysis: {} configured and analysed".format(release.label))
+    roots.append(release)
     for label in DARWIN_PYTHON_HARNESS:
         t = _configured(ctx, label)
         ctx.analysis(t)

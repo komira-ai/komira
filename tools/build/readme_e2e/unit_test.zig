@@ -654,3 +654,17 @@ test "take refuses a staged set that is not there, and an output it cannot write
     try tmp.dir.writeFile(.{ .sub_path = "out", .data = "a file where the output goes" });
     try expectTakeRefused(a, tmp.dir, try std.fmt.allocPrint(a, "readme_e2e take: cannot write {s}/out: NotDir\n", .{root}));
 }
+
+test "a locked file is installed on the host of its own subdir or noarch only, and each host has the subdir mopm names" {
+    try std.testing.expect(verify.installsOn("linux-64", "linux-64"));
+    try std.testing.expect(verify.installsOn("noarch", "linux-64"));
+    try std.testing.expect(!verify.installsOn("osx-arm64", "linux-64"));
+    try std.testing.expect(!verify.installsOn("linux-aarch64", "linux-64"));
+    try std.testing.expect(verify.installsOn("osx-arm64", "osx-arm64"));
+    try std.testing.expect(!verify.installsOn("linux-64", "osx-arm64"));
+    try std.testing.expectEqualStrings("linux-64", verify.hostSubdir(.linux, .x86_64).?);
+    try std.testing.expectEqualStrings("linux-aarch64", verify.hostSubdir(.linux, .aarch64).?);
+    try std.testing.expectEqualStrings("osx-arm64", verify.hostSubdir(.macos, .aarch64).?);
+    try std.testing.expect(verify.hostSubdir(.macos, .x86_64) == null);
+    try std.testing.expect(verify.hostSubdir(.windows, .x86_64) == null);
+}
