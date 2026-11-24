@@ -1,0 +1,2 @@
+-- IS NULL and IS NOT NULL, the empty string not NULL.
+SELECT id, s FROM nulls WHERE k IS NULL AND s IS NOT NULL AND id < 1000 ORDER BY id ASC NULLS LAST
