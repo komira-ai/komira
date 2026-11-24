@@ -126,7 +126,6 @@ wildcard_origin	src/http_core/tests/test_L1_tls_client_verify_fail_no_trust.mojo
 wildcard_origin	src/http_core/tests/test_L1_tls_handshake.mojo	1	predates the lint
 wildcard_origin	src/http_core/tests/test_L1_tls_handshake_departed_peer_fails_fast.mojo	2	predates the lint
 wildcard_origin	src/http_core/tests/test_L1_tls_init_process_local_not_env_inherited.mojo	1	predates the lint
-wildcard_origin	src/http_core/tests/test_L1_tls_partial_send_resumption.mojo	2	predates the lint
 wildcard_origin	src/http_core/tests/test_L1_tls_session_resumption.mojo	1	predates the lint
 wildcard_origin	src/http_core/tests/test_L1_tls_smoke.mojo	1	predates the lint
 wildcard_origin	src/job_supervisor/tests/test_heartbeat_no_credential_in_clear.mojo	7	predates the lint
