@@ -549,7 +549,7 @@ its build report names:
 | --- | --- | --- |
 | `http_core`'s s2n shim test expects `ECONNRESET` where macOS reads end of stream | 107 (`http_core` and what depends on it) | komira-ai/komira#2206 |
 | `http_core`'s partial-send test never sees a partial send on macOS (hidden behind the test above in the same package) | the same 107 | komira-ai/komira#2207 |
-| a library's native shared library is ELF only | 13 | komira-ai/komira#2197 |
+| a library's native shared library was ELF only; fixed: `native_shared_library` links a Mach-O `.dylib` for darwin-arm64 (tools/build/native/README.md, "On macOS (Mach-O)"), and a farm build of the nine `_native` targets for darwin-arm64 built all nine with checks 1 to 7 green (measured: `build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going --skip-incompatible-targets` of the nine, `Commands: 477 (cached: 0, remote: 477, local: 0)`); the other 4 of the 13 counted here were dependents of those nine (inferred, not rebuilt for this row) | 13 | komira-ai/komira#2197 |
 | the UDF spike helpers' C used Linux-only APIs; since it was ported (below), their welded tests stop instead: the native runtime has no macOS rule for loading a verified library, and the node worker's tests need a darwin-arm64 `node` and read `/proc` | 7 in the sweep; 2 since the port (`komira_udf_spike_native`, `komira_udf_spike_node_worker`) | komira-ai/komira#2199 |
 
 Since that sweep, `http_core`'s welded tests pass on macOS: the s2n shim test makes its reset

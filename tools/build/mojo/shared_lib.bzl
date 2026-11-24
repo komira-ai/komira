@@ -166,7 +166,7 @@ def _shared_lib_impl(ctx):
     owner_files = {}
     if ctx.attrs.native_owners:
         if darwin:
-            fail("{}: `native_owners` is ELF only (a library's shared library is Linux only; Mach-O is a later design)".format(ctx.label))
+            fail("{}: `native_owners` is Linux only: an owner's shared library builds on macOS (tools/build/native/shared.bzl), but no mojo_shared_lib links and stages one there yet".format(ctx.label))
         link_head = cmd_args([o[NativeSharedInfo].so for o in ctx.attrs.native_owners])
         for o in ctx.attrs.native_owners:
             for soname, so in o[NativeSharedInfo].closure.items():
