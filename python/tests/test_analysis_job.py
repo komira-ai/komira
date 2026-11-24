@@ -23,6 +23,7 @@ Any failure raises; its last traceback line is what a failing run names.
 import ctypes
 import importlib.util
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -69,6 +70,24 @@ def same(got, want):
     return [list(r.items()) for r in got] == [list(r.items()) for r in want]
 
 
+_LAUNCH = (
+    "import ctypes, runpy, sys\n"
+    "for lib in sys.argv[1].split('\\n'):\n"
+    "    if lib:\n"
+    "        ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)\n"
+    "sys.argv = sys.argv[2:]\n"
+    "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+)
+
+
+def run_command(opts, *args):
+    """Runs the example as `python analysis_job.py <args>` in a child of this
+    interpreter (isolated mode, as the installed environment is); the host
+    libraries the build workers lack are opened first, as this process did."""
+    cmd = [sys.executable, "-I", "-c", _LAUNCH, "\n".join(opts["host_lib"]), opts["example"], *args]
+    return subprocess.run(cmd, cwd=os.getcwd(), env=dict(os.environ), capture_output=True, text=True)
+
+
 def check(label, got, want):
     assert want, "{}: DuckDB's answer is empty, so it proves nothing".format(label)
     assert same(got, want), "{}: komira answers {}, DuckDB answers {}".format(label, got, want)
@@ -86,6 +105,7 @@ def main(argv):
     assert init == os.path.join(site, "komira", "__init__.py"), "komira was imported from {}, not from {}".format(init, site)
 
     import duckdb
+    import pyarrow.parquet as pq
 
     job = load_example(opts["example"])
     with tempfile.TemporaryDirectory(dir=os.getcwd()) as directory:
@@ -105,6 +125,34 @@ def main(argv):
             len(job.REGIONS), len(per_region)
         )
         assert len(overall) == 3, "expected three customers overall, got {}".format(len(overall))
+
+        # The command a user runs.
+        shown = os.path.join(directory, "command")
+        os.mkdir(shown)
+        done = run_command(opts, shown)
+        assert done.returncode == 0, "analysis_job.py exited {}: {}".format(done.returncode, done.stderr)
+        assert done.stderr == "", "analysis_job.py wrote to stderr: {}".format(done.stderr)
+        shown_con = duckdb.connect()
+        shown_con.execute("CREATE VIEW orders AS SELECT * FROM read_parquet('{}')".format(os.path.join(shown, "orders.parquet")))
+        shown_customers = os.path.join(shown, "customers.csv")
+        want_per_region = duckdb_rows(shown_con, job.TOP_PER_REGION.format(customers=shown_customers))
+        want_overall = duckdb_rows(shown_con, job.TOP_OVERALL.format(customers=shown_customers))
+        want_out = (
+            ["top two customers of each region:"]
+            + [str(r) for r in want_per_region]
+            + ["top three customers overall:"]
+            + [str(r) for r in want_overall]
+        )
+        assert done.stdout.splitlines() == want_out, "analysis_job.py printed {!r}, DuckDB's rows give {!r}".format(
+            done.stdout.splitlines(), want_out
+        )
+        written = pq.read_table(os.path.join(shown, "top_customers.parquet")).to_pylist()
+        check("the Parquet file the command wrote", written, want_per_region)
+        for args in ((), (shown, shown)):
+            bad = run_command(opts, *args)
+            assert bad.returncode != 0, "analysis_job.py with {} arguments exited 0".format(len(args))
+            assert bad.stdout == "", "analysis_job.py with {} arguments printed {!r}".format(len(args), bad.stdout)
+            assert "usage: analysis_job.py <directory>" in bad.stderr, "its usage line is missing from {!r}".format(bad.stderr)
 
         # The same query with the join on the wrong key must not equal DuckDB's
         # answer for the right one.

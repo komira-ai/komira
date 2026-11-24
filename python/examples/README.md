@@ -53,5 +53,7 @@ for bit in any engine that follows DuckDB.
   CPython 3.13, installed beside pyarrow and the pinned DuckDB wheel, and holds
   the per-region answer, the overall answer and the Parquet file it wrote to
   DuckDB's answer for the same SQL over the same files. The same query with
-  the join on the wrong key must differ from DuckDB's answer.
+  the join on the wrong key must differ from DuckDB's answer. It also starts
+  the command below as a child process and holds its exit code, printed rows,
+  written Parquet file and usage error to the same account.
 - Run it yourself with `python analysis_job.py <empty directory>`.
