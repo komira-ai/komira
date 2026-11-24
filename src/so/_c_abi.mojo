@@ -2,7 +2,7 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of so that holds
 # pointers.
 # =============================================================================
-# Thirteen `@export abi("C")` functions are the library's whole surface today:
+# Fifteen `@export abi("C")` functions are the library's whole surface today:
 #
 #   int32_t  komira_abi_version(void);
 #   void    *komira_ctx_new(void);
@@ -31,6 +31,11 @@
 #   int32_t  komira_credential_seal(void *ctx, int32_t id, int32_t scope);
 #   int32_t  komira_sql_stream(void *ctx, const char *sql,
 #                              struct ArrowArrayStream *out);
+#   int32_t  komira_register_csv(void *ctx, const char *name,
+#                                const char *path, uint8_t delimiter,
+#                                int32_t has_header, int32_t all_varchar);
+#   int32_t  komira_register_json(void *ctx, const char *name,
+#                                 const char *path);
 #
 # Ownership. `komira_ctx_new` creates a `Session` (the last error and the
 # engine, whose workers start here) in an `OwnedPointer`, relinquishes the
@@ -103,6 +108,8 @@ from so.sources import (
     json_binding_bytes,
     parquet_schema_bytes,
     plan_render_text,
+    register_csv,
+    register_json,
     register_parquet,
     sql_result,
 )
@@ -671,6 +678,73 @@ def komira_sql_stream(ctx: Handle, sql: CStr, out_stream: ArrowStream) abi("C") 
         # Nothing is written to `*out_stream` before this call, and it writes the
         # stream whole once its own checks have passed.
         build_record_batch_stream(result.take_batches(), result.take_schema(), out_stream)
+        return KOMIRA_OK
+    except e:
+        session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+
+
+@export
+def komira_register_csv(
+    ctx: Handle,
+    name: CStr,
+    path: CStr,
+    delimiter: UInt8,
+    has_header: Int32,
+    all_varchar: Int32,
+) abi("C") -> Int32:
+    """Register the CSV file at `path` in the session as the table `name`.
+
+    The table is what `read_csv` reads for the same file and dialect: its
+    schema is inferred here from a bounded prefix of an uncompressed file (a
+    compressed file is read whole), and every later query reads the file at
+    that schema. `has_header` and `all_varchar` are `int32_t`; any non-zero
+    value is true. Returns `KOMIRA_ERR_NULL_CTX` for a NULL `ctx`,
+    `KOMIRA_ERR_NULL_ARG` for a NULL `name` or `path`, and `KOMIRA_ERR_ENGINE`
+    with a last error for a file that cannot be read or inferred, an empty
+    name (`TABLE_NAME_EMPTY`) and a name the session already holds
+    (`TABLE_ALREADY_REGISTERED`); nothing is registered then.
+    """
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(name) == 0 or Int(path) == 0:
+        session[].set_error(String("komira_register_csv: name or path is NULL"))
+        return KOMIRA_ERR_NULL_ARG
+    try:
+        register_csv(
+            session[],
+            _c_string(name),
+            _c_string(path),
+            delimiter,
+            Int(has_header) != 0,
+            Int(all_varchar) != 0,
+        )
+        return KOMIRA_OK
+    except e:
+        session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+
+
+@export
+def komira_register_json(ctx: Handle, name: CStr, path: CStr) abi("C") -> Int32:
+    """Register the newline-delimited JSON file at `path` in the session as
+    the table `name`.
+
+    The table is what `read_json` reads for the same file: its schema is
+    inferred here from the leading records. Errors are those of
+    `komira_register_csv`.
+    """
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(name) == 0 or Int(path) == 0:
+        session[].set_error(String("komira_register_json: name or path is NULL"))
+        return KOMIRA_ERR_NULL_ARG
+    try:
+        register_json(session[], _c_string(name), _c_string(path))
         return KOMIRA_OK
     except e:
         session[].set_error(String(e))
