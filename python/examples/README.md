@@ -46,8 +46,8 @@ reads the CSV with `read_csv`, joins them, sums per customer, ranks the
 customers of each region with `row_number()` and a running `sum()` window,
 keeps the top two of each region and the top three overall, and writes the
 per-region result to `top_customers.parquet` with `COPY ... TO`. The amounts
-are multiples of 0.25, so every sum is exact and the answer is the same bit
-for bit in any engine that follows DuckDB.
+are whole cents in a BIGINT column, so every sum is exact and the answer is
+the same in any engine that follows DuckDB.
 
 - `analysis_job_test` of `python/BUCK` runs it from the installed wheel on
   CPython 3.13, installed beside pyarrow and the pinned DuckDB wheel, and holds

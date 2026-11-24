@@ -6,9 +6,9 @@ the result to Parquet.
 
 The program writes its two inputs into <directory> (`orders.parquet` and
 `customers.csv`), runs the job with komira, writes the answer to
-`top_customers.parquet` there, and prints it. Everything it computes is exact
-in binary floating point (the amounts are multiples of 0.25), so the same SQL
-run by any engine that follows DuckDB gives the same rows, bit for bit.
+`top_customers.parquet` there, and prints it. The amounts are whole cents
+(BIGINT), so every sum is exact and the same SQL run by any engine that follows
+DuckDB gives the same rows.
 `python/tests/test_analysis_job.py` runs this file from the installed wheel and
 compares every answer with DuckDB's.
 """
@@ -43,7 +43,7 @@ def write_inputs(directory):
             {
                 "order_id": pa.array(range(1, ORDERS + 1), pa.int64()),
                 "customer_id": pa.array([1 + (i * 5 + i // 3) % 14 for i in range(ORDERS)], pa.int64()),
-                "amount": pa.array([0.25 * (1 + (i * 37) % 400) for i in range(ORDERS)], pa.float64()),
+                "amount_cents": pa.array([25 * (1 + (i * 37) % 400) for i in range(ORDERS)], pa.int64()),
                 "quantity": pa.array([i % 5 for i in range(ORDERS)], pa.int64()),
             }
         ),
@@ -62,7 +62,7 @@ def write_inputs(directory):
 # dropped, summed per customer.
 SPEND = """
     SELECT c.region AS region, c.name AS customer,
-           count(*) AS n_orders, sum(o.amount) AS total
+           count(*) AS n_orders, CAST(sum(o.amount_cents) AS BIGINT) AS total_cents
     FROM orders o JOIN cust c ON o.customer_id = c.id
     WHERE o.quantity > 0
     GROUP BY c.region, c.name
@@ -71,9 +71,9 @@ SPEND = """
 # Each customer's place among its region's customers by total, and the
 # region's running total down that order.
 RANKED = """
-    SELECT region, customer, n_orders, total,
-           row_number() OVER (PARTITION BY region ORDER BY total DESC, customer) AS place,
-           sum(total) OVER (PARTITION BY region ORDER BY total DESC, customer) AS running_total
+    SELECT region, customer, n_orders, total_cents,
+           row_number() OVER (PARTITION BY region ORDER BY total_cents DESC, customer) AS place,
+           sum(total_cents) OVER (PARTITION BY region ORDER BY total_cents DESC, customer) AS running_total
     FROM spend
 """
 
@@ -81,7 +81,7 @@ RANKED = """
 TOP_PER_REGION = (
     "WITH cust AS (SELECT id, name, region FROM read_csv('{customers}')), "
     "spend AS (" + SPEND + "), ranked AS (" + RANKED + ") "
-    "SELECT region, customer, n_orders, total, place, running_total "
+    "SELECT region, customer, n_orders, total_cents, place, running_total "
     "FROM ranked WHERE place <= 2 ORDER BY region, place"
 )
 
@@ -89,7 +89,7 @@ TOP_PER_REGION = (
 TOP_OVERALL = (
     "WITH cust AS (SELECT id, name, region FROM read_csv('{customers}')), "
     "spend AS (" + SPEND + ") "
-    "SELECT customer, region, total FROM spend ORDER BY total DESC, customer LIMIT 3"
+    "SELECT customer, region, total_cents FROM spend ORDER BY total_cents DESC, customer LIMIT 3"
 )
 
 # The result as written: the per-region top two, to Parquet.
