@@ -12,11 +12,20 @@
 //! the command and the first line mopm wrote to stderr:
 //!
 //!   mopm init --name release-check/prod_add
+//!   (set `[toolchain] mojo` of the mopm.toml init wrote to the Mojo this release was built for)
 //!   mopm add komira-ai/<name> --registry prod      (once for each name of `add_set`)
 //!   mopm sync --registry prod --cache <work>/cache
 //!
+//! `mopm init` writes the Mojo of its own default (`mojo = "1.0.0"` for mopm 0.0.135), and `mopm add` resolves the
+//! newest version built for the project's Mojo, so a project left at that default gets the last release built for
+//! it, not this one. A user who builds for this release's Mojo edits that line, and so does `add`: the version is
+//! the `<mojo>` of the build string `mojo<mojo>_<n>` of every file of `add_set` in the plan (`releaseMojo`), which
+//! must name one Mojo; the mopm.toml must hold exactly one `mojo =` line in `[toolchain]` (`setMojo`). Either
+//! failing is refused before `mopm add` runs.
+//!
 //! Then it reads the `mopm.lock` they wrote and refuses, reporting every difference at once:
-//!  - a `lock_version` other than 3, or a `channels` other than exactly [`prod_channel`];
+//!  - a `lock_version` other than 3, a `channels` other than exactly [`prod_channel`], or a `mojo` other than
+//!    exactly [the release's Mojo];
 //!  - an entry whose name is not a full name (`<namespace>/<name>`), whose `channel` is not
 //!    `prod_channel` followed by its namespace and `/` (the namespace's own channel), whose name is not a
 //!    member of the plan, whose version is not the plan's (the version of this run), or an artifact whose
@@ -173,17 +182,71 @@ const Lock = struct {
     packages: []const LockEntry = &.{},
 };
 
+/// The Mojo version this release built `names` for (header). Every file of each name is
+/// `mojo-<namespace>.<name>-<version>-mojo<mojo>_<n>.conda`; a file named otherwise, files that name two Mojo
+/// versions (one compiler builds a release), or names with no file at all are refused.
+pub fn releaseMojo(a: Allocator, why: *[]const u8, plan: rbf.Plan, names: []const []const u8) ![]const u8 {
+    var found: ?[]const u8 = null;
+    var from: []const u8 = "";
+    for (names) |n| {
+        const m = memberOf(plan, n) orelse return refuse(a, why, "{s} is not a member of plan.json", .{n});
+        const conda = try std.mem.replaceOwned(u8, a, m.name, "/", ".");
+        const prefix = try std.fmt.allocPrint(a, "mojo-{s}-{s}-mojo", .{ conda, m.version });
+        for (m.files) |f| {
+            const ok = std.mem.startsWith(u8, f.filename, prefix) and std.mem.endsWith(u8, f.filename, ".conda");
+            const build = if (ok) f.filename[prefix.len .. f.filename.len - ".conda".len] else "";
+            const us = std.mem.lastIndexOfScalar(u8, build, '_') orelse 0;
+            if (us == 0 or us + 1 == build.len) return refuse(a, why, "{s}: {s} is not named {s}<mojo>_<n>.conda, so it names no Mojo version", .{ n, f.filename, prefix });
+            const mojo = build[0..us];
+            if (found) |seen| {
+                if (!std.mem.eql(u8, seen, mojo)) return refuse(a, why, "plan.json names two Mojo versions for the packages add installs: {s} ({s}) and {s} ({s}); a project is set to one", .{ seen, from, mojo, f.filename });
+            } else {
+                found = mojo;
+                from = f.filename;
+            }
+        }
+    }
+    return found orelse return refuse(a, why, "plan.json lists no file for {s}, so it names no Mojo version", .{try std.mem.join(a, ", ", names)});
+}
+
+/// `toml` with the one `mojo = ...` line of its `[toolchain]` table replaced by `mojo = "<mojo>"` (header). A table
+/// with no such line, or with more than one, is refused: mopm's template is not the one this was written for.
+pub fn setMojo(a: Allocator, why: *[]const u8, toml: []const u8, mojo: []const u8) ![]const u8 {
+    var out = std.Io.Writer.Allocating.init(a);
+    var table: []const u8 = "";
+    var count: usize = 0;
+    var it = std.mem.splitScalar(u8, toml, '\n');
+    var first = true;
+    while (it.next()) |line| {
+        if (!first) try out.writer.writeByte('\n');
+        first = false;
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (std.mem.startsWith(u8, trimmed, "[")) table = trimmed;
+        const key = std.mem.trimLeft(u8, if (std.mem.startsWith(u8, trimmed, "mojo")) trimmed["mojo".len..] else "", " \t");
+        if (std.mem.eql(u8, table, "[toolchain]") and std.mem.startsWith(u8, key, "=")) {
+            count += 1;
+            try out.writer.print("mojo = \"{s}\"{s}", .{ mojo, if (std.mem.endsWith(u8, line, "\r")) "\r" else "" });
+        } else try out.writer.writeAll(line);
+    }
+    if (count != 1) return refuse(a, why, "the mopm.toml `mopm init` wrote has {d} `mojo =` line(s) in [toolchain]; add sets exactly one to this release's Mojo {s}", .{ count, mojo });
+    return out.written();
+}
+
 /// An entry of the lock that is one of this release's files, and the file of the plan it pins.
 const Pinned = struct { entry: LockEntry, file: rbf.File };
 
 /// Checks every entry of `lock` against the plan (header); appends one line per difference to `bad` and returns the
 /// entries of `subdir` (or `noarch`) whose artifact for the first locked Mojo, the one `mopm sync` installs, is the
 /// plan's file: the ones the installed files are then checked for.
-fn checkLock(a: Allocator, lock: Lock, plan: rbf.Plan, names: []const []const u8, subdir: []const u8, bad: *std.ArrayList([]const u8)) ![]const Pinned {
+fn checkLock(a: Allocator, lock: Lock, plan: rbf.Plan, names: []const []const u8, subdir: []const u8, release_mojo: []const u8, bad: *std.ArrayList([]const u8)) ![]const Pinned {
     if (lock.lock_version != 3) try bad.append(a, try std.fmt.allocPrint(a, "mopm.lock has lock_version {d}; lock 3 (full names, a channel per namespace) is the one wanted", .{lock.lock_version}));
     if (lock.channels.len != 1 or !std.mem.eql(u8, lock.channels[0], prod_channel)) {
         const listed = try std.mem.join(a, ", ", lock.channels);
         try bad.append(a, try std.fmt.allocPrint(a, "mopm.lock lists the channel roots [{s}]; wanted exactly [{s}]", .{ listed, prod_channel }));
+    }
+    if (lock.mojo.len != 1 or !std.mem.eql(u8, lock.mojo[0], release_mojo)) {
+        const listed = try std.mem.join(a, ", ", lock.mojo);
+        try bad.append(a, try std.fmt.allocPrint(a, "mopm.lock is locked for mojo [{s}]; this release was built for mojo {s}", .{ listed, release_mojo }));
     }
     const mojo: ?[]const u8 = if (lock.mojo.len > 0) lock.mojo[0] else null;
     var pinned = std.ArrayList(Pinned).empty;
@@ -272,6 +335,17 @@ fn checkInstalled(a: Allocator, project: std.fs.Dir, pinned: []const Pinned, bad
     }
 }
 
+/// Sets `[toolchain] mojo` of `<project>/mopm.toml` to `mojo` (`setMojo`), as a user building for it would.
+fn setProjectMojo(a: Allocator, why: *[]const u8, project: []const u8, mojo: []const u8, log: *std.Io.Writer) !void {
+    var dir = std.fs.cwd().openDir(project, .{}) catch |e| return refuse(a, why, "cannot open {s}: {s}", .{ project, @errorName(e) });
+    defer dir.close();
+    const text = dir.readFileAlloc(a, "mopm.toml", max_lock_bytes) catch |e|
+        return refuse(a, why, "the mopm.toml `mopm init` wrote in {s}: {s}", .{ project, @errorName(e) });
+    dir.writeFile(.{ .sub_path = "mopm.toml", .data = try setMojo(a, why, text, mojo) }) catch |e|
+        return refuse(a, why, "cannot write mopm.toml in {s}: {s}", .{ project, @errorName(e) });
+    try log.print("set [toolchain] mojo = \"{s}\" in mopm.toml: the Mojo this release was built for\n", .{mojo});
+}
+
 /// `add` (header). `names` is `add_set` on the command line; `subdir` the host's (`subdirOf`). `log` gets every
 /// command, what mopm printed, and one `installed` line per file that matched.
 pub fn add(a: Allocator, why: *[]const u8, staged: []const u8, mopm: []const u8, work: []const u8, names: []const []const u8, subdir: []const u8, runner: Runner, log: *std.Io.Writer) !Report {
@@ -281,6 +355,7 @@ pub fn add(a: Allocator, why: *[]const u8, staged: []const u8, mopm: []const u8,
     if (!std.fs.path.isAbsolute(work)) return refuse(a, why, "--work {s} is not an absolute path", .{work});
     for (names) |n| if (memberOf(plan, n) == null)
         return refuse(a, why, "{s} is not a member of plan.json: this release did not publish it, so it cannot be added from prod", .{n});
+    const mojo = try releaseMojo(a, why, plan, names);
     if (std.fs.path.dirname(work)) |parent| std.fs.cwd().makePath(parent) catch |e|
         return refuse(a, why, "cannot make {s}: {s}", .{ parent, @errorName(e) });
     std.fs.cwd().makeDir(work) catch |e| {
@@ -293,6 +368,7 @@ pub fn add(a: Allocator, why: *[]const u8, staged: []const u8, mopm: []const u8,
         return refuse(a, why, "cannot make {s}: {s}", .{ d, @errorName(e) });
 
     try runStep(a, why, runner, mopm, &.{ "init", "--name", project_name }, project, log);
+    try setProjectMojo(a, why, project, mojo, log);
     for (names) |n| try runStep(a, why, runner, mopm, &.{ "add", n, "--registry", "prod" }, project, log);
     try runStep(a, why, runner, mopm, &.{ "sync", "--registry", "prod", "--cache", cache }, project, log);
 
@@ -303,7 +379,7 @@ pub fn add(a: Allocator, why: *[]const u8, staged: []const u8, mopm: []const u8,
     const lock = std.json.parseFromSliceLeaky(Lock, a, lock_text, .{ .ignore_unknown_fields = true }) catch |e|
         return refuse(a, why, "mopm.lock does not parse: {s}", .{@errorName(e)});
     var bad = std.ArrayList([]const u8).empty;
-    const pinned = try checkLock(a, lock, plan, names, subdir, &bad);
+    const pinned = try checkLock(a, lock, plan, names, subdir, mojo, &bad);
     if (pinned.len == 0 and bad.items.len == 0) try bad.append(a, try std.fmt.allocPrint(a, "mopm.lock pins no file for {s}: nothing was installed", .{subdir}));
     try checkInstalled(a, dir, pinned, &bad, log);
     if (bad.items.len != 0) {

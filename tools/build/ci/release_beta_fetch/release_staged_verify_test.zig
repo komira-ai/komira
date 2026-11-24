@@ -321,11 +321,18 @@ test "the yank hint names the group of state.json, and only a plain group id" {
 
 const RUN = "0.1.9";
 const PROD_NS = "https://conda.mopm.dev/komira-ai/";
+/// The Mojo this release's files are built for, and the one `mopm init` writes (mopm's default, older).
+const RELEASE_MOJO = "1.1.0";
+const INIT_MOJO = "1.0.0";
+/// The mopm.toml `mopm init --name release-check/prod_add` writes (mopm's template).
+const INIT_TOML = "[package]\nname = \"release-check/prod_add\"\nversion = \"0.1.0\"\n\n[toolchain]\nmojo = \"" ++ INIT_MOJO ++
+    "\"\n\n[dependencies]\n\n[targets]\nlib = { path = \"src/prod_add\" }\ntests = [\"tests\"]\n";
 
-/// A package a channel serves: its full name, version and the bytes of its one linux-64 file.
+/// A package a channel serves: its full name, version, the Mojo it is built for and the bytes of its one linux-64 file.
 const Pkg = struct {
     name: []const u8,
     version: []const u8 = RUN,
+    mojo: []const u8 = RELEASE_MOJO,
     bytes: []const u8,
     deps: []const []const u8 = &.{},
 };
@@ -338,9 +345,17 @@ const SERVED = [_]Pkg{
     .{ .name = "komira-ai/uuid", .bytes = "uuid bytes", .deps = &.{"komira-ai/clock"} },
 };
 
-fn fileName(a: std.mem.Allocator, name: []const u8, version: []const u8) ![]u8 {
+/// What prod also holds: the release before, built for the Mojo `mopm init` writes.
+const PRIOR = [_]Pkg{
+    .{ .name = "komira-ai/clock", .version = "0.1.8", .mojo = INIT_MOJO, .bytes = "clock of the release before" },
+    .{ .name = "komira-ai/json", .version = "0.1.8", .mojo = INIT_MOJO, .bytes = "json of the release before" },
+    .{ .name = "komira-ai/libc", .version = "0.1.8", .mojo = INIT_MOJO, .bytes = "libc of the release before" },
+    .{ .name = "komira-ai/uuid", .version = "0.1.8", .mojo = INIT_MOJO, .bytes = "uuid of the release before", .deps = &.{"komira-ai/clock"} },
+};
+
+fn fileName(a: std.mem.Allocator, name: []const u8, version: []const u8, mojo: []const u8) ![]u8 {
     const slash = std.mem.indexOfScalar(u8, name, '/').?;
-    return std.fmt.allocPrint(a, "mojo-{s}.{s}-{s}-mojo1.0.0_0.conda", .{ name[0..slash], name[slash + 1 ..], version });
+    return std.fmt.allocPrint(a, "mojo-{s}.{s}-{s}-mojo{s}_0.conda", .{ name[0..slash], name[slash + 1 ..], version, mojo });
 }
 
 /// The committed set of this release (plan.json and the READMEs) for `SERVED`, at version RUN.
@@ -349,7 +364,7 @@ fn stageAdd(a: std.mem.Allocator, tmp: *t.TmpDir) !void {
     try plan.writer.writeAll("{\"version\":2,\"members\":[");
     for (SERVED, 0..) |p, i| {
         try plan.writer.print("{s}{{\"name\":\"{s}\",\"version\":\"{s}\",\"action\":\"upload\",\"readme\":\"{s}/README.md\",", .{ if (i == 0) "" else ",", p.name, RUN, p.name });
-        try plan.writer.print("\"files\":[{{\"subdir\":\"linux-64\",\"filename\":\"{s}\",\"sha256\":\"{s}\",\"size\":{d}}}]}}", .{ try fileName(a, p.name, RUN), try sha(a, p.bytes), p.bytes.len });
+        try plan.writer.print("\"files\":[{{\"subdir\":\"linux-64\",\"filename\":\"{s}\",\"sha256\":\"{s}\",\"size\":{d}}}]}}", .{ try fileName(a, p.name, RUN, RELEASE_MOJO), try sha(a, p.bytes), p.bytes.len });
         try tmp.dir.makePath(try std.fmt.allocPrint(a, "committed/{s}", .{p.name}));
         try tmp.dir.writeFile(.{ .sub_path = try std.fmt.allocPrint(a, "committed/{s}/README.md", .{p.name}), .data = "# readme\n" });
     }
@@ -357,12 +372,19 @@ fn stageAdd(a: std.mem.Allocator, tmp: *t.TmpDir) !void {
     try tmp.dir.writeFile(.{ .sub_path = "committed/plan.json", .data = plan.written() });
 }
 
-/// mopm in memory, against a channel of `served`. `init`, `add` and `sync` do what mopm does to the project
-/// directory: `add` exits 1 for a name the channel lacks, `sync` writes mopm.lock (lock 3) for the closure of the
-/// added names, keeps each file in `.mopm/pkgs` and installs its record and metadata into `.mopm/env`. The
-/// other fields make it a mopm, or a registry, that does something else.
+/// mopm in memory, against a channel of `served` and `prior`. `init`, `add` and `sync` do what mopm does to the
+/// project directory: `init` writes `init_toml`, `add` exits 1 for a name the channel lacks or has no version of
+/// for the project's Mojo (the `mojo =` line of its mopm.toml), `sync` writes mopm.lock (lock 3) for the closure of
+/// the added names, each at its newest version built for that Mojo, keeps each file in `.mopm/pkgs` and installs
+/// its record and metadata into `.mopm/env`. The other fields make it a mopm, or a registry, that does something
+/// else.
 const FakeMopm = struct {
     served: []const Pkg = &SERVED,
+    prior: []const Pkg = &PRIOR,
+    /// What `init` writes as mopm.toml; null writes none.
+    init_toml: ?[]const u8 = INIT_TOML,
+    /// `add` and `sync` resolve for this Mojo, not the project's: a mopm that ignores the project's `mojo`.
+    lock_mojo: ?[]const u8 = null,
     /// Every command line, joined by spaces, without the binary.
     calls: std.ArrayList([]const u8) = .empty,
     added: std.ArrayList([]const u8) = .empty,
@@ -396,9 +418,27 @@ const FakeMopm = struct {
         return .{ .ctx = self, .runFn = run };
     }
 
-    fn lookup(self: *FakeMopm, name: []const u8) ?Pkg {
-        for (self.served) |p| if (std.mem.eql(u8, p.name, name)) return p;
-        return null;
+    fn known(self: *FakeMopm, name: []const u8) bool {
+        for ([_][]const Pkg{ self.served, self.prior }) |set| for (set) |p| if (std.mem.eql(u8, p.name, name)) return true;
+        return false;
+    }
+
+    /// The newest version of `name` built for `mojo`, from `served` and `prior`.
+    fn lookup(self: *FakeMopm, name: []const u8, mojo: []const u8) ?Pkg {
+        var best: ?Pkg = null;
+        for ([_][]const Pkg{ self.served, self.prior }) |set| for (set) |p| {
+            if (!std.mem.eql(u8, p.name, name) or !std.mem.eql(u8, p.mojo, mojo)) continue;
+            if (best == null or std.mem.order(u8, p.version, best.?.version) == .gt) best = p;
+        };
+        return best;
+    }
+
+    /// The Mojo the project resolves for: `lock_mojo`, or the value of the `mojo = "..."` line of its mopm.toml.
+    fn projectMojo(self: *FakeMopm, a: std.mem.Allocator, dir: std.fs.Dir) ![]const u8 {
+        if (self.lock_mojo) |m| return m;
+        const toml = try dir.readFileAlloc(a, "mopm.toml", 1 << 20);
+        const at = std.mem.indexOf(u8, toml, "\nmojo = \"").? + "\nmojo = \"".len;
+        return toml[at .. at + std.mem.indexOfScalar(u8, toml[at..], '"').?];
     }
 
     fn run(ctx: *anyopaque, a: std.mem.Allocator, argv: []const []const u8, cwd: []const u8) anyerror!pa.Ran {
@@ -410,9 +450,11 @@ const FakeMopm = struct {
         var dir = try std.fs.cwd().openDir(cwd, .{});
         defer dir.close();
         if (std.mem.eql(u8, argv[1], "init")) {
-            try dir.writeFile(.{ .sub_path = "mopm.toml", .data = "[package]\nname = \"release-check/prod_add\"\n" });
+            if (self.init_toml) |toml| try dir.writeFile(.{ .sub_path = "mopm.toml", .data = toml });
         } else if (std.mem.eql(u8, argv[1], "add")) {
-            if (self.lookup(argv[2]) == null) return .{ .code = 1, .stderr = try std.fmt.allocPrint(a, "mopm add: {s} (required by mopm.toml) is not in the registry's index\n", .{argv[2]}) };
+            if (!self.known(argv[2])) return .{ .code = 1, .stderr = try std.fmt.allocPrint(a, "mopm add: {s} (required by mopm.toml) is not in the registry's index\n", .{argv[2]}) };
+            const mojo = try self.projectMojo(a, dir);
+            if (self.lookup(argv[2], mojo) == null) return .{ .code = 1, .stderr = try std.fmt.allocPrint(a, "mopm add: no version of {s} is built for mojo {s}\n", .{ argv[2], mojo }) };
             try self.added.append(a, argv[2]);
         } else if (std.mem.eql(u8, argv[1], "sync")) {
             try self.sync(a, dir);
@@ -421,6 +463,7 @@ const FakeMopm = struct {
     }
 
     fn sync(self: *FakeMopm, a: std.mem.Allocator, dir: std.fs.Dir) !void {
+        const mojo = try self.projectMojo(a, dir);
         var closure = std.ArrayList(Pkg).empty;
         var todo = std.ArrayList([]const u8).empty;
         for (self.added.items) |n| if (self.drop == null or !std.mem.eql(u8, n, self.drop.?)) try todo.append(a, n);
@@ -428,7 +471,7 @@ const FakeMopm = struct {
             var seen = false;
             for (closure.items) |p| seen = seen or std.mem.eql(u8, p.name, n);
             if (seen) continue;
-            const p = self.lookup(n).?;
+            const p = self.lookup(n, mojo).?;
             try closure.append(a, p);
             for (p.deps) |d| try todo.append(a, d);
         }
@@ -439,18 +482,18 @@ const FakeMopm = struct {
             }
         }.lt);
         var lock = std.Io.Writer.Allocating.init(a);
-        try lock.writer.print("{{\"lock_version\":{d},\"mojo\":[\"1.0.0\"],\"channels\":[{s}],\"packages\":[", .{ self.lock_version, self.roots });
+        try lock.writer.print("{{\"lock_version\":{d},\"mojo\":[\"{s}\"],\"channels\":[{s}],\"packages\":[", .{ self.lock_version, mojo, self.roots });
         try dir.makePath(".mopm/pkgs");
         try dir.makePath(".mopm/env/conda-meta");
         try dir.makePath(".mopm/env/lib/mojo");
         for (closure.items, 0..) |p, i| {
-            const file = try fileName(a, p.name, p.version);
+            const file = try fileName(a, p.name, p.version, p.mojo);
             const slash = std.mem.indexOfScalar(u8, p.name, '/').?;
             const is_flat = self.flat != null and std.mem.eql(u8, self.flat.?, p.name);
             const is_global = self.global != null and std.mem.eql(u8, self.global.?, p.name);
             const channel = if (is_global) "https://conda.mopm.dev/" else PROD_NS;
             try lock.writer.print("{s}{{\"name\":\"{s}\",\"version\":\"{s}\",\"subdir\":\"linux-64\",\"channel\":\"{s}\",", .{ if (i == 0) "" else ",", if (is_flat) p.name[slash + 1 ..] else p.name, p.version, channel });
-            try lock.writer.print("\"artifacts\":{{\"1.0.0\":{{\"build\":\"mojo1.0.0_0\",\"url\":\"{s}linux-64/{s}\",\"sha256\":\"{s}\",\"size\":{d}}}}}}}", .{ channel, file, try sha(a, p.bytes), p.bytes.len });
+            try lock.writer.print("\"artifacts\":{{\"{s}\":{{\"build\":\"mojo{s}_0\",\"url\":\"{s}linux-64/{s}\",\"sha256\":\"{s}\",\"size\":{d}}}}}}}", .{ mojo, p.mojo, channel, file, try sha(a, p.bytes), p.bytes.len });
             const other = self.kept_other != null and std.mem.eql(u8, self.kept_other.?, p.name);
             try dir.writeFile(.{ .sub_path = try std.fmt.allocPrint(a, ".mopm/pkgs/{s}", .{file}), .data = if (other) "other bytes" else p.bytes });
             const stem = file[0 .. file.len - ".conda".len];
@@ -493,9 +536,162 @@ test "add: prod serves the set; init, an add per package, then sync, and the loc
     try t.expectEqual(want.len, fake.calls.items.len);
     for (want, fake.calls.items) |w, got| try t.expectEqualStrings(w, got);
     // uuid's dependency clock is installed and checked too
-    const clock = try std.fmt.allocPrint(a, "installed {s} komira-ai/clock 0.1.9 mojo-komira-ai.clock-0.1.9-mojo1.0.0_0.conda\n", .{try sha(a, "clock bytes")});
+    const clock = try std.fmt.allocPrint(a, "installed {s} komira-ai/clock 0.1.9 mojo-komira-ai.clock-0.1.9-mojo1.1.0_0.conda\n", .{try sha(a, "clock bytes")});
     try t.expect(std.mem.indexOf(u8, log.written(), clock) != null);
     try t.expect(exists(&tmp, "work/project/mopm.toml"));
+}
+
+test "add: prod also holds the release before, built for the Mojo init writes; the project is set to this release's Mojo and locks this release" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    var fake = FakeMopm{};
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    const rep = try runAdd(a, &tmp, &fake, &why, &log.writer);
+    try t.expectEqual(@as(usize, 4), rep.entries);
+    // init's mopm.toml with only the [toolchain] mojo line changed
+    const want = try std.mem.replaceOwned(u8, a, INIT_TOML, "mojo = \"" ++ INIT_MOJO ++ "\"", "mojo = \"" ++ RELEASE_MOJO ++ "\"");
+    try t.expectEqualStrings(want, try tmp.dir.readFileAlloc(a, "work/project/mopm.toml", 1 << 20));
+    try t.expect(std.mem.indexOf(u8, log.written(), "set [toolchain] mojo = \"1.1.0\" in mopm.toml: the Mojo this release was built for\n") != null);
+    const lock = try tmp.dir.readFileAlloc(a, "work/project/mopm.lock", 1 << 20);
+    try t.expect(std.mem.indexOf(u8, lock, "\"mojo\":[\"1.1.0\"]") != null);
+    try t.expect(std.mem.indexOf(u8, lock, "0.1.8") == null);
+}
+
+test "add: a mopm that locks for the Mojo init wrote gets the release before, and fails naming both Mojo versions and every version" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    var fake = FakeMopm{ .lock_mojo = INIT_MOJO };
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    try t.expectEqualStrings("5 problem(s) with what `mopm add` installed from prod:\n" ++
+        "  mopm.lock is locked for mojo [1.0.0]; this release was built for mojo 1.1.0\n" ++
+        "  komira-ai/clock: the lock records version 0.1.8; this release published 0.1.9\n" ++
+        "  komira-ai/json: the lock records version 0.1.8; this release published 0.1.9\n" ++
+        "  komira-ai/libc: the lock records version 0.1.8; this release published 0.1.9\n" ++
+        "  komira-ai/uuid: the lock records version 0.1.8; this release published 0.1.9", why);
+}
+
+test "add: a channel with no build of a member for this release's Mojo fails at its `mopm add`, naming it" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    const lacking = [_]Pkg{ SERVED[0], SERVED[1], SERVED[3] };
+    var fake = FakeMopm{ .served = &lacking };
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    try t.expectEqualStrings("`mopm add komira-ai/libc --registry prod` exited with 1: mopm add: no version of komira-ai/libc is built for mojo 1.1.0", why);
+    try t.expectEqual(@as(usize, 4), fake.calls.items.len);
+}
+
+test "add: a mopm.toml from init with no [toolchain] mojo line, two of them, or none at all is refused before `mopm add` runs" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    const Case = struct { toml: ?[]const u8, want: []const u8 };
+    const cases = [_]Case{
+        .{ .toml = "[package]\nname = \"release-check/prod_add\"\nmojo = [\"1.0.0\"]\n", .want = "the mopm.toml `mopm init` wrote has 0 `mojo =` line(s) in [toolchain]; add sets exactly one to this release's Mojo 1.1.0" },
+        .{ .toml = "[toolchain]\nmojo = \"1.0.0\"\nmojo = \"1.1.0\"\n", .want = "the mopm.toml `mopm init` wrote has 2 `mojo =` line(s) in [toolchain]; add sets exactly one to this release's Mojo 1.1.0" },
+        .{ .toml = null, .want = "" },
+    };
+    for (cases) |c| {
+        var tmp = t.tmpDir(.{});
+        defer tmp.cleanup();
+        try stageAdd(a, &tmp);
+        var fake = FakeMopm{ .init_toml = c.toml };
+        try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+        if (c.toml == null) {
+            const want = try std.fmt.allocPrint(a, "the mopm.toml `mopm init` wrote in {s}: FileNotFound", .{try path(a, &tmp, "work/project")});
+            try t.expectEqualStrings(want, why);
+        } else try t.expectEqualStrings(c.want, why);
+        try t.expectEqual(@as(usize, 1), fake.calls.items.len);
+    }
+}
+
+test "add: setMojo changes only the mojo line of [toolchain], with or without spaces, and keeps every other byte" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var why: []const u8 = "";
+    try t.expectEqualStrings("[toolchain]\nmojo = \"1.1.0\"", try pa.setMojo(a, &why, "[toolchain]\nmojo=\"1.0.0\"", "1.1.0"));
+    const before = "# mojo = \"0\"\n[package]\nmojo_x = 1\nmojo = \"9\"\n[toolchain]\r\n  mojo   = \"1.0.0\"  \r\nmojox = 2\n\n";
+    const after = "# mojo = \"0\"\n[package]\nmojo_x = 1\nmojo = \"9\"\n[toolchain]\r\nmojo = \"1.1.0\"\r\nmojox = 2\n\n";
+    try t.expectEqualStrings(after, try pa.setMojo(a, &why, before, "1.1.0"));
+}
+
+test "add: releaseMojo reads the Mojo of the build string of every file of the names, and refuses a file named otherwise, two Mojo versions or no file" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var why: []const u8 = "";
+    const f = struct {
+        fn file(subdir: []const u8, filename: []const u8) rbf.File {
+            return .{ .subdir = subdir, .filename = filename, .sha256 = "0" ** 64, .size = 1 };
+        }
+    }.file;
+    const json = rbf.Member{ .name = "komira-ai/json", .version = "0.1.9", .action = "upload", .files = &.{ f("linux-64", "mojo-komira-ai.json-0.1.9-mojo1.1.0_0.conda"), f("osx-arm64", "mojo-komira-ai.json-0.1.9-mojo1.1.0_0.conda") } };
+    const uuid = rbf.Member{ .name = "komira-ai/uuid", .version = "0.1.9", .action = "upload", .files = &.{f("linux-64", "mojo-komira-ai.uuid-0.1.9-mojo1.1.0_12.conda")} };
+    const plan = rbf.Plan{ .members = &.{ json, uuid } };
+    try t.expectEqualStrings("1.1.0", try pa.releaseMojo(a, &why, plan, &.{ "komira-ai/json", "komira-ai/uuid" }));
+
+    const Case = struct { file: []const u8, want: []const u8 };
+    const bad = [_]Case{
+        .{ .file = "mojo-komira-ai.uuid-0.1.9-mojo1.1.0.conda", .want = "komira-ai/uuid: mojo-komira-ai.uuid-0.1.9-mojo1.1.0.conda is not named mojo-komira-ai.uuid-0.1.9-mojo<mojo>_<n>.conda, so it names no Mojo version" },
+        .{ .file = "mojo-komira-ai.uuid-0.1.9-mojo1.1.0_.conda", .want = "komira-ai/uuid: mojo-komira-ai.uuid-0.1.9-mojo1.1.0_.conda is not named mojo-komira-ai.uuid-0.1.9-mojo<mojo>_<n>.conda, so it names no Mojo version" },
+        .{ .file = "mojo-komira-ai.uuid-0.1.9-mojo_0.conda", .want = "komira-ai/uuid: mojo-komira-ai.uuid-0.1.9-mojo_0.conda is not named mojo-komira-ai.uuid-0.1.9-mojo<mojo>_<n>.conda, so it names no Mojo version" },
+        .{ .file = "mojo-komira-ai.uuid-0.1.8-mojo1.1.0_0.conda", .want = "komira-ai/uuid: mojo-komira-ai.uuid-0.1.8-mojo1.1.0_0.conda is not named mojo-komira-ai.uuid-0.1.9-mojo<mojo>_<n>.conda, so it names no Mojo version" },
+        .{ .file = "mojo-komira-ai.uuid-0.1.9-mojo1.1.0_0.tar.bz2", .want = "komira-ai/uuid: mojo-komira-ai.uuid-0.1.9-mojo1.1.0_0.tar.bz2 is not named mojo-komira-ai.uuid-0.1.9-mojo<mojo>_<n>.conda, so it names no Mojo version" },
+        .{ .file = "mojo-komira-ai.uuid-0.1.9-mojo1.0.0_0.conda", .want = "plan.json names two Mojo versions for the packages add installs: 1.1.0 (mojo-komira-ai.json-0.1.9-mojo1.1.0_0.conda) and 1.0.0 (mojo-komira-ai.uuid-0.1.9-mojo1.0.0_0.conda); a project is set to one" },
+    };
+    for (bad) |c| {
+        const other = rbf.Member{ .name = "komira-ai/uuid", .version = "0.1.9", .action = "upload", .files = &.{f("linux-64", c.file)} };
+        try t.expectError(error.Refused, pa.releaseMojo(a, &why, .{ .members = &.{ json, other } }, &.{ "komira-ai/json", "komira-ai/uuid" }));
+        try t.expectEqualStrings(c.want, why);
+    }
+    const empty = rbf.Member{ .name = "komira-ai/libc", .version = "0.1.9", .action = "upload" };
+    try t.expectError(error.Refused, pa.releaseMojo(a, &why, .{ .members = &.{empty} }, &.{"komira-ai/libc"}));
+    try t.expectEqualStrings("plan.json lists no file for komira-ai/libc, so it names no Mojo version", why);
+    try t.expectError(error.Refused, pa.releaseMojo(a, &why, plan, &.{"komira-ai/gone"}));
+    try t.expectEqualStrings("komira-ai/gone is not a member of plan.json", why);
+}
+
+test "add: a plan whose packages name two Mojo versions is refused before anything is made or run" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageAdd(a, &tmp);
+    const text = try tmp.dir.readFileAlloc(a, "committed/plan.json", 1 << 20);
+    const mixed = try std.mem.replaceOwned(u8, a, text, "mojo-komira-ai.libc-0.1.9-mojo1.1.0_0.conda", "mojo-komira-ai.libc-0.1.9-mojo1.0.0_0.conda");
+    try tmp.dir.writeFile(.{ .sub_path = "committed/plan.json", .data = mixed });
+    var fake = FakeMopm{};
+    var log = sink();
+    defer log.deinit();
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+    try t.expectEqualStrings("plan.json names two Mojo versions for the packages add installs: 1.1.0 (mojo-komira-ai.json-0.1.9-mojo1.1.0_0.conda) and 1.0.0 (mojo-komira-ai.libc-0.1.9-mojo1.0.0_0.conda); a project is set to one", why);
+    try t.expectEqual(@as(usize, 0), fake.calls.items.len);
+    try t.expect(!exists(&tmp, "work"));
 }
 
 test "add: a channel that lacks a member fails at its `mopm add`, naming it, and nothing is synced" {
@@ -506,7 +702,7 @@ test "add: a channel that lacks a member fails at its `mopm add`, naming it, and
     defer tmp.cleanup();
     try stageAdd(a, &tmp);
     const lacking = [_]Pkg{ SERVED[0], SERVED[1], SERVED[3] };
-    var fake = FakeMopm{ .served = &lacking };
+    var fake = FakeMopm{ .served = &lacking, .prior = &.{} };
     var log = sink();
     defer log.deinit();
     var why: []const u8 = "";
@@ -640,8 +836,8 @@ test "add: an installed file with other bytes than the plan's fails, naming the 
     var why: []const u8 = "";
     try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
     const want = try std.fmt.allocPrint(a, "2 problem(s) with what `mopm add` installed from prod:\n" ++
-        "  komira-ai/uuid 0.1.9: .mopm/pkgs/mojo-komira-ai.uuid-0.1.9-mojo1.0.0_0.conda has size 11, the plan says 10\n" ++
-        "  komira-ai/uuid 0.1.9: .mopm/pkgs/mojo-komira-ai.uuid-0.1.9-mojo1.0.0_0.conda has sha256 {s}, the plan says {s}", .{ try sha(a, "other bytes"), try sha(a, "uuid bytes") });
+        "  komira-ai/uuid 0.1.9: .mopm/pkgs/mojo-komira-ai.uuid-0.1.9-mojo1.1.0_0.conda has size 11, the plan says 10\n" ++
+        "  komira-ai/uuid 0.1.9: .mopm/pkgs/mojo-komira-ai.uuid-0.1.9-mojo1.1.0_0.conda has sha256 {s}, the plan says {s}", .{ try sha(a, "other bytes"), try sha(a, "uuid bytes") });
     try t.expectEqualStrings(want, why);
 }
 
@@ -658,7 +854,7 @@ test "add: an environment whose record names another sha256, or that lacks a pac
     var why: []const u8 = "";
     try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
     const want = try std.fmt.allocPrint(a, "2 problem(s) with what `mopm add` installed from prod:\n" ++
-        "  komira-ai/json 0.1.9: .mopm/env/conda-meta/mojo-komira-ai.json-0.1.9-mojo1.0.0_0.json records sha256 '{s}', the plan says {s}\n" ++
+        "  komira-ai/json 0.1.9: .mopm/env/conda-meta/mojo-komira-ai.json-0.1.9-mojo1.1.0_0.json records sha256 '{s}', the plan says {s}\n" ++
         "  komira-ai/libc 0.1.9: .mopm/env/lib/mojo/libc.mopm.json FileNotFound", .{ "0" ** 64, try sha(a, "json bytes, no dependency") });
     try t.expectEqualStrings(want, why);
 }
@@ -676,7 +872,7 @@ test "add: a lock that pins other bytes than the plan's fails, naming the file a
     defer log.deinit();
     var why: []const u8 = "";
     try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
-    const label = "komira-ai/json 0.1.9 linux-64/mojo-komira-ai.json-0.1.9-mojo1.0.0_0.conda";
+    const label = "komira-ai/json 0.1.9 linux-64/mojo-komira-ai.json-0.1.9-mojo1.1.0_0.conda";
     const want = try std.fmt.allocPrint(a, "2 problem(s) with what `mopm add` installed from prod:\n" ++
         "  " ++ label ++ ": the lock pins sha256 {s}, the plan says {s}\n" ++
         "  " ++ label ++ ": the lock pins size 20, the plan says 25", .{ try sha(a, "json bytes, but othe"), try sha(a, "json bytes, no dependency") });
