@@ -98,6 +98,8 @@ _CODE_CLASSES: dict[str, type[KomiraError]] = {
             "SQL_NOT_SUPPORTED",
             "STATEMENT_NOT_A_QUERY",
             "OPTIMIZE_UNRESOLVED_SCALAR",
+            "LOWERING_UNCUTTABLE_NODE",
+            "LOWERING_SCAN_NOT_TOTAL",
             "LOWERING_SINK_UNSERVED",
             "LOWERING_JOIN_UNSERVED",
             "LOWERING_WINDOW_UNSERVED",

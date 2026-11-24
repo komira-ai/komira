@@ -245,7 +245,8 @@ _ISA_FIXTURES = [
 ) for p in PYTHONS]
 
 # Any minor of ABI 1 loads: 1.0, whose 1.1, 1.2 and 1.3 calls raise when used,
-# and 1.3, which seals a credential and fills a stand-in stream.
+# and 1.3, which seals a credential and fills a stand-in stream; on both the
+# 1.5 calls register_csv and register_json raise when used.
 [python_binding_test(
     name = "minor0_test" + p["suffix"],
     src = "test_minor.py",
@@ -435,6 +436,28 @@ c_shared_lib(
         "labels.parquet": "komira//src/parquet_codec:pyarrow_multi_dict_page.parquet",
         "libkomira": LIBKOMIRA,
         "readings.parquet": "komira//python:examples/readings.parquet",
+    },
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Session.register_csv and register_json on the real library, over the
+# fixtures: the names, types and rows the engine infers, NULL where a file has
+# no value, the same schema and rows as read_csv and read_json; the delimiter,
+# all_varchar and header arguments; a pathlib.Path, a relative path and `~`
+# resolved when the call is made; a missing and an empty file refused with the
+# engine's message naming the absolute path; a taken name refused word for
+# word; the argument checks and a closed session.
+[python_binding_test(
+    name = "register_text_test" + p["suffix"],
+    src = "test_register_text.py",
+    data = {
+        "empty.txt": "fixtures/empty.txt",
+        "events.jsonl": "fixtures/events.jsonl",
+        "libkomira": LIBKOMIRA,
+        "people.csv": "fixtures/people.csv",
+        "people_pipe.csv": "fixtures/people_pipe.csv",
+        "two_columns.parquet": PARQUET,
     },
     deps = ["//python:komira", _PYARROW[p["suffix"]]],
     **_ON[p["suffix"]]
