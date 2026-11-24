@@ -624,14 +624,15 @@ static napi_value describe_array(napi_env env, Shared *sh, const struct ArrowSch
       case K_VALIDITY:
       case K_BITS: size = (uint64_t)(slots + 7) / 8; break;
       case K_FIXED: size = (uint64_t)slots * (uint64_t)l.width; break;
-      case K_OFFSETS32: size = (uint64_t)(slots + 1) * 4; break;
-      case K_OFFSETS64: size = (uint64_t)(slots + 1) * 8; break;
+      // An array of no slots reads no offset: its offsets buffer may hold none.
+      case K_OFFSETS32: size = slots == 0 ? 0 : (uint64_t)(slots + 1) * 4; break;
+      case K_OFFSETS64: size = slots == 0 ? 0 : (uint64_t)(slots + 1) * 8; break;
       case K_TYPE_IDS: size = (uint64_t)slots; break;
       case K_UNION_OFFSETS: size = (uint64_t)slots * 4; break;
       case K_DATA32:
       case K_DATA64: {
         const void *offsets = a->buffers[i - 1];
-        int64_t end = offsets == NULL ? 0 : offset_at(offsets, l.kind[i] == K_DATA64, slots);
+        int64_t end = offsets == NULL || slots == 0 ? 0 : offset_at(offsets, l.kind[i] == K_DATA64, slots);
         if (end < 0) {
           snprintf(what, sizeof what, "the last offset is negative (%lld)", (long long)end);
           return invalid(env, path, what);
@@ -641,8 +642,8 @@ static napi_value describe_array(napi_env env, Shared *sh, const struct ArrowSch
       }
     }
     napi_value b;
-    if (p == NULL && (l.kind[i] == K_VALIDITY || slots == 0)) {
-      // No bitmap means no nulls; an array of no slots may omit any buffer.
+    if (p == NULL && (l.kind[i] == K_VALIDITY || size == 0)) {
+      // No bitmap means no nulls, and a buffer of no bytes may be NULL.
       if (l.kind[i] == K_VALIDITY) {
         if (napi_get_null(env, &b) != napi_ok) return NULL;
       } else if ((b = make_buffer(env, sh, NULL, 0)) == NULL) {

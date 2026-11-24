@@ -7,7 +7,7 @@
 // The formats mapped are the exporter's set (src/arrow_ipc/README.md): every
 // integer and float width, bool, date32 and date64, timestamps of every unit,
 // decimal128 and decimal256, time, duration and interval, utf8, binary, large
-// utf8 and large binary, dictionaries, list, struct, map, and sparse and dense
+// utf8 and large binary, dictionaries (indices of up to 32 bits), list, struct, map, and sparse and dense
 // unions. Any other format raises UnsupportedOperation naming the column and
 // the format string, from the schema, before a batch is read: a column is
 // never read as some other type.
@@ -138,8 +138,11 @@ const TIMESTAMP_UNITS: Record<string, TimeUnit> = {
   n: TimeUnit.NANOSECOND,
 };
 
-// The index formats of a dictionary: the integer formats.
-const INDEX_FORMATS = new Set(['c', 'C', 's', 'S', 'i', 'I', 'l', 'L']);
+// The index formats of a dictionary: the integers of up to 32 bits.
+// apache-arrow 21.2.0 builds a dictionary of 64-bit indices but cannot read a
+// value of it (a BigInt index into the dictionary throws), so 'l' and 'L' are
+// refused by name.
+const INDEX_FORMATS = new Set(['c', 'C', 's', 'S', 'i', 'I']);
 
 function unsupported(path: string, format: string): never {
   throw new UnsupportedOperation(`column "${path}": Arrow format "${format}" is not supported`);

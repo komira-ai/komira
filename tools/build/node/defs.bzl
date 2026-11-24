@@ -304,7 +304,7 @@ def _node_binding_test_impl(ctx):
 
 _node_binding_test = rule(
     impl = _node_binding_test_impl,
-    doc = "Runs the test files `srcs` (plain `.mjs`/`.js` using `node:test`) with the pinned `node --test` as a build action; the output (`<name>.pass`) exists only if node exited 0 and its TAP summary reports tests that all passed with none skipped or todo. `data` ({dest: source}, a build output allowed, a built `.node` addon for one) is staged at `dest` and the closure of the npm packages in `deps` under `node_modules/<package>`.",
+    doc = "Runs the test files `srcs` (`.mjs`/`.js` using `node:test`, or `.mts`, whose types the pinned node strips) with the pinned `node --test` as a build action; the output (`<name>.pass`) exists only if node exited 0 and its TAP summary reports tests that all passed with none skipped or todo. `data` ({dest: source}, a build output allowed, a built `.node` addon for one) is staged at `dest` and the closure of the npm packages in `deps` under `node_modules/<package>`.",
     attrs = {
         "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "deps": attrs.list(attrs.dep(providers = [NpmPackageInfo]), default = []),

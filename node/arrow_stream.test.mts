@@ -144,6 +144,16 @@ test('arrowNextBatch describes each batch with buffers of the exact length, then
   addon.arrowClose(result);
 });
 
+test('an array of no slots reads none of its buffers, which may be empty', async () => {
+  // Non-NULL buffers of no bytes: nothing is read from them, not even an offset.
+  const spec = streamOf([[{ schema: { format: 'u', name: 's' }, array: { length: 0, buffers: [null, new Int32Array(0), new Uint8Array(0)] } }]]);
+  const result = await addon.importArrowStream(stand.stream(spec));
+  const batch = addon.arrowNextBatch(result);
+  assert.ok(batch !== null);
+  assert.deepEqual(batch.children[0].buffers.map((b) => (b === null ? null : b.byteLength)), [null, 0, 0]);
+  addon.arrowClose(result);
+});
+
 test('a batch is released exactly once, only after its buffers are collected', async () => {
   const capsule = stand.stream(twoBatches());
   let batches: unknown[] | null = [];

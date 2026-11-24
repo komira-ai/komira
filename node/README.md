@@ -61,7 +61,8 @@ private TypeScript module ([`src/arrow_import.mts`](src/arrow_import.mts)) build
 - **The types** are the exporter's set ([`src/arrow_ipc`](../src/arrow_ipc/README.md)):
   every integer and float width, bool, date32 and date64, timestamps of every
   unit, decimal128 and decimal256, time, duration and interval, utf8, binary and
-  their large forms, dictionaries with an integer index, list, struct, map, and
+  their large forms, dictionaries with an integer index of up to 32 bits (64-bit
+  indices are refused: apache-arrow 21.2.0 cannot read them), list, struct, map, and
   sparse and dense unions. `readArrowStream(addon, capsule)` returns an
   `apache-arrow` `Table`, and refuses any other format from the schema, before
   it reads a batch, with `UnsupportedOperation`

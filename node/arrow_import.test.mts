@@ -9,6 +9,8 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
+import v8 from 'node:v8';
+import vm from 'node:vm';
 
 import { Decimal, Union, UnionMode, type Table } from 'apache-arrow';
 
@@ -32,6 +34,18 @@ const addon: ArrowAddon = require(path.join(here, 'komira_addon.node'));
 const stand = require(path.join(here, 'arrow_stand_in.node'));
 
 const read = (spec: StreamSpec): Promise<Table> => readArrowStream(addon, stand.stream(spec));
+
+v8.setFlagsFromString('--expose-gc');
+const gc = vm.runInNewContext('gc');
+
+// Collect garbage until `done()`, letting the finalizers of Node-API values
+// run between collections; a bounded number of rounds, so no clock is read.
+async function collect(done: () => boolean, rounds = 200): Promise<void> {
+  for (let i = 0; i < rounds && !done(); i++) {
+    gc();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
 
 // The values of column `name`, nulls included; rows of nested types as JSON.
 function values(table: Table, name: string): unknown[] {
@@ -449,6 +463,43 @@ test('names, nullability and the schema and field metadata carry over', async ()
   assert.deepEqual([m.name, m.nullable, [...m.metadata]], ['m', true, []]);
 });
 
+test('every dictionary index of up to 32 bits reads its values', async () => {
+  const indices: [string, ArrayBufferView][] = [
+    ['c', Int8Array.of(1, 0)],
+    ['C', Uint8Array.of(1, 0)],
+    ['s', Int16Array.of(1, 0)],
+    ['S', Uint16Array.of(1, 0)],
+    ['i', Int32Array.of(1, 0)],
+    ['I', Uint32Array.of(1, 0)],
+  ];
+  const table = await read(
+    streamOf([
+      indices.map(([format, data]) => ({
+        schema: { format, name: `d_${format}`, dictionary: { format: 'u' } },
+        array: { length: 2, buffers: [null, data], dictionary: { length: 2, buffers: [null, ...varlen(['p', 'q'], false)] } },
+      })),
+    ]),
+  );
+  for (const [format] of indices) assert.deepEqual(values(table, `d_${format}`), ['q', 'p'], format);
+});
+
+test('a utf8 column of empty values may leave its data buffer NULL', async () => {
+  const table = await read(
+    streamOf([[{ schema: { format: 'u', name: 's' }, array: { length: 3, buffers: [null, Int32Array.of(0, 0, 0, 0), null] } }]]),
+  );
+  assert.deepEqual(values(table, 's'), ['', '', '']);
+});
+
+test('a table that was read holds its batches until it is collected, and the stream and schema are released', async () => {
+  const capsule = stand.stream(streamOf([[fixed('n', 'i', 2, Int32Array.of(1, 2))], [fixed('n', 'i', 1, Int32Array.of(3))]]));
+  let table: Table | null = await readArrowStream(addon, capsule);
+  assert.deepEqual(values(table, 'n'), [1, 2, 3]);
+  assert.deepEqual(released(capsule), { streams: 1, schemas: 1, arrays: 0, bad: 0 });
+  table = null;
+  await collect(() => released(capsule).arrays >= 2);
+  assert.deepEqual(released(capsule), { streams: 1, schemas: 1, arrays: 2, bad: 0 });
+});
+
 test('a stream with no batch is a table of its schema with no rows', async () => {
   const table = await read({
     schema: {
@@ -510,6 +561,8 @@ test('a format the mapping does not know is refused, naming the column and the f
       { format: 'g', name: 'dict', dictionary: { format: 'u' } },
       'column "dict": Arrow format "g" is not supported',
     ],
+    [{ format: 'l', name: 'dict64', dictionary: { format: 'u' } }, 'column "dict64": Arrow format "l" is not supported'],
+    [{ format: 'L', name: 'dictu64', dictionary: { format: 'u' } }, 'column "dictu64": Arrow format "L" is not supported'],
     [
       { format: '+m', name: 'm', children: [{ format: 'i', name: 'entries' }] },
       'column "m": Arrow format "+m" is not supported',
