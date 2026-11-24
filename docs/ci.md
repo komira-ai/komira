@@ -941,7 +941,8 @@ The push filter is `release.yml`'s (`paths-ignore`: `docs/**`, `**.md`, held equ
 cases): a push of documentation alone starts no run. The version is `0.1.<N>`, `<N>` the build number of
 `release_json stamp`, which counts only commits that change more than `docs`, `*.md` and `.github`
 ([below](#the-version-and-documentation-only-commits)), so each code commit is a new version. The wheel
-carries the Mojo runtime libraries and requires no other distribution. A pull request never starts the
+carries the Mojo runtime libraries and requires no distribution of Modular's; its one requirement is
+pyarrow. A pull request never starts the
 workflow.
 
 | job | half | environment | permissions | what it does |
@@ -1023,11 +1024,13 @@ no space on TestPyPI.
 in place of the index: an empty virtual environment of the runner's Python; the wheel's requirements, if it
 has any, from PyPI; then `komira==<version>` with `--no-deps --no-index --find-links <dist>`, so pip reads no
 index for `komira` and installs the one wheel of the directory; `pip check`, `pip show` and `pip freeze` hold
-the environment to `komira` at the built version and nothing else; no `modular` package is importable; and
+the environment to `komira` at the built version and the distributions its `Requires-Dist` names (pyarrow),
+and nothing else; no `modular` package is importable; and
 the quickstart, the program the README and the install page show (held byte for byte by
 `//python/smoke:readme_shows_quickstart` and `//python/smoke:install_page_shows_quickstart`), runs and must
 print exactly what `python/examples/quickstart.expected` says. Today that is import, the version, the
-engine's ABI version and a Parquet file registered in a session. When the quickstart grows (a query, say),
+engine's ABI version, and `SELECT 1 AS n` and an aggregate over a registered Parquet file, each printed as
+rows through pyarrow. When the quickstart grows (a pandas result, say),
 this job and the index smokes run the new program with no change here. A local directory does not lag, so
 the install is tried once (`--attempts` and `--delay` are refused with `--index dist`).
 
@@ -1232,12 +1235,13 @@ and make no network request; the live indexes are reached only by a run of this 
    the real PyPI (`--only-binary=:all:`), then `komira==<version>` with `--no-deps` from TestPyPI alone, so
    nothing but `komira` comes from TestPyPI. For PyPI, `komira==<version>` is one install from PyPI. Every pip
    runs `--isolated`, without a cache. Then `pip check` must pass, `pip show komira` must report the version,
-   `pip freeze` must list `komira==<version>` and nothing else (the wheel carries the Mojo runtime, so no
-   `mojo-compiler` and no other distribution is installed), no package named `modular` may be importable, and
+   `pip freeze` must list `komira==<version>` once and otherwise only the distributions the wheel's
+   `Requires-Dist` names, at any version (pyarrow; the wheel carries the Mojo runtime, so no `mojo-compiler`
+   and no other distribution is installed), no package named `modular` may be importable, and
    the quickstart runs with `python -I` in a directory holding only the example and its data file: it
    must exit 0 and print what `python/examples/quickstart.expected` says, compared exactly, with `<version>`
    replaced by the version and `<abi_version>` by the ABI version of the `--abi-table` file
-   (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.4` is 1004). A failed step names the command, its exit
+   (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.6` is 1006). A failed step names the command, its exit
    status and the last lines of its stderr.
 
 The user test of the wheel file is the first gate: `testpypi` `needs` `wheel-user-test`, so a wheel that does
@@ -1245,8 +1249,9 @@ not install and run from its own file is uploaded nowhere. The TestPyPI smoke is
 version whose TestPyPI smoke passed on every Python gets a record, and only a record is promoted to PyPI.
 
 The quickstart is [`python/examples/quickstart.py`](../python/examples/README.md). Today it asserts the
-version, the engine's C ABI version, and that a `Session` registers `readings.parquet` and closes. It
-asserts no query result: the call that runs a query has not landed. The README's block under "What works"
+version, the engine's C ABI version, and the rows of `SELECT 1 AS n` and of an aggregate over
+`readings.parquet` (its row count and the sum of `value`), read through pyarrow, and that the session
+closes. The README's block under "What works"
 is the same text, held byte for byte by `//python/smoke:readme_shows_quickstart`. The install page,
 [docs/install.md](install.md), shows the same program and what it prints, `quickstart.expected` with the
 newest release of [python/CHANGELOG.md](../python/CHANGELOG.md) and the ABI version put in, held by

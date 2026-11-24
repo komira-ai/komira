@@ -483,12 +483,12 @@ test "an environment that holds a distribution besides komira is refused, naming
     const a = ar.allocator();
     const s = try Scene.init(a, lib.common.testpypi);
     defer s.tmp.cleanup();
-    const rules = [_]h.Rule{.{ .contains = " freeze", .code = 0, .stdout = "komira==0.1.7\nmojo-compiler==1.0.0\n" }};
+    const rules = [_]h.Rule{.{ .contains = " freeze", .code = 0, .stdout = "komira==0.1.7\npyarrow==26.0.1\n" }};
     var fake = s.runner(a, &rules);
     var log = h.sink(a);
     var why: []const u8 = "";
     try t.expectError(error.Refused, runWith(a, &why, &fake, s, .{ .requires_dist = &.{} }, &log.writer));
-    try t.expectEqualStrings("the environment holds other distributions than komira\nexpected:\nkomira==0.1.7\ninstalled:\nkomira==0.1.7\nmojo-compiler==1.0.0\n", why);
+    try t.expectEqualStrings("the environment holds other distributions than komira\nexpected:\nkomira==0.1.7\ninstalled:\nkomira==0.1.7\npyarrow==26.0.1\n", why);
     try t.expectEqual(@as(usize, 5), fake.calls.items.len);
 }
 
@@ -503,7 +503,79 @@ test "an environment without komira in pip freeze is refused" {
     var log = h.sink(a);
     var why: []const u8 = "";
     try t.expectError(error.Refused, runWith(a, &why, &fake, s, .{}, &log.writer));
-    try t.expectEqualStrings("the environment holds other distributions than komira\nexpected:\nkomira==0.1.7\ninstalled:\n", why);
+    try t.expectEqualStrings("the environment holds other distributions than komira and its requirements (mojo-compiler)\nexpected:\nkomira==0.1.7\nmojo-compiler==<any version>\ninstalled:\n", why);
+}
+
+test "an environment that holds komira and a requirement of the wheel at any version passes" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const s = try Scene.init(a, lib.common.pypi);
+    defer s.tmp.cleanup();
+    const rules = [_]h.Rule{.{ .contains = " freeze", .code = 0, .stdout = "komira==0.1.7\npyarrow==26.0.1\n" }};
+    var fake = s.runner(a, &rules);
+    var log = h.sink(a);
+    var why: []const u8 = "";
+    try runWith(a, &why, &fake, s, .{ .requires_dist = &.{"pyarrow>=25.0.1"} }, &log.writer);
+    try t.expectEqual(@as(usize, 7), fake.calls.items.len);
+}
+
+test "a requirement is matched to its pip freeze line by normalised name, whatever its spelling, extras or marker" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const s = try Scene.init(a, lib.common.pypi);
+    defer s.tmp.cleanup();
+    const rules = [_]h.Rule{.{ .contains = " freeze", .code = 0, .stdout = "komira==0.1.7\nfoo-bar==1.0\ntyping-extensions==4.12.0\n" }};
+    var fake = s.runner(a, &rules);
+    var log = h.sink(a);
+    var why: []const u8 = "";
+    const spec: h.WheelSpec = .{ .requires_dist = &.{ "Typing_Extensions>=4", "Foo.Bar[extra] ; python_version < \"3.12\"" } };
+    try runWith(a, &why, &fake, s, spec, &log.writer);
+    try t.expectEqual(@as(usize, 7), fake.calls.items.len);
+}
+
+test "a requirement that pip freeze does not list does not fail the freeze check" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const s = try Scene.init(a, lib.common.pypi);
+    defer s.tmp.cleanup();
+    var fake = s.runner(a, &.{});
+    var log = h.sink(a);
+    var why: []const u8 = "";
+    try runWith(a, &why, &fake, s, .{ .requires_dist = &.{"pyarrow>=25.0.1"} }, &log.writer);
+}
+
+test "a distribution that is neither komira nor a requirement is refused, naming the requirements, with expected and installed" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const s = try Scene.init(a, lib.common.pypi);
+    defer s.tmp.cleanup();
+    const rules = [_]h.Rule{.{ .contains = " freeze", .code = 0, .stdout = "komira==0.1.7\nnumpy==2.5.3\npyarrow==26.0.1\n" }};
+    var fake = s.runner(a, &rules);
+    var log = h.sink(a);
+    var why: []const u8 = "";
+    try t.expectError(error.Refused, runWith(a, &why, &fake, s, .{ .requires_dist = &.{"pyarrow>=25.0.1"} }, &log.writer));
+    try t.expectEqualStrings("the environment holds other distributions than komira and its requirements (pyarrow)\nexpected:\nkomira==0.1.7\npyarrow==<any version>\ninstalled:\nkomira==0.1.7\nnumpy==2.5.3\npyarrow==26.0.1\n", why);
+}
+
+test "a pip freeze with komira at another version, or komira listed twice, is refused" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var log = h.sink(a);
+    const frozen = [_][]const u8{ "komira==0.1.6\npyarrow==26.0.1\n", "komira==0.1.7\nkomira==0.1.7\npyarrow==26.0.1\n", "pyarrow==26.0.1\n" };
+    for (frozen) |text| {
+        const s = try Scene.init(a, lib.common.pypi);
+        defer s.tmp.cleanup();
+        const rules = [_]h.Rule{.{ .contains = " freeze", .code = 0, .stdout = text }};
+        var fake = s.runner(a, &rules);
+        var why: []const u8 = "";
+        try t.expectError(error.Refused, runWith(a, &why, &fake, s, .{ .requires_dist = &.{"pyarrow>=25.0.1"} }, &log.writer));
+        try t.expectEqualStrings(try std.fmt.allocPrint(a, "the environment holds other distributions than komira and its requirements (pyarrow)\nexpected:\nkomira==0.1.7\npyarrow==<any version>\ninstalled:\n{s}", .{text}), why);
+    }
 }
 
 test "a pip freeze that fails is refused with its command" {

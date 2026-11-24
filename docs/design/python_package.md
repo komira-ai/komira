@@ -5,8 +5,11 @@ Status: design, partly built. The allowlist entry that admits the package (`pyth
 Release 1's surface is built ([python/README.md](../../python/README.md)): the loader, `Session` with
 `register_parquet` and `close`, `abi_version()`, `__version__`, `KomiraError`, `LibraryLoadError`
 and `UnsupportedCpuError`, and their tests. The linux-x86_64 wheel is built and carries `libkomira`, its native
-owners and the Mojo runtime libraries in one directory (decision 6), so `pip install komira` needs no other
-distribution. `Session.sql`, `Result` and the default session are not built; the linux-arm64 and macos-arm64
+owners and the Mojo runtime libraries in one directory (decision 6), so `pip install komira` needs no package of
+Modular's. `Session.sql` and `Result` are built, with `to_arrow`, `to_reader` and `__arrow_c_stream__`
+(a result still reads after its session is closed), and the wheel requires pyarrow; `to_pandas`,
+`to_polars`, the default session, the per-session lock and the fork hook are not built, and
+`UnsupportedOperation` is not public yet; the linux-arm64 and macos-arm64
 wheels are not built.
 
 ## Release 1
@@ -179,8 +182,9 @@ Behaviour each later pull request implements, fixed here so they agree:
   registers an `os.register_at_fork` hook that marks every session of the parent closed in the child, so
   a call there raises `KomiraError` instead of running on a copied context. The package never forks;
   UDF workers are the engine's, not this package's.
-- **Ctrl-C during a query** is delivered when the query returns; the session stays usable. The first
-  release has no cancel and its docs say so.
+- **Ctrl-C during a query** is delivered when the query returns: `KeyboardInterrupt` is raised then, the
+  answer the query computed is freed, and the session stays usable. The first release has no cancel and
+  its docs say so.
 
 ### 4. What is carried from the earlier SDK, and what is not
 
@@ -348,8 +352,8 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  # none in release 1: no Requires-Dist, and none for the Mojo runtime (decision 6)
-  # "pyarrow",   # arrives with the Arrow terminals; range from the range they are tested at
+  # none for the Mojo runtime (decision 6)
+  "pyarrow>=25.0.1",   # with Session.sql's Result; the lower bound is the pyarrow the tests run on
 ]
 
 [project.optional-dependencies]
@@ -374,8 +378,9 @@ Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
   time). There is no `License ::` classifier: PEP 639 deprecates them alongside an expression. The wheel
   rule stages the files, so `python/` holds no copy that could drift. The wheel rule's read-back check
   refuses a wheel without them: an absent licence file must not build a wheel with no licence in it.
-- **No `Requires-Dist`.** The wheel's `METADATA` lists no dependency in release 1, and none on
-  `mojo-compiler`: the runtime libraries are in the wheel (decision 6).
+- **One `Requires-Dist`, `pyarrow>=25.0.1`.** Release 1 listed none; the release with `Session.sql`
+  requires pyarrow, which a `Result` is read as (python/dependencies.bzl says why the range has no
+  upper bound). None is on `mojo-compiler`: the runtime libraries are in the wheel (decision 6).
 - **The tag is `py3-none-manylinux_2_35_x86_64`.** `libAsyncRTRuntimeGlobals.so` needs
   `GLIBC_2.35`, so a `manylinux_2_34` tag would promise a glibc the library does not run on; the highest
   C++ runtime versions the three need are `GLIBCXX_3.4.30` and `CXXABI_1.3.11`
