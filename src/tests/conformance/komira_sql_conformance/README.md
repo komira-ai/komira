@@ -157,6 +157,8 @@ Columns: `name`; `row`, the lowering kind of the name's row (`FNK_*`),
 | `equal_within_4_ulps:n` | n cases ran and differ from DuckDB only in floats, by at most 4 ulps |
 | `differs:n` | n cases ran and an answer differs from DuckDB's |
 | `refused_<step>:n` | n cases ended at that `run_sql` step (parse, bind, optimize, lower, execute) with a refusal: at bind the name does not bind, at a later step it bound and could not run |
+| `batches_n` | the case ran but answered n result batches, not one |
+| `unreadable:n` | n cases ran and answered one batch, and the comparison could not read the answer (a type the answer parser does not read, such as a list or a timestamp): the function executes, its values are not yet compared |
 | `no_case` | the row lowers, and no case calls the name: bound by the table, never run by this measurement |
 | `probe:refused_bind` | a refusal row or a name with no row: `SELECT name(k) FROM T` is refused at bind, as the table says |
 | `probe:ok` | the same probe ran: a name the table refuses, or has no row for, that nevertheless executes |
@@ -165,3 +167,30 @@ Columns: `name`; `row`, the lowering kind of the name's row (`FNK_*`),
 A case's column names are not compared (the header of DuckDB's answer is
 replaced by the engine's own): the table measures values and types, not how a
 column is named.
+
+### What the committed table says
+
+Counts of the names in `function_coverage.tsv` (731 names), each from
+`awk -F'\t' 'NR>2 { ... }'` over the `row` and `outcome` columns:
+
+| names | what was measured |
+|---|---|
+| 120 | lowering rows whose cases all ran and equal DuckDB's answers |
+| 4 | lowering rows that run and differ from DuckDB only in floats, within 4 ulps (`cos`, `exp`, `log`, `log10`) |
+| 10 | lowering rows that run but whose answer the comparison cannot read yet: `date_trunc` and `datetrunc` (timestamp results), `string_split`, `str_split`, `split`, `string_to_array` and the four `regexp` / `string_split_regex` spellings (list results) |
+| 4 | lowering rows refused at bind by every case that calls them: `date_diff`, `datediff`, `date_sub`, `datesub` (the table binds the row; the cases' calls do not bind; the reason is not recorded in this table) |
+| 50 | lowering rows no `scalar_fn` case calls, so only the binder has seen them: among the common ones `abs`, `round`, `sign`, `trunc`, `floor`, `ceil`, `sqrt`, `pow`, `power`, `year`, `month`, `day`, `week`, `second`, `coalesce`, `nullif`, `ifnull`, `greatest`, `least`, `isnan`, `json_extract`, `json_extract_string`, `make_timestamp` (cases for some of them exist in other corpora, such as `fn_positions`, and are not run here) |
+| 3 | rows keyed by a constant (`internal`) |
+| 538 | refusal rows; every one is refused at bind by `SELECT name(k) FROM T` |
+| 2 | common names with no row at all (`initcap`, `current_timestamp`), refused at bind |
+
+So the rows that execute and are checked against DuckDB are 124 of the 189
+lowering-row names (the first two lines); 14 execute or bind without a
+verified answer; 50 are unmeasured. The gap list of common analysis
+functions is the `common = yes` lines whose `row` is `FNK_REFUSED` or
+`NO_ROW`: for example `split_part`, `strftime`, `strptime`, `epoch`, `age`,
+`current_date`, `now`, `dayname`, `monthname`, `make_date`, `to_timestamp`,
+`random`, `gcd`, `lcm`, `list_*` and `array_length`, `date_add`, `typeof`,
+`position`, `format` and `printf`, `chr`, `initcap`, `current_timestamp`;
+each carries its reason family in `detail`. The 50 unmeasured names are the
+next measurement: a `scalar_fn` case each, with DuckDB's committed answer.
