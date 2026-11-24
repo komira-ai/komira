@@ -38,7 +38,7 @@ def test_code_values() raises:
 
 def test_version_scheme() raises:
     var v = abi_version()
-    assert_equal(v, Int32(1006))
+    assert_equal(v, Int32(1007))
     assert_equal(v // Int32(1000), ABI_MAJOR)
     assert_equal(v % Int32(1000), ABI_MINOR)
 

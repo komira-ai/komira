@@ -1,4 +1,4 @@
-version	1.6
+version	1.7
 # The C ABI of libkomira. One row per export: symbol, return type, argument types, the version that added it.
 # Types are Mojo's, origins dropped; see tools/build/mojo/abi_golden.bzl. Adding a row raises the minor version.
 # Changing or removing one raises the major version (status.mojo: ABI_MAJOR, ABI_MINOR).
@@ -23,6 +23,7 @@ komira_run_free	None	Handle	1.6
 komira_run_cancel	Int32	Handle	1.6
 komira_run_progress	Int32	Handle,UnsafePointer[UInt64],UnsafePointer[UInt64]	1.6
 komira_sql_stream_run	Int32	Handle,CStr,Handle,ArrowStream	1.6
+komira_register_arrow_stream	Int32	Handle,CStr,ArrowStream	1.7
 # Status codes (status.mojo): zero is success, every failure is negative.
 constant	KOMIRA_OK	0	1.0
 constant	KOMIRA_ERR_NULL_CTX	-1	1.0

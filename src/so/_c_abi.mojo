@@ -2,7 +2,7 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of so that holds
 # pointers.
 # =============================================================================
-# Twenty-one `@export abi("C")` functions are the library's whole surface today:
+# Twenty-two `@export abi("C")` functions are the library's whole surface today:
 #
 #   int32_t  komira_abi_version(void);
 #   void    *komira_ctx_new(void);
@@ -45,6 +45,8 @@
 #                                uint64_t *out_total);
 #   int32_t  komira_sql_stream_run(void *ctx, const char *sql, void *run,
 #                                  struct ArrowArrayStream *out);
+#   int32_t  komira_register_arrow_stream(void *ctx, const char *name,
+#                                         struct ArrowArrayStream *stream);
 #
 # Session options. `komira_ctx_new_with_options` is `komira_ctx_new` with the
 # engine's worker count and memory budget (the bytes the sinks of one query
@@ -85,7 +87,9 @@
 # the stream's own pointers) and no reference to the session, so
 # `komira_ctx_free` may come before the stream's `release`. Its callbacks are
 # code of this library, which must stay loaded until every stream from it is
-# released.
+# released. `komira_register_arrow_stream` takes a caller's stream, copies its
+# chunks into a table the session holds and calls its `release` once before it
+# returns, whatever the status (unless NULL or released); the caller frees the struct.
 #
 # Errors. A call returns `KOMIRA_OK` (0) or a negative `KOMIRA_ERR_*` code
 # (status.mojo). A run that its run handle's cancel stopped is
@@ -130,16 +134,19 @@
 
 from std.memory import OwnedPointer, unsafe_memcpy
 
-from arrow_ipc.c_data_stream import CArrowArrayStream, build_record_batch_stream
+from arrow_ipc.c_data_stream import CArrowArrayStream, build_record_batch_stream, consumer_release_c_stream
+from arrow_ipc.c_stream_table import drain_record_batch_stream_table
 
 from so.session import Session, session_options, try_new_session
 from sdk_exec.run_control import RunControl
 from so.sources import (
+    check_table_name,
     csv_binding_bytes,
     is_cancelled_error,
     json_binding_bytes,
     parquet_schema_bytes,
     plan_render_text,
+    register_arrow,
     register_csv,
     register_json,
     register_parquet,
@@ -181,9 +188,10 @@ comptime CStr = UnsafePointer[UInt8, MutUntrackedOrigin]
 # value of `komira_credential_set`: read for their length argument, copied in
 # full, never written.
 comptime ConstBytes = UnsafePointer[UInt8, MutUntrackedOrigin]
-# SAFETY: `struct ArrowArrayStream *`, a stream the caller allocated: never
-# read, and written once, whole, only when `komira_sql_stream` returns
-# `KOMIRA_OK`; from then on the caller owns what it holds.
+# SAFETY: `struct ArrowArrayStream *`, a stream the caller allocated: as an
+# output never read, and written once, whole, only on `KOMIRA_OK`, then the
+# caller's; as `komira_register_arrow_stream`'s input the caller's live stream,
+# drained and released during the call and kept nowhere.
 comptime ArrowStream = UnsafePointer[CArrowArrayStream, MutUntrackedOrigin]
 
 
@@ -940,6 +948,50 @@ def komira_register_json(ctx: Handle, name: CStr, path: CStr) abi("C") -> Int32:
         return KOMIRA_ERR_NULL_ARG
     try:
         register_json(session[], _c_string(name), _c_string(path))
+        return KOMIRA_OK
+    except e:
+        session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+
+
+@export
+def komira_register_arrow_stream(
+    ctx: Handle, name: CStr, stream: ArrowStream
+) abi("C") -> Int32:
+    """Drain `stream` into a table held in memory and register it in the
+    session as `name`, replacing the session's table of that name (any kind).
+
+    `stream`'s own `release` is called once before this returns, whatever the
+    status, unless it is NULL or released already: here before the drain, or
+    by the drain on every path out. `KOMIRA_ERR_NULL_CTX` for a NULL `ctx`,
+    `KOMIRA_ERR_NULL_ARG` for a NULL `name` or `stream`, `KOMIRA_ERR_ENGINE`
+    with a last error for an empty name (`TABLE_NAME_EMPTY`), a released
+    stream, a failing callback, and a column type the import
+    (`UnsupportedArrowCABIType`) or the table (`TABLE_TYPE_UNSUPPORTED`)
+    refuses; nothing is registered or replaced then.
+    """
+    if Int(ctx) == 0:
+        consumer_release_c_stream(stream)
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(name) == 0 or Int(stream) == 0:
+        consumer_release_c_stream(stream)
+        session[].set_error(String("komira_register_arrow_stream: name or stream is NULL"))
+        return KOMIRA_ERR_NULL_ARG
+    var table_name: String
+    try:  # the name is refused before any of the stream is read
+        table_name = _c_string(name)
+        check_table_name(table_name)
+    except e:
+        consumer_release_c_stream(stream)
+        session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+    try:
+        # SAFETY: `stream` is non-NULL (tested above) and the caller's live
+        # stream for the call; the drain reads it by reference and keeps none.
+        var table = drain_record_batch_stream_table(stream[])
+        register_arrow(session[], table_name, table^)
         return KOMIRA_OK
     except e:
         session[].set_error(String(e))

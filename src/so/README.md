@@ -12,7 +12,9 @@ session by name and hold its values in the session's secret store; and
 `komira_sql_stream`, which runs one SQL statement on the session and hands its
 answer over as an Arrow C stream; and the run handle, a cancel token and a
 progress counter that `komira_sql_stream_run` runs a statement under and that
-another thread cancels and reads while it runs.
+another thread cancels and reads while it runs; and
+`komira_register_arrow_stream`, which drains a host's Arrow C stream into a
+table the session holds in memory, which SQL on the session reads by name.
 
 - `abi/komira.tsv`: the golden of the C ABI; `komira.h` is made from it.
 - `status.mojo`: the seven status codes, `KOMIRA_MAX_INPUT_BYTES`, the credential
@@ -78,6 +80,8 @@ int32_t  komira_run_progress(void *run, uint64_t *out_done,
                              uint64_t *out_total);
 int32_t  komira_sql_stream_run(void *ctx, const char *sql, void *run,
                                struct ArrowArrayStream *out);
+int32_t  komira_register_arrow_stream(void *ctx, const char *name,
+                                      struct ArrowArrayStream *stream);
 ```
 
 **Status codes.** Every fallible call returns one: `KOMIRA_OK` (0),
@@ -132,7 +136,7 @@ from so import ABI_MAJOR, ABI_MINOR, abi_version
 from std.testing import assert_equal
 
 assert_equal(abi_version(), ABI_MAJOR * 1000 + ABI_MINOR)
-assert_equal(abi_version(), Int32(1006))
+assert_equal(abi_version(), Int32(1007))
 ```
 
 **The handle.** `komira_ctx_new` returns a context the caller owns until it
@@ -443,6 +447,62 @@ A consumer reads a sealed value only through a reveal: the session's
 takes, and the value reaches the consumer as a zeroizing `SecretValue` for the
 length of that one call.
 
+**An Arrow stream as a table.** `komira_register_arrow_stream(ctx, name,
+stream)` takes a stream the host produced (a pyarrow table or reader, a pandas
+frame through pyarrow, any producer of the Arrow C Stream Interface), reads
+its schema and every chunk, copies each buffer into a table the session holds,
+and registers that table as `name`, found without regard to case. Every query
+on the session then reads the copy: the host may free or change what it
+exported as soon as the call returns. A stream of no chunk is a table of no
+row with the stream's schema.
+
+The library takes the stream. It calls the stream's own `release` exactly
+once before it returns, whatever the status, unless `stream` is NULL or
+already released (its `release` NULL); the host frees only the struct it
+allocated. A name or context refused before the stream is read releases it
+without calling `get_schema`.
+
+A second registration of a name replaces the table of that name, of any kind,
+as DuckDB's `register` replaces a view of that name; the file registrations
+(`komira_register_csv`, `komira_register_json`) still refuse a name the
+session holds, this table's too. Refusals are -1 for a NULL `ctx`, -2 for a
+NULL `name` or `stream` (the last error `komira_register_arrow_stream: name or
+stream is NULL`), and -3 with a last error for an empty name
+(`TABLE_NAME_EMPTY: a table name must not be empty`), a released stream
+(`from_arrow_c_stream: stream is already released`), a callback of the stream
+that fails (`from_arrow_c_stream: get_schema failed (rc=<n>): <the stream's
+last error>`, and the same for `get_next`), a column type the import does not
+read (`UnsupportedArrowCABIType: ...`, the Null type among them), and a column
+of a nested type (list, struct, map) or a union
+(`TABLE_TYPE_UNSUPPORTED: column '<c>' has type <t>; only flat columns are
+registered`). Nothing is registered or replaced on a refusal.
+
+On values, the call is `register_arrow` over the table the drain built:
+
+```mojo
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.primitive_array import PrimitiveArray
+from arrow.record_batch import RecordBatchBuilder
+from arrow.schema import Field, SchemaBuilder
+from arrow.table import Table
+from so import Session, register_arrow, sql_result
+from std.testing import assert_equal
+
+var sb = SchemaBuilder()
+sb.add_field(Field(String("k"), ArrowType.INT64, False))
+var rows = RecordBatchBuilder.with_capacity(1)
+rows.add_column(
+    Column.from_primitive(
+        PrimitiveArray[DType.int64].from_list([Int64(1), Int64(2), Int64(3)])
+    )
+)
+var session = Session()
+register_arrow(session, String("t"), Table.from_batch(rows.build(sb.build())))
+var answer = sql_result(session, String("select count(*) as n from T where k > 1"))
+assert_equal(answer.batches[0].column_at(0).as_primitive[DType.int64]().get(0), Int64(2))
+```
+
 ## Building and testing
 
 ```sh
@@ -451,10 +511,10 @@ length of that one call.
 ```
 
 The library is published only if the gate passes: the exports check, then
-sixteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
-foreign host would. Seven cover the skeleton: the version (1006, which is 1.6),
+seventeen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
+foreign host would. Seven cover the skeleton: the version (1007, which is 1.7),
 create and free (distinct handles, separate sessions), no symbol beyond the
-twenty-one, a fresh session's empty error, the two-call protocol (zero capacity, one
+twenty-two, a fresh session's empty error, the two-call protocol (zero capacity, one
 byte short, exact, larger), a NULL context, and a NULL `out_len`. One driver per
 new call writes its input file under `$TEST_TMPDIR` and checks a good input,
 NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
@@ -468,12 +528,16 @@ CSV driver once for each dialect argument), and check a taken name (in any
 case, and taken by the other call) and an empty one word for word, the NULL
 cases, a missing and an empty file and a path that is not UTF-8, and that a
 refused name stays free.
-`exports_exact` makes the twenty-one names above the whole dynamic symbol table.
+`gate_register_arrow_stream` checks the refusals met before any chunk is
+read: a released stream (five NULL words) and an empty name or one that is
+not UTF-8 are -3 word for word, the NULL cases -1 and -2, and each leaves the
+name free; the streams the library drains are the C driver's.
+`exports_exact` makes the twenty-two names above the whole dynamic symbol table.
 On Linux the eleven C owners in the library's closure (async, async_api,
 compression, crypto, fs, http_core, libc, metrics, objectstore, parquet_codec,
 scan_source) are linked as their own shared libraries (`native_owners`), not
 embedded; on macOS arm64 there are none, and the C archives are linked
-statically into `libkomira.dylib`. On Linux the sixteenth driver, `gate_native_owners`,
+statically into `libkomira.dylib`. On Linux the seventeenth driver, `gate_native_owners`,
 reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
 the SONAME of each of the eleven (`libkomira_<owner>_native.so.1`); an owner
 dropped from `native_owners` leaves its C embedded, and that driver fails.
@@ -617,7 +681,7 @@ the extra `$ORIGIN/../../lib` finds the one `lib/` of the variants directory fro
 
 ## The header and the golden
 
-`abi/komira.tsv` is the golden of the ABI: the version (1.6), one row per export
+`abi/komira.tsv` is the golden of the ABI: the version (1.7), one row per export
 with its return type, argument types and the version that added it, and one row
 per status code, limit and credential kind, field and scope (`constant`). `komira_abi_golden` checks it on every
 build against the `@export abi("C")` functions of `_c_abi.mojo` (names, return and
@@ -641,7 +705,7 @@ headers. The golden does not check that its version was raised when
 a row changed: that compares with the previous release.
 
 `tests/c/abi_driver.c` is a C program that includes `komira.h` and nothing of
-ours. It opens `./libkomira.so`, binds each of the twenty-one functions to a pointer
+ours. It opens `./libkomira.so`, binds each of the twenty-two functions to a pointer
 declared with the header's own prototype, and checks the version in the header
 against `komira_abi_version()`, the status codes, the input bound
 (`KOMIRA_MAX_INPUT_BYTES` plus one is -5), and the last-error round trip (NULL
@@ -681,7 +745,17 @@ before, and the reading after the run is done equal to total. Last, this
 thread cancels a run in flight on a second thread: the answer (the cancel came
 after the run's last check) or -6 with `*out` untouched and a
 `QUERY_CANCELLED` last error, and the context answers after either; no check
-depends on how long the run takes. It is built by zig cc and run against the
+depends on how long the run takes. And it is a producer of Arrow C streams, in
+C, whose callbacks count the library's releases: a stream of two chunks
+registered with `komira_register_arrow_stream` answers a sort, filters, an
+aggregate and a join with a registered CSV file after the producer overwrote
+and freed its buffers, with the stream, its schema and each chunk released
+once; a stream of no chunk keeps its schema; a second registration replaces
+a table (a CSV one too) and `komira_register_csv` refuses a name it holds; a
+failing `get_schema`, a failing `get_next` after one chunk and a Null-type
+column are refused word for word with the stream released once and the table
+under the name kept; an empty or NULL name and a NULL context release the
+stream without reading it. It is built by zig cc and run against the
 published library:
 
 ```sh
