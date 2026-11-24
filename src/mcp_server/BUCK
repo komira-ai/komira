@@ -51,7 +51,7 @@ mojo_conda(
         "../json": "//src/json:mopm.toml",
     },
     mojo = "1.1.0",
-    mopm = "toolchains//:mopm_0_0_135",
+    mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/mcp_server",
     version = "0.1.0",
     visibility = ["PUBLIC"],
