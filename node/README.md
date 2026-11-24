@@ -20,10 +20,60 @@ in this repository ([third_party/node](../third_party/node/README.md)).
 | `parquetSchema(session, path)` | `komira_parquet_schema`: a `Buffer` of the file's schema as `komira.plan.v1` `WireSchema` bytes (a protobuf message, not an Arrow IPC stream), through the two-call protocol inside the addon |
 | `planRender(session, plan)` | `komira_plan_render`: the text of a serialized plan (a `Uint8Array`, a `Buffer` included), as a string. The plan is not run |
 | `sessionStats()` | `{ created, freed }`: how many contexts the addon made and destroyed, for the tests of the session's lifetime |
+| `importArrowStream(capsule)` | a promise of a result: the Arrow C stream in `capsule` drained (below). It needs no library loaded |
+| `arrowSchema(result)` | the stream's schema, described |
+| `arrowNextBatch(result)` | the next batch, described, or `null` after the last |
+| `arrowClose(result)` | releases the schema and the batches not read yet. Idempotent |
 
 Everything else in the C ABI (`komira_last_error` is used by the addon itself;
 `komira_csv_binding` and `komira_json_binding` have no call yet) and every
 call that would run a query is outside this addon.
+
+## The Arrow import
+
+`apache-arrow` has no importer for the Arrow C Data Interface, so the addon
+reads an Arrow C stream itself ([`arrow_import.c`](arrow_import.c)) and a
+private TypeScript module ([`src/arrow_import.mts`](src/arrow_import.mts)) builds
+`apache-arrow` data over the stream's own memory
+([design](../docs/design/typescript_package.md#arrow-from-the-c-stream-to-javascript)).
+
+- **The stream** arrives as a capsule: an N-API external tagged as an Arrow C
+  stream ([`arrow_c.h`](arrow_c.h)), the Node form of Python's
+  `arrow_array_stream` PyCapsule. `importArrowStream` moves the stream out of
+  it, calls `get_schema` once and `get_next` until the end, keeps every
+  `ArrowArray`, and calls the stream's `release`. A non-zero callback status
+  rejects with `get_last_error`'s text, after everything taken so far is
+  released. The run call that will hand the addon a stream of a query
+  (`komira_sql_stream`) is not bound yet; the tests make streams with a
+  stand-in producer.
+- **The descriptions.** A schema is `{ format, name, flags, metadata, children,
+  dictionary }`, the metadata as `[key, value]` pairs or `null`. A batch is
+  `{ length, nullCount, offset, buffers, children, dictionary }`. Each buffer is
+  an `ArrayBuffer` of the length its format and the array give (the C structs
+  carry no lengths), `null` for an absent validity bitmap. At an 8-byte aligned
+  address it is an external `ArrayBuffer` over the array's memory; at another
+  address it is a copy, since a typed array needs its element alignment.
+- **Ownership.** A batch `arrowNextBatch` hands out is released when the last
+  external `ArrayBuffer` over it is collected (a count per batch), or at once
+  when it has none. The schema and the batches never read are released by
+  `arrowClose`, or by the result's finalizer if it is never called. Each struct
+  is released once.
+- **The types** are the exporter's set ([`src/arrow_ipc`](../src/arrow_ipc/README.md)):
+  every integer and float width, bool, date32 and date64, timestamps of every
+  unit, decimal128 and decimal256, time, duration and interval, utf8, binary and
+  their large forms, dictionaries with an integer index of up to 32 bits (64-bit
+  indices are refused: apache-arrow 21.2.0 cannot read them), list, struct, map, and
+  sparse and dense unions. `readArrowStream(addon, capsule)` returns an
+  `apache-arrow` `Table`, and refuses any other format from the schema, before
+  it reads a batch, with `UnsupportedOperation`
+  (`column "<name>": Arrow format "<format>" is not supported`, a nested column
+  named by its path, `outer.inner`).
+
+[`package.json`](package.json) is private and names `apache-arrow` as a peer
+dependency at `^21.2.0`, the range the tests run: they use the pinned 21.2.0
+([third_party/node](../third_party/node/README.md)). The TypeScript files are
+`.mts` with only erasable syntax, so the pinned node runs them by stripping
+their types; nothing checks the types yet.
 
 ## Why `dlopen` at `load`, not a NEEDED dependency
 
@@ -51,6 +101,15 @@ wrong kind (a path with a NUL byte included), `KOMIRA_SESSION_FREED`,
 message), `KOMIRA_ABI_MISMATCH` (with the library's version),
 `KOMIRA_MISSING_SYMBOL` (with the name) and `KOMIRA_LOADED`.
 
+The Arrow import rejects a failed stream callback with `code`
+`KOMIRA_ARROW_STREAM`, `status` (the callback's status, an errno value),
+`lastError` (`get_last_error`'s text, empty when there is none) and the message
+`get_schema failed (status N): <lastError>` (or `get_next`). A stream or an
+array that breaks the C Data Interface is `KOMIRA_ARROW_INVALID`, naming the
+column (`column "a.b": buffer 1 is NULL`, `the batch: ...` for the batch itself).
+A closed result is `KOMIRA_ARROW_CLOSED`. A value that is not a capsule or a
+result, and a capsule imported before, are `TypeError`s `KOMIRA_ARG`.
+
 ## The session
 
 A session is an external over a heap box that holds the context handle. The
@@ -61,8 +120,9 @@ destroys the context if `freeSession` has not, so a context is destroyed once.
 
 | target | what it proves | the defect it catches |
 |---|---|---|
-| `:load_test` ([`load.test.mjs`](load.test.mjs), [`capacity.test.mjs`](capacity.test.mjs)) | the addon exposes exactly the eight calls; calls before `load` say not loaded; `load` refuses a non-string, a NUL byte, a missing file (with the loader's message), a library of ABI 2.0 and one of 0.999 (stand-ins built from [`tests/fake_libkomira.c`](tests/fake_libkomira.c)) and one without `komira_plan_render`, and each refusal leaves the addon unloaded; the real library loads, reports 1003, loads again as a no-op, and another path is then refused; with a stand-in that writes into each result the capacity it was given and the length it reported, `parquetSchema` and `planRender` pass exactly the reported length as the second call's capacity | an ABI check that is missing or accepts a higher major version, a missing symbol that is not named, a refused library that stays half-loaded, a second path ignored, a second call with more room than the reported length |
+| `:load_test` ([`load.test.mjs`](load.test.mjs), [`capacity.test.mjs`](capacity.test.mjs)) | the addon exposes exactly the twelve calls; calls before `load` say not loaded; `load` refuses a non-string, a NUL byte, a missing file (with the loader's message), a library of ABI 2.0 and one of 0.999 (stand-ins built from [`tests/fake_libkomira.c`](tests/fake_libkomira.c)) and one without `komira_plan_render`, and each refusal leaves the addon unloaded; the real library loads, reports 1003, loads again as a no-op, and another path is then refused; with a stand-in that writes into each result the capacity it was given and the length it reported, `parquetSchema` and `planRender` pass exactly the reported length as the second call's capacity | an ABI check that is missing or accepts a higher major version, a missing symbol that is not named, a refused library that stays half-loaded, a second path ignored, a second call with more room than the reported length |
 | `:session_test` ([`session.test.mjs`](session.test.mjs)) | the version; a missing file is an `Error` with status -3, code, `lastError` and the message ending in it; a good call on the same session after a refusal; `parquetSchema` of the fixture ([`src/so`](../src/so/tests/fixtures/two_columns.parquet)) is a `Buffer` equal to the bytes the C ABI returns (frozen as hex), twice; `planRender` of the scan plan the C gates render, from a `Buffer` and from a view with an offset; bytes that are not a plan (and an empty array) are status -3 with a last error; arguments of the wrong kind, another addon's external and a NUL byte are `TypeError`s without a status; `freeSession` twice calls `komira_ctx_free` once and a freed session is refused; five sessions never freed are each freed once by their finalizers, and five freed by `freeSession` are not freed again by theirs | an error without its status or last error; a truncated or empty result; an offset ignored; a double free; no finalizer; a finalizer that frees again; a foreign external read as a session |
+| `:arrow_test` ([`arrow_stream.test.mts`](arrow_stream.test.mts), [`arrow_import.test.mts`](arrow_import.test.mts)) | over streams of a stand-in producer ([`tests/arrow_stand_in.c`](tests/arrow_stand_in.c), an addon that builds a stream from a description and counts the releases of each stream's structs): the import releases the stream at once and holds the schema and batches; the schema and each batch are described exactly, every buffer at its exact length; a batch is released once, and not while its buffers are alive; a misaligned buffer is copied, and a batch of copies only is released when it is read; `get_schema` and `get_next` failures reject with the status and the last error (or the status alone), with everything released once; a released schema, a schema that is not a struct, eleven malformed arrays, a value that is not a capsule or a result, a capsule imported twice and a closed result are refused by name; a result never closed is released by its finalizer. Through `readArrowStream`: every integer and float width, bool, dates, times, timestamps, durations, intervals, decimal128 and decimal256, utf8 and binary and their large forms, a dictionary whose memory two batches share, list, struct, map and both unions round-trip equal, with nulls; offsets in every kind of column and in the batch; names, nullability and metadata; an empty stream and a batch of NULL buffers; eleven formats the mapping does not know are refused with `UnsupportedOperation` by their full message, everything released; the pinned `apache-arrow` satisfies the peer range | a buffer of the wrong length or slot; an offset ignored, or not carried into a struct's children; a batch released early, twice or never; a misaligned typed array; a callback error lost or without its text; a column read as another type; a dictionary id or union type id mixed up |
 
 The frozen schema bytes are what `libkomira` returned when the test was
 written, checked by reading them: a protobuf message of two fields, `i64` and
