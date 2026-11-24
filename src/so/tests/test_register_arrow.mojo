@@ -8,7 +8,9 @@
 # aggregate, and a left join that keeps the CSV row with no match); a table of
 # no chunk keeps its schema, counts no row and joins to no row; a second
 # registration of a name replaces the table of that name, whether the first
-# was registered from memory or from a CSV file, while register_csv still
+# was registered from memory, from a CSV file or from a Parquet file (whose
+# replacement leaves the session's other Parquet tables answering), while
+# register_csv still
 # refuses a name the in-memory table holds (TABLE_ALREADY_REGISTERED); a
 # column of a nested type or a union is refused as TABLE_TYPE_UNSUPPORTED
 # word for word and the table already under the name keeps answering; an empty name is
@@ -31,8 +33,11 @@ from so import (
     check_table_name,
     register_arrow,
     register_csv,
+    register_parquet,
     sql_result,
 )
+
+comptime PARQUET = "src/so/tests/fixtures/two_columns.parquet"
 
 comptime PEOPLE = "id,name,score\n1,ann,10\n2,bob,20\n3,cy,30\n"
 comptime COMMA = UInt8(ord(","))
@@ -190,6 +195,17 @@ def test_a_second_registration_replaces_the_table_of_its_name() raises:
     _assert_ints(_ints(sql_result(s, String("select amount from orders"))), [Int64(99)])
 
 
+def test_a_replaced_parquet_table_leaves_the_other_parquet_tables_answering() raises:
+    var s = Session()
+    register_parquet(s, String("two"), String(PARQUET))
+    register_parquet(s, String("other"), String(PARQUET))
+    register_arrow(s, String("Two"), _orders())
+    assert_equal(len(s.engine.tables), 1)
+    assert_equal(s.engine.tables[0].name, String("other"))
+    _assert_ints(_ints(sql_result(s, String("select count(*) from two"))), [Int64(3)])
+    _assert_ints(_ints(sql_result(s, String("select count(*) from other"))), [Int64(0)])
+
+
 def test_a_nested_column_is_refused_and_the_table_of_its_name_stays() raises:
     var s = Session()
     register_arrow(s, String("orders"), _orders())
@@ -239,6 +255,7 @@ def main() raises:
     test_registered_table_joins_a_registered_csv()
     test_a_table_of_no_chunk_keeps_its_schema_and_has_no_row()
     test_a_second_registration_replaces_the_table_of_its_name()
+    test_a_replaced_parquet_table_leaves_the_other_parquet_tables_answering()
     test_a_nested_column_is_refused_and_the_table_of_its_name_stays()
     test_an_empty_name_is_refused()
     print("OK")

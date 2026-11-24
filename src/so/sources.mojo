@@ -38,6 +38,7 @@ from scan_source.source_variant import SourceVariant
 from sdk.parquet_footer import read_parquet_footer
 from sdk_exec.arrow_result import ArrowResult, arrow_result
 from sdk_exec.engine_catalog import register_parquet as engine_register_parquet
+from sdk_exec.engine_context import RegisteredTable
 from sdk_exec.engine_sql import STEP_EXECUTE, run_sql
 from sdk_exec.run_control import RunControl
 from sql.sql_ast import TvfOptions
@@ -151,6 +152,14 @@ def register_arrow(mut session: Session, name: String, var table: Table) raises:
                 + "; only flat columns are registered"
             )
     _ = session.engine.catalog.remove(name)
+    # A Parquet table is also listed with its paths (`EngineContext.tables`),
+    # which lowering reads for every Parquet scan; a replaced one leaves it.
+    var key = name.lower()
+    var kept = List[RegisteredTable]()
+    for i in range(len(session.engine.tables)):
+        if session.engine.tables[i].name != key:
+            kept.append(session.engine.tables[i].copy())
+    session.engine.tables = kept^
     session.engine.catalog.add_in_memory(name, table^)
 
 
