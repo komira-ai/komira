@@ -168,7 +168,8 @@ class Result:
         it when collected.
 
         A `requested_schema` other than None raises `UnsupportedOperation`
-        and leaves the result unread: komira does not cast an answer.
+        (a `KomiraError`; the class is not public yet) and leaves the result
+        unread: komira does not cast an answer.
         """
         if requested_schema is not None:
             raise UnsupportedOperation(

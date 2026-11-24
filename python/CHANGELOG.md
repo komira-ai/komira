@@ -16,8 +16,8 @@ install page shows names it.
   a `Result`, read once as a pyarrow `Table` (`to_arrow()`), a `RecordBatchReader` (`to_reader()`) or
   through the Arrow PyCapsule interface (`__arrow_c_stream__`, so `pyarrow.table(result)` reads it). A
   syntax error, an unknown table or a refused construct raises `KomiraError` from `sql` itself, with the
-  engine's message. A result still reads after its session is closed. `komira.Result` and
-  `komira.UnsupportedOperation` (a requested schema on `__arrow_c_stream__`) are new public names.
+  engine's message. A result still reads after its session is closed. `komira.Result` is a new public name; a requested
+  schema on `__arrow_c_stream__` raises a `KomiraError`.
 - **pyarrow.** The wheel requires `pyarrow>=25.0.1`, so `pip install komira` installs it; it had no
   requirement.
 - **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its

@@ -33,7 +33,8 @@ import os
 import sys
 
 import komira
-from komira import KomiraError, Result, UnsupportedOperation
+from komira import KomiraError, Result
+from komira._errors import UnsupportedOperation
 from komira import _native
 
 assert "pyarrow" not in sys.modules, "importing komira imported pyarrow"

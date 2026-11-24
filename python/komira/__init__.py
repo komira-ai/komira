@@ -10,7 +10,7 @@ does.
 from importlib import metadata as _metadata
 
 from . import _native
-from ._errors import KomiraError, LibraryLoadError, UnsupportedCpuError, UnsupportedOperation
+from ._errors import KomiraError, LibraryLoadError, UnsupportedCpuError
 from ._session import Result, Session
 
 try:
@@ -33,7 +33,6 @@ __all__ = [
     "Result",
     "Session",
     "UnsupportedCpuError",
-    "UnsupportedOperation",
     "__version__",
     "abi_version",
 ]

@@ -8,7 +8,8 @@ and `UnsupportedCpuError`, and their tests. The linux-x86_64 wheel is built and 
 owners and the Mojo runtime libraries in one directory (decision 6), so `pip install komira` needs no package of
 Modular's. `Session.sql` and `Result` are built, with `to_arrow`, `to_reader` and `__arrow_c_stream__`
 (a result still reads after its session is closed), and the wheel requires pyarrow; `to_pandas`,
-`to_polars`, the default session, the per-session lock and the fork hook are not built; the linux-arm64 and macos-arm64
+`to_polars`, the default session, the per-session lock and the fork hook are not built, and
+`UnsupportedOperation` is not public yet; the linux-arm64 and macos-arm64
 wheels are not built.
 
 ## Release 1
