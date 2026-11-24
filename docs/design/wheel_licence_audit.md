@@ -2,8 +2,9 @@
 
 The wheel carries `libkomira`, the native owner libraries `libkomira`
 links as `DT_NEEDED`, the three Mojo runtime libraries it needs, the Python
-package, `py.typed` and four licence files (`LICENSE`, `NOTICE`,
-`MODULAR_LICENSE`, `MODULAR_THIRD_PARTY_NOTICES`). This page lists every native file, the third-party code
+package, `py.typed` and six licence files (`LICENSE`, `NOTICE`,
+`AWS_LC_LICENSE`, `S2N_TLS_LICENSE`, `MODULAR_LICENSE`,
+`MODULAR_THIRD_PARTY_NOTICES`). This page lists every native file, the third-party code
 inside each, its licence, and where `NOTICE` reproduces the notice that
 licence requires. The file list is the measured table in
 [src/so/README.md](../../src/so/README.md) ("What the library links and
@@ -24,8 +25,8 @@ the built files; this page adds what each file contains.
 | `libkomira_scan_source_native.so.1` | none: komira's C | Apache-2.0 | none | (LICENSE) |
 | `libkomira_compression_native.so.1` | snappy 1.3.1 (static); LLVM libc++ and libc++abi from the Zig toolchain (static, symbols local) | BSD-3-Clause; Apache-2.0 with LLVM exceptions | snappy: copyright notice, conditions and disclaimer reproduced for binary redistribution; libc++: none for object code (LLVM exception), recorded anyway | "Third-party code inside the native files" 1 and 3 |
 | `libkomira_parquet_codec_native.so.1` | Brotli decoder 1.1.0 (static, names prefixed `komira_brotli_`) | MIT | copyright notice and permission notice reproduced | same section, 2 |
-| `libkomira_crypto_native.so.1` | aws-lc 1.39.0 libcrypto (static, names prefixed `komira_awslc_`), with komira's SHA-256 C | Apache-2.0 OR ISC (AWS-LC's files); OpenSSL License and original SSLeay License, ISC, MIT, BSD-3-Clause (inherited parts, as its LICENSE states) | its NOTICE and its LICENSE reproduced (the Apache text is LICENSE's; the "Licenses for support code" section covers code not compiled in) | same section, 4 |
-| `libkomira_http_core_native.so.1` | s2n-tls 1.5.6 (static, names prefixed `komira_s2n_`); `DT_NEEDED` on the crypto owner above | Apache-2.0 | its NOTICE reproduced; the licence text is LICENSE | same section, 5 |
+| `libkomira_crypto_native.so.1` | aws-lc 1.39.0 libcrypto (static, names prefixed `komira_awslc_`), with komira's SHA-256 C | Apache-2.0 OR ISC (AWS-LC's files); OpenSSL License and original SSLeay License, ISC, MIT, BSD-3-Clause (inherited parts, as its LICENSE states) | its NOTICE reproduced in `NOTICE`; its LICENSE (every notice, condition and disclaimer of those licences) carried unmodified as `.dist-info/licenses/AWS_LC_LICENSE` | same section, 4 |
+| `libkomira_http_core_native.so.1` | s2n-tls 1.5.6 (static, names prefixed `komira_s2n_`); `DT_NEEDED` on the crypto owner above | Apache-2.0 | its NOTICE reproduced in `NOTICE`; its LICENSE carried unmodified as `.dist-info/licenses/S2N_TLS_LICENSE` | same section, 5 |
 | `libKGENCompilerRTShared.so` | Modular's Mojo runtime: binary, unmodified from the pinned `mojo-compiler` conda package | Modular Community License Terms (`LicenseRef-Modular-Proprietary`) | the licence text displayed with the copies, which the wheel carries as `.dist-info/licenses/MODULAR_LICENSE`, and the package's `Third-Party-Notices` (`.dist-info/licenses/MODULAR_THIRD_PARTY_NOTICES`) | "The Mojo runtime: Modular's libraries, carried in the bundled wheel" |
 | `libAsyncRTRuntimeGlobals.so` | same | same | same | same |
 | `libMSupportGlobals.so` | same | same | same | same |

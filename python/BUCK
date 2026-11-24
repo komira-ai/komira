@@ -158,10 +158,18 @@ _MODULAR_LICENSE_FILES = {
     "MODULAR_THIRD_PARTY_NOTICES": "komira//third_party/modular:mojo_compiler_licenses[info/licenses/Third-Party-Notices]",
 }
 
+# The licence texts of the third-party code compiled into the native owner
+# libraries libkomira links (NOTICE, "Third-party code inside the native
+# files"), extracted unmodified from the pinned source archives.
+_THIRD_PARTY_LICENSE_FILES = {
+    "AWS_LC_LICENSE": "komira//third_party/aws-lc:src[LICENSE]",
+    "S2N_TLS_LICENSE": "komira//third_party/s2n-tls:src[LICENSE]",
+}
+
 _LICENSE_FILES = {
     "LICENSE": "komira//:LICENSE",
     "NOTICE": "komira//:NOTICE",
-} | _MODULAR_LICENSE_FILES
+} | _THIRD_PARTY_LICENSE_FILES | _MODULAR_LICENSE_FILES
 
 # komira's own files are Apache-2.0; the Mojo runtime libraries are Modular's,
 # under the licence their package declares (`LicenseRef-Modular-Proprietary`,
@@ -231,12 +239,14 @@ wheel_file(
 
 _TEST_FILES = {
     "--abi-table": "komira//src/so:abi/komira.tsv",
+    "--aws-lc-license": _THIRD_PARTY_LICENSE_FILES["AWS_LC_LICENSE"],
     "--license": "komira//:LICENSE",
     "--modular-license": _MODULAR_LICENSE_FILES["MODULAR_LICENSE"],
     "--modular-notices": _MODULAR_LICENSE_FILES["MODULAR_THIRD_PARTY_NOTICES"],
     "--notice": "komira//:NOTICE",
     "--parquet": "komira//src/so:tests/fixtures/two_columns.parquet",
     "--plan-hex": "komira//python/tests:fixtures/scan_plan.hex",
+    "--s2n-tls-license": _THIRD_PARTY_LICENSE_FILES["S2N_TLS_LICENSE"],
 }
 
 # The version the wheel is stamped with: the stamp wheel_file reads.
