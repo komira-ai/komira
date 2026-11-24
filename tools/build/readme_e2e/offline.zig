@@ -141,7 +141,7 @@ fn answer(self: *Registry, stream: std.net.Stream) void {
         return;
     }
     self.remember(method, target);
-    reply(stream, "403 Forbidden", "{\"error\":{\"code\":\"offline\",\"message\":\"the README e2e is offline: this registry serves its configuration and nothing else, so a package the staged set lacks cannot be fetched\",\"hint\":\"stage the package\"}}");
+    reply(stream, "403 Forbidden", "{\"error\":{\"code\":\"offline\",\"message\":\"the README e2e is offline: this registry serves its configuration and answers the index of each staged package with 404, and nothing else, so a package the staged set lacks cannot be fetched\",\"hint\":\"stage the package\"}}");
 }
 
 fn reply(stream: std.net.Stream, status: []const u8, body: []const u8) void {
