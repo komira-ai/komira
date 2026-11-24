@@ -31,6 +31,12 @@
 # and `LocalOnlyScanFs`, which refuses such a scan at step `execute` with
 # `SCAN_FS_UNSERVED`.
 #
+# Each takes a `RunControl` (`run_control`) in a second form: the plan's run
+# polls its cancel token and counts its segments into its progress, so a
+# cancel from another thread stops the run at its next check and is refused at
+# step `execute`. Parse, bind, optimize and lower do not poll it, and a COPY's
+# file write after the run does not either.
+#
 # Parse and bind are the steps `sql.sql_frontend.plan_from_sql` composes; they
 # are called one by one here so a refusal names the step that refused.
 # `STATEMENT_NOT_A_QUERY` is `sql.sql_frontend`'s refusal, named here too so a
@@ -60,6 +66,7 @@ from .engine_plan import (
     SqlRefusal as _SqlRefusal,
     run_plan_batch,
 )
+from .run_control import RunControl
 from .engine_write import check_copy_target, count_result, write_copy_result
 
 comptime STEP_PARSE = "parse"
@@ -87,6 +94,17 @@ def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
     return run_sql_with(ctx, text, LocalOnlyScanFs())
 
 
+def run_sql(
+    mut ctx: EngineContext, text: String, control: RunControl
+) -> SqlOutcome:
+    """`run_sql` under `control`: a cancel on it stops the plan's run at its
+    next check, refused at step `execute` with `pipeline_exec`'s cancelled
+    error, and the run counts its segments into the control's progress. A
+    statement refused before its plan runs is refused as without a control.
+    """
+    return run_sql_with(ctx, text, LocalOnlyScanFs(), control)
+
+
 def run_sql_with[
     R: ScanFsOpener
 ](mut ctx: EngineContext, text: String, var opener: R) -> SqlOutcome:
@@ -94,6 +112,15 @@ def run_sql_with[
     a local Parquet, CSV or JSON file. A Parquet scan of a remote store (a catalog table
     whose source names a bucket) reads through the file system `opener` opens
     on the bucket."""
+    return run_sql_with(ctx, text, opener^, RunControl())
+
+
+def run_sql_with[
+    R: ScanFsOpener
+](
+    mut ctx: EngineContext, text: String, var opener: R, control: RunControl
+) -> SqlOutcome:
+    """`run_sql_with` under `control` (see `run_sql`)."""
     ctx.begin_query()
     ctx.statements_parsed += 1
     var step = String(STEP_PARSE)
@@ -115,7 +142,7 @@ def run_sql_with[
                 " to write a file"
             )
         var plan = bound.take_plan()
-        var batch = run_plan_batch(ctx, plan^, opener^, step)
+        var batch = run_plan_batch(ctx, plan^, opener^, step, control)
         var outcome = SqlOutcome()
         if bound.kind == STMT_COPY:
             var rows = write_copy_result(

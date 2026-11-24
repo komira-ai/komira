@@ -1,7 +1,7 @@
-# Port: the libkomira calls that run a query (C ABI 1.3 and 1.6)
+# Port: the libkomira calls that run a query (C ABI 1.3 and 1.7)
 
 Status: port document. `komira_sql_stream` is built (ABI 1.3, with the `ArrowStream`
-golden type and the header's Arrow structs), and so is `komira_plan_stream` (ABI 1.6,
+golden type and the header's Arrow structs), and so is `komira_plan_stream` (ABI 1.7,
 over `sdk_exec.engine_plan.run_plan`); the abort containment is not. **EXISTS** names code on `main`; **PROPOSED** is new. Statements the author deduced rather than read are marked *(inferred)*.
 
 `libkomira` is komira's one shared library and its flat C ABI
@@ -27,7 +27,7 @@ The callers are thin bindings over these calls: the Python package
 | item | port |
 |---|---|
 | run SQL | `komira_sql_stream(ctx, sql, out)`, from the earlier golden. ABI 1.3 |
-| run a plan | `komira_plan_stream(ctx, plan, plan_len, out)`, from the earlier golden. ABI 1.6 (`komira_sql_stream` landed alone as 1.3, and 1.4 and 1.5 are other calls). The bytes are an authored `WirePlanEnvelope`, the same input `komira_plan_render` takes. libkomira optimizes it in-process |
+| run a plan | `komira_plan_stream(ctx, plan, plan_len, out)`, from the earlier golden. ABI 1.7 (`komira_sql_stream` landed alone as 1.3, and 1.4 to 1.6 are other calls). The bytes are an authored `WirePlanEnvelope`, the same input `komira_plan_render` takes. libkomira optimizes it in-process |
 | result | an Arrow C stream (`struct ArrowArrayStream`), as in the earlier golden. The caller allocates it and libkomira fills it. The caller owns it after `KOMIRA_OK`. It does not depend on the context, which may be freed first |
 | status codes | the six of ABI 1.1. The port adds none. Every engine refusal is `KOMIRA_ERR_ENGINE` (-3), with the reason in the last error |
 | conventions | ABI 1.1's: the two-call `komira_last_error`, the 64 MiB input bound (-5), and `*out` untouched on any refusal |
@@ -38,8 +38,8 @@ The callers are thin bindings over these calls: the Python package
 1.2 is the credential calls (`komira_credential_add`, `_set`, `_seal`;
 [credentials_and_writes.md](credentials_and_writes.md) decision 8), which landed first. Releases
 come from `main` automatically, so a row's `since` is the version of the first change that lands
-it on `main`: `komira_sql_stream` landed alone, as 1.3, and `komira_plan_stream` followed as 1.6, after the session options (1.4) and the CSV and JSON
-registration calls (1.5).
+it on `main`: `komira_sql_stream` landed alone, as 1.3, and `komira_plan_stream` followed as 1.7, after the session options (1.4), the CSV and JSON
+registration calls (1.5) and the run handle (1.6).
 The golden (`src/so/abi/komira.tsv`) holds both.
 
 ## 2. What exists today
@@ -96,13 +96,13 @@ komira_plan_stream	c_int32	c_void_p,POINTER(c_ubyte),c_uint64,POINTER(ArrowArray
 ```
 
 The same calls as libkomira golden rows (`symbol<TAB>return<TAB>arguments<TAB>since`).
-The rows of 1.1 and 1.2 stay byte for byte. 1.3 added the first row and 1.6 the second, and
+The rows of 1.1 and 1.2 stay byte for byte. 1.3 added the first row and 1.7 the second, and
 neither changed a type or a constant:
 
 ```text
-version	1.6
+version	1.7
 komira_sql_stream	Int32	Handle,CStr,ArrowStream	1.3
-komira_plan_stream	Int32	Handle,ConstBytes,UInt64,ArrowStream	1.6
+komira_plan_stream	Int32	Handle,ConstBytes,UInt64,ArrowStream	1.7
 ```
 
 The C prototypes in `komira.h`:
@@ -479,17 +479,28 @@ changes:
   window in which a setter could still change it, and the constructor is what
   remains. Still rejected: an options struct (its layout would become ABI),
   string key and value pairs, and environment variables (rule S2).
-- **Cancel and progress.** The engine has a `CancellationToken`, but the token is
-  local to `run_lowered_plan` today. The engine has no progress counter. The
-  proposal:
-  - `komira_cancel(ctx)` and `komira_progress(ctx, uint64_t *done, uint64_t *total)`,
-    callable from another thread while a run is in flight.
-  - Both go through one atomic control block that is allocated with the context
-    and never replaced. They do not touch the last error.
-  - A cancel with no run in flight does nothing.
-  - A cancelled run returns a new status code (-6) and leaves `*out` untouched.
-    An incrementally read stream would return `ECANCELED`.
-  - Progress is polled, never called back into the host.
+- **Cancel and progress** (decided and built in ABI 1.6; [src/so/README.md](../../src/so/README.md),
+  "Cancel and progress"). The earlier proposal here was `komira_cancel(ctx)` and
+  `komira_progress(ctx, ...)` on one control block per context, where a cancel with no
+  run in flight did nothing. What was built is a run handle the caller creates and
+  passes to the run instead:
+  - `komira_run_new`, `komira_run_free`, `komira_run_cancel(run)`,
+    `komira_run_progress(run, uint64_t *done, uint64_t *total)` and
+    `komira_sql_stream_run(ctx, sql, run, out)`. Cancel and progress are callable
+    from another thread while the run is in flight, and touch no context and no
+    last error.
+  - Why a handle and not the context: a cancel belongs to the run the caller chose.
+    A Ctrl-C that lands just as one query returns cancels that query's handle, which
+    no later run is given, so it cannot reach the next query. And a cancel that comes
+    before the call reaches the run, so a test cancels without racing the engine.
+  - A cancelled run returns `KOMIRA_ERR_CANCELLED` (-6), leaves `*out` untouched, and
+    sets the last error `QUERY_CANCELLED: execute: <reason>`. A cancel is observed
+    only while the plan runs (before each segment and at each morsel boundary); a
+    statement refused earlier keeps its own refusal.
+  - Progress counts the plan's segments: the total when the plan is checked, and the
+    done count as each segment finishes. It is polled, never called back into the
+    host.
+  - An incrementally read stream, when one exists, would return `ECANCELED`.
 - **Credentials** (decided in [credentials_and_writes.md](credentials_and_writes.md)).
   Constraints from the repository rules that design starts from:
   - Configuration comes as explicit calls. The provider-standard environment

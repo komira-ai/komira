@@ -40,6 +40,7 @@ from plan_ir.logical_plan import LogicalPlan
 from .engine_context import EngineContext
 from .engine_execute import run_lowered_plan_with
 from .engine_lower import lower_for_context
+from .run_control import RunControl
 
 comptime STEP_OPTIMIZE = "optimize"
 comptime STEP_LOWER = "lower"
@@ -109,13 +110,16 @@ def run_plan_batch[
     var plan: LogicalPlan,
     var opener: R,
     mut step: String,
+    control: RunControl,
 ) raises -> RecordBatch:
     """Optimize, lower and run `plan` on `ctx` and return the result batch.
 
     `step` is set to each step's name as the step starts, so a caller that
     catches the raise knows which step refused. The caller has started the
     query (`EngineContext.begin_query`): the footers lowering reads are the
-    ones already cached for it.
+    ones already cached for it. The run polls `control`'s cancel token and
+    counts its segments into its progress (`run_lowered_plan_with`); optimize
+    and lower do not poll it.
     """
     step = String(STEP_OPTIMIZE)
     var t_optimize = pt_now()
@@ -126,7 +130,7 @@ def run_plan_batch[
     var lowered = lower_for_context(optimized, ctx)
     pt_record[PH_LOWER](t_lower)
     step = String(STEP_EXECUTE)
-    return run_lowered_plan_with(ctx, lowered^, opener^)
+    return run_lowered_plan_with(ctx, lowered^, opener^, control)
 
 
 def run_plan(mut ctx: EngineContext, var plan: LogicalPlan) -> SqlOutcome:
@@ -144,12 +148,13 @@ def run_plan_with[
     The call is a query of its own: the footer cache is replaced first
     (`EngineContext.begin_query`), so the files the plan names are read as
     they are now. A Parquet scan of a remote store reads through the file
-    system `opener` opens on its bucket. Nothing raises.
+    system `opener` opens on its bucket. Nothing cancels the run. Nothing
+    raises.
     """
     ctx.begin_query()
     var step = String(STEP_OPTIMIZE)
     try:
-        var batch = run_plan_batch(ctx, plan^, opener^, step)
+        var batch = run_plan_batch(ctx, plan^, opener^, step, RunControl())
         var outcome = SqlOutcome()
         outcome.batches.append(batch^)
         return outcome^

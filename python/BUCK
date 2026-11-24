@@ -1,4 +1,4 @@
-load("@komira//python:dependencies.bzl", "PYARROW_MACOS", "PYARROW_REQUIREMENT", "PYARROW_WHEELS")
+load("@komira//python:dependencies.bzl", "DUCKDB_WHEEL", "PYARROW_MACOS", "PYARROW_REQUIREMENT", "PYARROW_WHEELS")
 load("@komira//python:install_test.bzl", "picked_files", "python_versions", "wheel_install_test")
 load("@komira//python:pythons.bzl", "CLASSIFIERS", "HOSTED", "PYTHONS", "REQUIRES_PYTHON")
 load("@komira//third_party/modular:pins.bzl", "OTHER_MOJO", "TOOLCHAIN_MOJO", "is_newer", "modular_wheel")
@@ -336,6 +336,21 @@ wheel_install_test(
     files = _TEST_FILES,
     exec_compatible_with = DARWIN_ARM64,
     target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
+)
+
+# The analysis job (examples/analysis_job.py) run from the installed wheel on
+# CPython 3.13, the one minor with a pinned DuckDB: it reads a Parquet file and
+# a CSV file, joins, groups, ranks with window functions, takes the top
+# customers and writes Parquet, and each answer, with the file it wrote, is
+# held to DuckDB's for the same SQL over the same files. The same query with the
+# join on the wrong key must differ from DuckDB's answer
+# (tests/test_analysis_job.py).
+wheel_install_test(
+    name = "analysis_job_test",
+    python = "komira//third_party/python:cpython",
+    wheels = [":komira_wheel", _PYARROW_WHL[""], "komira//python/tests:" + DUCKDB_WHEEL["file"]],
+    script = "komira//python/tests:test_analysis_job.py",
+    files = {"--example": "examples/analysis_job.py"},
 )
 
 # The same test on installs that must fail, each with the line it fails with

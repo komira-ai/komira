@@ -2,7 +2,7 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of so that holds
 # pointers.
 # =============================================================================
-# Seventeen `@export abi("C")` functions are the library's whole surface today:
+# Twenty-two `@export abi("C")` functions are the library's whole surface today:
 #
 #   int32_t  komira_abi_version(void);
 #   void    *komira_ctx_new(void);
@@ -38,6 +38,13 @@
 #                                int32_t has_header, int32_t all_varchar);
 #   int32_t  komira_register_json(void *ctx, const char *name,
 #                                 const char *path);
+#   void    *komira_run_new(void);
+#   void     komira_run_free(void *run);
+#   int32_t  komira_run_cancel(void *run);
+#   int32_t  komira_run_progress(void *run, uint64_t *out_done,
+#                                uint64_t *out_total);
+#   int32_t  komira_sql_stream_run(void *ctx, const char *sql, void *run,
+#                                  struct ArrowArrayStream *out);
 #   int32_t  komira_plan_stream(void *ctx, const uint8_t *plan,
 #                               uint64_t plan_len,
 #                               struct ArrowArrayStream *out);
@@ -58,8 +65,19 @@
 # `komira_ctx_free`, which rebuilds the one `OwnedPointer` over the same
 # allocation and destroys the session, stopping its workers. Freeing a handle twice, or using one
 # after `komira_ctx_free`, is undefined, as for `free(3)`; `komira_ctx_free`
-# of NULL does nothing. Every other pointer is the caller's: this library
-# reads or writes it during the call and keeps none.
+# of NULL does nothing. A run handle (`komira_run_new`) is the same: a
+# `RunControl` (a cancel token and a progress counter) in an `OwnedPointer`
+# whose free is relinquished, owned by the caller until `komira_run_free`,
+# which rebuilds the one `OwnedPointer`. Unlike a context, a run handle is
+# used from several threads at once: `komira_run_cancel` and
+# `komira_run_progress` may run while `komira_sql_stream_run` given the same
+# handle runs on another thread. They touch only atomic cells and the token's
+# shared slot (whose reason one claimed cancel writes before it stores the
+# flag), and the run works on a second handle of its own (`share`), so the
+# caller's `RunControl` is never written while another thread reads it. A run
+# handle is freed only once no call given it is running. Every other pointer
+# is the caller's: this library reads or writes it during the call and keeps
+# none.
 #
 # The Arrow stream. `komira_sql_stream` and `komira_plan_stream` fill the caller's
 # `struct ArrowArrayStream` (allocated by the caller) only when the call returns
@@ -73,7 +91,9 @@
 # released.
 #
 # Errors. A call returns `KOMIRA_OK` (0) or a negative `KOMIRA_ERR_*` code
-# (status.mojo). A call refused with `KOMIRA_ERR_NULL_ARG` on a live context
+# (status.mojo). A run that its run handle's cancel stopped is
+# `KOMIRA_ERR_CANCELLED`, with a `QUERY_CANCELLED: ` last error; the run
+# handle calls touch no context and store no last error. A call refused with `KOMIRA_ERR_NULL_ARG` on a live context
 # stores its refusal as the context's last error; `KOMIRA_ERR_BUFFER_TOO_SMALL`
 # stores nothing. Every source and render call first clears the context's last
 # error, and stores the engine's message when it returns `KOMIRA_ERR_ENGINE`.
@@ -117,8 +137,10 @@ from std.memory import OwnedPointer, unsafe_memcpy
 from arrow_ipc.c_data_stream import CArrowArrayStream, build_record_batch_stream
 
 from so.session import Session, session_options, try_new_session
+from sdk_exec.run_control import RunControl
 from so.sources import (
     csv_binding_bytes,
+    is_cancelled_error,
     json_binding_bytes,
     parquet_schema_bytes,
     plan_render_text,
@@ -129,6 +151,7 @@ from so.sources import (
     sql_result,
 )
 from so.status import (
+    KOMIRA_ERR_CANCELLED,
     KOMIRA_ERR_ENGINE,
     KOMIRA_ERR_NULL_ARG,
     KOMIRA_ERR_NULL_CTX,
@@ -148,7 +171,9 @@ from so.status import (
 # `CArrowArrayStream`, the Mojo struct of the Arrow C stream's layout. The
 # exported signatures spell every other pointer in full, for the same reason.
 # SAFETY: `void *`, the context handle: an address returned by
-# `komira_ctx_new`, valid until `komira_ctx_free`.
+# `komira_ctx_new`, valid until `komira_ctx_free`; and the run handle, an
+# address returned by `komira_run_new`, valid until `komira_run_free`. The
+# golden knows one opaque handle type, so both are spelled `komira_handle`.
 comptime Handle = UnsafePointer[NoneType, MutUntrackedOrigin]
 # SAFETY: `uint8_t *`, a caller-owned output buffer with its capacity beside it.
 comptime _Bytes = UnsafePointer[UInt8, MutUntrackedOrigin]
@@ -668,6 +693,48 @@ def komira_credential_seal(ctx: Handle, id: Int32, scope: Int32) abi("C") -> Int
         return KOMIRA_ERR_ENGINE
 
 
+def _sql_stream(
+    session: UnsafePointer[Session, MutUntrackedOrigin],
+    call: String,
+    sql: CStr,
+    control: RunControl,
+    out_stream: ArrowStream,
+) -> Int32:
+    """What `komira_sql_stream` and `komira_sql_stream_run` do once the
+    context, and the run handle of the second, are known to be non-NULL:
+    bound and copy the SQL text, run it under `control` and write the stream.
+    `call` names the export in its own refusals. A run that `control`'s cancel
+    stopped is `KOMIRA_ERR_CANCELLED`, every other refusal of the engine
+    `KOMIRA_ERR_ENGINE`."""
+    var n = _c_text_length(sql)
+    if not n:
+        session[].set_error(
+            call
+            + String(": sql is above ")
+            + String(KOMIRA_MAX_INPUT_BYTES)
+            + String(" bytes")
+        )
+        return KOMIRA_ERR_TOO_LARGE
+    var bytes = _copy_in(sql, UInt64(n.value()))
+    var text: String
+    try:
+        text = String(from_utf8=Span(bytes))
+    except:
+        session[].set_error(call + String(": the SQL text is not valid UTF-8"))
+        return KOMIRA_ERR_ENGINE
+    try:
+        var result = sql_result(session[], text, control)
+        # Nothing is written to `*out_stream` before this call, and it writes the
+        # stream whole once its own checks have passed.
+        build_record_batch_stream(result.take_batches(), result.take_schema(), out_stream)
+        return KOMIRA_OK
+    except e:
+        var message = String(e)
+        var status = KOMIRA_ERR_CANCELLED if is_cancelled_error(message) else KOMIRA_ERR_ENGINE
+        session[].set_error(message^)
+        return status
+
+
 @export
 def komira_sql_stream(ctx: Handle, sql: CStr, out_stream: ArrowStream) abi("C") -> Int32:
     """Run the SQL statement `sql` on the session and fill the caller's
@@ -685,6 +752,8 @@ def komira_sql_stream(ctx: Handle, sql: CStr, out_stream: ArrowStream) abi("C") 
     refusal, with the last error `<step>: <reason>` (`parse`, `bind`,
     `optimize`, `lower` or `execute`) or the export's error naming a column
     the stream cannot carry. The session stays usable after any refusal.
+    Nothing can cancel the run: `komira_sql_stream_run` is the call that takes
+    a run handle.
     """
     if Int(ctx) == 0:
         return KOMIRA_ERR_NULL_CTX
@@ -693,32 +762,126 @@ def komira_sql_stream(ctx: Handle, sql: CStr, out_stream: ArrowStream) abi("C") 
     if Int(sql) == 0 or Int(out_stream) == 0:
         session[].set_error(String("komira_sql_stream: sql or out is NULL"))
         return KOMIRA_ERR_NULL_ARG
-    var n = _c_text_length(sql)
-    if not n:
+    return _sql_stream(
+        session, String("komira_sql_stream"), sql, RunControl(), out_stream
+    )
+
+
+@always_inline
+def _run(run: Handle) -> UnsafePointer[RunControl, MutUntrackedOrigin]:
+    """The run control behind a non-NULL run handle."""
+    # SAFETY: `run` was returned by `komira_run_new` and has not been passed
+    # to `komira_run_free` (the documented contract of the handle); every
+    # caller tests for NULL first. The slot holds one live `RunControl`.
+    return run.bitcast[RunControl]()
+
+
+@export
+def komira_run_new() abi("C") -> Handle:
+    """Create a run handle: a cancel token that is not cancelled and a
+    progress counter at 0 of 0 segments. The caller frees it with
+    `komira_run_free`. Never NULL."""
+    var owned = OwnedPointer[RunControl](RunControl())
+    # SAFETY: `unsafe_leak` relinquishes the OwnedPointer's free, so the only
+    # owner of the allocation from here on is whoever holds the returned
+    # address; `komira_run_free` rebuilds the single OwnedPointer over it.
+    return owned^.unsafe_take_allocation().unsafe_leak().bitcast[NoneType]().unsafe_origin_cast[
+        MutUntrackedOrigin
+    ]()
+
+
+@export
+def komira_run_free(run: Handle) abi("C"):
+    """Destroy a run handle created by `komira_run_new`. NULL does nothing.
+    No call given the handle may still be running."""
+    if Int(run) == 0:
+        return
+    # SAFETY: `run` is the allocation `komira_run_new` leaked from its
+    # OwnedPointer and nothing else owns it (a run that was given the handle
+    # holds its own clone of the token and counts, and has returned), so this
+    # OwnedPointer is the single owner: it moves the control out and frees
+    # the slot once.
+    var owned = OwnedPointer[RunControl](unsafe_from_raw_pointer=_run(run))
+    var control = owned^.into_inner()
+    _ = control^
+
+
+@export
+def komira_run_cancel(run: Handle) abi("C") -> Int32:
+    """Cancel every run given `run`, the one in flight and every later one.
+    Callable from any thread, while a call given `run` is running on
+    another; a second cancel does nothing. Returns `KOMIRA_ERR_NULL_ARG` for a
+    NULL `run` and `KOMIRA_OK` otherwise; it touches no context."""
+    if Int(run) == 0:
+        return KOMIRA_ERR_NULL_ARG
+    # SAFETY: `run` is a live run handle (tested non-NULL; the caller frees it
+    # only after every call given it returned). `cancel` writes only through
+    # the token's shared slot, claimed by an atomic cell so that one caller
+    # writes, and reads no field another thread writes.
+    _run(run)[].cancel()
+    return KOMIRA_OK
+
+
+@export
+def komira_run_progress(
+    run: Handle,
+    # SAFETY: `uint64_t *`, one caller-owned slot each, written only on
+    # KOMIRA_OK.
+    out_done: UnsafePointer[UInt64, MutUntrackedOrigin],
+    out_total: UnsafePointer[UInt64, MutUntrackedOrigin],
+) abi("C") -> Int32:
+    """Store in `*out_done` the segments finished, and in `*out_total` the
+    segments counted, by the runs given `run`. Callable from any thread,
+    while a call given `run` is running on another. Both only grow, and
+    `*out_done` is at most `*out_total`. Returns `KOMIRA_ERR_NULL_ARG` for a
+    NULL `run`, `out_done` or `out_total` (nothing written) and `KOMIRA_OK`
+    otherwise; it touches no context."""
+    if Int(run) == 0 or Int(out_done) == 0 or Int(out_total) == 0:
+        return KOMIRA_ERR_NULL_ARG
+    # SAFETY: `run` is a live run handle (tested non-NULL); `snapshot` only
+    # loads two atomic cells.
+    var reading = _run(run)[].snapshot()
+    # SAFETY: `out_done` and `out_total` are non-NULL (tested above) and are
+    # caller-owned slots.
+    out_done[0] = UInt64(reading.done)
+    out_total[0] = UInt64(reading.total)
+    return KOMIRA_OK
+
+
+@export
+def komira_sql_stream_run(
+    ctx: Handle, sql: CStr, run: Handle, out_stream: ArrowStream
+) abi("C") -> Int32:
+    """`komira_sql_stream` under the run handle `run`: a `komira_run_cancel`
+    of it, from another thread, stops the run at its next check (before each
+    segment of the plan, and at each morsel boundary inside one), and the run
+    counts its segments into the handle's progress.
+
+    Returns what `komira_sql_stream` returns, and `KOMIRA_ERR_NULL_ARG` for a
+    NULL `run` too, and `KOMIRA_ERR_CANCELLED` when the run is refused at step
+    `execute` with `run` cancelled, `*out_stream` untouched and the last error
+    `QUERY_CANCELLED: execute: <reason>`. A cancel that comes after the run's
+    last check leaves the answer standing (`KOMIRA_OK`); a statement refused
+    before its plan runs keeps its own refusal. The session stays usable after
+    a cancel. `run` stays the caller's: it is not freed, and it may be given
+    to later calls, which a cancelled handle refuses too.
+    """
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(sql) == 0 or Int(run) == 0 or Int(out_stream) == 0:
         session[].set_error(
-            String("komira_sql_stream: sql is above ")
-            + String(KOMIRA_MAX_INPUT_BYTES)
-            + String(" bytes")
+            String("komira_sql_stream_run: sql, run or out is NULL")
         )
-        return KOMIRA_ERR_TOO_LARGE
-    var bytes = _copy_in(sql, UInt64(n.value()))
-    var text: String
-    try:
-        text = String(from_utf8=Span(bytes))
-    except:
-        session[].set_error(
-            String("komira_sql_stream: the SQL text is not valid UTF-8")
-        )
-        return KOMIRA_ERR_ENGINE
-    try:
-        var result = sql_result(session[], text)
-        # Nothing is written to `*out_stream` before this call, and it writes the
-        # stream whole once its own checks have passed.
-        build_record_batch_stream(result.take_batches(), result.take_schema(), out_stream)
-        return KOMIRA_OK
-    except e:
-        session[].set_error(String(e))
-        return KOMIRA_ERR_ENGINE
+        return KOMIRA_ERR_NULL_ARG
+    # SAFETY: `run` is a live run handle (tested non-NULL). The run works on a
+    # second handle of its own (`share`), so nothing here reads the caller's
+    # `RunControl` while another thread cancels through it.
+    var control = _run(run)[].share()
+    return _sql_stream(
+        session, String("komira_sql_stream_run"), sql, control, out_stream
+    )
 
 
 @export
@@ -792,23 +955,15 @@ def komira_register_json(ctx: Handle, name: CStr, path: CStr) abi("C") -> Int32:
 def komira_plan_stream(
     ctx: Handle, plan: ConstBytes, plan_len: UInt64, out_stream: ArrowStream
 ) abi("C") -> Int32:
-    """Decode the serialized plan `plan[0..plan_len]` (an authored
-    `WirePlanEnvelope`), run it on the session and fill the caller's
-    `struct ArrowArrayStream` at `out_stream` with its answer.
+    """Decode the authored `WirePlanEnvelope` `plan[0..plan_len]`, run it on
+    the session (optimized, lowered and run in-process, with no SQL front
+    end) and fill `*out_stream` with its answer, as `komira_sql_stream` does.
 
-    The plan is optimized, lowered and run in-process; no SQL text is made
-    and the SQL front end does not run. A scan carries its own source, so no
-    table need be registered. The answer is computed before the call returns.
-    `*out_stream` is written only on `KOMIRA_OK`, and the caller then owns the
-    stream and releases it once; it needs neither the session nor the handle,
-    so `komira_ctx_free` may come first. Returns `KOMIRA_ERR_NULL_CTX` for a
-    NULL `ctx`, `KOMIRA_ERR_NULL_ARG` for a NULL `plan` or `out_stream`,
-    `KOMIRA_ERR_TOO_LARGE` for a `plan_len` above `KOMIRA_MAX_INPUT_BYTES`
-    (64 MiB), checked before the plan is read, and `KOMIRA_ERR_ENGINE` for
-    every refusal, with the last error `<step>: <reason>` (`decode`,
-    `optimize`, `lower` or `execute`; an envelope with a write target or UDFs
-    is refused at `decode`) or the export's error naming a column the stream
-    cannot carry. The session stays usable after any refusal.
+    -1 for a NULL `ctx`; -2 for a NULL `plan` or `out_stream`; -5 for a
+    `plan_len` above `KOMIRA_MAX_INPUT_BYTES`, before the plan is read; -3
+    for every refusal, the last error `<step>: <reason>` (`decode`, which
+    refuses an envelope with a write target or UDFs, `optimize`, `lower` or
+    `execute`).
     """
     if Int(ctx) == 0:
         return KOMIRA_ERR_NULL_CTX

@@ -51,7 +51,7 @@ load fails. What each release changed is in the
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1006 is 1.6
+print(komira.abi_version())   # the engine's C ABI version: 1007 is 1.7
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
@@ -95,6 +95,16 @@ against the published package.
 - A session is a context manager. `close()` frees it and can be called again,
   and `closed` says whether it was. Any other call on a closed session raises
   `KomiraError`.
+- A session may be used from several threads. Its calls run one at a time: a
+  call made while another thread's call runs on the same session waits for it
+  to return. `close()` waits too, so a session is never freed under a running
+  call. Two sessions run their calls at once, so a session per thread is how
+  to run queries in parallel. A call made from a signal handler or a finalizer
+  while a call of the same thread is running on that session raises
+  `KomiraError` instead of waiting for itself. A `Result` reads without the
+  session, so reading one never waits for a call on its session; of two
+  threads that read one `Result`, one reads it and the other gets the
+  already-read `KomiraError`.
 - `komira.KomiraError` is the base class of every error komira raises on
   purpose. Its `status` attribute is the engine's status code, or `None`.
 - `komira.LibraryLoadError` is raised when the engine cannot be loaded. Its
@@ -122,7 +132,6 @@ answer's schema is read; neither on `import komira`.
 - Cancelling a query. A query cannot be interrupted while it runs: Ctrl-C
   during `Session.sql` raises `KeyboardInterrupt` when the engine has finished
   the query. The answer is freed, and the session runs the next query.
-- Using one session from two threads at once.
 - The DataFrame APIs: one shaped like pandas and one shaped like polars.
 - Registering CSV and JSON files.
 - Iceberg tables: reading one, and writing to one by its name in a catalog.
@@ -152,7 +161,7 @@ The package's layout and API are designed in
 | `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the plan encoder's tests; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |
 | `pythons.bzl` | the supported Pythons, the one list of them (Supported Pythons, below) |
-| `tests/` | the tests (`python_binding_test`, and `py_test` for the plan encoder: `test_plan_expr.py`, `test_plan_expr_goldens.py`, `test_plan_rel.py`, `test_plan_rel_goldens.py`, `test_plan_udf.py`, `test_plan_udf_goldens.py` and `test_plan_no_sql.py`), `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
+| `tests/` | the tests (`python_binding_test`, and `py_test` for the plan encoder: `test_plan_expr.py`, `test_plan_expr_goldens.py`, `test_plan_rel.py`, `test_plan_rel_goldens.py`, `test_plan_udf.py`, `test_plan_udf_goldens.py` and `test_plan_no_sql.py`), `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, `test_analysis_job.py`, which runs `examples/analysis_job.py` from the installed wheel and compares its answers with DuckDB's (`:analysis_job_test`), and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
 
 ### Supported Pythons
 
@@ -263,6 +272,7 @@ The tests below run on Linux x86_64 as build actions, with
 `//python/tests:credentials_test`, `//python/tests:credentials_lib_test`,
 `//python/tests:iceberg_test`, `//python/tests:sql_test`,
 `//python/tests:sql_fake_test`, `//python/tests:sql_interrupt_test`,
+`//python/tests:threads_test`,
 `//python/tests:runtime_test` and `//python/tests:cpu_test`:
 
 | test | what it covers |
@@ -273,6 +283,7 @@ The tests below run on Linux x86_64 as build actions, with
 | `sql_test` | `Session.sql` on the real library: `SELECT 1 AS n`, a GROUP BY over a checked-in Parquet file, an aggregate, an answer of no rows, each terminal, the engine's refusals, and a result read after its session was closed or collected |
 | `sql_fake_test` | `Session.sql` on a stand-in Arrow stream that counts releases: a result read once, each stream, schema and batch released exactly once whoever ends it, a requested schema refused, a schema error raised from `sql` and a batch error from the terminal, the argument checks, and results left unread at exit |
 | `sql_interrupt_test` | Ctrl-C during `Session.sql`, on a stand-in whose `komira_sql_stream` raises SIGINT in the calling thread: `KeyboardInterrupt` once the call returns, the stream it filled released exactly once, the session answering the next query (also after a refusal SIGINT came during), a handler that does not raise running once while `sql` returns the answer, and an ignored SIGINT changing nothing |
+| `threads_test` | a session used from several threads, on a stand-in that journals each call and holds one at a gate: a call waits for the call running on its session, each thread gets its own error message, `close` waits for the running call, two sessions run at once, a signal handler calling the session inside a call is refused, a `Result` reads while its session is busy, and of two threads reading one `Result` one reads it |
 | `two_call_test` | the error path, the two-call protocol and the arguments of each call, on a stand-in |
 | `credentials_test` | the credential objects, and what sealing each sends the library, on a stand-in's fake store that records every credential call |
 | `iceberg_test` | the Iceberg catalog, table and SigV4 values, with no library: each argument's checks and refusals with their full messages, which credential fits a catalog with and without SigV4, how a table name splits, repr, and no pickle or copy |
