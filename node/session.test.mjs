@@ -1,6 +1,8 @@
 // The calls over the real libkomira: the version, the error path with the
 // session's last error, the Parquet schema, the rendered plan and the
-// lifetime of a session. The library is loaded by path, as a host does.
+// lifetime of a session. The library is loaded by path, as a host does. The
+// calls on a session return Promises (the session thread, thread.test.mjs);
+// misuse of the addon throws before anything is queued.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -29,10 +31,10 @@ test('abiVersion is 1.2', () => {
   assert.equal(addon.abiVersion(), 1002);
 });
 
-test('a missing Parquet file is an Error with status -3 and the last error text', () => {
+test('a missing Parquet file rejects with an Error with status -3 and the last error text', async () => {
   const s = session();
   try {
-    assert.throws(() => addon.registerParquet(s, 'gone', '/no/such/file.parquet'), (err) => {
+    await assert.rejects(addon.registerParquet(s, 'gone', '/no/such/file.parquet'), (err) => {
       assert.ok(err instanceof Error);
       assert.equal(err.status, -3);
       assert.equal(err.code, 'KOMIRA_ERR_ENGINE');
@@ -43,38 +45,38 @@ test('a missing Parquet file is an Error with status -3 and the last error text'
       return true;
     });
   } finally {
-    addon.freeSession(s);
+    await addon.freeSession(s);
   }
 });
 
-test('a text file is refused as Parquet, and a good call afterwards works on the same session', () => {
+test('a text file is refused as Parquet, and a good call afterwards works on the same session', async () => {
   const s = session();
   try {
-    assert.throws(() => addon.parquetSchema(s, new URL(import.meta.url).pathname), { status: -3 });
-    assert.equal(addon.registerParquet(s, 'two', PARQUET), undefined);
+    await assert.rejects(addon.parquetSchema(s, new URL(import.meta.url).pathname), { status: -3 });
+    assert.equal(await addon.registerParquet(s, 'two', PARQUET), undefined);
   } finally {
-    addon.freeSession(s);
+    await addon.freeSession(s);
   }
 });
 
-test('parquetSchema returns the schema bytes as a Buffer', () => {
+test('parquetSchema resolves to the schema bytes as a Buffer', async () => {
   const s = session();
   try {
-    const bytes = addon.parquetSchema(s, PARQUET);
+    const bytes = await addon.parquetSchema(s, PARQUET);
     assert.ok(Buffer.isBuffer(bytes));
     assert.equal(bytes.toString('hex'), SCHEMA_HEX);
     assert.ok(bytes.includes('i64') && bytes.includes('s'));
-    assert.equal(addon.parquetSchema(s, PARQUET).toString('hex'), SCHEMA_HEX);
+    assert.equal((await addon.parquetSchema(s, PARQUET)).toString('hex'), SCHEMA_HEX);
   } finally {
-    addon.freeSession(s);
+    await addon.freeSession(s);
   }
 });
 
-test('planRender returns the text of the plan, from a Buffer and from a Uint8Array view', () => {
+test('planRender resolves to the text of the plan, from a Buffer and from a Uint8Array view', async () => {
   const s = session();
   try {
     const plan = Buffer.from(SCAN_PLAN_HEX, 'hex');
-    const text = addon.planRender(s, plan);
+    const text = await addon.planRender(s, plan);
     assert.equal(typeof text, 'string');
     assert.ok(text.startsWith('Scan(path="orders"'), text);
     assert.match(text, /komira\.orc\(orders/);
@@ -82,28 +84,28 @@ test('planRender returns the text of the plan, from a Buffer and from a Uint8Arr
     // A view into a larger buffer: the offset is honoured.
     const padded = new Uint8Array(plan.length + 7);
     padded.set(plan, 3);
-    assert.equal(addon.planRender(s, padded.subarray(3, 3 + plan.length)), text);
+    assert.equal(await addon.planRender(s, padded.subarray(3, 3 + plan.length)), text);
   } finally {
-    addon.freeSession(s);
+    await addon.freeSession(s);
   }
 });
 
-test('planRender of bytes that are not a plan is status -3 with a last error', () => {
+test('planRender of bytes that are not a plan rejects with status -3 and a last error', async () => {
   const s = session();
   try {
     for (const bad of [new Uint8Array([0xff, 0xff, 0xff]), new Uint8Array(0)]) {
-      assert.throws(() => addon.planRender(s, bad), (err) => {
+      await assert.rejects(addon.planRender(s, bad), (err) => {
         assert.equal(err.status, -3);
         assert.ok(err.lastError.length > 0);
         return true;
       });
     }
   } finally {
-    addon.freeSession(s);
+    await addon.freeSession(s);
   }
 });
 
-test('arguments of the wrong kind are TypeErrors with no status', () => {
+test('arguments of the wrong kind are TypeErrors with no status, thrown before anything is queued', async () => {
   const s = session();
   try {
     const refuse = (call) => assert.throws(call, (err) => {
@@ -124,15 +126,15 @@ test('arguments of the wrong kind are TypeErrors with no status', () => {
     refuse(() => addon.parquetSchema(foreign.make(), PARQUET));
     refuse(() => addon.freeSession(foreign.make()));
   } finally {
-    addon.freeSession(s);
+    await addon.freeSession(s);
   }
 });
 
-test('freeSession is idempotent, and a freed session is refused', () => {
+test('freeSession is idempotent, and a freed session is refused', async () => {
   const before = addon.sessionStats();
   const s = session();
-  assert.equal(addon.freeSession(s), undefined);
-  assert.equal(addon.freeSession(s), undefined);
+  assert.equal(await addon.freeSession(s), undefined);
+  assert.equal(await addon.freeSession(s), undefined);
   const after = addon.sessionStats();
   assert.equal(after.created - before.created, 1);
   assert.equal(after.freed - before.freed, 1, 'komira_ctx_free was not called exactly once');
@@ -140,12 +142,12 @@ test('freeSession is idempotent, and a freed session is refused', () => {
   assert.throws(() => addon.planRender(s, new Uint8Array(1)), { code: 'KOMIRA_SESSION_FREED' });
 });
 
-test('two sessions are separate: freeing one leaves the other usable', () => {
+test('two sessions are separate: freeing one leaves the other usable', async () => {
   const a = session();
   const b = session();
-  addon.freeSession(a);
-  assert.equal(addon.registerParquet(b, 'two', PARQUET), undefined);
-  addon.freeSession(b);
+  await addon.freeSession(a);
+  assert.equal(await addon.registerParquet(b, 'two', PARQUET), undefined);
+  await addon.freeSession(b);
 });
 
 // Collect garbage, then let the finalizers of Node-API externals run (node
@@ -181,4 +183,17 @@ test('a session freed by freeSession is not freed again by its finalizer', async
   const after = addon.sessionStats();
   assert.equal(after.created - before.created, 5);
   assert.equal(after.freed - before.freed, 5, 'a freed session was freed again by its finalizer');
+});
+
+test('a session whose calls ran on its thread and that is never freed is freed once by its finalizer', async () => {
+  const before = addon.sessionStats();
+  await (async function useAndDrop() {
+    const s = session();
+    assert.equal(await addon.registerParquet(s, 'two', PARQUET), undefined);
+    assert.equal((await addon.parquetSchema(s, PARQUET)).toString('hex'), SCHEMA_HEX);
+  })();
+  await collect(() => addon.sessionStats().freed - before.freed >= 1);
+  const after = addon.sessionStats();
+  assert.equal(after.created - before.created, 1);
+  assert.equal(after.freed - before.freed, 1, 'the finalizer did not free the session exactly once');
 });
