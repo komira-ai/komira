@@ -172,6 +172,40 @@ _FAKE_RUNTIME = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# The variant selector (docs/design/isa_variants.md, decision 5): from a
+# directory with a VARIANTS manifest the loader opens the highest CPU level
+# whose features every processor lists, picks a lower one only when the CPU
+# lacks a feature of the higher, refuses a CPU below the floor with
+# UnsupportedCpuError, and refuses a damaged manifest, an unreadable cpuinfo
+# or a missing variant file with LibraryLoadError. The choices are the table
+# of fixtures/isa_variants, over the manifest the build writes from the
+# linux-x86_64 row and the manifests of rows not shipped yet.
+_ISA_FIXTURES = [
+    "README.md",
+    "VARIANTS_aarch64",
+    "VARIANTS_macos",
+    "VARIANTS_x86_64_v4",
+    "choices.tsv",
+    "cpuinfo_aarch64_cortex_a72.txt",
+    "cpuinfo_aarch64_neoverse_n1.txt",
+    "cpuinfo_x86_64_core2.txt",
+    "cpuinfo_x86_64_skylake_sp.txt",
+    "cpuinfo_x86_64_westmere.txt",
+]
+
+[python_binding_test(
+    name = "variants_test" + p["suffix"],
+    src = "test_variants.py",
+    data = {
+        "cpuinfo_x86_64_v3.txt": "fixtures/cpuinfo_x86_64_v3.txt",
+        "fake_v1_3/libkomira.so": ":fake_v1_3",
+        "fake_v2/libkomira.so": ":fake_v2",
+        "isa_variants/VARIANTS_shipped": "komira//tools/build/package/libkomira:libkomira_variants_manifest",
+    } | {"isa_variants/" + f: "fixtures/isa_variants/" + f for f in _ISA_FIXTURES},
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # The public surface on the real library: abi_version(), Session,
 # register_parquet and a session's close.
 [python_binding_test(

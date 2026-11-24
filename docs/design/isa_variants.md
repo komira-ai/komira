@@ -3,9 +3,9 @@
 Status: design, partly built. What already exists is marked **EXISTS**, with the path on `main` that
 does it; everything else is **PROPOSED**. Built: the `isa_variants` field and its checks, the
 x86-64-v2 toolchain, C at the floor, the variant links, the variants directory with its manifest and
-the load of each variant from it (**EXISTS** marks below). Not built yet: the wheel's and the npm
-packages' copy of that directory, the selector, `target_features` in the compile, and the
-generic-arm64 guard of `quote_region_mask_u64`. Scope: the `libkomira` that the Python wheel and the npm platform packages carry
+the load of each variant from it, and the Python selector (**EXISTS** marks below). Not built yet:
+the wheel's and the npm packages' copy of that directory, the Node selector, `target_features` in
+the compile, and the generic-arm64 guard of `quote_region_mask_u64`. Scope: the `libkomira` that the Python wheel and the npm platform packages carry
 ([python_package.md](python_package.md), [typescript_package.md](typescript_package.md)). The Mojo
 program bundles of `tools/build/package` already have their own level check and are not changed here
 (see [What is not changed](#what-is-not-changed)).
@@ -228,10 +228,18 @@ link target is declared, and the manifest gains its line. Neither loader changes
 
 ### 5. How the loader picks a variant
 
-The selector lives in each language package's loader, just before the library is opened. **PROPOSED**
-for Python, in `_native.load`, replacing the fixed x86-64-v3 check of `_check_cpu`. For Node, it is
-the main package's loading step, replacing "on linux-x64, it runs the CPU check"
+The selector lives in each language package's loader, just before the library is opened.
+**EXISTS** for Python: `_select_variant`, called by `_native.load`
+([python/komira/_native.py](../../python/komira/_native.py)). **PROPOSED** for Node: the main
+package's loading step, replacing "on linux-x64, it runs the CPU check"
 ([typescript_package.md](typescript_package.md), "How the package finds libkomira").
+
+Until the wheel copies the variants directory, the Python loader also opens a directory without a
+`VARIANTS` manifest, which is what the wheel's `komira/_lib/` and the tests' library directories
+are today: it holds one `libkomira`, built for the row's own `target_cpu`, and the fixed x86-64-v3
+check of `_check_cpu` still guards it. Only a directory that has a manifest goes through the steps
+below. When the wheel carries the variants directory, a missing manifest becomes the
+`LibraryLoadError` of step 1 and `_check_cpu` goes.
 
 1. Read `<dir>/VARIANTS`. A missing or malformed manifest is a `LibraryLoadError` naming the file.
    An installed package always carries one, so without it the install is damaged.
@@ -251,7 +259,9 @@ the main package's loading step, replacing "on linux-x64, it runs the CPU check"
 The rest of the load is unchanged. The library is opened once per process and never closed, and a
 second load from another path is refused. So a process holds one variant, and the zygote-forked UDF
 workers inherit it. The selector takes the directory and the cpuinfo path as private arguments, as
-`_check_cpu` takes `cpuinfo` today, so tests plant both.
+`_check_cpu` takes `cpuinfo` today, so tests plant both. The loader keeps the directory it loaded
+from, so a second load of the same directory returns the same library without reading the CPU
+again, and the runtime check is given the directory's own `lib/`, not one beside the variant.
 
 The selector adds no environment variable (rule S2), no user setting, and no public name. A user
 whose virtual machine hides a flag gets the lower variant. That is correct: the hidden flag may not
@@ -321,7 +331,12 @@ Timing is never asserted.
   [tools/build/tests/functional/platform_table/cases.bzl](../../tools/build/tests/functional/platform_table/cases.bzl):
   an empty list, a duplicate name, a non-increasing `requires`, and no variant equal to `target_cpu`.
 - **The selector**, from planted cpuinfo files and planted directories, in Python and in the Node
-  package's tests.
+  package's tests. **EXISTS** for Python: `variants_test`
+  ([python/tests/test_variants.py](../../python/tests/test_variants.py)), with the fixtures and the
+  table of expected choices in
+  [python/tests/fixtures/isa_variants](../../python/tests/fixtures/isa_variants/README.md) and the
+  shipped manifest read from `//tools/build/package/libkomira:libkomira_variants_manifest`, written
+  from the row.
   - Both languages share one fixture set and one table of expected choices, so the two loaders cannot
     disagree.
   - The fixtures are written from real `/proc/cpuinfo` files of each level. The cases:
@@ -415,7 +430,7 @@ without it.
    one link target per variant, and the directory layout and manifest. Then the wheel's `komira/_lib/`
    copy, the size rows and the per-variant installed-wheel run.
 3. **The selector** in Python and in the Node package, with the shared fixtures and expected-choice
-   table.
+   table. The Python half is built (decision 5).
 4. **Later, each on its own:** `x86-64-v4` and `neoverse-n1`, when [decision 4](#4-when-a-higher-variant-is-added)
    holds.
 

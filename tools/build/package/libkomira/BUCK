@@ -4,7 +4,7 @@ load("@komira//tools/build/platforms:isa_variants.bzl", "variant_label_name")
 load("@komira//tools/build/platforms:table.bzl", "row")
 load(":dist.bzl", "libkomira_dist_load", "picked_dir")
 load(":elf_report.bzl", "libkomira_elf_report")
-load(":variants.bzl", "libkomira_variants", "libkomira_variants_load")
+load(":variants.bzl", "libkomira_variants", "libkomira_variants_load", "libkomira_variants_manifest")
 load("@komira//tools/build/package/install_check:install_check.bzl", "conda_install_check")
 
 # libkomira as a conda package. The package is so's own: the library's
@@ -179,6 +179,14 @@ libkomira_variants(
     libs = _LIBS,
     native_owners = _NATIVE_OWNERS,
     visibility = ["PUBLIC"],
+)
+
+# The directory's VARIANTS alone, written from the row without linking a
+# variant: what the Python loader's selector test (python/tests) reads as the
+# shipped manifest.
+libkomira_variants_manifest(
+    name = "libkomira_variants_manifest",
+    visibility = ["//python/tests:"],
 )
 
 staged_files(

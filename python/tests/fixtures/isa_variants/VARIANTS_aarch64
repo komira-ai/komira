@@ -1,0 +1,2 @@
+generic	libkomira.so	asimd fp
+neoverse-n1	variants/neoverse-n1/libkomira.so	aes asimd asimddp asimdhp asimdrdm atomics crc32 dcpop fp fphp lrcpc pmull sha1 sha2

@@ -34,6 +34,12 @@ tools/build/toolchains/README.md), so each variant of the row runs where it is c
 It is `libkomira_dist_load` (dist.bzl) for a directory of more than one library: the same copy,
 environment, host C++ runtime and `expect_failure` contract, with the library chosen by its
 manifest line and the check that no other variant is mapped.
+
+    libkomira_variants_manifest(name)
+
+The file `VARIANTS` alone, the same text `libkomira_variants` writes into the directory, without
+linking any variant: the manifest the language packages' selector tests read
+(python/tests/test_variants.py), so their expected choices follow the row.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -89,6 +95,15 @@ _libkomira_variants = rule(
     },
 )
 
+def _manifest_impl(ctx):
+    return [DefaultInfo(default_output = ctx.actions.write("VARIANTS", variants_manifest(row(_ROW), _LIB_FILE)))]
+
+_libkomira_variants_manifest = rule(
+    impl = _manifest_impl,
+    doc = "The VARIANTS manifest of the linux-x86_64 row alone, the text `libkomira_variants` writes into its directory. See variants.bzl.",
+    attrs = {},
+)
+
 def _load_impl(ctx):
     tc = ctx.attrs.toolchain[MojoToolchainInfo]
     src = ctx.attrs.dir[DefaultInfo].default_outputs[0]
@@ -127,3 +142,4 @@ def _libkomira_variants_load_macro(**kwargs):
 
 libkomira_variants = declares_docs(_libkomira_variants_macro)
 libkomira_variants_load = declares_docs(_libkomira_variants_load_macro)
+libkomira_variants_manifest = declares_docs(_libkomira_variants_manifest)
