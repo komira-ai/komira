@@ -1,7 +1,11 @@
 # Per-ISA variants of libkomira: levels, layout, selector and size
 
-Status: design, not built. What already exists is marked **EXISTS**, with the path on `main` that does
-it; everything else is **PROPOSED**. Scope: the `libkomira` that the Python wheel and the npm platform packages carry
+Status: design, partly built. What already exists is marked **EXISTS**, with the path on `main` that
+does it; everything else is **PROPOSED**. Built: the `isa_variants` field and its checks, the
+x86-64-v2 toolchain, C at the floor, the variant links, the variants directory with its manifest and
+the load of each variant from it (**EXISTS** marks below). Not built yet: the wheel's and the npm
+packages' copy of that directory, the selector, `target_features` in the compile, and the
+generic-arm64 guard of `quote_region_mask_u64`. Scope: the `libkomira` that the Python wheel and the npm platform packages carry
 ([python_package.md](python_package.md), [typescript_package.md](typescript_package.md)). The Mojo
 program bundles of `tools/build/package` already have their own level check and are not changed here
 (see [What is not changed](#what-is-not-changed)).
@@ -10,8 +14,8 @@ program bundles of `tools/build/package` already have their own level check and 
 
 Each platform row compiles for exactly one CPU. **EXISTS:** `target_cpu` in
 [tools/build/platforms/table.bzl](../../tools/build/platforms/table.bzl) is `x86-64-v3` for
-linux-x86_64, `apple-m1` for darwin-arm64, and `generic` with `+outline-atomics` for the reserved
-linux-arm64 row. Every `mojo build` passes that value as `--target-cpu`
+linux-x86_64, `apple-m1` for darwin-arm64, and `generic` with `+outline-atomics` for the
+linux-arm64 row (registered, with no toolchain building for it yet). Every `mojo build` passes that value as `--target-cpu`
 ([tools/build/mojo/compile.bzl](../../tools/build/mojo/compile.bzl), `_build_executable`), and so does
 every Linux C compile through zig's `-mcpu` ([tools/build/mojo/cxx.bzl](../../tools/build/mojo/cxx.bzl));
 macOS C compiles at zig's generic arm64.
@@ -56,7 +60,7 @@ below it.
 |---|---|---|
 | linux-x86_64 | `x86-64-v2`, `x86-64-v3`, `x86-64-v4` | v2 and v3. v4 waits for [the conditions in 4](#4-when-a-higher-variant-is-added) |
 | darwin-arm64 | `apple-m1` | yes, as today: one variant |
-| linux-arm64 (reserved) | `generic` (+outline-atomics), `neoverse-n1` | generic when the row is registered. neoverse-n1 waits for the conditions in 4 |
+| linux-arm64 | `generic` (+outline-atomics), `neoverse-n1` | generic once a toolchain builds for the row (it is registered, with none yet). neoverse-n1 waits for the conditions in 4 |
 
 - **linux-x86_64 gets an x86-64-v2 floor.**
   - The floor library runs on every x86-64 CPU sold in the last fifteen years except the rare parts
@@ -82,7 +86,7 @@ below it.
   BF16, I8MM and SME, which no komira source uses, and no Apple chip offers SVE outside SME's
   streaming mode. A second variant would add size and no faster code.
 - **linux-arm64 gets `generic` and `neoverse-n1`.**
-  - The reserved row's comment already sets a generic ARMv8-A floor, because a Raspberry Pi must run
+  - The row's comment already sets a generic ARMv8-A floor, because a Raspberry Pi must run
     what the servers build. The Pi 4's Cortex-A72 is ARMv8.0 without the crypto extension.
   - `neoverse-n1` (ARMv8.2 with LSE atomics, dot product, FP16 and the crypto extension) is the CPU of
     the Neoverse N1 servers, and every later Neoverse core implements it.
@@ -96,7 +100,9 @@ npm platform packages copy ([typescript_package.md](typescript_package.md), "The
 self-contained"). That directory is itself not on `main` yet: it lands with the change that makes the
 wheel self-contained, and today's wheel carries `libkomira.so` and the owners in `lib/` and takes the
 Mojo runtime from `mojo-compiler` (**EXISTS:** [python/BUCK](../../python/BUCK)). The variants build on
-that change. **PROPOSED** layout for linux-x86_64:
+that change. The layout for linux-x86_64 (**EXISTS** as a directory of its own:
+`//tools/build/package/libkomira:libkomira_variants`, [variants.bzl](../../tools/build/package/libkomira/variants.bzl);
+no package copies it yet):
 
 ```
 VARIANTS                               the manifest (below)
@@ -138,8 +144,10 @@ lib/...                                native owners and the Mojo runtime librar
 
 ### 3. How the build makes a variant
 
-- **The platform table gains `isa_variants`** (PROPOSED). It is a field of every row: a list of
-  `isa_variant(name, target_cpu, target_features, requires)`, lowest first. The completeness check
+- **The platform table gains `isa_variants`** (**EXISTS:**
+  [tools/build/platforms/isa_variants.bzl](../../tools/build/platforms/isa_variants.bzl); the table
+  lists only the variants that are built, so v4 and `neoverse-n1` are not in it). It is a field of every row: a list of
+  `isa_variant(name, target_cpu, requires, target_features = [])`, lowest first. The completeness check
   at the bottom of the table refuses a row in each of these cases:
   - the list is empty;
   - two variants share a name;
@@ -191,10 +199,11 @@ lib/...                                native owners and the Mojo runtime librar
     The build task measures the owners with hot loops (`compression`, `parquet_codec`) at both
     levels. If one is slower at v2, that owner gets one build per variant in the variant's own
     `lib/`, instead of moving the whole directory's C to v3.
-- **`target_features` is wired into the compile.** No rule reads it today
-  (`grep -rn target_features tools/build` finds only the table and its README), so the generic
-  arm64 row's `+outline-atomics` is not applied yet. The build task passes the field to `mojo build`
-  and to zig's `-mcpu` suffixes.
+- **`target_features` is wired into the compile.** No rule passes it to a compile today: only the
+  table, its checks and its README read it, so the generic arm64 row's `+outline-atomics` is not
+  applied yet, and the table refuses a variant other than the row's own build that sets it
+  (**EXISTS**, `variant_refusals` in `tools/build/platforms/isa_variants.bzl`). A later task passes
+  the field to `mojo build` and to zig's `-mcpu` suffixes.
 
 ### 4. When a higher variant is added
 
