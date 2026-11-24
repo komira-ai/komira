@@ -100,9 +100,19 @@ against the published package.
   - `to_arrow()`, the whole answer as a `pyarrow.Table`;
   - `to_reader()`, a `pyarrow.RecordBatchReader` that reads batches as they
     are asked for;
+  - `to_pandas()`, the whole answer as a `pandas.DataFrame`, converted by
+    pyarrow's `Table.to_pandas()` with its default dtypes (an integer column
+    with nulls becomes `float64`, a decimal holds `decimal.Decimal`, a
+    timestamp keeps its unit);
+  - `to_polars()`, the whole answer as a `polars.DataFrame`, converted by
+    `polars.from_arrow`;
   - `__arrow_c_stream__()`, the Arrow PyCapsule interface, so
     `pyarrow.table(result)` and other Arrow libraries read it with no copy. A
     requested schema raises `KomiraError`.
+
+  pandas and polars are not installed with komira. When one is missing,
+  `to_pandas()` or `to_polars()` raises `ImportError` saying what to install
+  (`pip install pandas`, `pip install polars`), and the result stays unread.
 
   Reading it a second time raises `KomiraError`: run the query again. A
   result still reads after its session is closed, and one never read frees
@@ -141,7 +151,6 @@ answer's schema is read; neither on `import komira`.
 
 ## What does not work yet
 
-- Results as pandas or polars frames (`to_pandas`, `to_polars`).
 - The module-level `komira.sql` and `komira.register_parquet` on a default
   session.
 - Cancelling a query. A query cannot be interrupted while it runs: Ctrl-C
@@ -291,7 +300,8 @@ The tests below run on Linux x86_64 as build actions, with
 `//python/tests:credentials_test`, `//python/tests:credentials_lib_test`,
 `//python/tests:iceberg_test`, `//python/tests:sql_test`,
 `//python/tests:sql_fake_test`, `//python/tests:sql_interrupt_test`,
-`//python/tests:register_text_test`, `//python/tests:threads_test`,
+`//python/tests:result_frames_test`, `//python/tests:register_text_test`,
+`//python/tests:threads_test`,
 `//python/tests:runtime_test` and `//python/tests:cpu_test`:
 
 | test | what it covers |
@@ -304,6 +314,7 @@ The tests below run on Linux x86_64 as build actions, with
 | `sql_fake_test` | `Session.sql` on a stand-in Arrow stream that counts releases: a result read once, each stream, schema and batch released exactly once whoever ends it, a requested schema refused, a schema error raised from `sql` and a batch error from the terminal, the argument checks, and results left unread at exit |
 | `sql_interrupt_test` | Ctrl-C during `Session.sql`, on a stand-in whose `komira_sql_stream` raises SIGINT in the calling thread: `KeyboardInterrupt` once the call returns, the stream it filled released exactly once, the session answering the next query (also after a refusal SIGINT came during), a handler that does not raise running once while `sql` returns the answer, and an ignored SIGINT changing nothing |
 | `threads_test` | a session used from several threads, on a stand-in that journals each call and holds one at a gate: a call waits for the call running on its session, each thread gets its own error message, `close` waits for the running call, two sessions run at once, a signal handler calling the session inside a call is refused, a `Result` reads while its session is busy, and of two threads reading one `Result` one reads it |
+| `result_frames_test` | `to_pandas` and `to_polars` on the real library: every integer width at its edges, nullable integers, strings, a bool, decimals, timestamps and a date, equal in values and dtypes to pyarrow's and polars' own conversion of the same table; two million rows; no rows; read once. In new interpreters, the library loaded before pyarrow (the load-order case), and on a stand-in stream, each stream released once, a failing batch and a missing pandas or polars. CPython 3.13 and 3.14 (polars on 3.13 only) |
 | `two_call_test` | the error path, the two-call protocol and the arguments of each call, on a stand-in |
 | `credentials_test` | the credential objects, and what sealing each sends the library, on a stand-in's fake store that records every credential call |
 | `iceberg_test` | the Iceberg catalog, table and SigV4 values, with no library: each argument's checks and refusals with their full messages, which credential fits a catalog with and without SigV4, how a table name splits, repr, and no pickle or copy |

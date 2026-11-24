@@ -6,12 +6,14 @@ Release 1's surface is built ([python/README.md](../../python/README.md)): the l
 `register_parquet` and `close`, `abi_version()`, `__version__`, `KomiraError`, `LibraryLoadError`
 and `UnsupportedCpuError`, and their tests. The linux-x86_64 wheel is built and carries `libkomira`, its native
 owners and the Mojo runtime libraries in one directory (decision 6), so `pip install komira` needs no package of
-Modular's. `Session.sql` and `Result` are built, with `to_arrow`, `to_reader` and `__arrow_c_stream__`
-(a result still reads after its session is closed), and the wheel requires pyarrow.
+Modular's. `Session.sql` and `Result` are built, with `to_arrow`, `to_reader`, `to_pandas`, `to_polars` and
+`__arrow_c_stream__` (a result still reads after its session is closed), and the wheel requires pyarrow;
+the wheel declares no `pandas` or `polars` extra yet (its rule writes no `Provides-Extra`), so the
+`ImportError` of a missing one names the distribution (`pip install pandas`) until it does.
 `Session.register_csv(name, path, *, delimiter=",", header=True, all_varchar=False)` and
 `Session.register_json(name, path)` are built (`komira_register_csv` and `komira_register_json`,
-ABI 1.5): decision 4's CSV and NDJSON registration, from the engine's own schema. `to_pandas`,
-`to_polars`, the default session, the per-session lock and the fork hook are not built, and
+ABI 1.5): decision 4's CSV and NDJSON registration, from the engine's own schema. The default session,
+the per-session lock and the fork hook are not built, and
 `UnsupportedOperation` is not public yet; the linux-arm64 and macos-arm64
 wheels are not built.
 
@@ -171,7 +173,8 @@ Behaviour each later pull request implements, fixed here so they agree:
   on, whether or not its consumer reads it. A `requested_schema` other than `None` raises
   `UnsupportedOperation`; casting on request is a later, additive decision.
 - **pandas and polars are optional.** `to_pandas` and `to_polars` import them when called; when one is
-  missing, the `ImportError` names the extra that installs it (`pip install komira[pandas]`).
+  missing, the `ImportError` names the extra that installs it (`pip install komira[pandas]`). Until the
+  wheel declares the extras, it names the distribution (`pip install pandas`).
 - **A closed session refuses every call** with `KomiraError`, and closing a session while a `Result` of
   it is unread never crashes the interpreter. Whether that unread result then still reads, or refuses, is
   the session pull request's choice, held by a test of each case it allows.
@@ -491,8 +494,9 @@ and `_py311`, `_py312` and `_py314` on the other supported minors), alone: the e
   but an `abort()`, a fault, stack exhaustion or an out-of-memory kill cannot be caught in the process
   ([libkomira_run_abi.md](libkomira_run_abi.md) §8 lists the inputs refused before they reach one, and
   the ones that still do). The package README says so, under "What does not work yet".
-- `Result.to_polars` and `to_pandas` convert through Arrow; their dtype mapping is the Arrow terminals
-  pull request's tests.
+- `Result.to_polars` and `to_pandas` convert through Arrow, with pyarrow's `Table.to_pandas()` and
+  `polars.from_arrow` and no options of their own; `python/tests/test_result_frames.py` holds the dtype
+  each Arrow type the engine answers becomes.
 
 ## Where is the code?
 

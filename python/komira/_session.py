@@ -5,9 +5,10 @@ A session registers Parquet, CSV and newline-delimited JSON files as tables,
 runs SQL over them (`komira_sql_stream`:
 the library turns the text into a logical plan; this package builds no SQL)
 and is closed. A `Result` holds the query's Arrow C stream, already handed to
-pyarrow, and is read once, by `to_arrow`, `to_reader` or `__arrow_c_stream__`. The stream needs neither
-the session nor its context, so a result still reads after its session is
-closed or collected (docs/design/python_package.md, decision 3).
+pyarrow, and is read once, by `to_arrow`, `to_reader`, `to_pandas`,
+`to_polars` or `__arrow_c_stream__`. The stream needs neither the session nor
+its context, so a result still reads after its session is closed or collected
+(docs/design/python_package.md, decision 3).
 
 A session may be used from any thread. It holds a lock around each call into
 the library, so its context never runs two calls at once (the C ABI's rule,
@@ -19,11 +20,12 @@ session nor its context.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import os
 import threading
 import weakref
 from collections.abc import Iterator
-from types import TracebackType
+from types import ModuleType, TracebackType
 from typing import TYPE_CHECKING
 
 from . import _arrow, _native
@@ -31,6 +33,8 @@ from ._credentials import _BuiltIn, _Credential
 from ._errors import KomiraError, UnsupportedOperation
 
 if TYPE_CHECKING:
+    import pandas
+    import polars
     import pyarrow
 
 
@@ -268,11 +272,12 @@ class Result:
     """The answer of one `Session.sql` call, read once.
 
     It holds the query's Arrow C stream inside a `pyarrow.RecordBatchReader`
-    whose schema is already read. The first of `to_arrow()`, `to_reader()` and
-    `__arrow_c_stream__()` takes the stream; any of them called again raises
-    `KomiraError`, since keeping a copy would make a large answer's memory
-    depend on which was called first. Run the query again to read it again. A
-    result that is never read releases its stream when it is collected.
+    whose schema is already read. The first of `to_arrow()`, `to_reader()`,
+    `to_pandas()`, `to_polars()` and `__arrow_c_stream__()` takes the stream;
+    any of them called again raises `KomiraError`, since keeping a copy would
+    make a large answer's memory depend on which was called first. Run the
+    query again to read it again. A result that is never read releases its
+    stream when it is collected.
     Reading does not need the session: a result still reads after its session
     is closed, and while another call runs on it. Of two threads that read one
     result at once, one reads it and the other gets the `KomiraError`.
@@ -312,6 +317,34 @@ class Result:
     def to_arrow(self) -> pyarrow.Table:
         """The whole answer as a `pyarrow.Table`. A failure while a batch is
         read raises `KomiraError` with the engine's message."""
+        return self._read_all()
+
+    def to_pandas(self) -> pandas.DataFrame:
+        """The whole answer as a `pandas.DataFrame`, converted from the Arrow
+        table `to_arrow()` returns by pyarrow's `Table.to_pandas()` with its
+        default dtype mapping; the table and the frame are both held while it
+        converts. pandas is optional: when it cannot be imported this raises
+        `ImportError` naming the distribution to install, and the result
+        stays unread. A failure while a batch is read raises `KomiraError`
+        with the engine's message; a failure of the conversion raises
+        pyarrow's own error. Either way the result has been read."""
+        # pyarrow's conversion imports pandas itself; importing it first is
+        # what leaves the result unread when it is missing.
+        _import_optional("pandas", "to_pandas")
+        return self._read_all().to_pandas()
+
+    def to_polars(self) -> polars.DataFrame:
+        """The whole answer as a `polars.DataFrame`, converted from the Arrow
+        table `to_arrow()` returns by `polars.from_arrow`. polars is optional:
+        when it cannot be imported this raises `ImportError` naming the
+        distribution to install, and the result stays unread. A failure while
+        a batch is read raises `KomiraError` with the engine's message; a
+        failure of the conversion raises polars' own error. Either way the
+        result has been read."""
+        polars = _import_optional("polars", "to_polars")
+        return polars.from_arrow(self._read_all())
+
+    def _read_all(self) -> pyarrow.Table:
         reader = self._take()
         try:
             return reader.read_all()
@@ -325,3 +358,18 @@ class Result:
             return self._reader.pop()
         except IndexError:
             raise KomiraError("the result was already read: run the query again to read it again") from None
+
+
+def _import_optional(name: str, terminal: str) -> ModuleType:
+    """The module `name`, imported for the terminal `terminal`. When it
+    cannot be imported, an `ImportError` that says which distribution to
+    install, chained to the import's own error."""
+    try:
+        return importlib.import_module(name)
+    except ImportError as e:
+        raise ImportError(
+            "Result.{}() needs {}, which could not be imported: install it with `pip install {}`".format(
+                terminal, name, name
+            ),
+            name=name,
+        ) from e

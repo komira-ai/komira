@@ -69,7 +69,7 @@ mojo_conda(
         "../wkt": "//src/wkt:mopm.toml",
     },
     mojo = "1.1.0",
-    mopm = "toolchains//:mopm_0_0_135",
+    mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/calendar",
     version = "0.1.0",
     visibility = ["PUBLIC"],
