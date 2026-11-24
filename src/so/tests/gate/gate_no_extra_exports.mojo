@@ -109,8 +109,8 @@ def main() raises:
             else:
                 print("UNEXPECTED EXPORT: " + name)
                 extra += 1
-        if seen != 16:
-            raise Error("expected 16 defined exports, the symbol table has " + String(seen))
+        if seen != 18:
+            raise Error("expected 18 defined exports, the symbol table has " + String(seen))
     if extra != 0:
         raise Error(String(extra) + " symbol(s) outside the eighteen exports are defined")
     print("ok")
