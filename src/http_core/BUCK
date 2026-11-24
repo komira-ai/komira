@@ -160,6 +160,9 @@ mojo_library(
             "tests/fixtures/tls/leaf_key.pem",
         ],
     },
+    # The resident set test_L1_tls_cert_chain_freed bounds, on Linux and on
+    # macOS.
+    test_deps = ["//src/tests/helpers/komira_test_rss:komira_test_rss"],
     visibility = ["PUBLIC"],
 )
 
