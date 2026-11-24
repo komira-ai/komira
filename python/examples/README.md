@@ -16,7 +16,7 @@ closes the session. It runs from this directory.
   virtual environment, run `quickstart.py` there with `readings.parquet` beside
   it, and compare what it prints with `quickstart.expected` exactly, after
   replacing `<version>` with the installed version and `<abi_version>` with the
-  ABI version of `src/so/abi/komira.tsv` (`1.2` is `1002`).
+  ABI version of `src/so/abi/komira.tsv` (`1.3` is `1003`).
 - The "What works" block of [the package README](../README.md) is the same
   text as `quickstart.py`, byte for byte. The test
   `//python/smoke:readme_shows_quickstart` fails when the two differ.

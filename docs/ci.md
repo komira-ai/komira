@@ -1237,7 +1237,7 @@ and make no network request; the live indexes are reached only by a run of this 
    the quickstart runs with `python -I` in a directory holding only the example and its data file: it
    must exit 0 and print what `python/examples/quickstart.expected` says, compared exactly, with `<version>`
    replaced by the version and `<abi_version>` by the ABI version of the `--abi-table` file
-   (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.2` is 1002). A failed step names the command, its exit
+   (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.3` is 1003). A failed step names the command, its exit
    status and the last lines of its stderr.
 
 The user test of the wheel file is the first gate: `testpypi` `needs` `wheel-user-test`, so a wheel that does

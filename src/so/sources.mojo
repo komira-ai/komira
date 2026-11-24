@@ -13,6 +13,8 @@ error. Nothing here holds a pointer.
 - `csv_binding_bytes`, `json_binding_bytes`: the whole `WireScanBinding` of a
   CSV or newline-delimited JSON file, schema inferred from a bounded prefix.
 - `plan_render_text`: a serialized plan decoded and printed, not run.
+- `sql_result`: one SQL statement run on a session's engine, its answer as
+  batches checked to cross the Arrow C Stream Interface.
 """
 
 from byte_buffer.file_identity import FileIdentity
@@ -21,7 +23,9 @@ from scan_source.csv_source import CsvSource
 from scan_source.json_source import JsonSource
 from scan_source.source_variant import SourceVariant
 from sdk.parquet_footer import read_parquet_footer
+from sdk_exec.arrow_result import ArrowResult, arrow_result
 from sdk_exec.engine_catalog import register_parquet as engine_register_parquet
+from sdk_exec.engine_sql import run_sql
 from sql.sql_ast import TvfOptions
 from sql.sql_tvf_bind import csv_tvf_schema, json_tvf_schema
 
@@ -108,3 +112,28 @@ def plan_render_text(var plan_bytes: List[UInt8]) raises -> String:
     """
     var plan = plan_from_bytes(plan_bytes^)
     return String(plan)
+
+
+def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
+    """Run the SQL statement `sql` on `session`'s engine and return its answer,
+    every batch checked to cross the Arrow C Stream Interface whole.
+
+    The statement reads the tables registered on the session
+    (`register_parquet`); it is `sdk_exec.run_sql`: a query, or a
+    `COPY ... TO` a local file, whose answer is one row of the BIGINT
+    `Count`. An answer of no rows is one batch of no rows with the answer's
+    schema. The result owns its batches and keeps no reference to the
+    session, which may be dropped first.
+
+    Raises:
+        Error `<step>: <reason>` when `run_sql` refuses, where `<step>` is the
+        step that refused (`parse`, `bind`, `optimize`, `lower` or
+        `execute`) and `<reason>` its own message, unchanged; and the export
+        check's error naming the column when a result column cannot cross the
+        stream (`arrow_result`).
+    """
+    var outcome = run_sql(session.engine, sql)
+    if outcome.refusal:
+        ref refusal = outcome.refusal.value()
+        raise Error(refusal.step + ": " + refusal.reason)
+    return arrow_result(outcome^)

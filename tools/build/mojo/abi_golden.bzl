@@ -18,9 +18,11 @@ finding, on:
 - a row whose `since` is above the golden version,
 - a symbol listed twice, and
 - a type outside the type map (Int8..Int64, UInt8..UInt64, Int, UInt, Float32,
-  Float64, OpaquePointer, Handle, CStr, ConstBytes, and `UnsafePointer[...]` of
-  those). `CStr` is `const char *` and `ConstBytes` is `const uint8_t *`; the
-  source must declare each it uses as `comptime CStr = UnsafePointer[UInt8, ...]`,
+  Float64, OpaquePointer, Handle, CStr, ConstBytes, ArrowStream, and
+  `UnsafePointer[...]` of those). `CStr` is `const char *`, `ConstBytes` is
+  `const uint8_t *` and `ArrowStream` is `struct ArrowArrayStream *`; the source
+  must declare each it uses as `comptime CStr = UnsafePointer[UInt8, ...]` (for
+  `ArrowStream`, `comptime ArrowStream = UnsafePointer[CArrowArrayStream, ...]`),
   and a declaration of any other type is a finding.
 
 Constants are golden rows too, `constant<TAB>NAME<TAB>VALUE<TAB>since`, with NAME
@@ -36,7 +38,12 @@ With none, the target's one output, `<header_name>`, is the C header of the
 golden: include guards, `<stddef.h>` and `<stdint.h>`,
 `KOMIRA_ABI_VERSION_MAJOR` and `KOMIRA_ABI_VERSION_MINOR`, one `#define` per
 constant, the opaque handle typedef `komira_handle`, and one prototype per row
-in the golden's order.
+in the golden's order. When a row uses `ArrowStream`, the Arrow C Data Interface
+and C Stream Interface struct definitions (`ArrowSchema`, `ArrowArray`,
+`ArrowArrayStream`, each in its `ARROW_C_*_INTERFACE` guard) come after the
+handle typedef and before the prototypes; a golden without it gets none of them.
+A golden with constants gets a comment before the first one: every failure is a
+negative status, and a status the header does not name is a failure.
 
 What this does not check: that the golden's version was raised when a row
 changed. That compares with the previous release, and a build holds only the

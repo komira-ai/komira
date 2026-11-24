@@ -44,7 +44,7 @@ Save this as `quickstart.py`:
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1002 is 1.2
+print(komira.abi_version())   # the engine's C ABI version: 1003 is 1.3
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
@@ -63,7 +63,7 @@ Then `python quickstart.py` prints:
 
 ```text
 0.1.1512
-1002
+1003
 registered readings
 True
 ```

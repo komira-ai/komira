@@ -17,11 +17,12 @@
   reveal of `secret_bindings` over `secret_store`.
 - `sources.mojo`: what the source and render exports do on values:
   `register_parquet`, `parquet_schema_bytes`, `csv_binding_bytes`,
-  `json_binding_bytes` and `plan_render_text`.
+  `json_binding_bytes`, `plan_render_text` and `sql_result`, the answer of
+  one SQL statement as batches ready for the Arrow C stream.
 
 `_c_abi.mojo` is the library's C surface (`komira_abi_version`,
 `komira_ctx_new`, `komira_ctx_free`, `komira_last_error`, the source and
-render calls and the three credential calls). It is the one file that holds pointers and is not part of this
+render calls, the three credential calls and `komira_sql_stream`). It is the one file that holds pointers and is not part of this
 Mojo package; `libkomira` is built from it by the `libkomira` target.
 """
 
@@ -38,6 +39,7 @@ from .sources import (
     parquet_schema_bytes,
     plan_render_text,
     register_parquet,
+    sql_result,
 )
 from .status import (
     ABI_MAJOR,
