@@ -973,6 +973,12 @@ generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
   below. A conda package of the library (`conda_package(shared_lib = ...)`, [`../package`](../package/README.md))
   does not ship them: they come from its `mojo-compiler` requirement, installed in the same `lib/`, and
   [`../package/install_check`](../package/install_check/README.md) loads it from an empty prefix holding them.
+- **Never unmapped (Linux).** The `.so` is linked `-z nodelete` (`DF_1_NODELETE`): `dlclose` leaves it
+  mapped. A stdlib `_Global` the library creates is registered with that shared Mojo runtime along with a
+  destructor in the library's own code; a host that is a Mojo program keeps the runtime loaded after
+  `dlclose` and destroys the globals when it exits, which would otherwise jump into unmapped code (a SIGSEGV
+  after the host's last line). `//src/so:libkomira`'s `gate_new_free` closes the library after creating
+  engines, which make such a global, and requires a clean exit.
 - **macOS arm64.** The same rule builds `<out_name>.dylib`: install name `@rpath/<out_name>.dylib`, run path
   `@loader_path/lib`, linker-signed ad hoc by ld (nothing else signs it), runtime library
   `@rpath/libKGENCompilerRTShared.dylib`. `exports_exact` uses `-exported_symbols_list` (names with the C

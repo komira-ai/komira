@@ -130,7 +130,7 @@ Fixed before this design, and not reopened here:
 - **EXISTS** `libkomira` is at ABI 1.2, with twelve exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
   - It runs no query. The run calls are designed but not built; they take the next minor.
-  - On linux-x86_64 it is 3.6 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eight native owners
+  - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,
     `libAsyncRTRuntimeGlobals` and `libMSupportGlobals`
@@ -330,7 +330,7 @@ the host.
 | package (decision D1) | holds | `os` / `cpu` / `libc` |
 |---|---|---|
 | `@komira-ai/komira` | the compiled JavaScript, `.d.ts` types, `README.md`, `LICENSE`, `NOTICE` | none |
-| `@komira-ai/komira-linux-x64-gnu` | `komira_addon.node` and the self-contained native directory: `libkomira.so`, the eight native owners and the three Mojo runtime libraries, laid out as the directory lays them out; the licence files | `linux` / `x64` / `glibc` |
+| `@komira-ai/komira-linux-x64-gnu` | `komira_addon.node` and the self-contained native directory: `libkomira.so`, the eleven native owners and the three Mojo runtime libraries, laid out as the directory lays them out; the licence files | `linux` / `x64` / `glibc` |
 | `@komira-ai/komira-linux-arm64-gnu` | the same, for aarch64 | `linux` / `arm64` / `glibc` |
 | `@komira-ai/komira-darwin-arm64` | `komira_addon.node` and the directory, with `libkomira.dylib`; the licence files | `darwin` / `arm64` |
 

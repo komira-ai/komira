@@ -1,4 +1,9 @@
 # komira_ctx_new returns distinct non-NULL handles with independent state; komira_ctx_free releases them and accepts NULL.
+# The library is then closed and this program, a Mojo host whose runtime
+# outlives the dlclose, exits: it destroys the runtime globals the
+# contexts' engines created, whose destructors are the library's code. The
+# gate passes only if that exit is clean (the library is linked
+# DF_1_NODELETE, so it stays mapped; without it the exit is a SIGSEGV).
 #
 # A gate driver of //src/so:libkomira. It has no dependency: it opens
 # the library with dlopen (RTLD_NOW, through OwnedDLHandle) and calls the
@@ -49,4 +54,6 @@ def main() raises:
     if c == 0:
         raise Error("komira_ctx_new returned NULL after a free")
     lib.call["komira_ctx_free", NoneType](c)
+    # dlclose here, before the runtime's globals are destroyed at exit.
+    _ = lib^
     print("ok")

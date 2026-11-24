@@ -290,8 +290,8 @@ The table is the output of `komira//tools/build/package/libkomira:libkomira_elf_
 (`tools/build/native/so_report.zig`, tested in `so_report_test.zig`) on the built
 `libkomira.so`, on each native owner's `.so.1`, and on the Mojo runtime libraries of
 the platform row's `runtime_libs`, and writes the table below; nothing is
-read by hand. It is a record of the library as it is while `so` depends on `sdk` and
-not on `sdk_exec`, not a gate: the gates above and `libkomira_install` hold the
+read by hand. It is a record of the library as it is now that `so` depends on
+`sdk_exec` (a session holds an engine), not a gate: the gates above and `libkomira_install` hold the
 exports, the owner SONAMEs, a version of at least 1000 and that every library is
 mapped from the prefix. Each `RUNPATH` or `RPATH` entry is one backticked
 item; an entry holding colons is one string the loader splits itself. The `RPATH` values of
@@ -299,30 +299,36 @@ the Mojo runtime libraries are the vendor's own.
 
 | file | role | size (bytes) | SONAME | RUNPATH | RPATH | highest GLIBC | highest GLIBCXX | highest CXXABI |
 |---|---|---|---|---|---|---|---|---|
-| `libkomira.so` | target | 3642072 | `libkomira.so` | `$ORIGIN/lib:$ORIGIN` | none | `GLIBC_2.34` | none | none |
+| `libkomira.so` | target | 3752832 | `libkomira.so` | `$ORIGIN/lib:$ORIGIN` | none | `GLIBC_2.34` | none | none |
 | `libkomira_async_api_native.so.1` | owner | 2760 | `libkomira_async_api_native.so.1` | none | none | none | none | none |
 | `libkomira_async_rt_native.so.1` | owner | 43992 | `libkomira_async_rt_native.so.1` | none | none | `GLIBC_2.17` | none | none |
 | `libkomira_compression_native.so.1` | owner | 244856 | `libkomira_compression_native.so.1` | none | none | `GLIBC_2.34` | none | none |
+| `libkomira_crypto_native.so.1` | owner | 3240416 | `libkomira_crypto_native.so.1` | none | none | `GLIBC_2.33` | none | none |
 | `libkomira_fs_native.so.1` | owner | 11192 | `libkomira_fs_native.so.1` | none | none | `GLIBC_2.33` | none | none |
+| `libkomira_http_core_native.so.1` | owner | 1180024 | `libkomira_http_core_native.so.1` | `$ORIGIN` | none | `GLIBC_2.33` | none | none |
 | `libkomira_libc_native.so.1` | owner | 11080 | `libkomira_libc_native.so.1` | none | none | `GLIBC_2.33` | none | none |
 | `libkomira_metrics_native.so.1` | owner | 2600 | `libkomira_metrics_native.so.1` | none | none | none | none | none |
+| `libkomira_objectstore_native.so.1` | owner | 8472 | `libkomira_objectstore_native.so.1` | none | none | `GLIBC_2.33` | none | none |
 | `libkomira_parquet_codec_native.so.1` | owner | 173736 | `libkomira_parquet_codec_native.so.1` | none | none | `GLIBC_2.14` | none | none |
 | `libkomira_scan_source_native.so.1` | owner | 2488 | `libkomira_scan_source_native.so.1` | none | none | none | none | none |
 | `libAsyncRTRuntimeGlobals.so` | runtime | 685176 | `libAsyncRTRuntimeGlobals.so` | none | `$ORIGIN:$ORIGIN/../lib:$ORIGIN/../_solib_k8/_USupport:$ORIGIN/libAsyncRTRuntimeGlobals.so.runfiles/_main/_solib_k8/_USupport` | `GLIBC_2.35` | `GLIBCXX_3.4.29` | `CXXABI_1.3.9` |
-| `libKGENCompilerRTShared.so` | runtime | 1222584 | `libKGENCompilerRTShared.so` | none | `$ORIGIN:$ORIGIN/../lib:$ORIGIN/../_solib_k8/_USupport:$ORIGIN/libKGENCompilerRTShared.so.runfiles/_main/_solib_k8/_USupport:$ORIGIN/../_solib_k8/_UAsyncRT:$ORIGIN/libKGENCompilerRTShared.so.runfiles/_main/_solib_k8/_UAsyncRT` | `GLIBC_2.34` | `GLIBCXX_3.4.30` | `CXXABI_1.3.11` |
-| `libMSupportGlobals.so` | runtime | 49200 | `libMSupportGlobals.so` | none | `$ORIGIN:$ORIGIN/../lib` | `GLIBC_2.34` | `GLIBCXX_3.4.14` | `CXXABI_1.3.11` |
+| `libKGENCompilerRTShared.so` | runtime | 1267976 | `libKGENCompilerRTShared.so` | none | `$ORIGIN:$ORIGIN/../lib:$ORIGIN/../_solib_k8/_USupport:$ORIGIN/libKGENCompilerRTShared.so.runfiles/_main/_solib_k8/_USupport:$ORIGIN/../_solib_k8/_UAsyncRT:$ORIGIN/libKGENCompilerRTShared.so.runfiles/_main/_solib_k8/_UAsyncRT` | `GLIBC_2.34` | `GLIBCXX_3.4.30` | `CXXABI_1.3.11` |
+| `libMSupportGlobals.so` | runtime | 49296 | `libMSupportGlobals.so` | none | `$ORIGIN:$ORIGIN/../lib` | `GLIBC_2.34` | `GLIBCXX_3.4.14` | `CXXABI_1.3.11` |
 | `libgcc_s.so.1` | runtime | 902392 | `libgcc_s.so.1` | none | `$ORIGIN/.` | `GLIBC_2.14` | none | none |
 | `libstdc++.so.6` | runtime | 21186008 | `libstdc++.so.6` | none | `$ORIGIN/.` | `GLIBC_2.17` | none | none |
 
 | file | DT_NEEDED, in order |
 |---|---|
-| `libkomira.so` | `libKGENCompilerRTShared.so`, `libkomira_async_rt_native.so.1`, `libkomira_async_api_native.so.1`, `libkomira_compression_native.so.1`, `libkomira_fs_native.so.1`, `libkomira_libc_native.so.1`, `libkomira_metrics_native.so.1`, `libkomira_parquet_codec_native.so.1`, `libkomira_scan_source_native.so.1`, `libpthread.so.0`, `libc.so.6` |
+| `libkomira.so` | `libKGENCompilerRTShared.so`, `libkomira_async_rt_native.so.1`, `libkomira_async_api_native.so.1`, `libkomira_compression_native.so.1`, `libkomira_crypto_native.so.1`, `libkomira_fs_native.so.1`, `libkomira_http_core_native.so.1`, `libkomira_libc_native.so.1`, `libkomira_metrics_native.so.1`, `libkomira_objectstore_native.so.1`, `libkomira_parquet_codec_native.so.1`, `libkomira_scan_source_native.so.1`, `libpthread.so.0`, `libc.so.6` |
 | `libkomira_async_api_native.so.1` | none |
 | `libkomira_async_rt_native.so.1` | `libpthread.so.0`, `libc.so.6`, `ld-linux-x86-64.so.2` |
 | `libkomira_compression_native.so.1` | `libpthread.so.0`, `libc.so.6` |
+| `libkomira_crypto_native.so.1` | `libpthread.so.0`, `libc.so.6` |
 | `libkomira_fs_native.so.1` | `libpthread.so.0`, `libc.so.6` |
+| `libkomira_http_core_native.so.1` | `libkomira_crypto_native.so.1`, `libpthread.so.0`, `libc.so.6`, `ld-linux-x86-64.so.2` |
 | `libkomira_libc_native.so.1` | `libpthread.so.0`, `libc.so.6` |
 | `libkomira_metrics_native.so.1` | none |
+| `libkomira_objectstore_native.so.1` | `libpthread.so.0`, `libc.so.6` |
 | `libkomira_parquet_codec_native.so.1` | `libc.so.6` |
 | `libkomira_scan_source_native.so.1` | none |
 | `libAsyncRTRuntimeGlobals.so` | `libm.so.6`, `libstdc++.so.6`, `libMSupportGlobals.so`, `libgcc_s.so.1`, `libc.so.6`, `ld-linux-x86-64.so.2` |
@@ -333,35 +339,41 @@ the Mojo runtime libraries are the vendor's own.
 
 | library | role | reached from the target | target's undefined symbols it defines |
 |---|---|---|---|
-| `libkomira_async_api_native.so.1` | owner | needed (direct) | 0 |
-| `libkomira_async_rt_native.so.1` | owner | needed (direct) | 0 |
+| `libkomira_async_api_native.so.1` | owner | needed (direct) | 1 |
+| `libkomira_async_rt_native.so.1` | owner | needed (direct) | 2 |
 | `libkomira_compression_native.so.1` | owner | needed (direct) | 1 |
-| `libkomira_fs_native.so.1` | owner | needed (direct) | 0 |
+| `libkomira_crypto_native.so.1` | owner | needed (direct) | 0 |
+| `libkomira_fs_native.so.1` | owner | needed (direct) | 5 |
+| `libkomira_http_core_native.so.1` | owner | needed (direct) | 0 |
 | `libkomira_libc_native.so.1` | owner | needed (direct) | 6 |
 | `libkomira_metrics_native.so.1` | owner | needed (direct) | 0 |
+| `libkomira_objectstore_native.so.1` | owner | needed (direct) | 0 |
 | `libkomira_parquet_codec_native.so.1` | owner | needed (direct) | 1 |
 | `libkomira_scan_source_native.so.1` | owner | needed (direct) | 0 |
 | `libAsyncRTRuntimeGlobals.so` | runtime | needed (through another library) | 0 |
-| `libKGENCompilerRTShared.so` | runtime | needed (direct) | 5 |
+| `libKGENCompilerRTShared.so` | runtime | needed (direct) | 6 |
 | `libMSupportGlobals.so` | runtime | needed (through another library) | 0 |
 | `libgcc_s.so.1` | runtime | needed (through another library) | 0 |
 | `libstdc++.so.6` | runtime | needed (through another library) | 0 |
 
-Owners needed: 8 of 8 (492704 bytes); declared only: 0.
+Owners needed: 11 of 11 (4921616 bytes); declared only: 0.
 
 Wheel tag: `manylinux_2_34` (highest GLIBC of the target and the owners: `GLIBC_2.34`).
 
 Reading it:
 
-- **Owners.** All eight are `DT_NEEDED` of libkomira (direct), none is embedded, and
-  together they weigh 492,704 bytes. They are needed at load time: the loader refuses
-  a library with a missing `DT_NEEDED`. Only three of the eight (libc, compression,
-  parquet_codec) define a symbol that libkomira's own undefined symbols name; the other five
-  (async_rt, async_api, fs, metrics, scan_source) are `DT_NEEDED` with no symbol bound to
-  them from libkomira itself, so today they are declared and loaded but not called through
+- **Owners.** All eleven are `DT_NEEDED` of libkomira (direct), none is embedded, and
+  together they weigh 4,921,616 bytes, of which crypto (aws-lc's libcrypto, 3,240,416)
+  and http_core (s2n-tls, 1,180,024; itself `DT_NEEDED` on crypto) are most. They are
+  needed at load time: the loader refuses a library with a missing `DT_NEEDED`. Six of
+  the eleven (async_api, async_rt, compression, fs, libc, parquet_codec) define a symbol
+  that libkomira's own undefined symbols name; the other five (crypto, http_core,
+  metrics, objectstore, scan_source) are `DT_NEEDED` with no symbol bound to them from
+  libkomira itself, so today they are declared and loaded but not called through
   libkomira's own symbol table. They stay in the package because each is a
-  `native_owners` entry the library's gate requires.
-- **glibc floor.** The highest `GLIBC_` version of libkomira and the eight owners is
+  `native_owners` entry of the library's closure that the gate requires; a call that
+  runs a query reaches them, and then their C is never embedded in libkomira.
+- **glibc floor.** The highest `GLIBC_` version of libkomira and the eleven owners is
   2.34 (libkomira and compression), so `manylinux_2_34` is honest for the files the package
   carries. No `GLIBCXX_` or `CXXABI_` version is needed by them. The Python wheel also
   carries the three Mojo runtime libraries (through `[dist]`); `libAsyncRTRuntimeGlobals.so`
@@ -373,12 +385,12 @@ Reading it:
   other two of the three, and those need `libstdc++.so.6` and `libgcc_s.so.1`. Each
   carries its own `RPATH` that includes `$ORIGIN`, so the three are found beside one
   another; libkomira finds them through its `RUNPATH` entry `$ORIGIN/lib`. The `[dist]`
-  directory of this target holds them in `lib/` beside the eight owners, and the Python
+  directory of this target holds them in `lib/` beside the eleven owners, and the Python
   wheel copies it whole; the C++ libraries are not in it, the host provides them.
 
 The `libkomira_install` check loads libkomira from an empty prefix with `RTLD_NOW`
 and the probe calls `komira_abi_version`; every library the loader mapped came from the
-prefix's `lib/`: the eight owners, `libKGENCompilerRTShared.so`, and the runtime's
+prefix's `lib/`: the eleven owners, `libKGENCompilerRTShared.so`, and the runtime's
 own dependencies of it (`libAsyncRTRuntimeGlobals.so`, `libMSupportGlobals.so`,
 `libgcc_s.so.1`, `libstdc++.so.6`).
 
