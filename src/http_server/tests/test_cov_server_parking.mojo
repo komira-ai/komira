@@ -239,8 +239,8 @@ def _small_server(var server: HttpServer[NoopGrpcDispatch]) raises -> HttpServer
 def _shrink_accepted(server: HttpServer[NoopGrpcDispatch]) raises:
     """Give the accepted connection its own 4 KiB send buffer. Linux's
     accepted socket inherits the listener's; Darwin's does not reliably keep
-    it (the loopback buffer autotunes up), so the response burst would fit unparked.
-    Setting the option on the connection itself pins it on both."""
+    it (the loopback buffer autotunes up), so the response burst would fit
+    unparked. Setting the option on the connection itself pins it on both."""
     _sockopt(
         server._conns[0].fd(), Int32(7), Int32(0x1001), Int32(4096), Int32(0), 1
     )

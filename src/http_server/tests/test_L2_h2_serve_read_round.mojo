@@ -139,9 +139,9 @@ def _set_sndbuf(fd: Int32, bytes: Int) raises:
         level = Int32(0xFFFF)
         opt = Int32(0x1001)
         # Linux raises a tiny value to about 4.5 KiB; Darwin keeps 1 byte
-        # literally, so each flush moves almost nothing. Ask for the
-        # same few KiB there.
-        val = Int32(4096)
+        # literally, so each flush moves almost nothing. Ask for at least
+        # the same few KiB there.
+        val = Int32(max(bytes, 4096))
     var rc = external_call["setsockopt", Int32](
         fd,
         level,
@@ -593,7 +593,7 @@ def test_one_round_reads_at_most_32_chunks() raises:
 
 
 def test_blocked_write_keeps_the_unsent_tail_in_order() raises:
-    """With the smallest send buffer the kernel allows, 1000 PING ACKs
+    """With a send buffer of a few KiB (`_set_sndbuf`), 1000 PING ACKs
     (17000 bytes) do not fit: the round says alive and keeps the tail
     queued; each later round writes on from where the last stopped, and the
     client gets all 1000 in order."""
@@ -621,7 +621,7 @@ def test_blocked_write_keeps_the_unsent_tail_in_order() raises:
 
 def test_goaway_waits_for_its_queue_before_closing() raises:
     """h2spec http2/5.1.2/1 behind a backlog: 1000 PINGs, a zero initial
-    window and 51 GETs, with the smallest send buffer. The 51st GET is refused
+    window and 51 GETs, with a few-KiB send buffer. The 51st GET is refused
     with GOAWAY(REFUSED_STREAM) and RST_STREAM(101), together, ahead of
     everything not yet offered to TLS (the round flushes between reads, so
     the frames of earlier reads were offered already and stay in front, see
@@ -697,7 +697,7 @@ def test_server_settings_precede_a_refusal_in_the_first_read() raises:
 
 
 def test_refusal_never_overtakes_an_unwritten_tail() raises:
-    """With the smallest send buffer, a zero initial window and 1000 PINGs
+    """With a few-KiB send buffer, a zero initial window and 1000 PINGs
     leave a partly written queue whose unwritten tail may begin mid-frame.
     Then 51 GETs: the 51st is refused and its GOAWAY and RST_STREAM go to
     the front of the queue, but behind that tail. Every frame the client
