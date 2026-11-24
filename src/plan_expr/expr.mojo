@@ -1214,9 +1214,10 @@ comptime STRFNN_REPEAT: UInt8 = 5
 
 `n <= 0` gives `''` (measured at 0 and -1); `repeat('',5)` = `''`.
 
-⚠ THE ONE MEMBER THAT CAN ALLOCATE UNBOUNDEDLY FROM A SMALL PLAN. `n` is a
-BIGINT in DuckDB and `repeat('ab', 2147483647)` really does try to build a 4 GB
-value. The kernel here refuses a result longer than `STRFNN_REPEAT_MAX_BYTES`
+⚠ WITH `lpad` AND `rpad`, A MEMBER THAT CAN ALLOCATE UNBOUNDEDLY FROM A SMALL
+PLAN. `n` is a BIGINT in DuckDB and `repeat('ab', 2147483647)` really does try
+to build a 4 GB value. The kernel here refuses a result longer than
+`STRING_FN_N_REPEAT_MAX_BYTES`
 BY NAME rather than attempting the allocation, because an OOM in a morsel
 worker takes the process and a refusal takes one query.
 """

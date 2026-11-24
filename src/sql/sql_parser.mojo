@@ -28,7 +28,7 @@ from containers.slab import Slab
 
 from .sql_copy_format import copy_codec_from_path, copy_format_from_path
 from .sql_interval_parse import interval_literal_starts, parse_interval_literal
-from .sql_nesting import enter_sql_nesting
+from .sql_nesting import enter_sql_nesting, primary_opens_a_level
 from .sql_token import (
     Token,
     TK_EOF, TK_IDENT, TK_INT, TK_FLOAT, TK_STRING, TK_LPAREN, TK_RPAREN,
@@ -2513,19 +2513,7 @@ struct _Parser(Movable):
         """A parenthesised expression, a function call and a CASE count as one
         level of nesting each; a parenthesised SELECT counts in
         `_parse_nested_select`."""
-        var nests = False
-        var k = self._kind()
-        if k == TK_LPAREN:
-            nests = not (
-                self.pos + 1 < len(self.tokens)
-                and self.tokens[self.pos + 1].kind == TK_IDENT
-                and self.tokens[self.pos + 1].text == "select"
-            )
-        elif k == TK_IDENT:
-            nests = self.tokens[self.pos].text == "case" or (
-                self.pos + 1 < len(self.tokens)
-                and self.tokens[self.pos + 1].kind == TK_LPAREN
-            )
+        var nests = primary_opens_a_level(self.tokens, self.pos)
         if nests:
             enter_sql_nesting(self.nesting)
         var e = self._parse_primary_body()

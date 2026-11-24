@@ -133,15 +133,18 @@ static void expect_refused(komira_handle ctx, const char *what, const char *sql,
 }
 
 /* `sql` is refused with KOMIRA_ERR_ENGINE for a reason of its own, one that
-   starts with `prefix`, and the next query on the context answers. */
+   starts with `prefix`: *out untouched, and the next query on the context
+   answers. */
 static void expect_engine_refusal(komira_handle ctx, const char *what, const char *sql, const char *prefix) {
-    struct ArrowArrayStream out;
-    memset(&out, 0, sizeof out);
+    struct ArrowArrayStream out, before;
+    memset(&out, 0xAB, sizeof out);
+    memcpy(&before, &out, sizeof out);
     char text[512];
     int32_t rc = sql == NULL ? KOMIRA_ERR_NULL_ARG : p_komira_sql_stream(ctx, sql, &out);
     if (rc != KOMIRA_ERR_ENGINE) fprintf(stderr, "FAIL: %s returned %d, want %d\n", what, rc, KOMIRA_ERR_ENGINE);
     CHECK(rc == KOMIRA_ERR_ENGINE);
     if (rc == KOMIRA_OK) out.release(&out);
+    CHECK(rc == KOMIRA_OK || memcmp(&out, &before, sizeof out) == 0);
     const char *got = last_error_text(ctx, text, sizeof text);
     if (strncmp(got, prefix, strlen(prefix)) != 0) fprintf(stderr, "FAIL: %s: last error '%s', want '%s...'\n", what, got, prefix);
     CHECK(strncmp(got, prefix, strlen(prefix)) == 0);

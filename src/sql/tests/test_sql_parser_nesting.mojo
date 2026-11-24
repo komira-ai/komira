@@ -10,7 +10,7 @@
 #      100000 levels deep is refused rather than overflowing the stack.
 #   3. Siblings at depth do not add up: the count returns when a level closes.
 
-from std.testing import TestSuite, assert_equal, assert_true
+from std.testing import TestSuite, assert_equal
 
 from sql.sql_nesting import MAX_SQL_NESTING
 from sql.sql_parser import parse_sql
@@ -193,6 +193,9 @@ def test_a_level_closed_frees_its_room_for_the_next() raises:
 
 
 def test_a_token_list_that_ends_inside_parentheses_is_refused() raises:
+    # With no EOF token the parser stays on the last token, the `(`, so each
+    # `(` it reads opens one more level until the limit refuses it: the
+    # guard for a `(` with no token after it holds.
     var tokens = tokenize("SELECT (")
     _ = tokens.pop()
     var message = String("")
@@ -204,6 +207,8 @@ def test_a_token_list_that_ends_inside_parentheses_is_refused() raises:
 
 
 def test_a_token_list_that_ends_on_a_name_is_not_a_call() raises:
+    # A name with no token after it is a column, not a call: the parser
+    # reads it and refuses the missing end of the statement instead.
     var tokens = tokenize("SELECT x")
     _ = tokens.pop()
     var message = String("")
@@ -211,7 +216,7 @@ def test_a_token_list_that_ends_on_a_name_is_not_a_call() raises:
         _ = parse_sql(tokens^)
     except e:
         message = String(e)
-    assert_true(message != _REFUSAL)
+    assert_equal(message, "SQL syntax error: unexpected trailing tokens after query")
 
 
 def main() raises:

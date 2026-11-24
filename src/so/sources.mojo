@@ -106,8 +106,9 @@ def register_json(mut session: Session, name: String, path: String) raises:
 
     Raises:
         As `register_csv`, with the JSON inference's own error for a file
-        that is missing, unreadable or holds no object. Nothing is registered
-        then.
+        that is missing, unreadable or holds no object, and `compression:
+        cannot load <soname>: <loader error>` when a codec library cannot be
+        loaded. Nothing is registered then.
     """
     probe_codec_libraries()
     _check_name_free(session, name)

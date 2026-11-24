@@ -627,7 +627,7 @@ reach one, so that it comes back as a status:
   caller's stack, so a deep enough text exhausted it.
 - `lpad`, `rpad` and `repeat` whose value for one row would be over 64 MiB
   (`STRING_FN_N_REPEAT_MAX_BYTES`) are refused by name before anything is
-  allocated. `lpad` and `rpad` used to try the allocation.
+  allocated.
 - libzstd, libz and liblz4, which the codec packages open by soname at first
   use in an initializer that cannot raise, are opened first by a probe that
   can, at the start of every call that can reach a codec (the register and

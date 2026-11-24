@@ -528,9 +528,9 @@ def _pad_bytes(
 
     A result over `max_bytes` is REFUSED before anything is allocated, as
     `_repeat_bytes` does: `count` is a BIGINT, so
-    `lpad('a', 9223372036854775807, 'x')` is a legal call. The exact byte count is the input, plus the whole pad
-    cycles, plus the bytes of the partial pad prefix; exactly `max_bytes` is
-    accepted.
+    `lpad('a', 9223372036854775807, 'x')` is a legal call. The byte count
+    checked is exact: the input, plus the whole pad cycles, plus the bytes of
+    the partial pad prefix. Exactly `max_bytes` is accepted.
     """
     var b = s.as_bytes()
     var starts = _utf8_char_starts(b)
@@ -593,8 +593,8 @@ def _pad_bytes(
 def _repeat_bytes(s: String, count: Int, max_bytes: Int) raises -> List[UInt8]:
     """`repeat(s, count)` — `count <= 0` gives `''` (measured at 0 and -1).
 
-    ⚠ THE ONE MEMBER WHOSE OUTPUT SIZE IS SET BY A DATA VALUE. DuckDB types
-    `count` as BIGINT, so `repeat('ab', 2147483647)` is a legal call asking for
+    ⚠ ITS OUTPUT SIZE IS SET BY A DATA VALUE, as `lpad`'s and `rpad`'s are.
+    DuckDB types `count` as BIGINT, so `repeat('ab', 2147483647)` is a legal call asking for
     4 GB, and this runs inside a morsel worker where an OOM takes the PROCESS
     and a raise takes one query. The ceiling is checked BEFORE any allocation
     and is a REFUSAL, not a clamp — a clamp returns a string that differs from
