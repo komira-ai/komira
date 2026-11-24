@@ -82,6 +82,7 @@ python/tests/test_session.py	the Python package's tests: the SDK surface is test
 python/tests/test_result_frames.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql_fake.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_sql_interrupt.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_two_call.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/wheel_install_run.py	the Python package's tests: installs the wheel into an empty environment of the pinned interpreter that runs it (python/install_test.bzl), as that interpreter's own installer does
 python/tests/udf_host.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)

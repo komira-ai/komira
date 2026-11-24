@@ -185,8 +185,9 @@ Behaviour each later pull request implements, fixed here so they agree:
   registers an `os.register_at_fork` hook that marks every session of the parent closed in the child, so
   a call there raises `KomiraError` instead of running on a copied context. The package never forks;
   UDF workers are the engine's, not this package's.
-- **Ctrl-C during a query** is delivered when the query returns; the session stays usable. The first
-  release has no cancel and its docs say so.
+- **Ctrl-C during a query** is delivered when the query returns: `KeyboardInterrupt` is raised then, the
+  answer the query computed is freed, and the session stays usable. The first release has no cancel and
+  its docs say so.
 
 ### 4. What is carried from the earlier SDK, and what is not
 

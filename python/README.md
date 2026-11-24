@@ -51,7 +51,7 @@ load fails. What each release changed is in the
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1004 is 1.4
+print(komira.abi_version())   # the engine's C ABI version: 1005 is 1.5
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
@@ -128,7 +128,9 @@ answer's schema is read; neither on `import komira`.
 
 - The module-level `komira.sql` and `komira.register_parquet` on a default
   session.
-- Cancelling a query: Ctrl-C is delivered when the query returns.
+- Cancelling a query. A query cannot be interrupted while it runs: Ctrl-C
+  during `Session.sql` raises `KeyboardInterrupt` when the engine has finished
+  the query. The answer is freed, and the session runs the next query.
 - Using one session from two threads at once.
 - The DataFrame APIs: one shaped like pandas and one shaped like polars.
 - Registering CSV and JSON files.
@@ -269,7 +271,8 @@ The tests below run on Linux x86_64 as build actions, with
 `//python/tests:minor3_test`, `//python/tests:two_call_test`,
 `//python/tests:credentials_test`, `//python/tests:credentials_lib_test`,
 `//python/tests:iceberg_test`, `//python/tests:sql_test`,
-`//python/tests:sql_fake_test`, `//python/tests:result_frames_test`,
+`//python/tests:sql_fake_test`, `//python/tests:sql_interrupt_test`,
+`//python/tests:result_frames_test`,
 `//python/tests:runtime_test` and `//python/tests:cpu_test`:
 
 | test | what it covers |
@@ -279,6 +282,7 @@ The tests below run on Linux x86_64 as build actions, with
 | `minor0_test`, `minor3_test` | stand-ins of ABI 1.0 and 1.3: a 1.0 library refuses `sql` by the ABI version it needs |
 | `sql_test` | `Session.sql` on the real library: `SELECT 1 AS n`, a GROUP BY over a checked-in Parquet file, an aggregate, an answer of no rows, each terminal, the engine's refusals, and a result read after its session was closed or collected |
 | `sql_fake_test` | `Session.sql` on a stand-in Arrow stream that counts releases: a result read once, each stream, schema and batch released exactly once whoever ends it, a requested schema refused, a schema error raised from `sql` and a batch error from the terminal, the argument checks, and results left unread at exit |
+| `sql_interrupt_test` | Ctrl-C during `Session.sql`, on a stand-in whose `komira_sql_stream` raises SIGINT in the calling thread: `KeyboardInterrupt` once the call returns, the stream it filled released exactly once, the session answering the next query (also after a refusal SIGINT came during), a handler that does not raise running once while `sql` returns the answer, and an ignored SIGINT changing nothing |
 | `result_frames_test` | `to_pandas` and `to_polars` on the real library: every integer width at its edges, nullable integers, strings, a bool, decimals, timestamps and a date, equal in values and dtypes to pyarrow's and polars' own conversion of the same table; two million rows; no rows; read once. In new interpreters, the library loaded before pyarrow (the load-order case), and on a stand-in stream, each stream released once, a failing batch and a missing pandas or polars. CPython 3.13 and 3.14 (polars on 3.13 only) |
 | `two_call_test` | the error path, the two-call protocol and the arguments of each call, on a stand-in |
 | `credentials_test` | the credential objects, and what sealing each sends the library, on a stand-in's fake store that records every credential call |

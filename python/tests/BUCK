@@ -351,6 +351,20 @@ _PYARROW = {
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# Ctrl-C during Session.sql, on the stand-in's stream (fake_libkomira.c, whose
+# komira_sql_stream raises SIGINT for a text starting "interrupted:"): sql
+# raises KeyboardInterrupt once the call returns and the stream it filled is
+# released exactly once; the session answers the next query, also after a
+# refusal SIGINT came during; a handler that does not raise runs once and sql
+# returns the answer; an ignored SIGINT changes nothing.
+[python_binding_test(
+    name = "sql_interrupt_test" + p["suffix"],
+    src = "test_sql_interrupt.py",
+    data = {"fake_v1_3/libkomira.so": ":fake_v1_3"},
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # Session.sql on the real library: SELECT 1 AS n, a GROUP BY over a checked-in
 # Parquet file (3000 rows, five labels, six row groups), an aggregate over the
 # quickstart's readings.parquet, an answer of no rows, each terminal, an engine
