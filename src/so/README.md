@@ -707,9 +707,10 @@ Node's).
 What the library does instead is refuse, before running, every input known to
 reach one, so that it comes back as a status:
 
-- A statement nested more than 100 levels deep (parentheses, prefix `NOT` or
-  minus, subqueries, derived tables) is `parse: SQL syntax error: the statement
-  nests deeper than 100 levels`. The parser recursed once per level on the
+- A statement nested more than 100 levels deep (parentheses, prefix operators,
+  function calls, `CASE`, subqueries, derived tables; `src/sql/README.md` lists
+  what counts as a level) is `parse: SQL syntax error: the statement nests
+  deeper than 100 levels`. The parser recursed once per level on the
   caller's stack, so a deep enough text exhausted it.
 - `lpad`, `rpad` and `repeat` whose value for one row would be over 64 MiB
   (`STRING_FN_N_REPEAT_MAX_BYTES`) are refused by name before anything is

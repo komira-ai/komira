@@ -398,7 +398,7 @@ otherwise fail fast. The port keeps that answer and makes it explicit:
      page).
    - **EXISTS:** every call that can reach a codec (the three register calls,
      the three describe calls, `komira_sql_stream` and `komira_sql_stream_run`) first opens libzstd, libz and liblz4 through a raising
-     probe (`compression.probe_codec_libraries`), so a missing library is -3 at
+     probe (`probe_codec_libraries` in `compression.codec_libraries`), so a missing library is -3 at
      that call. Today the engine is built by `komira_ctx_new`, and the probe runs
      per call instead of there: a context on a host
      without one of them still describes plans and defines credentials.
@@ -428,7 +428,7 @@ call paths from the exports; nothing here was measured unless it says so.
 
 | input | where it ended the process | now |
 |---|---|---|
-| a statement nested more than 100 levels (parentheses, prefix `NOT`, prefix minus, scalar subqueries, derived tables) | the parser recursed once per level on the caller's stack (`sql/sql_parser.mojo`), about 25 KB per parenthesis and 35 KB per subquery (measured on linux-x86_64 from the stack's high-water mark), so about 300 levels filled an 8 MiB stack in the parser alone | `parse: SQL syntax error: the statement nests deeper than 100 levels`; exactly 100 levels runs. DuckDB allows 1000; smaller parser frames would let the limit rise |
+| a statement nested more than 100 levels (parentheses, prefix `NOT`, `-`, `+` or `@`, function calls, `CASE`, `IN` lists, scalar, `IN` and `EXISTS` subqueries, derived tables) | the parser recursed once per level on the caller's stack (`sql/sql_parser.mojo`), about 25 KB per parenthesis and 35 KB per subquery (measured on linux-x86_64 from the stack's high-water mark), so about 300 levels filled an 8 MiB stack in the parser alone | `parse: SQL syntax error: the statement nests deeper than 100 levels`; exactly 100 levels runs, except nested scalar subqueries, which the optimizer refuses by name (`OPTIMIZE_UNRESOLVED_SCALAR`). DuckDB allows 1000; smaller parser frames would let the limit rise |
 | `lpad` / `rpad` with a count such as 2^63 - 1 | `_pad_bytes` (`batch_eval/string_bytes.mojo`) appended the pad with no ceiling | refused over the 64 MiB per-row ceiling `repeat` already had (`STRING_FN_N_REPEAT_MAX_BYTES`) |
 | `repeat` with a count such as 2^31 - 1 | not an abort: refused before the change too; kept as a case | the same refusal |
 
@@ -445,7 +445,7 @@ of `compression` over a soname that does not exist.
 
 | site | why no input reaches it |
 |---|---|
-| `op_sort/sort_stage_string_key.mojo`, `op_sort/sort_stage_payloads.mojo` (25 `abort(`) | the typed sort stage (`SortBuffer`, `SortKeyColumn_String`, `PayloadCol_String`) has no caller outside `op_sort`'s and `op_window`'s tests; SQL sorts run in `pipeline_exec/sink_sort.mojo` through `op_sort.sort_multi` and `sort_topn_sink`, which hold no `abort(` |
+| `op_sort/sort_stage_string_key.mojo`, `op_sort/sort_stage_payloads.mojo` (19 `abort(`) | the typed sort stage (`SortBuffer`, `SortKeyColumn_String`, `PayloadCol_String`) has no caller outside `op_sort`'s and `op_window`'s tests; SQL sorts run in `pipeline_exec/sink_sort.mojo` through `op_sort.sort_multi` and `sort_topn_sink`, which hold no `abort(` |
 | `agg/aggregator.mojo` (2), `op_agg_state/dyn_accumulator.mojo` (2) | no file of `sdk_exec`, `pipeline_exec`, `lowering` or `so` imports `agg` or `op_agg_state`; SQL aggregates run in `pipeline_exec/sink_agg.mojo`, which raises on a type or tag it does not serve |
 | `compression/codec_libraries.mojo` for libbz2 and liblzma | only the Avro block codecs open them, and no export reads Avro |
 | `aws_core/aws_retry.mojo` (1) | the token bucket is built from two positive constants it never refuses |

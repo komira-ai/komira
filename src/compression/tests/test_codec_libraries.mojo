@@ -22,6 +22,7 @@ from compression.codec_libraries import (
     LIBLZMA_SONAME,
     LIBZSTD_SONAME,
     _open_codec_library,
+    codec_probe_sonames,
     probe_codec_libraries,
     probe_libraries,
 )
@@ -69,12 +70,12 @@ def test_a_missing_xz_library_is_named() raises:
 
 
 def test_the_probe_opens_the_three_libraries() raises:
+    var sonames = codec_probe_sonames()
+    assert_equal(len(sonames), 3)
+    assert_equal(sonames[0], String(LIBZSTD_SONAME))
+    assert_equal(sonames[1], String(LIBZ_SONAME))
+    assert_equal(sonames[2], String(LIBLZ4_SONAME))
     probe_codec_libraries()
-    var sonames = List[String]()
-    sonames.append(String(LIBZSTD_SONAME))
-    sonames.append(String(LIBZ_SONAME))
-    sonames.append(String(LIBLZ4_SONAME))
-    probe_libraries(sonames)
 
 
 def _probe_message(sonames: List[String]) -> String:

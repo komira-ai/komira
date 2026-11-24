@@ -68,14 +68,20 @@ def probe_libraries(sonames: List[String]) raises:
         _ = _open_codec_library(soname)
 
 
-def probe_codec_libraries() raises:
-    """Open libzstd, libz and liblz4, raising the opener's error naming the
-    first that cannot be loaded."""
+def codec_probe_sonames() -> List[String]:
+    """The libraries `probe_codec_libraries` opens, in order: libzstd, libz,
+    liblz4."""
     var sonames = List[String]()
     sonames.append(String(LIBZSTD_SONAME))
     sonames.append(String(LIBZ_SONAME))
     sonames.append(String(LIBLZ4_SONAME))
-    probe_libraries(sonames)
+    return sonames^
+
+
+def probe_codec_libraries() raises:
+    """Open libzstd, libz and liblz4 (`codec_probe_sonames`), raising the
+    opener's error naming the first that cannot be loaded."""
+    probe_libraries(codec_probe_sonames())
 
 
 def _open_or_abort(soname: String) -> OwnedDLHandle:
