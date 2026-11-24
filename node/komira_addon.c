@@ -6,10 +6,10 @@
 //   load(libraryPath)                  open libkomira from `libraryPath`
 //   abiVersion()                       the library's komira_abi_version()
 //   newSession()                       a session handle (an external)
-//   freeSession(session)               destroy it; calling it again is a no-op
-//   registerParquet(session, name, path)
-//   parquetSchema(session, path)       Buffer: the file's schema as komira.plan.v1 WireSchema bytes
-//   planRender(session, bytes)         string: the text of a serialized plan; the plan is not run
+//   freeSession(session)               Promise<undefined>: destroy it once the calls made before it finish
+//   registerParquet(session, name, path)  Promise<undefined>
+//   parquetSchema(session, path)       Promise<Buffer>: the file's schema as komira.plan.v1 WireSchema bytes
+//   planRender(session, bytes)         Promise<string>: the text of a serialized plan; the plan is not run
 //   sessionStats()                     { created, freed }: komira_ctx_new and komira_ctx_free calls made here
 //
 // Why the library is opened with dlopen at `load`, and is not a NEEDED
@@ -23,16 +23,33 @@
 // is never dlclose'd: the Mojo runtime does not support unloading, and a
 // session finalizer may run late.
 //
-// Errors. A call that gets a non-zero status throws an Error with `status`
+// The session thread. Every call on a session's context runs on one native
+// thread that the session owns, started by its first call: the JavaScript
+// thread queues the call and gets a Promise, the session thread runs the
+// queued calls one at a time in the order they were made, and a thread-safe
+// function settles each Promise on the JavaScript thread. So a context is used
+// by one thread at a time (the ABI's rule), the event loop never waits on the
+// library, and two sessions run at once. The thread-safe function is
+// referenced only while a call is pending, so a pending call keeps the event
+// loop alive and an idle session does not.
+//
+// Errors. A call whose status is not zero rejects with an Error with `status`
 // (the number), `code` (the KOMIRA_ERR_* name) and `lastError` (the session's
-// last error text, read with komira_last_error's two-call protocol). Misuse of
-// the addon itself (wrong argument types, a freed session, a library not
-// loaded, a path with a NUL byte) throws TypeError or Error with `code` and no
-// `status`.
+// last error text, read on the session thread with komira_last_error's
+// two-call protocol right after the call). Misuse of the addon itself (wrong
+// argument types, a freed session, a library not loaded, a path with a NUL
+// byte) throws TypeError or Error with `code` and no `status`, synchronously,
+// before anything is queued.
 //
 // Sessions. A session is an N-API external over a heap box that holds the
-// context handle. The external's finalizer destroys the context if
-// freeSession has not, so a context is freed exactly once.
+// context handle and the session thread's queue. `freeSession` refuses new
+// calls at once and queues the destruction of the context behind the calls
+// already made, so a context is never destroyed under a running call; its
+// Promise settles once the context is destroyed. Each pending call holds a
+// strong reference to the external, so a session is finalized only when no
+// call is pending. The external's finalizer destroys the context if
+// freeSession has not, after the session thread is stopped and joined, so a
+// context is freed exactly once.
 #define NAPI_VERSION 8
 #include <node_api.h>
 
@@ -52,6 +69,10 @@
 #define KOMIRA_ERR_TOO_LARGE (-5)
 
 #define ABI_MAJOR 1
+
+// The session thread's stack: the size of a main thread's under the usual
+// 8 MiB stack limit, where the calls ran before they moved to this thread.
+#define SESSION_STACK_BYTES (8u << 20)
 
 // The library's functions, resolved by `load`. One library per process:
 // dlopen of the same file again returns the same handle, so the table is
@@ -74,8 +95,57 @@ static atomic_bool g_loaded;
 static atomic_uint_fast64_t g_created;
 static atomic_uint_fast64_t g_freed;
 
+typedef enum { OP_REGISTER, OP_SCHEMA, OP_RENDER, OP_FREE } Op;
+
+// A further freeSession call made while the free was queued: its Promise
+// settles with the free's.
+typedef struct Waiter {
+  struct Waiter *next;
+  napi_deferred deferred;
+} Waiter;
+
+// One queued call. The JavaScript thread fills the arguments and owns the
+// napi_* fields; the session thread fills the outcome; ownership passes with
+// the queue and with the thread-safe function's call.
+typedef struct Job {
+  struct Job *next;
+  Op op;
+  char *name;  // OP_REGISTER
+  char *path;  // OP_REGISTER, OP_SCHEMA
+  uint8_t *plan;  // OP_RENDER: a copy of the caller's bytes, never NULL
+  uint64_t plan_len;
+  // The outcome. `code` set: the addon failed (no status), with `message`.
+  // Otherwise `status` is the library's; `last` its last error when not zero.
+  int32_t status;
+  const char *code;
+  const char *message;
+  char *last;
+  uint8_t *out;  // OP_SCHEMA, OP_RENDER: the result bytes
+  uint64_t out_len;
+  // JavaScript thread only.
+  napi_deferred deferred;
+  napi_ref keep;     // the session's external, kept alive while the call is pending
+  Waiter *waiters;   // OP_FREE
+} Job;
+
 typedef struct {
-  void *ctx;  // NULL once freed
+  // Shared with the session thread, under `lock`.
+  pthread_mutex_t lock;
+  pthread_cond_t wake;
+  Job *head, *tail;
+  bool stop;
+  // The context: the session thread's while it runs, the JavaScript thread's
+  // before it starts and after it is joined. NULL once freed.
+  void *ctx;
+  // JavaScript thread only.
+  bool closed;    // freeSession was called: new calls are refused
+  bool freed;     // komira_ctx_free ran and its Promise settled
+  Job *free_job;  // the queued free, until it settles
+  bool started;   // the session thread exists (and `tsfn`)
+  pthread_t thread;
+  napi_threadsafe_function tsfn;  // NULL before the first call and after its finalizer
+  uint32_t pending;  // calls queued and not settled
+  int owners;  // the external, and the thread-safe function while it exists
 } Session;
 
 // Marks the externals this addon makes, so another addon's external is refused.
@@ -104,7 +174,7 @@ static napi_value fail_type(napi_env env, const char *code, const char *message)
 
 // The session's last error text, read with the two-call protocol. Returns a
 // malloc'd NUL-terminated string (empty when there is none or it cannot be
-// read); the caller frees it.
+// read), or NULL when there is no memory for it; the caller frees it.
 static char *read_last_error(void *ctx) {
   uint64_t n = 0;
   int32_t rc = g_api.last_error(ctx, NULL, 0, &n);
@@ -121,22 +191,20 @@ static char *read_last_error(void *ctx) {
   return text;
 }
 
-// Throws the Error for a failed call `op`: message, `code`, `status` and
-// `lastError`. Always returns NULL.
-static napi_value throw_status(napi_env env, const char *op, int32_t status, void *ctx) {
-  char *last = read_last_error(ctx);
+// The Error of a failed call `op`: message, `code`, `status` and `lastError`.
+// NULL if it cannot be made.
+static napi_value status_error(napi_env env, const char *op, int32_t status, const char *last) {
+  if (last == NULL) last = "";
   size_t cap = strlen(op) + strlen(last) + 64;
   char *message = malloc(cap);
-  if (message == NULL) {
-    free(last);
-    return fail(env, "KOMIRA_ERR_NOMEM", "out of memory");
-  }
+  if (message == NULL) return NULL;
   if (last[0] != '\0') {
     snprintf(message, cap, "%s failed (status %d): %s", op, (int)status, last);
   } else {
     snprintf(message, cap, "%s failed (status %d)", op, (int)status);
   }
   napi_value code, msg, err, status_v, last_v;
+  napi_value out = NULL;
   if (napi_create_string_utf8(env, status_code(status), NAPI_AUTO_LENGTH, &code) == napi_ok &&
       napi_create_string_utf8(env, message, NAPI_AUTO_LENGTH, &msg) == napi_ok &&
       napi_create_error(env, code, msg, &err) == napi_ok &&
@@ -144,13 +212,21 @@ static napi_value throw_status(napi_env env, const char *op, int32_t status, voi
       napi_create_string_utf8(env, last, NAPI_AUTO_LENGTH, &last_v) == napi_ok &&
       napi_set_named_property(env, err, "status", status_v) == napi_ok &&
       napi_set_named_property(env, err, "lastError", last_v) == napi_ok) {
-    napi_throw(env, err);
-  } else {
-    fail(env, status_code(status), message);
+    out = err;
   }
   free(message);
-  free(last);
-  return NULL;
+  return out;
+}
+
+// An Error with `code` and no `status`. NULL if it cannot be made.
+static napi_value code_error(napi_env env, const char *code, const char *message) {
+  napi_value code_v, msg, err;
+  if (napi_create_string_utf8(env, code, NAPI_AUTO_LENGTH, &code_v) != napi_ok ||
+      napi_create_string_utf8(env, message, NAPI_AUTO_LENGTH, &msg) != napi_ok ||
+      napi_create_error(env, code_v, msg, &err) != napi_ok) {
+    return NULL;
+  }
+  return err;
 }
 
 static int require_loaded(napi_env env) {
@@ -229,11 +305,12 @@ static Session *get_box(napi_env env, napi_value v) {
   return p;
 }
 
-// The live Session behind `v`, or NULL with an exception pending.
+// The Session behind `v` that takes calls (freeSession not called on it), or
+// NULL with an exception pending.
 static Session *get_session(napi_env env, napi_value v) {
   Session *s = get_box(env, v);
   if (s == NULL) return NULL;
-  if (s->ctx == NULL) {
+  if (s->closed) {
     fail(env, "KOMIRA_SESSION_FREED", "the session was freed");
     return NULL;
   }
@@ -328,58 +405,390 @@ static napi_value js_abi_version(napi_env env, napi_callback_info info) {
   return out;
 }
 
-// ---- sessions ---------------------------------------------------------------
+// ---- the session thread -----------------------------------------------------
 
-static void finalize_session(napi_env env, void *data, void *hint) {
-  (void)env;
-  (void)hint;
-  Session *s = data;
+static void free_job(Job *j) {
+  free(j->name);
+  free(j->path);
+  free(j->plan);
+  free(j->last);
+  free(j->out);
+  for (Waiter *w = j->waiters; w != NULL;) {
+    Waiter *next = w->next;
+    free(w);
+    w = next;
+  }
+  free(j);
+}
+
+static void free_ctx(Session *s) {
   if (s->ctx != NULL) {
     g_api.ctx_free(s->ctx);
     s->ctx = NULL;
     atomic_fetch_add(&g_freed, 1);
   }
+}
+
+static int32_t two_call_step(Session *s, Job *j, uint8_t *buf, uint64_t cap, uint64_t *n) {
+  return j->op == OP_SCHEMA ? g_api.parquet_schema(s->ctx, j->path, buf, cap, n)
+                            : g_api.plan_render(s->ctx, j->plan, j->plan_len, buf, cap, n);
+}
+
+// The bytes of a call that follows the two-call protocol: the first call
+// (capacity 0) learns the length, the second fills a buffer of exactly that
+// size.
+static void run_two_call(Session *s, Job *j) {
+  uint64_t n = 0;
+  int32_t rc = two_call_step(s, j, NULL, 0, &n);
+  if (rc != KOMIRA_OK && rc != KOMIRA_ERR_BUFFER_TOO_SMALL) {
+    j->status = rc;
+    return;
+  }
+  if (n > 0) {
+    j->out = malloc((size_t)n);
+    if (j->out == NULL) {
+      j->code = "KOMIRA_ERR_NOMEM";
+      j->message = "cannot allocate the result";
+      return;
+    }
+    uint64_t got = 0;
+    rc = two_call_step(s, j, j->out, n, &got);
+    if (rc != KOMIRA_OK) {
+      j->status = rc;
+      return;
+    }
+    if (got != n) {
+      j->code = "KOMIRA_ERR_LENGTH";
+      j->message = "the result changed length between the two calls";
+      return;
+    }
+  }
+  j->out_len = n;
+}
+
+// Runs one call on the session thread and records its outcome in `j`.
+static void run_job(Session *s, Job *j) {
+  switch (j->op) {
+    case OP_REGISTER:
+      j->status = g_api.register_parquet(s->ctx, j->name, j->path);
+      break;
+    case OP_SCHEMA:
+    case OP_RENDER:
+      run_two_call(s, j);
+      break;
+    case OP_FREE:
+      free_ctx(s);
+      return;
+  }
+  if (j->code == NULL && j->status != KOMIRA_OK) j->last = read_last_error(s->ctx);
+}
+
+// The session thread: runs the queued calls in order until it is stopped or
+// has destroyed the context (nothing is queued after the free).
+static void *session_main(void *arg) {
+  Session *s = arg;
+  pthread_mutex_lock(&s->lock);
+  for (;;) {
+    while (!s->stop && s->head == NULL) pthread_cond_wait(&s->wake, &s->lock);
+    if (s->stop) break;
+    Job *j = s->head;
+    s->head = j->next;
+    if (s->head == NULL) s->tail = NULL;
+    j->next = NULL;
+    pthread_mutex_unlock(&s->lock);
+    run_job(s, j);
+    bool last = j->op == OP_FREE;
+    // The call fails only while the environment is torn down, when nothing
+    // can settle the Promise any more; the job is then this thread's to free.
+    if (napi_call_threadsafe_function(s->tsfn, j, napi_tsfn_nonblocking) != napi_ok) free_job(j);
+    if (last) return NULL;
+    pthread_mutex_lock(&s->lock);
+  }
+  pthread_mutex_unlock(&s->lock);
+  return NULL;
+}
+
+static void drop_owner(Session *s) {
+  if (--s->owners > 0) return;
+  pthread_cond_destroy(&s->wake);
+  pthread_mutex_destroy(&s->lock);
   free(s);
+}
+
+// Stops the session thread and waits for it: it finishes the call it is
+// running, if any, and runs nothing more. Jobs still queued (only when the
+// environment is torn down) are freed unrun.
+static void stop_thread(Session *s) {
+  pthread_mutex_lock(&s->lock);
+  s->stop = true;
+  pthread_cond_signal(&s->wake);
+  pthread_mutex_unlock(&s->lock);
+  pthread_join(s->thread, NULL);
+  // Joined: no other thread reads `stop`, and a later first call starts afresh.
+  s->stop = false;
+  s->started = false;
+  for (Job *j = s->head; j != NULL;) {
+    Job *next = j->next;
+    free_job(j);
+    j = next;
+  }
+  s->head = s->tail = NULL;
+}
+
+// The thread-safe function's finalizer, on the JavaScript thread: after the
+// external's finalizer released it, or when the environment is torn down
+// (then possibly while a call runs, which it waits for).
+static void finalize_tsfn(napi_env env, void *data, void *hint) {
+  (void)env;
+  (void)hint;
+  Session *s = data;
+  if (s->started) stop_thread(s);
+  free_ctx(s);
+  s->tsfn = NULL;
+  drop_owner(s);
+}
+
+// The Value a settled job resolves with, or the Error it rejects with
+// (`*reject`). NULL if neither can be made.
+static napi_value outcome(napi_env env, Job *j, bool *reject) {
+  static const char *const ops[] = {"komira_register_parquet", "komira_parquet_schema",
+                                    "komira_plan_render", "komira_ctx_free"};
+  napi_value v = NULL;
+  *reject = true;
+  if (j->code != NULL) return code_error(env, j->code, j->message);
+  if (j->status != KOMIRA_OK) return status_error(env, ops[j->op], j->status, j->last);
+  *reject = false;
+  switch (j->op) {
+    case OP_REGISTER:
+    case OP_FREE:
+      if (napi_get_undefined(env, &v) != napi_ok) v = NULL;
+      break;
+    case OP_SCHEMA: {
+      void *copy = NULL;
+      if (napi_create_buffer_copy(env, (size_t)j->out_len, j->out != NULL ? j->out : (void *)"", &copy, &v) !=
+          napi_ok) {
+        v = NULL;
+      }
+      break;
+    }
+    case OP_RENDER:
+      if (napi_create_string_utf8(env, j->out != NULL ? (const char *)j->out : "", (size_t)j->out_len, &v) !=
+          napi_ok) {
+        v = NULL;
+      }
+      break;
+  }
+  return v;
+}
+
+static void resolve_undefined(napi_env env, napi_deferred d) {
+  napi_value u;
+  if (napi_get_undefined(env, &u) == napi_ok) napi_resolve_deferred(env, d, u);
+}
+
+// The thread-safe function's call, on the JavaScript thread: settles the
+// Promise of a job the session thread ran. `env` is NULL while the
+// environment is torn down: the job is then only freed.
+static void settle(napi_env env, napi_value js_cb, void *context, void *data) {
+  (void)js_cb;
+  Job *j = data;
+  if (env == NULL) {
+    free_job(j);
+    return;
+  }
+  Session *s = context;
+  bool reject = false;
+  napi_value v = outcome(env, j, &reject);
+  if (v == NULL) {
+    reject = true;
+    v = code_error(env, "KOMIRA_NAPI", "cannot make the result");
+  }
+  if (v != NULL) {
+    if (reject) {
+      napi_reject_deferred(env, j->deferred, v);
+    } else {
+      napi_resolve_deferred(env, j->deferred, v);
+    }
+  }
+  if (j->op == OP_FREE) {
+    s->freed = true;
+    s->free_job = NULL;
+    for (Waiter *w = j->waiters; w != NULL; w = w->next) resolve_undefined(env, w->deferred);
+  }
+  if (--s->pending == 0) napi_unref_threadsafe_function(env, s->tsfn);
+  napi_delete_reference(env, j->keep);
+  free_job(j);
+}
+
+// Starts the session thread and its thread-safe function at the session's
+// first call. Returns 0 with an exception pending if either cannot be made.
+static int ensure_thread(napi_env env, Session *s) {
+  if (s->started) return 1;
+  pthread_attr_t attr;
+  int rc = pthread_attr_init(&attr);
+  if (rc == 0) {
+    rc = pthread_attr_setstacksize(&attr, SESSION_STACK_BYTES);
+    if (rc == 0) rc = pthread_create(&s->thread, &attr, session_main, s);
+    pthread_attr_destroy(&attr);
+  }
+  if (rc != 0) {
+    fail(env, "KOMIRA_ERR_THREAD", "cannot start the session thread");
+    return 0;
+  }
+  s->started = true;
+  napi_value name;
+  napi_threadsafe_function tsfn = NULL;
+  if (napi_create_string_utf8(env, "komira session", NAPI_AUTO_LENGTH, &name) != napi_ok ||
+      napi_create_threadsafe_function(env, NULL, NULL, name, 0, 1, s, finalize_tsfn, s, settle, &tsfn) !=
+          napi_ok) {
+    stop_thread(s);
+    fail(env, "KOMIRA_NAPI", "cannot make the session's thread-safe function");
+    return 0;
+  }
+  // The thread reads `tsfn` only after it takes a job from the queue, under
+  // the lock the job was queued under.
+  pthread_mutex_lock(&s->lock);
+  s->tsfn = tsfn;
+  pthread_mutex_unlock(&s->lock);
+  s->owners++;
+  // Referenced again while a call is pending (enqueue).
+  napi_unref_threadsafe_function(env, tsfn);
+  return 1;
+}
+
+// Queues `j` on the session behind `ext` and returns its Promise, or NULL with
+// an exception pending (`j` is freed either way on failure).
+static napi_value enqueue(napi_env env, napi_value ext, Session *s, Job *j) {
+  if (!ensure_thread(env, s)) {
+    free_job(j);
+    return NULL;
+  }
+  napi_value promise;
+  if (napi_create_reference(env, ext, 1, &j->keep) != napi_ok) {
+    free_job(j);
+    return fail(env, "KOMIRA_NAPI", "cannot hold the session");
+  }
+  if (napi_create_promise(env, &j->deferred, &promise) != napi_ok) {
+    napi_delete_reference(env, j->keep);
+    free_job(j);
+    return fail(env, "KOMIRA_NAPI", "cannot make a promise");
+  }
+  if (s->pending++ == 0) napi_ref_threadsafe_function(env, s->tsfn);
+  pthread_mutex_lock(&s->lock);
+  if (s->tail != NULL) {
+    s->tail->next = j;
+  } else {
+    s->head = j;
+  }
+  s->tail = j;
+  pthread_cond_signal(&s->wake);
+  pthread_mutex_unlock(&s->lock);
+  return promise;
+}
+
+static Job *new_job(napi_env env, Op op) {
+  Job *j = calloc(1, sizeof *j);
+  if (j == NULL) fail(env, "KOMIRA_ERR_NOMEM", "out of memory");
+  if (j != NULL) j->op = op;
+  return j;
+}
+
+static napi_value resolved(napi_env env) {
+  napi_deferred d;
+  napi_value promise;
+  if (napi_create_promise(env, &d, &promise) != napi_ok) return fail(env, "KOMIRA_NAPI", "cannot make a promise");
+  resolve_undefined(env, d);
+  return promise;
+}
+
+// ---- sessions ---------------------------------------------------------------
+
+// The external's finalizer. No call is pending (each holds the external), so
+// the session thread is idle: releasing the thread-safe function lets its
+// finalizer stop and join the thread and destroy the context. A session that
+// made no call destroys its context here.
+static void finalize_session(napi_env env, void *data, void *hint) {
+  (void)env;
+  (void)hint;
+  Session *s = data;
+  if (s->tsfn != NULL) {
+    napi_release_threadsafe_function(s->tsfn, napi_tsfn_release);
+  } else {
+    free_ctx(s);
+  }
+  drop_owner(s);
 }
 
 static napi_value js_new_session(napi_env env, napi_callback_info info) {
   (void)info;
   if (!require_loaded(env)) return NULL;
-  Session *s = malloc(sizeof *s);
+  Session *s = calloc(1, sizeof *s);
   if (s == NULL) return fail(env, "KOMIRA_ERR_NOMEM", "out of memory");
+  if (pthread_mutex_init(&s->lock, NULL) != 0) {
+    free(s);
+    return fail(env, "KOMIRA_ERR_NOMEM", "cannot make the session's lock");
+  }
+  if (pthread_cond_init(&s->wake, NULL) != 0) {
+    pthread_mutex_destroy(&s->lock);
+    free(s);
+    return fail(env, "KOMIRA_ERR_NOMEM", "cannot make the session's condition");
+  }
+  s->owners = 1;
   s->ctx = g_api.ctx_new();
   if (s->ctx == NULL) {
-    free(s);
+    drop_owner(s);
     return fail(env, "KOMIRA_ERR_NOMEM", "komira_ctx_new returned NULL");
   }
   atomic_fetch_add(&g_created, 1);
   napi_value ext = NULL;
-  if (napi_create_external(env, s, finalize_session, NULL, &ext) != napi_ok ||
-      napi_type_tag_object(env, ext, &g_session_tag) != napi_ok) {
-    // The external, if made, owns `s` through its finalizer.
-    if (s->ctx != NULL && ext == NULL) {
-      g_api.ctx_free(s->ctx);
-      atomic_fetch_add(&g_freed, 1);
-      free(s);
-    }
+  if (napi_create_external(env, s, finalize_session, NULL, &ext) != napi_ok) {
+    free_ctx(s);
+    drop_owner(s);
+    return fail(env, "KOMIRA_NAPI", "cannot make a session");
+  }
+  // From here the external owns `s` through its finalizer.
+  if (napi_type_tag_object(env, ext, &g_session_tag) != napi_ok) {
     return fail(env, "KOMIRA_NAPI", "cannot make a session");
   }
   return ext;
 }
 
+// Refuses new calls on the session at once, and returns a Promise that
+// settles once the context is destroyed: at once if the session made no call,
+// else after every call made before this one.
 static napi_value js_free_session(napi_env env, napi_callback_info info) {
   napi_value argv[1];
   if (!get_args(env, info, 1, argv)) return NULL;
   Session *s = get_box(env, argv[0]);
   if (s == NULL) return NULL;
-  if (s->ctx != NULL) {
-    g_api.ctx_free(s->ctx);
-    s->ctx = NULL;
-    atomic_fetch_add(&g_freed, 1);
+  if (s->freed) return resolved(env);
+  if (s->closed) {
+    // The free is queued: this Promise settles with it.
+    Waiter *w = calloc(1, sizeof *w);
+    if (w == NULL) return fail(env, "KOMIRA_ERR_NOMEM", "out of memory");
+    napi_value promise;
+    if (napi_create_promise(env, &w->deferred, &promise) != napi_ok) {
+      free(w);
+      return fail(env, "KOMIRA_NAPI", "cannot make a promise");
+    }
+    w->next = s->free_job->waiters;
+    s->free_job->waiters = w;
+    return promise;
   }
-  napi_value out;
-  if (napi_get_undefined(env, &out) != napi_ok) return NULL;
-  return out;
+  if (!s->started) {
+    // No call was made: no thread uses the context.
+    s->closed = true;
+    free_ctx(s);
+    s->freed = true;
+    return resolved(env);
+  }
+  Job *j = new_job(env, OP_FREE);
+  if (j == NULL) return NULL;
+  napi_value promise = enqueue(env, argv[0], s, j);
+  if (promise == NULL) return NULL;
+  s->closed = true;
+  s->free_job = j;
+  return promise;
 }
 
 static napi_value js_session_stats(napi_env env, napi_callback_info info) {
@@ -409,39 +818,15 @@ static napi_value js_register_parquet(napi_env env, napi_callback_info info) {
     free(name);
     return NULL;
   }
-  int32_t rc = g_api.register_parquet(s->ctx, name, path);
-  free(name);
-  free(path);
-  if (rc != KOMIRA_OK) return throw_status(env, "komira_register_parquet", rc, s->ctx);
-  napi_value out;
-  if (napi_get_undefined(env, &out) != napi_ok) return NULL;
-  return out;
-}
-
-// The bytes of a call that follows the two-call protocol, as a Buffer: the
-// first call (capacity 0) learns the length, the second fills a Buffer of
-// exactly that size. `plan` is NULL for the schema call.
-static napi_value two_call(napi_env env, Session *s, const char *op, const char *path,
-                           const uint8_t *plan, uint64_t plan_len, uint8_t **raw, uint64_t *raw_len) {
-  uint64_t n = 0;
-  int32_t rc = path != NULL ? g_api.parquet_schema(s->ctx, path, NULL, 0, &n)
-                            : g_api.plan_render(s->ctx, plan, plan_len, NULL, 0, &n);
-  if (rc != KOMIRA_OK && rc != KOMIRA_ERR_BUFFER_TOO_SMALL) return throw_status(env, op, rc, s->ctx);
-  napi_value buf = NULL;
-  void *data = NULL;
-  if (napi_create_buffer(env, (size_t)n, &data, &buf) != napi_ok) {
-    return fail(env, "KOMIRA_ERR_NOMEM", "cannot allocate the result");
+  Job *j = new_job(env, OP_REGISTER);
+  if (j == NULL) {
+    free(name);
+    free(path);
+    return NULL;
   }
-  if (n > 0) {
-    uint64_t got = 0;
-    rc = path != NULL ? g_api.parquet_schema(s->ctx, path, data, n, &got)
-                      : g_api.plan_render(s->ctx, plan, plan_len, data, n, &got);
-    if (rc != KOMIRA_OK) return throw_status(env, op, rc, s->ctx);
-    if (got != n) return fail(env, "KOMIRA_ERR_LENGTH", "the result changed length between the two calls");
-  }
-  *raw = data;
-  *raw_len = n;
-  return buf;
+  j->name = name;
+  j->path = path;
+  return enqueue(env, argv[0], s, j);
 }
 
 static napi_value js_parquet_schema(napi_env env, napi_callback_info info) {
@@ -451,11 +836,13 @@ static napi_value js_parquet_schema(napi_env env, napi_callback_info info) {
   if (s == NULL) return NULL;
   char *path = get_cstring(env, argv[1], "path");
   if (path == NULL) return NULL;
-  uint8_t *raw;
-  uint64_t raw_len;
-  napi_value out = two_call(env, s, "komira_parquet_schema", path, NULL, 0, &raw, &raw_len);
-  free(path);
-  return out;
+  Job *j = new_job(env, OP_SCHEMA);
+  if (j == NULL) {
+    free(path);
+    return NULL;
+  }
+  j->path = path;
+  return enqueue(env, argv[0], s, j);
 }
 
 static napi_value js_plan_render(napi_env env, napi_callback_info info) {
@@ -472,19 +859,20 @@ static napi_value js_plan_render(napi_env env, napi_callback_info info) {
       type != napi_uint8_array) {
     return fail_type(env, "KOMIRA_ARG", "the plan must be a Uint8Array");
   }
-  // An empty array has no data pointer; the library refuses a NULL plan as an
-  // argument error, but an empty plan is bytes that are not a plan.
-  static const uint8_t empty = 0;
-  const uint8_t *plan = data != NULL ? data : &empty;
-  uint8_t *raw;
-  uint64_t raw_len;
-  napi_value buf = two_call(env, s, "komira_plan_render", NULL, plan, (uint64_t)length, &raw, &raw_len);
-  if (buf == NULL) return NULL;
-  napi_value text;
-  if (napi_create_string_utf8(env, raw_len > 0 ? (const char *)raw : "", (size_t)raw_len, &text) != napi_ok) {
-    return fail(env, "KOMIRA_NAPI", "cannot make the text");
+  Job *j = new_job(env, OP_RENDER);
+  if (j == NULL) return NULL;
+  // A copy: the caller may change or drop its array while the call is queued.
+  // An empty plan is a one-byte allocation, not NULL: the library refuses a
+  // NULL plan as an argument error, but an empty plan is bytes that are not a
+  // plan.
+  j->plan = malloc(length > 0 ? length : 1);
+  if (j->plan == NULL) {
+    free_job(j);
+    return fail(env, "KOMIRA_ERR_NOMEM", "out of memory");
   }
-  return text;
+  if (length > 0) memcpy(j->plan, data, length);
+  j->plan_len = (uint64_t)length;
+  return enqueue(env, argv[0], s, j);
 }
 
 // ---- the module -------------------------------------------------------------

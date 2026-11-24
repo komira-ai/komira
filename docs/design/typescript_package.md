@@ -46,11 +46,10 @@ Fixed before this design, and not reopened here:
 
 ### The addon
 
-- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (511 lines) is a Node-API addon in C.
+- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (899 lines) is a Node-API addon in C.
   - It defines `NAPI_VERSION 8` and uses `NAPI_MODULE_INIT`, so it is context-aware. Its function
-    table is process-wide, and a worker thread shares it (the comment at the table). No test loads
-    this addon in a worker. `src/tests/helpers/komira_test_node` shows the pattern with its own
-    test addon, loaded in a main thread and two workers.
+    table is process-wide, and a worker thread shares it (the comment at the table).
+    `:thread_test` loads it in worker threads.
   - It exports eight functions: `load`, `abiVersion`, `newSession`, `freeSession`,
     `registerParquet`, `parquetSchema`, `planRender` and `sessionStats`.
 - **How it binds libkomira.** `load(path)` opens the library with `dlopen(RTLD_NOW | RTLD_LOCAL)`
@@ -66,7 +65,14 @@ Fixed before this design, and not reopened here:
 - **Sessions.** A session is an N-API external over a heap box holding the `komira_handle`. Its
   type tag makes the addon refuse another addon's externals. The finalizer frees the context if
   `freeSession` did not, so a context is freed once.
-- **Errors.** A non-zero status throws an `Error` that carries `status`, `code` (the
+  - Each session owns one native thread, started by its first call, which runs the session's
+    calls in call order. `registerParquet`, `parquetSchema`, `planRender` and `freeSession`
+    return Promises, settled through a thread-safe function that is referenced only while a call
+    is pending.
+  - `freeSession` refuses new calls at once and frees the context after the calls made before it.
+    A pending call holds its session, so the finalizer never runs under a call, and it joins the
+    thread before it frees the context.
+- **Errors.** A non-zero status rejects with an `Error` that carries `status`, `code` (the
   `KOMIRA_ERR_*` name) and `lastError` (read with the two-call protocol). Misuse of the addon
   throws an error with a `code` and no `status`: `KOMIRA_ARG`, `KOMIRA_NOT_LOADED`,
   `KOMIRA_SESSION_FREED`, `KOMIRA_LOAD_FAILED`, `KOMIRA_ABI_MISMATCH`, `KOMIRA_MISSING_SYMBOL` and
@@ -76,7 +82,7 @@ Fixed before this design, and not reopened here:
 
 ### Tests and CI
 
-- **EXISTS** [node/BUCK](../../node/BUCK) has two `node_binding_test` targets.
+- **EXISTS** [node/BUCK](../../node/BUCK) has three `node_binding_test` targets.
   - `:load_test` runs [load.test.mjs](../../node/load.test.mjs) and
     [capacity.test.mjs](../../node/capacity.test.mjs). They cover the load refusals, using
     stand-ins built from [tests/fake_libkomira.c](../../node/tests/fake_libkomira.c): ABI 2.0,
@@ -85,7 +91,12 @@ Fixed before this design, and not reopened here:
   - `:session_test` runs [session.test.mjs](../../node/session.test.mjs). It covers errors with
     their last error, the frozen schema bytes of `two_columns.parquet`, plan text, wrong-kind
     arguments, a foreign external, double free, and finalizers counted with `gc()` with no clock.
-- **EXISTS** Both tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
+  - `:thread_test` runs [thread.test.mjs](../../node/thread.test.mjs) against a stand-in
+    ([tests/fake_latch.c](../../node/tests/fake_latch.c)) that journals each call's context and
+    thread and holds a call at a gate. It covers call order on one thread per session, two
+    sessions at once, `freeSession` while a call is held, the finalizer of a session with a
+    pending call, and sessions in worker threads.
+- **EXISTS** The three tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
   - `node_binding_test` runs `node --test` as a build action, under `env -i`, with no network.
   - It passes only if TAP reports tests, all passed, and none skipped
     ([tools/build/node/README.md](../../tools/build/node/README.md)).
