@@ -11,7 +11,8 @@ rendered as text. No call runs a query yet.
 - `abi/komira.tsv`: the golden of the C ABI; `komira.h` is made from it.
 - `status.mojo`: the six status codes, `KOMIRA_MAX_INPUT_BYTES`, `abi_version`, `buffer_status`, `input_length_status`.
 - `session.mojo`: `Session`, the state a context handle stands for: the last
-  error and the catalog of registered tables.
+  error and the engine (`sdk_exec`'s `EngineContext`), whose catalog holds the
+  registered tables.
 - `sources.mojo`: what the source and render calls do on values (a path or the
   bytes of a plan in; bytes or text out, or a raise with the engine's message).
 - `_c_abi.mojo`: the exports. It is the only file here that holds pointers, it
@@ -92,11 +93,14 @@ assert_equal(abi_version(), Int32(1001))
 ```
 
 **The handle.** `komira_ctx_new` returns a context the caller owns until it
-passes it to `komira_ctx_free`. A handle is not safe to use from two threads at
+passes it to `komira_ctx_free`, or NULL when the context's engine does not
+start (the host probe or the start of its workers fails). A handle is not safe to use from two threads at
 once, freeing one twice or using it after the free is undefined (as for
 `free(3)`), and `komira_ctx_free(NULL)` does nothing. A context holds a
-`Session`: the text of the last error, empty on a fresh one, and the tables
-registered by name.
+`Session`: the text of the last error, empty on a fresh one, and an engine
+(`sdk_exec`'s `EngineContext`) whose catalog holds the tables registered by
+name. The engine's workers (the host's compute thread count) start in
+`komira_ctx_new` and stop in `komira_ctx_free`.
 
 ```mojo
 from so import Session
@@ -109,6 +113,9 @@ assert_true(session.has_error())
 assert_equal(session.last_error(), String("the file does not exist"))
 session.clear_error()
 assert_equal(session.last_error(), String(""))
+# The engine started with the host's own worker count and holds no table yet.
+assert_true(session.engine.host_profile.thread_count >= 1)
+assert_false(session.engine.catalog.has("t"))
 ```
 
 **The two-call output protocol.** A call that returns bytes takes
@@ -146,7 +153,7 @@ refused (-3, with a last error) before it is used.
 
 | call | what it does | refusals |
 |---|---|---|
-| `komira_register_parquet(ctx, name, path)` | reads the footer of the Parquet file at `path` and binds it into the session under `name` (found without regard to case) | NULL `name` or `path`: -2. A missing, unreadable or nested file: -3 |
+| `komira_register_parquet(ctx, name, path)` | reads the footer of the Parquet file at `path` through the engine's footer reader and binds it into the engine's catalog under `name` (found without regard to case) | NULL `name` or `path`: -2. A missing, unreadable or nested file, or a glob path: -3 |
 | `komira_parquet_schema(ctx, path, out_buf, out_cap, out_len)` | the file's Arrow schema as `komira.plan.v1` `WireSchema` bytes, for a plan author to splice into a Parquet scan | NULL `path` or `out_len`: -2. A file that cannot be read: -3 |
 | `komira_csv_binding(ctx, path, delimiter, has_header, all_varchar, out_buf, out_cap, out_len)` | the whole `WireScanBinding` of a CSV file, schema inferred from a bounded prefix of an uncompressed file (a compressed file is read whole). `has_header` and `all_varchar` are `int32_t`; any non-zero value is true | as `komira_parquet_schema` |
 | `komira_json_binding(ctx, path, out_buf, out_cap, out_len)` | the same for a newline-delimited JSON file; the schema comes from the leading records | as `komira_parquet_schema` |
@@ -175,11 +182,12 @@ NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
 with the message as the last error) and, for the four calls with an output, the
 two-call protocol; a good call after a refusal leaves no error.
 `exports_exact` makes the nine names above the whole dynamic symbol table.
-The eight C owners in the library's closure (async, async_api, compression, fs,
-libc, metrics, parquet_codec, scan_source) are linked as their own shared libraries
+The ten C owners in the library's closure (async, async_api, compression,
+crypto, fs, libc, metrics, objectstore, parquet_codec, scan_source) are linked
+as their own shared libraries
 (`native_owners`), not embedded. The thirteenth driver, `gate_native_owners`,
 reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
-the SONAME of each of the eight (`libkomira_<owner>_native.so.1`); an owner
+the SONAME of each of the ten (`libkomira_<owner>_native.so.1`); an owner
 dropped from `native_owners` leaves its C embedded, and that driver fails.
 The plan driver also refuses a `plan_len` of 64 MiB plus one and of
 `UINT64_MAX` (-5, nothing written), and accepts exactly 64 MiB as a length;
@@ -226,5 +234,6 @@ packaging change that lists it.
 
 ## Not done
 
-No release-over-release version check and no packaged header yet; no plan execution, query
-or UDF call; no engine in the session; the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).
+No release-over-release version check and no packaged header yet; the session
+holds an engine, but no call runs a plan, a query or a UDF yet; no session
+options (the engine takes the host profile's worker count and memory budget); the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).

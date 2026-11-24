@@ -5,12 +5,25 @@
 # Parquet is refused with nothing registered; parquet_schema_bytes carries the
 # footer's column names; csv_binding_bytes names the path and the CSV kind, and
 # changes with each of delimiter, header and all_varchar; json_binding_bytes
-# names the path and the JSON kind; a missing file is refused by both; a plan
+# names the path and the JSON kind; a missing file is refused by both; a
+# table registered on a session is what a query on the session's engine reads
+# (count(*) of a three-row file is 3, a filter keeps 2 and 3), a name
+# never registered is refused at bind, and a refused registration leaves no
+# table a query could read; a plan
 # is rendered as the text of its scan (the binding's name, kind and path), and bytes that are not a plan are
 # refused.
 from std.testing import assert_equal, assert_false, assert_true
 
+from arrow.arrow_types import ArrowType
+from arrow.column import Column
+from arrow.primitive_array import PrimitiveArray
+from arrow.schema import Field, RecordBatchBuilder, SchemaBuilder
+from parquet_writer.record_batch_writer import (
+    write_record_batch_to_parquet_bytes,
+)
+
 from runtime_paths import test_tmpdir
+from sdk_exec.engine_sql import STEP_BIND, run_sql
 
 from so import (
     Session,
@@ -70,12 +83,12 @@ def _write(name: String, text: String) raises -> String:
 
 def test_register_parquet() raises:
     var s = Session()
-    assert_false(s.catalog.has("t"))
+    assert_false(s.engine.catalog.has("t"))
     register_parquet(s, String("Two"), String(PARQUET))
-    assert_true(s.catalog.has("two"))
-    assert_true(s.catalog.has("TWO"))
-    assert_false(s.catalog.has("other"))
-    var schema = s.catalog.schema_of("two")
+    assert_true(s.engine.catalog.has("two"))
+    assert_true(s.engine.catalog.has("TWO"))
+    assert_false(s.engine.catalog.has("other"))
+    var schema = s.engine.catalog.schema_of("two")
     assert_equal(schema.num_columns(), 2)
     assert_equal(schema.field_at_unchecked(0).name, String("i64"))
     assert_equal(schema.field_at_unchecked(1).name, String("s"))
@@ -89,7 +102,7 @@ def test_register_parquet_refusals() raises:
     except:
         raised = True
     assert_true(raised)
-    assert_false(s.catalog.has("gone"))
+    assert_false(s.engine.catalog.has("gone"))
     var notpq = _write(String("not_parquet.parquet"), String("this is text"))
     raised = False
     try:
@@ -97,7 +110,60 @@ def test_register_parquet_refusals() raises:
     except:
         raised = True
     assert_true(raised)
-    assert_false(s.catalog.has("text"))
+    assert_false(s.engine.catalog.has("text"))
+
+
+def _three_row_parquet() raises -> String:
+    """A Parquet file of one INT64 column `k` holding 1, 2 and 3."""
+    var arr = PrimitiveArray[DType.int64].allocate(3)
+    for i in range(3):
+        arr.set(i, Scalar[DType.int64](i + 1))
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("k"), ArrowType.INT64, False))
+    var rbb = RecordBatchBuilder()
+    rbb.add_column(Column.from_primitive[DType.int64](arr^))
+    var bytes = write_record_batch_to_parquet_bytes(rbb.build(sb.build()))
+    var path = test_tmpdir() + "/three_rows.parquet"
+    var fh = open(path, "w")
+    fh.write_bytes(Span(bytes))
+    fh.close()
+    return path^
+
+
+def test_registered_table_runs_on_the_session_engine() raises:
+    var s = Session()
+    register_parquet(s, String("Three"), _three_row_parquet())
+    var counted = run_sql(s.engine, String("select count(*) as c from three"))
+    assert_true(counted.ok(), "count(*) over a registered table was refused")
+    assert_equal(len(counted.batches), 1)
+    assert_equal(counted.batches[0].num_rows(), 1)
+    assert_equal(counted.batches[0].schema.field_name(0), String("c"))
+    assert_equal(
+        counted.batches[0].column_at(0).as_primitive[DType.int64]().get(0),
+        Int64(3),
+    )
+    var rows = run_sql(s.engine, String("select k from THREE where k > 1"))
+    assert_true(rows.ok(), "a filtered select over a registered table was refused")
+    assert_equal(len(rows.batches), 1)
+    assert_equal(rows.batches[0].num_rows(), 2)
+    var k = rows.batches[0].column_at(0).as_primitive[DType.int64]()
+    assert_equal(k.get(0) + k.get(1), Int64(5))
+
+
+def test_unregistered_table_is_refused_at_bind() raises:
+    var s = Session()
+    try:
+        register_parquet(s, String("gone"), String("/no/such/file.parquet"))
+    except:
+        pass
+    for name in [String("gone"), String("other")]:
+        var out = run_sql(s.engine, String("select count(*) from ") + name)
+        assert_false(out.ok(), "a query named the unregistered table " + name)
+        assert_equal(out.refusal.value().step, String(STEP_BIND))
+        assert_true(
+            name in out.refusal.value().reason,
+            "the bind refusal does not name " + name,
+        )
 
 
 def test_parquet_schema_bytes() raises:
@@ -176,6 +242,8 @@ def test_plan_render_refuses_garbage() raises:
 def main() raises:
     test_register_parquet()
     test_register_parquet_refusals()
+    test_registered_table_runs_on_the_session_engine()
+    test_unregistered_table_is_refused_at_bind()
     test_parquet_schema_bytes()
     test_csv_binding()
     test_csv_binding_missing_file()

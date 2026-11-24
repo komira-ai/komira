@@ -1,26 +1,34 @@
 """The state behind a context handle."""
 
-from sql.sql_catalog import SqlCatalog
+from sdk_exec.engine_context import EngineContext
 
 
 struct Session(Movable):
     """What `komira_ctx_new` creates: the text of the last error and the
-    catalog of tables registered by name.
+    engine (`sdk_exec`'s `EngineContext`) the session's tables are registered
+    on and its queries will run against.
 
     The C surface owns a `Session` through an `OwnedPointer` and lends it to
-    each call; it is destroyed by `komira_ctx_free`. A later change adds the
-    engine's state here without changing the handle's type for the caller.
+    each call; it is destroyed by `komira_ctx_free`, which stops the engine's
+    workers.
     """
 
     var _last_error: String
-    var catalog: SqlCatalog
-    """The tables registered on this session (`register_parquet`), looked up
-    by name without regard to case."""
+    var engine: EngineContext
+    """The session's engine: its catalog holds the tables registered on this
+    session (`register_parquet`), looked up by name without regard to case,
+    and its workers are started when the session is created."""
 
-    def __init__(out self):
-        """A session with no error and no table."""
+    def __init__(out self) raises:
+        """A session with no error and no table, over an engine with the host
+        profile's own worker count and memory budget.
+
+        Raises:
+            Error with the engine's message when the engine does not start
+            (the host probe or the worker start fails).
+        """
         self._last_error = String()
-        self.catalog = SqlCatalog()
+        self.engine = EngineContext()
 
     def set_error(mut self, var message: String):
         """Replace the last error with `message`."""

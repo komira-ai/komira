@@ -6,7 +6,8 @@
   two-call output protocol applies to a caller's buffer, and
   `input_length_status`, the bound on a byte input (`KOMIRA_MAX_INPUT_BYTES`).
 - `session.mojo`: `Session`, the state behind a context handle: the text of
-  the last error and the catalog of registered tables.
+  the last error and the engine (`sdk_exec`'s `EngineContext`) whose catalog
+  holds the registered tables.
 - `sources.mojo`: what the source and render exports do on values:
   `register_parquet`, `parquet_schema_bytes`, `csv_binding_bytes`,
   `json_binding_bytes` and `plan_render_text`.
