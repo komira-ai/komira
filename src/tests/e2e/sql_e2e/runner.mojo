@@ -76,29 +76,29 @@ def compare_answer(var result: Table, answer_tsv: String) -> String:
         return String(e)
 
 
-def check_case(mut session: Session, case: SqlCase, listed: Optional[String]) -> Optional[String]:
+def check_case(mut session: Session, sql_case: SqlCase, listed: Optional[String]) -> Optional[String]:
     """The problem of one case, or None when komira answers it as DuckDB
     does (`listed` None) or refuses it with exactly `listed`."""
     var refusal = String()
     var table = Table()
     var answered = False
     try:
-        var answer = sql_result(session, query_text(case.sql))
+        var answer = sql_result(session, query_text(sql_case.sql))
         table = Table.from_chunks(answer.take_batches(), answer.take_schema())
         answered = True
     except e:
         refusal = String(e)
     if answered:
         if listed:
-            return case.name + ": listed as refused (" + listed.value() + "), but komira answered"
-        var diff = compare_answer(table^, case.answer)
+            return sql_case.name + ": listed as refused (" + listed.value() + "), but komira answered"
+        var diff = compare_answer(table^, sql_case.answer)
         if diff.byte_length() > 0:
-            return case.name + ": komira's answer differs from DuckDB's: " + diff
+            return sql_case.name + ": komira's answer differs from DuckDB's: " + diff
         return None
     if not listed:
-        return case.name + ": refused, and not listed in refusals.tsv: " + refusal
+        return sql_case.name + ": refused, and not listed in refusals.tsv: " + refusal
     if refusal != listed.value():
-        return case.name + ": refused with \"" + refusal + "\", refusals.tsv lists \"" + listed.value() + "\""
+        return sql_case.name + ": refused with \"" + refusal + "\", refusals.tsv lists \"" + listed.value() + "\""
     return None
 
 
