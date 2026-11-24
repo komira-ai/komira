@@ -6,6 +6,7 @@ TARGETS = [
     "komira//node:arrow_test",
     "komira//node:load_test",
     "komira//node:session_test",
+    "komira//node:thread_test",
     "komira//python/smoke:pypi_smoke",
     "komira//python/tests:capture_test",
     "komira//python/tests:capture_test_py311",
