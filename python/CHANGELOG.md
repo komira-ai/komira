@@ -18,6 +18,11 @@ install page shows names it.
   syntax error, an unknown table or a refused construct raises `KomiraError` from `sql` itself, with the
   engine's message. A result still reads after its session is closed. `komira.Result` is a new public name; a requested
   schema on `__arrow_c_stream__` raises a `KomiraError`.
+- **Threads.** A `Session` may be used from several threads: its calls run one at a time, a call waiting
+  for the one running on the same session, and `close()` waits for a running call. Two sessions run at
+  once. A call from a signal handler or a finalizer made inside a running call of the same thread raises
+  `KomiraError`. Of two threads reading one `Result`, one reads it and the other gets `KomiraError`. Using
+  one session from two threads at once was not supported.
 - **pyarrow.** The wheel requires `pyarrow>=25.0.1`, so `pip install komira` installs it; it had no
   requirement.
 - **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its
