@@ -261,7 +261,7 @@ After any change to a source, a test, a manifest of this package or of the sibli
 both packages staged, commit what it writes, and build `komira//src/bench_report:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-komira-ai.bench_report-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
+(`mojo-komira-ai.bench_report-0.1.0-mojo1.1.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
 which therefore exists only once the tests have passed. `:conda_holds` reads it back and requires the one dependency
 `mojo-komira-ai.json >=0.1,<0.2`. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that
 file, not a build action.

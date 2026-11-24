@@ -384,12 +384,15 @@ def test_concurrent_drain_does_not_deadlock() raises:
     var sup = Supervisor()
     # Child: write ~256KB to STDERR (well past the ~64KB pipe buffer), THEN a
     # single terminal marker line to STDOUT as its LAST write, then exit 0.
-    # `yes | head -c` emits deterministic bytes fast; redirect to fd 2 (stderr).
+    # A loop of shell builtins writes 32768 x "ERRLINE\n" = 262144 bytes to fd
+    # 2 (stderr), the same bytes on every host: no external `yes` or `head`,
+    # whose output differs between the GNU and BSD tools.
     _spawned(
         sup.spawn(
             ChildSpec.shell(
                 String(
-                    "yes ERRLINE | head -c 262144 1>&2; "
+                    "i=0; while [ $i -lt 32768 ]; do echo ERRLINE; "
+                    + "i=$((i+1)); done 1>&2; "
                     + "echo DONE_MARKER=deadbeef; "
                     + "exit 0"
                 )
@@ -406,7 +409,7 @@ def test_concurrent_drain_does_not_deadlock() raises:
 
     var out_ok = String("DONE_MARKER=deadbeef") in out
     # stderr must be captured IN FULL (not silently dropped): 262144 bytes of
-    # "ERRLINE\n" -> err.byte_length() should be ~262144 (head -c exact cut).
+    # "ERRLINE\n" -> err.byte_length() should be ~262144.
     var err_len = err.byte_length()
     var err_ok = err_len >= 262000 and (String("ERRLINE") in err)
     if not (out_ok and err_ok and info.exit_code == Int32(0)):
@@ -819,7 +822,12 @@ def test_chunked_capture_is_byte_exact() raises:
         sup.spawn(
             ChildSpec.shell(
                 String(
-                    "X=$(printf 'A\\342\\200\\224B'); yes \"$X\" | head -c 200000"
+                    # 33333 x "A\u2014B\n" (6 bytes) then "A" and the first
+                    # byte of the dash: exactly 200000 bytes, ending mid
+                    # character, written by shell builtins only.
+                    "i=0; while [ $i -lt 33333 ]; do "
+                    + "printf 'A\\342\\200\\224B\\n'; i=$((i+1)); done; "
+                    + "printf 'A\\342'"
                 )
             )
         )

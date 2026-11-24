@@ -151,7 +151,10 @@ def _describe(mut rt: UdfRuntime) raises:
     # "node" and the major version, nothing else: an ABI copied from the
     # wrong offset of the reply starts with the id's last bytes, "node".
     assert_true(caps.runtime_abi.startswith("node"), caps.runtime_abi)
-    var abi = caps.runtime_abi.as_bytes()
+    # The bytes are read from a copy: Mojo 1.1.0 refuses a read of
+    # `caps.runtime_abi` (the messages below) while a borrow of its own bytes is live.
+    var abi_text = caps.runtime_abi.copy()
+    var abi = abi_text.as_bytes()
     assert_true(len(abi) > 4, caps.runtime_abi)
     for i in range(4, len(abi)):
         assert_true(abi[i] >= 48 and abi[i] <= 57, "runtime_abi '" + caps.runtime_abi + "': not node<major>")

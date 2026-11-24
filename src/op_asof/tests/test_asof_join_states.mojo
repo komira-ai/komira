@@ -115,7 +115,7 @@ def _probe_state() raises -> Probe:
     var b = _build_batch()
     _feed_all(st, batch_view_over(b))
     var owned = st.take_asof_build_table()
-    return Probe(owned^.take())
+    return Probe(owned^.into_inner())
 
 
 def _probe[bo: Origin[mut=False]](
@@ -184,7 +184,7 @@ def test_build_skips_a_null_temporal_key() raises:
     var b = _build_batch()
     _feed_all(st, batch_view_over(b))
     var owned = st.take_asof_build_table()
-    var t = owned^.take()
+    var t = owned^.into_inner()
     assert_equal(t.n_rows(), 3)
     assert_equal(t.temp_at(0), Int64.MIN)
     assert_equal(t.temp_at(1), Int64(10))
@@ -252,7 +252,7 @@ def test_a_failed_row_read_leaves_no_partial_row() raises:
             failures += 1
     assert_equal(failures, 1, "only the negative cell fails")
     var owned = st.take_asof_build_table()
-    var t = owned^.take()
+    var t = owned^.into_inner()
     assert_equal(t.n_rows(), 2)
     assert_equal(len(t.temporal), 2)
     assert_equal(t.payload[0].length(), 2)
@@ -327,7 +327,7 @@ def test_float_temporal_key_orders_nan_last() raises:
     for r in range(2):
         st.feed_row(bv, r)
     var owned = st.take_asof_build_table()
-    var probe = FProbe(owned^.take())
+    var probe = FProbe(owned^.into_inner())
 
     var psb = SchemaBuilder()
     psb.add_field(Field(String("t"), ArrowType.FLOAT64, False))

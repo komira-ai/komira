@@ -529,24 +529,28 @@ tests, which no pull request builds. The rest of this section is about `release-
 Not built yet. `//release:mopm_darwin_libs` covers the mopm packages only. Most of `//src` is
 not a mopm package, so a change that breaks one of those libraries on macOS is seen by nobody.
 Measured: a `uquery` of `kind(...)` for the library rules (`mojo_library`, gated, shared,
-system, native and `cxx_library`) over the `src` directory lists 415 targets. One
+system, native and `cxx_library`) over the `src` directory lists 411 targets. One
 `build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going
---skip-incompatible-targets` of that list on the farm built 156 and stopped on 259. Every
-target that stopped has an open issue, one per cause. The counts in this table are from that
-build's report:
+--skip-incompatible-targets` of that list on the farm (`Commands: 1204 (cached: 1, remote: 1203,
+local: 0)`) built 278, skipped 4 as incompatible (the connect, git pack, git protocol and HTTP
+conformance suites) and stopped on 129. Every target that stopped has an open issue, one per
+cause. A target is counted under the first failing action its build report names:
 
 | Cause | Targets | Issue |
 | --- | --- | --- |
-| aws-lc and s2n-tls had no darwin-arm64 build. Since komira-ai/komira#2203 all 133 configure for darwin-arm64 (a `cquery` of them); they have not been built for it again | 133 | komira-ai/komira#2196 |
-| a library's native shared library is ELF only | 9 | komira-ai/komira#2197 |
-| `so_exports` is the Linux binary on a macOS executor | the UDF spike helpers, `arrow_c_abi_probe` | komira-ai/komira#2198 |
-| the UDF spike helpers' C uses Linux-only APIs | 5 | komira-ai/komira#2199 |
-| `phase_timers` drops a join tail on the fork's clock tick | 1 | komira-ai/komira#2200 |
-| `http_core` and `host_probe` tests still read `/proc/self/status` (found in the sources; the sweep did not reach them) | not reached | komira-ai/komira#2201 |
+| `http_core`'s s2n shim test expects `ECONNRESET` where macOS reads end of stream | 106 (`http_core` and what depends on it) | komira-ai/komira#2206 |
+| `http_core`'s partial-send test never sees a partial send on macOS (hidden behind the test above in the same package) | the same 106 | komira-ai/komira#2207 |
+| a library's native shared library is ELF only | 13 | komira-ai/komira#2197 |
+| the UDF spike helpers' C uses Linux-only APIs | 7 | komira-ai/komira#2199 |
+| `bench_data`'s h2o join tables `x` and `big` hash differently on macOS | 3 | komira-ai/komira#2208 |
 
-The rest of the 259 were stopped by three of our own failures, now fixed. Two tests read
-`/proc/self/status` and now use `//src/tests/helpers/komira_test_rss`. The int64 column sum
-depended on the SIMD lane count. A test wrote a fixed `/tmp` path.
+No target stopped on aws-lc and s2n-tls (komira-ai/komira#2196), on `so_exports`
+(komira-ai/komira#2198), on `phase_timers` (komira-ai/komira#2200, which built in both sweeps
+since and so is intermittent) or on a read of `/proc/self/status` (komira-ai/komira#2201).
+Seven more causes were ours and are fixed: tests that assumed Linux's `PATH_MAX`, a
+`SIGPIPE` that macOS raises for the whole process, BSD `yes`, the epoll backend, the
+`libc.so.6` name, a temporary-file name that two threads could draw alike on macOS's coarser
+clock, and an NFD file name that APFS treats as the same file as its NFC form.
 
 The proposal keeps this set built, in the same way as the mopm set:
 
@@ -650,7 +654,7 @@ steps (a documentation-only push does not start the workflow, so it publishes no
 
 | job | when | what it does |
 |---|---|---|
-| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_113`, `MOPM` of `packages.bzl`) and `//release:mopm_artifacts`. **Version:** `release_beta_version --workspace-root src --version 0.1.<run number>` gives every member the version of this run (below, "The version of every release"). **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)). Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
+| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_135`, `MOPM` of `packages.bzl`) and `//release:mopm_artifacts`. **Version:** `release_beta_version --workspace-root src --version 0.1.<run number>` gives every member the version of this run (below, "The version of every release"). **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.1.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)). Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
 | `prod-stage` | after `release` and `mopm-stage`, **only on a push to `main`** (a manual run skips all six prod jobs before they start; there is no other switch) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, even when the step failed. |
 | `prod-test` | after `prod-stage`, on a push to `main` | in the environment `build` (the farm's; `id-token: write` for the tailnet join only), with **no registry identity and no secret**. It downloads the directory `prod-stage` kept, checks every file against `plan.json` (`release_staged_verify verify`: sha256 and size), writes `release/staged_set` from the files that matched and from nothing else, and runs `-c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm. |
 | `prod-commit` | after `prod-test`, on a push to `main` | in the environment `prod`, with `contents: read` and `id-token: write`. The same command without `--no-commit`, on the same directory with its `state.json`, after a fresh OIDC exchange: the same group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-prod-committed-<sha>`. |
@@ -741,7 +745,7 @@ would be handed two files for one name.
    whether to run it.
 6. **`prod-add`** runs after the smoke, so the channel already serves every file. `release_staged_verify add`
    ([source](../tools/build/ci/release_beta_fetch/prod_add.zig)) does what a user does, with the mopm that
-   staged and committed the set (`toolchains//:mopm_0_0_113`), in a directory it makes on the runner (both
+   staged and committed the set (`toolchains//:mopm_0_0_135`), in a directory it makes on the runner (both
    paths absolute):
    `mopm init --name release-check/prod_add`, then `mopm add komira-ai/<name> --registry prod` for three
    packages of [`packages.bzl`](../release/readme_e2e/packages.bzl), a library with no dependency (`json`),
@@ -786,7 +790,7 @@ the full names under the namespace's channel at this run's version and install e
   run gives the members the version `0.1.<run number>` (below).
 
 **Needs a mopm with `--no-commit` and `--abort`.** The jobs run the mopm that `mopm-stage` built: the pin
-`MOPM` in [`packages.bzl`](../release/readme_e2e/packages.bzl) (`toolchains//:mopm_0_0_113` in the
+`MOPM` in [`packages.bzl`](../release/readme_e2e/packages.bzl) (`toolchains//:mopm_0_0_135` in the
 `mopm-stage` job). The first mopm release with both flags is 0.0.66, so the pin has them; a later move of
 the pin must keep them, in the same change as the toolchain entry the job builds.
 
@@ -1618,3 +1622,52 @@ The lints alone, without building the rest:
 ```
 
 A failing lint prints `Validation for <target> failed:` and its findings.
+
+## A cold build of the Linux check set
+
+How long the farm takes when nothing is cached: the Linux set that `pr / check` builds when a change
+is built as the aggregate (`//ci:pr`; `//ci:pr_default` is the same set while `HEAVY` is empty), and
+the smaller set of `//src/arrow:arrow` and `//src/bench:bench`. A cold measurement is a sanctioned
+use of `--no-remote-cache` (B2), never a step of CI. Run it from a fresh worktree at the commit to
+measure, when the farm's queue is quiet:
+
+```sh
+./buck2 kill && ./buck2 clean
+./buck2 cquery 'deps(//ci:pr)' > /dev/null
+./buck2 build --no-remote-cache --keep-going --console simple //ci:pr
+```
+
+`kill` gives the build a fresh daemon and `clean` drops the outputs of earlier builds in the
+worktree. The `cquery` does the analysis first, so the build's time is its execution. The summary
+must read `Commands: N (cached: 0, remote: N, local: 0)`. Without `--keep-going`, buck2 starts no
+new action after the first failure, so a failed build reports fewer commands than the set has.
+
+The measured builds. `main at` is the merge commit of that pull request on main. The wall times are
+`date -u` taken around the build command, except the first row's, which is the build's time from the
+record of that run; the `Commands:` lines and the exit codes are buck2's final summary:
+
+| main at | targets | flags | wall | buck2 summary | exit |
+|---|---|---|---|---|---|
+| komira-ai/komira#2106 | `//src/arrow:arrow //src/bench:bench` | `--no-remote-cache` | 4,818 s (20 Nov 2026) | `Commands: 341 (cached: 0, remote: 341, local: 0)` | 3 |
+| komira-ai/komira#2106 | `//src/arrow:arrow //src/bench:bench` | `--no-remote-cache` | 639 s (24 Nov 2026, 02:49:15Z to 02:59:54Z) | `Commands: 482 (cached: 0, remote: 482, local: 0)` | 0 |
+| komira-ai/komira#2194 | `//ci:pr` | `--no-remote-cache --keep-going` | 21,101 s (24 Nov 2026, 04:23:53Z to 10:15:34Z) | `Commands: 24028 (cached: 0, remote: 24028, local: 0)` | 2 |
+
+The first two rows build the same commit and targets. The 20 Nov build failed when its test action
+`test_codec_libraries` was killed (exit code 137) and it ran without `--keep-going`; either is a
+likely reason it reports 341 commands to the later build's 482 (inferred, not measured).
+
+The `//ci:pr` build at komira-ai/komira#2194 failed three actions; this list is of that commit only:
+
+- `buildrules//rules/coverage/branch:llvm23` (`llvm_branch_unpack`): a farm fault, not a build
+  defect. The farm answered `the task tool exited nonzero (exit code Some(-1))`, with no output from
+  the action.
+- `//src/trace:test_span_microbench__cov` (`mojo_cov_run`): the test failed its assertion
+  `one name, registered once` (2, expected 1) at `src/trace/tests/test_span_microbench.mojo:103`.
+- `//src/bench_q6_phases:bench_q6_phases` (`mojo_build_test test_probe_phases`): the link step
+  failed with `unable to find suitable c compiler for linking`.
+
+Each action's wait in the farm's queue, from `queue_time_us` in the build's event log
+(`./buck2 log show`): the second row's build waited 2.1 s at the median and 11.9 s at p90; the
+`//ci:pr` build waited 36.1 s at the median, 111.7 s at p90 and 589 s at most. In both builds the
+first 20 actions waited under 10 s, so the queue was quiet when each started; in the `//ci:pr` build
+the farm's capacity set the pace (inferred from the queue times).

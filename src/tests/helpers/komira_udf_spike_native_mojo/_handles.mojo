@@ -113,7 +113,7 @@ def _box[T: Movable & Deinitable](host: Void, var v: T) -> Void:
 def _unbox[T: Movable & Deinitable](host: Void, p: Void):
     # SAFETY: `p` came from _box[T] and is freed once, by its close entry.
     var q = p.bitcast[T]()
-    q.destroy_pointee()
+    q.unsafe_deinit_pointee()
     q.free()
     _release(host, size_of[T]())
 

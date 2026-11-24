@@ -36,7 +36,7 @@
 from atomic_alias import AtomicI64
 from std.atomic import Ordering
 from std.io import FileDescriptor
-from std.memory import memset, UnsafePointer
+from std.memory import unsafe_memset, UnsafePointer
 from std.sys.intrinsics import prefetch, PrefetchOptions
 
 from arrow.primitive_array import PrimitiveArray
@@ -377,7 +377,7 @@ def chain_build_parallel(
     if not fan_fill:
         # SAFETY: `cap` 64-bit slots owned by this frame; the pointer does not
         # escape.
-        memset(ht.unsafe_ptr().bitcast[UInt8](), UInt8(0xFF), cap * 8)
+        unsafe_memset(ht.unsafe_ptr().bitcast[UInt8](), UInt8(0xFF), cap * 8)
     # CHAIN-ENTRY LAYOUT: an elided array is NOT ALLOCATED AT ALL -- that is
     # where that array's allocation and first-touch write traffic go, and why
     # the lever is not merely "skip a load".

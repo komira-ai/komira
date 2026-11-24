@@ -69,6 +69,7 @@ from std.testing import TestSuite, assert_equal, assert_true, assert_false
 from std.ffi import external_call
 
 from supervisor import ChildSpec, Supervisor
+from supervisor.proc_ffi import proc_write
 
 comptime _CLOSED_FD = Int32(1000000)  # above any fd limit a test runs with
 
@@ -228,6 +229,15 @@ def test_a_write_to_a_child_that_has_exited_fails_and_we_live() raises:
     assert_equal(sup.write_stdin(String("late\n")), -32)
     assert_equal(sup.write_stdin(String("later\n")), -32)
     sup.close()
+
+
+def test_a_write_to_a_closed_descriptor_returns_ebadf() raises:
+    # Before any byte goes out the descriptor is checked: on Linux by write()
+    # itself, on macOS by the F_SETNOSIGPIPE mark the write sets first. Either
+    # way the call returns -EBADF and raises no signal.
+    var text = String("x")
+    assert_equal(proc_write(_CLOSED_FD, text.as_bytes()), -9)
+    assert_equal(proc_write(_CLOSED_FD, text.as_bytes()), -9)
 
 
 def test_wait_readable_reports_silence_data_and_end_of_file() raises:

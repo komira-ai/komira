@@ -825,22 +825,22 @@ def new_owned_metrics_set() raises -> OwnedPointer[MetricsSet]:
     # +1 for the quarantine slot; see QUARANTINE_COUNTER above. This is the
     # SECOND construction path — it initializes fields directly rather than
     # calling `__init__`, so it must mirror every field the ctor sets.
-    UnsafePointer(to=raw[].counters).init_pointee_move(
+    UnsafePointer(to=raw[].counters).unsafe_write(
         Slab[NamedCounter].create_prefilled(MAX_COUNTERS + 1)
     )
-    UnsafePointer(to=raw[].times).init_pointee_move(
+    UnsafePointer(to=raw[].times).unsafe_write(
         Slab[NamedTime].create_prefilled(MAX_TIMES + 1)
     )
-    UnsafePointer(to=raw[].gauges).init_pointee_move(
+    UnsafePointer(to=raw[].gauges).unsafe_write(
         Slab[NamedGauge].create_prefilled(MAX_GAUGES + 1)
     )
-    UnsafePointer(to=raw[].lookup_misses).init_pointee_move(
+    UnsafePointer(to=raw[].lookup_misses).unsafe_write(
         Slab[Counter].create_prefilled(1)
     )
-    UnsafePointer(to=raw[].n_counters).init_pointee_move(UInt8(0))
-    UnsafePointer(to=raw[].n_times).init_pointee_move(UInt8(0))
-    UnsafePointer(to=raw[].n_gauges).init_pointee_move(UInt8(0))
-    UnsafePointer(to=raw[].dropped_registrations).init_pointee_move(
+    UnsafePointer(to=raw[].n_counters).unsafe_write(UInt8(0))
+    UnsafePointer(to=raw[].n_times).unsafe_write(UInt8(0))
+    UnsafePointer(to=raw[].n_gauges).unsafe_write(UInt8(0))
+    UnsafePointer(to=raw[].dropped_registrations).unsafe_write(
         AtomicI32(Int32(0))
     )
     return OwnedPointer[MetricsSet](unsafe_from_raw_pointer=raw)

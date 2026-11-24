@@ -100,7 +100,7 @@ writes, and build `komira//src/spsc_ring:lib` on the farm. A test file that the 
 run: run the sync after adding one.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-komira-ai.spsc_ring-0.1.0-mojo1.0.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
+(`mojo-komira-ai.spsc_ring-0.1.0-mojo1.1.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
 which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a
 CI job that takes that file, not a build action.
 

@@ -16,3 +16,7 @@ INSERT INTO T VALUES
     (9, -5, 4, NULL, 'Z', 'green', 3),
     (10, 0, 8, '0.0'::DOUBLE, 'zebra', 'blue', 1),
     (11, 2, 2, 'nan'::DOUBLE, ' lead', 'red', 2);
+
+-- U: 20000 rows. x: BIGINT with ties (1009 values) and a NULL for every k divisible by 37.
+CREATE TABLE U (k BIGINT, x BIGINT);
+INSERT INTO U SELECT i, CASE WHEN i % 37 = 0 THEN NULL ELSE (i * 7919) % 1009 END FROM range(20000) t(i);

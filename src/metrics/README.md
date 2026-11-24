@@ -144,7 +144,7 @@ test, the C file, a manifest of this package or of a sibling, or `mopm.lock`, ru
 workspaces of the five direct dependencies staged, commit what it writes, and build `komira//src/metrics:lib`
 on the farm.
 
-`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.metrics-0.1.0-mojo1.0.0_0.conda`): the `.mojoc` and
+`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.metrics-0.1.0-mojo1.1.0_0.conda`): the `.mojoc` and
 `lib/libkomira_metrics_ea_flag.a`. `:metrics` is `:lib` as komira's Mojo rules take it
 (`mojo_adopted_library`): its `deps` are the adopted target of each package in `[dependencies]`, and the rule refuses
 a list that is not the closure `:lib` was built from. It also compiles and runs the README's examples above

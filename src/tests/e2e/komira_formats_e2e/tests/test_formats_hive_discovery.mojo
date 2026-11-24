@@ -18,7 +18,7 @@
 #   * test_hive_partition_values_are_utf8_exact -- `PrunedHiveDiscovery.open`
 #     infers one STRING partition column `city` and reports, for each file,
 #     the value whose bytes are exactly 5A C3 BC 72 69 63 68 (or `Oslo`).
-#   * test_prune_to_zurich_by_fold -- the tree gets two near-miss sibling
+#   * test_prune_to_zurich_by_fold -- the tree gets up to two near-miss sibling
 #     partitions, `city=Zurich` (ASCII u) and `city=Zürich` spelled NFD
 #     (5A 75 CC 88 72 69 63 68: u + U+0308), each with one file. `open_pruned`
 #     with `city = 'Zürich'` (precomposed) and the partition schema inferred
@@ -27,7 +27,10 @@
 #     compare. A compare that folds accents or case, normalizes Unicode, or
 #     looks only at a prefix or first byte keeps a sibling and reds (planted:
 #     a first-byte compare in the STRING equality gave "fold prune: 6 paths,
-#     want 4").
+#     want 4"). On a filesystem that folds Unicode normalization (APFS, the
+#     macOS default), the NFD spelling names the precomposed directory, so the
+#     NFD sibling cannot exist there: the test probes for that, prints that it
+#     leaves the NFD sibling out, and asserts the rest with the ASCII sibling.
 #   * test_escaped_partition_dir_decodes -- a directory spelled the way
 #     komira's own encoder writes it, `city=Z%C3%BCrich`, decodes to exactly
 #     the 7 raw bytes of `Zürich` (the %-unescape accumulates bytes; a
@@ -52,6 +55,7 @@
 # =============================================================================
 
 from std.os import makedirs
+from std.os.path import exists
 from std.testing import assert_equal, assert_true
 
 from async_rt.ops.waker_sink import NoopSink
@@ -250,6 +254,16 @@ def _zurich_nfd() -> String:
     return _from_bytes([0x5A, 0x75, 0xCC, 0x88, 0x72, 0x69, 0x63, 0x68])
 
 
+def _keeps_nfc_and_nfd_apart() raises -> Bool:
+    """True when this run's filesystem keeps the precomposed and the NFD
+    spelling of `Zürich` as two names. APFS folds Unicode normalization: there
+    the NFD spelling finds the directory made with the precomposed one. The
+    probe is its own root, outside every tree a test lists."""
+    var probe = _root("nfd_probe")
+    makedirs(probe + "/" + city_zurich(), exist_ok=True)
+    return not exists(probe + "/" + _zurich_nfd())
+
+
 def _write_sibling(root: String, city: String) raises:
     var pdir = root + "/city=" + city
     makedirs(pdir, exist_ok=True)
@@ -261,13 +275,24 @@ def _write_sibling(root: String, city: String) raises:
 def test_prune_to_zurich_by_fold() raises:
     var root = _built_tree("prune_fold")
     _write_sibling(root, String("Zurich"))
-    _write_sibling(root, _zurich_nfd())
+    var nfd_apart = _keeps_nfc_and_nfd_apart()
+    if nfd_apart:
+        _write_sibling(root, _zurich_nfd())
+    else:
+        print(
+            "  test_prune_to_zurich_by_fold: the NFD sibling is left out: this"
+            " filesystem folds Unicode normalization, so city=<NFD Zürich> is"
+            " the precomposed directory"
+        )
     var fs = _Fs.new()
 
     # Vacuity guard: the near-misses are on disk and discovered unpruned, as
     # values distinct from the precomposed spelling.
     var every = PrunedHiveDiscovery.open(fs, root)
-    assert_equal(every.num_paths(), 10, "eight tree files + two near-miss siblings")
+    if nfd_apart:
+        assert_equal(every.num_paths(), 10, "eight tree files + two near-miss siblings")
+    else:
+        assert_equal(every.num_paths(), 9, "eight tree files + the ASCII near-miss sibling")
     var seen_ascii = False
     var seen_nfd = False
     for i in range(every.num_paths()):
@@ -277,7 +302,7 @@ def test_prune_to_zurich_by_fold() raises:
         if v == _zurich_nfd():
             seen_nfd = True
     assert_true(seen_ascii, "city=Zurich sibling discovered")
-    assert_true(seen_nfd, "NFD city=Zürich sibling discovered")
+    assert_equal(seen_nfd, nfd_apart, "NFD city=Zürich sibling discovered where it can exist")
     assert_true(_zurich_nfd() != city_zurich(), "NFD differs from NFC in bytes")
 
     var d = PrunedHiveDiscovery.open_pruned(

@@ -260,7 +260,7 @@ def _library(path: String, name: String) raises -> String:
     # SAFETY: one heap slot that keeps the handle, never freed, so the copy
     # is never dlclosed (a library may register exit handlers).
     var keep = alloc[OwnedDLHandle](1)
-    keep.init_pointee_move(h^)
+    keep.unsafe_write(h^)
     return (
         '{"library": ' + _json_str(name) + ', "bytes": ' + String(size) + ', "sha256_ns": ' + String(t1 - t0)
         + ', "dlopen_ns": ' + String(t3 - t2) + "}"

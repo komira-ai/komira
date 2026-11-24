@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Lowering: a bound LogicalPlan, a HostProfile and the resolved inputs to the
-# PhysicalPlan IR (version 20) and the ParamTable its segments index. Pure: the
+# PhysicalPlan IR (version 21) and the ParamTable its segments index. Pure: the
 # entry opens no file, reads no clock and no environment variable and touches
 # no global (README.md).
 #
@@ -75,6 +75,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        bucket beside the keys for one key, several and Hive
 #                        partitioned keys, and the render line names the store
 #                        of a remote scan only.
+# test_lower_topn        a range of a sort's order cut as one SINK_TOPN segment: a
+#                        top-n over a scan, a limit with an offset over a sort,
+#                        the projections above it fused onto the reading
+#                        pipeline, limits over a sort or a top-n composed into
+#                        one range (saturating at Int.MAX), a top-n over an
+#                        aggregate, in a union branch and below a filter, and
+#                        the shapes that stay an operator or a sort sink.
 # test_lower_union       a UNION ALL: one segment per branch (a collect, or the
 #                        branch's own breaker segment) and a SOURCE_CONCAT
 #                        segment over them in branch order with an E3 edge to
@@ -84,7 +91,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_lower_shared      a shared subplan (a PLAN_CSE_REF and its canonical
 #                        subtree): one with a breaker or a limit cut once and
 #                        read by every reference over E3 edges, a sort's
-#                        readers sorted, a canonical subtree holding a
+#                        and a top-n's readers sorted, a limit over an
+#                        unshared sort still a range (also when the sort
+#                        reads a reference) and over a shared one refused,
+#                        a canonical subtree holding a
 #                        reference found by its hash before folding, a join's
 #                        right child walked first (a self-join, scan facts
 #                        kept, a shared join), one of scans, filters, projections
@@ -159,6 +169,7 @@ mojo_library(
         "tests/test_lower_s3_scan.mojo",
         "tests/test_lower_shared.mojo",
         "tests/test_lower_sum_fuse.mojo",
+        "tests/test_lower_topn.mojo",
         "tests/test_lower_union.mojo",
         "tests/test_lower_udf_nodes.mojo",
         "tests/test_lower_udf_refusals.mojo",

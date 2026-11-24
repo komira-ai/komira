@@ -180,7 +180,7 @@ def _fed(rows: Rows) raises -> State:
 
 def _taken(mut st: State) raises -> Table:
     var owned = st.take_join_build_table()
-    return owned^.take()
+    return owned^.into_inner()
 
 
 def _sample() -> Rows:
@@ -327,7 +327,7 @@ def test_two_column_key_skips_a_null_in_either_column() raises:
     for r in range(bv.n_rows()):
         st.feed_row(bv, r)
     var owned = st.take_join_build_table()
-    var t = owned^.take()
+    var t = owned^.into_inner()
     assert_equal(t.n_rows(), 3, "both NULL-key rows are skipped")
     assert_false(t.has_duplicate_keys, "(3, NULL) was not stored as (3, 0)")
     var s30 = join_build_probe_2(t, Int64(3), Int64(0))

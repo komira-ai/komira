@@ -275,7 +275,7 @@ def test_noop_destroy_touches_nothing() raises:
     # the pointer reaches `_noop_destroy` with no origin cast.
     var buf = alloc[UInt8](16)
     for i in range(16):
-        (buf + i).init_pointee_copy(UInt8(0xAB))
+        (buf + i).unsafe_write(copy=UInt8(0xAB))
     _noop_destroy(buf)
     var bytes = List[UInt8](capacity=16)
     for i in range(16):

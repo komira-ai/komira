@@ -390,7 +390,7 @@ struct Uuidv7Generator(Deinitable):
     on each call so successive IDs are strictly ordered. `rand_b` (62 bits)
     stays fully random for global uniqueness across generators / processes.
 
-    Monotonic state is packed into a single `Atomic[DType.uint64]`:
+    Monotonic state is packed into a single `Atomic[UInt64]`:
 
         state = (last_ms << 16) | last_seq        (seq is the low 16 bits)
 

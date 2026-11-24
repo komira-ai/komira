@@ -38,7 +38,7 @@ conda_closure(
     libs = {
         "lib/liblz4.dylib": ":" + pinned_kwargs("darwin-arm64", "liblz4")["name"],
     },
-    package = ":mojo_compiler_1.0.0_osx-arm64.conda",
+    package = ":mojo_compiler_1.1.0_osx-arm64.conda",
     unpacker = "komira//tools/build/toolchains:conda_unpack",
     visibility = ["PUBLIC"],
 )

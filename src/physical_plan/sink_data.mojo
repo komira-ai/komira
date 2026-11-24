@@ -130,6 +130,10 @@ struct TopNSinkData(Movable):
         nulls_first: Per-key EXPLICIT NULL placement, or EMPTY for "derive".
             Same empty-means-derive contract as `SortSinkData.nulls_first` —
             read that field's note; it is stated once.
+        offset: Rows of the sort order to skip before the `n` kept: the sink
+            answers rows [offset, offset + n) of its input in sort order
+            (`ORDER BY ... LIMIT n OFFSET offset`). 0, the default, is the
+            plain top-N.
 
     ⚠ ON A TOP-N THE PLACEMENT IS NOT COSMETIC: it decides WHICH `n` ROWS COME
     BACK, not merely where they sit. `ORDER BY v LIMIT 3` over a column with
@@ -141,6 +145,7 @@ struct TopNSinkData(Movable):
     var descending: List[Bool]
     var n: Int
     var nulls_first: List[Bool]
+    var offset: Int
 
     def __init__(
         out self,
@@ -148,11 +153,13 @@ struct TopNSinkData(Movable):
         var descending: List[Bool],
         n: Int,
         var nulls_first: List[Bool] = List[Bool](),
+        offset: Int = 0,
     ):
         self.sort_keys = sort_keys^
         self.descending = descending^
         self.n = n
         self.nulls_first = nulls_first^
+        self.offset = offset
 
 # =============================================================================
 # is_explicit_nulls_first_request -- "did the producer ask for something the

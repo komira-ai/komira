@@ -61,7 +61,7 @@ mojo_binary(
 )
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
-# (`mojo-komira-ai.resources-0.1.0-mojo1.0.0_0.conda`), which records runtime_paths as a
+# (`mojo-komira-ai.resources-0.1.0-mojo1.1.0_0.conda`), which records runtime_paths as a
 # dependency (`mojo-komira-ai.runtime_paths >=0.1,<0.2`) and holds that package's files nowhere. `members`
 # is the manifests of the path dependencies, staged at their repository paths, because `mopm pack`
 # reads the manifest of each beside the one it is given. `:lib` exists only once the test passed, so
@@ -74,8 +74,8 @@ mojo_conda(
     lib = ":lib",
     manifest = "mopm.toml",
     members = {"../runtime_paths": "//src/runtime_paths:mopm.toml"},
-    mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_113",
+    mojo = "1.1.0",
+    mopm = "toolchains//:mopm_0_0_135",
     package = "komira-ai/resources",
     version = "0.1.0",
     visibility = ["PUBLIC"],

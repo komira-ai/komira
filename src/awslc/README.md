@@ -57,5 +57,5 @@ package that depends on it, and packs it into the package under `lib/`. The file
 `:lib` is the library file and exists only once the test of `tests/` has passed. After any change to a source, a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run
 `buildrules mojo sync`, commit what it writes, and build `komira//src/awslc:lib` on the farm.
 
-`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.awslc-0.1.0-mojo1.0.0_0.conda`): the `.mojoc` and `lib/libawslc.a`. `:awslc` is `:lib` as komira's Mojo rules
+`:conda` is the `.conda` of the mopm package (`mojo-komira-ai.awslc-0.1.0-mojo1.1.0_0.conda`): the `.mojoc` and `lib/libawslc.a`. `:awslc` is `:lib` as komira's Mojo rules
 take it (`mojo_adopted_library`): a package that lists it in `deps` links the same archive.

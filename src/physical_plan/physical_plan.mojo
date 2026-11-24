@@ -88,9 +88,12 @@ from physical_plan.sink_data import (
 #       table snapshot. `ParquetSourceData` moved to `parquet_source_data`.
 #   20: `SOURCE_JSONL` and `SourceSpecPod.jsonl_path` / `jsonl_schema` -- a
 #       segment that reads one newline-delimited JSON file at a stated schema.
+#   21: `TopNSinkData.offset` — the rows of the sort order a top-N skips
+#       before the `n` it keeps (LIMIT n OFFSET m over a sort). 0 is the plain
+#       top-N.
 #   Retired `MorselOp` tag values (4-13) are not reused.
 
-comptime PHYSICAL_PLAN_IR_VERSION: Int = 20
+comptime PHYSICAL_PLAN_IR_VERSION: Int = 21
 
 
 # =============================================================================

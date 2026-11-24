@@ -31,7 +31,7 @@
 # elision):
 #   var _worker_id: UInt16
 #   var _io_subsystem: IoSubsystem[Self.S]                  (Movable)
-#   var _shutdown_flag: OwnedPointer[Atomic[DType.int32]]   (heap-stable)
+#   var _shutdown_flag: OwnedPointer[Atomic[Int32]]   (heap-stable)
 #   var _stall_detector: ReactorStallDetector
 #   var _imbalance_metrics: HotShardMetrics
 #   var _iter_count: UInt64                                 (Class G; task-id)
@@ -419,7 +419,7 @@ struct Worker[S: WakerSink & Movable & Deinitable](
         (PerCoreAsyncRuntime._worker_senders) for the dispatcher /
         spawner to clone from.
 
-        Atomic[DType.int32] is non-Movable on 0.26.3, so the shutdown flag
+        Atomic[Int32] is non-Movable on 0.26.3, so the shutdown flag
         is heap-allocated via OwnedPointer (Repro 7 pattern). Stall
         detector + imbalance metrics are constructed with their own
         OwnedPointer[Atomic[..]] inner fields.

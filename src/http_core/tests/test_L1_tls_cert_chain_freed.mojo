@@ -7,8 +7,8 @@ frees none of them (tls/s2n_config.c, `s2n_config_free_cert_chain_and_key`
 returns early). The config handle must free each chain itself.
 
 Each case builds and drops a config many times and reads the process's
-resident set (komira_test_rss: VmRSS of /proc/self/status on Linux,
-task_info's resident_size on macOS) after a warm-up and at the end. A
+resident set after a warm-up and at the end, through komira_test_rss (VmRSS
+of /proc/self/status on Linux, task_info's resident_size on macOS). A
 chain holds the parsed certificate, the RSA 2048 private key and s2n's own
 structs, several KiB, so a chain left behind on every round grows the
 resident set by megabytes over the rounds below; freed chains let the
@@ -61,14 +61,14 @@ def _refuse_and_drop(cert: String, key: String) raises:
 def _check_growth(name: String, before: Int, after: Int) raises:
     var growth = after - before
     print(
-        "    " + name + ": resident set " + String(before) + " KiB -> "
-        + String(after) + " KiB over " + String(_ROUNDS - _WARMUP)
-        + " rounds (growth " + String(growth) + " KiB, limit "
+        "    " + name + ": resident set " + String(before) + " kB -> "
+        + String(after) + " kB over " + String(_ROUNDS - _WARMUP)
+        + " rounds (growth " + String(growth) + " kB, limit "
         + String(_MAX_GROWTH_KIB) + ")"
     )
     if growth > _MAX_GROWTH_KIB:
         raise Error(
-            name + ": resident set grew " + String(growth) + " KiB over "
+            name + ": resident set grew " + String(growth) + " kB over "
             + String(_ROUNDS - _WARMUP)
             + " config drops; the cert chains were not freed"
         )

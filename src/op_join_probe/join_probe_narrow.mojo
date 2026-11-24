@@ -51,10 +51,10 @@ comptime NARROW_HEADROOM: Int = JOIN_PS_MIN_HEADROOM
    fill it and cost a second kernel call and a growth per morsel."""
 
 
-def _init_npn_i64() -> OwnedPointer[Atomic[DType.int64]]:
-    var raw = alloc[Atomic[DType.int64]](1)
-    UnsafePointer(to=raw[].value).unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[Atomic[DType.int64]](unsafe_from_raw_pointer=raw)
+def _init_npn_i64() -> OwnedPointer[Atomic[Int64]]:
+    var raw = alloc[Atomic[Int64]](1)
+    raw.unsafe_write(Atomic[Int64](Int64(0)))
+    return OwnedPointer[Atomic[Int64]](unsafe_from_raw_pointer=raw)
 
 
 # 0 = not configured (on), 1 = on, -1 = off.

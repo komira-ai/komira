@@ -39,8 +39,10 @@
 # Then run_bounded_inflight itself, over a fake store that counts requests in
 # flight (below): the peak is exactly the bound, never more; fewer jobs than
 # the bound run all at once; a bound of 1 runs in order on the calling
-# thread; a failed job is raised as it is and stops new jobs. And twelve
-# file systems made, used on several threads and dropped, one after another.
+# thread. Over a store whose job 0 fails, a failed job is raised as it is and
+# stops new jobs (the other jobs hold until the runner's failure flag is set,
+# so no race decides it). And twelve file systems made, used on several
+# threads and dropped, one after another.
 from std.ffi import external_call
 from std.memory import ArcPointer
 from std.memory import Pointer
@@ -73,6 +75,7 @@ from objectstore_s3 import (
     inflight_workers,
     run_bounded_inflight,
 )
+from objectstore_s3.inflight import _FailureFlag, _run_bounded_inflight
 from retry import Backoff, Jitter, RetryPolicy
 
 
@@ -577,7 +580,8 @@ def test_a_write_bound_of_one_is_one_part_at_a_time() raises:
 # request until every job of its round (`job // wait_for`) is in flight, so a
 # runner that keeps the bound in flight reaches it every time and one that
 # keeps more is seen at once; the wait is on the other jobs' arrival, with no
-# clock. Each job records the worker it ran on.
+# clock. Each job records the worker it ran on. The failure case runs over
+# `_FailFirstStore` (below) instead.
 
 
 comptime _RunnerRounds = GlobalCounterTable["komira_objectstore_s3_test_inflight_runner", 32]
@@ -589,7 +593,6 @@ struct _FakeStore[io: MutOrigin, po: MutOrigin, ro: MutOrigin](InflightJobs):
     var peak: Pointer[AtomicI64, Self.po]
     var ran_on: Pointer[List[Int], Self.ro]
     var wait_for: Int
-    var fail_job: Int
     var n_jobs: Int
 
     def __init__(
@@ -599,13 +602,11 @@ struct _FakeStore[io: MutOrigin, po: MutOrigin, ro: MutOrigin](InflightJobs):
         ran_on: Pointer[List[Int], Self.ro],
         wait_for: Int,
         n_jobs: Int,
-        fail_job: Int = -1,
     ):
         self.in_flight = in_flight
         self.peak = peak
         self.ran_on = ran_on
         self.wait_for = wait_for
-        self.fail_job = fail_job
         self.n_jobs = n_jobs
 
     def run_job(self, worker: Int, job: Int) raises:
@@ -629,11 +630,9 @@ struct _FakeStore[io: MutOrigin, po: MutOrigin, ro: MutOrigin](InflightJobs):
         if self.ran_on[][job] != -1:
             raise Error(String("job ") + String(job) + " ran twice")
         self.ran_on[][job] = worker
-        if job == self.fail_job:
-            raise Error(String("job ") + String(job) + " failed")
 
 
-def _run(n_jobs: Int, bound: Int, fail_job: Int = -1) raises -> Tuple[Int, List[Int]]:
+def _run(n_jobs: Int, bound: Int) raises -> Tuple[Int, List[Int]]:
     """The peak in flight and the worker each job ran on."""
     var in_flight = AtomicI64(0)
     var peak = AtomicI64(0)
@@ -645,7 +644,6 @@ def _run(n_jobs: Int, bound: Int, fail_job: Int = -1) raises -> Tuple[Int, List[
         Pointer(to=ran_on),
         inflight_workers(n_jobs, bound),
         n_jobs,
-        fail_job,
     )
     run_bounded_inflight(store, n_jobs, bound)
     return (Int(peak.load()), ran_on^)
@@ -685,18 +683,67 @@ def test_a_bound_of_one_runs_in_order_on_the_caller() raises:
         assert_equal(got[1][j], 0)
 
 
-def test_a_failed_job_is_raised_and_stops_new_jobs() raises:
-    var in_flight = AtomicI64(0)
-    var peak = AtomicI64(0)
-    var ran_on = List[Int](length=40, fill=-1)
-    var store = _FakeStore(Pointer(to=in_flight), Pointer(to=peak), Pointer(to=ran_on), 1, 40, 0)
+comptime _RunnerFailures = GlobalCounterTable["komira_objectstore_s3_test_inflight_failures", 1]
+
+
+struct _GlobalFlag(_FailureFlag):
+    """The runner's failure flag, kept in a global counter so the store's jobs
+    can read it without a reference to it beside the runner's own."""
+
+    def __init__(out self):
+        pass
+
+    def record(self) raises:
+        _RunnerFailures.incr(0)
+
+    def is_set(self) raises -> Bool:
+        return _RunnerFailures.read(0) != 0
+
+
+struct _FailFirstStore[ro: MutOrigin](InflightJobs):
+    """Job 0 raises. Every other job records that it ran, then holds until the
+    runner's failure flag is set, so the order is fixed, not raced: the job a
+    worker holds ends only after the failure is recorded, and the worker's next
+    check of the flag sees it. A runner that stops new jobs after a failure
+    therefore takes at most one job per worker (jobs 0..workers-1, taken in
+    index order); one that keeps taking runs all of them. A runner that never
+    sets the flag leaves the held jobs waiting (the build's watchdog ends the
+    run, as for the round tests above)."""
+
+    var ran_on: Pointer[List[Int], Self.ro]
+
+    def __init__(out self, ran_on: Pointer[List[Int], Self.ro]):
+        self.ran_on = ran_on
+
+    def run_job(self, worker: Int, job: Int) raises:
+        if self.ran_on[][job] != -1:
+            raise Error(String("job ") + String(job) + " ran twice")
+        self.ran_on[][job] = worker
+        if job == 0:
+            raise Error("job 0 failed")
+        while _RunnerFailures.read(0) == 0:
+            _yield()
+
+
+def _check_a_failure_stops_new_jobs(bound: Int) raises:
+    var n_jobs = 40
+    var workers = inflight_workers(n_jobs, bound)
+    _RunnerFailures.reset()
+    var ran_on = List[Int](length=n_jobs, fill=-1)
+    var store = _FailFirstStore(Pointer(to=ran_on))
     with assert_raises(contains="job 0 failed"):
-        run_bounded_inflight(store, 40, 2)
-    var ran = 0
-    for j in range(40):
-        if ran_on[j] != -1:
-            ran += 1
-    assert_true(ran < 40, "every job ran after one failed")
+        _run_bounded_inflight(store, n_jobs, bound, _GlobalFlag())
+    assert_equal(_RunnerFailures.read(0), 1, "exactly one worker recorded a failure")
+    assert_true(ran_on[0] != -1, "job 0 did not run")
+    for j in range(workers, n_jobs):
+        assert_equal(ran_on[j], -1, String("job ") + String(j) + " was taken after one failed")
+
+
+def test_a_failed_job_is_raised_and_stops_new_jobs() raises:
+    # Two workers: the other worker holds at most job 1 and takes none after it.
+    _check_a_failure_stops_new_jobs(2)
+    # Four workers: each of the other three holds at most one of jobs 1..3.
+    _check_a_failure_stops_new_jobs(4)
 
 
 def main() raises:

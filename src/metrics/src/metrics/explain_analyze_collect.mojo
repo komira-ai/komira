@@ -73,7 +73,7 @@
 # across a whole process and report a sum over every query that ran, which is
 # not what "EXPLAIN ANALYZE this query" means.
 #
-# THREAD SAFETY. Every slot is an `Atomic[DType.int64]` mutated with a relaxed
+# THREAD SAFETY. Every slot is an `Atomic[Int64]` mutated with a relaxed
 # `fetch_add`. All the recording sites in this repo are DRIVER-side (the walk,
 # the collect leaf, the streaming-sink driver — all post-barrier or pre-fork),
 # so contention is nil; the atomics are for correctness under a future

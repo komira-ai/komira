@@ -138,8 +138,10 @@ def test_desc_pack_round_trips_at_the_ceiling() raises:
     codec's two halves against each other, not just the packer against itself.
     """
     var cell = _var_desc_pack(VAR_DESC_OFFSET_MAX, VAR_DESC_OFFSET_MAX)
-    assert_equal(Int(cell & UInt64(0xFFFFFFFF)), VAR_DESC_OFFSET_MAX)
-    assert_equal(Int(cell >> 32), VAR_DESC_OFFSET_MAX)
+    # The halves are compared as UInt64: both are 0xFFFFFFFF, and Mojo 1.1.0 can
+    # fold Int() of a compile-time-known UInt64 0xFFFFFFFF to -1.
+    assert_equal(cell & UInt64(0xFFFFFFFF), UInt64(VAR_DESC_OFFSET_MAX))
+    assert_equal(cell >> 32, UInt64(VAR_DESC_OFFSET_MAX))
     var ordinary = _var_desc_pack(1234567, 89)
     assert_equal(Int(ordinary & UInt64(0xFFFFFFFF)), 1234567)
     assert_equal(Int(ordinary >> 32), 89)

@@ -14,6 +14,8 @@
 # that places a row after every row not greater than it (stable), comparing
 # each key as the plan states: a NULL against a NULL is a tie, a NULL against a
 # value goes first or last by `nulls_first`, two values by the direction.
+# `oracle_first` is the first `keep` ids of that order, at a cost of rows * keep
+# rather than rows ^ 2, for the inputs of a top-N's tests.
 
 from arrow.arrow_types import ArrowType
 from arrow.column import Column
@@ -121,4 +123,24 @@ def oracle_order(
         while at > 0 and _cmp(out[at - 1], r, cols, desc, nf) > 0:
             at -= 1
         out.insert(at, r)
+    return out^
+
+
+def oracle_first(
+    rows: Int, keep: Int, cols: List[Int], desc: List[Bool], nf: List[Bool]
+) -> List[Int]:
+    """The first `keep` ids of `oracle_order(rows, ...)`, found without
+    sorting every row: a row that sorts after `keep` others is never held."""
+    var out = List[Int]()
+    if keep <= 0:
+        return out^
+    for r in range(rows):
+        var at = len(out)
+        while at > 0 and _cmp(out[at - 1], r, cols, desc, nf) > 0:
+            at -= 1
+        if at >= keep:
+            continue
+        out.insert(at, r)
+        if len(out) > keep:
+            _ = out.pop()
     return out^

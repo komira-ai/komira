@@ -55,7 +55,7 @@ def _str_col_nullable(
         total_bytes += values[i].byte_length()
     var offsets_buf = OwnedAlignedBuffer((n + 1) * int32_size)
     var off_ptr = offsets_buf.view_typed_mut[DType.int32]()
-    (off_ptr + 0).init_pointee_copy(Int32(0))
+    (off_ptr + 0).unsafe_write(copy=Int32(0))
     var data_buf = OwnedAlignedBuffer(max(total_bytes, 1))
     var data_ptr = data_buf.view_typed_mut[DType.uint8]()
     var offset = 0
@@ -65,9 +65,9 @@ def _str_col_nullable(
         if s_len > 0:
             var s_ptr = s.unsafe_ptr().bitcast[UInt8]()
             for k in range(s_len):
-                (data_ptr + offset + k).init_pointee_copy((s_ptr + k)[])
+                (data_ptr + offset + k).unsafe_write(copy=(s_ptr + k)[])
         offset += s_len
-        (off_ptr + i + 1).init_pointee_copy(Int32(offset))
+        (off_ptr + i + 1).unsafe_write(copy=Int32(offset))
     offsets_buf.set_length(Int64((n + 1) * int32_size))
     data_buf.set_length(Int64(total_bytes))
 
@@ -388,7 +388,7 @@ def test_prefix_key_slice_offset() raises:
         total_bytes += all_values[i].byte_length()
     var offsets_buf = OwnedAlignedBuffer((n_total + 1) * int32_size)
     var off_ptr = offsets_buf.view_typed_mut[DType.int32]()
-    (off_ptr + 0).init_pointee_copy(Int32(0))
+    (off_ptr + 0).unsafe_write(copy=Int32(0))
     var data_buf = OwnedAlignedBuffer(max(total_bytes, 1))
     var data_ptr = data_buf.view_typed_mut[DType.uint8]()
     var offset = 0
@@ -398,9 +398,9 @@ def test_prefix_key_slice_offset() raises:
         if s_len > 0:
             var s_ptr = s.unsafe_ptr().bitcast[UInt8]()
             for k in range(s_len):
-                (data_ptr + offset + k).init_pointee_copy((s_ptr + k)[])
+                (data_ptr + offset + k).unsafe_write(copy=(s_ptr + k)[])
         offset += s_len
-        (off_ptr + i + 1).init_pointee_copy(Int32(offset))
+        (off_ptr + i + 1).unsafe_write(copy=Int32(offset))
     offsets_buf.set_length(Int64((n_total + 1) * int32_size))
     data_buf.set_length(Int64(total_bytes))
 

@@ -35,15 +35,14 @@
 #     any assertion runs.
 #   * ENAMETOOLONG ON AN ENTRY BELOW THE ROOT (forceable for any user, root
 #     included): a directory chain whose absolute path is just under PATH_MAX
-#     (4096 on Linux, 1024 on macOS) holds an entry, sized from the
-#     chain's actual length so the joined path is past PATH_MAX whatever the
-#     test root's length, created relative to it (a shell `cd` then `touch`),
-#     so opendir of the deepest directory succeeds and the walk's lstat of
-#     `<deepest>/<entry>` fails with ENAMETOOLONG. The walk must raise
-#     `walk of '<root>' failed at '<path>': errno N (ENAMETOOLONG)`
-#     with the path truncated to the 4095 bytes the error buffer holds
-#     (only reached on Linux; on macOS the joined path is whole),
-#     instead of skipping the entry. The entry is removed the same relative
+#     (4096 on Linux, 1024 on macOS) holds an entry, sized from the chain's
+#     actual length so the
+#     joined path is past PATH_MAX whatever the test root's length, created
+#     relative to it (a shell `cd` then `touch`), so opendir of the deepest directory succeeds and the walk's
+#     lstat of `<deepest>/<entry>` fails with ENAMETOOLONG. The walk must
+#     raise `walk of '<root>' failed at '<path>': errno N (ENAMETOOLONG)`
+#     with the path truncated to the 4095 bytes the error buffer holds (on
+#     Linux; macOS's shorter path fits whole), instead of skipping the entry. The entry is removed the same relative
 #     way before the tree is deleted.
 #   * EACCES (mode 000 directory, and a mode 000 subdirectory inside a walked
 #     tree): only forceable unprivileged; the test probes access(R_OK) and
@@ -243,6 +242,19 @@ def test_walk_subdir_emfile_raises() raises:
 # -----------------------------------------------------------------------------
 # ENAMETOOLONG below the root: the walk must not skip an entry it cannot lstat.
 # -----------------------------------------------------------------------------
+# FFI-BOUNDARY: `komira_fs_test_path_max` (fs/_fs_shim.c) takes no argument and
+# returns a C int64_t; no pointer crosses, so nothing is owned or freed.
+def _path_max() -> Int:
+    """The host's PATH_MAX, NUL included (4096 on Linux, 1024 on macOS), from
+    <limits.h> through the fs shim: a path of this many bytes or more is
+    refused with ENAMETOOLONG."""
+    return Int(external_call["komira_fs_test_path_max", Int64]())
+
+
+# The bytes of the failed path the walk's error buffer holds (local_fs.mojo).
+comptime _ERR_PATH_BYTES = 4095
+
+
 def _repeat_x(n: Int) -> String:
     var s = String("")
     for _ in range(n):
@@ -250,30 +262,23 @@ def _repeat_x(n: Int) -> String:
     return s
 
 
-# FFI-BOUNDARY: `komira_fs_test_path_max` (fs/_fs_shim.c) takes no argument and
-# returns a C int64_t; no pointer crosses, so nothing is owned or freed.
-def _path_max() -> Int:
-    """PATH_MAX of the platform (4096 on Linux, 1024 on macOS), read from
-    <limits.h> through the fs shim."""
-    return Int(external_call["komira_fs_test_path_max", Int64]())
-
-
 def _walk_entry_lstat_enametoolong_under(pad: Int) raises:
     """The ENAMETOOLONG case with the test root nested `pad` bytes deeper
     (one extra directory component of `pad - 1` bytes plus its slash). The
     pad stands in for a longer exec root: the sizing must reach PATH_MAX
     whatever the root's length."""
+    var path_max = _path_max()
     var base = _disk_root(String("nametoolong"))
     var root = base
     if pad > 0:
         root = base + "/" + _repeat_x(pad - 1)
         _sh(String("mkdir -p '") + root + String("'"))
-    # Grow `deep` with 200-byte components into (pmax - 256, pmax - 55]: each
-    # step adds 201 bytes, so the stop lands in that 201-byte window whatever
-    # the root's length, and every mkdir names an absolute path under pmax.
-    var pmax = _path_max()
-    var lo = pmax - 256
-    var hi = pmax - 55
+    # Grow `deep` with 200-byte components into (PATH_MAX - 256,
+    # PATH_MAX - 55] ((3840, 4041] on Linux, (768, 969] on macOS): each step
+    # adds 201 bytes, so the stop lands in that 201-byte window whatever the
+    # root's length, and every mkdir names an absolute path under PATH_MAX.
+    var lo = path_max - 256
+    var hi = path_max - 55
     assert_true(
         root.byte_length() <= lo,
         "test root too long: " + String(root.byte_length()),
@@ -289,11 +294,11 @@ def _walk_entry_lstat_enametoolong_under(pad: Int) raises:
     )
     _sh(String("mkdir -p '") + deep + String("'"))
     # The entry is sized from `deep`'s actual length so `<deep>/<entry>` is
-    # pmax + 1 bytes, past PATH_MAX (pmax with the NUL); with `deep` in
-    # (pmax - 256, pmax - 55] the name is 55 to 255 bytes, within NAME_MAX.
-    # Create it relative to `deep` in a child shell, which is the only way to
-    # name it.
-    var entry = _repeat_x(pmax - deep.byte_length())
+    # PATH_MAX + 1 bytes, past PATH_MAX with the NUL; with `deep` in
+    # (PATH_MAX - 256, PATH_MAX - 55] the name is 55 to 255 bytes, within
+    # NAME_MAX. Create it relative to `deep` in a child shell, which is the
+    # only way to name it.
+    var entry = _repeat_x(path_max - deep.byte_length())
     var rel = String("cd '") + deep + String("' && ")
     _sh(rel + String("touch ") + entry)
     var msg = _err_walk(root)
@@ -301,10 +306,10 @@ def _walk_entry_lstat_enametoolong_under(pad: Int) raises:
     # assertion cannot leave an over-PATH_MAX path behind.
     _sh(rel + String("rm ") + entry)
     _sh(String("rm -rf '") + base + String("'"))
-    # The error buffer holds 4095 bytes: the reported path is the joined path
-    # (pmax + 1 bytes) cut to that, immediately followed by "': errno". On
-    # Linux it is cut inside the entry name; on macOS it is whole.
-    var shown_len = min(pmax + 1, 4095)
+    # The error buffer holds 4095 bytes: the reported path is `<deep>/` plus
+    # as much of the entry name as fits (all of it on macOS), immediately
+    # followed by "': errno".
+    var shown_len = min(path_max + 1, _ERR_PATH_BYTES)
     var shown = deep + "/" + _repeat_x(shown_len - deep.byte_length() - 1)
     var want = (
         String("walk of '") + root + "' failed at '" + shown + "': errno "

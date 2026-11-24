@@ -160,7 +160,7 @@ release publishes one of them.
 The bundled flavour carries these three files, unmodified, at
 `komira/_lib/lib/`: libKGENCompilerRTShared.so, libAsyncRTRuntimeGlobals.so
 and libMSupportGlobals.so, taken from the Mojo compiler package that compiled
-libkomira (Modular's conda package `mojo-compiler` 1.0.0, pinned by sha256 in
+libkomira (Modular's conda package `mojo-compiler` 1.1.0, pinned by sha256 in
 tools/build/platforms/table.bzl). It carries no other file of Modular's.
 
 The external flavour carries none of them and no other file of Modular's. It

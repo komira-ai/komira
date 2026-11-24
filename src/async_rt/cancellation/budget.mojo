@@ -6,7 +6,7 @@
 # Wall-clock + work-unit budget. Workers consult on morsel boundaries:
 # if either dimension is exhausted, the budget cancels its bound token.
 #
-# Atomic[DType.int64] for morsels — uint8 lacks fetch_sub on Mojo 0.26.3
+# Atomic[Int64] for morsels — uint8 lacks fetch_sub on Mojo 0.26.3
 # (finding 4); int64 is canonical.
 #
 # 8 scope: morsels-only. Wall-clock deadline support is structurally
