@@ -529,24 +529,28 @@ tests, which no pull request builds. The rest of this section is about `release-
 Not built yet. `//release:mopm_darwin_libs` covers the mopm packages only. Most of `//src` is
 not a mopm package, so a change that breaks one of those libraries on macOS is seen by nobody.
 Measured: a `uquery` of `kind(...)` for the library rules (`mojo_library`, gated, shared,
-system, native and `cxx_library`) over the `src` directory lists 415 targets. One
+system, native and `cxx_library`) over the `src` directory lists 411 targets. One
 `build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going
---skip-incompatible-targets` of that list on the farm built 156 and stopped on 259. Every
-target that stopped has an open issue, one per cause. The counts in this table are from that
-build's report:
+--skip-incompatible-targets` of that list on the farm (`Commands: 1204 (cached: 1, remote: 1203,
+local: 0)`) built 278, skipped 4 as incompatible (the connect, git pack, git protocol and HTTP
+conformance suites) and stopped on 129. Every target that stopped has an open issue, one per
+cause. A target is counted under the first failing action its build report names:
 
 | Cause | Targets | Issue |
 | --- | --- | --- |
-| aws-lc and s2n-tls had no darwin-arm64 build. Since komira-ai/komira#2203 all 133 configure for darwin-arm64 (a `cquery` of them); they have not been built for it again | 133 | komira-ai/komira#2196 |
-| a library's native shared library is ELF only | 9 | komira-ai/komira#2197 |
-| `so_exports` is the Linux binary on a macOS executor | the UDF spike helpers, `arrow_c_abi_probe` | komira-ai/komira#2198 |
-| the UDF spike helpers' C uses Linux-only APIs | 5 | komira-ai/komira#2199 |
-| `phase_timers` drops a join tail on the fork's clock tick | 1 | komira-ai/komira#2200 |
-| `http_core` and `host_probe` tests still read `/proc/self/status` (found in the sources; the sweep did not reach them) | not reached | komira-ai/komira#2201 |
+| `http_core`'s s2n shim test expects `ECONNRESET` where macOS reads end of stream | 106 (`http_core` and what depends on it) | komira-ai/komira#2206 |
+| `http_core`'s partial-send test never sees a partial send on macOS (hidden behind the test above in the same package) | the same 106 | komira-ai/komira#2207 |
+| a library's native shared library is ELF only | 13 | komira-ai/komira#2197 |
+| the UDF spike helpers' C uses Linux-only APIs | 7 | komira-ai/komira#2199 |
+| `bench_data`'s h2o join tables `x` and `big` hash differently on macOS | 3 | komira-ai/komira#2208 |
 
-The rest of the 259 were stopped by three of our own failures, now fixed. Two tests read
-`/proc/self/status` and now use `//src/tests/helpers/komira_test_rss`. The int64 column sum
-depended on the SIMD lane count. A test wrote a fixed `/tmp` path.
+No target stopped on aws-lc and s2n-tls (komira-ai/komira#2196), on `so_exports`
+(komira-ai/komira#2198), on `phase_timers` (komira-ai/komira#2200, which built in both sweeps
+since and so is intermittent) or on a read of `/proc/self/status` (komira-ai/komira#2201).
+Seven more causes were ours and are fixed: tests that assumed Linux's `PATH_MAX`, a
+`SIGPIPE` that macOS raises for the whole process, BSD `yes`, the epoll backend, the
+`libc.so.6` name, a temporary-file name that two threads could draw alike on macOS's coarser
+clock, and an NFD file name that APFS treats as the same file as its NFC form.
 
 The proposal keeps this set built, in the same way as the mopm set:
 

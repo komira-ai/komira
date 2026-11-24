@@ -19,6 +19,7 @@ mojo_library(
     test_srcs = ["tests/test_rss.mojo"],
     visibility = [
         "//src/arrow_ipc:",
+        "//src/http_core:",
     ],
 )
 
