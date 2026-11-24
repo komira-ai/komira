@@ -3,11 +3,11 @@ config komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
 config komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be:
 config   prelude//cpu/constraints:cpu[x86_64]                        (prelude//cpu/constraints:cpu)
 config   prelude//os/constraints:os[linux]                           (prelude//os/constraints:os)
-sample b80877f14717675dcabc5f83179a1e901c362fd7f1209d01d85443fe94ca702e komira//tools/build/examples:hello
-sample 7815ae683994b6a6fc979eb3d853eab80700079506ccd72888ef295ab0da63b3 komira//tools/build/examples:hellopkg
-sample a8c87603b54f2266b6f93b9deeacc413e30f64ddae446550b71e35dc723f2497 komira//tools/build/examples:test_hellopkg
-sample 4f5e04d3279b2176f0000abb37e461e790b45c90c18d94f0158cb17d6f7fb8cc komira//tools/build/toolchains:conda_unpack
-sample cd73d4b3f70a123d52b0beaef85235efa084b805c5efcef4de8cb8de8a5958e0 komira//tools/build/toolchains:zig_cc_launcher
-sample 890f92475000abe87ba1184a6b9689143f6c2767ba9d6cd74e487151fc5b329a komira//tools/build/run:gate
-sample c88de3b36e565585a73f1fc7059fed2c125ee0dff34f6e21ae018710d3991140 komira//third_party/snappy:snappy
-sample 4384077d3d189beeca854658bcef1b7b7c9334df1d6068365ea4f059907c3595 komira//tools/build/proto-codegen:komira_proto_codegen
+sample 878716d6130fae896a4dfddeb501e932a1716c642feb56a0c706a9444dfbb9b9 komira//tools/build/examples:hello
+sample e05c7d48dddfe9aa1a4e4b2e868b5a2545d03b80a271d0d8f3fca6622bc327b9 komira//tools/build/examples:hellopkg
+sample cd5b8cf3c72101f84b0e3fbbbf0a419daa133754253f6de85e0ebc73a5469791 komira//tools/build/examples:test_hellopkg
+sample f6bba8829d209f473fd7a77e700a27d242b713131d3ed5321ec4b633b7681efd komira//tools/build/toolchains:conda_unpack
+sample 794988e65a015b90e1602a49dd0c19ea0f315372905397333825019d070d55d4 komira//tools/build/toolchains:zig_cc_launcher
+sample 47535251ad3024a30a80aaa41c7b56fbc0c467568c1221b9d521e6069bb127a5 komira//tools/build/run:gate
+sample e429cb1c2ddaca37f4936986d9ccf0f30e31b0f901595ef5e96065fdd5df469a komira//third_party/snappy:snappy
+sample 7c3e4c3c7a8c93d951c655b4b748a668719c3ed0101325c4f504e111d89aec83 komira//tools/build/proto-codegen:komira_proto_codegen

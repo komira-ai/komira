@@ -11,6 +11,15 @@
 #   end stamp, `pt_record_wake` and `pt_record_join_tails` each count one
 #   interval. Catches a join tail that counts lanes which did not run in the
 #   segment, or a wake measured from nothing.
+# - test_the_fork_splits_end_stamps_on_every_round: 1000 rounds of an end
+#   stamp, a fork, a join (no tail), an end stamp and a join (one tail), with
+#   the calls back to back. Catches a fork that can read the same clock value
+#   as a stamp taken just before or just after it, which a coarse clock (macOS
+#   reads microseconds) gives: the stale stamp counted, or the task's dropped.
+# - test_join_tails_with_no_fork_since_the_reset: with no `pt_mark_fork` since
+#   `pt_reset`, a lane that stamped its end counts one tail and a lane that did
+#   not stamp counts none. Catches a lane zeroed by the reset read as a task
+#   that ended at the (zeroed) fork.
 # - test_reset_zeroes_the_counters_and_keeps_the_lane: after `pt_reset` every
 #   counter reads 0 and the thread is still lane 0. Catches a reset that forgets
 #   the thread table (the next run would register the same thread twice).
@@ -123,6 +132,27 @@ def test_wake_and_join_tails_follow_the_fork() raises:
     pt_mark_fork()
     pt_record_wake()
     assert_equal(pt_get(0, PH_WAKE, FIELD_CALLS), 1)
+    pt_record_join_tails()
+    assert_equal(pt_get(0, PH_JOIN_TAIL, FIELD_CALLS), 0)
+    pt_stamp[PH_END_STAMP]()
+    pt_record_join_tails()
+    assert_equal(pt_get(0, PH_JOIN_TAIL, FIELD_CALLS), 1)
+
+
+def test_the_fork_splits_end_stamps_on_every_round() raises:
+    for round in range(1000):
+        pt_reset()
+        pt_stamp[PH_END_STAMP]()
+        pt_mark_fork()
+        pt_record_join_tails()
+        assert_equal(pt_get(0, PH_JOIN_TAIL, FIELD_CALLS), 0, "stale stamp, round " + String(round))
+        pt_stamp[PH_END_STAMP]()
+        pt_record_join_tails()
+        assert_equal(pt_get(0, PH_JOIN_TAIL, FIELD_CALLS), 1, "task stamp, round " + String(round))
+
+
+def test_join_tails_with_no_fork_since_the_reset() raises:
+    pt_reset()
     pt_record_join_tails()
     assert_equal(pt_get(0, PH_JOIN_TAIL, FIELD_CALLS), 0)
     pt_stamp[PH_END_STAMP]()
@@ -266,6 +296,8 @@ def main() raises:
     suite.test[test_intervals_sum_and_keep_the_longest]()
     suite.test[test_a_stamp_is_stored_not_added]()
     suite.test[test_wake_and_join_tails_follow_the_fork]()
+    suite.test[test_the_fork_splits_end_stamps_on_every_round]()
+    suite.test[test_join_tails_with_no_fork_since_the_reset]()
     suite.test[test_reset_zeroes_the_counters_and_keeps_the_lane]()
     suite.test[test_a_lane_is_keyed_by_the_kernel_thread_id]()
     suite.test[test_forgetting_threads_frees_every_lane]()
