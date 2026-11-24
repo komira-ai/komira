@@ -469,7 +469,7 @@ changes:
   window in which a setter could still change it, and the constructor is what
   remains. Still rejected: an options struct (its layout would become ABI),
   string key and value pairs, and environment variables (rule S2).
-- **Cancel and progress** (decided and built in ABI 1.5; [src/so/README.md](../../src/so/README.md),
+- **Cancel and progress** (decided and built in ABI 1.6; [src/so/README.md](../../src/so/README.md),
   "Cancel and progress"). The earlier proposal here was `komira_cancel(ctx)` and
   `komira_progress(ctx, ...)` on one control block per context, where a cancel with no
   run in flight did nothing. What was built is a run handle the caller creates and

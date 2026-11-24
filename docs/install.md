@@ -44,7 +44,7 @@ Save this as `quickstart.py`:
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1005 is 1.5
+print(komira.abi_version())   # the engine's C ABI version: 1006 is 1.6
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
@@ -65,7 +65,7 @@ Then `python quickstart.py` prints:
 
 ```text
 0.1.1512
-1005
+1006
 [{'n': 1}]
 [{'n': 5, 'total': 152.5}]
 True
@@ -105,7 +105,9 @@ The package's [README](../python/README.md), which is also its PyPI description,
 
 - **pandas and polars results.** A result reads as pyarrow only; `pyarrow.Table.to_pandas()` and
   `polars.from_arrow()` convert it.
-- **Cancelling a query.** Ctrl-C is delivered when the query returns.
+- **Cancelling a query.** A query cannot be interrupted while it runs: Ctrl-C during `Session.sql`
+  raises `KeyboardInterrupt` when the engine has finished the query. The answer is freed, and the
+  session runs the next query.
 - **One session from two threads at once.** Use a session per thread.
 - **The DataFrame APIs**, pandas-shaped and polars-shaped.
 - **CSV and JSON files.** Only Parquet files can be registered.

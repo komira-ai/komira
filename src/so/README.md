@@ -5,8 +5,8 @@ The C ABI of komira's one shared library, `libkomira` (`libkomira.so` on Linux,
 one library and its flat C surface: no Mojo type crosses it. This package holds
 the surface's skeleton (the status codes, the version, the context handle and
 the last-error call), the session options (the engine's worker count and
-memory budget, as arguments of `komira_ctx_new_with_options`) and the source and render calls: registering a Parquet
-file, the schema and scan bindings of Parquet, CSV and JSON files, and a plan
+memory budget, as arguments of `komira_ctx_new_with_options`) and the source and render calls: registering a Parquet,
+CSV or newline-delimited JSON file as a table, the schema and scan bindings of Parquet, CSV and JSON files, and a plan
 rendered as text; the credential calls, which define a credential on the
 session by name and hold its values in the session's secret store; and
 `komira_sql_stream`, which runs one SQL statement on the session and hands its
@@ -66,6 +66,11 @@ int32_t  komira_credential_set(void *ctx, int32_t id, int32_t field,
 int32_t  komira_credential_seal(void *ctx, int32_t id, int32_t scope);
 int32_t  komira_sql_stream(void *ctx, const char *sql,
                            struct ArrowArrayStream *out);
+int32_t  komira_register_csv(void *ctx, const char *name, const char *path,
+                             uint8_t delimiter, int32_t has_header,
+                             int32_t all_varchar);
+int32_t  komira_register_json(void *ctx, const char *name,
+                              const char *path);
 void    *komira_run_new(void);
 void     komira_run_free(void *run);
 int32_t  komira_run_cancel(void *run);
@@ -127,7 +132,7 @@ from so import ABI_MAJOR, ABI_MINOR, abi_version
 from std.testing import assert_equal
 
 assert_equal(abi_version(), ABI_MAJOR * 1000 + ABI_MINOR)
-assert_equal(abi_version(), Int32(1005))
+assert_equal(abi_version(), Int32(1006))
 ```
 
 **The handle.** `komira_ctx_new` returns a context the caller owns until it
@@ -224,12 +229,46 @@ refused (-3, with a last error) before it is used.
 | `komira_parquet_schema(ctx, path, out_buf, out_cap, out_len)` | the file's Arrow schema as `komira.plan.v1` `WireSchema` bytes, for a plan author to splice into a Parquet scan | NULL `path` or `out_len`: -2. A file that cannot be read: -3 |
 | `komira_csv_binding(ctx, path, delimiter, has_header, all_varchar, out_buf, out_cap, out_len)` | the whole `WireScanBinding` of a CSV file, schema inferred from a bounded prefix of an uncompressed file (a compressed file is read whole). `has_header` and `all_varchar` are `int32_t`; any non-zero value is true | as `komira_parquet_schema` |
 | `komira_json_binding(ctx, path, out_buf, out_cap, out_len)` | the same for a newline-delimited JSON file; the schema comes from the leading records | as `komira_parquet_schema` |
+| `komira_register_csv(ctx, name, path, delimiter, has_header, all_varchar)` | infers the schema of the CSV file at `path` now (a bounded prefix of an uncompressed file; a compressed file is read whole) and binds the file into the engine's catalog as the table `name` (found without regard to case). The table is the scan `read_csv` builds for the same file and dialect: `delimiter` and `has_header` are what the file is read with, `all_varchar` makes every column a string; `has_header` and `all_varchar` are `int32_t`, any non-zero value is true. Every later query reads the file at the schema inferred here. A table registered with `has_header` 0 is refused when a query reads it, at `lower`, naming `header=false`, as `read_csv(..., header=false)` is, until the reader names the columns as DuckDB does | NULL `name` or `path`: -2. A file that cannot be read or has no column: -3. An empty name: -3, `TABLE_NAME_EMPTY: a table name must not be empty`. A name the session already holds, of any kind and in any case: -3, `TABLE_ALREADY_REGISTERED: the session already has a table named '<name>'`. Nothing is registered on a refusal |
+| `komira_register_json(ctx, name, path)` | the same for a newline-delimited JSON file, the scan `read_json` builds; the schema comes from the leading records | as `komira_register_csv` |
 | `komira_plan_render(ctx, plan, plan_len, out_buf, out_cap, out_len)` | decodes the serialized plan `plan[0..plan_len]` (a `WirePlanEnvelope`) and writes its text as authored, before any optimizer rule; the plan is not run | NULL `plan` or `out_len`: -2. `plan_len` above 64 MiB (`KOMIRA_MAX_INPUT_BYTES`): -5, checked before the plan is read or anything is allocated; exactly 64 MiB is accepted. Bytes that are not an admissible plan: -3 |
 
 The four calls with an `out_buf` follow the two-call protocol above. The
 binding and schema bytes are what a plan author splices into a scan leaf: the
 fingerprint, kind id and snapshot fields come from the engine and are not
-computed by the caller. A NULL `ctx` is -1 for all five.
+computed by the caller. A NULL `ctx` is -1 for all seven.
+
+A name is refused when it is taken because the catalog resolves a name to the
+first table registered under it: a second table there would never be read.
+`komira_register_parquet` does not refuse a taken name, and the first table
+keeps it. `register_csv` and `register_json` are the calls on values:
+
+```mojo
+from runtime_paths import test_tmpdir
+from so import Session, register_csv, register_json, sql_result
+from std.testing import assert_equal, assert_true
+
+var csv = test_tmpdir() + "/readme_people.csv"
+with open(csv, "w") as f:
+    f.write("id|name\n1|ann\n2|bob\n")
+var jsonl = test_tmpdir() + "/readme_events.jsonl"
+with open(jsonl, "w") as f:
+    f.write('{"id":1,"v":"x"}\n{"id":2,"v":"y"}\n')
+
+var session = Session()
+register_csv(session, "people", csv, UInt8(ord("|")), True, False)
+register_json(session, "events", jsonl)
+var answer = sql_result(session, "select id from people where name = 'bob'")
+assert_equal(answer.batches[0].column_at(0).as_primitive[DType.int64]().get(0), Int64(2))
+var counted = sql_result(session, "select count(*) from events where v = 'y'")
+assert_equal(counted.batches[0].column_at(0).as_primitive[DType.int64]().get(0), Int64(1))
+var refused = String()
+try:
+    register_json(session, "People", jsonl)
+except e:
+    refused = String(e)
+assert_true(refused.startswith("TABLE_ALREADY_REGISTERED: "))
+```
 
 **Running SQL.** `komira_sql_stream(ctx, sql, out)` runs the one SQL statement
 `sql` on the session's engine, over the tables registered on it, and fills the
@@ -412,10 +451,10 @@ length of that one call.
 ```
 
 The library is published only if the gate passes: the exports check, then
-fourteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
-foreign host would. Seven cover the skeleton: the version (1005, which is 1.5),
+sixteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
+foreign host would. Seven cover the skeleton: the version (1006, which is 1.6),
 create and free (distinct handles, separate sessions), no symbol beyond the
-nineteen, a fresh session's empty error, the two-call protocol (zero capacity, one
+twenty-one, a fresh session's empty error, the two-call protocol (zero capacity, one
 byte short, exact, larger), a NULL context, and a NULL `out_len`. One driver per
 new call writes its input file under `$TEST_TMPDIR` and checks a good input,
 NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
@@ -424,12 +463,17 @@ two-call protocol; a good call after a refusal leaves no error.
 `gate_credentials` defines a credential through the three calls and checks each
 named refusal word for word, the NULL and length cases, and that `*out_id` is
 untouched on a refusal.
-`exports_exact` makes the nineteen names above the whole dynamic symbol table.
+`gate_register_csv` and `gate_register_json` register a file they write (the
+CSV driver once for each dialect argument), and check a taken name (in any
+case, and taken by the other call) and an empty one word for word, the NULL
+cases, a missing and an empty file and a path that is not UTF-8, and that a
+refused name stays free.
+`exports_exact` makes the twenty-one names above the whole dynamic symbol table.
 On Linux the eleven C owners in the library's closure (async, async_api,
 compression, crypto, fs, http_core, libc, metrics, objectstore, parquet_codec,
 scan_source) are linked as their own shared libraries (`native_owners`), not
 embedded; on macOS arm64 there are none, and the C archives are linked
-statically into `libkomira.dylib`. On Linux the fourteenth driver, `gate_native_owners`,
+statically into `libkomira.dylib`. On Linux the sixteenth driver, `gate_native_owners`,
 reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
 the SONAME of each of the eleven (`libkomira_<owner>_native.so.1`); an owner
 dropped from `native_owners` leaves its C embedded, and that driver fails.
@@ -573,7 +617,7 @@ the extra `$ORIGIN/../../lib` finds the one `lib/` of the variants directory fro
 
 ## The header and the golden
 
-`abi/komira.tsv` is the golden of the ABI: the version (1.5), one row per export
+`abi/komira.tsv` is the golden of the ABI: the version (1.6), one row per export
 with its return type, argument types and the version that added it, and one row
 per status code, limit and credential kind, field and scope (`constant`). `komira_abi_golden` checks it on every
 build against the `@export abi("C")` functions of `_c_abi.mojo` (names, return and
@@ -597,7 +641,7 @@ headers. The golden does not check that its version was raised when
 a row changed: that compares with the previous release.
 
 `tests/c/abi_driver.c` is a C program that includes `komira.h` and nothing of
-ours. It opens `./libkomira.so`, binds each of the nineteen functions to a pointer
+ours. It opens `./libkomira.so`, binds each of the twenty-one functions to a pointer
 declared with the header's own prototype, and checks the version in the header
 against `komira_abi_version()`, the status codes, the input bound
 (`KOMIRA_MAX_INPUT_BYTES` plus one is -5), and the last-error round trip (NULL
@@ -619,7 +663,13 @@ budget of one byte (with one worker, and with the host's count) a `sum` over
 the three-row file is -3 with the sink's denial naming `budget 1` at step
 `execute`, `*out` untouched and the context still answering; the same `sum`
 answers with 0 and 0 and with one worker; and a negative worker count or
-budget (-1, `INT64_MIN`) is NULL. Under a run handle: NULL `run`, `done` and `total` are -2 with nothing
+budget (-1, `INT64_MIN`) is NULL. It also registers files it writes under `$TEST_TMPDIR` with
+`komira_register_csv` (a file with a header, a `|` file and one with
+`all_varchar`) and `komira_register_json`, and holds each query by name to the
+rows it wrote; a file registered with no header is refused at `lower` when
+queried, naming `header=false`; a taken name, an empty one, a missing file and the
+NULL cases are refused with their named last error, and the tables first
+registered keep answering. Under a run handle: NULL `run`, `done` and `total` are -2 with nothing
 written; a fresh handle reads 0 of 0; a run nobody cancels answers and reads
 done equal to total, and a second run given the handle doubles both; a handle
 cancelled before the call (twice) refuses the run with -6, `*out` untouched

@@ -220,8 +220,9 @@ rebuild them for today's numbers.
 
 **Totals.** 6 surfaces x 52 capabilities = 312 cells;
 **0 filled (0.0%)**; 312 missing; floor 0. No surface e2e package
-exists yet (`src/tests/e2e/<surface>_e2e`), so every cell is `-`. That is
-the starting point.
+existed then (`src/tests/e2e/<surface>_e2e`), so every cell is `-`. That is
+the starting point. Since then `src/tests/e2e/sql_e2e` exists; no cell names
+one of its targets yet.
 
 | Surface | Filled | Cells | % |
 |---|---:|---:|---:|

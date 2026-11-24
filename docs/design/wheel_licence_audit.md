@@ -74,7 +74,7 @@ there), Brotli `//third_party/brotli`, aws-lc `//third_party/aws-lc`, s2n-tls
 
 Verified by reading, not by running anything on a developer machine:
 
-- `libkomira`'s dynamic symbol table is exactly the nineteen `komira_*` exports
+- `libkomira`'s dynamic symbol table is exactly the twenty-one `komira_*` exports
   (`exports_exact` gate in `src/so/tests/gate/`). None takes a URL, host or
   socket: they take a local file path, a worker count and memory budget, the bytes of a plan, SQL text, or a
   credential's kind, name and field values, or a run handle, and return bytes,
@@ -82,9 +82,10 @@ Verified by reading, not by running anything on a developer machine:
 - The closure holds network code: `async_rt`'s reactor and socket primitives,
   `net`, `http_core` (HTTP and TLS) and `http_client`, which the engine uses
   to read object stores and to call an Iceberg REST catalog. No export of the
-  nineteen reaches it: `komira_ctx_new` and `komira_ctx_new_with_options`
+  twenty-one reaches it: `komira_ctx_new` and `komira_ctx_new_with_options`
   start the engine's worker threads and open nothing, and `komira_register_parquet` lists and reads local files
-  only (`parquet_footers` reads through `LocalFs`); `komira_sql_stream` and
+  only (`parquet_footers` reads through `LocalFs`), as do `komira_register_csv` and
+  `komira_register_json`, which infer a local file's schema; `komira_sql_stream` and
   `komira_sql_stream_run` run `sdk_exec.run_sql`, whose scans read the local file system only
   (`LocalOnlyScanFs`) and whose `COPY ... TO` refuses a URL
   (`check_copy_target`); the run-handle calls (`komira_run_new`, `_free`, `_cancel`,
