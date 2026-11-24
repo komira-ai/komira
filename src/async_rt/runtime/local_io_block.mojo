@@ -79,7 +79,7 @@ struct LocalIoBlock[
     `rt.io_block()` which returns `ref [self._io_block] LocalIoBlock[S]`.
 
     Field set:
-      var _park_word: OwnedPointer[Atomic[DType.int32]]   # stable wake-target
+      var _park_word: OwnedPointer[Atomic[Int32]]   # stable wake-target
 
     The park-word is reserved for the reactor-driven park/unpark
     cycle. It MUST live at a stable heap address (futex / __ulock_wait
@@ -93,7 +93,7 @@ struct LocalIoBlock[
     def __init__(out self):
         """Construct a LocalIoBlock with a fresh park-word at 0.
 
-        Atomic[DType.int32] is non-Movable on Mojo 0.26.3, so we
+        Atomic[Int32] is non-Movable on Mojo 0.26.3, so we
         heap-allocate via alloc + the OwnedPointer.unsafe_from_raw_pointer
         ctor (Repro 7 / the canonical shape). Same shape as Worker._shutdown_flag.
         """

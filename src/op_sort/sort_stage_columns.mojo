@@ -49,7 +49,7 @@ lists grow past it, and a breaker that must bound memory spills (the
 
 comptime MAX_SORT_KEYS: Int = 8
 """The most sort keys a buffer takes. The per-key direction array
-(`directions`) is a fixed `InlineArray[UInt8, MAX_SORT_KEYS]`, so the buffer
+(`directions`) is a fixed `Array[UInt8, MAX_SORT_KEYS]`, so the buffer
 holds no heap-owning direction field."""
 
 comptime SORT_DIR_ASC_U8: UInt8 = 0

@@ -43,7 +43,7 @@
 #
 # Public API:
 #   * `x25519_scalarmult(scalar, peer_public, mut shared_out) -> Bool`
-#     takes Span[UInt8, _] + mut InlineArray[UInt8, 32] — ZERO
+#     takes Span[UInt8, _] + mut Array[UInt8, 32] — ZERO
 #     UnsafePointer in the public signature.
 # Internal FFI:
 #   * The `external_call["komira_awslc_X25519", ...]` site uses `UnsafePointer(to=...)`
@@ -118,7 +118,7 @@ def x25519_scalarmult(
     # Pointers are constructed via `UnsafePointer(to=x).bitcast[UInt8]()`
     # following the in-package pattern in `sha256_compress.mojo` and
     # `zeroize.mojo` (memset_s).
-    # Origin is INFERRED from the locals `shared_out` (mut InlineArray)
+    # Origin is INFERRED from the locals `shared_out` (mut Array)
     # and the `scalar`/`peer_public` spans — NOT a wildcard widening.
     # The local pointers do not escape this function body and are passed
     # directly to the external_call below.

@@ -26,7 +26,7 @@
 # =============================================================================
 
 from std.ffi import external_call
-from std.memory import memset
+from std.memory import unsafe_memset
 from std.sys import size_of
 
 from komira_udf_spike_abi._cabi import (
@@ -147,7 +147,7 @@ def make_col(a: Void, n: Int) -> Void:
     var block = external_call["malloc", Void](16 + vb + 8 * n + 8)
     var bufs = block.bitcast[Void]()
     var validity = (block.bitcast[UInt8]() + 16).bitcast[NoneType]()
-    memset(validity.bitcast[UInt8](), 0xFF, vb)
+    unsafe_memset(validity.bitcast[UInt8](), 0xFF, vb)
     var data = (block.bitcast[Int64]() + (16 + vb + 7) // 8).bitcast[NoneType]()
     bufs[0] = validity
     bufs[1] = data

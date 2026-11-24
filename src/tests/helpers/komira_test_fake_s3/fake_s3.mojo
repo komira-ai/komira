@@ -16,7 +16,11 @@
 # `trap` is answered 403 TrappedKeyRead; once `overwrite_after_reads` GETs
 # and HEADs have been answered, the object the last one read is overwritten
 # (a writer racing a reader); UploadPart of part `fail_part`, and with
-# `fail_complete` CompleteMultipartUpload, are answered 403 InjectedFault.
+# `fail_complete` CompleteMultipartUpload, are answered 403 InjectedFault;
+# with `key_id` set, a request whose Authorization header does not name that
+# access key id (`Credential=<key_id>/`) is answered 403 InvalidAccessKeyId,
+# as S3 answers a key it does not know (the rest of the signature is still
+# not checked).
 # With `record_writes`, every write verb records the counts of PutObject,
 # DeleteObject and the multipart verbs as the object `~fake/writes` of
 # bucket `lake`, which a test reads back through the store.
@@ -72,6 +76,8 @@ struct FakeS3State(Movable):
     var fail_part: Int
     # CompleteMultipartUpload is answered 403 InjectedFault.
     var fail_complete: Bool
+    # The access key id a request must be signed with. "" for any.
+    var key_id: String
     # Whether each write verb records what the write verbs did as the
     # object `~fake/writes` of bucket `lake` (note_writes).
     var record_writes: Bool
@@ -90,6 +96,7 @@ struct FakeS3State(Movable):
         fail_part: Int,
         fail_complete: Bool,
         record_writes: Bool,
+        var key_id: String,
     ):
         self.names = List[String]()
         self.bodies = List[List[UInt8]]()
@@ -110,6 +117,7 @@ struct FakeS3State(Movable):
         self.fail_part = fail_part
         self.fail_complete = fail_complete
         self.record_writes = record_writes
+        self.key_id = key_id^
         self.puts = 0
         self.completed = 0
         self.aborted = 0
@@ -367,6 +375,7 @@ def _serve(mut st: FakeS3State, written: List[UInt8]) raises -> List[UInt8]:
     var if_match = String("")
     var if_none_match = String("")
     var range_ = String("")
+    var authorization = String("")
     for i in range(1, len(lines)):
         var line = String(lines[i])
         var colon = line.find(":")
@@ -380,6 +389,10 @@ def _serve(mut st: FakeS3State, written: List[UInt8]) raises -> List[UInt8]:
             if_none_match = value
         elif name == "range":
             range_ = value
+        elif name == "authorization":
+            authorization = value
+    if st.key_id.byte_length() > 0 and authorization.find("Credential=" + st.key_id + "/") < 0:
+        return _error(403, "Forbidden", "InvalidAccessKeyId", is_head)
     var q = target.find("?")
     var path = target if q < 0 else _sub(target, 0, q)
     var query = String("") if q < 0 else _sub(target, q + 1, target.byte_length())
@@ -621,6 +634,7 @@ struct FakeS3Connector(Connector, Movable, Deinitable):
         fail_part: Int = -1,
         fail_complete: Bool = False,
         record_writes: Bool = False,
+        key_id: String = "",
     ):
         """A fake S3 holding no object. Each argument is a fault or a
         record, off by default: see FakeS3State's fields."""
@@ -633,16 +647,21 @@ struct FakeS3Connector(Connector, Movable, Deinitable):
                 fail_part,
                 fail_complete,
                 record_writes,
+                key_id,
             )
         )
 
     def seed(mut self, key: String, body: String):
         """Stores `body` as `key` of bucket `lake` before any request."""
-        _ = self._state[].put(String("lake/") + key, _bytes(body))
+        self.seed_in("lake", key, _bytes(body))
 
     def seed_bytes(mut self, key: String, var body: List[UInt8]):
         """Stores `body` as `key` of bucket `lake` before any request."""
-        _ = self._state[].put(String("lake/") + key, body^)
+        self.seed_in("lake", key, body^)
+
+    def seed_in(mut self, bucket: String, key: String, var body: List[UInt8]):
+        """Stores `body` as `key` of `bucket` before any request."""
+        _ = self._state[].put(bucket + "/" + key, body^)
 
     def connect[RT: Runtime](
         mut self, mut reactor: Reactor[RT.Sink], ip_be: UInt32, port: UInt16

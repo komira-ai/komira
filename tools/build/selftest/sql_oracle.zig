@@ -44,6 +44,9 @@
 //! (`notes.sql.mysql`, `out.<f>.m<f>`), so a check of the first entry only,
 //! a substring test or a suffix without its dot passes one of them. (The
 //! `.`/`..` arms are covered by the name pattern too.)
+//! An `extensions` entry that does not end in `.duckdb_extension` (second in
+//! its list), one that holds a quote, and one named twice (the extension_*
+//! refusals).
 //! Also: komira_test_oracle's case runner no longer calling its oracle
 //! discipline (discipline_unplaced and discipline_unordered build green).
 //! And: komira_sql_conformance's case runner no longer comparing its answer
@@ -62,17 +65,32 @@ const REFUSALS = [_]lib.Row{
     .{
         .name = "output_format_parquet",
         .target = PKG ++ "output_format_parquet",
-        .text = PKG ++ "output_format_parquet: output \"out.parquet.mparquet\" must end in one of .parquet, .csv, .tsv",
+        .text = PKG ++ "output_format_parquet: output \"out.parquet.mparquet\" must end in one of .parquet, .csv, .tsv, .json, .gz, .zst",
     },
     .{
         .name = "output_format_csv",
         .target = PKG ++ "output_format_csv",
-        .text = PKG ++ "output_format_csv: output \"out.csv.mcsv\" must end in one of .parquet, .csv, .tsv",
+        .text = PKG ++ "output_format_csv: output \"out.csv.mcsv\" must end in one of .parquet, .csv, .tsv, .json, .gz, .zst",
     },
     .{
         .name = "output_format_tsv",
         .target = PKG ++ "output_format_tsv",
-        .text = PKG ++ "output_format_tsv: output \"out.tsv.mtsv\" must end in one of .parquet, .csv, .tsv",
+        .text = PKG ++ "output_format_tsv: output \"out.tsv.mtsv\" must end in one of .parquet, .csv, .tsv, .json, .gz, .zst",
+    },
+    .{
+        .name = "output_format_json",
+        .target = PKG ++ "output_format_json",
+        .text = PKG ++ "output_format_json: output \"out.json.mjson\" must end in one of .parquet, .csv, .tsv, .json, .gz, .zst",
+    },
+    .{
+        .name = "output_format_gz",
+        .target = PKG ++ "output_format_gz",
+        .text = PKG ++ "output_format_gz: output \"out.gz.mgz\" must end in one of .parquet, .csv, .tsv, .json, .gz, .zst",
+    },
+    .{
+        .name = "output_format_zst",
+        .target = PKG ++ "output_format_zst",
+        .text = PKG ++ "output_format_zst: output \"out.zst.mzst\" must end in one of .parquet, .csv, .tsv, .json, .gz, .zst",
     },
     .{
         .name = "output_glob",
@@ -102,7 +120,7 @@ const REFUSALS = [_]lib.Row{
     .{
         .name = "input_dotdot",
         .target = PKG ++ "input_dotdot",
-        .text = PKG ++ "input_dotdot: input \"../staged.csv\" holds a segment that is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.-]*$)",
+        .text = PKG ++ "input_dotdot: input \"../staged.csv\" holds a segment that is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.=-]*$)",
     },
     .{
         .name = "src_not_sql",
@@ -157,7 +175,27 @@ const REFUSALS = [_]lib.Row{
     .{
         .name = "input_glob_segment",
         .target = PKG ++ "input_glob_segment",
-        .text = PKG ++ "input_glob_segment: input \"data/*.csv\" holds a segment that is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.-]*$)",
+        .text = PKG ++ "input_glob_segment: input \"data/*.csv\" holds a segment that is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.=-]*$)",
+    },
+    .{
+        .name = "input_equals_first",
+        .target = PKG ++ "input_equals_first",
+        .text = PKG ++ "input_equals_first: input \"=day/part.csv\" holds a segment that is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.=-]*$)",
+    },
+    .{
+        .name = "extension_suffix",
+        .target = PKG ++ "extension_suffix",
+        .text = PKG ++ "extension_suffix: extensions entry \"staged.csv\" is not a plain file name ending in .duckdb_extension",
+    },
+    .{
+        .name = "extension_quote",
+        .target = PKG ++ "extension_quote",
+        .text = PKG ++ "extension_quote: extensions entry \"q'uote.duckdb_extension\" is not a plain file name ending in .duckdb_extension",
+    },
+    .{
+        .name = "extension_twice",
+        .target = PKG ++ "extension_twice",
+        .text = PKG ++ "extension_twice: extensions names \"fake.duckdb_extension\" twice",
     },
     .{
         .name = "dist_version_injection",

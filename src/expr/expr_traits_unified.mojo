@@ -60,7 +60,7 @@ from kernels.eval_chunks import (
 
 
 # Mojo 1.0.0 MIGRATION: `ImplicitlyCopyable` dropped from the bound.
-# `RuntimeExprBool` holds `InlineArray[RuntimeNode, 256]` (~20 KB), which
+# `RuntimeExprBool` holds `Array[RuntimeNode, 256]` (~20 KB), which
 # 1.0.0 will not synthesize an implicit copy for -- and an implicit 20 KB
 # memcpy is not something this trait should have been promising. Generic
 # code over `E: ExprBoolU` now spells its copies `.copy()`.

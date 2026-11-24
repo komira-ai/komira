@@ -8,8 +8,9 @@ the binder saw and the plan the host lowers are built from that one read
 | module | does |
 |---|---|
 | `footer_cache` | `FooterCache`: a locked cache of parsed footers over `parquet.ParquetMetadataCache`. A copy is another handle on the same cache. Its errors name the file. It stamps each file's identity (size, modification time, inode, device) before reading it, so `changed_since_read` says whether the file at a path is still the one whose footer was cached |
-| `parquet_footers` | `ParquetFooters`: `sql.SqlParquetFooters` over a `FooterCache`, so `bind_statement(stmt, catalog, footers)` binds off real footers. `register_parquet_table` takes a table's schema from the footer; `check_registered_schema` and `check_catalog_table` refuse, by table, file and column, a registered schema that disagrees with the file |
-| `lowering_facts` | `add_parquet_scan`, `add_read_parquet_scan`, `add_catalog_scan`: append one scan's facts to `lowering.LoweringInputs` from the same cache |
+| `parquet_footers` | `ParquetFooters`: `sql.SqlParquetFooters` over a `FooterCache`, so `bind_statement(stmt, catalog, footers)` binds off real footers; `parquet_relation(path, hive_partitioning)` is the source a `read_parquet(path)` scans; `iceberg_relation(path, allow_moved_paths, snapshot_id)` is the source an `iceberg_scan(path, ...)` scans: the table's metadata read through `iceberg_scan.table_ref` (no footer is read or cached). `register_parquet_table` registers a file, a glob or a directory; `check_registered_schema` and `check_catalog_table` refuse, by table, file and column, a registered schema that disagrees with any file of the table |
+| `parquet_files` | `resolve_parquet_source`: the files a path names (a file, a glob, or with `allow_directory` every `.parquet` file below a directory), each checked against the first file's schema, with Hive partition columns |
+| `lowering_facts` | `add_parquet_scan`, `add_read_parquet_scan`, `add_parquet_files_scan`, `add_catalog_scan`: append one scan's facts to `lowering.LoweringInputs` from the same cache; over several files the facts are folded |
 
 ```text
 from parquet_footers.parquet_footers import ParquetFooters, register_parquet_table
@@ -33,6 +34,114 @@ def run(path: String) raises:
     # lower(plan, host_profile, inputs): the footer was read once.
 ```
 
+## Several files and Hive partitions
+
+`resolve_parquet_source(footers, path, hive_partitioning, allow_directory)`
+lists the files of `path` with `fs.file_discovery.EagerGlobDiscovery` (glob
+syntax of `fs.glob`: `*`, `?`, `[...]`, `{a,b}`, one `**`), sorted byte-wise.
+A directory is the glob `<dir>/**/*.parquet` and skips a file or directory whose
+name starts with `.`; it is allowed for registration and refused in SQL. A glob
+whose braces leave no wildcard (`part-{0,2}.parquet`) names those files, each
+kept when it exists.
+
+| refusal | when |
+|---|---|
+| `PARQUET_GLOB_NO_MATCH` | no file matches |
+| `PARQUET_PATH_IS_DIRECTORY` | a directory where directories are not allowed |
+| `PARQUET_FILES_SCHEMA_MISMATCH` | a file's names, order, Arrow type, decimal precision and scale, time zone or nullability differ from the first file's |
+| `HIVE_PARTITION_LAYOUT_MISMATCH` | `hive_partitioning = true` and a file's key set differs from the first file's |
+| `HIVE_PARTITION_VALUE_UNSUPPORTED` | a repeated key, a malformed escape, an empty value, `NULL`, `__HIVE_DEFAULT_PARTITION__`, or a value DuckDB's cast might read as a date, timestamp or integer that the strict forms do not |
+| `HIVE_PARTITION_COLUMN_IN_FILE` | a partition key equals, ignoring case, a data column |
+
+Hive detection follows DuckDB over the whole path: a `key=value` component
+ends in `/` (the file name never counts), holds one `=` that is not its first
+byte, and no `?` or newline. AUTO makes partition columns when the first file
+has a key and every file has the same keys; ON also refuses a file with other
+keys; OFF makes none. Columns follow the data columns, ordered by key, not
+nullable. Their type is DATE, TIMESTAMP or BIGINT by the first value and falls
+to VARCHAR at the first later value that does not parse as that type. The
+values kept are the decoded text.
+
+`lowering_facts` folds the statistics of every file: row counts and null counts
+are summed (unknown if any file's is), the minimum is the smallest and the
+maximum the largest (unknown if any file's is), and the distinct count is the
+largest of the files' lower bounds. The file list is fixed when the table is
+registered; each query reads the footers again and checks every file.
+
+Refusals read as values: a glob that matches nothing, and a directory where
+SQL does not allow one, in an empty temporary directory the example creates:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from std.tempfile import mkdtemp
+from parquet_footers.parquet_files import resolve_parquet_source
+from parquet_footers.parquet_footers import ParquetFooters
+from sql.sql_ast import HIVE_PARTITIONING_OFF
+
+var footers = ParquetFooters()
+var root = mkdtemp(prefix="komira_footers_readme_")
+
+var no_match = String()
+try:
+    _ = resolve_parquet_source(footers, root + "/*.parquet", HIVE_PARTITIONING_OFF, False)
+except e:
+    no_match = String(e)
+assert_equal(no_match, "PARQUET_GLOB_NO_MATCH: no file matches '" + root + "/*.parquet'")
+
+# `ParquetFooters.parquet_relation` is the same call with directories refused.
+var is_dir = String()
+try:
+    _ = footers.parquet_relation(root, HIVE_PARTITIONING_OFF)
+except e:
+    is_dir = String(e)
+assert_true(is_dir.startswith("PARQUET_PATH_IS_DIRECTORY: "))
+
+# Registration allows a directory; one with no `.parquet` file matches nothing.
+var empty_dir = String()
+try:
+    _ = resolve_parquet_source(footers, root, HIVE_PARTITIONING_OFF, True)
+except e:
+    empty_dir = String(e)
+assert_equal(empty_dir, "PARQUET_GLOB_NO_MATCH: the directory '" + root + "' holds no .parquet file")
+```
+
+The facts of a scan are appended only when every footer reads. A source naming
+a file that does not exist is refused naming the file and adds no scan, and a
+table the catalog does not hold is refused by name:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from std.tempfile import mkdtemp
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, Schema
+from lowering.lowered_plan import LoweringInputs
+from parquet_footers.lowering_facts import add_catalog_table_scan, add_parquet_files_scan
+from parquet_footers.parquet_footers import ParquetFooters
+from scan_source.parquet_source import ParquetSource
+from sql.sql_catalog import SqlCatalog
+
+var footers = ParquetFooters()
+var inputs = LoweringInputs()
+var absent = mkdtemp(prefix="komira_footers_readme_") + "/absent.parquet"
+var source = ParquetSource(absent.copy(), Schema.from_fields_1(Field("x", ArrowType.INT64, False)))
+
+var no_file = String()
+try:
+    add_parquet_files_scan(inputs, footers, source)
+except e:
+    no_file = String(e)
+assert_true(no_file.find(absent) >= 0)  # the error names the file
+assert_equal(len(inputs.scans), 0)  # and no scan was added
+
+var no_table = String()
+try:
+    add_catalog_table_scan(inputs, SqlCatalog(), "nope", footers, source)
+except e:
+    no_table = String(e)
+assert_equal(no_table, "SQL bind error: unknown table 'nope'")
+assert_equal(len(inputs.scans), 0)
+```
+
 ## Why a package of its own
 
 The design puts `ParquetFooters` and the footer cache in `sdk_exec`
@@ -46,10 +155,9 @@ passes `ctx.footers` to `bind_statement` and the same cache to
 
 ## Limits
 
-- A glob path is refused by name (`footer_schema` of `data/*.parquet`): a
-  glob's footers are not unioned yet. A table naming several files is
-  refused by `check_catalog_table` (naming the files), and lowering refuses a
-  scan of several files.
+- `footer_schema` reads one file and refuses a glob path by name;
+  `parquet_relation` reads a glob.
+- Hive NULL partitions (`__HIVE_DEFAULT_PARTITION__`) are refused, not read.
 - `ScanFacts.dict_encoded_columns` is left empty. The footer reader does not
   parse the page encoding statistics that tell a column stored entirely
   dictionary encoded from one that fell back to plain pages, so no column is
@@ -105,4 +213,10 @@ The tests run when the package is built.
 - `test_bind_and_lower`: `bind_statement` and `lower` over a real footer for a
   registered table and for `read_parquet(...)`, one read for both, the
   statistics in the inputs, a registered schema that disagrees refused by
-  name (count, name, type, nullability), a missing or text file named at bind.
+  name (count, name, type, nullability), a two-file table checked file by
+  file, a missing or text file named at bind.
+- `test_multifile_scan`: globs, directories and their hidden and non-Parquet
+  files, the named refusals above, Hive partitions (modes, key order, value
+  types, refused values), a table registered over a directory and over a Hive
+  tree, a disagreeing or replaced second file refused by name, and the facts
+  folded over three files.

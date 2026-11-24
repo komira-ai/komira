@@ -27,8 +27,8 @@
 #     Catches the INT32 type leaking into a literal another expression reads
 #     (a binary operator takes its left operand's type, which would wrap).
 #   * test_union_all_of_literals_still_binds: `SELECT 1 AS n UNION ALL
-#     SELECT 2` binds to one INT64 column `n`. Catches the leading branch alone
-#     taking INT32, which the UNION ALL type check refuses.
+#     SELECT 2` binds to one INT32 column `n`, DuckDB's INTEGER. Catches the
+#     branches' literals taking INT64.
 #   * test_a_literal_over_a_parquet_table: `SELECT 1 AS one FROM t` over a
 #     five-row Parquet file is five INT32 ones.
 #   * test_the_context_runs_on_after_from_less_queries: a FROM-less query, a
@@ -203,7 +203,7 @@ def test_union_all_of_literals_still_binds() raises:
     var plan = bound.take_plan()
     assert_equal(plan.output_schema.num_columns(), 1)
     assert_equal(plan.output_schema.field_name(0), "n")
-    assert_true(plan.output_schema.field_arrow_type(0) == ArrowType.INT64)
+    assert_true(plan.output_schema.field_arrow_type(0) == ArrowType.INT32)
 
 
 def test_a_literal_over_a_parquet_table() raises:

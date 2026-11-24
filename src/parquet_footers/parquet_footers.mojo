@@ -6,16 +6,28 @@
 # `FooterCache`:
 #
 #   * `footer_schema(path)`: the Arrow schema of the file's flat footer schema.
-#     A glob path is refused by name (a glob's footers are not unioned yet).
+#     A glob path is refused by name (it reads one file; `parquet_relation`
+#     reads a glob).
+#   * `parquet_relation(path, hive_partitioning)`: the `ParquetSource` a
+#     `read_parquet(path)` relation scans, over the files `path` names
+#     (`parquet_files.resolve_parquet_source`).
+#   * `iceberg_relation(path, allow_moved_paths, snapshot_id)`: the source an
+#     `iceberg_scan(path, ...)` relation scans, resolved from the table's
+#     metadata (`iceberg_scan.table_ref`): a binding that names the metadata
+#     file, the snapshot it is pinned to and the table's columns. It reads the
+#     metadata file only (no footer, so nothing is cached), and the manifests
+#     are read when the scan is lowered.
 #   * `column_null_count(path, column)`: the column's null count summed over
 #     every row group, or None when the file has no such column or any row
 #     group records no count. Never a partial sum: one row group without a
 #     count makes the answer unknown, which keeps the binder's run-time NULL
 #     checks.
 #
-# `register_parquet_table` takes a table's schema from the footer at
-# registration, and `check_registered_schema` refuses, by table and column, a
-# registered schema that disagrees with the file it names. The comparison is
+# `register_parquet_table` takes a table's files and schema from the path at
+# registration (a file, a glob or a directory), and `check_catalog_table`
+# checks every file of the table with `check_registered_schema`, which
+# refuses, by table, file and column, a registered schema that disagrees with a
+# file. The comparison is
 # exact: names and order, Arrow type, decimal precision and scale, time zone,
 # and nullability in both directions (a nullable column registered not null is
 # unsafe; a not-null column registered nullable is refused too, so a registered
@@ -25,11 +37,15 @@
 from arrow.arrow_types import ArrowType
 from arrow.schema import Schema
 from parquet_api.metadata import RowGroup
-from scan_source.source_variant import SOURCE_VARIANT_PARQUET
+from iceberg_scan.table_ref import iceberg_scan_binding, resolve_iceberg_table
+from scan_source.source_variant import SOURCE_VARIANT_PARQUET, SourceVariant
+from scan_source.parquet_source import ParquetSource
+from sql.sql_ast import HIVE_PARTITIONING_AUTO
 from sql.sql_bind_parquet import SqlParquetFooters, path_has_glob
 from sql.sql_catalog import SqlCatalog
 
 from parquet_footers.footer_cache import FooterCache, footer_error
+from parquet_footers.parquet_files import resolve_parquet_source
 
 
 comptime CHANGED_REASON = (
@@ -75,13 +91,30 @@ struct ParquetFooters(SqlParquetFooters, Copyable, Movable):
             raise Error(
                 footer_error(
                     path,
-                    "a glob path is not read yet; name one file",
+                    "a glob path reads more than one file; name one file",
                 )
             )
         _ = self._cache.footer(path)
         self._refuse_if_changed(path)
         var summary = self._cache.summary(path)
         return summary.take_schema()
+
+    def parquet_relation(
+        self, path: String, hive_partitioning: UInt8
+    ) raises -> ParquetSource:
+        return resolve_parquet_source(self, path, hive_partitioning, False)
+
+    def iceberg_relation(
+        self,
+        path: String,
+        allow_moved_paths: Bool,
+        snapshot_id: Optional[Int64],
+    ) raises -> SourceVariant:
+        return SourceVariant.from_binding(
+            iceberg_scan_binding(
+                resolve_iceberg_table(path, allow_moved_paths, snapshot_id)
+            )
+        )
 
     def column_null_count(
         self, path: String, column: String
@@ -178,32 +211,30 @@ def check_registered_schema(
 def register_parquet_table(
     mut catalog: SqlCatalog, name: String, path: String, footers: ParquetFooters
 ) raises:
-    """Register the Parquet file `path` as table `name`, with the schema its
-    own footer gives. Nothing is registered when the footer does not read."""
-    var schema = footers.footer_schema(path)
-    catalog.add_parquet(name, path, schema^)
+    """Register `path` as table `name`: a file, a glob or a directory (every
+    `.parquet` file under it). The files are listed now, checked against the
+    first file's schema, and Hive partition columns are detected. Nothing is
+    registered when a footer does not read or the files disagree."""
+    var source = resolve_parquet_source(
+        footers, path, HIVE_PARTITIONING_AUTO, True
+    )
+    catalog.add_parquet_source(name, source^)
 
 
 def check_catalog_table(
     catalog: SqlCatalog, name: String, footers: ParquetFooters
 ) raises:
-    """Refuse the catalog table `name` when its registered schema is not the
-    schema of the Parquet file it names.
+    """Refuse the catalog table `name` when the schema of any Parquet file it
+    names is not the schema its source holds.
 
     Raises:
-        Error when `name` is unknown, is not a Parquet table, names more than
-        one file (not checked yet), or its schema disagrees with the file.
+        Error when `name` is unknown, is not a Parquet table, or a file's
+        footer does not read or disagrees; the error names the file.
     """
     var table = catalog.table_of(name)
     if table.source.tag != SOURCE_VARIANT_PARQUET:
         raise Error("parquet table '" + name + "': the table is not a Parquet table")
     ref ps = table.source._parquet.value()
-    if len(ps.paths) != 1:
-        var files = String("")
-        for i in range(len(ps.paths)):
-            files += ("" if i == 0 else ", ") + "'" + String(ps.paths[i]) + "'"
-        raise Error(
-            "parquet table '" + name + "': names " + String(len(ps.paths))
-            + " files (" + files + "); only a one-file table is checked"
-        )
-    check_registered_schema(name, String(ps.paths[0]), table.schema, footers)
+    var expected = ps.schema()
+    for i in range(len(ps.paths)):
+        check_registered_schema(name, String(ps.paths[i]), expected, footers)

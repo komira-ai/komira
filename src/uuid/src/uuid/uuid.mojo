@@ -99,11 +99,11 @@ struct Uuid(ImplicitlyCopyable, Movable, Writable):
     hyphenated string, and (for v7) in creation-time order.
     """
 
-    # REPRESENTATION: two 8-lane halves, not an `InlineArray` and not one
+    # REPRESENTATION: two 8-lane halves, not an `Array` and not one
     # 16-lane vector.
     #
-    # Not `InlineArray[UInt8, 16]`: in Mojo 1.0.0 a struct with an
-    # `InlineArray` field cannot be ImplicitlyCopyable at all. `InlineArray`
+    # Not `Array[UInt8, 16]`: in Mojo 1.0.0 a struct with an
+    # `Array` field cannot be ImplicitlyCopyable at all. `Array`
     # conforms to `Copyable` (explicit `.copy()`) but not
     # `ImplicitlyCopyable`, so synthesis refuses ("cannot synthesize implicit
     # copy constructor because field '_bytes' has non-implicitly-copyable
@@ -390,7 +390,7 @@ struct Uuidv7Generator(Deinitable):
     on each call so successive IDs are strictly ordered. `rand_b` (62 bits)
     stays fully random for global uniqueness across generators / processes.
 
-    Monotonic state is packed into a single `Atomic[DType.uint64]`:
+    Monotonic state is packed into a single `Atomic[UInt64]`:
 
         state = (last_ms << 16) | last_seq        (seq is the low 16 bits)
 

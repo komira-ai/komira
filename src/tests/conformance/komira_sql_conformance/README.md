@@ -8,8 +8,12 @@ committed beside it. Komira's answer to a query is DuckDB's answer
 engine to. Each case is run again by the pinned DuckDB as a `sql_oracle`
 build action ([tools/build/sql](../../../../tools/build/sql/README.md)), and
 the action fails unless its answer equals the committed one byte for byte.
-Test-only data: nothing here is Mojo or Python, nothing komira builds is an
-input, and nothing runs komira on these cases yet.
+Test-only data: nothing here is Mojo or Python, and nothing komira builds is an
+input. Two corpora are run through komira: pipeline_exec's
+`tests/test_sink_float_agg_duckdb.mojo` holds the ungrouped aggregation
+sink to the answers of `agg_float_ungrouped`, and sdk_exec's
+`tests/test_run_sql_topn.mojo` holds `run_sql` to the answers of each
+`order_by_limit` case with a LIMIT or an OFFSET.
 
 ```sh
 ./buck2 build //src/tests/conformance/komira_sql_conformance:corpus
@@ -90,18 +94,20 @@ them, then copy them over the committed ones and review the diff:
 ## The corpora
 
 Counts are of the case files (`ls cases/<corpus>/*.sql`, less
-`tables.sql`); 6197 in all, 2217 of them `order: query`.
+`tables.sql`); 6273 in all, 2283 of them `order: query`.
 
 | corpus | cases | what it probes |
 |---|---|---|
 | `join_shapes` | 57 | INNER, LEFT, RIGHT, FULL, CROSS and NATURAL joins, ON and USING: keys with orphans, duplicates and a NULL on both sides, an empty side, DOUBLE keys with NaN and -0.0, string keys, a two-column key, a repeated column name |
 | `set_operations` | 45 | UNION, INTERSECT, EXCEPT, each with and without ALL, over duplicates and NULLs, widened key types |
+| `union_all` | 28 | UNION ALL: the common type of two or three branches (integers of each width signed and unsigned, FLOAT, DOUBLE, DECIMAL, timestamp units), recorded with `typeof`; NULLs in one branch, an empty branch, a second branch with other column names, ORDER BY and LIMIT after the last branch, aggregates under and over a union, integer literals |
 | `subquery_cte` | 45 | scalar, IN, EXISTS and correlated subqueries, CTEs (with and without reuse) |
 | `window_frames`, `range_frames` | 91, 119 | window aggregates over ROWS frames, and RANGE frames by offset over integers, floats, NULL and tied keys, both directions |
-| `order_by_limit` | 49 | ORDER BY direction and NULL placement, several keys, LIMIT and OFFSET (zero, past the end), ties in a group |
+| `order_by_limit` | 75 | ORDER BY direction and NULL placement, several keys, LIMIT and OFFSET (zero, past the end), ties in a group; `topn_*`: LIMIT with and without OFFSET over BIGINT, DOUBLE (NaN, inf) and text keys with ties at the cut and NULLS FIRST or LAST in both directions, total orders carrying `k`, and a 20000-row table `U` |
 | `predicates_three_valued`, `conditional_exprs` | 147, 90 | AND, OR, NOT, comparisons, IN, BETWEEN, LIKE and IS NULL over NULLs; CASE, COALESCE, NULLIF, IF in SELECT, WHERE, GROUP BY, aggregates and ORDER BY |
 | `null_pattern_n<rows>`, `null_adversarial_n<rows>` | 882, 2100 | filters, aggregates and sorts over a table of `<rows>` rows (5 to 257, either side of 8, 16, 32, 64, 128, 192 and 256) whose text column mixes NULLs and empty strings |
 | `aggregate_modifiers`, `aggregate_names`, `agg_exact_floats` | 55, 31, 17 | DISTINCT and FILTER on aggregates, grouping forms; median, quantiles and the other aggregate names with their output names; float aggregates over 50000 rows of dyadic rationals, whose sums are exact in any order |
+| `agg_float_ungrouped` | 22 | SUM, AVG, MIN, MAX, COUNT and COUNT(*) of a DOUBLE and a FLOAT column with no GROUP BY: 4096 rows of non-dyadic values with NULLs, and small sets holding NaN (first, among values, only), +inf, -inf, both infinities, a sum past the double range, only NULLs, no row, and -0.0 |
 | `scalar_fn`, `string_domain` | 293, 52 | the scalar functions (math, string, date part) over a row each of edge inputs; string functions over Unicode, combining marks, NUL and empty strings |
 | `numeric_domain`, `numeric_envelope` | 103, 42 | arithmetic over every integer width signed and unsigned, FLOAT and DOUBLE, at their extremes (the rows that overflow are left out); comparisons and promotion across types |
 | `cast_boundaries`, `temporal_domain` | 108, 96 | CAST between types at their boundaries; date and timestamp parts, truncation and arithmetic, at the ends of months, leap years and before year 1 |

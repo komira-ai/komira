@@ -49,8 +49,8 @@ env -i LC_ALL=C TZ=UTC0 HOME=<scratch>/home TMPDIR=<scratch>/tmp \
 - esbuild (a static executable) runs with an empty environment from the
   staged directory, so the path comments in a bundle are paths in it
   (`main.mjs`, `node_modules/apache-arrow/...`).
-- `zig cc` runs with its caches in the action's scratch directory, as in
-  `c_exe` ([native](../native/README.md)).
+- `zig cc` runs with its caches in the action's scratch directory, as every
+  zig action does (`zig_launch`, [mojo](../mojo/toolchain.bzl)).
 
 ## Tests
 

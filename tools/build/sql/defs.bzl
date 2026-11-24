@@ -15,6 +15,7 @@ script), with one fixed invocation:
         -cmd "SET threads = 1; SET TimeZone = 'UTC'; ...; SET allowed_paths = [...]"
         -cmd "SELECT CASE WHEN version() <> 'v<version>' THEN error(...) END"
         -cmd "SELECT CASE WHEN getenv('TZ') IS DISTINCT FROM 'UTC' OR ... THEN error(...) END"
+        -cmd "LOAD '../ext/<extension>'"                 (one per `extensions` entry, in order)
         -cmd ".safe_mode"
         -cmd ".mode duckbox"
         -f ../sql/0_<src> -f ../sql/1_<src> ...
@@ -38,6 +39,11 @@ by their path there ('data.csv', 'golden/rows.tsv', 'rows.parquet').
 read of a file that is not an input are DuckDB errors, `-bail` stops at the
 first error with exit status 1, and an output the SQL did not write fails
 the last check (and buck2's own check of the action's outputs).
+
+`extensions` (DuckDB extension files, each named `<name>.duckdb_extension`)
+are staged in `ext/` beside `work/`, not inside it, so the SQL cannot read
+them, and each is loaded by a `LOAD` before `.safe_mode`, in the order
+listed. With none, the invocation is the one above without those `-cmd`s.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -83,17 +89,23 @@ _duckdb_dist = rule(
 # rule documents. A name is matched by DuckDB literally (allowed_paths) and
 # also used as a glob pattern by the existence check, so no glob characters.
 _NAME = "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
-_OUTPUT_FORMATS = [".parquet", ".csv", ".tsv"]
+_OUTPUT_FORMATS = [".parquet", ".csv", ".tsv", ".json", ".gz", ".zst"]
+
+# An input path's segment may also hold `=`, after its first character, so an
+# input can sit in a Hive layout (`day=2028-01-01/part-0.parquet`). `=` is no
+# glob character, so DuckDB's allowed_paths and the existence check still match
+# it literally. Outputs keep _NAME.
+_INPUT_SEGMENT = "^[A-Za-z0-9_][A-Za-z0-9_.=-]*$"
 
 def _where(ctx):
     return str(ctx.label.raw_target())
 
-def _check_path(ctx, what, path):
+def _check_path(ctx, what, path, pattern):
     if path == "" or path.startswith("/") or path.endswith("/"):
         fail("{}: {} {} must be a relative file path".format(_where(ctx), what, repr(path)))
     for part in path.split("/"):
-        if part in (".", "..") or not regex_match(_NAME, part):
-            fail("{}: {} {} holds a segment that is not a plain name ({})".format(_where(ctx), what, repr(path), _NAME))
+        if part in (".", "..") or not regex_match(pattern, part):
+            fail("{}: {} {} holds a segment that is not a plain name ({})".format(_where(ctx), what, repr(path), pattern))
 
 def _inputs(ctx):
     """{path in the work directory: artifact}."""
@@ -110,7 +122,7 @@ def _inputs(ctx):
         staged = dict(ctx.attrs.inputs)
     dirs = {}
     for p in staged:
-        _check_path(ctx, "input", p)
+        _check_path(ctx, "input", p, _INPUT_SEGMENT)
         parts = p.split("/")
         for i in range(1, len(parts)):
             dirs["/".join(parts[:i])] = p
@@ -118,6 +130,22 @@ def _inputs(ctx):
         if p in dirs:
             fail("{}: input {} is both a file and the directory of {}".format(_where(ctx), repr(p), repr(dirs[p])))
     return staged, dirs
+
+# An extension file's name: a plain name ending in `.duckdb_extension`. It is
+# written into the SQL of the `LOAD`, so it holds no quote.
+_EXTENSION_SUFFIX = ".duckdb_extension"
+
+def _extension_names(ctx):
+    """The basenames of `extensions`, each checked."""
+    names = []
+    for e in ctx.attrs.extensions:
+        n = e.basename
+        if not n.endswith(_EXTENSION_SUFFIX) or not regex_match(_NAME, n):
+            fail("{}: extensions entry {} is not a plain file name ending in {}".format(_where(ctx), repr(n), _EXTENSION_SUFFIX))
+        if n in names:
+            fail("{}: extensions names {} twice".format(_where(ctx), repr(n)))
+        names.append(n)
+    return names
 
 def _sql_list(names):
     return "[" + ", ".join(["'{}'".format(n) for n in names]) + "]"
@@ -133,6 +161,7 @@ def _sql_oracle_impl(ctx):
     if not ctx.attrs.outputs:
         fail("{}: outputs is empty: an oracle writes its answer to declared files (COPY ... TO)".format(_where(ctx)))
     staged, dirs = _inputs(ctx)
+    extension_names = _extension_names(ctx)
     seen = {}
     for o in ctx.attrs.outputs:
         if not regex_match(_NAME, o) or o in (".", ".."):
@@ -158,6 +187,10 @@ def _sql_oracle_impl(ctx):
         dest = ctx.actions.declare_output("sql/{}_{}".format(i, s.basename), has_content_based_path = False)
         hidden.append(ctx.actions.copy_file(dest.as_output(), s))
         sql.append("../sql/{}_{}".format(i, s.basename))
+
+    for e, n in zip(ctx.attrs.extensions, extension_names):
+        dest = ctx.actions.declare_output("ext/" + n, has_content_based_path = False)
+        hidden.append(ctx.actions.copy_file(dest.as_output(), e))
 
     first = outs[ctx.attrs.outputs[0]]
     allowed = sorted(staged.keys()) + sorted(ctx.attrs.outputs)
@@ -207,6 +240,10 @@ def _sql_oracle_impl(ctx):
         version,
         "-cmd",
         env_check,
+    )
+    for n in extension_names:
+        cmd.add("-cmd", "LOAD '../ext/{}'".format(n))
+    cmd.add(
         "-cmd",
         ".safe_mode",
         "-cmd",
@@ -234,6 +271,8 @@ _sql_oracle = rule(
     impl = _sql_oracle_impl,
     doc = "Runs `srcs` (one .sql file or a list, in order) with the pinned DuckDB CLI as one build action, in-memory, threads=1, TimeZone 'UTC', from a working directory holding `inputs` (a list of sources, each at its path in the package, or {path: source}); the SQL writes every name in `outputs` there (`COPY ... TO '<name>'`), each a sub-target `[<name>]`. A file the SQL reads or writes that is neither an input nor an output, a missing output, a SQL error or a changed setting fails the action.",
     attrs = {
+        # DuckDB extension files, loaded in this order before `.safe_mode`.
+        "extensions": attrs.list(attrs.source(), default = []),
         "inputs": attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source()), default = []),
         "outputs": attrs.list(attrs.string()),
         "srcs": attrs.one_of(attrs.source(), attrs.list(attrs.source())),

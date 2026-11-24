@@ -77,6 +77,7 @@ TARGETS = [
     "komira//src/uuid:coverage_floor",
     "komira//src/uuid:table",
     "komira//src/uuid:uuid_conda",
+    "komira//third_party/aws-lc:crypto_macos",
     "komira//third_party/aws-lc:srcs_drift",
     "komira//third_party/aws-lc:srcs_files_check",
     "komira//third_party/aws-lc:srcs_files_drift",

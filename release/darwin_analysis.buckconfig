@@ -1,0 +1,12 @@
+# Placeholders for release/darwin_analysis.bxl:check (pr.yml): they register the macOS arm64
+# execution platform so that the macOS set (//release:mopm_darwin_libs) can be configured and
+# analysed on a Linux runner. The property set names no worker and no service, and the file holds
+# no endpoint: the check configures and analyses, and runs no action, so nothing is ever sent to a
+# macOS worker. A farm's real values come from farm-connect (release-macos.yml), never from here.
+[komira_release]
+  # //release:mopm_release_artifacts is compatible only with this set (release/BUCK, `mac_tree`)
+  mac_tree = true
+
+[komira_re]
+  darwin_arm64_properties = OSFamily=macOS,komira-analysis=never-runs
+  darwin_macos_hosts = 27.0-0123456789abcdef

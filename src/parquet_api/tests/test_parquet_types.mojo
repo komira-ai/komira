@@ -216,6 +216,9 @@ def test_schema_element_leaf() raises:
     assert_false(elem.type_length)
     assert_false(elem.scale)
     assert_false(elem.precision)
+    assert_false(elem.field_id)
+    var with_id = SchemaElement(name="id", field_id=5)
+    assert_equal(with_id.field_id.value(), 5)
 
 
 def test_schema_element_group() raises:

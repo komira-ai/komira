@@ -29,15 +29,15 @@
 #
 # **The slab-safety gate**: `F.State` MUST conform to `PodState` — a fixed-size
 # POD `@fieldwise_init` struct whose fields are all `PodScalar` (the
-# int/float/bool families) or `InlineArray[T: PodScalar, N]`. No heap-owning
+# int/float/bool families) or `Array[T: PodScalar, N]`. No heap-owning
 # field — `flush_partial_to_column` Arrow-columnar-dumps the raw `State` slab,
 # so a `State` with a `List`/`String`/`Set` field corrupts memory at
 # parallel-merge time. The `PodState` bound + the explicit allowlist is the
 # compile-time gate (a `WeightedAvg(AggFn)` with `var bad: List[Int]` in its
 # `State` must FAIL TO COMPILE). A UDF agg whose state genuinely needs heap
 # (a HyperLogLog with a dynamic register array) ships its state as an
-# `InlineArray[T, MAX]` — same workaround the engine's own statistical
-# accumulators use (the AggLayout -> InlineArray migration).
+# `Array[T, MAX]` — same workaround the engine's own statistical
+# accumulators use (the AggLayout -> Array migration).
 #
 # The user trait ships the scalar `update` path; `update_chunk` is the
 # engine-internal fast path.
@@ -57,7 +57,7 @@ trait PodScalar(Copyable, Movable):
 trait PodState(Copyable, Movable, Deinitable):
     """Marker — an `AggFn.State` MUST conform: a fixed-size POD
     `@fieldwise_init` struct whose fields are all `PodScalar` or
-    `InlineArray[T: PodScalar, N]`. No heap-owning field —
+    `Array[T: PodScalar, N]`. No heap-owning field —
     `flush_partial_to_column` Arrow-columnar-dumps the raw slab. A conformer
     with a `List`/`String`/`Set` field FAILS TO COMPILE (the trait-conformance
     check rejects it — the slab-safety compile-time gate)."""

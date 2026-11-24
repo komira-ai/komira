@@ -1,0 +1,134 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+
+# Test-only: read_json through run_sql (the SQL door of sdk_exec: parse, bind,
+# optimize, lower to a SOURCE_JSONL segment, run) against the pinned DuckDB's
+# read_json over the same file. data/rows.jsonl is the input of both: ten
+# objects whose keys come in different orders, with JSON nulls, missing keys, a
+# key on one line only, integers in a float column, escapes and non-ASCII text.
+# oracle/<case>.sql is one query, written by DuckDB as <case>.tsv; the test
+# runs the text between `COPY (` and `) TO` of the same file, so a query has
+# one source. types.sql records the type DuckDB gives each column.
+#
+#   test_read_json_equals_duckdb  the names, order and types of `SELECT *` are
+#                                 DuckDB's (BIGINT, DOUBLE, BOOLEAN, VARCHAR),
+#                                 and each case's result equals DuckDB's by
+#                                 value (komira_plan_harness: duckdb_tsv read
+#                                 at the engine's schema, compare_canon), as a
+#                                 multiset or, for ORDER BY, in order
+#
+# Nothing depends on this package.
+
+_CASES = [
+    "scan_all",
+    "project_reordered",
+    "filter_compare",
+    "filter_bool",
+    "filter_unprojected",
+    "count_star",
+    "aggregate",
+    "group_by",
+    "order_by",
+]
+
+[sql_oracle(
+    name = case,
+    srcs = ["oracle/" + case + ".sql"],
+    inputs = {"rows.jsonl": "data/rows.jsonl"},
+    outputs = [case + ".tsv"],
+) for case in _CASES + ["types"]]
+
+mojo_library(
+    name = "komira_read_json_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/agg:agg",
+        "//src/agg_api:agg_api",
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_api:async_api",
+        "//src/async_rt:async_rt",
+        "//src/atomic_alias:atomic_alias",
+        "//src/avro:avro",
+        "//src/batch_eval:batch_eval",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/containers:containers",
+        "//src/counters:counters",
+        "//src/crypto:crypto",
+        "//src/csv:csv",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/encoding:encoding",
+        "//src/engine_runtime:engine_runtime",
+        "//src/exec_types:exec_types",
+        "//src/expr:expr",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/host_profile:host_profile",
+        "//src/join_assembly:join_assembly",
+        "//src/json:json",
+        "//src/json_index:json_index",
+        "//src/jsonl:jsonl",
+        "//src/kernels:kernels",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/lowering:lowering",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/morsel:morsel",
+        "//src/name_registry:name_registry",
+        "//src/objectstore:objectstore",
+        "//src/op_agg_state:op_agg_state",
+        "//src/op_sources:op_sources",
+        "//src/operator_api:operator_api",
+        "//src/optimizer:optimizer",
+        "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_footers:parquet_footers",
+        "//src/parquet_scan:parquet_scan",
+        "//src/physical_plan:physical_plan",
+        "//src/pipeline_exec:pipeline_exec",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_proto:plan_proto",
+        "//src/plan_stats:plan_stats",
+        "//src/plan_wire:plan_wire",
+        "//src/proto_codec:proto_codec",
+        "//src/protobuf:protobuf",
+        "//src/row_format:row_format",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_planning:scan_planning",
+        "//src/scan_source:scan_source",
+        "//src/sdk:sdk",
+        "//src/sdk_exec:sdk_exec",
+        "//src/secret_registry:secret_registry",
+        "//src/secret_store:secret_store",
+        "//src/shuffle:shuffle",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/sql:sql",
+        "//src/sync:sync",
+        "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
+        "//src/trace:trace",
+        "//src/udf:udf",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    conda = False,
+    test_srcs = [
+        "tests/test_read_json_equals_duckdb.mojo",
+    ],
+    test_data = {
+        "tests/test_read_json_equals_duckdb.mojo": dict(
+            [("rows.jsonl", "data/rows.jsonl"), ("types.tsv", ":types[types.tsv]")] +
+            [(case + ".sql", "oracle/" + case + ".sql") for case in _CASES] +
+            [(case + ".tsv", ":" + case + "[" + case + ".tsv]") for case in _CASES],
+        ),
+    },
+    visibility = ["PUBLIC"],
+)

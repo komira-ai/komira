@@ -6,8 +6,8 @@ returns bytes or text, or raises with the engine's own message. `_c_abi.mojo`
 turns a raise into `KOMIRA_ERR_ENGINE` and the message into the context's last
 error. Nothing here holds a pointer.
 
-- `register_parquet`: bind a Parquet file into a session's engine under a
-  name, after reading its footer.
+- `register_parquet`: bind Parquet files (one file, a glob or a directory)
+  into a session's engine under a name, after reading their footers.
 - `parquet_schema_bytes`: a Parquet file's schema as `komira.plan.v1`
   `WireSchema` bytes.
 - `csv_binding_bytes`, `json_binding_bytes`: the whole `WireScanBinding` of a
@@ -29,14 +29,15 @@ from .session import Session
 
 
 def register_parquet(mut session: Session, name: String, path: String) raises:
-    """Bind the Parquet file at `path` into `session`'s engine under `name`.
+    """Bind the Parquet files at `path` into `session`'s engine under `name`.
 
-    The footer is read here, through the engine's own footer reader
-    (`sdk_exec.engine_catalog.register_parquet`), so a missing or unreadable
-    file is refused at registration with the reader's own message and not
-    later as an empty result, and the table is in the catalog a query on the
-    session binds against. A flat schema only: a nested or repeated column is
-    refused. A glob path is refused: a table names one file.
+    `path` is what `sdk_exec.engine_catalog.register_parquet` takes: one file,
+    a glob or a directory. The footers are read here, through the engine's own
+    footer reader, so a missing or unreadable file is refused at registration
+    with the reader's own message and not later as an empty result, and the
+    table is in the catalog a query on the session binds against. A flat
+    schema only: a nested or repeated column is refused, as are files whose
+    schemas differ and a glob that matches nothing.
     """
     engine_register_parquet(session.engine, name, path)
 

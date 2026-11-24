@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # `LogicalPlan.union` (a `PLAN_UNION` with N children) already exists
-# and the SQL binder reaches it for `UNION ALL` (`_bind_union_all_chain`), but
+# and the SQL binder reaches it for `UNION ALL` (`_bind_set_chain`), but
 # the untyped Mojo carrier had NO verb over it: the corpus element `union` was
 # a DECLARED absence at @mojo (`MOJO_NO_VERB`). `PlanCarrier.concat(top,
 # bottom)` is that verb — polars' `pl.concat([top, bottom])`, answered the way
@@ -21,11 +21,12 @@
 #     PROJECT that renames its columns to `top`'s (`concat_align_names`) —
 #     the positional rule made structural rather than assumed.
 #
-# ⛔ A TYPE MISMATCH IS REFUSED BY NAME, NOT COERCED — the SQL binder's rule
-# (`_union_branch_schema_check`) for the same reason: `PLAN_UNION` concatenates
-# batches that must already share a physical layout, and admitting two
-# layouts under one advertised schema returns reinterpreted bytes, not an
-# error. DuckDB coerces (`1 UNION ALL 1.5` is DOUBLE); cast a branch first.
+# ⛔ A TYPE MISMATCH IS REFUSED BY NAME, NOT COERCED, in this door:
+# `PLAN_UNION` concatenates batches that must already share a physical
+# layout, and admitting two layouts under one advertised schema returns
+# reinterpreted bytes, not an error. DuckDB coerces (`1 UNION ALL 1.5` is
+# DOUBLE) and the SQL binder does too (`_union_merge_schema`, which casts each
+# branch to the common type under a projection); here, cast a branch first.
 # =============================================================================
 
 from arrow.schema import Schema

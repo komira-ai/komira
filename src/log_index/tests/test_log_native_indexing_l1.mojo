@@ -190,14 +190,14 @@ def _build_l0_split(views: List[LogRecordView]) raises -> List[UInt8]:
     var batch = log_views_to_record_batch(views)
     var seg = L0SegmentBuilder(schema^)
     seg.add_batch(batch^)
-    var uuid = InlineArray[UInt8, 16](fill=UInt8(7))
+    var uuid = Array[UInt8, 16](fill=UInt8(7))
     return seg.serialize_split_bytes(LOG_INDEX_TEXT_FIELD, uuid)
 
 
 def _build_optimized_split(views: List[LogRecordView]) raises -> List[UInt8]:
     var schema = log_index_schema()
     var batch = log_views_to_record_batch(views)
-    var uuid = InlineArray[UInt8, 16](fill=UInt8(7))
+    var uuid = Array[UInt8, 16](fill=UInt8(7))
     var sink = SearchSink(
         String("bucket"),
         String("prefix"),
@@ -442,7 +442,7 @@ def test_04_rtc_task_builds_publishes_and_is_queryable() raises:
 
     # Build the RtC task (owned views + the publish target) and RUN it inline
     # (the spawner would run this type-erased on a worker; run() is the contract).
-    var uuid = InlineArray[UInt8, 16](fill=UInt8(0))
+    var uuid = Array[UInt8, 16](fill=UInt8(0))
     uuid[0] = UInt8(0)  # worker-disc 0
     uuid[8] = UInt8(1)  # seq 1
     var task = L0BuildTask[SharedInMemoryConditionalStore](

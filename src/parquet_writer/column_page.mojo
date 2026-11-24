@@ -15,7 +15,7 @@
 # the body is compressed and again after (a codec can expand a body).
 # =============================================================================
 
-from std.memory import memcpy
+from std.memory import unsafe_memcpy
 
 from parquet_api.metadata import Statistics
 from parquet_api.types import CompressionCodec, Encoding, ParquetType
@@ -140,7 +140,7 @@ def _append_bytes(mut dest: List[UInt8], src: List[UInt8]):
     dest.resize(cur + n, UInt8(0))
     # SAFETY: `dest` was just resized to hold `cur + n` bytes and `src` holds
     # `n`; both Lists are alive through the copy.
-    memcpy(dest=dest.unsafe_ptr() + cur, src=src.unsafe_ptr(), count=n)
+    unsafe_memcpy(dest=dest.unsafe_ptr() + cur, src=src.unsafe_ptr(), count=n)
 
 
 def _value_encodings(nullable: Bool, encoding: Encoding) -> List[Encoding]:

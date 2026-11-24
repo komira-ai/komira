@@ -268,6 +268,8 @@ def make_host(mut arena: _Arena, abi_major: UInt32, hd_w: Word) -> Word:
     h[].mem_release = _host_mem_release
     h[].now_ns = _host_now_ns
     h[].log = _host_log
+    # No runtime options: n_options is 0 and options stays the arena's NULL.
+    h[].n_options = 0
     return Word(h.bitcast[NoneType]())
 
 

@@ -5,6 +5,7 @@
 TARGETS = [
     "komira//release/ci:check_release_ref",
     "komira//release/ci:main_red",
+    "komira//release/ci:test_buck2_failure_cli",
     "komira//src/arrow_ipc:arrow_c_abi_probe",
     "komira//src/arrow_ipc:large_writes_check",
     "komira//src/aws_scheduler:aws_scheduler_conda",
@@ -103,8 +104,7 @@ TARGETS = [
     "komira//tools/build/run:gate",
     "komira//tools/build/selftest/graph:selftest_closure",
     "komira//tools/build/toolchains/darwin:lz4-c_1.10.0_osx-arm64.conda",
-    "komira//tools/build/toolchains/darwin:mojo_compiler_1.0.0_osx-arm64.conda",
-    "komira//tools/build/toolchains/proto:protoc",
+    "komira//tools/build/toolchains/darwin:mojo_compiler_1.1.0_osx-arm64.conda",
     "tests//functional/driver_kit:doc_tree",
     "tests//functional/location_path:doc_tree",
     "tests//functional/location_path:main",

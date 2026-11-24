@@ -495,10 +495,10 @@ test "check 7: green; red on an unversioned or non-glibc-versioned strong undefi
 // ---- the readers refuse what they cannot read -------------------------------
 
 test "readers: a thin archive, a non-archive and a non-ELF shared object are errors" {
-    try t.expectError(error.BadElf, elf.readArchive(A, "!<thin>\nxxxx"));
-    try t.expectError(error.BadElf, elf.readArchive(A, "not an archive"));
-    try t.expectError(error.BadElf, elf.readArchive(A, "!<arch>\n"));
-    try t.expectError(error.BadElf, elf.readShared(A, "\x7fELF"));
+    try t.expectError(error.BadObject, elf.readArchive(A, "!<thin>\nxxxx"));
+    try t.expectError(error.BadObject, elf.readArchive(A, "not an archive"));
+    try t.expectError(error.BadObject, elf.readArchive(A, "!<arch>\n"));
+    try t.expectError(error.BadObject, elf.readShared(A, "\x7fELF"));
     // A member header announcing 64 bytes, and none after it.
     const member = comptime blk: {
         var m = [_]u8{' '} ** 60;
@@ -508,7 +508,7 @@ test "readers: a thin archive, a non-archive and a non-ELF shared object are err
         break :blk m;
     };
     const short = "!<arch>\n" ++ member;
-    try t.expectError(error.BadElf, elf.readArchive(A, short));
+    try t.expectError(error.BadObject, elf.readArchive(A, short));
 }
 
 // ---- the README check (slice 10) ---------------------------------------------
@@ -564,5 +564,5 @@ test "readProgram: a linked program's .symtab, locals included; an archive is re
     }
     try t.expect(locals > 0);
     try t.expect(defined > 0);
-    try t.expectError(error.BadElf, elf.readProgram(A, "!<arch>\n"));
+    try t.expectError(error.BadObject, elf.readProgram(A, "!<arch>\n"));
 }

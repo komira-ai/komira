@@ -61,6 +61,7 @@ static const row ROWS[] = {
     S(komira_udf_host), O(komira_udf_host, struct_size), O(komira_udf_host, abi_major),
     O(komira_udf_host, abi_minor), O(komira_udf_host, host_data), O(komira_udf_host, mem_reserve),
     O(komira_udf_host, mem_release), O(komira_udf_host, now_ns), O(komira_udf_host, log),
+    O(komira_udf_host, n_options), O(komira_udf_host, options),
 
     S(komira_udf_capabilities), O(komira_udf_capabilities, struct_size),
     O(komira_udf_capabilities, runtime_id), O(komira_udf_capabilities, runtime_abi),
@@ -101,7 +102,7 @@ static const row ROWS[] = {
     K(KOMIRA_UDF_ERR_CANCELLED), K(KOMIRA_UDF_ERR_DEADLINE), K(KOMIRA_UDF_ERR_OUT_OF_MEMORY),
     K(KOMIRA_UDF_ERR_INSTANCE_LOST), K(KOMIRA_UDF_ERR_INTERNAL), K(KOMIRA_UDF_ERR_FIELD_NOT_DECLARED),
     K(KOMIRA_UDF_ERR_WORKER_CRASHED), K(KOMIRA_UDF_ERR_HOST_CONTRACT), K(KOMIRA_UDF_ERR_KILLED),
-    K(KOMIRA_UDF_ERR_READ_SET_MISMATCH),
+    K(KOMIRA_UDF_ERR_READ_SET_MISMATCH), K(KOMIRA_UDF_ERR_BAD_OPTION),
     K(KOMIRA_UDF_SHAPE_SCALAR), K(KOMIRA_UDF_SHAPE_ROW), K(KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN),
     K(KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME), K(KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME_GROUPED),
     K(KOMIRA_UDF_SHAPE_AGG_PLAIN), K(KOMIRA_UDF_SHAPE_AGG_MERGEABLE), K(KOMIRA_UDF_SHAPE_STEP),

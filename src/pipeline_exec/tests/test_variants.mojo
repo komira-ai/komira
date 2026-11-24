@@ -11,8 +11,20 @@
 #     instead of doing nothing.
 #   * An operator variant runs the member of its slot: the same morsel through
 #     an adding member and a multiplying member gives different values.
+#   * The fourth operator slot works as the first three do: a variant built
+#     with `fourth` reports OP_TAG_FOURTH and forwards `execute` and
+#     `metrics_snapshot` to its member (a multiplying fake, and a join probe
+#     whose metrics are empty before a morsel and not after). The default
+#     fourth slot is `NoOperator`, which raises when used, and the three-slot
+#     name is unchanged.
 #   * A sink variant forwards the whole life of a sink to its member: sized,
 #     consumed by two workers, combined in worker id order, finalized and taken.
+#   * The fourth sink slot works as the first three do: a variant built with
+#     `fourth` reports SINK_TAG_FOURTH and forwards `resize_worker_state`,
+#     `consume`, `combine`, `finalize` and `take_output` to its member (the
+#     same rows as the first slot gives, tallied by the member), the other
+#     slots still reach their own members, and the default fourth slot is
+#     `NoSink`, which raises when used.
 #   * Each hook of the source trait that takes no pointer reaches the member of
 #     the slot: bypass columns, dictionary preservation, prefetch and count only
 #     each change what the member recorded.
@@ -22,6 +34,15 @@
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from morsel.pipeline_execution import PipelineExecution
+from pipeline_exec.join_harness import (
+    customer_batch,
+    expect_rows,
+    expected_rows,
+    key_names,
+    orders_batch,
+    probe_op,
+    rows_of,
+)
 from pipeline_exec.fake_members import (
     FakeBatchSource,
     FakeCountSink,
@@ -33,6 +54,10 @@ from pipeline_exec.fake_members import (
     SOURCE_CURSOR,
 )
 from pipeline_exec.fake_support import (
+    SLOT_COMBINES,
+    SLOT_CONSUMED_MORSELS,
+    SLOT_FINALIZES,
+    SLOT_TAKES,
     SLOT_CONSUMED_ROWS,
     SLOT_HOOKS_SEEN,
     Tally,
@@ -40,13 +65,17 @@ from pipeline_exec.fake_support import (
     fake_values,
     int64_batch,
 )
+from pipeline_exec.op_hash_probe import HashProbeOp, HashProbeShared
 from pipeline_exec.op_variant import (
     OP_TAG_FIRST,
+    OP_TAG_FOURTH,
     OP_TAG_SECOND,
+    OP_TAG_THIRD,
     OpVariant,
 )
 from pipeline_exec.pipeline_sink import (
     SINK_TAG_FIRST,
+    SINK_TAG_FOURTH,
     SINK_TAG_SECOND,
     SINK_TAG_THIRD,
     PipelineSink,
@@ -62,7 +91,10 @@ from morsel.morsel import Morsel
 
 comptime Sources = SourceVariant[FakeSource, FakeBatchSource, NoSource]
 comptime Ops = OpVariant[FakeOp, FakeOp, NoOperator]
+comptime FourOps = OpVariant[FakeOp, FakeOp, NoOperator, FakeOp]
+comptime JoinOps = OpVariant[FakeOp, FakeOp, NoOperator, HashProbeOp]
 comptime Sinks = PipelineSink[FakeSink, FakeCountSink, NoSink]
+comptime FourSinks = PipelineSink[FakeSink, FakeCountSink, NoSink, FakeCountSink]
 
 
 def test_source_variant_calls_the_member_of_its_slot() raises:
@@ -152,6 +184,57 @@ def test_unused_operator_slot_raises() raises:
         assert_true("operator slot is unused" in String(e), String(e))
 
 
+def test_operator_variant_runs_the_member_of_its_fourth_slot() raises:
+    var mul = FourOps.fourth(FakeOp(OP_MUL, 7, Tally()))
+    assert_equal(Int(mul.tag()), Int(OP_TAG_FOURTH))
+    var m = Morsel(int64_batch(fake_values(1, 3)), 1, 0)
+    assert_true(mul.execute(m).is_need_more_input())
+    var got = batch_values(m.batch)
+    for r in range(3):
+        assert_equal(got[r], Int64((100 + r) * 7))
+    assert_equal(mul.metrics_snapshot().count(), 0)
+    var first = FourOps.first(FakeOp(OP_ADD, 5, Tally()))
+    assert_equal(Int(first.tag()), Int(OP_TAG_FIRST))
+    var again = Morsel(int64_batch(fake_values(1, 3)), 1, 0)
+    assert_true(first.execute(again).is_need_more_input())
+    assert_equal(batch_values(again.batch)[0], Int64(105))
+
+
+def test_operator_variant_forwards_a_probe_in_its_fourth_slot() raises:
+    var spec = probe_op(1, key_names("o_custkey"), key_names("c_custkey"))
+    var shared = HashProbeShared(spec, customer_batch(10))
+    var op = JoinOps.fourth(shared.make())
+    assert_equal(Int(op.tag()), Int(OP_TAG_FOURTH))
+    assert_equal(op.metrics_snapshot().count(), 0)
+    var m = Morsel(orders_batch(0, 30), 0, 0)
+    assert_true(op.execute(m).is_need_more_input())
+    var want = expected_rows(
+        orders_batch(0, 30),
+        customer_batch(10),
+        key_names("o_custkey"),
+        key_names("c_custkey"),
+    )
+    assert_true(len(want) > 0)
+    expect_rows(rows_of(m.batch), want, "fourth slot probe")
+    assert_true(op.metrics_snapshot().count() > 0)
+
+
+def test_the_default_fourth_operator_slot_raises_and_the_slot_tags_are_unchanged() raises:
+    assert_equal(Int(OP_TAG_FIRST), 0)
+    assert_equal(Int(OP_TAG_SECOND), 1)
+    assert_equal(Int(OP_TAG_THIRD), 2)
+    assert_equal(Int(OP_TAG_FOURTH), 3)
+    var none = Ops.fourth(NoOperator())
+    assert_equal(Int(none.tag()), Int(OP_TAG_FOURTH))
+    var m = Morsel(int64_batch(fake_values(0, 1)), 0, 0)
+    try:
+        _ = none.execute(m)
+        assert_true(False, "an unused fourth operator slot must raise")
+    except e:
+        assert_true("operator slot is unused" in String(e), String(e))
+    assert_equal(none.metrics_snapshot().count(), 0)
+
+
 def test_sink_variant_forwards_a_sinks_whole_life() raises:
     var tally = Tally()
     var sink = Sinks.first(FakeSink(tally.share()))
@@ -204,6 +287,60 @@ def test_unused_sink_slot_raises() raises:
         assert_true("not implemented" in String(e), String(e))
 
 
+def test_sink_variant_forwards_a_sinks_whole_life_from_its_fourth_slot() raises:
+    var tally = Tally()
+    var sink = FourSinks.fourth(FakeCountSink(tally.share()))
+    assert_equal(Int(sink.tag()), Int(SINK_TAG_FOURTH))
+    sink.resize_worker_state(2)
+    sink.consume(1, Morsel(int64_batch(fake_values(7, 2)), 7, 1))
+    sink.consume(0, Morsel(int64_batch(fake_values(3, 5)), 3, 0))
+    var pipe = PipelineExecution(2, 0)
+    sink.combine(pipe)
+    sink.finalize()
+    var counted = batch_values(sink.take_output())
+    assert_equal(len(counted), 1)
+    assert_equal(counted[0], Int64(7))
+    assert_equal(tally.get(SLOT_CONSUMED_MORSELS), 2)
+    assert_equal(tally.get(SLOT_CONSUMED_ROWS), 7)
+    assert_equal(tally.get(SLOT_COMBINES), 1)
+    assert_equal(tally.get(SLOT_FINALIZES), 1)
+    assert_equal(tally.get(SLOT_TAKES), 1)
+    var first_tally = Tally()
+    var first = FourSinks.first(FakeSink(first_tally.share()))
+    assert_equal(Int(first.tag()), Int(SINK_TAG_FIRST))
+    first.resize_worker_state(1)
+    first.consume(0, Morsel(int64_batch(fake_values(1, 3)), 1, 0))
+    first.combine(pipe)
+    first.finalize()
+    assert_equal(len(batch_values(first.take_output())), 3)
+    assert_equal(first_tally.get(SLOT_CONSUMED_ROWS), 3)
+    assert_equal(tally.get(SLOT_CONSUMED_ROWS), 7)
+
+
+def test_the_default_fourth_sink_slot_raises_and_the_slot_tags_are_unchanged() raises:
+    assert_equal(Int(SINK_TAG_FIRST), 0)
+    assert_equal(Int(SINK_TAG_SECOND), 1)
+    assert_equal(Int(SINK_TAG_THIRD), 2)
+    assert_equal(Int(SINK_TAG_FOURTH), 3)
+    var none = Sinks.fourth(NoSink())
+    assert_equal(Int(none.tag()), Int(SINK_TAG_FOURTH))
+    try:
+        none.consume(0, Morsel(int64_batch(fake_values(0, 1)), 0, 0))
+        assert_true(False, "an unused fourth sink slot must raise")
+    except e:
+        assert_true("sink slot is unused" in String(e), String(e))
+    try:
+        none.finalize()
+        assert_true(False, "an unused fourth sink slot must raise")
+    except e:
+        assert_true("sink slot is unused" in String(e), String(e))
+    try:
+        _ = none.take_output()
+        assert_true(False, "an unused fourth sink slot must raise")
+    except e:
+        assert_true("not implemented" in String(e), String(e))
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_source_variant_calls_the_member_of_its_slot]()
@@ -211,6 +348,15 @@ def main() raises:
     suite.test[test_unused_source_slot_raises]()
     suite.test[test_operator_variant_runs_the_member_of_its_slot]()
     suite.test[test_unused_operator_slot_raises]()
+    suite.test[test_operator_variant_runs_the_member_of_its_fourth_slot]()
+    suite.test[test_operator_variant_forwards_a_probe_in_its_fourth_slot]()
+    suite.test[
+        test_the_default_fourth_operator_slot_raises_and_the_slot_tags_are_unchanged
+    ]()
     suite.test[test_sink_variant_forwards_a_sinks_whole_life]()
     suite.test[test_unused_sink_slot_raises]()
+    suite.test[test_sink_variant_forwards_a_sinks_whole_life_from_its_fourth_slot]()
+    suite.test[
+        test_the_default_fourth_sink_slot_raises_and_the_slot_tags_are_unchanged
+    ]()
     suite^.run()

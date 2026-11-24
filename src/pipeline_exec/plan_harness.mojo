@@ -5,14 +5,17 @@
 # What a test, or a measurement before the binder exists, needs to run a plan
 # it wrote by hand through `run_plan` and `RealBuilder`:
 #
-#   * segment descriptors for the three sources with an operator chain and a
-#     collect sink (`parquet_segment`, `batch_segment`, `output_segment`);
+#   * segment descriptors for the four sources with an operator chain and a
+#     collect sink (`parquet_segment`, `batch_segment`, `output_segment`,
+#     `csv_segment`);
 #   * the operators of the chain (`op_filter`, `op_project`, `op_limit`);
 #   * a sample batch and readers for what comes out of a plan.
 #
 # `with_agg_sink` turns a segment into an ungrouped aggregation and
 # `ungrouped_agg_data` builds the sink data the builder keeps for it;
-# `with_sort_sink` turns one into the in-memory sort.
+# `with_sort_sink` turns one into the in-memory sort, `with_topn_sink` into
+# the sort that keeps a range of its order and `with_window_sink` into the
+# window functions.
 #
 # The sample batch has three columns:
 #   a  INT64, no NULL, row r holds r
@@ -43,10 +46,14 @@ from physical_plan.physical_plan import (
     SegmentDescPod,
     SINK_AGG,
     SINK_COLLECT,
+    SINK_PARTITION_BY,
     SINK_ORIENT_COLUMNAR,
     SINK_ORIENT_DICT_ENCODED,
     SINK_SORT,
+    SINK_TOPN,
     SOURCE_BATCH,
+    SOURCE_CSV,
+    SOURCE_ICEBERG,
     SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
     SourceSpecPod,
@@ -120,6 +127,42 @@ def batch_segment(
     )
 
 
+def csv_segment(
+    seg_id: Int,
+    var spec: SourceSpecPod,
+    var ops: Slab[MorselOp] = Slab[MorselOp](),
+    morsel_rows: Int = 0,
+) -> SegmentDescPod:
+    """A segment that reads the CSV file `spec` names and collects."""
+    return _segment(
+        seg_id,
+        SOURCE_CSV,
+        spec^,
+        ops^,
+        morsel_rows,
+        List[Int](),
+        List[UInt8](),
+    )
+
+
+def iceberg_segment(
+    seg_id: Int,
+    var spec: SourceSpecPod,
+    var ops: Slab[MorselOp] = Slab[MorselOp](),
+    morsel_rows: Int = 0,
+) -> SegmentDescPod:
+    """A segment that reads the Iceberg files `spec` names and collects."""
+    return _segment(
+        seg_id,
+        SOURCE_ICEBERG,
+        spec^,
+        ops^,
+        morsel_rows,
+        List[Int](),
+        List[UInt8](),
+    )
+
+
 def output_segment(
     seg_id: Int,
     producer: Int,
@@ -163,6 +206,16 @@ def with_sort_sink(var desc: SegmentDescPod, param_id: Int) -> SegmentDescPod:
     return desc^
 
 
+def with_topn_sink(var desc: SegmentDescPod, param_id: Int) -> SegmentDescPod:
+    """`desc` with its sink changed to the top-N whose data the builder holds
+    as `param_id` (`RealBuilder.add_topn_sink`)."""
+    desc.sink_kind = SINK_TOPN
+    desc.sink_key_dtype = KEY_DTYPE_NONE
+    desc.sink_orientation = SINK_ORIENT_COLUMNAR
+    desc.sink_param_id = param_id
+    return desc^
+
+
 def ungrouped_agg_data(
     var aggs: Slab[AggExpr], var output_schema: Schema
 ) -> AggSinkData:
@@ -174,8 +227,9 @@ def with_group_sink(
     var desc: SegmentDescPod, param_id: Int, key_dtype: UInt8
 ) -> SegmentDescPod:
     """`desc` with its sink changed to the grouped aggregation of key row
-    `key_dtype` (`KEY_DTYPE_I64`, `I32`, `F64` or `F32`) whose data the builder
-    holds as `param_id`."""
+    `key_dtype` (`KEY_DTYPE_I64`, `I32`, `F64`, `F32`, `DATE32`, `BOOL`,
+    `DECIMAL128` or `COMPOSITE`) whose data the builder holds as
+    `param_id`."""
     desc.sink_kind = SINK_AGG
     desc.sink_key_dtype = key_dtype
     desc.sink_orientation = SINK_ORIENT_COLUMNAR
@@ -316,3 +370,13 @@ def column_names(ref batch: RecordBatch) raises -> List[String]:
     for i in range(batch.num_columns()):
         out.append(batch.schema.field_name(i))
     return out^
+
+
+def with_window_sink(var desc: SegmentDescPod, param_id: Int) -> SegmentDescPod:
+    """`desc` with its sink changed to the window functions whose data the
+    builder holds as `param_id` (`RealBuilder.add_window_sink`)."""
+    desc.sink_kind = SINK_PARTITION_BY
+    desc.sink_key_dtype = KEY_DTYPE_NONE
+    desc.sink_orientation = SINK_ORIENT_COLUMNAR
+    desc.sink_param_id = param_id
+    return desc^

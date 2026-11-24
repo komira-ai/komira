@@ -5,7 +5,8 @@
 #
 # What each test proves:
 #   1. A scalar subquery binds to an uncorrelated CORR_KIND_SCALAR (kind=2)
-#      expression; one projecting two columns is refused.
+#      expression, or one with an outer reference when its body names an
+#      outer column; one projecting two columns is refused.
 #   2. EXISTS binds to CORR_KIND_EXISTS (kind=0), NOT EXISTS to
 #      CORR_KIND_NOT_EXISTS (kind=1), IN to EXISTS with the membership equi
 #      folded in; the outer references are recorded (`outer_refs=#n`).
@@ -15,8 +16,8 @@
 #   4. The correlated-predicate binder: inner vs outer columns by
 #      qualifier, the operators it binds, the constant-folded date_diff,
 #      and its refusals (another function, an aggregate, `*`, a dangling
-#      index); body-shape refusals (multi-table FROM, GROUP BY / ORDER BY /
-#      LIMIT / OFFSET, an IN body not projecting one bare column).
+#      index); body-shape refusals of EXISTS (multi-table FROM, GROUP BY /
+#      ORDER BY / LIMIT), and of an IN body projecting more than one column.
 #   5. The NOT IN null-freedom proof (with footer readers giving null
 #      counts) keeps the run-time `x IS NOT NULL` check when x is a
 #      join-renamed output column whose source holds NULLs, under a LEFT,
@@ -33,6 +34,7 @@ from arrow.schema import Field, Schema, SchemaBuilder
 from sql.sql_token import tokenize
 from sql.sql_parser import parse_sql
 from sql.sql_catalog import SqlCatalog
+from scan_source.parquet_source import ParquetSource
 from sql.sql_bind_parquet import NoParquetFooters, SqlParquetFooters
 from sql.sql_binder import bind_statement
 
@@ -111,6 +113,11 @@ struct _Footers(SqlParquetFooters):
             return 3
         return None
 
+    def parquet_relation(
+        self, path: String, hive_partitioning: UInt8
+    ) raises -> ParquetSource:
+        return ParquetSource(String(path), self.footer_schema(path), None)
+
 
 def _got(sql: String) raises -> String:
     """The bound plan's text, or `ERR: ` and the binder's message."""
@@ -152,6 +159,11 @@ struct _FootersUk(SqlParquetFooters):
         if path == "u.parquet" and column == "k":
             return 5
         return 0
+
+    def parquet_relation(
+        self, path: String, hive_partitioning: UInt8
+    ) raises -> ParquetSource:
+        return ParquetSource(String(path), self.footer_schema(path), None)
 
 
 def _checku(sql: String, want: String) raises:
@@ -199,9 +211,13 @@ def test_scalar_subqueries() raises:
         "SELECT k FROM t WHERE k = (SELECT k, w FROM u)",
         "ERR: SQL bind error: a scalar subquery must project exactly one column (got 2)"
     )
+    # A body naming an outer column is a correlated scalar: one outer
+    # reference (test_sql_bind_corr_scalar holds its body).
     _check(
         "SELECT k FROM t WHERE (SELECT max(w) FROM u WHERE u.k = t.k) > 1",
-        "ERR: SQL bind error: unknown column 't.k'"
+        "Project(exprs=[ColRef(k)])\n"
+        "  Filter(predicate=BinaryOp(GT, CorrelatedSubquery(kind=2, outer_refs=#1, inner_tag=2), Literal(ScalarValue(int64, 1))))\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
 
 
@@ -481,21 +497,23 @@ def test_correlated_predicate_refusals() raises:
         "SELECT k FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.k = t.k GROUP BY u.k)",
         "ERR: SQL not supported: GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET / DISTINCT inside a predicate subquery"
     )
+    # An IN body of another shape is bound whole (test_sql_bind_in_body):
+    # OFFSET without LIMIT then meets the parser's own refusal, and two
+    # columns are refused.
     _check(
         "SELECT k FROM t WHERE k IN (SELECT k FROM u OFFSET 3)",
-        "ERR: SQL not supported: GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET / DISTINCT inside a predicate subquery"
+        "ERR: SQL not supported: OFFSET without LIMIT — this dialect honours an"
+        " OFFSET only as part of a row window, so write `LIMIT <n> OFFSET 3` with"
+        " an explicit row count. (Refused rather than ignored: silently dropping"
+        " the OFFSET would return every row.)"
     )
     _check(
         "SELECT k FROM t WHERE k IN (SELECT k, w FROM u)",
         "ERR: SQL bind error: an IN subquery must project exactly one column"
     )
     _check(
-        "SELECT k FROM t WHERE k IN (SELECT k + 1 FROM u)",
-        "ERR: SQL bind error: an IN subquery must project a single bare column"
-    )
-    _check(
         "SELECT k FROM t WHERE k IN (SELECT * FROM u)",
-        "ERR: SQL bind error: an IN subquery must project a single bare column"
+        "ERR: SQL bind error: an IN subquery must project exactly one column"
     )
 
 
@@ -559,7 +577,9 @@ def test_not_in_null_freedom_proof_edges() raises:
     # refused when the query binds.
     _check(
         "SELECT k FROM t GROUP BY k HAVING k NOT IN (SELECT k FROM u)",
-        "ERR: SQL bind error: unsupported expression"
+        "ERR: SQL not supported: an EXISTS or IN subquery in a HAVING clause or in the"
+        " SELECT list of a grouped query (a scalar subquery is served there; a"
+        " predicate subquery is served as a WHERE conjunct)"
     )
     _check(
         "SELECT kk.k FROM kk LEFT JOIN mm ON kk.k = mm.k WHERE kk.k NOT IN (SELECT k FROM u)",

@@ -11,11 +11,12 @@ from plan_ir.logical_plan import (
     AggExprArray, ExprArray, LogicalPlan,
 )
 from sql.sql_ast import (
-    SX_CALL, SX_COLUMN, SX_INT, SX_WINDOW, SelectStmt, SqlExpr,
+    SX_CALL, SX_COLUMN, SX_INT, SX_SUBQUERY, SX_WINDOW, SelectStmt, SqlExpr,
     sql_call_is_aggregate,
 )
 from sql.sql_bind_agg_expr import (
     _bind_agg_from_sx, _bind_agg_from_sx_call, _extract_and_bind_post_agg,
+    _post_agg_scalar_subquery,
 )
 from sql.sql_bind_expr import _bind_scalar
 from sql.sql_bind_names import (
@@ -257,6 +258,17 @@ def _bind_aggregate(stmt: SelectStmt, schema: Schema, scope: BindScope, var chil
             else:
                 proj_names.append(_duckdb_expr_text(item.expr))
             proj.append(e^)
+        elif item.expr.tag == SX_SUBQUERY:
+            # An uncorrelated scalar subquery is one value for every group:
+            # it stands in the reorder Project, which
+            # `scalar_subquery_decorrelate` joins to the aggregate's output.
+            var sq_name: String
+            if item.out_alias:
+                sq_name = String(item.out_alias.value())
+            else:
+                sq_name = _duckdb_expr_text(item.expr)
+            proj_names.append(String(sq_name))
+            proj.append(Expr.alias(_post_agg_scalar_subquery(item.expr, prebound), sq_name))
         else:
             # Bare non-aggregate SELECT item — must name a GROUP BY key.
             # Ask "is this item one of the group keys?" first, the same way
@@ -430,8 +442,9 @@ def _bind_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, var chi
     """The SELECT list as a Project, WIDENED by any ORDER BY column the list
     does not already produce.
 
-    With `result_int_literals` (the list is the query's result: not a CTE, a
-    subquery or a UNION ALL branch) a bare integer literal item that fits
+    With `result_int_literals` (the list is the query's result or a UNION ALL
+    branch, whose common type is folded afterwards; not a CTE or a subquery)
+    a bare integer literal item that fits
     INT32 is an INT32 column, as in DuckDB (`_result_int_literal`).
 
     Widen, sort, prune (the SELECT binder prunes): `LogicalPlan.sort`

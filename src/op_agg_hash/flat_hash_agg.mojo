@@ -523,7 +523,7 @@ struct FlatHashAggregator(Movable, Deinitable):
         PERF-CRITICAL: layout-aware offset from `self._layout.offsets`, so
         narrow-layout queries (ACC_SUM_COUNT_F64: 16B per slot) read and
         write at the right byte offsets. `_layout.offsets` is an
-        `InlineArray[Int, MAX_AGGS]`: stack-backed and move-stable.
+        `Array[Int, MAX_AGGS]`: stack-backed and move-stable.
         """
         return entry + self._agg_off(agg_idx)
 

@@ -25,7 +25,7 @@ mojo_adopted_library(
 )
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
-# (`mojo-komira-ai.scalar_arithmetic-0.1.0-mojo1.0.0_0.conda`). `:lib` exists only once the tests passed, so
+# (`mojo-komira-ai.scalar_arithmetic-0.1.0-mojo1.1.0_0.conda`). `:lib` exists only once the tests passed, so
 # this file exists only then. Publishing it (`mopm publish`) uploads, which is not a build action: it is
 # a step of a CI job that takes this target's output. `mopm` is the one `mojo_package` pins
 # (mopm-toolchain.toml).
@@ -33,8 +33,8 @@ mojo_conda(
     name = "conda",
     lib = ":lib",
     manifest = "mopm.toml",
-    mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_113",
+    mojo = "1.1.0",
+    mopm = "toolchains//:mopm_0_0_135",
     package = "komira-ai/scalar_arithmetic",
     version = "0.1.0",
     visibility = ["PUBLIC"],

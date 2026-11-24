@@ -7,7 +7,7 @@
 #
 # # Public surface
 #
-#   * AesGcm128(key: InlineArray[UInt8, 16])
+#   * AesGcm128(key: Array[UInt8, 16])
 #   * AesGcm128.seal_in_place(nonce, aad, plaintext_then_tag) raises
 #   * AesGcm128.open_in_place(nonce, aad, ciphertext_then_tag) raises
 #   * KEY_SIZE / NONCE_SIZE / TAG_SIZE / SEQUENCE_LIMIT aliases
@@ -67,11 +67,11 @@ struct AesGcm128(Aead, Movable, Deinitable):
             EVP_AEAD_CTX_free.
 
     Usage:
-        var k = InlineArray[UInt8, 16](fill=UInt8(0))
+        var k = Array[UInt8, 16](fill=UInt8(0))
         # ... populate k ...
         var cipher = AesGcm128(k)
         var buf = ...  # [plaintext (N-16)][tag (16)]
-        var nonce = InlineArray[UInt8, 12](fill=UInt8(0))
+        var nonce = Array[UInt8, 12](fill=UInt8(0))
         cipher.seal_in_place(nonce, aad, buf)
         # ... transmit buf ...
         # Decrypt:

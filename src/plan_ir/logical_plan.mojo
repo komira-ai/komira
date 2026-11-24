@@ -131,12 +131,12 @@ comptime PLAN_VIEW_REF: UInt8 = 13
 # `optimizer.plan_cse.plan_cse_eliminate` (the plan-level CSE rewrite),
 # which `optimizer_driver` does not call. The IR stays a TREE (not a DAG): the
 # canonical occurrence keeps the full subtree; the 2nd..Nth occurrences become
-# `PLAN_CSE_REF` leaves carrying `canonical_hash`. No consumer exists in this
-# tree yet: nothing resolves a `PLAN_CSE_REF` to the canonical result, so a
-# plan that holds one cannot be lowered until a resolver is added.
+# `PLAN_CSE_REF` leaves carrying `canonical_hash`. Its consumer is lowering
+# (`lowering.cut_shared`), which cuts the canonical occurrence once and has
+# every reference read its result.
 comptime PLAN_CSE_REF: UInt8 = 14
 # cast_to_varchar: a single-child node that wraps its input with
-# `CastToVarcharOp` (`komira_engine_operators/cast_to_varchar.mojo`). The
+# `CastToVarcharOp`. The
 # node's output_schema is the per-column STRING-typed mirror of the child
 # (synthesized at factory time). Producer: `cast_to_varchar_insert.mojo`
 # walks the plan top and inserts ONE PLAN_CAST_TO_VARCHAR above a root
@@ -1191,7 +1191,7 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         Returns a single-node plan: a `PLAN_CSE_REF` leaf carrying the
         canonical subtree's `structural_hash` + a snapshot of its output
         schema. The only producer is `plan_cse.plan_cse_eliminate` (the
-        plan-level CSE rewrite); there is no consumer in this tree yet.
+        plan-level CSE rewrite); its consumer is `lowering.cut_shared`.
         `structural_hash()` on the returned plan
         returns `canonical_hash` (so re-CSE is idempotent — see
         `CseRefData` docstring).

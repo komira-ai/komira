@@ -165,8 +165,8 @@ holds M1 and M4 to M8.
   `MutExternalOrigin`, `MutUntrackedOrigin`.
 - **M5 BLOCK.** Banned: `unsafe_from_address=`.
 - **M6 BLOCK.** Banned: moving a field out through a pointer
-  (`UnsafePointer(to=x.f).take_pointee()`). Use `Optional.take()`, `OwnedPointer.take()`, `swap`,
-  `List.pop()`, or `Slab.take_slot_*`.
+  (`UnsafePointer(to=x.f).take_pointee()`). Use `Optional.take()`, `OwnedPointer.into_inner()`,
+  `swap`, `List.pop()`, or `Slab.take_slot_*`.
 - **M7 BLOCK.** Banned: stdlib `parallelize[`. Use a `ParallelDispatch` or `fork_join_shared` from
   `komira_core`.
 - **M8 BLOCK.** Banned: re-declaring libc `read` or `open`. Platform constants go through a C shim.
@@ -216,6 +216,15 @@ holds M1 and M4 to M8.
 
 ## komira rules
 
+- **The macOS part of the pull request check.** In this repository the macOS clause of B9 has one
+  exception:
+  `pr / check` builds, for darwin-arm64 on the build farm's Macs, the libraries of the macOS set
+  (`//release:mopm_darwin_libs`) that the change reaches, or the whole set when the change is built as
+  the aggregate. It is a step of the one job `check`, never a job of its own and never a hosted macOS
+  runner. It runs after the Linux part, which never waits on it, and it is bounded at 60 minutes
+  ([docs/ci.md](docs/ci.md#the-macos-part-of-the-check)). The tests it runs are the welded tests of
+  those libraries, the ones the Linux part runs, so it adds no slow test. Every other
+  per-pull-request macOS job or target stays refused by B9.
 - **B21 BLOCK.** Product constraints:
   - Query results equal DuckDB's for the same SQL. Departures only for Arrow representation limits
     (128-bit ints, infinite dates, uint64 mixed with signed), and they fail with a named error.

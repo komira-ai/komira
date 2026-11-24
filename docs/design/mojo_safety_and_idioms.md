@@ -40,7 +40,7 @@ They lend views and references whose origin is the collection. `ByteView[origin]
 
 ### How do I move a field out of a struct?
 
-Use a primitive that ends the source's ownership on the record: `Optional.take()`, `OwnedPointer.take()`, the standard library's `swap(field, default)`, `List.pop()`, or `Slab.take_slot_*`. Taking a field's address and calling `take_pointee()` on it is a **partial move via a pointer**: the compiler still believes the field is live and destroys it again when the struct dies.
+Use a primitive that ends the source's ownership on the record: `Optional.take()`, `OwnedPointer.into_inner()`, the standard library's `swap(field, default)`, `List.pop()`, or `Slab.take_slot_*`. Taking a field's address and calling `take_pointee()` on it is a **partial move via a pointer**: the compiler still believes the field is live and destroys it again when the struct dies.
 
 ### How is work run in parallel?
 
@@ -52,12 +52,12 @@ With `external_call`, from the module that owns the foreign resource, behind a s
 
 ### Which Mojo 1.0 spellings does the compiler require?
 
-The toolchain pins Mojo `1.0.0` (the `mojo-compiler` packages in `tools/build/toolchains/BUCK`). Each of these is a compile error on it, so the compiler enforces the rule; the right-hand column says how to choose among the fixes.
+The toolchain pins Mojo `1.1.0` (the `mojo-compiler` packages in `tools/build/cells/toolchains/mojo_pins.bzl`). Each of these became a compile error in Mojo 1.0.0 and the 1.1.0 release restores none of them, so the compiler enforces the rule; the right-hand column says how to choose among the fixes.
 
 | You write | 1.0.0 wants | Choosing |
 |---|---|---|
 | `len(s)` on a `String` or `StringSlice` | `s.byte_length()`, `len(s.codepoints())` or `len(s.graphemes())` | Bytes for buffers and offsets, code points or graphemes for text shown to people. |
-| an implicit copy of an `InlineArray[T, N]` | `x^` or `x.copy()` | `^` when the value is dead afterwards (a `return` or a hand-off); `.copy()` when it is read later, with a comment naming that read. |
+| an implicit copy of an `Array[T, N]` | `x^` or `x.copy()` | `^` when the value is dead afterwards (a `return` or a hand-off); `.copy()` when it is read later, with a comment naming that read. |
 | an implicit `Int` to `UInt8` (or other sized integer) conversion at a call | an explicit `UInt8(x)`, `Int(x)` | The conversion is removed in both directions. |
 | `x = String(x[byte=0:n])`, a value rebound to a slice of itself | an owned temporary: `var t = String(x[byte=0:n])`, then `x = t^` | The compiler refuses to borrow a value and construct into it in one call; the temporary adds no allocation. |
 | `mut self: Slab[_T]` to refine a method's receiver | `where conforms_to(Self.T, Movable)` after the signature | The diagnostic names a `where` clause but not this spelling. |
@@ -126,7 +126,7 @@ The spelling rules in the table above are different: the compiler refuses the ol
 | `src/byte_buffer/src/byte_buffer/byte_view.mojo`, `slab.mojo` | the view and slab types that keep pointers private | `ByteView`, `Slab` |
 | `src/async_api/src/async_api/parallel_dispatch.mojo`, `fork_join_shared.mojo` | the parallel dispatch contract | `ParallelDispatch`, `NoDispatch`, `fork_join_shared` |
 | `src/byte_buffer/src/byte_buffer/mmap_region.mojo`, `src/libc/native/komira_libc_posix.c` | an FFI boundary through a C shim that resolves platform constants in C | `open_readonly`, `komira_open_ro` |
-| `tools/build/toolchains/BUCK` | the compiler pin | the `mojo-compiler` 1.0.0 packages |
+| `tools/build/cells/toolchains/mojo_pins.bzl` | the compiler pin | the `mojo-compiler` 1.1.0 packages |
 | `tools/build/lint/pointer_lint.zig`, `mojo_tokens.zig`, `pointer_lint_test.zig`, `defs.bzl`; `tests/pointer_lint_ffi.tsv`, `tests/pointer_lint_holds.tsv` | the pointer lint, and its two ledgers | `pointer_lint`, `//:pointer_lint` |
 
 Entry points:

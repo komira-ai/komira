@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # `SimdOf[T, W]` carries W lanes of struct T laid out as struct-of-arrays in a
-# single `InlineArray[UInt8, _total_simd_bytes[T, W]()]` blob. Per-field byte
+# single `Array[UInt8, _total_simd_bytes[T, W]()]` blob. Per-field byte
 # offsets are derived at comptime via `reflect[T]()`.
 #
 # A load/eval/store round-trip matches the scalar reference row for row, and
@@ -11,7 +11,7 @@
 # calls; seven SimdOf-bound operators compose into one fused loop.
 #
 # Encapsulation rule:
-#   - SimdOf's `_blob: InlineArray[UInt8, N]` is POD; no heap, no
+#   - SimdOf's `_blob: Array[UInt8, N]` is POD; no heap, no
 #     wildcard-origin pointer field. Movable + Copyable trivially.
 #     No stale-pointer hazard across destroy and recreate.
 #   - The `unsafe_ptr()` calls inside the typed accessors live ONLY inside
@@ -110,7 +110,7 @@ struct SimdOf[T: AnyType & Copyable & Movable, W: Int](Copyable, Movable):
     The round-trip matches the scalar reference and the inner loop is
     vectorized with zero `bl` calls.
 
-    # SAFETY: SimdOf uses `InlineArray[UInt8, _total_simd_bytes[Self.T,
+    # SAFETY: SimdOf uses `Array[UInt8, _total_simd_bytes[Self.T,
     # Self.W]()]` blob storage with comptime-derived per-field offsets.
     # `UnsafePointer` is used ONLY inside this struct's typed accessors
     # for `(blob.unsafe_ptr() + sub_off).bitcast[T]().load[width=W]()`

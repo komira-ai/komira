@@ -5,7 +5,7 @@
 # ERR-COUNT-DISTINCT-GROWABLE-SUBSTRATE — set
 # primitive over Int64 keys, growable (no cap), gap6-safe.
 #
-# Replaces the legacy 16-cap `HashSetI64` (InlineArray-backed open-addressing
+# Replaces the legacy 16-cap `HashSetI64` (Array-backed open-addressing
 # mirror of the pre-DENSE-HASH-AGG `HashAggTableI64`) for the two v0.4 GA
 # consumers:
 #
@@ -102,7 +102,7 @@ from op_agg_state.dense_hash_agg_table import (
 struct GrowableHashSetI64(Copyable, Movable):
     """Growable single-Int64-key hash SET.
 
-    Mirror of `HashSetI64` (16-cap, InlineArray-backed) but storage-
+    Mirror of `HashSetI64` (16-cap, Array-backed) but storage-
     unbounded — uses `_DenseAggDirectory` (the same salt-packed
     open-addressing directory that powers `HashAggTableF64/I64/I32/F32`)
     for grow-on-load probe + rehash semantics.

@@ -8,8 +8,8 @@ load(":table.bzl", "constraints", "registered_names")
 # mounts komira.
 
 # One platform per registered row of the platform table (table.bzl), named
-# for the row: `linux-x86_64`, `darwin-arm64`. A row komira reserves
-# (`registered = False`, today `linux-arm64`) has no platform here: it is not a
+# for the row: `linux-x86_64`, `linux-arm64`, `darwin-arm64`. A row komira
+# reserves (`registered = False`; none today) has no platform here: it is not a
 # build key. Each is also the configuration of the one execution platform of
 # that (os, cpu) that runs actions (registered by `komira_execution_platforms`
 # or `komira_local_execution_platforms` in defs.bzl), so a tool built to run in
@@ -18,7 +18,10 @@ load(":table.bzl", "constraints", "registered_names")
 #
 # `linux-x86_64` is the target platform for everything in this repo run from a
 # Linux x86_64 client (see `host` below, and `[parser]` in .buckconfig), and the
-# configuration of the linux execution platform. `darwin-arm64` is the target
+# configuration of the linux execution platform. `linux-arm64` is the target
+# platform for Linux on aarch64 (`--target-platforms
+# komira//tools/build/platforms:linux-arm64`), and the configuration of the
+# arm64 execution platform, registered only when one is configured. `darwin-arm64` is the target
 # platform for macOS on Apple silicon: `--target-platforms
 # komira//tools/build/platforms:darwin-arm64`, and the configuration of the
 # macOS execution platform, registered only when one is configured; see

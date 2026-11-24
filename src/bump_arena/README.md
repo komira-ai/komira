@@ -57,7 +57,7 @@ with this package and the packages of its closure staged, commit what it writes,
 `komira//src/bump_arena:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-komira-ai.bump_arena-0.1.0-mojo1.0.0_0.conda`), packed with the manifests of the path dependencies beside its own
+(`mojo-komira-ai.bump_arena-0.1.0-mojo1.1.0_0.conda`), packed with the manifests of the path dependencies beside its own
 (`members`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is
 a step of a CI job that takes that file, not a build action.
 

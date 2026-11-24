@@ -7,17 +7,21 @@
 # changes with each of delimiter, header and all_varchar; json_binding_bytes
 # names the path and the JSON kind; a missing file is refused by both; a
 # table registered on a session is what a query on the session's engine reads
-# (count(*) of a three-row file is 3, a filter keeps 2 and 3), a name
+# (count(*) of a three-row file is 3, a filter keeps 2 and 3), a glob registers
+# every file it matches (count(*) over two such files is 6) and a glob that
+# matches nothing is refused by name with nothing registered, a name
 # never registered is refused at bind, and a refused registration leaves no
 # table a query could read; a plan
 # is rendered as the text of its scan (the binding's name, kind and path), and bytes that are not a plan are
 # refused.
+from std.os import makedirs
 from std.testing import assert_equal, assert_false, assert_true
 
 from arrow.arrow_types import ArrowType
 from arrow.column import Column
 from arrow.primitive_array import PrimitiveArray
 from arrow.schema import Field, RecordBatchBuilder, SchemaBuilder
+from parquet_footers.parquet_files import PARQUET_GLOB_NO_MATCH
 from parquet_writer.record_batch_writer import (
     write_record_batch_to_parquet_bytes,
 )
@@ -113,8 +117,8 @@ def test_register_parquet_refusals() raises:
     assert_false(s.engine.catalog.has("text"))
 
 
-def _three_row_parquet() raises -> String:
-    """A Parquet file of one INT64 column `k` holding 1, 2 and 3."""
+def _three_row_parquet(path: String) raises -> String:
+    """A Parquet file at `path` of one INT64 column `k` holding 1, 2 and 3."""
     var arr = PrimitiveArray[DType.int64].allocate(3)
     for i in range(3):
         arr.set(i, Scalar[DType.int64](i + 1))
@@ -123,16 +127,17 @@ def _three_row_parquet() raises -> String:
     var rbb = RecordBatchBuilder()
     rbb.add_column(Column.from_primitive[DType.int64](arr^))
     var bytes = write_record_batch_to_parquet_bytes(rbb.build(sb.build()))
-    var path = test_tmpdir() + "/three_rows.parquet"
     var fh = open(path, "w")
     fh.write_bytes(Span(bytes))
     fh.close()
-    return path^
+    return path
 
 
 def test_registered_table_runs_on_the_session_engine() raises:
     var s = Session()
-    register_parquet(s, String("Three"), _three_row_parquet())
+    register_parquet(
+        s, String("Three"), _three_row_parquet(test_tmpdir() + "/three_rows.parquet")
+    )
     var counted = run_sql(s.engine, String("select count(*) as c from three"))
     assert_true(counted.ok(), "count(*) over a registered table was refused")
     assert_equal(len(counted.batches), 1)
@@ -148,6 +153,42 @@ def test_registered_table_runs_on_the_session_engine() raises:
     assert_equal(rows.batches[0].num_rows(), 2)
     var k = rows.batches[0].column_at(0).as_primitive[DType.int64]()
     assert_equal(k.get(0) + k.get(1), Int64(5))
+
+
+def _count_of(mut s: Session, table: String) raises -> Int64:
+    var out = run_sql(s.engine, String("select count(*) as c from ") + table)
+    assert_true(out.ok(), "count(*) over " + table + " was refused")
+    assert_equal(len(out.batches), 1)
+    return out.batches[0].column_at(0).as_primitive[DType.int64]().get(0)
+
+
+def test_glob_registers_every_matching_file() raises:
+    var dir = test_tmpdir() + "/glob_two"
+    makedirs(dir, exist_ok=True)
+    _ = _three_row_parquet(dir + "/a.parquet")
+    _ = _three_row_parquet(dir + "/b.parquet")
+    var s = Session()
+    register_parquet(s, String("both"), dir + "/*.parquet")
+    assert_equal(_count_of(s, String("both")), Int64(6))
+    register_parquet(s, String("one"), dir + "/a.parquet")
+    assert_equal(_count_of(s, String("one")), Int64(3))
+
+
+def test_glob_matching_nothing_is_refused() raises:
+    var dir = test_tmpdir() + "/glob_none"
+    makedirs(dir, exist_ok=True)
+    var s = Session()
+    var glob = dir + "/*.parquet"
+    var message = String()
+    try:
+        register_parquet(s, String("none"), glob)
+    except e:
+        message = String(e)
+    assert_equal(
+        message,
+        String(PARQUET_GLOB_NO_MATCH) + ": no file matches '" + glob + "'",
+    )
+    assert_false(s.engine.catalog.has("none"))
 
 
 def test_unregistered_table_is_refused_at_bind() raises:
@@ -243,6 +284,8 @@ def main() raises:
     test_register_parquet()
     test_register_parquet_refusals()
     test_registered_table_runs_on_the_session_engine()
+    test_glob_registers_every_matching_file()
+    test_glob_matching_nothing_is_refused()
     test_unregistered_table_is_refused_at_bind()
     test_parquet_schema_bytes()
     test_csv_binding()

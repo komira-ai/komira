@@ -33,8 +33,17 @@ from physical_plan.physical_plan import (
     SOURCE_BATCH,
     SOURCE_PARQUET as SEG_SOURCE_PARQUET,
     SOURCE_SINK_OUTPUT,
+    ORDER_NONE,
+    ORDER_ROW_RANGE,
 )
-from plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_MEAN, AGG_SUM
+from plan_expr.agg_expr import (
+    AggExpr,
+    AGG_COUNT,
+    AGG_MAX,
+    AGG_MEAN,
+    AGG_MIN,
+    AGG_SUM,
+)
 from plan_expr.expr import Expr, BIN_GT, BIN_LE, BIN_MUL
 from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import (
@@ -49,6 +58,7 @@ from plan_stats.table_stats import (
     STATS_SOURCE_PARQUET_METADATA,
 )
 from scan_source.in_memory_source import InMemorySource
+from scan_source.parquet_source import ParquetSource
 from scan_source.source_variant import SourceVariant
 
 
@@ -170,9 +180,9 @@ def test_ungrouped_filter_aggregate_is_one_segment() raises:
     expected += "  op 0: FILTER " + String(_ship_le(100)) + "\n"
     expected += "  sink: (SINK_AGG, NONE, COLUMNAR) param=0 state=0\n"
     expected += "  deps: none\n"
-    expected += "  order: ORDER_NONE partitions=1\n"
+    expected += "  order: ORDER_ROW_RANGE partitions=1\n"
     expected += "  estimates: morsel_rows=" + String(m) + " card_rows=6000 mem_bytes=0\n"
-    expected += "params: agg=1 sort=0 batches=0\n"
+    expected += "params: agg=1 sort=0 topn=0 window=0 batches=0\n"
     expected += "  agg 0: group_by=[] aggs=[" + String(_revenue()) + "]\n"
     expected += "result: segment 0\n"
     assert_equal(render_lowered_plan(_lowered(plan, _one_scan())), expected)
@@ -206,7 +216,7 @@ def test_grouped_dictionary_aggregate_then_sort_is_two_segments() raises:
     expected += "  deps: 0/E3\n"
     expected += "  order: ORDER_NONE partitions=1\n"
     expected += "  estimates: morsel_rows=" + String(policy.default_morsel_rows(agg_schema)) + " card_rows=0 mem_bytes=0\n"
-    expected += "params: agg=1 sort=1 batches=0\n"
+    expected += "params: agg=1 sort=1 topn=0 window=0 batches=0\n"
     var group_by = "[" + String(_col("flag")) + ", " + String(_col("status")) + "]"
     expected += "  agg 0: group_by=" + group_by + " aggs=["
     expected += String(_sum_as("qty", "sum_qty")) + ", "
@@ -306,7 +316,7 @@ def test_project_over_an_aggregate_reads_the_aggregate_output() raises:
 # =============================================================================
 
 
-def _key_schema() -> Schema:
+def _key_schema() raises -> Schema:
     var sb = SchemaBuilder()
     sb.add_field(Field("i64", ArrowType.INT64, False))
     sb.add_field(Field("i32", ArrowType.INT32, False))
@@ -314,10 +324,13 @@ def _key_schema() -> Schema:
     sb.add_field(Field("f32", ArrowType.FLOAT32, False))
     sb.add_field(Field("s", ArrowType.STRING, False))
     sb.add_field(Field("t", ArrowType.STRING, False))
+    sb.add_field(Field("d32", ArrowType.DATE32, False))
+    sb.add_field(Field("flag", ArrowType.BOOL, False))
+    sb.add_field(Field.decimal128("dec", 18, 4, False))
     return sb.build()
 
 
-def _count_by(keys: List[String]) -> LogicalPlan:
+def _count_by(keys: List[String]) raises -> LogicalPlan:
     var aggs = AggExprArray()
     aggs.append(AggExpr(AGG_COUNT, Optional[Expr](), Optional[String]("n")))
     return LogicalPlan.aggregate(
@@ -339,6 +352,35 @@ def test_each_group_key_type_picks_its_sink_row() raises:
     assert_equal(_sink_of(_count_by(_names("i32")), List[String]()), "(SINK_AGG, I32, COLUMNAR)")
     assert_equal(_sink_of(_count_by(_names("f64")), List[String]()), "(SINK_AGG, F64, COLUMNAR)")
     assert_equal(_sink_of(_count_by(_names("f32")), List[String]()), "(SINK_AGG, F32, COLUMNAR)")
+    assert_equal(_sink_of(_count_by(_names("d32")), List[String]()), "(SINK_AGG, DATE32, COLUMNAR)")
+    assert_equal(_sink_of(_count_by(_names("flag")), List[String]()), "(SINK_AGG, BOOL, COLUMNAR)")
+    assert_equal(_sink_of(_count_by(_names("dec")), List[String]()), "(SINK_AGG, DECIMAL128, COLUMNAR)")
+
+
+def test_a_key_of_several_columns_is_composite_unless_all_are_dictionary_strings() raises:
+    var composite = "(SINK_AGG, COMPOSITE, COLUMNAR)"
+    # Mixed types: an integer, a string and a date, in any order.
+    var ism = List[String]()
+    ism.append("i64")
+    ism.append("s")
+    ism.append("d32")
+    assert_equal(_sink_of(_count_by(ism^), List[String]()), composite)
+    var dsi = List[String]()
+    dsi.append("d32")
+    dsi.append("s")
+    dsi.append("i32")
+    assert_equal(_sink_of(_count_by(dsi^), _names("s")), composite)
+    # Two columns of one family, and a decimal beside a bool and a float.
+    assert_equal(_sink_of(_count_by(_names("i64", "i32")), List[String]()), composite)
+    assert_equal(_sink_of(_count_by(_names("dec", "flag")), List[String]()), composite)
+    assert_equal(_sink_of(_count_by(_names("f64", "f32")), List[String]()), composite)
+    # Strings: plain, or one of two dictionary encoded, are composite; a
+    # dictionary string beside an integer is too; two dictionary strings stay
+    # the DICT_ENCODED string row.
+    assert_equal(_sink_of(_count_by(_names("s", "t")), List[String]()), composite)
+    assert_equal(_sink_of(_count_by(_names("s", "t")), _names("s")), composite)
+    assert_equal(_sink_of(_count_by(_names("s", "i64")), _names("s")), composite)
+    assert_equal(_sink_of(_count_by(_names("t", "s")), _names("s", "t")), "(SINK_AGG, STRING, DICT_ENCODED)")
 
 
 def test_a_string_key_is_dictionary_encoded_only_when_the_footers_say_so() raises:
@@ -428,6 +470,137 @@ def test_an_in_memory_scan_is_a_batch_source_with_its_filter_and_projection_as_o
     assert_equal(seg.sink_kind, SINK_COLLECT)
 
 
+def _two_files() -> List[String]:
+    var paths = List[String]()
+    paths.append("a/lineitem.parquet")
+    paths.append("b/lineitem.parquet")
+    return paths^
+
+
+def _dated_lineitem() -> Schema:
+    """`_lineitem()` followed by the partition column `dt`."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field("flag", ArrowType.STRING, False))
+    sb.add_field(Field("status", ArrowType.STRING, False))
+    sb.add_field(Field("qty", ArrowType.INT64, False))
+    sb.add_field(Field("price", ArrowType.FLOAT64, False))
+    sb.add_field(Field("disc", ArrowType.FLOAT64, False))
+    sb.add_field(Field("ship", ArrowType.INT64, False))
+    sb.add_field(Field("dt", ArrowType.DATE32, False))
+    return sb.build()
+
+
+def test_a_scan_of_several_files_lowers_to_a_source_that_lists_them_and_pushes_projection_and_filter() raises:
+    var source = ParquetSource.partitioned(
+        _two_files(), _lineitem(), List[Field](), List[List[String]]()
+    )
+    var scan = LogicalPlan.scan_from_source(
+        SourceVariant(source^),
+        _lineitem(),
+        Optional[List[String]](_names("qty", "price")),
+        Optional[Expr](_ship_le(100)),
+    )
+    var lp = _lowered(scan, _one_scan())
+    assert_equal(len(lp.segments), 1)
+    ref seg = lp.segments[0]
+    assert_equal(seg.source_kind, SEG_SOURCE_PARQUET)
+    assert_true(seg.source_spec.parquet_spec_is_total)
+    assert_equal(seg.source_spec.parquet_path, "a/lineitem.parquet")
+    assert_equal(len(seg.source_spec.parquet_paths), 2)
+    assert_equal(seg.source_spec.parquet_paths[1], "b/lineitem.parquet")
+    assert_equal(len(seg.source_spec.parquet_partition_cols), 0)
+    assert_equal(len(seg.source_spec.parquet_projection.value()), 2)
+    assert_equal(String(seg.source_spec.parquet_filter.value()), String(_ship_le(100)))
+    assert_equal(len(seg.ops), 0)
+    var text = render_lowered_plan(lp)
+    var line = "  source: SOURCE_PARQUET path=a/lineitem.parquet total=True files=[a/lineitem.parquet, b/lineitem.parquet] projection=[qty, price] filter="
+    assert_true(line + String(_ship_le(100)) + "\n" in text, text)
+    assert_false(" partitions=[" in text)
+    assert_false(" partition_values=" in text)
+
+
+def test_a_plain_single_file_scan_renders_no_file_list() raises:
+    var text = render_lowered_plan(_lowered(_scan(), _one_scan()))
+    assert_true("files=" not in text, text)
+    assert_true(" partitions=[" not in text, text)
+    assert_true(" partition_values=" not in text, text)
+    assert_equal(len(_lowered(_scan(), _one_scan()).segments[0].source_spec.parquet_paths), 0)
+
+
+def test_a_hive_partitioned_scan_lists_files_and_values_and_runs_filter_and_projection_as_operators() raises:
+    var cols = List[Field]()
+    cols.append(Field("dt", ArrowType.DATE32, False))
+    var values = List[List[String]]()
+    values.append(_names("2026-10-01"))
+    values.append(_names("2026-10-02"))
+    var source = ParquetSource.partitioned(_two_files(), _lineitem(), cols^, values^)
+    var pushed = _ship_le(100)
+    var scan = LogicalPlan.scan_from_source(
+        SourceVariant(source^),
+        _dated_lineitem(),
+        Optional[List[String]](_names("qty", "dt")),
+        Optional[Expr](pushed.copy()),
+    )
+    var lp = _lowered(scan, _one_scan())
+    assert_equal(len(lp.segments), 1)
+    ref seg = lp.segments[0]
+    assert_equal(seg.source_kind, SEG_SOURCE_PARQUET)
+    assert_true(seg.source_spec.parquet_spec_is_total)
+    assert_equal(len(seg.source_spec.parquet_paths), 2)
+    assert_equal(len(seg.source_spec.parquet_partition_cols), 1)
+    assert_equal(seg.source_spec.parquet_partition_cols[0].name, "dt")
+    assert_equal(seg.source_spec.parquet_partition_values[1][0], "2026-10-02")
+    assert_false(Bool(seg.source_spec.parquet_projection))
+    assert_false(Bool(seg.source_spec.parquet_filter))
+    assert_equal(len(seg.ops), 2)
+    assert_equal(seg.ops[0].tag, OP_FILTER)
+    assert_equal(String(seg.ops[0].filter_predicate.value()), String(pushed))
+    assert_equal(seg.ops[1].tag, OP_PROJECT)
+    var text = render_lowered_plan(lp)
+    var line = "  source: SOURCE_PARQUET path=a/lineitem.parquet total=True files=[a/lineitem.parquet, b/lineitem.parquet] partitions=[dt] partition_values=[[2026-10-01], [2026-10-02]]\n"
+    assert_true(line in text, text)
+
+
+def test_a_hive_partitioned_scan_with_no_projection_or_filter_has_no_operators() raises:
+    var cols = List[Field]()
+    cols.append(Field("dt", ArrowType.DATE32, False))
+    var values = List[List[String]]()
+    values.append(_names("2026-10-01"))
+    values.append(_names("2026-10-02"))
+    var source = ParquetSource.partitioned(_two_files(), _lineitem(), cols^, values^)
+    var scan = LogicalPlan.scan_from_source(SourceVariant(source^), _dated_lineitem())
+    var lp = _lowered(scan, _one_scan())
+    assert_equal(len(lp.segments[0].ops), 0)
+    assert_equal(len(lp.segments[0].source_spec.parquet_partition_cols), 1)
+
+
+def test_a_group_key_over_a_hive_partitioned_scan_is_never_dictionary_encoded() raises:
+    var cols = List[Field]()
+    cols.append(Field("dt", ArrowType.DATE32, False))
+    var values = List[List[String]]()
+    values.append(_names("2026-10-01"))
+    values.append(_names("2026-10-02"))
+    var source = ParquetSource.partitioned(_two_files(), _lineitem(), cols^, values^)
+    var scan = LogicalPlan.scan_from_source(
+        SourceVariant(source^),
+        _dated_lineitem(),
+        Optional[List[String]](_names("flag", "qty")),
+    )
+    var aggs = AggExprArray()
+    aggs.append(AggExpr(AGG_COUNT, Optional[Expr](), Optional[String]("n")))
+    var plan = LogicalPlan.aggregate(_keys(_names("flag")), aggs^, scan^)
+    var lp = _lowered(plan, _one_scan(_names("flag")))
+    assert_equal(lp.segments[0].sink_kind, SINK_AGG)
+    assert_equal(
+        triple_name(
+            lp.segments[0].sink_kind,
+            lp.segments[0].sink_key_dtype,
+            lp.segments[0].sink_orientation,
+        ),
+        "(SINK_AGG, STRING, COLUMNAR)",
+    )
+
+
 def test_the_card_estimate_is_the_footer_row_count_or_zero() raises:
     var known = _lowered(_scan(), _one_scan(List[String](), 4242))
     assert_equal(known.segments[0].card_estimate_rows, 4242)
@@ -451,10 +624,105 @@ def test_every_segment_is_sized_stamped_and_ordered_none() raises:
         assert_equal(seg.ir_version, PHYSICAL_PLAN_IR_VERSION)
         assert_true(seg.morsel_rows > 0)
         assert_equal(seg.partition_count, 1)
+        assert_equal(seg.order_key_kind, ORDER_NONE)
         assert_equal(seg.sink_state_id, i)
         assert_equal(seg.cancel_slot, -1)
         assert_equal(seg.error_slot, -1)
     assert_equal(lp.params.sort[0].descending[0], True)
+
+
+# =============================================================================
+# The combine order an aggregation's segment gets
+# =============================================================================
+
+
+def _agg(func: UInt8, col: String) -> AggExpr:
+    return AggExpr(func, Optional[Expr](_col(col)), Optional[String]("a"))
+
+
+def _count_star() -> AggExpr:
+    return AggExpr(AGG_COUNT, Optional[Expr](), Optional[String]("n"))
+
+
+def _order_of(
+    var aggs: AggExprArray, keys: List[String] = List[String]()
+) raises -> UInt8:
+    """The order key kind of the aggregation segment of `aggs` grouped by
+    `keys` over a scan of `_key_schema`."""
+    var plan = LogicalPlan.aggregate(
+        _keys(keys),
+        aggs^,
+        LogicalPlan.scan(String("keys.parquet"), SOURCE_PARQUET, _key_schema()),
+    )
+    var lp = _lowered(plan, _one_scan())
+    assert_equal(lp.segments[0].sink_kind, SINK_AGG)
+    return lp.segments[0].order_key_kind
+
+
+def _one(var agg: AggExpr) -> AggExprArray:
+    var out = AggExprArray()
+    out.append(agg^)
+    return out^
+
+
+def test_an_ungrouped_float_sum_or_avg_is_cut_row_range() raises:
+    assert_equal(_order_of(_one(_agg(AGG_SUM, "f64"))), ORDER_ROW_RANGE)
+    assert_equal(_order_of(_one(_agg(AGG_MEAN, "f64"))), ORDER_ROW_RANGE)
+    assert_equal(_order_of(_one(_agg(AGG_SUM, "f32"))), ORDER_ROW_RANGE)
+    assert_equal(_order_of(_one(_agg(AGG_MEAN, "f32"))), ORDER_ROW_RANGE)
+    # The argument's type decides, not the column's: an INT64 times a FLOAT64
+    # is a FLOAT64 sum.
+    var mixed = AggExprArray()
+    mixed.append(
+        AggExpr(
+            AGG_SUM,
+            Optional[Expr](Expr.binary(BIN_MUL, _col("i64"), _col("f64"))),
+            Optional[String]("a"),
+        )
+    )
+    assert_equal(_order_of(mixed^), ORDER_ROW_RANGE)
+    # One float sum among exact aggregates is enough.
+    var several = AggExprArray()
+    several.append(_count_star())
+    several.append(_agg(AGG_SUM, "i64"))
+    several.append(_agg(AGG_MEAN, "f64"))
+    assert_equal(_order_of(several^), ORDER_ROW_RANGE)
+
+
+def test_exact_and_grouped_aggregates_stay_order_none() raises:
+    assert_equal(_order_of(_one(_agg(AGG_SUM, "i64"))), ORDER_NONE)
+    assert_equal(_order_of(_one(_agg(AGG_MEAN, "i32"))), ORDER_NONE)
+    assert_equal(_order_of(_one(_count_star())), ORDER_NONE)
+    # MIN, MAX and COUNT of a float are exact: no order is needed.
+    assert_equal(_order_of(_one(_agg(AGG_MIN, "f64"))), ORDER_NONE)
+    assert_equal(_order_of(_one(_agg(AGG_MAX, "f32"))), ORDER_NONE)
+    assert_equal(_order_of(_one(_agg(AGG_COUNT, "f64"))), ORDER_NONE)
+    # A grouped aggregation is ORDER_NONE even over a float sum: its sinks
+    # fold no float argument and refuse one by name when built.
+    assert_equal(
+        _order_of(_one(_agg(AGG_SUM, "f64")), _names("i64")), ORDER_NONE
+    )
+    assert_equal(
+        _order_of(_one(_agg(AGG_MEAN, "f64")), _names("s")), ORDER_NONE
+    )
+
+
+def test_only_the_float_aggregation_segment_is_row_range() raises:
+    # A float AVG under a sort: the aggregation's segment is ORDER_ROW_RANGE,
+    # the sort's and the distinct's are not.
+    var aggs = AggExprArray()
+    aggs.append(_agg(AGG_MEAN, "f64"))
+    var agg = LogicalPlan.aggregate(
+        ExprArray(),
+        aggs^,
+        LogicalPlan.scan(String("keys.parquet"), SOURCE_PARQUET, _key_schema()),
+    )
+    var plan = LogicalPlan.sort(_names("a"), _bools(1, False), agg^)
+    var lp = _lowered(plan, _one_scan())
+    assert_equal(len(lp.segments), 2)
+    assert_equal(lp.segments[0].order_key_kind, ORDER_ROW_RANGE)
+    assert_equal(lp.segments[1].sink_kind, SINK_SORT)
+    assert_equal(lp.segments[1].order_key_kind, ORDER_NONE)
 
 
 def _small_l2_host() raises -> HostProfile:

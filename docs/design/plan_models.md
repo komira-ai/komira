@@ -109,9 +109,10 @@ metadata. `optimized_plan.md` §5.2 adds recursive `children` for nested types.
 (§15.7). In-memory sources are refused on the wire.
 
 **UDFs.** `optimized_plan_udfs.md` §10.2 defines six kinds: SCALAR, ROW, MAP_BATCHES_COLUMN, MAP_BATCHES_FRAME,
-AGGREGATE (plain or mergeable) and STEP. A ROW or MAP_BATCHES_FRAME `UdfRef` may carry a read set, the input columns
-it reads (`UdfRef.read_set`, `optimized_plan_udfs.md` §10.2): unset, the UDF reads every input column and the optimizer
-keeps them all; set, possibly empty, the optimizer projects the input to it. Each language has one mode,
+AGGREGATE (plain or mergeable) and STEP. A ROW or MAP_BATCHES_FRAME `UdfRef` must carry a read set, the input
+columns it reads (`UdfRef.read_set`, `optimized_plan_udfs.md` §10.2), possibly empty, and the optimizer projects the
+input to it; unset is refused. The other kinds carry their columns as `arg_types` or have no input, and a read set on
+them is refused. Each language has one mode,
 chosen by its runtime: native UDFs run in the engine's process, and the Python and Node runtimes run user code in
 worker processes they manage; the engine calls every runtime through one C ABI and chooses no transport
 (`udf_runtime_interface.md` §1.2). **No plan field names the mode, at any level**, and streaming changes none of this.
@@ -917,7 +918,7 @@ open windows it discards.
 | A1 | `storage_stack.md` | Rename the per-partition "watermark" and the property `komira.tail.<lineage>.watermarks` to "rolled offsets" (`komira.tail.<lineage>.rolled-offsets`) before it lands; `optimized_plan_sources.md` §15.4.3 renames `wm(p)` to match. |
 | A2 | `optimized_plan.md` §8 | `key_groups` on `WireExchangeNode` and `ExchangeEdge`; a keyed stateful node's `HASH` exchange is placed even when `host_count_max = 1`, and the cut elides it. |
 | A3 | `optimized_plan_udfs.md` §10.3 ("`UdfRef`") | `preserves_event_time` on `UdfRef`. |
-| A4 | `optimized_plan_udfs.md` §10.2-§10.4, §10.7, §10.9; `optimized_plan_udf_runtime.md` §10.10, §10.13; `optimized_plan.md` §7.1, §7.2, §9.4, §12 | An optional read set on ROW and MAP_BATCHES_FRAME, `UdfRef.read_set = 19` (`UdfReadSet`): unset means every input column; set, possibly empty, means exactly those columns. Replaces "the read set is `arg_types`". No UDF batch is retried at the first release (`udf_runtime_interface.md` §4.5). |
+| A4 | `optimized_plan_udfs.md` §10.2-§10.4, §10.7, §10.9; `optimized_plan_udf_runtime.md` §10.10, §10.13; `optimized_plan.md` §7.1, §7.2, §9.4, §12 | A read set, `UdfRef.read_set = 19` (`UdfReadSet`): required on ROW and on MAP_BATCHES_FRAME, because a UDF without one keeps every column of a wide input live (an optional read set on either is rejected); unset is refused. Set, possibly empty, means exactly those columns. Replaces "the read set is `arg_types`". No UDF batch is retried at the first release (`udf_runtime_interface.md` §4.5). |
 
 ---
 
@@ -940,7 +941,7 @@ open windows it discards.
 | D13 | Lookup build side across snapshot expiry | Copy the build side into every savepoint; rebuild from the pin when it is live | Tag the pinned snapshot (impossible on tables komira did not create and on S3 Tables) | Recovery must not depend on someone else's expiry policy. |
 | D14 | An added measure in a roll | `RESET` of that state in the first version; a "new measure is null for open windows" `MAP` later | Define the `MAP` now | Its meaning for open windows is a product choice; `RESET` is explicit and correct. |
 | D15 | A roll's audit step on tables where branches are unavailable | Held pre-commits with a shadow sink for output checks | Let v2 commit directly, so a failed roll can only roll forward | Keeps "a failed roll parks v2 and keeps v1" true on every table. |
-| D16 | Whether a change of a UDF's `read_set` moves the `state_id` of a stateful node above it (open; `udf_runtime_interface.md` §1.3) | Yes: the read set joins the signature the logical path digests | No: only `arg_types`, `return_type` and `state_type` count | The state was computed from different inputs, and `schema_digest` would not catch a change that keeps the state layout. When set, `arg_types` already lists the read set's columns, so most read-set changes move the id through `arg_types`; what D16 decides is whether presence itself counts (unset against a read set naming every input column). |
+| D16 | Whether a change of a UDF's `read_set` moves the `state_id` of a stateful node above it (open; `udf_runtime_interface.md` §1.3) | Yes: the read set joins the signature the logical path digests | No: only `arg_types`, `return_type` and `state_type` count | The state was computed from different inputs, and `schema_digest` would not catch a change that keeps the state layout. When set, `arg_types` already lists the read set's columns, so most read-set changes move the id through `arg_types`; since a read set is always present on ROW and MAP_BATCHES_FRAME, what D16 decides is only whether a change of its names counts when `arg_types` and the rest of the signature are the same (they are equal by rule, so this is moot unless the rule is relaxed). |
 
 ---
 

@@ -76,8 +76,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_s3_fs_scripted_read (an S3Fs and its clone each read over a
 # ScriptedConnector with a store of their own, a built store kept through a
 # move, and the production connector's TLS form refusing a plaintext
-# http:// endpoint) and test_no_env_reads (the package's sources read no
-# environment).
+# http:// endpoint), test_s3_scan_fs (S3ScanFs opens an S3Fs on the bucket a
+# scan names, reading it through the fake, with the bucket's URL as its cache
+# key prefix; opening dials nothing; another scheme and an empty bucket are
+# refused with SCAN_FS_UNSERVED) and test_no_env_reads (the package's sources
+# read no environment).
 #
 # test_s3_conditional_store and test_s3_fs share one fake S3,
 # komira_test_fake_s3 (src/tests/helpers), named in `test_deps` with
@@ -129,6 +132,7 @@ mojo_library(
         "tests/test_s3_http_config.mojo",
         "tests/test_s3_presign.mojo",
         "tests/test_s3_retry_quota_clones.mojo",
+        "tests/test_s3_scan_fs.mojo",
         "tests/test_s3_shared_creds.mojo",
         "tests/test_s3_store.mojo",
         "tests/test_s3_wire.mojo",

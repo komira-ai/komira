@@ -349,3 +349,184 @@ are), and agreement across members beyond the stamp.
 [`list_conda_targets.sh`](list_conda_targets.sh) prints the package targets. The layout,
 the version scheme and the metapackage: [packaging/conda](../../../packaging/conda/README.md). The version
 a release carries comes from [`release_version.sh`](release_version.sh).
+
+## The Python wheel
+
+`wheel_file` ([`wheel.bzl`](wheel.bzl)) writes a Python wheel of the files it is
+given, with METADATA made from its attributes, and refuses to write one that
+would be wrong for the platform it is tagged for. `komira_wheel`
+([`wheel/main.zig`](wheel/main.zig)) is the writer and its read-back check, a
+static executable run as build actions: no shell, no Python, nothing from
+`third_party/python`. It is generic: the package's own wheel target is declared
+with the package, not here; the targets here are fixtures.
+
+| attribute | METADATA, or what it does |
+|---|---|
+| `distribution` | `Name` (normalised: lowercase letters, digits, single `-`), and the file name `<dist>-<version>-<tag>.whl` |
+| `summary`, `readme` | `Summary`, and the body (the README, Markdown: `Description-Content-Type: text/markdown`) |
+| `requires_python`, `requires_dist`, `classifiers`, `project_urls` | `Requires-Python`, `Requires-Dist` (in order), `Classifier`, `Project-URL` |
+| `license_expression`, `license_files` | `License-Expression` and a `License-File` per file, the files at `.dist-info/licenses/<name>` (PEP 639); default the root's `LICENSE` and `NOTICE`. A `License ::` classifier beside the expression is refused (PEP 639 forbids the pair) |
+| `files`, `executable` | `{path in the wheel: file or directory}` (a directory adds every file under it), written 0644, or 0755 for the paths `executable` names (shared libraries) |
+| `platform` | the row of [tools/build/platforms/table.bzl](../platforms/table.bzl) the wheel is for (default `linux-x86_64`); the tag is `wheel_tag` of it |
+| `os_floor` | the floor the tag promises, when it is above the platform row's `os_floor`: a wheel carrying a vendor's library that needs a newer glibc names it (`glibc-2.35`); unset, the row's |
+| `max_glibcxx`, `max_cxxabi`, `external_needed` | the bounds and the outside libraries of the library checks below |
+
+What the rule fixes, so no BUCK file states it:
+
+- **The tag** comes from the platform row: `py3-none-manylinux_<glibc floor>_<arch>`
+  for a Linux row (`x86_64`, or `aarch64` for `arm64`) and
+  `py3-none-macosx_<major>_<minor>_arm64` for macOS, with the row's `os_floor`,
+  or the wheel's own `os_floor` when it raises the floor. linux-x86_64 gives
+  `py3-none-manylinux_2_34_x86_64`; komira's wheel sets `glibc-2.35` and is
+  `py3-none-manylinux_2_35_x86_64`. The package loads its
+  library with ctypes, so it is `py3-none`. A wheel with a native library is
+  never `any`. Root-Is-Purelib is false, Wheel-Version 1.0, Metadata-Version 2.4.
+- **The version** is the stamp's, the one the release set uses:
+  `-c komira.package_stamp=<N> -c komira.package_commit=<sha> -c komira.package_timestamp_ms=<ms>`
+  gives `0.1.<N>`, a PEP 440 final release. N is the first-parent commit count
+  (`release_version.sh`): the same on every runner for one commit, and a
+  documentation-only commit does not raise it. With none of the three, the wheel
+  is `0.0.0`, an unstamped development wheel. Any other mix fails the build,
+  naming what is missing. This is not the `<compiler version>.post<N>` of
+  [packaging/conda/README.md](../../../packaging/conda/README.md), which would
+  call komira 1.0 and tie its version to the Mojo compiler's: the wheel is
+  komira's own release, and it carries the Mojo runtime it was built with
+  instead of requiring one (it has no `Requires-Dist`).
+- **Reproducible bytes**: members sorted bytewise, then the dist-info's METADATA,
+  WHEEL, licences and RECORD (sha256 in urlsafe base64 without padding, RECORD
+  last); every member dated with the commit time (1980-01-01 unstamped); modes
+  0644 and 0755 only; no extra fields; each member deflated by the packer's
+  `deflate.zig` when that is smaller. A second action writes the wheel again
+  from the same inputs staged at another path (`[twin]`), and the check refuses
+  the wheel unless the two are the same bytes.
+
+The library checks ([`wheel/policy.zig`](wheel/policy.zig)) read every ELF
+member ([`wheel/elf.zig`](wheel/elf.zig), through its program headers, so a
+stripped library reads the same). A refusal names its check:
+
+- `glibc`: the highest `GLIBC_` version it needs is at most the tag's glibc
+  (`GLIBC_PRIVATE` is refused);
+- `glibcxx`, `cxxabi`: the highest `GLIBCXX_` and `CXXABI_` versions are at most
+  `max_glibcxx` and `max_cxxabi`, and with one unset, none may be needed. The
+  package's own target sets them from the measured needs of libkomira;
+- `runpath`: every `DT_RUNPATH` and `DT_RPATH` entry is `$ORIGIN` or under it;
+- `needed`: every `DT_NEEDED` is a member of the wheel (by file name), a system
+  library of the manylinux list (libc, libm, libdl, libpthread, librt, libstdc++,
+  libgcc_s, the dynamic loader), or in `external_needed`;
+- `external`: no member is a library of `external_needed`, the sonames another
+  package provides. komira's wheel names none: it carries the Mojo runtime
+  (libMSupportGlobals, libAsyncRTRuntimeGlobals, libKGENCompilerRTShared);
+- `platform`: an ELF member only in a manylinux wheel;
+- `size`: no member over 90 MB (90,000,000 bytes; PyPI takes 100 MB a file).
+
+The same checks read every Mach-O member of a macosx wheel
+([`wheel/macho.zig`](wheel/macho.zig), through its load commands; thin arm64
+files only, a universal file is refused), with the manylinux ones above left
+out. For a macOS wheel `max_glibcxx` and `max_cxxabi` have nothing to bound and
+`os_floor` is the macOS the tag promises:
+
+- `platform`: a Mach-O member only in a macosx wheel (an ELF member in one is
+  refused as above);
+- `arch`: the CPU type is arm64;
+- `minos`: the member states a minimum macOS (`LC_BUILD_VERSION` for macOS, or
+  `LC_VERSION_MIN_MACOSX`), and it is at most the tag's macOS (`macosx_11_0`
+  promises 11.0);
+- `installname`: an `LC_ID_DYLIB` is `@rpath/<file name>`, with no directory;
+- `runpath`: every `LC_RPATH` entry is `@loader_path` or under it, the Mach-O
+  counterpart of `$ORIGIN`;
+- `needed`: every library a load command names is `@rpath/<file>` or
+  `@loader_path/<path>` of a member of the wheel (by file name), an
+  `@rpath/<file>` in `external_needed`, or an operating system library, an
+  absolute path under `/usr/lib/` or `/System/Library/`. Any other absolute
+  path, `@executable_path` and an `@rpath` name nobody provides are refused;
+- `signature`: the member has a code signature (`LC_CODE_SIGNATURE`) that
+  matches it, as `codesign --verify` checks one ([`wheel/codesign.zig`](wheel/codesign.zig)):
+  every CodeDirectory covers the file up to the signature, its hash type is
+  SHA-1, SHA-256 or SHA-384, every page hashes to its slot, every special slot
+  naming a blob of the signature (requirements, entitlements) holds that blob's
+  hash and every other one is zero. macOS on arm64 maps no unsigned code, and a
+  file changed after it was signed (an install name rewritten, a strip) no
+  longer matches. A CMS blob (a Developer ID signature) is not verified; ad hoc
+  signing, which the linker does, is enough.
+
+`size` and `external` apply to a Mach-O member as to any other.
+
+`wheel_libs_check` (also [`wheel.bzl`](wheel.bzl)) is a second reader of a
+finished wheel: `komira_wheel libs` ([`wheel/libs.zig`](wheel/libs.zig)) reads
+the wheel's bytes, a few names (the entry library, the Mojo runtime's file
+names, its licence files and the distributions that carry it) and the
+toolchain's copies of the runtime libraries, and nothing else the rule that
+wrote the wheel was given. It reads the zip as `zip.zig` reads it, so the wheel
+is one this writer wrote: the build's, or the same bytes as an index serves them
+after an upload. Where `needed` above asks only that a name be a member somewhere, this
+check walks the libraries as the loader would load them from an install: from
+the entry library, each DT_NEEDED is a manylinux system library, a library
+already loaded, or the member at one of the needing library's own run path
+entries with `$ORIGIN` its directory. For a Mach-O entry (a macOS wheel) the
+walk is dyld's: each load command names an operating system library (under
+`/usr/lib/` or `/System/Library/`), a library already loaded, an
+`@rpath/<file>` that one of the loading library's own `LC_RPATH` entries
+reaches with `@loader_path` its directory, or an `@loader_path/<path>` member;
+anything else (another absolute path such as Homebrew's or conda's, a home
+directory, `@executable_path`, a bare name) is refused. The runtime's copies
+come from the toolchain, or from a `mojo_runtime` directory named by `runtime`
+(the darwin toolchain executes on macOS, and the check on Linux). A refusal
+names its check:
+
+- `path`: every member is a relative path of plain components (no `/` first,
+  no `\`, no empty, `.` or `..` part);
+- `layout`: every member is under the import package (the entry's top
+  directory) or the one `.dist-info`, so no `modular/` beside it;
+- `entry`: the entry is a member and an ELF or a Mach-O file;
+- `runtime`: each Mojo runtime library is in the wheel exactly once, with the
+  bytes of the toolchain's runtime: a second copy, one of another build, or none
+  is refused;
+- `runpath`: every run path entry of a loaded library is `$ORIGIN`-relative
+  (`@loader_path`-relative for Mach-O) and stays inside the import package;
+- `needed`: every DT_NEEDED of a loaded library resolves as above (a name
+  holding `/`, which the loader opens as a path, is refused), and a refusal
+  says where in the wheel the library is when the run path misses it;
+- `stray`: every ELF and Mach-O member is one the entry loads;
+- `licence`: each runtime licence file is a non-empty `.dist-info/licenses/`
+  member and a `License-File` of METADATA;
+- `requires`: no Requires-Dist names a distribution that carries the runtime.
+
+The output lists the loaded libraries in load order; with `expect_refusal` the
+target builds only while the wheel is refused with exactly that line.
+python/BUCK runs it on komira's wheel (`:wheel_libs`), on the macOS wheel
+(`:wheel_libs_macos_arm64`), and on four wheels it refuses: a second
+libKGENCompilerRTShared.so beside libkomira, the owners off libkomira's run
+path, a runtime library missing, and libkomira missing.
+
+`wheel_same_check` ([`wheel.bzl`](wheel.bzl)) reads two finished wheels of one
+package for two platforms with `komira_wheel same`
+([`wheel/compare.zig`](wheel/compare.zig)): one `.dist-info` of the same name in
+both, every member but RECORD and WHEEL in both with the same bytes and mode,
+apart from the members named as each wheel's own, each in its wheel alone and
+each a native library (Mach-O or ELF), and WHEEL the same but for the platform
+part of its Tag. python/BUCK holds the macOS wheel to the Linux wheel of the
+same stamp with it (`:wheel_same_macos_arm64`).
+
+Sub-targets: `[default]` is the wheel, copied only after `[check]` passed;
+`[check]` reads it back ([`wheel/check.zig`](wheel/check.zig)). That covers the
+name, every member's date, the members exactly (bytes and modes), RECORD's hashes
+and sizes, WHEEL's tag, METADATA and its Requires-Dist, the licences, the library
+checks again, and the twin. `[release]` is the wheel copied only after
+`[release_check]` passed: the same check, refusing an unstamped wheel. A
+publisher reads `[release]` and nothing else. `wheel_file_test_stamped` gives
+conda.bzl's test stamp (and its default output waits for `[release]` too). 
+`wheel_file_at_stamp(stamp = "<N>")` is the same with the build
+number `<N>` (version `0.1.<N>`) and the same test commit and commit time, for a
+build that needs wheels of two versions of one package, such as an upgrade test.
+
+The tests: the Zig scenarios `:wheel_zip_unit`, `:wheel_elf_unit`,
+`:wheel_macho_unit`, `:wheel_codesign_unit`, `:wheel_policy_unit`,
+`:wheel_build_unit`, `:wheel_check_unit`, `:wheel_cli_unit`,
+`:wheel_libs_unit` and `:wheel_compare_unit` in
+[`BUCK`](BUCK), on synthetic files and ELF libraries
+([`wheel/testing.zig`](wheel/testing.zig)). The rule on fixtures: `:wheel_fixture`
+(a linux-x86_64 wheel holding the example Mojo shared library `plain`, with the
+Mojo runtime as `external_needed`), `:wheel_fixture_aarch64_tag` and
+`:wheel_fixture_macosx_tag` (the linux-arm64 and darwin-arm64 rows' tags; built on
+linux like every target). `:wheel_tag_cases` holds each release row's tag
+and the refusal of a member path holding a brace.

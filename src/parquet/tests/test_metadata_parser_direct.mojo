@@ -302,6 +302,22 @@ def test_schema_element_every_field() raises:
     assert_false(e.logical_timestamp_is_utc.value())
 
 
+def test_schema_element_reads_field_id_from_field_9() raises:
+    var w = _W()
+    w.text(4, "id")
+    w.i32(9, 77)
+    w.stop()
+    var r = ThriftCompactReader(_view(Span(w.out)))
+    assert_equal(_parse_schema_element(r).field_id.value(), 77)
+    # Field 9 sent as an i64 is not a field id: skipped.
+    var w2 = _W()
+    w2.text(4, "id")
+    w2.i64(9, 77)
+    w2.stop()
+    var r2 = ThriftCompactReader(_view(Span(w2.out)))
+    assert_false(Bool(_parse_schema_element(r2).field_id))
+
+
 def test_schema_element_text_backfill_never_overrides_field_6() raises:
     # JSON in the modern union only: backfilled to 19.
     var w = _W()

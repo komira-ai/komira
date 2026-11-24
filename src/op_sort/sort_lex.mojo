@@ -30,7 +30,7 @@
 # supported key types (same lexicographic order, same stable tie-break).
 # =============================================================================
 
-from std.memory import alloc, memcpy
+from std.memory import alloc, unsafe_memcpy
 
 from counters.keyeq_census import keyeq_record, KEYEQ_SORTLEX_VERIFY
 
@@ -187,8 +187,8 @@ def _encode_string_key[
             # Hash collision (rare): String-keyed fallback.
             var tmp = alloc[UInt8](slen + 1)
             if slen > 0:
-                memcpy(dest=tmp, src=data_ptr + start, count=slen)
-            (tmp + slen).init_pointee_copy(UInt8(0))
+                unsafe_memcpy(dest=tmp, src=data_ptr + start, count=slen)
+            (tmp + slen).unsafe_write(copy=UInt8(0))
             var s = String(unsafe_from_utf8_ptr=tmp)
             tmp.free()
             if s in collision_dict:
@@ -207,8 +207,8 @@ def _encode_string_key[
                 distinct.append(String(""))
             else:
                 var tmp = alloc[UInt8](slen + 1)
-                memcpy(dest=tmp, src=data_ptr + start, count=slen)
-                (tmp + slen).init_pointee_copy(UInt8(0))
+                unsafe_memcpy(dest=tmp, src=data_ptr + start, count=slen)
+                (tmp + slen).unsafe_write(copy=UInt8(0))
                 distinct.append(String(unsafe_from_utf8_ptr=tmp))
                 tmp.free()
             rev_starts.append(start)
@@ -252,8 +252,8 @@ def _encode_dictionary_key[
             distinct.append(String(""))
         else:
             var tmp = alloc[UInt8](slen + 1)
-            memcpy(dest=tmp, src=data_src + s, count=slen)
-            (tmp + slen).init_pointee_copy(UInt8(0))
+            unsafe_memcpy(dest=tmp, src=data_src + s, count=slen)
+            (tmp + slen).unsafe_write(copy=UInt8(0))
             distinct.append(String(unsafe_from_utf8_ptr=tmp))
             tmp.free()
     var perm = _sorted_perm_from_distinct(distinct)
@@ -333,7 +333,7 @@ def _merge_idx[
     hi: Int,
 ):
     var rl = hi - lo
-    memcpy(dest=tmp + lo, src=idx_ptr + lo, count=rl)
+    unsafe_memcpy(dest=tmp + lo, src=idx_ptr + lo, count=rl)
     var left = lo
     var right = mid
     var dest = lo
@@ -350,10 +350,10 @@ def _merge_idx[
         dest += 1
     var lrem = mid - left
     if lrem > 0:
-        memcpy(dest=idx_ptr + dest, src=tmp + left, count=lrem)
+        unsafe_memcpy(dest=idx_ptr + dest, src=tmp + left, count=lrem)
     var rrem = hi - right
     if rrem > 0:
-        memcpy(dest=idx_ptr + dest + lrem, src=tmp + right, count=rrem)
+        unsafe_memcpy(dest=idx_ptr + dest + lrem, src=tmp + right, count=rrem)
 
 
 def _merge_sort_idx[

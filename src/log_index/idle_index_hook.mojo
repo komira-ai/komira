@@ -152,7 +152,7 @@ struct IdleIndexContext[
     var _node_id: String
     var _meta_root: String  # "<key_prefix>/<index>/meta"
     var _index: String  # the index name (for example "logs")
-    var _seq: OwnedPointer[Atomic[DType.int64]]
+    var _seq: OwnedPointer[Atomic[Int64]]
     # Wall-clock microseconds read once at install; mixed into every split uuid
     # so a restarted process does not reuse an earlier process's object keys.
     var _epoch_us: UInt64
@@ -177,11 +177,11 @@ struct IdleIndexContext[
         # Atomic is not Movable, so: alloc, assign in place, then transfer
         # ownership to the OwnedPointer (not `value=`, which needs a Movable
         # payload).
-        var seq_ptr = alloc[Atomic[DType.int64]](1)
+        var seq_ptr = alloc[Atomic[Int64]](1)
         # SAFETY: fresh allocation we own; assign in place, then move into the
         # OwnedPointer, whose destructor frees it.
-        seq_ptr[] = Atomic[DType.int64](Int64(0))
-        self._seq = OwnedPointer[Atomic[DType.int64]](
+        seq_ptr[] = Atomic[Int64](Int64(0))
+        self._seq = OwnedPointer[Atomic[Int64]](
             unsafe_from_raw_pointer=seq_ptr
         )
         self._retry = retry
@@ -190,7 +190,7 @@ struct IdleIndexContext[
         # engine through it at drain time.
         self._engine = MutCarriedHandle[SharedEngine, Self.engine_origin](engine)
 
-    def _next_uuid(mut self, worker_id: UInt16) -> InlineArray[UInt8, 16]:
+    def _next_uuid(mut self, worker_id: UInt16) -> Array[UInt8, 16]:
         """Mint a unique-per-build split uuid: worker_id in bytes 0 and 1, the
         low 48 bits of the install time (microseconds) in bytes 2..8 and a
         process-wide atomic seq in bytes 8..16. (worker_id, seq) is unique across
@@ -198,7 +198,7 @@ struct IdleIndexContext[
         (whose seq starts at 0 again) from minting a key an earlier process
         already published, because the split `put` overwrites unconditionally."""
         var s = self._seq[].fetch_add(1)
-        var u = InlineArray[UInt8, 16](fill=UInt8(0))
+        var u = Array[UInt8, 16](fill=UInt8(0))
         u[0] = UInt8(Int(worker_id) & 0xFF)
         u[1] = UInt8((Int(worker_id) >> 8) & 0xFF)
         for i in range(6):
@@ -210,7 +210,7 @@ struct IdleIndexContext[
             u[8 + i] = UInt8(Int((sv >> UInt64(i * 8)) & UInt64(0xFF)))
         return u^
 
-    def next_uuid(mut self, worker_id: UInt16) -> InlineArray[UInt8, 16]:
+    def next_uuid(mut self, worker_id: UInt16) -> Array[UInt8, 16]:
         """Public alias of `_next_uuid`; the trampoline reads the sequence
         through this on the first-level borrow (atomic, thread-safe)."""
         return self._next_uuid(worker_id)
@@ -412,7 +412,7 @@ def _build_and_publish_split[
     var meta_root: String,
     var index: String,
     store: Storage,
-    var uuid: InlineArray[UInt8, 16],
+    var uuid: Array[UInt8, 16],
     retry: RetryPolicy,
 ) raises -> Int:
     """Transpose, build the cheap L0 split, and publish it into the worker's

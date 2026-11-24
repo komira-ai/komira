@@ -14,7 +14,8 @@
 #   5. A correlated `WHERE EXISTS` binds to a SEMI join and `WHERE NOT
 #      EXISTS` to an ANTI join.
 #   6. A CTE name used twice, a derived-table column list of the wrong length,
-#      a UNION ALL whose branches differ in column count or type, `SELECT *`
+#      a UNION ALL whose branches differ in column count or have no common
+#      type, `SELECT *`
 #      with no FROM, a window beside GROUP BY, a DISTINCT over two items of
 #      one name and OFFSET without LIMIT are each refused by name; a
 #      derived-table column list renames the columns; LIMIT with OFFSET binds
@@ -197,7 +198,8 @@ def test_union_all_branches_must_agree() raises:
     )
     _err_starts(
         "SELECT k FROM t UNION ALL SELECT s FROM t",
-        "SQL not supported: UNION ALL over branches whose column 1 differs in TYPE",
+        "SQL not supported: UNION ALL column 1 (k): branch 1 gives int64 and"
+        " branch 2 gives string; no common type this engine casts to",
     )
 
 
@@ -253,7 +255,7 @@ def test_result_with_two_columns_of_one_name_keeps_both() raises:
 
 def test_hand_built_statements_without_a_target_are_refused() raises:
     var cat = _catalog()
-    var copy = parse_sql(tokenize("COPY t TO 'o'"))
+    var copy = parse_sql(tokenize("COPY t TO 'o.parquet'"))
     copy.dest_path = String("")
     try:
         _ = bind_statement(copy, cat, NoParquetFooters())

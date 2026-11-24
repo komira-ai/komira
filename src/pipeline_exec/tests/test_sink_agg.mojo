@@ -73,8 +73,8 @@ from pipeline_exec.segment_builder import SegmentBuilder
 from pipeline_exec.tpch_q6 import LineitemTable, lineitem_batch, q6_table
 from plan_expr.agg_expr import (
     AGG_COUNT,
-    AGG_COUNT_DISTINCT,
     AGG_FIRST,
+    AGG_LAST,
     AGG_MAX,
     AGG_MEAN,
     AGG_MIN,
@@ -539,11 +539,12 @@ def test_what_the_sink_refuses_when_it_is_built() raises:
             ungrouped_agg_data(agg_list(_agg(AGG_FIRST, "b")), _one_field(ArrowType.INT64))
         )
     )
+    var last = _built_with(
+        ungrouped_agg_data(agg_list(_agg(AGG_LAST, "b")), _one_field(ArrowType.INT64))
+    )
+    assert_true("does not serve aggregate tag 7" in last, last)
     assert_true(
-        "does not serve aggregate tag"
-        in _built_with(
-            ungrouped_agg_data(agg_list(_agg(AGG_COUNT_DISTINCT, "b")), _one_field(ArrowType.INT64))
-        )
+        "(SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)" in last, last
     )
     # SUM with no argument.
     assert_true(
@@ -568,11 +569,13 @@ def test_what_the_sink_refuses_when_it_is_built() raises:
         "has no aggregate"
         in _built_with(ungrouped_agg_data(Slab[AggExpr](), Schema()))
     )
-    # An output type the aggregate cannot produce.
+    # An output type the aggregate cannot produce (a SUM is never FLOAT32;
+    # FLOAT64 is the SUM of a float column, refused over this integer column
+    # when the output is built, test_sink_float_agg).
     assert_true(
         "cannot produce the declared output type"
         in _built_with(
-            ungrouped_agg_data(agg_list(_agg(AGG_SUM, "b")), _one_field(ArrowType.FLOAT64))
+            ungrouped_agg_data(agg_list(_agg(AGG_SUM, "b")), _one_field(ArrowType.FLOAT32))
         )
     )
     assert_true(

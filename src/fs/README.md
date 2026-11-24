@@ -12,12 +12,28 @@ local implementation:
   memory map, footer reads, and positional and appending writes through
   `write(2)`, all synchronous. `S` is the async_rt waker-sink type the
   `FileSystem` trait is generic over.
+- `write_file_atomic(path, data)` (`atomic_write`): replace a local file
+  with `data`, all or nothing. The bytes go to a temporary file in the same
+  directory (`.<name>.<random>.tmp`), which is synced and renamed over
+  `path`, then the directory is synced. A failure before the rename removes
+  the temporary file and leaves `path` as it was; it raises `STORAGE_NOT_FOUND` when the
+  directory does not exist (it is never created) and `STORAGE_IO` naming the
+  step and the errno otherwise.
 - Path discovery: the glob engine (`*`, `?`, `[a-z]`, POSIX classes, `**`
   across directories, and `{a,b}` brace alternation), splitting a pattern
   into the static prefix a listing can use and the residual matched
-  client-side, eager and pruned Hive-partition discovery, and the partition
+  client-side, eager and pruned Hive-partition discovery, a fixed file list
+  with constant partition columns (`ExplicitFileDiscovery`), and the partition
   value codec (`key=value` directory segments, percent-escaped, with
   `__HIVE_DEFAULT_PARTITION__` for null).
+
+- `ScanFsOpener` (`scan_fs`): what an engine is handed to read a scan on a
+  store other than the local disk. It opens one file system of its `FS` type
+  per bucket a plan's scan names, or refuses the store with
+  `SCAN_FS_UNSERVED` (`scan_fs_unserved`). `FileSystem.key_prefix()` names
+  the namespace a cache shared by several file systems keys a path under:
+  empty for the local file system, the bucket's URL prefix for an object
+  store.
 
 The object-store file systems live in their own packages (for example
 `objectstore_s3`). This package does not read any file format itself.
@@ -70,6 +86,34 @@ assert_equal(encode_partition_value("", ArrowType.STRING), "__HIVE_DEFAULT_PARTI
 assert_equal(parse_partition_value("__HIVE_DEFAULT_PARTITION__", ArrowType.STRING), "")
 ```
 
+A fixed file list with constant partition columns, as a scan over several
+Parquet files uses it (values are decoded text, one row per file, one entry per
+column):
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field
+from fs.explicit_file_discovery import ExplicitFileDiscovery
+
+var files = List[String]()
+files.append("/data/region=eu/part-0.parquet")
+files.append("/data/region=us/part-0.parquet")
+var cols = List[Field]()
+cols.append(Field("region", ArrowType.STRING, False))
+var rows = List[List[String]]()
+var eu = List[String]()
+eu.append("eu")
+var us = List[String]()
+us.append("us")
+rows.append(eu^)
+rows.append(us^)
+var disc = ExplicitFileDiscovery.from_files(files, cols, rows)
+assert_equal(disc.num_paths(), 2)
+assert_equal(disc.partition_col_name_at(0), "region")
+assert_equal(disc.partition_values_at(1).values[0], "us")
+```
+
 The local file system, in a temporary directory the example creates: write a
 file, probe it, read a range back, list the directory, then delete:
 
@@ -113,4 +157,43 @@ try:
 except e:
     message = String(e)
 assert_true("path not found" in message)
+```
+
+The local file system's cache keys are its paths, and the refusal of a store
+no file system of the run reads names that store:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from async_rt.ops.waker_sink import NoopSink
+from fs.local_fs import LocalFs
+from fs.scan_fs import scan_fs_unserved
+
+assert_equal(LocalFs[NoopSink].new().key_prefix(), "")
+assert_equal(
+    String(scan_fs_unserved("s3://lake")),
+    "SCAN_FS_UNSERVED: no file system of this run reads s3://lake",
+)
+```
+
+Replace a file all or nothing:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from std.os import listdir
+from std.tempfile import mkdtemp
+from fs.atomic_write import STORAGE_NOT_FOUND, write_file_atomic
+
+var dir = mkdtemp(prefix="komira_fs_atomic_readme_")
+write_file_atomic(dir + "/out.bin", "first".as_bytes())
+write_file_atomic(dir + "/out.bin", "second".as_bytes())
+with open(dir + "/out.bin", "r") as f:
+    assert_equal(f.read(), "second")
+assert_equal(len(listdir(dir)), 1)  # no temporary file is left
+
+var message = String()
+try:
+    write_file_atomic(dir + "/missing/out.bin", "x".as_bytes())
+except e:
+    message = String(e)
+assert_true(message.startswith(STORAGE_NOT_FOUND))
 ```

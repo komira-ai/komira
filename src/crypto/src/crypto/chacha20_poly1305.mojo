@@ -7,7 +7,7 @@
 #
 # # Public surface
 #
-#   * ChaCha20Poly1305(key: InlineArray[UInt8, 32])
+#   * ChaCha20Poly1305(key: Array[UInt8, 32])
 #   * ChaCha20Poly1305.seal_in_place(nonce, aad, plaintext_then_tag) raises
 #   * ChaCha20Poly1305.open_in_place(nonce, aad, ciphertext_then_tag) raises
 #   * KEY_SIZE / NONCE_SIZE / TAG_SIZE / SEQUENCE_LIMIT aliases
@@ -70,11 +70,11 @@ struct ChaCha20Poly1305(Aead, Movable, Deinitable):
             Zeroized on drop by EVP_AEAD_CTX_free.
 
     Usage:
-        var k = InlineArray[UInt8, 32](fill=UInt8(0))
+        var k = Array[UInt8, 32](fill=UInt8(0))
         # ... populate k ...
         var cipher = ChaCha20Poly1305(k)
         var buf = ...  # [plaintext (N-16)][tag (16)]
-        var nonce = InlineArray[UInt8, 12](fill=UInt8(0))
+        var nonce = Array[UInt8, 12](fill=UInt8(0))
         cipher.seal_in_place(nonce, aad, buf)
         # ... transmit buf ...
         # Decrypt:

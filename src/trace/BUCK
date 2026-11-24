@@ -45,7 +45,7 @@ mojo_adopted_library(
 )
 
 # The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
-# (`mojo-komira-ai.trace-0.1.0-mojo1.0.0_0.conda`), which records the five direct dependencies
+# (`mojo-komira-ai.trace-0.1.0-mojo1.1.0_0.conda`), which records the five direct dependencies
 # (`mojo-komira-ai.atomic_alias`, `mojo-komira-ai.clock`, `mojo-komira-ai.containers`,
 # `mojo-komira-ai.name_registry`, `mojo-komira-ai.spsc_ring`, each `>=0.1,<0.2`) and holds none of their
 # files. `members` is the manifests of the path dependencies of the closure, staged at their
@@ -66,8 +66,8 @@ mojo_conda(
         "../name_registry": "//src/name_registry:mopm.toml",
         "../spsc_ring": "//src/spsc_ring:mopm.toml",
     },
-    mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_113",
+    mojo = "1.1.0",
+    mopm = "toolchains//:mopm_0_0_135",
     package = "komira-ai/trace",
     version = "0.1.0",
     visibility = ["PUBLIC"],

@@ -5,7 +5,7 @@
 # =============================================================================
 #
 # Nothing in this file names an org, a project, a tenant or a provider
-# endpoint: it is an InlineArray of bytes, a length, a redacted `Display`, a
+# endpoint: it is an Array of bytes, a length, a redacted `Display`, a
 # scoped `Span` accessor and a zeroizing destructor. Its whole dep closure is
 # `crypto.zeroize_inline_array`.
 #
@@ -19,7 +19,7 @@
 # is removed as dead code at -O3 (see `crypto`'s `zeroize` module). An
 # accessor returning an owned `String` copy multiplies the problem. So
 # `SecretValue`:
-#   * stores bytes in an `InlineArray[UInt8, MAX_SECRET_LEN]` + a `_len`,
+#   * stores bytes in an `Array[UInt8, MAX_SECRET_LEN]` + a `_len`,
 #     NEVER a `String` (no heap-inner String/List; the bytes live inline in the
 #     struct, so there is no heap allocation to leak);
 #   * has an explicit destructor that calls `zeroize_inline_array` (the FFI
@@ -31,7 +31,7 @@
 #     wiping the source. Move-only (`Movable`), single-owner.
 #
 # The redacted `Display` (no secret in `__str__`/`Display`/`repr`) is the
-# REDACTION half; the BYTE representation (InlineArray, not String) is the
+# REDACTION half; the BYTE representation (Array, not String) is the
 # wiping half.
 #
 # SAFETY. ZERO UnsafePointer crosses any boundary. The one `UnsafePointer` use
@@ -94,7 +94,7 @@ struct SecretMeta(Copyable, Movable, Deinitable, Writable):
 # =============================================================================
 struct SecretValue(Movable, Deinitable, Writable):
     """The plaintext secret value a resolving process briefly holds.
-    InlineArray-backed (NOT a `String`), zeroized on drop via
+    Array-backed (NOT a `String`), zeroized on drop via
     `zeroize_inline_array`, redacted `Display`, scoped read-only accessors, and
     NOT Copyable (move-only, single-owner — a copy would memcpy a live secret
     without wiping the source).

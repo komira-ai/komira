@@ -25,6 +25,10 @@
 #     footer, keys on the ordered set, and is dropped by invalidate;
 #   * the stripped footer and the summary copy no column chunk;
 #   * a file system that is not mmap-backed is never pinned or stat-ed;
+#   * one path on two file systems with different key prefixes (two buckets)
+#     is two entries, each with its own footer, and the row-count memo of one
+#     path set on two such file systems is two memos; one prefix and one path
+#     is one entry;
 #   * the budget policy: an override wins, an unknown RAM basis gives the
 #     default, otherwise 30% clamped to [1 GiB, 8 GiB].
 # =============================================================================
@@ -321,19 +325,25 @@ struct _Handle(Movable, Deinitable):
 
 
 struct _MemFs(FileSystem, Movable, Deinitable):
-    """One in-memory file, served for any path; not mmap-backed."""
+    """One in-memory file, served for any path; not mmap-backed. `prefix`
+    is its cache key prefix, as an object store's bucket URL is."""
 
     comptime File = _Handle
     comptime WriteFile = _Handle
     comptime IS_MMAP_BACKED: Bool = False
 
     var data: List[UInt8]
+    var prefix: String
 
-    def __init__(out self, var data: List[UInt8]):
+    def __init__(out self, var data: List[UInt8], prefix: String = ""):
         self.data = data^
+        self.prefix = prefix
 
     def clone(self) -> Self:
-        return Self(self.data.copy())
+        return Self(self.data.copy(), self.prefix)
+
+    def key_prefix(self) -> String:
+        return self.prefix
 
     def list(self, prefix: String) raises -> List[String]:
         raise Error("unused")
@@ -408,6 +418,48 @@ def test_a_file_system_that_is_not_mmap_backed() raises:
     assert_equal(cache.mmap_pin_declined(), 0)
     assert_equal(cache.revalidate_stat_count(), 0)
     assert_equal(cache.hit_count_for("mem://x"), 1)
+
+
+def test_one_path_on_two_file_systems_is_two_entries() raises:
+    # Bucket a's object holds 7 rows, bucket b's object at the same key 11.
+    var a = _MemFs(_bytes([6, 1], 20), "s3://a/")
+    var b = _MemFs(_bytes([4, 4, 3], 9), "s3://b/")
+    var cache = ParquetMetadataCache()
+    assert_equal(cache.get_or_parse_shared_via_fs("t.parquet", a).meta[].num_rows, 7)
+    assert_equal(cache.get_or_parse_shared_via_fs("t.parquet", b).meta[].num_rows, 11)
+    assert_equal(cache.stripped_footer_via_fs("t.parquet", a).num_rows, 7)
+    assert_equal(cache.size(), 2)
+    assert_equal(cache.miss_count(), 2)
+    # Each entry is under its file system's key, parsed once; none under the
+    # bare path. A populate is not a hit, nor is a stripped footer.
+    assert_equal(cache.parse_count_for("s3://a/t.parquet"), 1)
+    assert_equal(cache.parse_count_for("s3://b/t.parquet"), 1)
+    assert_equal(cache.parse_count_for("t.parquet"), 0)
+    assert_equal(cache.hit_count_for("s3://a/t.parquet"), 0)
+    # The same prefix and path is the one entry: a hit, no parse.
+    var a2 = _MemFs(_bytes([6, 1], 20), "s3://a/")
+    assert_equal(cache.get_or_parse_shared_via_fs("t.parquet", a2).meta[].num_rows, 7)
+    assert_equal(cache.size(), 2)
+    assert_equal(cache.miss_count(), 2)
+    assert_equal(cache.hit_count_for("s3://a/t.parquet"), 1)
+    assert_equal(cache.hit_count_for("s3://b/t.parquet"), 0)
+
+
+def test_the_row_count_memo_keys_on_the_prefix() raises:
+    var a = _MemFs(_bytes([6, 1], 20), "s3://a/")
+    var b = _MemFs(_bytes([4, 4, 3], 9), "s3://b/")
+    var cache = ParquetMetadataCache()
+    var paths: List[String] = ["t.parquet"]
+    var from_a = List[Int]()
+    cache.resolve_rg_counts_via_fs(paths, a, from_a)
+    var from_b = List[Int]()
+    cache.resolve_rg_counts_via_fs(paths, b, from_b)
+    assert_equal(len(from_a), 2)
+    assert_equal(from_a[0], 6)
+    assert_equal(len(from_b), 3)
+    assert_equal(from_b[2], 3)
+    assert_equal(cache.row_window_rg_counts_cache_misses(), 2)
+    assert_equal(cache.row_window_rg_counts_cache_hits(), 0)
 
 
 def test_the_budget_policy() raises:

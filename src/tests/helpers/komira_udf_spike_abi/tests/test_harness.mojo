@@ -49,6 +49,7 @@
 # `devices == 0`: red on gpu_only.
 
 from std.os import setenv, unsetenv
+from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_udf_spike_abi.cases import Case, parse_case
@@ -96,6 +97,7 @@ def _statuses() raises:
         "UDF_HOST_CONTRACT_VIOLATION",
         "UDF_DEADLINE_EXCEEDED",
         "OPTIMIZED_UDF_READ_SET_DESCRIPTOR_MISMATCH",
+        "UDF_RUNTIME_FAULT",
     ]
     var lost: List[Int] = [13, 14, 17, 19]
     assert_equal(len(want), STATUS_COUNT)
@@ -124,7 +126,7 @@ def _statuses() raises:
         "an outcome's cancel state reaches the table",
     )
     assert_equal(run_error(Int32(STATUS_COUNT), True), "UDF_RUNTIME_FAULT", "an unknown status")
-    assert_equal(status_name(Int32(STATUS_COUNT)), "UNKNOWN(21)")
+    assert_equal(status_name(Int32(STATUS_COUNT)), "UNKNOWN(22)")
     var msg = String()
     try:
         _ = status_from_name("ERR_NOPE")
@@ -555,8 +557,11 @@ def _open_refusals() raises:
         msg = String(e)
     assert_true(msg.startswith("UDF_RUNTIME_OPEN_FAILED"), msg)
     msg = String()
+    # A real shared library that exports none of the runtime's symbols: the
+    # C library, by its name on each host.
+    comptime libc = "/usr/lib/libSystem.B.dylib" if CompilationTarget.is_macos() else "libc.so.6"
     try:
-        _ = UdfRuntime.open("libc.so.6")
+        _ = UdfRuntime.open(libc)
     except e:
         msg = String(e)
     assert_true(msg.startswith("UDF_RUNTIME_MISSING_SYMBOL"), msg)

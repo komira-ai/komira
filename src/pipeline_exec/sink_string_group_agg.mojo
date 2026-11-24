@@ -1,10 +1,12 @@
 # =============================================================================
 # sink_string_group_agg -- (SINK_AGG, KEY_DTYPE_STRING, DICT_ENCODED | COLUMNAR)
+#                          and (SINK_AGG, KEY_DTYPE_COMPOSITE, COLUMNAR)
 # =============================================================================
 #
 # The grouped aggregation sink over string keys: GROUP BY one or more STRING
-# columns, with SUM, COUNT, COUNT(*), MIN, MAX and AVG exactly as the fixed-width
-# sink (`sink_group_agg`) serves them: the same `GroupTable`, the same exact
+# columns, with SUM, COUNT, COUNT(*), COUNT(DISTINCT), MIN, MAX and AVG exactly
+# as the fixed-width sink (`sink_group_agg`) serves them (with no aggregate, one
+# row per distinct key: SELECT DISTINCT): the same `GroupTable`, the same exact
 # folds (`agg_fold`), the same merge rule, the same refusals and the same
 # charging of the segment pool. What differs is the key.
 #
@@ -35,6 +37,21 @@
 #
 # NULL is a key of its own (a flag, no id) and the empty string is a string:
 # they are two groups.
+#
+# The COMPOSITE row is this sink with `composite=True`: a key of several
+# columns whose types differ, or whose strings are not all dictionary encoded
+# (GROUP BY an integer, a string and a date). A STRING key column is interned
+# as above and takes one cell; any other key column takes the cells of the
+# fixed-width row that keys its type (`group_keys.fixed_key_dtype`: one cell
+# for an integer, float, date or bool, two for a decimal), with the NULL rule,
+# the float canonical forms and the decimal scale rule of that row. The cells
+# lie column by column in one row of the `GroupTable`, `_cell_at[k]` being the
+# first cell of key column `k`. A group's hash mixes, in column order, the
+# content hash of each string column and each cell of each fixed-width column
+# (a NULL column contributing `NULL_KEY_HASH` per cell), so it is a function of
+# the key's values alone and the same in every worker. The merge remaps the
+# string cells to merge ids and copies the fixed-width cells as they are. A
+# fixed-width key column must arrive in the type the output declares for it.
 #
 # `combine` merges the workers' groups in worker order by VALUE. A worker's
 # group holds ids of that worker's table, which mean nothing to another; the
@@ -68,11 +85,14 @@
 #
 # Refused when the sink is built: no group-by expression, an aggregate the sink
 # does not serve, an aggregate without its argument, an output schema that does
-# not list the keys and aggregates, and a declared key column that is not
-# STRING (a key of a fixed-width type beside a string key is not served: the
-# rows of `lowering` never ask for one). Refused when rows arrive: a key
+# not list the keys and aggregates, and, for the STRING rows, a declared key
+# column that is not STRING (a fixed-width column beside a string key is the
+# COMPOSITE row's). Refused when rows arrive: a key
 # column that is neither STRING nor a string DICTIONARY, a dictionary code
-# outside its dictionary.
+# outside its dictionary. Under `composite=True`: a declared key column of a
+# type no row keys (a timestamp, a binary, ...), and a fixed-width key column
+# whose rows arrive in another type than the declared one (or, for a decimal,
+# at another scale or a wider precision).
 
 from std.memory import ArcPointer
 
@@ -86,9 +106,10 @@ from morsel.morsel import Morsel
 from morsel.morsel_sink import MorselSinkImpl
 from morsel.pipeline_execution import PipelineExecution
 from operator_api.map_op import MapOp
-from physical_plan.physical_plan import AggSinkData
+from physical_plan.physical_plan import AggSinkData, KEY_DTYPE_NONE
 from plan_expr.agg_expr import (
     AGG_COUNT,
+    AGG_COUNT_DISTINCT,
     AGG_MAX,
     AGG_MEAN,
     AGG_MIN,
@@ -99,11 +120,26 @@ from plan_expr.expr_pool import ExprPool
 
 from .agg_fold import WideColumn, agg_name, fold_wide, merge_cell, widen_column
 from .agg_output import agg_result_column_rows, check_declared_type
+from .count_distinct import (
+    DistinctColumn,
+    DistinctMerge,
+    DistinctSlot,
+    admit_distinct,
+    read_distinct_column,
+)
+from .group_keys import (
+    KeyColumn,
+    fixed_key_dtype,
+    key_output_column,
+    key_width,
+    read_key_column,
+)
 from .group_table import GroupTable, MAX_GROUP_CAPACITY, mix64
 from .segment_pool import SegmentPool, WorkerReservation
 from .string_keys import (
     InternTable,
     MAX_INTERN_ENTRIES,
+    NULL_KEY_HASH,
     STRING_KEY_SEED,
     StrKeyRows,
     read_string_keys,
@@ -116,25 +152,27 @@ struct _StringSlot(Movable):
     var intern: InternTable
     var map: Optional[MapOp]
     var reservation: WorkerReservation
+    var distinct: DistinctSlot
     var scratch_cells: List[Int64]
     var scratch_nulls: List[UInt8]
     var started: Bool
 
     def __init__(
         out self,
-        nk: Int,
+        nc: Int,
         na: Int,
         max_groups: Int,
         max_strings: Int,
         var reservation: WorkerReservation,
     ):
-        self.table = GroupTable(nk, na, max_groups)
+        self.table = GroupTable(nc, na, max_groups)
         self.intern = InternTable(max_strings)
         self.map = None
         self.reservation = reservation^
+        self.distinct = DistinctSlot(na)
         self.scratch_cells = List[Int64]()
         self.scratch_nulls = List[UInt8]()
-        for _ in range(nk):
+        for _ in range(nc):
             self.scratch_cells.append(0)
             self.scratch_nulls.append(0)
         self.started = False
@@ -145,8 +183,16 @@ struct StringGroupAggSink(MorselSinkImpl):
     string keys."""
 
     var _seg_id: Int
+    var _where: String
     var _by_code: Bool
     var _nk: Int
+    # The key cells of a group: one per STRING key column, the fixed-width
+    # row's count per other column (COMPOSITE only); `_cell_at[k]` is the
+    # first cell of key column `k`, and `_fixed[k]` the row that reads column
+    # `k`, `KEY_DTYPE_NONE` for a STRING column.
+    var _nc: Int
+    var _cell_at: List[Int]
+    var _fixed: List[UInt8]
     var _max_groups: Int
     var _max_strings: Int
     var _funcs: List[UInt8]
@@ -175,12 +221,19 @@ struct StringGroupAggSink(MorselSinkImpl):
         seg_id: Int,
         max_groups: Int = MAX_GROUP_CAPACITY,
         max_strings: Int = MAX_INTERN_ENTRIES,
+        composite: Bool = False,
     ) raises:
         var where_ = (
             "pipeline_exec: the string-keyed aggregation sink of"
             " segment "
             + String(seg_id)
         )
+        if composite:
+            where_ = (
+                "pipeline_exec: the composite-keyed aggregation sink of"
+                " segment "
+                + String(seg_id)
+            )
         var nk = len(data.group_by_exprs)
         var na = len(data.agg_exprs)
         if nk == 0:
@@ -200,8 +253,12 @@ struct StringGroupAggSink(MorselSinkImpl):
                 + " aggregates"
             )
         self._seg_id = seg_id
+        self._where = where_
         self._by_code = by_code
         self._nk = nk
+        self._nc = 0
+        self._cell_at = List[Int]()
+        self._fixed = List[UInt8]()
         self._max_groups = max_groups
         self._max_strings = max_strings
         self._funcs = List[UInt8]()
@@ -213,16 +270,32 @@ struct StringGroupAggSink(MorselSinkImpl):
         var expr_pool = ExprPool()
         for k in range(nk):
             var t = data.output_schema.field_arrow_type(k)
+            var fixed: UInt8 = KEY_DTYPE_NONE
             if t != ArrowType.STRING:
-                raise Error(
-                    where_
-                    + " declares output column "
-                    + String(k)
-                    + " (a key) as "
-                    + String(t)
-                    + "; the string rows key STRING columns, and a key of"
-                    " another type beside a string key is not served"
-                )
+                if not composite:
+                    raise Error(
+                        where_
+                        + " declares output column "
+                        + String(k)
+                        + " (a key) as "
+                        + String(t)
+                        + "; the string rows key STRING columns, and a key"
+                        " of another type beside a string key is the"
+                        " COMPOSITE row's"
+                    )
+                fixed = fixed_key_dtype(t)
+                if fixed == KEY_DTYPE_NONE:
+                    raise Error(
+                        where_
+                        + " declares output column "
+                        + String(k)
+                        + " (a key) as "
+                        + String(t)
+                        + ", which no key row keys"
+                    )
+            self._cell_at.append(self._nc)
+            self._fixed.append(fixed)
+            self._nc += 1 if fixed == KEY_DTYPE_NONE else key_width(t)
             self._key_labels.append("group key " + String(k))
             self._names.append("group_key_" + String(k))
             self._expr_ids.append(
@@ -234,6 +307,7 @@ struct StringGroupAggSink(MorselSinkImpl):
             if (
                 func != AGG_SUM
                 and func != AGG_COUNT
+                and func != AGG_COUNT_DISTINCT
                 and func != AGG_MIN
                 and func != AGG_MAX
                 and func != AGG_MEAN
@@ -242,7 +316,7 @@ struct StringGroupAggSink(MorselSinkImpl):
                     where_
                     + " does not serve aggregate tag "
                     + String(Int(func))
-                    + " (SUM, COUNT, MIN, MAX and AVG are)"
+                    + " (SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)"
                 )
             var label = (
                 agg_name(func) + " (output column " + String(nk + i) + ")"
@@ -268,7 +342,7 @@ struct StringGroupAggSink(MorselSinkImpl):
         self._slots = List[ArcPointer[_StringSlot]]()
         self._merge_reservation = WorkerReservation(self._pool.share())
         self._merge_intern = InternTable(max_strings)
-        self._merged = GroupTable(nk, na, max_groups)
+        self._merged = GroupTable(self._nc, na, max_groups)
         self._combined = False
 
     def _refused(
@@ -276,9 +350,7 @@ struct StringGroupAggSink(MorselSinkImpl):
     ) -> Error:
         if too_many:
             return Error(
-                "pipeline_exec: the string-keyed aggregation sink of"
-                " segment "
-                + String(self._seg_id)
+                self._where
                 + " has more "
                 + what
                 + " than it holds ("
@@ -288,9 +360,7 @@ struct StringGroupAggSink(MorselSinkImpl):
                 + " distinct strings, or a string over 2 GiB)"
             )
         return Error(
-            "pipeline_exec: the string-keyed aggregation sink of"
-            " segment "
-            + String(self._seg_id)
+            self._where
             + " was denied "
             + String(denied_bytes)
             + " bytes of the segment's memory pool for its "
@@ -308,7 +378,7 @@ struct StringGroupAggSink(MorselSinkImpl):
             self._slots.append(
                 ArcPointer[_StringSlot](
                     _StringSlot(
-                        self._nk,
+                        self._nc,
                         len(self._funcs),
                         self._max_groups,
                         self._max_strings,
@@ -346,8 +416,33 @@ struct StringGroupAggSink(MorselSinkImpl):
         var nk = self._nk
         var na = len(self._funcs)
         var keys = List[StrKeyRows]()
+        var fixed_keys = List[KeyColumn]()
         for k in range(nk):
             var rows = StrKeyRows()
+            if self._fixed[k] != KEY_DTYPE_NONE:
+                var kc = read_key_column(
+                    dense,
+                    k,
+                    selected,
+                    self._fixed[k],
+                    self._schema,
+                    k,
+                    self._key_labels[k],
+                )
+                var declared = self._schema.field_arrow_type(k)
+                if kc.arrow != declared:
+                    raise Error(
+                        "pipeline_exec: "
+                        + self._key_labels[k]
+                        + " is a "
+                        + String(kc.arrow)
+                        + " column, and the sink declares the key "
+                        + String(declared)
+                    )
+                keys.append(rows^)
+                fixed_keys.append(kc^)
+                continue
+            fixed_keys.append(KeyColumn())
             if not read_string_keys(
                 rows,
                 dense,
@@ -365,7 +460,25 @@ struct StringGroupAggSink(MorselSinkImpl):
                 )
             keys.append(rows^)
         var args = List[WideColumn]()
+        var distinct_args = List[DistinctColumn]()
         for i in range(na):
+            if self._funcs[i] == AGG_COUNT_DISTINCT:
+                args.append(WideColumn())
+                distinct_args.append(
+                    read_distinct_column(
+                        slot.distinct,
+                        i,
+                        dense,
+                        self._arg_col[i],
+                        selected,
+                        self._where,
+                        self._labels[i],
+                        self._pool,
+                        slot.reservation,
+                    )
+                )
+                continue
+            distinct_args.append(DistinctColumn())
             if self._arg_col[i] < 0:
                 args.append(WideColumn())
             else:
@@ -381,12 +494,28 @@ struct StringGroupAggSink(MorselSinkImpl):
         for r in range(selected):
             var h = STRING_KEY_SEED
             for k in range(nk):
+                var at = self._cell_at[k]
+                if self._fixed[k] != KEY_DTYPE_NONE:
+                    ref kc = fixed_keys[k]
+                    var w = kc.width
+                    var null = len(kc.null) > 0 and kc.null[r] != 0
+                    for j in range(w):
+                        if null:
+                            slot.scratch_nulls[at + j] = 1
+                            slot.scratch_cells[at + j] = 0
+                            h = mix64(h ^ NULL_KEY_HASH)
+                        else:
+                            var c = kc.cells[r * w + j]
+                            slot.scratch_nulls[at + j] = 0
+                            slot.scratch_cells[at + j] = c
+                            h = mix64(h ^ UInt64(c.cast[DType.uint64]()))
+                    continue
                 if keys[k].null[r] != 0:
-                    slot.scratch_nulls[k] = 1
-                    slot.scratch_cells[k] = 0
+                    slot.scratch_nulls[at] = 1
+                    slot.scratch_cells[at] = 0
                 else:
-                    slot.scratch_nulls[k] = 0
-                    slot.scratch_cells[k] = keys[k].ids[r]
+                    slot.scratch_nulls[at] = 0
+                    slot.scratch_cells[at] = keys[k].ids[r]
                 h = mix64(h ^ keys[k].hashes[r])
             var g = slot.table.find_or_insert(
                 h, slot.scratch_cells, slot.scratch_nulls, slot.reservation
@@ -398,7 +527,18 @@ struct StringGroupAggSink(MorselSinkImpl):
                     slot.table.denied_bytes,
                 )
             for i in range(na):
-                if self._arg_col[i] < 0:
+                if self._funcs[i] == AGG_COUNT_DISTINCT:
+                    admit_distinct(
+                        slot.distinct,
+                        i,
+                        g,
+                        distinct_args[i],
+                        r,
+                        self._where,
+                        self._pool,
+                        slot.reservation,
+                    )
+                elif self._arg_col[i] < 0:
                     slot.table.cells[g * na + i].count += 1
                 else:
                     fold_wide(
@@ -411,15 +551,19 @@ struct StringGroupAggSink(MorselSinkImpl):
 
     def combine(mut self, mut pipeline: PipelineExecution) raises -> None:
         var nk = self._nk
+        var nc = self._nc
         var na = len(self._funcs)
         var scratch_cells = List[Int64]()
         var scratch_nulls = List[UInt8]()
-        for _ in range(nk):
+        for _ in range(nc):
             scratch_cells.append(0)
             scratch_nulls.append(0)
+        var distinct = DistinctMerge(na, WorkerReservation(self._pool.share()))
         for w in range(len(self._slots)):
             ref slot = self._slots[w][]
             ref t = slot.table
+            # The merged group of each of this worker's groups.
+            var group_map = List[Int](capacity=t.n)
             # The merge id of each string of this worker, -1 until a group
             # uses it.
             # Drawn from the pool before it is made, given back after.
@@ -428,13 +572,16 @@ struct StringGroupAggSink(MorselSinkImpl):
                 raise self._refused(False, "merge id array", remap_bytes)
             var remap = List[Int32](length=slot.intern.n, fill=-1)
             for g in range(t.n):
+                for c in range(nc):
+                    scratch_nulls[c] = t.nulls[g * nc + c]
+                    scratch_cells[c] = t.keys[g * nc + c]
                 for k in range(nk):
-                    if t.nulls[g * nk + k] != 0:
-                        scratch_nulls[k] = 1
-                        scratch_cells[k] = 0
+                    var at = self._cell_at[k]
+                    if self._fixed[k] != KEY_DTYPE_NONE:
                         continue
-                    scratch_nulls[k] = 0
-                    var id = Int(t.keys[g * nk + k])
+                    if t.nulls[g * nc + at] != 0:
+                        continue
+                    var id = Int(t.keys[g * nc + at])
                     var mid = Int(remap[id])
                     if mid < 0:
                         mid = self._merge_intern.intern(
@@ -449,7 +596,7 @@ struct StringGroupAggSink(MorselSinkImpl):
                                 self._merge_intern.denied_bytes,
                             )
                         remap[id] = Int32(mid)
-                    scratch_cells[k] = Int64(mid)
+                    scratch_cells[at] = Int64(mid)
                 var mg = self._merged.find_or_insert(
                     t.hashes[g],
                     scratch_cells,
@@ -462,6 +609,7 @@ struct StringGroupAggSink(MorselSinkImpl):
                         "groups",
                         self._merged.denied_bytes,
                     )
+                group_map.append(mg)
                 for i in range(na):
                     merge_cell(
                         self._merged.cells[mg * na + i],
@@ -470,10 +618,21 @@ struct StringGroupAggSink(MorselSinkImpl):
                         self._labels[i],
                     )
             self._merge_reservation.release(remap_bytes)
+            distinct.merge_worker(
+                slot.distinct,
+                group_map,
+                self._merged.cells,
+                na,
+                self._where,
+                self._labels,
+                self._pool,
+            )
             # This worker is merged: free its tables and return its memory.
-            slot.table = GroupTable(nk, na, self._max_groups)
+            slot.table = GroupTable(nc, na, self._max_groups)
             slot.intern = InternTable(self._max_strings)
+            slot.distinct = DistinctSlot(na)
             slot.reservation.give_back_all()
+        distinct.finish()
         self._combined = True
 
     def finalize(mut self) raises:
@@ -493,13 +652,26 @@ struct StringGroupAggSink(MorselSinkImpl):
             return empty_batch_like_schema(self._schema)
         var builder = RecordBatchBuilder()
         for k in range(nk):
+            if self._fixed[k] != KEY_DTYPE_NONE:
+                builder.add_column(
+                    key_output_column(
+                        self._merged.keys,
+                        self._merged.nulls,
+                        self._nc,
+                        self._cell_at[k],
+                        n,
+                        self._schema,
+                        k,
+                    )
+                )
+                continue
             builder.add_column(
                 string_key_column(
                     self._merge_intern,
                     self._merged.keys,
                     self._merged.nulls,
-                    nk,
-                    k,
+                    self._nc,
+                    self._cell_at[k],
                     n,
                 )
             )
@@ -517,7 +689,7 @@ struct StringGroupAggSink(MorselSinkImpl):
                 )
             )
         var out = builder.build(self._schema.copy())
-        self._merged = GroupTable(nk, na, self._max_groups)
+        self._merged = GroupTable(self._nc, na, self._max_groups)
         self._merge_intern = InternTable(self._max_strings)
         self._merge_reservation.give_back_all()
         return out^

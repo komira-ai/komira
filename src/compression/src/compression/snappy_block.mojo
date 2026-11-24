@@ -56,7 +56,7 @@ def _check_written(what: StaticString, written: Int, cap: Int) raises -> Int:
 
 @always_inline
 def _src_ptr(
-    s: Span[UInt8, _], ref scratch: InlineArray[UInt8, 1]
+    s: Span[UInt8, _], ref scratch: Array[UInt8, 1]
 ) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     """The address snappy reads `s` from: the Span's own, or `scratch` when
     `s` is empty (an empty Span may carry a null pointer)."""
@@ -80,7 +80,7 @@ def _src_ptr(
 def _dst_ptr[
     dori: MutOrigin
 ](
-    s: Span[UInt8, dori], ref scratch: InlineArray[UInt8, 1]
+    s: Span[UInt8, dori], ref scratch: Array[UInt8, 1]
 ) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     """The address snappy writes `s` at: the Span's own, or `scratch` when `s`
     is empty (snappy is then told it has 0 bytes, so it writes none)."""
@@ -113,8 +113,8 @@ def snappy_compress_into[
     """
     var input_len = len(src)
     var output_cap = len(dst)
-    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
-    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var src_scratch = Array[UInt8, 1](fill=UInt8(0))
+    var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
     var size = UInt64(output_cap)
     # SAFETY: snappy reads `input_len` bytes at the source address and writes
     # at most `size` (= `len(dst)`) bytes at the destination address, then
@@ -156,8 +156,8 @@ def snappy_uncompress_into[
     """
     var input_len = len(src)
     var output_cap = len(dst)
-    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
-    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var src_scratch = Array[UInt8, 1](fill=UInt8(0))
+    var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
     var size = UInt64(output_cap)
     # SAFETY: snappy reads `input_len` bytes at the source address and writes
     # at most `size` (= `len(dst)`) bytes at the destination address, then
@@ -194,7 +194,7 @@ def snappy_uncompressed_length(src: Span[UInt8, _]) raises -> Int:
     preamble snappy cannot parse (an empty `src` among them).
     """
     var input_len = len(src)
-    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var src_scratch = Array[UInt8, 1](fill=UInt8(0))
     var result = UInt64(0)
     # SAFETY: snappy reads at most `input_len` bytes at the source address
     # and stores the declared length in `result`, a stack local. Both are

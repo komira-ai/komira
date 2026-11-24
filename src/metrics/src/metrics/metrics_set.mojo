@@ -33,7 +33,7 @@
 #   * Public-API surface is `Counter`, `Time`, `Gauge`, `MetricsSet`,
 #     `MetricsSnapshot`, `TimeScope`. No raw UnsafePointer in any
 #     signature — fields use Slab[T] / OwnedPointer[T] for indirection,
-#     and the per-worker arrays are direct `InlineArray` fields.
+#     and the per-worker arrays are direct `Array` fields.
 #   * Slab[T] is the canonical container for non-Movable Atomic-bearing
 #     element types (Slab.create_prefilled zero-fills bytes — matches
 #     Atomic's expected initial state).
@@ -89,7 +89,7 @@ struct Counter(Deinitable):
     """Per-worker int64 counter with an out-of-pipeline atomic fallback.
 
     Layout (POD aside from the trailing Atomic):
-        per_worker:      InlineArray[Int64, MAX_WORKERS=64]   # ~512 bytes
+        per_worker:      Array[Int64, MAX_WORKERS=64]   # ~512 bytes
         out_of_pipeline: Atomic[Int64]                         #     8 bytes
 
     Hot-path contract:
@@ -465,7 +465,7 @@ struct MetricsSnapshot(Copyable, Movable, Deinitable):
     POD-shaped — embedders pass it across thread boundaries safely.
     EXPLAIN ANALYZE renders directly from this.
 
-    Copyable: the entries array is `InlineArray[MetricsSnapshotEntry, _]`
+    Copyable: the entries array is `Array[MetricsSnapshotEntry, _]`
     where `MetricsSnapshotEntry` is itself Copyable POD, so the snapshot
     is bitwise-copyable. EXPLAIN ANALYZE relies on this so the
     report builder can `.copy()` snapshots into its `List[...]` storage
@@ -825,22 +825,22 @@ def new_owned_metrics_set() raises -> OwnedPointer[MetricsSet]:
     # +1 for the quarantine slot; see QUARANTINE_COUNTER above. This is the
     # SECOND construction path — it initializes fields directly rather than
     # calling `__init__`, so it must mirror every field the ctor sets.
-    UnsafePointer(to=raw[].counters).init_pointee_move(
+    UnsafePointer(to=raw[].counters).unsafe_write(
         Slab[NamedCounter].create_prefilled(MAX_COUNTERS + 1)
     )
-    UnsafePointer(to=raw[].times).init_pointee_move(
+    UnsafePointer(to=raw[].times).unsafe_write(
         Slab[NamedTime].create_prefilled(MAX_TIMES + 1)
     )
-    UnsafePointer(to=raw[].gauges).init_pointee_move(
+    UnsafePointer(to=raw[].gauges).unsafe_write(
         Slab[NamedGauge].create_prefilled(MAX_GAUGES + 1)
     )
-    UnsafePointer(to=raw[].lookup_misses).init_pointee_move(
+    UnsafePointer(to=raw[].lookup_misses).unsafe_write(
         Slab[Counter].create_prefilled(1)
     )
-    UnsafePointer(to=raw[].n_counters).init_pointee_move(UInt8(0))
-    UnsafePointer(to=raw[].n_times).init_pointee_move(UInt8(0))
-    UnsafePointer(to=raw[].n_gauges).init_pointee_move(UInt8(0))
-    UnsafePointer(to=raw[].dropped_registrations).init_pointee_move(
+    UnsafePointer(to=raw[].n_counters).unsafe_write(UInt8(0))
+    UnsafePointer(to=raw[].n_times).unsafe_write(UInt8(0))
+    UnsafePointer(to=raw[].n_gauges).unsafe_write(UInt8(0))
+    UnsafePointer(to=raw[].dropped_registrations).unsafe_write(
         AtomicI32(Int32(0))
     )
     return OwnedPointer[MetricsSet](unsafe_from_raw_pointer=raw)

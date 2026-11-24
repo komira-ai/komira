@@ -108,5 +108,5 @@ a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo 
 writes, and build `komira//src/simd_ops:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-komira-ai.simd_ops-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed.
+(`mojo-komira-ai.simd_ops-0.1.0-mojo1.1.0_0.conda`), which therefore exists only once the tests have passed.
 Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.

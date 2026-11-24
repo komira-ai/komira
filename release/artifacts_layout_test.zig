@@ -8,8 +8,9 @@
 //! `[layout]`, to the package list (release/readme_e2e/packages.bzl: `NAMESPACE`, `PACKAGES`) and the
 //! declared natives (`native_ids.json`):
 //!  - the built linux-64 directory is exactly one library per package and one archive per declared
-//!    native, under the namespace; the osx-arm64 layout is exactly one library per package not in
-//!    `DARWIN_EXCLUDED` (darwin_libs.bzl), under the namespace;
+//!    native, under the namespace; the osx-arm64 layout is exactly one library and one archive per
+//!    declared native of each package not in `DARWIN_EXCLUDED` (darwin_libs.bzl), under the namespace
+//!    (`mopm stage` refuses a member that declares a native with no archive for a subdir it has a library for);
 //!  - a library or archive without the namespace directory, under another namespace or another subdir,
 //!    a missing member, a missing archive, a path for no package, and an empty layout are each refused,
 //!    naming the path.
@@ -107,18 +108,22 @@ fn checkLinux(ar: std.mem.Allocator, got: []const []const u8, r: Release) !?[]co
     return null;
 }
 
-/// Null when `layout` (a JSON list of paths) is exactly `osx-arm64/<namespace>/<package>.mojoc` for every
-/// package not in `darwin_excluded`; otherwise the reason.
+/// Null when `layout` (a JSON list of paths) is exactly `osx-arm64/<namespace>/<package>.mojoc` and
+/// `osx-arm64/<namespace>/<package>.native/lib<id>.a` for each declared native, for every package not in
+/// `darwin_excluded`; otherwise the reason.
 fn checkDarwin(ar: std.mem.Allocator, layout: []const u8, r: Release) !?[]const u8 {
     const got = try parseList(ar, layout);
     if (got.len == 0) return "the osx-arm64 layout lists no path: the check would be vacuous";
     var want = std.ArrayList([]const u8){};
-    for (r.packages) |p| if (!contains(r.darwin_excluded, p))
+    for (r.packages) |p| if (!contains(r.darwin_excluded, p)) {
         try want.append(ar, try std.fmt.allocPrint(ar, "osx-arm64/{s}/{s}.mojoc", .{ r.namespace, p }));
+        if (r.natives.get(p)) |ids| for (ids.array.items) |id|
+            try want.append(ar, try std.fmt.allocPrint(ar, "osx-arm64/{s}/{s}.native/lib{s}.a", .{ r.namespace, p, id.string }));
+    };
     for (got) |path| if (!contains(want.items, path)) return try std.fmt.allocPrint(
         ar,
-        "{s} is not osx-arm64/{s}/<name>.mojoc for a package of packages.bzl built for macOS",
-        .{ path, r.namespace },
+        "{s} is not osx-arm64/{s}/<name>.mojoc or osx-arm64/{s}/<name>.native/lib<id>.a for a package of packages.bzl built for macOS",
+        .{ path, r.namespace, r.namespace },
     );
     for (want.items) |path| if (!contains(got, path)) return try std.fmt.allocPrint(ar, "{s} is missing from the osx-arm64 layout", .{path});
     return null;
@@ -182,7 +187,7 @@ test "the built linux-64 directory is every package's library and every declared
     }
 }
 
-test "the real osx-arm64 layout is the library of every package built for macOS, under the namespace" {
+test "the real osx-arm64 layout is the library and the declared archives of every package built for macOS, under the namespace" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -257,9 +262,9 @@ test "an osx-arm64 library without the namespace, of no package, not a library, 
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const ok = "[\"osx-arm64/komira-ai/json.mojoc\", \"osx-arm64/komira-ai/libc.mojoc\"]";
+    const ok = "[\"osx-arm64/komira-ai/json.mojoc\", \"osx-arm64/komira-ai/libc.mojoc\", \"osx-arm64/komira-ai/libc.native/libkomira_libc_posix.a\"]";
     try t.expectEqual(@as(?[]const u8, null), try checkDarwin(ar, ok, try fixture(ar)));
-    const want_tail = " is not osx-arm64/komira-ai/<name>.mojoc for a package of packages.bzl built for macOS";
+    const want_tail = " is not osx-arm64/komira-ai/<name>.mojoc or osx-arm64/komira-ai/<name>.native/lib<id>.a for a package of packages.bzl built for macOS";
     try expectRefused(try checkDarwin(ar, "[\"osx-arm64/json.mojoc\", \"osx-arm64/komira-ai/libc.mojoc\"]", try fixture(ar)), "osx-arm64/json.mojoc" ++ want_tail);
     try expectRefused(try checkDarwin(ar, "[\"osx-arm64/komira-ai/ghost.mojoc\"]", try fixture(ar)), "osx-arm64/komira-ai/ghost.mojoc" ++ want_tail);
     try expectRefused(try checkDarwin(ar, "[\"osx-arm64/komira-ai/json.a\"]", try fixture(ar)), "osx-arm64/komira-ai/json.a" ++ want_tail);
@@ -269,6 +274,23 @@ test "an osx-arm64 library without the namespace, of no package, not a library, 
     excluding.darwin_excluded = &.{"libc"};
     try t.expectEqual(@as(?[]const u8, null), try checkDarwin(ar, "[\"osx-arm64/komira-ai/json.mojoc\"]", excluding));
     try expectRefused(try checkDarwin(ar, ok, excluding), "osx-arm64/komira-ai/libc.mojoc" ++ want_tail);
+}
+
+test "an osx-arm64 layout without a declared archive, with an archive of no declared native, or one outside the namespace is refused, naming it" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const want_tail = " is not osx-arm64/komira-ai/<name>.mojoc or osx-arm64/komira-ai/<name>.native/lib<id>.a for a package of packages.bzl built for macOS";
+    // the archive mopm stage would refuse the member for: "has no archive for osx-arm64"
+    try expectRefused(try checkDarwin(ar, "[\"osx-arm64/komira-ai/json.mojoc\", \"osx-arm64/komira-ai/libc.mojoc\"]", try fixture(ar)), "osx-arm64/komira-ai/libc.native/libkomira_libc_posix.a is missing from the osx-arm64 layout");
+    try expectRefused(try checkDarwin(ar, "[\"osx-arm64/komira-ai/json.mojoc\", \"osx-arm64/komira-ai/libc.mojoc\", \"osx-arm64/komira-ai/libc.native/libkomira_libc_posix.a\", \"osx-arm64/komira-ai/json.native/libghost.a\"]", try fixture(ar)), "osx-arm64/komira-ai/json.native/libghost.a" ++ want_tail);
+    try expectRefused(try checkDarwin(ar, "[\"osx-arm64/komira-ai/json.mojoc\", \"osx-arm64/komira-ai/libc.mojoc\", \"osx-arm64/libc.native/libkomira_libc_posix.a\"]", try fixture(ar)), "osx-arm64/libc.native/libkomira_libc_posix.a" ++ want_tail);
+    // the linux-64 archive in the macOS layout is not the macOS one
+    try expectRefused(try checkDarwin(ar, "[\"osx-arm64/komira-ai/json.mojoc\", \"osx-arm64/komira-ai/libc.mojoc\", \"linux-64/komira-ai/libc.native/libkomira_libc_posix.a\"]", try fixture(ar)), "linux-64/komira-ai/libc.native/libkomira_libc_posix.a" ++ want_tail);
+    // an excluded package takes its archive with it
+    var excluding = try fixture(ar);
+    excluding.darwin_excluded = &.{"libc"};
+    try expectRefused(try checkDarwin(ar, "[\"osx-arm64/komira-ai/json.mojoc\", \"osx-arm64/komira-ai/libc.native/libkomira_libc_posix.a\"]", excluding), "osx-arm64/komira-ai/libc.native/libkomira_libc_posix.a" ++ want_tail);
 }
 
 test "DARWIN_EXCLUDED is read empty, with entries, and refused when absent" {

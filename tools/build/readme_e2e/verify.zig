@@ -10,9 +10,13 @@
 //!             configuration>` (offline.zig), so a closure member the set lacks
 //!             is a refusal and not a fetch; the lock
 //!             it writes names the closure, each locked file is the staged
-//!             file byte for byte (sha256 and size) and the plan's, and each is
-//!             unpacked into the project's prefix, `lib/mojo/<import name>.mojoc`
-//!             (the import name is the part of the full name after the slash)
+//!             file byte for byte (sha256 and size) and the plan's, and each of
+//!             the host's subdir (or `noarch`) is unpacked into the project's
+//!             prefix, `lib/mojo/<import name>.mojoc` (the import name is the part
+//!             of the full name after the slash). A release built for several
+//!             platforms locks a package once per subdir; the builds for another
+//!             platform are checked against the plan like the host's, and never
+//!             unpacked or linked, as `mopm sync` installs only the host's
 //!   readme    the README the set holds is cut into one program per example
 //!             (tools/build/readme_examples, as the README gate of
 //!             tools/build/mojo does), with no relative link
@@ -33,6 +37,25 @@ const conda = @import("conda.zig");
 const plan_mod = @import("plan.zig");
 const offline = @import("offline.zig");
 const native = @import("native.zig");
+const builtin = @import("builtin");
+
+/// The conda subdir of the host the e2e runs on, as mopm names it, or null when mopm installs no toolchain there.
+pub fn hostSubdir(os: std.Target.Os.Tag, arch: std.Target.Cpu.Arch) ?[]const u8 {
+    return switch (os) {
+        .linux => switch (arch) {
+            .x86_64 => "linux-64",
+            .aarch64 => "linux-aarch64",
+            else => null,
+        },
+        .macos => if (arch == .aarch64) "osx-arm64" else null,
+        else => null,
+    };
+}
+
+/// Whether a locked file of `subdir` is installed on `host`: the host's own builds and `noarch` ones.
+pub fn installsOn(subdir: []const u8, host: []const u8) bool {
+    return std.mem.eql(u8, subdir, host) or std.mem.eql(u8, subdir, "noarch");
+}
 
 pub const Options = struct {
     /// The full name, `<namespace>/<name>`.
@@ -303,6 +326,8 @@ fn run(c: *Ctx) !void {
     var prefix_dir = try cwd.openDir(prefix, .{});
     defer prefix_dir.close();
     const want_build = try std.fmt.allocPrint(c.a, "mojo{s}_0", .{opts.mojo});
+    const host = hostSubdir(builtin.os.tag, builtin.cpu.arch) orelse
+        return c.fail("install", "mopm installs no Mojo toolchain on this host ({s}-{s})", .{ @tagName(builtin.cpu.arch), @tagName(builtin.os.tag) });
     var installed: usize = 0;
     var natives: std.ArrayList(native.Native) = .empty;
     for (lock.packages) |p| {
@@ -328,6 +353,8 @@ fn run(c: *Ctx) !void {
         if (!std.mem.eql(u8, &got, art.sha256) or bytes.len != art.size) {
             return c.fail("install", "{s} is not the file the lock pins (sha256 {s}, {d} bytes; the lock says {s}, {d})", .{ rel, &got, bytes.len, art.sha256, art.size });
         }
+        // another platform's build: checked above, and not installed here
+        if (!installsOn(p.subdir, host)) continue;
         const files = conda.read(c.a, bytes, &why) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             error.Corrupt => return c.fail("install", "{s}: {s}", .{ rel, why }),
@@ -356,6 +383,7 @@ fn run(c: *Ctx) !void {
         conda.extract(prefix_dir, files) catch |e| return c.fail("install", "cannot unpack {s} into {s}: {s}", .{ rel, prefix, @errorName(e) });
         installed += 1;
     }
+    if (installed == 0) return c.fail("install", "the lock pins no file for {s} (or noarch): nothing would be installed on this host", .{host});
     c.say("install: {d} package(s) locked and unpacked into {s}", .{ installed, prefix });
 
     // ---- link ---------------------------------------------------------------

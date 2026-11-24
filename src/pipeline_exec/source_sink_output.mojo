@@ -6,7 +6,8 @@
 # output. `SinkOutputSource` serves the batch a finished producer segment
 # published (`PublishedOutputs`), cut into morsels of `morsel_rows` rows that
 # the workers claim from one shared cursor. The batch is moved in, not copied:
-# the producer's output has one reader.
+# it is this reader's own, the producer's output itself for its last reader
+# and a copy for every other (`PublishedOutputs.take`).
 
 from arrow.schema import RecordBatch, Schema
 from morsel.morsel import Morsel

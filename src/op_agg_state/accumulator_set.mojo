@@ -496,7 +496,7 @@ def count_star_aos_thunk[
 # `AggCommitPlan.commit_row` is the per-row hot path called from
 # `agg_hash.mojo`, `agg_radix.mojo`, `agg_hash_parallel.mojo`, etc. Today
 # it dispatches through `agg._update_agg(entry, agg_idx, value)` which
-# loads `agg._layout.tags[agg_idx]` at runtime (InlineArray field read,
+# loads `agg._layout.tags[agg_idx]` at runtime (Array field read,
 # ~1-2 cycles + ~1 cycle branch). At 6M rows * 4 aggs that's 48M per-row
 # tag-checks.
 #
@@ -731,7 +731,7 @@ struct AosRowThunk(ImplicitlyCopyable, Movable):
     """A pre-resolved per-slot row kernel (see `resolve_row_thunk`).
 
     Stored inline inside AggCommitPlan's per-bucket
-    InlineArray[AosRowThunk, MAX_AGGS] fields (see agg_commit.mojo). The
+    Array[AosRowThunk, MAX_AGGS] fields (see agg_commit.mojo). The
     handle is one fn-ptr wide, so it costs what the bare fn-ptr did.
     """
     var _fn: _RowFn

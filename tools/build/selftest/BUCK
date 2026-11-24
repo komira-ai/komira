@@ -112,6 +112,8 @@ selftest_scenario(name = "analysis_refusals_lint")
 
 selftest_scenario(name = "analysis_refusals_python_oracle")
 
+selftest_scenario(name = "analysis_refusals_python_proto")
+
 selftest_scenario(name = "analysis_refusals_node")
 
 selftest_scenario(name = "planted_red_builds_node")
@@ -137,5 +139,7 @@ selftest_scenario(name = "rerun")
 selftest_scenario(name = "bench_salt")
 
 selftest_scenario(name = "graph_check_refusals")
+
+selftest_scenario(name = "darwin_select")
 
 selftest_scenario(name = "sql_oracle")

@@ -1,0 +1,36 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: the process's resident set, its peak, and its peak virtual size,
+# in KiB, on Linux (/proc/self/status) and macOS (task_info), for welded tests
+# that bound how much memory a loop may grow. A library names it in
+# `test_deps`.
+#
+# The welded test, test_rss, holds that touching 64 MiB of fresh pages raises
+# the resident set by a KiB amount within bounds and keeps the peak at or above
+# it, that the peak
+# virtual size is read on Linux and None on macOS, and that every negative
+# reading is refused by name.
+mojo_library(
+    name = "komira_test_rss",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [":komira_test_rss_c"],
+    test_srcs = ["tests/test_rss.mojo"],
+    visibility = [
+        "//src/arrow_ipc:",
+        "//src/http_core:",
+    ],
+)
+
+staged_files(
+    name = "c_files",
+    srcs = ["native/komira_test_rss.c"],
+)
+
+cxx_library(
+    name = "komira_test_rss_c",
+    compiler_flags = ["-O2", "-Wall", "-Werror"],
+    srcs = [":c_files[native/komira_test_rss.c]"],
+    visibility = ["PUBLIC"],
+)

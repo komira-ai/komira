@@ -11,7 +11,11 @@
 #   * `footers`, the one footer reader the binder and lowering both read;
 #   * the host profile (workers, memory budget) that lowering takes and the
 #     driver's worker count comes from;
-#   * the worker runtime the driver forks onto.
+#   * the worker runtime the driver forks onto;
+#   * the spill directory, if the caller gave one: a run hands it to the
+#     builder, so a grouped aggregation that outgrows the memory budget spills
+#     its group tables there instead of failing (`engine_execute`). It is not
+#     part of the host profile because it does not change the lowered plan.
 #
 # THE FOOTER CACHE IS PINNED TO A QUERY. `parquet_footers.FooterCache`
 # keeps one footer per path for its life and has no cap, so a context that
@@ -46,7 +50,8 @@ comptime ENGINE_OPTIONS_INVALID = "ENGINE_OPTIONS_INVALID"
 
 
 struct RegisteredTable(Copyable, Movable):
-    """A Parquet table registered on a context: its name and its file."""
+    """A Parquet table registered on a context: its name and the path it was
+    registered with (a file, a glob or a directory)."""
 
     var name: String
     var path: String
@@ -64,15 +69,20 @@ struct EngineContext(Movable):
     var footers: ParquetFooters
     var host_profile: HostProfile
     var runtime: PerCoreAsyncRuntime[NoopSink]
+    var spill_directory: Optional[String]
 
     def __init__(out self, options: EngineOptions = EngineOptions()) raises:
         """Probe the host once, apply `options` over it and start the workers.
 
         Raises:
             Error starting with `ENGINE_OPTIONS_INVALID` when `worker_count` or
-            `memory_budget_bytes` is present and below 1. There is no upper
-            bound. The options are read here only: they reach the host
-            profile, and the profile is what the context keeps.
+            `memory_budget_bytes` is present and below 1, or
+            `spill_directory` is present and empty. There is no upper bound.
+            The count and the budget reach the host profile, which is what
+            the context keeps of them; the spill directory is kept as given
+            (it is not checked against the filesystem here: a directory that
+            cannot be created fails the query that first spills, at step
+            `execute`).
         """
         var threads = 0
         var budget = 0
@@ -92,12 +102,18 @@ struct EngineContext(Movable):
                     + ": memory_budget_bytes must be at least 1, got "
                     + String(budget)
                 )
+        if options.spill_directory and options.spill_directory.value() == "":
+            raise Error(
+                String(ENGINE_OPTIONS_INVALID)
+                + ": spill_directory must not be empty"
+            )
         var profile = detect_host_profile(String(ENGINE_BUILD), threads, budget)
         self.runtime = build_engine_runtime(profile.thread_count)
         self.host_profile = profile^
         self.catalog = SqlCatalog()
         self.tables = List[RegisteredTable]()
         self.footers = ParquetFooters()
+        self.spill_directory = options.spill_directory
 
     def begin_query(mut self):
         """Start a query: drop every footer the previous one cached."""

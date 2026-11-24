@@ -341,7 +341,7 @@ def _getaddrinfo_collect(host: String, port: UInt16) raises -> List[IpAddr]:
     #   - The result-head local `res` is an `UnsafePointer[UInt8]` with the
     #     CONCRETE origin Mojo infers for a stack local (NOT a wildcard origin;
     #     the pointer rules) and is never built via `unsafe_from_address=Int` (hard
-    #     ban #4). We pass `&res` to getaddrinfo via a 1-elem stack InlineArray
+    #     ban #4). We pass `&res` to getaddrinfo via a 1-elem stack Array
     #     of pointers, mirroring socket_setup.mojo's out-param style.
     #   - For each AF_INET node we read the 4 sin_addr bytes out of the
     #     glibc-owned sockaddr_in into a value `IpAddr` and APPEND it to the
@@ -372,7 +372,7 @@ def _getaddrinfo_collect(host: String, port: UInt16) raises -> List[IpAddr]:
     var hp = hints.unsafe_ptr()
 
     # Result head out-param. getaddrinfo's `struct addrinfo **res` writes the
-    # list head into res_slot[0]. `res_slot` is a 1-elem STACK-LOCAL InlineArray
+    # list head into res_slot[0]. `res_slot` is a 1-elem STACK-LOCAL Array
     # (concrete stack storage; we pass `res_slot.unsafe_ptr()` as the **res
     # out-param, NOT unsafe_from_address=Int — the pointer rules). The ELEMENT type is
     # `UnsafePointer[UInt8, MutExternalOrigin]` because the addrinfo list it

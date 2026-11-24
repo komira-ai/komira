@@ -7,7 +7,8 @@
 # below_join`, which requires ALL agg-referenced columns on one side and
 # therefore fires on ZERO TPC-H queries).
 #
-# Pattern (INNER shown; a LEFT join is handled only when S is its right side):
+# Pattern (INNER shown; a LEFT join is handled only when S is its right side
+# and no COUNT(*) is among the aggregates):
 #
 #     Aggregate(GB, AGGS, Join(L, R, L.lk = R.rk, INNER))
 #
@@ -472,6 +473,14 @@ def _classify_eager_push(
     # q13 case pushes the aggregated many-side (orders) which is the right.
     if jd.join_type == JOIN_LEFT and push_to_left:
         return _EagerDecision(_EAGER_NONE)
+    # A COUNT(*) beside the pushed aggregates counts every row of the LEFT
+    # join, an unmatched left row included; a partial COUNT(*) on the right
+    # side reads NULL for that row, and no merge can tell it from a row the
+    # count must skip. Decline.
+    if jd.join_type == JOIN_LEFT:
+        for i in range(n_aggs):
+            if aggs[i].func == AGG_COUNT and not aggs[i].child:
+                return _EagerDecision(_EAGER_NONE)
 
     # --- S must be a REDUCIBLE LEAF (Scan / Filter* / Project* over ONE
     #     scan — no join/aggregate underneath). Pushing a partial agg over

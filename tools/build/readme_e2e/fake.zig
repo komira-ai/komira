@@ -8,7 +8,8 @@
 //!         closure: reads the registry's configuration (URL must be a loopback
 //!         one, offline.zig), reads DIR/plan.json and the packages it names, and
 //!         writes `mopm.lock` (version 3) in the current directory, one entry per
-//!         package of the closure, named by its full name. A name without a namespace is
+//!         file of each package of the closure (a package with a build for each of
+//!         two subdirs is locked twice, as mopm locks it), named by its full name. A name without a namespace is
 //!         refused, as mopm 0.0.113 refuses it. A package the set lacks is asked of the
 //!         registry, as the real one does, and the registry's refusal fails the
 //!         command. Both options are required: the e2e names its registry itself.
@@ -128,44 +129,46 @@ fn mopmAdd(a: Allocator, args: []const []const u8, mode: Mode) void {
         if (std.mem.eql(u8, name, want_name) and !std.mem.eql(u8, m.version, want_version)) {
             die("mopm: no {s} {s} (the overlay holds {s})", .{ name, want_version, m.version });
         }
-        if (m.files.len != 1) die("mopm: {s}: this stand-in reads one file per member", .{name});
-        const f = m.files[0];
-        const rel = std.fs.path.join(a, &.{ f.subdir, f.filename }) catch die("mopm: out of memory", .{});
-        const bytes: []const u8 = if (mode == .plan_only) "" else fileOrDie(a, staged, rel);
-        var deps: std.ArrayList([]const u8) = .empty;
-        var native: []const std.json.Value = &.{};
-        if (mode != .plan_only) {
-            const files = conda.read(a, bytes, &why) catch die("mopm: {s}: {s}", .{ rel, why });
-            const meta_path = std.fmt.allocPrint(a, "lib/mojo/{s}.mopm.json", .{plan_mod.importName(name)}) catch die("mopm: out of memory", .{});
-            const meta_bytes = conda.find(files, meta_path) orelse die("mopm: {s} holds no {s}", .{ rel, meta_path });
-            const meta = plan_mod.parseMetadata(a, meta_bytes, &why) catch die("mopm: {s}", .{why});
-            native = meta.native;
-            for (meta.deps) |d| {
-                deps.append(a, d.name) catch die("mopm: out of memory", .{});
-                todo.append(a, d.name) catch die("mopm: out of memory", .{});
+        // one locked entry per file of the member, as mopm locks a release built for several platforms (a
+        // package once per subdir); its dependencies are read from the first file, and each is followed once
+        for (m.files, 0..) |f, file_index| {
+            const rel = std.fs.path.join(a, &.{ f.subdir, f.filename }) catch die("mopm: out of memory", .{});
+            const bytes: []const u8 = if (mode == .plan_only) "" else fileOrDie(a, staged, rel);
+            var deps: std.ArrayList([]const u8) = .empty;
+            var native: []const std.json.Value = &.{};
+            if (mode != .plan_only) {
+                const files = conda.read(a, bytes, &why) catch die("mopm: {s}: {s}", .{ rel, why });
+                const meta_path = std.fmt.allocPrint(a, "lib/mojo/{s}.mopm.json", .{plan_mod.importName(name)}) catch die("mopm: out of memory", .{});
+                const meta_bytes = conda.find(files, meta_path) orelse die("mopm: {s} holds no {s}", .{ rel, meta_path });
+                const meta = plan_mod.parseMetadata(a, meta_bytes, &why) catch die("mopm: {s}", .{why});
+                native = meta.native;
+                for (meta.deps) |d| {
+                    deps.append(a, d.name) catch die("mopm: out of memory", .{});
+                    if (file_index == 0) todo.append(a, d.name) catch die("mopm: out of memory", .{});
+                }
             }
+            const build = buildOf(f.filename, name, m.version);
+            const mojo_of = if (std.mem.startsWith(u8, build, "mojo") and build.len > "mojo_0".len) build["mojo".len .. build.len - "_0".len] else "";
+            const namespace = plan_mod.splitName(name).?.namespace;
+            var artifacts: std.json.ArrayHashMap(plan_mod.Artifact) = .{};
+            // A lock keys a build by the Mojo version of the project; `keyed_by_build` is a lock that keys it by
+            // the version the file's build names, which is another compiler's when the staged set was built for one.
+            artifacts.map.put(a, if (mode == .keyed_by_build) mojo_of else project_mojo, .{
+                .build = build,
+                .url = std.fmt.allocPrint(a, "https://conda.mopm.dev/{s}/{s}/{s}", .{ namespace, f.subdir, f.filename }) catch die("mopm: out of memory", .{}),
+                .sha256 = if (from_plan) f.sha256 else a.dupe(u8, &plan_mod.sha256Hex(bytes)) catch die("mopm: out of memory", .{}),
+                .size = if (from_plan) f.size else bytes.len,
+            }) catch die("mopm: out of memory", .{});
+            locked.append(a, .{
+                .name = name,
+                .version = m.version,
+                .subdir = f.subdir,
+                .channel = std.fmt.allocPrint(a, "https://conda.mopm.dev/{s}/", .{namespace}) catch die("mopm: out of memory", .{}),
+                .artifacts = artifacts,
+                .deps = deps.items,
+                .native = native,
+            }) catch die("mopm: out of memory", .{});
         }
-        const build = buildOf(f.filename, name, m.version);
-        const mojo_of = if (std.mem.startsWith(u8, build, "mojo") and build.len > "mojo_0".len) build["mojo".len .. build.len - "_0".len] else "";
-        const namespace = plan_mod.splitName(name).?.namespace;
-        var artifacts: std.json.ArrayHashMap(plan_mod.Artifact) = .{};
-        // A lock keys a build by the Mojo version of the project; `keyed_by_build` is a lock that keys it by
-        // the version the file's build names, which is another compiler's when the staged set was built for one.
-        artifacts.map.put(a, if (mode == .keyed_by_build) mojo_of else project_mojo, .{
-            .build = build,
-            .url = std.fmt.allocPrint(a, "https://conda.mopm.dev/{s}/{s}/{s}", .{ namespace, f.subdir, f.filename }) catch die("mopm: out of memory", .{}),
-            .sha256 = if (from_plan) f.sha256 else a.dupe(u8, &plan_mod.sha256Hex(bytes)) catch die("mopm: out of memory", .{}),
-            .size = if (from_plan) f.size else bytes.len,
-        }) catch die("mopm: out of memory", .{});
-        locked.append(a, .{
-            .name = name,
-            .version = m.version,
-            .subdir = f.subdir,
-            .channel = std.fmt.allocPrint(a, "https://conda.mopm.dev/{s}/", .{namespace}) catch die("mopm: out of memory", .{}),
-            .artifacts = artifacts,
-            .deps = deps.items,
-            .native = native,
-        }) catch die("mopm: out of memory", .{});
     }
     std.mem.sort(plan_mod.Locked, locked.items, {}, struct {
         fn less(_: void, x: plan_mod.Locked, y: plan_mod.Locked) bool {

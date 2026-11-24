@@ -357,14 +357,16 @@ def _scan_int_simd_no_validity[dtype: DType](
 ):
     """SIMD column scan for a null-free integer column (vectorized feed).
 
-    Per W-lane iteration (W = native int64 lane count, 4 on AVX2 / 8 on
-    AVX-512):
+    Per W-lane iteration (W = native int64 lane count, 2 on arm64 NEON, 4 on
+    AVX2, 8 on AVX-512):
       - load W `dtype` values from `col._data` and widen to `SIMD[int64, W]`;
       - lane-wise min / max / sum reduction (branchless `select`) —
         the SIMD accumulators are seeded from the running `acc.min_i/max_i` and
         reduced back after the loop; a lane sum that wraps is recorded in
-        `ovf_vec` (the sign bit of `(a ^ s) & (b ^ s)`), and the lanes are
-        folded into `acc.sum_i` through the checked `add_to_sum`;
+        `ovf_vec` (the sign bit of `(a ^ s) & (b ^ s)`); with no lane wrapped
+        the lanes are folded into `acc.sum_i` through the checked
+        `add_to_sum`, and with one wrapped the rows are summed again in row
+        order through it;
       - lane-wise `_mix64` hash on the int64 bit-pattern, then a single
         `HyperLogLog.add_bulk[W]` (SIMD index/rank compute, scalar scatter-max)
         and `_ColAccum.feed_hashes_simd_block[W]` for the exact-set / bloom side
@@ -378,7 +380,9 @@ def _scan_int_simd_no_validity[dtype: DType](
     register-max is order-independent, min/max are commutative, and a
     wrapping sum is the same modulo 2^64 in any order. Only the
     overflow flag can differ: a sum that wraps and wraps back is flagged
-    by one order and not another, and a flagged sum is never reported.
+    by one order and not another, and a flagged sum is never reported. So
+    when a lane wrapped, the SIMD rows are summed again in row order, and the
+    flag is the row order's, the same for every lane count W.
     """
     if nrows == 0:
         return
@@ -420,9 +424,19 @@ def _scan_int_simd_no_validity[dtype: DType](
     acc.min_i = min_vec.reduce_min()
     acc.max_i = max_vec.reduce_max()
     if ovf_vec.reduce_or() < 0:
-        acc.sum_overflowed = True
-    comptime for j in range(W):
-        acc.add_to_sum(sum_vec[j])
+        # A lane wrapped, but the lanes hold every W-th row, so a sum that is
+        # in range in row order can wrap in a lane (MAX, MIN, ... then 1 in the
+        # same lane), and how often depends on W (2 on arm64 NEON, 4 on AVX2).
+        # Add the SIMD rows again in row order, checked, as `note_int` would:
+        # the sum and its flag are then the row-at-a-time path's on every
+        # platform. Taken only when a lane wrapped.
+        for r in range(simd_end):
+            acc.add_to_sum(
+                Int64(Int(col._data.get_typed[Scalar[dtype]](off + r)))
+            )
+    else:
+        comptime for j in range(W):
+            acc.add_to_sum(sum_vec[j])
 
     # Scalar tail (< W rows) — use the row-at-a-time path for exact parity.
     while i < nrows:

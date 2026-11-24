@@ -121,7 +121,7 @@
 #   delta reset         `take_slot_delta` returns   the value survives the take
 #                       without zeroing
 #
-# Encapsulation: `InlineArray` of POD + a `Slab[SeriesTable]`. No
+# Encapsulation: `Array` of POD + a `Slab[SeriesTable]`. No
 # `UnsafePointer` in any signature, no wildcard origin, no heap-owning field on
 # `SeriesTable` itself (which is why `Slab.create_prefilled`'s zero-fill IS a
 # valid empty table).
@@ -210,7 +210,7 @@ struct SeriesTable(Copyable, Movable, Deinitable):
     ⭐ A ZERO-FILLED `SeriesTable` IS A VALID EMPTY TABLE — every bitset word 0,
     every counter 0 — which is what makes `Slab.create_prefilled` the correct
     constructor for the 64-table array and avoids ever building 5 MiB of
-    `InlineArray` on a stack."""
+    `Array` on a stack."""
 
     var entries: Array[SeriesEntry, MAX_SERIES_PER_WORKER]
     # `MetricPoint.scope_id` for this slot's series. See "SCOPE IS PER-SLOT".
@@ -438,8 +438,8 @@ struct SeriesTable(Copyable, Movable, Deinitable):
 struct SeriesTables(Movable, Deinitable):
     """The `MAX_WORKERS` per-worker tables, heap-owned.
 
-    ⭐ `Slab.create_prefilled` AND NOT AN `InlineArray` FIELD. 64 tables is
-    5.28 MiB; an `InlineArray[SeriesTable, 64]` field would be constructed
+    ⭐ `Slab.create_prefilled` AND NOT AN `Array` FIELD. 64 tables is
+    5.28 MiB; an `Array[SeriesTable, 64]` field would be constructed
     wherever the owner is, which for a stack-local owner is a 5 MiB stack
     frame. `Slab` puts it on the heap and its zero-fill IS the empty state
     (see `SeriesTable`), so no 4096-iteration per-table constructor runs

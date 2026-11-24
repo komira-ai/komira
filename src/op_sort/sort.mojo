@@ -26,7 +26,7 @@
 # =============================================================================
 
 from std.math import isnan
-from std.memory import alloc, memcpy
+from std.memory import alloc, unsafe_memcpy
 from std.sys import simd_width_of
 
 from arrow.primitive_array import PrimitiveArray
@@ -254,7 +254,7 @@ def _merge[
 ):
     """Merge the sorted runs `[lo, mid)` and `[mid, hi)`. On equal keys the
     left run's element goes first (stability)."""
-    memcpy(dest=tmp + lo, src=idx_ptr + lo, count=hi - lo)
+    unsafe_memcpy(dest=tmp + lo, src=idx_ptr + lo, count=hi - lo)
     var left = lo
     var right = mid
     var dest = lo
@@ -276,10 +276,10 @@ def _merge[
         dest += 1
     var left_remaining = mid - left
     if left_remaining > 0:
-        memcpy(dest=idx_ptr + dest, src=tmp + left, count=left_remaining)
+        unsafe_memcpy(dest=idx_ptr + dest, src=tmp + left, count=left_remaining)
     var right_remaining = hi - right
     if right_remaining > 0:
-        memcpy(
+        unsafe_memcpy(
             dest=idx_ptr + dest + left_remaining,
             src=tmp + right,
             count=right_remaining,

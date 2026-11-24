@@ -183,7 +183,7 @@ def _cancel_in_list(mut entries: List[TimerEntry], id: UInt64) -> Bool:
     """Linear scan a per-bucket entry list for the matching id; flip the
     _cancelled flag if found. Returns True iff found.
 
-    Implemented as a free fn so the caller's borrow on the InlineArray
+    Implemented as a free fn so the caller's borrow on the Array
     slot stays scoped to the call expression — Mojo 0.26.3's borrow
     checker is happier with this shape than with `entries[i]._cancelled =
     True` written inside cancel() under a `mut self` body that's
@@ -232,18 +232,18 @@ struct TimerWheel(Deinitable):
 
     full field set declared + __init__ initializes all
     384 buckets to empty Lists. Bucket layout: 6 named `_level_<N>:
-    InlineArray[List[TimerEntry], 64]` fields.
+    Array[List[TimerEntry], 64]` fields.
     schedule/cancel/advance still raise NotImplementedError; Commits 3/4/5
     land them.
 
     Storage rationale (destroy-recreate audit):
-    - `InlineArray[List[TimerEntry], N]` is inline-stored for the OUTER
+    - `Array[List[TimerEntry], N]` is inline-stored for the OUTER
       array. The INNER List heap-buffers TimerEntry, but TimerEntry is
       safe across destroy-recreate POD (UInt64 + Int64 + Bool + TimerCallback POD).
     - `List[List[TimerEntry]]` outer would heap-allocate the level
-      itself, adding redundant indirection. Six named InlineArray fields
+      itself, adding redundant indirection. Six named Array fields
       is uglier source but cleaner runtime + zero-pointer-chasing.
-    - `_occupied: InlineArray[UInt64, 6]` is the per-level bitmask of
+    - `_occupied: Array[UInt64, 6]` is the per-level bitmask of
       "this slot has at least one entry" — Tokio's level.rs:14-19
       optimization for skip-empty advance().
     """
@@ -265,9 +265,9 @@ struct TimerWheel(Deinitable):
         _next_handle_id starts at 1; 0 is reserved as the "null handle"
         sentinel (a TimerHandle whose _id == 0 is invalid).
 
-        InlineArray initialization uses `fill=List[TimerEntry]()` per
+        Array initialization uses `fill=List[TimerEntry]()` per
         Mojo 0.26.3 idiom (matches `agg_commit.mojo:322` precedent for
-        `InlineArray[Movable_T, N](fill=...)`).
+        `Array[Movable_T, N](fill=...)`).
         """
         self._level_0 = Array[List[TimerEntry], Int(LEVEL_MULT)](
             fill=List[TimerEntry]()
@@ -502,7 +502,7 @@ struct TimerWheel(Deinitable):
         the bucket. Update _occupied bit accordingly.
 
         Helper-function shape (not method) lets us hold a `mut` borrow
-        on the OUT result list while walking the InlineArray slot —
+        on the OUT result list while walking the Array slot —
         Mojo 0.26.3 borrow checker is happier this way.
         """
         for slot_idx in range(Int(LEVEL_MULT)):

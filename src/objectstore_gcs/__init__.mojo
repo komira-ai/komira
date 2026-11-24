@@ -10,6 +10,9 @@ traits.
   * `GcsConditionalStore[B]` (conditional_store.mojo) — the
     `CloneableConditionalWriteStore` conformer over the seam.
   * `GcsFs[B]` (gcs_fs.mojo) — the `FileSystem` read conformer over the seam.
+  * `GcsScanFs[B]` (gcs_scan_fs.mojo) — fs's `ScanFsOpener` for GCS: it
+    opens one `GcsFs` per bucket a plan's scan names, over backends one
+    factory builds, and refuses another scheme with `SCAN_FS_UNSERVED`.
   * `GCS_ERR_*` / `gcs_store_error_kind_from_message` (errors.mojo) — the
     reader for the `StoreError[<KIND>]` message every backend raises.
   * `GcsV4Signer[C]` (signer.mojo) — the `ObjectUrlSigner` conformer: V4
@@ -47,6 +50,7 @@ from .errors import (
 )
 from .fake_backend import FakeGcsStorageBackend
 from .gcs_fs import GcsFileHandle, GcsFs, GcsWriteFile
+from .gcs_scan_fs import GcsScanFs
 from .grpc_backend import (
     GCS_DEFAULT_CALL_DEADLINE_MS,
     GCS_GRPC_HOST,

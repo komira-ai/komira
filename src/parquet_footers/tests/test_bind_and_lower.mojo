@@ -43,7 +43,11 @@
 #     file against registered (20,2), (20,3) and (18,2).
 #   * test_nullability_is_exact_in_both_directions, test_swapped_column_order_is_refused,
 #     test_check_catalog_table_refuses_what_it_cannot_check (unknown table, an
-#     in-memory table, a two-file table naming both files).
+#     in-memory table).
+#   * test_a_two_file_table_is_checked_file_by_file: a table of two files with
+#     one schema passes `check_catalog_table` and `add_catalog_scan` folds the
+#     facts of both (row count 2000); a second file with another schema is
+#     refused naming that file, by `check_catalog_table` and `add_catalog_scan`.
 #   * test_binding_a_missing_or_text_file_names_the_file: `read_parquet` of an
 #     absent file and of a text file fail `bind_statement` with an error naming
 #     the path.
@@ -391,18 +395,48 @@ def test_check_catalog_table_refuses_what_it_cannot_check() raises:
     catalog.add_in_memory("mem", _batch(3))
     with assert_raises(contains="not a Parquet table"):
         check_catalog_table(catalog, "mem", footers)
-    # A table naming two files: both are named.
-    var a = _write_table("bl_multi_a.parquet")
-    var b = _write_table("bl_multi_b.parquet")
-    var src = ParquetSource(a.copy(), _batch(1).schema.copy())
-    src.paths.append(b.copy())
+
+
+def _two_file_catalog(first: String, second: String) raises -> SqlCatalog:
+    var src = ParquetSource(first.copy(), _batch(1).schema.copy())
+    src.paths.append(second.copy())
+    var catalog = SqlCatalog()
     catalog._tables.append(
         CatalogTable("multi", _batch(1).schema.copy(), SourceVariant(src^))
     )
-    with assert_raises(contains="bl_multi_a.parquet"):
-        check_catalog_table(catalog, "multi", footers)
-    with assert_raises(contains="bl_multi_b.parquet"):
-        check_catalog_table(catalog, "multi", footers)
+    return catalog^
+
+
+def test_a_two_file_table_is_checked_file_by_file() raises:
+    var footers = ParquetFooters()
+    var a = _write_table("bl_multi_a.parquet")
+    var b = _write_table("bl_multi_b.parquet")
+    var good = _two_file_catalog(a, b)
+    check_catalog_table(good, "multi", footers)
+    var inputs = LoweringInputs()
+    add_catalog_scan(inputs, good, "multi", footers)
+    assert_equal(inputs.scans[0].stats.value().row_count, 2000)
+    # The second file has one column only.
+    var sb = SchemaBuilder()
+    var bb = RecordBatchBuilder()
+    var x = PrimitiveArray[DType.int64].allocate(3)
+    for i in range(3):
+        x.set(i, Int64(i))
+    sb.add_field(Field("x", ArrowType.INT64, False))
+    bb.add_column(Column.from_primitive[DType.int64](x))
+    var narrow = _put(
+        "bl_multi_c.parquet",
+        write_record_batch_to_parquet_bytes(
+            bb.build(sb.build()), CompressionCodec.UNCOMPRESSED
+        ),
+    )
+    var bad = _two_file_catalog(a, narrow)
+    with assert_raises(contains="bl_multi_c.parquet"):
+        check_catalog_table(bad, "multi", footers)
+    var refused = LoweringInputs()
+    with assert_raises(contains="registered 3 columns, the file has 1"):
+        add_catalog_scan(refused, bad, "multi", footers)
+    assert_equal(len(refused.scans), 0)
 
 
 def test_binding_a_missing_or_text_file_names_the_file() raises:

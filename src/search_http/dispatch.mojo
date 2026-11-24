@@ -212,7 +212,7 @@ struct SearchHttpDispatcher[Storage: CloneableConditionalWriteStore](
         """`<meta_root>/<index>/meta`: the parent of the sub-lineages."""
         return _trim_trailing_slash(self._cfg.meta_root) + "/" + index + "/meta"
 
-    def _next_split_uuid(mut self) -> InlineArray[UInt8, 16]:
+    def _next_split_uuid(mut self) -> Array[UInt8, 16]:
         self._split_seq += Int64(1)
         return make_split_uuid(
             self._worker_disc, self._epoch_us, self._split_seq

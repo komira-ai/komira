@@ -48,6 +48,12 @@ def test_constants_of_each_type() raises:
         assert_equal(s.as_string().get(r), "eu-west")
     var i64 = _build_constant_column(ArrowType.INT64, "-1234567890123", 3, "k", "f")
     assert_equal(Int(i64.as_primitive[DType.int64]().get(2)), -1234567890123)
+    var i64_max = _build_constant_column(ArrowType.INT64, "9223372036854775807", 1, "k", "f")
+    assert_equal(Int(i64_max.as_primitive[DType.int64]().get(0)), 9223372036854775807)
+    var i64_min = _build_constant_column(ArrowType.INT64, "-9223372036854775808", 1, "k", "f")
+    assert_equal(Int(i64_min.as_primitive[DType.int64]().get(0)), -9223372036854775807 - 1)
+    var i64_zero = _build_constant_column(ArrowType.INT64, "-0", 1, "k", "f")
+    assert_equal(Int(i64_zero.as_primitive[DType.int64]().get(0)), 0)
     var i32 = _build_constant_column(ArrowType.INT32, "+2147483647", 2, "k", "f")
     assert_equal(Int(i32.as_primitive[DType.int32]().get(1)), 2147483647)
     var d = _build_constant_column(ArrowType.DATE32, "2028-02-29", 2, "dt", "f")
@@ -75,7 +81,9 @@ def _refused(t: ArrowType, value: String) raises:
 def test_text_that_is_not_a_value_is_refused() raises:
     _refused(ArrowType.INT64, "12a")
     _refused(ArrowType.INT64, "-")
-    _refused(ArrowType.INT64, "1234567890123456789")  # 19 digits
+    _refused(ArrowType.INT64, "9223372036854775808")  # one past Int64 max
+    _refused(ArrowType.INT64, "-9223372036854775809")  # one before Int64 min
+    _refused(ArrowType.INT64, "12345678901234567890")  # 20 digits
     _refused(ArrowType.INT32, "2147483648")
     _refused(ArrowType.INT32, "-2147483649")
     _refused(ArrowType.UINT32, "-1")

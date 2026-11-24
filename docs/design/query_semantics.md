@@ -167,7 +167,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** NaN is greater than every other float, including +inf: MAX over a set containing NaN is NaN; MIN is NaN only if every input is NaN. The answer does not depend on input order or on how work is split between workers.
 - **DuckDB.** "NaN compares equal to NaN and greater than any other floating point number" (DuckDB documentation, "numeric types").
-- **Current behaviour.** `src/agg/builtin_agg_fns_minmax.mojo:19-37`: the float cells compare through the float model, and the header records the order-dependent answers the bare comparison used to give.
+- **Current behaviour.** `src/agg/builtin_agg_fns_minmax.mojo:19-37`: the float cells compare through the float model, and the header records the order-dependent answers the bare comparison used to give. The ungrouped SQL sink (`src/pipeline_exec/agg_fold.mojo`) folds MIN and MAX of FLOAT and DOUBLE in the same order.
 - **Mark.** MATCHES.
 
 ### 2.8 MEDIAN and quantiles over NaN
@@ -186,9 +186,9 @@ The rulings that settled each item once open or departing, the table of parity g
 
 ### 2.10 Floating-point SUM and AVG
 
-- **Rule.** SUM and AVG of FLOAT/DOUBLE add in an unspecified order, so the last bits of the answer may differ between runs, worker counts and batch sizes. A test compares them with a tolerance stated in the case (relative or in units in the last place), never bit for bit. An integer SUM is exact (§8.1).
+- **Rule.** SUM and AVG of FLOAT/DOUBLE add in an order the SQL text does not fix, so the last bits of the answer may differ from DuckDB's and between batch sizes. A test against DuckDB compares them with a tolerance stated in the case (relative or in units in the last place), never bit for bit. This engine's own answer to an ungrouped float SUM or AVG is the same bits on every worker count and run of one plan (current behaviour below), and a test of that compares bits. An integer SUM is exact (§8.1).
 - **DuckDB.** Also order-dependent: its plain `sum` of DOUBLE is not compensated (`fsum`/`kahan_sum` are the compensated forms), and its parallel aggregation combines partial sums in a non-fixed order.
-- **Current behaviour.** The plain float SUM cells are uncompensated (`src/agg/builtin_agg_fns_states.mojo:123-127`).
+- **Current behaviour.** The plain float SUM cells are uncompensated (`src/agg/builtin_agg_fns_states.mojo:123-127`). The ungrouped SQL sink (`src/pipeline_exec/sink_agg.mojo`, `agg_fold.mojo`) adds each morsel's values from +0.0 in row order and the morsels' sums in source position order, uncompensated (`lowering` cuts an ungrouped float SUM or AVG with `ORDER_ROW_RANGE`), so one lowered plan gives the same bits on every worker count and run; another morsel size, which the host profile sets, can change the last bits. Its tolerance against DuckDB is 1e-9 relative for a well-conditioned sum, stated with its bound in `src/pipeline_exec/README.md`.
 - **Mark.** MATCHES.
 
 ### 2.11 Sample statistics of one row
@@ -243,7 +243,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
   So a single NULL in the subquery's result removes every row. A frontend builds this from an ANTI join plus the two NULL conditions; the plan has no separate null-aware anti join.
 - **DuckDB.** Follows from §1.5 and the ANTI-join note in §3.2.
-- **Current behaviour.** The SQL AST names the null-aware construction (`src/sql/sql_ast.mojo:116`); the binder that builds it is not in this repository.
+- **Current behaviour.** The binder builds the null-aware construction (`src/sql/sql_bind_subquery.mojo`, `_bind_null_aware_not_in` and, for a body with GROUP BY, DISTINCT, a join or an expression, `_bind_uncorrelated_in_body`), and `run_sql` answers it as DuckDB does (`src/sdk_exec/tests/test_run_sql_join_kinds.mojo`, `test_run_sql_subquery.mojo`).
 - **Mark.** MATCHES.
 
 ### 3.4 Outer-join padding
@@ -742,7 +742,7 @@ The type of every result column is in [the result-type table](query_semantics_ty
 
 - **Rule.** ROW_NUMBER numbers the rows of a partition 1 to n. Peers are rows whose order keys compare equal on every key, with NULL equal to NULL (§9.7) and floats under §2.6. RANK gives peers the row number of the first peer, leaving gaps. DENSE_RANK numbers peer groups 1, 2, 3 without gaps; PERCENT_RANK and CUME_DIST are computed over the same peer groups. Ranking functions ignore the frame, so this peer definition applies to them whatever the frame says.
 - **DuckDB.** rank is "same as row_number of its first peer"; dense_rank "counts peer groups" (DuckDB documentation, "window functions").
-- **Current behaviour.** Declared at `src/plan_expr/partition_expr.mojo:44-46`; the window operator is not here.
+- **Current behaviour.** Declared at `src/plan_expr/partition_expr.mojo:44-46`. `run_sql` serves them: lowering cuts a PARTITION_BY node into a SINK_PARTITION_BY segment, and `src/pipeline_exec/sink_window.mojo` runs `op_window`'s kernel over the collected rows; `src/sdk_exec/tests/test_run_sql_window.mojo` compares row_number, rank, dense_rank, percent_rank, cume_dist and ntile with DuckDB's answers.
 - **Mark.** MATCHES.
 
 ### 9.3 ROW_NUMBER among peers
@@ -777,28 +777,28 @@ The type of every result column is in [the result-type table](query_semantics_ty
 
 - **Rule.** Rows whose order key is NULL are peers of one another: they form one peer group, placed by §4.1. This holds for the ranking functions whatever the frame (§9.2), so NULL-keyed rows tie in RANK, DENSE_RANK, PERCENT_RANK and CUME_DIST; and under a RANGE frame they also get the same running value. Under a ROWS frame, frame bounds count physical rows, but ranking still treats them as peers.
 - **DuckDB.** The same: NULLs compare equal for peer detection, so NULL-keyed rows tie in the ranking functions and share a RANGE frame (the oracle confirms).
-- **Current behaviour.** No window operator here.
+- **Current behaviour.** Served through `run_sql` as in §9.2: rank, dense_rank and the default running RANGE aggregate give NULL-keyed rows one value, as `test_run_sql_window` compares with DuckDB.
 - **Mark.** MATCHES.
 
 ### 9.8 RANGE frames with offsets
 
 - **Rule.** As DuckDB. `RANGE BETWEEN n PRECEDING AND m FOLLOWING` needs exactly one numeric or temporal order key. The frames of NULL and NaN order keys are DuckDB's, measured by the oracle before a case relies on them; the expected answer is that a NULL-keyed row's frame is the NULL peer group and NaN keys are peers of each other, sorting per §4.3. The plan's offsets are INT64 (`src/plan_expr/partition_frame.mojo:51-58`); a fractional offset over a float key and an interval offset over a temporal key are refused by name until the plan carries them ([komira#1228](https://github.com/komira-ai/komira/issues/1228)).
 - **DuckDB.** Accepts fractional offsets over float keys; its frame for a NULL or NaN key is not documented and the oracle measures it.
-- **Current behaviour.** No window operator here.
+- **Current behaviour.** Lowering serves only the frames RANGE UNBOUNDED PRECEDING to CURRENT ROW and UNBOUNDED PRECEDING to UNBOUNDED FOLLOWING; a frame with an offset is refused by name (`LOWERING_WINDOW_UNSERVED`, step `lower`), so no frame with offsets runs yet.
 - **Mark.** MATCHES (its non-integer offsets are a parity gap).
 
 ### 9.9 NULL partition keys
 
 - **Rule.** For PARTITION BY (windows and PARTITION_TOPN), NULL equals NULL: all rows whose partition key is NULL form one partition, as in grouping (§2.4). Multi-column keys compare column by column under the same rule, and float keys follow §2.6.
 - **DuckDB.** PARTITION BY groups rows like GROUP BY, NULLs together (DuckDB documentation, "window functions"; the oracle confirms).
-- **Current behaviour.** No window operator here.
+- **Current behaviour.** Served through `run_sql` for INT64, INT32, FLOAT64, BOOL and STRING partition keys; a NULL key is one partition (`test_run_sql_window` compares an INTEGER and a VARCHAR key with NULLs against DuckDB). Another key type (DATE, DECIMAL, timestamps, 8 and 16-bit integers) is refused by name at `lower`.
 - **Mark.** MATCHES.
 
 ### 9.10 FIRST_VALUE, LAST_VALUE and NTH_VALUE over NULLs
 
 - **Rule.** These functions respect NULLs: FIRST_VALUE is the value of the frame's first row and LAST_VALUE of its last row, NULL if that row's value is NULL. NTH_VALUE(x, n) is the value of the n-th row of the frame, counting from 1 and counting rows whose value is NULL; it is NULL when the frame has fewer than n rows. All three are NULL over an empty frame. Skipping NULLs (`IGNORE NULLS`) is §9.5.
 - **DuckDB.** RESPECT NULLS is the default, with IGNORE NULLS as an option; `nth_value` evaluates "at the nth row (counting from 1) of the window frame" (DuckDB documentation, "window functions").
-- **Current behaviour.** `PartitionExpr` carries no IGNORE NULLS field, and the value functions read their frame (`src/plan_expr/partition_expr.mojo:51-54`, `:226-255`); no window operator is in this repository.
+- **Current behaviour.** `PartitionExpr` carries no IGNORE NULLS field, and the value functions read their frame (`src/plan_expr/partition_expr.mojo:51-54`, `:226-255`). `run_sql` serves them over BIGINT, DOUBLE and VARCHAR arguments under the default running frame or a whole-partition frame (`test_run_sql_window`).
 - **Mark.** MATCHES.
 
 ## 10. Reserved
@@ -823,10 +823,10 @@ Excel semantics are not part of the plan; they belong to the Excel surface, whic
 
 ### 11.3 INTERSECT and EXCEPT
 
-- **Rule.** As DuckDB: INTERSECT and EXCEPT compare whole rows with NULLs equal, like DISTINCT, not with `=`. Without ALL they return distinct rows. With ALL they are bag operations: a row appearing `m` times on the left and `n` on the right appears `min(m, n)` times in INTERSECT ALL and `max(m - n, 0)` times in EXCEPT ALL. The plan has no node for them yet, so frontends refuse them by name until it does.
+- **Rule.** As DuckDB: INTERSECT and EXCEPT compare whole rows with NULLs equal, like DISTINCT, not with `=`. Without ALL they return distinct rows. With ALL they are bag operations: a row appearing `m` times on the left and `n` on the right appears `min(m, n)` times in INTERSECT ALL and `max(m - n, 0)` times in EXCEPT ALL. INTERSECT binds tighter than UNION and EXCEPT, which fold left to right. The plan has no node for them: a frontend builds the set forms from plan nodes it has (below), and refuses the ALL forms by name until the plan can number or repeat rows.
 - **DuckDB.** Both forms, set and bag (DuckDB documentation, "set operations"); NULL handling is not documented there and the oracle measures it.
-- **Current behaviour.** The plan has no set-operation node for them. A SEMI or ANTI join on `=` is **not** a lowering of them: it drops rows with a NULL in any column (§3.1), where INTERSECT and EXCEPT keep them.
-- **Mark.** PARITY GAP ([komira#1229](https://github.com/komira-ai/komira/issues/1229)).
+- **Current behaviour.** The SQL frontend (`src/sql/sql_bind_set_op.mojo`) binds `a INTERSECT b` and `a EXCEPT b` to a UNION ALL of the two inputs, each with a constant side column (0 for `a`, 1 for `b`), under an aggregation grouped by every column with MIN and MAX of the side, a filter (INTERSECT: MIN 0 and MAX 1; EXCEPT: MAX 0) and a projection back to the columns. The grouping puts NULLs in one group, every NaN in one and 0.0 with -0.0 in one, as DISTINCT does (§11.2). A SEMI or ANTI join on `=` is **not** a lowering of them: it drops rows with a NULL in any column (§3.1), where INTERSECT and EXCEPT keep them. INTERSECT ALL and EXCEPT ALL are refused by name. `src/sdk_exec/tests/test_run_sql_set_ops.mojo` holds the set forms to the pinned oracle.
+- **Mark.** MATCHES for INTERSECT and EXCEPT; PARITY GAP for INTERSECT ALL and EXCEPT ALL ([komira#1229](https://github.com/komira-ai/komira/issues/1229)).
 
 ### 11.4 Column types across set-operation inputs
 

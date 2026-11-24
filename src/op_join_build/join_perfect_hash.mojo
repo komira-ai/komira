@@ -3,7 +3,7 @@
 # unique INT64 build keys
 # =============================================================================
 
-from std.memory import memset, UnsafePointer
+from std.memory import unsafe_memset, UnsafePointer
 
 from arrow.primitive_array import PrimitiveArray
 
@@ -111,7 +111,7 @@ struct PerfectHashJoin(Movable):
 
         var entries = List[Int](capacity=rng)
         entries.resize(unsafe_uninit_length=rng)
-        memset(entries.unsafe_ptr().bitcast[UInt8](), 0xFF, rng * 8)  # fill with -1
+        unsafe_memset(entries.unsafe_ptr().bitcast[UInt8](), 0xFF, rng * 8)  # fill with -1
 
         # Check uniqueness during insertion.
         # SAFETY: Mutable raw pointer into the local `entries` List.

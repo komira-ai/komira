@@ -57,7 +57,7 @@
 #   - MmapAlignedBuffer.reserve is destructive (frees + re-allocs without
 #     copy). Pre-allocate large with comptime upper-bound estimate;
 #     overflow raises with clear error.
-#   - Vtable storage: `InlineArray[UInt16, MAX_VTABLE_FIELDS]` where
+#   - Vtable storage: `Array[UInt16, MAX_VTABLE_FIELDS]` where
 #     MAX_VTABLE_FIELDS = 16 (comfortable upper bound for the largest
 #     Arrow table — Field has ~6 fields, with view-types it grows to
 #     ~10). POD-only (fixed inline storage; no heap-owning inner).
@@ -113,7 +113,7 @@ comptime MAX_VTABLE_FIELDS: Int = 16
 # wide schemas — 64 is a comfortable upper bound. On overflow (cache
 # full) or for field_count > MAX_VTABLE_FIELDS, `end_table` falls back
 # to emitting a fresh vtable; correctness is preserved, only the dedup
-# size win is skipped. Storage is POD-only InlineArray (no heap-owning
+# size win is skipped. Storage is POD-only Array (no heap-owning
 # element): 64 * (3 ints + 16 u16 offsets) is a small fixed-size struct.
 comptime MAX_VTABLES: Int = 64
 
@@ -178,7 +178,7 @@ struct FlatbufWriter(Movable):
     #                        in the vtable header, slot 1).
     #   _vt_offsets[k*MAX_VTABLE_FIELDS + i]: vtable field_offset for field
     #                        i of shape k (0 = absent field). Flattened so
-    #                        the cache stays a single InlineArray.
+    #                        the cache stays a single Array.
     # POD-only: all elements are POD ints; no heap-owning member.
     var _vt_count: Int
     var _vt_pos: Array[Int, MAX_VTABLES]
@@ -906,7 +906,7 @@ struct _TableBuilder(Movable):
     natural alignment, then writes inline data back-to-front, soffset
     placeholder, vtable, and patches the soffset.
 
-    Per-field state (parallel arrays, POD-only InlineArray):
+    Per-field state (parallel arrays, POD-only Array):
       - `_field_present[i]`: did the caller call any add_field_*(i, ...)?
       - `_field_widths[i]`: 1 / 2 / 4 / 8 / 16 / N — bytes per field
         (16 = Buffer-as-inline-struct; >16 = generic inline-struct

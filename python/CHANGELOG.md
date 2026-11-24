@@ -1,0 +1,38 @@
+# Changelog
+
+What each release of the Python package `komira` added or changed, newest first. Installing it is
+on [the install page](../docs/install.md).
+
+A release's version is `0.1.<n>`, given by the release workflow, so a pull request cannot know the
+version it will ship in. A pull request that changes what the package does, or what it needs, adds
+a line under `## Unreleased` (adding that heading above the newest release if it is not there), and
+the release that ships it moves those lines under its own `## <version>` heading.
+`//python/smoke:install_page_shows_quickstart` reads the newest version heading here: the output the
+install page shows names it.
+
+## Unreleased
+
+- **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its
+  `Requires-Python` is `>=3.11` (it was `>=3.13`), and its classifiers name the four. The package's
+  tests and the install of each release run on all four.
+- **UDF types.** A function captured for `komira/python` takes and returns `bool`, `int8` to `int64`, `float32`,
+  `float64`, `string`, `binary`, `date32`, `timestamp` (with or without a time zone), `decimal128`, `list` and
+  `struct`, with any number of arguments (it carried only `int32`, `int64` and `float64`). `decimal.Decimal` takes
+  `return_dtype=`; a list item or struct field is not a list, struct, decimal or zoned timestamp; a `timestamp[ns]`
+  argument is refused for a `VALUES` function. A dtype is the `str()` of the pyarrow type, except that the
+  floats are `float32` and `float64` (pyarrow's `float` and `double` are accepted and kept as those). A
+  `TypedDict` return hint with an optional key is refused: a struct's fields are all required.
+
+## 0.1.1512
+
+The first release, on PyPI and TestPyPI: one wheel, `komira-0.1.1512-py3-none-manylinux_2_35_x86_64.whl`.
+
+- **Platforms.** Linux on x86_64 only, with glibc 2.35 or newer, an x86-64-v3 CPU (AVX2, BMI2,
+  FMA) and the system `libstdc++`. Python 3.13 or newer.
+- **Self-contained.** The wheel carries `libkomira` and the three Mojo runtime libraries it loads, and
+  requires no other package.
+- **What works.** `import komira`, `komira.__version__`, `komira.abi_version()` (1001: ABI 1.1), and
+  `komira.Session()` with `register_parquet(name, path)`, `close()` and `closed`. The errors
+  `KomiraError`, `LibraryLoadError` and `UnsupportedCpuError`.
+- **What does not.** No query runs: no SQL, no results, no DataFrame API. Only Parquet files
+  register.

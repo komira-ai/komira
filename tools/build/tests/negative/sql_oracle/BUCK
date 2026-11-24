@@ -153,6 +153,9 @@ sql_oracle(
     "parquet",
     "csv",
     "tsv",
+    "json",
+    "gz",
+    "zst",
 ]]
 
 # REFUSED: an output name with a glob character, second: the name pattern,
@@ -314,6 +317,15 @@ sql_oracle(
     outputs = ["out.tsv"],
 )
 
+# REFUSED: an input path whose segment starts with `=`: a segment may hold `=`
+# (a Hive layout) only after its first character.
+sql_oracle(
+    name = "input_equals_first",
+    srcs = "ok.sql",
+    inputs = {"=day/part.csv": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
 # REFUSED: `version ... is not a release number (^[0-9.]+$)`. `injection` is
 # the attack itself: a version that would end the version check's SQL string
 # and comment out the rest; it holds a quote, spaces, letters, a semicolon
@@ -350,3 +362,35 @@ sql_oracle(
     ("newline", "1.5\n6"),
     ("empty", ""),
 ]]
+
+# REFUSED: an extensions entry whose name does not end in `.duckdb_extension`;
+# it is the second entry, so a check of only the first passes it.
+sql_oracle(
+    name = "extension_suffix",
+    srcs = "ok.sql",
+    extensions = [
+        "fake.duckdb_extension",
+        "staged.csv",
+    ],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an extensions entry that ends in `.duckdb_extension` but holds a
+# quote, which would close the string of its LOAD statement.
+sql_oracle(
+    name = "extension_quote",
+    srcs = "ok.sql",
+    extensions = ["q'uote.duckdb_extension"],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an extension named twice.
+sql_oracle(
+    name = "extension_twice",
+    srcs = "ok.sql",
+    extensions = [
+        "fake.duckdb_extension",
+        "fake.duckdb_extension",
+    ],
+    outputs = ["out.tsv"],
+)

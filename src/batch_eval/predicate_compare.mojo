@@ -546,8 +546,8 @@ def _eval_col_vs_col(
 ) raises -> BooleanArray:
     """Evaluate a comparison between two columns of the same type.
 
-    Supports GT, LT, EQ, NE, GE, LE for INT64, INT32, FLOAT64 and FLOAT32
-    columns.
+    Supports GT, LT, EQ, NE, GE, LE for INT64, INT32, FLOAT64, FLOAT32 and
+    DATE32 columns.
 
     NULL CONTRACT: finalizes through the ONE
     kleene mechanism, exactly as the DECIMAL128 sibling
@@ -606,6 +606,16 @@ def _eval_col_vs_col(
         return _col_cmp_nullable[DType.float32](
             left_col.as_primitive[DType.float32](),
             right_col.as_primitive[DType.float32](),
+            op,
+        )
+
+    elif col_type == ArrowType.DATE32:
+        # Two DATE32 columns (`d >= (SELECT min(d2) ...)`, whose scalar is a
+        # column of the cross join): days since the epoch in int32 storage,
+        # so the order of the days is the order of the int32s.
+        return _col_cmp_nullable[DType.int32](
+            left_col.as_primitive[DType.int32](),
+            right_col.as_primitive[DType.int32](),
             op,
         )
 

@@ -6,9 +6,13 @@
 #   1. A trailing `;` is accepted and anything else after the query is
 #      "unexpected trailing tokens". (catches: _finalize accepting extra
 #      tokens, or refusing the `;`)
-#   2. `UNION ALL` chains each branch off the previous one in the subquery
-#      table; bare UNION, INTERSECT and EXCEPT are refused by name.
-#      (catches: every branch hung off the root; bare UNION bound as UNION ALL)
+#   2. `UNION ALL`, `INTERSECT` and `EXCEPT` chain each branch off the
+#      previous one in the subquery table, each entry's kind its operator;
+#      `INTERSECT DISTINCT` / `EXCEPT DISTINCT` are the set forms; bare UNION,
+#      INTERSECT ALL and EXCEPT ALL are refused by name; a clause before any
+#      operator is a syntax error naming that operator.
+#      (catches: every branch hung off the root; bare UNION bound as UNION ALL;
+#      an ALL form bound as the set form)
 #   3. COPY: a bare table (with or without a schema qualifier) becomes
 #      `SELECT * FROM t`, a parenthesised query is the source, and the
 #      defaults are parquet + snappy; every malformed COPY head is refused.
@@ -42,6 +46,10 @@
 #      in a nested SELECT; an aliased derived table keyed by its bare alias
 #      or by index 0)
 #  12. A derived table's column-list rename and its malformed spellings.
+#  13. ORDER BY / LIMIT / OFFSET after the last UNION ALL branch move onto a
+#      `SELECT *` over the union parked as a derived table (qualifier `#union`)
+#      after every branch; on any earlier branch each is a syntax error naming
+#      the clause; a derived table may hold a UNION ALL, wrapped the same way.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -57,6 +65,8 @@ from sql.sql_ast import (
     STMT_COPY,
     STMT_CREATE_TABLE_AS,
     SUBQ_UNION_ALL,
+    SUBQ_INTERSECT,
+    SUBQ_EXCEPT,
     SUBQ_DERIVED,
     SX_COLUMN,
 )
@@ -81,7 +91,7 @@ def _refuses(sql: String, needle: String) raises:
 
 
 def _copy(opts: String) raises -> SqlStatement:
-    return _parse("COPY t TO 'out' " + opts)
+    return _parse("COPY t TO 'out.parquet' " + opts)
 
 
 def _copy_pair(opts: String, fmt: UInt8, codec: UInt8) raises:
@@ -109,8 +119,172 @@ def test_union_all_chains_and_other_set_operators_refuse() raises:
     assert_equal(st.query.subqueries[1].body.from_tables[0].name, "v")
     assert_equal(st.query.subqueries[1].body.union_all_idx, -1)
     _refuses("SELECT a FROM t UNION SELECT a FROM u", "bare UNION")
-    _refuses("SELECT a FROM t INTERSECT SELECT a FROM u", "the INTERSECT set operator")
-    _refuses("SELECT a FROM t EXCEPT SELECT a FROM u", "the EXCEPT set operator")
+
+
+def test_intersect_and_except_chain_with_their_kind() raises:
+    var st = _parse(
+        "SELECT a FROM t INTERSECT SELECT b FROM u EXCEPT SELECT c FROM v"
+        " UNION ALL SELECT d FROM w"
+    )
+    assert_equal(st.query.union_all_idx, 0)
+    assert_equal(len(st.query.subqueries), 3)
+    assert_equal(Int(st.query.subqueries[0].kind), Int(SUBQ_INTERSECT))
+    assert_equal(st.query.subqueries[0].body.from_tables[0].name, "u")
+    assert_equal(st.query.subqueries[0].body.union_all_idx, 1)
+    assert_equal(Int(st.query.subqueries[1].kind), Int(SUBQ_EXCEPT))
+    assert_equal(st.query.subqueries[1].body.from_tables[0].name, "v")
+    assert_equal(st.query.subqueries[1].body.union_all_idx, 2)
+    assert_equal(Int(st.query.subqueries[2].kind), Int(SUBQ_UNION_ALL))
+    assert_equal(st.query.subqueries[2].body.from_tables[0].name, "w")
+    assert_equal(st.query.subqueries[2].body.union_all_idx, -1)
+    # DISTINCT spells out the set form: the same kind, and the branch's own
+    # select list is not marked distinct.
+    var spelled = _parse(
+        "SELECT a FROM t INTERSECT DISTINCT SELECT a FROM u"
+        " EXCEPT DISTINCT SELECT a FROM v"
+    )
+    assert_equal(Int(spelled.query.subqueries[0].kind), Int(SUBQ_INTERSECT))
+    assert_false(spelled.query.subqueries[0].body.distinct)
+    assert_equal(Int(spelled.query.subqueries[1].kind), Int(SUBQ_EXCEPT))
+    assert_false(spelled.query.subqueries[1].body.distinct)
+    # A trailing ORDER BY / LIMIT wraps the chain as it wraps a UNION ALL.
+    var wrapped = _parse("SELECT a FROM t EXCEPT SELECT a FROM u ORDER BY 1 LIMIT 2")
+    assert_equal(Int(wrapped.query.subqueries[0].kind), Int(SUBQ_EXCEPT))
+    assert_equal(len(wrapped.query.subqueries[0].body.order_by), 0)
+    assert_equal(wrapped.query.subqueries[1].derived_alias, "#union#1")
+    assert_equal(wrapped.query.from_tables[0].name, "#union#1")
+    assert_equal(len(wrapped.query.order_by), 1)
+    assert_equal(wrapped.query.limit.value(), 2)
+    # A derived table holds a chain too.
+    var derived = _parse("SELECT a FROM (SELECT a FROM t INTERSECT SELECT a FROM u) d")
+    assert_equal(Int(derived.query.subqueries[0].kind), Int(SUBQ_INTERSECT))
+    assert_equal(Int(derived.query.subqueries[1].kind), Int(SUBQ_DERIVED))
+
+
+def test_intersect_all_and_except_all_are_refused_by_name() raises:
+    assert_equal(
+        _err("SELECT a FROM t INTERSECT ALL SELECT a FROM u"),
+        "SQL not supported: INTERSECT ALL. The bag form keeps a row min(m, n)"
+        " (INTERSECT ALL) or max(m - n, 0) (EXCEPT ALL) times, which needs the"
+        " rows of each side numbered or repeated, and no plan node here does"
+        " either yet (komira-ai/komira#1229). INTERSECT without ALL, which"
+        " returns distinct rows, is served.",
+    )
+    _refuses("SELECT a FROM t EXCEPT ALL SELECT a FROM u", "SQL not supported: EXCEPT ALL.")
+    # Also as a later branch of a chain.
+    _refuses(
+        "SELECT a FROM t UNION ALL SELECT a FROM u EXCEPT ALL SELECT a FROM v",
+        "SQL not supported: EXCEPT ALL.",
+    )
+
+
+def test_union_all_trailing_clauses_wrap_the_union() raises:
+    # ORDER BY / LIMIT / OFFSET after the last branch belong to the whole
+    # union: the query becomes `SELECT * FROM (<union>) #union ORDER BY ...`
+    # over a derived table parked after both branches.
+    var st = _parse(
+        "SELECT a FROM t UNION ALL SELECT b FROM u ORDER BY 1 DESC LIMIT 3"
+        " OFFSET 2"
+    )
+    assert_equal(len(st.query.subqueries), 2)
+    assert_equal(Int(st.query.subqueries[0].kind), Int(SUBQ_UNION_ALL))
+    assert_equal(len(st.query.subqueries[0].body.order_by), 0)
+    assert_false(Bool(st.query.subqueries[0].body.limit))
+    assert_false(Bool(st.query.subqueries[0].body.offset))
+    assert_equal(Int(st.query.subqueries[1].kind), Int(SUBQ_DERIVED))
+    assert_equal(st.query.subqueries[1].derived_alias, "#union#1")
+    assert_equal(st.query.subqueries[1].body.from_tables[0].name, "t")
+    assert_equal(st.query.subqueries[1].body.union_all_idx, 0)
+    assert_equal(st.query.union_all_idx, -1)
+    assert_equal(len(st.query.select_items), 1)
+    assert_true(st.query.select_items[0].is_star)
+    assert_equal(len(st.query.from_tables), 1)
+    assert_equal(st.query.from_tables[0].name, "#union#1")
+    assert_equal(st.query.from_tables[0].rel_alias, "#union")
+    assert_equal(len(st.query.order_by), 1)
+    assert_true(st.query.order_by[0].descending)
+    assert_equal(st.query.limit.value(), 3)
+    assert_equal(st.query.offset.value(), 2)
+    # Each clause alone moves; a query with no trailing clause is not wrapped.
+    var only_offset = _parse("SELECT a FROM t UNION ALL SELECT b FROM u OFFSET 1")
+    assert_equal(only_offset.query.offset.value(), 1)
+    assert_true(only_offset.query.select_items[0].is_star)
+    var only_limit = _parse("SELECT a FROM t UNION ALL SELECT b FROM u LIMIT 1")
+    assert_equal(only_limit.query.limit.value(), 1)
+    var plain = _parse("SELECT a FROM t UNION ALL SELECT b FROM u")
+    assert_equal(plain.query.union_all_idx, 0)
+    assert_false(plain.query.select_items[0].is_star)
+    # A chain of three wraps once; the CTEs sit on the outer select.
+    var chain = _parse(
+        "WITH c AS (SELECT 1 AS a) SELECT a FROM c UNION ALL SELECT a FROM c"
+        " UNION ALL SELECT a FROM c ORDER BY a"
+    )
+    assert_equal(len(chain.query.subqueries), 3)
+    assert_equal(len(chain.query.ctes), 1)
+    assert_equal(chain.query.subqueries[2].derived_alias, "#union#2")
+    assert_equal(len(chain.query.order_by), 1)
+
+
+def test_union_all_clause_before_a_branch_is_a_syntax_error() raises:
+    _refuses(
+        "SELECT a FROM t ORDER BY a UNION ALL SELECT b FROM u",
+        "SQL syntax error: ORDER BY before UNION ALL",
+    )
+    _refuses(
+        "SELECT a FROM t LIMIT 1 UNION ALL SELECT b FROM u",
+        "SQL syntax error: LIMIT before UNION ALL",
+    )
+    _refuses(
+        "SELECT a FROM t OFFSET 1 UNION ALL SELECT b FROM u",
+        "SQL syntax error: OFFSET before UNION ALL",
+    )
+    _refuses(
+        "SELECT a FROM t UNION ALL SELECT b FROM u ORDER BY b UNION ALL"
+        " SELECT c FROM v",
+        "SQL syntax error: ORDER BY before UNION ALL",
+    )
+    _refuses(
+        "SELECT a FROM t UNION ALL SELECT b FROM u LIMIT 1 UNION ALL"
+        " SELECT c FROM v",
+        "SQL syntax error: LIMIT before UNION ALL",
+    )
+
+
+def test_a_clause_before_intersect_or_except_names_the_operator() raises:
+    assert_equal(
+        _err("SELECT a FROM t ORDER BY a INTERSECT SELECT b FROM u"),
+        "SQL syntax error: ORDER BY before INTERSECT. ORDER BY, LIMIT and"
+        " OFFSET apply to the whole INTERSECT, so they must follow its last"
+        " branch.",
+    )
+    _refuses(
+        "SELECT a FROM t EXCEPT SELECT b FROM u LIMIT 1 EXCEPT SELECT c FROM v",
+        "SQL syntax error: LIMIT before EXCEPT",
+    )
+
+
+def test_a_derived_table_holds_a_union_all() raises:
+    var st = _parse("SELECT a FROM (SELECT a FROM t UNION ALL SELECT b FROM u) d")
+    assert_equal(len(st.query.subqueries), 2)
+    assert_equal(Int(st.query.subqueries[0].kind), Int(SUBQ_UNION_ALL))
+    assert_equal(Int(st.query.subqueries[1].kind), Int(SUBQ_DERIVED))
+    assert_equal(st.query.subqueries[1].derived_alias, "d#1")
+    assert_equal(st.query.subqueries[1].body.union_all_idx, 0)
+    # A trailing ORDER BY / LIMIT inside the parentheses is wrapped the same
+    # way: the derived entry holds the star select over the wrapped union.
+    var sorted_union = _parse(
+        "SELECT a FROM (SELECT a FROM t UNION ALL SELECT b FROM u ORDER BY 1"
+        " LIMIT 2) d"
+    )
+    assert_equal(len(sorted_union.query.subqueries), 3)
+    assert_equal(sorted_union.query.subqueries[1].derived_alias, "#union#1")
+    assert_equal(sorted_union.query.subqueries[2].derived_alias, "d#2")
+    assert_true(sorted_union.query.subqueries[2].body.select_items[0].is_star)
+    assert_equal(
+        sorted_union.query.subqueries[2].body.from_tables[0].name, "#union#1"
+    )
+    assert_equal(sorted_union.query.subqueries[2].body.limit.value(), 2)
+    assert_equal(len(sorted_union.query.subqueries[2].body.order_by), 1)
 
 
 def test_copy_heads() raises:
@@ -121,7 +295,7 @@ def test_copy_heads() raises:
     assert_equal(Int(st.codec), Int(WCOMP_SNAPPY))
     assert_true(st.query.select_items[0].is_star)
     assert_equal(st.query.from_tables[0].name, "t")
-    var q = _parse("COPY s.t2 TO 'o'")
+    var q = _parse("COPY s.t2 TO 'o.parquet'")
     assert_equal(q.query.from_tables[0].name, "t2")
     var sub = _parse("COPY (SELECT a FROM t WHERE a > 1) TO 'o.csv' (FORMAT csv);")
     assert_equal(sub.query.select_items[0].expr.text, "a")
@@ -149,37 +323,37 @@ def test_copy_options() raises:
     _copy_pair("(HEADER true, FORMAT 'csv')", WFMT_CSV, WCOMP_UNCOMPRESSED)
     _copy_pair("(FORMAT csv, HEADER '1', COMPRESSION zstd)", WFMT_CSV, WCOMP_ZSTD)
     _copy_pair("(FORMAT csv, HEADER on)", WFMT_CSV, WCOMP_UNCOMPRESSED)
-    _refuses("COPY t TO 'o' (5)", "expected a COPY option (FORMAT")
-    _refuses("COPY t TO 'o' (FOO 1)", "COPY option 'foo'")
-    _refuses("COPY t TO 'o' (FORMAT 7)", "expected a COPY option value")
-    _refuses("COPY t TO 'o' (FORMAT avro)", "(FORMAT 'avro')")
-    _refuses("COPY t TO 'o' (COMPRESSION brotli)", "COPY compression 'brotli'")
+    _refuses("COPY t TO 'o.parquet' (5)", "expected a COPY option (FORMAT")
+    _refuses("COPY t TO 'o.parquet' (FOO 1)", "COPY option 'foo'")
+    _refuses("COPY t TO 'o.parquet' (FORMAT 7)", "expected a COPY option value")
+    _refuses("COPY t TO 'o.parquet' (FORMAT avro)", "(FORMAT 'avro')")
+    _refuses("COPY t TO 'o.parquet' (COMPRESSION brotli)", "COPY compression 'brotli'")
     _refuses(
-        "COPY t TO 'o' (FORMAT csv, COMPRESSION snappy)",
+        "COPY t TO 'o.parquet' (FORMAT csv, COMPRESSION snappy)",
         "(FORMAT 'csv', COMPRESSION 'snappy') — no wired write sink",
     )
-    _refuses("COPY t TO 'o' (HEADER true)", "HEADER applies to FORMAT 'csv', not 'parquet'")
-    _refuses("COPY t TO 'o' (FORMAT csv, HEADER false)", "(HEADER false)")
-    _refuses("COPY t TO 'o' (FORMAT csv, HEADER 'off')", "(HEADER false)")
-    _refuses("COPY t TO 'o' (FORMAT csv, HEADER '0')", "(HEADER false)")
-    _refuses("COPY t TO 'o' (FORMAT csv, HEADER maybe)", "HEADER expects true/false, got 'maybe'")
-    _refuses("COPY t TO 'o' (FORMAT csv, ARRAY false)", "ARRAY applies to FORMAT 'json', not 'csv'")
-    _refuses("COPY t TO 'o' (FORMAT json, ARRAY true)", "(ARRAY true)")
-    _refuses("COPY t TO 'o' (FORMAT json, ARRAY '1')", "(ARRAY true)")
-    _refuses("COPY t TO 'o' (FORMAT json, ARRAY on)", "(ARRAY true)")
-    _refuses("COPY t TO 'o' (COMPRESSION_LEVEL 1)", "(COMPRESSION_LEVEL 1) — codec 'snappy' takes no level")
-    _refuses("COPY t TO 'o' (FORMAT csv, COMPRESSION lz4, COMPRESSION_LEVEL 1)", "codec 'lz4' takes no level")
+    _refuses("COPY t TO 'o.parquet' (HEADER true)", "HEADER applies to FORMAT 'csv', not 'parquet'")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER false)", "(HEADER false)")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER 'off')", "(HEADER false)")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER '0')", "(HEADER false)")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER maybe)", "HEADER expects true/false, got 'maybe'")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, ARRAY false)", "ARRAY applies to FORMAT 'json', not 'csv'")
+    _refuses("COPY t TO 'o.parquet' (FORMAT json, ARRAY true)", "(ARRAY true)")
+    _refuses("COPY t TO 'o.parquet' (FORMAT json, ARRAY '1')", "(ARRAY true)")
+    _refuses("COPY t TO 'o.parquet' (FORMAT json, ARRAY on)", "(ARRAY true)")
+    _refuses("COPY t TO 'o.parquet' (COMPRESSION_LEVEL 1)", "(COMPRESSION_LEVEL 1) — codec 'snappy' takes no level")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, COMPRESSION lz4, COMPRESSION_LEVEL 1)", "codec 'lz4' takes no level")
     _refuses(
-        "COPY t TO 'o' (COMPRESSION zstd, COMPRESSION_LEVEL 9)",
+        "COPY t TO 'o.parquet' (COMPRESSION zstd, COMPRESSION_LEVEL 9)",
         "(COMPRESSION 'zstd', COMPRESSION_LEVEL 9) — the wired sink is parameterized on level 3",
     )
-    _refuses("COPY t TO 'o' (COMPRESSION gzip, COMPRESSION_LEVEL 3)", "parameterized on level 6")
-    _refuses("COPY t TO 'o' (COMPRESSION_LEVEL x)", "expected an integer COPY option value")
+    _refuses("COPY t TO 'o.parquet' (COMPRESSION gzip, COMPRESSION_LEVEL 3)", "parameterized on level 6")
+    _refuses("COPY t TO 'o.parquet' (COMPRESSION_LEVEL x)", "expected an integer COPY option value")
     _refuses(
-        "COPY t TO 'o' (COMPRESSION_LEVEL 99999999999999999999)",
+        "COPY t TO 'o.parquet' (COMPRESSION_LEVEL 99999999999999999999)",
         "the COPY option value 99999999999999999999 is out of range for BIGINT (DuckDB v1.5.3 raises a Conversion Error",
     )
-    _refuses("COPY t TO 'o' (FORMAT csv", "')' to close COPY options")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv", "')' to close COPY options")
 
 
 def test_create_table_as() raises:
@@ -231,7 +405,7 @@ def test_from_less_select_ends_at_every_allowed_clause() raises:
     var tails: List[String] = [
         "", ";", " WHERE 1 = 0", " GROUP BY 1", " HAVING 1 = 1", " ORDER BY 1",
         " LIMIT 1", " OFFSET 1", " FETCH FIRST 1 ROWS ONLY",
-        " UNION ALL SELECT 2",
+        " UNION ALL SELECT 2", " INTERSECT SELECT 2", " EXCEPT SELECT 2",
     ]
     for i in range(len(tails)):
         var st = _parse("SELECT 7 / 2 AS x" + tails[i])
@@ -241,8 +415,6 @@ def test_from_less_select_ends_at_every_allowed_clause() raises:
     assert_equal(sub.query.subqueries[0].body.from_tables[0].name, String(FROM_LESS_RELATION))
     _refuses("SELECT 1 WINDOW w AS (ORDER BY 1)", "a named WINDOW clause")
     _refuses("SELECT 1 QUALIFY 1 = 1", "the QUALIFY clause")
-    _refuses("SELECT 1 EXCEPT SELECT 2", "the EXCEPT set operator")
-    _refuses("SELECT 1 INTERSECT SELECT 2", "the INTERSECT set operator")
     _refuses("SELECT a b c", "expected keyword 'from'")
 
 

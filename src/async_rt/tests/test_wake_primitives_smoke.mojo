@@ -88,7 +88,7 @@ def test_wait_on_address_stale_expected_returns_immediately() raises:
     raw[] = AtomicI32(Int32(0))
     var word = OwnedPointer[AtomicI32](unsafe_from_raw_pointer=raw)
     # Bump word from 0 to 5. Use static form (the canonical shape) — instance
-    # `.store()` on Atomic[DType.int32] takes `mut self` which conflicts
+    # `.store()` on Atomic[Int32] takes `mut self` which conflicts
     # with the OwnedPointer[]= deref form here.
     AtomicI32.store(UnsafePointer(to=word[]).unsafe_bitcast[Scalar[DType.int32]](), Int32(5))
     # Wait with `expected=0` — kernel sees 5 != 0 + returns immediately.
