@@ -71,7 +71,7 @@ const PROD_VERIFY_RUN = "        run: '\"$RUNNER_TEMP/prod-test/release_staged_v
 const PROD_E2E_RUN = "          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all";
 const STAGE_E2E_RUN = PROD_E2E_RUN;
 const PROD_REWRITE_NAME = "      - name: every member gets the version of this run";
-const PROD_MOPM_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.0.0 --out release/staged_set --registry prod'";
+const PROD_MOPM_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.1.0 --out release/staged_set --registry prod'";
 const PROD_SMOKE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" smoke --staged \"$RUNNER_TEMP/prod-smoke/committed\" --config-url https://api.mopm.dev/index/config.json --attempts 5 --delay 30'";
 const PROD_ADD_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" add --staged \"$RUNNER_TEMP/prod-add/committed\" --mopm \"$RUNNER_TEMP/mopm-publish/mopm\" --work \"$RUNNER_TEMP/prod-add/work\"'";
 const STAGE_BUILD_VERIFY = "          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/mopm-publish/release_staged_verify";

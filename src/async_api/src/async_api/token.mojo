@@ -40,9 +40,9 @@
 #   `DynamicFilter` (manual `copy()` method).
 #
 # Atomic dtype rationale:
-#   * cancel flag: Atomic[DType.uint8] — only needs store/load (no
+#   * cancel flag: Atomic[UInt8] — only needs store/load (no
 #     compare_exchange or fetch_*). uint8 supports those on Mojo 0.26.3.
-#   * NOT Atomic[DType.bool]: bool dtype rejects pop.atomic.rmw.
+#   * NOT Atomic[Bool]: bool dtype rejects pop.atomic.rmw.
 #
 # Pointer discipline:
 #   * ArcPointer encapsulated in `_chain` field (List of slots).
@@ -62,7 +62,7 @@ struct _AtomicSlot(Movable, Deinitable):
     """One slot in the ancestor chain. Holds the cancel flag, reason, and
     frozen marker for a single level of the tree.
 
-    OwnedPointer[Atomic] indirection because Atomic[DType.uint8] is NOT
+    OwnedPointer[Atomic] indirection because Atomic[UInt8] is NOT
     Movable on Mojo 0.26.3; ArcPointer requires T: Movable.
     """
 

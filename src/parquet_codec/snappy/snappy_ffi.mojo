@@ -92,7 +92,7 @@ struct SnappyDecoder(ImplicitlyCopyable, Copyable, Equatable, Writable):
             writer.write("SnappyDecoder(", String(Int(self.value)), ")")
 
 
-comptime _DecoderSlot = Atomic[DType.uint8]
+comptime _DecoderSlot = Atomic[UInt8]
 
 
 def _init_snappy_decoder_slot() -> OwnedPointer[_DecoderSlot]:

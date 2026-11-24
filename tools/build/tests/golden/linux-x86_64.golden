@@ -3,9 +3,9 @@ config komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
 config komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be:
 config   prelude//cpu/constraints:cpu[x86_64]                        (prelude//cpu/constraints:cpu)
 config   prelude//os/constraints:os[linux]                           (prelude//os/constraints:os)
-sample 66b3872121287a437fb4aa47daf3eea3caa16ac123f33d337473d5f84a0b5f6a komira//tools/build/examples:hello
-sample 33b42aa91c6ec57f912b6c81ceb358fa792f802b600795da722bea00ab3811d4 komira//tools/build/examples:hellopkg
-sample 2c6b33fa64f93d68a4561cfbef92fc40fd45791fcf26f454ed6e1b5c5f0dfcb9 komira//tools/build/examples:test_hellopkg
+sample 878716d6130fae896a4dfddeb501e932a1716c642feb56a0c706a9444dfbb9b9 komira//tools/build/examples:hello
+sample e05c7d48dddfe9aa1a4e4b2e868b5a2545d03b80a271d0d8f3fca6622bc327b9 komira//tools/build/examples:hellopkg
+sample cd5b8cf3c72101f84b0e3fbbbf0a419daa133754253f6de85e0ebc73a5469791 komira//tools/build/examples:test_hellopkg
 sample f6bba8829d209f473fd7a77e700a27d242b713131d3ed5321ec4b633b7681efd komira//tools/build/toolchains:conda_unpack
 sample 794988e65a015b90e1602a49dd0c19ea0f315372905397333825019d070d55d4 komira//tools/build/toolchains:zig_cc_launcher
 sample 47535251ad3024a30a80aaa41c7b56fbc0c467568c1221b9d521e6069bb127a5 komira//tools/build/run:gate

@@ -2,7 +2,8 @@
 
 The Python wheel carries three Mojo runtime libraries, `libKGENCompilerRTShared`,
 `libAsyncRTRuntimeGlobals` and `libMSupportGlobals`, copied unmodified from the pinned
-`mojo-compiler` 1.0.0 conda package ([wheel_licence_audit.md](wheel_licence_audit.md)). That
+`mojo-compiler` conda package ([wheel_licence_audit.md](wheel_licence_audit.md)), 1.1.0 today
+(tools/build/platforms/table.bzl); this page's measurements were made when the pin was 1.0.0. That
 package's licence is Modular's, not Apache-2.0. This page answers one question with evidence:
 could komira build those three libraries itself, from the source Modular publishes at
 github.com/modular/modular, and ship those instead?
@@ -401,7 +402,8 @@ STATED and MEASURED in Modular's source:
 So the match must be held by the choice of source and by komira's own tests:
 
 1. **Source at the compiler's own release tag.** Compiler and runtime then come from one tree.
-   With the pin at 1.0.0 the nearest Apache-headed source is not a tag (section 1).
+   With the pin at 1.0.0 the nearest Apache-headed source was not a tag (section 1); at the 1.1.0
+   pin it is the `mojo/v1.1.0` tag.
 2. **Exports gate.** A test that the from-source `libKGENCompilerRTShared` defines every runtime
    symbol of every library komira ships, read from the built files as above. The library check
    `-z defs` at link time does not cover this, because libkomira is linked against the toolchain's
@@ -428,7 +430,7 @@ So the match must be held by the choice of source and by komira's own tests:
 ## 4. The work, as tasks
 
 Route: move the compiler pin to a Modular release tag that holds the runtime source, and build the
-three libraries from that same tag. Keeping the 1.0.0 pin would build from an untagged commit of
+three libraries from that same tag. Keeping the 1.0.0 pin would have built from an untagged commit of
 Modular's history whose source is not exactly the shipped one (section 1). The tasks are the same
 either way.
 
@@ -463,7 +465,7 @@ held by the exports gate of task 8.
 
 ## 5. Modular's licence texts, as the pinned download and the source repository give them
 
-The pinned `mojo-compiler` 1.0.0 package carries three licence files under `info/`. Their sha256s
+The `mojo-compiler` 1.0.0 package, the pin when this was measured, carries three licence files under `info/`. Their sha256s
 are the same on all three platforms (MEASURED).
 
 | file | sha256 |

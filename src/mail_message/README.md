@@ -144,6 +144,6 @@ passed. After any change to a source, a test, a manifest of this package or of a
 with all five packages staged, commit what it writes, and build `komira//src/mail_message:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-komira-ai.mail_message-0.1.0-mojo1.0.0_0.conda`), packed with the manifests of the siblings of its closure beside
+(`mojo-komira-ai.mail_message-0.1.0-mojo1.1.0_0.conda`), packed with the manifests of the siblings of its closure beside
 its own (`members`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so
 it is a step of a CI job that takes that file, not a build action.

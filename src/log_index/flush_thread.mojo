@@ -85,7 +85,7 @@ struct OffCoreFlushThread[Storage: ConditionalWriteStore](
     behind an `OwnedPointer`."""
 
     var _consumer: LogIndexConsumer[Self.Storage]
-    var _shutdown: Atomic[DType.uint8]
+    var _shutdown: Atomic[UInt8]
     var _idle_park_us: Int64
     var _thread_id: Int64  # thread handle recorded by the owner (0 == none)
 
@@ -95,7 +95,7 @@ struct OffCoreFlushThread[Storage: ConditionalWriteStore](
         idle_park_us: Int64 = DEFAULT_IDLE_PARK_US,
     ):
         self._consumer = consumer^
-        self._shutdown = Atomic[DType.uint8](UInt8(0))
+        self._shutdown = Atomic[UInt8](UInt8(0))
         self._idle_park_us = idle_park_us
         self._thread_id = Int64(0)
 

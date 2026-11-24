@@ -65,7 +65,7 @@ def write_hex[W: Writer](mut writer: W, s: String):
     comptime HEX = "0123456789abcdef"
     var bytes = s.as_bytes()
     var n = len(bytes)
-    var out = String(capacity=2 + 2 * n)
+    var out = String(capacity_bytes=2 + 2 * n)
     out += "0x"
     for i in range(n):
         var b = Int(bytes[i])

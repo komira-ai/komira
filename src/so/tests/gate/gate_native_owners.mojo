@@ -10,18 +10,22 @@
 # load the library: it only reads the file "./libkomira.so" as bytes.
 
 comptime LIB = "./libkomira.so"
-comptime OWNERS = (
-    "libkomira_async_rt_native.so.1",
-    "libkomira_async_api_native.so.1",
-    "libkomira_compression_native.so.1",
-    "libkomira_fs_native.so.1",
-    "libkomira_libc_native.so.1",
-    "libkomira_metrics_native.so.1",
-    "libkomira_parquet_codec_native.so.1",
-    "libkomira_scan_source_native.so.1",
-)
 comptime SHT_DYNAMIC = 6
 comptime DT_NEEDED = 1
+
+
+def _owners() -> List[String]:
+    """The SONAMEs of the eight owners the BUCK file lists."""
+    return [
+        "libkomira_async_rt_native.so.1",
+        "libkomira_async_api_native.so.1",
+        "libkomira_compression_native.so.1",
+        "libkomira_fs_native.so.1",
+        "libkomira_libc_native.so.1",
+        "libkomira_metrics_native.so.1",
+        "libkomira_parquet_codec_native.so.1",
+        "libkomira_scan_source_native.so.1",
+    ]
 
 
 def _le(data: List[UInt8], at: Int, n: Int) raises -> Int:
@@ -74,13 +78,13 @@ def _needed(data: List[UInt8]) raises -> List[String]:
 
 def main() raises:
     var needed = _needed(open(LIB, "r").read_bytes())
-    comptime for i in range(len(OWNERS)):
+    for owner in _owners():
         var present = False
         for name in needed:
-            if name == OWNERS[i]:
+            if name == owner:
                 present = True
         if not present:
             raise Error(
-                LIB + " is not NEEDED on " + OWNERS[i] + ": that owner's C is embedded or missing"
+                LIB + " is not NEEDED on " + owner + ": that owner's C is embedded or missing"
             )
     print("ok")

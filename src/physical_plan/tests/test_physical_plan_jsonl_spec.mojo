@@ -10,8 +10,8 @@
 #   * test_an_empty_spec_reads_no_file: the default spec names no JSONL path
 #     and holds a schema of no column.
 #   * test_the_kind_is_new_and_the_version_moved: SOURCE_JSONL is a value no
-#     other source kind has, and the IR version is 20, the version that
-#     added it.
+#     other source kind has, and the IR version has moved on from 20, the
+#     version that added it (the current version is 21).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -71,7 +71,7 @@ def test_the_kind_is_new_and_the_version_moved() raises:
     for i in range(len(others)):
         assert_true(others[i] != SOURCE_JSONL)
     assert_equal(Int(SOURCE_JSONL), 7)
-    assert_equal(PHYSICAL_PLAN_IR_VERSION, 20)
+    assert_equal(PHYSICAL_PLAN_IR_VERSION, 21)
 
 
 def main() raises:

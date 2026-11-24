@@ -2,7 +2,6 @@ from std.ffi import OwnedDLHandle
 
 comptime LIB = "./spike_native.so"
 comptime OWNER = "libkomira_libc_native.so.1"
-comptime OWNED_SYMBOLS = ("komira_openat_creat", "komira_write_bytes", "komira_lseek_end")
 
 
 def le(data: List[UInt8], at: Int, n: Int) -> Int:
@@ -56,13 +55,14 @@ def main() raises:
     # The owner's C is bound to that copy, not embedded: the library's own
     # dynamic symbol table leaves each name undefined.
     var undefined = undefined_dynamic_symbols(LIB)
-    comptime for i in range(len(OWNED_SYMBOLS)):
+    var owned_symbols = ["komira_openat_creat", "komira_write_bytes", "komira_lseek_end"]
+    for symbol in owned_symbols:
         var found = False
         for name in undefined:
-            if name == OWNED_SYMBOLS[i]:
+            if name == symbol:
                 found = True
         if not found:
-            raise Error(OWNED_SYMBOLS[i] + " is defined inside the library: the owner's C is embedded")
+            raise Error(symbol + " is defined inside the library: the owner's C is embedded")
     # Keep the library open until here.
     if not lib.check_symbol("native_owner_write_probe"):
         raise Error("native_owner_write_probe is not exported")

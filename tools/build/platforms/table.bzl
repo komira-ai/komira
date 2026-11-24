@@ -264,10 +264,10 @@ PLATFORMS = {
                 size = 601301,
             ),
             "mojo_compiler": pin(
-                "mojo_compiler_1.0.0_linux-64.conda",
-                "https://conda.modular.com/max-nightly/linux-64/mojo-compiler-1.0.0-release.conda",
-                "4394c6146d47ec7794a9a3ed5775ae158f59f83f8e1aed59408b17c4909821b3",
-                size = 68511359,
+                "mojo_compiler_1.1.0_linux-64.conda",
+                "https://conda.modular.com/max/linux-64/mojo-compiler-1.1.0-release.conda",
+                "1ff52b39a0d2a1bedb8c4705aadc460205ca62fc19f63426bc545e4b60a31aa0",
+                size = 69781261,
             ),
             # pixi, the raw static (musl) executable of the release: no archive,
             # nothing to unpack. Release validations install into an environment
@@ -450,10 +450,10 @@ PLATFORMS = {
             "llvm_branch_tools": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
             "llvm_branch_zstd": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
             "mojo_compiler": pin(
-                "mojo_compiler_1.0.0_osx-arm64.conda",
-                "https://conda.modular.com/max-nightly/osx-arm64/mojo-compiler-1.0.0-release.conda",
-                "c52054bc444d851e5c38cc33e790fb011a1080470244aaa59351ac5056d08c59",
-                size = 61221085,
+                "mojo_compiler_1.1.0_osx-arm64.conda",
+                "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.1.0-release.conda",
+                "6b0bac64c58040eed477c77a998ee685168b52f34256397867e85e1024d7f0a9",
+                size = 62368467,
             ),
             # pixi, the raw executable of the same release as linux-x86_64's.
             "pixi": pin(
@@ -597,10 +597,10 @@ PLATFORMS = {
             "llvm_branch_tools": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
             "llvm_branch_zstd": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
             "mojo_compiler": pin(
-                "mojo_compiler_1.0.0_linux-aarch64.conda",
-                "https://conda.modular.com/max-nightly/linux-aarch64/mojo-compiler-1.0.0-release.conda",
-                "da1772742c54f1f8f7b883e6338b1fe5de4592f2c882220dcceae623cc661e57",
-                size = 66479788,
+                "mojo_compiler_1.1.0_linux-aarch64.conda",
+                "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.1.0-release.conda",
+                "6d764a80411401b0e04ef4c8e779d7b09564cb0011d382986aefe189378451d1",
+                size = 67816551,
             ),
             # pixi, the raw static (musl) executable of the same release as the
             # other rows'.

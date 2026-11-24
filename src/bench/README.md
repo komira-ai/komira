@@ -200,7 +200,7 @@ it runs `:spsc_ring_bench`, komira's build of `bins/run_spsc_ring.mojo` (`buck2 
 the whole output, standard error included, to be the three `RESULT` lines of one capacity; then once with real values,
 where it requires the three lines, each value a finite number; then `--help`; and refused arguments, which must exit
 with status 1 (not a signal or a launch failure), print no `RESULT` line and end with the named error. `:conda` is
-buildrules' `mojo_conda` over `:lib` (`mojo-komira-ai.bench-0.1.0-mojo1.0.0_0.conda`), with the program source
+buildrules' `mojo_conda` over `:lib` (`mojo-komira-ai.bench-0.1.0-mojo1.1.0_0.conda`), with the program source
 staged (`bins`); `:conda_holds` reads the built file back and requires its `lib/mojo/bench.bins/spsc_ring.mojo`
 to be the bytes of `bins/run_spsc_ring.mojo`, the file `:bins_smoke` runs a build of. Publishing it (`mopm publish`)
 uploads, so it is a step of a CI job that takes that file, not a build action.
