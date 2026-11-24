@@ -1,0 +1,2 @@
+-- GROUP BY two keys.
+SELECT k, b1, count(*) AS n FROM nulls GROUP BY k, b1 ORDER BY k ASC NULLS FIRST, b1 ASC NULLS FIRST
