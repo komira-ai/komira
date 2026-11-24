@@ -58,11 +58,11 @@ struct TopNSinkGlobal(KeepAlive):
     (inline Atomic); built in place by `init_global`."""
 
     var combined: Optional[RecordBatch]
-    var claim: Atomic[DType.int64]
+    var claim: Atomic[Int64]
 
     def __init__(out self):
         self.combined = None
-        self.claim = Atomic[DType.int64](Int64(0))
+        self.claim = Atomic[Int64](Int64(0))
 
     def __keep_alive(mut self):
         pass

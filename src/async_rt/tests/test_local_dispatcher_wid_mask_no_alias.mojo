@@ -4,7 +4,7 @@
 # BUG: THE wid >= 32 MASK ALIASING.
 #
 # WHAT WAS WRONG. `LocalDispatcher` carried the per-dispatch DELIVERED and
-# ENTERED shard bitmasks in ONE `Atomic[DType.int64]` cell, split 32/32:
+# ENTERED shard bitmasks in ONE `Atomic[Int64]` cell, split 32/32:
 #
 #     DELIVERED:  fetch_add(1 << (32 + (wid & 31)))     # local_dispatcher:592
 #     ENTERED:    fetch_add(1 << (wid & 63))            # local_dispatcher:623

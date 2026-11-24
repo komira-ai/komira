@@ -42,7 +42,7 @@
 #                         same run, or it is a test of nothing.
 #
 # THE SPLIT IS AT THE WRITE, NOT AT THE READ, BECAUSE `Atomic` HAS NO
-# `fetch_or` (`Atomic[DType.int64]` exposes `fetch_add` / `load` / `store` and
+# `fetch_or` (`Atomic[Int64]` exposes `fetch_add` / `load` / `store` and
 # no bitwise RMW, so a `1 << width` bitmask does not compile). Two counters and
 # a branch at the call site is strictly better anyway: `narrow == 0` is
 # readable as an invariant where `mask & 0b110 == 0` is a puzzle, and neither

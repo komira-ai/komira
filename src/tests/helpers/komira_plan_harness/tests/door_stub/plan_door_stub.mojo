@@ -428,7 +428,7 @@ def _counted_release(stream_ptr: _StreamPtr) -> None:
     cs[].inner.free()
     # SAFETY: `cs` was allocated and initialised by `_export_counted`; this is
     # its one destruction, guarded by the two slots checked above.
-    cs.destroy_pointee()
+    cs.unsafe_deinit_pointee()
     cs.free()
     # SAFETY: the consumer's struct, rewritten as released (all callbacks the
     # no-op stubs, release and private_data NULL)...
@@ -505,7 +505,7 @@ def komira_ctx_new() abi("C") -> _VoidPtr:
         p[].rt.start()
     except e:
         print("plan_door_stub: komira_ctx_new: " + String(e))
-        p.destroy_pointee()
+        p.unsafe_deinit_pointee()
         p.free()
         return _null_void()
     return p.bitcast[NoneType]()
@@ -521,7 +521,7 @@ def komira_ctx_free(ctx: _VoidPtr) abi("C"):
     except e:
         print("plan_door_stub: komira_ctx_free: " + String(e))
     # SAFETY: the one destruction of the session komira_ctx_new made.
-    s.destroy_pointee()
+    s.unsafe_deinit_pointee()
     s.free()
 
 

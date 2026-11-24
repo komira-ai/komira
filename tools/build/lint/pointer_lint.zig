@@ -82,7 +82,7 @@ pub const Rule = enum {
         return switch (r) {
             .wildcard_origin => "a wildcard origin outside a module's FFI internals",
             .from_address => "a pointer made from an integer (unsafe_from_address=)",
-            .partial_move => "a partial move through a pointer: move the field out with Optional.take(), OwnedPointer.take(), swap or List.pop()",
+            .partial_move => "a partial move through a pointer: move the field out with Optional.take(), OwnedPointer.into_inner(), swap or List.pop()",
             .parallelize => "the standard library's parallelize[: run the work on a ParallelDispatch",
             .libc_redeclare => "a second declaration of libc read or open, which the standard library binds",
             .public_pointer => "a public function takes or returns a pointer",

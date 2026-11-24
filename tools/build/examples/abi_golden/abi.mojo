@@ -6,7 +6,7 @@ def abi_add(a: Int32, b: Int32) abi("C") -> Int32:
 
 @export
 def abi_sum_bytes(
-    data: UnsafePointer[UInt8, MutExternalOrigin], n: Int
+    data: UnsafePointer[UInt8, MutUntrackedOrigin], n: Int
 ) abi("C") -> Int64:
     var s: Int64 = 0
     for i in range(n):
@@ -16,7 +16,7 @@ def abi_sum_bytes(
 
 @export
 def abi_fill(
-    buf: UnsafePointer[UInt8, MutExternalOrigin], n: Int, value: UInt8
+    buf: UnsafePointer[UInt8, MutUntrackedOrigin], n: Int, value: UInt8
 ) abi("C"):
     for i in range(n):
         buf[i] = value
@@ -29,6 +29,6 @@ def abi_scale(x: Float64, k: Float64) abi("C") -> Float64:
 
 # Added in 1.1: a handle argument.
 @export
-def abi_touch(handle: UnsafePointer[NoneType, MutExternalOrigin]) abi("C") -> Int32:
+def abi_touch(handle: UnsafePointer[NoneType, MutUntrackedOrigin]) abi("C") -> Int32:
     _ = handle
     return 7

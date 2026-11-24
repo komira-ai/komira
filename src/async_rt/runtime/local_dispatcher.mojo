@@ -362,7 +362,7 @@ struct _DispatchCtx[
 # =============================================================================
 #
 # THE BUG THIS TYPE EXISTS TO REMOVE.
-# These two masks used to share ONE `Atomic[DType.int64]`, split 32/32:
+# These two masks used to share ONE `Atomic[Int64]`, split 32/32:
 # DELIVERED at `1 << (32 + (wid & 31))`, ENTERED at `1 << (wid & 63)`. Those
 # ranges overlap. `wid = 32`'s ENTERED bit IS `wid = 0`'s DELIVERED bit;
 # `wid = 63`'s ENTERED mark `fetch_add`s the Int64 SIGN BIT; `wid >= 64` wraps
@@ -413,7 +413,7 @@ struct _ShardMarkTable(Deinitable):
     comptime CAPACITY: Int = 64 * Self.WORDS
 
     # SAFETY: plain Int64 storage, mutated ONLY through the static
-    # `Atomic[DType.int64]` ops below (the same shape the dispatcher already
+    # `Atomic[Int64]` ops below (the same shape the dispatcher already
     # uses for `_in_flight`). Never read or written non-atomically after
     # construction. `UnsafePointer` never leaves this struct.
     var _delivered: Array[Int64, Self.WORDS]
@@ -1053,9 +1053,9 @@ struct LocalDispatcher[
     wake-word until in-flight reaches zero.
 
     Field set:
-      var _in_dispatch: OwnedPointer[Atomic[DType.int32]]   # re-entrance CAS
-      var _in_flight:   OwnedPointer[Atomic[DType.int64]]   # work counter
-      var _wake_word:   OwnedPointer[Atomic[DType.int32]]   # completion signal
+      var _in_dispatch: OwnedPointer[Atomic[Int32]]   # re-entrance CAS
+      var _in_flight:   OwnedPointer[Atomic[Int64]]   # work counter
+      var _wake_word:   OwnedPointer[Atomic[Int32]]   # completion signal
       var _seg_buf:     Slab[UInt8]                          # shared Segment
       var _worker_senders: List[MpscSender[_TaskEntry]]      # one per worker
 

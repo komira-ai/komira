@@ -252,9 +252,11 @@ def test_a_truncated_set_is_REFUSED_not_interned() raises -> None:
     assert_true(a.truncated, "and the set says so")
 
     var reg = AttrSetRegistry()
+    # The ids are compared as UInt32: Mojo 1.1.0 folds `Int(ATTRSET_OVERFLOW_ID)`
+    # to -1 in this program instead of 4294967295.
     assert_equal(
-        Int(reg.intern(a.copy())),
-        Int(ATTRSET_OVERFLOW_ID),
+        reg.intern(a.copy()),
+        ATTRSET_OVERFLOW_ID,
         "a truncated set is REFUSED",
     )
     assert_equal(reg.num_truncated_refused(), 1, "and the refusal is counted")
@@ -381,8 +383,8 @@ def test_a_digest_collision_is_REFUSED_never_MERGED() raises -> None:
 
     var id_b = reg.intern(b.copy())
     assert_equal(
-        Int(id_b),
-        Int(ATTRSET_OVERFLOW_ID),
+        id_b,
+        ATTRSET_OVERFLOW_ID,
         "the colliding set is REFUSED -- never handed the first set's id",
     )
     assert_true(id_b != id_a, "and above all is NOT merged into it")
@@ -438,7 +440,7 @@ def test_a_FULL_table_REFUSES_rather_than_reusing_a_slot() raises -> None:
     )
     var id = reg.intern(extra.copy())
     assert_equal(
-        Int(id), Int(ATTRSET_OVERFLOW_ID), "a FULL table REFUSES the new set"
+        id, ATTRSET_OVERFLOW_ID, "a FULL table REFUSES the new set"
     )
     assert_true(
         Int(id) != Int(EMPTY_ATTRSET_ID),

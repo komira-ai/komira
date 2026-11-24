@@ -152,7 +152,7 @@ struct IdleIndexContext[
     var _node_id: String
     var _meta_root: String  # "<key_prefix>/<index>/meta"
     var _index: String  # the index name (for example "logs")
-    var _seq: OwnedPointer[Atomic[DType.int64]]
+    var _seq: OwnedPointer[Atomic[Int64]]
     # Wall-clock microseconds read once at install; mixed into every split uuid
     # so a restarted process does not reuse an earlier process's object keys.
     var _epoch_us: UInt64
@@ -177,11 +177,11 @@ struct IdleIndexContext[
         # Atomic is not Movable, so: alloc, assign in place, then transfer
         # ownership to the OwnedPointer (not `value=`, which needs a Movable
         # payload).
-        var seq_ptr = alloc[Atomic[DType.int64]](1)
+        var seq_ptr = alloc[Atomic[Int64]](1)
         # SAFETY: fresh allocation we own; assign in place, then move into the
         # OwnedPointer, whose destructor frees it.
-        seq_ptr[] = Atomic[DType.int64](Int64(0))
-        self._seq = OwnedPointer[Atomic[DType.int64]](
+        seq_ptr[] = Atomic[Int64](Int64(0))
+        self._seq = OwnedPointer[Atomic[Int64]](
             unsafe_from_raw_pointer=seq_ptr
         )
         self._retry = retry

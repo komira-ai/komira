@@ -225,7 +225,7 @@ def run_nested_frame(
     var c = rt._begin(opts)
     var pipe = _pipe_new(rt._calls + 1)
     var nest = alloc[_Nest](1).unsafe_origin_cast[MutUntrackedOrigin]()
-    nest.init_pointee_move(
+    nest.unsafe_write(
         _Nest(UnsafePointer(to=rt).unsafe_origin_cast[MutUntrackedOrigin](), s_inst, s_spec, inputs, Word(pipe), c.call)
     )
     var nest_p = nest.bitcast[NoneType]()

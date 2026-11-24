@@ -153,7 +153,7 @@ struct JoinBuildState[
                 " already taken"
             )
         var other_owned = other.build.take()
-        var other_table = other_owned^.take()
+        var other_table = other_owned^.into_inner()
         ref self_table = self.build.value()[]
         self_table.combine(other_table^)
 

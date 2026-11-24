@@ -102,7 +102,7 @@ manifest of this package or of the sibling, run `buildrules mojo sync` with both
 writes, and build `komira//src/resources:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-komira-ai.resources-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
+(`mojo-komira-ai.resources-0.1.0-mojo1.1.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
 which therefore exists only once the test has passed. Publishing it (`mopm publish`) uploads, so it is a step of a
 CI job that takes that file, not a build action.
 

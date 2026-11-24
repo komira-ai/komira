@@ -16,7 +16,7 @@
 # floating-point rules (no nan_count: a dictionary cannot count NaN rows).
 # =============================================================================
 
-from std.memory import memcpy
+from std.memory import unsafe_memcpy
 from std.sys import size_of
 
 from arrow.primitive_array import PrimitiveArray
@@ -42,7 +42,7 @@ def encode_dict_values_plain_numeric[dtype: DType](
     if total > 0:
         # SAFETY: `out` holds `total` bytes and `dict_values` `total` bytes
         # of scalars; both alive for the copy.
-        memcpy(
+        unsafe_memcpy(
             dest=out.unsafe_ptr(),
             src=dict_values.unsafe_ptr().bitcast[UInt8](),
             count=total,

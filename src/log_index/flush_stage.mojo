@@ -191,15 +191,15 @@ struct InFlightBytesGate(Deinitable):
     ref to the same instance."""
 
     var _cap_bytes: Int64
-    var _in_flight: Atomic[DType.int64]
+    var _in_flight: Atomic[Int64]
     # Rejection counter: a rejected reservation means the producer is being
     # pushed back; distinct from the ring's overflow drop.
-    var _rejections: Atomic[DType.int64]
+    var _rejections: Atomic[Int64]
 
     def __init__(out self, cap_bytes: Int64 = DEFAULT_INFLIGHT_CAP_BYTES):
         self._cap_bytes = cap_bytes
-        self._in_flight = Atomic[DType.int64](Int64(0))
-        self._rejections = Atomic[DType.int64](Int64(0))
+        self._in_flight = Atomic[Int64](Int64(0))
+        self._rejections = Atomic[Int64](Int64(0))
 
     @always_inline
     def cap_bytes(self) -> Int64:

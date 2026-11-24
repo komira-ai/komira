@@ -81,7 +81,7 @@ After any change to a source, a test, or a manifest of this package or of the si
 with both packages staged, commit what it writes, and build `komira//src/name_registry:lib` on the farm.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
-(`mojo-komira-ai.name_registry-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own
+(`mojo-komira-ai.name_registry-0.1.0-mojo1.1.0_0.conda`), packed with the sibling's manifest beside its own
 (`members`). Publishing it (`mopm publish`) uploads, so it is a step of a CI job, not a build action.
 
 `:name_registry` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted
