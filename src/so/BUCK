@@ -160,12 +160,14 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): twelve exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): thirteen exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). Every context it creates owns
 # an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
+# komira_sql_stream runs SQL on that engine and answers an Arrow C stream; the
+# C driver below (c_abi_check) reads those streams through komira.h.
 # It is published only if every gate driver passes, each of which dlopens it
 # with RTLD_NOW and calls it as a foreign host would:
-#   gate_version       the version is 1002 (1.2);
+#   gate_version       the version is 1003 (1.3);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op, and a context (with its
 #                      engine's workers) is created and freed again;
