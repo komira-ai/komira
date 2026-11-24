@@ -236,6 +236,16 @@ def _small_server(var server: HttpServer[NoopGrpcDispatch]) raises -> HttpServer
     return server^
 
 
+def _shrink_accepted(server: HttpServer[NoopGrpcDispatch]) raises:
+    """Give the accepted connection its own 4 KiB send buffer. Linux's
+    accepted socket inherits the listener's; Darwin's does not reliably keep
+    it (the loopback buffer autotunes up), so the response burst would fit unparked.
+    Setting the option on the connection itself pins it on both."""
+    _sockopt(
+        server._conns[0].fd(), Int32(7), Int32(0x1001), Int32(4096), Int32(0), 1
+    )
+
+
 def _assert_parked(server: HttpServer[NoopGrpcDispatch]) raises:
     """The one connection holds a parked tail (it reads the server's private
     table on purpose: the park is the point of these tests)."""
@@ -598,6 +608,7 @@ def _run_burst(
         if server.live_conn_count() == 1:
             break
     assert_equal(server.live_conn_count(), 1)
+    _shrink_accepted(server)
     _send_burst(fd)
     if half_close:
         _ = external_call["shutdown", Int32](fd, Int32(1))
@@ -699,6 +710,7 @@ def test_canned_loop_drops_a_reset_peer_with_a_parked_response() raises:
         _ = server.serve_for_iterations(1, Int32(20_000))
         if server.live_conn_count() == 1:
             break
+    _shrink_accepted(server)
     _send_burst(fd)
     _ = server.serve_for_iterations(2, Int32(20_000))
     _assert_parked(server)

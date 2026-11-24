@@ -56,7 +56,11 @@ from async_rt.reactor.reactor import (
     BACKEND_MOCK,
     Reactor,
 )
-from async_rt.reactor.socket_io import try_io_read, try_io_write
+from async_rt.reactor.socket_io import (
+    set_nosigpipe,
+    try_io_read,
+    try_io_write,
+)
 from async_rt.reactor.socket_setup import inet_loopback_be
 from async_rt.runtime.tcp_stream import TcpListener, TcpStream
 from containers.slab import Slab
@@ -112,6 +116,11 @@ def _socketpair() raises -> Array[Int32, 2]:
     for i in range(2):
         if external_call["komira_fcntl_set_nonblock", Int32](pair[i]) < 0:
             raise Error("set_nonblock failed")
+        # A send after `_shut_wr` (or after the peer closed) must fail with
+        # EPIPE, not kill the process: a no-op on Linux (`try_io_write` passes
+        # MSG_NOSIGNAL), SO_NOSIGPIPE on macOS.
+        if not set_nosigpipe(pair[i]):
+            raise Error("set_nosigpipe failed")
     return pair^
 
 
