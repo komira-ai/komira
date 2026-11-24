@@ -74,7 +74,7 @@ there), Brotli `//third_party/brotli`, aws-lc `//third_party/aws-lc`, s2n-tls
 
 Verified by reading, not by running anything on a developer machine:
 
-- `libkomira`'s dynamic symbol table is exactly the thirteen `komira_*` exports
+- `libkomira`'s dynamic symbol table is exactly the fourteen `komira_*` exports
   (`exports_exact` gate in `src/so/tests/gate/`). None takes a URL, host or
   socket: they take a local file path, the bytes of a plan, SQL text, or a
   credential's kind, name and field values, and return bytes, text, an id, an
@@ -82,13 +82,16 @@ Verified by reading, not by running anything on a developer machine:
 - The closure holds network code: `async_rt`'s reactor and socket primitives,
   `net`, `http_core` (HTTP and TLS) and `http_client`, which the engine uses
   to read object stores and to call an Iceberg REST catalog. No export of the
-  thirteen reaches it: `komira_ctx_new` starts the engine's worker threads and
+  fourteen reaches it: `komira_ctx_new` starts the engine's worker threads and
   opens nothing, and `komira_register_parquet` lists and reads local files
   only (`parquet_footers` reads through `LocalFs`); `komira_sql_stream` runs
   `sdk_exec.run_sql`, whose scans read the local file system only
   (`LocalOnlyScanFs`) and whose `COPY ... TO` refuses a URL
-  (`check_copy_target`); the other exports read a local file or the bytes
-  given.
+  (`check_copy_target`); `komira_plan_stream` runs
+  `sdk_exec.run_plan`, with the same local-only scans, and the plan decoder
+  refuses a scan of a remote file system (`PLAN_WIRE_UNSUPPORTED_REMOTE_FS`)
+  and an envelope with a write target; the other exports read a local file or
+  the bytes given.
 - Nothing is sent anywhere. `docs/design/logging_and_telemetry.md` records
   that spans and metrics go to in-process rings and that "nothing exports".
   The closure reads the environment through one primitive

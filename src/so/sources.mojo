@@ -15,9 +15,13 @@ error. Nothing here holds a pointer.
 - `plan_render_text`: a serialized plan decoded and printed, not run.
 - `sql_result`: one SQL statement run on a session's engine, its answer as
   batches checked to cross the Arrow C Stream Interface.
+- `plan_result`: a serialized plan (a `WirePlanEnvelope`) decoded and run on
+  a session's engine, with no SQL text anywhere on the way, its answer as
+  `sql_result`'s is.
 """
 
 from byte_buffer.file_identity import FileIdentity
+from plan_ir.logical_plan import LogicalPlan
 from plan_wire import binding_to_bytes, plan_from_bytes, schema_to_bytes
 from scan_source.csv_source import CsvSource
 from scan_source.json_source import JsonSource
@@ -25,11 +29,16 @@ from scan_source.source_variant import SourceVariant
 from sdk.parquet_footer import read_parquet_footer
 from sdk_exec.arrow_result import ArrowResult, arrow_result
 from sdk_exec.engine_catalog import register_parquet as engine_register_parquet
+from sdk_exec.engine_plan import run_plan
 from sdk_exec.engine_sql import run_sql
 from sql.sql_ast import TvfOptions
 from sql.sql_tvf_bind import csv_tvf_schema, json_tvf_schema
 
 from .session import Session
+
+comptime STEP_DECODE = "decode"
+"""The step of `plan_result` that turns the plan's bytes into a plan; the
+steps after it are `run_plan`'s (`optimize`, `lower`, `execute`)."""
 
 
 def register_parquet(mut session: Session, name: String, path: String) raises:
@@ -133,6 +142,39 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
         stream (`arrow_result`).
     """
     var outcome = run_sql(session.engine, sql)
+    if outcome.refusal:
+        ref refusal = outcome.refusal.value()
+        raise Error(refusal.step + ": " + refusal.reason)
+    return arrow_result(outcome^)
+
+
+def plan_result(mut session: Session, var plan_bytes: List[UInt8]) raises -> ArrowResult:
+    """Decode the serialized plan `plan_bytes` (an authored `WirePlanEnvelope`)
+    and run it on `session`'s engine, returning its answer as `sql_result`
+    does: every batch checked to cross the Arrow C Stream Interface whole.
+
+    The plan is decoded with `plan_wire.plan_from_bytes` (the wire's admission,
+    value and UDF checks) and then optimized, lowered and run in-process
+    (`sdk_exec.engine_plan.run_plan`); it is never turned into SQL text, and
+    the SQL front end does not run. A scan carries its own source, so the
+    plan needs no table registered on the session. The result owns its
+    batches and keeps no reference to the session.
+
+    Raises:
+        Error `<step>: <reason>`, where `<step>` is `decode` when the bytes are
+        not a plan this build runs (among them an envelope that carries a
+        write target, `PLAN_WIRE_WRITE_TARGET_DROPPED`, or UDFs,
+        `PLAN_WIRE_UDFS_DROPPED`), and otherwise the step of `run_plan` that
+        refused (`optimize`, `lower` or `execute`); `<reason>` is that step's
+        own message, unchanged. And the export check's error naming the
+        column when a result column cannot cross the stream (`arrow_result`).
+    """
+    var plan: LogicalPlan
+    try:
+        plan = plan_from_bytes(plan_bytes^)
+    except e:
+        raise Error(String(STEP_DECODE) + ": " + String(e))
+    var outcome = run_plan(session.engine, plan^)
     if outcome.refusal:
         ref refusal = outcome.refusal.value()
         raise Error(refusal.step + ": " + refusal.reason)

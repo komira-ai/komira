@@ -9,7 +9,8 @@ file, the schema and scan bindings of Parquet, CSV and JSON files, and a plan
 rendered as text; the credential calls, which define a credential on the
 session by name and hold its values in the session's secret store; and
 `komira_sql_stream`, which runs one SQL statement on the session and hands its
-answer over as an Arrow C stream.
+answer over as an Arrow C stream, and `komira_plan_stream`, which does the same
+for a serialized logical plan, with no SQL text on the way.
 
 - `abi/komira.tsv`: the golden of the C ABI; `komira.h` is made from it.
 - `status.mojo`: the six status codes, `KOMIRA_MAX_INPUT_BYTES`, the credential
@@ -23,9 +24,9 @@ answer over as an Arrow C stream.
   kind, a name, a field's bytes in; an id out, or a raise with a named error).
 - `credential_store.mojo`: `SessionSecretStore`, the `SecretStore` the values
   live in, wiped when replaced or dropped.
-- `sources.mojo`: what the source, render and SQL calls do on values (a path,
-  the bytes of a plan or SQL text in; bytes, text or `sql_result`'s answer
-  batches out, or a raise with the engine's message).
+- `sources.mojo`: what the source, render, SQL and plan calls do on values (a
+  path, the bytes of a plan or SQL text in; bytes, text or the answer batches
+  of `sql_result` and `plan_result` out, or a raise with the engine's message).
 - `_c_abi.mojo`: the exports. It is the only file here that holds pointers, it
   is not part of the Mojo package (it is the source of the `libkomira`
   target), and its header says who owns and frees each pointer.
@@ -58,6 +59,8 @@ int32_t  komira_credential_set(void *ctx, int32_t id, int32_t field,
 int32_t  komira_credential_seal(void *ctx, int32_t id, int32_t scope);
 int32_t  komira_sql_stream(void *ctx, const char *sql,
                            struct ArrowArrayStream *out);
+int32_t  komira_plan_stream(void *ctx, const uint8_t *plan, uint64_t plan_len,
+                            struct ArrowArrayStream *out);
 ```
 
 **Status codes.** Every fallible call returns one: `KOMIRA_OK` (0),
@@ -108,7 +111,7 @@ from so import ABI_MAJOR, ABI_MINOR, abi_version
 from std.testing import assert_equal
 
 assert_equal(abi_version(), ABI_MAJOR * 1000 + ABI_MINOR)
-assert_equal(abi_version(), Int32(1003))
+assert_equal(abi_version(), Int32(1004))
 ```
 
 **The handle.** `komira_ctx_new` returns a context the caller owns until it
@@ -233,6 +236,46 @@ except e:
 assert_true(refused.startswith("bind: "))
 ```
 
+**Running a plan.** `komira_plan_stream(ctx, plan, plan_len, out)` decodes
+`plan[0..plan_len]`, an authored `komira.plan.v1.WirePlanEnvelope` (the bytes
+`komira_plan_render` renders and the SDKs' plan builders write), optimizes it,
+lowers it and runs it on the session's engine, and fills `*out` as
+`komira_sql_stream` does. No SQL text is made and the SQL front end does not
+run: a frame built by an SDK reaches the engine as a plan. A scan leaf carries
+its own source (its paths and the schema `komira_parquet_schema` answers), so
+the plan needs no table registered on the session.
+
+- `*out`, its ownership and its lifetime are as for `komira_sql_stream`.
+- Refusals: NULL `ctx` is -1; a NULL `plan` or `out` is -2; a `plan_len` above
+  `KOMIRA_MAX_INPUT_BYTES` is -5 before any byte of `plan` is read (exactly
+  64 MiB is read, and the decoder then refuses what is above its own 16 MiB
+  bound); every other refusal is -3, with the last error `<step>: <reason>`:
+  `decode` for bytes that are not a plan this build runs (SQL text among them,
+  a version it does not speak, and an envelope that carries a write target or
+  UDFs, `PLAN_WIRE_WRITE_TARGET_DROPPED` and `PLAN_WIRE_UDFS_DROPPED`), then
+  `optimize`, `lower` or `execute`. The context answers the next call after any
+  refusal.
+
+`plan_result` is the call on values: the plan's bytes in, an `ArrowResult` out,
+or a raise with the `<step>: <reason>` text. The route from the optimizer down
+is `sdk_exec.engine_plan.run_plan`, the one `run_sql` takes after it binds.
+
+```mojo
+from so import STEP_DECODE, Session, plan_result
+from std.testing import assert_true
+
+var session = Session()
+var not_a_plan = List[UInt8]()
+not_a_plan.append(UInt8(0xFF))
+not_a_plan.append(UInt8(0x00))
+var refused = String()
+try:
+    _ = plan_result(session, not_a_plan^)
+except e:
+    refused = String(e)
+assert_true(refused.startswith(String(STEP_DECODE) + ": "))
+```
+
 **Credentials.** A credential is defined in three calls and then belongs to
 the session under its name. `komira_credential_add(ctx, kind, name, &id)` opens
 a definition; `komira_credential_set(ctx, id, field, value, value_len)` sets one
@@ -312,9 +355,9 @@ length of that one call.
 
 The library is published only if the gate passes: the exports check, then
 fourteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
-foreign host would. Seven cover the skeleton: the version (1003, which is 1.3),
+foreign host would. Seven cover the skeleton: the version (1004, which is 1.4),
 create and free (distinct handles, separate sessions), no symbol beyond the
-thirteen, a fresh session's empty error, the two-call protocol (zero capacity, one
+fourteen, a fresh session's empty error, the two-call protocol (zero capacity, one
 byte short, exact, larger), a NULL context, and a NULL `out_len`. One driver per
 new call writes its input file under `$TEST_TMPDIR` and checks a good input,
 NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
@@ -323,7 +366,7 @@ two-call protocol; a good call after a refusal leaves no error.
 `gate_credentials` defines a credential through the three calls and checks each
 named refusal word for word, the NULL and length cases, and that `*out_id` is
 untouched on a refusal.
-`exports_exact` makes the thirteen names above the whole dynamic symbol table.
+`exports_exact` makes the fourteen names above the whole dynamic symbol table.
 On Linux the eleven C owners in the library's closure (async, async_api,
 compression, crypto, fs, http_core, libc, metrics, objectstore, parquet_codec,
 scan_source) are linked as their own shared libraries (`native_owners`), not
@@ -472,7 +515,7 @@ the extra `$ORIGIN/../../lib` finds the one `lib/` of the variants directory fro
 
 ## The header and the golden
 
-`abi/komira.tsv` is the golden of the ABI: the version (1.3), one row per export
+`abi/komira.tsv` is the golden of the ABI: the version (1.4), one row per export
 with its return type, argument types and the version that added it, and one row
 per status code, limit and credential kind, field and scope (`constant`). `komira_abi_golden` checks it on every
 build against the `@export abi("C")` functions of `_c_abi.mojo` (names, return and
@@ -496,7 +539,7 @@ headers. The golden does not check that its version was raised when
 a row changed: that compares with the previous release.
 
 `tests/c/abi_driver.c` is a C program that includes `komira.h` and nothing of
-ours. It opens `./libkomira.so`, binds each of the thirteen functions to a pointer
+ours. It opens `./libkomira.so`, binds each of the fourteen functions to a pointer
 declared with the header's own prototype, and checks the version in the header
 against `komira_abi_version()`, the status codes, the input bound
 (`KOMIRA_MAX_INPUT_BYTES` plus one is -5), and the last-error round trip (NULL
@@ -513,7 +556,19 @@ three-row Parquet file it writes with `COPY` from a CSV file under
 leaving `*out` byte for byte as written and followed by a good query on the
 same context; a text of exactly `KOMIRA_MAX_INPUT_BYTES` bytes that runs and
 one of a byte more that is -5; and a stream read whole after its context was
-freed. It is built by zig cc and run against the published library:
+freed. It runs plans through `komira_plan_stream`, each a `WirePlanEnvelope` it
+encodes by hand (a scan of a Parquet file, the schema bytes
+`komira_parquet_schema` answers spliced in), on a second context with no table
+registered: the three-row file's scan answers what `SELECT k FROM three`
+answers on the first (names, formats, flags, rows and values), and so does the
+no-row fixture's against `SELECT i64, s FROM two`; SQL text as plan bytes,
+garbage, an envelope of version 3 and exactly 64 MiB of garbage are -3 at
+`decode`, a scan of a missing file is -3 at `lower` naming the file, a NULL
+`plan` or `out` is -2, and a `plan_len` of 64 MiB plus one and `UINT64_MAX` are
+-5 with a 3-byte buffer unread, each leaving `*out` as written and followed by
+a good plan on the same context; a NULL `ctx` is -1; and a plan's stream is read
+whole after its context was freed. It is built by zig cc and run against the
+published library:
 
 ```sh
 ./buck2 build komira//src/so:c_abi_check     # exit 0 of the driver, or red
@@ -525,8 +580,9 @@ packaging change that lists it.
 ## Not done
 
 No release-over-release version check and no packaged header yet; the session
-holds an engine, and `komira_sql_stream` runs SQL on it, but no call runs a plan
-(`komira_plan_stream`) or a UDF yet; no session
+holds an engine, and `komira_sql_stream` runs SQL and `komira_plan_stream` a
+plan on it, but no call runs a UDF or writes a plan's answer to a file yet
+(the plan door refuses an envelope with UDFs or a write target); no session
 options (the engine takes the host profile's worker count and memory budget); the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).
 The calls that run a query, ported from the earlier SDK, their result as an Arrow
 C stream, and what an abort does at the boundary (not contained yet: an abort

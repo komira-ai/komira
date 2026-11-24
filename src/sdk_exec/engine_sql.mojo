@@ -3,8 +3,9 @@
 # =============================================================================
 #
 # In order: tokenize and parse; bind against the context's catalog and footers;
-# optimize, then hold each subtree the optimized plan repeats once
-# (`optimize_for_run`); lower with inputs from the same footers; run. A
+# then the route a plan takes (`engine_plan.run_plan_batch`): optimize, then
+# hold each subtree the optimized plan repeats once (`optimize_for_run`);
+# lower with inputs from the same footers; run. A
 # `COPY ... TO` runs its query the same way and then writes the result as a
 # local Parquet, CSV or newline-delimited JSON file (`engine_write`, still
 # step `execute`), answering one row with the BIGINT column `Count`; its
@@ -13,6 +14,10 @@
 # ends the call, and the outcome says which step and the step's own message
 # unchanged; the door retries nothing and keeps no second route. Nothing here
 # raises: a failure of any step is a value.
+#
+# Each call counts one statement parsed on the context
+# (`EngineContext.statements_parsed`) as it starts to parse; the plan door
+# (`engine_plan.run_plan`) parses nothing and leaves the count as it is.
 #
 # The footer cache is pinned to the call (`EngineContext.begin_query`), so the
 # binder and lowering read each file's footer once and the next call reads
@@ -29,22 +34,12 @@
 # Parse and bind are the steps `sql.sql_frontend.plan_from_sql` composes; they
 # are called one by one here so a refusal names the step that refused.
 # `STATEMENT_NOT_A_QUERY` is `sql.sql_frontend`'s refusal, named here too so a
-# caller of this module finds it beside the `STEP_*` names.
+# caller of this module finds it beside the `STEP_*` names. `SqlOutcome`,
+# `SqlRefusal`, `OPTIMIZE_UNRESOLVED_SCALAR` and the steps from `optimize` on
+# are `engine_plan`'s, named here too; `optimize_for_run` is
+# `engine_plan.optimize_for_run`.
 
-from arrow.schema import RecordBatch
-from optimizer.optimizer_config import OptimizerConfig
-from optimizer.optimizer_driver import optimize
-from optimizer.optimizer_scalar_deps import ScalarDepTable
-from optimizer.plan_cse import plan_cse_eliminate
-from plan_ir.logical_plan import LogicalPlan
-from phase_timers.phase_timers import (
-    PH_BIND,
-    PH_LOWER,
-    PH_OPTIMIZE,
-    PH_PARSE,
-    pt_now,
-    pt_record,
-)
+from phase_timers.phase_timers import PH_BIND, PH_PARSE, pt_now, pt_record
 from sql.sql_ast import STMT_COPY, STMT_QUERY
 from sql.sql_binder import bind_statement
 from sql.sql_frontend import (
@@ -56,76 +51,33 @@ from fs.scan_fs import ScanFsOpener
 from pipeline_exec.source_parquet import LocalOnlyScanFs
 
 from .engine_context import EngineContext
-from .engine_execute import run_lowered_plan_with
-from .engine_lower import lower_for_context
+from .engine_plan import (
+    OPTIMIZE_UNRESOLVED_SCALAR as _OPTIMIZE_UNRESOLVED_SCALAR,
+    STEP_EXECUTE as _STEP_EXECUTE,
+    STEP_LOWER as _STEP_LOWER,
+    STEP_OPTIMIZE as _STEP_OPTIMIZE,
+    SqlOutcome as _SqlOutcome,
+    SqlRefusal as _SqlRefusal,
+    run_plan_batch,
+)
 from .engine_write import check_copy_target, count_result, write_copy_result
 
 comptime STEP_PARSE = "parse"
 comptime STEP_BIND = "bind"
-comptime STEP_OPTIMIZE = "optimize"
-comptime STEP_LOWER = "lower"
-comptime STEP_EXECUTE = "execute"
+comptime STEP_OPTIMIZE = _STEP_OPTIMIZE
+comptime STEP_LOWER = _STEP_LOWER
+comptime STEP_EXECUTE = _STEP_EXECUTE
+comptime OPTIMIZE_UNRESOLVED_SCALAR = _OPTIMIZE_UNRESOLVED_SCALAR
+"""Refusal (step `optimize`): `engine_plan`'s, named here too."""
+comptime SqlOutcome = _SqlOutcome
+"""`engine_plan.SqlOutcome`: the batches, or the step that refused and why."""
+comptime SqlRefusal = _SqlRefusal
+"""`engine_plan.SqlRefusal`."""
 
 comptime STATEMENT_NOT_A_QUERY = _SQL_STATEMENT_NOT_A_QUERY
 """Refusal (step `bind`): CREATE TABLE AS, which writes into a catalog table,
 and no catalog is bound. The same name `sql.sql_frontend.plan_from_sql`
 refuses a write with."""
-
-comptime OPTIMIZE_UNRESOLVED_SCALAR = "OPTIMIZE_UNRESOLVED_SCALAR"
-"""Refusal (step `optimize`): the plan needs a scalar subquery executed first,
-which this door does not do yet."""
-
-
-struct SqlRefusal(Copyable, Movable):
-    """Which step refused and why."""
-
-    var step: String
-    """One of the `STEP_*` names."""
-    var reason: String
-    """The step's own message, unchanged."""
-
-    def __init__(out self, var step: String, var reason: String):
-        self.step = step^
-        self.reason = reason^
-
-
-struct SqlOutcome(Movable):
-    """What `run_sql` returns: the result batches, or the refusal."""
-
-    var batches: List[RecordBatch]
-    var refusal: Optional[SqlRefusal]
-
-    def __init__(out self):
-        self.batches = List[RecordBatch]()
-        self.refusal = None
-
-    def __init__(out self, var step: String, var reason: String):
-        self.batches = List[RecordBatch]()
-        self.refusal = Optional(SqlRefusal(step^, reason^))
-
-    def ok(self) -> Bool:
-        return not self.refusal
-
-
-def optimize_for_run(var plan: LogicalPlan) raises -> LogicalPlan:
-    """The plan `run_sql` lowers for the bound `plan`: `optimize`, then each
-    subtree the optimized plan repeats held once and every later occurrence a
-    reference to it (`plan_cse_eliminate`: a CTE the query reads twice, two
-    equal UNION ALL branches), which lowering cuts once
-    (`lowering.cut_shared`).
-
-    Raises:
-        OPTIMIZE_UNRESOLVED_SCALAR when the plan needs a scalar subquery
-        executed first; an optimizer pass's own error otherwise.
-    """
-    var deps = ScalarDepTable()
-    var optimized = optimize(plan^, OptimizerConfig(), deps)
-    if deps.has_requests():
-        raise Error(
-            String(OPTIMIZE_UNRESOLVED_SCALAR)
-            + ": the plan needs a scalar subquery executed first"
-        )
-    return plan_cse_eliminate(optimized^)
 
 
 def run_sql(mut ctx: EngineContext, text: String) -> SqlOutcome:
@@ -143,6 +95,7 @@ def run_sql_with[
     whose source names a bucket) reads through the file system `opener` opens
     on the bucket."""
     ctx.begin_query()
+    ctx.statements_parsed += 1
     var step = String(STEP_PARSE)
     try:
         var t_parse = pt_now()
@@ -162,16 +115,7 @@ def run_sql_with[
                 " to write a file"
             )
         var plan = bound.take_plan()
-        step = String(STEP_OPTIMIZE)
-        var t_optimize = pt_now()
-        var optimized = optimize_for_run(plan^)
-        pt_record[PH_OPTIMIZE](t_optimize)
-        step = String(STEP_LOWER)
-        var t_lower = pt_now()
-        var lowered = lower_for_context(optimized, ctx)
-        pt_record[PH_LOWER](t_lower)
-        step = String(STEP_EXECUTE)
-        var batch = run_lowered_plan_with(ctx, lowered^, opener^)
+        var batch = run_plan_batch(ctx, plan^, opener^, step)
         var outcome = SqlOutcome()
         if bound.kind == STMT_COPY:
             var rows = write_copy_result(

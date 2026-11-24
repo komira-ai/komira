@@ -57,7 +57,7 @@
 # union's branches in order, a join's right child first), so it reaches the
 # canonical occurrence first. This pass is not part of
 # `optimizer_driver`'s fixed order, so `optimize` never produces a reference;
-# `sdk_exec.engine_sql.optimize_for_run` calls it on the optimized plan.
+# `sdk_exec.engine_plan.optimize_for_run` calls it on the optimized plan.
 #
 # COST. Analysis is linear in the plan apart from the hashes: each
 # scan-bearing node costs one render of its subtree, so a deep chain of

@@ -2,7 +2,7 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of so that holds
 # pointers.
 # =============================================================================
-# Thirteen `@export abi("C")` functions are the library's whole surface today:
+# Fourteen `@export abi("C")` functions are the library's whole surface today:
 #
 #   int32_t  komira_abi_version(void);
 #   void    *komira_ctx_new(void);
@@ -31,6 +31,9 @@
 #   int32_t  komira_credential_seal(void *ctx, int32_t id, int32_t scope);
 #   int32_t  komira_sql_stream(void *ctx, const char *sql,
 #                              struct ArrowArrayStream *out);
+#   int32_t  komira_plan_stream(void *ctx, const uint8_t *plan,
+#                               uint64_t plan_len,
+#                               struct ArrowArrayStream *out);
 #
 # Ownership. `komira_ctx_new` creates a `Session` (the last error and the
 # engine, whose workers start here) in an `OwnedPointer`, relinquishes the
@@ -43,8 +46,8 @@
 # of NULL does nothing. Every other pointer is the caller's: this library
 # reads or writes it during the call and keeps none.
 #
-# The Arrow stream. `komira_sql_stream` fills the caller's
-# `struct ArrowArrayStream` (allocated by the caller) only when it returns
+# The Arrow stream. `komira_sql_stream` and `komira_plan_stream` fill the caller's
+# `struct ArrowArrayStream` (allocated by the caller) only when the call returns
 # `KOMIRA_OK`; on any other status the struct is left exactly as the caller
 # wrote it. After `KOMIRA_OK` the caller owns the stream and calls its
 # `release` once, as the Arrow C Stream Interface requires; the stream owns
@@ -66,7 +69,8 @@
 # string that is not valid UTF-8 is refused as `KOMIRA_ERR_ENGINE` with a last
 # error, never used. The SQL text of `komira_sql_stream` is bounded like a
 # byte input: its NUL is looked for in at most `KOMIRA_MAX_INPUT_BYTES + 1`
-# bytes, and a text with none there is `KOMIRA_ERR_TOO_LARGE`. The plan bytes of `komira_plan_render` are
+# bytes, and a text with none there is `KOMIRA_ERR_TOO_LARGE`. The plan bytes
+# of `komira_plan_render` and `komira_plan_stream` are
 # `plan[0..plan_len]`, with the length an argument because a serialized plan
 # holds NUL bytes; they are copied in full before anything is decoded. The
 # length is bounded: above `KOMIRA_MAX_INPUT_BYTES` (64 MiB) the call returns
@@ -103,6 +107,7 @@ from so.sources import (
     json_binding_bytes,
     parquet_schema_bytes,
     plan_render_text,
+    plan_result,
     register_parquet,
     sql_result,
 )
@@ -135,13 +140,13 @@ comptime _Len = UnsafePointer[UInt64, MutUntrackedOrigin]
 # SAFETY: `const char *`, a NUL-terminated string the caller keeps alive for
 # the call; it is copied into a `String` before any use.
 comptime CStr = UnsafePointer[UInt8, MutUntrackedOrigin]
-# SAFETY: `const uint8_t *`, the plan bytes of `komira_plan_render` and the
-# value of `komira_credential_set`: read for their length argument, copied in
-# full, never written.
+# SAFETY: `const uint8_t *`, the plan bytes of `komira_plan_render` and
+# `komira_plan_stream` and the value of `komira_credential_set`: read for their
+# length argument, copied in full, never written.
 comptime ConstBytes = UnsafePointer[UInt8, MutUntrackedOrigin]
 # SAFETY: `struct ArrowArrayStream *`, a stream the caller allocated: never
-# read, and written once, whole, only when `komira_sql_stream` returns
-# `KOMIRA_OK`; from then on the caller owns what it holds.
+# read, and written once, whole, only when `komira_sql_stream` or
+# `komira_plan_stream` returns `KOMIRA_OK`; from then on the caller owns what it holds.
 comptime ArrowStream = UnsafePointer[CArrowArrayStream, MutUntrackedOrigin]
 
 
@@ -668,6 +673,53 @@ def komira_sql_stream(ctx: Handle, sql: CStr, out_stream: ArrowStream) abi("C") 
         return KOMIRA_ERR_ENGINE
     try:
         var result = sql_result(session[], text)
+        # Nothing is written to `*out_stream` before this call, and it writes the
+        # stream whole once its own checks have passed.
+        build_record_batch_stream(result.take_batches(), result.take_schema(), out_stream)
+        return KOMIRA_OK
+    except e:
+        session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+
+
+@export
+def komira_plan_stream(
+    ctx: Handle, plan: ConstBytes, plan_len: UInt64, out_stream: ArrowStream
+) abi("C") -> Int32:
+    """Decode the serialized plan `plan[0..plan_len]` (an authored
+    `WirePlanEnvelope`), run it on the session and fill the caller's
+    `struct ArrowArrayStream` at `out_stream` with its answer.
+
+    The plan is optimized, lowered and run in-process; no SQL text is made
+    and the SQL front end does not run. A scan carries its own source, so no
+    table need be registered. The answer is computed before the call returns.
+    `*out_stream` is written only on `KOMIRA_OK`, and the caller then owns the
+    stream and releases it once; it needs neither the session nor the handle,
+    so `komira_ctx_free` may come first. Returns `KOMIRA_ERR_NULL_CTX` for a
+    NULL `ctx`, `KOMIRA_ERR_NULL_ARG` for a NULL `plan` or `out_stream`,
+    `KOMIRA_ERR_TOO_LARGE` for a `plan_len` above `KOMIRA_MAX_INPUT_BYTES`
+    (64 MiB), checked before the plan is read, and `KOMIRA_ERR_ENGINE` for
+    every refusal, with the last error `<step>: <reason>` (`decode`,
+    `optimize`, `lower` or `execute`; an envelope with a write target or UDFs
+    is refused at `decode`) or the export's error naming a column the stream
+    cannot carry. The session stays usable after any refusal.
+    """
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(plan) == 0 or Int(out_stream) == 0:
+        session[].set_error(String("komira_plan_stream: plan or out is NULL"))
+        return KOMIRA_ERR_NULL_ARG
+    if input_length_status(plan_len) != KOMIRA_OK:
+        session[].set_error(
+            String("komira_plan_stream: plan_len is above ")
+            + String(KOMIRA_MAX_INPUT_BYTES)
+            + String(" bytes")
+        )
+        return KOMIRA_ERR_TOO_LARGE
+    try:
+        var result = plan_result(session[], _copy_in(plan, plan_len))
         # Nothing is written to `*out_stream` before this call, and it writes the
         # stream whole once its own checks have passed.
         build_record_batch_stream(result.take_batches(), result.take_schema(), out_stream)
