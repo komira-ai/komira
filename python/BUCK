@@ -1,3 +1,4 @@
+load("@komira//python:dependencies.bzl", "PYARROW_MACOS", "PYARROW_REQUIREMENT", "PYARROW_WHEELS")
 load("@komira//python:install_test.bzl", "picked_files", "python_versions", "wheel_install_test")
 load("@komira//python:pythons.bzl", "CLASSIFIERS", "HOSTED", "PYTHONS", "REQUIRES_PYTHON")
 load("@komira//third_party/modular:pins.bzl", "OTHER_MOJO", "TOOLCHAIN_MOJO", "is_newer", "modular_wheel")
@@ -68,14 +69,15 @@ python_versions(
 # native owner libraries and the three Mojo runtime libraries of the pinned
 # compiler that built it, with the licence texts of their package
 # (third_party/modular/BUCK; NOTICE says which files each covers). The wheel
-# requires no other distribution. Written by `wheel_file`
+# requires no distribution of Modular's. Written by `wheel_file`
 # (tools/build/package/README.md, "The Python wheel"), which refuses a library
 # that needs a newer glibc than the tag's, a GLIBCXX_ or CXXABI_ version above
 # the bounds below, a run path not under `$ORIGIN`, or a NEEDED library that is
 # neither in the wheel nor a manylinux system library (the C++ runtime,
 # libstdc++ and libgcc_s, is one: the host provides it). The description is
-# README.md. Release 1 returns no Arrow and encodes no plan, so neither pyarrow
-# nor protobuf is required, and the generated plan modules are not in the
+# README.md. Its one requirement is pyarrow (`PYARROW_REQUIREMENT`,
+# dependencies.bzl), which a `Result` reads as; the wheel encodes no plan, so
+# protobuf is not required and the generated plan modules are not in the
 # wheel. Unstamped the version is 0.0.0; the release set's stamp gives
 # 0.1.<N>.
 #
@@ -190,6 +192,7 @@ _SHARED_METADATA = {
         "Source": "https://github.com/komira-ai/komira",
     },
     "readme": "README.md",
+    "requires_dist": [PYARROW_REQUIREMENT],
     "requires_python": REQUIRES_PYTHON,
     "summary": "SQL over local files, with the komira query engine in process",
 }
@@ -222,12 +225,16 @@ wheel_file(
 # The wheel installed into an empty virtual environment of the hermetic
 # interpreter, with no pip, no index, no network and no library path, and
 # python/tests/test_installed.py run there in isolated mode from an empty
-# directory (python/install_test.bzl): the environment holds komira and
+# directory (python/install_test.bzl), with the pinned pyarrow wheel of the
+# interpreter's minor beside it (tests/BUCK), which the installer holds to the
+# wheel's Requires-Dist: the environment holds komira and its requirement and
 # nothing else, no `modular/` directory and no distribution of Modular's; the
 # package imports from the prefix at the wheel's version, with its licences
-# and the runtime's licence texts and no Requires-Dist; libkomira loads at the
-# ABI version of src/so/abi/komira.tsv, a Parquet file registers and a missing
-# one raises KomiraError, a serialized plan renders, and libkomira, its native
+# and the runtime's licence texts and the Requires-Dist `--requires-dist`;
+# libkomira loads at the ABI version of src/so/abi/komira.tsv, a Parquet file
+# registers and a missing one raises KomiraError, `SELECT 1 AS n` and an
+# aggregate over readings.parquet answer their rows as pyarrow, a serialized
+# plan renders, and libkomira, its native
 # owners and the three Mojo runtime libraries are mapped from
 # <site>/komira/_lib and nothing else of theirs is. One test per supported
 # minor (pythons.bzl), on its pinned interpreter: `:wheel_install_test` on
@@ -246,6 +253,7 @@ _TEST_FILES = {
     "--notice": "komira//:NOTICE",
     "--parquet": "komira//src/so:tests/fixtures/two_columns.parquet",
     "--plan-hex": "komira//python/tests:fixtures/scan_plan.hex",
+    "--readings": "examples/readings.parquet",
     "--s2n-tls-license": _THIRD_PARTY_LICENSE_FILES["S2N_TLS_LICENSE"],
 }
 
@@ -278,11 +286,19 @@ _PYTHON_METADATA_ARGS = ["--requires-python", _PYTHON_METADATA["requires_python"
     for a in ["--classifier", c]
 ]
 
+# The pinned pyarrow wheel file of each minor (tests/BUCK), installed beside
+# komira's wheel: `pip install komira` installs it with komira.
+_PYARROW_WHL = {suffix: "komira//python/tests:" + w["file"] for suffix, w in PYARROW_WHEELS.items()}
+
+_PYARROW_WHL_MACOS = "komira//python/tests:" + PYARROW_MACOS["file"]
+
 _INSTALLED_ARGS = [
     "--version",
     _VERSION,
     "--license-expression",
     _LICENSE_EXPRESSION,
+    "--requires-dist",
+    PYARROW_REQUIREMENT,
 ] + _PYTHON_METADATA_ARGS
 
 # Modular's wheels of the Mojo compiler (third_party/modular/pins.bzl): the
@@ -301,7 +317,7 @@ _OTHER_RUNTIME = "newer" if is_newer(_OTHER_MOJO, _TOOLCHAIN_MOJO) else "older"
 [wheel_install_test(
     name = "wheel_install_test" + p["suffix"],
     python = p["python"],
-    wheels = [":komira_wheel"],
+    wheels = [":komira_wheel", _PYARROW_WHL[p["suffix"]]],
     script = "komira//python/tests:test_installed.py",
     args = _INSTALLED_ARGS,
     files = _TEST_FILES,
@@ -314,7 +330,7 @@ _OTHER_RUNTIME = "newer" if is_newer(_OTHER_MOJO, _TOOLCHAIN_MOJO) else "older"
 wheel_install_test(
     name = "wheel_install_test_macos_arm64",
     python = "komira//third_party/python:cpython_macos",
-    wheels = [":komira_wheel_macos_arm64"],
+    wheels = [":komira_wheel_macos_arm64", _PYARROW_WHL_MACOS],
     script = "komira//python/tests:test_installed.py",
     args = _INSTALLED_ARGS,
     files = _TEST_FILES,
@@ -323,7 +339,7 @@ wheel_install_test(
 )
 
 # The same test on installs that must fail, each with the line it fails with
-# (on CPython 3.13; `refuses_python_outside_requires_python`, after them, on
+# (on CPython 3.13, beside its pyarrow unless the case says otherwise; `refuses_python_outside_requires_python`, after them, on
 # CPython 3.10). The first wheels below are the wheel with one thing wrong
 # that the wheel rule does not refuse: its native files are picked one by one
 # out of the same `[dist]` directory.
@@ -384,6 +400,15 @@ wheel_file(
     **(_WHEEL | {"requires_python": ">=3.12"})
 )
 
+# The wheel with another pyarrow range than PYARROW_REQUIREMENT: it installs
+# beside pyarrow 25.0.1, and the test refuses its metadata.
+wheel_file(
+    name = "komira_wheel_other_pyarrow_range",
+    files = _PY_FILES | _NATIVE_FILES,
+    executable = sorted(_NATIVE_FILES.keys()),
+    **(_WHEEL | {"requires_dist": ["pyarrow>=24"]})
+)
+
 wheel_file(
     name = "komira_wheel_arm64_tag",
     files = _PY_FILES,
@@ -403,6 +428,9 @@ _CLASSIFIERS_WITHOUT_311_REPR = "[" + ", ".join([
 
 _LOAD_ERROR = "komira._errors.LibraryLoadError: cannot load libkomira from <site>/komira/_lib/libkomira.so: "
 
+# The pyarrow wheel of CPython 3.13, which these cases run on.
+_PYARROW_313 = _PYARROW_WHL[""]
+
 [wheel_install_test(
     name = name,
     python = "komira//third_party/python:cpython",
@@ -415,7 +443,7 @@ _LOAD_ERROR = "komira._errors.LibraryLoadError: cannot load libkomira from <site
     # The wheel without libkomira.so.
     (
         "refuses_missing_libkomira",
-        [":komira_wheel_without_libkomira"],
+        [":komira_wheel_without_libkomira", _PYARROW_313],
         _LOAD_ERROR + "<site>/komira/_lib/libkomira.so: cannot open shared object file: No such file or directory",
     ),
     # A wheel whose owner libraries libkomira's run path does not reach: the
@@ -423,14 +451,14 @@ _LOAD_ERROR = "komira._errors.LibraryLoadError: cannot load libkomira from <site
     # error.
     (
         "refuses_owners_off_run_path",
-        [":komira_wheel_misplaced_owners"],
+        [":komira_wheel_misplaced_owners", _PYARROW_313],
         _LOAD_ERROR + "libkomira_async_rt_native.so.1: cannot open shared object file: No such file or directory",
     ),
     # A wheel without libMSupportGlobals.so: libKGENCompilerRTShared.so, found
     # in lib/, needs it, and the error names the missing file.
     (
         "refuses_missing_runtime_library",
-        [":komira_wheel_without_runtime_library"],
+        [":komira_wheel_without_runtime_library", _PYARROW_313],
         _LOAD_ERROR + "libMSupportGlobals.so: cannot open shared object file: No such file or directory",
     ),
     # A wheel tagged for another platform is not installed.
@@ -440,28 +468,49 @@ _LOAD_ERROR = "komira._errors.LibraryLoadError: cannot load libkomira from <site
         "install: the wheel of komira is tagged py3-none-manylinux_2_35_aarch64, which this interpreter (CPython 3.13 on x86_64) does not install",
     ),
     # Another distribution beside the wheel is refused by the test: the
-    # environment of `pip install komira` holds komira and nothing else.
+    # environment of `pip install komira` holds komira, its requirement and
+    # nothing else.
     (
         "refuses_other_distribution",
-        [":komira_wheel"] + _MODULAR,
+        [":komira_wheel", _PYARROW_313] + _MODULAR,
         "AssertionError: the environment holds komira and also mojo-compiler, mojo-compiler-mojo-libs",
+    ),
+    # The wheel without pyarrow: the installer refuses the unmet
+    # requirement, as pip would install it.
+    (
+        "refuses_missing_requirement",
+        [":komira_wheel"],
+        "install: komira {} requires {}, which is not installed".format(_VERSION, PYARROW_REQUIREMENT),
+    ),
+    # A pyarrow wheel of another CPython minor (cp312 on 3.13) is not
+    # installed: a cp ABI tag names the one minor it runs on.
+    (
+        "refuses_requirement_of_another_minor",
+        [":komira_wheel", _PYARROW_WHL["_py312"]],
+        "install: the wheel of pyarrow is tagged cp312-cp312-manylinux_2_28_x86_64, which this interpreter (CPython 3.13 on x86_64) does not install",
+    ),
+    # The installed Requires-Dist, held to PYARROW_REQUIREMENT.
+    (
+        "refuses_requires_dist_not_the_declared_range",
+        [":komira_wheel_other_pyarrow_range", _PYARROW_313],
+        "AssertionError: the wheel's Requires-Dist is ['pyarrow>=24'], not ['{}']".format(PYARROW_REQUIREMENT),
     ),
     # The metadata of the Pythons, held to the supported list: a classifier
     # left out, and a Requires-Python that starts a minor later.
     (
         "refuses_classifiers_not_the_supported_pythons",
-        [":komira_wheel_without_py311_classifier"],
+        [":komira_wheel_without_py311_classifier", _PYARROW_313],
         "AssertionError: the wheel's Classifier lines are {}, not {}".format(_CLASSIFIERS_WITHOUT_311_REPR, _CLASSIFIERS_REPR),
     ),
     (
         "refuses_requires_python_not_the_oldest_supported",
-        [":komira_wheel_requires_python_312"],
+        [":komira_wheel_requires_python_312", _PYARROW_313],
         "AssertionError: the wheel's Requires-Python is >=3.12, not >=3.11",
     ),
     # mojo-compiler without the wheel it requires: the installer's own check.
     (
         "refuses_unmet_requirement",
-        [":komira_wheel", _MODULAR[0]],
+        [":komira_wheel", _PYARROW_313, _MODULAR[0]],
         "install: mojo-compiler {v} requires mojo-compiler-mojo-libs=={v}, which is not installed".format(v = _TOOLCHAIN_MOJO),
     ),
 ]]
@@ -613,9 +662,10 @@ wheel_same_check(
 #
 # `pip install --upgrade komira`: two releases of the wheel, the previous
 # (build number 999999998) and the current (999999999), installed in that order
-# into one empty environment, the first uninstalled before the second as pip
-# does (wheel_install_test `upgrade`), and python/tests/test_upgrade.py run
-# there: the environment holds the current release's dist-info and no other,
+# into one empty environment after their requirement, pyarrow, the first
+# uninstalled before the second as pip does (wheel_install_test `upgrade`),
+# and python/tests/test_upgrade.py run there: the environment holds the
+# current release's dist-info and no other komira one,
 # every file only the previous release had is gone, and everything the
 # clean-environment test holds of a fresh install holds. The previous release
 # is the package's files plus two it dropped since: a module and a file in
@@ -650,6 +700,8 @@ _UPGRADE_ARGS = [
     _UPGRADE_VERSION,
     "--license-expression",
     _LICENSE_EXPRESSION,
+    "--requires-dist",
+    PYARROW_REQUIREMENT,
 ] + _PYTHON_METADATA_ARGS + [a for p in sorted(_PREVIOUS_ONLY.keys()) for a in ["--expect-removed", p]]
 
 # The releases in the order given.
@@ -661,7 +713,7 @@ _RELEASES = {
 [wheel_install_test(
     name = "upgrade_test" + p["suffix"],
     python = p["python"],
-    wheels = _RELEASES["previous,current"],
+    wheels = [_PYARROW_WHL[p["suffix"]]] + _RELEASES["previous,current"],
     script = "komira//python/tests:test_upgrade.py",
     args = _UPGRADE_ARGS,
     files = _UPGRADE_FILES,
@@ -671,7 +723,7 @@ _RELEASES = {
 [wheel_install_test(
     name = name,
     python = "komira//third_party/python:cpython",
-    wheels = wheels,
+    wheels = [_PYARROW_313] + wheels,
     script = "komira//python/tests:test_upgrade.py",
     args = _UPGRADE_ARGS,
     files = _UPGRADE_FILES,
@@ -739,7 +791,7 @@ _BESIDE_FILES = {"--parquet": "komira//src/so:tests/fixtures/two_columns.parquet
 [wheel_install_test(
     name = name,
     python = "komira//third_party/python:cpython",
-    wheels = [":komira_wheel"] + modular,
+    wheels = [":komira_wheel", _PYARROW_313] + modular,
     script = "komira//python/tests:test_beside_modular.py",
     args = [
         "--order",
@@ -817,6 +869,17 @@ export_file(
     name = "examples/quickstart.expected",
     src = "examples/quickstart.expected",
     visibility = ["//python/smoke:"],
+)
+
+# The quickstart's data: the aggregate of the install test (`--readings`
+# above) and of python/tests' sql_test.
+export_file(
+    name = "examples/readings.parquet",
+    src = "examples/readings.parquet",
+    visibility = [
+        "//python/smoke:",
+        "//python/tests:",
+    ],
 )
 
 export_file(

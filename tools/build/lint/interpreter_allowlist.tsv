@@ -11,6 +11,7 @@
 buck2	a thin wrapper: runs the pinned buck2 release
 python/examples/quickstart.py	the Python package's quickstart: the example the README shows and the release smoke runs (python/examples/README.md)
 python/komira/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_arrow.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_errors.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_native.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_ops/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
@@ -78,6 +79,8 @@ python/tests/test_runtime.py	the Python package's tests: the SDK surface is test
 python/tests/test_upgrade.py	the Python package's tests: the wheel upgraded from its previous release is tested in Python, by the interpreter it is installed for
 python/tests/test_variants.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_session.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_sql.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_sql_fake.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_two_call.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/wheel_install_run.py	the Python package's tests: installs the wheel into an empty environment of the pinned interpreter that runs it (python/install_test.bzl), as that interpreter's own installer does
 python/tests/udf_host.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)

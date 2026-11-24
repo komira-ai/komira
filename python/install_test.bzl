@@ -28,8 +28,8 @@ passed to the script as `--host-lib` paths, `args` as they are, and `files`
 only if the run passed: with `expect_failure`, only if it failed with exactly
 that line (`<site>` and `<python>` standing for the site directory and the
 interpreter's prefix). With `upgrade`, `wheels` are the releases of one
-distribution, oldest first, and each is installed the way `pip install` of a
-newer version installs it: the release before it is uninstalled first (its
+distribution, oldest first, after any distribution they require, and each
+release is installed the way `pip install` of a newer version installs it: the release before it is uninstalled first (its
 RECORD's files deleted), and the script is given `--removed <path>` for each
 file the replaced release had that the new one lacks. Building the target is
 running the test. It runs on `exec_compatible_with`, Linux x86_64 unless given
