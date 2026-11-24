@@ -9,6 +9,17 @@
  * close-on-exec, so a worker started by one engine thread never inherits
  * another worker's channel, and a worker's end of file is its own.
  *
+ * Linux makes each descriptor close-on-exec as it is created
+ * (SOCK_CLOEXEC, MFD_CLOEXEC), and the cancel word's file is a memfd.
+ * macOS has neither: the socket pair is marked with fcntl after it is made,
+ * and the file is made in the scratch directory (TMPDIR, else the user's
+ * temporary directory) and unlinked at once, so it has no name and nothing
+ * is left behind. Since another engine thread could spawn between
+ * socketpair and fcntl, a macOS worker is started with
+ * POSIX_SPAWN_CLOEXEC_DEFAULT: it inherits only fds 3 and 4 and those of
+ * 0, 1 and 2 that are open and not close-on-exec, which is what Linux's
+ * spawn gives it.
+ *
  * kudfw_request sends one message and waits for the reply in 1 ms poll
  * ticks. Each tick reads the host's clock (the deadline is against it) and
  * the call's cancel flag; a flag seen set is written to the cancel word; a
@@ -26,6 +37,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
 #include <signal.h>
 #include <spawn.h>
@@ -90,6 +102,68 @@ void kudfw_log(const komira_udf_host* host, int32_t level, const char* fmt, ...)
   vsnprintf(buf, sizeof(buf), fmt, ap);
   va_end(ap);
   host->log(host->host_data, level, buf);
+}
+
+#ifdef __APPLE__
+static int set_cloexec(int fd) {
+  int f = fcntl(fd, F_GETFD);
+  return f < 0 ? -1 : fcntl(fd, F_SETFD, f | FD_CLOEXEC);
+}
+
+/* The cancel word's file: made in the scratch directory, unlinked, and
+ * close-on-exec from the start. -1 with errno on failure. */
+static int cancel_file(void) {
+  const char* dir = getenv("TMPDIR");
+  char tmp[PATH_MAX];
+  if (dir == NULL || dir[0] == 0) {
+    size_t n = confstr(_CS_DARWIN_USER_TEMP_DIR, tmp, sizeof(tmp));
+    if (n == 0 || n > sizeof(tmp)) {
+      errno = ENOENT;
+      return -1;
+    }
+    dir = tmp;
+  }
+  char path[PATH_MAX];
+  if (snprintf(path, sizeof(path), "%s/komira-udf-cancel-XXXXXX", dir) >= (int)sizeof(path)) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  int fd = mkostemp(path, O_CLOEXEC);
+  if (fd >= 0) unlink(path);
+  return fd;
+}
+#endif
+
+int kudfw_channel_open(int sv[2], int* cancel_fd, const char** what) {
+  *cancel_fd = -1;
+#ifdef __APPLE__
+  *what = "socketpair";
+  if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) return -1;
+  if (set_cloexec(sv[0]) != 0 || set_cloexec(sv[1]) != 0) {
+    int e = errno;
+    close(sv[0]);
+    close(sv[1]);
+    errno = e;
+    return -1;
+  }
+  *what = "cancel file";
+  int mfd = cancel_file();
+#else
+  *what = "socketpair";
+  if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) != 0) return -1;
+  *what = "memfd_create";
+  int mfd = memfd_create("komira-udf-cancel", MFD_CLOEXEC);
+#endif
+  if (mfd < 0 || ftruncate(mfd, 4096) != 0) {
+    int e = errno;
+    close(sv[0]);
+    close(sv[1]);
+    if (mfd >= 0) close(mfd);
+    errno = e;
+    return -1;
+  }
+  *cancel_fd = mfd;
+  return 0;
 }
 
 /* A close-on-exec descriptor numbered above 4, so dup2 to 3 or 4 in the
@@ -390,16 +464,10 @@ int32_t kudfw_spawn(const kudfw_launcher* l, const komira_udf_host* host, kudfw_
   w->cancel_fd = -1;
   int64_t t0 = kudfw_mono_ns();
   int sv[2];
-  if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) != 0)
-    return kudfw_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "socketpair: %s", strerror(errno));
-  int mfd = memfd_create("komira-udf-cancel", MFD_CLOEXEC);
-  if (mfd < 0 || ftruncate(mfd, 4096) != 0) {
-    int e = errno;
-    close(sv[0]);
-    close(sv[1]);
-    if (mfd >= 0) close(mfd);
-    return kudfw_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "memfd_create: %s", strerror(e));
-  }
+  int mfd = -1;
+  const char* what = NULL;
+  if (kudfw_channel_open(sv, &mfd, &what) != 0)
+    return kudfw_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "%s: %s", what, strerror(errno));
   int child = high_fd(sv[1]);
   mfd = high_fd(mfd);
   posix_spawn_file_actions_t fa;
@@ -413,7 +481,15 @@ int32_t kudfw_spawn(const kudfw_launcher* l, const komira_udf_host* host, kudfw_
   sigfillset(&all);
   posix_spawnattr_setsigmask(&attr, &none);
   posix_spawnattr_setsigdefault(&attr, &all);
+#ifdef __APPLE__
+  for (int fd = 0; fd <= 2; fd++) {
+    int f = fcntl(fd, F_GETFD);
+    if (f >= 0 && (f & FD_CLOEXEC) == 0) posix_spawn_file_actions_addinherit_np(&fa, fd);
+  }
+  posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_CLOEXEC_DEFAULT);
+#else
   posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF);
+#endif
   pid_t pid = -1;
   int rc = posix_spawn(&pid, l->argv[0], &fa, &attr, (char* const*)l->argv, (char* const*)l->envp);
   posix_spawn_file_actions_destroy(&fa);

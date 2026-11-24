@@ -110,7 +110,8 @@ def loaded_objects() -> Int:
 
 
 def heap_in_use() -> Int:
-    """The bytes of the C heap in use (native/probe.c, glibc's mallinfo2)."""
+    """The bytes of the C heap in use (native/probe.c: glibc's mallinfo2 on
+    Linux, the malloc zones' bytes in use on macOS)."""
     return Int(external_call["komira_udf_spike_heap_in_use", Int64]())
 
 

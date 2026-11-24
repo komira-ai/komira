@@ -11,7 +11,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "m
 #                            verified bytes, checks the library's describe and
 #                            forwards the C ABI to its table (:native)
 #   native/probe.c           the count of objects the dynamic loader mapped,
-#                            the C heap in use and the open descriptors
+#                            the C heap in use and the open descriptors, on
+#                            Linux and on macOS
 #   native/variant_lib.c     the C library with one change per init, for the
 #                            runtime's refusal and context cases
 #   code.mojo                libraries staged as code objects, code sets
@@ -66,6 +67,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "m
 #   test_threads      both libraries called from four threads at once, on
 #                     threads the Mojo runtime did not create, every output
 #                     read back.
+#   test_probe        the probe's own readings on the system it runs on
+#                     (Linux or macOS): a dlopen counted once, 8 MiB of heap
+#                     held and freed, a descriptor added and taken away, and
+#                     descriptor 0 closed and restored.
 # Not welded: :native_bench, the measurements (cold start, per-batch cost,
 # rows/s, threads) as one JSON object on standard output. It fails only on a
 # broken call; no time is asserted. `run_id` is its input, so editing it
@@ -86,6 +91,7 @@ mojo_library(
         "tests/test_library_calls.mojo",
         "tests/test_native_io.mojo",
         "tests/test_native_loader.mojo",
+        "tests/test_probe.mojo",
         "tests/test_stdin_closed.mojo",
         "tests/test_threads.mojo",
     ],
@@ -135,6 +141,9 @@ mojo_library(
             "variant_no_scalar.so": ":variant_no_scalar",
             "variant_one_short.so": ":variant_one_short",
             "variant_short_table.so": ":variant_short_table",
+        },
+        "tests/test_probe.mojo": {
+            "native_c.so": ":native_c",
         },
         "tests/test_stdin_closed.mojo": {
             "native.so": ":native",

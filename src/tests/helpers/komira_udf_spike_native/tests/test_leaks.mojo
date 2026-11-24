@@ -1,7 +1,7 @@
 # The native runtime, and both libraries behind it, free what they allocate.
 #
 # A leak has no other effect a host can see, so this test reads the C heap
-# (glibc's mallinfo2, native/probe.c) around the same calls made on the
+# (native/probe.c: glibc's mallinfo2 on Linux, the malloc zones on macOS) around the same calls made on the
 # native runtime and on the echo runtime directly (echo.so, the reference
 # runtime whose C fixtures are the C library's). The harness allocates the
 # same for both, so the heap's growth over the same rounds must match.
@@ -18,7 +18,7 @@
 #     kept; the bytes read for a mismatched or unreadable code object, or a
 #     refusal's message, never freed).
 #   - the Mojo library's own blocks: it reserves every block from the host
-#     while the block lives (its heap is not glibc's, so mallinfo2 cannot
+#     while the block lives (its heap is not the C heap, so the probe cannot
 #     see it); the reserved bytes are the same after the rounds as before
 #     and zero after shutdown (a handle, scratch block or table not freed).
 #   - instances the counted library refuses (slot 98) cost the runtime what
