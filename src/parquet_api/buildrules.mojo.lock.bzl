@@ -112,7 +112,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "efcae023d184a5dbd090984801febbf4d5038e483d5167acd935164a1cc550e8"}
+        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "0ad438c8c0cd7480d9f117a9881f8343927a800de3795196ad9ff4dc96f07e02"}
       ],
       "deps": ["komira-ai/parquet_api@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -242,7 +242,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "efcae023d184a5dbd090984801febbf4d5038e483d5167acd935164a1cc550e8"}
+        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "0ad438c8c0cd7480d9f117a9881f8343927a800de3795196ad9ff4dc96f07e02"}
       ],
       "deps": ["komira-ai/parquet_api@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -369,7 +369,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "efcae023d184a5dbd090984801febbf4d5038e483d5167acd935164a1cc550e8"}
+        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "0ad438c8c0cd7480d9f117a9881f8343927a800de3795196ad9ff4dc96f07e02"}
       ],
       "deps": ["komira-ai/parquet_api@0.1.0#mojo1.1.0/lib"],
       "natives": [],

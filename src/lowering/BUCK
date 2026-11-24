@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Lowering: a bound LogicalPlan, a HostProfile and the resolved inputs to the
-# PhysicalPlan IR (version 18) and the ParamTable its segments index. Pure: the
+# PhysicalPlan IR (version 20) and the ParamTable its segments index. Pure: the
 # entry opens no file, reads no clock and no environment variable and touches
 # no global (README.md).
 #
@@ -16,6 +16,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        type and dictionary footer, the group keys in column
 #                        order, the sort, limit, filter, distinct and
 #                        aggregate it composes with.
+# test_lower_iceberg     a scan of an Iceberg table (a binding of kind
+#                        komira.iceberg.table) as a SOURCE_ICEBERG segment:
+#                        the spec the inputs carry (files, delete files,
+#                        bound columns and field ids), its filter and
+#                        projection as operators over the full schema, the
+#                        render line, the row estimate from the inputs, the
+#                        refusal of a scan whose files were not planned, and
+#                        a binding of another kind still not cut.
 # test_lower_names       the names a render and a refusal print for every
 #                        source, edge, order, operator and sink tag and for a
 #                        tag with no name, and the two group keys (over an
@@ -49,11 +57,20 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        after a left build, a three-table chain, a join under
 #                        an aggregate, a breaker below the build side, the
 #                        estimates and the scan order.
+# test_lower_jsonl_scan  a JSON scan is a SOURCE_JSONL segment whose spec reads
+#                        the projection at the bound types; a pushed filter
+#                        reads the whole file and becomes an operator; a
+#                        projection of a column the schema lacks and an
+#                        unbounded scan are refused; Avro is still refused.
 # test_lower_refusals    every refusal token, raised by the plan that should
 #                        raise it with the text that names why, and a plan
 #                        beside each that lowers (a distinct over a column
 #                        list, a repeated name, no column or a column no sink
 #                        row serves included).
+# test_lower_gcs_azure_scan
+#                        a Parquet scan of GCS objects and of Azure blobs: the
+#                        spec carries the bucket or container beside one key
+#                        and several, and the render line names the store.
 # test_lower_s3_scan     a Parquet scan of S3 objects: the spec carries the
 #                        bucket beside the keys for one key, several and Hive
 #                        partitioned keys, and the render line names the store
@@ -133,6 +150,9 @@ mojo_library(
         "tests/test_lower_joins.mojo",
         "tests/test_lower_csv.mojo",
         "tests/test_lower_distinct.mojo",
+        "tests/test_lower_gcs_azure_scan.mojo",
+        "tests/test_lower_iceberg.mojo",
+        "tests/test_lower_jsonl_scan.mojo",
         "tests/test_lower_names.mojo",
         "tests/test_lower_plans.mojo",
         "tests/test_lower_refusals.mojo",

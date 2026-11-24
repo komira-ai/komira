@@ -1,8 +1,8 @@
 load("@komira//python:install_test.bzl", "picked_files", "python_versions", "wheel_install_test")
 load("@komira//python:pythons.bzl", "CLASSIFIERS", "HOSTED", "PYTHONS", "REQUIRES_PYTHON")
-load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_file_at_stamp", "wheel_libs_check", "wheel_version")
+load("@komira//third_party/modular:pins.bzl", "OTHER_MOJO", "TOOLCHAIN_MOJO", "is_newer", "modular_wheel")
+load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_file_at_stamp", "wheel_libs_check", "wheel_same_check", "wheel_version")
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
-load("@komira//tools/build/platforms:table.bzl", "asset")
 load("@komira//tools/build/python:defs.bzl", "python_proto", "python_source_package")
 
 # The import package `komira` (README.md): its files at their paths, as the site
@@ -86,7 +86,9 @@ python_versions(
 # tested only by pypi-macos-arm64.yml, on the farm's macOS workers, never in a
 # pull request (tools/build/ci/rules.bzl, EXCLUDED); its targets name
 # `--target-platforms komira//tools/build/platforms:darwin-arm64`. On macOS the
-# wheel rule refuses a Mach-O member that needs a newer macOS than the tag's.
+# wheel rule refuses a Mach-O member that needs a newer macOS than the tag's,
+# and one whose code signature is missing or does not match it; "The macOS
+# wheel, read back" below holds the finished file.
 
 _PLATFORM = "linux-x86_64"
 
@@ -238,8 +240,8 @@ _TEST_FILES = {
 _VERSION = wheel_version(read_config("komira", "package_stamp", "0"))
 
 # The Mojo of the toolchain: the version of its conda pin
-# (`mojo_compiler_<version>_<subdir>.conda`).
-_TOOLCHAIN_MOJO = asset(_PLATFORM, "mojo_compiler")["name"].split("_")[2]
+# (`mojo_compiler_<version>_<subdir>.conda`; third_party/modular/pins.bzl).
+_TOOLCHAIN_MOJO = TOOLCHAIN_MOJO
 
 # What the wheel's metadata says of the Pythons it installs on, written out
 # here rather than read from pythons.bzl: test_installed.py holds the installed
@@ -270,14 +272,18 @@ _INSTALLED_ARGS = [
     _LICENSE_EXPRESSION,
 ] + _PYTHON_METADATA_ARGS
 
-# Modular's wheels of the Mojo compiler (third_party/modular/BUCK): 1.1.0, the
-# toolchain's version, with the wheel it requires, and 1.2.0.
-_MODULAR = [
-    "komira//third_party/modular:mojo_compiler-1.1.0-py3-none-manylinux_2_34_x86_64.whl",
-    "komira//third_party/modular:mojo_compiler_mojo_libs-1.1.0-py3-none-any.whl",
-]
+# Modular's wheels of the Mojo compiler (third_party/modular/pins.bzl): the
+# toolchain's version, with the wheel it requires, and the compiler wheel of
+# the newest other version of the table.
+_MODULAR = [modular_wheel(_TOOLCHAIN_MOJO, "compiler"), modular_wheel(_TOOLCHAIN_MOJO, "libs")]
 
-_MODULAR_OTHER = ["komira//third_party/modular:mojo_compiler-1.2.0-py3-none-manylinux_2_34_x86_64.whl"]
+_OTHER_MOJO = OTHER_MOJO
+
+_MODULAR_OTHER = [modular_wheel(_OTHER_MOJO, "compiler")]
+
+# How the other version's runtime relates to the toolchain's: `newer` or
+# `older` (test_beside_modular.py says what each order does with each).
+_OTHER_RUNTIME = "newer" if is_newer(_OTHER_MOJO, _TOOLCHAIN_MOJO) else "older"
 
 [wheel_install_test(
     name = "wheel_install_test" + p["suffix"],
@@ -443,7 +449,7 @@ _LOAD_ERROR = "komira._errors.LibraryLoadError: cannot load libkomira from <site
     (
         "refuses_unmet_requirement",
         [":komira_wheel", _MODULAR[0]],
-        "install: mojo-compiler 1.1.0 requires mojo-compiler-mojo-libs==1.1.0, which is not installed",
+        "install: mojo-compiler {v} requires mojo-compiler-mojo-libs=={v}, which is not installed".format(v = _TOOLCHAIN_MOJO),
     ),
 ]]
 
@@ -527,6 +533,68 @@ wheel_file(
         "entry: the wheel has no komira/_lib/libkomira.so",
     ),
 ]]
+
+# ---- The macOS wheel, read back ----------------------------------------------
+#
+# What the macOS arm64 wheel holds, each held by a check that reads the
+# finished wheel; built by pypi-macos-arm64.yml's build-macos-arm64 beside the
+# wheel, never in a pull request (tools/build/ci/rules.bzl, EXCLUDED). The
+# wheel rule itself already refuses, on every member: an ELF file (a Linux
+# library), a Mach-O file for a CPU other than arm64 or a universal one, a
+# minimum macOS above the tag's, an install name that is not @rpath/<file>, a
+# run path that is not @loader_path-relative, a load that is neither a member,
+# nor under /usr/lib or /System/Library, and a code signature that is missing
+# or does not match the file's pages (wheel/policy.zig, wheel/codesign.zig).
+#
+# `:wheel_libs_macos_arm64`: from komira/_lib/libkomira.dylib, the library
+# _native.load opens on macOS, every load command resolves to a member through
+# the loading library's own run path, or to a macOS system library, and every
+# Mach-O member is one libkomira loads; the three Mojo runtime dylibs are in
+# the wheel once each with the bytes of the toolchain's runtime, with their
+# licence texts (wheel/libs.zig).
+#
+# `:wheel_same_macos_arm64`: the macOS wheel and the Linux wheel of the same
+# build are the same package: every Python file, METADATA and the licence
+# files are in both with the same bytes and modes, WHEEL differs only in the
+# platform part of its Tag (both `py3-none`, so the same Pythons), and the
+# files only one of them has are its native libraries, listed here
+# (wheel/compare.zig).
+
+_RUNTIME_MACOS = [
+    "libKGENCompilerRTShared.dylib",
+    "libAsyncRTRuntimeGlobals.dylib",
+    "libMSupportGlobals.dylib",
+]
+
+wheel_libs_check(
+    name = "wheel_libs_macos_arm64",
+    wheel = ":komira_wheel_macos_arm64",
+    entry = "komira/_lib/libkomira.dylib",
+    # The darwin toolchain's runtime directory itself: that toolchain executes
+    # on macOS and this check on Linux, so it is not reached through it.
+    runtime = "komira//tools/build/toolchains/darwin:mojo_runtime",
+    runtime_dists = _LIBS_CHECK["runtime_dists"],
+    runtime_libs = _RUNTIME_MACOS,
+    runtime_licenses = _LIBS_CHECK["runtime_licenses"],
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
+)
+
+# The Linux wheel of the same build, configured for linux-x86_64 whatever the
+# platform of the target that reads it.
+configured_alias(
+    name = "komira_wheel_linux_x86_64",
+    actual = ":komira_wheel",
+    platform = "komira//tools/build/platforms:linux-x86_64",
+)
+
+wheel_same_check(
+    name = "wheel_same_macos_arm64",
+    wheel = ":komira_wheel_macos_arm64",
+    like = ":komira_wheel_linux_x86_64",
+    only_in_wheel = ["komira/_lib/libkomira.dylib"] + ["komira/_lib/lib/" + n for n in _RUNTIME_MACOS],
+    only_in_like = ["komira/_lib/libkomira.so"] + ["komira/_lib/lib/" + n for n in _OWNERS + _RUNTIME],
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
+)
 
 # ---- Upgrading from the previous release ----------------------------------
 #
@@ -640,12 +708,18 @@ _RELEASES = {
 #   mapped;
 # - the toolchain's version, komira's first: Modular's libKGENCompilerRTShared.so
 #   is a second copy, bound to komira's two other libraries; both work;
-# - 1.2.0, Modular's first: the runtime check refuses it by name;
-# - 1.2.0, komira's first: Modular's library fails to load, with the loader's
-#   `undefined symbol` (its 1.2.0 code needs symbols komira's 1.1.0
-#   libraries lack), and komira keeps working.
+# - another version (`_OTHER_MOJO`), Modular's first: the runtime check
+#   refuses it by name;
+# - another version, komira's first: a newer Modular library fails to load,
+#   with the loader's `undefined symbol` (its code needs symbols komira's
+#   older libraries lack), and komira keeps working; an older one (inferred
+#   from its `M::` symbols; first run at a 1.1.0 or 1.2.0 toolchain) loads as a
+#   second copy bound to komira's two other libraries (komira's newer ones
+#   define every `M::` symbol it needs), and komira keeps working.
 #
-# 1.2.0's mojo-compiler-mojo-libs is not installed (`skip_requirements`, pip's
+# The toolchain's version picks both (third_party/modular/pins.bzl), so a
+# toolchain pin moves these tests with it. The other version's
+# mojo-compiler-mojo-libs is not installed (`skip_requirements`, pip's
 # --no-deps): the compiler wheel's runtime is all the test loads.
 _BESIDE_FILES = {"--parquet": "komira//src/so:tests/fixtures/two_columns.parquet"}
 
@@ -668,32 +742,46 @@ _BESIDE_FILES = {"--parquet": "komira//src/so:tests/fixtures/two_columns.parquet
     skip_requirements = modular == _MODULAR_OTHER,
     expect_failure = expect,
 ) for name, modular, order, runtime, version, toolchain, expect in [
-    ("beside_modular_loaded_first", _MODULAR, "modular-first", "same", "1.1.0", _TOOLCHAIN_MOJO, None),
-    ("beside_modular_loaded_after", _MODULAR, "komira-first", "same", "1.1.0", _TOOLCHAIN_MOJO, None),
+    ("beside_modular_loaded_first", _MODULAR, "modular-first", "same", _TOOLCHAIN_MOJO, _TOOLCHAIN_MOJO, None),
+    ("beside_modular_loaded_after", _MODULAR, "komira-first", "same", _TOOLCHAIN_MOJO, _TOOLCHAIN_MOJO, None),
     (
         "beside_other_mojo_loaded_first",
         _MODULAR_OTHER,
         "modular-first",
-        "other",
-        "1.2.0",
+        _OTHER_RUNTIME,
+        _OTHER_MOJO,
         _TOOLCHAIN_MOJO,
         "komira._errors.LibraryLoadError: the Mojo runtime library libKGENCompilerRTShared.so is already loaded " +
         "from <site>/modular/lib, and it is another build than komira's " +
         "(<site>/komira/_lib/lib/libKGENCompilerRTShared.so): a process holds one Mojo runtime, so komira " +
         "cannot be loaded beside Mojo code built with another Mojo version",
     ),
-    ("beside_other_mojo_loaded_after", _MODULAR_OTHER, "komira-first", "other", "1.2.0", _TOOLCHAIN_MOJO, None),
+    ("beside_other_mojo_loaded_after", _MODULAR_OTHER, "komira-first", _OTHER_RUNTIME, _OTHER_MOJO, _TOOLCHAIN_MOJO, None),
     # The same-version cases hold the installed mojo-compiler to the
-    # toolchain's Mojo: a toolchain pin moved without third_party/modular
-    # fails here.
+    # toolchain's Mojo: a pins.bzl row whose wheels are another version's
+    # fails there, as this case does.
     (
         "refuses_modular_unlike_toolchain",
         _MODULAR,
         "modular-first",
         "same",
-        "1.1.0",
+        _TOOLCHAIN_MOJO,
         "0.0.1",
-        "AssertionError: the same-version cases need Modular's runtime at the toolchain's Mojo: mojo-compiler 1.1.0 is installed, the toolchain's is 0.0.1",
+        "AssertionError: the same-version cases need Modular's runtime at the toolchain's Mojo: " +
+        "mojo-compiler {} is installed, the toolchain's is 0.0.1".format(_TOOLCHAIN_MOJO),
+    ),
+    # The other-version cases hold the installed mojo-compiler to another
+    # Mojo than the toolchain's: the toolchain's own wheel given as the other
+    # version is refused.
+    (
+        "refuses_other_mojo_at_toolchain",
+        _MODULAR,
+        "komira-first",
+        _OTHER_RUNTIME,
+        _TOOLCHAIN_MOJO,
+        _TOOLCHAIN_MOJO,
+        "AssertionError: the other-version cases need Modular's runtime at another Mojo than the toolchain's: " +
+        "mojo-compiler {v} is installed, the toolchain's is {v}".format(v = _TOOLCHAIN_MOJO),
     ),
 ]]
 

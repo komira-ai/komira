@@ -162,13 +162,13 @@ def _raw(
     )
 
 
-def _snap(id: Int64, seq: Int64) -> TableUpdate:
+def _snap(id: Int64, seq: Int64, ts: Int64 = 1000) -> TableUpdate:
     return TableUpdate.add_snapshot(
         NewSnapshot(
             id,
             None,
             seq,
-            1000,
+            ts,
             0,
             String("s3://wh/m.avro"),
             String("append"),
@@ -406,6 +406,21 @@ def test_add_snapshot_advances_the_last_sequence_number() raises:
     assert_equal(len(md.snapshots), 2)
     assert_equal(md.snapshots[1].snapshot_id, Int64(12))
     assert_equal(md.snapshots[1].sequence_number, Int64(5))
+
+
+def test_add_snapshot_moves_last_updated_ms_forward_only() raises:
+    var c = _seeded()
+    assert_equal(
+        _commit(c, _no_reqs(), _ups(_snap(11, 1, 5000))).status, 200
+    )
+    var doc = parse_json_value(c.metadata_json(String("db"), String("t")))
+    assert_equal(int_member(doc, String("last-updated-ms"), -1), Int64(5000))
+    # An older snapshot timestamp leaves the newer last-updated-ms in place.
+    assert_equal(
+        _commit(c, _no_reqs(), _ups(_snap(12, 2, 4000))).status, 200
+    )
+    doc = parse_json_value(c.metadata_json(String("db"), String("t")))
+    assert_equal(int_member(doc, String("last-updated-ms"), -1), Int64(5000))
 
 
 def test_add_snapshot_refuses_a_sequence_number_not_above_the_last() raises:
@@ -791,7 +806,7 @@ def test_the_starting_values_of_a_new_table() raises:
         empty_table_metadata().serialize(),
         String(
             '{"format-version":2,"table-uuid":"","location":"",'
-            '"last-sequence-number":0,"last-column-id":0,'
+            '"last-sequence-number":0,"last-updated-ms":0,"last-column-id":0,'
             '"current-schema-id":-1,"schemas":[],"default-spec-id":0,'
             '"partition-specs":[],"last-partition-id":999,'
             '"default-sort-order-id":0,"sort-orders":[],"properties":{},'
@@ -815,6 +830,7 @@ def main() raises:
     test_set_properties_merges_replacing_and_adding()
     test_assign_uuid_format_version_and_location_updates_take_effect()
     test_add_snapshot_advances_the_last_sequence_number()
+    test_add_snapshot_moves_last_updated_ms_forward_only()
     test_add_snapshot_refuses_a_sequence_number_not_above_the_last()
     test_add_snapshot_refuses_an_id_the_table_already_has()
     test_set_snapshot_ref_to_an_unknown_snapshot_is_400()

@@ -1,0 +1,103 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Reads Apache Iceberg tables (format versions 1 and 2) written by any engine,
+# from local files: the metadata.json of any writer (`table_metadata`), a path
+# resolved to a table pinned to one snapshot with its Arrow schema, scan binding
+# and local file paths (`table_ref`), any Avro object container file decoded by
+# its own schema (`avro_datum`) and read as a manifest list and manifests
+# (`manifests`), the pruning evaluator (`prune`), the scan planner that chooses
+# data files and the delete files that apply to them (`scan_planner`), and the
+# reader of those files with position and equality deletes applied
+# (`scan_reader`). `table_fixture` builds the metadata and manifest bytes of a
+# small table for tests, here because each welded test is compiled from one file
+# and the packages that scan tables share it. It is separate from `iceberg`, the
+# writer of the file-based tables of cdc_ingest, which reads only what it wrote.
+#
+# The welded tests (each file's header says what each test proves):
+# - test_avro_datum: every Avro kind, unions, arrays in both block forms, maps,
+#   the codec, the header map and each way a file is damaged, refused by message.
+# - test_table_metadata: v1 and v2 metadata.json as Iceberg Java writes them,
+#   `refs.main` against `current-snapshot-id`, the version refusals and the
+#   malformed documents.
+# - test_table_ref: a directory through its version hint or a metadata file, file
+#   URIs, the scheme refusal, every type mapping and refusal, snapshot pinning and
+#   time travel, the binding's identity and `local_path_of` with relocation.
+# - test_manifests: the manifest list and the manifest by field name, sequence
+#   number inheritance, partition values of every Avro type, both map layouts and
+#   the codecs.
+# - test_iceberg_prune: every pruning rule of the design (NaN, truncated string
+#   bounds, int bounds under a long column, missing metrics, null counts,
+#   identity partition values and manifest summaries).
+# - test_scan_planner: manifest and entry skipping, DELETED entries, delete file
+#   matching by sequence number and partition, the refusals, v1 inline
+#   manifests, moved tables and time travel.
+# - test_scan_reader: binding by field id or name, widening, the null columns,
+#   the refusals, the empty scans and a planned table read end to end, over
+#   Parquet files written by parquet_writer.
+# - test_scan_reader_deletes: position and equality deletes in Parquet and Avro,
+#   null equal to null, NaN equal to NaN, and each malformed delete file.
+#
+# deps is the full transitive closure of the packages the sources import: arrow,
+# avro, json, parquet, parquet_api, fs, physical_plan, plan_expr, scan_source,
+# column_kernels and containers. runtime_paths is for the welded tests' scratch
+# directory; parquet_writer writes their data files.
+mojo_library(
+    name = "iceberg_scan",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_api:async_api",
+        "//src/async_rt:async_rt",
+        "//src/atomic_alias:atomic_alias",
+        "//src/avro:avro",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/containers:containers",
+        "//src/counters:counters",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/join_assembly:join_assembly",
+        "//src/json:json",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/name_registry:name_registry",
+        "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/physical_plan:physical_plan",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_stats:plan_stats",
+        "//src/row_format:row_format",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_source:scan_source",
+        "//src/simd_ops:simd_ops",
+        "//src/spsc_ring:spsc_ring",
+        "//src/sync:sync",
+        "//src/trace:trace",
+        "//src/udf:udf",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    test_deps = [
+        "//src/parquet_writer:parquet_writer",
+    ],
+    test_srcs = [
+        "tests/test_avro_datum.mojo",
+        "tests/test_iceberg_prune.mojo",
+        "tests/test_manifests.mojo",
+        "tests/test_scan_planner.mojo",
+        "tests/test_scan_reader.mojo",
+        "tests/test_scan_reader_deletes.mojo",
+        "tests/test_table_metadata.mojo",
+        "tests/test_table_ref.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -5,7 +5,8 @@
 #
 # What each test proves:
 #   1. A scalar subquery binds to an uncorrelated CORR_KIND_SCALAR (kind=2)
-#      expression; one projecting two columns is refused.
+#      expression, or one with an outer reference when its body names an
+#      outer column; one projecting two columns is refused.
 #   2. EXISTS binds to CORR_KIND_EXISTS (kind=0), NOT EXISTS to
 #      CORR_KIND_NOT_EXISTS (kind=1), IN to EXISTS with the membership equi
 #      folded in; the outer references are recorded (`outer_refs=#n`).
@@ -210,9 +211,13 @@ def test_scalar_subqueries() raises:
         "SELECT k FROM t WHERE k = (SELECT k, w FROM u)",
         "ERR: SQL bind error: a scalar subquery must project exactly one column (got 2)"
     )
+    # A body naming an outer column is a correlated scalar: one outer
+    # reference (test_sql_bind_corr_scalar holds its body).
     _check(
         "SELECT k FROM t WHERE (SELECT max(w) FROM u WHERE u.k = t.k) > 1",
-        "ERR: SQL bind error: unknown column 't.k'"
+        "Project(exprs=[ColRef(k)])\n"
+        "  Filter(predicate=BinaryOp(GT, CorrelatedSubquery(kind=2, outer_refs=#1, inner_tag=2), Literal(ScalarValue(int64, 1))))\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
 
 

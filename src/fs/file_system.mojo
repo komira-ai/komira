@@ -356,7 +356,8 @@ trait FileSystem(Movable, Deinitable):
     # (`parquet.ParquetMetadataCache`, one per run) keys an entry by this
     # prefix followed by the path, so their entries never meet. Empty by
     # default, so the local file system's keys are its paths; an object store
-    # returns its URL prefix (`S3Fs`: `s3://<bucket>/`).
+    # returns its URL prefix (`S3Fs`: `s3://<bucket>/`, `GcsFs`:
+    # `gs://<bucket>/`, `AzureFs`: `az://<container>/`).
     def key_prefix(self) -> String:
         """The text a shared cache puts before a path of this file system:
         empty for the local file system, the store's URL prefix for an

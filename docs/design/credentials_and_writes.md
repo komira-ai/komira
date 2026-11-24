@@ -134,7 +134,7 @@ The ABI design for running a query hands credentials to this design
 ([libkomira_run_abi.md §10](libkomira_run_abi.md#10-new-relative-to-the-earlier-abi)). It also leaves
 statements that are not queries refused "until writes have their own design"
 ([§3](libkomira_run_abi.md#what-komira_sql_stream-runs)). The Python package design promises a
-`KomiraError` with `code` and `step` ([decision 9](python_package.md#9-errors)), and ABI 1.2 gives no
+`KomiraError` with `code` and `step` ([decision 9](python_package.md#9-errors)), and the ABI gives no
 source for either. This design settles both.
 
 Fixed before this design and not reopened:
@@ -780,13 +780,14 @@ read for identity A.
 
 ### 8. The C ABI
 
-**PROPOSED** rows, additive, in the first minor after 1.2 that lands them, in the golden's spelling
-([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)):
+The three credential rows **EXIST** at ABI 1.2, with session scope only, the eight kinds and the
+thirteen fields below; the other rows are **PROPOSED**, additive, in the first minor that lands
+them, in the golden's spelling ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)):
 
 ```text
-komira_credential_add	Int32	Handle,Int32,CStr,UnsafePointer[Int32]	1.x
-komira_credential_set	Int32	Handle,Int32,Int32,ConstBytes,UInt64	1.x
-komira_credential_seal	Int32	Handle,Int32,Int32	1.x
+komira_credential_add	Int32	Handle,Int32,CStr,UnsafePointer[Int32]	1.2
+komira_credential_set	Int32	Handle,Int32,Int32,ConstBytes,UInt64	1.2
+komira_credential_seal	Int32	Handle,Int32,Int32	1.2
 komira_add_sql_binding	Int32	Handle,CStr,ConstBytes,UInt64,Int32	1.x
 komira_last_error_code	Int32	Handle,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.x
 komira_last_error_step	Int32	Handle	1.x
@@ -795,7 +796,8 @@ komira_last_error_step	Int32	Handle	1.x
 - **A credential is defined in three calls.** `komira_credential_add(ctx, kind, name, &id)` starts a
   definition. `komira_credential_set(ctx, id, field, value, len)` sets one field. Then
   `komira_credential_seal(ctx, id, scope)` makes it the value of `name`. `scope` is
-  `KOMIRA_BIND_SESSION` 1 or `KOMIRA_BIND_CALL` 2 (`constant` rows).
+  `KOMIRA_BIND_SESSION` 1 (**EXISTS**) or `KOMIRA_BIND_CALL` 2 (**PROPOSED**, with `komira_sql_stream`;
+  until then a scope other than 1 is refused with `CREDENTIALS_INVALID`) (`constant` rows).
   - With `KOMIRA_BIND_SESSION`, it is the session's value: a new generation, unless the name already
     holds a byte-equal value.
   - With `KOMIRA_BIND_CALL`, it is the next `komira_sql_stream` call's value, with the generation of
@@ -805,12 +807,23 @@ komira_last_error_step	Int32	Handle	1.x
   - Kinds and fields are `constant` rows: `KOMIRA_CRED_AWS_KEYS` 1, `_AWS_PROFILE` 2,
     `_GCP_SERVICE_ACCOUNT` 3, `_GCP_TOKEN` 4, `_AZURE_KEY` 5, `_AZURE_SAS` 6, `_BEARER` 7,
     `_OAUTH2_CLIENT` 8.
-  - Each field of decision 1's table has a `KOMIRA_FIELD_*` constant.
+  - Each field of decision 1's table has a `KOMIRA_FIELD_*` constant (**EXISTS**): `KEY_ID` 1,
+    `SECRET` 2, `SESSION_TOKEN` 3, `PROFILE` 4, `FILE` 5, `TOKEN` 6 (of `GCP_TOKEN` and `BEARER`),
+    `ACCOUNT` 7 (of both Azure kinds), `KEY` 8, `SAS` 9, `CLIENT_ID` 10, `CLIENT_SECRET` 11, `SCOPE` 12
+    and `TOKEN_URL` 13. `komira_credential_seal` refuses a definition without a field its kind
+    requires; `komira_credential_set` refuses a field its kind does not take, an empty value, one
+    longer than 4096 bytes (the `SecretValue` bound) and one that is not UTF-8. Each refusal is
+    `CREDENTIALS_INVALID` naming the credential and the setting, and discards the definition. A
+    name outside decision 1's grammar is refused without being quoted.
   - A new kind or field is a new constant row, which raises the minor.
   - Values are bytes with a length, never required to be NUL-terminated. The library copies each into
     the session's `SecretStore` before the call returns and never echoes it, so the caller may
     overwrite its buffer at once.
-  - `ambient` and `anonymous` need no definition. Defining either is refused.
+  - `ambient` and `anonymous` need no definition. Defining either, in any case, is refused.
+  - The values live in the session's `SessionSecretStore` (`src/so/credential_store.mojo`), a
+    `SecretStore`, one `secret_ref` per field, bound by node id in the session's `SecretBindings`. A
+    consumer reads one only through `SecretCapability.open_connection_for` over those bindings and
+    that store, which hands it a zeroizing `SecretValue` for the call.
 - **`komira_add_sql_binding(ctx, name, source, len, scope)`** binds the SQL name `name` to a source.
   - With `KOMIRA_BIND_SESSION`, the binding is on the session, replacing any binding of that name.
     `Session.add_sql_binding` uses this.
@@ -964,7 +977,7 @@ Iceberg design's `IcebergError` is a `KomiraError` too.
 | `CREDENTIAL_NAME_CONFLICT` | one statement carries two different values under one credential name: a call value against the session's, or two call values | `bind` | `CredentialsError` |
 | `CREDENTIAL_KIND_MISMATCH` | a credential does not fit its source (an Azure key on `s3://`) | `bind` | `CredentialsError` |
 | `CREDENTIALS_NOT_FOUND` | `ambient` found nothing configured; a URL under no scope | `bind` or `execute` | `CredentialsError` |
-| `CREDENTIALS_INVALID` | a configured chain step is broken; a credentials file is unreadable or malformed; a token the provider rejects at exchange | `bind` or `execute` | `CredentialsError` |
+| `CREDENTIALS_INVALID` | a configured chain step is broken; a credentials file is unreadable or malformed; a token the provider rejects at exchange; a credential defined through the C ABI with an unknown kind or field, a field its kind lacks or does not take, an empty, oversized or non-UTF-8 value, or a name outside the grammar or reserved (decision 8) | `bind` or `execute` | `CredentialsError` |
 | `STORAGE_REGION_UNKNOWN` | no region for an S3 source (decision 7) | `bind` | `StorageError` |
 | `STORAGE_NOT_FOUND` | the object, or the destination's directory, does not exist | `bind` or `execute` | `StorageError` |
 | `STORAGE_ACCESS_DENIED` | the store refused the credential (401, 403), or the server's certificate failed verification, which the store layer classes with these | `bind` or `execute` | `StorageError` |
@@ -1310,11 +1323,17 @@ that changes an answer or a refusal.
 
 ## Where is the code?
 
-Not built, except the engine's S3 read arm: lowering carries a scan's bucket and object keys
-(`SourceSpecPod.parquet_fs`), and `sdk_exec.run_sql_with` reads them through the file system an
-`objectstore_s3.S3ScanFs` opens on the bucket, with one footer cache keyed per bucket
+Not built, except the engine's S3, GCS and Azure read arms: lowering carries a scan's bucket (an
+Azure container) and object keys (`SourceSpecPod.parquet_fs`), and `sdk_exec.run_sql_with` reads them
+through the file system an `objectstore_s3.S3ScanFs`, `objectstore_gcs.GcsScanFs` or
+`azure_blob.AzureScanFs` opens on the bucket, with one footer cache keyed per bucket
 ([src/lowering/README.md](../../src/lowering/README.md), [src/sdk_exec/README.md](../../src/sdk_exec/README.md)).
-No surface, credential name, wire field or error code of this design is built. The parts it builds on are:
+The three credential calls of decision 8 are built ([src/so](../../src/so/README.md)), and so are
+decision 1's credential objects in Python, private until `add_sql_binding` exports them
+(`python/komira/_credentials.py`, sealed by `Session._seal_credential`, refused as `CredentialsError`).
+Section 1's `komira.iceberg`, `catalog.table` and `komira.SigV4` are built as Python values, checked when
+built and private until `add_sql_binding` exports them (`python/komira/_iceberg.py`).
+No other surface, wire field or error code of this design is built. The parts it builds on are:
 - [src/sql](../../src/sql/sql_binder.mojo) (`sql_binder.mojo`, `sql_catalog.mojo`, `sql_parser.mojo`);
 - [src/so](../../src/so/README.md);
 - [src/sdk_exec](../../src/sdk_exec/README.md) (`secret_capability.mojo`, `engine_sql.mojo`,

@@ -184,13 +184,43 @@ prefixed_archive_check(
     prefix = THIRD_PARTY_OWNERS["third_party/aws-lc"].prefix,
 )
 
+# libcrypto on macOS arm64: //src/awslc's build of the same archive (its
+# Mach-O assembly set, the s2n-bignum arm assembly split at `;`, and the
+# CommonCrypto header), prefixed komira_awslc_ for C and for the underscored
+# Mach-O assembly names. Its prefix header is exported, so a C caller that
+# includes aws-lc's headers calls the renamed names, as on Linux.
+cxx_library(
+    name = "crypto_macos",
+    exported_deps = ["//src/awslc:awslc_native_cxx"],
+    exported_preprocessor_flags = ["-include", "$(location //src/awslc:awslc_native_prefix)"],
+)
+
+# The original names the macOS archive renames, as :prefix_symbols[symbols]
+# lists them on Linux: s2n-tls's archive check refuses a reference to one.
+alias(
+    name = "prefix_symbols_names",
+    actual = select({
+        "DEFAULT": ":prefix_symbols[symbols]",
+        "prelude//os/constraints:macos": "//src/awslc:awslc_native_prefix[symbols]",
+    }),
+    visibility = ["//third_party/s2n-tls:"],
+)
+
 # libcrypto as its users take it: every global symbol is komira_awslc_X
-# (C callers that include its headers get the renamed names), and
-# :crypto_symbols gates every build holding it.
+# (C callers that include its headers get the renamed names), and a check of
+# the archive gates every build holding it: :crypto_symbols on Linux, and on
+# macOS //src/awslc's archive check (the same rule: everything defined is
+# prefixed, no original name is referenced).
 checked_cxx_library(
     name = "crypto",
-    checks = [":crypto_symbols"],
-    lib = ":crypto_prefixed",
+    checks = select({
+        "DEFAULT": [":crypto_symbols"],
+        "prelude//os/constraints:macos": ["//src/awslc:awslc_native_archive"],
+    }),
+    lib = select({
+        "DEFAULT": ":crypto_prefixed",
+        "prelude//os/constraints:macos": ":crypto_macos",
+    }),
     visibility = ["PUBLIC"],
 )
 

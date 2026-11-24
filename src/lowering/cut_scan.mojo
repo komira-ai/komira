@@ -5,9 +5,10 @@
 # A bounded Parquet scan of one local file, or of several, opens a
 # SOURCE_PARQUET pipeline whose spec carries the scan's projection and pushed
 # filter; several files are listed in the spec. A scan of objects in an S3
-# bucket is cut the same way, and the spec carries the scan's descriptor
-# (`parquet_fs`): its paths are then object keys in that bucket, which the
-# engine reads through the file system it is handed for the bucket. A scan with Hive partition
+# or GCS bucket or an Azure container is cut the same way, and the spec
+# carries the scan's descriptor (`parquet_fs`): its paths are then object keys
+# in that bucket, which the engine reads through the file system it is handed
+# for the bucket. A scan with Hive partition
 # columns lists its files and their partition values too, but pushes no
 # projection or filter: both become operators, the filter first, over the full
 # schema (the files' columns, then the partition columns). An in-memory scan
@@ -15,22 +16,33 @@
 # (`read_csv`) opens a SOURCE_CSV pipeline whose spec carries the file's path,
 # its dialect (delimiter, header, quote style) and every column of the file
 # with the type the plan bound it at, so the reader decodes at the bound
-# schema and never infers a second one. Neither the batch arm nor the CSV arm
-# has a pushed filter or projection, so both become operators, the filter
-# first, over the source's full schema.
+# schema and never infers a second one. A scan of an Iceberg table (a binding
+# of kind `komira.iceberg.table`) opens a SOURCE_ICEBERG pipeline whose spec is
+# the one the host planned before lowering (`ScanFacts.iceberg`: the data files
+# that survive pruning, the delete files that apply, the bound columns); this
+# module reads no table metadata and does not depend on the package that does.
+# None of the batch, CSV and Iceberg arms has a pushed filter or projection, so
+# each becomes operators, the filter first, over the source's full schema. The
+# filter an Iceberg scan pushed is kept as an operator because the planner uses
+# it only to skip files.
+# A scan of one newline-delimited JSON file opens a SOURCE_JSONL pipeline
+# (`cut_scan_jsonl`).
 #
 # Refused: an unbounded scan, a Hive-partitioned scan that lists its files
 # lazily (a directory scan or a partition predicate) or a Parquet scan on a
-# store other than the local file system and S3, or with an explicit local
-# binding (LOWERING_SCAN_NOT_TOTAL); a scan
+# store other than the local file system, S3, GCS and Azure (a scheme code
+# that names none of them), or with an explicit local binding
+# (LOWERING_SCAN_NOT_TOTAL); a scan
 # beyond the inputs' count (LOWERING_INPUTS_SCAN_COUNT); a CSV scan with
 # header=false, whose columns the reader would not name as DuckDB does, and
 # any other source
-# (LOWERING_UNCUTTABLE_NODE).
+# (LOWERING_UNCUTTABLE_NODE); an Iceberg scan whose files the inputs do not
+# carry (LOWERING_SCAN_NOT_TOTAL).
 # =============================================================================
 
 from arrow.schema import Field
 from containers.slab import Slab
+from lowering.cut_scan_jsonl import _open_jsonl_scan
 from lowering.cut_state import _Cutter, _Pipe, _uncuttable
 from lowering.lowered_plan import (
     LoweringInputs,
@@ -38,7 +50,12 @@ from lowering.lowered_plan import (
     LOWERING_INPUTS_SCAN_COUNT,
 )
 from plan_expr.expr import Expr
-from plan_expr.fs_descriptor_pod import FS_SCHEME_S3, FsDescriptorPod
+from plan_expr.fs_descriptor_pod import (
+    FS_SCHEME_AZURE,
+    FS_SCHEME_GCS,
+    FS_SCHEME_S3,
+    FsDescriptorPod,
+)
 from plan_ir.logical_plan import LogicalPlan
 from scan_source.source_variant import SourceVariant
 from plan_ir.plan_decisions import SCAN_BOUNDED
@@ -49,6 +66,7 @@ from physical_plan.physical_plan import (
     SOURCE_PARQUET,
     SOURCE_BATCH,
     SOURCE_CSV,
+    SOURCE_ICEBERG,
 )
 from arrow.arrow_types import ArrowType
 from arrow.schema import Schema
@@ -57,7 +75,14 @@ from scan_source.source_variant import (
     SOURCE_VARIANT_PARQUET,
     SOURCE_VARIANT_IN_MEMORY,
     SOURCE_VARIANT_CSV,
+    SOURCE_VARIANT_BINDING,
+    SOURCE_VARIANT_JSON,
 )
+
+comptime ICEBERG_TABLE_KIND_NAME: StaticString = "komira.iceberg.table"
+"""The kind name of the binding an Iceberg table scan carries. Spelled here
+rather than imported: lowering does not depend on the package that reads
+Iceberg tables."""
 
 
 def _open_scan(
@@ -165,12 +190,31 @@ def _open_scan(
         var pipe = _Pipe(SOURCE_CSV, spec^, full.copy(), idx)
         _scan_ops(pipe, node, pushed^, proj^)
         return pipe^
+    if (
+        sd.source.tag == SOURCE_VARIANT_BINDING
+        and sd.source.binding_ref().kind_name == String(ICEBERG_TABLE_KIND_NAME)
+    ):
+        if not inputs.scans[idx].iceberg:
+            raise Error(
+                String(LOWERING_SCAN_NOT_TOTAL)
+                + ": an Iceberg scan whose files were not planned"
+            )
+        var pipe = _Pipe(
+            SOURCE_ICEBERG,
+            SourceSpecPod.iceberg(inputs.scans[idx].iceberg.value().copy()),
+            sd.source.schema(),
+            idx,
+        )
+        _scan_ops(pipe, node, pushed^, proj^)
+        return pipe^
+    if sd.source.tag == SOURCE_VARIANT_JSON:
+        return _open_jsonl_scan(node, idx, proj^, pushed^)
     raise _uncuttable(node, "a " + sd.source.kind_name() + " source")
 
 
 def _carried_fs(desc: FsDescriptorPod) raises -> FsDescriptorPod:
     """The store a Parquet segment's spec names for a scan with `desc`: the
-    local file system, or an S3 bucket.
+    local file system, an S3 or GCS bucket, or an Azure container.
 
     Raises:
         `LOWERING_SCAN_NOT_TOTAL`, naming the store, for any other store (the
@@ -180,13 +224,18 @@ def _carried_fs(desc: FsDescriptorPod) raises -> FsDescriptorPod:
     """
     if desc.is_local():
         return FsDescriptorPod.local()
-    if desc.scheme == FS_SCHEME_S3:
+    if (
+        desc.scheme == FS_SCHEME_S3
+        or desc.scheme == FS_SCHEME_GCS
+        or desc.scheme == FS_SCHEME_AZURE
+    ):
         return desc.copy()
     raise Error(
         String(LOWERING_SCAN_NOT_TOTAL)
         + ": a Parquet scan on "
         + desc.url_prefix()
-        + "; the segment's Parquet arm reads the local file system and S3"
+        + "; the segment's Parquet arm reads the local file system, S3, GCS"
+        " and Azure"
     )
 
 
@@ -197,8 +246,8 @@ def _scan_ops(
     var proj: Optional[List[String]],
 ) raises:
     """The scan's pushed filter and projection as operators of `pipe`, the
-    filter first, over the source's full schema: the batch and CSV arms carry
-    neither."""
+    filter first, over the source's full schema: the batch, CSV and Iceberg arms
+    carry neither."""
     if pushed:
         pipe.append_op(MorselOp.filter(pushed.take()))
     if proj:

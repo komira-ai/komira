@@ -21,9 +21,10 @@ _ON = {p["suffix"]: ({"python": p["python"]} if p["suffix"] else {}) for p in PY
 # Stand-ins for libkomira (fake_libkomira.c). The loader must refuse a library
 # of ABI major 2, of major 0 (version 0.999), one reporting -1, one without
 # komira_abi_version and a 1.1 one without komira_register_parquet; it must
-# load a 1.0 one (without the calls 1.1 added) and a 1.3 one. `fake_modes`
+# load a 1.0 one (without the calls 1.1 and 1.2 added) and a 1.3 one. `fake_modes`
 # (version 1.1) answers each call by the mode its register_parquet name set,
-# for the error path, the two-call protocol and the output calls.
+# for the error path, the two-call protocol and the output calls. `fake_store`
+# (version 1.2) records every credential call in its fake store.
 c_shared_lib(
     name = "fake_v2",
     srcs = ["fake_libkomira.c"],
@@ -80,6 +81,13 @@ c_shared_lib(
     name = "fake_modes",
     srcs = ["fake_libkomira.c"],
     out = "libkomira_fake_modes.so",
+)
+
+c_shared_lib(
+    name = "fake_store",
+    srcs = ["fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=1002"],
+    out = "libkomira_fake_store.so",
 )
 
 # Stand-ins for a Mojo runtime library (fake_runtime_lib.c), for the check of
@@ -177,7 +185,8 @@ _FAKE_RUNTIME = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
-# Any minor of ABI 1 loads: 1.0, whose 1.1 calls raise when used, and 1.3.
+# Any minor of ABI 1 loads: 1.0, whose 1.1 and 1.2 calls raise when used, and
+# 1.3, which seals a credential.
 [python_binding_test(
     name = "minor0_test" + p["suffix"],
     src = "test_minor.py",
@@ -215,6 +224,33 @@ _FAKE_RUNTIME = [
     name = "two_call_test" + p["suffix"],
     src = "test_two_call.py",
     data = {"fake_modes/libkomira.so": ":fake_modes"},
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Credential objects and sealing them on a session, on the stand-in's fake
+# store: the name grammar and reserved names, each field's type, emptiness,
+# UTF-8 and 4096-byte bound, repr with secrets as <set>, no pickle or copy;
+# the kind, name, field ids and exact value bytes each kind sends, in order,
+# in the session scope; nothing sent for AMBIENT and ANONYMOUS or on a closed
+# session; an engine refusal of add, set or seal as CredentialsError with the
+# library's message, and a -2 or a -3 with no message as KomiraError.
+[python_binding_test(
+    name = "credentials_test" + p["suffix"],
+    src = "test_credentials.py",
+    data = {"fake_store/libkomira.so": ":fake_store"},
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Credentials on the real library: every kind seals, the package's edges
+# (a 128-byte name, a 4096-byte value) are accepted, and each refusal of the
+# credential calls is a CredentialsError with the library's
+# CREDENTIALS_INVALID message; a value above 64 MiB is a KomiraError.
+[python_binding_test(
+    name = "credentials_lib_test" + p["suffix"],
+    src = "test_credentials_lib.py",
+    data = {"libkomira": LIBKOMIRA},
     deps = ["//python:komira"],
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
@@ -353,6 +389,19 @@ _CASES = [
     "udf",
     "dtype",
 ]]
+
+# The Iceberg catalog and table sources (komira._iceberg), with no library:
+# the catalog URI's scheme, host, user, password, query and fragment, the
+# warehouse, which credential fits a catalog with and without SigV4 signing,
+# access_delegation's two values, how a table name splits into namespace
+# levels and a table, repr with secrets as <set>, no pickle or copy, and that
+# building one loads no library.
+[py_test(
+    name = "iceberg_test" + p["suffix"],
+    src = "test_iceberg.py",
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
 
 # Capture of a user function (komira._capture), with no library: the `@udf`
 # decorator, return types, the read set (columns=, annotations and the

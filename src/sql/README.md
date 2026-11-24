@@ -17,8 +17,9 @@ name tables that say which identifiers the grammar claims
 (`sql_agg_code`, `sql_call_is_aggregate`, `sql_name_claimed_by_grammar`).
 
 `sql.sql_tvf_options` holds what the nodes share about table functions: the reader
-kinds (`TVF_PARQUET`, `TVF_CSV`, `TVF_JSON`, `TVF_AVRO`), `TvfOptions` (the
-`all_varchar`, `header`, `delim` and `hive_partitioning` options of a `read_*` call
+kinds (`TVF_PARQUET`, `TVF_CSV`, `TVF_JSON`, `TVF_AVRO`, `TVF_ICEBERG`), `TvfOptions` (the
+`all_varchar`, `header`, `delim` and `hive_partitioning` options of a `read_*` call,
+the `allow_moved_paths` and `snapshot_from_id` options of `iceberg_scan`,
 and the `HIVE_PARTITIONING_*` modes), and the extension rules of the
 `FROM '<path>'` replacement scan (`_replacement_scan_kind`, `_file_stem`).
 `sql_ast` and `sql_parser` import them back, so the old import paths still work.
@@ -46,6 +47,9 @@ INNER (or bare) `JOIN` is folded into WHERE; a RIGHT or FULL join later in
 the same FROM is therefore refused by name (`INNER_ON_BEFORE_OUTER_REFUSAL`),
 because the folded predicate would drop the rows that join pads with NULL. A
 LEFT, SEMI or ANTI join after it keeps the same answer and is parsed.
+
+`SUBSTRING(s FROM start [FOR length])`, the standard form TPC-H Q22 writes,
+parses as the call `substring(s, start[, length])`, as DuckDB reads it.
 
 A `COPY ... TO` with no `FORMAT` takes its format from the destination's
 extension, as DuckDB does (`sql.sql_copy_format`): `.parquet`, `.csv`, and
@@ -109,8 +113,10 @@ table name. It resolves names case-insensitively against the catalog, the
 `WITH` definitions and derived tables; binds scalar and aggregate
 expressions, GROUP BY and HAVING, joins (inner, outer, NATURAL / USING, semi,
 anti), subqueries (scalar, also in a HAVING and in the SELECT list of a
-grouped query; `[NOT] EXISTS`; `[NOT] IN`, NULL-aware, its body either one
-table projecting one bare column or, uncorrelated, any query of one column),
+grouped query; a correlated scalar in a WHERE or the SELECT list of an
+ungrouped query, see below; `[NOT] EXISTS`; `[NOT] IN`, NULL-aware, its body
+either one table projecting one bare column or, uncorrelated, any query of
+one column),
 window functions, ORDER BY, LIMIT / OFFSET, DISTINCT, UNION ALL, INTERSECT
 and EXCEPT; and
 raises an `Error` starting `SQL bind error` or `SQL not supported`, naming
@@ -124,11 +130,38 @@ with no `read_parquet` relation. `read_parquet('path', hive_partitioning =
 true|false)` sets the mode the reader resolves the path under (no option is
 auto-detect); a column counts as NULL-free only when every file of the
 relation records no NULL and it is not a partition column.
-`SqlCatalog.add_parquet_source` registers such a resolved source as a table. A `read_csv`, `read_json` or `read_avro`
+`SqlCatalog.add_parquet_source` registers such a resolved source as a table.
+An `iceberg_scan('path' [, allow_moved_paths = true] [, snapshot_from_id = N])`
+relation is resolved the same way, by the reader's `iceberg_relation(path,
+allow_moved_paths, snapshot_id)`, which returns the `SourceVariant` the relation
+scans (its own schema is the relation's schema); a reader that does not
+override that method refuses with `SQL bind error: iceberg_scan('<path>') needs
+a binder that reads Iceberg tables`. `parquet_footers.ParquetFooters` reads
+Iceberg tables. Every other DuckDB `iceberg_scan` option (`version`,
+`version_name_format`, `mode`, `metadata_compression_codec`,
+`skip_schema_inference`, `snapshot_from_timestamp`) is refused by name, as is
+any CSV, JSON or Parquet option on `iceberg_scan`, and both Iceberg options on
+the other readers. `SqlCatalog.add_source` registers any resolved
+`SourceVariant` as a table under its own schema (an Iceberg table). A `read_csv`, `read_json` or `read_avro`
 relation gets its schema from `sql_tvf_bind`, which reads the file. The
 binder's code is split over the `sql_bind_*` modules (the FROM scope,
-operators, functions, casts and timestamps, subqueries, aggregates and
+operators, functions, casts and timestamps, subqueries, correlated scalar
+subqueries, aggregates and
 GROUP BY, output names, windows and ORDER BY, joins, parquet facts).
+
+A correlated scalar subquery (`sql.sql_bind_corr_scalar`), one whose WHERE
+names a column of the statement around it, as TPC-H Q2, Q17 and Q20 do, binds
+grouped by its correlation keys: `(SELECT f(aggs) FROM R WHERE p AND r = o)`
+is the group `o` of `SELECT r, aggs FROM R WHERE p GROUP BY r`, and over no
+row its value is `f` with every count 0 and every other aggregate NULL, as in
+DuckDB. The optimizer's `flatten_dependent_joins` makes it a LEFT join of the
+outer rows with that grouped body. Its WHERE may name outer columns only in
+`inner_column = outer_column` conjuncts, and its body must aggregate (sum,
+count, min, max, avg) over a FROM of comma or CROSS joins with no GROUP BY,
+HAVING, DISTINCT, ORDER BY, LIMIT or OFFSET; any other shape, an outer column
+in its SELECT list, and a correlated scalar in a HAVING or a grouped SELECT
+list are refused with `SQL not supported: a correlated scalar subquery ...`
+naming it. One under a CASE or a function call binds as an uncorrelated body.
 
 `UNION ALL` (`sql.sql_bind_set_op`, with the common types of
 `sql.sql_bind_union`) binds the chain `a UNION ALL b UNION ALL c`

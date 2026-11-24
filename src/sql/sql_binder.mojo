@@ -33,6 +33,10 @@ from sql.sql_bind_subquery import (
     _bind_scalar_subquery_body, _bind_correlated_subquery_body,
     _corr_outer_of, _not_in_lhs_is_null_free, _in_lhs_output_name,
 )
+from sql.sql_bind_corr_scalar import (
+    bind_correlated_scalar_body, refuse_grouped_correlated_scalar,
+    scalar_body_is_correlated, scalar_outer_of,
+)
 from sql.sql_bind_set_op import _bind_select_with_union
 from sql.sql_bind_window_order import (
     _has_window, _bind_window_projection, _order_key_name, _OK_COLUMN, _OK_OUTPUT,
@@ -222,8 +226,21 @@ def _bind_query(
             # anywhere in the query looks its Expr up by that index.
             prebound.append(Expr.literal(ScalarValue.from_int64(0)))  # placeholder
         elif sd.kind == SUBQ_SCALAR:
-            var sq = _bind_scalar_subquery_body(sd.body, catalog, cte_scope, prebound)
-            prebound.append(sq^)
+            # A body naming a column of the statement around it is bound
+            # grouped by its correlation keys (sql_bind_corr_scalar).
+            var outer = scalar_outer_of(stmt, i, catalog, cte_scope)
+            if not outer.known:
+                refuse_grouped_correlated_scalar(stmt, i, catalog, cte_scope)
+            if scalar_body_is_correlated(sd.body, outer, catalog, cte_scope):
+                prebound.append(
+                    bind_correlated_scalar_body(
+                        sd.body, i, outer, catalog, cte_scope, prebound
+                    )
+                )
+            else:
+                prebound.append(
+                    _bind_scalar_subquery_body(sd.body, catalog, cte_scope, prebound)
+                )
         else:
             # `in_lhs` is "" for EXISTS / NOT EXISTS (no left column).
             var outer = _corr_outer_of(stmt, i, catalog, cte_scope)

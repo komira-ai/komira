@@ -1,18 +1,29 @@
 load("@komira//third_party/s2n-tls:features.bzl", "S2N_FEATURES")
+load("@komira//third_party/s2n-tls:features_macos.bzl", "S2N_FEATURES_MACOS")
 load("@komira//third_party/s2n-tls:srcs.bzl", "PROBES")
 load(":defs.bzl", "s2n_probe")
 
-# The s2n-tls feature probes that pass on the one platform this repository
-# builds for (linux x86_64): the features third_party/s2n-tls/features.bzl
-# names. Every target here builds; a feature listed that does not compile is
-# a red build. The probes that fail on that platform are
+# The s2n-tls feature probes that pass: on linux x86_64 the features
+# third_party/s2n-tls/features.bzl names (S2N_FEATURES), on macOS arm64
+# those of features_macos.bzl (a darwin-arm64 build of this package). A probe
+# one list lacks is built only for the other OS. Every target here builds
+# for the platforms it is built for; a feature listed that does not compile
+# is a red build. The probes that fail on that platform are
 # tests//negative/s2n_probes: a probe that is expected to fail does not
 # belong in a package whose targets are all expected to build.
 # third_party/s2n-tls/BUCK refuses at load a feature with no probe, so each
 # feature listed has its target here; tools/build/tests/c_libs_tests.sh
 # requires every probe of the other package to fail.
+_LINUX = "prelude//os/constraints:linux"
+
+_MACOS = "prelude//os/constraints:macos"
+
 [
-    cxx_library(**s2n_probe(name, flags))
+    cxx_library(**s2n_probe(
+        name,
+        flags,
+        [] if name in S2N_FEATURES and name in S2N_FEATURES_MACOS else [_LINUX] if name in S2N_FEATURES else [_MACOS],
+    ))
     for name, flags in PROBES.items()
-    if name in S2N_FEATURES
+    if name in S2N_FEATURES or name in S2N_FEATURES_MACOS
 ]

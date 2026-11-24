@@ -34,6 +34,7 @@ def _read(name: String) raises -> String:
 
 comptime _FILES: List[String] = [
     "__init__.mojo",
+    "iceberg_arrow_data_file.mojo",
     "iceberg_avro_manifest.mojo",
     "iceberg_avro_manifest_read.mojo",
     "iceberg_bounds.mojo",
@@ -196,6 +197,7 @@ def test_imports_only_its_deps() raises:
         "clock",
         "avro",
         "byte_buffer",
+        "containers",
         "iceberg",
         "objectstore",
         "parquet",

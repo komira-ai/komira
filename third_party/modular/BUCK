@@ -2,6 +2,7 @@ load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "asset", "pinned_kwargs")
+load(":pins.bzl", "MODULAR_WHEELS", "USED")
 
 # ---- The licence of the Mojo runtime the wheel carries ------------------------
 #
@@ -41,15 +42,18 @@ archive_files(
 
 # ---- Modular's own wheels, for the tests beside them --------------------------
 #
-# Modular's published wheels of the Mojo compiler, from PyPI. komira requires
-# none of them and carries none of their files; they are test data of the
-# Python package's install tests that put Modular's runtime in the same
-# process as komira's (python/BUCK, the `beside_modular` targets):
+# Modular's published wheels of the Mojo compiler, from PyPI, one pair per Mojo
+# version (pins.bzl, MODULAR_WHEELS). komira requires none of them and carries
+# none of their files; they are test data of the Python package's install
+# tests that put Modular's runtime in the same process as komira's
+# (python/BUCK, the `beside_modular` targets), which take:
 #
-# - 1.1.0, the version of the toolchain's pin, and the wheel it requires
-#   (`mojo-compiler-mojo-libs==1.1.0`): the same runtime as komira's, in
-#   `<site-packages>/modular/lib/` (docs/design/mojo_runtime_pypi_vs_conda.md);
-# - 1.2.0, another version, whose runtime is not komira's.
+# - the pair at the version of the toolchain's pin: the compiler wheel and the
+#   wheel it requires (`mojo-compiler-mojo-libs==<version>`), the same runtime
+#   as komira's, in `<site-packages>/modular/lib/`
+#   (docs/design/mojo_runtime_pypi_vs_conda.md);
+# - the compiler wheel of another version (`OTHER_MOJO`, the newest other
+#   one of the table), whose runtime is not komira's.
 #
 # Plain downloads, fetched at build time and checked against the sha256 and
 # size PyPI publishes for each file (https://pypi.org/pypi/<name>/<version>/json).
@@ -59,30 +63,14 @@ archive_files(
 # Modular's (`LicenseRef-MAX-Platform-Software-License` in the compiler
 # wheel's METADATA).
 #
-# A newer toolchain pin is a new 1.1.0 pair here at its version: the
-# beside_modular tests fail while the toolchain's Mojo and the installed
-# mojo-compiler differ.
+# Only the wheels of `USED` are declared: those the tests take at this
+# toolchain. A toolchain pin moves them to its version with no edit here, as
+# long as the table has a row for it.
 
-pinned_file(
-    name = "mojo_compiler-1.1.0-py3-none-manylinux_2_34_x86_64.whl",
-    url = "https://files.pythonhosted.org/packages/e8/5e/31522e5336d63ab0fad18980cccf6c5cc2085c1a041ea3723eb916a17c08/mojo_compiler-1.1.0-py3-none-manylinux_2_34_x86_64.whl",
-    sha256 = "b47442278eb39705075f23d058b38a364bd68bdaa542ad514c187cee633beab7",
-    size_bytes = 80657416,
+[pinned_file(
+    name = wheel["url"].split("/")[-1],
+    url = wheel["url"],
+    sha256 = wheel["sha256"],
+    size_bytes = wheel["size"],
     visibility = ["komira//python:"],
-)
-
-pinned_file(
-    name = "mojo_compiler_mojo_libs-1.1.0-py3-none-any.whl",
-    url = "https://files.pythonhosted.org/packages/83/8d/4fb2147d140b6ea688f6d256b3119d6554a3d50095d802f01bf24234bd7d/mojo_compiler_mojo_libs-1.1.0-py3-none-any.whl",
-    sha256 = "dd8c5382e27fe5c1ffe0834d267f549abbffee35bf1a8d605cf24252ff95a2e6",
-    size_bytes = 3216162,
-    visibility = ["komira//python:"],
-)
-
-pinned_file(
-    name = "mojo_compiler-1.2.0-py3-none-manylinux_2_34_x86_64.whl",
-    url = "https://files.pythonhosted.org/packages/54/8b/2758e8a2207793613d386f41e36f2bfd28837b157a659518c7b7474f7eb3/mojo_compiler-1.2.0-py3-none-manylinux_2_34_x86_64.whl",
-    sha256 = "3ee34a3b26c6cccaa9523a0e8db8f67bea954497d782d97c9e61c3c4ecbdac7b",
-    size_bytes = 81774875,
-    visibility = ["komira//python:"],
-)
+) for version in sorted(USED.keys()) for wheel in [MODULAR_WHEELS[version][kind] for kind in USED[version]]]
