@@ -1,7 +1,8 @@
 # Port: the libkomira calls that run a query (C ABI 1.3)
 
-Status: port document, not built. **EXISTS** names code on `main`; **PROPOSED** is
-new. Statements the author deduced rather than read are marked *(inferred)*.
+Status: port document. `komira_sql_stream` is built (ABI 1.3, with the `ArrowStream`
+golden type and the header's Arrow structs); `komira_plan_stream` and the abort
+containment are not. **EXISTS** names code on `main`; **PROPOSED** is new. Statements the author deduced rather than read are marked *(inferred)*.
 
 `libkomira` is komira's one shared library and its flat C ABI
 ([src/so](../../src/so/README.md)). ABI 1.1 registers and describes sources and

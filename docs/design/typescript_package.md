@@ -155,9 +155,10 @@ Fixed before this design, and not reopened here:
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.2, with twelve exports
+- **EXISTS** `libkomira` is at ABI 1.3, with thirteen exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
-  - It runs no query. The run calls are designed but not built; they take the next minor.
+  - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream. The plan call,
+    `komira_plan_stream`, is designed but not built; it takes the next minor.
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,

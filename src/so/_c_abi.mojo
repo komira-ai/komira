@@ -2,7 +2,7 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of so that holds
 # pointers.
 # =============================================================================
-# Twelve `@export abi("C")` functions are the library's whole surface today:
+# Thirteen `@export abi("C")` functions are the library's whole surface today:
 #
 #   int32_t  komira_abi_version(void);
 #   void    *komira_ctx_new(void);
@@ -29,6 +29,8 @@
 #   int32_t  komira_credential_set(void *ctx, int32_t id, int32_t field,
 #                                  const uint8_t *value, uint64_t value_len);
 #   int32_t  komira_credential_seal(void *ctx, int32_t id, int32_t scope);
+#   int32_t  komira_sql_stream(void *ctx, const char *sql,
+#                              struct ArrowArrayStream *out);
 #
 # Ownership. `komira_ctx_new` creates a `Session` (the last error and the
 # engine, whose workers start here) in an `OwnedPointer`, relinquishes the
@@ -41,6 +43,17 @@
 # of NULL does nothing. Every other pointer is the caller's: this library
 # reads or writes it during the call and keeps none.
 #
+# The Arrow stream. `komira_sql_stream` fills the caller's
+# `struct ArrowArrayStream` (allocated by the caller) only when it returns
+# `KOMIRA_OK`; on any other status the struct is left exactly as the caller
+# wrote it. After `KOMIRA_OK` the caller owns the stream and calls its
+# `release` once, as the Arrow C Stream Interface requires; the stream owns
+# the answer's batches (`arrow_ipc.build_record_batch_stream`, which holds
+# the stream's own pointers) and no reference to the session, so
+# `komira_ctx_free` may come before the stream's `release`. Its callbacks are
+# code of this library, which must stay loaded until every stream from it is
+# released.
+#
 # Errors. A call returns `KOMIRA_OK` (0) or a negative `KOMIRA_ERR_*` code
 # (status.mojo). A call refused with `KOMIRA_ERR_NULL_ARG` on a live context
 # stores its refusal as the context's last error; `KOMIRA_ERR_BUFFER_TOO_SMALL`
@@ -51,7 +64,9 @@
 # Strings and byte inputs. A `const char *` is NUL-terminated UTF-8 that the
 # caller keeps alive for the call; the library copies it before using it, and a
 # string that is not valid UTF-8 is refused as `KOMIRA_ERR_ENGINE` with a last
-# error, never used. The plan bytes of `komira_plan_render` are
+# error, never used. The SQL text of `komira_sql_stream` is bounded like a
+# byte input: its NUL is looked for in at most `KOMIRA_MAX_INPUT_BYTES + 1`
+# bytes, and a text with none there is `KOMIRA_ERR_TOO_LARGE`. The plan bytes of `komira_plan_render` are
 # `plan[0..plan_len]`, with the length an argument because a serialized plan
 # holds NUL bytes; they are copied in full before anything is decoded. The
 # length is bounded: above `KOMIRA_MAX_INPUT_BYTES` (64 MiB) the call returns
@@ -80,6 +95,8 @@
 
 from std.memory import OwnedPointer, unsafe_memcpy
 
+from arrow_ipc.c_data_stream import CArrowArrayStream, build_record_batch_stream
+
 from so.session import Session, try_new_session
 from so.sources import (
     csv_binding_bytes,
@@ -87,6 +104,7 @@ from so.sources import (
     parquet_schema_bytes,
     plan_render_text,
     register_parquet,
+    sql_result,
 )
 from so.status import (
     KOMIRA_ERR_ENGINE,
@@ -100,10 +118,12 @@ from so.status import (
     input_length_status,
 )
 
-# `Handle`, `CStr` and `ConstBytes` are the names the ABI golden
+# `Handle`, `CStr`, `ConstBytes` and `ArrowStream` are the names the ABI golden
 # (abi/komira.tsv) knows: the header spells them `komira_handle`,
-# `const char *` and `const uint8_t *`, and the golden check refuses a
-# declaration of `CStr` or `ConstBytes` that is not a pointer to `UInt8`. The
+# `const char *`, `const uint8_t *` and `struct ArrowArrayStream *`, and the
+# golden check refuses a declaration of `CStr` or `ConstBytes` that is not a
+# pointer to `UInt8`, and of `ArrowStream` that is not a pointer to
+# `CArrowArrayStream`, the Mojo struct of the Arrow C stream's layout. The
 # exported signatures spell every other pointer in full, for the same reason.
 # SAFETY: `void *`, the context handle: an address returned by
 # `komira_ctx_new`, valid until `komira_ctx_free`.
@@ -119,6 +139,10 @@ comptime CStr = UnsafePointer[UInt8, MutUntrackedOrigin]
 # value of `komira_credential_set`: read for their length argument, copied in
 # full, never written.
 comptime ConstBytes = UnsafePointer[UInt8, MutUntrackedOrigin]
+# SAFETY: `struct ArrowArrayStream *`, a stream the caller allocated: never
+# read, and written once, whole, only when `komira_sql_stream` returns
+# `KOMIRA_OK`; from then on the caller owns what it holds.
+comptime ArrowStream = UnsafePointer[CArrowArrayStream, MutUntrackedOrigin]
 
 
 @always_inline
@@ -243,9 +267,27 @@ def _c_string(text: CStr) raises -> String:
         raise Error("a string argument is not valid UTF-8")
 
 
+def _c_text_length(text: CStr) -> Optional[Int]:
+    """The byte count of the NUL-terminated string at `text`, or None when
+    none of its first `KOMIRA_MAX_INPUT_BYTES + 1` bytes is the NUL (a text
+    longer than the bound). No byte past the NUL or past that bound is read."""
+    var limit = Int(KOMIRA_MAX_INPUT_BYTES)
+    var i = 0
+    while i <= limit:
+        # SAFETY: `text` is non-NULL (every caller tests first) and points at
+        # a NUL-terminated string the caller keeps alive for the call; every
+        # byte before its NUL is readable, and this stops at the NUL, so it
+        # never reads past the string.
+        if text[i] == 0:
+            return i
+        i += 1
+    return None
+
+
 def _copy_in(plan: _Bytes, plan_len: UInt64) -> List[UInt8]:
-    """A copy of `plan[0..plan_len]`; `plan_len` is at most
-    `KOMIRA_MAX_INPUT_BYTES` (the caller tests with `input_length_status`)."""
+    """A copy of `plan[0..plan_len]` (plan bytes, a credential value or the SQL
+    text before its NUL); `plan_len` is at most `KOMIRA_MAX_INPUT_BYTES` (the
+    caller tests with `input_length_status` or `_c_text_length`)."""
     var n = Int(plan_len)
     var bytes = List[UInt8](length=n, fill=0)
     if n > 0:
@@ -576,6 +618,59 @@ def komira_credential_seal(ctx: Handle, id: Int32, scope: Int32) abi("C") -> Int
     session[].clear_error()
     try:
         session[].credentials.seal(id, scope)
+        return KOMIRA_OK
+    except e:
+        session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+
+
+@export
+def komira_sql_stream(ctx: Handle, sql: CStr, out_stream: ArrowStream) abi("C") -> Int32:
+    """Run the SQL statement `sql` on the session and fill the caller's
+    `struct ArrowArrayStream` at `out_stream` with its answer.
+
+    The statement reads the tables registered on the session; a `COPY ... TO`
+    a local file answers one row, the BIGINT `Count`. The answer is computed
+    before the call returns. `*out_stream` is written only on `KOMIRA_OK`, and the
+    caller then owns the stream and releases it once; it needs neither the
+    session nor the handle, so `komira_ctx_free` may come first. Returns
+    `KOMIRA_ERR_NULL_CTX` for a NULL `ctx`, `KOMIRA_ERR_NULL_ARG` for a NULL
+    `sql` or `out_stream`, `KOMIRA_ERR_TOO_LARGE` for a text whose NUL is not among
+    its first `KOMIRA_MAX_INPUT_BYTES + 1` bytes (nothing past that is read),
+    and `KOMIRA_ERR_ENGINE` for a text that is not UTF-8 and for every engine
+    refusal, with the last error `<step>: <reason>` (`parse`, `bind`,
+    `optimize`, `lower` or `execute`) or the export's error naming a column
+    the stream cannot carry. The session stays usable after any refusal.
+    """
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(sql) == 0 or Int(out_stream) == 0:
+        session[].set_error(String("komira_sql_stream: sql or out is NULL"))
+        return KOMIRA_ERR_NULL_ARG
+    var n = _c_text_length(sql)
+    if not n:
+        session[].set_error(
+            String("komira_sql_stream: sql is above ")
+            + String(KOMIRA_MAX_INPUT_BYTES)
+            + String(" bytes")
+        )
+        return KOMIRA_ERR_TOO_LARGE
+    var bytes = _copy_in(sql, UInt64(n.value()))
+    var text: String
+    try:
+        text = String(from_utf8=Span(bytes))
+    except:
+        session[].set_error(
+            String("komira_sql_stream: the SQL text is not valid UTF-8")
+        )
+        return KOMIRA_ERR_ENGINE
+    try:
+        var result = sql_result(session[], text)
+        # Nothing is written to `*out_stream` before this call, and it writes the
+        # stream whole once its own checks have passed.
+        build_record_batch_stream(result.take_batches(), result.take_schema(), out_stream)
         return KOMIRA_OK
     except e:
         session[].set_error(String(e))

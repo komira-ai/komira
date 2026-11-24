@@ -27,8 +27,8 @@ function session() {
   return addon.newSession();
 }
 
-test('abiVersion is 1.2', () => {
-  assert.equal(addon.abiVersion(), 1002);
+test('abiVersion is 1.3', () => {
+  assert.equal(addon.abiVersion(), 1003);
 });
 
 test('a missing Parquet file rejects with an Error with status -3 and the last error text', async () => {

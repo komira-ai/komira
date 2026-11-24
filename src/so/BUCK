@@ -39,8 +39,10 @@ NATIVE_OWNERS = [
 # each option the engine refuses; a session for good options);
 # test_sources holds the operations on values: a Parquet file registered and
 # its schema bytes, a registered table queried through the session's engine
-# (and an unregistered one refused at bind), the CSV and JSON bindings, and a
-# plan rendered; test_credentials holds the three steps of a definition, each
+# (and an unregistered one refused at bind), the CSV and JSON bindings, a
+# plan rendered, and sql_result, komira_sql_stream's answer on values (rows,
+# no rows with the schema, a result that outlives its session, and refusals as
+# `<step>: <reason>`); test_credentials holds the three steps of a definition, each
 # kind's fields and every named refusal, word for word, and the generations of
 # a name; test_credentials_reveal reads sealed values through sdk_exec's
 # SecretCapability and reads an object of a fake S3 with them, where a wrong
@@ -158,12 +160,14 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): twelve exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): thirteen exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). Every context it creates owns
 # an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
+# komira_sql_stream runs SQL on that engine and answers an Arrow C stream; the
+# C driver below (c_abi_check) reads those streams through komira.h.
 # It is published only if every gate driver passes, each of which dlopens it
 # with RTLD_NOW and calls it as a foreign host would:
-#   gate_version       the version is 1002 (1.2);
+#   gate_version       the version is 1003 (1.3);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op, and a context (with its
 #                      engine's workers) is created and freed again;
@@ -213,6 +217,7 @@ _LIBKOMIRA = dict(
         "komira_credential_add",
         "komira_credential_set",
         "komira_credential_seal",
+        "komira_sql_stream",
     ],
     exports_exact = True,
     gate_srcs = [
@@ -321,10 +326,18 @@ cxx_binary(
 # Runs abi_driver against libkomira: it dlopens the library, binds each function
 # the header declares with the header's type, and checks the version, the
 # status codes and the input bound the header names, and the two-call error
-# round trip. A header that disagrees with the binary fails here.
+# round trip. A header that disagrees with the binary fails here. It also runs
+# SQL through komira_sql_stream and reads the answers through the header's
+# struct ArrowArrayStream: count(*) over two_columns.parquet (staged beside it),
+# that file's columns with no row, and a file of three rows it writes with
+# COPY into $TEST_TMPDIR, registers and queries; each refusal (NULL ctx, sql or
+# out, a parse and a bind error, a text one byte over the bound) leaves *out as
+# the driver wrote it, and a good query follows each on the same context; a
+# stream outlives komira_ctx_free.
 komira_c_abi_check(
     name = "c_abi_check",
     driver = ":abi_driver",
     lib = ":libkomira",
     native_owners = NATIVE_OWNERS,
+    data = {"two_columns.parquet": "tests/fixtures/two_columns.parquet"},
 )
