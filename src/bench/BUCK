@@ -58,7 +58,7 @@ mojo_conda(
         "../spsc_ring": "//src/spsc_ring:mopm.toml",
     },
     mojo = "1.1.0",
-    mopm = "toolchains//:mopm_0_0_135",
+    mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/bench",
     version = "0.1.0",
     visibility = ["PUBLIC"],
