@@ -310,7 +310,7 @@ jobs:
       - name: build the packages
         uses: ./.github/actions/buck2-farm
         with:
-          args: build --config-file ${{ runner.temp }}/darwin.buckconfig //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts
+          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts
           assert-remote: ${{ steps.assert.outputs.path }}
       # THE VERSION OF THIS RUN. A (name, version) pair can be created once on a registry, and a
       # mopm version is exactly MAJOR.MINOR.PATCH, so every release carries new versions: every

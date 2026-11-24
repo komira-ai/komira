@@ -267,6 +267,23 @@ mopm_darwin_libs(
     visibility = ["PUBLIC"],
 )
 
+# The gate of :mopm_release_artifacts: it is compatible only under `-c komira_release.mac_tree=true`, which the two
+# places that register the macOS execution platform pass (release.yml's step `build the packages`, and
+# darwin_analysis.buckconfig for pr.yml's analysis). Anywhere else (a Linux graph query of `//...`, the pull request
+# check) it is incompatible and skipped, since its macOS half cannot be configured without that platform.
+config_setting(
+    name = "mac_tree",
+    values = {"komira_release.mac_tree": "true"},
+)
+
+constraint_setting(name = "mac_tree_setting")
+
+# No platform has it: a target that requires it is incompatible everywhere.
+constraint_value(
+    name = "mac_tree_off",
+    constraint_setting = ":mac_tree_setting",
+)
+
 # The directory release.yml's `mopm-stage` stages and publishes (mopm_artifacts.bzl, `mopm_release_artifacts`):
 # :mopm_artifacts (linux-64) and :mopm_darwin_libs (osx-arm64, configured for darwin-arm64 by the rule's
 # transition, so it is built on the farm's macOS workers), merged into one `mopm stage --artifacts` directory. Built
@@ -277,5 +294,6 @@ mopm_release_artifacts(
     name = "mopm_release_artifacts",
     linux = ":mopm_artifacts",
     mac = ":mopm_darwin_libs",
+    target_compatible_with = select({":mac_tree": [], "DEFAULT": [":mac_tree_off"]}),  # komira-limit:release-mac-tree
     visibility = ["PUBLIC"],
 )

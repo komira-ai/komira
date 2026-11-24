@@ -80,7 +80,7 @@ const PROD_SMOKE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged
 const PROD_ADD_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" add --staged \"$RUNNER_TEMP/prod-add/committed\" --mopm \"$RUNNER_TEMP/mopm-publish/mopm\" --work \"$RUNNER_TEMP/prod-add/work\"'";
 // The packages of both platforms in the one directory `mopm stage --artifacts` reads; the only step that names the
 // buckconfig of the macOS keys (MAC_CONFIG_INPUT writes it), so no other step of mopm-stage configures a macOS platform.
-const PACKAGES_BUILD = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts";
+const PACKAGES_BUILD = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts";
 const MAC_CONFIG_INPUT = "          darwin-config-file: ${{ runner.temp }}/darwin.buckconfig";
 const MAC_CONFIG_FILE = "darwin.buckconfig";
 const STAGE_BUILD_VERIFY = "          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/mopm-publish/release_staged_verify";
@@ -742,6 +742,8 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD, linux_only), "does not build the packages of both platforms");
     try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD, "          args: build //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts"), "does not build the packages of both platforms");
     try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD, PACKAGES_BUILD ++ nl ++ PACKAGES_BUILD), "does not build the packages of both platforms");
+    // without the gate the target is incompatible, and the build would build nothing of either platform
+    try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD, "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts"), "does not build the packages of both platforms");
     try expectRefused(ar, try replaced(ar, text, MAC_CONFIG_INPUT ++ nl, ""), "no darwin-config-file");
     try expectRefused(ar, try replaced(ar, text, STAGE_E2E_RUN, "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all"), "names the macOS keys' buckconfig");
     const rewrite_step = PROD_REWRITE_NAME ++ "\n        env:\n" ++ REWRITE_ENV ++ "\n" ++ PROD_REWRITE_RUN ++ "\n";

@@ -85,7 +85,7 @@ const DARWIN_HOSTS = "          darwin-macos-hosts: ${{ vars.FARM_DARWIN_MACOS_H
 const QOS = "          farm-qos: batch";
 const MACOS_LIBS = "          macos-library-dirs: ${{ vars.FARM_MACOS_LIBRARY_DIRS }}";
 const MAC_CONFIG_INPUT = "          darwin-config-file: ${{ runner.temp }}/darwin.buckconfig";
-const PACKAGES_BUILD = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts";
+const PACKAGES_BUILD = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts";
 /// The job of release.yml that stages and publishes the packages of both platforms, and the only lines of release.yml
 /// that may name macOS: its farm connection's macOS keys, written to a buckconfig of their own, and the build of the
 /// packages, the one step that names that file.
