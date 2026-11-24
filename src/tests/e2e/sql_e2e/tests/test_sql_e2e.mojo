@@ -1,7 +1,8 @@
 # The corpus run end to end: every case of cases/ through komira's SQL
 # surface (so.sql_result, what komira_sql_stream runs) over
-# komira_test_oracle's datasets and the regression tables, held to the pinned DuckDB's answer by value
-# and in row order, or refused with exactly the text refusals.tsv lists.
+# komira_test_oracle's datasets and the regression tables, held to the
+# pinned DuckDB's answer by value and in row order, or refused with exactly
+# the text refusals.tsv lists.
 #
 # Catches: komira answering a case otherwise than DuckDB (a wrong value, a
 # missing or extra row, rows in another order, another column name); a
