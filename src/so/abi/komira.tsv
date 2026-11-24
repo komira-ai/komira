@@ -1,9 +1,10 @@
-version	1.3
+version	1.4
 # The C ABI of libkomira. One row per export: symbol, return type, argument types, the version that added it.
 # Types are Mojo's, origins dropped; see tools/build/mojo/abi_golden.bzl. Adding a row raises the minor version.
 # Changing or removing one raises the major version (status.mojo: ABI_MAJOR, ABI_MINOR).
 komira_abi_version	Int32	-	1.0
 komira_ctx_new	Handle	-	1.0
+komira_ctx_new_with_options	Handle	Int64,Int64	1.4
 komira_ctx_free	None	Handle	1.0
 komira_last_error	Int32	Handle,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.0
 komira_register_parquet	Int32	Handle,CStr,CStr	1.1
