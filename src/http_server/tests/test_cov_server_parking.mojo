@@ -46,6 +46,7 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from async_rt.ops.waker_sink import NoopSink, WakerSink
 from async_rt.reactor.reactor import Reactor
+from async_rt.reactor.socket_setup import set_so_sndbuf
 from async_rt.runtime.blocking_runtime import BlockingRuntime
 from async_rt.runtime.runtime_trait import Runtime
 from async_rt.runtime.shared_erasure import (
@@ -241,9 +242,7 @@ def _shrink_accepted(server: HttpServer[NoopGrpcDispatch]) raises:
     accepted socket inherits the listener's; Darwin's does not reliably keep
     it (the loopback buffer autotunes up), so the response burst would fit
     unparked. Setting the option on the connection itself pins it on both."""
-    _sockopt(
-        server._conns[0].fd(), Int32(7), Int32(0x1001), Int32(4096), Int32(0), 1
-    )
+    set_so_sndbuf(server._conns[0].fd(), Int32(4096))
 
 
 def _assert_parked(server: HttpServer[NoopGrpcDispatch]) raises:

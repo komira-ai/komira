@@ -184,6 +184,10 @@ def _set_sockbuf(fd: Int32, opt: Int32, size: Int32):
     )
 
 
+# FFI-BOUNDARY: `_fill_socket` and `_drain_socket` call libc `send` and `recv`
+# on the raw socketpair fd. Each helper owns its stack-local buffer and lends
+# it to libc only for the duration of the call; libc neither retains nor frees
+# it. The fd is owned by the test and closed by it, never by these helpers.
 def _fill_socket(fd: Int32) -> Int:
     """Non-blocking write of raw filler bytes to `fd` until the kernel refuses
     more (the send buffer and the peer's receive buffer are both full).

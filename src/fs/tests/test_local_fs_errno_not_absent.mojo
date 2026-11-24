@@ -54,7 +54,6 @@
 # =============================================================================
 
 from std.ffi import external_call
-from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_true
 
 from runtime_paths import test_tmpdir
@@ -251,12 +250,12 @@ def _repeat_x(n: Int) -> String:
     return s
 
 
+# FFI-BOUNDARY: `komira_fs_test_path_max` (fs/_fs_shim.c) takes no argument and
+# returns a C int64_t; no pointer crosses, so nothing is owned or freed.
 def _path_max() -> Int:
-    """PATH_MAX of the platform: 1024 on macOS, 4096 on Linux."""
-    comptime if CompilationTarget.is_macos():
-        return 1024
-    else:
-        return 4096
+    """PATH_MAX of the platform (4096 on Linux, 1024 on macOS), read from
+    <limits.h> through the fs shim."""
+    return Int(external_call["komira_fs_test_path_max", Int64]())
 
 
 def _walk_entry_lstat_enametoolong_under(pad: Int) raises:

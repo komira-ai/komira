@@ -40,6 +40,7 @@ from async_rt.reactor.completion_queue import (
     INTEREST_READ,
     RegistrationHandle,
 )
+from async_rt.reactor.socket_setup import set_so_rcvbuf, set_so_sndbuf
 from async_rt.runtime.tcp_stream import TcpStream
 from http_core.codec.h2.connection_state import H2ConnectionState
 from http_core.codec.h2.frame import (
@@ -109,49 +110,21 @@ def _socketpair() raises -> Array[Int32, 2]:
         # could not hand the server a 17 KB burst in one go (Linux's take
         # it); widen the client's send side and the server's receive side.
         # The server's send side stays at its default for `_set_sndbuf`.
-        _set_buf(pair[1], Int32(0x1001), 1 << 20)
-        _set_buf(pair[0], Int32(0x1002), 1 << 20)
+        set_so_sndbuf(pair[1], Int32(1 << 20))
+        set_so_rcvbuf(pair[0], Int32(1 << 20))
     return pair^
-
-
-def _set_buf(fd: Int32, opt: Int32, bytes: Int) raises:
-    """Darwin only: SO_SNDBUF (0x1001) or SO_RCVBUF (0x1002) of `fd`."""
-    var val = Int32(bytes)
-    var rc = external_call["setsockopt", Int32](
-        fd,
-        Int32(0xFFFF),
-        opt,
-        # SAFETY: `val` is a stack local read synchronously; nothing retains it.
-        UnsafePointer(to=val).bitcast[UInt8](),
-        UInt32(4),
-    )
-    if rc < 0:
-        raise Error("setsockopt(buffer size) failed")
 
 
 def _set_sndbuf(fd: Int32, bytes: Int) raises:
     """Shrink `fd`'s send buffer to a few KiB (Linux raises a tiny value to
     its minimum; macOS is asked for 4 KiB), so a flush of a few KiB blocks."""
-    var val = Int32(bytes)
-    var level = Int32(1)
-    var opt = Int32(7)
+    var val = bytes
     comptime if CompilationTarget.is_macos():
-        level = Int32(0xFFFF)
-        opt = Int32(0x1001)
         # Linux raises a tiny value to about 4.5 KiB; Darwin keeps 1 byte
         # literally, so each flush moves almost nothing. Ask for at least
         # the same few KiB there.
-        val = Int32(max(bytes, 4096))
-    var rc = external_call["setsockopt", Int32](
-        fd,
-        level,
-        opt,
-        # SAFETY: `val` is a stack local read synchronously; nothing retains it.
-        UnsafePointer(to=val).bitcast[UInt8](),
-        UInt32(4),
-    )
-    if rc < 0:
-        raise Error("setsockopt(SO_SNDBUF) failed")
+        val = max(bytes, 4096)
+    set_so_sndbuf(fd, Int32(val))
 
 
 def _unread_bytes(fd: Int32) -> Int:
