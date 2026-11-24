@@ -8,13 +8,22 @@ pyarrow, and is read once, by `to_arrow`, `to_reader`, `to_pandas`,
 `to_polars` or `__arrow_c_stream__`. The stream needs neither the session nor
 its context, so a result still reads after its session is closed or collected
 (docs/design/python_package.md, decision 3).
+
+A session may be used from any thread. It holds a lock around each call into
+the library, so its context never runs two calls at once (the C ABI's rule,
+src/so/README.md): a call waits for the one running on the same session to
+return. Reading a `Result` takes no lock, since its stream needs neither the
+session nor its context.
 """
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import os
+import threading
 import weakref
+from collections.abc import Iterator
 from types import ModuleType, TracebackType
 from typing import TYPE_CHECKING
 
@@ -36,6 +45,13 @@ class Session:
     s:` closes it on exit. `close()` frees the context and may be called again;
     any other call on a closed session raises `KomiraError`. A session that is
     never closed is freed when it is garbage collected.
+
+    A session may be used from several threads. Its calls run one at a time:
+    a call made while another runs on the same session waits for that one to
+    return, and `close()` waits too, so the context is never freed under a
+    running call. Two sessions run their calls at once. A call made on the
+    thread whose call is running, which only a signal handler or a finalizer
+    can do, raises `KomiraError` instead of waiting for itself.
     """
 
     def __init__(self) -> None:
@@ -43,6 +59,10 @@ class Session:
         ctx = native.ctx_new()
         self._native = native
         self._ctx: int | None = ctx
+        # Held around every call into the library; `_owner` is the thread
+        # holding it, None when no thread does.
+        self._lock = threading.Lock()
+        self._owner: int | None = None
         self._free = weakref.finalize(self, native.ctx_free, ctx)
         # At interpreter exit the operating system reclaims the context with
         # the library, which is never unloaded; calling into it then is not
@@ -70,8 +90,9 @@ class Session:
             path = os.fspath(path)
         if not isinstance(path, str):
             raise TypeError("path must be a str or os.PathLike[str], not {}".format(type(path).__name__))
-        ctx = self._live()
-        self._native.register_parquet(ctx, name, os.path.abspath(os.path.expanduser(path)))
+        path = os.path.abspath(os.path.expanduser(path))
+        with self._held():
+            self._native.register_parquet(self._live(), name, path)
 
     def sql(self, query: str) -> Result:
         """Runs the one SQL statement `query` over the session's tables and
@@ -95,8 +116,8 @@ class Session:
         """
         if not isinstance(query, str):
             raise TypeError("query must be a str, not {}".format(type(query).__name__))
-        ctx = self._live()
-        stream = self._native.sql_stream(ctx, query)
+        with self._held():
+            stream = self._native.sql_stream(self._live(), query)
         try:
             return Result(_arrow.import_stream(stream))
         except _arrow.stream_errors() as e:
@@ -122,17 +143,20 @@ class Session:
             return
         if not isinstance(credential, _Credential):
             raise TypeError("credential must be a komira credential, not {}".format(type(credential).__name__))
-        ctx = self._live()
         kind, name, fields = credential._definition()
-        cred_id = self._native.credential_add(ctx, kind, name)
-        for field, value in fields:
-            self._native.credential_set(ctx, cred_id, field, value.encode("utf-8"))
-        self._native.credential_seal(ctx, cred_id)
+        with self._held():
+            ctx = self._live()
+            cred_id = self._native.credential_add(ctx, kind, name)
+            for field, value in fields:
+                self._native.credential_set(ctx, cred_id, field, value.encode("utf-8"))
+            self._native.credential_seal(ctx, cred_id)
 
     def close(self) -> None:
-        """Frees the context. A second call does nothing."""
-        self._ctx = None
-        self._free()
+        """Frees the context, after the call running on another thread, if
+        any, returns. A second call does nothing."""
+        with self._held():
+            self._ctx = None
+            self._free()
 
     def __enter__(self) -> Session:
         self._live()
@@ -151,6 +175,32 @@ class Session:
             raise KomiraError("the session is closed")
         return self._ctx
 
+    @contextlib.contextmanager
+    def _held(self) -> Iterator[None]:
+        """Holds the session's lock for one call into the library, its last
+        error read included, so that another thread's call cannot run on the
+        context between a failed call and the read of its message.
+
+        The thread already holding it is refused rather than left waiting for
+        itself: a signal handler or a finalizer that runs inside a call and
+        calls the session again gets a `KomiraError`. Another thread's
+        `_owner` is never this thread's id, so only that thread is refused.
+        A handler that runs in the few bytecodes between taking the lock and
+        setting `_owner`, or between clearing it and letting go of the lock,
+        is not seen and waits; Python code cannot close that window.
+        """
+        me = threading.get_ident()
+        if self._owner == me:
+            raise KomiraError(
+                "a call on this session was made while another call on it is running on the same thread "
+                "(from a signal handler or a finalizer): make it after that call returns"
+            )
+        with self._lock:
+            try:
+                self._owner = me
+                yield
+            finally:
+                self._owner = None
 
 
 class Result:
@@ -160,15 +210,19 @@ class Result:
     whose schema is already read. The first of `to_arrow()`, `to_reader()`,
     `to_pandas()`, `to_polars()` and `__arrow_c_stream__()` takes the stream;
     any of them called again raises `KomiraError`, since keeping a copy would
-    make a large answer's memory depend on which was called first. Run the query again to read it again. A
-    result that is never read releases its stream when it is collected.
+    make a large answer's memory depend on which was called first. Run the
+    query again to read it again. A result that is never read releases its
+    stream when it is collected.
     Reading does not need the session: a result still reads after its session
-    is closed.
+    is closed, and while another call runs on it. Of two threads that read one
+    result at once, one reads it and the other gets the `KomiraError`.
     """
 
     def __init__(self, reader: pyarrow.RecordBatchReader) -> None:
-        # None once a terminal took it.
-        self._reader: pyarrow.RecordBatchReader | None = reader
+        # The reader, until a terminal takes it. `list.pop` takes it in one
+        # step, so of two threads reading one result, one gets it and the
+        # other the error.
+        self._reader: list[pyarrow.RecordBatchReader] = [reader]
 
     def __arrow_c_stream__(self, requested_schema: object | None = None) -> object:
         """The Arrow PyCapsule interface: a PyCapsule named
@@ -235,11 +289,10 @@ class Result:
             reader.close()
 
     def _take(self) -> pyarrow.RecordBatchReader:
-        reader = self._reader
-        if reader is None:
-            raise KomiraError("the result was already read: run the query again to read it again")
-        self._reader = None
-        return reader
+        try:
+            return self._reader.pop()
+        except IndexError:
+            raise KomiraError("the result was already read: run the query again to read it again") from None
 
 
 def _import_optional(name: str, terminal: str) -> ModuleType:

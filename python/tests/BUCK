@@ -365,6 +365,29 @@ _PYARROW = {
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# A session used from several threads, on a stand-in (fake_threads.c, ABI 1.3)
+# that journals each call's entry and exit on its context, holds a call at a
+# gate until the test opens it, and counts calls that enter a context another
+# call is inside: a call waits for the call running on its session (each kind
+# of call, a refused one with its own message), a failed call's message is
+# read before another thread's call runs, close waits for the running call and
+# frees once, two sessions run at once, a signal handler calling the session
+# inside a call is refused, a Result reads while a call on its session is
+# held, and of two threads reading one Result one reads it.
+c_shared_lib(
+    name = "fake_threads",
+    srcs = ["fake_threads.c"],
+    out = "libkomira_fake_threads.so",
+)
+
+[python_binding_test(
+    name = "threads_test" + p["suffix"],
+    src = "test_threads.py",
+    data = {"fake_threads/libkomira.so": ":fake_threads"},
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # Session.sql on the real library: SELECT 1 AS n, a GROUP BY over a checked-in
 # Parquet file (3000 rows, five labels, six row groups), an aggregate over the
 # quickstart's readings.parquet, an answer of no rows, each terminal, an engine
