@@ -76,7 +76,15 @@ class _Call:
         self.reading = (0, 0)
 
     def start(self) -> None:
-        threading.Thread(target=self._work, name="komira-sql", daemon=True).start()
+        try:
+            threading.Thread(target=self._work, name="komira-sql", daemon=True).start()
+        except RuntimeError:
+            # No helper thread exists: the call is abandoned and its handle
+            # freed here, since no helper will free it.
+            with self._mu:
+                self._state = _ABANDONED
+            self._free()
+            raise
 
     def _work(self) -> None:
         with self._mu:
@@ -129,8 +137,11 @@ class _Call:
                 self._state = _ABANDONED
                 return
             if self._state == _RUNNING and not self._cancelled:
-                self._cancelled = True
+                # The flag is set once the cancel returned, so an exception
+                # between the two repeats the cancel, which does nothing the
+                # second time, rather than losing it.
                 self._native.run_cancel(self._run)
+                self._cancelled = True
         while not self.done.wait(POLL_SECONDS):
             pass
         # A stream made before the cancel took is released here, when the

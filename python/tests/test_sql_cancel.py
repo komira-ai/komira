@@ -24,7 +24,8 @@ on a context and on a run handle, and counts the streams it made and released:
   library's message and status, and free the handle;
 - the arguments are checked before any handle is made;
 - a call abandoned before its helper thread started makes no call, and its
-  helper frees the handle;
+  helper frees the handle; a helper thread that cannot be started raises its
+  RuntimeError from sql, with the handle freed and no call made;
 - the logger "komira" says which library it loaded, how many segments a query
   ran, and what stopped one, word for word;
 - no call ran on a context while another was inside it, none on a freed
@@ -430,6 +431,31 @@ def an_abandoned_call_makes_no_call(fake, s):
     assert call.stream is None and call.error is None
 
 
+def a_helper_thread_that_cannot_start_frees_its_handle(fake, s):
+    """threading cannot start the helper: sql raises its RuntimeError, the
+    handle is freed with no call made, and the session answers after."""
+
+    class NoThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    journal = Journal(fake)
+    real = _run.threading.Thread
+    _run.threading.Thread = NoThread
+    try:
+        e = raised(lambda: s.sql("ok"))
+    finally:
+        _run.threading.Thread = real
+    assert type(e) is RuntimeError and str(e) == "can't start new thread", repr(e)
+    lines = journal.lines()
+    r = run_number(lines)
+    assert lines == ["r{} new".format(r), "r{} free".format(r)], lines
+    answers(s)
+
+
 class Records(logging.Handler):
     def __init__(self):
         super().__init__(logging.DEBUG)
@@ -483,6 +509,7 @@ def main(args):
     refusals_raise_the_library_message(fake, s)
     the_arguments_are_checked_first(fake, s)
     an_abandoned_call_makes_no_call(fake, s)
+    a_helper_thread_that_cannot_start_frees_its_handle(fake, s)
     the_log_says_what_happened(fake, s, records)
 
     journal = Journal(fake)
