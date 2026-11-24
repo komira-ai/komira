@@ -1,4 +1,4 @@
-load("@komira//python:dependencies.bzl", "PROTOBUF_REQUIREMENT", "PYARROW_MACOS", "PYARROW_WHEELS")
+load("@komira//python:dependencies.bzl", "DUCKDB_WHEEL", "PROTOBUF_REQUIREMENT", "PYARROW_MACOS", "PYARROW_WHEELS")
 load("@komira//python:pythons.bzl", "PYTHONS")
 load("@komira//third_party/python:pins.bzl", "PROTOBUF_EDGES", "WHEELS")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
@@ -305,6 +305,16 @@ _ISA_FIXTURES = [
     size_bytes = w["size"],
     visibility = ["komira//python:"],
 ) for w in PYARROW_WHEELS.values()]
+
+# The pinned DuckDB wheel, installed beside komira's wheel by the analysis job
+# test (python/BUCK, `analysis_job_test`).
+pinned_file(
+    name = DUCKDB_WHEEL["file"],
+    url = DUCKDB_WHEEL["url"],
+    sha256 = DUCKDB_WHEEL["sha256"],
+    size_bytes = DUCKDB_WHEEL["size"],
+    visibility = ["komira//python:"],
+)
 
 # Read only by the macOS wheel's install test, which runs from
 # pypi-macos-arm64.yml alone, never in a pull request.
@@ -663,6 +673,7 @@ _PLAN_EXPR_RUNTIMES = [
 ) for f in [
     "wheel_install_run.py",
     "test_installed.py",
+    "test_analysis_job.py",
     "test_tpch_installed.py",
     "tpch_compare.py",
     "test_beside_modular.py",
