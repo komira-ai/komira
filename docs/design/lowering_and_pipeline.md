@@ -974,10 +974,11 @@ order keys, so the reopened pipeline is marked as a sorted stream and a `LIMIT` 
 is. `lower` refuses with `LOWERING_WINDOW_UNSERVED`, before it walks the child: a key that is not a column of the child or
 whose type is not INT64, INT32, FLOAT64, BOOL or STRING, a function or argument type the sink does not compute (the
 ranking functions, `NTILE`, `LAG`, `LEAD`, `FIRST_VALUE`, `LAST_VALUE`, `NTH_VALUE`, `SUM`, `AVG`, `MIN`, `MAX` and
-`COUNT` are served), a `LAG` or `LEAD` default the column cannot hold unchanged, and a frame other than `RANGE`
-`UNBOUNDED PRECEDING` to `CURRENT ROW` or the whole partition. The schema the sink declares marks a `SUM`, `AVG`, `MIN`
-or `MAX` column nullable when its argument column is. Not built: explicit sliding frames, a partition top-n and a parallel
-window sink.
+`COUNT` are served), a `LAG` or `LEAD` default the column cannot hold unchanged, a frame shape SQL refuses, and a
+`RANGE` frame with an offset whose window does not order by one INT64, INT32 or FLOAT64 key; every other `ROWS` or
+`RANGE` frame is served. The schema the sink declares marks a `SUM`, `AVG`, `MIN` or `MAX` column nullable when its
+argument column is, and a `SUM`, `AVG`, `MIN`, `MAX`, `FIRST_VALUE` or `LAST_VALUE` column nullable when its frame can be
+empty. Not built: a partition top-n and a parallel window sink.
 **What step 9 built, against the row above.** The ungrouped sink, the only one that folds a float argument, is
 reproducible; neither 9a nor `GrainSourceImpl` was built, because the sources already stamp a position on every morsel:
 the Parquet source's partition id is its flat row group times 2^20 plus the morsel's index in that row group (the

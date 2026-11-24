@@ -61,12 +61,13 @@
 #   test_unserved_windows_are_named_refusals_at_lower
 #                                            a sum over an INTEGER, a DATE
 #                                            partition key, a DECIMAL order
-#                                            key, an explicit ROWS frame and a
-#                                            float default over a BIGINT lag
-#                                            are refused at step lower with a
+#                                            key and a float default over a
+#                                            BIGINT lag are refused at step
+#                                            lower with a
 #                                            LOWERING_WINDOW_UNSERVED reason.
 #
-# Every case runs on one worker and on three.
+# Every case runs on one worker and on three. Explicit ROWS and RANGE frames
+# are test_run_sql_window_frames'.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -350,12 +351,6 @@ def _refusals() -> List[_Refusal]:
         "a DECIMAL order key",
         "SELECT id, rank() OVER (PARTITION BY g ORDER BY m) AS rk " + t,
         "the ORDER BY key 'm' has type decimal128, which the window's sort does not order",
-    ))
-    out.append(_Refusal(
-        "an explicit ROWS frame",
-        "SELECT id, sum(v) OVER (PARTITION BY g ORDER BY id ROWS BETWEEN"
-        " 1 PRECEDING AND CURRENT ROW) AS sv " + t,
-        "SUM(v) has the frame ROWS BETWEEN 1 PRECEDING AND CURRENT ROW; only RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW and the whole partition are served",
     ))
     out.append(_Refusal(
         "a float default over a BIGINT lag",

@@ -94,7 +94,9 @@ def _value_sources(
             elif expr.func == PF_LAST_VALUE:
                 pick = hi - 1
             elif expr.func == PF_NTH_VALUE:
-                if expr.offset >= 1 and lo + expr.offset - 1 < hi:
+                # Compared as a count, not as `lo + n - 1 < hi`: an n near
+                # INT64's top would overflow that sum and pick a row.
+                if expr.offset >= 1 and expr.offset - 1 < hi - lo:
                     pick = lo + expr.offset - 1
             else:
                 raise Error(

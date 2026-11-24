@@ -17,21 +17,36 @@
 #     number of order keys, and NULL keys.
 #   * RANGE with an offset (`n PRECEDING` / `n FOLLOWING`): the bound is a
 #     VALUE offset on the one ORDER BY key: `1 PRECEDING` selects the rows of
-#     the partition whose key lies in `[k - 1, k]`. Served for one INT64 or
-#     FLOAT64 key with no NULL and no NaN; anything else raises rather than
-#     answering with ROWS semantics.
+#     the partition whose key lies in `[k - 1, k]`. Served for one INT64,
+#     INT32 or FLOAT64 key, as DuckDB v1.5.6 answers it (measured):
+#       - a row whose key is NULL frames over the NULL peer group: each bound
+#         with an offset, and CURRENT ROW, is the group's edge; an UNBOUNDED
+#         bound stays the partition's edge. The window sorts NULLs last in
+#         both directions, so the NULL group ends the partition;
+#       - a row whose key is not NULL searches its offset bounds among the
+#         rows whose key is not NULL; UNBOUNDED FOLLOWING still reaches the
+#         partition's end, NULL keys included;
+#       - floats compare in DuckDB's order (`sort_key_lt`: NaN above +inf and
+#         equal to NaN), and NaN or an infinity plus or minus an offset is
+#         itself, so each offset bound of a NaN key is an edge of the NaN
+#         peer group;
+#       - an integer bound that leaves the key's type raises DuckDB's
+#         `Overflow in subtraction / addition` error. DuckDB computes the
+#         bound in the wider of the key's type and the offset literal's
+#         (INTEGER when the offset fits in 32 bits, else BIGINT), so an
+#         INT32 key overflows at INT32 for a small offset and at INT64 for a
+#         wide one.
 #
 # Both lists are non-decreasing in `row` within a partition, under every
 # unit: the ring-buffer kernels need that. ROWS clamps an affine function;
 # RANGE walks a key that is sorted inside the partition.
 # =============================================================================
 
-from std.math import isnan
-
 from arrow.arrow_types import ArrowType
 from arrow.column import Column
 from arrow.record_batch import RecordBatch
 from byte_buffer.heap_region import HeapRegion
+from op_sort.sort import sort_key_lt
 from plan_expr.partition_expr import (
     FRAME_BOUND_CURRENT_ROW,
     FRAME_BOUND_FOLLOWING,
@@ -79,16 +94,32 @@ def _is_offset_bound(tag: UInt8) -> Bool:
 # =============================================================================
 
 
+# A ROWS offset is clamped to this magnitude before it is added to a row
+# position: past any partition's length it frames the same rows, and the sum
+# of a position and a clamped offset cannot overflow (`9223372036854775807
+# FOLLOWING` would).
+comptime _ROWS_OFFSET_LIMIT: Int64 = Int64(1 << 61)
+
+
+def _clamped(offset: Int64) -> Int:
+    if offset > _ROWS_OFFSET_LIMIT:
+        return Int(_ROWS_OFFSET_LIMIT)
+    if offset < -_ROWS_OFFSET_LIMIT:
+        return -Int(_ROWS_OFFSET_LIMIT)
+    return Int(offset)
+
+
 def _rows_offset(tag: UInt8, offset: Int64) -> Int:
-    """A ROWS bound as a row offset from the current row."""
+    """A ROWS bound as a row offset from the current row. A negative offset
+    looks the other way (`-1 PRECEDING` is the row after), as in DuckDB."""
     if tag == FRAME_BOUND_UNBOUNDED_PRECEDING:
         return _UNBOUNDED_NEG
     elif tag == FRAME_BOUND_PRECEDING:
-        return -Int(offset)
+        return -_clamped(offset)
     elif tag == FRAME_BOUND_CURRENT_ROW:
         return 0
     elif tag == FRAME_BOUND_FOLLOWING:
-        return Int(offset)
+        return _clamped(offset)
     return _UNBOUNDED_POS
 
 
@@ -176,80 +207,165 @@ def _range_peer_frame_index(
 # =============================================================================
 
 
+comptime _INT32_MIN: Int64 = -2147483648
+comptime _INT32_MAX: Int64 = 2147483647
+
+
+def _overflow(
+    toward_larger: Bool, type_name: String, k: Int64, off: Int64, key: String
+) -> Error:
+    """DuckDB's error for a RANGE bound that leaves the key's type."""
+    var op = String("addition") if toward_larger else String("subtraction")
+    var sign = String(" + ") if toward_larger else String(" - ")
+    return Error(
+        "partition_frame_index: Out of Range Error: Overflow in "
+        + op
+        + " of "
+        + type_name
+        + " ("
+        + String(k)
+        + sign
+        + String(off)
+        + ")! (the RANGE frame bound of the ORDER BY key '"
+        + key
+        + "')"
+    )
+
+
+def _int_bound(
+    k: Int64, off: Int64, toward_larger: Bool, key_is_int32: Bool, key: String
+) raises -> Int64:
+    """`k + off` or `k - off` for an integer key, raising where DuckDB does:
+    at INT64 always, and at INT32 for an INT32 key whose offset fits in 32
+    bits (DuckDB types such an offset INTEGER)."""
+    var r: Int64
+    if toward_larger:
+        if (off > 0 and k > Int64.MAX - off) or (off < 0 and k < Int64.MIN - off):
+            raise _overflow(toward_larger, "INT64", k, off, key)
+        r = k + off
+    else:
+        if (off > 0 and k < Int64.MIN + off) or (off < 0 and k > Int64.MAX + off):
+            raise _overflow(toward_larger, "INT64", k, off, key)
+        r = k - off
+    if (
+        key_is_int32
+        and off >= _INT32_MIN
+        and off <= _INT32_MAX
+        and (r < _INT32_MIN or r > _INT32_MAX)
+    ):
+        raise _overflow(toward_larger, "INT32", k, off, key)
+    return r
+
+
+def _bound_value[
+    dt: DType, wide: DType
+](
+    k: Scalar[wide], tag: UInt8, offset: Int64, desc: Bool, key: String
+) raises -> Scalar[wide]:
+    """The key value a PRECEDING, FOLLOWING or CURRENT ROW bound measures
+    against. Under `ORDER BY k DESC`, PRECEDING still means earlier in the
+    window's order, which is a larger key: `n PRECEDING` is `k + n` there and
+    `k - n` ascending."""
+    if tag == FRAME_BOUND_CURRENT_ROW:
+        return k
+    var toward_larger = (tag == FRAME_BOUND_PRECEDING) == desc
+    comptime if wide.is_floating_point():
+        var o = offset.cast[wide]()
+        return (k + o) if toward_larger else (k - o)
+    else:
+        var r = _int_bound(
+            k.cast[DType.int64](), offset, toward_larger, dt == DType.int32, key
+        )
+        return r.cast[wide]()
+
+
+@always_inline
+def _key_at[
+    dt: DType, wide: DType
+](key_col: Column[HeapRegion], row: Int) -> Scalar[wide]:
+    return key_col._data.get_typed[Scalar[dt]](key_col._offset + row).cast[
+        wide
+    ]()
+
+
+@always_inline
+def _before[wide: DType](kv: Scalar[wide], b: Scalar[wide], desc: Bool) -> Bool:
+    """True iff key `kv` comes before the bound value `b` in the window's
+    order (DuckDB's float order: NaN last ascending, first descending)."""
+    return sort_key_lt[wide](b, kv) if desc else sort_key_lt[wide](kv, b)
+
+
+def _non_null_end(key_col: Column[HeapRegion], seg_start: Int, seg_end: Int) -> Int:
+    """The first row of the partition's NULL-key group (NULLs sort last), or
+    `seg_end` when no key is NULL."""
+    var e = seg_end
+    while e > seg_start and key_col.is_null_at(e - 1):
+        e -= 1
+    return e
+
+
 def _range_value_fill[
-    dt: DType
+    dt: DType, wide: DType
 ](
     key_col: Column[HeapRegion],
+    key: String,
     bounds: List[Int],
     ends: List[Int],
     n: Int,
     frame: PartitionFrame,
     desc: Bool,
 ) raises -> FrameIdx:
-    """RANGE over one INT64 or FLOAT64 order key with no NULL and no NaN.
-
-    `desc` mirrors every threshold rather than swapping the bounds: under
-    `ORDER BY k DESC`, PRECEDING still means earlier in the window's order,
-    which is a larger key, so `n PRECEDING` is `key <= k + n` where ascending
-    it is `key >= k - n`. The offset is converted to the key's own type; an
-    INT64 key is never routed through FLOAT64, where a key above 2^53 would
-    lose its low bits and move a frame edge.
-    """
+    """RANGE over one INT64, INT32 or FLOAT64 order key, every bound compared
+    in `wide` (INT64 for an integer key, FLOAT64 for a float one): an INT64
+    key is never routed through FLOAT64, where a key above 2^53 would lose its
+    low bits and move a frame edge."""
     var lo = _zeros(n)
     var hi = _zeros(n)
-    var s_off = Scalar[dt](frame.start_offset)
-    var e_off = Scalar[dt](frame.end_offset)
+    var nullable = column_has_nulls(key_col)
     for p in range(len(bounds)):
         var seg_start = bounds[p]
         var seg_end = ends[p]
+        var nn_end = seg_end
+        if nullable:
+            nn_end = _non_null_end(key_col, seg_start, seg_end)
         var cur_lo = seg_start
         var cur_hi = seg_start
         for row in range(seg_start, seg_end):
-            var k = key_col._data.get_typed[Scalar[dt]](key_col._offset + row)
-
             var new_lo: Int
+            var new_hi: Int
             if frame.start_tag == FRAME_BOUND_UNBOUNDED_PRECEDING:
                 new_lo = seg_start
             elif frame.start_tag == FRAME_BOUND_UNBOUNDED_FOLLOWING:
                 new_lo = seg_end
+            elif row >= nn_end:
+                new_lo = nn_end
             else:
-                var b: Scalar[dt]
-                if frame.start_tag == FRAME_BOUND_PRECEDING:
-                    b = (k + s_off) if desc else (k - s_off)
-                elif frame.start_tag == FRAME_BOUND_FOLLOWING:
-                    b = (k - s_off) if desc else (k + s_off)
-                else:
-                    b = k
-                while cur_lo < seg_end:
-                    var kv = key_col._data.get_typed[Scalar[dt]](
-                        key_col._offset + cur_lo
-                    )
-                    var before = (kv > b) if desc else (kv < b)
-                    if not before:
-                        break
+                var b = _bound_value[dt, wide](
+                    _key_at[dt, wide](key_col, row),
+                    frame.start_tag, frame.start_offset, desc, key,
+                )
+                while cur_lo < nn_end and _before[wide](
+                    _key_at[dt, wide](key_col, cur_lo), b, desc
+                ):
                     cur_lo += 1
                 new_lo = cur_lo
 
-            var new_hi: Int
             if frame.end_tag == FRAME_BOUND_UNBOUNDED_FOLLOWING:
                 new_hi = seg_end
             elif frame.end_tag == FRAME_BOUND_UNBOUNDED_PRECEDING:
                 new_hi = seg_start
+            elif row >= nn_end:
+                new_hi = seg_end
             else:
-                var b2: Scalar[dt]
-                if frame.end_tag == FRAME_BOUND_PRECEDING:
-                    b2 = (k + e_off) if desc else (k - e_off)
-                elif frame.end_tag == FRAME_BOUND_FOLLOWING:
-                    b2 = (k - e_off) if desc else (k + e_off)
-                else:
-                    b2 = k
-                while cur_hi < seg_end:
-                    var kv2 = key_col._data.get_typed[Scalar[dt]](
-                        key_col._offset + cur_hi
-                    )
-                    var inside = (kv2 >= b2) if desc else (kv2 <= b2)
-                    if not inside:
-                        break
+                var b2 = _bound_value[dt, wide](
+                    _key_at[dt, wide](key_col, row),
+                    frame.end_tag, frame.end_offset, desc, key,
+                )
+                # A row is inside the end bound while the bound does not come
+                # before it.
+                while cur_hi < nn_end and not _before[wide](
+                    b2, _key_at[dt, wide](key_col, cur_hi), desc
+                ):
                     cur_hi += 1
                 new_hi = cur_hi
 
@@ -283,32 +399,26 @@ def _range_value_frame_index(
             + String(len(order_keys))
         )
     var n = batch.num_rows()
-    ref key_col = batch.column_at(batch.schema.column_index(order_keys[0]))
+    var key = String(order_keys[0])
+    ref key_col = batch.column_at(batch.schema.column_index(key))
     var desc = False
     if len(descending) > 0:
         desc = descending[0]
-    if column_has_nulls(key_col):
-        raise Error(
-            "partition_frame_index: a RANGE frame with an offset over an ORDER"
-            " BY key that holds NULLs is not supported; filter the NULLs, or"
-            " write the frame in ROWS"
-        )
     if key_col.arrow_type == ArrowType.INT64:
-        return _range_value_fill[DType.int64](key_col, bounds, ends, n, frame, desc)
+        return _range_value_fill[DType.int64, DType.int64](
+            key_col, key, bounds, ends, n, frame, desc
+        )
+    elif key_col.arrow_type == ArrowType.INT32:
+        return _range_value_fill[DType.int32, DType.int64](
+            key_col, key, bounds, ends, n, frame, desc
+        )
     elif key_col.arrow_type == ArrowType.FLOAT64:
-        for r in range(n):
-            if isnan(key_col._data.get_typed[Scalar[DType.float64]](key_col._offset + r)):
-                raise Error(
-                    "partition_frame_index: a RANGE frame with an offset over"
-                    " an ORDER BY key that holds NaN is not supported; write"
-                    " the frame in ROWS"
-                )
-        return _range_value_fill[DType.float64](
-            key_col, bounds, ends, n, frame, desc
+        return _range_value_fill[DType.float64, DType.float64](
+            key_col, key, bounds, ends, n, frame, desc
         )
     raise Error(
-        "partition_frame_index: a RANGE frame with an offset needs an INT64 or"
-        " FLOAT64 ORDER BY key; got "
+        "partition_frame_index: a RANGE frame with an offset needs an INT64,"
+        " INT32 or FLOAT64 ORDER BY key; got "
         + String(key_col.arrow_type)
     )
 

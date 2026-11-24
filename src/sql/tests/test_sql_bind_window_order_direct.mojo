@@ -22,6 +22,10 @@
 #   4. NULLS FIRST / LAST: the placement list is built only when a key asks,
 #      a key that does not ask gets the derived default.
 #   5. LIMIT / OFFSET bind one limit node; OFFSET without LIMIT is refused.
+#   6. A written frame DuckDB refuses raises DuckDB's error, for every
+#      function: the five frame shapes its parser refuses, a RANGE offset
+#      without exactly one ORDER BY key, and a RANGE offset over a VARCHAR or
+#      BOOLEAN key; the frames it allows bind.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -308,6 +312,65 @@ def test_window_refusals() raises:
     _check(
         "SELECT lag(v, 1, DATE '2021-02-30') OVER (ORDER BY k) FROM t",
         "ERR: SQL bind error: date out of range '2021-02-30'"
+    )
+
+
+def test_written_frames_duckdb_refuses_raise_its_error() raises:
+    var syntax = String("ERR: SQL syntax error: ")
+    _check(
+        "SELECT sum(v) OVER (ORDER BY k ROWS BETWEEN UNBOUNDED FOLLOWING AND UNBOUNDED FOLLOWING) FROM t",
+        syntax + "frame start cannot be UNBOUNDED FOLLOWING",
+    )
+    _check(
+        "SELECT row_number() OVER (ORDER BY k ROWS BETWEEN CURRENT ROW AND UNBOUNDED PRECEDING) FROM t",
+        syntax + "frame end cannot be UNBOUNDED PRECEDING",
+    )
+    _check(
+        "SELECT lag(v) OVER (ORDER BY k ROWS BETWEEN 1 FOLLOWING AND 1 PRECEDING) FROM t",
+        syntax + "frame starting from following row cannot have preceding rows",
+    )
+    _check(
+        "SELECT count(*) OVER (ORDER BY k RANGE 2 FOLLOWING) FROM t",
+        syntax + "frame starting from following row cannot end with current row",
+    )
+    _check(
+        "SELECT first_value(v) OVER (ORDER BY k RANGE BETWEEN CURRENT ROW AND 1 PRECEDING) FROM t",
+        syntax + "frame starting from current row cannot have preceding rows",
+    )
+    var one_key = String(
+        "ERR: SQL bind error: RANGE frames must have only one ORDER BY expression"
+    )
+    _check("SELECT sum(v) OVER (RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t", one_key)
+    _check(
+        "SELECT rank() OVER (ORDER BY k, g RANGE BETWEEN CURRENT ROW AND 1 FOLLOWING) FROM t",
+        one_key,
+    )
+    _check(
+        "SELECT sum(v) OVER (ORDER BY s RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t",
+        "ERR: SQL bind error: a RANGE frame with an offset subtracts the offset"
+        " from the ORDER BY key, and 's' is VARCHAR, which has no `-` (DuckDB:"
+        " no function matches '-(VARCHAR, INTEGER_LITERAL)')",
+    )
+    _check(
+        "SELECT sum(v) OVER (ORDER BY b RANGE BETWEEN CURRENT ROW AND 1 FOLLOWING) FROM t",
+        "ERR: SQL bind error: a RANGE frame with an offset subtracts the offset"
+        " from the ORDER BY key, and 'b' is BOOLEAN, which has no `-` (DuckDB:"
+        " no function matches '-(BOOLEAN, INTEGER_LITERAL)')",
+    )
+    # What DuckDB allows binds: RANGE without an offset over two keys or a
+    # VARCHAR key, a RANGE offset over one numeric or temporal key, and ROWS
+    # offsets with no ORDER BY.
+    _check(
+        "SELECT sum(v) OVER (ORDER BY k, s RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS a,"
+        " count(*) OVER (ORDER BY i32 RANGE BETWEEN 2 PRECEDING AND 3 FOLLOWING) AS b,"
+        " min(v) OVER (ORDER BY d DESC RANGE BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS c,"
+        " max(v) OVER (ROWS BETWEEN 1 FOLLOWING AND 2 FOLLOWING) AS e FROM t",
+        "Project(exprs=[ColRef(a), Alias(ColRef(_w_shadow_1_b), \"b\"), ColRef(c), ColRef(e)])\n"
+        "  PartitionBy(partition=[], order=[], funcs=[MAX(v, offset=0, frame=ROWS[3:1..3:2]) AS e])\n"
+        "    PartitionBy(partition=[], order=[d DESC], funcs=[MIN(v, offset=0, frame=RANGE[0:0..1:1]) AS c])\n"
+        "      PartitionBy(partition=[], order=[i32 ASC], funcs=[COUNT(, offset=0, frame=RANGE[1:2..3:3]) AS _w_shadow_1_b])\n"
+        "        PartitionBy(partition=[], order=[k ASC, s ASC], funcs=[SUM(v, offset=0, frame=RANGE[2:0..4:0]) AS a])\n"
+        "          Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n",
     )
 
 

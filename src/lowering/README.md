@@ -180,11 +180,16 @@ shape:
   FLOAT64 column; an argument that is not a column of the child; a `LAG` or
   `LEAD` default the column would change (a float over INT64, a string over a
   number, anything but a string over STRING); a function the sink does not
-  compute; and a frame of a value function or aggregate other than `RANGE`
-  `UNBOUNDED PRECEDING` to `CURRENT ROW` (SQL's default with an order) and
-  `UNBOUNDED PRECEDING` to `UNBOUNDED FOLLOWING` in `ROWS` or `RANGE` units.
-  The sink declares a `SUM`, `AVG`, `MIN` or `MAX` column nullable when its
-  argument is.
+  compute; and, for a value function or aggregate, a frame SQL refuses (a
+  start of `UNBOUNDED FOLLOWING`, an end of `UNBOUNDED PRECEDING`, a
+  `FOLLOWING` start ending at `CURRENT ROW` or `PRECEDING`, a `CURRENT ROW`
+  start ending `PRECEDING`, each with DuckDB's reason), frame units that are
+  neither `ROWS` nor `RANGE`, and a `RANGE` frame with an offset over a
+  window whose `ORDER BY` is not one key of type INT64, INT32 or FLOAT64.
+  Every other `ROWS` or `RANGE` frame is served. The sink declares a `SUM`,
+  `AVG`, `MIN` or `MAX` column nullable when its argument is, and a `SUM`,
+  `AVG`, `MIN`, `MAX`, `FIRST_VALUE` or `LAST_VALUE` column nullable when
+  its frame need not hold the current row (and so can be empty).
 - `LOWERING_JOIN_UNSERVED`, naming the reason, raised before either child of
   the join is walked: a join type the plan IR does not define, a SEMI or ANTI
   join that builds its left side, a CROSS join that names a key, an equi-join
