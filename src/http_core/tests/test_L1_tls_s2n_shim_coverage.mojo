@@ -1,6 +1,7 @@
 """Every arm of `tls/s2n_shim.mojo` that a live s2n connection or config can
 take, driven in-process: a komira server and a komira client `TlsConnection`
-over an AF_UNIX socketpair, with the package's fixture certificates. No test
+over an AF_UNIX socketpair (over a TCP loopback connection for the reset),
+with the package's fixture certificates. No test
 here makes s2n fail a protocol check, so none pays s2n's blinding delay: every
 error below is an I/O, closed or usage error, which s2n does not blind
 (tls/s2n_connection.c, `s2n_connection_apply_error_blinding`).
@@ -25,13 +26,14 @@ error below is an I/O, closed or usage error, which s2n does not blind
     while plaintext is buffered and DONE(0) once it is not; the close_notify
     exchange gives EOF and DONE on both sides; a send after shutdown is an
     ERROR (CLOSED), never DONE(0).
-  * test_tls13_blocked_send_and_reset: a TLS 1.3 handshake with ALPN; key
-    update refusals and one update; a send into a full socket blocks with
-    nothing accepted, an empty send then makes no s2n call (s2n's would
-    flush, and block), and every byte still arrives intact; a peer that
-    closes with unread bytes makes `recv` an ERROR (I/O) on Linux and EOF
-    (CLOSED) on macOS, which does not reset an AF_UNIX peer, and the next
-    send an ERROR (I/O) on both.
+  * test_tls13_blocked_send: a TLS 1.3 handshake with ALPN; key update
+    refusals and one update; a send into a full socket blocks with nothing
+    accepted, an empty send then makes no s2n call (s2n's would flush, and
+    block), and every byte still arrives intact.
+  * test_tls13_reset_is_io_error: over TCP loopback, a server that closes
+    with SO_LINGER {1, 0} and a client record unread resets the connection,
+    on Linux and on macOS alike: the client's `recv` is an ERROR (I/O), not
+    EOF and not a block, and its next send an ERROR (I/O) too.
   * test_abrupt_close_is_eof: a peer that closes without close_notify is
     EOF on `recv_into_span` and `recv` (CLOSED), not an error and not a block.
 """
@@ -41,7 +43,16 @@ from std.memory import ArcPointer
 from std.pathlib import Path
 from std.sys.info import CompilationTarget
 
-from async_rt.reactor.socket_setup import set_so_sndbuf, so_sndbuf
+from async_rt.reactor.socket_setup import (
+    bind_inet,
+    getsockname_port,
+    inet_loopback_be,
+    listen_socket,
+    set_so_sndbuf,
+    set_tcp_nodelay,
+    so_sndbuf,
+    sockaddr_in_bytes,
+)
 from http_core.tls import (
     PeerKeyUpdate,
     TLS_OUTCOME_BLOCKED_ON_READ,
@@ -72,7 +83,15 @@ from http_core.tls.s2n_shim import (
 
 
 comptime _AF_UNIX: Int32 = 1
+comptime _AF_INET: Int32 = 2
 comptime _SOCK_STREAM: Int32 = 1
+# SOL_SOCKET and SO_LINGER differ by OS (Linux asm-generic/socket.h; Darwin
+# sys/socket.h). `struct linger` is two ints on both.
+comptime _SOL_SOCKET_LINUX: Int32 = 1
+comptime _SOL_SOCKET_DARWIN: Int32 = 0xFFFF
+comptime _SO_LINGER_LINUX: Int32 = 13
+comptime _SO_LINGER_DARWIN: Int32 = 0x80
+comptime _POLLIN: Int32 = 1
 comptime _FIXTURES = "src/http_core/tests/fixtures/tls/"
 # The client's send buffer for the blocked-send case. The fill below sends at
 # most 1 MiB, so it must block well before that whatever the worker's
@@ -96,14 +115,145 @@ def _socketpair() raises -> Tuple[Int32, Int32]:
     if rc != Int32(0):
         raise Error("socketpair() returned " + String(Int(rc)))
     for i in range(2):
-        if external_call["komira_fcntl_set_nonblock", Int32](sv[i]) < 0:
-            raise Error("komira_fcntl_set_nonblock failed")
+        _set_nonblock(sv[i])
     return (sv[0], sv[1])
 
 
 def _close_fd(fd: Int32):
     if fd >= 0:
         var _rc = external_call["close", Int32](fd)
+
+
+def _set_nonblock(fd: Int32) raises:
+    if external_call["komira_fcntl_set_nonblock", Int32](fd) < 0:
+        raise Error("komira_fcntl_set_nonblock failed")
+
+
+def _tcp_loopback_pair() raises -> Tuple[Int32, Int32]:
+    """A connected TCP pair on 127.0.0.1 with a kernel-chosen port: (server,
+    client), both non-blocking. The connect and the accept block, so the pair
+    is established when this returns; the listener is closed."""
+    var lfd = external_call["socket", Int32](_AF_INET, _SOCK_STREAM, Int32(0))
+    if lfd < 0:
+        raise Error("listener socket() failed")
+    var cfd = Int32(-1)
+    var sfd = Int32(-1)
+    try:
+        bind_inet(lfd, inet_loopback_be(), UInt16(0))
+        listen_socket(lfd, Int32(1))
+        var addr = sockaddr_in_bytes(inet_loopback_be(), getsockname_port(lfd))
+        cfd = external_call["socket", Int32](_AF_INET, _SOCK_STREAM, Int32(0))
+        if cfd < 0:
+            raise Error("client socket() failed")
+        # SAFETY: the pointer's origin is `addr`, a 16-byte local alive across
+        # the synchronous call, which reads it and keeps no pointer.
+        if external_call["connect", Int32](cfd, addr.unsafe_ptr(), UInt32(16)) != 0:
+            raise Error("connect() to the loopback listener failed")
+        var peer = Array[UInt8, 16](fill=UInt8(0))
+        var peer_len = Array[UInt32, 1](fill=UInt32(16))
+        # SAFETY: the pointers' origins are `peer` and `peer_len`, locals
+        # alive across the synchronous call, which writes at most 16 bytes
+        # and one length into them and keeps no pointer.
+        sfd = external_call["accept", Int32](lfd, peer.unsafe_ptr(), peer_len.unsafe_ptr())
+        if sfd < 0:
+            raise Error("accept() failed")
+        _set_nonblock(sfd)
+        _set_nonblock(cfd)
+        set_tcp_nodelay(sfd)
+        set_tcp_nodelay(cfd)
+    except e:
+        _close_fd(sfd)
+        _close_fd(cfd)
+        _close_fd(lfd)
+        raise e^
+    _close_fd(lfd)
+    return (sfd, cfd)
+
+
+def _linger_option() -> Tuple[Int32, Int32]:
+    """(SOL_SOCKET, SO_LINGER) for the target; any other OS fails to build."""
+    comptime assert (
+        CompilationTarget.is_linux() or CompilationTarget.is_macos()
+    ), "SOL_SOCKET and SO_LINGER are known for Linux and macOS only"
+    comptime if CompilationTarget.is_linux():
+        return (_SOL_SOCKET_LINUX, _SO_LINGER_LINUX)
+    return (_SOL_SOCKET_DARWIN, _SO_LINGER_DARWIN)
+
+
+def _set_linger_zero(fd: Int32) raises:
+    """SO_LINGER {on, 0 seconds}: a close of `fd` then aborts the connection
+    with a reset instead of a FIN. Reads the option back, so a wrong option
+    number for the OS fails here, not as a later EOF."""
+    var opt = _linger_option()
+    var linger = Array[Int32, 2](fill=Int32(0))
+    linger[0] = Int32(1)
+    # SAFETY: the pointer's origin is `linger`, an 8-byte local alive across
+    # the synchronous call, which copies it and keeps no pointer.
+    if external_call["setsockopt", Int32](fd, opt[0], opt[1], linger.unsafe_ptr(), UInt32(8)) != 0:
+        raise Error("setsockopt(SO_LINGER {1, 0}) failed")
+    var got = Array[Int32, 2](fill=Int32(-1))
+    var got_len = Array[UInt32, 1](fill=UInt32(8))
+    # SAFETY: the pointers' origins are `got` and `got_len`, locals alive
+    # across the synchronous call, which writes 8 bytes and one length into
+    # them and keeps no pointer.
+    if external_call["getsockopt", Int32](fd, opt[0], opt[1], got.unsafe_ptr(), got_len.unsafe_ptr()) != 0:
+        raise Error("getsockopt(SO_LINGER) failed")
+    # Darwin reports l_onoff as the option's flag bit, Linux as 1.
+    if got_len[0] != UInt32(8) or got[0] == 0 or got[1] != 0:
+        raise Error(
+            "SO_LINGER read back as {" + String(Int(got[0])) + ", "
+            + String(Int(got[1])) + "} (length " + String(Int(got_len[0]))
+            + "), expected {on, 0}"
+        )
+
+
+def _wait_readable(fd_a: Int32, fd_b: Int32) raises:
+    """Wait, without a timeout, until `fd_a` or `fd_b` (-1: not watched) is
+    readable or has an error. TCP loopback delivers a segment, the reset
+    included, asynchronously to the call that sent it."""
+    # Two struct pollfd {int fd; short events; short revents}, little-endian:
+    # events in the low half of the second word, revents (0) in the high half.
+    # poll(2) skips an entry with a negative fd.
+    var pfd = Array[Int32, 4](fill=Int32(0))
+    pfd[0] = fd_a
+    pfd[1] = _POLLIN
+    pfd[2] = fd_b
+    pfd[3] = _POLLIN
+    # SAFETY: the pointer's origin is `pfd`, two struct pollfd on the stack
+    # alive across the synchronous call, which writes only their revents and
+    # keeps no pointer.
+    if external_call["poll", Int32](pfd.unsafe_ptr(), UInt64(2), Int32(-1)) < 1:
+        raise Error("poll() did not report a socket ready")
+
+
+def _handshake_tcp(mut server: TlsConnection, mut client: TlsConnection) raises:
+    """`_handshake` over TCP: a side blocked on read waits in poll for the
+    peer's flight instead of spinning, so 256 rounds is a bound on protocol
+    steps, not on how fast loopback delivers."""
+    var sv_done = False
+    var cl_done = False
+    for _ in range(256):
+        var sv_wait = Int32(-1)
+        var cl_wait = Int32(-1)
+        if not sv_done:
+            var o = server.handshake()
+            if o == TLS_OUTCOME_ERROR:
+                raise Error("server handshake: " + s2n_strerror_message(last_s2n_errno()))
+            sv_done = o == TLS_OUTCOME_DONE
+            if o == TLS_OUTCOME_BLOCKED_ON_READ:
+                sv_wait = server.fd()
+        if not cl_done:
+            var o = client.handshake()
+            if o == TLS_OUTCOME_ERROR:
+                raise Error("client handshake: " + s2n_strerror_message(last_s2n_errno()))
+            cl_done = o == TLS_OUTCOME_DONE
+            if o == TLS_OUTCOME_BLOCKED_ON_READ:
+                cl_wait = client.fd()
+        if sv_done and cl_done:
+            return
+        if (sv_done or sv_wait >= 0) and (cl_done or cl_wait >= 0):
+            _wait_readable(sv_wait, cl_wait)
+    raise Error("handshake did not finish in 256 rounds")
 
 
 def _server_config(tls13: Bool) raises -> TlsConfig:
@@ -439,8 +589,8 @@ def test_tls12_session_recv_and_close() raises:
     print("    OK")
 
 
-def test_tls13_blocked_send_and_reset() raises:
-    print("  test_tls13_blocked_send_and_reset...")
+def test_tls13_blocked_send() raises:
+    print("  test_tls13_blocked_send...")
     var server_config = _server_config(True)
     var client_config = _client_config(True)
     var alpn = List[String]()
@@ -449,7 +599,6 @@ def test_tls13_blocked_send_and_reset() raises:
     server_config.set_alpn_protocols(alpn)
     client_config.set_alpn_protocols(alpn)
     var fds = _socketpair()
-    var server_fd = fds[0]
     try:
         var server = TlsConnection(server_config)
         server.bind_fd(fds[0])
@@ -534,27 +683,43 @@ def test_tls13_blocked_send_and_reset() raises:
             if got[i] != payload[i]:
                 raise Error("byte " + String(i) + " differs after the blocked send")
         _expect_eq(server.key_update_counts().received, 1, "server key updates received")
+    finally:
+        _close_fd(fds[0])
+        _close_fd(fds[1])
+    print("    OK")
 
-        # The server closes with a record unread: on Linux, ECONNRESET on the
-        # client.
-        # That holds only while the unread record exists: Linux resets the
-        # peer when an AF_UNIX stream socket closes with data in its receive
-        # queue; with the queue empty the client sees EOF instead
-        # (test_abrupt_close_is_eof).
-        _expect_pair(client.send(Span[UInt8](payload)[0:100].as_imm()), TLS_OUTCOME_DONE, 100, "send left unread")
+
+def test_tls13_reset_is_io_error() raises:
+    print("  test_tls13_reset_is_io_error...")
+    var server_config = _server_config(True)
+    var client_config = _client_config(True)
+    var fds = _tcp_loopback_pair()
+    var server_fd = fds[0]
+    try:
+        var server = TlsConnection(server_config)
+        server.bind_fd(fds[0])
+        var client = TlsConnection.new_client(client_config)
+        client.bind_fd(fds[1])
+        client.set_server_name(String("localhost"))
+        _handshake_tcp(server, client)
+        _expect_eq(client.negotiated_tls_version(), TLS_VERSION_TLS13, "client version")
+        var scratch = _zeros(64)
+        _expect_pair(client.recv_into_span(Span[UInt8](scratch)), TLS_OUTCOME_BLOCKED_ON_READ, -1, "recv before the reset")
+
+        # The server aborts with a client record unread. SO_LINGER {1, 0}
+        # makes the close send a reset on Linux and on macOS alike (an
+        # AF_UNIX peer reads EOF on macOS instead); a plain close with the
+        # receive queue empty is the EOF of test_abrupt_close_is_eof.
+        var payload = _payload(100, 4)
+        _expect_pair(client.send(Span[UInt8](payload)), TLS_OUTCOME_DONE, 100, "send left unread")
+        _set_linger_zero(server_fd)
         _close_fd(server_fd)
         server_fd = Int32(-1)
-        comptime if CompilationTarget.is_linux():
-            _expect_pair(client.recv_into_span(Span[UInt8](scratch)), TLS_OUTCOME_ERROR, -1, "recv after a reset")
-            _expect_err_type(S2N_ERR_T_IO, "recv after a reset")
-        else:
-            # macOS does not reset an AF_UNIX stream peer that closes with
-            # data unread: the client reads a plain EOF, the same answer as
-            # test_abrupt_close_is_eof. The write below still fails with EPIPE.
-            _expect_pair(client.recv_into_span(Span[UInt8](scratch)), TLS_OUTCOME_DONE, 0, "recv after a close with data unread")
-            _expect_err_type(S2N_ERR_T_CLOSED, "recv after a close with data unread")
-        _expect_pair(client.send(Span[UInt8](payload)[0:100].as_imm()), TLS_OUTCOME_ERROR, -1, "send after the peer closed")
-        _expect_err_type(S2N_ERR_T_IO, "send after the peer closed")
+        _wait_readable(fds[1], Int32(-1))
+        _expect_pair(client.recv_into_span(Span[UInt8](scratch)), TLS_OUTCOME_ERROR, -1, "recv after a reset")
+        _expect_err_type(S2N_ERR_T_IO, "recv after a reset")
+        _expect_pair(client.send(Span[UInt8](payload)), TLS_OUTCOME_ERROR, -1, "send after a reset")
+        _expect_err_type(S2N_ERR_T_IO, "send after a reset")
     finally:
         _close_fd(server_fd)
         _close_fd(fds[1])
@@ -599,6 +764,7 @@ def main() raises:
     test_empty_config_refusals()
     test_before_handshake()
     test_tls12_session_recv_and_close()
-    test_tls13_blocked_send_and_reset()
+    test_tls13_blocked_send()
+    test_tls13_reset_is_io_error()
     test_abrupt_close_is_eof()
-    print("== L1 TLS s2n shim arms PASSED (7 tests) ==")
+    print("== L1 TLS s2n shim arms PASSED (8 tests) ==")

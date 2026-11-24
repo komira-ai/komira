@@ -552,6 +552,11 @@ its build report names:
 | a library's native shared library is ELF only | 13 | komira-ai/komira#2197 |
 | the UDF spike helpers' C uses Linux-only APIs, and the native spike runtime has no macOS way to load a verified library | 7 | komira-ai/komira#2199 |
 
+Since that sweep, `http_core`'s welded tests pass on macOS: the s2n shim test makes its reset
+happen there too (a TCP loopback connection closed with `SO_LINGER` zero, komira-ai/komira#2206),
+and the partial-send test passes on macOS. The targets of its two rows now build, or stop on a
+cause of their own that the next sweep counts.
+
 `bench_runner` stopped on `bench_data` before and now stops on `http_core`, which it also
 depends on. No target stopped on aws-lc and s2n-tls (komira-ai/komira#2196), on `so_exports`
 (komira-ai/komira#2198) or on a read of `/proc/self/status` (komira-ai/komira#2201). Nine
