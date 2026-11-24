@@ -2,7 +2,7 @@
 
 `load` opens the library from a directory, once per process, checks that its
 ABI major version is the one this package was written for, and binds the
-calls of ABI 1.6 it makes; every failure is a `LibraryLoadError` that says which
+calls of `_FUNCTIONS` (the newest from ABI 1.6); every failure is a `LibraryLoadError` that says which
 library and why. `Native` holds the bound calls and turns their status codes
 into `KomiraError`, with the context's last error, read with the two-call
 protocol, as the message.
@@ -130,6 +130,12 @@ _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
         ctypes.c_int32,
         [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(_arrow.ArrowArrayStream)],
     ),
+    "komira_register_csv": (
+        5,
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint8, ctypes.c_int32, ctypes.c_int32],
+    ),
+    "komira_register_json": (5, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]),
     "komira_run_new": (6, ctypes.c_void_p, []),
     "komira_run_free": (6, None, [ctypes.c_void_p]),
     "komira_run_cancel": (6, ctypes.c_int32, [ctypes.c_void_p]),
@@ -407,6 +413,15 @@ def _c_path(value: object) -> bytes:
     return _c_string("path", value)
 
 
+def _delimiter(value: object) -> int:
+    """A CSV delimiter argument: one ASCII character, as the byte the call takes."""
+    if not isinstance(value, str):
+        raise TypeError("delimiter must be a str, not {}".format(type(value).__name__))
+    if len(value) != 1 or ord(value) > 127:
+        raise ValueError("delimiter must be one ASCII character, not {!r}".format(value))
+    return ord(value)
+
+
 def _flag(what: str, value: object) -> int:
     if not isinstance(value, bool):
         raise TypeError("{} must be a bool, not {}".format(what, type(value).__name__))
@@ -468,6 +483,33 @@ class Native:
         fn = self._fn(op)
         self._check(op, ctx, fn(ctx, _c_string("name", name), _c_path(path)))
 
+    def register_csv(
+        self,
+        ctx: int,
+        name: str,
+        path: str | os.PathLike[str],
+        *,
+        delimiter: str,
+        header: bool,
+        all_varchar: bool,
+    ) -> None:
+        """Registers the CSV file at `path` in the context as the table
+        `name`, read with `delimiter` and, when `header`, its first line as
+        the column names; `all_varchar` makes every column a string. The
+        library infers the schema now."""
+        op = "komira_register_csv"
+        fn = self._fn(op)
+        c_name, c_path = _c_string("name", name), _c_path(path)
+        d, h, a = _delimiter(delimiter), _flag("header", header), _flag("all_varchar", all_varchar)
+        self._check(op, ctx, fn(ctx, c_name, c_path, d, h, a))
+
+    def register_json(self, ctx: int, name: str, path: str | os.PathLike[str]) -> None:
+        """Registers the newline-delimited JSON file at `path` in the context
+        as the table `name`. The library infers the schema now."""
+        op = "komira_register_json"
+        fn = self._fn(op)
+        self._check(op, ctx, fn(ctx, _c_string("name", name), _c_path(path)))
+
     def parquet_schema(self, ctx: int, path: str | os.PathLike[str]) -> bytes:
         """The `WireSchema` bytes of the Parquet file at `path`."""
         c_path = _c_path(path)
@@ -478,11 +520,7 @@ class Native:
     ) -> bytes:
         """The `WireScanBinding` bytes of the CSV file at `path`."""
         c_path = _c_path(path)
-        if not isinstance(delimiter, str):
-            raise TypeError("delimiter must be a str, not {}".format(type(delimiter).__name__))
-        if len(delimiter) != 1 or ord(delimiter) > 127:
-            raise ValueError("delimiter must be one ASCII character, not {!r}".format(delimiter))
-        d, h, a = ord(delimiter), _flag("has_header", has_header), _flag("all_varchar", all_varchar)
+        d, h, a = _delimiter(delimiter), _flag("has_header", has_header), _flag("all_varchar", all_varchar)
         return self._out("komira_csv_binding", ctx, lambda fn, b, c, n: fn(ctx, c_path, d, h, a, b, c, n))
 
     def json_binding(self, ctx: int, path: str | os.PathLike[str]) -> bytes:

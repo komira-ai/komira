@@ -20,7 +20,8 @@
 // komira_sql_stream answers, on success, a stream of the schema
 // `n: int64` and no batch.
 //
-// Built with -DFAKE_RUN it reports ABI 1.6 and has the run handle calls
+// Built with -DFAKE_RUN it reports ABI 1.6 and has komira_register_csv and
+// komira_register_json of ABI 1.5 and the run handle calls
 // (komira_run_new, _free, _cancel, _progress) and komira_sql_stream_run, for
 // the tests of a query cancelled and watched through one (test_sql_cancel.py).
 // Each handle has a number, in the order made, and its making, cancel and
@@ -333,6 +334,20 @@ EXPORT int32_t komira_sql_stream(void *ctx, const char *sql, struct ArrowArraySt
 // ---- the run handle of ABI 1.6 ---------------------------------------------------
 
 #define QUERY_CANCELLED_TEXT "QUERY_CANCELLED: execute: the stand-in's run was cancelled"
+
+// The registration calls of ABI 1.5, which the loader requires of a 1.6
+// library: they take their command from the table name, as
+// komira_register_parquet does.
+EXPORT int32_t komira_register_csv(void *ctx, const char *name, const char *path, uint8_t delimiter,
+                                   int32_t header, int32_t all_varchar) {
+  (void)path, (void)delimiter, (void)header, (void)all_varchar;
+  return run(ctx, "register_csv", name);
+}
+
+EXPORT int32_t komira_register_json(void *ctx, const char *name, const char *path) {
+  (void)path;
+  return run(ctx, "register_json", name);
+}
 
 typedef struct {
   int id;
