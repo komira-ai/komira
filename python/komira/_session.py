@@ -78,7 +78,8 @@ class Session:
         unknown table or column, or a construct the engine refuses raises
         `KomiraError` here, with the engine's `<step>: <reason>` message and
         `status` -3 (a stream whose schema cannot be read raises it with no
-        `status`). pyarrow is imported on the first call. A `query` that is not a
+        `status`). pyarrow is imported the first time the engine accepts a
+        query, when the answer's schema is read. A `query` that is not a
         `str` is a `TypeError`, and one holding a NUL byte or a lone surrogate
         a `ValueError`, both raised before the library is called.
         """

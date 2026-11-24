@@ -111,7 +111,8 @@ against the published package.
   Its message lists the missing flags as `/proc/cpuinfo` spells them.
 
 The engine is loaded on the first `Session()` or `abi_version()` call, and
-pyarrow on the first read of a result, not on `import komira`.
+pyarrow during the first `Session.sql` call the engine accepts, when the
+answer's schema is read; neither on `import komira`.
 
 ## What does not work yet
 
