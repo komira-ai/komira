@@ -201,47 +201,42 @@ class Session:
         except _arrow.stream_errors() as e:
             raise KomiraError(str(e)) from e
 
-    # ---- The calls the DataFrame skins make (komira.pl) ----------------------
-    #
-    # Private: a skin's reader reads a file's schema or binding through them,
-    # and its terminal renders or runs the plan bytes it encoded. None of them
-    # takes or makes SQL text.
-
-    def _parquet_schema(self, path: str) -> bytes:
-        """The `WireSchema` bytes of the local Parquet file at `path`, an
-        absolute path."""
-        with self._held():
-            return self._native.parquet_schema(self._live(), path)
-
-    def _json_binding(self, path: str) -> bytes:
-        """The `WireScanBinding` bytes of the newline-delimited JSON file at
-        `path`, an absolute path."""
-        with self._held():
-            return self._native.json_binding(self._live(), path)
-
-    def _csv_binding(self, path: str, *, delimiter: str, has_header: bool) -> bytes:
-        """The `WireScanBinding` bytes of the CSV file at `path`, an absolute
-        path, with the column types the engine infers."""
-        with self._held():
-            return self._native.csv_binding(
-                self._live(), path, delimiter=delimiter, has_header=has_header, all_varchar=False
-            )
-
-    def _render_plan(self, plan: bytes) -> str:
-        """The engine's text of the serialized plan `plan`, which is not run."""
-        with self._held():
-            return self._native.plan_render(self._live(), plan)
-
-    def _run_plan(self, plan: bytes) -> Result:
-        """Runs the serialized plan `plan` (`komira_plan_stream`) and returns
-        its answer as a `Result`, unread. A refusal raises as `sql` does, with
-        the engine's code and step."""
+    def _plan_stream(self, plan: bytes) -> Result:
+        """Runs the serialized plan `plan` (`komira_plan_stream`: no SQL front
+        end) and returns its answer as a `Result`, unread. This is the
+        terminal of a DataFrame (komira/_frame.py); a refusal raises the
+        engine's error, as `sql` does."""
         with self._held():
             stream = self._native.plan_stream(self._live(), plan)
         try:
             return Result(_arrow.import_stream(stream))
         except _arrow.stream_errors() as e:
             raise KomiraError(str(e)) from e
+
+    def _plan_render(self, plan: bytes) -> str:
+        """The engine's text of the serialized plan `plan` (`komira_plan_render`)."""
+        with self._held():
+            return self._native.plan_render(self._live(), plan)
+
+    def _parquet_schema(self, path: str) -> bytes:
+        """The `WireSchema` bytes of the local Parquet file at the absolute
+        `path`, read from its footer now (`komira_parquet_schema`)."""
+        with self._held():
+            return self._native.parquet_schema(self._live(), path)
+
+    def _csv_binding(self, path: str, *, delimiter: str, header: bool) -> bytes:
+        """The `WireScanBinding` bytes of the local CSV file at the absolute
+        `path` (`komira_csv_binding`), its columns inferred now."""
+        with self._held():
+            return self._native.csv_binding(
+                self._live(), path, delimiter=delimiter, has_header=header, all_varchar=False
+            )
+
+    def _json_binding(self, path: str) -> bytes:
+        """The `WireScanBinding` bytes of the local newline-delimited JSON
+        file at the absolute `path` (`komira_json_binding`)."""
+        with self._held():
+            return self._native.json_binding(self._live(), path)
 
     def _seal_credential(self, credential: _Credential | _BuiltIn) -> None:
         """Makes `credential` the session's value of its name, replacing any
@@ -323,14 +318,14 @@ class Session:
                 self._owner = None
 
 
+# The process's default session: the one a reader called without `session=`
+# uses, made by the first such call (docs/design/python_package.md, decision 5).
 _default_lock = threading.Lock()
 _default: Session | None = None
 
 
 def default_session() -> Session:
-    """The process's default session (docs/design/python_package.md, decision
-    5), opened with default options by the first call that needs it and never
-    closed by the package. There is one per process, not one per thread."""
+    """The process's default session, made now when no call made it yet."""
     global _default
     with _default_lock:
         if _default is None:

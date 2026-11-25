@@ -12,6 +12,7 @@ TARGETS = [
     "komira//python:refuses_classifiers_not_the_supported_pythons",
     "komira//python:refuses_downgrade",
     "komira//python:refuses_missing_libkomira",
+    "komira//python:refuses_missing_protobuf",
     "komira//python:refuses_missing_requirement",
     "komira//python:refuses_missing_runtime_library",
     "komira//python:refuses_modular_unlike_toolchain",

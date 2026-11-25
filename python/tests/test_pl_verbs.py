@@ -81,11 +81,11 @@ class StandIn(Session):
         fields = [field(n, arrow_id(t), True) for n, t in self.schemas[path]]
         return pb.WireSchema(fields=fields).SerializeToString()
 
-    def _run_plan(self, plan):
+    def _plan_stream(self, plan):
         self.ran.append(plan)
         return "result"
 
-    def _render_plan(self, plan):
+    def _plan_render(self, plan):
         self.rendered.append(plan)
         return "rendered"
 

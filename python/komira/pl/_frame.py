@@ -58,7 +58,7 @@ __all__ = ["LazyFrame", "concat", "scan_csv", "scan_ndjson", "scan_parquet"]
 def _encoder():
     """The plan encoder, imported when a frame is first made: it needs the
     generated `komira.plan.v1` modules and protobuf, which `import komira`
-    does not, and which the wheel does not ship yet."""
+    does not; the wheel ships them."""
     try:
         from komira import _plan
     except ImportError as e:
@@ -410,11 +410,11 @@ class LazyFrame:
         `Result` read once (`to_arrow`, `to_polars`, ...). Each call runs the
         plan again. A plan the engine cannot run raises `KomiraError` (or
         `UnsupportedOperation`) with the engine's code and step."""
-        return self._session._run_plan(self._encode())
+        return self._session._plan_stream(self._encode())
 
     def explain(self) -> str:
         """The engine's text of the plan, which is not run."""
-        return self._session._render_plan(self._encode())
+        return self._session._plan_render(self._encode())
 
 
 def _carried(order: tuple[SortKey, ...], plan, below) -> tuple[SortKey, ...] | None:
@@ -562,7 +562,7 @@ def scan_csv(
     `session`, the process's default session when None."""
     s = _session_of(session)
     path = _path_of("scan_csv", source)
-    src = _encoder().binding_source(s._csv_binding(path, delimiter=separator, has_header=has_header))
+    src = _encoder().binding_source(s._csv_binding(path, delimiter=separator, header=has_header))
     return _scan_frame(s, path, "csv", src, src.binding.schema)
 
 

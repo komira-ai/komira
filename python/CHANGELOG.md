@@ -12,6 +12,17 @@ install page shows names it.
 
 ## Unreleased
 
+- **The pandas-shaped DataFrame, first part.** `komira.read_parquet(path)`, `komira.read_csv(path, *,
+  sep=",", header="infer")` and `komira.read_json(path, lines=True)` make a lazy `komira.DataFrame` of
+  a file, its schema read now, on the session given as `session=` or the process's default session.
+  `df["x"]` (a `komira.Series`), `df[["a", "b"]]`, `df[cond]`, `assign`, `df["x"] = ...`,
+  `sort_values`, `head` and `copy` build a plan and run nothing; `materialize()` runs it through the
+  engine's plan entry, with no SQL, and returns a `Result`; `explain()` returns the engine's text of
+  the plan. `columns`, `dtypes` and `repr` run nothing. A pandas name komira does not have raises
+  `AttributeError` saying what to write instead, and `len(df)` and the other conversions raise
+  `UnsupportedOperation` naming `materialize()`. They need libkomira ABI 1.8.
+- **protobuf.** The wheel requires `protobuf>=5.29.1,<8`, so `pip install komira` installs it, and
+  ships the generated plan modules a DataFrame encodes its plan with. `import komira` imports neither.
 - **komira.pl, the polars-shaped frames (core).** `import komira.pl as kpl`: `kpl.scan_parquet`,
   `scan_ndjson` and `scan_csv` make a lazy `LazyFrame` (reading the file's schema, nothing else), and
   `select`, `with_columns`, `filter`, `sort`, `head`, `limit`, `slice`, `tail`, `top_k`, `bottom_k`,
@@ -21,8 +32,7 @@ install page shows names it.
   through SQL, and returns a `Result`; `schema` and `explain()` run nothing. Output names and types
   follow polars 1.44.2, except that a count, `len()`, `str.len_chars()` and the sum of a boolean or a UInt32
   column are Int64 where polars gives UInt32; what the engine cannot run is refused by name (today `median()`, `std()`, `var()` and `min()` or `max()` of a string column build their
-  plans and the engine refuses them when the frame is collected). The wheel does not ship the plan modules this
-  needs yet, so in an installed package the readers raise `ImportError`.
+  plans and the engine refuses them when the frame is collected).
 - **CSV and JSON files.** `Session.register_csv(name, path, *, delimiter=",", header=True,
   all_varchar=False)` and `Session.register_json(name, path)` register a CSV file and a
   newline-delimited JSON file as a table for `Session.sql`, with the column names and types the

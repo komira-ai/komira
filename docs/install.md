@@ -5,8 +5,10 @@ program, what it does not do yet, and what to do when something goes wrong. To b
 instead, see [getting started](getting-started.md).
 
 > **This is an early release.** It registers Parquet files as tables and runs SQL over them, with each
-> answer read as pyarrow, or as a pandas or polars frame. A DataFrame API shaped like pandas and one shaped like polars come in later
-> releases of this same package. This page changes when they do.
+> answer read as pyarrow, or as a pandas or polars frame. A first part of the pandas-shaped DataFrame
+> (`komira.read_parquet`, filters, column selection, computed columns, `sort_values` and `head`) runs
+> as a plan with no SQL; the rest of it and the polars-shaped one come in later releases of this same
+> package. This page changes when they do.
 
 ## Install
 
@@ -18,8 +20,9 @@ python3 -m venv .venv
 pip install komira
 ```
 
-That is the whole install. The wheel is about 2.4 MB, and `pip` installs one other package with it,
-pyarrow (`pip show komira` lists `Requires: pyarrow`), which a query's answer is read as.
+That is the whole install. The wheel is about 2.4 MB, and `pip` installs two other packages with it
+(`pip show komira` lists `Requires: protobuf, pyarrow`): pyarrow, which a query's answer is read as, and
+protobuf, which a DataFrame's plan is encoded with.
 
 ## What it needs
 
@@ -44,7 +47,7 @@ Save this as `quickstart.py`:
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1008 is 1.8
+print(komira.abi_version())   # the engine's C ABI version: 1009 is 1.9
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
@@ -65,7 +68,7 @@ Then `python quickstart.py` prints:
 
 ```text
 0.1.1512
-1008
+1009
 [{'n': 1}]
 [{'n': 5, 'total': 152.5}]
 True
@@ -105,7 +108,9 @@ The package's [README](../python/README.md), which is also its PyPI description,
 
 ## What does not work yet
 
-- **The DataFrame APIs**, pandas-shaped and polars-shaped.
+- **Most of the DataFrame APIs**: the pandas-shaped one beyond reading, filtering, selecting,
+  computing columns, sorting and `head` (see the [README](../python/README.md)), and the
+  polars-shaped one.
 - **Python UDFs.**
 - **Other platforms**: Linux on arm64, macOS on Intel, Windows, and Linux with musl (Alpine) have no
   wheel.

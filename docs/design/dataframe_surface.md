@@ -3,11 +3,12 @@
 Status: design, partly built. The Python package is under [`python/komira/`](../../python/komira/), and
 its private layers of this surface are built: the plan node tree (`komira._ops`), the plan encoder
 (`komira._plan`), which writes a `komira.plan.v1.WirePlanEnvelope` with each node's output schema, the
-capture of a user function (`komira._capture`) and the UDF worker runtime (`komira._udf`). The core of
-the polars-shaped skin, `komira.pl`, is built (the readers of Parquet, NDJSON and CSV, the row-wise
-verbs, sort and its order rules, aggregates without keys, and `concat`), and its `collect()` runs a
-frame through `komira_plan_stream`; the pandas-shaped frames, group-by, joins, windows and the write
-terminals are not built. The verbs, the plan each one builds and
+capture of a user function (`komira._capture`) and the UDF worker runtime (`komira._udf`). The first
+part of the pandas-shaped skin is built too: its readers, subscripts, `assign`, `sort_values`, `head`,
+`materialize` and `explain` are in `python/komira/_frame.py` and `_series.py`, and `materialize` runs
+the plan through `komira_plan_stream`. The core of the polars-shaped skin, `komira.pl`, is built (the readers of Parquet, NDJSON and CSV, the
+row-wise verbs, sort and its order rules, aggregates without keys, and `concat`), and its `collect()` runs
+the plan the same way. The other verbs are not built. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
 
@@ -608,7 +609,7 @@ package design). D4 to D18 are this design's own.
 
 ## Where is the code?
 
-The code is in `python/komira/`. The node tree (`komira/_ops/`), the encoder (`komira/_plan/`) and the
-core of `komira/pl/` are built; the pandas-shaped skin is not. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
+The code is in `python/komira/`: the node tree (`_ops/`), the encoder (`_plan/`) and the first part of
+the pandas-shaped skin (`_frame.py`, `_series.py`, `_refusals.py`) and the core of the polars-shaped skin (`pl/`). The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
 `src/plan_expr/col_expr.mojo`. The wire format is in [src/plan_proto](../../src/plan_proto/plan.proto)
 and `src/plan_wire`.
