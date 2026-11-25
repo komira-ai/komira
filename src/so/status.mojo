@@ -83,13 +83,30 @@ comptime KOMIRA_FIELD_SCOPE: Int32 = 12
 comptime KOMIRA_FIELD_TOKEN_URL: Int32 = 13
 """The token endpoint `KOMIRA_CRED_OAUTH2_CLIENT` exchanges at."""
 
+# The step of the pipeline a refused call stopped at, what `komira_last_error_step`
+# returns. A failure of a registration, a schema or binding read, or a
+# credential call is `KOMIRA_STEP_BIND`; a refusal of `komira_sql_stream` is the
+# step that refused; any other error, and no error, is `KOMIRA_STEP_NONE`.
+comptime KOMIRA_STEP_NONE: Int32 = 0
+"""No step: there is no error, or the error belongs to no step."""
+comptime KOMIRA_STEP_PARSE: Int32 = 1
+"""The SQL text was refused as a statement."""
+comptime KOMIRA_STEP_BIND: Int32 = 2
+"""A name, a table or a credential could not be bound."""
+comptime KOMIRA_STEP_OPTIMIZE: Int32 = 3
+"""The optimizer refused the plan."""
+comptime KOMIRA_STEP_LOWER: Int32 = 4
+"""The plan could not be lowered to an executable pipeline."""
+comptime KOMIRA_STEP_EXECUTE: Int32 = 5
+"""The pipeline was refused or failed while it ran."""
+
 # The ABI version is `ABI_MAJOR * 1000 + ABI_MINOR`: 1000 is 1.0 and 2003 is
 # 2.3. A new symbol raises the minor version; changing or removing a symbol
 # raises the major version and resets the minor to 0. The minor version stays
 # below 1000 so that the integer decodes uniquely.
 comptime ABI_MAJOR: Int32 = 1
 """The major version: raised by a change that breaks an existing caller."""
-comptime ABI_MINOR: Int32 = 6
+comptime ABI_MINOR: Int32 = 7
 """The minor version: raised by an addition that breaks no caller."""
 comptime _ABI_MINOR_LIMIT: Int32 = 1000
 
