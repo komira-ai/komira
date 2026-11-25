@@ -12,7 +12,9 @@ given and has no SQL entry. Checked:
 - the types: columns, dtypes and repr of frames and Series after the verbs;
 - every refusal by its class and its full message;
 - the attribute rules for every row of the frame, Series and module refusal
-  tables, assignment to an attribute, dir, copy and `in`;
+  tables, assignment to an attribute, dir, copy and `in`; a pandas verb the
+  skin lacks raises `AttributeError` (so `getattr` with a default returns the
+  default) and is never read as a column, even when a column has its name;
 - no dunder runs a query;
 - the terminals send exactly the encoded plan bytes to the session and
   nothing else, each time they are called;
@@ -728,6 +730,22 @@ def test_a_column_is_not_an_attribute_and_a_column_named_count_is_reached_by_sub
     assert "count" in df and "zeta" in df
     assert not {"zeta", "count", "index", "_hidden"} & set(dir(df))
     check_refused(Env().df, "a", hint.format("a"), "frame")
+
+
+def test_a_pandas_verb_komira_lacks_raises_and_is_never_a_column():
+    missing = object()
+    df = Env().df
+    for name in ("fillna", "dropna"):
+        check_refused(df, name, f"'DataFrame' object has no attribute '{name}'", "frame")
+        check_refused(df["a"], name, f"'Series' object has no attribute '{name}'", "series")
+        assert getattr(df, name, missing) is missing, name
+        assert getattr(df["a"], name, missing) is missing, name
+    named = Env((("fillna", "float64"), ("dropna", "int64"))).df
+    hint = "'DataFrame' object has no attribute '{0}': a column is not an attribute; write df[\"{0}\"]"
+    for name in ("fillna", "dropna"):
+        check_refused(named, name, hint.format(name), "frame")
+        assert getattr(named, name, missing) is missing, name
+    assert named["fillna"]._node == ColRef("fillna") and named["fillna"].dtype == "float64"
 
 
 def test_setting_an_attribute_of_a_frame_or_a_series_is_refused():
