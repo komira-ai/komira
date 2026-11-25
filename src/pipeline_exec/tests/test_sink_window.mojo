@@ -25,7 +25,10 @@
 #   * No input gives a batch of no rows under the output schema.
 #   * The output columns have the plan's names and types (an alias, the
 #     function's default name, INT64 and FLOAT64).
-#   * A descending list that does not match the order keys, and an output
+#   * ORDER BY o NULLS FIRST, ascending and descending, puts the NULL-key rows
+#     first in source position order and ranks them as one peer group.
+#   * A NULL placement list, or a descending list, that does not match the
+#     order keys, and an output
 #     schema with fewer columns than window expressions, are refused by exact
 #     message when the sink is built; a read before combine is refused; a SUM
 #     over a STRING column fails in combine with the kernel's message.
@@ -433,6 +436,49 @@ def _same_batch(ref a: RecordBatch, ref b: RecordBatch, label: String) raises:
                 )
 
 
+def _nulls_first_run(desc: Bool) raises -> RecordBatch:
+    var pool = SegmentPool()
+    var data = _data(False, desc, _exprs())
+    data.nulls_first = [True]
+    var sink = _sink(data, pool, 1)
+    sink.consume(0, Morsel(table(0, N), 0, 0))
+    var out = _finish(sink, 1)
+    _ = sink^
+    return out^
+
+
+def _check_nulls_first(ref out: RecordBatch, desc: Bool) raises:
+    var n_null = 0
+    for r in range(N):
+        if o_null(r):
+            n_null += 1
+    assert_equal(out.num_rows(), N)
+    var ids = int64_column(out, 0)
+    var o = int64_column(out, 2)
+    var o_nulls = null_column(out, 2)
+    var rank = int64_column(out, FIRST_WINDOW + 1)
+    for p in range(N):
+        assert_equal(o_nulls[p], p < n_null, "o null flag at " + String(p))
+    for p in range(1, n_null):
+        assert_true(ids[p - 1] < ids[p], "NULL rows keep source order")
+    for p in range(n_null):
+        assert_equal(rank[p], 1, "NULL peers are rank 1 at " + String(p))
+    assert_equal(rank[n_null], n_null + 1)
+    for p in range(n_null + 1, N):
+        if desc:
+            assert_true(o[p - 1] >= o[p], "o is non-increasing at " + String(p))
+        else:
+            assert_true(o[p - 1] <= o[p], "o is non-decreasing at " + String(p))
+
+
+def test_nulls_first_ascending_leads_with_the_null_keys_as_one_peer_group() raises:
+    _check_nulls_first(_nulls_first_run(False), False)
+
+
+def test_nulls_first_descending_leads_with_the_null_keys_as_one_peer_group() raises:
+    _check_nulls_first(_nulls_first_run(True), True)
+
+
 def test_row_number_and_rank_equal_the_oracle_with_null_keys_and_ties() raises:
     var out = _run(1)
     _expect_columns(out, _expected(True, False), 0, 1, "row number and rank")
@@ -588,6 +634,17 @@ def test_a_sink_the_plan_cannot_describe_is_refused_by_name() raises:
             String(e),
             "pipeline_exec: the window sink of segment 7 lists 0 directions"
             " for 1 order keys",
+        )
+    var placed = _data(True, False, _exprs())
+    placed.nulls_first = [True, False]
+    try:
+        _ = WindowSink(placed, pool.share(), 7)
+        assert_true(False, "a NULL placement list of the wrong length must be refused")
+    except e:
+        assert_equal(
+            String(e),
+            "pipeline_exec: the window sink of segment 7 lists 2 NULL"
+            " placements for 1 order keys",
         )
     var short = _data(True, False, _exprs())
     var sb = SchemaBuilder()
@@ -759,6 +816,8 @@ def main() raises:
     var suite = TestSuite()
     suite.test[test_row_number_and_rank_equal_the_oracle_with_null_keys_and_ties]()
     suite.test[test_lag_and_lead_with_and_without_a_default_equal_the_oracle]()
+    suite.test[test_nulls_first_ascending_leads_with_the_null_keys_as_one_peer_group]()
+    suite.test[test_nulls_first_descending_leads_with_the_null_keys_as_one_peer_group]()
     suite.test[test_a_running_sum_over_range_gives_peers_one_sum]()
     suite.test[test_whole_partition_aggregates_equal_the_oracle_with_null_values]()
     suite.test[test_descending_order_and_no_partition_key_equal_the_oracle]()

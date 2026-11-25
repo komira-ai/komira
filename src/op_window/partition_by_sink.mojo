@@ -7,7 +7,8 @@
 # and in `finalize` runs the window operator over it on the engine's workers
 # (`partition_scan_sink_parallel._execute_partition_by_sink_parallel`, which
 # falls back to the single-thread kernel for a small input). Its output is in
-# (partition keys ASC ++ order keys per direction) order, NULLs last.
+# (partition keys ASC ++ order keys per direction) order, each order key's NULLs placed by
+# `nulls_first` (last when it is empty).
 #
 # The batches are folded in worker order, then in each worker's append order,
 # not in morsel order, so rows that tie on every key reach the window in that

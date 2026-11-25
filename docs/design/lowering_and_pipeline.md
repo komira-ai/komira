@@ -974,7 +974,7 @@ order keys, so the reopened pipeline is marked as a sorted stream and a `LIMIT` 
 is. `lower` refuses with `LOWERING_WINDOW_UNSERVED`, before it walks the child: a key that is not a column of the child or
 whose type is not INT64, INT32, FLOAT64, BOOL or STRING, a function or argument type the sink does not compute (the
 ranking functions, `NTILE`, `LAG`, `LEAD`, `FIRST_VALUE`, `LAST_VALUE`, `NTH_VALUE`, `SUM`, `AVG`, `MIN`, `MAX` and
-`COUNT` are served), a `LAG` or `LEAD` default the column cannot hold unchanged, a frame shape SQL refuses, and a
+`COUNT` are served; a `SUM`, `AVG`, `MIN` or `MAX` argument is an INT8, INT16, INT32, INT64 or FLOAT64 column, a narrow integer widened by the sink), a `LAG` or `LEAD` default the column cannot hold unchanged, a frame shape SQL refuses, and a
 `RANGE` frame with an offset whose window does not order by one INT64, INT32 or FLOAT64 key; every other `ROWS` or
 `RANGE` frame is served. The schema the sink declares marks a `SUM`, `AVG`, `MIN` or `MAX` column nullable when its
 argument column is, and a `SUM`, `AVG`, `MIN`, `MAX`, `FIRST_VALUE` or `LAST_VALUE` column nullable when its frame can be

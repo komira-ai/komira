@@ -18,8 +18,4 @@ scan_dates_bools	parse: SQL syntax error: unexpected character '"'
 string_agg_ordered	parse: SQL syntax error: expected ')'
 string_case_length	bind: SQL not supported: the `||` string-concatenation operator. DuckDB's `||` PROPAGATES NULL (`'a' || NULL` is NULL) where this engine's only concatenation, `concat()`, SKIPS a NULL operand (`concat('a', NULL)` is 'a'), and answering one for the other would be wrong on every row with a NULL. The missing primitive is a STRING-typed NULL value in the plan (the CASE that would propagate the NULL has no string NULL to return). `concat(a, b)` is served for the NULL-skipping answer, and is EXACT wherever neither operand can be NULL.
 string_substr_replace	bind: SQL not supported: the `||` string-concatenation operator. DuckDB's `||` PROPAGATES NULL (`'a' || NULL` is NULL) where this engine's only concatenation, `concat()`, SKIPS a NULL operand (`concat('a', NULL)` is 'a'), and answering one for the other would be wrong on every row with a NULL. The missing primitive is a STRING-typed NULL value in the plan (the CASE that would propagate the NULL has no string NULL to return). `concat(a, b)` is served for the NULL-skipping answer, and is EXACT wherever neither operand can be NULL.
-window_lag	parse: SQL syntax error: expected ')' to close the OVER clause
-window_row_number	parse: SQL syntax error: expected ')' to close the OVER clause
-window_running_sum	parse: SQL syntax error: expected ')' to close the OVER clause
-window_sum_integer	lower: LOWERING_WINDOW_UNSERVED: SUM(i32) has an argument of type int32, which the window sink does not compute over
 with_recursive	parse: SQL not supported: WITH RECURSIVE (recursive CTEs)

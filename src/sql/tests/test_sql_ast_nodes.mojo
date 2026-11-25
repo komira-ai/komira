@@ -22,7 +22,8 @@
 #      and for an aggregate node with no argument slot.
 #      (mutant caught: the SX_STAR test inverted)
 #   5. SqlWindowData: the constructor's defaults (one empty qualifier per
-#      PARTITION BY and ORDER BY name, the default frame) and set_frame().
+#      PARTITION BY and ORDER BY name, one unwritten NULLS placement per
+#      ORDER BY key, the default frame) and set_frame().
 #      (mutant caught: a qualifier list not parallel to its names)
 #   6. Empty slots: a CASE with no ELSE, a CASE with no branches and a call
 #      with no arguments hold no aggregate (every walk loop runs zero
@@ -297,6 +298,8 @@ def test_window_data_defaults_and_frame() raises:
     assert_equal(w.partition_qual[0], "")
     assert_equal(w.partition_qual[1], "")
     assert_equal(len(w.order_qual), 1)
+    assert_equal(len(w.nulls_first), 1)
+    assert_false(Bool(w.nulls_first[0]))
     assert_equal(w.order_by[0], "o")
     assert_true(w.descending[0])
     assert_false(w.has_frame)

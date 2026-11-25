@@ -338,6 +338,8 @@ for that is the ENGINE, not `plan.proto`'s prose. The comment on
 plan validator states both pairings:
 
     PartitionBy     len(order_keys) == len(descending)
+                    len(order_keys) == len(nulls_first)  (a wire list that is
+                    empty is derived at decode, so only a non-empty one can differ)
     PartitionTopN   len(sort_keys)  == len(descending)
 
 So both are checked here, exactly as a Sort's are. Without the check,
@@ -2916,6 +2918,15 @@ def _check_plan(plan: LogicalPlan) raises:
         _check_parallel(
             len(d.order_keys), String("order keys"),
             len(d.descending), String("`descending` flags"),
+            String("PartitionBy"),
+        )
+        # The decoded node's `nulls_first` is full length: the decoder derives
+        # it when the wire list is empty (a producer that never wrote the
+        # field) and carries a non-empty wire list verbatim, so a wire list of
+        # the wrong length is the only way to differ from `order_keys` here.
+        _check_parallel(
+            len(d.order_keys), String("order keys"),
+            len(d.nulls_first), String("`nulls_first` flags"),
             String("PartitionBy"),
         )
         _check_keys(d.partition_keys, cs, String("PartitionBy partition"))

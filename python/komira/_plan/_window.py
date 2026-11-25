@@ -18,9 +18,10 @@ gets the binder's: the whole partition when unordered, `RANGE BETWEEN
 UNBOUNDED PRECEDING AND CURRENT ROW` when ordered. A frame offset is a row or
 value count, its direction the bound's.
 
-The engine orders a partition with NULLs last in both directions, and the node
-has no other placement, so an order key with `nulls_first` is refused. An
-aggregate window with an offset is refused too: the frame says which rows it
+The engine's placement of NULLs in an order key is last in both directions. The
+node carries a placement per order key (`nulls_first`) and the encoder writes
+the list only when some key asks for NULLs first, so a window that asks for
+nothing encodes exactly as it did before the field existed. An aggregate window with an offset is refused too: the frame says which rows it
 reads, and the engine reads no offset for it.
 
 The appended field is the engine's (`partition_expr_output_field`):
@@ -94,12 +95,6 @@ def window_field(name: str, win: WindowExpr, schema) -> pb.WireField:
 
 
 def _partition_by(win: WindowExpr, column: str, child: pb.WirePlan, item: str) -> pb.WirePlan:
-    for key in win.order_by:
-        if key.nulls_first:
-            raise UnsupportedOperation(
-                f"the window {item!r} orders '{key.column}' with NULLs first, and the engine "
-                "orders a partition with NULLs last; sort by a NULL test first instead"
-            )
     if win.func in WINDOW_AGGREGATE and win.offset != 0:
         raise UnsupportedOperation(
             f"the window {item!r} is a {win.func} with offset {win.offset}, and an aggregate "
@@ -111,6 +106,8 @@ def _partition_by(win: WindowExpr, column: str, child: pb.WirePlan, item: str) -
     node.partition_keys.extend(win.partition_by)
     node.order_keys.extend(key.column for key in win.order_by)
     node.descending.extend(key.descending for key in win.order_by)
+    if any(key.nulls_first for key in win.order_by):
+        node.nulls_first.extend(key.nulls_first for key in win.order_by)
     expr = node.partition_exprs.add(
         func=member("PF_", win.func),
         column=win.arg or "",
