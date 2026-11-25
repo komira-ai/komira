@@ -352,9 +352,8 @@ its number).
      (`na_position="last"`). polars puts nulls first in both directions (`nulls_last=False`).
    - An explicit `na_position` or `nulls_last` is honoured per key. No sort is refused for its NULL
      placement.
-   - A window's ORDER BY cannot carry a placement yet
-     ([komira-ai/komira#1227](https://github.com/komira-ai/komira/issues/1227)). So a window whose
-     library default differs from the plan's raises at the terminal until that lands.
+   - A window's ORDER BY carries the same placement per key (`nulls_first` on the PartitionBy node),
+     so no window is refused for its NULL placement either.
 6. **Missing values.** Differs (D7).
    - polars keeps NULL and NaN apart, as the plan does: `is_null` and `drop_nulls` test NULL only, and
      `is_nan` and `fill_nan` test NaN only.

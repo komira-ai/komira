@@ -18,11 +18,12 @@ gets the binder's: the whole partition when unordered, `RANGE BETWEEN
 UNBOUNDED PRECEDING AND CURRENT ROW` when ordered. A frame offset is a row or
 value count, its direction the bound's.
 
-The engine's placement of NULLs in an order key is last in both directions. The
-node carries a placement per order key (`nulls_first`) and the encoder writes
-the list only when some key asks for NULLs first, so a window that asks for
-nothing encodes exactly as it did before the field existed. An aggregate window with an offset is refused too: the frame says which rows it
-reads, and the engine reads no offset for it.
+By default the engine places the NULLs of an order key last in both
+directions. The node carries a placement per order key (`nulls_first`) that
+overrides it, and the encoder writes the list only when some key asks for
+NULLs first, so a window that asks for nothing encodes exactly as it did
+before the field existed. An aggregate window with an offset is refused: the
+frame says which rows it reads, and the engine reads no offset for it.
 
 The appended field is the engine's (`partition_expr_output_field`):
 
