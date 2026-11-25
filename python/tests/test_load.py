@@ -78,6 +78,7 @@ def main(args):
         "DataFrame",
         "KomiraError",
         "LibraryLoadError",
+        "MemoryLimitError",
         "ParseError",
         "Result",
         "Series",

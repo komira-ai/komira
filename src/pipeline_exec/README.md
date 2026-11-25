@@ -350,7 +350,7 @@ Import each module by name; the package root exports nothing.
   what the kernel adds (a sorted copy, 16 bytes per row per expression and the
   argument column of a STRING value function), from the segment pool; when the
   kernel is done it draws the output's bytes and holds them until the output is
-  taken. A denied draw fails by name; there is no spill. Refused when built: a
+  taken. A denied draw fails by name, its message beginning with the code `MEMORY_BUDGET_EXCEEDED: `; there is no spill. Refused when built: a
   direction list that does not match the order keys, an output schema with
   fewer columns than expressions. A kernel refusal surfaces from `combine`.
 - `spike/intern_spike.mojo` (target `intern_spike`, not part of the library): the

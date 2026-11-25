@@ -67,7 +67,7 @@ from plan_expr.partition_expr import (
     PartitionExpr,
 )
 
-from .segment_pool import SegmentPool, WorkerReservation
+from .segment_pool import MEMORY_BUDGET_EXCEEDED, SegmentPool, WorkerReservation
 from .sink_collect import CollectSink
 
 # The bytes the kernel's per-row working state takes for one expression.
@@ -183,7 +183,8 @@ struct WindowSink(MorselSinkImpl):
 
     def _denied(self, what: String, bytes: Int) -> Error:
         return Error(
-            "pipeline_exec: the window sink of segment "
+            String(MEMORY_BUDGET_EXCEEDED)
+            + ": pipeline_exec: the window sink of segment "
             + String(self._seg_id)
             + " was denied "
             + String(bytes)
