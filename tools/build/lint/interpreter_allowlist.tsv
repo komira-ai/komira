@@ -16,6 +16,7 @@ python/komira/_arrow.py	the Python package: its sources are Python (docs/design/
 python/komira/_errors.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_display.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_frame.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_groupby.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_native.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_ops/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_ops/_build.py	the Python package: its sources are Python (docs/design/python_package.md)
@@ -97,6 +98,7 @@ python/tests/tpch_compare.py	the Python package's tests: the answer check of the
 python/tests/test_display.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_frame.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_frame_duckdb.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_frame_groupby.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_frame_run.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql_cancel.py	the Python package's tests: the SDK surface is tested in Python

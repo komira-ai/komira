@@ -7,8 +7,9 @@ calls it with `ctypes`.
 **This is an early release.** It registers Parquet files as tables and runs
 SQL over them, and it hands each answer to pyarrow. A first part of the
 pandas-shaped DataFrame reads the same files, filters, selects, computes
-columns, sorts and takes the first rows, as a plan the engine runs with no
-SQL. The rest of the DataFrame APIs come later.
+columns, sorts, takes the first rows, groups and aggregates, and drops
+duplicate rows, as a plan the engine runs with no SQL. The rest of the
+DataFrame APIs come later.
 
 ## Install
 
@@ -268,6 +269,52 @@ again. The install test runs this program on the installed wheel.
   shows its first ten rows at most, saying when there are more, and is still
   unread afterwards: `to_arrow()` and the other terminals read every row.
 
+#### Group-by and aggregates
+
+```python
+by_id = df.groupby("id").agg(total=("value", "sum"), n=("value", "size"))
+print(by_id.columns)                      # ['id', 'total', 'n']
+stats = df[["value"]].median()            # one row, the column value
+```
+
+- **`df.groupby(by, *, sort=True, dropna=True)`** gives a `komira.GroupBy`.
+  Its reductions return a frame whose columns are the keys, then one column
+  per output: a komira frame has no index, so the keys are columns
+  (`as_index` is accepted and changes nothing). `sort=True` sorts the answer
+  by the keys, missing keys last; `sort=False` promises no row order.
+  `dropna=True` leaves out the rows with a missing key; `dropna=False` keeps
+  their group. `gb["v"]` and `gb[["v", "w"]]` choose the columns to reduce.
+- **Reductions.** `sum`, `mean`, `median`, `std` and `var` (ddof=1), `min`,
+  `max`, `count` (values that are not missing), `nunique` (distinct values
+  that are not missing) and, on a GroupBy, `size` (rows, the column `size`).
+  `sum`, `mean`, `median`, `std` and `var` need numeric or boolean columns
+  (`numeric_only=True` leaves the others out); a boolean counts True as 1. A
+  sum of nothing is 0 (`min_count=1` makes it missing), as in pandas.
+- **`agg`.** Named outputs, `agg(total=("v", "sum"))`; a dict of column to
+  reduction, each output named after its column; one reduction's name; and on
+  one chosen column, `gb["v"].agg(["sum", "mean"])` or `gb["v"].agg(t="sum")`.
+- **The frame's own reductions.** `df.agg(...)`, `df.sum()` and the others
+  reduce every column to a one-row frame, where pandas gives a Series: like
+  every verb they are lazy, and the number comes from `materialize()`.
+- **`df.drop_duplicates()`** keeps one of each set of equal rows
+  (`keep="first"` and `"last"` give the same rows); `keep=False` keeps only
+  the rows no other row equals. `subset` must name every column: to keep one
+  row per value of some columns, select those columns first. The answer has
+  no row order.
+- **What the engine runs today.** The engine's aggregation computes `sum`,
+  `mean`, `min`, `max`, `count`, `size` and `nunique`. With a group key,
+  `sum` and `mean` take integer and boolean columns but not float ones. `min`
+  and `max` take numbers. `nunique` takes numbers and strings. A reduction
+  outside that (`median`, `std`, `var`, a grouped float sum, the `mean` of a
+  boolean column, the `min` of a string, ...) builds its plan and is refused at `materialize()` with a
+  `KomiraError` naming the engine's step. It runs with no change here once the
+  engine computes it.
+- **Refused by name** with `UnsupportedOperation`: a Python function in
+  `agg`, `first`, `last` and the other choices by row order, `ddof` other
+  than 1, `skipna=False`, `nunique(dropna=False)` and `axis=1`. A missing
+  value is NULL: unlike pandas, a NaN in a float column is a value, not a
+  missing one.
+
 protobuf and the generated plan modules are imported by the first reader, not
 by `import komira`.
 
@@ -275,8 +322,8 @@ by `import komira`.
 
 - The module-level `komira.sql` and `komira.register_parquet` on a default
   session.
-- The rest of the pandas-shaped DataFrame (group-by and aggregates, joins,
-  windows, missing-value verbs, writing files, `//`, `%` and `**`, `isna`),
+- The rest of the pandas-shaped DataFrame (joins, windows, `Series`
+  reductions, missing-value verbs, writing files, `//`, `%` and `**`, `isna`),
   and the polars-shaped one.
 - Iceberg tables: reading one, and writing to one by its name in a catalog.
 
@@ -295,7 +342,8 @@ The package's layout and API are designed in
 | `komira/_frame.py` | the pandas-shaped `DataFrame` and its readers `read_parquet`, `read_csv` and `read_json`: a plan of `komira/_ops` nodes, the sources its scans read and the session it runs on; the verbs build nodes with `_ops`'s builder (with a sort put back above a limit where a verb keeps the order), derive the output schema with the encoder, and `materialize()` sends the encoded plan to the session's plan door. It writes no SQL text, and imports `_plan`, so protobuf, only when the first frame is made |
 | `komira/_display.py` | the HTML of the notebook display (`_repr_html_`): a frame's column names over their types, and the first ten rows a result read; values as Arrow's string cast (Python's `str` for a column the cast refuses), cut at 100 characters and HTML-escaped. It reads no stream and calls no library |
 | `komira/_series.py` | `Series`: an expression node over its frame's columns and the field the engine derives for it, bound to the frame and its generation; its operators, `isin` and `dtype` |
-| `komira/_refusals.py` | the refusal tables of the frame, the Series and the module ([docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md)) |
+| `komira/_groupby.py` | `GroupBy` and the frame's reductions: each builds one `Aggregate` node (a filter of missing keys below it for `dropna=True`, a sort by the keys above it for `sort=True`, a projection that makes an empty sum 0), and `drop_duplicates` a `Distinct` (or, for `keep=False`, an `Aggregate` with `count = 1`); it writes no SQL text |
+| `komira/_refusals.py` | the refusal tables of the frame, the GroupBy, the Series and the module ([docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md)) |
 | `komira/_capture/` | the capture of Python user functions (private; no query runs them yet): `udf`, the decorator that records a function's call shape (`scalar`, `map_batches_column`, `row`, `map_batches_frame`), its return type (`return_dtype=`, `schema=` or the type hints) and, for `row` and `map_batches_frame`, its read set (`columns=`, a `TypedDict` or dataclass annotation, or for `row` a scan of the function's bytecode, refused with `UDF_READ_SET_REQUIRED` when the reads are not bounded); `Udf.spec()`, the `UdfSpec` the plan encodes, with the function's code as a bundle named by its sha256 or as a reference into an installed distribution; and `write_code`, which writes each code object under its digest. Calling a decorated function calls the function, which is how the komira/python worker runs it. It imports no `ctypes` |
 | `komira/_credentials.py` | the credential objects (private; nothing public takes one yet): `AwsKeys`, `AwsProfile`, `GcpServiceAccount`, `GcpToken`, `AzureKey`, `AzureSas`, `BearerToken` and `OAuth2ClientCredentials`, each a name and its fields, checked when built (the name's grammar and reserved names; each value a non-empty `str` of at most 4096 bytes of UTF-8), with every secret shown as `<set>` by `repr` and no pickle or copy; and the built-in `AMBIENT` and `ANONYMOUS` ([docs/design/credentials_and_writes.md](https://github.com/komira-ai/komira/blob/main/docs/design/credentials_and_writes.md), decision 1) |
 | `komira/_iceberg.py` | the Iceberg sources (private; nothing public takes one yet): `iceberg(uri, *, warehouse=None, credential=AMBIENT, signing=None, access_delegation="vended-credentials")`, an `IcebergCatalog`; `catalog.table(name)`, an `IcebergTable`, with `name` as `"namespace.table"` or a tuple of namespace levels and the table; and `SigV4(region, service)`. Each is checked when built (an http or https URI with a host and no user, password, query or fragment; a credential that fits the catalog: `AMBIENT` or `AwsKeys` with SigV4, and `AMBIENT`, `ANONYMOUS`, `BearerToken` or `OAuth2ClientCredentials` without; `access_delegation` `vended-credentials` or `none`), does no I/O and loads no library; a catalog or a table shows its credential's secrets as `<set>` and refuses pickle and copy ([docs/design/iceberg_tables.md](https://github.com/komira-ai/komira/blob/main/docs/design/iceberg_tables.md), "What the user sees") |
@@ -310,7 +358,7 @@ The package's layout and API are designed in
 | `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the tests that encode or run a plan; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |
 | `pythons.bzl` | the supported Pythons, the one list of them (Supported Pythons, below) |
-| `tests/` | the tests (`python_binding_test`, and `py_test` for the plan encoder and the frame with no library: `test_plan_expr.py`, `test_plan_expr_goldens.py`, `test_plan_rel.py`, `test_plan_rel_goldens.py`, `test_plan_udf.py`, `test_plan_udf_goldens.py`, `test_plan_no_sql.py` and `test_frame.py`), `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, `test_tpch_installed.py` and `tpch_compare.py`, TPC-H q1 to q22 at scale factor 1 through the installed wheel against DuckDB's recorded answers (`:tpch_via_wheel_test`; its answer check is held by `test_tpch_compare.py`), `test_analysis_job.py`, which runs `examples/analysis_job.py` from the installed wheel and compares its answers with DuckDB's (`:analysis_job_test`), and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
+| `tests/` | the tests (`python_binding_test`, and `py_test` for the plan encoder and the frame with no library: `test_plan_expr.py`, `test_plan_expr_goldens.py`, `test_plan_rel.py`, `test_plan_rel_goldens.py`, `test_plan_udf.py`, `test_plan_udf_goldens.py`, `test_plan_no_sql.py`, `test_frame.py` and `test_frame_groupby.py`), `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, `test_tpch_installed.py` and `tpch_compare.py`, TPC-H q1 to q22 at scale factor 1 through the installed wheel against DuckDB's recorded answers (`:tpch_via_wheel_test`; its answer check is held by `test_tpch_compare.py`), `test_analysis_job.py`, which runs `examples/analysis_job.py` from the installed wheel and compares its answers with DuckDB's (`:analysis_job_test`), and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
 
 ### Supported Pythons
 
@@ -453,9 +501,10 @@ The tests below run on Linux x86_64 as build actions, with
 | `runtime_test` | the runtime check on stand-in runtime libraries: not loaded, same build id, another build id, no build id, komira's copy unreadable, and the build id reader |
 | `cpu_test` | the CPU check on cpuinfo files written from `tests/fixtures/cpuinfo_x86_64_v3.txt`, and that a refused CPU never opens the library |
 | `frame_test` | the DataFrame with no library: each verb's node tree, where the row-order rules put each node, each output type, every refusal with its full message, the attribute rules of the frame, the Series and the module for every row of the refusal tables, no dunder running a query, and a terminal sending the encoded plan to the plan door and nothing else, with no SQL in the frame's modules |
+| `frame_groupby_test` | groupby, the reductions and drop_duplicates with no library: each one's node tree (the filter of missing keys below the aggregate, the key sort above it, the zero of an empty sum), its output types, the encoded aggregate, every refusal with its full message, and the GroupBy's attribute rules |
 | `frame_run_test` | the DataFrame on the real library: the readers over Parquet, CSV and JSON files written by the test, each verb's rows through `komira_plan_stream`, `explain()`, a frame run twice, a missing file and a closed session refused at the reader, the engine's refusal at the terminal, the default session, and an ABI 1.7 stand-in refusing the plan door by the version it needs |
 | `display_test` | the notebook display with no library: a frame's names and types and a result's rows, each equal to its file in `tests/fixtures/display/`; at most ten rows, the stream read one batch past them; the row limit at its edges, long values cut and escaped, a stream failing while the rows are read, a Ctrl-C during the read, and a terminal on another thread waiting for a display; and each terminal reading every row after a display |
-| `frame_duckdb_test` | frame programs over one Parquet file with NULLs, negative numbers, floats and strings, each equal to DuckDB's answer to the SQL that means the same over the same file, in order where the frame is sorted; CPython 3.13 (the minor with a pinned DuckDB) |
+| `frame_duckdb_test` | frame programs over one Parquet file with NULLs, negative numbers, floats and strings, each equal to DuckDB's answer to the SQL that means the same over the same file, in order where the frame is sorted: the verbs above, groupby and the reductions the engine runs against GROUP BY, the frame's reductions, drop_duplicates against DISTINCT, and the reductions the engine does not run yet refused at the terminal; CPython 3.13 (the minor with a pinned DuckDB) |
 
 The Linux wheel is `./buck2 build //python:komira_wheel`: the package and, in
 `komira/_lib/`, `libkomira[dist]` whole: `libkomira.so`, and in `lib/` its
