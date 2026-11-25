@@ -112,12 +112,21 @@ It does three things, in this order:
    (buck2 reads `~/.buckconfig.d/` and `/etc/buckconfig.d/`): the
    `[buck2_re_client]` addresses, instance name, `tls` and
    `execution_concurrency_limit`, and `linux_x86_64_properties` under
-   `[komira_re]`. It also writes two keys for a slow connection to the farm
-   (through a tailnet relay it carries a few MB/s for all of a job's
-   uploads): `grpc_keepalive_timeout_secs = 60`, since buck2's default of
-   10 s to answer a PING drops a connection whose PING waits behind upload
-   data, with every stream on it; and `max_concurrent_uploads_per_action = 4`,
-   so fewer streams share the connection and each blob finishes sooner.
+   `[komira_re]`. It also writes the keepalive of the connection to the farm:
+   `grpc_keepalive_time_secs = 30` (buck2's own interval: a PING after 30 s
+   with nothing read) and `grpc_keepalive_timeout_secs`, the input
+   `grpc-keepalive-timeout-secs`, 300 by default and refused unless a whole
+   number from 1 to 839 (under 840 s, the keepalive limit the farm's server is to be given). buck2's default of
+   10 s to answer drops the connection, with every action on it, when the
+   path to the farm goes silent for 40 s, though TCP would carry it across the
+   gap, or when the PING waits behind upload data on a slow connection
+   (through a tailnet relay a few MB/s for all of a job's uploads); with 300 s
+   a connection is kept through a silent gap of up to 330 s, and the actions on
+   one that is really gone fail within 330 s of its last read. The keepalive
+   bounds only a dead connection: an action the farm keeps queued on a live
+   connection waits as long as the farm keeps it. And it writes
+   `max_concurrent_uploads_per_action = 4`, so fewer streams share the
+   connection and each blob finishes sooner.
    Developers put the addresses, instance name, `tls` and properties in their own gitignored
    `.buckconfig.local` ([DEVELOPMENT.md](../DEVELOPMENT.md)). Optional
    inputs add the rest: `darwin-properties` with `darwin-macos-hosts` (both or
