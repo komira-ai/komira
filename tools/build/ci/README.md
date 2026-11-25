@@ -35,7 +35,7 @@ spell the `--` and the option that take the lines that follow.
 | a coverage hold taken out of a `coverage_held`, or a marker deleted while its package stays | fails: `BROKEN`; a hold is never dropped |
 | a query Buck2 cannot answer | fails with Buck2's own error |
 
-**The heavy checks.** `rules.bzl` `HEAVY` lists checks that cost one compile of several GB and are of a frozen program, with the roots that reach each. It is empty today, so `//ci:pr_default` equals `//ci:pr`. The mechanism stays, and `heavy_cases.bzl` holds it over rows written there. A row owns paths (and the selector's own files `ci/**` and `tools/build/ci/**`). A change with a file under a row's paths builds the row. A change with none leaves it out: an AFFECTED answer loses the row's target and every target that depends on it, and a WIDENED answer (a file under `tools/build/` or `third_party/`, say) is `//ci:pr_default`, the aggregate without the row's roots (`ci/BUCK` declares it from the generated lists), plus the roots of any row the change does own. `default_guard.bxl:check` holds `//ci:pr_default` to that: it reaches no heavy target, and every root a row names reaches it. What a row costs: a change outside its paths that breaks the heavy target is not found by the pull request check.
+**The heavy checks.** `rules.bzl` `HEAVY` lists checks that cost one compile of several GB and are of a frozen program, with the roots that reach each. It is empty today, so `//ci:pr_default` equals `//ci:pr`. The mechanism stays, and `heavy_cases.bzl` holds it over rows written there. A row owns paths (and the selector's own files `ci/**`, `tools/build/ci/**` and `.buckconfig`, which pins the selector's library). A change with a file under a row's paths builds the row. A change with none leaves it out: an AFFECTED answer loses the row's target and every target that depends on it, and a WIDENED answer (a file under `tools/build/` or `third_party/`, say) is `//ci:pr_default`, the aggregate without the row's roots (`ci/BUCK` declares it from the generated lists), plus the roots of any row the change does own. `default_guard.bxl:check` holds `//ci:pr_default` to that: it reaches no heavy target, and every root a row names reaches it. What a row costs: a change outside its paths that breaks the heavy target is not found by the pull request check.
 
 The AWS conformance drivers (`//tools/build/proto-codegen:aws_conformance_driver_<protocol>`, one generated Mojo program per protocol: ec2, json, query, rest-json, rest-xml; they share no dependency, so they compile in parallel) are not a row: they are welded into `aws-client-gen`'s build through `:aws_conformance_test`, so every generated AWS client library and the tests of `tests//functional/aws_codegen` depend on them, and leaving them out would leave out their builds. They are rebuilt when one of their inputs changes (the generator, `aws_core`, `json`, `xml`, the Mojo rules) and cached otherwise.
 
@@ -44,9 +44,17 @@ The targets the aggregate leaves out on purpose (`rules.bzl` `EXCLUDED`) are dro
 The reason for a widening and the warnings go to the log. The rows are
 data in `rules.bzl` (a BXL script cannot read a text file), and `cases.bxl`
 holds them to the paths that must always widen. The mapping itself is
-`affected.bzl`, a pure function over a graph facade, so
-`cases.bxl` answers it from tables and from the real graph of
-the fixture package (`fixture/`).
+buildrules' selector library, `rules/affected` of the commit `.buckconfig`
+pins (its `README.md` is the reference: the configuration, the command line,
+the output and the failures); `affected.bxl` passes it the rows of `rules.bzl`
+as one configuration value and keeps the command line above. The library
+holds its own cases over table graphs; `cases.bxl` runs it from this cell over
+the real graph of the fixture package (`fixture/`), and holds the log and
+failure text of `affected.bxl`'s configuration.
+
+`--format json` prints one line instead of the labels: the verdict
+(`AFFECTED` or `WIDENED`), its reason, the labels, the notes, the warnings
+and the number of files. `pr.yml` reads the labels, the default.
 
 ## The macOS targets: `darwin.bxl`
 

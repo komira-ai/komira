@@ -54,7 +54,7 @@ mojo_conda(
         "../validation_run": "//src/validation_run:mopm.toml",
     },
     mojo = "1.1.0",
-    mopm = "toolchains//:mopm_0_0_135",
+    mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/test_run_id",
     version = "0.1.0",
     visibility = ["PUBLIC"],

@@ -1,4 +1,4 @@
-load("@komira//python:dependencies.bzl", "PYARROW_MACOS", "PYARROW_REQUIREMENT", "PYARROW_WHEELS")
+load("@komira//python:dependencies.bzl", "DUCKDB_WHEEL", "PYARROW_MACOS", "PYARROW_REQUIREMENT", "PYARROW_WHEELS")
 load("@komira//python:install_test.bzl", "picked_files", "python_versions", "wheel_install_test")
 load("@komira//python:pythons.bzl", "CLASSIFIERS", "HOSTED", "PYTHONS", "REQUIRES_PYTHON")
 load("@komira//third_party/modular:pins.bzl", "OTHER_MOJO", "TOOLCHAIN_MOJO", "is_newer", "modular_wheel")
@@ -323,6 +323,31 @@ _OTHER_RUNTIME = "newer" if is_newer(_OTHER_MOJO, _TOOLCHAIN_MOJO) else "older"
     files = _TEST_FILES,
 ) for p in PYTHONS]
 
+# TPC-H q1 .. q22 at scale factor 1 through the installed wheel, against
+# DuckDB's answers (python/tests/test_tpch_installed.py): the wheel and its
+# pyarrow in an empty prefix as above, the staged data, the recorded answers and
+# the query texts of `//src/tpch_answers:tpch_sf1`, and the answer check of
+# python/tests/tpch_compare.py. Each query is accepted and answered, its
+# signature equals DuckDB's (exact for integers, decimals and texts, within 1e-9
+# for doubles, the declared type of each column the same) and its rows are in
+# the order of its ORDER BY; the per-query table is the test's output and a
+# failing query is named with its refusal token. On CPython 3.13 only. A validation run, built on request and not in the pull request's check
+# set (tools/build/ci/rules.bzl, EXCLUDED); the answer check it uses is held
+# in the pull request by `//python/tests:tpch_compare_test`.
+# Derived from TPC-H; not comparable to published TPC-H results.
+wheel_install_test(
+    name = "tpch_via_wheel_test",
+    python = "komira//third_party/python:cpython",
+    wheels = [":komira_wheel", _PYARROW_WHL[""]],
+    script = "komira//python/tests:test_tpch_installed.py",
+    files = {
+        "--answers": "komira//src/tpch_answers:tpch_sf1[answers.txt]",
+        "--compare": "komira//python/tests:tpch_compare.py",
+        "--data": "komira//src/tpch_answers:tpch_sf1[data]",
+        "--queries": "komira//src/tpch_answers:tpch_sf1[queries]",
+    },
+)
+
 # The same test on the macOS wheel, on the farm's macOS workers: run from
 # pypi-macos-arm64.yml's build-macos-arm64 only, never in a pull request
 # (tools/build/ci/rules.bzl, EXCLUDED). CPython 3.13 is the one macOS
@@ -336,6 +361,21 @@ wheel_install_test(
     files = _TEST_FILES,
     exec_compatible_with = DARWIN_ARM64,
     target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
+)
+
+# The analysis job (examples/analysis_job.py) run from the installed wheel on
+# CPython 3.13, the one minor with a pinned DuckDB: it reads a Parquet file and
+# a CSV file, joins, groups, ranks with window functions, takes the top
+# customers and writes Parquet, and each answer, with the file it wrote, is
+# held to DuckDB's for the same SQL over the same files. The same query with the
+# join on the wrong key must differ from DuckDB's answer
+# (tests/test_analysis_job.py).
+wheel_install_test(
+    name = "analysis_job_test",
+    python = "komira//third_party/python:cpython",
+    wheels = [":komira_wheel", _PYARROW_WHL[""], "komira//python/tests:" + DUCKDB_WHEEL["file"]],
+    script = "komira//python/tests:test_analysis_job.py",
+    files = {"--example": "examples/analysis_job.py"},
 )
 
 # The same test on installs that must fail, each with the line it fails with

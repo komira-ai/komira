@@ -1,30 +1,32 @@
-# The cases of the BXL selector and the aggregate's guard.
+# The cases of the BXL selector's use here and of the aggregate's guard.
 #
 #   ./buck2 bxl komira//tools/build/ci/cases.bxl:run
 #
-# Fails, listing every case that answered otherwise. Two layers:
+# Fails, listing every case that answered otherwise. The selector's mapping is
+# buildrules' `rules/affected`, which holds its own table cases (every file
+# shape, the coverage holds, the patterns, the heavy rows). Here:
 #
-#   table cases  affected.bzl over a graph written out in this file: every
-#                file shape (leaf source, BUCK, .bzl, deleted, build system,
-#                ownerless, inert, empty), the coverage holds, the patterns.
-#   real cases   the same functions over the real Buck2 graph of the fixture
-#                package (fixture/BUCK, fixture/agg/BUCK): the queries the
-#                selector asks (owner, targets in a build file, reverse
-#                dependencies, the loaders of a .bzl), and the guard green
-#                over a complete aggregate and red over one that leaves a
-#                check out.
+#   real cases     the library over the real Buck2 graph of the fixture
+#                  package (fixture/BUCK, fixture/agg/BUCK), run from this
+#                  cell: the queries the selector asks (owner, targets in a
+#                  build file, reverse dependencies, the loaders of a .bzl) and
+#                  the guard green over a complete aggregate and red over one
+#                  that leaves a check out.
+#   shipped cases  rules.bzl as shipped and affected.bxl's configuration: the
+#                  paths that must widen, the log and failure text.
+#   the rest       the aggregate's generator, shards and guards, the
+#                  toolchains per platform, the macOS selection.
 #
-# Each case names what it proves. A defect planted in affected.bzl,
-# ci_graph.bzl or the fixture turns a named case red (see the PR that added
-# this file for the mutants tried).
+# Each case names what it proves.
 
 load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo")
-load(":affected.bzl", "AFFECTED", "EMPTY", "VACUOUS", "WIDENED", "held_refusals", "is_held_file", "is_inert", "parse_held_lines", "pattern_matches", "select", "widen_reason")
+load("@buildrules//rules/affected:defs.bzl", "AFFECTED", "VACUOUS", "WIDENED", "affected_answer", "affected_output", "is_inert", "make_graph", "select", "widen_reason", "without_left_out")
 load("//release:darwin_libs.bzl", "DARWIN_PACKAGES")
 load(":darwin_cases.bzl", "darwin_answer_cases", "darwin_real_cases", "darwin_table_cases")
 load(":heavy_cases.bzl", "heavy_cases")
 load(":rules.bzl", "EXCLUDED", "INERT", "WIDEN")
-load(":ci_graph.bzl", "check_nodes", "closure", "findings", "make_graph", "python_findings", "python_nodes", "render_all", "render_loader", "render_shard", "roots", "sdk_own_deps", "shard_findings", "shard_of", "SHARDS", "LINE_LIMIT", "without_left_out")
+load(":affected.bxl", "CONFIG")
+load(":ci_graph.bzl", "check_nodes", "closure", "findings", "python_findings", "python_nodes", "render_all", "render_loader", "render_shard", "roots", "sdk_own_deps", "shard_findings", "shard_of", "SHARDS", "LINE_LIMIT")
 
 # ---- the table graph ---------------------------------------------------
 #
@@ -95,120 +97,6 @@ def _table():
         including = lambda p: _INCLUDING.get(p, []),
         rdeps = _reverse_closure,
     )
-
-_RULES = struct(
-    widen = [
-        (".buckconfig", "the configuration"),
-        ("tools/build/**", "the build system"),
-        ("third_party/**", "pinned sources"),
-    ],
-    inert = ["*.md", ".github/CODEOWNERS"],
-)
-
-def _table_case(name, changed, kind, targets = None, reason = None):
-    v = select(_RULES, changed, _table(), "ci")
-    problems = []
-    if v.kind != kind:
-        problems.append("kind {} (reason: {}), wanted {}".format(v.kind, v.reason, kind))
-    if targets != None and v.targets != targets:
-        problems.append("targets {}, wanted {}".format(v.targets, targets))
-    if reason != None and reason not in v.reason:
-        problems.append("reason '{}' lacks '{}'".format(v.reason, reason))
-    return [] if not problems else ["{}: {}".format(name, "; ".join(problems))]
-
-def _table_cases():
-    out = []
-    a_and_dependents = ["k//src/a:a", "k//src/a:a_test", "k//src/b:b", "k//src/c:c"]
-
-    # a leaf change selects its owner and every dependent, transitively, and nothing else
-    out += _table_case("leaf source selects owner and dependents", ["src/a/a.mojo"], AFFECTED, a_and_dependents)
-    out += _table_case("a leaf with one dependent chain", ["src/b/b.mojo"], AFFECTED, ["k//src/b:b", "k//src/c:c"])
-
-    # BUCK seeds the package, .bzl the loaders
-    out += _table_case("BUCK change selects the package and dependents", ["src/b/BUCK"], AFFECTED, ["k//src/b:b", "k//src/c:c"])
-    out += _table_case("bzl change selects every loader and dependents", ["src/lib.bzl"], AFFECTED, a_and_dependents)
-    out += _table_case("a bzl no BUCK loads widens", ["orphan.bzl"], WIDENED, reason = "loaded by no BUCK file")
-
-    # the build system and the toolchain widen, whatever else is in the change
-    out += _table_case("tools/build change widens", ["tools/build/mojo/defs.bzl"], WIDENED, reason = "tools/build/**")
-    out += _table_case("third_party change widens", ["third_party/zlib/pin.txt"], WIDENED, reason = "third_party/**")
-    out += _table_case(".buckconfig widens", [".buckconfig"], WIDENED, reason = ".buckconfig")
-    out += _table_case("a widening file beside a leaf change widens", ["src/a/a.mojo", "tools/build/x.zig"], WIDENED)
-
-    # docs only: owned by the doc tree, so selected (not vacuous)
-    out += _table_case("docs-only change selects the doc tree", ["docs/x.md"], AFFECTED, ["k//docs:doc_tree"])
-    out += _table_case("inert unowned files alone are vacuous", ["README.md", ".github/CODEOWNERS"], VACUOUS)
-    out += _table_case("an inert file beside a leaf change is ignored", ["README.md", "src/b/b.mojo"], AFFECTED, ["k//src/b:b", "k//src/c:c"])
-
-    # no owner and no inert row: widens (never silently dropped)
-    out += _table_case("an existing file no target owns widens", [".hidden"], WIDENED, reason = "no target owns '.hidden'")
-
-    # deleted files: the package above them, a deleted BUCK widens
-    out += _table_case("deleted file selects its package and dependents", ["src/a/old.mojo"], AFFECTED, a_and_dependents)
-    out += _table_case("deleted BUCK widens", ["src/a/deleted/BUCK"], WIDENED, reason = "its package is gone")
-    out += _table_case("deleted file in no package, not inert, widens", ["nowhere/old.txt"], WIDENED, reason = "no package holds it")
-    out += _table_case("deleted inert file in no package is ignored alone (vacuous)", ["gone/NOTES.md"], VACUOUS)
-
-    # the aggregate's own list changing is not a selection: it widens
-    out += _table_case("a change to the aggregate's package widens", ["ci/targets.bzl"], WIDENED, reason = "aggregate's own package")
-    out += _table_case("a change to a shard of the aggregate's list widens", ["ci/targets/shard_3.bzl"], WIDENED, reason = "aggregate's own package")
-    out += _table_case("the aggregate's BUCK widens", ["ci/BUCK"], WIDENED, reason = "aggregate's own package")
-
-    # a seed that reaches nothing widens (the universe does not hold it)
-    v = select(_RULES, ["src/a/a.mojo"], struct(exists = lambda p: True, owners = lambda p: ["k//elsewhere:x"], package_targets = lambda d: [], including = lambda p: [], rdeps = lambda s: []), "ci")
-    if v.kind != WIDENED:
-        out.append("reverse query answering nothing: kind {}, wanted {}".format(v.kind, WIDENED))
-
-    # empty
-    out += _table_case("no changed file is EMPTY, not a pass", [], EMPTY)
-    out += _table_case("blank lines are no file", ["", ""], EMPTY)
-
-    # patterns
-    for pattern, path, wanted in [
-        ("tools/build/**", "tools/build/a/b.zig", True),
-        ("tools/build/**", "tools/buildx/a", False),
-        ("tools/build/**", "tools/build", False),
-        ("tools/buck2*", "tools/buck2.toml", True),
-        ("tools/buck2*", "tools/buck", False),
-        ("*.md", "docs/a/b.md", True),
-        ("*.md", "docs/a/b.mdx", False),
-        ("buck2", "buck2", True),
-        ("buck2", "tools/buck2", False),
-    ]:
-        if pattern_matches(pattern, path) != wanted:
-            out.append("pattern {} on {}: wanted {}".format(pattern, path, wanted))
-    return out
-
-# ---- coverage holds ------------------------------------------------------
-
-def _held(changed, lines, package_stays = True):
-    base, head = parse_held_lines(lines, "HEAD")
-    g = struct(exists = lambda p: package_stays)
-    return held_refusals(changed, base, head, g)
-
-def _held_cases():
-    out = []
-    marker = "src/a/coverage_held"
-
-    def case(name, changed, lines, wanted, package_stays = True):
-        got = _held(changed, lines, package_stays)
-        if got != wanted:
-            out.append("held: {}: {}, wanted {}".format(name, got, wanted))
-
-    base = ["abc123:{}:1:# held".format(marker), "abc123:{}:2:line".format(marker), "abc123:{}:3:branch".format(marker)]
-    case("a metric taken out is refused", [marker], base + ["HEAD:{}:1:line".format(marker)], [marker + ": branch is no longer held"])
-    case("every metric taken out, marker emptied, is refused", [marker], base, [marker + ": branch is no longer held", marker + ": line is no longer held"])
-    case("a reordered marker passes", [marker], base + ["HEAD:{}:1:branch".format(marker), "HEAD:{}:2:line".format(marker)], [])
-    case("a gained metric passes", [marker], ["abc123:{}:1:line".format(marker), "HEAD:{}:1:line".format(marker), "HEAD:{}:2:branch".format(marker)], [])
-    case("a comment taken out passes", [marker], base + ["HEAD:{}:1:line".format(marker), "HEAD:{}:2:branch".format(marker)], [])
-    case("a new marker passes", [marker], ["HEAD:{}:1:line".format(marker)], [])
-    case("a marker deleted with its package stays refused", [marker], base, [marker + ": branch is no longer held", marker + ": line is no longer held"])
-    case("a marker deleted with its package's BUCK passes", [marker], base, [], package_stays = False)
-    case("a marker the change does not name is not read", ["src/a/a.mojo"], base, [])
-    case("another package's marker is its own", [marker], base + ["HEAD:src/b/coverage_held:1:line", "HEAD:{}:1:line".format(marker), "HEAD:{}:2:branch".format(marker)], [])
-    if not is_held_file("coverage_held") or not is_held_file("src/a/coverage_held") or is_held_file("src/a/coverage_held.md"):
-        out.append("held: is_held_file")
-    return out
 
 # ---- the real graph: the fixture ----------------------------------------
 
@@ -438,7 +326,7 @@ _MUST_WIDEN = [
     "tools/build/cells/toolchains/BUCK",
     "tools/build/mojo/defs.bzl",
     "tools/build/ci/rules.bzl",
-    "tools/build/ci/affected.bzl",
+    "tools/build/ci/affected.bxl",
     "third_party/snappy/pin.bzl",
 ]
 
@@ -467,6 +355,84 @@ def _shipped_rules_cases():
     for p in ["src/x/x.mojo", "release/channels.textproto", "tools/build/ci/BUCK"]:
         if is_inert(shipped, p):
             out.append("shipped rules: '{}' builds something and must not be inert".format(p))
+    return out
+
+# ---- the shipped configuration -----------------------------------------------
+#
+# affected.bxl's CONFIG run through the library over the table graph: what a run
+# prints and fails with, by exact equality. pr.yml, darwin.bzl and the scripts that
+# read the selector's log match these lines, so the configuration's `held` message
+# and `where` names hold the text they read.
+
+def _keep(targets):
+    return list(targets)
+
+def _shipped_config_cases():
+    out = []
+    marker = "src/a/coverage_held"
+
+    def case(name, changed, drop, held, log, failure, stdout):
+        got = affected_output(affected_answer(CONFIG, changed, _table(), drop, held, "HEAD"), "labels")
+        if got.log != log or got.failure != failure or got.stdout != stdout:
+            out.append("shipped config: {}: log {}, failure '{}', stdout {}; wanted log {}, failure '{}', stdout {}".format(name, got.log, got.failure, got.stdout, log, failure, stdout))
+
+    case(
+        "a dropped hold fails BROKEN with the coverage README in the message",
+        [marker],
+        _keep,
+        ["B:{}:1:line".format(marker), "B:{}:2:branch".format(marker), "HEAD:{}:1:line".format(marker)],
+        [],
+        "BROKEN: a coverage hold was dropped (a package that reached the target stays held; tools/build/coverage/README.md): src/a/coverage_held: branch is no longer held",
+        [],
+    )
+    case(
+        "a hold marker named by another basename is not a hold",
+        ["src/a/held_marker"],
+        _keep,
+        ["B:src/a/held_marker:1:line"],
+        ["affected: AFFECTED: 1 file(s), 4 target(s), 0 left out (EXCLUDED), 0 left out (HEAVY)"],
+        "",
+        ["k//src/a:a", "k//src/a:a_test", "k//src/b:b", "k//src/c:c"],
+    )
+    case(
+        "an AFFECTED answer logs its counts and prints its labels",
+        ["src/b/b.mojo"],
+        _keep,
+        [],
+        ["affected: AFFECTED: 1 file(s), 2 target(s), 0 left out (EXCLUDED), 0 left out (HEAVY)"],
+        "",
+        ["k//src/b:b", "k//src/c:c"],
+    )
+    case(
+        "an answer whose every target is excluded is the aggregate, naming rules.bzl EXCLUDED",
+        ["src/b/b.mojo"],
+        lambda targets: [],
+        [],
+        ["affected: WIDENED: every target reached is left out of the aggregate (rules.bzl EXCLUDED)"],
+        "",
+        ["komira//ci:pr"],
+    )
+    case(
+        "a build-system file widens to komira//ci:pr, naming the row",
+        ["tools/build/mojo/defs.bzl"],
+        _keep,
+        [],
+        ["affected: WIDENED: 'tools/build/mojo/defs.bzl' matches widen rule tools/build/**: the Mojo rules, platforms, toolchains and build tooling are loaded by every target"],
+        "",
+        ["komira//ci:pr"],
+    )
+    case(
+        "inert files alone, one unowned and one deleted, fail VACUOUS after their warnings",
+        ["README.md", ".github/CODEOWNERS"],
+        _keep,
+        [],
+        ["affected: warning: deleted file no package holds (inert): .github/CODEOWNERS", "affected: warning: no target owns (inert): README.md"],
+        "VACUOUS: the 2 changed file(s) reach no target: .github/CODEOWNERS, README.md",
+        [],
+    )
+    case("no file fails EMPTY", [], _keep, [], [], "EMPTY: the change names no file", [])
+    if CONFIG.where.heavy != "rules.bzl HEAVY" or CONFIG.default != "komira//ci:pr_default":
+        out.append("shipped config: a left-out HEAVY row's note must name rules.bzl HEAVY and a WIDENED answer without it is komira//ci:pr_default: where {}, default {}".format(CONFIG.where, CONFIG.default))
     return out
 
 # ---- the C/C++ toolchain per target platform ---------------------------------
@@ -658,7 +624,7 @@ def _shard_cases():
     return out
 
 def _run(ctx):
-    table = _shard_cases() + _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + heavy_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _proto_toolchain_cases(ctx) + _adopted_darwin_cases(ctx) + darwin_table_cases()
+    table = _shard_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _shipped_config_cases() + heavy_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _proto_toolchain_cases(ctx) + _adopted_darwin_cases(ctx) + darwin_table_cases()
     real = _real_cases(ctx) + darwin_real_cases(ctx, DARWIN_PACKAGES, "komira//release:mopm_darwin_libs") + darwin_answer_cases(DARWIN_PACKAGES, "komira//release:mopm_darwin_libs")
     failures = table + real
     if failures:

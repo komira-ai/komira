@@ -1,0 +1,2 @@
+-- DATE from 0001-01-01 to 9999-12-31.
+SELECT id, date32 FROM types ORDER BY id ASC NULLS LAST

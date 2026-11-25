@@ -1,0 +1,228 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+
+# Test-only: komira's SQL surface held end to end to the pinned DuckDB.
+#
+# A case is cases/<case>.sql: comment lines, then one SELECT over
+# komira_test_oracle's datasets (types, nulls, join_left, join_right) or
+# the regression tables below, whose outermost ORDER BY is total. A
+# regression case (regress_*) says in its comment which engine defect it
+# catches. Its expected answer is the sql_oracle target
+# :oracle/<case>: the pinned DuckDB reads the same Parquet files
+# (sql/tables.sql), komira_test_oracle's discipline refuses a case whose
+# answer could depend on the order DuckDB happened to produce, and its
+# run.sql writes the answer as expected.tsv. Nothing komira builds is an
+# input of an answer.
+#
+# The library (corpus.mojo, runner.mojo) runs each case through so.sql_result,
+# the call on values libkomira's komira_sql_stream wraps, and holds komira's
+# answer to DuckDB's by value and in row order; a case komira refuses must
+# be listed in refusals.tsv with its refusal, word for word. Nothing ships,
+# so `conda = False`.
+#
+# The tests, each run as a build action:
+#   test_sql_e2e -- every case equals DuckDB's answer or is refused as
+#     listed; the count of cases is pinned; the whole corpus with one DuckDB
+#     answer changed in one cell fails that case alone, by name.
+#   test_sql_e2e_checks -- the runner and the corpus reader fed wrong
+#     answers and broken lists: a wrong cell, a missing or extra row, another row order or
+#     column name; a refusal not listed, listed but answered, or worded
+#     otherwise; a malformed refusal list; a case with no answer, an answer
+#     with no case, a file that is no case; a session with no table.
+#
+# `deps` is the full transitive closure: so's, so itself and
+# komira_plan_harness.
+
+_DATASETS = [
+    "types",
+    "nulls",
+    "join_left",
+    "join_right",
+]
+
+_TABLES = {
+    d + ".parquet": "//src/tests/helpers/komira_test_oracle:datasets[" + d + ".parquet]"
+    for d in _DATASETS
+}
+
+# The small tables the regression cases (cases/regress_*.sql) read, written
+# by the pinned DuckDB from sql/regression_tables.sql: each is shaped so one
+# engine defect (a NULL-padded row lost in an outer or anti join, a
+# string-key join, a join fan-out, a correlated IN, a distinct count across
+# a cross join, ...) changes a case's answer.
+_REGRESSION_TABLES = [
+    "agg_scalar",
+    "count_groups",
+    "lj_customer",
+    "lj_orders",
+    "distinct_pairs",
+    "cross_a",
+    "cross_b",
+    "skey_probe",
+    "skey_build",
+    "derived_l",
+    "derived_r",
+    "profit_lineitem",
+    "profit_partsupp",
+    "profit_supplier",
+    "pad_probe",
+    "pad_build",
+    "fan_probe",
+    "fan_build",
+    "full_l",
+    "full_r",
+    "in_outer",
+    "in_inner",
+    "in_supplier",
+    "in_partsupp",
+    "in_part",
+    "floats",
+]
+
+sql_oracle(
+    name = "regression_tables",
+    srcs = "sql/regression_tables.sql",
+    outputs = [t + ".parquet" for t in _REGRESSION_TABLES],
+)
+
+_TABLES.update({
+    t + ".parquet": ":regression_tables[" + t + ".parquet]"
+    for t in _REGRESSION_TABLES
+})
+
+_ORACLE = "//src/tests/helpers/komira_test_oracle:"
+
+_CASES = [p[len("cases/"):-len(".sql")] for p in glob(["cases/*.sql"])]
+
+[sql_oracle(
+    name = "oracle/" + case,
+    srcs = [
+        _ORACLE + "sql/discipline.sql",
+        "sql/tables.sql",
+        _ORACLE + "sql/run.sql",
+    ],
+    inputs = dict(_TABLES, **{"case.sql": "cases/" + case + ".sql"}),
+    outputs = ["expected.tsv"],
+) for case in _CASES]
+
+# The corpus as test_sql_e2e reads it: cases/, answers/, refusals.tsv and
+# the tables under tables/.
+_CORPUS = dict(
+    [("cases/" + c + ".sql", "cases/" + c + ".sql") for c in _CASES] +
+    [("answers/" + c + ".tsv", ":oracle/" + c + "[expected.tsv]") for c in _CASES] +
+    [("tables/" + t, src) for t, src in _TABLES.items()] +
+    [("refusals.tsv", "refusals.tsv")],
+)
+
+mojo_library(
+    name = "sql_e2e",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/agg:agg",
+        "//src/agg_api:agg_api",
+        "//src/arrow:arrow",
+        "//src/arrow_ipc:arrow_ipc",
+        "//src/async_api:async_api",
+        "//src/async_rt:async_rt",
+        "//src/atomic_alias:atomic_alias",
+        "//src/avro:avro",
+        "//src/awslc:awslc",
+        "//src/batch_eval:batch_eval",
+        "//src/byte_buffer:byte_buffer",
+        "//src/clock:clock",
+        "//src/column_format:column_format",
+        "//src/column_kernels:column_kernels",
+        "//src/compression:compression",
+        "//src/containers:containers",
+        "//src/counters:counters",
+        "//src/crypto:crypto",
+        "//src/csv:csv",
+        "//src/dynamic_filter:dynamic_filter",
+        "//src/encoding:encoding",
+        "//src/engine_runtime:engine_runtime",
+        "//src/exec_types:exec_types",
+        "//src/expr:expr",
+        "//src/fork_join:fork_join",
+        "//src/fs:fs",
+        "//src/hashing:hashing",
+        "//src/host_probe:host_probe",
+        "//src/host_profile:host_profile",
+        "//src/http_client:http_client",
+        "//src/http_core:http_core",
+        "//src/iceberg_catalog:iceberg_catalog",
+        "//src/iceberg_scan:iceberg_scan",
+        "//src/join_assembly:join_assembly",
+        "//src/json:json",
+        "//src/json_index:json_index",
+        "//src/jsonl:jsonl",
+        "//src/kernels:kernels",
+        "//src/libc:libc",
+        "//src/log:log",
+        "//src/lowering:lowering",
+        "//src/lz4:lz4",
+        "//src/metrics:metrics",
+        "//src/morsel:morsel",
+        "//src/name_registry:name_registry",
+        "//src/net:net",
+        "//src/objectstore:objectstore",
+        "//src/op_agg_state:op_agg_state",
+        "//src/op_join_probe:op_join_probe",
+        "//src/op_sort:op_sort",
+        "//src/op_sources:op_sources",
+        "//src/op_spill_rows:op_spill_rows",
+        "//src/op_window:op_window",
+        "//src/operator_api:operator_api",
+        "//src/optimizer:optimizer",
+        "//src/parquet:parquet",
+        "//src/parquet_api:parquet_api",
+        "//src/parquet_codec:parquet_codec",
+        "//src/parquet_footers:parquet_footers",
+        "//src/parquet_scan:parquet_scan",
+        "//src/parquet_writer:parquet_writer",
+        "//src/phase_timers:phase_timers",
+        "//src/physical_plan:physical_plan",
+        "//src/pipeline_exec:pipeline_exec",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_proto:plan_proto",
+        "//src/plan_stats:plan_stats",
+        "//src/plan_wire:plan_wire",
+        "//src/proto_codec:proto_codec",
+        "//src/protobuf:protobuf",
+        "//src/row_format:row_format",
+        "//src/scalar_arithmetic:scalar_arithmetic",
+        "//src/scan_planning:scan_planning",
+        "//src/scan_source:scan_source",
+        "//src/sdk:sdk",
+        "//src/sdk_exec:sdk_exec",
+        "//src/secret_registry:secret_registry",
+        "//src/secret_store:secret_store",
+        "//src/shuffle:shuffle",
+        "//src/simd_ops:simd_ops",
+        "//src/so:so",
+        "//src/spsc_ring:spsc_ring",
+        "//src/sql:sql",
+        "//src/sync:sync",
+        "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
+        "//src/trace:trace",
+        "//src/udf:udf",
+        "//src/uuid:uuid",
+        "//src/zlib:zlib",
+        "//tools/build/mojo/runtime_paths:runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_sql_e2e.mojo",
+        "tests/test_sql_e2e_checks.mojo",
+    ],
+    test_data = {
+        "tests/test_sql_e2e.mojo": _CORPUS,
+        # The tables, and a tree for load_corpus at tree/ (case a with its
+        # answer, case b with none, answer c with no case, notes.txt).
+        "tests/test_sql_e2e_checks.mojo": dict(
+            [("tables/" + t, src) for t, src in _TABLES.items()] +
+            [(f[len("tests/data/"):], f) for f in glob(["tests/data/tree/**"])],
+        ),
+    },
+    visibility = ["PUBLIC"],
+)

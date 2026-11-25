@@ -9,6 +9,7 @@
 .github/ci/coverage_measure.sh	coverage and mutation tooling: to port to Zig
 .github/ci/tests/coverage_ci_cases.sh	coverage and mutation tooling: to port to Zig
 buck2	a thin wrapper: runs the pinned buck2 release
+python/examples/analysis_job.py	the Python package's analysis job example: run from the installed wheel and compared with DuckDB (python/examples/README.md)
 python/examples/quickstart.py	the Python package's quickstart: the example the README shows and the release smoke runs (python/examples/README.md)
 python/komira/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_arrow.py	the Python package: its sources are Python (docs/design/python_package.md)
@@ -45,6 +46,7 @@ python/komira/_udf/__init__.py	the Python UDF runtime: the zygote and its worker
 python/komira/_udf/wire.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
 python/komira/_udf/worker.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
 python/komira/_udf/zygote.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
+python/tests/test_analysis_job.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
 python/tests/test_beside_modular.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
 python/tests/test_cpu.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_installed.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
@@ -78,9 +80,16 @@ python/tests/test_iceberg.py	the Python package's tests: the SDK surface is test
 python/tests/test_runtime.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_upgrade.py	the Python package's tests: the wheel upgraded from its previous release is tested in Python, by the interpreter it is installed for
 python/tests/test_variants.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_register_text.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_session.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_result_frames.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_tpch_compare.py	the Python package's tests: the answer check of the wheel's TPC-H run is tested in Python
+python/tests/test_tpch_installed.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
+python/tests/tpch_compare.py	the Python package's tests: the answer check of the wheel's TPC-H run, read by the installed wheel's test and by its own, in Python
 python/tests/test_sql.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql_fake.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_sql_interrupt.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_threads.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_two_call.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/wheel_install_run.py	the Python package's tests: installs the wheel into an empty environment of the pinned interpreter that runs it (python/install_test.bzl), as that interpreter's own installer does
 python/tests/udf_host.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)

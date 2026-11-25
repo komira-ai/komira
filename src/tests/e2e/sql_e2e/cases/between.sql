@@ -1,0 +1,2 @@
+-- BETWEEN, both ends included.
+SELECT id, i32 FROM nulls WHERE i32 BETWEEN -2 AND 2 ORDER BY id ASC NULLS LAST

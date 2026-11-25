@@ -46,7 +46,12 @@ NATIVE_OWNERS = [
 # (and an unregistered one refused at bind), the CSV and JSON bindings, a
 # plan rendered, and sql_result, komira_sql_stream's answer on values (rows,
 # no rows with the schema, a result that outlives its session, and refusals as
-# `<step>: <reason>`); test_credentials holds the three steps of a definition, each
+# `<step>: <reason>`); test_register_text holds register_csv and
+# register_json: a CSV or JSON file registered by name and queried through
+# the session's engine, each CSV dialect argument equal to read_csv's (a
+# header-less table refused at lower as read_csv's is) and the JSON table
+# equal to read_json's, an unreadable file, an empty name and a
+# taken name refused with nothing registered; test_credentials holds the three steps of a definition, each
 # kind's fields and every named refusal, word for word, and the generations of
 # a name; test_credentials_reveal reads sealed values through sdk_exec's
 # SecretCapability and reads an object of a fake S3 with them, where a wrong
@@ -149,8 +154,10 @@ mojo_library(
     test_srcs = [
         "tests/test_credentials.mojo",
         "tests/test_credentials_reveal.mojo",
+        "tests/test_register_text.mojo",
         "tests/test_session.mojo",
         "tests/test_sources.mojo",
+        "tests/test_sql_cancel.mojo",
         "tests/test_status.mojo",
     ],
     test_deps = [
@@ -159,19 +166,23 @@ mojo_library(
         "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
     ],
     test_data = {
+        "tests/test_register_text.mojo": ["tests/fixtures/two_columns.parquet"],
         "tests/test_sources.mojo": ["tests/fixtures/two_columns.parquet"],
     },
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): fourteen exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): twenty-one exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). Every context it creates owns
 # an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
 # komira_sql_stream runs SQL on that engine and answers an Arrow C stream; the
 # C driver below (c_abi_check) reads those streams through komira.h.
+# komira_sql_stream_run is that call under a run handle (komira_run_new), whose
+# komira_run_cancel and komira_run_progress another thread may call while the
+# run is in flight.
 # It is published only if every gate driver passes, each of which dlopens it
 # with RTLD_NOW and calls it as a foreign host would:
-#   gate_version       the version is 1004 (1.4);
+#   gate_version       the version is 1006 (1.6);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op, and a context (with its
 #                      engine's workers) is created and freed again;
@@ -197,7 +208,16 @@ mojo_library(
 #                      nothing written and no read of the plan; exactly 64 MiB
 #                      is read (garbage, so -3). gate_parquet_schema also: a
 #                      path that is not UTF-8 is -3 with a last error.
-#   gate_credentials   a credential added, set and sealed is 0 at each step;
+#   gate_register_csv, gate_register_json  a file is registered by name (CSV:
+#                      for each dialect argument); a name already taken, in
+#                      any case and by either call, is -3 with
+#                      TABLE_ALREADY_REGISTERED and an empty one -3 with
+#                      TABLE_NAME_EMPTY, word for word; NULL ctx -1, NULL name
+#                      or path -2 with the named last error; a missing or
+#                      empty file and a path that is not UTF-8 -3; a refused
+#                      name stays free and a good call afterwards leaves no
+#                      error.
+#   gate_credentials  a credential added, set and sealed is 0 at each step;
 #                      one sealed without its secret, a field of another
 #                      kind, an empty value, a 4097-byte value, an unknown
 #                      kind, `ambient`, a malformed name, a name that is not
@@ -223,6 +243,13 @@ _LIBKOMIRA = dict(
         "komira_credential_set",
         "komira_credential_seal",
         "komira_sql_stream",
+        "komira_register_csv",
+        "komira_register_json",
+        "komira_run_new",
+        "komira_run_free",
+        "komira_run_cancel",
+        "komira_run_progress",
+        "komira_sql_stream_run",
     ],
     exports_exact = True,
     gate_srcs = [
@@ -236,6 +263,8 @@ _LIBKOMIRA = dict(
         "tests/gate/gate_json_binding.mojo",
         "tests/gate/gate_parquet_schema.mojo",
         "tests/gate/gate_plan_render.mojo",
+        "tests/gate/gate_register_csv.mojo",
+        "tests/gate/gate_register_json.mojo",
         "tests/gate/gate_register_parquet.mojo",
         "tests/gate/gate_two_call.mojo",
         "tests/gate/gate_version.mojo",
@@ -329,6 +358,9 @@ cxx_binary(
     srcs = [":c_driver_files[tests/c/abi_driver.c]"],
     headers = {"komira.h": ":komira_abi"},
     header_namespace = "",
+    # The run-handle cases call komira_run_cancel and komira_run_progress from
+    # a second thread.
+    linker_flags = ["-lpthread"],
 )
 
 # Runs abi_driver against libkomira: it dlopens the library, binds each function
@@ -347,7 +379,20 @@ cxx_binary(
 # with the aggregation sink's denial naming the budget, *out untouched and
 # the context still answering; the same sum answers with 0 and 0 (the host's
 # own values) and with one worker; a negative worker count or budget
-# (-1, INT64_MIN) is NULL.
+# (-1, INT64_MIN) is NULL. And it registers files it writes into
+# $TEST_TMPDIR with komira_register_csv (a `|` file, one with all_varchar)
+# and komira_register_json and queries each by name: the rows are the files'
+# own, and a file registered with no header is refused at lower when
+# queried; a taken name, an empty one and a missing file are refused with
+# the named last error, and the first table keeps answering.
+# Then the run handle: a run cancelled before the
+# call is -6 with the QUERY_CANCELLED last error word for word and *out
+# untouched, its progress done 0 of a total above 0, and the context answers
+# the next query; a run nobody cancels answers with done equal to total; a
+# second thread reads the progress of a run in flight and every reading is
+# at least the one before with done at most total; a cancel from a second
+# thread while the run is in flight gives 0 or -6 and the context answers
+# after it; NULL run, done or total pointers are -2.
 komira_c_abi_check(
     name = "c_abi_check",
     driver = ":abi_driver",

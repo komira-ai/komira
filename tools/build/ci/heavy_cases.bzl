@@ -1,130 +1,33 @@
-"""The cases of the heavy checks (rules.bzl HEAVY): which labels a change builds
-when a row's target is one it owns nothing of, over a graph written out here, and
-the shipped row held to the paths that own it. cases.bxl runs them.
+"""The cases of the heavy checks (rules.bzl HEAVY) that are this repository's:
+the shipped rows held to the paths that own them, and the guard of the default
+aggregate (ci_graph.bzl `default_findings`). How a row changes the labels of a
+change (`plan`, `heavy_split`) is buildrules' `rules/affected`, which holds those
+cases. cases.bxl runs them.
 
-The graph (labels `k//package:name`):
-
-    src/a/a.mojo  -> k//src/a:a         k//src/a:a_test tests it
-    src/h/h.mojo  -> k//src/h:heavy     depends on a:a; k//src/h:h_root depends on heavy
-    src/g/g.mojo  -> k//src/g:heavy2    depends on a:a; k//src/g:g_root depends on heavy2
-    src/r/r.mojo  -> k//src/r:r         depends on heavy (a check of its own that needs it)
-
-Two rows: heavy owned by `src/h/**` and `ci/**` with root h_root, heavy2 owned by
-`src/g/**` with root g_root.
+The rows of the guard's cases (labels `k//package:name`): heavy owned by
+`src/h/**` and `ci/**` with roots h_root and r, in front of the aggregate
+`k//ci:pr` and its default `k//ci:pr_default`.
 """
 
-load(":affected.bzl", "AFFECTED", "WIDENED", "heavy_split", "plan", "select")
+load("@buildrules//rules/affected:defs.bzl", "heavy_split")
 load(":ci_graph.bzl", "default_findings")
-load(":rules.bzl", "HEAVY", "INERT", "WIDEN")
-
-_FILES = {
-    "src/a/a.mojo": True,
-    "src/h/h.mojo": True,
-    "src/g/g.mojo": True,
-    "src/r/r.mojo": True,
-    "tools/build/x.zig": True,
-    "ci/BUCK": True,
-    "ci/targets.bzl": True,
-}
-_OWNERS = {
-    "src/a/a.mojo": ["k//src/a:a"],
-    "src/h/h.mojo": ["k//src/h:heavy"],
-    "src/g/g.mojo": ["k//src/g:heavy2"],
-    "src/r/r.mojo": ["k//src/r:r"],
-    "ci/targets.bzl": ["k//ci:pr"],
-}
-_DEPENDENTS = {
-    "k//src/a:a": ["k//src/a:a_test", "k//src/h:heavy", "k//src/g:heavy2"],
-    "k//src/h:heavy": ["k//src/h:h_root", "k//src/r:r"],
-    "k//src/g:heavy2": ["k//src/g:g_root"],
-}
-
-def _reverse_closure(seeds):
-    seen = {}
-    todo = list(seeds)
-    for _ in range(1000):
-        if not todo:
-            break
-        t = todo.pop()
-        if t in seen:
-            continue
-        seen[t] = True
-        todo += _DEPENDENTS.get(t, [])
-    return seen.keys()
-
-_GRAPH = struct(
-    exists = lambda p: p in _FILES,
-    owners = lambda p: _OWNERS.get(p, []),
-    package_targets = lambda d: [],
-    including = lambda p: [],
-    rdeps = _reverse_closure,
-)
+load(":rules.bzl", "HEAVY")
 
 _H = ("k//src/h:heavy", ["src/h/**", "ci/**"], ["k//src/h:h_root", "k//src/r:r"], "one compile")
-_G = ("k//src/g:heavy2", ["src/g/**"], ["k//src/g:g_root"], "another compile")
-
-_WIDEN = [("tools/build/**", "the build system")]
 
 _AGG = "k//ci:pr"
 _DEFAULT = "k//ci:pr_default"
 
-def _labels(heavy, changed):
-    rules = struct(widen = _WIDEN, inert = [], heavy = heavy)
-    v = select(rules, changed, _GRAPH, "ci")
-    if v.kind not in [AFFECTED, WIDENED]:
-        return "the verdict is " + v.kind
-    return sorted(plan(rules, changed, _GRAPH, v, _AGG, _DEFAULT)[0])
-
-def _case(out, name, heavy, changed, wanted):
-    got = _labels(heavy, changed)
-    if got != sorted(wanted):
-        out.append("heavy: {}: {}, wanted {}".format(name, got, sorted(wanted)))
-
-def _plan_cases():
-    out = []
-    a_all = ["k//src/a:a", "k//src/a:a_test"]
-
-    # a change that owns nothing of a row loses the row's target and everything above it
-    _case(out, "a change outside both rows loses both and what depends on them", [_H, _G], ["src/a/a.mojo"], a_all)
-    _case(out, "a change that owns one row keeps that row only", [_H, _G], ["src/g/g.mojo"], ["k//src/g:heavy2", "k//src/g:g_root"])
-    _case(out, "a change of both rows' own keeps what each reaches", [_H, _G], ["src/g/g.mojo", "src/h/h.mojo"], ["k//src/g:heavy2", "k//src/g:g_root", "k//src/h:heavy", "k//src/h:h_root", "k//src/r:r"])
-    _case(out, "a leaf and an own file keep every target of the leaf's reach that the owned row reaches", [_H], ["src/a/a.mojo", "src/h/h.mojo"], a_all + ["k//src/h:heavy", "k//src/h:h_root", "k//src/r:r", "k//src/g:heavy2", "k//src/g:g_root"])
-    _case(out, "a check that depends on the heavy target is left out with it", [_H], ["src/r/r.mojo"], [_DEFAULT])
-
-    # no row, or every row owned: the verdict as it was
-    _case(out, "with no rows the verdict is unchanged", [], ["src/a/a.mojo"], a_all + ["k//src/h:heavy", "k//src/h:h_root", "k//src/r:r", "k//src/g:heavy2", "k//src/g:g_root"])
-    _case(out, "with no rows a widening is the full aggregate", [], ["tools/build/x.zig"], [_AGG])
-
-    # a widening, whichever file made it
-    _case(out, "a widening that owns nothing is the default aggregate", [_H, _G], ["tools/build/x.zig"], [_DEFAULT])
-    _case(out, "a widening with one row's own file is the default and that row's roots", [_H, _G], ["tools/build/x.zig", "src/g/g.mojo"], [_DEFAULT, "k//src/g:g_root"])
-    _case(out, "a widening with the roots of a row with two of them", [_H, _G], ["tools/build/x.zig", "src/h/h.mojo"], [_DEFAULT, "k//src/h:h_root", "k//src/r:r"])
-    _case(out, "a widening that owns every row is the full aggregate", [_H, _G], ["tools/build/x.zig", "src/h/h.mojo", "src/g/g.mojo"], [_AGG])
-    _case(out, "a change to the aggregate's own files owns the row that names ci/**, not the other", [_H, _G], ["ci/targets.bzl"], [_DEFAULT, "k//src/h:h_root", "k//src/r:r"])
-    return out
-
-def _split_cases():
-    out = []
-    wanted, left = heavy_split(struct(heavy = [_H, _G]), ["src/h/h.mojo", "docs/a.md", ""])
-    if [r[0] for r in wanted] != ["k//src/h:heavy"] or [r[0] for r in left] != ["k//src/g:heavy2"]:
-        out.append("heavy split: wanted [heavy] and left [heavy2], got {} and {}".format([r[0] for r in wanted], [r[0] for r in left]))
-    wanted, left = heavy_split(struct(heavy = [_H]), [])
-    if wanted or len(left) != 1:
-        out.append("heavy split: no changed file owns nothing, got wanted {}".format(wanted))
-    for path in ["src/h", "src/hx/h.mojo", "src/g/g.mojo"]:
-        wanted, _ = heavy_split(struct(heavy = [_H]), [path])
-        if wanted:
-            out.append("heavy split: '{}' is not under src/h/**".format(path))
-    return out
-
 # ---- the shipped rows ------------------------------------------------------------
 #
 # Every row's own paths hold the selector's and the aggregate's own files (a change to how
-# the check set is chosen runs the whole of it).
+# the check set is chosen runs the whole of it). The selector's mapping is buildrules', behind
+# the pin in .buckconfig, so .buckconfig is one of them.
 
 _SELECTOR_FILES = [
+    ".buckconfig",
     "ci/targets.bzl",
-    "tools/build/ci/affected.bzl",
+    "tools/build/ci/affected.bxl",
 ]
 
 def _shipped_cases():
@@ -170,4 +73,4 @@ def _guard_cases():
     return out
 
 def heavy_cases():
-    return _plan_cases() + _split_cases() + _shipped_cases() + _guard_cases()
+    return _shipped_cases() + _guard_cases()

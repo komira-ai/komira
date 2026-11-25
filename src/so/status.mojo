@@ -19,6 +19,9 @@ been written to the buffer."""
 comptime KOMIRA_ERR_TOO_LARGE: Int32 = -5
 """A byte input is longer than `KOMIRA_MAX_INPUT_BYTES`. Nothing was read from
 it; the context's last error says so."""
+comptime KOMIRA_ERR_CANCELLED: Int32 = -6
+"""The run was cancelled through the run handle it was given
+(`komira_run_cancel`); the context's last error starts `QUERY_CANCELLED: `."""
 
 comptime KOMIRA_MAX_INPUT_BYTES: UInt64 = 64 * 1024 * 1024
 """The longest byte input (the plan of `komira_plan_render`) a call accepts:
@@ -86,7 +89,7 @@ comptime KOMIRA_FIELD_TOKEN_URL: Int32 = 13
 # below 1000 so that the integer decodes uniquely.
 comptime ABI_MAJOR: Int32 = 1
 """The major version: raised by a change that breaks an existing caller."""
-comptime ABI_MINOR: Int32 = 4
+comptime ABI_MINOR: Int32 = 6
 """The minor version: raised by an addition that breaks no caller."""
 comptime _ABI_MINOR_LIMIT: Int32 = 1000
 

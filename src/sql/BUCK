@@ -111,3 +111,12 @@ mojo_library(
     ],
     visibility = ["PUBLIC"],
 )
+
+# The scalar-function table's source text, for the function coverage test in
+# src/tests/conformance/komira_sql_conformance, which lists the rows of
+# sql_scalar_fn_spec from it.
+export_file(
+    name = "sql_fn_table_source",
+    src = "sql_fn_table.mojo",
+    visibility = ["//src/tests/conformance/..."],
+)

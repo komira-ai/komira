@@ -1,0 +1,2 @@
+-- CAST between integer widths, to DOUBLE and to VARCHAR.
+SELECT id, CAST(i32 AS BIGINT) AS b, CAST(i32 AS DOUBLE) AS d, CAST(i32 AS VARCHAR) AS t FROM nulls WHERE id < 300 ORDER BY id ASC NULLS LAST
