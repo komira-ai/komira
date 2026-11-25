@@ -36,6 +36,7 @@ protos has one, and protoc leaves a map's entry order open. Every refusal is an
   canonical(DigestTrailer))` (§7.1). The trailer copies `format_version`,
   `producer.optimizer_contract_version`, `write_target`, `needs.udfs`,
   `needs.runtimes` and `needs.data_scopes` from the header.
+  `header_plan_digest(header)` is the same digest taken over `header.body`.
 - `produce_optimized_plan(plan, stamp, write_target)`: serializes a plan the
   caller has already optimized (the producer never calls the optimizer) into
   canonical `OptimizedPlan` bytes: body `OptimizedPlanBody{plan}` from
@@ -92,7 +93,11 @@ from std.testing import assert_equal, assert_true
 
 from arrow.arrow_types import ArrowType
 from arrow.schema import Field, SchemaBuilder
-from optimized_plan import admit_optimized_plan, produce_optimized_plan
+from optimized_plan import (
+    admit_optimized_plan,
+    header_plan_digest,
+    produce_optimized_plan,
+)
 from plan_ir.logical_plan import LogicalPlan, SOURCE_PARQUET
 from plan_proto.optimized_plan import ProducerStamp
 
@@ -109,5 +114,6 @@ def main() raises:
     var admitted = admit_optimized_plan(bytes^, List[List[UInt8]]())
     assert_true(admitted.plan.is_scan())
     assert_equal(len(admitted.header.plan_digest), 32)
+    assert_true(admitted.header.plan_digest == header_plan_digest(admitted.header))
     print("admitted a plan of", admitted.plan.output_schema.num_columns(), "column")
 ```

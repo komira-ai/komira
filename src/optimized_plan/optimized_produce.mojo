@@ -55,7 +55,7 @@ def produce_optimized_plan(
     write_target: Optional[WireWriteTarget] = None,
 ) raises -> List[UInt8]:
     """The canonical `OptimizedPlan` bytes of an optimized `plan`, stamped by
-    `stamp` (module header). the producer sets
+    `stamp` (module header). The producer sets
     `stamp.optimizer_contract_version` to the version this build writes; a
     write target is bound into the digest."""
     stamp.optimizer_contract_version = OPTIMIZED_PLAN_CONTRACT_VERSION_1

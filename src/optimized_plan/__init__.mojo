@@ -33,8 +33,6 @@ from .optimized_admit import (
 from .optimized_body import (
     OPTIMIZED_BODY_UNBOUNDED_V1,
     OPTIMIZED_PLAN_BODY_MALFORMED,
-    BodyFrame,
-    frame_optimized_body,
 )
-from .optimized_digest import digest_trailer_of, header_plan_digest, optimized_plan_digest
+from .optimized_digest import header_plan_digest, optimized_plan_digest
 from .optimized_produce import produce_optimized_plan
