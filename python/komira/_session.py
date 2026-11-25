@@ -85,7 +85,7 @@ class Session:
         """Registers the local Parquet file at `path` as the table `name`.
 
         The file's footer is read now; a missing or unreadable file raises
-        `KomiraError` with the engine's message. A relative `path` is resolved
+        `BindError` (step "bind") with the engine's message. A relative `path` is resolved
         against the working directory and `~` is expanded. Registering a name
         again replaces it; a `Result` already returned keeps the answer it has.
         """
@@ -153,9 +153,11 @@ class Session:
         The statement is parsed, bound, optimized and lowered, and the
         answer's schema read, before this returns, so a syntax error, an
         unknown table or column, or a construct the engine refuses raises
-        `KomiraError` here, with the engine's `<step>: <reason>` message and
-        `status` -3 (a stream whose schema cannot be read raises it with no
-        `status`). pyarrow is imported the first time the engine accepts a
+        here, with the engine's `<step>: <reason>` message, `status` -3, and
+        the refusal's `code` and `step`: a syntax error is a `ParseError`, a
+        name that does not resolve a `BindError`, and a construct refused by
+        name an `UnsupportedOperation`; another refusal is a `KomiraError` (a
+        stream whose schema cannot be read raises one with no `status`). pyarrow is imported the first time the engine accepts a
         query, when the answer's schema is read. A `query` that is not a
         `str` is a `TypeError`, and one holding a NUL byte or a lone surrogate
         a `ValueError`, both raised before the library is called.
@@ -328,7 +330,7 @@ class Result:
         it when collected.
 
         A `requested_schema` other than None raises `UnsupportedOperation`
-        (a `KomiraError`; the class is not public yet) and leaves the result
+        (a `KomiraError`) and leaves the result
         unread: komira does not cast an answer.
         """
         if requested_schema is not None:

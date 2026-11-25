@@ -1,7 +1,8 @@
 """`so` -- the C ABI of komira's one shared library, `libkomira`.
 
 - `status.mojo`: the status codes every fallible call returns (`KOMIRA_OK`
-  and the six negative `KOMIRA_ERR_*` codes), the credential kinds, fields
+  and the six negative `KOMIRA_ERR_*` codes), the steps of an error
+  (`KOMIRA_STEP_*`), the credential kinds, fields
   and scope (`KOMIRA_CRED_*`, `KOMIRA_FIELD_*`, `KOMIRA_BIND_SESSION`), the
   ABI version
   (`abi_version`, `ABI_MAJOR`, `ABI_MINOR`), `buffer_status`, the test the
@@ -10,8 +11,9 @@
 - `session.mojo`: `Session`, the state behind a context handle,
   `try_new_session`, the session `komira_ctx_new` hands out or None, and
   `session_options`, the engine options of `komira_ctx_new_with_options`'s
-  two `int64_t` arguments (0 is the host's own value). A session holds the
-  text of the last error, the engine (`sdk_exec`'s `EngineContext`) whose
+  two `int64_t` arguments (0 is the host's own value), `error_code` (the code
+  of an error reason) and `step_number` (the number of a step name). A session
+  holds the last error (text, step and code), the engine (`sdk_exec`'s `EngineContext`) whose
   catalog holds the registered tables, and the credentials.
 - `credentials.mojo`: `SessionCredentials`, a session's credentials by name:
   defined in three steps (`add`, `set`, `seal`), held in a
@@ -24,7 +26,7 @@
   one SQL statement as batches ready for the Arrow C stream.
 
 `_c_abi.mojo` is the library's C surface (`komira_abi_version`,
-`komira_ctx_new`, `komira_ctx_new_with_options`, `komira_ctx_free`, `komira_last_error`, the source and
+`komira_ctx_new`, `komira_ctx_new_with_options`, `komira_ctx_free`, `komira_last_error`, `komira_last_error_code`, `komira_last_error_step`, the source and
 render calls, the three credential calls, `komira_sql_stream`,
 `komira_register_csv` and `komira_register_json`, the four run-control
 calls and `komira_sql_stream_run`). It is the one file that holds pointers and is not part of this
@@ -37,7 +39,13 @@ from .credentials import (
     CREDENTIAL_UNBOUND,
     SessionCredentials,
 )
-from .session import Session, session_options, try_new_session
+from .session import (
+    Session,
+    error_code,
+    session_options,
+    step_number,
+    try_new_session,
+)
 from .sources import (
     QUERY_CANCELLED,
     csv_binding_bytes,
@@ -83,6 +91,12 @@ from .status import (
     KOMIRA_FIELD_TOKEN_URL,
     KOMIRA_MAX_INPUT_BYTES,
     KOMIRA_OK,
+    KOMIRA_STEP_BIND,
+    KOMIRA_STEP_EXECUTE,
+    KOMIRA_STEP_LOWER,
+    KOMIRA_STEP_NONE,
+    KOMIRA_STEP_OPTIMIZE,
+    KOMIRA_STEP_PARSE,
     abi_version,
     buffer_status,
     input_length_status,

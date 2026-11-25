@@ -2,10 +2,11 @@
 
 `load` opens the library from a directory, once per process, checks that its
 ABI major version is the one this package was written for, and binds the
-calls of `_FUNCTIONS` (the newest from ABI 1.6); every failure is a `LibraryLoadError` that says which
+calls of `_FUNCTIONS` (the newest from ABI 1.7); every failure is a `LibraryLoadError` that says which
 library and why. `Native` holds the bound calls and turns their status codes
 into `KomiraError`, with the context's last error, read with the two-call
-protocol, as the message.
+protocol, as the message, and, from ABI 1.7, its code and step as the error's
+`code` and `step`; `_errors.error_class` picks the subclass from them.
 
 Before the library is opened, `load` picks the file and checks the CPU, then
 calls `_runtime.check_loaded_runtime(<directory>/lib)` (Linux only; it does
@@ -70,7 +71,7 @@ import threading
 from collections.abc import Callable
 
 from . import _arrow, _runtime
-from ._errors import CredentialsError, KomiraError, LibraryLoadError, UnsupportedCpuError
+from ._errors import CredentialsError, KomiraError, LibraryLoadError, UnsupportedCpuError, error_class
 
 # The ABI major version this package calls: komira_abi_version() is
 # major * 1000 + minor, and a library of another major is refused. Any minor
@@ -87,6 +88,11 @@ KOMIRA_ERR_CANCELLED = -6
 
 # The scope a credential is sealed in: the session (src/so/abi/komira.tsv).
 KOMIRA_BIND_SESSION = 1
+
+# The step of a refusal, komira_last_error_step's answer, as the name the
+# error's `step` carries (the KOMIRA_STEP_* constants of src/so/abi/komira.tsv).
+# KOMIRA_STEP_NONE, and a number a later library adds, have no name.
+_STEPS = {1: "parse", 2: "bind", 3: "optimize", 4: "lower", 5: "execute"}
 
 _LIB_NAME = "libkomira.dylib" if sys.platform == "darwin" else "libkomira.so"
 
@@ -105,6 +111,8 @@ _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
     "komira_ctx_new": (0, ctypes.c_void_p, []),
     "komira_ctx_free": (0, None, [ctypes.c_void_p]),
     "komira_last_error": (0, ctypes.c_int32, [ctypes.c_void_p] + _Out),
+    "komira_last_error_code": (7, ctypes.c_int32, [ctypes.c_void_p] + _Out),
+    "komira_last_error_step": (7, ctypes.c_int32, [ctypes.c_void_p]),
     "komira_register_parquet": (1, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]),
     "komira_parquet_schema": (1, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p] + _Out),
     "komira_csv_binding": (
@@ -358,6 +366,18 @@ def _select_variant(
     return file
 
 
+def _missing_runtime(lib_dir: str) -> list[str]:
+    """The paths of the Mojo runtime libraries (`_runtime.RUNTIME_LIBRARIES`,
+    spelled `.dylib` on macOS) that `lib_dir` does not hold, in the order the
+    list names them. A symlink to a file that is gone counts as missing. `load`
+    asks only when libkomira itself is there, so a directory with no library
+    in it is not reported as an incomplete package."""
+    suffix = ".dylib" if sys.platform == "darwin" else ".so"
+    names = [name[: -len(".so")] + suffix for name in _runtime.RUNTIME_LIBRARIES]
+    paths = [os.path.join(lib_dir, name) for name in names]
+    return [p for p in paths if not os.path.exists(p)]
+
+
 def _library_path(directory: str) -> str:
     """The file `load` opens from `directory` (absolute), once the CPU has
     been checked: the variant `_select_variant` picks when the directory
@@ -476,6 +496,26 @@ class Native:
         # The library writes UTF-8; a byte that is not becomes U+FFFD rather
         # than an error raised while reporting another.
         return text.decode("utf-8", "replace")
+
+    def last_error_code(self, ctx: int) -> str | None:
+        """The named code of the context's last error, or None when it has
+        none, there is no error, or the library is older than ABI 1.7."""
+        if self._functions["komira_last_error_code"] is None:
+            return None
+        fn = self._fn("komira_last_error_code")
+        status, text = _two_call("komira_last_error_code", lambda buf, cap, n: fn(ctx, buf, cap, n))
+        if status != KOMIRA_OK:
+            raise KomiraError("komira_last_error_code failed with status {}".format(status), status=status)
+        return text.decode("utf-8", "replace") or None
+
+    def last_error_step(self, ctx: int) -> str | None:
+        """The step ("parse", "bind", "optimize", "lower" or "execute") of the
+        context's last error, or None when it has none, a number this package
+        does not know, or the library is older than ABI 1.7."""
+        fn = self._functions["komira_last_error_step"]
+        if fn is None:
+            return None
+        return _STEPS.get(fn(ctx))
 
     def register_parquet(self, ctx: int, name: str, path: str | os.PathLike[str]) -> None:
         """Registers the Parquet file at `path` in the context as the table `name`."""
@@ -624,20 +664,24 @@ class Native:
         """Raises the KomiraError of a call `op` on `ctx` that returned `status`,
         unless it is KOMIRA_OK. The message is the context's last error. When
         the engine refused (KOMIRA_ERR_ENGINE) and the context holds that
-        message, the error is a `refused`, the subclass the call's refusals
-        have; every other failure is a plain KomiraError."""
+        message, the error's class is `error_class`'s pick from its code and
+        step, `refused` (the subclass the call's refusals have) when they name
+        none; every other failure is a plain KomiraError. `code` and `step`
+        are the context's last error's, None from a library without them."""
         if status == KOMIRA_OK:
             return
         try:
             text = self.last_error(ctx)
+            code = self.last_error_code(ctx)
         except KomiraError as e:
             raise KomiraError(
                 "{} failed with status {}; its last error could not be read: {}".format(op, status, e),
                 status=status,
             ) from e
+        step = self.last_error_step(ctx)
         if not text:
             raise KomiraError("{} failed with status {} and no message".format(op, status), status=status)
-        raise (refused if status == KOMIRA_ERR_ENGINE else KomiraError)(text, status=status)
+        raise error_class(status, code, step, refused)(text, status=status, code=code, step=step)
 
 
 def _resolve(lib: ctypes.CDLL, name: str) -> ctypes._CFuncPtr | None:
@@ -711,6 +755,14 @@ def load(lib_dir: str | os.PathLike[str] | None = None) -> Native:
         try:
             lib = ctypes.CDLL(path, mode=ctypes.RTLD_LOCAL)
         except OSError as e:
+            missing = _missing_runtime(os.path.join(directory, "lib")) if os.path.exists(path) else []
+            if missing:
+                raise LibraryLoadError(
+                    "cannot load libkomira from {}: the package is incomplete (reinstall komira), "
+                    "{} missing: {}; the loader says: {}".format(
+                        path, "this file is" if len(missing) == 1 else "these files are", ", ".join(missing), e
+                    )
+                ) from None
             raise LibraryLoadError("cannot load libkomira from {}: {}".format(path, e)) from None
         _loaded = _bind(lib, path)
         _loaded_dir = directory

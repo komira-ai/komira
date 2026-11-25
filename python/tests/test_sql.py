@@ -8,9 +8,12 @@
   is its one row; a filter that keeps nothing is no rows with the column's
   type;
 - each terminal reads it: to_arrow, to_reader and the PyCapsule interface;
-- an unknown table and a syntax error raise KomiraError with the engine's
-  message, its last error, and status -3, and the session answers the next
-  query;
+- an unknown table raises BindError, a syntax error ParseError and a construct
+  refused by name (the bitwise OR operator, an unknown function)
+  UnsupportedOperation, each with the engine's message, its last error, status
+  -3, and its code and step ("bind"/SQL_BIND_ERROR, "parse"/SQL_SYNTAX_ERROR,
+  SQL_NOT_SUPPORTED at "parse" and at "bind"), and the session answers the
+  next query after each;
 - a result reads after its session was closed, after its session was
   collected without a close, and half read before the close; results never
   read are dropped after their session was freed, and one is left for the
@@ -29,7 +32,6 @@ import sys
 import pyarrow as pa
 
 import komira
-from komira import KomiraError
 from komira import _native
 
 # A result left unread for the interpreter's exit to release.
@@ -60,7 +62,7 @@ def raised(call):
 def main(args):
     lib_dir = os.path.abspath(args[args.index("--lib-dir") + 1])
     _native.load(os.path.join(lib_dir, "libkomira"))
-    assert komira.abi_version() >= 1003, komira.abi_version()
+    assert komira.abi_version() >= 1007, komira.abi_version()
     labels = os.path.join(lib_dir, "labels.parquet")
     readings = os.path.join(lib_dir, "readings.parquet")
 
@@ -99,13 +101,35 @@ def main(args):
         assert pa.RecordBatchReader.from_stream(s.sql(READINGS)).read_all().to_pylist() == READING_ROWS
         assert pa.table(s.sql("SELECT 1 AS n")).to_pylist() == ONE
 
-        # Refusals: the engine's message, which is its last error, and the
-        # session answers the next query.
-        for query in ("SELECT * FROM nosuch", "SELEC 1"):
-            e = raised(lambda: s.sql(query))
-            assert type(e) is KomiraError and e.status == -3 and str(e), repr(e)
-            assert str(e) == _native.load().last_error(s._ctx), (str(e), query)
-        assert str(raised(lambda: s.sql("SELECT * FROM nosuch"))).startswith("bind: ")
+        # Refusals: the engine's message, which is its last error, with its
+        # code and step, as the class the table gives; the session answers
+        # the next query after each.
+        e = raised(lambda: s.sql("SELECT * FROM nosuch"))
+        assert type(e) is komira.BindError, repr(e)
+        assert (e.status, e.step, e.code) == (-3, "bind", "SQL_BIND_ERROR"), (e.status, e.step, e.code)
+        assert str(e) == "bind: SQL bind error: unknown table 'nosuch'", str(e)
+        assert str(e) == _native.load().last_error(s._ctx), str(e)
+        assert s.sql("SELECT 1 AS n").to_arrow().to_pylist() == ONE
+
+        e = raised(lambda: s.sql("SELEC 1"))
+        assert type(e) is komira.ParseError, repr(e)
+        assert (e.status, e.step, e.code) == (-3, "parse", "SQL_SYNTAX_ERROR"), (e.status, e.step, e.code)
+        assert str(e).startswith("parse: SQL syntax error: "), str(e)
+        assert str(e) == _native.load().last_error(s._ctx), str(e)
+        assert s.sql("SELECT 1 AS n").to_arrow().to_pylist() == ONE
+
+        # A construct refused by name is an UnsupportedOperation, whichever
+        # step refuses it: the bitwise OR operator at the parse step, an
+        # unknown scalar function at the bind step.
+        e = raised(lambda: s.sql("SELECT 5 | 3 AS k"))
+        assert type(e) is komira.UnsupportedOperation, repr(e)
+        assert (e.status, e.step, e.code) == (-3, "parse", "SQL_NOT_SUPPORTED"), (e.status, e.step, e.code)
+        assert str(e).startswith("parse: SQL not supported: the bitwise OR operator `|`"), str(e)
+        assert s.sql("SELECT 1 AS n").to_arrow().to_pylist() == ONE
+        e = raised(lambda: s.sql("SELECT nosuchfn(1) AS k"))
+        assert type(e) is komira.UnsupportedOperation, repr(e)
+        assert (e.status, e.step, e.code) == (-3, "bind", "SQL_NOT_SUPPORTED"), (e.status, e.step, e.code)
+        assert str(e).startswith("bind: SQL not supported: scalar function 'nosuchfn'."), str(e)
         assert s.sql("SELECT 1 AS n").to_arrow().to_pylist() == ONE
 
     # A result read after its session was closed: the stream needs neither the

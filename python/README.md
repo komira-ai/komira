@@ -51,7 +51,7 @@ load fails. What each release changed is in the
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1006 is 1.6
+print(komira.abi_version())   # the engine's C ABI version: 1007 is 1.7
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
@@ -73,8 +73,8 @@ against the published package.
   - `path` may be a `str` or a `pathlib.Path`.
   - A relative path is resolved against the working directory, and `~` is
     expanded.
-  - A missing or unreadable file raises `komira.KomiraError` with the engine's
-    message.
+  - A missing or unreadable file raises `komira.BindError` with the engine's
+    message (a plain `KomiraError` from a library older than ABI 1.7).
   - Registering a name again replaces the table.
 - `register_csv(name, path, *, delimiter=",", header=True, all_varchar=False)`
   registers a CSV file as the table `name`, the table SQL's `read_csv` makes
@@ -94,8 +94,10 @@ against the published package.
 - `Session.sql(query)` runs one SQL statement over the session's tables and
   returns a `komira.Result`. The engine turns the text into a plan before
   `sql` returns, so a syntax error, an unknown table or column, or a construct
-  the engine does not run yet raises `KomiraError` from `sql`, with the
-  engine's `<step>: <reason>` message.
+  the engine does not run yet raises a `KomiraError` from `sql`, with the
+  engine's `<step>: <reason>` message: `ParseError` for a syntax error,
+  `BindError` for an unknown name, `UnsupportedOperation` for a construct the
+  engine refuses by name.
 - Ctrl-C while `Session.sql` runs cancels the query: the engine stops at its
   next check, `sql` raises `KeyboardInterrupt`, nothing the query computed is
   kept, and the session runs the next query. A second Ctrl-C while the query
@@ -158,12 +160,27 @@ against the published package.
   threads that read one `Result`, one reads it and the other gets the
   already-read `KomiraError`.
 - `komira.KomiraError` is the base class of every error komira raises on
-  purpose. Its `status` attribute is the engine's status code, or `None`.
+  purpose. Its `status` attribute is the engine's status code, or `None`; its
+  `code` is the refusal's named code (`SQL_SYNTAX_ERROR`,
+  `LOWERING_WINDOW_UNSERVED`, ...) and its `step` the step that refused
+  (`"parse"`, `"bind"`, `"optimize"`, `"lower"` or `"execute"`), each `None`
+  when the library gave none (an empty code is `None`, never `""`).
+- Its subclasses, chosen from the code and then the step of an engine refusal
+  (status -3; any other status is a plain `KomiraError`): `ParseError`
+  (`SQL_SYNTAX_ERROR`, or any refusal of the parse step), `BindError`
+  (`SQL_BIND_ERROR` and the `BIND_*` codes, or any refusal of the bind step),
+  `UnsupportedOperation` (`SQL_NOT_SUPPORTED`, `STATEMENT_NOT_A_QUERY`,
+  `LOWERING_*_UNSERVED`, `LOWERING_UNCUTTABLE_NODE`, `STORAGE_URL_REFUSED`, ...), `CredentialsError`
+  (`CREDENTIAL_*` and `CREDENTIALS_*`) and `StorageError` (the other
+  `STORAGE_*` codes). The table is `_errors._CODE_CLASSES`; the package never
+  parses a message to choose a class.
 - `komira.LibraryLoadError` is raised when the engine cannot be loaded. Its
   message names the library and the reason. For example, a library built for
   a different ABI major version is refused.
-  A file of the package that is missing is reported the same way, with the
-  loader's message naming the file.
+  A Mojo runtime library missing from the package's `lib/` is reported as an
+  incomplete package: the message names each missing file, says to reinstall
+  komira, and ends with the loader's own text. Another file that is missing is
+  reported with the loader's message naming the file.
 - A process holds one Mojo runtime. `komira.LibraryLoadError` is also raised
   when a Mojo runtime library of another build is already loaded in the
   process, for example by Mojo code built with another Mojo version. Its
@@ -199,8 +216,8 @@ The package's layout and API are designed in
 | `komira/_credentials.py` | the credential objects (private; nothing public takes one yet): `AwsKeys`, `AwsProfile`, `GcpServiceAccount`, `GcpToken`, `AzureKey`, `AzureSas`, `BearerToken` and `OAuth2ClientCredentials`, each a name and its fields, checked when built (the name's grammar and reserved names; each value a non-empty `str` of at most 4096 bytes of UTF-8), with every secret shown as `<set>` by `repr` and no pickle or copy; and the built-in `AMBIENT` and `ANONYMOUS` ([docs/design/credentials_and_writes.md](https://github.com/komira-ai/komira/blob/main/docs/design/credentials_and_writes.md), decision 1) |
 | `komira/_iceberg.py` | the Iceberg sources (private; nothing public takes one yet): `iceberg(uri, *, warehouse=None, credential=AMBIENT, signing=None, access_delegation="vended-credentials")`, an `IcebergCatalog`; `catalog.table(name)`, an `IcebergTable`, with `name` as `"namespace.table"` or a tuple of namespace levels and the table; and `SigV4(region, service)`. Each is checked when built (an http or https URI with a host and no user, password, query or fragment; a credential that fits the catalog: `AMBIENT` or `AwsKeys` with SigV4, and `AMBIENT`, `ANONYMOUS`, `BearerToken` or `OAuth2ClientCredentials` without; `access_delegation` `vended-credentials` or `none`), does no I/O and loads no library; a catalog or a table shows its credential's secrets as `<set>` and refuses pickle and copy ([docs/design/iceberg_tables.md](https://github.com/komira-ai/komira/blob/main/docs/design/iceberg_tables.md), "What the user sees") |
 | `komira/_arrow.py` | the Arrow C stream of a query: `ArrowArrayStream`, the C struct for `ctypes`, and `import_stream`, which hands a filled stream to pyarrow's public `RecordBatchReader.from_stream` through a PyCapsule with no destructor, and releases it itself if pyarrow did not take it |
-| `komira/_errors.py` | `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError`, and the private `UnsupportedOperation` and `CredentialsError` |
-| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.6 (`sql_stream`, `register_csv`, `register_json` and the run handle calls `run_new`, `run_cancel`, `run_progress` and `sql_stream_run` among them) |
+| `komira/_errors.py` | `KomiraError`, its subclasses, and `error_class`, which picks one from an engine refusal's code and step |
+| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.7 (`sql_stream`, `register_csv`, `register_json`, the run handle calls `run_new`, `run_cancel`, `run_progress` and `sql_stream_run` of 1.6, and the last error's code and step among them) |
 | `komira/_run.py` | `run_sql`, which `Session.sql` runs a query with on ABI 1.6: the call `komira_sql_stream_run` on a helper thread under a run handle of its own, while the calling thread waits, reads the handle's progress for the `progress` callback, and cancels the handle when anything is raised on it (a Ctrl-C's `KeyboardInterrupt`, the callback's exception) |
 | `komira/_plan/` | the plan encoder: `encode_plan`, a plan of `komira/_ops` as the `komira.plan.v1` `WirePlanEnvelope` the plan door takes, every node with the output schema the engine derives for it and every scan reading a source libkomira described (`parquet_source`, `binding_source`); calls of user functions (`UdfCall`, `MapBatches`) as `WireUdfApply` and `WireMapBatchesNode` over the envelope's `UdfRef` list, one per distinct function, each with the komira/python descriptor; `encode_expr`, an expression node as a `WireExpr`; and `expr_field`, the output field the engine derives for it. It writes no SQL text. It imports the generated plan modules, which the wheel does not ship yet, so `import komira` does not import it |
 | `komira/_runtime.py` | `check_loaded_runtime`, called before libkomira is opened: it compares the Mojo runtime libraries already loaded in the process with komira's copies by build id, and the GNU build id reader it uses |
@@ -249,7 +266,8 @@ How the loader behaves:
   on macOS they are linked into the dylib) in `_lib/lib/`, and the three Mojo
   runtime libraries there too. A file of the package that
   is missing is a `LibraryLoadError` with the loader's message, which names
-  the file.
+  the file; when a Mojo runtime library is missing from `_lib/lib/`, the
+  message first says the package is incomplete and names each missing one.
 - **What runs before the library opens.** `load` first checks the CPU, with
   `_native._select_variant(<lib_dir>)` when the directory holds a `VARIANTS`
   manifest and `_native._check_cpu()` when it does not, then calls
@@ -305,9 +323,12 @@ How the loader behaves:
 - **Call errors.** A failed call raises `KomiraError` with its status. The
   message is the context's last error, read with the two-call protocol: the
   first call learns the length, and the second passes a buffer of exactly that
-  length. An engine refusal (-3) of a credential call, which the library
-  answers only with `CREDENTIALS_INVALID`, raises `CredentialsError`, a
-  `KomiraError`; the package never parses the message to choose the class.
+  length. From ABI 1.7 the error also carries `komira_last_error_code` and
+  `komira_last_error_step`, and `_errors.error_class` picks the class of an
+  engine refusal (-3) from them: by code first, then by step, then the call's
+  own default (`CredentialsError` for the credential calls, which a library
+  older than 1.7 answers only with `CREDENTIALS_INVALID`). The package never
+  parses the message to choose the class.
 - **Private calls.** `parquet_schema`, `csv_binding`, `json_binding`,
   `plan_render`, `credential_add`, `credential_set` and `credential_seal`
   exist only on `_native.Native`. They have no public API and no stability
@@ -321,8 +342,8 @@ The tests below run on Linux x86_64 as build actions, with
 `//python/tests:iceberg_test`, `//python/tests:sql_test`,
 `//python/tests:sql_fake_test`, `//python/tests:sql_interrupt_test`,
 `//python/tests:sql_cancel_test`, `//python/tests:sql_run_test`,
-`//python/tests:result_frames_test`, `//python/tests:register_text_test`,
-`//python/tests:threads_test`,
+`//python/tests:errors_test`, `//python/tests:result_frames_test`,
+`//python/tests:register_text_test`, `//python/tests:threads_test`,
 `//python/tests:runtime_test` and `//python/tests:cpu_test`:
 
 | test | what it covers |
@@ -336,6 +357,7 @@ The tests below run on Linux x86_64 as build actions, with
 | `sql_interrupt_test` | Ctrl-C during `Session.sql`, on a stand-in whose `komira_sql_stream` raises SIGINT in the calling thread: `KeyboardInterrupt` once the call returns, the stream it filled released exactly once, the session answering the next query (also after a refusal SIGINT came during), a handler that does not raise running once while `sql` returns the answer, and an ignored SIGINT changing nothing; and a `progress` callback on that 1.3 stand-in refused by the ABI version it needs |
 | `sql_cancel_test` | Ctrl-C and progress on a stand-in of ABI 1.6 that holds a run at a gate: Ctrl-C cancels the query's run handle and `sql` raises `KeyboardInterrupt`, the handle freed after the call, the session answering after; a second Ctrl-C while it stops not raised; an answer that stood after the cancel, and a refusal during Ctrl-C, dropped; a handler that does not raise leaving the query running; each progress reading given on the calling thread, from the main thread or another; the callback's exception and its call into the session cancelling the query; refusals with their message; the log lines |
 | `sql_run_test` | progress and Ctrl-C on the real library: the readings of a GROUP BY grow and end at done equal to total, a Ctrl-C and an exception from the callback are raised from `sql` and the session answers after, a refusal never calls the callback |
+| `errors_test` | the exception table on stand-ins of ABI 1.7 and 1.3: each class by its code, the code before the step, the step when there is no code, a plain `KomiraError` otherwise, and no code or step from a 1.3 library |
 | `threads_test` | a session used from several threads, on a stand-in that journals each call and holds one at a gate: a call waits for the call running on its session, each thread gets its own error message, `close` waits for the running call, two sessions run at once, a signal handler calling the session inside a call is refused, a `Result` reads while its session is busy, and of two threads reading one `Result` one reads it |
 | `result_frames_test` | `to_pandas` and `to_polars` on the real library: every integer width at its edges, nullable integers, strings, a bool, decimals, timestamps and a date, equal in values and dtypes to pyarrow's and polars' own conversion of the same table; two million rows; no rows; read once. In new interpreters, the library loaded before pyarrow (the load-order case), and on a stand-in stream, each stream released once, a failing batch and a missing pandas or polars. CPython 3.13 and 3.14 (polars on 3.13 only) |
 | `two_call_test` | the error path, the two-call protocol and the arguments of each call, on a stand-in |

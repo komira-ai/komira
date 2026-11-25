@@ -17,7 +17,16 @@ import logging as _logging
 from importlib import metadata as _metadata
 
 from . import _native
-from ._errors import KomiraError, LibraryLoadError, UnsupportedCpuError
+from ._errors import (
+    BindError,
+    CredentialsError,
+    KomiraError,
+    LibraryLoadError,
+    ParseError,
+    StorageError,
+    UnsupportedCpuError,
+    UnsupportedOperation,
+)
 from ._session import Result, Session
 
 _logging.getLogger("komira").addHandler(_logging.NullHandler())
@@ -37,11 +46,16 @@ def abi_version() -> int:
 
 
 __all__ = [
+    "BindError",
+    "CredentialsError",
     "KomiraError",
     "LibraryLoadError",
+    "ParseError",
     "Result",
     "Session",
+    "StorageError",
     "UnsupportedCpuError",
+    "UnsupportedOperation",
     "__version__",
     "abi_version",
 ]

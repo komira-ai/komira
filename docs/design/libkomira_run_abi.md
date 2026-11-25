@@ -453,8 +453,9 @@ The earlier golden has no row for any of the items below. **None of them is
 decided here.** Each is settled by its own change:
 - session options (now built, below), cancel and progress by their feature
   pull requests;
-- credentials, and the structured error calls `komira_last_error_code` and
-  `komira_last_error_step`, by [credentials_and_writes.md](credentials_and_writes.md).
+- credentials, by [credentials_and_writes.md](credentials_and_writes.md). The credential calls
+  (ABI 1.2) and the structured error calls `komira_last_error_code` and `komira_last_error_step`
+  (ABI 1.7, built) have landed; neither is part of this port.
 
 What earlier drafts of this document proposed is kept as input for those
 changes:

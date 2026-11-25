@@ -87,7 +87,7 @@ def main(args):
         # A refusal before the plan is checked counts no segment.
         seen.clear()
         e = raised(lambda: s.sql("SELECT * FROM nosuch", progress=record))
-        assert type(e) is KomiraError and e.status == -3 and str(e).startswith("bind: "), repr(e)
+        assert type(e) is komira.BindError and e.status == -3 and str(e).startswith("bind: "), repr(e)
         assert seen == [], seen
     assert s.closed
     print("sql_run: libkomira {} reports a query's progress and answers after Ctrl-C".format(komira.abi_version()))
