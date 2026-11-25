@@ -527,7 +527,7 @@ def _udf_plan_bytes() raises -> List[UInt8]:
         sha.append(0x5A)
     var digests = List[CodeDigest]()
     digests.append(CodeDigest("payload", sha^))
-    var ref = UdfRef(
+    var udf = UdfRef(
         UDF_REF_KIND_SCALAR,
         UdfCode("komira/python", CODE_FORM_VALUE, "", digests^),
         args^,
@@ -542,7 +542,7 @@ def _udf_plan_bytes() raises -> List[UInt8]:
     exprs.append(Expr.alias(Expr.udf_apply(0, ret^, cols^), String("y")))
     var plan = LogicalPlan.project(exprs^, scan^)
     var refs = List[UdfRef]()
-    refs.append(ref^)
+    refs.append(udf^)
     return plan_to_bytes_with_udfs(plan, refs)
 
 
