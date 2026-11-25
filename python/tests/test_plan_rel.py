@@ -120,13 +120,48 @@ def test_sources_that_are_not_a_mapping_are_refused():
     )
 
 
-def test_a_write_is_refused():
-    plan = Write(ORDERS, WriteTarget("/out/o.parquet", "parquet"))
-    refuses(
-        lambda: encode_plan(plan, ORDERS_SOURCES),
-        UnsupportedOperation,
-        "a Write cannot be encoded: the plan door returns rows and takes no write target",
-    )
+def test_a_write_root_is_format_5_and_carries_its_target():
+    out = encode_plan(Write(ORDERS, WriteTarget("/out/o.parquet", "parquet", "zstd")), ORDERS_SOURCES)
+    assert out.format_version == 5
+    assert [d.name for d, _ in out.ListFields()] == ["format_version", "plan", "write_target"]
+    assert out.write_target.path == "/out/o.parquet"
+    assert out.write_target.format == vocab.WFMT_PARQUET
+    assert out.write_target.codec == vocab.WCOMP_ZSTD
+    assert out.plan == encode_plan(ORDERS, ORDERS_SOURCES).plan
+
+
+def test_a_write_target_without_a_codec_gets_the_formats_default():
+    for fmt, wire_format, wire_codec in (
+        ("parquet", vocab.WFMT_PARQUET, vocab.WCOMP_SNAPPY),
+        ("csv", vocab.WFMT_CSV, vocab.WCOMP_UNCOMPRESSED),
+        ("jsonl", vocab.WFMT_JSONL, vocab.WCOMP_UNCOMPRESSED),
+    ):
+        out = encode_plan(Write(ORDERS, WriteTarget("/out/o", fmt)), ORDERS_SOURCES)
+        assert (out.write_target.format, out.write_target.codec) == (wire_format, wire_codec), fmt
+
+
+def test_each_explicit_codec_is_its_wire_value():
+    for codec, wire in (
+        ("snappy", vocab.WCOMP_SNAPPY),
+        ("uncompressed", vocab.WCOMP_UNCOMPRESSED),
+        ("zstd", vocab.WCOMP_ZSTD),
+        ("gzip", vocab.WCOMP_GZIP),
+        ("lz4", vocab.WCOMP_LZ4),
+    ):
+        out = encode_plan(Write(ORDERS, WriteTarget("/out/o.parquet", "parquet", codec)), ORDERS_SOURCES)
+        assert out.write_target.codec == wire, codec
+
+
+def test_a_write_over_a_composed_plan_encodes_the_plan_under_it():
+    child = Limit(Filter(ORDERS, Compare("gt", ColRef("qty"), Lit(1))), 3)
+    out = encode_plan(Write(child, WriteTarget("/out/o.csv", "csv")), ORDERS_SOURCES)
+    assert out.plan == encode_plan(child, ORDERS_SOURCES).plan
+    assert out.format_version == 5 and out.HasField("write_target")
+
+
+def test_a_plan_without_a_write_has_no_write_target():
+    out = encode_plan(ORDERS, ORDERS_SOURCES)
+    assert out.format_version == 4 and not out.HasField("write_target")
 
 
 # --- scans ------------------------------------------------------------------

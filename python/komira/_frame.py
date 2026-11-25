@@ -20,6 +20,10 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
   that keeps the sort keys, an `assign` that replaces none of them and `head`
   keep it ordered, the builder placing filters and projections under the sort
   and a limit above it, and a sort above a limit when a verb comes after one.
+- The write terminals `to_parquet`, `to_csv` and `to_json(orient="records",
+  lines=True)` run the plan once and write its rows to a file through the same
+  plan door, with a write target in the envelope (komira/_write.py); they
+  return None. The format follows the verb, not the file's extension.
 - No dunder runs a query, no attribute is a column, and a name the class does
   not define raises `AttributeError` (komira/_refusals.py).
 
@@ -34,7 +38,7 @@ from collections.abc import Callable
 from types import ModuleType
 from typing import TYPE_CHECKING
 
-from . import _ops, _refusals
+from . import _ops, _refusals, _write
 from ._errors import UnsupportedOperation
 from ._series import Series, operand
 from ._session import Result, Session, _local_path, default_session
@@ -312,6 +316,63 @@ class DataFrame:
         `Result`, read once (`to_arrow`, `to_pandas`, ...). Every call runs
         the plan again. A plan the engine refuses raises its error here."""
         return self._session._plan_stream(self._plan_bytes())
+
+    def to_parquet(self, path: str | os.PathLike[str], *, compression: str | None = "snappy") -> None:
+        """Runs the frame's plan and writes all its rows to the Parquet file
+        `path`, in the frame's order when it is ordered. `compression` is
+        "snappy" (the default), "gzip", "zstd", "lz4" or None. The file is
+        written whole or not at all, an existing one is replaced, and
+        the call returns None once the write is complete. A relative `path` is
+        resolved against the working directory now and `~` is expanded. The
+        engine's refusal raises its error: a URL (`UnsupportedOperation`,
+        `STORAGE_URL_REFUSED`), a directory that is not there (`StorageError`),
+        a column type the writer does not write (`UnsupportedOperation`)."""
+        dest = _write.destination(path, "to_parquet")
+        codec = _write.parquet_codec(compression)
+        _write.write(self._session, self._plan, self._sources, dest, "parquet", codec)
+
+    def to_csv(
+        self,
+        path_or_buf: str | os.PathLike[str] | None = None,
+        *,
+        compression: str | dict | None = "infer",
+        index: bool = True,
+    ) -> None:
+        """Runs the frame's plan and writes all its rows to the CSV file
+        `path_or_buf`: a header line of the column names, then a line per row,
+        in the frame's order when it is ordered. The format is CSV whatever the
+        file's extension. `compression` is "infer" (gzip for `.gz`, zstd for
+        `.zst`, else none), "gzip", "zstd" or None. `index` is accepted and
+        changes nothing, since a frame has no index. Path, replacement,
+        refusals and the return are as for `to_parquet`; there is no string
+        result: a `path_or_buf` of None is refused."""
+        dest = _write.destination(path_or_buf, "to_csv")
+        if not isinstance(index, bool):
+            raise TypeError(f"to_csv index must be a bool, not {type(index).__name__}")
+        codec = _write.text_codec(compression, dest, "to_csv")
+        _write.write(self._session, self._plan, self._sources, dest, "csv", codec)
+
+    def to_json(
+        self,
+        path_or_buf: str | os.PathLike[str] | None = None,
+        *,
+        orient: str | None = None,
+        lines: bool = False,
+        compression: str | dict | None = "infer",
+    ) -> None:
+        """Runs the frame's plan and writes all its rows to the newline-delimited
+        JSON file `path_or_buf`, one object per row, in the frame's order when
+        it is ordered; only `orient="records"` with `lines=True` is written. The
+        format is JSON whatever the file's extension, and `compression`, path,
+        replacement, refusals and the return are as for `to_csv`."""
+        dest = _write.destination(path_or_buf, "to_json")
+        if orient != "records" or lines is not True:
+            raise UnsupportedOperation(
+                f"to_json(orient={orient!r}, lines={lines!r}) writes one JSON document, which komira "
+                'does not write: pass orient="records", lines=True for one object per line'
+            )
+        codec = _write.text_codec(compression, dest, "to_json")
+        _write.write(self._session, self._plan, self._sources, dest, "jsonl", codec)
 
     def explain(self) -> str:
         """The engine's text of the frame's plan; runs nothing."""

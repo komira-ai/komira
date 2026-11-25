@@ -258,8 +258,8 @@ for a NULL `ctx`, when no error is held and for an error with no step, and it
 never fails or clears.
 
 The step of an error: an engine refusal of `komira_sql_stream` has the step
-that refused, and so does one of `komira_plan_stream` at `optimize`, `lower`
-or `execute` (one at `decode` has `KOMIRA_STEP_NONE`, as `decode` is no step
+that refused, and so does one of `komira_plan_stream` at `bind` (a write's
+destination), `optimize`, `lower` or `execute` (one at `decode` has `KOMIRA_STEP_NONE`, as `decode` is no step
 of the SQL pipeline); a `KOMIRA_ERR_ENGINE` of `komira_register_parquet`,
 `komira_parquet_schema`, `komira_csv_binding`, `komira_json_binding` or a
 credential call has `KOMIRA_STEP_BIND`; every other error (a NULL argument, a
@@ -271,8 +271,9 @@ supported: ` is `SQL_NOT_SUPPORTED`; any other reason that starts with an
 upper-case word of two or more underscore-joined parts and `: `
 (`LOWERING_WINDOW_UNSERVED: ...`) has that word; every other reason has no code.
 For a `komira_sql_stream` or `komira_plan_stream` refusal the reason is the
-text after `<step>: `, so an envelope with a write target has the code
-`PLAN_WIRE_WRITE_TARGET_DROPPED`.
+text after `<step>: `, so an envelope with UDFs has the code
+`PLAN_WIRE_UDFS_DROPPED` and a write to an `s3://` destination has
+`STORAGE_URL_REFUSED` (step `bind`).
 
 **Sources and render.** Each call below takes the context first and returns a
 status code; on `KOMIRA_ERR_ENGINE` the context's last error holds the engine's
@@ -384,21 +385,34 @@ its own source (its paths and the schema `komira_parquet_schema` answers), so
 the plan needs no table registered on the session.
 
 - `*out`, its ownership and its lifetime are as for `komira_sql_stream`.
+- An envelope that carries a write target (`WirePlanEnvelope.write_target`,
+  format version 5) is written, not answered: the plan's rows go to the local
+  Parquet, CSV or newline-delimited JSON file the target names, as `COPY ... TO`
+  writes them (the same bytes, replacing an existing file), and `*out` is the
+  one-row stream `COPY` answers, one `NOT NULL` int64 column `Count` holding
+  the rows written. The destination is checked at `bind`, before the plan runs
+  or any file is touched, so a refused write leaves the destination as it was.
 - Refusals: NULL `ctx` is -1; a NULL `plan` or `out` is -2; a `plan_len` above
   `KOMIRA_MAX_INPUT_BYTES` is -5 before any byte of `plan` is read (exactly
   64 MiB is read, and the decoder then refuses what is above its own 16 MiB
   bound); every other refusal is -3, with the last error `<step>: <reason>`:
   `decode` for bytes that are not a plan this build runs (SQL text among them,
-  a version it does not speak, and an envelope that carries a write target or
-  UDFs, `PLAN_WIRE_WRITE_TARGET_DROPPED` and `PLAN_WIRE_UDFS_DROPPED`), then
-  `optimize`, `lower` or `execute`. The context answers the next call after any
+  a version it does not speak, and an envelope that carries UDFs,
+  `PLAN_WIRE_UDFS_DROPPED`), then `bind` (a write's destination refused before
+  the plan runs: a path with `://`, `STORAGE_URL_REFUSED`; CSV or JSON with
+  `lz4`, `COPY_COMPRESSION_UNSUPPORTED`), then `optimize`, `lower` or
+  `execute` (a destination directory that does not exist,
+  `STORAGE_NOT_FOUND`; a column type the writer does not write,
+  `COPY_TYPE_UNSUPPORTED`). The context answers the next call after any
   refusal. The refusal's step and code are read with `komira_last_error_step`
   and `komira_last_error_code`.
 
 `plan_result` is the call on values: the plan's bytes in, an `ArrowResult` out,
 or a raise with the `<step>: <reason>` text, which it records on the session
 as the last error with its step and code. The route from the optimizer down
-is `sdk_exec.engine_plan.run_plan`, the one `run_sql` takes after it binds.
+is `sdk_exec.engine_plan.run_plan`, the one `run_sql` takes after it binds; an
+envelope with a write target takes `sdk_exec.engine_plan.run_plan_write`, the
+route `run_sql` takes for `COPY ... TO`.
 
 ```mojo
 from so import KOMIRA_STEP_NONE, STEP_DECODE, Session, plan_result
@@ -888,8 +902,9 @@ packaging change that lists it.
 No release-over-release version check and no packaged header yet; the session
 holds an engine, and `komira_sql_stream` runs SQL on it (cancelled and
 watched through a run handle with `komira_sql_stream_run`) and
-`komira_plan_stream` a plan, but no call runs a UDF or writes a plan's answer
-to a file yet (the plan door refuses an envelope with UDFs or a write target); no session
+`komira_plan_stream` a plan, and writes it to a file when its envelope carries a
+write target, but no call runs a UDF yet (the plan door refuses an envelope
+with UDFs); no session
 options beyond the worker count and the memory budget (no spill directory); the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).
 The calls that run a query, ported from the earlier SDK, their result as an Arrow
 C stream, and what an abort does at the boundary (not contained yet: an abort

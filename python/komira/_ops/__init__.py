@@ -115,6 +115,7 @@ from ._vocab import (
     WINDOW_FUNCS,
     WINDOW_OFFSET,
     WINDOW_RANKING,
+    WRITE_CODECS,
     WRITE_FORMATS,
 )
 from ._walk import (
@@ -197,6 +198,7 @@ __all__ = [
     "WINDOW_FUNCS",
     "WINDOW_OFFSET",
     "WINDOW_RANKING",
+    "WRITE_CODECS",
     "WRITE_FORMATS",
     "When",
     "WindowExpr",

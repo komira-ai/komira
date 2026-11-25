@@ -28,22 +28,30 @@ error. Nothing here holds a pointer.
   recorded on the session as its last error, with the step and the code.
 - `plan_result`: a serialized plan (a `WirePlanEnvelope`) decoded and run on
   a session's engine, with no SQL text anywhere on the way, its answer as
-  `sql_result`'s is.
+  `sql_result`'s is; an envelope that carries a write target writes its
+  answer to that file and answers the rows written.
 """
 
 from arrow.arrow_types import ArrowType
 from arrow.table import Table
+from arrow.write_target import WriteTarget
 from byte_buffer.file_identity import FileIdentity
 from csv.csv_options import QUOTE_STYLE_TAG_RFC4180
 from plan_ir.logical_plan import LogicalPlan
-from plan_wire import binding_to_bytes, plan_from_bytes, schema_to_bytes
+from plan_wire import (
+    PLAN_WIRE_UDFS_DROPPED,
+    binding_to_bytes,
+    plan_envelope_from_bytes,
+    plan_from_bytes,
+    schema_to_bytes,
+)
 from scan_source.csv_source import CsvSource
 from scan_source.json_source import JsonSource
 from scan_source.source_variant import SourceVariant
 from sdk.parquet_footer import read_parquet_footer
 from sdk_exec.arrow_result import ArrowResult, arrow_result
 from sdk_exec.engine_catalog import register_parquet as engine_register_parquet
-from sdk_exec.engine_plan import run_plan
+from sdk_exec.engine_plan import SqlOutcome, run_plan, run_plan_write
 from sdk_exec.engine_context import RegisteredTable
 from sdk_exec.engine_sql import STEP_EXECUTE, run_sql
 from sdk_exec.run_control import RunControl
@@ -344,36 +352,59 @@ def plan_result(mut session: Session, var plan_bytes: List[UInt8]) raises -> Arr
     and run it on `session`'s engine, returning its answer as `sql_result`
     does: every batch checked to cross the Arrow C Stream Interface whole.
 
-    The plan is decoded with `plan_wire.plan_from_bytes` (the wire's admission,
-    value and UDF checks) and then optimized, lowered and run in-process
-    (`sdk_exec.engine_plan.run_plan`); it is never turned into SQL text, and
-    the SQL front end does not run. A scan carries its own source, so the
-    plan needs no table registered on the session. The result owns its
+    The envelope is decoded with `plan_wire.plan_envelope_from_bytes` (the
+    wire's admission, value and UDF checks) and then optimized, lowered and run
+    in-process (`sdk_exec.engine_plan.run_plan`); it is never turned into SQL
+    text, and the SQL front end does not run. A scan carries its own source, so
+    the plan needs no table registered on the session. The result owns its
     batches and keeps no reference to the session.
+
+    An envelope with a write target (`WirePlanEnvelope.write_target`) is run by
+    `sdk_exec.engine_plan.run_plan_write` instead: the plan's rows are written
+    to the destination as a local Parquet, CSV or newline-delimited JSON file,
+    all or nothing, and the answer is one row, the NOT NULL BIGINT column
+    `Count` holding the rows written. The destination is checked at `bind`
+    before the plan runs, so a refused write touches no file.
 
     Raises:
         Error `<step>: <reason>`, where `<step>` is `decode` when the bytes are
-        not a plan this build runs (among them an envelope that carries a
-        write target, `PLAN_WIRE_WRITE_TARGET_DROPPED`, or UDFs,
-        `PLAN_WIRE_UDFS_DROPPED`), and otherwise the step of `run_plan` that
-        refused (`optimize`, `lower` or `execute`); `<reason>` is that step's
-        own message, unchanged. The session records the refusal too
-        (`Session.set_refusal`): its step is `step_number(<step>)`, which is
-        `KOMIRA_STEP_NONE` for `decode`, and its code `error_code(<reason>)`.
-        And the export check's error naming the column when a result column
-        cannot cross the stream (`arrow_result`), which the session does not
-        record.
+        not a plan this build runs (among them an envelope that carries UDFs,
+        `PLAN_WIRE_UDFS_DROPPED`: the plan door runs no user function yet),
+        `bind` when a write's destination or compression is refused
+        (`STORAGE_URL_REFUSED`, `COPY_COMPRESSION_UNSUPPORTED`), and otherwise
+        the step of `run_plan` that refused (`optimize`, `lower` or `execute`;
+        a destination that cannot be written, `STORAGE_NOT_FOUND`, is refused
+        at `execute`); `<reason>` is that step's own message, unchanged. The
+        session records the refusal too (`Session.set_refusal`): its step is
+        `step_number(<step>)`, which is `KOMIRA_STEP_NONE` for `decode`, and
+        its code `error_code(<reason>)`. And the export check's error naming
+        the column when a result column cannot cross the stream
+        (`arrow_result`), which the session does not record.
     """
     var plan: LogicalPlan
+    var target: Optional[WriteTarget]
     try:
-        plan = plan_from_bytes(plan_bytes^)
+        var decoded = plan_envelope_from_bytes(plan_bytes^)
+        if len(decoded.udfs) > 0:
+            raise Error(
+                String(PLAN_WIRE_UDFS_DROPPED)
+                + ": these bytes carry "
+                + String(len(decoded.udfs))
+                + " UdfRef entries (`WirePlanEnvelope.udfs`), and the plan"
+                " door runs no user function yet"
+            )
+        target = decoded.write_target.copy()
+        plan = decoded.take_plan()
     except e:
         # `decode` is no `KOMIRA_STEP_*` step: `step_number` gives it
-        # `KOMIRA_STEP_NONE`, and the code is the decoder's
-        # (`PLAN_WIRE_WRITE_TARGET_DROPPED`).
+        # `KOMIRA_STEP_NONE`, and the code is the decoder's.
         session.set_refusal(String(STEP_DECODE), String(e))
         raise Error(session.last_error())
-    var outcome = run_plan(session.engine, plan^)
+    var outcome: SqlOutcome
+    if target:
+        outcome = run_plan_write(session.engine, plan^, target.value())
+    else:
+        outcome = run_plan(session.engine, plan^)
     if outcome.refusal:
         ref refusal = outcome.refusal.value()
         session.set_refusal(refusal.step, refusal.reason.copy())

@@ -26,9 +26,12 @@ derived by the engine's own factory for the node (src/plan_ir/logical_plan.mojo)
                type
 
 Refused by name (`UnsupportedOperation`), because the engine has no node that
-means them: a `Distinct` over a subset of the columns, a `Union` whose inputs
-differ in a column's type or nullability, and a `Write`, whose target the
-plan door does not take.
+means them: a `Distinct` over a subset of the columns, and a `Union` whose
+inputs differ in a column's type or nullability.
+
+A `Write` is the root of a plan only. It is not a node: `encode_plan` encodes its
+child as the envelope's plan and its target as `WirePlanEnvelope.write_target`,
+and gives the envelope the format version that carries a write target.
 
 The `UdfRef`s of the plan's user functions are collected in a `UdfTable` while
 the nodes are encoded, leaf to root, and become `WirePlanEnvelope.udfs`.
@@ -74,6 +77,18 @@ __all__ = ["encode_plan"]
 # The format version of a plan that carries no write target
 # (`PLAN_WIRE_FORMAT_VERSION`, src/plan_wire/plan_wire_codec.mojo).
 FORMAT_VERSION = 4
+
+# The format version of a plan that carries one
+# (`PLAN_WIRE_WRITE_TARGET_MIN_VERSION`, the same file).
+WRITE_FORMAT_VERSION = 5
+
+# Each write format's wire name and its default codec: the codec a target that
+# names none gets (komira/_ops/_rel.py, `WriteTarget`).
+_WRITE_FORMATS = {
+    "parquet": ("WFMT_PARQUET", "snappy"),
+    "csv": ("WFMT_CSV", "uncompressed"),
+    "jsonl": ("WFMT_JSONL", "uncompressed"),
+}
 
 _LEFT_PADDED = frozenset({"right", "full"})
 _RIGHT_PADDED = frozenset({"left", "full"})
@@ -177,10 +192,6 @@ def encode_node(
     reading `sources` (by path) and its user functions added to `udfs`."""
     if isinstance(plan, Scan):
         return encode_scan(plan, sources)
-    if isinstance(plan, Write):
-        raise UnsupportedOperation(
-            "a Write cannot be encoded: the plan door returns rows and takes no write target"
-        )
     if isinstance(plan, Join):
         return _join(
             plan, encode_node(plan.left, sources, udfs), encode_node(plan.right, sources, udfs), udfs
@@ -221,16 +232,25 @@ def encode_node(
 
 
 def encode_plan(plan, sources: Mapping[str, pb.WireScanSource]) -> pb.WirePlanEnvelope:
-    """The plan `plan` as the `WirePlanEnvelope` the plan door takes. `sources`
-    maps the path of each scan to what it reads (`parquet_source`,
-    `binding_source`). Raises `UnsupportedOperation` for a node the engine
+    """The plan `plan` as the `WirePlanEnvelope` the plan door takes; a `Write`
+    root adds its target to the envelope. `sources` maps the path of each scan
+    to what it reads (`parquet_source`, `binding_source`). Raises `UnsupportedOperation` for a node the engine
     cannot run as written, and the errors of `encode_expr` for an expression."""
     if not isinstance(plan, PLAN_NODES):
         raise TypeError(f"plan must be a plan node, not {type(plan).__name__}")
     if not isinstance(sources, Mapping):
         raise TypeError(f"sources must be a mapping of paths to sources, not {type(sources).__name__}")
+    target = None
+    if isinstance(plan, Write):
+        plan, target = plan.child, plan.target
     out = pb.WirePlanEnvelope(format_version=FORMAT_VERSION)
     udfs = UdfTable()
     out.plan.CopyFrom(encode_node(plan, sources, udfs))
     out.udfs.extend(udfs.refs)
+    if target is not None:
+        wire_format, default_codec = _WRITE_FORMATS[target.format]
+        out.format_version = WRITE_FORMAT_VERSION
+        out.write_target.path = target.path
+        out.write_target.format = getattr(vocab, wire_format)
+        out.write_target.codec = getattr(vocab, "WCOMP_" + (target.codec or default_codec).upper())
     return out

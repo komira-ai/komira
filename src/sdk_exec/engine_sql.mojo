@@ -42,7 +42,7 @@
 # `STATEMENT_NOT_A_QUERY` is `sql.sql_frontend`'s refusal, named here too so a
 # caller of this module finds it beside the `STEP_*` names. `SqlOutcome`,
 # `SqlRefusal`, `OPTIMIZE_UNRESOLVED_SCALAR` and the steps from `optimize` on
-# are `engine_plan`'s, named here too; `optimize_for_run` is
+# are `engine_plan`'s (as is `bind`), named here too; `optimize_for_run` is
 # `engine_plan.optimize_for_run`.
 
 from phase_timers.phase_timers import PH_BIND, PH_PARSE, pt_now, pt_record
@@ -59,6 +59,7 @@ from pipeline_exec.source_parquet import LocalOnlyScanFs
 from .engine_context import EngineContext
 from .engine_plan import (
     OPTIMIZE_UNRESOLVED_SCALAR as _OPTIMIZE_UNRESOLVED_SCALAR,
+    STEP_BIND as _STEP_BIND,
     STEP_EXECUTE as _STEP_EXECUTE,
     STEP_LOWER as _STEP_LOWER,
     STEP_OPTIMIZE as _STEP_OPTIMIZE,
@@ -70,7 +71,7 @@ from .run_control import RunControl
 from .engine_write import check_copy_target, count_result, write_copy_result
 
 comptime STEP_PARSE = "parse"
-comptime STEP_BIND = "bind"
+comptime STEP_BIND = _STEP_BIND
 comptime STEP_OPTIMIZE = _STEP_OPTIMIZE
 comptime STEP_LOWER = _STEP_LOWER
 comptime STEP_EXECUTE = _STEP_EXECUTE

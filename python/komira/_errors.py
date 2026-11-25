@@ -107,6 +107,8 @@ _CODE_CLASSES: dict[str, type[KomiraError]] = {
             "SQL_STATEMENT_UNSUPPORTED",
             "COPY_OPTION_UNSUPPORTED",
             "COPY_FORMAT_NOT_INFERRED",
+            "COPY_TYPE_UNSUPPORTED",
+            "COPY_COMPRESSION_UNSUPPORTED",
             "STORAGE_URL_REFUSED",
             "STORAGE_RANGE_NOT_SUPPORTED",
             "STORAGE_WRITE_UNSUPPORTED",

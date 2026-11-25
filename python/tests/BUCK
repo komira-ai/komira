@@ -861,6 +861,27 @@ _PLAN_EXPR_RUNTIMES = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# - frame_write_test, on the real libkomira, per minor: the write terminals
+#   (`to_parquet`, `to_csv`, `to_json(orient="records", lines=True)`) over a
+#   Parquet file written here, each output read back with pyarrow: the codecs,
+#   a composed frame's rows in order, `head(0)`, NULL against the empty string
+#   in CSV, compression by extension and by argument, a relative path, an
+#   existing destination replaced, the refusals made before the library is
+#   called, and the engine's refusals with their code and step (a URL, a
+#   missing directory, a column type the writer does not write) leaving the
+#   destination as it was.
+[python_binding_test(
+    name = "frame_write_test" + p["suffix"],
+    src = "test_frame_write.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 python_binding_test(
     name = "frame_duckdb_test",
     src = "test_frame_duckdb.py",

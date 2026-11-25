@@ -7,8 +7,8 @@ calls it with `ctypes`.
 **This is an early release.** It registers Parquet files as tables and runs
 SQL over them, and it hands each answer to pyarrow. A first part of the
 pandas-shaped DataFrame reads the same files, filters, selects, computes
-columns, sorts and takes the first rows, as a plan the engine runs with no
-SQL. The rest of the DataFrame APIs come later.
+columns, sorts and takes the first rows, and writes its rows to a Parquet,
+CSV or JSON Lines file, as a plan the engine runs with no SQL. The rest of the DataFrame APIs come later.
 
 ## Install
 
@@ -256,6 +256,29 @@ again. The install test runs this program on the installed wheel.
   `sort_values(inplace=True)`, a stable sort, `head(-n)` and `df[0:5]` raise
   `UnsupportedOperation`.
 - `explain()` returns the engine's text of the plan and runs nothing.
+- **Writing files.** `df.to_parquet(path, *, compression="snappy")`,
+  `df.to_csv(path_or_buf, *, compression="infer", index=True)` and
+  `df.to_json(path_or_buf, *, orient=None, lines=False, compression="infer")`
+  run the plan once and write all of the frame's rows (in its order when it is
+  sorted) to a local file, all or nothing, and return `None` once the file is
+  complete. An existing file at the path is replaced. The format follows the
+  verb, not the extension: `to_csv("x.parquet")` writes CSV. A relative path is
+  resolved against the working directory at the call, and `~` is expanded.
+  - `to_parquet` takes `compression` `"snappy"`, `"gzip"`, `"zstd"`, `"lz4"` or
+    `None`. `to_csv` writes a header line; `index` is accepted and has no effect,
+    as a frame has no index. `to_json` writes only `orient="records",
+    lines=True`, one object per line.
+  - `to_csv` and `to_json` take `compression` `"infer"` (gzip for a path ending
+    `.gz`, zstd for `.zst`, otherwise none), `"gzip"`, `"zstd"` or `None`.
+    `bz2`, `zip`, `xz` and `tar`, named or inferred, raise
+    `UnsupportedOperation`, as do `"brotli"` for Parquet, a dict of options, any
+    other `to_json` form and `to_csv(None)`. A keyword the verb does not have is
+    a `TypeError`.
+  - The engine refuses a URL destination (`UnsupportedOperation`,
+    `STORAGE_URL_REFUSED`, step `bind`), a missing directory (`StorageError`,
+    `STORAGE_NOT_FOUND`) and a column type the writer does not write, a
+    timestamp among them (`UnsupportedOperation`, `COPY_TYPE_UNSUPPORTED`), and
+    a refused write leaves the destination as it was.
 
 protobuf and the generated plan modules are imported by the first reader, not
 by `import komira`.
@@ -265,7 +288,7 @@ by `import komira`.
 - The module-level `komira.sql` and `komira.register_parquet` on a default
   session.
 - The rest of the pandas-shaped DataFrame (group-by and aggregates, joins,
-  windows, missing-value verbs, writing files, `//`, `%` and `**`, `isna`),
+  windows, missing-value verbs, `//`, `%` and `**`, `isna`),
   and the polars-shaped one.
 - Iceberg tables: reading one, and writing to one by its name in a catalog.
 
@@ -281,7 +304,7 @@ The package's layout and API are designed in
 | path | what it is |
 |---|---|
 | `komira/__init__.py` | the public names, exactly `__all__`, and the module's `__getattr__`, which refuses the pandas names of `_refusals.MODULE` with their message |
-| `komira/_frame.py` | the pandas-shaped `DataFrame` and its readers `read_parquet`, `read_csv` and `read_json`: a plan of `komira/_ops` nodes, the sources its scans read and the session it runs on; the verbs build nodes with `_ops`'s builder (with a sort put back above a limit where a verb keeps the order), derive the output schema with the encoder, and `materialize()` sends the encoded plan to the session's plan door. It writes no SQL text, and imports `_plan`, so protobuf, only when the first frame is made |
+| `komira/_frame.py` | the pandas-shaped `DataFrame` and its readers `read_parquet`, `read_csv` and `read_json`: a plan of `komira/_ops` nodes, the sources its scans read and the session it runs on; the verbs build nodes with `_ops`'s builder (with a sort put back above a limit where a verb keeps the order), derive the output schema with the encoder, and `materialize()` sends the encoded plan to the session's plan door, and `to_parquet`, `to_csv` and `to_json` send a plan with a write target there. It writes no SQL text, and imports `_plan`, so protobuf, only when the first frame is made |
 | `komira/_series.py` | `Series`: an expression node over its frame's columns and the field the engine derives for it, bound to the frame and its generation; its operators, `isin` and `dtype` |
 | `komira/_refusals.py` | the refusal tables of the frame, the Series and the module ([docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md)) |
 | `komira/_capture/` | the capture of Python user functions (private; no query runs them yet): `udf`, the decorator that records a function's call shape (`scalar`, `map_batches_column`, `row`, `map_batches_frame`), its return type (`return_dtype=`, `schema=` or the type hints) and, for `row` and `map_batches_frame`, its read set (`columns=`, a `TypedDict` or dataclass annotation, or for `row` a scan of the function's bytecode, refused with `UDF_READ_SET_REQUIRED` when the reads are not bounded); `Udf.spec()`, the `UdfSpec` the plan encodes, with the function's code as a bundle named by its sha256 or as a reference into an installed distribution; and `write_code`, which writes each code object under its digest. Calling a decorated function calls the function, which is how the komira/python worker runs it. It imports no `ctypes` |
@@ -293,7 +316,7 @@ The package's layout and API are designed in
 | `komira/_run.py` | `run_sql`, which `Session.sql` runs a query with on ABI 1.6: the call `komira_sql_stream_run` on a helper thread under a run handle of its own, while the calling thread waits, reads the handle's progress for the `progress` callback, and cancels the handle when anything is raised on it (a Ctrl-C's `KeyboardInterrupt`, the callback's exception) |
 | `komira/_plan/` | the plan encoder: `encode_plan`, a plan of `komira/_ops` as the `komira.plan.v1` `WirePlanEnvelope` the plan door takes, every node with the output schema the engine derives for it and every scan reading a source libkomira described (`parquet_source`, `binding_source`); calls of user functions (`UdfCall`, `MapBatches`) as `WireUdfApply` and `WireMapBatchesNode` over the envelope's `UdfRef` list, one per distinct function, each with the komira/python descriptor; `encode_expr`, an expression node as a `WireExpr`; and `expr_field`, the output field the engine derives for it. It writes no SQL text. It imports the generated plan modules, which the wheel ships at `komira/plan/v1/`; `import komira` does not import it |
 | `komira/_runtime.py` | `check_loaded_runtime`, called before libkomira is opened: it compares the Mojo runtime libraries already loaded in the process with komira's copies by build id, and the GNU build id reader it uses |
-| `komira/_session.py` | `Session` with `register_parquet`, `register_csv`, `register_json` and `sql`, `Result`, and the session's private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal`; the private calls a frame makes (`_parquet_schema`, `_csv_binding`, `_json_binding`, `_plan_stream`, `_plan_render`), each under the session's lock; and `default_session()`, the process's default session |
+| `komira/_session.py` | `Session` with `register_parquet`, `register_csv`, `register_json` and `sql`, `Result`, and the session's private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal`; the private calls a frame makes (`_parquet_schema`, `_csv_binding`, `_json_binding`, `_plan_stream`, `_plan_write`, `_plan_render`), each under the session's lock; and `default_session()`, the process's default session |
 | `komira/py.typed` | the PEP 561 marker |
 | `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the tests that encode or run a plan; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |

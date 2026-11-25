@@ -6,7 +6,7 @@ its private layers of this surface are built: the plan node tree (`komira._ops`)
 capture of a user function (`komira._capture`) and the UDF worker runtime (`komira._udf`). The first
 part of the pandas-shaped skin is built too: its readers, subscripts, `assign`, `sort_values`, `head`,
 `materialize` and `explain` are in `python/komira/_frame.py` and `_series.py`, and `materialize` runs
-the plan through `komira_plan_stream`. `komira.pl` and the other verbs are not built. The verbs, the plan each one builds and
+the plan through `komira_plan_stream`, and so do the write terminals `to_parquet`, `to_csv` and `to_json`. `komira.pl` and the other verbs are not built. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
 
@@ -141,10 +141,13 @@ The frames are immutable, except for one pandas idiom:
   ([src/plan_proto/plan.proto](../../src/plan_proto/plan.proto)), using the generated protobuf modules
   under `komira/plan/v1/`. The encoder is built (`komira._plan.encode_plan`); the package does not ship
   the generated modules yet. The session sends the bytes through the plan entry, `komira_plan_stream`
-  (`libkomira` ABI 1.8), which no session method calls yet.
+  (`libkomira` ABI 1.8), which the session's `_plan_stream` and `_plan_write` call.
   - The plan entry decodes the bytes with `plan_wire`, binds the scans, optimizes, lowers, runs, and
     returns an Arrow C stream.
-  - A write terminal sets the envelope's `write_target`.
+  - A write terminal sets the envelope's `write_target` (format version 5). The plan entry writes the file
+    and answers the one-row `Count` stream, which the terminal reads and drops, returning `None`
+    ([credentials_and_writes.md §10](credentials_and_writes.md#10-writes)). Built for the pandas-shaped
+    skin; the polars-shaped `sink_*` come with `komira.pl`.
   - protobuf becomes a required dependency of the package with this surface, beside pyarrow, as the
     Python package design says. Its range is `PROTOBUF_REQUIREMENT` in `python/dependencies.bzl`, which
     the wheel of the release that first ships the plan modules declares.

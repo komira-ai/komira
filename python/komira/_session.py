@@ -213,6 +213,21 @@ class Session:
         except _arrow.stream_errors() as e:
             raise KomiraError(str(e)) from e
 
+    def _plan_write(self, plan: bytes) -> int:
+        """Runs the serialized plan `plan`, an envelope with a write target,
+        through the plan door as `_plan_stream` does and returns the number of
+        rows it wrote: the plan door answers one row, the column "Count". This
+        is the terminal of a DataFrame write (komira/_write.py); a refusal
+        raises the engine's error, as `sql` does."""
+        table = self._plan_stream(plan).to_arrow()
+        if table.schema.names != ["Count"] or table.num_rows != 1:
+            raise KomiraError(
+                "the plan door answered a write with {} rows of the columns ({}), not one row of Count".format(
+                    table.num_rows, ", ".join(table.schema.names)
+                )
+            )
+        return table.column(0)[0].as_py()
+
     def _plan_render(self, plan: bytes) -> str:
         """The engine's text of the serialized plan `plan` (`komira_plan_render`)."""
         with self._held():
