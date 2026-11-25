@@ -12,6 +12,7 @@ TARGETS = [
     "komira//release:prod_claimed_names_cases",
     "komira//release:release_checks_cases",
     "komira//release:release_set",
+    "komira//release:unpublished_cases",
     "komira//src/anomaly:ci",
     "komira//src/anomaly:coverage_floor",
     "komira//src/anomaly:table",

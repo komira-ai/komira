@@ -87,6 +87,20 @@ def main(args):
             assert stream.release and stream.get_next
             _arrow._Release(stream.release)(ctypes.addressof(stream))
             assert not stream.release
+        # Neither stand-in has komira_ctx_new_with_options (1.4): naming an
+        # option raises, naming the call and both versions, with no status;
+        # naming none calls komira_ctx_new and works.
+        want = "komira_ctx_new_with_options needs libkomira ABI version 1.4; the library at {} is {}.{}".format(
+            os.path.join(directory, "libkomira.so"), *divmod(version, 1000)
+        )
+        for options in ({"memory_limit": 1 << 20}, {"threads": 2}):
+            try:
+                komira.Session(**options)
+            except KomiraError as e:
+                assert type(e) is KomiraError and str(e) == want and e.status is None, repr(e)
+            else:
+                raise AssertionError("a {} library ran komira_ctx_new_with_options".format(version))
+        komira.Session(threads=None, memory_limit=None).close()
         # Neither stand-in has the registration calls of 1.5: each raises
         # when it is used, naming the call and both versions, with no status.
         path = os.path.join(directory, "libkomira.so")
