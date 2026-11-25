@@ -193,6 +193,14 @@ def _int32(tree: String) -> String:
     return "Cast(" + tree + ", int32)"
 
 
+def _narrow(t: String) -> String:
+    """The `_check` text of the refusal of a CASE whose integer arms have the
+    common type `t`, which this engine's CASE cannot produce."""
+    return (
+        "ERR: SQL not supported: a CASE, coalesce, ifnull, nullif, greatest or least whose integer arms have the common type " + t + " in DuckDB. This engine computes such a CASE in BIGINT and casts an answer back to INTEGER only, so the result would have another type than DuckDB's. CAST an argument to INTEGER or BIGINT to pick the result type."
+    )
+
+
 def test_coalesce_over_mixed_integer_widths() raises:
     # INTEGER beside a literal that fits it: INT64 CASE, cast back to INT32.
     _check(
@@ -208,15 +216,11 @@ def test_coalesce_over_mixed_integer_widths() raises:
         "SELECT coalesce(i32, 3000000000) AS c FROM iw",
         _proj("Alias(" + _coalesce2(_c64("i32"), _int("3000000000")) + ", \"c\")"),
     )
-    # A literal that fits the arm's type keeps it (TINYINT / SMALLINT here are
-    # left as INT64, which the engine cannot cast down to).
-    _check(
-        "SELECT coalesce(i8, 100) AS c, coalesce(i16, -1) AS d FROM iw",
-        _proj(
-            "Alias(" + _coalesce2(_c64("i8"), _int("100")) + ", \"c\"), Alias("
-            + _coalesce2(_c64("i16"), _int("-1")) + ", \"d\")"
-        ),
-    )
+    # A literal that fits the arm's type keeps it: TINYINT and SMALLINT, which
+    # the engine's CASE cannot produce, so each is refused by name.
+    _check("SELECT coalesce(i8, 100) AS c FROM iw", _narrow("TINYINT"))
+    _check("SELECT coalesce(i16, -1) AS d FROM iw", _narrow("SMALLINT"))
+    _check("SELECT coalesce(i8, i8) AS d FROM iw", _narrow("TINYINT"))
     # A literal that does not fit TINYINT counts as INTEGER, above or below.
     _check(
         "SELECT coalesce(i8, 200) AS c, coalesce(i8, -200) AS d FROM iw",
@@ -247,26 +251,26 @@ def test_coalesce_over_unsigned_and_signed_integers() raises:
             + _int32(_coalesce2(_c64("u16"), _c64("i8"))) + ", \"d\")"
         ),
     )
-    # UINTEGER with INTEGER is BIGINT, UTINYINT with TINYINT is SMALLINT,
-    # UTINYINT with USMALLINT is USMALLINT: all left as INT64.
+    # UINTEGER with INTEGER is BIGINT: served, no cast back.
     _check(
-        "SELECT coalesce(u32, i32) AS c, coalesce(u8, i8) AS d, coalesce(u8, u16) AS e FROM iw",
-        _proj(
-            "Alias(" + _coalesce2(_c64("u32"), _c64("i32")) + ", \"c\"), Alias("
-            + _coalesce2(_c64("u8"), _c64("i8")) + ", \"d\"), Alias("
-            + _coalesce2(_c64("u8"), _c64("u16")) + ", \"e\")"
-        ),
+        "SELECT coalesce(u32, i32) AS c FROM iw",
+        _proj("Alias(" + _coalesce2(_c64("u32"), _c64("i32")) + ", \"c\")"),
     )
+    # UTINYINT with TINYINT is SMALLINT, UTINYINT with USMALLINT is USMALLINT,
+    # UINTEGER alone is UINTEGER: types the CASE cannot produce, refused.
+    _check("SELECT coalesce(u8, i8) AS d FROM iw", _narrow("SMALLINT"))
+    _check("SELECT coalesce(u8, u16) AS e FROM iw", _narrow("USMALLINT"))
+    _check("SELECT coalesce(u32, 5) AS e FROM iw", _narrow("UINTEGER"))
     # A literal that is no UTINYINT value (300, or negative) counts as INTEGER;
-    # 255 is one.
+    # 255 is one, so the type stays UTINYINT and is refused.
     _check(
-        "SELECT coalesce(u8, 300) AS c, coalesce(u8, -1) AS d, coalesce(u8, 255) AS e FROM iw",
+        "SELECT coalesce(u8, 300) AS c, coalesce(u8, -1) AS d FROM iw",
         _proj(
             "Alias(" + _int32(_coalesce2(_c64("u8"), _int("300"))) + ", \"c\"), Alias("
-            + _int32(_coalesce2(_c64("u8"), _int("-1"))) + ", \"d\"), Alias("
-            + _coalesce2(_c64("u8"), _int("255")) + ", \"e\")"
+            + _int32(_coalesce2(_c64("u8"), _int("-1"))) + ", \"d\")"
         ),
     )
+    _check("SELECT coalesce(u8, 255) AS e FROM iw", _narrow("UTINYINT"))
 
 
 def test_coalesce_integer_arms_left_as_bound() raises:

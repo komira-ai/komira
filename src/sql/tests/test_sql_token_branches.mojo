@@ -288,6 +288,19 @@ def test_quoted_identifier_refusals_name_what_is_wrong() raises:
         _error_of('select a as ""'),
         "SQL syntax error: zero-length quoted identifier",
     )
+    # A `#` anywhere in a quoted name is refused, whole message; a `#` only
+    # in a string literal is not an identifier and lexes as before.
+    var hash_msg = String(
+        "SQL not supported: a double-quoted identifier containing '#'. This"
+        " SQL front end names the derived tables it makes with a '#', so a"
+        " name holding one could stand for one of them; rename it without"
+        " the '#'."
+    )
+    assert_equal(_error_of('select 1 as "#union"'), hash_msg)
+    assert_equal(_error_of('select * from "t#0"'), hash_msg)
+    assert_equal(_error_of('"ab#"'), hash_msg)
+    var lit = tokenize("'a#b'")
+    assert_equal(lit[0].text, "a#b")
 
 
 def test_refusals_name_what_they_refuse() raises:

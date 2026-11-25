@@ -293,9 +293,37 @@ def _int_literal_fits(v: Int64, code: Int) -> Bool:
     return v >= 0 and v < (Int64(1) << Int64(-code))
 
 
+def _int_type_name(code: Int) -> String:
+    """DuckDB's name of the integer type `code` (`_int_code`) that the CASE
+    cannot produce: one narrower than INTEGER, or UINTEGER."""
+    if code == 8:
+        return "TINYINT"
+    if code == 16:
+        return "SMALLINT"
+    if code == -8:
+        return "UTINYINT"
+    if code == -16:
+        return "USMALLINT"
+    return "UINTEGER"
+
+
+def _narrow_int_refusal(code: Int) -> String:
+    """The refusal of a CASE whose integer arms have DuckDB's common type
+    `code`, a type this engine's CASE cannot produce."""
+    return (
+        "SQL not supported: a CASE, coalesce, ifnull, nullif, greatest or"
+        " least whose integer arms have the common type "
+        + _int_type_name(code)
+        + " in DuckDB. This engine computes such a CASE in BIGINT and casts"
+        " an answer back to INTEGER only, so the result would have another"
+        " type than DuckDB's. CAST an argument to INTEGER or BIGINT to pick"
+        " the result type."
+    )
+
+
 def _unify_integer_arms(
     var arms: List[Expr], schema: Schema, mut narrow_to_int32: Bool
-) -> List[Expr]:
+) raises -> List[Expr]:
     """Unify the value arms of a CASE built from `coalesce`, `ifnull`,
     `nullif`, `greatest`, `least` or a written CASE when they are integers of
     different widths. The engine's CASE takes one dtype from its ELSE and
@@ -314,9 +342,11 @@ def _unify_integer_arms(
     literal that is not a value of it, which counts as INTEGER, or BIGINT when
     it is not an INTEGER value. `narrow_to_int32` is True when that type is
     INTEGER, and the caller then wraps the CASE in a CAST to INT32. When it is
-    BIGINT the CASE already has the type. When it is narrower than INTEGER the
-    CASE stays INT64, since the engine casts INT64 down to INT32 only
-    (`project_cast._project_cast`)."""
+    BIGINT the CASE already has the type. Any other common type (TINYINT,
+    SMALLINT, UTINYINT, USMALLINT, UINTEGER) is refused by name
+    (`_narrow_int_refusal`): the engine casts INT64 down to INT32 only
+    (`project_cast._project_cast`), so the CASE could not have DuckDB's
+    type."""
     var codes = List[Int]()
     var common = 0
     var n_typed = 0
@@ -351,6 +381,8 @@ def _unify_integer_arms(
             out.append(arms[i].copy())
         else:
             out.append(Expr.cast(arms[i].copy(), DType.int64))
+    if result != 32 and result != 64:
+        raise Error(_narrow_int_refusal(result))
     narrow_to_int32 = result == 32
     return out^
 

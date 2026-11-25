@@ -607,14 +607,20 @@ def test_unify_integer_arms_directly() raises:
     var sch = _iw_schema()
     var null64 = Expr.literal(ScalarValue.null(DType.int64))
     var narrow = False
-    # A NULL arm adds no type: INT8 beside it is cast to INT64 and stays INT8.
+    # A NULL arm adds no type: INT8 beside it stays TINYINT, a type the CASE
+    # cannot produce, so the unification refuses it by name.
     var a = List[Expr]()
     a.append(Expr.col_ref("i8"))
     a.append(null64.copy())
-    var ua = _unify_integer_arms(a^, sch, narrow)
-    assert_equal(String(ua[0]), "Cast(ColRef(i8), int64)")
-    assert_equal(String(ua[1]), "Literal(ScalarValue(null, int64))")
-    assert_false(narrow)
+    var refused = String("")
+    try:
+        _ = _unify_integer_arms(a^, sch, narrow)
+    except e:
+        refused = String(e)
+    assert_equal(
+        refused,
+        "SQL not supported: a CASE, coalesce, ifnull, nullif, greatest or least whose integer arms have the common type TINYINT in DuckDB. This engine computes such a CASE in BIGINT and casts an answer back to INTEGER only, so the result would have another type than DuckDB's. CAST an argument to INTEGER or BIGINT to pick the result type.",
+    )
     # A column the schema lacks, and a UINT64 column, leave the arms as given.
     var b = List[Expr]()
     b.append(Expr.col_ref("i8"))

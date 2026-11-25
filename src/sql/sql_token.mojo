@@ -84,6 +84,14 @@ comptime TK_NTILDE: UInt8 = 29  # !~ — NOT regexp_full_match
 # classifies an identifier by its text.
 comptime _IDENT_QUOTED: Int64 = 1
 
+# A double-quoted identifier may not hold a `#`: the front end spells the
+# relations it names itself with one (`<alias>#<index>`, `#union`).
+comptime _QUOTED_HASH_REFUSAL = (
+    "SQL not supported: a double-quoted identifier containing '#'. This SQL"
+    " front end names the derived tables it makes with a '#', so a name"
+    " holding one could stand for one of them; rename it without the '#'."
+)
+
 
 @fieldwise_init
 struct Token(Copyable, Movable, Deinitable):
@@ -469,6 +477,12 @@ def tokenize(sql: String) raises -> List[Token]:
                 raise Error("SQL syntax error: unterminated quoted identifier")
             if len(qbytes) == 0:
                 raise Error("SQL syntax error: zero-length quoted identifier")
+            # The parser and binder name the relations they make up with a
+            # `#` (`<alias>#<index>`, `#union`), which no identifier may then
+            # spell, so a quoted name holding one is refused by name.
+            for qi in range(len(qbytes)):
+                if qbytes[qi] == UInt8(ord("#")):
+                    raise Error(_QUOTED_HASH_REFUSAL)
             out.append(
                 Token(
                     TK_IDENT,

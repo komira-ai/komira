@@ -272,6 +272,9 @@ def test_options_refused_by_name_and_kind() raises:
     _refuses("SELECT * FROM read_csv('f', format = 'csv')", "'format' is a read_json option")
     _refuses("SELECT * FROM read_csv('f', header = maybe)", "read_csv option 'header' expects TRUE or FALSE")
     _refuses("SELECT * FROM read_csv('f', header = 1)", "read_csv option 'header' expects TRUE or FALSE")
+    # A double-quoted "true" is a name, not the boolean value.
+    _refuses("SELECT * FROM read_csv('f', header = \"true\")", "read_csv option 'header' expects TRUE or FALSE")
+    _refuses("SELECT * FROM read_csv('f', header = \"false\")", "read_csv option 'header' expects TRUE or FALSE")
     _refuses("SELECT * FROM read_csv('f', delim = '||')", "'delim'='||' — only a SINGLE-byte delimiter is supported")
     _refuses("SELECT * FROM read_csv('f', delim = 5)", "read_csv option 'delim' expects a quoted string")
     _refuses("SELECT * FROM read_csv('f', quote = '''')", "read_csv quote=''' — this reader is RFC-4180")

@@ -216,6 +216,14 @@ def test_date_diff_and_date_sub() raises:
     )
 
 
+def _narrow(t: String) -> String:
+    """The `_check` text of the refusal of a CASE whose integer arms have the
+    common type `t`, which this engine's CASE cannot produce."""
+    return (
+        "ERR: SQL not supported: a CASE, coalesce, ifnull, nullif, greatest or least whose integer arms have the common type " + t + " in DuckDB. This engine computes such a CASE in BIGINT and casts an answer back to INTEGER only, so the result would have another type than DuckDB's. CAST an argument to INTEGER or BIGINT to pick the result type."
+    )
+
+
 def test_nullif_over_integer_widths() raises:
     var tail = String("  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n")
     var null64 = String("Literal(ScalarValue(null, int64))")
@@ -226,13 +234,10 @@ def test_nullif_over_integer_widths() raises:
         "Project(exprs=[Alias(Cast(When(WHEN BinaryOp(EQ, ColRef(i32), Literal(ScalarValue(int64, 2))) THEN "
         + null64 + ", ELSE Cast(ColRef(i32), int64)), int32), \"a\")])\n" + tail,
     )
-    # A narrower or unsigned `a` has no executable cast back: INT64 CASE.
-    _check(
-        "SELECT nullif(i8, 2) AS a, nullif(u16, 2) AS b FROM iw",
-        "Project(exprs=[Alias(When(WHEN BinaryOp(EQ, ColRef(i8), Literal(ScalarValue(int64, 2))) THEN "
-        + null64 + ", ELSE Cast(ColRef(i8), int64)), \"a\"), Alias(When(WHEN BinaryOp(EQ, ColRef(u16), Literal(ScalarValue(int64, 2))) THEN "
-        + null64 + ", ELSE Cast(ColRef(u16), int64)), \"b\")])\n" + tail,
-    )
+    # A narrower or unsigned `a` keeps its type in DuckDB (TINYINT,
+    # USMALLINT), which the engine's CASE cannot produce: refused by name.
+    _check("SELECT nullif(i8, 2) AS a FROM iw", _narrow("TINYINT"))
+    _check("SELECT nullif(u16, 2) AS b FROM iw", _narrow("USMALLINT"))
     # An INT64 `a` over a narrow `b` is bound as before.
     _check(
         "SELECT nullif(i64, i32) AS a FROM iw",

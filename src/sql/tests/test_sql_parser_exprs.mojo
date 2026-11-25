@@ -406,10 +406,39 @@ def test_is_distinct_from() raises:
     _is_bin(conj, SXOP_AND)
     _is_bin(_l(conj), SXOP_DISTINCT)
     _is_bin(_r(conj), SXOP_NOT_DISTINCT)
-    # A test after the right operand tests the whole `IS DISTINCT FROM`.
-    var tail = _w("a IS DISTINCT FROM 1 IS TRUE")
-    _is_un(tail, SXUN_IS_TRUE)
-    _is_bin(_child(tail), SXOP_DISTINCT)
+    # The right operand is a comparison-level expression, as in DuckDB:
+    # `a IS DISTINCT FROM b = 2` is `a IS DISTINCT FROM (b = 2)`, and an IN or
+    # BETWEEN there is the right operand too.
+    var rcmp = _w("a IS DISTINCT FROM b = 2")
+    _is_bin(rcmp, SXOP_DISTINCT)
+    _is_col(_l(rcmp), "a")
+    _is_bin(_r(rcmp), SXOP_EQ)
+    var rbetween = _w("a IS NOT DISTINCT FROM b BETWEEN 1 AND 3")
+    _is_bin(rbetween, SXOP_NOT_DISTINCT)
+    _is_bin(_r(rbetween), SXOP_AND)
+    # A parenthesized test is a right operand like any other.
+    var rparen = _w("a IS DISTINCT FROM (b IS TRUE)")
+    _is_bin(rparen, SXOP_DISTINCT)
+    _is_un(_r(rparen), SXUN_IS_TRUE)
+    # Any test after the right operand is refused, as DuckDB refuses it.
+    var after = String(
+        "SQL syntax error: a test after IS [NOT] DISTINCT FROM <operand>"
+        " needs parentheses around the DISTINCT test"
+    )
+    assert_equal(_err("SELECT a IS DISTINCT FROM 1 IS TRUE FROM t"), after)
+    assert_equal(_err("SELECT a IS DISTINCT FROM b = 2 IS NULL FROM t"), after)
+    assert_equal(_err("SELECT a IS NOT DISTINCT FROM 1 ISNULL FROM t"), after)
+    assert_equal(_err("SELECT a IS DISTINCT FROM 1 NOTNULL FROM t"), after)
+    assert_equal(_err("SELECT a IS DISTINCT FROM 1 NOT NULL FROM t"), after)
+    # A parenthesized DISTINCT test takes a test after it.
+    var wrapped = _w("(a IS DISTINCT FROM 1) IS TRUE")
+    _is_un(wrapped, SXUN_IS_TRUE)
+    _is_bin(_child(wrapped), SXOP_DISTINCT)
+    # `NOT` after the operand that is not `NOT NULL` is left to the caller.
+    _refuses("a IS DISTINCT FROM 1 NOT 2", "")
+    # Two comparisons on the right are refused as trailing tokens, as DuckDB
+    # refuses them.
+    _refuses("a IS DISTINCT FROM 2 = 2 = 3", "")
     _refuses("a IS DISTINCT b", "expected keyword 'from'")
     _refuses("(a IS NOT DISTINCT)", "expected keyword 'from'")
 
@@ -626,6 +655,10 @@ def test_quoted_words_in_the_special_call_grammars_are_plain_names() raises:
     _refuses("substring(a \"from\" 1)", "expected ')'")
     _refuses("cast(a AS double \"precision\")", "')' to close CAST(...)")
     _ = _e("cast(a AS double precision)")
+    # A quoted TYPE name resolves case-insensitively, as in DuckDB: it reaches
+    # the binder lower-folded, in both cast spellings.
+    assert_equal(_arg(_e('CAST(a AS "INTEGER")'), 1).text, "integer")
+    assert_equal(_arg(_e('a::"BigInt"'), 1).text, "bigint")
     # A quoted `"over"` after a call is an alias, not the window clause.
     var lag = _parse('SELECT lag(a) "over" FROM t')
     assert_equal(Int(lag.query.select_items[0].expr.tag), Int(SX_CALL))

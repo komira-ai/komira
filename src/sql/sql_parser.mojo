@@ -1193,15 +1193,13 @@ struct _Parser(Movable):
 
     def _tvf_bool_arg(mut self, fname: String, key: String) raises -> Bool:
         """Consume a `true` / `false` option value (the tokenizer lower-folds
-        both to `TK_IDENT`)."""
-        if self._kind() == TK_IDENT:
-            var v = String(self.tokens[self.pos].text)
-            if v == "true":
-                self._advance()
-                return True
-            if v == "false":
-                self._advance()
-                return False
+        both to `TK_IDENT`; a double-quoted `"true"` is a name, not a value)."""
+        if self._is_kw("true"):
+            self._advance()
+            return True
+        if self._is_kw("false"):
+            self._advance()
+            return False
         raise Error(
             "SQL syntax error: " + fname + " option '" + key
             + "' expects TRUE or FALSE"
@@ -1496,7 +1494,8 @@ struct _Parser(Movable):
         # index>`. The scope is ONE per statement while aliases are scoped to
         # their own SELECT level (two nested unaliased tables are BOTH
         # `unnamed_subquery`; a derived `t` inside an IN body is not the `t`
-        # of the top FROM), and `#` cannot occur in a lower-folded identifier,
+        # of the top FROM), and `#` cannot occur in an identifier (the tokenizer refuses it in
+        # a double-quoted one),
         # so the key can neither collide with a twin at another level nor
         # SHADOW a catalog table or CTE outside the FROM entry that declares
         # it. A same-FROM relation that answers to the same qualifier is
@@ -1876,7 +1875,11 @@ struct _Parser(Movable):
                 return SqlExpr.unary(SXUN_NOT, operand^)
         return self._parse_cmp()
 
-    def _parse_cmp(mut self) raises -> SqlExpr:
+    def _parse_cmp(mut self, suffix: Bool = True) raises -> SqlExpr:
+        """One comparison-level expression. `suffix` False leaves out every
+        trailing `IS ...` / `ISNULL` / `NOTNULL` test: the right operand of
+        `IS [NOT] DISTINCT FROM` is read that way, since DuckDB takes a
+        comparison, IN, LIKE or BETWEEN there but no further test."""
         # Prefix predicate: [NOT] EXISTS (SELECT ...) — no left operand.
         # Parked in the subquery side-table (SUBQ_EXISTS / SUBQ_NOT_EXISTS); the
         # binder lowers it to a correlated subquery Expr (SEMI / ANTI). Checked
@@ -1893,10 +1896,11 @@ struct _Parser(Movable):
         # ★ A NULL TEST DIRECTLY ON THE OPERAND (`x IS NULL`, `x + 1 ISNULL`).
         # Returned as-is: `x IS NULL = y` is not a shape this
         # grammar serves, and it falls out as a trailing token.
-        var at = self.pos
-        left = self._parse_null_test_suffix(left^)
-        if self.pos != at:
-            return left^
+        if suffix:
+            var at = self.pos
+            left = self._parse_null_test_suffix(left^)
+            if self.pos != at:
+                return left^
         # Postfix keyword predicates: [NOT] IN (...), [NOT] LIKE pat,
         # [NOT] ILIKE pat, [NOT] SIMILAR TO pat, [NOT] BETWEEN a AND b. A
         # leading NOT that prefixes one of those is handled here; a bare prefix
@@ -1906,7 +1910,7 @@ struct _Parser(Movable):
             self._is_kw("in") or self._is_kw("like") or self._is_kw("between")
             or self._is_kw("ilike") or self._is_similar_to_at(self.pos)
         ):
-            return self._parse_null_test_suffix(
+            return self._cmp_suffix(suffix, 
                 self._parse_postfix_pred(left^, False)
             )
         # ★ THE SYMBOL SPELLINGS: `~~` / `!~~` /
@@ -1929,7 +1933,7 @@ struct _Parser(Movable):
             var spat = String(self.tokens[self.pos].text)
             self._advance()
             var sflav = SXLIKE_ILIKE if code >= 2 else SXLIKE_LIKE
-            return self._parse_null_test_suffix(
+            return self._cmp_suffix(suffix, 
                 SqlExpr.like(left^, spat, code == 1 or code == 3, sflav)
             )
         if self._kind() == TK_TILDE or self._kind() == TK_NTILDE:
@@ -1941,8 +1945,8 @@ struct _Parser(Movable):
             targs.append(tpat^)
             var tm = SqlExpr.call(String("regexp_full_match"), targs^)
             if tneg:
-                return self._parse_null_test_suffix(SqlExpr.unary(SXUN_NOT, tm^))
-            return self._parse_null_test_suffix(tm^)
+                return self._cmp_suffix(suffix, SqlExpr.unary(SXUN_NOT, tm^))
+            return self._cmp_suffix(suffix, tm^)
         if self._is_kw("not") and self.pos + 1 < len(self.tokens):
             ref nx = self.tokens[self.pos + 1]
             if _tok_is_bare_word(nx) and (
@@ -1950,7 +1954,7 @@ struct _Parser(Movable):
                 or nx.text == "ilike" or self._is_similar_to_at(self.pos + 1)
             ):
                 self._advance()  # consume NOT
-                return self._parse_null_test_suffix(
+                return self._cmp_suffix(suffix, 
                     self._parse_postfix_pred(left^, True)
                 )
         var k = self._kind()
@@ -1975,7 +1979,13 @@ struct _Parser(Movable):
         # (PostgreSQL's) precedence, where IS / ISNULL / NOTNULL bind LOOSER
         # than `=`. Measured v1.5.3: `SELECT NULL = 1 IS NULL` and
         # `SELECT NULL = 1 ISNULL` are both TRUE, i.e. `(NULL = 1) IS NULL`.
-        return self._parse_null_test_suffix(SqlExpr.binary(op, left^, right^))
+        return self._cmp_suffix(suffix, SqlExpr.binary(op, left^, right^))
+
+    def _cmp_suffix(mut self, suffix: Bool, var operand: SqlExpr) raises -> SqlExpr:
+        """`_parse_null_test_suffix(operand)` when `suffix`, else `operand`."""
+        if suffix:
+            return self._parse_null_test_suffix(operand^)
+        return operand^
 
     def _parse_null_test_suffix(mut self, var operand: SqlExpr) raises -> SqlExpr:
         """Apply every postfix NULL test that follows `operand`: `IS NULL`,
@@ -2033,14 +2043,31 @@ struct _Parser(Movable):
                 elif self._is_kw("distinct"):
                     self._advance()
                     self._expect_kw("from")
-                    # The right operand is read at the level a comparison's
-                    # right side is, so `a IS DISTINCT FROM b + 1` takes the
-                    # sum and a trailing `IS ...` applies to the whole test.
-                    var other = self._parse_op()
+                    # The right operand is a comparison-level expression
+                    # with no test of its own, as in DuckDB:
+                    # `1 IS DISTINCT FROM 2 = 2` is `1 IS DISTINCT FROM (2 = 2)`.
+                    # DuckDB refuses any test after it (`a IS DISTINCT FROM b
+                    # IS TRUE`), and so does this parser.
+                    var other = self._parse_cmp(False)
                     e = SqlExpr.binary(
                         SXOP_NOT_DISTINCT if negate else SXOP_DISTINCT,
                         e^, other^,
                     )
+                    if (
+                        self._is_kw("is") or self._is_kw("isnull")
+                        or self._is_kw("notnull")
+                        or (
+                            self._is_kw("not")
+                            and self.pos + 1 < len(self.tokens)
+                            and _tok_is_kw(self.tokens[self.pos + 1], "null")
+                        )
+                    ):
+                        raise Error(
+                            "SQL syntax error: a test after IS [NOT] DISTINCT"
+                            " FROM <operand> needs parentheses around the"
+                            " DISTINCT test"
+                        )
+                    return e^
                 else:
                     raise Error(
                         "SQL syntax error: expected NULL, TRUE, FALSE or"
@@ -2449,7 +2476,9 @@ struct _Parser(Movable):
         return e^
 
     def _parse_sql_type_name(mut self, ctx: String) raises -> String:
-        """The TARGET TYPE of a cast, as written, lower-folded by the lexer.
+        """The TARGET TYPE of a cast, as written, lower-folded (by the lexer,
+        or here for a double-quoted name: DuckDB resolves `"INTEGER"` as it
+        resolves `integer`).
 
         ⛔ THE PARSER VALIDATES NO TYPE NAME AND THAT IS DELIBERATE — the same
         division of labour the `EXTRACT` arm states one screen up. This knows
@@ -2468,7 +2497,7 @@ struct _Parser(Movable):
                 "SQL syntax error: " + ctx + " expects a type name, as in"
                 + " CAST(<expr> AS BIGINT) or <expr>::BIGINT"
             )
-        var ty = String(self.tokens[self.pos].text)
+        var ty = String(self.tokens[self.pos].text).lower()
         self._advance()
         # `DOUBLE PRECISION` is TWO words in the standard and one type. Taken
         # only when the second word is exactly `precision`, so a select list
