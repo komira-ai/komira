@@ -597,6 +597,25 @@ def test_setting_a_column_to_a_window_series_is_assign_and_a_function_of_the_fra
     assert got._plan == Sort(assigned(SCAN, (running("sum", "b", BY_X),), {"c": missing("b", w(0))}), BY_X)
 
 
+def test_a_function_after_another_keyword_that_returns_a_window_is_refused_and_changes_nothing():
+    df = Env().df
+    before = df._plan
+    message = ("assign(t=...) is given a function that returns a window of the frame as the earlier keywords "
+               "left it: assign the window in an assign() call of its own")
+    refuses(lambda: df.assign(one=1, t=lambda f: f.groupby("a")["b"].transform("sum")), UnsupportedOperation, message)
+    # A window reached through an expression of such a function is refused alike.
+    refuses(lambda: df.assign(one=1, t=lambda f: f["one"] + f.groupby("a")["b"].transform("sum")),
+            UnsupportedOperation, message)
+    # So is a running window of a column an earlier function made.
+    sorted_frame = Env().df.sort_values("x")
+    refuses(lambda: sorted_frame.assign(one=lambda f: f["b"] + 1, t=lambda f: f["one"].cumsum()),
+            UnsupportedOperation, message)
+    assert df._plan == before and df.columns == list(COLS)
+    # The same window in an assign() call of its own works.
+    two = df.assign(one=1).assign(t=lambda f: f.groupby("a")["b"].transform("sum"))
+    assert two.columns == list(COLS) + ["one", "t"]
+
+
 def test_a_condition_that_reads_a_window_must_still_be_boolean():
     df = Env().df
     refuses(lambda: df[df.groupby("a")["b"].transform("sum")], TypeError,
