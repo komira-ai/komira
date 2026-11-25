@@ -26,7 +26,8 @@
 #   naming the query, because such an answer records no columns and would check
 #   nothing.
 # - test_the_run_writes_the_answers_and_the_lock_and_names_one_in_the_other: the
-#   answers file and the lock file exist, the file's header holds the lock's
+#   answers file, the lock file and the 22 query texts (byte for byte the
+#   corpus's) exist, the file's header holds the lock's
 #   fingerprint, DuckDB was started on one thread with the memory limit asked
 #   for and every file of the manifest is a view.
 # - test_unusable_data_stops_before_duckdb_is_asked_anything: a missing table
@@ -54,6 +55,7 @@ from runtime_paths import test_tmpdir
 
 from tpch_answers import (
     ANSWERS_FILE,
+    QUERIES_DIR,
     produce_tpch_sf1_answers,
     record_answers,
     register_tables,
@@ -362,6 +364,9 @@ def test_the_run_writes_the_answers_and_the_lock_and_names_one_in_the_other() ra
     assert_true(text.find(String("# duckdb v1.5.6\n")) >= 0)
     assert_equal(len(parse_references(text).answers), 22)
     assert_true(line.find(lock.fingerprint()) >= 0)
+    for i in range(len(corpus.queries)):
+        var file = out + "/" + String(QUERIES_DIR) + "/" + corpus.queries[i].id + ".sql"
+        assert_equal(Path(file).read_text(), corpus.queries[i].text)
     var all = String("")
     for i in range(len(sent[])):
         all += sent[][i]
