@@ -7,7 +7,8 @@
 #      `@`, function calls, CASE, IN lists, scalar, IN and EXISTS subqueries,
 #      and derived tables, also as a branch of a set operation.
 #   2. One level more is refused with the same message, and a statement nested
-#      100000 levels deep is refused rather than overflowing the stack.
+#      1000 levels deep is refused rather than overflowing the stack: without
+#      the limit, about 300 levels fill an 8 MiB stack in the parser alone.
 #   3. Siblings at depth do not add up: the count returns when a level closes.
 
 from std.testing import TestSuite, assert_equal
@@ -157,17 +158,17 @@ def test_derived_tables_in_set_operations_nest_to_the_maximum() raises:
     for op in [String("UNION ALL"), String("INTERSECT"), String("EXCEPT")]:
         _accepted_at_the_maximum(_derived_set_operations(100, op))
         assert_equal(_refusal(_derived_set_operations(101, op)), _REFUSAL)
-        assert_equal(_refusal(_derived_set_operations(100000, op)), _REFUSAL)
+        assert_equal(_refusal(_derived_set_operations(1000, op)), _REFUSAL)
 
 
-def test_a_statement_nested_one_hundred_thousand_deep_is_refused() raises:
-    assert_equal(_refusal(_parens(100000)), _REFUSAL)
-    assert_equal(_refusal(_nots(100000)), _REFUSAL)
-    assert_equal(_refusal(_minuses(100000)), _REFUSAL)
-    assert_equal(_refusal(_scalar_subqueries(100000)), _REFUSAL)
-    assert_equal(_refusal(_derived_tables(100000)), _REFUSAL)
-    assert_equal(_refusal(_in_lists(100000)), _REFUSAL)
-    assert_equal(_refusal(_calls(100000)), _REFUSAL)
+def test_a_statement_nested_a_thousand_deep_is_refused() raises:
+    assert_equal(_refusal(_parens(1000)), _REFUSAL)
+    assert_equal(_refusal(_nots(1000)), _REFUSAL)
+    assert_equal(_refusal(_minuses(1000)), _REFUSAL)
+    assert_equal(_refusal(_scalar_subqueries(1000)), _REFUSAL)
+    assert_equal(_refusal(_derived_tables(1000)), _REFUSAL)
+    assert_equal(_refusal(_in_lists(1000)), _REFUSAL)
+    assert_equal(_refusal(_calls(1000)), _REFUSAL)
 
 
 def test_siblings_at_depth_do_not_add_up() raises:
@@ -207,8 +208,10 @@ def test_a_token_list_that_ends_inside_parentheses_is_refused() raises:
 
 
 def test_a_token_list_that_ends_on_a_name_is_not_a_call() raises:
-    # A name with no token after it is a column, not a call: the parser
-    # reads it and refuses the missing end of the statement instead.
+    # A name with no token after it is a column, not a call (the guard for a
+    # `(` after a name finds no token and does not read past the list). With
+    # no EOF token the parser stays on the name, so the statement is then
+    # refused where it expects FROM.
     var tokens = tokenize("SELECT x")
     _ = tokens.pop()
     var message = String("")
@@ -216,7 +219,7 @@ def test_a_token_list_that_ends_on_a_name_is_not_a_call() raises:
         _ = parse_sql(tokens^)
     except e:
         message = String(e)
-    assert_equal(message, "SQL syntax error: unexpected trailing tokens after query")
+    assert_equal(message, "SQL syntax error: expected keyword 'from'")
 
 
 def main() raises:
