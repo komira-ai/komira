@@ -458,7 +458,8 @@ tests, which no pull request builds. The rest of this section is about `release-
   `pypi.yml` and `pypi-macos-arm64.yml` to not running on a pull request or a merge group. The five targets of the macOS wheel
   (`//python:komira_wheel_macos_arm64`, `//python:wheel_install_test_macos_arm64`,
   `//python:wheel_libs_macos_arm64`, `//python:wheel_same_macos_arm64`,
-  `//python/smoke:pypi_smoke_macos_arm64`) stay out of the check twice: each has an `EXCLUDED` row in
+  `//python/smoke:pypi_smoke_macos_arm64`) and the pinned macOS pyarrow wheel its install test reads
+  (`//python/tests:pyarrow-25.0.1-cp313-cp313-macosx_12_0_arm64.whl`) stay out of the check twice: each has an `EXCLUDED` row in
   `tools/build/ci/rules.bzl`, so the pull-request selector never picks it, and each has
   `target_compatible_with = DARWIN_ARM64` (limit `pypi-wheel-macos-arm64` in
   `tools/build/platforms/limits.tsv`), so it builds only with `--target-platforms
