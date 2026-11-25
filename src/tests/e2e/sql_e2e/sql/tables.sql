@@ -2,7 +2,9 @@
 -- regression tables (sql/regression_tables.sql), the Parquet files the
 -- pinned DuckDB wrote, read by DuckDB here and registered under the
 -- same names by the Mojo runner (runner.mojo, open_session), so both engines
--- read the same bytes.
+-- read the same bytes. The `_mem` views at the end are the tables komira
+-- registers a second time from memory (register_arrow, the table an Arrow C
+-- stream becomes); DuckDB reads them from the same files.
 CREATE VIEW types AS FROM read_parquet('types.parquet');
 CREATE VIEW nulls AS FROM read_parquet('nulls.parquet');
 CREATE VIEW join_left AS FROM read_parquet('join_left.parquet');
@@ -34,3 +36,6 @@ CREATE VIEW in_supplier AS FROM read_parquet('in_supplier.parquet');
 CREATE VIEW in_partsupp AS FROM read_parquet('in_partsupp.parquet');
 CREATE VIEW in_part AS FROM read_parquet('in_part.parquet');
 CREATE VIEW floats AS FROM read_parquet('floats.parquet');
+-- The resident twins (runner.mojo, has_resident_twin).
+CREATE VIEW lj_customer_mem AS FROM read_parquet('lj_customer.parquet');
+CREATE VIEW lj_orders_mem AS FROM read_parquet('lj_orders.parquet');

@@ -349,7 +349,7 @@ pinned_file(
 )
 
 # Read only by the macOS wheel's install test, which runs from
-# pypi-macos-arm64.yml alone, never in a pull request.
+# the macOS jobs of pypi.yml alone, never in a pull request.
 pinned_file(
     name = PYARROW_MACOS["file"],
     url = PYARROW_MACOS["url"],
@@ -565,7 +565,7 @@ _PROTOBUF_UPPER = [w for w in WHEELS if w["name"] == "protobuf"]
 ) for w in PROTOBUF_EDGES + _PROTOBUF_UPPER]
 
 # Read only by the macOS wheel's install test, which runs from
-# pypi-macos-arm64.yml alone, never in a pull request.
+# the macOS jobs of pypi.yml alone, never in a pull request.
 pinned_file(
     name = PROTOBUF_MACOS["file"],
     url = PROTOBUF_MACOS["url"],

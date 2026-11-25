@@ -242,7 +242,7 @@ wheel_file_test_stamped(
 # The `[file_name]` of two fixtures read back (wheel/file_name_test.zig): each is the one line
 # of its distribution, the stamp's version and its row's tag, and agrees with the wheel the same
 # target wrote (its dist-info directory, METADATA's Version, WHEEL's Tag); a name that does not
-# agree is refused. pypi-macos-arm64.yml asks TestPyPI for the macOS wheel's `[file_name]` before building it.
+# agree is refused. pypi.yml asks TestPyPI for the macOS wheel's `[file_name]` before building it.
 zig_test(
     name = "wheel_file_name_cases",
     exec_compatible_with = LINUX_X86_64,

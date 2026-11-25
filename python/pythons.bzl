@@ -6,7 +6,7 @@ Everything that names the supported Pythons reads PYTHONS: the wheel's
 `Programming Language` classifiers (CLASSIFIERS), the package's tests and the
 wheel's install and upgrade tests, one of each per minor on its pinned
 interpreter (python/BUCK, python/tests/BUCK), and the hosted-runner jobs of
-pypi.yml and pypi-macos-arm64.yml, one per minor and platform (the wheel's
+pypi.yml (the Linux and the macOS jobs), one per minor and platform (the wheel's
 user test and the index smoke): they build the target
 `//python:supported_pythons`, whose sub-target per platform
 (`[linux-x86_64]`, `[macos-arm64]`) is a JSON list of the exact versions
