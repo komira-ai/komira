@@ -19,7 +19,7 @@ from arrow_ipc.c_data_stream_check import check_record_batch_stream
 from column_kernels.compiler_helpers import materialize_selection_if_present
 from containers.slab import Slab
 
-from .engine_sql import SqlOutcome
+from .engine_plan import SqlOutcome
 
 
 struct ArrowResult(Movable):

@@ -1,8 +1,8 @@
-# Port: the libkomira calls that run a query (C ABI 1.3)
+# Port: the libkomira calls that run a query (C ABI 1.3 and 1.8)
 
 Status: port document. `komira_sql_stream` is built (ABI 1.3, with the `ArrowStream`
-golden type and the header's Arrow structs); `komira_plan_stream` and the abort
-containment are not. **EXISTS** names code on `main`; **PROPOSED** is new. Statements the author deduced rather than read are marked *(inferred)*.
+golden type and the header's Arrow structs), and so is `komira_plan_stream` (ABI 1.8,
+over `sdk_exec.engine_plan.run_plan`); the abort containment is not. **EXISTS** names code on `main`; **PROPOSED** is new. Statements the author deduced rather than read are marked *(inferred)*.
 
 `libkomira` is komira's one shared library and its flat C ABI
 ([src/so](../../src/so/README.md)). ABI 1.1 registers and describes sources and
@@ -27,7 +27,7 @@ The callers are thin bindings over these calls: the Python package
 | item | port |
 |---|---|
 | run SQL | `komira_sql_stream(ctx, sql, out)`, from the earlier golden. ABI 1.3 |
-| run a plan | `komira_plan_stream(ctx, plan, plan_len, out)`, from the earlier golden. ABI 1.3. The bytes are an authored `WirePlanEnvelope`, the same input `komira_plan_render` takes. libkomira optimizes it in-process |
+| run a plan | `komira_plan_stream(ctx, plan, plan_len, out)`, from the earlier golden. ABI 1.8 (`komira_sql_stream` landed alone as 1.3, and 1.4 to 1.7 are other calls). The bytes are an authored `WirePlanEnvelope`, the same input `komira_plan_render` takes. libkomira optimizes it in-process |
 | result | an Arrow C stream (`struct ArrowArrayStream`), as in the earlier golden. The caller allocates it and libkomira fills it. The caller owns it after `KOMIRA_OK`. It does not depend on the context, which may be freed first |
 | status codes | the six of ABI 1.1. The port adds none. Every engine refusal is `KOMIRA_ERR_ENGINE` (-3), with the reason in the last error |
 | conventions | ABI 1.1's: the two-call `komira_last_error`, the 64 MiB input bound (-5), and `*out` untouched on any refusal |
@@ -35,12 +35,12 @@ The callers are thin bindings over these calls: the Python package
 | not carried | `komira_register_python_udf`, `komira_declare_sql_udf`, `komira_register_builtin_mojo_udf`, the seven `xl_*` calls, `komira_plan_bytes` and `komira_sql_render` (§9) |
 | new relative to the earlier ABI | session options, cancel, progress, a cancelled status code and credentials. Not decided here (§10) |
 
-The rows' `since` is 1.3 when they land together: 1.2 is the credential calls
-(`komira_credential_add`, `_set`, `_seal`; [credentials_and_writes.md](credentials_and_writes.md)
-decision 8), which landed first. Releases come from `main` automatically, so a row's `since` is
-the version of the first change that lands it on `main`. If `komira_sql_stream` lands alone,
-`komira_plan_stream` takes the next minor. The golden (`src/so/abi/komira.tsv`) holds whichever
-version is true.
+1.2 is the credential calls (`komira_credential_add`, `_set`, `_seal`;
+[credentials_and_writes.md](credentials_and_writes.md) decision 8), which landed first. Releases
+come from `main` automatically, so a row's `since` is the version of the first change that lands
+it on `main`: `komira_sql_stream` landed alone, as 1.3, and `komira_plan_stream` followed as 1.8, after the session options (1.4), the CSV and JSON
+registration calls (1.5), the run handle (1.6) and the error code and step calls (1.7).
+The golden (`src/so/abi/komira.tsv`) holds both.
 
 ## 2. What exists today
 
@@ -96,13 +96,13 @@ komira_plan_stream	c_int32	c_void_p,POINTER(c_ubyte),c_uint64,POINTER(ArrowArray
 ```
 
 The same calls as libkomira golden rows (`symbol<TAB>return<TAB>arguments<TAB>since`).
-The rows of 1.1 and 1.2 stay byte for byte. Only these two rows are added, and no type or
-constant changes:
+The rows of 1.1 and 1.2 stay byte for byte. 1.3 added the first row and 1.8 the second, and
+neither changed a type or a constant:
 
 ```text
-version	1.3
+version	1.8
 komira_sql_stream	Int32	Handle,CStr,ArrowStream	1.3
-komira_plan_stream	Int32	Handle,ConstBytes,UInt64,ArrowStream	1.3
+komira_plan_stream	Int32	Handle,ConstBytes,UInt64,ArrowStream	1.8
 ```
 
 The C prototypes in `komira.h`:
@@ -167,7 +167,7 @@ to every later run on the context.
   design also lifts the refusal, into a bound catalog, for `CREATE TABLE ... AS` and `INSERT`, which
   answer what DuckDB returns: a one-row `Count` stream, or no rows for `CREATE TABLE` with a column
   list ([credentials_and_writes.md](credentials_and_writes.md#10-writes)).
-- **The error text.** **PROPOSED:** the last error text is `<step>: <reason>`,
+- **The error text.** **EXISTS:** the last error text is `<step>: <reason>`,
   where the step is the one that refused (parse, bind, optimize, lower or
   execute). That text is for people, and bindings do not parse it (§6).
 
@@ -183,10 +183,20 @@ bytes `komira_plan_render` renders, and the format the SDKs' plan builders write
   by the UDFs' own. `plan_envelope_from_bytes` already decodes both, for the door
   that carries them later.
 - **The route.** It is `plan_from_bytes`, then `optimize`, `lower_for_context` and
-  `run_lowered_plan`: the tail of `run_sql` after bind. **PROPOSED:** `sdk_exec`
-  gets one `run_plan(mut ctx, var plan: LogicalPlan) -> SqlOutcome`, and `run_sql`
-  calls it after binding. SQL and plans then share one route from the optimizer
-  down.
+  `run_lowered_plan`: the tail of `run_sql` after bind. **EXISTS:** `sdk_exec`
+  has one `run_plan(mut ctx, var plan: LogicalPlan) -> SqlOutcome`
+  (`src/sdk_exec/engine_plan.mojo`), and `run_sql` runs its steps
+  (`run_plan_batch`) after binding. SQL and plans share one route from the
+  optimizer down. `run_plan` replaces the footer cache first, as `run_sql` does;
+  `run_sql` calls the steps without that, because its binder has already read
+  the footers lowering uses.
+- **The error text.** `<step>: <reason>`, where the step is `decode` (the bytes
+  are not a plan this build runs) or the step of `run_plan` that refused
+  (`optimize`, `lower` or `execute`).
+- **No SQL front end.** The door never makes SQL text and never calls the
+  tokenizer, parser or binder. `EngineContext.statements_parsed` counts the
+  statements `run_sql` parses on a context, and the door's tests hold it at 0
+  on the context that ran the plan.
 - **Tables.** A scan leaf carries its own binding (path, schema and fingerprint,
   from `komira_parquet_schema` or the binding calls), so a plan needs no
   registered table.

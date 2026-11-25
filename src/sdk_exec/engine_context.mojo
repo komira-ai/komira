@@ -3,7 +3,8 @@
 # =============================================================================
 #
 # A small state struct; what it can do lives in free functions in sibling
-# modules (`engine_catalog`, `engine_lower`, `engine_execute`, `engine_sql`),
+# modules (`engine_catalog`, `engine_lower`, `engine_execute`, `engine_plan`,
+# `engine_sql`),
 # so a feature that arrives later is a module and not another method here.
 #
 # The context owns:
@@ -15,7 +16,10 @@
 #   * the spill directory, if the caller gave one: a run hands it to the
 #     builder, so a grouped aggregation that outgrows the memory budget spills
 #     its group tables there instead of failing (`engine_execute`). It is not
-#     part of the host profile because it does not change the lowered plan.
+#     part of the host profile because it does not change the lowered plan;
+#   * `statements_parsed`, the number of SQL statements `run_sql` has started
+#     to parse on it. The plan door (`engine_plan.run_plan`) parses none, and
+#     its tests hold it to that by this count.
 #
 # THE FOOTER CACHE IS PINNED TO A QUERY. `parquet_footers.FooterCache`
 # keeps one footer per path for its life and has no cap, so a context that
@@ -70,6 +74,9 @@ struct EngineContext(Movable):
     var host_profile: HostProfile
     var runtime: PerCoreAsyncRuntime[NoopSink]
     var spill_directory: Optional[String]
+    var statements_parsed: Int
+    """How many SQL statements `run_sql` has started to parse on this context,
+    whether they then ran or were refused; 0 for a new context."""
 
     def __init__(out self, options: EngineOptions = EngineOptions()) raises:
         """Probe the host once, apply `options` over it and start the workers.
@@ -114,6 +121,7 @@ struct EngineContext(Movable):
         self.tables = List[RegisteredTable]()
         self.footers = ParquetFooters()
         self.spill_directory = options.spill_directory
+        self.statements_parsed = 0
 
     def begin_query(mut self):
         """Start a query: drop every footer the previous one cached."""
