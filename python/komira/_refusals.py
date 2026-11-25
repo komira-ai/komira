@@ -79,6 +79,11 @@ SERIES = _BOTH | _rows(
         ("cat", "sparse"),
         "the .{name} accessor is not supported: komira has no categorical or sparse dtype",
     ),
+    (
+        ("value_counts",),
+        ".{name}() gives a Series indexed by the values in pandas, and a komira Series has no index: "
+        'count the rows per value with df.groupby(column).size(), and sort them with sort_values("size", ascending=False)',
+    ),
 )
 
 GROUPBY = _rows(

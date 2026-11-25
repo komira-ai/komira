@@ -18,7 +18,8 @@ install page shows names it.
   `df.add_suffix`; `df.astype(dtype or {col: dtype})` and `s.astype(dtype)`, a dtype being a pyarrow
   type, a name of the design's table, a pandas spelling (`"Int64"`, `"boolean"`, `"str"`) or `int`,
   `float`, `bool` and `str`; `df.tail(n)` of a sorted frame; `komira.concat(frames)` of frames with
-  the same columns and types; `s.value_counts()`, a frame of the column and `count`; and the `s.str`
+  the same columns and types; `s.value_counts()` is refused by name, since a komira Series has no index to
+  hold the values (count them with `df.groupby(column).size()`); and the `s.str`
   (`lower`, `upper`, `len`, `startswith`, `endswith`, `contains`, `match`, `fullmatch`, `replace`,
   `slice`, `pad`, `extract`) and `s.dt` (`year`, `quarter`, `month`, `day`, `hour`, `minute`,
   `second`, `microsecond`, `dayofweek`, `dayofyear`, `floor`) accessors. Each builds plan nodes and

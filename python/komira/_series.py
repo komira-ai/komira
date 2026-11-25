@@ -13,8 +13,6 @@ nothing. It is used inside its own frame's verbs: `df[s]` filters by it and
 - Operators build expressions: comparisons, `+ - * /` (true division: the left
   operand of an integer division is cast to float64, as Python divides), unary
   `-`, and `& | ~` over boolean Series. `isin` takes a list of values.
-  `value_counts` of a Series that is a column gives a frame of the values and
-  their `count` (komira/_groupby.py).
 - `astype(dtype)` casts to one Arrow type (komira/_cast.py). `s.str` gives the
   string methods of a string Series and `s.dt` the date and time methods of a
   timestamp or date32 Series (komira/_accessors.py); on a Series of another
@@ -240,28 +238,6 @@ class Series:
             _ops.Compare("eq", *self._widened(self._node, _literal(v, "isin()"))) for v in values
         )
         return self._derive(_ops.or_all(tests) if tests else _ops.Lit(False))
-
-    def value_counts(
-        self,
-        normalize: bool = False,
-        sort: bool = True,
-        ascending: bool = False,
-        bins: object = None,
-        dropna: bool = True,
-    ) -> DataFrame:
-        """A frame of this column's values and `count`, the rows per value;
-        sorted by `count`, descending unless `ascending`, when `sort`. Only a
-        Series that is a column of its frame is counted. Rows with a missing
-        value (NULL, or NaN in a float column) are left out when `dropna`."""
-        from . import _groupby
-
-        self._check_current()
-        if not isinstance(self._node, _ops.ColRef) or self._node.side is not None:
-            raise UnsupportedOperation(
-                "value_counts() of a computed Series counts values the frame does not hold as a column: "
-                "assign it as a column first, then count df[name].value_counts()"
-            )
-        return _groupby.value_counts(self._frame, self._node.name, normalize, sort, ascending, bins, dropna)
 
     def __repr__(self) -> str:
         if self._generation != self._frame._generation:

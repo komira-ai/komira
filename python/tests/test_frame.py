@@ -928,7 +928,7 @@ ALLOWED_IMPORTS = {
     ".:_ops", ".:_refusals", ".:_plan", "._errors:UnsupportedOperation", "._series:Series", "._series:operand",
     "._session:Result", "._session:Session", "._session:_local_path", "._session:default_session",
     "._plan:_wire", ".plan.v1:plan_pb2", "._frame:DataFrame", "os", ".:_groupby", "._groupby:GroupBy",
-    ".:_verbs", ".:_cast", ".:_accessors", "._missing:FLOAT_TYPES", "._missing:present", "._series:_fits",
+    ".:_verbs", ".:_cast", ".:_accessors", "._missing:present", "._series:_fits",
     "typing:Any", "re",
 }
 

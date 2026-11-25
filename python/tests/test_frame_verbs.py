@@ -16,8 +16,8 @@ stand-in that records the plan bytes it is given. Checked:
 - the order rules: which verbs keep a sorted frame sorted, and which do not;
 - every refusal by its class and its full message.
 
-`concat`, `value_counts` and the verbs' names and wire are in
-test_frame_concat_counts.py.
+`concat`, the refusal of `value_counts` and the verbs' names and wire are in
+test_frame_concat.py.
 
     test_frame_verbs.py
 """

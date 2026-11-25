@@ -1,19 +1,20 @@
-"""`komira.concat`, `Series.value_counts` and the names and wire of the new
-frame verbs (komira/_frame.py, komira/_verbs.py, komira/_groupby.py,
-komira/_series.py) with no libkomira: a frame over a Parquet scan whose schema
+"""`komira.concat`, the refusal of `Series.value_counts` and the names and wire
+of the new frame verbs (komira/_frame.py, komira/_verbs.py, komira/_groupby.py,
+komira/_series.py, komira/_refusals.py) with no libkomira: a frame over a Parquet scan whose schema
 is made here, on a session stand-in that records the plan bytes it is given.
 Checked:
 
 - the union `concat` builds, with the projection that reorders a frame's
   columns, the sources of frames from different readers, and every refusal
   of a column set, a type, a nullability or a session, by its full message;
-- the filter, aggregate and sort `value_counts` builds, NaN as missing in a
-  float column, and every refusal by its class and full message;
+- that `value_counts` of a Series is refused by name with its full message,
+  and that the groupby spelling the message gives builds a count per value
+  sorted by `size` descending;
 - that the new verbs are attributes of the frame, even when a column has
   their name, and that a verb's frame reaches the session only as plan
   bytes, at its terminal.
 
-    test_frame_concat_counts.py
+    test_frame_concat.py
 """
 
 import os
@@ -23,7 +24,7 @@ import tempfile
 from komira import _ops
 from komira._errors import UnsupportedOperation
 from komira._frame import DataFrame, concat
-from komira._ops import Agg, BoolOp, Cast, ColRef, Compare, Field, Lit, SortKey, Unary, When
+from komira._ops import BoolOp, Cast, ColRef, Compare, Field, Lit, SortKey, Unary, When
 from komira._plan import encode_plan, parquet_source
 from komira._plan._wire import arrow_id, field, pb
 
@@ -292,130 +293,40 @@ def test_concat_of_a_column_that_allows_missing_values_in_one_frame_only_says_wh
     )
 
 
-# --- value_counts -------------------------------------------------------------------
+# --- value_counts is refused ---------------------------------------------------------
+
+VALUE_COUNTS_MESSAGE = (
+    ".value_counts() gives a Series indexed by the values in pandas, and a komira Series has no index: "
+    'count the rows per value with df.groupby(column).size(), and sort them with sort_values("size", ascending=False)'
+)
 
 
-def counted(plan, column, sort=True, descending=True):
-    """The plan of value_counts: the aggregate of count(*) by `column`, sorted by the count."""
-    plan = _ops.aggregate(plan, (column,), (("count", Agg("count")),))
-    if sort:
-        plan = _ops.sort(plan, (SortKey("count", descending=descending),))
-    return plan
-
-
-def test_value_counts_of_an_int_column_is_count_by_value_sorted_by_count_descending():
+def test_value_counts_of_a_series_is_refused_by_name_and_is_not_an_attribute():
     df = Env().df
-    got = df["a"].value_counts()
-    filtered = _ops.Filter(SCAN, Unary("is_not_null", ColRef("a")))
-    assert got._plan == counted(filtered, "a")
-    assert got.columns == ["a", "count"]
-    assert got.dtypes == {"a": "int64", "count": "int64"}
-    assert got._order() == (SortKey("count", descending=True),)
+    assert not hasattr(df["a"], "value_counts")
+    assert not hasattr(df, "value_counts")
+    try:
+        df["a"].value_counts
+    except AttributeError as e:
+        assert str(e) == VALUE_COUNTS_MESSAGE
+    else:
+        raise AssertionError("value_counts did not raise AttributeError")
 
 
-def test_value_counts_of_string_and_bool_columns_filter_only_null():
-    df = Env().df
-    assert df["s"].value_counts()._plan == counted(_ops.Filter(SCAN, Unary("is_not_null", ColRef("s"))), "s")
-    got = df["ok"].value_counts()
-    assert got._plan == counted(_ops.Filter(SCAN, Unary("is_not_null", ColRef("ok"))), "ok")
-    assert got.dtypes == {"ok": "bool", "count": "int64"}
-
-
-def test_value_counts_of_a_float_column_leaves_out_nan_as_well_as_null():
-    df = Env((("x", "float64"), ("f", "float32"))).df
-    assert df["x"].value_counts()._plan == counted(
-        _ops.Filter(df._plan, present("x", "float64")), "x"
-    )
-    assert df["f"].value_counts()._plan == counted(
-        _ops.Filter(df._plan, present("f", "float32")), "f"
-    )
-
-
-def test_value_counts_of_sort_false_is_unordered_and_ascending_sorts_the_other_way():
-    df = Env().df
-    filtered = _ops.Filter(SCAN, Unary("is_not_null", ColRef("a")))
-    unsorted = df["a"].value_counts(sort=False)
-    assert unsorted._plan == counted(filtered, "a", sort=False) and unsorted._order() is None
-    ascending = df["a"].value_counts(ascending=True)
-    assert ascending._plan == counted(filtered, "a", descending=False)
-    assert df["a"].value_counts(False, True, True)._plan == ascending._plan
-
-
-def test_value_counts_of_dropna_false_keeps_the_null_group_of_a_column_that_is_not_a_float():
-    df = Env().df
-    got = df["s"].value_counts(dropna=False)
-    assert got._plan == counted(SCAN, "s")
-
-
-def test_value_counts_of_a_filtered_or_sorted_frame_counts_its_rows():
-    df = Env().df
-    filtered = df[df["b"] > 1]
-    got = filtered["s"].value_counts()
-    assert got._plan == counted(_ops.Filter(filtered._plan, Unary("is_not_null", ColRef("s"))), "s")
-    ordered = df.sort_values("a")
-    under = ordered["s"].value_counts()
-    assert under._plan == counted(_ops.Sort(_ops.Filter(SCAN, Unary("is_not_null", ColRef("s"))), (SortKey("a"),)), "s")
-
-
-def test_value_counts_refuses_what_it_cannot_honour_by_its_full_message():
-    df = Env().df
-    refuses(
-        lambda: df["a"].value_counts(normalize=True),
-        UnsupportedOperation,
-        "value_counts(normalize=True) divides each count by the row total, which this release does not build: "
-        "use normalize=False and divide the count column by its sum",
-    )
-    refuses(
-        lambda: df["a"].value_counts(bins=3),
-        UnsupportedOperation,
-        "value_counts(bins=...) counts values per numeric range, which this release does not build: "
-        "assign the range of each row as a column, then count that column",
-    )
-    refuses(
-        lambda: Env(FIELDS + (("count", "int64"),)).df["count"].value_counts(),
-        UnsupportedOperation,
-        "value_counts() of the column 'count' would give two output columns named 'count': "
-        "rename the column first, as df.rename(columns={'count': 'value'})",
-    )
-    refuses(
-        lambda: df["x"].value_counts(dropna=False),
-        UnsupportedOperation,
-        "value_counts(dropna=False) of the float64 column 'x' would count NULL and NaN as two groups, "
-        "where pandas counts one missing group: use dropna=True, or fill the missing values first with fillna()",
-    )
-    refuses(
-        lambda: (df["a"] + 1).value_counts(),
-        UnsupportedOperation,
-        "value_counts() of a computed Series counts values the frame does not hold as a column: "
-        "assign it as a column first, then count df[name].value_counts()",
-    )
-    refuses(lambda: df["a"].value_counts(sort="yes"), TypeError, "value_counts sort must be a bool, not str")
-    refuses(lambda: df["a"].value_counts(ascending=1), TypeError, "value_counts ascending must be a bool, not int")
-    refuses(lambda: df["a"].value_counts(dropna=None), TypeError, "value_counts dropna must be a bool, not NoneType")
-    refuses(lambda: df["a"].value_counts(normalize=0), TypeError, "value_counts normalize must be a bool, not int")
-
-
-def test_value_counts_of_a_series_taken_before_the_frame_changed_is_refused():
-    df = Env().df
-    stale = df["a"]
-    df["b"] = df["a"] + 1
-    refuses(
-        lambda: stale.value_counts(),
-        UnsupportedOperation,
-        'this Series was taken from its frame before df["name"] = ... replaced the frame\'s columns: '
-        "take it from the frame again",
-    )
-    assert df["a"].value_counts().columns == ["a", "count"]
+def test_the_spelling_value_counts_names_counts_rows_per_value_sorted_by_size_descending():
+    got = Env().df.groupby("a").size().sort_values("size", ascending=False)
+    assert got.columns == ["a", "size"]
+    assert isinstance(got._plan, _ops.Sort)
+    assert got._plan.keys == (SortKey("size", descending=True),)
 
 
 # --- the names and the wire --------------------------------------------------------------
 
 
-def test_the_new_verbs_are_attributes_of_the_frame_and_value_counts_of_a_series():
+def test_the_new_verbs_are_attributes_of_the_frame():
     df = Env().df
     for name in ("fillna", "dropna", "rename", "add_prefix", "add_suffix", "astype", "tail"):
         assert hasattr(df, name) and callable(getattr(df, name)), name
-    assert hasattr(df["a"], "value_counts")
     assert callable(concat)
 
 
@@ -439,7 +350,6 @@ def test_every_new_verb_reaches_the_session_only_as_the_plan_bytes_at_its_termin
         "add_prefix": lambda env: env.df.add_prefix("p_"),
         "astype": lambda env: env.df.astype({"n": "int64"}),
         "tail": lambda env: sorted_frame(env).tail(3),
-        "value_counts": lambda env: env.df["s"].value_counts(),
     }
     for name, build in verbs.items():
         env = Env()
@@ -466,7 +376,7 @@ def main():
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for _, f in tests:
         f()
-    print("frame concat counts: {} tests".format(len(tests)))
+    print("frame concat: {} tests".format(len(tests)))
 
 
 if __name__ == "__main__":

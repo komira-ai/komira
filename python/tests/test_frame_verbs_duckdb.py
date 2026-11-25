@@ -32,9 +32,9 @@ below is a copy of its own, since a test file cannot import another.
   before the sort, a sort of a head; the answer is in the frame's order;
 - concat: two filtered frames, reordered columns, three frames, one frame, a
   frame with itself, a sort of the concat, frames of two readers (a multiset);
-- value_counts: an int, a string, a bool, a float with NaN dropped, sort=False,
-  ascending=True, dropna=False, a filtered frame's column, a computed column;
-  ordered by count, rows with the same count form a tie group;
+- the spelling value_counts is refused for, groupby(column).size() sorted by
+  size descending: an int, a string, a filtered frame's column; ordered by
+  size, rows with the same size form a tie group;
 - Series.str: lower, upper, len, startswith, endswith, contains (literal, regex,
   case=False), match, fullmatch, replace (literal, every occurrence; regex; regex
   ignoring case), slice (several), pad (left, right, a width shorter and longer
@@ -792,84 +792,30 @@ CONCATS = [
 ]
 
 
-# ---- value_counts ------------------------------------------------------------
-# A column's values and the rows each has, most rows first; rows with one count
-# may come out in any order, so the case is ordered by count alone.
+# ---- the count per value that value_counts is refused for ---------------------
+# value_counts is refused by name; the spelling its message gives is a groupby
+# of the column, its size, sorted by size descending. Rows with one size may
+# come out in any order, so each case is ordered by size alone.
 
-
-def counts_sql(column, where, order="DESC", group_extra=""):
-    return 'SELECT {c}, COUNT(*) AS "count" FROM t {w} GROUP BY {c}{g} ORDER BY "count" {o} NULLS LAST'.format(
-        c=column, w=where, o=order, g=group_extra
-    )
-
-
-COUNTS = [
+COUNTS_BY_GROUP = [
     Case(
-        "value_counts of an int column drops NULL",
-        lambda d: d["k"].value_counts(),
-        counts_sql("k", "WHERE k IS NOT NULL"),
-        ("count",),
+        "groupby size of an int column, sorted by size descending, drops the NULL key",
+        lambda d: d.groupby("k").size().sort_values("size", ascending=False),
+        'SELECT k, COUNT(*) AS "size" FROM t WHERE k IS NOT NULL GROUP BY k ORDER BY "size" DESC NULLS LAST',
+        ("size",),
     ),
     Case(
-        "value_counts of a string column",
-        lambda d: d["s"].value_counts(),
-        counts_sql("s", "WHERE s IS NOT NULL"),
-        ("count",),
+        "groupby size of a string column, sorted by size descending",
+        lambda d: d.groupby("s").size().sort_values("size", ascending=False),
+        'SELECT s, COUNT(*) AS "size" FROM t WHERE s IS NOT NULL GROUP BY s ORDER BY "size" DESC NULLS LAST',
+        ("size",),
     ),
     Case(
-        "value_counts of a bool column",
-        lambda d: d["flag"].value_counts(),
-        counts_sql("flag", "WHERE flag IS NOT NULL"),
-        ("count",),
-    ),
-    Case(
-        "value_counts of a float column drops NULL and NaN",
-        lambda d: d["v"].value_counts(),
-        counts_sql("v", "WHERE v IS NOT NULL AND NOT isnan(v)"),
-        ("count",),
-    ),
-    Case(
-        "value_counts ascending",
-        lambda d: d["k"].value_counts(ascending=True),
-        counts_sql("k", "WHERE k IS NOT NULL", "ASC"),
-        ("count",),
-    ),
-    Case(
-        "value_counts with sort=False is a multiset",
-        lambda d: d["s"].value_counts(sort=False),
-        'SELECT s, COUNT(*) AS "count" FROM t WHERE s IS NOT NULL GROUP BY s',
-    ),
-    Case(
-        "value_counts with dropna=False counts the NULL rows as one value",
-        lambda d: d["k"].value_counts(dropna=False),
-        counts_sql("k", ""),
-        ("count",),
-    ),
-    Case(
-        "value_counts of a string column with dropna=False",
-        lambda d: d["s"].value_counts(dropna=False),
-        counts_sql("s", ""),
-        ("count",),
-    ),
-    Case(
-        "value_counts of a filtered frame's column",
-        lambda d: d[d["n"] > 10]["s"].value_counts(),
-        counts_sql("s", "WHERE n > 10 AND s IS NOT NULL"),
-        ("count",),
-    ),
-    Case(
-        "value_counts of a column assigned from a timestamp field",
-        lambda d: d.assign(m=d["t"].dt.month)["m"].value_counts(),
-        'SELECT CAST(month(t) AS BIGINT) AS m, COUNT(*) AS "count" FROM t WHERE t IS NOT NULL '
-        'GROUP BY CAST(month(t) AS BIGINT) ORDER BY "count" DESC NULLS LAST',
-        ("count",),
-    ),
-    Case(
-        "value_counts then a filter on count keeps the order",
-        lambda d: on(d["s"].value_counts(), lambda f: f[f["count"] > 3]),
-        'SELECT * FROM (SELECT s, COUNT(*) AS "count" FROM t WHERE s IS NOT NULL GROUP BY s) '
-        'WHERE "count" > 3 ORDER BY "count" DESC NULLS LAST',
-        ("count",),
+        "groupby size of a filtered frame, sorted by size descending",
+        lambda d: d[d["n"] > 10].groupby("s").size().sort_values("size", ascending=False),
+        'SELECT s, COUNT(*) AS "size" FROM t WHERE n > 10 AND s IS NOT NULL GROUP BY s '
+        'ORDER BY "size" DESC NULLS LAST',
+        ("size",),
     ),
 ]
 
@@ -1138,8 +1084,8 @@ def test_concat_equals_duckdb_union_all(path):
     run_cases(path, CONCATS)
 
 
-def test_value_counts_equals_duckdb_group_by_count(path):
-    run_cases(path, COUNTS)
+def test_groupby_size_sorted_descending_equals_duckdb_group_by_count(path):
+    run_cases(path, COUNTS_BY_GROUP)
 
 
 def test_str_methods_equal_duckdb_string_functions(path):
@@ -1309,7 +1255,7 @@ WITH_FILE = [
     test_tail_equals_the_last_rows_of_duckdb_order_by,
     test_concat_equals_duckdb_union_all,
     test_concat_of_frames_from_two_readers_equals_duckdb_union_all,
-    test_value_counts_equals_duckdb_group_by_count,
+    test_groupby_size_sorted_descending_equals_duckdb_group_by_count,
     test_str_methods_equal_duckdb_string_functions,
     test_dt_fields_equal_duckdb_date_parts,
     test_casts_and_regexes_the_engine_does_not_run_are_refused_at_the_terminal,
@@ -1340,7 +1286,7 @@ def main(args):
         for test in WITH_FILE:
             test(path)
     assert not FAILED, "{} cases failed:\n".format(len(FAILED)) + "\n".join(FAILED)
-    lists = (TYPES, FILLS, DROPS, RENAMES, CASTS, TAILS, CONCATS, COUNTS, STRS, DTS)
+    lists = (TYPES, FILLS, DROPS, RENAMES, CASTS, TAILS, CONCATS, COUNTS_BY_GROUP, STRS, DTS)
     print("frame verbs duckdb: {} cases".format(sum(len(c) for c in lists)))
 
 

@@ -9,9 +9,9 @@ part of the pandas-shaped skin is built too: its readers, subscripts, `assign`, 
 the plan through `komira_plan_stream`. So are `groupby` with its `GroupBy` reductions and `agg`, the
 frame's own reductions (`agg`, `sum`, `mean`, `median`, `std`, `var`, `min`, `max`, `count`,
 `nunique`) and `drop_duplicates`, in `python/komira/_groupby.py`. So are `fillna`, `dropna`, `rename`,
-`add_prefix`, `add_suffix`, `astype`, `tail`, `komira.concat`, `Series.value_counts` and the `.str` and
+`add_prefix`, `add_suffix`, `astype`, `tail`, `komira.concat` and the `.str` and
 `.dt` accessors (`_frame.py`, `_verbs.py`, `_missing.py`, `_cast.py`, `_accessors.py`). NaN as missing
-(ruling 6) is built in `fillna`, `dropna` and `value_counts`, not yet in the aggregates; `isna`, `notna`
+(ruling 6) is built in `fillna` and `dropna`, not yet in the aggregates; `isna`, `notna`
 and the `Series` reductions are not built yet. `komira.pl` and the other verbs are not built. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
@@ -337,7 +337,7 @@ ruling. Section 7's departures belong to this list as well.
 Each ruling is marked **carried** (the earlier SDK's answer) or **differs** (a ruling of section 12, by
 its number).
 
-1. **There is no index.** Carried, except the integer subscript (D9) and `value_counts` (D16).
+1. **There is no index.** Carried, except the integer subscript (D9).
    - `loc`, `iloc`, `at`, `iat`, `index`, `set_index`, `reset_index`, `sort_index`, `reindex`, and
      pandas' index `join` are refused (use `merge`).
    - A slice subscript `df[0:5]` raises `UnsupportedOperation`.
@@ -351,8 +351,9 @@ its number).
        gives a frame indexed by the output names.
      - `df.sum()` and the other frame reductions give a one-row frame, where pandas gives a `Series`
        indexed by column.
-     - `s.value_counts()` gives a frame with the value column and `count`, where pandas gives a
-       `Series` named `count` indexed by value.
+     - `s.value_counts()` is refused by name: pandas gives a `Series` indexed by value, and a komira
+       `Series` has no index to hold the values. Count the rows per value with
+       `df.groupby(column).size()`, and sort them with `sort_values("size", ascending=False)`.
      - `s.sum()` and the other `Series` reductions are lazy aggregates (section 2), where pandas gives
        a number.
 2. **pandas sorts its groups; polars does not.** Carried; the NULL placement of the sort differs (D4).

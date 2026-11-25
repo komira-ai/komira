@@ -260,10 +260,9 @@ again. The install test runs this program on the installed wheel.
   another order) and the same types; the answer has no row order.
 - **Series.** Comparisons, `+ - * /` (true division, as Python's), unary `-`,
   `& | ~` over boolean Series, `isin([...])` with at most 64 values, `dtype`
-  and `astype(dtype)`. `s.value_counts()` gives a frame of the column and
-  `count`, the rows per value, most first (values that tie come out in any
-  order), missing values left out unless `dropna=False` (`dropna=False` of a float
-  column is refused).
+  and `astype(dtype)`. `s.value_counts()` is refused by name: pandas
+  gives a Series indexed by the values, and a komira Series has no index. Count the rows per value
+  with `df.groupby(column).size()`, and sort them with `sort_values("size", ascending=False)`.
 - **`s.str`** (a string column): `lower`, `upper`, `len`, `startswith`,
   `endswith`, `contains` (a regular expression unless `regex=False`, and
   `case=False`), `match`, `fullmatch`, `replace` (every occurrence, literal
@@ -343,7 +342,7 @@ stats = df[["value"]].median()            # one row, the column value
   `agg`, `first`, `last` and the other choices by row order, `ddof` other
   than 1, `skipna=False`, `nunique(dropna=False)` and `axis=1`. A missing
   value is NULL: unlike pandas, a NaN in a float column is a value in these
-  reductions, not a missing one (`fillna`, `dropna` and `value_counts` do read it as missing).
+  reductions, not a missing one (`fillna` and `dropna` do read it as missing).
 
 protobuf and the generated plan modules are imported by the first reader, not
 by `import komira`.
@@ -392,7 +391,7 @@ The package's layout and API are designed in
 | `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the tests that encode or run a plan; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |
 | `pythons.bzl` | the supported Pythons, the one list of them (Supported Pythons, below) |
-| `tests/` | the tests (`python_binding_test`, and `py_test` for the plan encoder and the frame with no library: `test_plan_expr.py`, `test_plan_expr_goldens.py`, `test_plan_rel.py`, `test_plan_rel_goldens.py`, `test_plan_udf.py`, `test_plan_udf_goldens.py`, `test_plan_no_sql.py`, `test_frame.py`, `test_frame_groupby.py`, `test_frame_verbs.py`, `test_frame_concat_counts.py` and `test_series_accessors.py`), `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, `test_tpch_installed.py` and `tpch_compare.py`, TPC-H q1 to q22 at scale factor 1 through the installed wheel against DuckDB's recorded answers (`:tpch_via_wheel_test`; its answer check is held by `test_tpch_compare.py`), `test_analysis_job.py`, which runs `examples/analysis_job.py` from the installed wheel and compares its answers with DuckDB's (`:analysis_job_test`), and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
+| `tests/` | the tests (`python_binding_test`, and `py_test` for the plan encoder and the frame with no library: `test_plan_expr.py`, `test_plan_expr_goldens.py`, `test_plan_rel.py`, `test_plan_rel_goldens.py`, `test_plan_udf.py`, `test_plan_udf_goldens.py`, `test_plan_no_sql.py`, `test_frame.py`, `test_frame_groupby.py`, `test_frame_verbs.py`, `test_frame_concat.py` and `test_series_accessors.py`), `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, `test_tpch_installed.py` and `tpch_compare.py`, TPC-H q1 to q22 at scale factor 1 through the installed wheel against DuckDB's recorded answers (`:tpch_via_wheel_test`; its answer check is held by `test_tpch_compare.py`), `test_analysis_job.py`, which runs `examples/analysis_job.py` from the installed wheel and compares its answers with DuckDB's (`:analysis_job_test`), and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
 
 ### Supported Pythons
 
@@ -537,11 +536,11 @@ The tests below run on Linux x86_64 as build actions, with
 | `frame_test` | the DataFrame with no library: each verb's node tree, where the row-order rules put each node, each output type, every refusal with its full message, the attribute rules of the frame, the Series and the module for every row of the refusal tables, no dunder running a query, and a terminal sending the encoded plan to the plan door and nothing else, with no SQL in the frame's modules |
 | `frame_groupby_test` | groupby, the reductions and drop_duplicates with no library: each one's node tree (the filter of missing keys below the aggregate, the key sort above it, the zero of an empty sum), its output types, the encoded aggregate, every refusal with its full message, and the GroupBy's attribute rules |
 | `frame_verbs_test` | fillna, dropna, rename, add_prefix, add_suffix, astype and tail with no library: each one's node tree (the not-NaN test of a float column, the CASE of an int32 or float32 column computed in int64 or float64 and cast back, the boolean logic of a bool column, the reversed-key top-n under a sort for tail), where the order is kept, the output types, the encoded plan, and every refusal with its full message |
-| `frame_concat_counts_test` | concat and value_counts with no library: the union and the projection that reorders a later frame, the session, column-set, type and nullability refusals, the count aggregate with its filter and count sort, and every refusal with its full message |
+| `frame_concat_test` | concat and the refusal of value_counts with no library: the union and the projection that reorders a later frame, the session, column-set, type and nullability refusals, the refusal message of value_counts and the plan of the groupby spelling it names, and every refusal with its full message |
 | `series_accessors_test` | `astype`, `.str` and `.dt` of a Series with no library: every dtype spelling, each method's node and type, every refusal with its full message, and the accessors' attribute rules (no `.str` on a non-string Series, the refusal tables, `dir`, no attribute set) |
 | `frame_run_test` | the DataFrame on the real library: the readers over Parquet, CSV and JSON files written by the test, each verb's rows through `komira_plan_stream`, `explain()`, a frame run twice, a missing file and a closed session refused at the reader, the engine's refusal at the terminal, the default session, and an ABI 1.7 stand-in refusing the plan door by the version it needs |
 | `frame_duckdb_test` | frame programs over one Parquet file with NULLs, negative numbers, floats and strings, each equal to DuckDB's answer to the SQL that means the same over the same file, in order where the frame is sorted: the verbs above, groupby and the reductions the engine runs against GROUP BY, the frame's reductions, drop_duplicates against DISTINCT, and the reductions the engine does not run yet refused at the terminal; CPython 3.13 (the minor with a pinned DuckDB) |
-| `frame_verbs_duckdb_test` | the same over a file that adds NaN, float32, timestamp and date columns: fillna, dropna, rename and the affixes, astype, tail, concat, value_counts, and the `.str` and `.dt` methods, each equal to DuckDB's answer to the SQL that means pandas' answer, and the casts and regular expressions the engine does not run refused at the terminal; CPython 3.13 |
+| `frame_verbs_duckdb_test` | the same over a file that adds NaN, float32, timestamp and date columns: fillna, dropna, rename and the affixes, astype, tail, concat, the groupby size sorted descending that value_counts is refused for, and the `.str` and `.dt` methods, each equal to DuckDB's answer to the SQL that means pandas' answer, and the casts and regular expressions the engine does not run refused at the terminal; CPython 3.13 |
 
 The Linux wheel is `./buck2 build //python:komira_wheel`: the package and, in
 `komira/_lib/`, `libkomira[dist]` whole: `libkomira.so`, and in `lib/` its

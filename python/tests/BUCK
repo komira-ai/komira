@@ -876,12 +876,12 @@ _PLAN_EXPR_RUNTIMES = [
 #   engine runs against GROUP BY, the frame's reductions, drop_duplicates
 #   against DISTINCT, and the reductions the engine does not run yet refused
 #   at the terminal with its step.
-# - frame_verbs_test, frame_concat_counts_test and series_accessors_test,
+# - frame_verbs_test, frame_concat_test and series_accessors_test,
 #   with no library, on the same runtimes: the node trees of fillna, dropna
 #   (a float column's not-NaN test), rename, add_prefix, add_suffix, astype,
 #   tail (a reversed-key top-n under the frame's sort), concat (the union and
-#   the projection that reorders a later frame), value_counts (the count
-#   aggregate and its sort), Series.astype and the .str and .dt methods, their
+#   the projection that reorders a later frame), the refusal of value_counts
+#   by name, Series.astype and the .str and .dt methods, their
 #   output types, where the order is kept, every refusal with its full
 #   message, and the accessors' attribute rules.
 # - frame_verbs_duckdb_test, on CPython 3.13: those verbs over a Parquet file
@@ -919,8 +919,8 @@ _PLAN_EXPR_RUNTIMES = [
 ) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
 
 [py_test(
-    name = "frame_concat_counts_test{}".format(suffix),
-    src = "test_frame_concat_counts.py",
+    name = "frame_concat_test{}".format(suffix),
+    src = "test_frame_concat.py",
     deps = [
         "//python:komira_with_plan_modules",
         _PROTOBUF[p["suffix"]][runtime],
