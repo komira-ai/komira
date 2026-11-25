@@ -10,9 +10,12 @@
 //!         writes `mopm.lock` (version 3) in the current directory, one entry per
 //!         file of each package of the closure (a package with a build for each of
 //!         two subdirs is locked twice, as mopm locks it), named by its full name. A name without a namespace is
-//!         refused, as mopm 0.0.113 refuses it. A package the set lacks is asked of the
-//!         registry, as the real one does, and the registry's refusal fails the
-//!         command. Both options are required: the e2e names its registry itself.
+//!         refused, as mopm 0.0.113 refuses it. A package the set lacks (or holds as `skip`) is
+//!         asked of the registry, as the real one does, and the registry's refusal fails the
+//!         command. A package the set uploads is asked of the registry too, as mopm 0.0.138 asks
+//!         it: a 404 or a refusal leaves the set's package as it is, and a record the registry
+//!         holds is more than this stand-in takes. Both options are required: the e2e names its
+//!         registry itself.
 //!     fake mopm_swallow add ...
 //!         The same, but a refusal of the registry is ignored: the package is left
 //!         out of the lock and the command exits 0.
@@ -90,6 +93,15 @@ fn askRegistry(a: Allocator, registry: []const u8, name: []const u8, mode: Mode)
     die("mopm: {s}{s} answered HTTP {d}: {s}", .{ registry, target, answer.status, answer.body });
 }
 
+/// What mopm 0.0.138 does for a package the overlay holds: asks the registry for its index, to add the
+/// staged builds to a version the registry already holds. A 404 (the registry holds none of it) and a
+/// refusal both leave the staged package alone, as the real one does (its core/overlay.zig, `Index`).
+fn askRegistryStaged(a: Allocator, registry: []const u8, name: []const u8) void {
+    const target = offline.indexTarget(a, name) catch die("mopm: out of memory", .{});
+    const answer = offline.get(a, registry, target) catch |e| die("mopm: cannot read {s}{s}: {s}", .{ registry, target, @errorName(e) });
+    if (answer.status == 200) die("mopm: this stand-in has no registry record of {s} to add the staged builds to", .{name});
+}
+
 fn mopmAdd(a: Allocator, args: []const []const u8, mode: Mode) void {
     const from_plan = mode == .plan_hashes or mode == .plan_only;
     // add NAME@=VERSION --overlay DIR --registry URL: the e2e names an offline registry itself
@@ -122,10 +134,13 @@ fn mopmAdd(a: Allocator, args: []const []const u8, mode: Mode) void {
         var seen = false;
         for (locked.items) |l| seen = seen or std.mem.eql(u8, l.name, name);
         if (seen) continue;
-        const m = plan.member(name) orelse {
+        const held = plan.member(name);
+        if (held == null or !std.mem.eql(u8, held.?.action, "upload")) {
             askRegistry(a, registry, name, mode);
             continue;
-        };
+        }
+        const m = held.?;
+        askRegistryStaged(a, registry, name);
         if (std.mem.eql(u8, name, want_name) and !std.mem.eql(u8, m.version, want_version)) {
             die("mopm: no {s} {s} (the overlay holds {s})", .{ name, want_version, m.version });
         }
