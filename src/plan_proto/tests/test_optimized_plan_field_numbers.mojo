@@ -41,6 +41,7 @@ from proto_codec import Serializable, decode_proto, encode_proto
 from plan_proto.plan import WirePlan
 from plan_proto.optimized_plan import (
     DeclaredNeeds,
+    DigestTrailer,
     ExchangeEdge,
     OptimizedPlan,
     OptimizedPlanBody,
@@ -329,6 +330,19 @@ def _needs(mut L: _Ledger, scope: String) raises -> List[UInt8]:
     return b^
 
 
+def _trailer(mut L: _Ledger) raises -> List[UInt8]:
+    var b = List[UInt8]()
+    _u(L, b, "DigestTrailer.format_version", 6)
+    _u(L, b, "DigestTrailer.optimizer_contract_version", 7)
+    _m(L, b, "DigestTrailer.write_target", _raw_write_target("out/q2/"))
+    _m(L, b, "DigestTrailer.udfs", _udf_ref_value("komira/python"))
+    _m(L, b, "DigestTrailer.udfs", _udf_ref_value("komira/node"))
+    _m(L, b, "DigestTrailer.runtimes", _runtime(L, "komira/python", "cp312"))
+    _s(L, b, "DigestTrailer.data_scopes", "orders")
+    _s(L, b, "DigestTrailer.data_scopes", "orders-2")
+    return b^
+
+
 def _udf_ref_value(runtime: String) -> List[UInt8]:
     """UdfRef { 16 code { 1 runtime } }: a value, not a pin (the UdfRef
     census is test_plan_field_numbers_udf.mojo)."""
@@ -428,6 +442,23 @@ def test_needs(mut L: _Ledger) raises:
     assert_equal(m.udfs[0].code.value().runtime, "komira/python", "DeclaredNeeds: m.udfs[0]")
     assert_equal(m.udfs[1].code.value().runtime, "komira/node", "DeclaredNeeds: m.udfs[1]")
     _same(encode_proto(m), b, "DeclaredNeeds")
+
+
+def test_digest_trailer(mut L: _Ledger) raises:
+    var b = _trailer(L)
+    var m = decode_proto[DigestTrailer](b.copy())
+    assert_equal(m.format_version, UInt32(6), "DigestTrailer: m.format_version")
+    assert_equal(m.optimizer_contract_version, UInt32(7), "DigestTrailer: m.optimizer_contract_version")
+    assert_equal(m.write_target.value().path, "out/q2/", "DigestTrailer: m.write_target.value().path")
+    assert_equal(len(m.udfs), 2, "DigestTrailer: len(m.udfs)")
+    assert_equal(m.udfs[0].code.value().runtime, "komira/python", "DigestTrailer: m.udfs[0]")
+    assert_equal(m.udfs[1].code.value().runtime, "komira/node", "DigestTrailer: m.udfs[1]")
+    assert_equal(len(m.runtimes), 1, "DigestTrailer: len(m.runtimes)")
+    assert_equal(m.runtimes[0].runtime_abi, "cp312", "DigestTrailer: m.runtimes[0].runtime_abi")
+    assert_equal(len(m.data_scopes), 2, "DigestTrailer: len(m.data_scopes)")
+    assert_equal(m.data_scopes[0], "orders", "DigestTrailer: m.data_scopes[0]")
+    assert_equal(m.data_scopes[1], "orders-2", "DigestTrailer: m.data_scopes[1]")
+    _same(encode_proto(m), b, "DigestTrailer")
 
 
 def test_pins_and_advice(mut L: _Ledger) raises:
@@ -570,6 +601,8 @@ def _residue_of(message: String, b: List[UInt8]) raises -> String:
         return _residue[PlanAdvice](b)
     elif message == "DeclaredNeeds":
         return _residue[DeclaredNeeds](b)
+    elif message == "DigestTrailer":
+        return _residue[DigestTrailer](b)
     elif message == "ScanPin":
         return _residue[ScanPin](b)
     elif message == "ScanStats":
@@ -623,6 +656,7 @@ def main() raises:
     var L = _Ledger(LEDGER)
     test_producer_stamp(L)
     test_needs(L)
+    test_digest_trailer(L)
     test_pins_and_advice(L)
     test_optimized_plan(L)
     test_body_and_shared(L)
@@ -633,7 +667,7 @@ def main() raises:
     print("ALL optimized_plan.proto FIELD NUMBERS PINNED:", len(L.names), "fields")
 
 
-# ---- THE LEDGER: every field of the 13 messages, numbers written by hand --------------
+# ---- THE LEDGER: every field of the 14 messages, numbers written by hand --------------
 # Change a number here only with the .proto, and only one no released
 # format_version carries: a released number is permanent.
 
@@ -661,6 +695,12 @@ DeclaredNeeds.data_scopes 5
 DeclaredNeeds.unbounded 8
 DeclaredNeeds.runtimes 9
 DeclaredNeeds.udfs 2
+DigestTrailer.format_version 1
+DigestTrailer.optimizer_contract_version 2
+DigestTrailer.write_target 3
+DigestTrailer.udfs 4
+DigestTrailer.runtimes 5
+DigestTrailer.data_scopes 6
 RuntimeNeed.runtime 1
 RuntimeNeed.runtime_abi 2
 ScanPin.binding_key 1
@@ -707,6 +747,8 @@ DeclaredNeeds 4 len held
 DeclaredNeeds 6 len reserved
 DeclaredNeeds 7 len reserved
 DeclaredNeeds 10 len held
+DigestTrailer 7 len held
+DigestTrailer 8 len held
 ScanPin 3 len held
 ScanPin 4 len held
 ScanPin 5 len held

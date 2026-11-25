@@ -3,17 +3,18 @@
 # on a LogicalPlan do not cross the wire silently.
 # =============================================================================
 #
-# `JoinData.build_side`, `JoinData.adaptive_allowed`, `AggregateData.mode` and
-# `ScanData.boundedness` have no `plan.proto` field yet, and a PLAN_EXCHANGE
-# node has no message arm. Encoding any of them as if it were absent would
-# decode as the default: a join that builds on the right, a single aggregate,
-# a bounded scan, no exchange — a smaller plan than the one built, with
-# nothing raised. So each is refused by name, and a node holding the default
-# still encodes and round-trips (the control: a refusal that fired on the
-# default would be a codec that refuses every join).
+# `JoinData.adaptive_allowed`, `AggregateData.mode` and `ScanData.boundedness`
+# have no `plan.proto` field, `JoinData.build_side` has one that only the
+# OPTIMIZED context writes (test_plan_wire_optimized_context.mojo), and a
+# PLAN_EXCHANGE node has no message arm. Encoding any of them as if it were
+# absent would decode as the default: a single aggregate, a bounded scan, a
+# join that builds on the right, no exchange — a smaller plan than the one
+# built, with nothing raised. So each is refused by name in the RAW encoder,
+# and a node holding the default still encodes and round-trips (the control: a
+# refusal that fired on the default would be a codec that refuses every join).
 #
-# Mutants: delete any one refusal in `_plan_to_wire`; the matching test sees
-# bytes where it expects `PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION`.
+# Each test expects `PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION` where an
+# encoder that did not refuse would have produced bytes.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true

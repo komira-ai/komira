@@ -5773,6 +5773,7 @@ def _wire_slot_registry() -> List[String]:
     r.append(String("WireJoinNode|6|algo_hint||JoinAlgo"))
     r.append(String("WireJoinNode|7|has_residual||"))
     r.append(String("WireJoinNode|8|residual|WireExpr|"))
+    r.append(String("WireJoinNode|9|build_side||JoinBuildSide"))
     r.append(String("WireJsonExtract|1|parent|WireExpr|"))
     r.append(String("WireJsonExtract|2|path_segments||"))
     r.append(String("WireJsonExtract|3|output_arrow_type_id||"))
@@ -5989,6 +5990,7 @@ def _wire_enum_members() -> List[String]:
     r.append(String("FrameBound|0,1,2,3,4,5"))
     r.append(String("FrameUnits|0,1,2"))
     r.append(String("JoinAlgo|0,1,2,3"))
+    r.append(String("JoinBuildSide|0,1,2"))
     r.append(String("JoinType|0,1,2,3,4,5,6,7"))
     r.append(String("MathFn1|0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24"))
     r.append(String("MathFn2|0,1,2"))
@@ -6030,6 +6032,18 @@ def _slot_exemptions() -> List[String]:
         + " a format it does not implement. The refusal itself IS asserted, by"
         + " token, in test_an_unknown_format_version_is_refused_not_best_effort,"
         + " which forges the bytes rather than asking the encoder for them."
+    )
+    r.append(
+        String("WireJoinNode|9|CENSUS:")
+        + "`build_side` is a recorded optimizer decision that only the"
+        + " OPTIMIZED context writes (plan_wire_optimized.mojo). This corpus"
+        + " goes through `plan_to_bytes`, the RAW encoder, which writes the"
+        + " unspecified value for every join, so the slot takes one value here"
+        + " and the census half cannot move it. The perturbation half still"
+        + " runs: the RAW decoder refuses a set value. The OPTIMIZED context,"
+        + " where LEFT and RIGHT are written, is asserted slot by slot in"
+        + " test_plan_wire_optimized_context.mojo (wire numbers 1 and 2, the"
+        + " round trip of each, the refusal of an unspecified or undeclared value)."
     )
     return r^
 
@@ -7602,7 +7616,7 @@ def _parquet_leaf_b() raises -> LogicalPlan:
     )
 
 
-comptime _WIRE_SLOTS_REACHED_FLOOR: Int = 288
+comptime _WIRE_SLOTS_REACHED_FLOOR: Int = 289
 # ⚠ `WireExpr.col_idx` AND `WireColIdx.index` ARE NOT REACHED, AND THE FORMAT
 # DID NOT LOSE THEM — the encoder still writes both and `plan.proto` still
 # declares them. A DECODED plan carrying one is refused by the value gate
@@ -8530,7 +8544,7 @@ def _append_varint_field_to_the_envelopes_plan(
     return out^
 
 
-comptime _ENUM_SLOTS_PIN: Int = 38
+comptime _ENUM_SLOTS_PIN: Int = 39
 """How many wire slots carry a DECLARED enum.
 
 The number is a property of the FORMAT, so it moves only when the format does.
@@ -8560,7 +8574,7 @@ with no length prefix. A bare `uint32` there would be a slot that can name a
 column type, or an arity, that nobody wrote.
 """
 
-comptime _FLIP_VACUOUS_ENUM_SLOTS_PIN: Int = 4
+comptime _FLIP_VACUOUS_ENUM_SLOTS_PIN: Int = 5
 """How many of them a plain `bytes[off] ^ 1` mutation could not lie to.
 
 A space whose live wire numbers are such that flipping bit 0 never lands on
@@ -8577,7 +8591,9 @@ the vocabulary allocates its members, not of the corpus. A pin that comes back
 down with no stated cause reads as a weakened operator — so say which, when it
 moves."""
 
-comptime _ENUM_MUTATION_SITES_PIN: Int = 2794
+# 2794 -> 2796: the corpus holds two joins, and each now writes the new
+# `WireJoinNode.build_side` slot (JoinBuildSide), one enum site apiece.
+comptime _ENUM_MUTATION_SITES_PIN: Int = 2796
 """How many perturbation sites `_census` mutated with the ENUM operator.
 
 The reach is per-column, not per-node: `WireField.dtype_code` IS ON EVERY

@@ -1,0 +1,65 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The optimized plan's serialization (docs/design/optimized_plan.md §7.1,
+# §7.2): the canonical protobuf encoder, the digest, the producer and the
+# executor's admission.
+#
+# `closure_excludes` holds the boundary §7.3 states: a host that links this
+# package must not link the optimizer. Analysis fails when the optimizer
+# enters this package's closure, directly or through another package
+# (tools/build/mojo/README.md).
+#
+# `test_data` names plan_proto's protoc canonical encodings of the optimized-plan
+# messages (`canonical_fixture_*` there): the reference bytes `encode_canonical`
+# must equal. Wire plans are covered by hand-built messages in
+# tests/test_canonical_wire_plan.mojo, since plan_wire exports no fixtures
+# to this package.
+mojo_library(
+    name = "optimized_plan",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    closure_excludes = ["optimizer"],
+    deps = [
+        "//src/arrow:arrow",
+        "//src/crypto:crypto",
+        "//src/encoding:encoding",
+        "//src/json:json",
+        "//src/optimized_plan_header:optimized_plan_header",
+        "//src/plan_expr:plan_expr",
+        "//src/plan_ir:plan_ir",
+        "//src/plan_proto:plan_proto",
+        "//src/plan_stats:plan_stats",
+        "//src/plan_wire:plan_wire",
+        "//src/proto_codec:proto_codec",
+        "//src/protobuf:protobuf",
+    ],
+    test_srcs = [
+        "tests/test_admit_refusals.mojo",
+        "tests/test_canonical_encoder.mojo",
+        "tests/test_canonical_goldens.mojo",
+        "tests/test_canonical_wire_plan.mojo",
+        "tests/test_optimized_golden.mojo",
+        "tests/test_round_trip.mojo",
+    ],
+    test_data = {
+        # A produced plan frozen as bytes, read by the test that produces it.
+        "tests/test_optimized_golden.mojo": ["tests/fixtures/optimized_plan_join_aggregate.hex"],
+        # plan_proto's protoc goldens, by the names the test opens.
+        "tests/test_canonical_goldens.mojo": {
+            "fixtures/declared_needs.canonical.hex": "//src/plan_proto:canonical_fixture_declared_needs",
+            "fixtures/digest_trailer.canonical.hex": "//src/plan_proto:canonical_fixture_digest_trailer",
+            "fixtures/exchange_edge.canonical.hex": "//src/plan_proto:canonical_fixture_exchange_edge",
+            "fixtures/optimized_plan.canonical.hex": "//src/plan_proto:canonical_fixture_optimized_plan",
+            "fixtures/optimized_plan_body.canonical.hex": "//src/plan_proto:canonical_fixture_optimized_plan_body",
+            "fixtures/optimized_segment.canonical.hex": "//src/plan_proto:canonical_fixture_optimized_segment",
+            "fixtures/optimized_segment_dag.canonical.hex": "//src/plan_proto:canonical_fixture_optimized_segment_dag",
+            "fixtures/pin_group.canonical.hex": "//src/plan_proto:canonical_fixture_pin_group",
+            "fixtures/plan_advice.canonical.hex": "//src/plan_proto:canonical_fixture_plan_advice",
+            "fixtures/producer_stamp.canonical.hex": "//src/plan_proto:canonical_fixture_producer_stamp",
+            "fixtures/runtime_need.canonical.hex": "//src/plan_proto:canonical_fixture_runtime_need",
+            "fixtures/scan_pin.canonical.hex": "//src/plan_proto:canonical_fixture_scan_pin",
+            "fixtures/scan_stats.canonical.hex": "//src/plan_proto:canonical_fixture_scan_stats",
+            "fixtures/shared_subplan.canonical.hex": "//src/plan_proto:canonical_fixture_shared_subplan",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

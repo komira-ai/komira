@@ -64,22 +64,22 @@ GRAPH_JSON = r'''{
       "srcs": [
         {"path": "src/plan_proto/generated/plan_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
         {"path": "src/plan_proto/generated/plan_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p01.mojo", "sha256": "c12126861ca1debe6ea8d12ccf5c915518f96ddc069b5eea314d1f534f76cea6"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p02.mojo", "sha256": "651c77271685fea42eb006473761e3a8481519fba00ab662fb3f43e969a4b00a"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p03.mojo", "sha256": "c69814eb951cbe5ed7ef86df75feb1e846eff79ca9c95401aa1bedc2916155de"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p04.mojo", "sha256": "7a3f89586b4d816328b98a54187b6df2256665c06a9a3cded37d2fac48bc463f"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p05.mojo", "sha256": "4001672673e6699b823fd967c84388fdc25c3dce25fdcd83d63ee17814d87608"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p06.mojo", "sha256": "28921f47f60a61d2c95579cb1b7ccfc49882e435d06ed794bd91fd05cdd6b799"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p07.mojo", "sha256": "74705ccc8be59ed67157158f352a08582f5e4da8e4ac95b0c8075295647bb28f"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p01.mojo", "sha256": "4c93ef67eee24dab2669fc018816a68c08de0e456457258d62b9532fafe0aecb"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p02.mojo", "sha256": "12595200ce8e8277a553d2664611c0f34d317df06ddd02109e338c3ad4b532af"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p03.mojo", "sha256": "7e3fb3f84c08689b56e578bb2394b4baef0fcee6bb3013e0864e984afff820e4"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p04.mojo", "sha256": "128b374fbb22fbd2ede61faccb7947caca71c5e6ffca9479e5b88580d34af0cb"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p05.mojo", "sha256": "40f5178c5b63e068a6a35592862be59eb7a26afae3b6ef3c991b717fd7b4d395"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p06.mojo", "sha256": "9ceb44a46371bdd43ce4bfb623bbb959054f6c0e411128add7ab6213fffd12b2"},
-        {"path": "src/plan_proto/generated/plan_proto/optimized_plan.mojo", "sha256": "20695c1698c377ac9f44ba5caed5b5f7a1038ba3382ac520cf3608cc9c235b01"},
-        {"path": "src/plan_proto/generated/plan_proto/plan.mojo", "sha256": "2188219a8a0de67fe668e3cd656cf3b6659725517a7167aafa6f6f000097d348"},
-        {"path": "src/plan_proto/generated/plan_proto/plan_vocabulary.mojo", "sha256": "7c4eb04af4817226e138d187ad36237a165f5262daf2e98a7d3350c8fcc4ed4c"}
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p01.mojo", "sha256": "c293959a1ccf78e33b242061d3f705ede82ca17db8f5eb1845e9559b7ba5de66"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p02.mojo", "sha256": "c518644ea95e203017bc58eb3fe9ffee202cc85d6c9f8188191e2e4f86a6592b"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p03.mojo", "sha256": "d600f2a0edc8e011013b6a35d743f950a6768648295b7ac7234a335bd26bc7b9"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p04.mojo", "sha256": "d19823fc81dc6cebbf0a1f2e9f2cf258d59dc98379aa81ac7d99d59a3198da4d"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p05.mojo", "sha256": "f6b95cdffffc32fc8d62068e3ce557903e2f5955781d060a34d6a40a7592ea4b"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p06.mojo", "sha256": "37ee082b596348ec8c03a1dc46918c23775252f516b7c43e6553f6332298f5ae"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p07.mojo", "sha256": "01fa8bd39da18328f5ef21da9b8daf948bafc8b6ea7a2be4a815e5da61a9cf94"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p01.mojo", "sha256": "1ae4cdf96d64b9f03cb7f228c21440284e562f40f3fdcb1b0be4d2ca11727ee2"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p02.mojo", "sha256": "d597f18d12a3b16c6afae44d4c9aaa8ca4bd8b6f276aff40e95e414020f97d17"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p03.mojo", "sha256": "8d2e0e03273b2294ab3f1ff48832f0e21c19d8740c4446c897fc5805d3f7b8df"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p04.mojo", "sha256": "9b99849a2873c456a9ced1e2f6a8205fc99b1110aadb4893822414adfd60c39d"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p05.mojo", "sha256": "eb55305dc6edc0c14dd5305143ea114fbc90cb7c6a77f25cb847306919798460"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p06.mojo", "sha256": "9eb370488f80dd626f376bc10e5fa20100c8473f30684dd52e7c1ced44e7ea0f"},
+        {"path": "src/plan_proto/generated/plan_proto/optimized_plan.mojo", "sha256": "b023496b40849a19ecbdd965c376003cf019a05b25fd79a5d4618b0668022033"},
+        {"path": "src/plan_proto/generated/plan_proto/plan.mojo", "sha256": "e123c78575a60c6d93f6924754e5f28e4d3016bc3048d4358c07390c968930f2"},
+        {"path": "src/plan_proto/generated/plan_proto/plan_vocabulary.mojo", "sha256": "56065a32708ece1e69be8af15eac10552ae39b6876dda87e86f5119577b36249"}
       ],
       "deps": ["komira-ai/proto_codec@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -93,7 +93,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "5294336f21b35c39570eda3d793a518379f3d6e04307bc1e73e0f7474a0b94f2"}
+        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "d297d0853d8e517bfcdac66d749404b2d3d05a1d4312384c74153daf2683ca63"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -107,7 +107,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "7dece02999b5af0f9642c3e1b8a56e66ea06bc3f883e55f995bed531c8651e8d"}
+        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "c1d8b057027610631fc9136218e6a6fe9c02678f18131aa8e42c7cd62d616c88"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -121,7 +121,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "c64310777f4ea45d9a7e19b7f2f2f4abbb01cf5edf802e2d50f2d89f5bf08588"}
+        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "da924fa5a8042481131aa44ee94f01a44c3a26b41a58f8b70c1f0455aa61a40b"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -149,7 +149,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "0c3a4c1c2b1a7924d093e1fb89e84e8c5dcfe2ada16c3958c77be09387fa74ab"}
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "b8ba84ba887d48733e6be5bb82eede6a1774308e332b87588d96975709a4722a"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -177,7 +177,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_field_numbers_plan.mojo", "sha256": "4c461542626310472f8e71b22e1c3fb6e29fa6995eb72fa0241d45501b3e692f"}
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_plan.mojo", "sha256": "b41a299f3e983a6f532916544d14f59bf17a1d43b990f6951badcddb9835be40"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -305,22 +305,22 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "srcs": [
         {"path": "src/plan_proto/generated/plan_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
         {"path": "src/plan_proto/generated/plan_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p01.mojo", "sha256": "c12126861ca1debe6ea8d12ccf5c915518f96ddc069b5eea314d1f534f76cea6"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p02.mojo", "sha256": "651c77271685fea42eb006473761e3a8481519fba00ab662fb3f43e969a4b00a"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p03.mojo", "sha256": "c69814eb951cbe5ed7ef86df75feb1e846eff79ca9c95401aa1bedc2916155de"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p04.mojo", "sha256": "7a3f89586b4d816328b98a54187b6df2256665c06a9a3cded37d2fac48bc463f"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p05.mojo", "sha256": "4001672673e6699b823fd967c84388fdc25c3dce25fdcd83d63ee17814d87608"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p06.mojo", "sha256": "28921f47f60a61d2c95579cb1b7ccfc49882e435d06ed794bd91fd05cdd6b799"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p07.mojo", "sha256": "74705ccc8be59ed67157158f352a08582f5e4da8e4ac95b0c8075295647bb28f"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p01.mojo", "sha256": "4c93ef67eee24dab2669fc018816a68c08de0e456457258d62b9532fafe0aecb"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p02.mojo", "sha256": "12595200ce8e8277a553d2664611c0f34d317df06ddd02109e338c3ad4b532af"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p03.mojo", "sha256": "7e3fb3f84c08689b56e578bb2394b4baef0fcee6bb3013e0864e984afff820e4"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p04.mojo", "sha256": "128b374fbb22fbd2ede61faccb7947caca71c5e6ffca9479e5b88580d34af0cb"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p05.mojo", "sha256": "40f5178c5b63e068a6a35592862be59eb7a26afae3b6ef3c991b717fd7b4d395"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p06.mojo", "sha256": "9ceb44a46371bdd43ce4bfb623bbb959054f6c0e411128add7ab6213fffd12b2"},
-        {"path": "src/plan_proto/generated/plan_proto/optimized_plan.mojo", "sha256": "20695c1698c377ac9f44ba5caed5b5f7a1038ba3382ac520cf3608cc9c235b01"},
-        {"path": "src/plan_proto/generated/plan_proto/plan.mojo", "sha256": "2188219a8a0de67fe668e3cd656cf3b6659725517a7167aafa6f6f000097d348"},
-        {"path": "src/plan_proto/generated/plan_proto/plan_vocabulary.mojo", "sha256": "7c4eb04af4817226e138d187ad36237a165f5262daf2e98a7d3350c8fcc4ed4c"}
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p01.mojo", "sha256": "c293959a1ccf78e33b242061d3f705ede82ca17db8f5eb1845e9559b7ba5de66"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p02.mojo", "sha256": "c518644ea95e203017bc58eb3fe9ffee202cc85d6c9f8188191e2e4f86a6592b"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p03.mojo", "sha256": "d600f2a0edc8e011013b6a35d743f950a6768648295b7ac7234a335bd26bc7b9"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p04.mojo", "sha256": "d19823fc81dc6cebbf0a1f2e9f2cf258d59dc98379aa81ac7d99d59a3198da4d"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p05.mojo", "sha256": "f6b95cdffffc32fc8d62068e3ce557903e2f5955781d060a34d6a40a7592ea4b"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p06.mojo", "sha256": "37ee082b596348ec8c03a1dc46918c23775252f516b7c43e6553f6332298f5ae"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p07.mojo", "sha256": "01fa8bd39da18328f5ef21da9b8daf948bafc8b6ea7a2be4a815e5da61a9cf94"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p01.mojo", "sha256": "1ae4cdf96d64b9f03cb7f228c21440284e562f40f3fdcb1b0be4d2ca11727ee2"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p02.mojo", "sha256": "d597f18d12a3b16c6afae44d4c9aaa8ca4bd8b6f276aff40e95e414020f97d17"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p03.mojo", "sha256": "8d2e0e03273b2294ab3f1ff48832f0e21c19d8740c4446c897fc5805d3f7b8df"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p04.mojo", "sha256": "9b99849a2873c456a9ced1e2f6a8205fc99b1110aadb4893822414adfd60c39d"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p05.mojo", "sha256": "eb55305dc6edc0c14dd5305143ea114fbc90cb7c6a77f25cb847306919798460"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p06.mojo", "sha256": "9eb370488f80dd626f376bc10e5fa20100c8473f30684dd52e7c1ced44e7ea0f"},
+        {"path": "src/plan_proto/generated/plan_proto/optimized_plan.mojo", "sha256": "b023496b40849a19ecbdd965c376003cf019a05b25fd79a5d4618b0668022033"},
+        {"path": "src/plan_proto/generated/plan_proto/plan.mojo", "sha256": "e123c78575a60c6d93f6924754e5f28e4d3016bc3048d4358c07390c968930f2"},
+        {"path": "src/plan_proto/generated/plan_proto/plan_vocabulary.mojo", "sha256": "56065a32708ece1e69be8af15eac10552ae39b6876dda87e86f5119577b36249"}
       ],
       "deps": ["komira-ai/proto_codec@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -334,7 +334,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "5294336f21b35c39570eda3d793a518379f3d6e04307bc1e73e0f7474a0b94f2"}
+        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "d297d0853d8e517bfcdac66d749404b2d3d05a1d4312384c74153daf2683ca63"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -348,7 +348,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "7dece02999b5af0f9642c3e1b8a56e66ea06bc3f883e55f995bed531c8651e8d"}
+        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "c1d8b057027610631fc9136218e6a6fe9c02678f18131aa8e42c7cd62d616c88"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -362,7 +362,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "c64310777f4ea45d9a7e19b7f2f2f4abbb01cf5edf802e2d50f2d89f5bf08588"}
+        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "da924fa5a8042481131aa44ee94f01a44c3a26b41a58f8b70c1f0455aa61a40b"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -390,7 +390,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "0c3a4c1c2b1a7924d093e1fb89e84e8c5dcfe2ada16c3958c77be09387fa74ab"}
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "b8ba84ba887d48733e6be5bb82eede6a1774308e332b87588d96975709a4722a"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -418,7 +418,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_field_numbers_plan.mojo", "sha256": "4c461542626310472f8e71b22e1c3fb6e29fa6995eb72fa0241d45501b3e692f"}
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_plan.mojo", "sha256": "b41a299f3e983a6f532916544d14f59bf17a1d43b990f6951badcddb9835be40"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -543,22 +543,22 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "srcs": [
         {"path": "src/plan_proto/generated/plan_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
         {"path": "src/plan_proto/generated/plan_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p01.mojo", "sha256": "c12126861ca1debe6ea8d12ccf5c915518f96ddc069b5eea314d1f534f76cea6"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p02.mojo", "sha256": "651c77271685fea42eb006473761e3a8481519fba00ab662fb3f43e969a4b00a"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p03.mojo", "sha256": "c69814eb951cbe5ed7ef86df75feb1e846eff79ca9c95401aa1bedc2916155de"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p04.mojo", "sha256": "7a3f89586b4d816328b98a54187b6df2256665c06a9a3cded37d2fac48bc463f"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p05.mojo", "sha256": "4001672673e6699b823fd967c84388fdc25c3dce25fdcd83d63ee17814d87608"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p06.mojo", "sha256": "28921f47f60a61d2c95579cb1b7ccfc49882e435d06ed794bd91fd05cdd6b799"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p07.mojo", "sha256": "74705ccc8be59ed67157158f352a08582f5e4da8e4ac95b0c8075295647bb28f"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p01.mojo", "sha256": "4c93ef67eee24dab2669fc018816a68c08de0e456457258d62b9532fafe0aecb"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p02.mojo", "sha256": "12595200ce8e8277a553d2664611c0f34d317df06ddd02109e338c3ad4b532af"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p03.mojo", "sha256": "7e3fb3f84c08689b56e578bb2394b4baef0fcee6bb3013e0864e984afff820e4"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p04.mojo", "sha256": "128b374fbb22fbd2ede61faccb7947caca71c5e6ffca9479e5b88580d34af0cb"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p05.mojo", "sha256": "40f5178c5b63e068a6a35592862be59eb7a26afae3b6ef3c991b717fd7b4d395"},
-        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p06.mojo", "sha256": "9ceb44a46371bdd43ce4bfb623bbb959054f6c0e411128add7ab6213fffd12b2"},
-        {"path": "src/plan_proto/generated/plan_proto/optimized_plan.mojo", "sha256": "20695c1698c377ac9f44ba5caed5b5f7a1038ba3382ac520cf3608cc9c235b01"},
-        {"path": "src/plan_proto/generated/plan_proto/plan.mojo", "sha256": "2188219a8a0de67fe668e3cd656cf3b6659725517a7167aafa6f6f000097d348"},
-        {"path": "src/plan_proto/generated/plan_proto/plan_vocabulary.mojo", "sha256": "7c4eb04af4817226e138d187ad36237a165f5262daf2e98a7d3350c8fcc4ed4c"}
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p01.mojo", "sha256": "c293959a1ccf78e33b242061d3f705ede82ca17db8f5eb1845e9559b7ba5de66"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p02.mojo", "sha256": "c518644ea95e203017bc58eb3fe9ffee202cc85d6c9f8188191e2e4f86a6592b"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p03.mojo", "sha256": "d600f2a0edc8e011013b6a35d743f950a6768648295b7ac7234a335bd26bc7b9"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p04.mojo", "sha256": "d19823fc81dc6cebbf0a1f2e9f2cf258d59dc98379aa81ac7d99d59a3198da4d"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p05.mojo", "sha256": "f6b95cdffffc32fc8d62068e3ce557903e2f5955781d060a34d6a40a7592ea4b"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p06.mojo", "sha256": "37ee082b596348ec8c03a1dc46918c23775252f516b7c43e6553f6332298f5ae"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p07.mojo", "sha256": "01fa8bd39da18328f5ef21da9b8daf948bafc8b6ea7a2be4a815e5da61a9cf94"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p01.mojo", "sha256": "1ae4cdf96d64b9f03cb7f228c21440284e562f40f3fdcb1b0be4d2ca11727ee2"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p02.mojo", "sha256": "d597f18d12a3b16c6afae44d4c9aaa8ca4bd8b6f276aff40e95e414020f97d17"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p03.mojo", "sha256": "8d2e0e03273b2294ab3f1ff48832f0e21c19d8740c4446c897fc5805d3f7b8df"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p04.mojo", "sha256": "9b99849a2873c456a9ced1e2f6a8205fc99b1110aadb4893822414adfd60c39d"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p05.mojo", "sha256": "eb55305dc6edc0c14dd5305143ea114fbc90cb7c6a77f25cb847306919798460"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p06.mojo", "sha256": "9eb370488f80dd626f376bc10e5fa20100c8473f30684dd52e7c1ced44e7ea0f"},
+        {"path": "src/plan_proto/generated/plan_proto/optimized_plan.mojo", "sha256": "b023496b40849a19ecbdd965c376003cf019a05b25fd79a5d4618b0668022033"},
+        {"path": "src/plan_proto/generated/plan_proto/plan.mojo", "sha256": "e123c78575a60c6d93f6924754e5f28e4d3016bc3048d4358c07390c968930f2"},
+        {"path": "src/plan_proto/generated/plan_proto/plan_vocabulary.mojo", "sha256": "56065a32708ece1e69be8af15eac10552ae39b6876dda87e86f5119577b36249"}
       ],
       "deps": ["komira-ai/proto_codec@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -572,7 +572,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "5294336f21b35c39570eda3d793a518379f3d6e04307bc1e73e0f7474a0b94f2"}
+        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "d297d0853d8e517bfcdac66d749404b2d3d05a1d4312384c74153daf2683ca63"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -586,7 +586,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "7dece02999b5af0f9642c3e1b8a56e66ea06bc3f883e55f995bed531c8651e8d"}
+        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "c1d8b057027610631fc9136218e6a6fe9c02678f18131aa8e42c7cd62d616c88"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -600,7 +600,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "c64310777f4ea45d9a7e19b7f2f2f4abbb01cf5edf802e2d50f2d89f5bf08588"}
+        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "da924fa5a8042481131aa44ee94f01a44c3a26b41a58f8b70c1f0455aa61a40b"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -628,7 +628,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "0c3a4c1c2b1a7924d093e1fb89e84e8c5dcfe2ada16c3958c77be09387fa74ab"}
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "b8ba84ba887d48733e6be5bb82eede6a1774308e332b87588d96975709a4722a"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -656,7 +656,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/plan_proto/tests/test_plan_field_numbers_plan.mojo", "sha256": "4c461542626310472f8e71b22e1c3fb6e29fa6995eb72fa0241d45501b3e692f"}
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_plan.mojo", "sha256": "b41a299f3e983a6f532916544d14f59bf17a1d43b990f6951badcddb9835be40"}
       ],
       "deps": ["komira-ai/plan_proto@0.1.0#mojo1.1.0/lib"],
       "natives": [],
