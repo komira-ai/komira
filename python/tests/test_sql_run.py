@@ -24,7 +24,6 @@ import sys
 import threading
 
 import komira
-from komira import KomiraError
 from komira import _native
 
 MAIN = threading.main_thread().ident
