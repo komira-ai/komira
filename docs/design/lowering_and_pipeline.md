@@ -218,10 +218,12 @@ that starts to emit `E4` cannot be silently serialized.
 **Combine order** (`order_key_kind`): `ORDER_NONE` is for exact folds (integer sums, counts, min, max, `DECIMAL`
 sums, §7.1) and for every segment of the MVP: the merge order cannot change a bit. `ORDER_ROW_RANGE` reduces grain
 states in source row-range order and is set on a segment whose sink folds floats into grain state (a float `SUM` or
-`AVG`, ungrouped or dense; step 9 of §7.3, which built the ungrouped case with one morsel position as the grain).
+`AVG`, ungrouped or grouped; step 9 of §7.3, which built the ungrouped case with one morsel position as the grain, and
+the grouped float fold after it, which keeps that grain per group).
 `ORDER_PARTITION_ID` emits the partitions of a partitioned sink in
 partition id order: it fixes the output order and says nothing about the float reduction inside a partition (§4.3). The
-first slices set `ORDER_NONE` only; step 9 sets `ORDER_ROW_RANGE` on the ungrouped float case. What `ORDER_ROW_RANGE`
+first slices set `ORDER_NONE` only; step 9 sets `ORDER_ROW_RANGE` on the ungrouped float case, and the grouped float fold
+on the grouped one. What `ORDER_ROW_RANGE`
 asks of the driver is in §3.3 and open point O1, and what step 9 built is after the table of §7.3.
 
 **What the cutter refuses.** An `ASOF` join (`SINK_ASOF_JOIN`), a sort-merge join (`SINK_SMJ_BUILD`), the IR's
@@ -245,7 +247,7 @@ that reads a sort or a top-n through nothing but projections and other limits, i
 keeping that range of the sort's order (src/lowering/README.md). A limit with a filter between it and the sort, and a
 limit with an offset over rows in no stated order, are refused (`LOWERING_UNCUTTABLE_NODE`): no segment records an
 order, so the rows such a limit keeps are not defined. An ungrouped float `SUM` or `AVG` is cut with `ORDER_ROW_RANGE` since step 9 of §7.3, and is
-bit-reproducible across worker counts; a grouped one is not served yet.
+bit-reproducible across worker counts; so is a grouped one, since the grouped float fold (after step 9's paragraph).
 
 ### 2.4 What lowering may and may not do
 
@@ -460,7 +462,9 @@ per-grain state is grains times groups, and the grain count grows with the input
 promised for the ungrouped sinks (built in step 9) and for the dense grouped sinks of §4.3 (not built yet), whose state is bounded by facts the footers
 hold (row groups x key domain x state width, under a byte cap the cutter holds). Every other grouped float sum uses the
 partitioned sink of §4.3, whose results are not reproducible bit for bit (§4.3 says why); they hold within the
-tolerance the fixture states and are disclosed as such on the benchmark board. Exact folds (integer, `DECIMAL`) are
+tolerance the fixture states and are disclosed as such on the benchmark board. What is built departs from this scope:
+with no dense or partitioned grouped sink, the grouped sinks keep a grain per (position, group) and are bit-identical
+too, at the memory cost the grouped float fold paragraph of §7.3 states. Exact folds (integer, `DECIMAL`) are
 bit-identical everywhere. Tests (§8): in the MVP, an exact fold on one, two and seven workers gives equal bits; from
 step 9, a float `SUM` and `AVG` in the promised classes do.
 
@@ -979,7 +983,8 @@ ranking functions, `NTILE`, `LAG`, `LEAD`, `FIRST_VALUE`, `LAST_VALUE`, `NTH_VAL
 `RANGE` frame is served. The schema the sink declares marks a `SUM`, `AVG`, `MIN` or `MAX` column nullable when its
 argument column is, and a `SUM`, `AVG`, `MIN`, `MAX`, `FIRST_VALUE` or `LAST_VALUE` column nullable when its frame can be
 empty. Not built: a partition top-n and a parallel window sink.
-**What step 9 built, against the row above.** The ungrouped sink, the only one that folds a float argument, is
+**What step 9 built, against the row above.** The ungrouped sink, the only one that folded a float argument at step 9 (the
+grouped sinks do since the grouped float fold below), is
 reproducible; neither 9a nor `GrainSourceImpl` was built, because the sources already stamp a position on every morsel:
 the Parquet source's partition id is its flat row group times 2^20 plus the morsel's index in that row group (the
 origin hint is the index), and a resident batch's or producer output's is the index of its slot, which is what
@@ -998,6 +1003,20 @@ not its worker count, so the promise is one lowered plan, any number of workers.
 aggregate per morsel, drawn from the segment pool, so it grows with the morsels read (a 10^9-row scan at 65,536-row
 morsels is about 15,000 cell sets). Not built: morsel ids from positions (the ids stay arrival stamps, which nothing
 reads for order), the dense grouped sink of slice 5b and its float fold, and a byte cap the cutter holds.
+
+**The grouped float fold, after step 9.** The grouped sinks (`sink_group_agg`, `sink_string_group_agg`) fold `FLOAT32`
+and `FLOAT64` arguments with the steps of the ungrouped sink, and `lowering.cut_aggregate` sets `ORDER_ROW_RANGE` on a
+grouped aggregation with a float `SUM` or `AVG` as on an ungrouped one; `plan_check` accepts `ORDER_ROW_RANGE` on every
+`SINK_AGG`. Built `by_position`, a grouped sink keeps step 9's grain of one morsel position per group
+(`pipeline_exec.group_positions`): a worker records, per position it folded, one float cell (a count and a double, 16
+bytes) for each group the position's rows reached and each float `SUM`, `AVG`, `MIN` and `MAX`, and `combine` merges those
+cells into the merged groups in position order after the workers' tables. This departs from the scope of §3.3, which
+promised bit-identity for the dense grouped sink only and left the other grouped float sums to the partitioned sink's
+tolerance: no dense or partitioned grouped sink exists, and the grain per group costs one entry per (position, group)
+pair, so the state is small when a morsel reaches few groups and at most one entry per row when it reaches many. It is
+charged to the segment pool, and a denial fails the query by name rather than giving a fold by worker; a sink that
+folds by position does not spill. The byte cap of §3.3, which would choose the fold by worker above a bound the footers
+give, is not built.
 
 Some pull requests of the list are stacked on others; their order is theirs. A step lists only what it needs. Joins are
 step 3 and 20 of the 22 TPC-H queries need one, so the board covers two TPC-H queries until step 3; the post-MVP order
@@ -1036,7 +1055,7 @@ condition. A test that needs a worker to be cancelled uses a source that cancels
 | Driver over fakes | source, operator and sink fakes: every morsel reaches the sink once; the end of input is seen once; the first error wins and stops the others; a limit stops the source | a lost or doubled morsel; a worker that keeps running after a failure |
 | Morsel ids (step 9a) | two schedules over one file give the same id for the same morsel; ids are distinct and ordered by (unit position, sub-morsel index), also for a unit cut into several morsels | an id from an arrival counter; two emit helpers minting overlapping ids |
 | Exact folds across workers (MVP) | a decimal `SUM`, an integer `SUM`, a `COUNT` and the `DOUBLE` `AVG` of a decimal over a fixed input are bit-identical on one, two and seven workers, also in a partitioned sink | a merge that depends on the schedule; an `AVG` computed from rounded partial quotients |
-| Float determinism (step 9b) | in the promised classes (§3.3): a float `SUM` and `AVG` over a fixed input, ungrouped and dense, are bit-identical on one, two and seven workers | a combine in completion order; two workers folding one grain |
+| Float determinism (step 9b) | in the promised classes (§3.3): a float `SUM` and `AVG` over a fixed input, ungrouped and dense, are bit-identical on one, two and seven workers (the grouped float fold: grouped, on one, four and sixteen) | a combine in completion order; two workers folding one grain |
 | Driver policy | the driver raises on an edge tag it has no policy for | a cutter that emits `E4` early and is silently serialized |
 | Purity closure | a `selftest_scenario` of `komira//tools/build/selftest` (the family of `analysis_refusals_mojo`: a `buck2 test` target that drives a nested buck2 on the farm) analyzes, for each refused package, a negative fixture under `tests//negative/closure_excludes` that lists that package in `deps` and expects the exact refusal message, and the real `lowering`, which depends on `async_api`, is the positive control: a dep named `async_api` is not refused | a purity claim the build cannot see; a check that matches by prefix |
 | Sinks against an oracle | each aggregation sink matches a naive row-at-a-time oracle on random inputs with NULLs, empty input, one group, many groups, repeated and colliding keys, dictionary keys across several row groups with different dictionaries | a dictionary code used as a group key across chunks |
@@ -1084,7 +1103,7 @@ recommendation each.
 | D5 | Where the shared-subplan elimination and the scan-dedup passes go | Into `optimizer`, as plan rewrites, after the MVP; Q1 and Q6 do not need them | Into lowering as host rules | Lowering runs no optimizer pass (§2.4); a pass that rewrites the plan is the optimizer's by definition, and a host that applies it differently from the producer breaks "hosts never re-optimize". |
 | D6 | How configuration reaches the engine | One `EngineOptions` struct filled by the caller from its flags; options that change the plan are inputs of `lower` through the host profile; no environment read in any package of this design (§5.2) | Keep some environment variables as mode markers | A flag is required and parsed at startup; the project rule admits environment variables only for platform-set markers, secret material and provider credentials, and a performance switch is none of these. |
 
-| D7 | What determinism is promised for float aggregates | Exact folds (integer, `DECIMAL`, count, min, max) are bit-identical on every schedule at no cost, and the MVP promises exactly that. For floats (step 9): bit-identity across worker counts for ungrouped sinks and for dense grouped sinks, whose per-grain state is bounded by footer facts (row groups x key domain x state width, under a byte cap); every other grouped float sum uses the partitioned sink and is stated within tolerance, disclosed on the board | (a) Bit-identity for every float sink, with grain state in the grouped sinks: reproducible, but memory is grains x groups and grows with the input (unbounded at 10^5 to 10^7 groups). (b) Order-insensitive float folds (compensated or fixed-width accumulators) everywhere: reproducible at a measured throughput cost. (c) No promise: cheapest, and no test can assert it | The grain state is the only scheme that reproduces a plain double sum, and it is affordable exactly where the footers bound it. For the partitioned case the choice between (b) and tolerance is a measured one; recommendation: tolerance first, (b) if the board shows a comparison that needs it. Open: whether a published board may carry a tolerance for the partitioned float case. |
+| D7 | What determinism is promised for float aggregates | Exact folds (integer, `DECIMAL`, count, min, max) are bit-identical on every schedule at no cost, and the MVP promises exactly that. For floats (step 9): bit-identity across worker counts for ungrouped sinks and for dense grouped sinks, whose per-grain state is bounded by footer facts (row groups x key domain x state width, under a byte cap); every other grouped float sum uses the partitioned sink and is stated within tolerance, disclosed on the board | (a) Bit-identity for every float sink, with grain state in the grouped sinks: reproducible, but memory is grains x groups and grows with the input (unbounded at 10^5 to 10^7 groups). (b) Order-insensitive float folds (compensated or fixed-width accumulators) everywhere: reproducible at a measured throughput cost. (c) No promise: cheapest, and no test can assert it | The grain state is the only scheme that reproduces a plain double sum, and it is affordable exactly where the footers bound it. For the partitioned case the choice between (b) and tolerance is a measured one; recommendation: tolerance first, (b) if the board shows a comparison that needs it. Open: whether a published board may carry a tolerance for the partitioned float case. Built so far: (a) for the grouped sinks that exist, a grain per (position, group) the rows reach rather than grains x groups (the grouped float fold, §7.3), charged to the pool and refused by name when denied; no dense or partitioned grouped sink and no byte cap. |
 | D8 | How grouped aggregation scales | A grouped sink is dense when the footers bound an integer key's domain at 65,536 keys or fewer, and radix-partitioned otherwise, with a fixed partition count and a parallel finalize of one task per partition through the sink trait's existing partition hooks (§4.3); the class is chosen from the row and the footer's key range, never from an estimated group count. A composite row-layout key (2 to 4 mixed columns, compare-by-row) is the later row that serves the mixed-key queries (step 8 of §7.3) | Per-worker tables with a serial merge, partitioned only above an estimated group count | A serial merge is Amdahl-bound on high-cardinality GROUP BY, and a footer cannot estimate group counts for string, float or sparse keys, so an estimate gate would be a guess; the partition-flush kernel and the trait's partition hooks are already on `main`. The cost: a small fixed partitioning cost on low-cardinality queries such as Q1, which the board will show; and a float fold in a partitioned sink is not reproducible bit for bit (§4.3). |
 | D9 | How `lowering` stays pure | A new leaf `host_profile` holding the `HostProfile` value and morsel sizing, with detection split from the value and left in `engine_runtime` (`host_detect`); an exact-name `closure_excludes` attribute in `lowering/BUCK` (and `lowering_rules/BUCK`), shown able to fail by `analysis_refusals_mojo` rows (§2.5, §8) | Move the four modules whole, bringing detection and its probe imports into the leaf; or keep `engine_runtime` as a dependency and drop the claim that the build enforces purity | `deps` is the full transitive closure and the runtime package depends on file-system, object-store, async and shuffle packages, so the claim is false with it as a dependency. The split keeps probe code and `l2_share` out of the leaf and leaves `lower` nothing that reads the host; `host_probe` is in the closure regardless, through `byte_buffer`. Cost: touching four modules and 26 importers in a package other lanes edit, in slice 1a, and splitting one test file. |
 | D10 | Whether the memory pool of a segment is atomic | Yes, from slice 3, the first slice with a sink that grows: each worker's slot reservation draws blocks from one segment pool by atomic grant and tallies plainly inside the block, so workers of one segment and, later, two running segments can share it (§4.5); the root reservation is the only bound in the MVP (§3.4) | A plain tally per breaker, which neither workers of one segment nor two running segments can share | A fixed per-worker share starves a skewed worker while others sit idle; a plain tally shared by workers races. |

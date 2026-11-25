@@ -662,6 +662,11 @@ _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".ts
 #   that adds each row group from +0.0 in row order and the row groups in file
 #   order (exact 1.0 / 0.25 for 1e16, 1, -1e16, 1; mixed magnitudes with NULLs;
 #   under a WHERE), and an integer sum beside them stays an exact DECIMAL(38, 0).
+# - test_run_sql_grouped_float_workers: run_sql GROUP BY an INT64 key (with a
+#   NULL group), a STRING key and both over a DOUBLE column in small row groups on 1,
+#   4 and 16 workers: each group's sum, avg, min, max and counts have the bits
+#   of a model that adds each row group per group from +0.0 and the row groups
+#   in file order; sum(v * 2.0) likewise; 1e16, 1, -1e16, 1 per group is 1.0.
 # - test_run_sql_group_keys: run_sql over a Parquet table of DATE32, BOOL,
 #   DECIMAL(12, 2), DECIMAL(30, 4) and INT64 columns in several row groups:
 #   GROUP BY one DATE32, BOOL or DECIMAL column equals an oracle computed in
@@ -967,6 +972,7 @@ mojo_library(
         "tests/test_run_sql_gcs_azure.mojo",
         "tests/test_run_sql_distinct.mojo",
         "tests/test_run_sql_float_sum_workers.mojo",
+        "tests/test_run_sql_grouped_float_workers.mojo",
         "tests/test_run_sql_group_keys.mojo",
         "tests/test_run_sql_group_keys_mixed.mojo",
         "tests/test_run_sql_iceberg.mojo",

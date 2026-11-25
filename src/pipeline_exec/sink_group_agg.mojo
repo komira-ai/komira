@@ -32,6 +32,17 @@
 # to the group's count. The order of the output groups is unspecified: a plan
 # that needs an order sorts.
 #
+# A FLOAT32 or FLOAT64 argument folds as in the ungrouped sink: SUM and AVG a
+# double sum from +0.0, MIN and MAX in DuckDB's order of floats (`agg_fold`).
+# Merged in worker order, a group's float SUM or AVG depends in its last bits
+# on which worker took which morsel. By position (the segment is
+# ORDER_ROW_RANGE, `by_position`; `lowering` cuts a grouped float SUM or AVG
+# so) each worker folds its float SUM, AVG, MIN and MAX per source position
+# and group instead (`group_positions`), and `combine` merges those cells into
+# the merged groups in source position order, so a group's answer is the same
+# bits on every worker count and schedule. The other aggregates fold into the
+# worker's table as above.
+#
 # Memory is charged as the tables grow, not once: every doubling of a table's
 # capacity is charged to the worker's reservation before it is made
 # (`segment_pool`), and the merged table is charged to the sink's own
@@ -67,18 +78,21 @@
 # partition, the workers' tables still in memory are written to disk (the
 # partitions not merged yet), freed with their reservations, and the partition
 # is merged again from disk; a denial with no table left to write is refused
-# by name. The folds are exact integer folds and merge in any order to the
-# same cell, so the rows are the rows without a spill (their order is
-# unspecified either way), and the overflow rule is the one above: a sum that
-# leaves 128 bits only when partials are added is refused at that add.
+# by name. The integer folds are exact and merge in any order to the same
+# cell, as do float MIN and MAX up to which of -0.0 and 0.0 is kept, so the
+# rows are the rows without a spill (their order is unspecified either way),
+# a float SUM or AVG differing at most in the last bits, as between worker
+# counts; and the overflow rule is the one above: a sum that leaves 128 bits
+# only when partials are added is refused at that add.
 #
 # Not charged to the pool: writing a chunk builds its batch and its encoding,
 # and reading one back the bytes read and the decoded batch, each at most
 # twice the bytes of the groups of one partition of one table; both are freed
 # before the next chunk. The spill files are deleted when `combine` is done,
 # or when the sink is dropped. A sink with a COUNT(DISTINCT) aggregate does
-# not spill (its per-group value sets are kept apart from the table): it
-# refuses as without a spill directory and says why.
+# not spill (its per-group value sets are kept apart from the table), nor does
+# a sink that folds by position (its grains name the groups of the worker's
+# table): either refuses as without a spill directory and says why.
 #
 # Refused when the sink is built: no group-by expression, an aggregate the
 # sink does not serve, an aggregate without its argument, an output schema
@@ -132,6 +146,7 @@ from .count_distinct import (
     admit_distinct,
     read_distinct_column,
 )
+from .group_positions import GroupPositions, merge_positions
 from .group_keys import (
     KeyColumn,
     key_output_column,
@@ -154,6 +169,7 @@ struct _GroupSlot(Movable):
     var scratch_nulls: List[UInt8]
     var started: Bool
     var spill: GroupSpill
+    var positions: GroupPositions
 
     def __init__(
         out self,
@@ -162,9 +178,11 @@ struct _GroupSlot(Movable):
         na: Int,
         max_groups: Int,
         var reservation: WorkerReservation,
+        var position_reservation: WorkerReservation,
         spill_dir: String,
     ):
         self.table = GroupTable(nc, na, max_groups)
+        self.positions = GroupPositions(position_reservation^)
         self.spill = GroupSpill(spill_dir, nc, na)
         self.map = None
         self.reservation = reservation^
@@ -220,6 +238,8 @@ struct GroupAggSink(MorselSinkImpl):
     # What the pool last denied a partitioned combine, for its refusal.
     var _denied_bytes: Int
     var _denied_what: String
+    # Fold the float aggregates by source position (ORDER_ROW_RANGE).
+    var _by_position: Bool
 
     def __init__(
         out self,
@@ -229,6 +249,7 @@ struct GroupAggSink(MorselSinkImpl):
         seg_id: Int,
         max_groups: Int = MAX_GROUP_CAPACITY,
         spill_dir: String = "",
+        by_position: Bool = False,
     ) raises:
         var where_ = (
             "pipeline_exec: the grouped aggregation sink of segment "
@@ -329,6 +350,7 @@ struct GroupAggSink(MorselSinkImpl):
         for _ in range(nk):
             self._merged_arrows.append(ArrowType.NULL)
         self._combined = False
+        self._by_position = by_position
         self._spill_dir = String("")
         self._spill_off = String("")
         if spill_dir != "":
@@ -337,6 +359,11 @@ struct GroupAggSink(MorselSinkImpl):
                     self._spill_off = (
                         "a COUNT(DISTINCT) aggregate does not spill"
                     )
+            if self._spill_off == "" and by_position:
+                self._spill_off = (
+                    "a sink that folds its float aggregates by source"
+                    " position does not spill"
+                )
             if self._spill_off == "":
                 self._spill_dir = spill_dir
         self._parts = List[RecordBatch]()
@@ -386,6 +413,7 @@ struct GroupAggSink(MorselSinkImpl):
                         len(self._funcs),
                         self._max_groups,
                         WorkerReservation(self._pool.share()),
+                        WorkerReservation(self._pool.share()),
                         self._spill_dir,
                     )
                 )
@@ -414,6 +442,8 @@ struct GroupAggSink(MorselSinkImpl):
             selected = morsel.batch.selection_mask_true_count()
         if selected == 0:
             return
+        var partition_id = morsel.partition_id
+        var origin_hint = morsel.origin_hint
         _ = slot.map.value().execute(morsel)
         var dense = materialize_selection_if_present(morsel^.take_batch())
         var nk = self._nk
@@ -471,6 +501,14 @@ struct GroupAggSink(MorselSinkImpl):
                         self._labels[i],
                     )
                 )
+        if self._by_position:
+            if not slot.positions.begin(
+                self._funcs, args, self._labels, partition_id, origin_hint
+            ):
+                raise self._denied(
+                    slot.positions.denied_bytes,
+                    "its float folds by source position",
+                )
         for r in range(selected):
             for k in range(nk):
                 var at = self._cell_at[k]
@@ -505,8 +543,20 @@ struct GroupAggSink(MorselSinkImpl):
                 raise self._refused(
                     slot.table.too_many, slot.table.denied_bytes
                 )
+            # The first of the group's cells in this morsel's grain, when the
+            # sink folds floats by position.
+            var base = -1
+            if slot.positions.np > 0:
+                base = slot.positions.row_for(g)
+                if base < 0:
+                    raise self._denied(
+                        slot.positions.denied_bytes,
+                        "its float folds by source position",
+                    )
             for i in range(na):
-                if self._funcs[i] == AGG_COUNT_DISTINCT:
+                if base >= 0 and slot.positions.slot_of[i] >= 0:
+                    slot.positions.fold(base, i, self._funcs[i], args[i], r)
+                elif self._funcs[i] == AGG_COUNT_DISTINCT:
                     admit_distinct(
                         slot.distinct,
                         i,
@@ -715,6 +765,10 @@ struct GroupAggSink(MorselSinkImpl):
             scratch_cells.append(0)
             scratch_nulls.append(0)
         var distinct = DistinctMerge(na, WorkerReservation(self._pool.share()))
+        # By position: each worker's grains and the merged group of each of
+        # its groups, merged after every worker's table.
+        var positions = List[GroupPositions]()
+        var group_maps = List[List[Int]]()
         for w in range(len(self._slots)):
             self._merge_key_types(w)
             ref slot = self._slots[w][]
@@ -753,9 +807,26 @@ struct GroupAggSink(MorselSinkImpl):
                 self._pool,
             )
             # This worker is merged: free its tables and return its memory.
+            # Its grains move out with their own reservation.
             slot.table = GroupTable(nc, na, self._max_groups)
             slot.distinct = DistinctSlot(na)
             slot.reservation.give_back_all()
+            if self._by_position:
+                var moved = GroupPositions(WorkerReservation(self._pool.share()))
+                swap(moved, slot.positions)
+                positions.append(moved^)
+                group_maps.append(group_map^)
+        if self._by_position:
+            merge_positions(
+                positions,
+                group_maps,
+                self._merged.cells,
+                self._funcs,
+                self._labels,
+                self._where,
+            )
+            for w in range(len(positions)):
+                positions[w].reservation.give_back_all()
         distinct.finish()
         self._combined = True
 

@@ -270,13 +270,13 @@ projection, leaves no dictionary key to an aggregation above it.
 
 ## Order
 
-An aggregation with no group key and a `SUM` or `AVG` whose argument is
+An aggregation, grouped or not, with a `SUM` or `AVG` whose argument is
 `FLOAT32` or `FLOAT64` in the child's schema is cut with `ORDER_ROW_RANGE`: the
-engine's ungrouped sink then folds each source position on its own and adds
-the positions' sums in position order, so the double sum is the same bits on
-every worker count and schedule of one lowered plan (`pipeline_exec`). Every
-other segment is `ORDER_NONE`: an integer, `DECIMAL`, `COUNT`, `MIN` or `MAX`
-fold is exact in any order, and the grouped sinks fold no float argument. A
+engine's sink then folds each source position on its own (per group, in a
+grouped sink) and adds the positions' sums in position order, so the double
+sum is the same bits on every worker count and schedule of one lowered plan
+(`pipeline_exec`). Every other segment is `ORDER_NONE`: an integer,
+`DECIMAL`, `COUNT`, `MIN` or `MAX` fold is exact in any order. A
 sort's output keeps the sort's order through filters,
 projections and the final collect only as far as the engine's sink-output
 source keeps it; lowering does not state more. A limit that reaches a
