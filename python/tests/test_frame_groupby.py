@@ -80,6 +80,10 @@ def refuses(call, cls, message):
     assert type(e) is cls and e.args[0] == message, repr(e)
 
 
+# A bool summed with min_count=0: True is 1, False and a missing value 0.
+TRUE_IS_ONE = When(((Compare("eq", ColRef("ok"), Lit(True)), Lit(1)),), Lit(0))
+
+
 def not_null(*keys):
     return _ops.and_all(tuple(Unary("is_not_null", ColRef(k)) for k in keys))
 
@@ -116,7 +120,7 @@ def test_groupby_sum_filters_missing_keys_aggregates_makes_empty_sums_zero_and_s
         ("b", agg("sum", "b")),
         ("n", agg("sum", "n")),
         ("x", agg("sum", "x")),
-        ("ok", agg("sum", arg=Cast(ColRef("ok"), "int64"))),
+        ("ok", agg("sum", arg=TRUE_IS_ONE)),
     )
     assert got._plan == grouped(SCAN, ("a",), aggs, sums=("b", "n", "x", "ok"))
     # The literal 0 of the float sum is a float64 literal on the wire.
@@ -226,7 +230,7 @@ def test_the_frame_reductions_are_one_row_aggregates_with_no_key_filter_or_sort(
     nums = df[["b", "x", "ok"]]
     child = nums._plan
     assert nums.sum()._plan == grouped(
-        child, (), (("b", agg("sum", "b")), ("x", agg("sum", "x")), ("ok", agg("sum", arg=Cast(ColRef("ok"), "int64")))),
+        child, (), (("b", agg("sum", "b")), ("x", agg("sum", "x")), ("ok", agg("sum", arg=TRUE_IS_ONE))),
         sums=("b", "x", "ok"),
     )
     assert nums.sum(min_count=1)._plan == _ops.aggregate(

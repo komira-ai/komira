@@ -37,7 +37,8 @@ equal (`frame_duckdb_test`, CPython 3.13, the real libkomira).
   and maxes too), also over no rows (a sum of 0, a count of 0, a missing mean
   and max);
 - the reductions the engine does not run yet (median, std, var, a grouped
-  float sum or mean, min and max of a string or a bool, nunique of a bool)
+  float sum or mean, a mean of a bool and its sum under min_count=1, min and
+  max of a string or a bool, nunique of a bool)
   build their plan and are refused at materialize() with the engine's step;
 - drop_duplicates of whole rows over one and several columns, with NULLs,
   keep="last", a subset naming every column, and keep=False (only the rows
@@ -672,8 +673,8 @@ EMPTIES = [
 # ORDER BY <keys> ASC NULLS LAST (sort=True); a sum is COALESCE(SUM(x), 0).
 #
 # The plan door's aggregation sinks run SUM, AVG, MIN, MAX, COUNT, COUNT(*)
-# and COUNT(DISTINCT): SUM and AVG over integers (a bool is cast to one), and
-# over floats only with no key; MIN and MAX over numbers; COUNT(DISTINCT) over
+# and COUNT(DISTINCT): SUM and AVG over integers (a bool's sum over the CASE
+# that makes True 1), and over floats only with no key; MIN and MAX over numbers; COUNT(DISTINCT) over
 # numbers and strings. These cases are those; ENGINE_REFUSED below holds the
 # rest.
 
@@ -854,9 +855,9 @@ REDUCTIONS = [
         "CAST(COALESCE(SUM(CAST(flag AS BIGINT)), 0) AS BIGINT) AS flag FROM t",
     ),
     Case(
-        "mean of the frame's numeric columns",
-        lambda d: d.mean(numeric_only=True),
-        "SELECT AVG(k) AS k, AVG(v) AS v, AVG(CAST(flag AS DOUBLE)) AS flag, AVG(n) AS n FROM t",
+        "mean of the frame's numbers",
+        lambda d: d[["k", "v", "n"]].mean(),
+        "SELECT AVG(k) AS k, AVG(v) AS v, AVG(n) AS n FROM t",
     ),
     Case(
         "min of the frame's numbers",
@@ -908,6 +909,8 @@ ENGINE_REFUSED = [
     ("a grouped sum of a float", lambda d: d.groupby("k")["v"].sum()),
     ("a grouped mean of a float", lambda d: d.groupby("k")["v"].mean()),
     ("a grouped mean of a bool", lambda d: d.groupby("k")["flag"].mean()),
+    ("a mean of a bool", lambda d: d[["flag"]].mean()),
+    ("a sum of a bool that keeps a missing sum", lambda d: d.groupby("k")["flag"].sum(min_count=1)),
     ("a grouped median", lambda d: d.groupby("k")["n"].median()),
     ("a grouped std", lambda d: d.groupby("k")["n"].std()),
     ("a grouped var", lambda d: d.groupby("k")["n"].var()),

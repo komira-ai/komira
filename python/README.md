@@ -294,8 +294,8 @@ stats = df[["value"]].median()            # one row, the column value
   `mean`, `min`, `max`, `count`, `size` and `nunique`. With a group key,
   `sum` and `mean` take integer and boolean columns but not float ones. `min`
   and `max` take numbers. `nunique` takes numbers and strings. A reduction
-  outside that (`median`, `std`, `var`, a grouped float sum, the `min` of a
-  string, ...) builds its plan and is refused at `materialize()` with a
+  outside that (`median`, `std`, `var`, a grouped float sum, the `mean` of a
+  boolean column, the `min` of a string, ...) builds its plan and is refused at `materialize()` with a
   `KomiraError` naming the engine's step. It runs with no change here once the
   engine computes it.
 - **Refused by name** with `UnsupportedOperation`: a Python function in

@@ -18,8 +18,11 @@ by nothing and give one row. No SQL text is written.
   (the sample ones, ddof=1).
 - `sum`, `mean`, `median`, `std` and `var` need a numeric or boolean column
   (ruling 4): a reduction of every column names the first one that is not,
-  unless `numeric_only=True` leaves it out. A boolean column is summed as
-  int64 and averaged as float64, as pandas counts True as 1.
+  unless `numeric_only=True` leaves it out. pandas counts True as 1: a
+  boolean column is summed as `CASE WHEN b = true THEN 1 ELSE 0 END` (a
+  missing value adds 0, as it is skipped), and cast to int64 for
+  `sum(min_count=1)` and to float64 for the others, where a missing value
+  must stay missing.
 - A sum of nothing is 0, as in pandas' `min_count=0` (ruling 10): the sum is
   read through `CASE WHEN s IS NOT NULL THEN s ELSE 0 END` above the
   aggregate. `min_count=1` keeps the missing sum.
@@ -130,7 +133,9 @@ def _agg_node(dtypes: dict[str, str], item: _Item, where: str, hint: str) -> _op
             raise UnsupportedOperation(
                 f"{where} needs numeric or boolean columns, and the column {item.column!r} is {dtype}: {hint}"
             )
-        if dtype == "bool":
+        if dtype == "bool" and item.how == "sum" and item.zero:
+            ref = _ops.When(((_ops.Compare("eq", ref, _ops.Lit(True)), _ops.Lit(1)),), _ops.Lit(0))
+        elif dtype == "bool":
             ref = _ops.Cast(ref, "int64" if item.how == "sum" else "float64")
     return _ops.Agg(_FUNCS[item.how], (ref,))
 
