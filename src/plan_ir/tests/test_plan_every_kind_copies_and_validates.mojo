@@ -272,6 +272,25 @@ def test_copy_keeps_the_fields_the_render_does_not_show() raises:
     assert_equal(l._limit.value()[].offset, 2)
 
 
+def test_copy_keeps_a_partition_by_null_placement() raises:
+    """A PartitionBy built with NULLS FIRST copies with NULLS FIRST, through
+    both `copy()` and `_copy_plan`, and the copy validates."""
+    var pe = List[PartitionExpr]()
+    pe.append(PartitionExpr.row_number())
+    var nf = List[Bool]()
+    nf.append(True)
+    var p = LogicalPlan.partition_by(
+        _l("a"), _l("b"), _f(), pe^, _scan(), Optional(nf^)
+    )
+    var c = p.copy()
+    assert_equal(len(c._partition_by.value()[].nulls_first), 1)
+    assert_true(c._partition_by.value()[].nulls_first[0], "copy() dropped NULLS FIRST")
+    var d = _copy_plan(p)
+    assert_true(d._partition_by.value()[].nulls_first[0], "_copy_plan dropped NULLS FIRST")
+    assert_true(validate_plan_integrity(d), "the copy fails integrity")
+    assert_equal(_render(c), _render(p))
+
+
 def test_a_scan_fingerprint_sees_projection_filter_and_row_count() raises:
     """Two scans of one source differing only in projection, pushed filter or
     row count have different fingerprints, and the full scan's fingerprint

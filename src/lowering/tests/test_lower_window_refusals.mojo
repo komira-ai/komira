@@ -14,6 +14,7 @@
 #   test_a_key_of_a_type_the_window_sort_does_not_order_is_refused
 #   test_keys_of_the_types_the_window_sort_orders_are_cut
 #   test_an_ntile_or_nth_value_count_below_one_is_refused_and_one_is_cut
+#   test_sum_avg_min_max_over_narrow_integer_columns_are_cut
 #   test_an_argument_type_the_sink_does_not_compute_over_is_refused
 #   test_an_argument_that_is_not_a_column_is_refused
 #   test_a_lag_or_lead_default_the_column_would_change_is_refused
@@ -148,6 +149,24 @@ def test_a_descending_list_of_the_wrong_length_is_refused() raises:
     assert_equal(_message(_over(PartitionExpr.row_number())), "")
 
 
+def test_a_null_placement_list_of_the_wrong_length_is_refused() raises:
+    var long = LogicalPlan.partition_by(
+        _names("g"), _names("k"), _flags(1), _one(PartitionExpr.row_number()),
+        _scan(), Optional(_flags(2)),
+    )
+    assert_equal(_message(long), _unserved("the node has 1 order keys and 2 nulls_first flags"))
+    var short = LogicalPlan.partition_by(
+        _names("g"), _names("k", "v"), _flags(2), _one(PartitionExpr.row_number()),
+        _scan(), Optional(_flags(1)),
+    )
+    assert_equal(_message(short), _unserved("the node has 2 order keys and 1 nulls_first flags"))
+    var placed = LogicalPlan.partition_by(
+        _names("g"), _names("k"), _flags(1), _one(PartitionExpr.row_number()),
+        _scan(), Optional(_flags(1)),
+    )
+    assert_equal(_message(placed), "")
+
+
 def test_a_key_that_is_not_a_column_is_refused_for_each_clause() raises:
     var partition = _over(PartitionExpr.row_number())
     partition._partition_by.value()[].partition_keys[0] = "nope"
@@ -202,6 +221,14 @@ def test_an_ntile_or_nth_value_count_below_one_is_refused_and_one_is_cut() raise
     assert_equal(_message(_over(PartitionExpr.nth_value("v", 1))), "")
 
 
+def test_sum_avg_min_max_over_narrow_integer_columns_are_cut() raises:
+    assert_equal(_message(_over(PartitionExpr.running_sum("i32").with_frame(_range_running()))), "")
+    assert_equal(_message(_over(PartitionExpr.running_avg("i32").with_frame(_range_running()))), "")
+    assert_equal(_message(_over(PartitionExpr.running_min("i16").with_frame(_range_running()))), "")
+    assert_equal(_message(_over(PartitionExpr.running_max("i32").with_frame(_range_running()))), "")
+    assert_equal(_message(_over(PartitionExpr.running_avg("i16"))), "")
+
+
 def test_an_argument_type_the_sink_does_not_compute_over_is_refused() raises:
     var tail = ", which the window sink does not compute over"
     assert_equal(
@@ -229,8 +256,8 @@ def test_an_argument_type_the_sink_does_not_compute_over_is_refused() raises:
         _unserved("SUM(g) has an argument of type string" + tail),
     )
     assert_equal(
-        _message(_over(PartitionExpr.running_avg("i32").with_frame(_range_running()))),
-        _unserved("AVG(i32) has an argument of type int32" + tail),
+        _message(_over(PartitionExpr.running_avg("f32").with_frame(_range_running()))),
+        _unserved("AVG(f32) has an argument of type float32" + tail),
     )
     assert_equal(
         _message(_over(PartitionExpr.running_min("g").with_frame(_range_running()))),
@@ -509,8 +536,9 @@ def test_the_refusal_comes_before_the_child_is_walked() raises:
 
 
 def test_the_checks_run_in_a_fixed_order() raises:
-    # A bad descending list beats a bad key, a bad key beats a bad function,
-    # and the first bad function in the node's order is the one named.
+    # A bad descending list beats a bad NULL placement list, a bad NULL
+    # placement list beats a bad key, a bad key beats a bad function, and the
+    # first bad function in the node's order is the one named.
     var exprs = List[PartitionExpr]()
     exprs.append(PartitionExpr.ntile(0))
     exprs.append(PartitionExpr.lag("d"))
@@ -518,6 +546,14 @@ def test_the_checks_run_in_a_fixed_order() raises:
         _names("d"), _names("k"), List[Bool](), exprs.copy(), _scan()
     )
     assert_equal(_message(plan), _unserved("the node has 1 order keys and 0 descending flags"))
+    var bad_placement = LogicalPlan.partition_by(
+        _names("d"), _names("k"), _flags(1), exprs.copy(), _scan(),
+        Optional(_flags(2)),
+    )
+    assert_equal(
+        _message(bad_placement),
+        _unserved("the node has 1 order keys and 2 nulls_first flags"),
+    )
     var bad_key = _window(_names("d"), _names("k"), exprs.copy(), _scan())
     assert_equal(
         _message(bad_key),

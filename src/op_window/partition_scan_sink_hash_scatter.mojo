@@ -309,6 +309,7 @@ def _execute_partition_by_sink_bucket(
         sink_data.partition_keys,
         sink_data.order_keys,
         sink_data.descending,
+        sink_data.nulls_first,
     )
     return _eval_sorted(sorted_sub, sink_data)
 

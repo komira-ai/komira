@@ -13,6 +13,7 @@
 from std.math import inf, isnan
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
+from arrow.arrow_types import ArrowType
 from arrow.column import Column
 from arrow.primitive_array import PrimitiveArray
 from arrow.record_batch import RecordBatch, RecordBatchBuilder
@@ -366,6 +367,235 @@ def test_sliding_int_sum_over_empty_and_null_frames() raises:
         assert_equal(_get(out, 3, r), want_count[r])
     assert_true(_null(out, 2, 3))
     assert_equal(_get(out, 3, 3), 0)
+
+# =============================================================================
+# SUM / AVG / MIN / MAX over INT8, INT16 and INT32 columns
+# =============================================================================
+
+def _narrow[dt: DType](vals: List[Int64], valid: List[Bool]) -> Column[HeapRegion]:
+    var arr = PrimitiveArray[dt].allocate_nullable(len(vals))
+    for i in range(len(vals)):
+        arr.store[1](i, vals[i].cast[dt]())
+        if not valid[i]:
+            arr._set_null(i)
+    return Column.from_primitive[dt](arr)
+
+def _getn[dt: DType](rb: RecordBatch, col: Int, row: Int) -> Int64:
+    ref c = rb.column_at(col)
+    return c._data.get_typed[Scalar[dt]](c._offset + row).cast[DType.int64]()
+
+def _all(n: Int) -> List[Bool]:
+    var out = List[Bool]()
+    for _ in range(n):
+        out.append(True)
+    return out^
+
+def _four_aggs(frame: PartitionFrame, column: String) -> List[PartitionExpr]:
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.agg_with_frame(PF_SUM, column, frame.copy()))
+    exprs.append(PartitionExpr.agg_with_frame(PF_AVG, column, frame.copy()))
+    exprs.append(PartitionExpr.agg_with_frame(PF_MIN, column, frame.copy()))
+    exprs.append(PartitionExpr.agg_with_frame(PF_MAX, column, frame.copy()))
+    return exprs^
+
+def _running_rows() -> PartitionFrame:
+    return _rows(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_CURRENT_ROW, 0)
+
+def test_running_int32_aggregates_are_exact_past_the_int32_range() raises:
+    # a = INT32 max, NULL, INT32 max, INT32 min, 5 under ROWS UNBOUNDED
+    # PRECEDING .. CURRENT ROW. The sums leave INT32 and stay exact in INT64;
+    # MIN and MAX come back as INT32 columns; the NULL row repeats the frame.
+    var o: List[Int64] = [1, 2, 3, 4, 5]
+    var a: List[Int64] = [2147483647, 0, 2147483647, -2147483648, 5]
+    var av: List[Bool] = [True, False, True, True, True]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(o))
+    cols.append(_narrow[DType.int32](a, av))
+    var names: List[String] = ["o", "a"]
+    var ok: List[String] = ["o"]
+    var out = _run(_batch(names, cols^), List[String](), ok, _four_aggs(_running_rows(), "a"))
+    assert_true(out.column_at(2).arrow_type == ArrowType.INT64)
+    assert_true(out.column_at(3).arrow_type == ArrowType.FLOAT64)
+    assert_true(out.column_at(4).arrow_type == ArrowType.INT32)
+    assert_true(out.column_at(5).arrow_type == ArrowType.INT32)
+    var want_sum: List[Int64] = [2147483647, 2147483647, 4294967294, 2147483646, 2147483651]
+    var want_avg: List[Float64] = [2147483647.0, 2147483647.0, 2147483647.0, 715827882.0, 536870912.75]
+    var want_min: List[Int64] = [2147483647, 2147483647, 2147483647, -2147483648, -2147483648]
+    var want_max: List[Int64] = [2147483647, 2147483647, 2147483647, 2147483647, 2147483647]
+    for r in range(5):
+        assert_equal(_get(out, 2, r), want_sum[r])
+        assert_equal(_getf(out, 3, r), want_avg[r])
+        assert_equal(_getn[DType.int32](out, 4, r), want_min[r])
+        assert_equal(_getn[DType.int32](out, 5, r), want_max[r])
+
+def test_int32_aggregates_over_an_all_null_frame_are_null() raises:
+    # a = NULL, NULL, 3 under the running frame: the first two frames hold no
+    # value, so every aggregate is NULL there.
+    var o: List[Int64] = [1, 2, 3]
+    var a: List[Int64] = [0, 0, 3]
+    var av: List[Bool] = [False, False, True]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(o))
+    cols.append(_narrow[DType.int32](a, av))
+    var names: List[String] = ["o", "a"]
+    var ok: List[String] = ["o"]
+    var out = _run(_batch(names, cols^), List[String](), ok, _four_aggs(_running_rows(), "a"))
+    for c in range(2, 6):
+        assert_true(_null(out, c, 0))
+        assert_true(_null(out, c, 1))
+        assert_false(_null(out, c, 2))
+    assert_equal(_get(out, 2, 2), 3)
+    assert_equal(_getf(out, 3, 2), 3.0)
+    assert_equal(_getn[DType.int32](out, 4, 2), 3)
+    assert_equal(_getn[DType.int32](out, 5, 2), 3)
+
+def test_sliding_int32_aggregates_skip_nulls_and_follow_the_frame() raises:
+    # ROWS 1 PRECEDING .. CURRENT ROW over a = 10, NULL, -3, 7.
+    var o: List[Int64] = [1, 2, 3, 4]
+    var a: List[Int64] = [10, 0, -3, 7]
+    var av: List[Bool] = [True, False, True, True]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(o))
+    cols.append(_narrow[DType.int32](a, av))
+    var names: List[String] = ["o", "a"]
+    var ok: List[String] = ["o"]
+    var frame = _rows(FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)
+    var out = _run(_batch(names, cols^), List[String](), ok, _four_aggs(frame, "a"))
+    var want_sum: List[Int64] = [10, 10, -3, 4]
+    var want_avg: List[Float64] = [10.0, 10.0, -3.0, 2.0]
+    var want_min: List[Int64] = [10, 10, -3, -3]
+    var want_max: List[Int64] = [10, 10, -3, 7]
+    assert_true(out.column_at(4).arrow_type == ArrowType.INT32)
+    for r in range(4):
+        assert_equal(_get(out, 2, r), want_sum[r])
+        assert_equal(_getf(out, 3, r), want_avg[r])
+        assert_equal(_getn[DType.int32](out, 4, r), want_min[r])
+        assert_equal(_getn[DType.int32](out, 5, r), want_max[r])
+
+def test_whole_partition_int32_aggregates_broadcast_and_all_null_partition_is_null() raises:
+    # Partition 1: 4, NULL, 9. Partition 2: NULL, NULL.
+    var p: List[Int64] = [1, 1, 1, 2, 2]
+    var o: List[Int64] = [1, 2, 3, 4, 5]
+    var a: List[Int64] = [4, 0, 9, 0, 0]
+    var av: List[Bool] = [True, False, True, False, False]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(p))
+    cols.append(_plain_i64(o))
+    cols.append(_narrow[DType.int32](a, av))
+    var names: List[String] = ["p", "o", "a"]
+    var pk: List[String] = ["p"]
+    var ok: List[String] = ["o"]
+    var frame = _rows(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0)
+    var out = _run(_batch(names, cols^), pk, ok, _four_aggs(frame, "a"))
+    for r in range(3):
+        assert_equal(_get(out, 3, r), 13)
+        assert_equal(_getf(out, 4, r), 6.5)
+        assert_equal(_getn[DType.int32](out, 5, r), 4)
+        assert_equal(_getn[DType.int32](out, 6, r), 9)
+    for r in range(3, 5):
+        for c in range(3, 7):
+            assert_true(_null(out, c, r))
+
+def test_range_default_frame_over_int32_gives_peers_one_value() raises:
+    # ORDER BY o with the default RANGE frame: the two rows with o = 1 are peers
+    # and share the aggregate over both of them.
+    var o: List[Int64] = [1, 1, 2]
+    var a: List[Int64] = [5, -7, 3]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(o))
+    cols.append(_narrow[DType.int32](a, _all(3)))
+    var names: List[String] = ["o", "a"]
+    var ok: List[String] = ["o"]
+    var out = _run(
+        _batch(names, cols^), List[String](), ok,
+        _four_aggs(PartitionFrame.running_range(), "a"),
+    )
+    var want_sum: List[Int64] = [-2, -2, 1]
+    var want_avg: List[Float64] = [-1.0, -1.0, 1.0 / 3.0]
+    var want_min: List[Int64] = [-7, -7, -7]
+    var want_max: List[Int64] = [5, 5, 5]
+    assert_true(out.column_at(4).arrow_type == ArrowType.INT32)
+    for r in range(3):
+        assert_equal(_get(out, 2, r), want_sum[r])
+        assert_equal(_getf(out, 3, r), want_avg[r])
+        assert_equal(_getn[DType.int32](out, 4, r), want_min[r])
+        assert_equal(_getn[DType.int32](out, 5, r), want_max[r])
+
+def test_int32_argument_that_is_also_the_range_offset_key_keeps_its_column() raises:
+    # a = 1, 2, 4, 5 ordered by a itself under RANGE 1 PRECEDING .. CURRENT
+    # ROW: the frame is measured on the INT32 key while the aggregates read it.
+    var a: List[Int64] = [1, 2, 4, 5]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_narrow[DType.int32](a, _all(4)))
+    var names: List[String] = ["a"]
+    var ok: List[String] = ["a"]
+    var frame = PartitionFrame(FRAME_UNITS_RANGE, FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)
+    var out = _run(_batch(names, cols^), List[String](), ok, _four_aggs(frame, "a"))
+    var want_sum: List[Int64] = [1, 3, 4, 9]
+    var want_min: List[Int64] = [1, 1, 4, 4]
+    assert_true(out.column_at(0).arrow_type == ArrowType.INT32)
+    for r in range(4):
+        assert_equal(_getn[DType.int32](out, 0, r), a[r])
+        assert_equal(_get(out, 1, r), want_sum[r])
+        assert_equal(_getn[DType.int32](out, 3, r), want_min[r])
+        assert_equal(_getn[DType.int32](out, 4, r), a[r])
+
+def test_int16_aggregates_average_in_double_and_keep_their_type() raises:
+    # a = 300, -200, NULL, 100 under the running frame; AVG is double division.
+    var o: List[Int64] = [1, 2, 3, 4]
+    var a: List[Int64] = [300, -200, 0, 100]
+    var av: List[Bool] = [True, True, False, True]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(o))
+    cols.append(_narrow[DType.int16](a, av))
+    var names: List[String] = ["o", "a"]
+    var ok: List[String] = ["o"]
+    var out = _run(_batch(names, cols^), List[String](), ok, _four_aggs(_running_rows(), "a"))
+    var want_sum: List[Int64] = [300, 100, 100, 200]
+    var want_avg: List[Float64] = [300.0, 50.0, 50.0, 200.0 / 3.0]
+    var want_min: List[Int64] = [300, -200, -200, -200]
+    var want_max: List[Int64] = [300, 300, 300, 300]
+    assert_true(out.column_at(2).arrow_type == ArrowType.INT64)
+    assert_true(out.column_at(3).arrow_type == ArrowType.FLOAT64)
+    assert_true(out.column_at(4).arrow_type == ArrowType.INT16)
+    assert_true(out.column_at(5).arrow_type == ArrowType.INT16)
+    for r in range(4):
+        assert_equal(_get(out, 2, r), want_sum[r])
+        assert_equal(_getf(out, 3, r), want_avg[r])
+        assert_equal(_getn[DType.int16](out, 4, r), want_min[r])
+        assert_equal(_getn[DType.int16](out, 5, r), want_max[r])
+
+def test_int8_aggregates_over_the_whole_partition_and_a_sliding_frame() raises:
+    # a = 100, -100, NULL, 27 (INT8).
+    var o: List[Int64] = [1, 2, 3, 4]
+    var a: List[Int64] = [100, -100, 0, 27]
+    var av: List[Bool] = [True, True, False, True]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(o))
+    cols.append(_narrow[DType.int8](a, av))
+    var names: List[String] = ["o", "a"]
+    var ok: List[String] = ["o"]
+    var whole = _rows(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0)
+    var out = _run(_batch(names, cols^), List[String](), ok, _four_aggs(whole, "a"))
+    for r in range(4):
+        assert_equal(_get(out, 2, r), 27)
+        assert_equal(_getf(out, 3, r), 9.0)
+        assert_equal(_getn[DType.int8](out, 4, r), -100)
+        assert_equal(_getn[DType.int8](out, 5, r), 100)
+    assert_true(out.column_at(4).arrow_type == ArrowType.INT8)
+
+    var cols2 = List[Column[HeapRegion]]()
+    cols2.append(_plain_i64(o))
+    cols2.append(_narrow[DType.int8](a, av))
+    var slide = _rows(FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)
+    var out2 = _run(_batch(names, cols2^), List[String](), ok, _four_aggs(slide, "a"))
+    var want_sum: List[Int64] = [100, 0, -100, 27]
+    var want_min: List[Int64] = [100, -100, -100, 27]
+    var want_max: List[Int64] = [100, 100, -100, 27]
+    for r in range(4):
+        assert_equal(_get(out2, 2, r), want_sum[r])
+        assert_equal(_getn[DType.int8](out2, 4, r), want_min[r])
+        assert_equal(_getn[DType.int8](out2, 5, r), want_max[r])
 
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
