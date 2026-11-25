@@ -23,6 +23,9 @@ on a context and on a run handle, and counts the streams it made and released:
 - a refusal (-3) and a cancel nobody asked for (-6) raise KomiraError with the
   library's message and status, and free the handle;
 - the arguments are checked before any handle is made;
+- an exception raised inside run_cancel before it cancelled (a second
+  Ctrl-C there) does not lose the cancel: it is made again, the handle is
+  freed, the first KeyboardInterrupt is raised, and the session answers;
 - a call abandoned before its helper thread started makes no call, and its
   helper frees the handle; a helper thread that cannot be started raises its
   RuntimeError from sql, with the handle freed and no call made;
@@ -431,6 +434,80 @@ def an_abandoned_call_makes_no_call(fake, s):
     assert call.stream is None and call.error is None
 
 
+class CancelRaisingOnce:
+    """Stands in for `Native.run_cancel`: the first call raises `raises`
+    before it cancels, as a second Ctrl-C landing inside it would; every
+    later call cancels through the stand-in."""
+
+    def __init__(self, native, raises):
+        self._cancel = native.run_cancel
+        self._raises = raises
+        self.calls = 0
+
+    def __call__(self, run):
+        self.calls += 1
+        if self.calls == 1:
+            raise self._raises
+        self._cancel(run)
+
+
+def a_cancel_an_exception_interrupted_is_made_again(fake, s):
+    """An exception raised inside run_cancel, before it cancelled, does not
+    lose the cancel: stop makes it again, then frees the handle."""
+    native = _native.load()
+
+    # On a call whose run is in flight and has returned (no helper thread,
+    # so the order of the journal is the test's own).
+    journal = Journal(fake)
+    call = _run._Call(native, s._ctx, b"ok", native.run_new())
+    call._state = _run._RUNNING
+    call.done.set()
+    flaky = CancelRaisingOnce(native, KeyboardInterrupt("inside run_cancel"))
+    native.run_cancel = flaky
+    try:
+        call.stop()
+    finally:
+        del native.run_cancel
+    lines = journal.lines()
+    r = run_number(lines)
+    assert flaky.calls == 2, flaky.calls
+    assert lines == ["r{} new".format(r), "r{} cancel".format(r), "r{} free".format(r)], lines
+
+    # Through sql, with a run held until it is cancelled: the run is
+    # cancelled, the first KeyboardInterrupt is the one raised, and the
+    # session answers after.
+    handler = Handler(calls=1)
+    signal.signal(signal.SIGINT, handler)
+    journal, streams = Journal(fake), Streams(fake)
+    flaky = CancelRaisingOnce(native, KeyboardInterrupt("inside run_cancel"))
+    native.run_cancel = flaky
+    waiter = on_thread(lambda: (fake.wait_entered(18), ctrl_c()))
+    try:
+        e = raised(lambda: s.sql("hold:18"))
+    finally:
+        del native.run_cancel
+        waiter.join()
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+    assert type(e) is KeyboardInterrupt and str(e) == "0", repr(e)
+    assert flaky.calls == 2 and handler.count == 1, (flaky.calls, handler.count)
+    lines = journal.lines()
+    r = run_number(lines)
+    assert [line for line in lines if line.startswith("r")] == [
+        "r{} new".format(r),
+        "r{} cancel".format(r),
+        "r{} free".format(r),
+    ], lines
+    assert lines.index("r{} cancel".format(r)) < lines.index("c{} sql_run hold:18 leave".format(s_ctx_number(fake))), lines
+    assert streams.since() == (0, 0), streams.since()
+    answers(s)
+
+
+def s_ctx_number(fake):
+    """The number of the newest context the stand-in made."""
+    news = [line for line in fake.journal() if line.startswith("c") and line.endswith(" new")]
+    return int(news[-1].split()[0][1:])
+
+
 def a_helper_thread_that_cannot_start_frees_its_handle(fake, s):
     """threading cannot start the helper: sql raises its RuntimeError, the
     handle is freed with no call made, and the session answers after."""
@@ -510,6 +587,7 @@ def main(args):
     the_arguments_are_checked_first(fake, s)
     an_abandoned_call_makes_no_call(fake, s)
     a_helper_thread_that_cannot_start_frees_its_handle(fake, s)
+    a_cancel_an_exception_interrupted_is_made_again(fake, s)
     the_log_says_what_happened(fake, s, records)
 
     journal = Journal(fake)
