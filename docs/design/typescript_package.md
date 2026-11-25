@@ -31,10 +31,11 @@ Fixed before this design, and not reopened here:
   loads from any location with nothing installed beyond the host's system C and C++ libraries.
   The owner also ruled that komira may redistribute those libraries. Their licence files and
   notice are the wheel's (§3).
-  - The directory is one build output, the self-contained directory of the libkomira target. The
-    change that makes the wheel self-contained builds it, and the wheel is its first user.
-  - That change is not on `main` yet. The wheel on `main` still takes the runtime from Modular's
-    `mojo-compiler` (komira-ai/komira#2122).
+  - The directory is one build output, the self-contained directory of the libkomira target
+    (`//src/so:libkomira[dist]`). The wheel is its first user: `//python:komira_wheel` copies it whole
+    to `komira/_lib/`, with `libkomira.so` at the top and the native owners and the three Mojo runtime
+    libraries in `lib/`, and requires no distribution of Modular's ([python/BUCK](../../python/BUCK),
+    komira-ai/komira#2139, komira-ai/komira#2151).
   - The npm platform packages copy the same directory (§3).
 - **Release platforms.** linux-x86_64, linux-arm64 and macos-arm64 (rule B11).
 - **One UDF mode per language.** UDFs written in TypeScript run in Node worker processes (rule B21,
@@ -172,7 +173,8 @@ Fixed before this design, and not reopened here:
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,
     `libAsyncRTRuntimeGlobals` and `libMSupportGlobals`
     ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)). The self-contained directory
-    puts them beside it, and that directory is not built on `main` yet.
+    (`//src/so:libkomira[dist]`) puts them in its `lib/`, which the library's run path finds, and the
+    wheel ships that directory.
 - **No TypeScript or Node SDK existed in the earlier code base.** Its one engine binding was the
   Python ctypes SDK ([python_package.md](python_package.md) decision 4).
 
@@ -463,11 +465,10 @@ is under [D2](#d2-where-the-mojo-runtime-comes-from). What follows from the ruli
   fails as any unloadable library does (§2, `LibraryLoadError`). The fix is to reinstall the
   package, never to install a Mojo runtime.
 - **The bytes a test ran.** Each platform package's runtime libraries are the bytes its install test
-  loaded (§5), because the package is the test's input. The open question of whether `libkomira`
-  built against the conda runtime loads against the PyPI runtime's libraries
-  ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)) is the wheel change's to settle
-  when it picks the directory's runtime. The npm packages fetch no runtime, so whatever it picks is
-  what the npm install test loads.
+  loaded (§5), because the package is the test's input. The directory's runtime libraries
+  are taken from the pinned toolchain's Mojo package, the build that compiled `libkomira`
+  ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md), [NOTICE](../../NOTICE)). The npm
+  packages fetch no runtime, so the npm install test loads those same bytes.
 - **What the host provides.** On Linux the host provides `libstdc++.so.6` and `libgcc_s.so.1`,
   which the runtime needs, as for the wheel today
   ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md),
@@ -482,12 +483,14 @@ is under [D2](#d2-where-the-mojo-runtime-comes-from). What follows from the ruli
 - The platform packages carry the same native files as the wheel, the Mojo runtime libraries among
   them, so they carry the same licence files and the same notice as the wheel, and their
   `"license"` field follows the wheel's licence metadata. This design does not write that text. The
-  change that makes the wheel self-contained settles it, and the npm package rule copies the
-  wheel's licence files rather than keeping a second set.
-- Today's `NOTICE` reproduces the notices of snappy, Brotli and libc++, which are inside the native
-  owners ([wheel_licence_audit.md](wheel_licence_audit.md)). Its section on the Mojo runtime
-  ("a dependency, not distributed") describes the wheel as it is on `main`. Whatever the wheel's
-  change makes of it, the npm packages copy. No npm change edits `NOTICE`.
+  wheel carries the three runtime libraries with Modular's licence file and third-party notices,
+  and its License-Expression is `Apache-2.0 AND LicenseRef-Modular-Proprietary`
+  ([python/README.md](../../python/README.md)). The npm package rule copies the wheel's licence files
+  rather than keeping a second set.
+- `NOTICE` reproduces the notices of snappy, Brotli and libc++, which are inside the native owners
+  ([wheel_licence_audit.md](wheel_licence_audit.md)), and its last section is on the Mojo runtime
+  libraries the wheel carries. Whatever `NOTICE` holds, the npm packages copy. No npm change edits
+  `NOTICE`.
 
 ### macOS
 
@@ -502,9 +505,9 @@ is under [D2](#d2-where-the-mojo-runtime-comes-from). What follows from the ruli
 
 The release machine today publishes mopm packages from `release.yml` on every push to `main`:
 stage, test, commit, smoke ([docs/ci.md](../ci.md), [docs/releases.md](../releases.md)). The conda
-release set (`//release:release_set`) is built but not uploaded. The wheel is to be published by a
-top-level `pypi.yml` through the environments `testpypi` and `pypi`
-([python_package.md](python_package.md)). The npm packages follow the wheel's shape.
+release set (`//release:release_set`) is built but not uploaded. The Linux wheel is published by the
+top-level `pypi.yml` and the macOS arm64 wheel by `pypi-macos-arm64.yml`, each through the environments
+`testpypi` and `pypi` ([python_package.md](python_package.md)). The npm packages follow the wheel's shape.
 
 ### The build
 
@@ -515,11 +518,11 @@ top-level `pypi.yml` through the environments `testpypi` and `pypi`
     elsewhere, and the check refuses it unless the bytes are equal.
   - It stamps `version` from `komira.package_stamp` and writes `package.json` from the rule's
     attributes. There is no `package.json` in the repository that could drift.
-  - Its native input is the self-contained directory of the libkomira target, built by the change
-    that makes the wheel self-contained. The rule takes the directory as one input and copies it
+  - Its native input is the self-contained directory of the libkomira target, the one the wheel
+    copies. The rule takes the directory as one input and copies it
     whole; it never assembles the library, owners and runtime from separate targets.
-  - It reads the tarball back. The ELF policy of `wheel_file`, as the wheel's change sets it for the
-    self-contained directory, applies to the platform packages: the glibc floor; every run path at
+  - It reads the tarball back. The ELF policy of `wheel_file` for that directory
+    (`_NATIVE_NEEDS` in [python/BUCK](../../python/BUCK)) applies to the platform packages: the glibc floor; every run path at
     `$ORIGIN` or under it; every NEEDED a member or a system library, so the three runtime
     libraries are members; no other file of Modular's distribution; a size cap.
   - The rule refuses a package whose `repository.url` is not `https://github.com/komira-ai/komira`,
@@ -826,13 +829,14 @@ that runs no query would be a release with nothing in it.
 
 ## What are the limits and open questions?
 
-- The npm platform packages wait for the self-contained directory, which does not exist on `main`
-  yet; its change also settles the licence files and notice the platform packages copy.
+- The npm platform packages wait for `npm_tarball` and the npm release set. The self-contained
+  directory they copy, and the licence files and notice the wheel carries with it, are on `main`.
 - Tests in `.ts` run with type stripping on the pinned 24, and on a Node 22 pin only from 22.18,
   so the Node 22 pin is 22.18 or later.
-- linux-arm64 waits for its build platform, and macos-arm64 for `libkomira`'s macOS build and
-  load. The Mach-O checks of komira-ai/komira#2116 are a step toward the macOS build. Both platforms
-  also need a Node pin of their own.
+- linux-arm64 waits for its build platform. macos-arm64 waits for the macOS build of the addon;
+  `libkomira` itself builds and loads on macOS, and the macOS arm64 wheel carries
+  `libkomira.dylib` and the three runtime libraries. Both platforms also need a Node pin of their
+  own (the one pin is linux-x64, [third_party/node/pins.bzl](../../third_party/node/pins.bzl)).
 - Whether ad-hoc signing is enough on macOS is inferred, not tested.
 - Whether a trusted publisher can be configured before its package exists is not stated by npm's
   documentation.
@@ -847,7 +851,7 @@ Each part is its own change, with its tests:
 4. `sql` and `Result`, once `komira_sql_stream` exists;
 5. errors, session options, and CSV and NDJSON registration, each after its library change;
 6. the package rule and the release set, consuming the self-contained directory of the libkomira
-   target, after the change that makes the wheel self-contained has landed;
+   target (`//src/so:libkomira[dist]`, which the wheel already uses);
 7. the macOS and linux-arm64 builds;
 8. the install tests;
 9. `npm.yml`;

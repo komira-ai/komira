@@ -31,9 +31,9 @@ What it needs:
 ### What is in the wheel
 
 libkomira needs three Mojo runtime libraries, which are Modular's and come
-under Modular's licence. The wheel carries libkomira, its native owner
-libraries (Linux only: on macOS they are linked into the dylib) and those
-three Mojo runtime libraries in `komira/_lib/`, with Modular's licence and
+under Modular's licence. The wheel carries libkomira in `komira/_lib/` and, in `komira/_lib/lib/`,
+its native owner libraries (Linux only: on macOS they are linked into the
+dylib) and those three Mojo runtime libraries, with Modular's licence and
 third-party notices beside komira's own. It requires two other
 distributions, which `pip install komira` installs: `pyarrow>=25.0.1`, which a
 result is read as, and `protobuf>=5.29.1,<8`, which a DataFrame's plan is

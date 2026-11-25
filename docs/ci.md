@@ -945,8 +945,8 @@ The push filter is `release.yml`'s (`paths-ignore`: `docs/**`, `**.md`, held equ
 cases): a push of documentation alone starts no run. The version is `0.1.<N>`, `<N>` the build number of
 `release_json stamp`, which counts only commits that change more than `docs`, `*.md` and `.github`
 ([below](#the-version-and-documentation-only-commits)), so each code commit is a new version. The wheel
-carries the Mojo runtime libraries and requires no distribution of Modular's; its one requirement is
-pyarrow. A pull request never starts the
+carries the Mojo runtime libraries and requires no distribution of Modular's; its requirements are
+pyarrow and protobuf. A pull request never starts the
 workflow.
 
 | job | half | environment | permissions | what it does |

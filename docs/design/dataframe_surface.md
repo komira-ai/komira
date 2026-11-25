@@ -1,16 +1,20 @@
 # The Python DataFrame surface: skins, verbs and refusals
 
-Status: design, partly built. The pandas-shaped skin's readers, subscripts, `assign`, `sort_values`,
-`head`, `materialize` and `explain` are in `python/komira/_frame.py` and `_series.py`, over the node
-tree (`komira/_ops`) and the encoder (`komira/_plan`). The verbs, the plan each one builds and
+Status: design, partly built. The Python package is under [`python/komira/`](../../python/komira/), and
+its private layers of this surface are built: the plan node tree (`komira._ops`), the plan encoder
+(`komira._plan`), which writes a `komira.plan.v1.WirePlanEnvelope` with each node's output schema, the
+capture of a user function (`komira._capture`) and the UDF worker runtime (`komira._udf`). The first
+part of the pandas-shaped skin is built too: its readers, subscripts, `assign`, `sort_values`, `head`,
+`materialize` and `explain` are in `python/komira/_frame.py` and `_series.py`, and `materialize` runs
+the plan through `komira_plan_stream`. `komira.pl` and the other verbs are not built. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
 
 ## What problem does this solve?
 
 The first release of the Python package (`import komira`) is SQL-first: a `Session`, `sql()`, and a
-`Result` read through Arrow. The DataFrame surfaces come next. Several pull requests build them: the plan
-builder, the plan encoder, the frame core, group-by, joins and windows, the polars-shaped skin, and the
+`Result` read through Arrow. The DataFrame surfaces come next. The plan builder and the plan encoder are built, as private
+modules. Several pull requests build the rest: the frame core, group-by, joins and windows, the polars-shaped skin, and the
 verbs pandas users reach for first (`fillna`, `dropna`, `concat`, `rename`, `astype`). Each of those
 pull requests needs the same answers first:
 
@@ -28,7 +32,8 @@ layout; the two skins and their modules; `Session` and `Result`; and `KomiraErro
 
 The evidence that the surface is missing today:
 
-- komira has no Python package.
+- The Python package has no frame, reader, `Series` or `komira.pl`: it exports only `Session`,
+  `Result`, the error classes, `__version__` and `abi_version` (`python/komira/__init__.py`).
 - The Mojo side already has plan builders for five DataFrame verbs that the earlier, never-published
   Python SDK did not have: `with_columns`, `rename`, `drop_nulls`, `concat` and a frame alias
   ([src/sdk/README.md](../../src/sdk/README.md); the files are `src/sdk/dataframe_*.mojo`).
@@ -134,12 +139,15 @@ The frames are immutable, except for one pandas idiom:
   the text into a logical plan. A frame never goes through it.
 - At a terminal, the encoder writes the tree as a `komira.plan.v1.WirePlanEnvelope`
   ([src/plan_proto/plan.proto](../../src/plan_proto/plan.proto)), using the generated protobuf modules
-  under `komira/plan/v1/`. The session sends the bytes through the plan entry, `komira_plan_stream`.
+  under `komira/plan/v1/`. The encoder is built (`komira._plan.encode_plan`); the package does not ship
+  the generated modules yet. The session sends the bytes through the plan entry, `komira_plan_stream`
+  (`libkomira` ABI 1.8), which no session method calls yet.
   - The plan entry decodes the bytes with `plan_wire`, binds the scans, optimizes, lowers, runs, and
     returns an Arrow C stream.
   - A write terminal sets the envelope's `write_target`.
   - protobuf becomes a required dependency of the package with this surface, beside pyarrow, as the
-    Python package design says. Its range is the plan encoder pull request's.
+    Python package design says. Its range is `PROTOBUF_REQUIREMENT` in `python/dependencies.bzl`, which
+    the wheel of the release that first ships the plan modules declares.
 - **The encoder writes every node's `output_schema`.** The decoder rebuilds each node through its
   `LogicalPlan` factory and refuses a schema the factory does not derive
   (`PLAN_WIRE_OUTPUT_SCHEMA_DIVERGED` in `src/plan_wire/plan_wire_codec.mojo`). So the builder derives
@@ -158,7 +166,10 @@ The frames are immutable, except for one pandas idiom:
     by `AGG_UDF`.
   - The verbs are the libraries' own (`map_elements`, `map_batches`, `Series.map`, `DataFrame.apply`)
     and are in the verb tables.
-  - Until the UDF worker path lands, each of these verbs raises `UnsupportedOperation` naming the verb.
+  - The capture of a user function (`komira._capture`), its `UdfRef` in the plan (`komira._plan`) and
+    the worker runtime (`komira._udf`) are built privately, and no query runs a UDF yet. Until the
+    public frames and the plan entry reach them, each of these verbs raises `UnsupportedOperation`
+    naming the verb.
   - The UDF verbs' `return_dtype` and null mode are the UDF design's.
 
 ### 4. Readers, sessions and in-memory data
@@ -580,8 +591,9 @@ package design). D4 to D18 are this design's own.
 - `subquery` has no spelling in either library, and `json_extract` has none in pandas. So the
   polars-shaped skin leaves 2 of its 52 cells empty by decision, and the pandas-shaped skin leaves 3
   (counted from the verbs document's table).
-- The early engine refuses at `lower` most of what the skins can build:
-  a distinct over an explicit column list, and sources other than Parquet or one JSON Lines file; a whole-row distinct runs only
+- The early engine refuses at `lower` some of what the skins can build:
+  a distinct over an explicit column list, a source other than Parquet, in memory, CSV, JSON Lines or an
+  Iceberg table, and a CSV scan with `header=false` ([src/lowering/README.md](../../src/lowering/README.md)); a whole-row distinct runs only
   over one fixed-width or string column, or several dictionary-encoded string columns. These plans raise at the terminal with the engine's code
   until the engine runs them.
 
