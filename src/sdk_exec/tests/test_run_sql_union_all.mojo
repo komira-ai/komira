@@ -54,7 +54,7 @@
 #     directions. Catches run_lowered_plan not handing the builder the sort
 #     sinks' data (every ORDER BY was refused at execute).
 #   * test_unions_with_no_common_type_or_misplaced_clauses_are_refused: a
-#     VARCHAR with an INTEGER is refused at bind naming the column; an ORDER BY
+#     VARCHAR with a DOUBLE is refused at bind naming the column; an ORDER BY
 #     before UNION ALL is refused at parse; the context runs the next query.
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -439,7 +439,7 @@ def test_an_order_by_runs_through_run_sql() raises:
 
 def test_unions_with_no_common_type_or_misplaced_clauses_are_refused() raises:
     var ctx = _context()
-    var mixed = run_sql(ctx, "select s from t_i32 union all select a from t_i32")
+    var mixed = run_sql(ctx, "select s from t_i32 union all select d from t_f64")
     assert_true(Bool(mixed.refusal))
     assert_equal(mixed.refusal.value().step, String(STEP_BIND))
     assert_true(
