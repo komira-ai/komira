@@ -21,10 +21,11 @@ fails: `ArrowException` for EINVAL, ENOMEM and ENOSYS, and `OSError` for any
 other code, EIO among them.
 
 A struct that is collected while it still holds a stream releases it: the
-`KeyboardInterrupt` of a Ctrl-C during `komira_sql_stream` is raised once the
-call has returned, which may be after the struct was filled and before
-`import_stream` took it (a query cannot be interrupted while it runs; see
-`Session.sql`).
+`KeyboardInterrupt` of a Ctrl-C during `komira_sql_stream` (a library older
+than ABI 1.6) is raised once the call has returned, which may be after the
+struct was filled and before `import_stream` took it; and a query cancelled
+under a run handle (`_run.run_sql`) may still have answered, and its stream is
+dropped.
 
 The stream needs neither the session nor its context (src/so/README.md,
 Running SQL): it may be read, or released, after the session is closed. Its

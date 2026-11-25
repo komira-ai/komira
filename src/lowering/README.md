@@ -70,7 +70,7 @@ and no environment variable and touches no global, so equal arguments give a
 - `cut_shared`: shared subplans. A plan may hold a subtree once, its canonical
   occurrence, and every later occurrence as a `PLAN_CSE_REF` leaf carrying the
   canonical subtree's `structural_hash()` (`optimizer.plan_cse`, which the
-  producer runs: `sdk_exec.engine_sql.optimize_for_run` for `run_sql`). The
+  producer runs: `sdk_exec.engine_plan.optimize_for_run` for `run_sql` and `run_plan`). The
   canonical subtree is the first node of that hash the walk reaches (a node
   before its children, a union's branches in order, and in a plan that holds
   a reference a join's right child before its left, the producer's order; the

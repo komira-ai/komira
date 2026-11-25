@@ -16,7 +16,9 @@
 //!   - c_shared_lib compiles with `-Wall -Werror`;
 //!   - node_binding_test: a failing test, a file that registers no test and a
 //!     skipped test fail though node may exit 0, an addon that is not staged
-//!     fails its test, and an addon that returns the wrong number fails it.
+//!     fails its test, and an addon that returns the wrong number fails it;
+//!     with covered sources, lines or branches under 99% and a covered source
+//!     no test loaded fail though every test passed.
 //!
 //! The analysis refusals of the same rules are analysis_refusals_node.
 const std = @import("std");
@@ -222,6 +224,21 @@ const ROWS = [_]lib.Row{
         .name = "node_binding_addon_wrong",
         .target = "tests//negative/node:binding_addon_wrong",
         .text = "answer() must return 42",
+    },
+    .{
+        .name = "node_binding_under_covered_lines",
+        .target = "tests//negative/node:binding_under_covered_lines",
+        .text = "the line coverage of the covered sources is",
+    },
+    .{
+        .name = "node_binding_under_covered_branches",
+        .target = "tests//negative/node:binding_under_covered_branches",
+        .text = "the branch coverage of the covered sources is",
+    },
+    .{
+        .name = "node_binding_cover_not_loaded",
+        .target = "tests//negative/node:binding_cover_not_loaded",
+        .text = "binding_cover_unloaded.mjs is to be covered, and no test loaded it",
     },
     .{
         .name = "node_c_warns",

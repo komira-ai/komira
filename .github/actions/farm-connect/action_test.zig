@@ -16,10 +16,14 @@
 //!    added or given the wrong value (`tls = false` written whatever `tls`
 //!    says, `tls_ca_certs`, `macos_library_dirs` or the macOS keys written when
 //!    not asked for, or not written when asked for) fails a case; every case's
-//!    buckconfig holds `grpc_keepalive_timeout_secs = 60` and
-//!    `max_concurrent_uploads_per_action = 4`, whatever the inputs, so a writer
-//!    that drops either (and leaves buck2's 10 s PING answer and unbounded
-//!    uploads per action) fails every case;
+//!    buckconfig holds `grpc_keepalive_time_secs = 30`, `grpc_keepalive_timeout_secs`
+//!    (300 unless the case gives `grpc-keepalive-timeout-secs`) and
+//!    `max_concurrent_uploads_per_action = 4`, so a writer that drops one (and leaves
+//!    buck2's 10 s PING answer, which drops every action in flight when the path to
+//!    the farm is silent for 40 s, or unbounded uploads per action) fails every case;
+//!  - `grpc-keepalive-timeout-secs` is written as given, 1 and 839 included, and
+//!    a value that is empty, zero, has a leading zero, a sign, a unit, a space or
+//!    more than three digits, or is 840 or more, is refused;
 //!  - with `darwin-config-file`, the macOS keys are written to that file alone
 //!    and the machine buckconfig is the linux-only one, both compared whole, so
 //!    a writer that leaves the keys in the machine buckconfig (and registers the
@@ -28,7 +32,8 @@
 //!    to the linux one, macOS library directories without a macOS set, a
 //!    relative one, one holding `$`, or none at all, a macOS config file without
 //!    a macOS set, relative or holding `$`, `tls` neither true nor false, a CA file with TLS off,
-//!    relative, holding `$`, missing or a directory, a line break or carriage
+//!    relative, holding `$`, missing or a directory, a PING timeout that is no
+//!    whole number from 1 to 839, a line break or carriage
 //!    return in a value) is a case that must exit 1 with its message and write
 //!    no buckconfig and no macOS file, so a check deleted or weakened fails it;
 //!  - the checks must come before the tailnet join (the step order is pinned),
@@ -47,7 +52,7 @@
 //!    `http_headers = x-kbf-qos:<class>` line under `[buck2_re_client]`, and left out
 //!    writes none (so a pull-request check sends no header and queues as `ci`); any
 //!    other value, or one with a line break, is refused. Every workflow step that uses
-//!    the action in release.yml, release-macos.yml, pypi.yml or pypi-macos-arm64.yml passes `farm-qos: batch`,
+//!    the action in release.yml, release-macos.yml or pypi.yml (both of pypi.yml's build jobs) passes `farm-qos: batch`,
 //!    and no step of any other
 //!    workflow passes `farm-qos` at all, so the release work queues behind the
 //!    pull-request checks and the pull-request checks are never lowered.
@@ -285,7 +290,8 @@ const LINUX_ONLY =
     \\  instance_name = main
     \\  tls = false
     \\  execution_concurrency_limit = 256
-    \\  grpc_keepalive_timeout_secs = 60
+    \\  grpc_keepalive_time_secs = 30
+    \\  grpc_keepalive_timeout_secs = 300
     \\  max_concurrent_uploads_per_action = 4
     \\[komira_re]
     \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
@@ -311,7 +317,8 @@ test "macOS properties and hosts: both keys under [komira_re], after the linux s
         \\  instance_name = main
         \\  tls = false
         \\  execution_concurrency_limit = 64
-        \\  grpc_keepalive_timeout_secs = 60
+        \\  grpc_keepalive_time_secs = 30
+        \\  grpc_keepalive_timeout_secs = 300
         \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
@@ -334,7 +341,8 @@ test "macOS library directories: written verbatim after the hosts, spaces and co
         \\  instance_name = main
         \\  tls = false
         \\  execution_concurrency_limit = 256
-        \\  grpc_keepalive_timeout_secs = 60
+        \\  grpc_keepalive_time_secs = 30
+        \\  grpc_keepalive_timeout_secs = 300
         \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
@@ -358,7 +366,8 @@ test "macOS properties and hosts without library directories write no macos_libr
         \\  instance_name = main
         \\  tls = false
         \\  execution_concurrency_limit = 256
-        \\  grpc_keepalive_timeout_secs = 60
+        \\  grpc_keepalive_time_secs = 30
+        \\  grpc_keepalive_timeout_secs = 300
         \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
@@ -405,7 +414,8 @@ test "tls true with no CA file: tls = true and no tls_ca_certs (the system's roo
         \\  instance_name = main
         \\  tls = true
         \\  execution_concurrency_limit = 256
-        \\  grpc_keepalive_timeout_secs = 60
+        \\  grpc_keepalive_time_secs = 30
+        \\  grpc_keepalive_timeout_secs = 300
         \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
@@ -417,6 +427,17 @@ test "tls false said outright is the default's buckconfig" {
     try expectWritten(&.{.{ .name = "tls", .value = "false" }}, LINUX_ONLY);
 }
 
+test "grpc-keepalive-timeout-secs is written as given, its bounds 1 and 839 included, and 300 said outright is the default's buckconfig" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    for ([_][]const u8{ "1", "9", "10", "60", "99", "100", "600", "799", "800", "839" }) |secs| {
+        const line = try std.fmt.allocPrint(arena.allocator(), "grpc_keepalive_timeout_secs = {s}\n", .{secs});
+        const want = try std.mem.replaceOwned(u8, arena.allocator(), LINUX_ONLY, "grpc_keepalive_timeout_secs = 300\n", line);
+        try expectWritten(&.{.{ .name = "grpc-keepalive-timeout-secs", .value = secs }}, want);
+    }
+    try expectWritten(&.{.{ .name = "grpc-keepalive-timeout-secs", .value = "300" }}, LINUX_ONLY);
+}
+
 const WITH_BATCH =
     \\[buck2_re_client]
     \\  engine_address = grpc://re.example.com:8980
@@ -425,7 +446,8 @@ const WITH_BATCH =
     \\  instance_name = main
     \\  tls = false
     \\  execution_concurrency_limit = 256
-    \\  grpc_keepalive_timeout_secs = 60
+    \\  grpc_keepalive_time_secs = 30
+    \\  grpc_keepalive_timeout_secs = 300
     \\  max_concurrent_uploads_per_action = 4
     \\  http_headers = x-kbf-qos:batch
     \\[komira_re]
@@ -468,7 +490,8 @@ test "tls true with a CA file: tls_ca_certs names that path" {
         \\  tls = true
         \\  tls_ca_certs = {s}
         \\  execution_concurrency_limit = 256
-        \\  grpc_keepalive_timeout_secs = 60
+        \\  grpc_keepalive_time_secs = 30
+        \\  grpc_keepalive_timeout_secs = 300
         \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
@@ -568,6 +591,15 @@ test "an empty required input is refused by name" {
     try expectRefused(&.{.{ .name = "farm-properties", .value = "" }}, "FARM_LINUX_X86_64_PROPERTIES");
 }
 
+test "a PING timeout that is no whole number of seconds from 1 to 839 is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    for ([_][]const u8{ "", "0", "000", "0600", "840", "841", "849", "850", "900", "999", "1000", "99999999999999999999", "-5", "+5", "600s", "6e2", "1.5", " 600", "600 " }) |bad| {
+        const msg = try std.fmt.allocPrint(arena.allocator(), "grpc-keepalive-timeout-secs is '{s}', not a whole number of seconds from 1 to 839", .{bad});
+        try expectRefused(&.{.{ .name = "grpc-keepalive-timeout-secs", .value = bad }}, msg);
+    }
+}
+
 test "a concurrency limit that is not a number is refused" {
     try expectRefused(&.{.{ .name = "execution-concurrency-limit", .value = "64x" }}, "execution-concurrency-limit is not a number");
 }
@@ -602,7 +634,7 @@ test "every input is used, and every use names a declared input" {
     defer arena.deinit();
     const ar = arena.allocator();
     const action = try loadAction(ar);
-    try t.expectEqual(@as(usize, 13), action.inputs.len);
+    try t.expectEqual(@as(usize, 14), action.inputs.len);
     for (action.inputs) |in| {
         const use = try std.fmt.allocPrint(ar, "${{{{ inputs.{s} }}}}", .{in.name});
         if (std.mem.indexOf(u8, action.runs, use) == null) std.debug.print("input '{s}' is never used\n", .{in.name});
@@ -627,14 +659,12 @@ test "every input is used, and every use names a declared input" {
 const ACTION_REF = "./.github/actions/farm-connect";
 const TLS_VALUE = "${{ vars.FARM_TLS || 'false' }}";
 /// The workflows whose farm steps run at the lower class (the release, the macOS build of the
-/// release, and the publish of the Python package's Linux and macOS wheels, each a workflow of its
-/// own), and the class.
+/// release, and the publish of the Python package's two wheels), and the class.
 const RELEASE_WORKFLOW = "release.yml";
 const RELEASE_MACOS_WORKFLOW = "release-macos.yml";
 const PYPI_WORKFLOW = "pypi.yml";
-const PYPI_MACOS_WORKFLOW = "pypi-macos-arm64.yml";
 fn isReleaseWorkflow(file: []const u8) bool {
-    return std.mem.eql(u8, file, RELEASE_WORKFLOW) or std.mem.eql(u8, file, RELEASE_MACOS_WORKFLOW) or std.mem.eql(u8, file, PYPI_WORKFLOW) or std.mem.eql(u8, file, PYPI_MACOS_WORKFLOW);
+    return std.mem.eql(u8, file, RELEASE_WORKFLOW) or std.mem.eql(u8, file, RELEASE_MACOS_WORKFLOW) or std.mem.eql(u8, file, PYPI_WORKFLOW);
 }
 const RELEASE_QOS = "batch";
 
@@ -903,7 +933,7 @@ fn wrongIn(file: []const u8, qos_line: []const u8) !usize {
     return (try wrongCallers(ar, file, text)).wrong;
 }
 
-test "the priority rule: a release.yml, release-macos.yml, pypi.yml or pypi-macos-arm64.yml step must pass batch, every other workflow's step none" {
+test "the priority rule: a release.yml, release-macos.yml or pypi.yml step must pass batch, every other workflow's step none" {
     const batch = "          farm-qos: batch\n";
     const ci = "          farm-qos: ci\n";
     // release.yml: batch is right; none, ci or another value is the lower class missing
@@ -913,9 +943,6 @@ test "the priority rule: a release.yml, release-macos.yml, pypi.yml or pypi-maco
     try t.expectEqual(@as(usize, 0), try wrongIn("pypi.yml", batch));
     try t.expectEqual(@as(usize, 1), try wrongIn("pypi.yml", ""));
     try t.expectEqual(@as(usize, 1), try wrongIn("pypi.yml", ci));
-    try t.expectEqual(@as(usize, 0), try wrongIn("pypi-macos-arm64.yml", batch));
-    try t.expectEqual(@as(usize, 1), try wrongIn("pypi-macos-arm64.yml", ""));
-    try t.expectEqual(@as(usize, 1), try wrongIn("pypi-macos-arm64.yml", ci));
     try t.expectEqual(@as(usize, 1), try wrongIn("release.yml", ""));
     try t.expectEqual(@as(usize, 1), try wrongIn("release.yml", ci));
     try t.expectEqual(@as(usize, 1), try wrongIn("release.yml", "          farm-qos: interactive\n"));
@@ -925,6 +952,26 @@ test "the priority rule: a release.yml, release-macos.yml, pypi.yml or pypi-maco
         try t.expectEqual(@as(usize, 1), try wrongIn(file, batch));
         try t.expectEqual(@as(usize, 1), try wrongIn(file, ci));
     }
+}
+
+test "the priority rule holds each farm-connect step of one workflow: in pypi.yml, a second build job without batch is the one wrong step" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const two = try std.fmt.allocPrint(ar,
+        \\    steps:
+        \\      - uses: ./.github/actions/farm-connect
+        \\        with:
+        \\          tls: ${{{{ vars.FARM_TLS || 'false' }}}}
+        \\          farm-qos: batch
+        \\      - uses: ./.github/actions/farm-connect
+        \\        with:
+        \\          tls: ${{{{ vars.FARM_TLS || 'false' }}}}
+        \\{s}
+    , .{"\n"});
+    const r = try wrongCallers(ar, "pypi.yml", two);
+    try t.expectEqual(@as(usize, 2), r.callers);
+    try t.expectEqual(@as(usize, 1), r.wrong);
 }
 
 test "every workflow step that uses the action passes tls from FARM_TLS, and farm-qos only in the release workflows" {
@@ -940,7 +987,6 @@ test "every workflow step that uses the action passes tls from FARM_TLS, and far
     var release_callers: usize = 0;
     var macos_callers: usize = 0;
     var pypi_callers: usize = 0;
-    var pypi_macos_callers: usize = 0;
     var di = dir.iterate();
     while (try di.next()) |e| {
         if (!std.mem.endsWith(u8, e.name, ".yml")) continue;
@@ -952,7 +998,6 @@ test "every workflow step that uses the action passes tls from FARM_TLS, and far
         if (std.mem.eql(u8, e.name, RELEASE_WORKFLOW)) release_callers = r.callers;
         if (std.mem.eql(u8, e.name, RELEASE_MACOS_WORKFLOW)) macos_callers = r.callers;
         if (std.mem.eql(u8, e.name, PYPI_WORKFLOW)) pypi_callers = r.callers;
-        if (std.mem.eql(u8, e.name, PYPI_MACOS_WORKFLOW)) pypi_macos_callers = r.callers;
     }
     // The staged workflows are read, and the action has callers: a staging
     // or reader fault would otherwise pass with nothing checked.
@@ -961,7 +1006,7 @@ test "every workflow step that uses the action passes tls from FARM_TLS, and far
     // release.yml is read and has its farm steps: with none seen, the priority rule would pass empty.
     try t.expect(release_callers > 0);
     try t.expect(macos_callers > 0);
-    try t.expect(pypi_callers > 0);
-    try t.expect(pypi_macos_callers > 0);
+    // pypi.yml holds the farm-connect steps of both builds, the Linux one and the macOS one
+    try t.expect(pypi_callers >= 2);
     try t.expectEqual(@as(usize, 0), wrong);
 }

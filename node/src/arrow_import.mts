@@ -62,7 +62,7 @@ import {
   makeVector,
 } from 'apache-arrow';
 
-import { UnsupportedOperation } from './errors.mts';
+import { UnsupportedOperation } from './errors.ts';
 
 // What arrowSchema returns: one node per field, as the C ArrowSchema holds it.
 export interface SchemaDescription {
