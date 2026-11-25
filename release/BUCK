@@ -10,9 +10,9 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":darwin_libs.bzl", "DARWIN_PACKAGES", "mopm_darwin_libs")
 load(":exec_tools.bzl", "exec_tool_cases")
-load(":mopm_artifacts.bzl", "merge_tree_cases", "mopm_artifacts", "mopm_release_artifacts", "native_ids_json")
+load(":mopm_artifacts.bzl", "merge_tree_cases", "mopm_artifacts", "mopm_release_artifacts", "native_ids_json", "release_packages_json")
 load(":release_set.bzl", "release_set")
-load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
+load("//release/readme_e2e:packages.bzl", README_E2E_NAMESPACE = "NAMESPACE", README_E2E_PACKAGES = "PACKAGES")
 
 # Fails loading this package if `exec_tool_refusal` (exec_tools.bzl, the check of
 # darwin_analysis.bxl that every Zig tool an action runs is built for the platform the action
@@ -36,6 +36,17 @@ RELEASE_NATIVES = {
     "log": {"komira_log_holder": "//src/log:native_komira_log_holder"},
     "metrics": {"komira_metrics_ea_flag": "//src/metrics:native_komira_metrics_ea_flag"},
 }
+
+# The packages of the release and those of them that ship a native archive (the keys of RELEASE_NATIVES), as
+# JSON: //tools/build/ci:prod_add_set_cases fails when a native package is not one `release_staged_verify add`
+# installs from prod, or when it installs a name that is no package of the release.
+release_packages_json(
+    name = "release_packages_json",
+    namespace = README_E2E_NAMESPACE,
+    natives = sorted(RELEASE_NATIVES.keys()),
+    packages = sorted(README_E2E_PACKAGES.keys()),
+    visibility = ["//tools/build/ci:"],
+)
 
 # The build artifacts of the libraries moved to mopm (mopm_artifacts.bzl): each
 # package's `:lib`, as `linux-64/komira-ai/<name>.mojoc`, and each package's native archive as
