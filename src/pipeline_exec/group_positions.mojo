@@ -34,12 +34,13 @@
 #
 # Memory: charged to the worker's position reservation (its own, beside the
 # one of the worker's tables, so the grains can outlive the worker's tables in
-# combine) before it is made: each doubling of the list of grains, each doubling of a grain's rows (a row is the group's id and
-# 16 bytes per positional aggregate), and the per-group index the worker
+# combine) before it is made: each doubling of the list of grains, each
+# doubling of a grain's rows (a row is the group's id and 16 bytes per
+# positional aggregate), and each growth of the per-group index the worker
 # keeps of its current grain (two `Int`s a group, grown by doubling). A
-# denial leaves nothing made and is reported by the caller by name. The
-# position order `merge_positions` builds (a few `Int`s per grain) is not
-# charged. The
+# denial makes nothing and is reported by the caller by name. Not charged:
+# the per-aggregate slot and type lists (one entry per aggregate) and the
+# position order `merge_positions` builds (a few `Int`s per grain). The
 # reservation is returned when the grains are merged, or dropped. The state
 # grows with the number of (position, group) pairs the rows reach: one entry
 # per group per morsel, so few groups cost little, and at most one entry per
@@ -92,7 +93,10 @@ comptime _FIRST_ROWS: Int = 8
 
 def _positional_func(func: UInt8) -> Bool:
     return (
-        func == AGG_SUM or func == AGG_MEAN or func == AGG_MIN or func == AGG_MAX
+        func == AGG_SUM
+        or func == AGG_MEAN
+        or func == AGG_MIN
+        or func == AGG_MAX
     )
 
 
@@ -207,6 +211,8 @@ struct GroupPositions(Movable):
             if not self.reservation.try_grow(bytes):
                 self.denied_bytes = bytes
                 return -1
+            self._grain_of.reserve(want)
+            self._row_of.reserve(want)
             for _ in range(grow):
                 self._grain_of.append(-1)
                 self._row_of.append(0)
