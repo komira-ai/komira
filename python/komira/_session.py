@@ -15,8 +15,8 @@ the library, so its context never runs two calls at once (the C ABI's rule,
 src/so/README.md): a call waits for the one running on the same session to
 return. Reading a `Result` takes no lock of the session, since its stream
 needs neither the session nor its context; a result has a lock of its own,
-held while a terminal takes its stream and while a notebook display reads its
-first rows.
+held while a notebook display reads its first rows, which a terminal that
+finds the stream taken waits for.
 
 On a library of ABI 1.6 or later, `sql` runs its statement under a run handle
 (`_run.run_sql`): a Ctrl-C while it runs cancels the run, and a `progress`
@@ -373,13 +373,15 @@ class Result:
     """
 
     def __init__(self, reader: pyarrow.RecordBatchReader) -> None:
-        # The reader, until a terminal takes it. A terminal takes it, and
-        # `_repr_html_` takes it and puts back the reader that replays it,
-        # under `_lock`, so of two threads reading one result one gets it and
-        # the other the error, and a terminal called while a display reads
-        # waits for it. The lock is reentrant, so a signal handler that reads
-        # the result during a display gets the error rather than waiting for
-        # itself.
+        # The reader, until a terminal takes it. `list.pop` takes it in one
+        # step, so of two threads reading one result, one gets it and the
+        # other the error, and neither waits for the other. `_repr_html_`
+        # takes it and puts back the reader that replays it while it holds
+        # `_lock`; a terminal that finds no reader takes `_lock` before it
+        # looks again, so a terminal called while a display reads waits for
+        # the display and then reads. The lock is reentrant, so a signal
+        # handler that reads the result during a display on its own thread
+        # gets the error rather than waiting for itself.
         self._reader: list[pyarrow.RecordBatchReader] = [reader]
         self._lock = threading.RLock()
 
@@ -470,6 +472,12 @@ class Result:
             reader.close()
 
     def _take(self) -> pyarrow.RecordBatchReader:
+        try:
+            return self._reader.pop()
+        except IndexError:
+            pass
+        # No reader: the result was read, or a display holds the reader under
+        # `_lock` and puts back the one that replays it before it lets go.
         with self._lock:
             try:
                 return self._reader.pop()
