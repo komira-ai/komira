@@ -506,12 +506,10 @@ def test_range_default_frame_over_int32_gives_peers_one_value() raises:
     cols.append(_narrow[DType.int32](a, _all(3)))
     var names: List[String] = ["o", "a"]
     var ok: List[String] = ["o"]
-    var exprs = List[PartitionExpr]()
-    exprs.append(PartitionExpr.running_sum("a"))
-    exprs.append(PartitionExpr.running_avg("a"))
-    exprs.append(PartitionExpr.running_min("a"))
-    exprs.append(PartitionExpr.running_max("a"))
-    var out = _run(_batch(names, cols^), List[String](), ok, exprs^)
+    var out = _run(
+        _batch(names, cols^), List[String](), ok,
+        _four_aggs(PartitionFrame.running_range(), "a"),
+    )
     var want_sum: List[Int64] = [-2, -2, 1]
     var want_avg: List[Float64] = [-1.0, -1.0, 1.0 / 3.0]
     var want_min: List[Int64] = [-7, -7, -7]

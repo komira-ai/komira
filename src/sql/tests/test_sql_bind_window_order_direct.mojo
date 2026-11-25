@@ -693,8 +693,8 @@ def test_window_nulls_placement_in_partition_by_order() raises:
 def test_windows_differing_only_by_nulls_placement_stay_separate() raises:
     _check(
         "SELECT rank() OVER (ORDER BY k) AS a, rank() OVER (ORDER BY k NULLS FIRST) AS b FROM t",
-        "Project(exprs=[ColRef(a), ColRef(b)])\n"
-        "  PartitionBy(partition=[], order=[k ASC NULLS FIRST], funcs=[RANK(, offset=0, frame=RANGE[0:0..2:0]) AS b])\n"
+        "Project(exprs=[ColRef(a), Alias(ColRef(_w_shadow_1_b), \"b\")])\n"
+        "  PartitionBy(partition=[], order=[k ASC NULLS FIRST], funcs=[RANK(, offset=0, frame=RANGE[0:0..2:0]) AS _w_shadow_1_b])\n"
         "    PartitionBy(partition=[], order=[k ASC], funcs=[RANK(, offset=0, frame=RANGE[0:0..2:0]) AS a])\n"
         "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
