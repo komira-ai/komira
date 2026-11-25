@@ -16,12 +16,14 @@ prefix. In order:
    `bin/python3.<minor>` a link to it, and nothing in
    `lib/python3.<minor>/site-packages/`, its one site directory.
 2. Each wheel's tag must be one this interpreter installs: a Python tag `py3`,
-   `py3<minor>` or `cp3<minor>`, the ABI tag `none`, or `cp3<minor>` (an
-   extension module built for this minor alone, pyarrow's), and the platform `any`
+   `py3<minor>` or `cp3<minor>` with the ABI tag `none` or `cp3<minor>` (an
+   extension module built for this minor alone, pyarrow's), or the stable ABI
+   `cp3<k>-abi3` with <k> at most this minor (built for 3.<k> and later,
+   protobuf's), and the platform `any`
    or `manylinux_2_<n>_<machine>` (or `manylinux2014_<machine>`) with this
    machine and <n> at most the C library's minor version, or, on macOS,
-   `macosx_<major>_<minor>_<machine>` with this machine (`arm64`) and a
-   version at most the macOS version this runs on.
+   `macosx_<major>_<minor>_<machine>` with this machine (`arm64`) or
+   `universal2` and a version at most the macOS version this runs on.
 3. Each wheel is installed into the site directory by `install` of
    `--installer` (tools/build/python/wheel_install.py, what `python_wheel`
    runs): every member at its path, a `.data/` directory's `purelib/` and
@@ -174,8 +176,9 @@ def parse_requirement(line):
 
 def supported(tag, minor, machine, glibc, system="linux", macos=(0, 0)):
     """Whether this interpreter installs a wheel tagged `tag`
-    (`py3-none-manylinux_2_34_x86_64`, `py3-none-macosx_11_0_arm64`; each part
-    may be a `.`-joined set): CPython 3.<minor> on `machine` with glibc
+    (`py3-none-manylinux_2_34_x86_64`, `py3-none-macosx_11_0_arm64`,
+    `cp310-abi3-manylinux2014_x86_64`; each part may be a `.`-joined set):
+    CPython 3.<minor> on `machine` with glibc
     `glibc` ((major, minor)) when `system` is "linux", or on macOS version
     `macos` ((major, minor)) when it is "darwin". A `manylinux` platform
     needs Linux and a `macosx` one needs macOS."""
@@ -183,16 +186,23 @@ def supported(tag, minor, machine, glibc, system="linux", macos=(0, 0)):
     if len(parts) != 3:
         return False
     pys, abis, plats = (p.split(".") for p in parts)
-    if not set(pys) & {"py3", "py3{}".format(minor), "cp3{}".format(minor)}:
-        return False
-    if not set(abis) & {"none", "cp3{}".format(minor)}:
+    exact = bool(set(pys) & {"py3", "py3{}".format(minor), "cp3{}".format(minor)}) and bool(
+        set(abis) & {"none", "cp3{}".format(minor)}
+    )
+    # The stable ABI: `cp3<k>-abi3` is built for CPython 3.<k> and runs on
+    # every later CPython 3, as pip installs it.
+    stable = "abi3" in abis and any(
+        re.fullmatch(r"cp3(\d+)", py) and int(py[3:]) <= minor for py in pys
+    )
+    if not (exact or stable):
         return False
     for plat in plats:
         if plat == "any":
             return True
         if system == "darwin":
             m = re.fullmatch(r"macosx_(\d+)_(\d+)_(.+)", plat)
-            if m and m.group(3) == machine and (int(m.group(1)), int(m.group(2))) <= macos:
+            # `universal2` holds both arm64 and x86_64 code.
+            if m and m.group(3) in (machine, "universal2") and (int(m.group(1)), int(m.group(2))) <= macos:
                 return True
             continue
         if system != "linux":
