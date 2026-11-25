@@ -52,7 +52,8 @@ commits nothing and never rewrites history. The plan:
 5. **`README.md`**: a `## Build files` section is appended.
 6. **Shared rows**, each inserted at its sorted place: `release/readme_e2e/packages.bzl` and
    `release/mopm_native_ids.bzl` (the `load` and the row). It does not edit `ci/targets.bzl` or its
-   shards: those are generated (see below).
+   shards: those are generated (see below). It does not delete the library's row in
+   `release/UNPUBLISHED.md`: `//release:unpublished_cases` refuses the change until the author deletes it.
 
 What it leaves to the farm, and prints: `buildrules.mojo.bzl` and `buildrules.mojo.lock.bzl`
 (`buildrules mojo sync`, the recipe's step 4), `coverage_floor.txt` (a measure), and the regeneration of the
