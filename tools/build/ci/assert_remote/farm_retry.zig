@@ -39,14 +39,24 @@
 //!     output marker), buck2's own `Error:` line with `RE channel error: code: `.
 //!     buck2's own lines carry its `[<time>] ` prefix; an action's output does
 //!     not, and a test's output comes after a marker, so the phrase quoted by
-//!     a compiler or a test never counts;
+//!     a compiler or a test never counts. The one exception is the output
+//!     buck2 gives a test whose run on the farm was cut, which never ran
+//!     (fixtures/test_cut.log): an empty `---- STDOUT ----`, then
+//!     `---- STDERR ----` holding only buck2's
+//!     `Remote Execution Error on Execute with digest ...` line and, on the
+//!     next line, the cut line. A failed test with that output and nothing
+//!     else (empty lines before the first and after the second) is a cut;
+//!     one more line of any kind makes it the test's own failure;
 //!   * no test timed out, was fatal, failed for the infrastructure or failed
 //!     to list (a block of that kind, or a nonzero count on `Tests finished:`);
 //!   * every line outside a block is one buck2 prints around such a run:
-//!     its progress and summary lines, `BUILD FAILED`, a `Failed to build`
-//!     line naming a target that has an `Action failed:` block, the test
-//!     counts. Any other line (an analysis error, a bxl script's error, a line
-//!     of a shape not seen before) is a failure that is not a cut.
+//!     its progress and summary lines, the files its daemon saw change
+//!     (`File changed: <path>`, `<N> additional file change events`),
+//!     `BUILD FAILED`, a `Failed to build` line naming a target that has an
+//!     `Action failed:` block, the test counts and the list of failed tests
+//!     after them (ended by `...and <N> more not shown...` when it is cut
+//!     short). Any other line (an analysis error, a bxl script's error, a
+//!     line of a shape not seen before) is a failure that is not a cut.
 //! Anything else is final: a log that mixes one real failure with any number
 //! of cuts is never run again.
 
@@ -137,8 +147,25 @@ fn progressOrSummary(c: []const u8) bool {
             if (at < 40 and std.mem.indexOfScalar(u8, c[0..at], ' ') == null) return true;
         }
     }
+    if (fileChanges(c)) return true;
     // A warning buck2 prints while it builds a target with no outputs.
     return std.mem.startsWith(u8, c, "Target ") and std.mem.endsWith(u8, c, " does not have any outputs. This means the rule did not define any outputs. See https://buck2.build/docs/users/faq/common_issues/#why-does-my-target-not-have-any-outputs for more information");
+}
+
+/// The lines buck2 prints at the start of a command when its daemon saw files
+/// change since the last one (fixtures/build_cut_after_file_changes.log, after
+/// a step that wrote the packages' mopm.toml): `File changed: <path>` for the
+/// first few, then `<N> additional file change events`. The path is one word:
+/// a line with more after it is not this one.
+fn fileChanges(c: []const u8) bool {
+    const changed = "File changed: ";
+    if (std.mem.startsWith(u8, c, changed)) {
+        const path = c[changed.len..];
+        return path.len > 0 and std.mem.indexOfScalar(u8, path, ' ') == null;
+    }
+    var end: usize = 0;
+    while (end < c.len and std.ascii.isDigit(c[end])) end += 1;
+    return end > 0 and std.mem.eql(u8, c[end..], " additional file change events");
 }
 
 /// buck2's verdict on a build or bxl run, unstamped.
@@ -198,9 +225,16 @@ fn hasActionBlock(log: []const u8, target: []const u8) bool {
 }
 
 /// True for a line buck2 prints after a test run's counts: `N TESTS FAILED`,
-/// `N BUILDS FAILED`, and the list of failed tests (`✗ <target>`).
+/// `N BUILDS FAILED`, the list of failed tests (`✗ <target>`) and the line
+/// that ends a list cut short (`...and N more not shown...`).
 fn testRunTail(l: []const u8) bool {
     if (std.mem.startsWith(u8, l, "✗ ")) return true;
+    const more = "...and ";
+    if (std.mem.startsWith(u8, l, more)) {
+        var at: usize = more.len;
+        while (at < l.len and std.ascii.isDigit(l[at])) at += 1;
+        return at > more.len and std.mem.eql(u8, l[at..], " more not shown...");
+    }
     var end: usize = 0;
     while (end < l.len and std.ascii.isDigit(l[end])) end += 1;
     if (end == 0) return false;
@@ -224,12 +258,73 @@ const Block = struct {
         output,
     } = .head,
     cut: bool = false,
+    /// For a failed test: how far its output is the output buck2 prints for a
+    /// test whose run on the farm was cut (fixtures/test_cut.log): an empty
+    /// `---- STDOUT ----`, then `---- STDERR ----` with buck2's
+    /// `Remote Execution Error on Execute with digest ...` line and, on the
+    /// next line, its cut line; empty lines only before the first and after
+    /// the second. A test that printed exactly those two lines itself, with
+    /// nothing else, would read as a cut and run once more; nothing else does.
+    unrun: enum {
+        /// Before the test's first output marker.
+        start,
+        /// In its stdout, only empty lines so far.
+        stdout,
+        /// In its stderr, only empty lines so far.
+        stderr,
+        /// After the `Remote Execution Error on Execute` line.
+        execute,
+        /// After the cut line: the whole shape, if nothing follows.
+        cut,
+        /// Any other output: the test's own, never a cut.
+        other,
+    } = .start,
+
+    /// True when every failure the block holds is a cut connection to the farm.
+    fn isCutBlock(b: Block) bool {
+        return b.cut or b.unrun == .cut;
+    }
+
+    /// For a failed test's output line: true when it is the next line of the
+    /// shape `unrun` follows, and so belongs to the block; false, and the
+    /// shape broken for good, when it is not.
+    fn unrunTakes(b: *Block, s: []const u8) bool {
+        switch (b.unrun) {
+            .stdout => {
+                if (s.len == 0) return true;
+                if (std.mem.eql(u8, s, "---- STDERR ----")) {
+                    b.unrun = .stderr;
+                    return true;
+                }
+            },
+            .stderr => {
+                if (s.len == 0) return true;
+                if (std.mem.startsWith(u8, s, "Remote Execution Error on Execute with digest ")) {
+                    b.unrun = .execute;
+                    return true;
+                }
+            },
+            .execute => if (isCut(s)) {
+                b.unrun = .cut;
+                return true;
+            },
+            .cut => if (s.len == 0) return true,
+            .start, .other => {},
+        }
+        b.unrun = .other;
+        return false;
+    }
 
     /// True when the line (`c` its content if buck2 stamped it, `l` the
     /// line) belongs to the block, after noting what it says; false when it
     /// ends the block and stands outside it.
     fn takes(b: *Block, c: ?[]const u8, l: []const u8) bool {
-        const s = c orelse return !runEnd(l);
+        const s = c orelse {
+            // A line without buck2's prefix in a test's block is the test's
+            // own: that test ran, so its output is not the cut-run shape.
+            if (std.mem.trim(u8, l, " ").len > 0) b.unrun = .other;
+            return !runEnd(l);
+        };
         if (opens(s) != null or finalTestResult(s) or progressOrSummary(s)) return false;
         switch (b.kind) {
             .action => switch (b.part) {
@@ -253,8 +348,12 @@ const Block = struct {
             },
             .test_fail, .test_other => switch (b.part) {
                 .head => {
-                    if (std.mem.eql(u8, s, "---- STDOUT ----") or std.mem.eql(u8, s, "---- STDERR ----")) {
+                    if (std.mem.eql(u8, s, "---- STDOUT ----")) {
                         b.part = .output;
+                        b.unrun = .stdout;
+                    } else if (std.mem.eql(u8, s, "---- STDERR ----")) {
+                        b.part = .output;
+                        b.unrun = .stderr;
                     } else if (isCut(s)) {
                         b.cut = true;
                     }
@@ -262,8 +361,13 @@ const Block = struct {
                 },
                 // A test's output carries buck2's prefix, so buck2's own error
                 // after it cannot be told from the test's: an `Error` line
-                // ends the block and is judged outside it, never passed over.
-                .stdout, .output => return !std.mem.startsWith(u8, s, "Error"),
+                // ends the block and is judged outside it, never passed over,
+                // unless it is the cut line of the whole shape of a failed
+                // test's cut run (`unrun`).
+                .stdout, .output => {
+                    if (b.kind == .test_fail and b.unrunTakes(s)) return true;
+                    return !std.mem.startsWith(u8, s, "Error");
+                },
             },
         }
     }
@@ -288,7 +392,7 @@ pub fn classify(a: std.mem.Allocator, log: []const u8) !Verdict {
         if (block) |*b| {
             if (b.takes(c, l)) continue;
             if (b.kind != .test_other) {
-                if (!b.cut) return .{ .failure = b.first };
+                if (!b.isCutBlock()) return .{ .failure = b.first };
                 cuts += 1;
             }
             block = null;
@@ -320,7 +424,7 @@ pub fn classify(a: std.mem.Allocator, log: []const u8) !Verdict {
     }
     if (block) |b| {
         if (b.kind != .test_other) {
-            if (!b.cut) return .{ .failure = b.first };
+            if (!b.isCutBlock()) return .{ .failure = b.first };
             cuts += 1;
         }
     }
