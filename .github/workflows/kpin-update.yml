@@ -97,6 +97,7 @@ jobs:
       # The step below refuses a pins.lock.bzl in the tree that is not listed,
       # so a new lock cannot go without its weekly update.
       KPIN_SETS: |
+        node/devtools/pins.toml node/devtools/pins.lock.bzl node/devtools/package-lock.json
         src/tests/helpers/komira_test_npm_modules_ts_jest/pins.toml src/tests/helpers/komira_test_npm_modules_ts_jest/pins.lock.bzl src/tests/helpers/komira_test_npm_modules_ts_jest/package-lock.json
       # One line per Cargo workspace: <workspace dir> <Cargo.lock> <trimmed metadata>
       # <sizes> <overrides> <generated crates file> <target triple>. The overrides

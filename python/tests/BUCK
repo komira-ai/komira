@@ -218,6 +218,13 @@ _ISA_FIXTURES = [
     "cpuinfo_x86_64_westmere.txt",
 ]
 
+# The Node package's selector test (node/BUCK, :package_test) reads the same
+# fixtures and table of choices, so the two loaders cannot disagree.
+[export_file(
+    name = "fixtures/" + f,
+    visibility = ["//node:"],
+) for f in ["cpuinfo_x86_64_v3.txt"] + ["isa_variants/" + x for x in _ISA_FIXTURES]]
+
 [python_binding_test(
     name = "variants_test" + p["suffix"],
     src = "test_variants.py",

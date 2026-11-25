@@ -1,9 +1,14 @@
 # CPU-level variant fixtures
 
-The inputs of the libkomira variant selector's test
-([`../../test_variants.py`](../../test_variants.py)), which checks `_select_variant` in
-[`python/komira/_native.py`](../../../komira/_native.py) against
-[docs/design/isa_variants.md](../../../../docs/design/isa_variants.md), decision 5.
+The inputs of the libkomira variant selector's tests, which check the selector of each language package
+against [docs/design/isa_variants.md](../../../../docs/design/isa_variants.md), decision 5, on the same
+files and the same table of choices: `_select_variant` in
+[`python/komira/_native.py`](../../../komira/_native.py) by
+[`../../test_variants.py`](../../test_variants.py), and `selectVariant` in
+[`node/src/cpu.ts`](../../../../node/src/cpu.ts) by
+[`node/tests/variants.test.ts`](../../../../node/tests/variants.test.ts). The table's `machine` column
+spells the machine as Python's `platform.machine()` does; the Node test reads `x86_64` as `x64` and
+`aarch64` as `arm64`, as `process.arch` spells them.
 
 - `cpuinfo_*.txt` are `/proc/cpuinfo` texts of one CPU model each, written with the `flags` (x86)
   or `Features` (arm64) words that Linux reports for that model:

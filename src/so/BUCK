@@ -339,11 +339,12 @@ export_file(
 # wheel_install_test), which holds komira.abi_version() of the installed
 # library to its `version` line, and by the install page's check
 # (python/smoke/BUCK, install_page_shows_quickstart), which holds the
-# output the page shows to it.
+# output the page shows to it, and by the Node package's test (node/BUCK,
+# package_test), which holds abiVersion() to it.
 export_file(
     name = "abi/komira.tsv",
     src = "abi/komira.tsv",
-    visibility = ["//python:", "//python/smoke:"],
+    visibility = ["//node:", "//python:", "//python/smoke:"],
 )
 
 # The C header of libkomira, komira.h, made from abi/komira.tsv (the golden:
