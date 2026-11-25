@@ -293,6 +293,24 @@ def test_is_distinct_from() raises:
     )
 
 
+def test_boolean_equality_binds_through_boolean_operators() raises:
+    # Two boolean operands of = / <> bind as AND / OR / NOT; the plan has no
+    # boolean column-vs-column comparison.
+    var eq = "BinaryOp(OR, BinaryOp(AND, ColRef(b), ColRef(b)), BinaryOp(AND, UnaryOp(NOT, ColRef(b)), UnaryOp(NOT, ColRef(b))))"
+    assert_equal(_predicate_of("SELECT k FROM t WHERE b = b"), eq)
+    assert_equal(_predicate_of("SELECT k FROM t WHERE b <> b"), "UnaryOp(NOT, " + eq + ")")
+    # IS NOT DISTINCT FROM over two booleans reaches the same `=`.
+    assert_true(eq in _predicate_of("SELECT k FROM t WHERE b IS NOT DISTINCT FROM b"))
+    # A boolean against a constant, and an ordered comparison, stay plain.
+    assert_equal(
+        _predicate_of("SELECT k FROM t WHERE b = TRUE"),
+        "BinaryOp(EQ, ColRef(b), Literal(ScalarValue(bool, true)))",
+    )
+    assert_equal(
+        _predicate_of("SELECT k FROM t WHERE b < b"), "BinaryOp(LT, ColRef(b), ColRef(b))"
+    )
+
+
 def test_integer_literal_past_bigint() raises:
     _check(
         "SELECT k FROM t WHERE u64 = 18446744073709551615",

@@ -497,9 +497,29 @@ def _float_dtype(t: ArrowType) -> DType:
 
 def _bind_comparison(op: UInt8, var lhs: Expr, var rhs: Expr, typing: Schema) raises -> Expr:
     """`lhs <op> rhs`, the DECIMAL side cast to the float's type when the other
-    side is a float that is not a constant (see the section header)."""
+    side is a float that is not a constant (see the section header).
+
+    Two non-constant BOOLEAN operands of `=` / `<>` are bound through the
+    boolean operators, since the plan's column-vs-column comparison has no
+    boolean pair: `a = b` is `(a AND b) OR (NOT a AND NOT b)` and `a <> b` its
+    NOT. Under Kleene logic that is NULL exactly when an operand is NULL, as
+    DuckDB's `=` is. `IS [NOT] DISTINCT FROM` over two boolean columns reaches
+    this through its `=`. A boolean against a constant keeps the plain
+    comparison, which the literal kernels serve."""
     var lt = _operand_type(lhs, typing)
     var rt = _operand_type(rhs, typing)
+    if (
+        (op == BIN_EQ or op == BIN_NE) and lt == ArrowType.BOOL and rt == ArrowType.BOOL
+        and not _is_constant(lhs) and not _is_constant(rhs)
+    ):
+        var both_true = Expr.binary(BIN_AND, lhs.copy(), rhs.copy())
+        var both_false = Expr.binary(
+            BIN_AND, Expr.unary(UN_NOT, lhs^), Expr.unary(UN_NOT, rhs^)
+        )
+        var equal = Expr.binary(BIN_OR, both_true^, both_false^)
+        if op == BIN_NE:
+            return Expr.unary(UN_NOT, equal^)
+        return equal^
     # A float constant is left as it is: the optimizer folds it to a literal,
     # and the comparison kernels serve a DECIMAL against a float literal.
     if lt == ArrowType.DECIMAL128 and rt.is_floating() and not _is_constant(rhs):
