@@ -129,6 +129,20 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# The whole-set check of release.yml (.github/workflows/release_plan_expect_test.zig says what each case
+# catches): `mopm-stage` builds //release:mopm_plan_expectation on the farm and, as the step right after
+# `mopm stage`, runs `release_staged_verify expect` on the staged plan with it, with no condition and no
+# ignored failure, and `prod-stage` needs `mopm-stage`, so a set that is not every package on every
+# platform stops before the registry is asked for a group. A build action.
+zig_test(
+    name = "release_plan_expect_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/release_plan_expect_test.zig",
+    data = {"workflows/release.yml": ".github/workflows/release.yml"},
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # The cases of the pull request's check on its two events (.github/workflows/pr_workflow_test.zig
 # says what each catches): pr.yml runs the job `check`, the one required status check, on a pull
 # request and on a merge group of the merge queue, with a concurrency group per merge group, the
