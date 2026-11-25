@@ -77,6 +77,7 @@ def main(args):
         "CredentialsError",
         "KomiraError",
         "LibraryLoadError",
+        "MemoryLimitError",
         "ParseError",
         "Result",
         "Session",

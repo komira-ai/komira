@@ -103,6 +103,7 @@ _Out = [_OutBuf, ctypes.c_uint64, _OutLen]
 # be there; a later one may be missing, and calling it then raises.
 _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
     "komira_ctx_new": (0, ctypes.c_void_p, []),
+    "komira_ctx_new_with_options": (4, ctypes.c_void_p, [ctypes.c_int64, ctypes.c_int64]),
     "komira_ctx_free": (0, None, [ctypes.c_void_p]),
     "komira_last_error": (0, ctypes.c_int32, [ctypes.c_void_p] + _Out),
     "komira_last_error_code": (7, ctypes.c_int32, [ctypes.c_void_p] + _Out),
@@ -456,6 +457,19 @@ class Native:
         ctx = self._fn("komira_ctx_new")()
         if not ctx:
             raise KomiraError("komira_ctx_new returned NULL")
+        return int(ctx)
+
+    def ctx_new_with_options(self, worker_count: int, memory_budget_bytes: int) -> int:
+        """A context whose engine runs `worker_count` workers within
+        `memory_budget_bytes`; 0 for either is the engine's own value. Needs
+        ABI 1.4. The engine refuses an option it cannot start with (NULL)."""
+        ctx = self._fn("komira_ctx_new_with_options")(worker_count, memory_budget_bytes)
+        if not ctx:
+            raise KomiraError(
+                "komira_ctx_new_with_options returned NULL for {} workers and a budget of {} bytes".format(
+                    worker_count, memory_budget_bytes
+                )
+            )
         return int(ctx)
 
     def ctx_free(self, ctx: int) -> None:

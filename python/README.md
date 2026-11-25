@@ -68,7 +68,13 @@ against the published package.
 - `komira.__version__` is the installed distribution's version.
 - `komira.abi_version()` loads the engine and returns its C ABI version as
   `major * 1000 + minor`.
-- `komira.Session()` is one engine context. `register_parquet(name, path)`
+- `komira.Session(*, threads=None, memory_limit=None)` is one engine context.
+  `threads` is the engine's worker count and `memory_limit` the bytes the
+  operators of one query may hold in total, each a positive `int`; `None`
+  takes the engine's own value. A query that needs more memory than
+  `memory_limit` raises `komira.MemoryLimitError` from `sql` (code
+  `MEMORY_BUDGET_EXCEEDED`, step `"execute"`); the session answers the next
+  query. `register_parquet(name, path)`
   reads the Parquet file's footer and registers the file as the table `name`.
   - `path` may be a `str` or a `pathlib.Path`.
   - A relative path is resolved against the working directory, and `~` is
@@ -142,7 +148,8 @@ against the published package.
   (status -3; any other status is a plain `KomiraError`): `ParseError`
   (`SQL_SYNTAX_ERROR`, or any refusal of the parse step), `BindError`
   (`SQL_BIND_ERROR` and the `BIND_*` codes, or any refusal of the bind step),
-  `UnsupportedOperation` (`SQL_NOT_SUPPORTED`, `STATEMENT_NOT_A_QUERY`,
+  `MemoryLimitError` (`MEMORY_BUDGET_EXCEEDED`: the query needed more memory
+  than the session's `memory_limit`), `UnsupportedOperation` (`SQL_NOT_SUPPORTED`, `STATEMENT_NOT_A_QUERY`,
   `LOWERING_*_UNSERVED`, `LOWERING_UNCUTTABLE_NODE`, `STORAGE_URL_REFUSED`, ...), `CredentialsError`
   (`CREDENTIAL_*` and `CREDENTIALS_*`) and `StorageError` (the other
   `STORAGE_*` codes). The table is `_errors._CODE_CLASSES`; the package never

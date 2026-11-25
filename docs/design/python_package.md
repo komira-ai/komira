@@ -457,6 +457,13 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
     `LOWERING_WINDOW_UNSERVED`, `LOWERING_UDF_UNSERVED`, `SQL_STATEMENT_UNSUPPORTED`,
     `COPY_OPTION_UNSUPPORTED`, `COPY_FORMAT_NOT_INFERRED`, `STORAGE_URL_REFUSED`,
     `STORAGE_RANGE_NOT_SUPPORTED`, `STORAGE_WRITE_UNSUPPORTED`, `PLAN_URL_QUERY_REFUSED`.
+  - `MemoryLimitError`: `MEMORY_BUDGET_EXCEEDED`, the engine's refusal at step `execute` when the
+    memory budget (`Session(memory_limit=)`) denies an operator the bytes its state needs. The
+    code is the first word of the engine's message, set by `pipeline_exec` at every site that
+    reports a denied draw (the aggregation, grouped aggregation, window and sort sinks and
+    COUNT(DISTINCT)). A query the engine runs in less memory, as a fixed-width GROUP BY that
+    spills, does not raise it; the class and the code stay the same when a spill directory
+    becomes reachable through the ABI, and an operator that does not spill still raises it.
   - `CredentialsError`: `CREDENTIAL_UNBOUND`, `CREDENTIAL_NAME_CONFLICT`,
     `CREDENTIAL_KIND_MISMATCH`, `CREDENTIALS_NOT_FOUND`, `CREDENTIALS_INVALID`; also the default of
     the credential calls.

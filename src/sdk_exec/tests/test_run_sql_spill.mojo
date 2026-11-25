@@ -220,6 +220,10 @@ def test_the_same_budget_without_a_spill_directory_is_refused_at_execute() raise
         out.refusal.value().reason,
     )
     assert_true(out.refusal.value().reason.find("was denied") >= 0)
+    assert_true(
+        out.refusal.value().reason.startswith("MEMORY_BUDGET_EXCEEDED: "),
+        out.refusal.value().reason,
+    )
 
 
 def test_a_query_that_fits_the_budget_writes_nothing() raises:

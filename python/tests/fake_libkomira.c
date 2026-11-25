@@ -500,6 +500,22 @@ EXPORT void komira_fake_stream_counts(int64_t *out) { memcpy(out, counts, sizeof
 
 #endif
 
+#if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 4
+// ABI 1.4: komira_ctx_new_with_options, which a loader of that minor requires.
+// It keeps the two options it was given (komira_fake_options reads them) and
+// refuses, with NULL, a worker count of 99, as the engine refuses an option it
+// cannot start with.
+static int64_t options[2];
+
+EXPORT void *komira_ctx_new_with_options(int64_t worker_count, int64_t memory_budget_bytes) {
+  options[0] = worker_count;
+  options[1] = memory_budget_bytes;
+  return worker_count == 99 ? NULL : &the_ctx;
+}
+
+EXPORT void komira_fake_options(int64_t *out) { memcpy(out, options, sizeof options); }
+#endif
+
 #if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 5
 // ABI 1.5: komira_register_csv and komira_register_json, which a loader of
 // that minor requires; like komira_register_parquet, the name sets the mode.
