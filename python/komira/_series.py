@@ -278,7 +278,8 @@ class Series:
         `method="dense"` numbers the distinct values 1, 2, ...; pandas'
         default `method="average"` is refused (no window function computes
         it). A missing value has a missing rank (`na_option="keep"`), or
-        ranks after every value (`"bottom"`)."""
+        ranks after every value (`"bottom"`) or before every value
+        (`"top"`)."""
         _check_axis(axis, "rank")
         if numeric_only is not False:
             raise UnsupportedOperation("rank(numeric_only=True) is for a frame's columns; a Series ranks its own values")

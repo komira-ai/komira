@@ -32,7 +32,8 @@ real libkomira). The comparator, the left file and the Case type are
   mean, min, max and count (NULL where the key is NULL, or the NULL group computed
   under `dropna=False`), cumsum, cummin and cummax of a column and of a group on
   a frame sorted by the unique `n`, ascending and descending, rank of method min
-  and dense, ascending and descending, `na_option` keep and bottom, over a column
+  and dense, ascending and descending, `na_option` keep, bottom and top, a running sum down a frame sorted with
+  its missing keys first, over a column
   and a group, rolling of 1, 2 and 3 rows with `min_periods` of 1 and 2 (missing
   when fewer than `min_periods` rows of the window hold a value), a window inside
   an expression, a filter by a window, and two windows in one assign;
@@ -632,6 +633,13 @@ def subscript_transform(d):
 
 CUMULATIVES = [
     Case(
+        "cumsum down a frame sorted with its missing keys first",
+        lambda d, o: column_of(d.sort_values(["k", "n"], na_position="first"), "c", lambda s: s["v"].cumsum()),
+        "SELECT *, CASE WHEN v IS NOT NULL THEN SUM(v) OVER (ORDER BY k ASC NULLS FIRST, n ASC NULLS FIRST {}) END "
+        "AS c FROM t ORDER BY k ASC NULLS FIRST, n ASC NULLS FIRST".format(RUNNING),
+        ("k", "n"),
+    ),
+    Case(
         "cumsum of a float down the frame sorted by n",
         lambda d, o: column_of(sorted_by_n(d), "c", lambda s: s["v"].cumsum()),
         cum_sql("SUM", "v"),
@@ -736,6 +744,16 @@ RANKS = [
         "rank min with na_option bottom ranks the NULLs after every value, tied",
         lambda d, o: d.assign(r=d["k"].rank(method="min", na_option="bottom")),
         rank_sql("RANK", "k", bottom=True),
+    ),
+    Case(
+        "rank min with na_option top ranks the NULLs before every value, tied at 1",
+        lambda d, o: d.assign(r=d["k"].rank(method="min", na_option="top")),
+        "SELECT *, CAST(RANK() OVER (ORDER BY k ASC NULLS FIRST) AS DOUBLE) AS r FROM t",
+    ),
+    Case(
+        "rank dense with na_option top, descending",
+        lambda d, o: d.assign(r=d["v"].rank(method="dense", ascending=False, na_option="top")),
+        "SELECT *, CAST(DENSE_RANK() OVER (ORDER BY v DESC NULLS FIRST) AS DOUBLE) AS r FROM t",
     ),
     Case(
         "rank dense with na_option bottom, descending",

@@ -30,7 +30,8 @@ The verbs, each of one column, and what it builds:
   pandas' `min_count=0` (`CASE WHEN w IS NOT NULL THEN w ELSE 0 END`).
 - `cumsum()`, `cummin()`, `cummax()` of a column, or of `groupby(keys)["c"]`:
   the aggregate over the rows from the first of the partition to this one
-  (ROWS UNBOUNDED PRECEDING .. CURRENT ROW), in the order of the frame's sort.
+  (ROWS UNBOUNDED PRECEDING .. CURRENT ROW), in the order of the frame's sort,
+  each key with its direction and its NULL placement.
   A frame that is not sorted has no row order, so they are refused there
   (section 7). A missing value stays missing (`skipna=True`).
 - `rolling(window, min_periods=None)` of a column, then `sum()`, `mean()`,
@@ -42,16 +43,11 @@ The verbs, each of one column, and what it builds:
 - `rank(method="min" | "dense", ascending=True, na_option="keep")` of a
   column or of `groupby(keys)["c"]`: RANK or DENSE_RANK ordered by the column
   itself, as float64, as pandas gives it; a missing value has a missing rank
-  (`na_option="keep"`), or ranks after every value (`"bottom"`).
+  (`na_option="keep"`), or ranks after every value (`"bottom"`) or before
+  every value (`"top"`).
 
 Under `groupby(dropna=True)`, pandas' default, a row whose key is missing
 belongs to no group, and its value is missing.
-
-The engine orders a window's rows with missing values last in both
-directions. A frame sorted with `na_position="first"` is refused by the
-running and rolling verbs at the verb, as the encoder would refuse the plan,
-until a window's order takes a NULL placement
-([komira-ai/komira#1227](https://github.com/komira-ai/komira/issues/1227)).
 """
 
 from __future__ import annotations
@@ -193,12 +189,6 @@ def _order(frame: DataFrame, verb: str) -> tuple[_ops.SortKey, ...]:
             f"{verb} runs in row order, and this frame is not sorted, so its rows have no order: "
             'sort it first, as df.sort_values("column")'
         )
-    for key in keys:
-        if key.nulls_first:
-            raise UnsupportedOperation(
-                f"{verb} runs in the frame's sort order, which puts the missing values of {key.column!r} first, "
-                'and a window orders them last: sort with na_position="last"'
-            )
     return keys
 
 
@@ -308,11 +298,6 @@ def rank(
         raise TypeError(f"rank ascending must be a bool, not {type(ascending).__name__}")
     if na_option not in ("keep", "top", "bottom"):
         raise ValueError("na_option must be one of 'keep', 'top', or 'bottom'")
-    if na_option == "top":
-        raise UnsupportedOperation(
-            'rank(na_option="top") ranks the missing values first, and a window orders them last: '
-            'use na_option="keep" or "bottom"'
-        )
     if not isinstance(pct, bool):
         raise TypeError(f"rank pct must be a bool, not {type(pct).__name__}")
     if pct:
@@ -320,9 +305,8 @@ def rank(
             "rank(pct=True) divides each rank by the count of values, which this release does not build: "
             "use pct=False"
         )
-    win = _ops.WindowExpr(
-        _RANKS[method], None, partition_by=keys, order_by=(_ops.SortKey(column, descending=not ascending),)
-    )
+    order = _ops.SortKey(column, descending=not ascending, nulls_first=na_option == "top")
+    win = _ops.WindowExpr(_RANKS[method], None, partition_by=keys, order_by=(order,))
 
     def value(w):
         ranked = _ops.Cast(w, "float64")

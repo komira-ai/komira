@@ -350,14 +350,13 @@ orders["share"] = orders["value"] / orders.groupby("id")["value"].transform("sum
   than `min_periods`, by default `n`, of the window's rows hold a value);
   and `rank(method="min")` or `rank(method="dense")` of a column or of a
   group's column, as float64, a missing value's rank missing
-  (`na_option="keep"`) or last (`"bottom"`). Under `groupby(dropna=True)` a
+  (`na_option="keep"`), last (`"bottom"`) or first (`"top"`). Under `groupby(dropna=True)` a
   row whose key is missing gets a missing value.
 - **Refused by name** with `UnsupportedOperation`: `merge` with the index
   (`left_index`, `right_index`), `indicator`, `validate`, `how="left_anti"`,
   `"right_anti"`, `"semi"` and `"anti"` (use `isin`), frames of two sessions;
-  a running or rolling window of a frame that is not sorted, or sorted with
-  missing values first; pandas' default `rank(method="average")`, and
-  `"max"` and `"first"`; `rank(pct=True)`, `na_option="top"`; a centred or
+  a running or rolling window of a frame that is not sorted; pandas' default
+  `rank(method="average")`, and `"max"` and `"first"`; `rank(pct=True)`; a centred or
   time-based `rolling`; a Python function in `transform`. A GroupBy (and a
   Series) taken before `df["x"] = ...` changed the frame is stale, so take
   `df.groupby(k)["c"]` again for each window you set, and set a window of a

@@ -9,8 +9,9 @@ records the plan bytes it is given. Checked:
   missing key under dropna=True only and with two keys; cumsum, cummin and
   cummax over a sorted frame (the frame's sort keys as the window's order, rows
   from the first to the current, a missing value kept missing), ungrouped and
-  grouped; rank (rank and dense_rank, ascending or not, na_option keep or
-  bottom), ungrouped and grouped; rolling sums, means, minima and maxima (the
+  grouped, and over a frame sorted with its missing values first (that
+  placement reaching the window's order); rank (rank and dense_rank,
+  ascending or not, na_option keep, bottom or top), ungrouped and grouped; rolling sums, means, minima and maxima (the
   frame of the n - 1 rows before, the second window that counts the values when
   min_periods is more than 1);
 - where the window projection sits: under the sort of a sorted frame, below a
@@ -19,7 +20,8 @@ records the plan bytes it is given. Checked:
 - a Series that reads windows: in an expression, two different windows in one
   assign, one window read twice (computed once, also from two GroupBys), a
   window in a filter (over an unsorted, a sorted and a limited frame), the
-  name of the window column when the frame has `_w0`, `df["x"] = ...` equal to
+  name of the window column when the frame has `_w0` and of the filter's
+  predicate column when it has `_keep`, `df["x"] = ...` equal to
   assign, and a function that returns a window of the frame in assign();
 - the output types of each verb;
 - the wire: an assigned window is a partition-by node under the projection
@@ -68,10 +70,6 @@ TRANSFORMS = "count, max, mean, min, sum"
 NOT_SORTED = (
     "{verb} runs in row order, and this frame is not sorted, so its rows have no order: "
     'sort it first, as df.sort_values("column")'
-)
-NULLS_FIRST = (
-    "{verb} runs in the frame's sort order, which puts the missing values of {column!r} first, "
-    'and a window orders them last: sort with na_position="last"'
 )
 EXPRESSION = (
     "{verb} takes a column of the frame, and this Series is an expression: "
@@ -725,20 +723,19 @@ def test_a_running_or_rolling_verb_of_an_unsorted_frame_is_refused_at_the_verb()
     assert df.groupby("a")["b"].transform("sum").dtype == "int64"
 
 
-def test_a_frame_sorted_with_missing_values_first_is_refused_by_the_running_and_rolling_verbs():
+def test_a_frame_sorted_with_missing_values_first_gives_its_windows_that_placement():
     df = Env().df.sort_values("x", na_position="first")
-    for how in ("sum", "min", "max"):
-        message = NULLS_FIRST.format(verb=f"cum{how}()", column="x")
-        refuses(lambda: getattr(df["b"], f"cum{how}")(), UnsupportedOperation, message)
-        refuses(lambda: getattr(df.groupby("a")["b"], f"cum{how}")(), UnsupportedOperation, message)
-    for how in ("sum", "mean", "min", "max"):
-        refuses(lambda: getattr(df["b"].rolling(3), how)(), UnsupportedOperation,
-                NULLS_FIRST.format(verb=f"rolling(3).{how}()", column="x"))
-    # The first key that puts missing values first is named.
-    mixed = Env().df.sort_values(["a", "x"], na_position="first")
-    refuses(lambda: mixed["b"].cumsum(), UnsupportedOperation, NULLS_FIRST.format(verb="cumsum()", column="a"))
-    # A rank reads no row order, so the frame's sort does not matter to it.
     keys = (SortKey("x", nulls_first=True),)
+    for how in ("sum", "min", "max"):
+        got = df.assign(c=getattr(df["b"], f"cum{how}")())
+        assert got._plan == Sort(assigned(SCAN, (running(how, "b", keys),), {"c": missing("b", w(0))}), keys)
+    got = df.assign(r=df["b"].rolling(3).sum())
+    assert got._plan.child.child.items[-2][1] == trailing("sum", "b", keys, 3)
+    assert got._plan.child.child.items[-1][1] == trailing("count", "b", keys, 3)
+    mixed = Env().df.sort_values(["a", "x"], ascending=[False, True], na_position="first")
+    order = (SortKey("a", descending=True, nulls_first=True), SortKey("x", nulls_first=True))
+    assert mixed.assign(c=mixed["b"].cumsum())._plan.child.child.items[-1][1] == running("sum", "b", order)
+    # A rank reads no row order, so the frame's sort does not matter to it.
     assert df.assign(r=df["b"].rank(method="min"))._plan == Sort(
         assigned(SCAN, (WindowExpr("rank", None, order_by=(SortKey("b"),)),), {"r": missing("b", Cast(w(0), "float64"))}),
         keys,
@@ -789,7 +786,7 @@ def test_a_verb_that_needs_numbers_refuses_a_string_and_a_bool_column_by_name():
     assert df["s"].rank(method="dense").dtype == "float64"
 
 
-def test_rank_refuses_the_methods_and_options_no_window_function_computes():
+def test_rank_refuses_the_methods_and_options_no_window_function_computes_and_top_ranks_missing_first():
     df = Env().df
     gb = df.groupby("a")["b"]
     for method in ("average", "max"):
@@ -810,10 +807,13 @@ def test_rank_refuses_the_methods_and_options_no_window_function_computes():
     for bad in ("median", None, 1):
         refuses(lambda: df["b"].rank(method=bad), ValueError, unknown)
         refuses(lambda: gb.rank(method=bad), ValueError, unknown)
-    top = ('rank(na_option="top") ranks the missing values first, and a window orders them last: '
-           'use na_option="keep" or "bottom"')
-    refuses(lambda: df["b"].rank(method="min", na_option="top"), UnsupportedOperation, top)
-    refuses(lambda: gb.rank(method="min", na_option="top"), UnsupportedOperation, top)
+    # na_option="top" ranks the missing values first: no mask, NULLs first in
+    # either direction.
+    for up in (True, False):
+        top = df.assign(r=df["b"].rank(method="dense", ascending=up, na_option="top"))
+        order = (SortKey("b", descending=not up, nulls_first=True),)
+        assert top._plan == assigned(SCAN, (WindowExpr("dense_rank", None, order_by=order),),
+                                     {"r": Cast(w(0), "float64")})
     for bad in ("middle", None):
         refuses(lambda: df["b"].rank(method="min", na_option=bad), ValueError,
                 "na_option must be one of 'keep', 'top', or 'bottom'")
