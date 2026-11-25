@@ -716,6 +716,16 @@ _CASES = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# The wheel tags the install driver (wheel_install_run.py) installs and
+# refuses, as pip does: exact tags on their own minor, the stable ABI
+# (`cp3<k>-abi3`, protobuf's wheels) on its minor and later ones, the machine,
+# the C library's version, and on macOS `universal2`.
+py_test(
+    name = "wheel_install_run_test",
+    src = "test_wheel_install_run.py",
+    srcs = ["wheel_install_run.py"],
+)
+
 # Capture of a user function (komira._capture), with no library: the `@udf`
 # decorator, return types, the read set (columns=, annotations and the
 # bytecode scan), the package or bundle code form, the deterministic bundle
