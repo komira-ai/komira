@@ -41,7 +41,7 @@ line, with those three filled in:
 - In the index smoke. The jobs `testpypi-smoke` (every push to main that
   changes code) and `pypi-smoke` (the daily promotion) of
   `.github/workflows/pypi.yml` do the same with the wheel `pip` installs from
-  the index; `pypi-macos-arm64.yml` does it for the macOS wheel.
+  the index, and its `-macos-arm64` jobs do it for the macOS wheel.
 
 The docs show the same text:
 

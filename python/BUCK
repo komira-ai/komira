@@ -85,7 +85,7 @@ python_versions(
 # py3-none-macosx_11_0_arm64) is the same package: its `[dist]` is
 # libkomira.dylib and lib/ with the three runtime .dylib, and it holds no
 # native owner library (they are linked into libkomira.dylib). It is built and
-# tested only by pypi-macos-arm64.yml, on the farm's macOS workers, never in a
+# tested only by the macOS jobs of pypi.yml, on the farm's macOS workers, never in a
 # pull request (tools/build/ci/rules.bzl, EXCLUDED); its targets name
 # `--target-platforms komira//tools/build/platforms:darwin-arm64`. On macOS the
 # wheel rule refuses a Mach-O member that needs a newer macOS than the tag's,
@@ -356,7 +356,7 @@ wheel_install_test(
 )
 
 # The same test on the macOS wheel, on the farm's macOS workers: run from
-# pypi-macos-arm64.yml's build-macos-arm64 only, never in a pull request
+# pypi.yml's job build-macos-arm64 only, never in a pull request
 # (tools/build/ci/rules.bzl, EXCLUDED). CPython 3.13 is the one macOS
 # interpreter pinned (third_party/python, cpython_macos).
 wheel_install_test(
@@ -649,7 +649,7 @@ wheel_file(
 # ---- The macOS wheel, read back ----------------------------------------------
 #
 # What the macOS arm64 wheel holds, each held by a check that reads the
-# finished wheel; built by pypi-macos-arm64.yml's build-macos-arm64 beside the
+# finished wheel; built by pypi.yml's job build-macos-arm64 beside the
 # wheel, never in a pull request (tools/build/ci/rules.bzl, EXCLUDED). The
 # wheel rule itself already refuses, on every member: an ELF file (a Linux
 # library), a Mach-O file for a CPU other than arm64 or a universal one, a

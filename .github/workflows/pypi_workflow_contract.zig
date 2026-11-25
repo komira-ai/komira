@@ -1,19 +1,21 @@
-//! The contract of pypi.yml's text, the Linux wheel's publish workflow, line by line, part of
+//! The contract of pypi.yml's text, the publish workflow of both wheels, line by line, part of
 //! //:pypi_workflow_cases: `check` reads the workflow's text and says why it breaks the contract, or null.
 //! pypi_workflow_test.zig writes each defect into the real text and wants it refused with its message;
 //! pypi_workflow_run.zig plays runs of the file. The file-level rules (`checkFile`) and each job's own
-//! (`checkJob`) are shared with the macOS wheel's workflow, pypi-macos-arm64.yml, whose contract is
-//! pypi_macos_workflow_contract.zig. What the contract of pypi.yml holds:
+//! (`checkJob`) are held for every job of the file; this file holds the rules of the file and of the ten
+//! Linux jobs, and `check` then runs the contract of the nine macOS jobs, whose own lines are
+//! pypi_macos_jobs_contract.zig's. What the contract of pypi.yml holds:
 //!  - the triggers: `on:` is exactly a push to main whose `paths-ignore` is release.yml's list, one
 //!    `schedule:` of one cron entry at a fixed minute and hour of every day, then `workflow_dispatch:` with
 //!    no input (no pull request, and no other schedule or cron outside a comment); no line outside a
 //!    comment reads a run input (`inputs.`); top-level `permissions` is `{}` exactly once; the concurrency
 //!    is one group per half (`pypi-testpypi` for a push, `pypi-promote` otherwise) with no run cancelled;
-//!  - the jobs are exactly the ten of JOBS, each once (no macOS job: that is pypi-macos-arm64.yml), each
-//!    with its exact `if:` (main only, and the half: `github.event_name == 'push'` for the TestPyPI half,
-//!    `!= 'push'` for the promotion), runner, `needs:`, environment and permissions; `id-token: write` is
-//!    held by the build job (the farm only) and the two upload jobs (the upload only) and by no other job;
-//!  - farm-connect and buck2 are in the build job alone, at `farm-qos: batch`; the promotion builds
+//!  - the jobs are exactly the nineteen of ALL_JOBS, each once, in order (each half's Linux jobs, then
+//!    its macOS jobs), each with its exact `if:` (main only, and the half: `github.event_name == 'push'` for the TestPyPI half,
+//!    `!= 'push'` for the promotion), runner, `needs:`, environment and permissions; among the Linux
+//!    jobs, `id-token: write` is held by the build job (the farm only) and the two upload jobs (the
+//!    upload only) and by no other (the macOS chain's own build and upload jobs are the macOS contract's);
+//!  - among the Linux jobs, farm-connect and buck2 are in the build job alone, at `farm-qos: batch`; the promotion builds
 //!    nothing; `actions/cache/save` is in the record job alone, `actions/cache/restore` in the promote job
 //!    alone;
 //!  - the jobs' own lines: the build's stamp, wheel,
@@ -31,6 +33,7 @@
 const std = @import("std");
 const reader = @import("pypi_workflow_text.zig");
 const user_test = @import("wheel_user_test_job.zig");
+const macos = @import("pypi_macos_jobs_contract.zig");
 const jobLines = reader.jobLines;
 const jobNames = reader.jobNames;
 const topLines = reader.topLines;
@@ -52,6 +55,21 @@ pub const JOBS = [_][]const u8{
     "pypi-smoke",
     "result-pypi",
 };
+/// The jobs of the macOS arm64 wheel's chain (pypi_macos_jobs_contract.zig holds each one's lines).
+pub const MACOS_JOBS = [_][]const u8{
+    "build-macos-arm64",
+    "testpypi-macos-arm64",
+    "testpypi-smoke-macos-arm64",
+    "testpypi-passed-macos-arm64",
+    "result-testpypi-macos-arm64",
+    "promote-macos-arm64",
+    "pypi-macos-arm64",
+    "pypi-smoke-macos-arm64",
+    "result-pypi-macos-arm64",
+};
+/// The jobs of the file, in order: the push half's Linux jobs, then its macOS ones, then the promotion's
+/// Linux jobs, then its macOS ones.
+pub const ALL_JOBS = JOBS[0..6].* ++ MACOS_JOBS[0..5].* ++ JOBS[6..].* ++ MACOS_JOBS[5..].*;
 
 pub const PUSH_GATE = "    if: github.ref == 'refs/heads/main' && github.event_name == 'push'";
 pub const PROMOTE_GATE = "    if: github.ref == 'refs/heads/main' && github.event_name != 'push'";
@@ -145,8 +163,8 @@ pub const FileSpec = struct {
 pub const FILE = FileSpec{
     .group = GROUP,
     .group_why = "concurrency is not exactly one group per half (pypi-testpypi for a push, pypi-promote otherwise) with cancel-in-progress: false",
-    .jobs = &JOBS,
-    .jobs_why = "the jobs are not exactly the ten of the two halves of the Linux wheel, each once, in order",
+    .jobs = &ALL_JOBS,
+    .jobs_why = "the jobs are not exactly the nineteen of the two halves of the two wheels, each once, in order (each half's Linux jobs, then its macOS jobs)",
 };
 pub const NO_CANCEL = "  cancel-in-progress: false";
 
@@ -667,6 +685,12 @@ pub fn checkExact(ar: std.mem.Allocator, job: []const []const u8, name: []const 
 /// Null if the workflow text holds the contract, else the refusal. `release_text` is release.yml's,
 /// whose push filter the push trigger repeats.
 pub fn check(ar: std.mem.Allocator, text: []const u8, release_text: []const u8) !?[]const u8 {
+    if (try checkLinuxJobs(ar, text, release_text)) |why| return why;
+    return try macos.checkJobs(ar, text);
+}
+
+/// Null if the file rules and the ten Linux jobs hold the contract, else the refusal.
+fn checkLinuxJobs(ar: std.mem.Allocator, text: []const u8, release_text: []const u8) !?[]const u8 {
     if (try checkFile(ar, text, release_text, FILE)) |why| return why;
     for (SPECS) |spec| {
         var n: usize = 0;

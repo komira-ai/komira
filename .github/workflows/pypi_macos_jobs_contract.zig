@@ -1,17 +1,13 @@
-//! The contract of pypi-macos-arm64.yml's text, the macOS arm64 wheel's publish workflow, line by line,
-//! part of //:pypi_macos_workflow_cases: `check` reads the workflow's text (with pypi.yml's and
-//! release.yml's) and says why it breaks the contract, or null. pypi_macos_workflow_test.zig writes each
-//! defect into the real text and wants it refused with its message; pypi_macos_workflow_run.zig plays runs
-//! of the file and of the two workflows side by side. The rules every file of the two holds are
-//! pypi_workflow_contract.zig's `checkFile` and `checkJob`; what this contract adds:
-//!  - the triggers are pypi.yml's `on:`, line for line (so a push that starts one starts the other, and
-//!    each daily run is at the same time), on top of the file rules both hold (release.yml's push filter,
-//!    one daily cron, a manual run with no input, no pull request);
-//!  - the concurrency is one group per half of its own, `pypi-macos-arm64-testpypi` for a push and
-//!    `pypi-macos-arm64-promote` otherwise, never pypi.yml's, with no run cancelled;
-//!  - the jobs are exactly the nine of JOBS (no Linux job), each once, in order, each with its exact `if:`,
-//!    runner, `needs:`, environment and permissions; `id-token: write` is held by the build job (the farm
-//!    only) and the two upload jobs (the upload only);
+//! The contract of the nine macOS arm64 jobs of pypi.yml, the macOS wheel's half of the publish workflow,
+//! part of //:pypi_workflow_cases: `checkJobs` reads pypi.yml's text and says why one of the nine breaks
+//! the contract, or null; pypi_workflow_contract.zig's `check` runs it after the Linux jobs, so one check
+//! holds the whole file. pypi_macos_jobs_test.zig writes each defect into the real text and wants it
+//! refused with its message; pypi_macos_jobs_run.zig plays runs of the file. The rules of the file (the
+//! triggers, the concurrency, the job set in order) are pypi_workflow_contract.zig's; each job's own
+//! `checkJob` is shared. What this contract holds of the nine jobs (MACOS_JOBS):
+//!  - each with its exact `if:`, runner, `needs:`, environment and permissions; `id-token: write` is held
+//!    by the macOS build job (the farm only) and the two macOS upload jobs (the upload only); the upload jobs keep
+//!    the environments `testpypi` and `pypi`, the ones the index's trusted publisher for pypi.yml names;
 //!  - the jobs after the build: each one's outputs and steps exactly, in order (the build's present step
 //!    and the gates of its Mac builds, and the chain's independence of the Linux one, are in
 //!    release_macos_test.zig).
@@ -29,26 +25,6 @@ const RESULT_PROMOTE_GATE = linux.RESULT_PROMOTE_GATE;
 const BUILD_PERMS = linux.BUILD_PERMS;
 const UPLOAD_PERMS = linux.UPLOAD_PERMS;
 const NO_PERMS = linux.NO_PERMS;
-
-pub const JOBS = [_][]const u8{
-    "build-macos-arm64",
-    "testpypi-macos-arm64",
-    "testpypi-smoke-macos-arm64",
-    "testpypi-passed-macos-arm64",
-    "result-testpypi-macos-arm64",
-    "promote-macos-arm64",
-    "pypi-macos-arm64",
-    "pypi-smoke-macos-arm64",
-    "result-pypi-macos-arm64",
-};
-
-pub const GROUP = "  group: pypi-macos-arm64-${{ github.event_name == 'push' && 'testpypi' || 'promote' }}";
-pub const FILE = linux.FileSpec{
-    .group = GROUP,
-    .group_why = "concurrency is not exactly one group per half of its own (pypi-macos-arm64-testpypi for a push, pypi-macos-arm64-promote otherwise) with cancel-in-progress: false",
-    .jobs = &JOBS,
-    .jobs_why = "the jobs are not exactly the nine of the two halves of the macOS wheel, each once, in order",
-};
 
 const SPECS = [_]JobSpec{
     // the build only asks the farm (an ubuntu runner), the smokes run on a hosted Mac
@@ -267,19 +243,8 @@ const MAC_EXACT = [_]MacExact{
     .{ .name = "result-pypi-macos-arm64", .lines = &MAC_RESULT_PYPI_LINES, .with_outputs = false },
 };
 
-/// Null if pypi-macos-arm64.yml's text holds the contract, else the refusal. `pypi_text` is pypi.yml's,
-/// whose triggers it repeats, and `release_text` release.yml's, whose push filter both repeat.
-pub fn check(ar: std.mem.Allocator, text: []const u8, pypi_text: []const u8, release_text: []const u8) !?[]const u8 {
-    if (try linux.checkFile(ar, text, release_text, FILE)) |why| return why;
-    var n: usize = 0;
-    var pn: usize = 0;
-    const on = (try reader.topLines(ar, text, "on:", &n)).?;
-    const pypi_on = (try reader.topLines(ar, pypi_text, "on:", &pn)) orelse return "pypi.yml has no on:";
-    var same_on = on.len == pypi_on.len;
-    if (same_on) {
-        for (on, pypi_on) |a, b| same_on = same_on and std.mem.eql(u8, a, b);
-    }
-    if (!same_on) return "on: is not pypi.yml's, line for line: a push or a day would start one workflow and not the other";
+/// Null if the nine macOS jobs of pypi.yml's text hold the contract, else the refusal.
+pub fn checkJobs(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     for (SPECS) |spec| {
         var jn: usize = 0;
         const job = (try reader.jobLines(ar, text, spec.name, &jn)) orelse return try std.fmt.allocPrint(ar, "the job {s} is missing", .{spec.name});
