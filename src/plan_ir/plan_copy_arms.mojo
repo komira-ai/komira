@@ -245,6 +245,7 @@ def _copy_partition_by_node(plan: LogicalPlan) raises -> LogicalPlan:
     var pk = plan._partition_by.value()[].partition_keys.copy()
     var ok = plan._partition_by.value()[].order_keys.copy()
     var desc = plan._partition_by.value()[].descending.copy()
+    var nf_copy = Optional(plan._partition_by.value()[].nulls_first.copy())
     var exprs = List[PartitionExpr]()
     for i in range(len(plan._partition_by.value()[].partition_exprs)):
         exprs.append(plan._partition_by.value()[].partition_exprs[i].copy())
@@ -255,7 +256,7 @@ def _copy_partition_by_node(plan: LogicalPlan) raises -> LogicalPlan:
     # never to produce (and `_copy_plan`'s post-condition would then report
     # a dropped payload instead of the PartitionExpr the factory rejected).
     # `_copy_plan` is a `def`, so it simply propagates.
-    return LogicalPlan.partition_by(pk^, ok^, desc^, exprs^, child^)
+    return LogicalPlan.partition_by(pk^, ok^, desc^, exprs^, child^, nf_copy^)
 
 
 def _copy_partition_topn_node(plan: LogicalPlan) raises -> LogicalPlan:

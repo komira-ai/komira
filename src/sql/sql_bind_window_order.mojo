@@ -240,12 +240,22 @@ def _apply_window(sx: SqlExpr, schema: Schema, scope: BindScope, out_name: Strin
 
     var okeys = List[String]()
     var desc = List[Bool]()
+    var nulls_first = List[Bool]()
+    var any_placement = False
     for j in range(len(w.order_by)):
         var ok = _win_col_name(w.order_by[j], w.order_qual[j], scope)
         if not _schema_has_col(schema, ok):
             raise Error("SQL bind error: unknown ORDER BY column '" + w.order_by[j] + "' in OVER clause")
         okeys.append(ok^)
         desc.append(w.descending[j])
+        # A written NULLS FIRST/LAST pins the placement; an unwritten one is
+        # the derived default. The plan is told of a placement only when some
+        # key wrote one, so a window without it plans and encodes as before.
+        if w.nulls_first[j]:
+            any_placement = True
+            nulls_first.append(w.nulls_first[j].value())
+        else:
+            nulls_first.append(derived_nulls_first(w.descending[j]))
 
     var frame: PartitionFrame
     if w.has_frame:
@@ -287,6 +297,10 @@ def _apply_window(sx: SqlExpr, schema: Schema, scope: BindScope, out_name: Strin
     var pexpr = PartitionExpr(pf, col^, offset, dv^, has_default, frame^, String(out_name))
     var pexprs = List[PartitionExpr]()
     pexprs.append(pexpr^)
+    if any_placement:
+        return LogicalPlan.partition_by(
+            pkeys^, okeys^, desc^, pexprs^, child^, Optional(nulls_first^)
+        )
     return LogicalPlan.partition_by(pkeys^, okeys^, desc^, pexprs^, child^)
 
 

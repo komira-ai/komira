@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # `frame_index` over batches already in window order (NULLs last in both
-# directions, floats in DuckDB's order). Every expected `[lo, hi)` is derived
+# directions unless a test passes NULLS FIRST, floats in DuckDB's order). Every expected `[lo, hi)` is derived
 # by hand from docs/design/query_semantics.md §9.8 and agrees with what DuckDB
 # v1.5.6 answers for the same rows (the sum or count each frame gives is in
 # the comment above each case):
@@ -17,6 +17,9 @@
 #                     stays the partition's edge, offset bounds of a non-NULL
 #                     key never reach a NULL key, ascending and descending,
 #                     two partitions.
+#   test_range_offsets_over_a_bigint_key_with_leading_null_keys
+#                     the same rules with the NULL group at the start of the
+#                     partition (NULLS FIRST), ascending and descending.
 #   test_range_offsets_over_a_double_key_with_nan_and_infinities
 #                     NaN rows frame over the NaN group, an infinity plus or
 #                     minus an offset is itself, ascending and descending.
@@ -131,8 +134,11 @@ def _expect(
     lo: List[Int],
     hi: List[Int],
     label: String,
+    nulls_first: List[Bool] = List[Bool](),
 ) raises:
-    var fi = frame_index(batch, bounds, _keys("k"), _dirs(desc), frame)
+    var fi = frame_index(
+        batch, bounds, _keys("k"), _dirs(desc), frame, nulls_first
+    )
     assert_equal(len(fi.lo), len(lo), label + ": rows")
     for r in range(len(lo)):
         assert_equal(fi.lo[r], lo[r], label + ": lo at row " + String(r))
@@ -231,6 +237,87 @@ def test_range_offsets_over_a_bigint_key_with_null_keys() raises:
         desc, [0], True,
         _range(FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0),
         [0, 0, 2, 2, 4, 4], [1, 2, 3, 4, 6, 6], "desc 1 P .. CR",
+    )
+
+
+def test_range_offsets_over_a_bigint_key_with_leading_null_keys() raises:
+    # NULLS FIRST ascending. Partition 0: k = NULL, NULL, 1, 2, 4, 5;
+    # partition 1: k = NULL, 3. The NULL group leads each partition.
+    var nf = _dirs(True)
+    var v = _all_valid(8)
+    v[0] = False
+    v[1] = False
+    v[6] = False
+    var batch = _one_column("k", _i64([0, 0, 1, 2, 4, 5, 0, 3], v))
+    var bounds: List[Int] = [0, 6]
+    # 1 PRECEDING AND 1 FOLLOWING: a NULL row frames the NULL group; a key
+    # frames the non-NULL keys within one of it.
+    _expect(
+        batch, bounds, False,
+        _range(FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_FOLLOWING, 1),
+        [0, 0, 2, 2, 4, 4, 6, 7], [2, 2, 4, 4, 6, 6, 7, 8],
+        "nulls first 1 P .. 1 F", nf,
+    )
+    # 3 FOLLOWING AND 5 FOLLOWING: keys 1 and 2 see keys 4 and 5, key 4 and 5
+    # and the other partition's key 3 see no row; the NULL rows keep the NULL
+    # group.
+    _expect(
+        batch, bounds, False,
+        _range(FRAME_BOUND_FOLLOWING, 3, FRAME_BOUND_FOLLOWING, 5),
+        [0, 0, 4, 5, 6, 6, 6, 8], [2, 2, 6, 6, 6, 6, 7, 8],
+        "nulls first 3 F .. 5 F", nf,
+    )
+    # UNBOUNDED PRECEDING AND 1 PRECEDING: the start reaches the partition's
+    # start, NULL rows included; the end of the smallest key is the end of
+    # the NULL group, since no non-NULL key lies below it.
+    _expect(
+        batch, bounds, False,
+        _range(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_PRECEDING, 1),
+        [0, 0, 0, 0, 0, 0, 6, 6], [2, 2, 2, 3, 4, 5, 7, 7],
+        "nulls first U P .. 1 P", nf,
+    )
+    # 1 FOLLOWING AND UNBOUNDED FOLLOWING: a NULL row starts at the NULL
+    # group and ends at the partition's end.
+    _expect(
+        batch, bounds, False,
+        _range(FRAME_BOUND_FOLLOWING, 1, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0),
+        [0, 0, 3, 4, 5, 6, 6, 8], [6, 6, 6, 6, 6, 6, 8, 8],
+        "nulls first 1 F .. U F", nf,
+    )
+    # 0 PRECEDING AND 0 FOLLOWING is each row's peer group, the NULLs
+    # included.
+    var pv = _all_valid(5)
+    pv[0] = False
+    pv[1] = False
+    var peers = _one_column("k", _i64([0, 0, 1, 1, 3], pv))
+    _expect(
+        peers, [0], False,
+        _range(FRAME_BOUND_PRECEDING, 0, FRAME_BOUND_FOLLOWING, 0),
+        [0, 0, 2, 2, 4], [2, 2, 4, 4, 5], "nulls first 0 P .. 0 F", nf,
+    )
+    # Descending NULLS FIRST: k = NULL, NULL, 5, 4, 2, 1.
+    var dv = _all_valid(6)
+    dv[0] = False
+    dv[1] = False
+    var desc = _one_column("k", _i64([0, 0, 5, 4, 2, 1], dv))
+    _expect(
+        desc, [0], True,
+        _range(FRAME_BOUND_PRECEDING, 2, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0),
+        [0, 0, 2, 2, 3, 4], [6, 6, 6, 6, 6, 6],
+        "nulls first desc 2 P .. U F", nf,
+    )
+    _expect(
+        desc, [0], True,
+        _range(FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0),
+        [0, 0, 2, 2, 4, 4], [2, 2, 3, 4, 5, 6],
+        "nulls first desc 1 P .. CR", nf,
+    )
+    # An explicit NULLS LAST on a descending key is the derived placement.
+    var last = _one_column("k", _i64([5, 4, 0], [True, True, False]))
+    _expect(
+        last, [0], True,
+        _range(FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0),
+        [0, 0, 2], [1, 2, 3], "nulls last desc 1 P .. CR", _dirs(False),
     )
 
 
