@@ -38,9 +38,19 @@
 #     session with its step and code; CSV with lz4 is refused at `bind`
 #     (`COPY_COMPRESSION_UNSUPPORTED`) and the existing file at its
 #     destination keeps its bytes; after each the session runs a good plan.
+#     JSON lines with lz4 is refused at `bind` the same way; a write whose
+#     plan is refused at `lower` (its file removed after the plan was built)
+#     also leaves the destination's bytes; neither the URL nor the missing
+#     directory is created.
 #   * test_a_write_replaces_its_destination: a second write to one path
 #     replaces the first file with the second plan's rows.
+#   * test_an_envelope_with_udfs_is_refused_at_decode: an envelope with one
+#     `UdfRef` is refused at `decode` with `PLAN_WIRE_UDFS_DROPPED`, word for
+#     word, step `KOMIRA_STEP_NONE`; the same envelope with a write target is
+#     refused the same way and writes no file; the session then runs a good
+#     plan.
 from std.os import remove
+from std.os.path import exists
 from std.testing import TestSuite, assert_equal, assert_true
 
 from arrow.arrow_types import ArrowType
@@ -61,10 +71,25 @@ from fs.atomic_write import STORAGE_NOT_FOUND
 from parquet_writer.record_batch_writer import (
     write_record_batch_to_parquet_bytes,
 )
+from plan_expr.expr import Expr
+from plan_expr.udf_data import UDF_NULL_PROPAGATE, UDF_STABILITY_STABLE
+from plan_expr.udf_type import UdfType
+from plan_ir.logical_plan import ExprArray, LogicalPlan
+from plan_ir.udf_ref import (
+    CODE_FORM_VALUE,
+    UDF_REF_KIND_SCALAR,
+    CodeDigest,
+    UdfCode,
+    UdfRef,
+)
+from plan_proto.plan import WirePlanEnvelope
 from plan_wire import (
+    PLAN_WIRE_UDFS_DROPPED,
     plan_to_bytes,
+    plan_to_bytes_with_udfs,
     plan_to_bytes_with_write_target,
 )
+from proto_codec import decode_proto, encode_proto
 from runtime_paths import test_tmpdir
 from sdk_exec.arrow_result import ArrowResult
 from sdk_exec.engine_write import (
@@ -388,6 +413,7 @@ def test_a_refused_write_touches_no_file() raises:
     assert_equal(s.last_error(), url)
     assert_equal(s.last_error_step(), KOMIRA_STEP_BIND)
     assert_equal(s.last_error_code(), String(STORAGE_URL_REFUSED))
+    assert_true(not exists(String("s3:")), "a refused URL made a directory")
     assert_equal(len(_int64_rows(plan_result(s, good.copy()))), 3)
 
     var missing = test_tmpdir() + "/plan_no_such_dir/o.parquet"
@@ -401,6 +427,10 @@ def test_a_refused_write_touches_no_file() raises:
     assert_equal(s.last_error(), gone)
     assert_equal(s.last_error_step(), KOMIRA_STEP_EXECUTE)
     assert_equal(s.last_error_code(), String(STORAGE_NOT_FOUND))
+    assert_true(
+        not exists(test_tmpdir() + "/plan_no_such_dir"),
+        "a refused write made the missing directory",
+    )
     assert_equal(len(_int64_rows(plan_result(s, good.copy()))), 3)
 
     var existing = test_tmpdir() + "/plan_refused_existing.csv"
@@ -417,6 +447,27 @@ def test_a_refused_write_touches_no_file() raises:
     assert_equal(s.last_error_step(), KOMIRA_STEP_BIND)
     assert_equal(s.last_error_code(), String(COPY_COMPRESSION_UNSUPPORTED))
     assert_true(_read(existing) == before, "a refused write changed the file")
+    var lz4_json = _message_of(
+        s, _write_bytes(authoring, query, existing, WFMT_JSONL, WCOMP_LZ4)
+    )
+    assert_true(
+        lz4_json.startswith("bind: " + String(COPY_COMPRESSION_UNSUPPORTED)),
+        lz4_json,
+    )
+    assert_true(_read(existing) == before, "a refused JSON write changed the file")
+    assert_equal(len(_int64_rows(plan_result(s, good.copy()))), 3)
+
+    # A plan refused after `bind` (its file removed once it was built, so
+    # `lower` refuses) leaves the destination as it was.
+    var src = _three_row_parquet(test_tmpdir() + "/plan_refused_late_src.parquet")
+    var late = Session()
+    register_parquet(late, String("late"), src)
+    var doomed = _write_bytes(late, String("select k from late"), existing, WFMT_CSV, WCOMP_UNCOMPRESSED)
+    remove(src)
+    var lowered = _message_of(s, doomed^)
+    assert_true(lowered.startswith("lower: "), lowered)
+    assert_equal(s.last_error_step(), KOMIRA_STEP_LOWER)
+    assert_true(_read(existing) == before, "a write refused at lower changed the file")
     assert_equal(len(_int64_rows(plan_result(s, good^))), 3)
 
 
@@ -456,6 +507,78 @@ def test_a_write_replaces_its_destination() raises:
     _assert_k_rows(path, want)
 
 
+def _udf_plan_bytes() raises -> List[UInt8]:
+    """An envelope whose plan calls one scalar user function: `y = f(b)`
+    over a scan of a file that does not exist, with its one `UdfRef`. The
+    plan door refuses it at `decode`, before the file is read."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("a"), ArrowType.INT64, True))
+    sb.add_field(Field(String("b"), ArrowType.FLOAT64, True))
+    var scan = LogicalPlan.scan(
+        String("/nonexistent/udf.parquet"), 0, sb.build(),
+        Optional[List[String]](None), Optional[Expr](None), Optional[Int](None),
+    )
+    var arg = UdfType(String("x"), ArrowType.FLOAT64, Field(String("x"), ArrowType.FLOAT64, True).dtype, True)
+    var ret = UdfType(String("y"), ArrowType.FLOAT64, Field(String("y"), ArrowType.FLOAT64, True).dtype, True)
+    var args = List[UdfType]()
+    args.append(arg^)
+    var sha = List[UInt8]()
+    for _ in range(32):
+        sha.append(0x5A)
+    var digests = List[CodeDigest]()
+    digests.append(CodeDigest("payload", sha^))
+    var ref = UdfRef(
+        UDF_REF_KIND_SCALAR,
+        UdfCode("komira/python", CODE_FORM_VALUE, "", digests^),
+        args^,
+        Optional(ret.copy()),
+        UDF_STABILITY_STABLE,
+        UDF_NULL_PROPAGATE,
+        Optional[List[String]](None),
+    )
+    var cols = List[Expr]()
+    cols.append(Expr.col_ref(String("b")))
+    var exprs = ExprArray()
+    exprs.append(Expr.alias(Expr.udf_apply(0, ret^, cols^), String("y")))
+    var plan = LogicalPlan.project(exprs^, scan^)
+    var refs = List[UdfRef]()
+    refs.append(ref^)
+    return plan_to_bytes_with_udfs(plan, refs)
+
+
+def test_an_envelope_with_udfs_is_refused_at_decode() raises:
+    var authoring = Session()
+    _three(authoring, String("plan_udf_src.parquet"))
+    var good = _plan_bytes(authoring, String("select k from three"))
+    var s = Session()
+    var want = (
+        String("decode: ") + String(PLAN_WIRE_UDFS_DROPPED)
+        + ": these bytes carry 1 UdfRef entries (`WirePlanEnvelope.udfs`),"
+        + " and the plan door runs no user function yet"
+    )
+    assert_equal(_message_of(s, _udf_plan_bytes()), want)
+    assert_equal(s.last_error(), want)
+    assert_equal(s.last_error_step(), KOMIRA_STEP_NONE)
+    assert_equal(s.last_error_code(), String(PLAN_WIRE_UDFS_DROPPED))
+    assert_equal(len(_int64_rows(plan_result(s, good.copy()))), 3)
+
+    # The same envelope with a write target is refused the same way, and
+    # writes nothing.
+    var dest = test_tmpdir() + "/plan_udf_never_written.csv"
+    var target_env = decode_proto[WirePlanEnvelope](
+        plan_to_bytes_with_write_target(
+            plan_from_sql(String("select k from three"), authoring.engine.catalog, authoring.engine.footers),
+            WriteTarget(dest, WFMT_CSV, WCOMP_UNCOMPRESSED),
+        )
+    )
+    var env = decode_proto[WirePlanEnvelope](_udf_plan_bytes())
+    env.format_version = target_env.format_version
+    env.write_target = target_env.write_target.copy()
+    assert_equal(_message_of(s, encode_proto(env)), want)
+    assert_true(not exists(dest), "an envelope with UDFs wrote its file")
+    assert_equal(len(_int64_rows(plan_result(s, good^))), 3)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_a_plan_answers_what_its_sql_answers]()
@@ -467,4 +590,5 @@ def main() raises:
     suite.test[test_a_plan_write_writes_the_bytes_copy_writes]()
     suite.test[test_a_refused_write_touches_no_file]()
     suite.test[test_a_write_replaces_its_destination]()
+    suite.test[test_an_envelope_with_udfs_is_refused_at_decode]()
     suite^.run()

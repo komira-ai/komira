@@ -5,7 +5,7 @@ and compared with the rows worked out by hand:
 
 - test_to_parquet_default_is_snappy_and_equals_the_source: the default codec is
   Snappy, and the rows, column names and types are the source's;
-- test_to_parquet_codecs: gzip, zstd, lz4 and None write GZIP, ZSTD, LZ4_RAW and
+- test_to_parquet_codecs: gzip, zstd, lz4 and None write GZIP, ZSTD, LZ4 (pyarrow's name for LZ4_RAW) and
   UNCOMPRESSED files with the same rows;
 - test_a_composed_frame_writes_its_rows_in_order: a filtered, assigned, sorted
   frame writes exactly its rows in its order;
@@ -204,7 +204,7 @@ def test_to_parquet_default_is_snappy_and_equals_the_source(lib_dir):
 
 def test_to_parquet_codecs(lib_dir):
     with workspace() as (s, p):
-        for compression, want in (("gzip", "GZIP"), ("zstd", "ZSTD"), ("lz4", "LZ4_RAW"), (None, "UNCOMPRESSED")):
+        for compression, want in (("gzip", "GZIP"), ("zstd", "ZSTD"), ("lz4", "LZ4"), (None, "UNCOMPRESSED")):
             path = p.join(f"{want}.parquet")
             frame(s, p).to_parquet(path, compression=compression)
             got = pq.ParquetFile(path).metadata.row_group(0).column(0).compression
