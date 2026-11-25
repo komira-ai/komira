@@ -62,6 +62,10 @@ inputs:
     description: The priority class the farm queues this job's actions in, `ci` or `batch` (a `batch` action starts after every queued `ci` action, so the pull-request checks go first when the farm is full). Written as the request header `x-kbf-qos` (buck2's `http_headers`); it is no platform property, so it does not change an action's digest or its cache entry. Left out, no header is sent and the farm queues the actions as `ci`. It takes effect only on a farm whose front end reads the header; one that does not ignores it.
     required: false
     default: ""
+  grpc-keepalive-timeout-secs:
+    description: How many seconds buck2 waits for the farm to answer a PING before it drops the connection with every action on it (buck2's `grpc_keepalive_timeout_secs`; buck2 PINGs a connection that has read nothing for 30 s, `grpc_keepalive_time_secs`). A whole number from 1 to 839, under 840 s, the keepalive limit the farm's server is to be given. The default, 300, keeps a connection through a silent outage of the path to the farm of up to 330 s, and fails the actions on a connection that is really gone within 330 s of its last read.
+    required: false
+    default: "300"
   tls:
     description: Whether the remote-execution service is reached over TLS, `true` or `false`.
     required: false
@@ -92,6 +96,7 @@ runs:
         TLS: ${{ inputs.tls }}
         TLS_CA_CERTS: ${{ inputs.tls-ca-certs }}
         FARM_QOS: ${{ inputs.farm-qos }}
+        KEEPALIVE_TIMEOUT: ${{ inputs.grpc-keepalive-timeout-secs }}
       run: |
         set -eu
         refuse() {
@@ -182,6 +187,13 @@ runs:
           esac
           [ -f "$TLS_CA_CERTS" ] && [ -r "$TLS_CA_CERTS" ] || refuse "tls-ca-certs is not a readable file on this runner"
         fi
+        # 1 to 839 with no leading zero, matched as text (no arithmetic on an
+        # unchecked value): under 840 s, the keepalive limit the farm's server is
+        # to be given, so the client never outwaits it.
+        case "$KEEPALIVE_TIMEOUT" in
+          [1-9] | [1-9][0-9] | [1-7][0-9][0-9] | 8[0-3][0-9]) ;;
+          *) refuse "grpc-keepalive-timeout-secs is '$KEEPALIVE_TIMEOUT', not a whole number of seconds from 1 to 839" ;;
+        esac
 
     - name: join the tailnet
       uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
@@ -232,6 +244,7 @@ runs:
         TLS: ${{ inputs.tls }}
         TLS_CA_CERTS: ${{ inputs.tls-ca-certs }}
         FARM_QOS: ${{ inputs.farm-qos }}
+        KEEPALIVE_TIMEOUT: ${{ inputs.grpc-keepalive-timeout-secs }}
       run: |
         set -eu
         case "$CONCURRENCY" in
@@ -257,16 +270,20 @@ runs:
             echo "  tls_ca_certs = $TLS_CA_CERTS"
           fi
           echo "  execution_concurrency_limit = $CONCURRENCY"
-          # The connection to the farm can be slow: through a tailnet relay it
-          # carries a few MB/s for all of a job's uploads together. buck2 PINGs a
-          # connection that has read nothing for 30 s, and that PING is queued
-          # behind the upload data the client already wrote to the connection.
-          # With buck2's default 10 s to answer, a slow but working connection is
-          # dropped with every stream on it (KeepAliveTimedOut), and each retry
-          # resends its file from the start. 60 s lets the PING through that
-          # queue; a connection that is really gone is still dropped, 90 s after
-          # its last read.
-          echo "  grpc_keepalive_timeout_secs = 60"
+          # buck2 PINGs a connection that has read nothing for
+          # grpc_keepalive_time_secs and drops it, with every action on it
+          # (KeepAliveTimedOut), when the answer has not come
+          # grpc_keepalive_timeout_secs later: by default 30 s and 10 s, so a
+          # path to the farm that goes silent for 40 s fails every action in
+          # flight, though TCP would carry the connection across the gap. The
+          # PING can also wait behind upload data on a slow connection (through
+          # a tailnet relay a few MB/s for all of a job's uploads). The interval
+          # stays buck2's 30 s, written here because the timeout is reasoned from
+          # it; the timeout is the input (300 s by default), so a connection is
+          # kept through a silent gap of up to 30 s plus the timeout, and one
+          # that is really gone is dropped that long after its last read.
+          echo "  grpc_keepalive_time_secs = 30"
+          echo "  grpc_keepalive_timeout_secs = $KEEPALIVE_TIMEOUT"
           # At most 4 blobs of one action in flight at once (buck2 sends them all
           # at once by default). Fewer streams share the connection, so each blob
           # finishes sooner, and the answers the client reads keep it from
