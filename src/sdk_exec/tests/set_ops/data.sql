@@ -3,7 +3,12 @@
 -- ta, tb, tn, te (k BIGINT, g VARCHAR): the arms of the conformance corpus's
 -- set_operations cases. ta and tb share the row (3, 'x') and the all-NULL row,
 -- tb also holds (NULL, 'w'); tn is three all-NULL rows; te has no row; ab is
--- ta's rows then tb's.
+-- ta's rows then tb's; tv (k VARCHAR, g VARCHAR) holds the string '3', which
+-- equals ta's 3 once ta's BIGINT key is widened to VARCHAR, and 'abc'.
+--
+-- z0 and zn (f DOUBLE): z0 holds 0.0 and zn -0.0 (each twice), with NaN twice,
+-- NULL and one value of its own, so a UNION of the two meets a NaN, a NULL and
+-- a zero in either input.
 --
 -- l.parquet (2000 rows, row groups of 512) and r.parquet (1500 rows): each
 -- column a function of the row number n, with NULLs at a period of its own, so
@@ -22,10 +27,19 @@ INSERT INTO tb VALUES (3, 'x'), (4, 'z'), (NULL, NULL), (NULL, 'w');
 CREATE TABLE tn (k BIGINT, g VARCHAR);
 INSERT INTO tn VALUES (NULL, NULL), (NULL, NULL), (NULL, NULL);
 CREATE TABLE te (k BIGINT, g VARCHAR);
+CREATE TABLE tv (k VARCHAR, g VARCHAR);
+INSERT INTO tv VALUES ('3', 'x'), ('abc', 'q');
+CREATE TABLE z0 (f DOUBLE);
+INSERT INTO z0 VALUES (CAST('0' AS DOUBLE)), (CAST('NaN' AS DOUBLE)), (NULL), (1.5), (CAST('NaN' AS DOUBLE)), (CAST('0' AS DOUBLE));
+CREATE TABLE zn (f DOUBLE);
+INSERT INTO zn VALUES (CAST('-0' AS DOUBLE)), (CAST('NaN' AS DOUBLE)), (NULL), (2.5), (CAST('-0' AS DOUBLE));
 COPY ta TO 'ta.parquet' (FORMAT parquet);
 COPY tb TO 'tb.parquet' (FORMAT parquet);
 COPY tn TO 'tn.parquet' (FORMAT parquet);
 COPY te TO 'te.parquet' (FORMAT parquet);
+COPY tv TO 'tv.parquet' (FORMAT parquet);
+COPY z0 TO 'z0.parquet' (FORMAT parquet);
+COPY zn TO 'zn.parquet' (FORMAT parquet);
 COPY (SELECT k, g FROM ta UNION ALL SELECT k, g FROM tb) TO 'ab.parquet' (FORMAT parquet);
 COPY (
     SELECT

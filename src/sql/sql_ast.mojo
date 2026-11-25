@@ -155,6 +155,10 @@ comptime SUBQ_UNION_ALL: UInt8 = 6
 comptime SUBQ_INTERSECT: UInt8 = 7
 comptime SUBQ_EXCEPT: UInt8 = 8
 
+# A branch joined by bare `UNION` / `UNION DISTINCT` (bound to a distinct over
+# the union of its inputs), a branch as the two above are.
+comptime SUBQ_UNION: UInt8 = 9
+
 # The qualifier the parser gives the derived table it wraps a whole UNION ALL in
 # when the last branch carries ORDER BY / LIMIT / OFFSET (the clauses belong to
 # the union, so the parser rewrites it to `SELECT * FROM (<union>) <alias>
@@ -1532,8 +1536,8 @@ struct SubqueryDef(Movable):
       - SUBQ_DERIVED     -> the body is bound to a subplan and registered in the
                             per-query CTE scope under `alias` (a named derived
                             relation); no `prebound` Expr is referenced for it.
-      - SUBQ_UNION_ALL / SUBQ_INTERSECT / SUBQ_EXCEPT -> a branch of a
-                            set-operation chain, bound by the chain's head
+      - SUBQ_UNION_ALL / SUBQ_UNION / SUBQ_INTERSECT / SUBQ_EXCEPT -> a branch
+                            of a set-operation chain, bound by the chain's head
                             (`sql_bind_set_op`); it pushes a placeholder.
 
     The `Slab[SubqueryDef]` storage on `SelectStmt` is byte-backed (its inner

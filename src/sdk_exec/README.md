@@ -509,13 +509,16 @@ The tests run when the package is built.
   comparison reports a reordered, changed, missing and added row; an OFFSET with
   no LIMIT is refused at bind by name (the two corpus cases that have one are
   listed, not skipped); a negative LIMIT is refused at parse.
-- `test_run_sql_set_ops`: INTERSECT and EXCEPT through `run_sql` answer what
-  the pinned DuckDB answers for each case of `tests/set_ops/cases.sql`, on one
-  worker and on three: NULL rows equal, an all-NULL and an empty input,
-  repeated rows, several columns of mixed types, one column of each key type,
-  NaN, inputs widened to a common type, INTERSECT binding tighter than UNION
-  ALL and EXCEPT, a sort and an aggregation over the result; every
-  case is run; INTERSECT ALL and EXCEPT ALL are refused at parse by name.
+- `test_run_sql_set_ops`: UNION (bare and UNION DISTINCT), INTERSECT and
+  EXCEPT through `run_sql` answer what the pinned DuckDB answers for each case
+  of `tests/set_ops/cases.sql` (the conformance corpus's bare-UNION cases among
+  them), on one worker and on three: NULL rows equal, an all-NULL and an empty
+  input, repeated rows, several columns of mixed types, one column of each key
+  type, NaN, 0.0 with -0.0, inputs widened to a common type (BIGINT and INTEGER
+  with VARCHAR among them), INTERSECT binding tighter than UNION, UNION ALL and
+  EXCEPT, a UNION ALL after a UNION keeping its duplicates, a chain in a CTE and
+  in a derived table, a sort and an aggregation over the result; every case is
+  run; INTERSECT ALL and EXCEPT ALL are refused at parse by name.
 - `test_secret_capability_reveal`: a capability reveals exactly the secret
   bound to its own node id, once and after one store resolve; two capabilities
   over one bindings table each reveal their own value; an unbound node or a
@@ -551,7 +554,7 @@ COUNT, AVG, MIN and MAX over any `ROWS` or `RANGE` frame SQL allows, a
 `RANGE` offset over one INT64, INT32 or FLOAT64 order key, with INT64, INT32,
 FLOAT64, BOOL or STRING partition and order keys)
 and UNION ALL, the
-concatenation of its branches. The post-rewrite gate and
+concatenation of its branches (UNION is a distinct over that concatenation). The post-rewrite gate and
 the plan validation gate are not called from `run_sql`.
 
 `post_rewrite_gate` is a free-standing check; its call sites belong to the
