@@ -474,7 +474,8 @@ def test_each_position_draws_from_the_pool() raises:
     except e:
         assert_equal(
             String(e),
-            "pipeline_exec: the aggregation sink of segment 0 was denied "
+            "MEMORY_BUDGET_EXCEEDED: pipeline_exec: the aggregation sink of"
+            " segment 0 was denied "
             + String(bytes)
             + " bytes of the segment's memory pool (budget "
             + String(3 * bytes)

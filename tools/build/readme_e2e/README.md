@@ -181,7 +181,7 @@ The packages are the list in [`packages.bzl`](../../../release/readme_e2e/packag
 ([`guard.bzl`](guard.bzl)): it fails analysis, naming the package, when a
 `src/<name>/mopm.toml` has no entry, or an entry has no `mopm.toml` (the files are
 read from the root `doc_tree`, which holds every file of the checkout). A new moved
-package needs its line in `packages.bzl` and nothing else. `mopm stage --workspace-root src` packs every `src/<name>/mopm.toml`, so a package that is not a release member has no `mopm.toml`.
+package needs its line in `packages.bzl`, and its row in [`release/UNPUBLISHED.md`](../../../release/UNPUBLISHED.md) deleted (`//release:unpublished_cases` refuses a row for a member). `mopm stage --workspace-root src` packs every `src/<name>/mopm.toml`, so a package that is not a release member has no `mopm.toml`.
 The guard's cases
 ([`cases.bxl`](cases.bxl)) run in the pull request check:
 `./buck2 bxl komira//tools/build/readme_e2e/cases.bxl:run`. They also hold how the staged set

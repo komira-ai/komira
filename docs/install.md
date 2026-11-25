@@ -5,8 +5,10 @@ program, what it does not do yet, and what to do when something goes wrong. To b
 instead, see [getting started](getting-started.md).
 
 > **This is an early release.** It registers Parquet files as tables and runs SQL over them, with each
-> answer read as pyarrow, or as a pandas or polars frame. A DataFrame API shaped like pandas and one shaped like polars come in later
-> releases of this same package. This page changes when they do.
+> answer read as pyarrow, or as a pandas or polars frame. A first part of the pandas-shaped DataFrame
+> (`komira.read_parquet`, filters, column selection, computed columns, `sort_values` and `head`) runs
+> as a plan with no SQL; the rest of it and the polars-shaped one come in later releases of this same
+> package. This page changes when they do.
 
 ## Install
 
@@ -18,18 +20,19 @@ python3 -m venv .venv
 pip install komira
 ```
 
-That is the whole install. The wheel is about 2.4 MB, and `pip` installs one other package with it,
-pyarrow (`pip show komira` lists `Requires: pyarrow`), which a query's answer is read as.
+That is the whole install. The wheel is about 2.4 MB, and `pip` installs two other packages with it
+(`pip show komira` lists `Requires: protobuf, pyarrow`): pyarrow, which a query's answer is read as, and
+protobuf, which a DataFrame's plan is encoded with.
 
 ## What it needs
 
 | | |
 |---|---|
-| platform | **Linux on x86_64**. Linux on arm64 and macOS on Apple silicon come in later releases. There is no Windows package. |
-| C library | **glibc 2.35 or newer**: the wheel is tagged `manylinux_2_35_x86_64`. For example Ubuntu 22.04 or newer, Debian 12 or newer and Fedora 36 or newer have it; RHEL 9 (glibc 2.34) and Debian 11 (glibc 2.31) do not, and neither does Alpine (musl). `ldd --version` prints yours on its first line. |
-| CPU | **x86-64-v3**: AVX2, BMI2 and FMA. Intel CPUs from Haswell on and AMD CPUs from Excavator on have it, except some low-end Pentium, Celeron and Atom models. `grep -c avx2 /proc/cpuinfo` prints 0 on a CPU without AVX2. |
+| platform | **Linux on x86_64**, or **macOS 11 or newer on Apple silicon** (arm64; the wheel is tagged `macosx_11_0_arm64`). Linux on arm64 comes in a later release. There is no Windows package. |
+| C library | **On Linux, glibc 2.35 or newer**: the wheel is tagged `manylinux_2_35_x86_64`. For example Ubuntu 22.04 or newer, Debian 12 or newer and Fedora 36 or newer have it; RHEL 9 (glibc 2.34) and Debian 11 (glibc 2.31) do not, and neither does Alpine (musl). `ldd --version` prints yours on its first line. |
+| CPU | **On Linux, x86-64-v3**: AVX2, BMI2 and FMA. Intel CPUs from Haswell on and AMD CPUs from Excavator on have it, except some low-end Pentium, Celeron and Atom models. `grep -c avx2 /proc/cpuinfo` prints 0 on a CPU without AVX2. |
 | Python | **CPython 3.11, 3.12, 3.13 or 3.14**. The package's tests, and a `pip install` of each release, run on each. One wheel serves all four. A newer CPython installs too, but nothing tests it yet. |
-| C++ runtime | the system `libstdc++`. Most systems have it; a minimal container image may need the `libstdc++6` package (Debian, Ubuntu) or `libstdc++` (Fedora, RHEL). |
+| C++ runtime | on Linux, the system `libstdc++`. Most systems have it; a minimal container image may need the `libstdc++6` package (Debian, Ubuntu) or `libstdc++` (Fedora, RHEL). macOS has its own. |
 
 The wheel carries everything else: `libkomira`, the engine as one shared library, its native libraries,
 and the three Mojo runtime libraries `libkomira` loads, which are Modular's and come under Modular's
@@ -44,7 +47,7 @@ Save this as `quickstart.py`:
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1008 is 1.8
+print(komira.abi_version())   # the engine's C ABI version: 1009 is 1.9
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
@@ -65,7 +68,7 @@ Then `python quickstart.py` prints:
 
 ```text
 0.1.1512
-1008
+1009
 [{'n': 1}]
 [{'n': 5, 'total': 152.5}]
 True
@@ -105,24 +108,24 @@ The package's [README](../python/README.md), which is also its PyPI description,
 
 ## What does not work yet
 
-- **Cancelling a query.** A query cannot be interrupted while it runs: Ctrl-C during `Session.sql`
-  raises `KeyboardInterrupt` when the engine has finished the query. The answer is freed, and the
-  session runs the next query.
-- **One session from two threads at once.** Use a session per thread.
-- **The DataFrame APIs**, pandas-shaped and polars-shaped.
+- **Most of the DataFrame APIs**: the pandas-shaped one beyond reading, filtering, selecting,
+  computing columns, sorting and `head` (see the [README](../python/README.md)), and the
+  polars-shaped one.
 - **Python UDFs.**
-- **Other platforms**: Linux on arm64, macOS, Windows, and Linux with musl (Alpine) have no wheel.
-- **Older systems**: glibc older than 2.35, CPUs older than x86-64-v3 and Python older than 3.11.
+- **Other platforms**: Linux on arm64, macOS on Intel, Windows, and Linux with musl (Alpine) have no
+  wheel.
+- **Older systems**: on Linux, glibc older than 2.35 and CPUs older than x86-64-v3; macOS older than 11;
+  Python older than 3.11.
 - **Installing from source.** Only wheels are published, so `pip` cannot build komira from source.
 
 ## When something goes wrong
 
 - **`ERROR: Could not find a version that satisfies the requirement komira`** and **`ERROR: No
   matching distribution found for komira`**: `pip` found no wheel for this machine. Check the
-  [requirements](#what-it-needs): `python --version` (3.11 or newer), `uname -m` (`x86_64`) and
-  `ldd --version` (2.35 or newer). An old `pip` may not know the `manylinux_2_35` tag:
+  [requirements](#what-it-needs): `python --version` (3.11 or newer), `uname -m` (`x86_64` on Linux,
+  `arm64` on macOS) and, on Linux, `ldd --version` (2.35 or newer). An old `pip` may not know the `manylinux_2_35` tag:
   `pip install --upgrade pip` first.
-- **`komira.UnsupportedCpuError`**: the CPU lacks a feature of x86-64-v3. The message lists the
+- **`komira.UnsupportedCpuError`** (Linux): the CPU lacks a feature of x86-64-v3. The message lists the
   missing flags as `/proc/cpuinfo` spells them. komira raises it before it loads the engine, instead
   of letting the engine stop on an illegal instruction.
 - **`komira.LibraryLoadError`**: the engine could not be loaded, and the message names the library
@@ -155,5 +158,5 @@ A pull request that changes what the package does, or what it needs, changes thi
 [README](../python/README.md), the [quickstart](../python/examples/README.md) and the
 [changelog](../python/CHANGELOG.md) with it: the release that adds SQL extends the first program with
 a query over `readings.parquet` and its rows, and the releases that add the pandas-shaped and
-polars-shaped APIs and other platforms move their lines out of
+polars-shaped APIs and Linux on arm64 move their lines out of
 [what does not work yet](#what-does-not-work-yet).
