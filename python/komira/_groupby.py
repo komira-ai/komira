@@ -137,11 +137,17 @@ def _agg_node(dtypes: dict[str, str], item: _Item, where: str, hint: str) -> _op
 
 def _zero(dtype: str, precision: int, scale: int) -> _ops.Node:
     """The 0 of a sum's type: an int literal for int64 and float64 (a float
-    CASE makes it a float64 literal), cast for the others."""
+    CASE makes it a float64 literal), a cast one for decimal128 and uint64;
+    a sum of another type (decimal256) is refused."""
     if dtype in ("int64", "float64"):
         return _ops.Lit(0)
     if dtype == "decimal128":
         return _ops.Cast(_ops.Lit(0), None, arrow="decimal128", precision=precision, scale=scale)
+    if dtype not in ("uint64",):
+        raise UnsupportedOperation(
+            f"sum() of a {dtype} column cannot be 0 when the column has no values, since the plan has no "
+            f"{dtype} literal: pass min_count=1, where a sum of nothing is missing"
+        )
     return _ops.Cast(_ops.Lit(0), dtype)
 
 

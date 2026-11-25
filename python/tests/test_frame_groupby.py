@@ -214,6 +214,11 @@ def test_min_count_one_keeps_the_missing_sum_and_other_sum_types_get_their_own_z
     zeros = {"u": Cast(Lit(0), "uint64"), "w": Cast(Lit(0), "uint64")}
     assert got._plan == grouped(env.scan, ("k",), aggs, sums=("u", "w", "f"), zeros=zeros), got._plan
     assert got.dtypes == {"k": "int64", "u": "uint64", "w": "uint64", "f": "float64"}
+    wide = Env((("k", "int64"), ("d", "decimal256")))
+    refuses(lambda: wide.df.groupby("k").sum(), UnsupportedOperation,
+            "sum() of a decimal256 column cannot be 0 when the column has no values, since the plan has no "
+            "decimal256 literal: pass min_count=1, where a sum of nothing is missing")
+    assert wide.df.groupby("k").sum(min_count=1)._plan == grouped(wide.scan, ("k",), (("d", agg("sum", "d")),))
 
 
 def test_the_frame_reductions_are_one_row_aggregates_with_no_key_filter_or_sort():
