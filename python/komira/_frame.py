@@ -16,10 +16,16 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
   `sort_values` and `head`. Each derives the output schema now, as the engine
   will, so `columns`, `dtypes` and `repr` run nothing and an unknown column is
   a `KeyError` at the verb that names it.
+- `groupby` gives a `GroupBy`, and `agg`, `sum`, `mean`, `median`, `std`,
+  `var`, `min`, `max`, `count` and `nunique` reduce the whole frame to one
+  row; each builds one aggregate node (komira/_groupby.py).
+  `drop_duplicates` builds a distinct over every column.
 - Row order (section 7): a sort makes a frame ordered; a filter, a projection
   that keeps the sort keys, an `assign` that replaces none of them and `head`
   keep it ordered, the builder placing filters and projections under the sort
   and a limit above it, and a sort above a limit when a verb comes after one.
+  A reduction and `drop_duplicates` give an unordered frame, except that
+  `groupby(sort=True)` sorts by its keys.
 - No dunder runs a query, no attribute is a column, and a name the class does
   not define raises `AttributeError` (komira/_refusals.py).
 
@@ -34,8 +40,9 @@ from collections.abc import Callable
 from types import ModuleType
 from typing import TYPE_CHECKING
 
-from . import _ops, _refusals
+from . import _groupby, _ops, _refusals
 from ._errors import UnsupportedOperation
+from ._groupby import GroupBy
 from ._series import Series, operand
 from ._session import Result, Session, _local_path, default_session
 
@@ -296,6 +303,113 @@ class DataFrame:
             # that orders the frame.
             return self._derive(_ops.limit(plan.child, min(plan.n, n)))
         return self._derive(_ops.limit(plan, n))
+
+    # ---- group-by and reductions (komira/_groupby.py) ---------------------
+
+    def groupby(
+        self,
+        by: str | list[str] | tuple[str, ...] | None = None,
+        *,
+        as_index: bool = True,
+        sort: bool = True,
+        dropna: bool = True,
+    ) -> GroupBy:
+        """The groups of the rows by the key columns `by`. Its reductions give
+        a frame of the keys and one column per output; `as_index` changes
+        nothing, since a frame has no index to put the keys in. `sort=True`
+        sorts the answer by the keys, missing keys last; `dropna=True` leaves
+        out the rows with a missing key, `dropna=False` keeps their group."""
+        return GroupBy._new(self, by, as_index, sort, dropna)
+
+    def agg(self, arg: object = None, **named: object) -> DataFrame:
+        """The frame reduced to one row: by named aggregates,
+        `agg(total=("v", "sum"), n=("v", "size"))`; by a dict of column to
+        reduction, each output named after its column; or by one reduction's
+        name, as its method."""
+        return _groupby.agg_frame(self, arg, named)
+
+    aggregate = agg
+
+    def sum(
+        self, axis: int | str = 0, skipna: bool = True, numeric_only: bool = False, min_count: int = 0
+    ) -> DataFrame:
+        """One row: the sum of each column, missing values skipped, 0 for a
+        column with none (`min_count=0`) or missing (`min_count=1`); each
+        column numeric or boolean, unless `numeric_only=True` leaves the
+        others out."""
+        _groupby._check_axis(axis, "sum")
+        _groupby._check_skipna(skipna, "sum")
+        return _groupby.reduce_frame(self, "sum", numeric_only, _groupby._sum_zero(min_count, "sum"))
+
+    def mean(self, axis: int | str = 0, skipna: bool = True, numeric_only: bool = False) -> DataFrame:
+        """One row: the mean of each column, as float64."""
+        return self._reduce("mean", axis, skipna, numeric_only)
+
+    def median(self, axis: int | str = 0, skipna: bool = True, numeric_only: bool = False) -> DataFrame:
+        """One row: the median of each column, as float64."""
+        return self._reduce("median", axis, skipna, numeric_only)
+
+    def std(
+        self, axis: int | str = 0, skipna: bool = True, ddof: int = 1, numeric_only: bool = False
+    ) -> DataFrame:
+        """One row: the sample standard deviation (ddof=1) of each column."""
+        _groupby._check_ddof(ddof, "std")
+        return self._reduce("std", axis, skipna, numeric_only)
+
+    def var(
+        self, axis: int | str = 0, skipna: bool = True, ddof: int = 1, numeric_only: bool = False
+    ) -> DataFrame:
+        """One row: the sample variance (ddof=1) of each column."""
+        _groupby._check_ddof(ddof, "var")
+        return self._reduce("var", axis, skipna, numeric_only)
+
+    def min(self, axis: int | str = 0, skipna: bool = True, numeric_only: bool = False) -> DataFrame:
+        """One row: the least value of each column, of its type."""
+        return self._reduce("min", axis, skipna, numeric_only)
+
+    def max(self, axis: int | str = 0, skipna: bool = True, numeric_only: bool = False) -> DataFrame:
+        """One row: the greatest value of each column, of its type."""
+        return self._reduce("max", axis, skipna, numeric_only)
+
+    def count(self, axis: int | str = 0, numeric_only: bool = False) -> DataFrame:
+        """One row: the count of values that are not missing in each column,
+        as int64."""
+        _groupby._check_axis(axis, "count")
+        return _groupby.reduce_frame(self, "count", numeric_only)
+
+    def nunique(self, axis: int | str = 0, dropna: bool = True) -> DataFrame:
+        """One row: the count of distinct values that are not missing in each
+        column, as int64."""
+        _groupby._check_axis(axis, "nunique")
+        _groupby._check_dropna(dropna, "nunique")
+        return _groupby.reduce_frame(self, "nunique")
+
+    def _reduce(self, how: str, axis: object, skipna: object, numeric_only: bool) -> DataFrame:
+        _groupby._check_axis(axis, how)
+        _groupby._check_skipna(skipna, how)
+        return _groupby.reduce_frame(self, how, numeric_only)
+
+    def drop_duplicates(
+        self,
+        subset: str | list[str] | tuple[str, ...] | None = None,
+        *,
+        keep: str | bool = "first",
+        inplace: bool = False,
+        ignore_index: bool = False,
+    ) -> DataFrame:
+        """The rows with duplicates removed. Equal rows are the same row, so
+        `keep="first"` and `keep="last"` give one of each; `keep=False` gives
+        only the rows no other row equals. `subset` must name every column (in
+        any order); `ignore_index` is accepted and does nothing, since a frame
+        has no index. The answer has no row order."""
+        if inplace is not False:
+            raise UnsupportedOperation(
+                "drop_duplicates(inplace=True) changes the frame in place, and komira frames do not change: "
+                "use the frame drop_duplicates returns"
+            )
+        if not isinstance(ignore_index, bool):
+            raise TypeError(f"drop_duplicates ignore_index must be a bool, not {type(ignore_index).__name__}")
+        return _groupby.drop_duplicates(self, subset, keep)
 
     def copy(self, deep: bool = True) -> DataFrame:
         """An equal frame: the same plan, on the same session. `deep` is
