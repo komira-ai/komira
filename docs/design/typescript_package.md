@@ -155,12 +155,12 @@ Fixed before this design, and not reopened here:
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.7, with twenty-three exports
+- **EXISTS** `libkomira` is at ABI 1.8, with twenty-four exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
   - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream.
     `komira_sql_stream_run` (1.6) runs it under a run handle that another thread cancels
-    (`komira_run_cancel`, status -6) and reads the progress of (`komira_run_progress`). The plan call,
-    `komira_plan_stream`, is designed but not built; it takes the next minor.
+    (`komira_run_cancel`, status -6) and reads the progress of (`komira_run_progress`).
+  - `komira_plan_stream` (1.8) runs a serialized logical plan and answers the same way.
   - `komira_ctx_new_with_options` (1.4) creates a context with the engine's worker count and
     memory budget as arguments (0 is the host's own value).
   - `komira_register_csv` and `komira_register_json` (1.5) bind a CSV or newline-delimited JSON
