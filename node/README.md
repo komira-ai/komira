@@ -1,12 +1,69 @@
-# node: the Node addon over libkomira
+# node: the Node.js package and its addon over libkomira
 
-A Node-API addon in C ([`komira_addon.c`](komira_addon.c)) that gives Node the
-calls of `libkomira`, komira's one shared library with a flat C ABI
-([`src/so`](../src/so/README.md)). It is built by `node_addon`
-([`tools/build/node`](../tools/build/node/README.md)) with the pinned zig against
-the headers of the pinned Node, and it is tested with the pinned Node's own
-runner (`node_binding_test`). Nothing here is shipped yet: Node.js is test-only
-in this repository ([third_party/node](../third_party/node/README.md)).
+Two layers, the package over the addon:
+
+- **The TypeScript package** `@komira-ai/komira` ([below](#the-typescript-package)): the public names a
+  user imports, the loader that finds libkomira in the platform package npm installs beside it, and
+  the errors. It is part 3 of [docs/design/typescript_package.md](../docs/design/typescript_package.md).
+- **The addon**: a Node-API addon in C ([`komira_addon.c`](komira_addon.c)) that gives Node the calls of
+  `libkomira`, komira's one shared library with a flat C ABI ([`src/so`](../src/so/README.md)). It is
+  built by `node_addon` ([`tools/build/node`](../tools/build/node/README.md)) with the pinned zig
+  against the headers of the pinned Node. The package's modules are the only callers it is written
+  for; its error codes stay inside them.
+
+Both are tested with the pinned Node's own runner (`node_binding_test`). Nothing here is published:
+the package is `"private": true`, and Node.js is test-only in this repository
+([third_party/node](../third_party/node/README.md)).
+
+## The TypeScript package
+
+ESM only, for Node 22.12 and later (which loads an ES module through `require`, so CommonJS users
+need no second build), with `apache-arrow ^21.2.0` as its peer dependency. The name
+`@komira-ai/komira` is a placeholder until the npm name is decided (the design's D1 and D4).
+
+| file | holds |
+|---|---|
+| [`package.json`](package.json) | the manifest npm reads: `exports` and `types` point at `dist/`, `engines`, the peer dependency, and the platform packages as optional dependencies at the package's own version. No `bin`, no scripts, no dependency of its own. Its `version` is a placeholder the package rule will stamp |
+| [`src/index.ts`](src/index.ts) | the one entry, and the public names: `Session`, `registerParquet`, `abiVersion`, `version`, `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError`, `UnsupportedOperation`, and the types `SessionOptions`, `CsvOptions`, `FilePath`, `KomiraErrorFields`, `Step` |
+| [`src/session.ts`](src/session.ts) | `Session`: `registerParquet(name, path)` (a path or a `file:` URL, a relative one resolved against the working directory when called), `registerCsv` and `registerNdjson` (their arguments checked, then refused with `UnsupportedOperation`: this package does not yet bind the call that registers those formats by name), `close()`, `closed`, `Symbol.dispose` and `Symbol.asyncDispose`; the options `threads` and `memoryLimit`, checked and refused by name until this package binds the call that sets them. The default session of the module-level `registerParquet`, one per JavaScript environment |
+| [`src/errors.ts`](src/errors.ts) | `KomiraError` (`status`, `code`, `step`, each `null` unless the engine gave one) and its subclasses |
+| [`src/platform.ts`](src/platform.ts) | the platform package's name for the host, and its directory, found with `require.resolve` |
+| [`src/cpu.ts`](src/cpu.ts) | which libkomira file of the native directory this CPU opens: the `VARIANTS` selector, or the x86-64-v3 check of a single library |
+| [`src/native.ts`](src/native.ts) | the load, once per JavaScript environment, and the conversion of the addon's errors |
+| [`src/version.ts`](src/version.ts) | `version`, read from the package's own `package.json` |
+| [`tsconfig.json`](tsconfig.json), [`tsconfig.build.json`](tsconfig.build.json) | `strict` over the sources and tests (`:typecheck`); the build of `dist/`, a `.js` and a `.d.ts` per source (`:dist`) |
+| [`devtools/`](devtools/README.md) | the pinned TypeScript compiler and Node.js types the two targets run |
+
+Every call that takes a table returns a promise, and every error, an argument's included, is its
+rejection. The addon runs each session's library calls in order on a native thread of the
+session's own ([below](#the-session-thread)), so the event loop never waits on the engine. `close()`
+is synchronous: it refuses later calls at once, and the context is freed after the calls already
+made have run; `await using` (`Symbol.asyncDispose`) settles once it is freed. A wrong argument type
+is a `TypeError` and a wrong value a `RangeError`, both before the library is called.
+
+### How it finds libkomira
+
+Importing the package loads nothing. The first `Session`, `registerParquet` or `abiVersion` of a
+JavaScript environment:
+
+1. names the platform package from `process.platform`, `process.arch` and whether Node runs on glibc
+   (`@komira-ai/komira-linux-x64-gnu`, `-linux-arm64-gnu`, `-darwin-arm64`), and finds it with
+   `require.resolve('<name>/package.json')` from the package itself. A host with no package, a
+   package that is not installed (npm's `--omit=optional`) and one that cannot be resolved are each a
+   `LibraryLoadError` that says which and what to do;
+2. picks the libkomira file of the package's `native/` directory, the self-contained directory of
+   `//src/so:libkomira[dist]`, before opening anything: with a `VARIANTS` manifest, the highest CPU
+   level whose features every processor of `/proc/cpuinfo` lists
+   ([docs/design/isa_variants.md](../docs/design/isa_variants.md), decision 5); without one, its
+   single `libkomira.so` (`libkomira.dylib` on macOS) after the x86-64-v3 check on Linux x64. The
+   rules, messages aside, are the Python loader's, held to the same fixtures;
+3. opens the package's `komira_addon.node`, and with it that file, which checks the ABI major version
+   and the functions the addon resolves.
+
+Every refusal is a `LibraryLoadError` (an `UnsupportedCpuError` for the CPU) naming the file, and
+leaves nothing loaded. No environment variable, no search of the working directory and no global
+path is read. A worker thread loads the same library again through the process-wide addon, and has
+its own default session.
 
 ## The calls
 
@@ -71,9 +128,10 @@ private TypeScript module ([`src/arrow_import.mts`](src/arrow_import.mts)) build
 
 [`package.json`](package.json) is private and names `apache-arrow` as a peer
 dependency at `^21.2.0`, the range the tests run: they use the pinned 21.2.0
-([third_party/node](../third_party/node/README.md)). The TypeScript files are
+([third_party/node](../third_party/node/README.md)). The Arrow import's files are
 `.mts` with only erasable syntax, so the pinned node runs them by stripping
-their types; nothing checks the types yet.
+their types; `:typecheck` does not cover them yet, since they import
+`apache-arrow`, which `devtools/` does not hold.
 
 ## Why `dlopen` at `load`, not a NEEDED dependency
 
@@ -140,6 +198,31 @@ terminated, the process at exit) while a call runs, the teardown waits for the
 call to return, then destroys the context.
 
 ## Tests
+
+`:package_test` runs the package's behaviour tests, [`tests/*.test.ts`](tests/), with node stripping
+their types; each file is its own process. Its covered sources are `src/*.ts`: every one must be
+loaded and their lines and branches together must each be at least 99% covered, or the target fails.
+It stages the platform package as npm lays it out (`node_modules/@komira-ai/komira-linux-x64-gnu/`
+with the addon and `//src/so:libkomira[dist]` as `native/`), the compiled `dist/`, the stand-ins below,
+and the CPU-level fixtures and table of choices of the Python selector
+([python/tests/fixtures/isa_variants](../python/tests/fixtures/isa_variants/README.md)). Every test
+that loads plants its host, so no real `/proc/cpuinfo` is read.
+
+| file | what it proves |
+|---|---|
+| [`exports.test.ts`](tests/exports.test.ts) | the public names exactly, in the sources, in `dist/`, by the package's name through its `exports` map, and from CommonJS's `require`; importing opens no addon; `dist/` holds a `.js` and a `.d.ts` per source and imports `.js` siblings; `version` is the manifest's; the manifest's type, engines, peer, exports, files, optional platform packages at the package's version, and no bin, scripts or dependency |
+| [`errors.test.ts`](tests/errors.test.ts) | the class tree and names; `status`, `code` and `step` default to null; a failed C call keeps its status and code and takes the engine's text as its message (the addon's when there is none); an unknown status has no code; the addon refusing its own use, and a thrown non-Error, have no status |
+| [`platform.test.ts`](tests/platform.test.ts) | the package name of each release platform; a host with none (no glibc, riscv64, darwin x64, win32) refused by name; an installed package found, the staged one by default; one not installed, and one whose `exports` hides its `package.json`, refused with their messages; the default host |
+| [`cpu.test.ts`](tests/cpu.test.ts) | features are a whole word on the key's own lines that every processor lists; the x86-64-v3 check passes v3 and v4, refuses westmere and core2 and a second processor without `movbe` naming the missing flags in order, refuses an unreadable cpuinfo, and reads nothing off Linux x64; a directory without a manifest is its single library |
+| [`variants.test.ts`](tests/variants.test.ts) | the selector on the Python selector's table of choices, the fallbacks of one missing feature, one processor, `vmx flags` and a partial word, arm64's `Features`, the manifest read as written, a relative directory, no cpuinfo read for a manifest without features, and each refusal (unreadable cpuinfo, a host without a feature key, a missing, non-UTF-8, empty or malformed manifest, a path outside the directory, a missing or directory variant file with no lower level loaded, a `VARIANTS` that is a directory or a broken link) |
+| [`load.test.ts`](tests/load.test.ts) | a host with no package and a CPU below x86-64-v3 refused before any addon is opened; a missing addon, one that is not ELF, a directory without libkomira and a library of ABI 2.0 each refused with the loader's or the addon's words; the v3 file of a variants directory loaded rather than its floor (an ABI 2.0 stand-in); the same directory again is the same library with no CPU read, and another is refused |
+| [`session.test.ts`](tests/session.test.ts) | against a stand-in whose `komira_register_parquet` fails: the engine's status, code and text; every wrong argument and option a `TypeError` or `RangeError` before the library is called; the two options and the CSV and NDJSON registrations refused by name; close frees once and a closed session refuses each call; a call made before `close` still runs and settles while later calls are refused at once, and `await using` settles after its session's call and free; `using`, `await using` and both dispose symbols close |
+| [`register_args.test.ts`](tests/register_args.test.ts) | against a stand-in whose refusal is the name and path `komira_register_parquet` received: each call passes its own table name unchanged; a string path as given, a `file:` URL as its decoded path, a relative path resolved against the working directory at the call (two directories, `..`, and `~` not expanded); the module-level call through the default session |
+| [`unknown_status.test.ts`](tests/unknown_status.test.ts) | a status libkomira does not define rejects with that number, no code and the addon's message |
+| [`package.test.ts`](tests/package.test.ts) | the real library loads from the staged platform package's `native/` with the planted host; the real engine opens the Parquet file by path, URL and relative path against the working directory at the call, and again under one name; a missing file is status -3 `KOMIRA_ERR_ENGINE` with the engine's text, and the session still works; the module-level call makes one default session and never closes it |
+| [`default_session.test.ts`](tests/default_session.test.ts) | a worker thread makes a default session of its own, once for two calls, and the main thread's is untouched |
+
+The addon's own tests:
 
 | target | what it proves | the defect it catches |
 |---|---|---|
