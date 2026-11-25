@@ -5,7 +5,9 @@ load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 #
 # A case is cases/<case>.sql: comment lines, then one SELECT over
 # komira_test_oracle's datasets (types, nulls, join_left, join_right) or
-# the regression tables below, whose outermost ORDER BY is total. A
+# the regression tables below (lj_customer and lj_orders also as
+# lj_customer_mem and lj_orders_mem, the same rows registered from memory:
+# runner.mojo, has_resident_twin), whose outermost ORDER BY is total. A
 # regression case (regress_*) says in its comment which engine defect it
 # catches. Its expected answer is the sql_oracle target
 # :oracle/<case>: the pinned DuckDB reads the same Parquet files
@@ -28,7 +30,8 @@ load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
 #     answers and broken lists: a wrong cell, a missing or extra row, another row order or
 #     column name; a refusal not listed, listed but answered, or worded
 #     otherwise; a malformed refusal list; a case with no answer, an answer
-#     with no case, a file that is no case; a session with no table.
+#     with no case, a file that is no case; a session with no table; a
+#     resident twin not registered from memory or not holding its rows.
 #
 # `deps` is the full transitive closure: so's, so itself and
 # komira_plan_harness.

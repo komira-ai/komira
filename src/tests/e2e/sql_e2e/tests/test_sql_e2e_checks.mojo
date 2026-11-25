@@ -7,8 +7,9 @@
 # words otherwise taken for a pass; a refusal list that accepts a line with no
 # step, an empty reason, a case it names twice or a name with no case; a
 # reader that pairs a case with no answer or an answer with no case, or reads
-# a file that is not `.sql` as a case; counts that drop a case; and a session
-# opened on a directory with no table.
+# a file that is not `.sql` as a case; counts that drop a case; a session
+# opened on a directory with no table; and a resident twin that is not
+# registered from memory or does not hold its file's rows.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
 
@@ -19,6 +20,7 @@ from sql_e2e import (
     SqlCase,
     check_case,
     check_corpus,
+    has_resident_twin,
     load_corpus,
     open_session,
     parse_refusals,
@@ -168,6 +170,23 @@ def test_the_report_counts_each_case_once() raises:
     assert_equal(len(report.problems), 2)
     assert_equal(report.problems[0], "corpus: a problem of the corpus")
     assert_true(report.problems[1].startswith("wrong: komira's answer differs from DuckDB's: "), report.problems[1])
+
+
+def test_the_resident_twins_are_in_memory_and_hold_their_files_rows() raises:
+    var session = open_session(String("tables"))
+    for name in [String("lj_customer"), String("lj_orders")]:
+        assert_true(has_resident_twin(name))
+        var twin = session.engine.catalog.table_of(name + "_mem")
+        assert_equal(twin.source.kind_name(), "in_memory")
+        assert_equal(session.engine.catalog.table_of(name).source.kind_name(), "parquet")
+        var file_rows = sql_result(session, "SELECT count(*) AS n FROM " + name)
+        var twin_rows = sql_result(session, "SELECT count(*) AS n FROM " + name + "_mem")
+        assert_equal(
+            twin_rows.batches[0].column_at(0).as_primitive[DType.int64]().get(0),
+            file_rows.batches[0].column_at(0).as_primitive[DType.int64]().get(0),
+        )
+    assert_false(has_resident_twin(String("nulls")))
+    assert_false(session.engine.catalog.has(String("nulls_mem")))
 
 
 def test_a_session_needs_a_table() raises:

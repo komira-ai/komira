@@ -12,12 +12,12 @@ Nothing is compiled on the runner.
 
 | event | runs |
 |---|---|
-| push to `main` | [`release.yml`](#releaseyml-the-release): builds the release set and publishes the mopm packages to the prod registry, on every push (no schedule, no switch); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert). And, when the push changes more than documentation, the TestPyPI half of [`pypi.yml`](#pypiyml-publishing-the-python-package): builds the `komira` wheel on the farm, installs the wheel file on a fresh runner per supported Python, uploads it to TestPyPI, installs it from there per supported Python and runs the quickstart, and records the version when all of that passed. And, on the same pushes, [`pypi-macos-arm64.yml`](#pypi-macos-arm64yml-the-macos-arm64-wheel): the same for the macOS arm64 wheel of the same version, in a run of its own |
+| push to `main` | [`release.yml`](#releaseyml-the-release): builds the release set and publishes the mopm packages to the prod registry, on every push (no schedule, no switch); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert). And, when the push changes more than documentation, the TestPyPI half of [`pypi.yml`](#pypiyml-publishing-the-python-package): builds the `komira` wheel on the farm, installs the wheel file on a fresh runner per supported Python, uploads it to TestPyPI, installs it from there per supported Python and runs the quickstart, and records the version when all of that passed. And, on the same pushes, [the macOS arm64 wheel in `pypi.yml`](#the-macos-arm64-wheel-in-pypiyml): the same for the macOS arm64 wheel of the same version, in jobs of the same run |
 | pull request from a branch of this repository | `pr / check`, whose [macOS part](#the-macos-part-of-the-check) builds the libraries of the macOS set the change reaches on the farm's Macs; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | merge group of the [merge queue](#the-merge-queue) (`merge_group`) | `pr / check` on the group's head commit, which is what `main` becomes; `coverage` does not run |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | [`release.yml`](#releaseyml-the-release), on the chosen ref, with a reason |
-| daily at 05:17 UTC (schedule) and manual (`workflow_dispatch`), on `main` | [the promotion of `pypi.yml`](#the-promotion): the newest version whose TestPyPI smoke passed, downloaded from TestPyPI and held to the sha256 its build recorded, is uploaded to PyPI and installed from there per supported Python; no build. At the same time, [the promotion of `pypi-macos-arm64.yml`](#pypi-macos-arm64yml-the-macos-arm64-wheel): the same for the macOS arm64 wheel, smoked on a hosted macOS runner |
+| daily at 05:17 UTC (schedule) and manual (`workflow_dispatch`), on `main` | [the promotion of `pypi.yml`](#the-promotion): the newest version whose TestPyPI smoke passed, downloaded from TestPyPI and held to the sha256 its build recorded, is uploaded to PyPI and installed from there per supported Python; no build. At the same time, [the macOS wheel's promotion jobs in `pypi.yml`](#the-macos-arm64-wheel-in-pypiyml): the same for the macOS arm64 wheel, smoked on a hosted macOS runner |
 | weekly (schedule) and manual | [`kpin-update.yml`](../tools/build/kpin/README.md#the-weekly-update): updates the pins and opens one pull request; no farm, and its pull request does not start `pr / check` by itself. A manual run with `real_hosts` instead checks kpin against the real registries |
 
 There is no separate static or lint job, and no other pull request check
@@ -25,8 +25,8 @@ that can block a merge: the `coverage` workflow only reports. The scheduled
 runs are the [build-system self-tests](#build-system-self-tests), which are not
 the gate, the weekly [`kpin-update.yml`](../tools/build/kpin/README.md#the-weekly-update),
 which opens a pull request and gates nothing, and the daily
-[promotions of `pypi.yml` and `pypi-macos-arm64.yml`](#the-promotion), which publish the newest Python
-package that passed its TestPyPI smoke, each for its own platform, and gate nothing.
+[promotion of `pypi.yml`](#the-promotion), which publishes the newest Python
+package that passed its TestPyPI smoke, each wheel (Linux, macOS) its own newest, and gates nothing.
 `ci.yml` and its check `ci / build` no longer exist. The whole-repository
 `//...` build they ran on every push to `main` is not run by any workflow now;
 a pull request's check builds and tests the targets the change affects, and
@@ -144,8 +144,8 @@ buckconfig written whole. It also reads every workflow and holds each step
 that uses the action to `tls: ${{ vars.FARM_TLS || 'false' }}` under its
 `with:`: a caller that dropped `tls` would connect in plain text whatever
 `FARM_TLS` says.
-It holds `farm-qos` to `batch` on every step of `release.yml`, `release-macos.yml`, `pypi.yml`
-and `pypi-macos-arm64.yml` and to absent on every step of any other workflow.
+It holds `farm-qos` to `batch` on every step of `release.yml`, `release-macos.yml` and `pypi.yml`
+and to absent on every step of any other workflow.
 
 A job that calls it needs `permissions: id-token: write` (to ask GitHub for the
 token) next to `contents: read`, and nothing else: the job reads no secret, holds
@@ -161,7 +161,7 @@ repository variables (Settings > Secrets and variables > Actions > Variables):
 | `FARM_ADDRESS` | the remote-execution service as a URL with its port |
 | `FARM_INSTANCE` | its instance name |
 | `FARM_LINUX_X86_64_PROPERTIES` | the worker property set of the linux x86_64 actions |
-| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml`, by the job `build-macos-arm64` of `pypi-macos-arm64.yml` and by the job `check` of `pr.yml` (which also passes `darwin-config-file`, so that only its step `build for macOS` sees them: [The macOS part of the check](#the-macos-part-of-the-check)), and by the job `mopm-stage` of `release.yml` (which also passes `darwin-config-file`, so that only its step `build the packages`, the build of `//release:mopm_release_artifacts`, sees them: [the mopm jobs](#the-mopm-jobs)), and by no other job |
+| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml`, by the job `build-macos-arm64` of `pypi.yml` and by the job `check` of `pr.yml` (which also passes `darwin-config-file`, so that only its step `build for macOS` sees them: [The macOS part of the check](#the-macos-part-of-the-check)), and by the job `mopm-stage` of `release.yml` (which also passes `darwin-config-file`, so that only its step `build the packages`, the build of `//release:mopm_release_artifacts`, sees them: [the mopm jobs](#the-mopm-jobs)), and by no other job |
 | `FARM_TLS` | `true` when the service serves REAPI over TLS; unset or empty means `false`. Each workflow passes it as farm-connect's `tls`, so the address and its transport change together |
 
 Variables are not masked, and a job's logs are public. The action masks the
@@ -176,7 +176,7 @@ farm's port does not answer.
 **Priority.** A farm that queues by priority class runs a `ci` action before a
 `batch` one. The action takes an optional `farm-qos` (`ci` or `batch`) and, when
 it is set, writes the request header `x-kbf-qos` as buck2's `http_headers`.
-Every job of `release.yml` passes `batch`, and so do the job `build` of `pypi.yml`, the job `build-macos-arm64` of `pypi-macos-arm64.yml` and the job `release-macos` of `release-macos.yml`, so the release work that a push to
+Every job of `release.yml` passes `batch`, and so do the job `build` of `pypi.yml`, the job `build-macos-arm64` of `pypi.yml` and the job `release-macos` of `release-macos.yml`, so the release work that a push to
 `main` starts waits behind the pull-request checks when the farm is full; no
 other workflow passes it, so they stay at `ci`. The class is not a platform
 property: it is not part of an action's digest, so a release build and a pull
@@ -435,9 +435,9 @@ The release workflows build macOS after the merge. There are two. The macOS
 (darwin-arm64) set of the mopm packages is its own workflow,
 [`release-macos.yml`](../.github/workflows/release-macos.yml) (one job, `release-macos`), once per release.
 The other is the macOS arm64 wheel of the Python package: the job `build-macos-arm64` of
-[`pypi-macos-arm64.yml`](../.github/workflows/pypi-macos-arm64.yml), at most once per version and only when that
+[`pypi.yml`](../.github/workflows/pypi.yml), at most once per version and only when that
 version's macOS file is missing from TestPyPI
-([below](#pypi-macos-arm64yml-the-macos-arm64-wheel)). `release.yml` holds no macOS job, and its job
+([below](#the-macos-arm64-wheel-in-pypiyml)). `release.yml` holds no macOS job, and its job
 `mopm-stage` builds the macOS set again as the osx-arm64 half of the packages it publishes, in the same
 configuration, so it finds this workflow's actions in the cache ([the mopm jobs](#the-mopm-jobs)). Before the
 merge, only [the macOS part of the check](#the-macos-part-of-the-check) builds for macOS: the libraries of
@@ -455,14 +455,14 @@ tests, which no pull request builds. The rest of this section is about `release-
   komira//tools/build/platforms:darwin-arm64` over a library is not.
   `//:release_macos_cases` holds the workflows and the shards of `ci/targets/` to it (the lines of
   `pr.yml`'s macOS part, `PR_MACOS_PART`, exactly as written, and where each stands), and holds
-  `pypi.yml` and `pypi-macos-arm64.yml` to not running on a pull request or a merge group. The five targets of the macOS wheel
+  `pypi.yml` (the macOS wheel's jobs are in it) to not running on a pull request or a merge group. The five targets of the macOS wheel
   (`//python:komira_wheel_macos_arm64`, `//python:wheel_install_test_macos_arm64`,
   `//python:wheel_libs_macos_arm64`, `//python:wheel_same_macos_arm64`,
   `//python/smoke:pypi_smoke_macos_arm64`) stay out of the check twice: each has an `EXCLUDED` row in
   `tools/build/ci/rules.bzl`, so the pull-request selector never picks it, and each has
   `target_compatible_with = DARWIN_ARM64` (limit `pypi-wheel-macos-arm64` in
   `tools/build/platforms/limits.tsv`), so it builds only with `--target-platforms
-  komira//tools/build/platforms:darwin-arm64`, which only `pypi-macos-arm64.yml` passes.
+  komira//tools/build/platforms:darwin-arm64`, which only the macOS jobs of `pypi.yml` pass.
 - **Analysed in every pull request.** What fails before anything is built
   (a target of the set's closure incompatible with darwin-arm64, a toolchain with no
   execution platform, a rule that fails at analysis) is found in the pull request that
@@ -908,9 +908,10 @@ a redirect.
 
 [`.github/workflows/pypi.yml`](../.github/workflows/pypi.yml) publishes the Linux x86_64 `komira` wheel
 ([python/README.md](../python/README.md)) in two halves of one file. It is written by hand. The macOS arm64
-wheel of the same version is published by a workflow of its own with the same triggers and the same two
-halves, [`pypi-macos-arm64.yml`](#pypi-macos-arm64yml-the-macos-arm64-wheel), so a red `pypi` run on `main`
-is always a failure of the Linux chain ([which run to look at](#which-run-to-look-at)).
+wheel of the same version is published by nine more jobs of the same file, with the same two halves
+([the macOS arm64 wheel in `pypi.yml`](#the-macos-arm64-wheel-in-pypiyml)): an independent chain, so a red
+`pypi` run on `main` is a failure of either chain, and the job names say which
+([which run to look at](#which-run-to-look-at)).
 
 | event | half | what the run does |
 |---|---|---|
@@ -964,23 +965,25 @@ with other bytes than TestPyPI serves, and when an index is over 80 percent; las
 published: komira <version> is on PyPI with the bytes TestPyPI served; nothing was uploaded, and the PyPI
 smoke passed` for `same`.
 
-**Why its own file.** PyPI's trusted publishing binds a publisher to a workflow file name and an
+**Why one file.** PyPI's trusted publishing binds a publisher to a workflow file name and an
 environment, not to an event: the publishers of TestPyPI and PyPI trust `pypi.yml` with the environments
-`testpypi` and `pypi`, so the push trigger needed no change on either index, and moving an upload to another
-workflow would (the macOS uploads did move, to `pypi-macos-arm64.yml`, which each index trusts with a
-publisher of its own: [below](#trusted-publishing-of-the-macos-file)). `release.yml` holds no publishing
+`testpypi` and `pypi`, so the push trigger needed no change on either index, and an upload from another
+workflow file would need a publisher of its own (the macOS uploads are in `pypi.yml` too, so the one publisher
+per index covers both wheels: [below](#trusted-publishing-of-the-macos-file)). `release.yml` holds no publishing
 credential. A job's index identity is the OIDC token of its environment: only `testpypi` and `pypi` hold a
 token an index trusts, and only for their own index. `build` names the environment `build`, which no index
 trusts, and has no upload step. Every other job holds no permission at all (`permissions: {}`): the
 smoke jobs read the quickstart from the smoke artifact, not from a checkout. `//:pypi_workflow_cases`
-(`pypi_workflow_contract.zig` says what it holds) pins the triggers, the concurrency, the ten jobs (no macOS
-job) and each one's `if:`, runner, `needs`, environment and permissions, that `id-token` is on no other job,
-that `farm-connect`, buck2 and a checkout are in the build job alone, that `actions/cache/save` is in the
-record job alone and `actions/cache/restore` in the promote job alone, that the publish action appears only
-in the two upload jobs and `setup-python` only in the smoke jobs and `wheel-user-test`, that every action is
-pinned to a commit, and that no secret, `curl`, `jq`, `twine` or `continue-on-error` is anywhere in the file.
-`//:release_macos_cases` holds that no job of `pypi.yml` names macOS. `//:farm_connect_cases` holds `build`
-to `farm-qos: batch`.
+(`pypi_workflow_contract.zig` says what it holds) pins the triggers, the concurrency, the nineteen jobs in
+order and each one's `if:`, runner, `needs`, environment and permissions. Of each chain it pins that
+`id-token` is on its build job and its two upload jobs alone, that `farm-connect`, buck2 and a checkout are
+in its build job alone, that `actions/cache/save` is in its record job alone and `actions/cache/restore` in
+its promote job alone, that the publish action appears only in its two upload jobs and `setup-python` only
+in its smoke jobs (and the Linux `wheel-user-test`). Of the file it pins that every action is pinned to a
+commit and that no secret, `curl`, `jq`, `twine` or `continue-on-error` is anywhere in it.
+`//:release_macos_cases` holds that no Linux job of `pypi.yml` names macOS, that neither chain needs or
+reads the other's jobs, and that both build jobs stamp the same way. `//:farm_connect_cases` holds both
+build jobs (`build` and `build-macos-arm64`) to `farm-qos: batch`.
 
 ### One run at a time, and which commits get a TestPyPI version
 
@@ -997,7 +1000,9 @@ promotes a version whose record was saved before it started. The play of `//:pyp
 holds this from the file's text: three merges while the first runs leave the first and the third started and
 the second cancelled; a promotion starts beside a running push, and a push that lands while a manual run
 waits replaces nothing; one group for both halves, or `cancel-in-progress: true`, is refused by what it
-would do.
+would do. The groups are the run's, and a run holds both wheels' chains, so a push run waits until
+both chains of the previous run have ended: a macOS build that takes its full time limit holds back the next
+Linux TestPyPI version by that long, and a slow Linux job holds back the next macOS one.
 
 ### The user test of the wheel file
 
@@ -1028,7 +1033,7 @@ this file existed. It is gone from there: the push run now builds every code mer
 moment, from the same commit and stamp, and installs it from the file and then from TestPyPI, so the
 `release.yml` job told nothing sooner and nothing more. `release.yml`'s cases (`//:release_workflow_cases`)
 hold that it has no wheel job, no `setup-python`, no wheel target and no smoke driver. What changed with it:
-A merge that breaks the wheel turns this file's push run red, and `main_red.yml` watches this file's push
+A merge that breaks either wheel turns this file's push run red, and `main_red.yml` watches this file's push
 runs as it watches `release.yml`'s, so it opens the `main red` issue as before.
 
 **The list.** The supported Pythons are one list, [`python/pythons.bzl`](../python/pythons.bzl): each minor's
@@ -1054,7 +1059,7 @@ every Python. The build writes it beside the driver (`pypi_smoke dist --record`)
 and `pythons.json`, is the record. `testpypi-passed` needs `testpypi-smoke`, a matrix job, which succeeds only
 when every one of its entries did, and then saves the record in the repository's Actions cache with
 `actions/cache/save` under the key `pypi-passed-linux-x86_64-<version>` (`pypi-passed-macos-arm64-<version>`
-for the macOS wheel, saved by `pypi-macos-arm64.yml`; the cache is the branch's, not the workflow's, and the
+for the macOS wheel, saved by its own job of `pypi.yml`; the cache is the branch's, not the workflow's, and the
 two prefixes never meet). So "passed" is the push run's own verdict, written down only when it passed: a version
 whose smoke failed on any Python, or whose run was cancelled or has not ended, has no record and is never
 promoted. The play holds that a smoke failure saves no record, and that a record job that did not wait for the
@@ -1132,9 +1137,8 @@ order until its build hits the cache (inferred).
 **Stopping it.** Either disable the workflow (Actions > pypi > the `...` menu > Disable workflow; enable it
 again the same way), which stops the push runs, the daily and the manual runs without a commit, or delete the
 `schedule:` entry in a pull request, which leaves the push runs and the manual run (`//:pypi_workflow_cases`
-then needs the same edit: it holds exactly one schedule; and `pypi-macos-arm64.yml` the same entry, since
-`//:pypi_macos_workflow_cases` holds its triggers to `pypi.yml`'s). The macOS promotion stops on its own the
-same way: Actions > pypi-macos-arm64 > Disable workflow. GitHub also disables a scheduled workflow of a
+then needs the same edit: it holds exactly one schedule). Both wheels' promotions are in this one workflow, so
+disabling it stops both. GitHub also disables a scheduled workflow of a
 public repository after 60 days with no activity in the repository; enabling it again is the same click.
 Required reviewers on the environment `pypi` (owner step 1 below) hold each promotion before its PyPI upload
 until someone approves it, which turns the daily release into a watched one; required reviewers on
@@ -1230,7 +1234,7 @@ and make no network request; the live indexes are reached only by a run of this 
    the quickstart runs with `python -I` in a directory holding only the example and its data file: it
    must exit 0 and print what `python/examples/quickstart.expected` says, compared exactly, with `<version>`
    replaced by the version and `<abi_version>` by the ABI version of the `--abi-table` file
-   (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.7` is 1007). A failed step names the command, its exit
+   (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.8` is 1008). A failed step names the command, its exit
    status and the last lines of its stderr.
 
 The user test of the wheel file is the first gate: `testpypi` `needs` `wheel-user-test`, so a wheel that does
@@ -1258,7 +1262,7 @@ no package of Modular's.
 **What ran where.** The build, the stamp and the wheel's own install test
 (`//python:wheel_install_test`, which installs the wheel into an empty environment and loads `libkomira`) run on the
 farm, in the push run's `build`, before any upload, on the same bytes that are uploaded. The macOS wheel's build and its install test
-(`//python:wheel_install_test_macos_arm64`) run on the farm's Macs, in `build-macos-arm64` of `pypi-macos-arm64.yml`. The user test of the wheel
+(`//python:wheel_install_test_macos_arm64`) run on the farm's Macs, in `build-macos-arm64` of `pypi.yml`. The user test of the wheel
 file, `storage`, `state`, the uploads, `promote`, `verify` and `install` run on GitHub-hosted runners, in the later jobs. The index checks and the install from an index
 run on a runner only, because a farm action has no network.
 
@@ -1270,8 +1274,8 @@ each with its own smoke.
 ### Owner steps before the first run
 
 Steps 1 and 2 were done once, in GitHub and on the indexes, outside this repository, and need no change for
-the push trigger (a publisher names the workflow file and the environment, not the event); step 3 is the one
-the macOS workflow needs:
+the push trigger (a publisher names the workflow file and the environment, not the event) or for the macOS
+wheel, whose uploads are in the same file:
 
 1. In the repository's Settings > Environments, create `testpypi` and `pypi`, each restricted to the
    branch `main` (deployment branches: selected branches, `main` only). Required reviewers on `pypi` are
@@ -1279,10 +1283,9 @@ the macOS workflow needs:
 2. On test.pypi.org and on pypi.org, add a pending trusted publisher (Your account > Publishing): project
    `komira`, owner `komira-ai`, repository `komira`, workflow `pypi.yml`, environment `testpypi` on
    TestPyPI and `pypi` on PyPI.
-3. For the macOS file, which `pypi-macos-arm64.yml` uploads: on each index, in the project's Manage >
-   Publishing, a second GitHub publisher, the same as step 2 with workflow `pypi-macos-arm64.yml`
-   ([why](#trusted-publishing-of-the-macos-file)). Until it is there, a macOS upload is refused and the
-   `pypi-macos-arm64` run is red.
+   The one publisher per index covers the uploads of both wheels
+   ([why](#trusted-publishing-of-the-macos-file)). A publisher naming another workflow file matches no upload;
+   the index owner may remove it.
 
 ### Yanking a bad release
 
@@ -1305,18 +1308,17 @@ when its bytes are the ones on TestPyPI (`same`), nothing is uploaded, the smoke
 nothing is uploaded, the smoke does not run, and the run is green with a notice that says the version's bytes
 differ. The fix reaches the index with the next commit that changes code, which has the next version.
 
-## pypi-macos-arm64.yml: the macOS arm64 wheel
+## The macOS arm64 wheel in pypi.yml
 
-[`.github/workflows/pypi-macos-arm64.yml`](../.github/workflows/pypi-macos-arm64.yml) publishes the macOS arm64
-`komira` wheel, `komira-0.1.<N>-py3-none-macosx_11_0_arm64.whl`, the same name and version as the Linux file
-of the same commit. It has `pypi.yml`'s triggers line for line (a push to `main` that changes more than
-documentation, the daily cron, a manual run) and the same two halves, told apart by `github.event_name` as in
-`pypi.yml`: the push half builds the wheel on the farm's Macs when TestPyPI lacks it, uploads it to TestPyPI,
-smokes it on a hosted macOS runner and saves its record; the promotion takes the newest macOS record and
-publishes that file to PyPI. It is a workflow of its own so that each platform's verdict is a run of its own:
-while the macOS wheel cannot be built, the `pypi-macos-arm64` run of each merge is red and the `pypi` run is
-green when the Linux wheel passed. Nothing of the macOS chain is skipped or softened for that: its build, its
-uploads, its smokes and its verdict jobs are the ones `pypi.yml` held, under the workflow's own name.
+Nine jobs of [`.github/workflows/pypi.yml`](../.github/workflows/pypi.yml), after the Linux jobs of each half,
+publish the macOS arm64 `komira` wheel, `komira-0.1.<N>-py3-none-macosx_11_0_arm64.whl`, the same name and
+version as the Linux file of the same commit. They run on the file's triggers (a push to `main` that changes
+more than documentation, the daily cron, a manual run) and in its two halves, told apart by `github.event_name`:
+the push half builds the wheel on the farm's Macs when TestPyPI lacks it, uploads it to TestPyPI, smokes it on a
+hosted macOS runner and saves its record; the promotion takes the newest macOS record and publishes that file to
+PyPI. The jobs' names say which chain a failure is in, and the two chains are independent
+(next paragraphs). Nothing of the macOS chain is skipped or
+softened: its build, its uploads, its smokes and its verdict jobs are the ones this section lists.
 
 | job | half | environment | permissions | what it does |
 |---|---|---|---|---|
@@ -1324,22 +1326,22 @@ uploads, its smokes and its verdict jobs are the ones `pypi.yml` held, under the
 | `testpypi-macos-arm64`, `testpypi-smoke-macos-arm64`, `testpypi-passed-macos-arm64`, `result-testpypi-macos-arm64` | push | as their twins in `pypi.yml` | as their twins in `pypi.yml` | the same as `pypi.yml`'s `testpypi`, `testpypi-smoke`, `testpypi-passed` and `result-testpypi` on the macOS dist, when the build made a wheel: the upload with the Linux driver (no storage steps), the smoke on the hosted runner `macos-15` (Apple silicon) with the macOS driver, the record under `pypi-passed-macos-arm64-<version>`, the verdict. |
 | `promote-macos-arm64`, `pypi-macos-arm64`, `pypi-smoke-macos-arm64`, `result-pypi-macos-arm64` | promotion | as their twins in `pypi.yml` | as their twins in `pypi.yml` | the same as `pypi.yml`'s promotion from the newest macOS record (the prefix `pypi-passed-macos-arm64-`), with the Linux driver on ubuntu and the macOS driver on `macos-15`; no storage steps. |
 
-A push run is in the concurrency group `pypi-macos-arm64-testpypi`, a promotion in `pypi-macos-arm64-promote`,
-each with `cancel-in-progress: false`, as `pypi.yml`'s are: a group's name is the repository's, so a group of
-its own means a macOS run never waits behind, replaces or is replaced by a `pypi` run.
-`//:pypi_macos_workflow_cases` (`pypi_macos_workflow_contract.zig` says what it holds) pins the triggers to
-`pypi.yml`'s, the groups, the nine jobs with each one's `if:`, runner, `needs`, environment and permissions,
-and each job's outputs and steps after the build; its play (`pypi_macos_workflow_run.zig`) runs the file for
-each event and answer, and runs it beside `pypi.yml`: for every pair of a Linux and a macOS outcome of a push
-or a promotion, each workflow's run is green exactly when its own chain passed, a push starts both or
-neither, and the two workflows' runs never wait on or cancel each other (with the macOS workflow put in
-`pypi.yml`'s group, the play shows them replacing each other's waiting runs).
+Both chains are in the concurrency groups of `pypi.yml`, `pypi-testpypi` for a push run and `pypi-promote`
+for a promotion, each with `cancel-in-progress: false`. `//:pypi_workflow_cases` holds the file: the contract
+files (`pypi_workflow_contract.zig` for the Linux jobs and the triggers, `pypi_macos_jobs_contract.zig` for the
+macOS jobs) pin the triggers, the groups, the nineteen jobs in order with each one's `if:`, runner, `needs`,
+environment and permissions, and each job's outputs and steps after the build; the plays
+(`pypi_workflow_run.zig`, `pypi_macos_jobs_run.zig`) run the file for each event and answer and look at it one
+chain at a time: for every pair of a Linux and a macOS outcome of a push or a promotion, a chain's verdict is
+green exactly when that chain passed, and the run is green only when both chains are.
 
-**The macOS wheel's chain is independent of the Linux one.** The two chains are two workflows: a job needs only
-jobs of its own workflow, no job of either reads the other's results, artifacts or record, and no job of
-`pypi.yml` names macOS. A red macOS chain never holds the Linux wheel or turns a `pypi` run red, and a red
-Linux chain never holds the macOS wheel. Both chains of a push build
-the same commit, so they carry the same stamp and the same version; the Linux file is
+**The macOS wheel's chain is independent of the Linux one.** The two chains share a file, not a dependency: a
+job needs only jobs of its own chain, no job of either reads the other's results, artifacts or record, and
+each chain's verdict job names its own failures (the annotation title is `pypi` for the Linux chain and
+`pypi-macos-arm64` for the macOS chain). A red macOS chain never holds the Linux wheel, and a red Linux chain
+never holds the macOS wheel; the run is red when either is, so a red macOS chain makes the `pypi` run red.
+Both chains of a push build
+the same commit (each build job runs the same stamp step), so they carry the same stamp and the same version; the Linux file is
 `komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl` and the macOS file
 `komira-0.1.<N>-py3-none-macosx_11_0_arm64.whl` (the platform `darwin-arm64`, whose floor is macOS 11.0), two
 files of one release. Each chain has its own artifacts and its own record, so each promotes the newest
@@ -1350,8 +1352,7 @@ but the one that stops buck2, carries `if: steps.testpypi_file.outputs.present !
 push that changed only what the stamp ignores, builds nothing on the Macs. `//:release_macos_cases` holds
 the order, the exact gate on each Mac build, that the file-name build alone is ungated, that
 `build-macos-arm64` runs on the ubuntu runner with the macOS worker set, hosts and the `tls` literal, that the
-macOS smoke jobs run the macOS driver, that each macOS job is in its half, and that `pypi.yml` holds none of
-them.
+macOS smoke jobs run the macOS driver, that each macOS job is in its half.
 
 **What the macOS wheel holds, read back.** Before anything is uploaded, the build holds the wheel to what a
 Mac loads (python/BUCK, "The macOS wheel, read back"). The wheel rule refuses, on every member
@@ -1373,38 +1374,31 @@ eleven native owner libraries and the three runtime `.so` files on Linux.
 
 ### Which run to look at
 
+There is one run of `pypi` per push and one per promotion; the job names say which chain a failure is in, and
+the verdict jobs annotate it under the title `pypi` (Linux) or `pypi-macos-arm64` (macOS).
+
 | to know | look at |
 |---|---|
 | whether a merge's Linux wheel was built, passed its user test, reached TestPyPI and installs from there | the `pypi` run of that push; its verdict is the job `result-testpypi` |
-| whether the same merge's macOS wheel did | the `pypi-macos-arm64` run of that push; its verdict is `result-testpypi-macos-arm64` |
-| what reached PyPI today, and why a newer version did not | the scheduled `pypi` run (`result-pypi`) for Linux, the scheduled `pypi-macos-arm64` run (`result-pypi-macos-arm64`) for macOS; each names the versions it skipped |
+| whether the same merge's macOS wheel did | the same run; its verdict is `result-testpypi-macos-arm64` |
+| what reached PyPI today, and why a newer version did not | the scheduled `pypi` run: `result-pypi` for Linux, `result-pypi-macos-arm64` for macOS; each names the versions it skipped |
 | how full the indexes are | the job summary of `testpypi` in a `pypi` push run, or of `promote` in a `pypi` promotion |
-| whether `main` is red | the `main red` issue: [`main_red.yml`](#main_redyml-the-main-red-alert) reads the push runs of `release` and `pypi`, not of `pypi-macos-arm64` (nor of `release-macos`), so a red macOS run opens no issue |
+| whether `main` is red | the `main red` issue: [`main_red.yml`](#main_redyml-the-main-red-alert) reads the push runs of `release` and `pypi` (not of `release-macos`), so a red macOS chain, which makes the `pypi` run red, opens or keeps it |
 
-Until the farm's macOS workers run build actions, every `pypi-macos-arm64` push run is red at
-`build-macos-arm64` (`the macOS build job did not succeed`) and every promotion is red at `promote-macos-arm64`
-(no macOS record exists, `fail-on-cache-miss`): that is the macOS chain reporting, and it says nothing about
-the Linux wheel. A red `pypi` run is always a failure of the Linux chain.
+Until the farm's macOS workers run build actions, every push run of `pypi` is red at `build-macos-arm64`
+(`the macOS build job did not succeed`) and every promotion is red at `promote-macos-arm64` (no macOS record
+exists, `fail-on-cache-miss`): that is the macOS chain reporting, and it says nothing about the Linux wheel,
+whose jobs and verdict are green or red on their own.
 
 ### Trusted publishing of the macOS file
 
 An index's trusted publisher names the repository, the workflow file and the environment; an upload from any
 other file is refused by the index. The macOS uploads (`testpypi-macos-arm64` and `pypi-macos-arm64`) are in
-`pypi-macos-arm64.yml`, so each index needs one publisher more, and nothing else changes on either index (the
-publisher of `pypi.yml` stays, for the Linux file):
+`pypi.yml`, as the Linux uploads are, so the one publisher each index has for `pypi.yml` (environment
+`testpypi` on TestPyPI, `pypi` on PyPI) covers both wheels, and nothing needs adding on either index.
 
-- on test.pypi.org, project `komira` > Manage > Publishing: a GitHub publisher with owner `komira-ai`,
-  repository `komira`, workflow `pypi-macos-arm64.yml`, environment `testpypi`;
-- on pypi.org, the same with environment `pypi`.
-
-Until an index holds that publisher, an upload of the macOS file to it is refused (the publish action fails
-with the index's `invalid-publisher` answer), the upload job fails, and the `pypi-macos-arm64` run is red with
-nothing uploaded; the Linux uploads are not touched. While the macOS build fails no macOS upload is tried, so
-nothing depends on the publishers yet. The other way, keeping the macOS uploads in `pypi.yml`, needs no index
-change but makes `pypi.yml` wait for another workflow's build: a `workflow_run` trigger on the completion of a
-macOS build workflow, a download of that run's artifacts (`actions: read` on the upload jobs), and a third
-kind of `pypi` run whose verdict is the macOS upload and smoke, red again whenever the macOS chain fails. One
-publisher per index is the smaller change and keeps each platform's whole chain in one run.
+A publisher that names any other workflow file of this repository matches no upload; the index owner may
+remove one, and nothing breaks if it stays.
 
 ### What a Mac user gets
 
@@ -1428,7 +1422,7 @@ while the macOS build cannot run no version passes on macOS, so it would stop ev
 included, for a gap outside the package; and a Mac user gains nothing from it, since pip already gives them
 the newest version that has their file. Once macOS builds pass routinely, a hold costs at most a day's delay
 and removes the lock-file failure, and is worth deciding then. The promotion rule is unchanged by the move
-to a workflow of its own.
+of the macOS wheel's jobs into `pypi.yml`.
 
 ## pr.yml: the pull request's check
 
@@ -1584,10 +1578,11 @@ the farm connection exchanges, checking out `main` and running no code of any
 pull request. The workflows it reads are `--workflow <name>` flags of that
 step (and the trigger's `workflows:` list): the program names none itself, so
 a replacement push workflow is added to both in its own pull request. It names
-two: `release`, and `pypi`, whose push run builds the Python wheel and installs it from its file
-and from TestPyPI (its scheduled and manual runs are not push runs and are never read). The two macOS
-workflows, `release-macos` and `pypi-macos-arm64`, are not named: a Mac build is reported, not blocking
-([The macOS build of the release](#the-macos-build-of-the-release)), so its red run opens no issue; the
+two: `release`, and `pypi`, whose push run builds the Python wheels (Linux and macOS) and installs them from their files
+and from TestPyPI (its scheduled and manual runs are not push runs and are never read). The macOS
+workflow `release-macos` is not named: a Mac build is reported, not blocking
+([The macOS build of the release](#the-macos-build-of-the-release)), so its red run opens no issue. The macOS
+wheel's jobs are in `pypi.yml`, so a red macOS chain makes the `pypi` run red and is reported; the
 macOS packages the release publishes are built by `release`'s own `mopm-stage`, so a macOS build of them
 that fails there is a red `release` run. A green run of
 either closes the open issues whose heads it contains, so an issue opened for a red `pypi` run can be

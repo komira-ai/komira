@@ -60,9 +60,9 @@ range, or the DataFrame surface; each has its own design, named under
 Fixed before this design and not reopened here: the distribution (the name on PyPI, the name `pip install`
 takes) is `komira`, the same as the import package (`komira-ai` is the organisation's name only: the GitHub
 organisation, the PyPI organisation account and the mopm namespace; PyPI has one flat namespace); it is
-published by the top-level workflows
-`.github/workflows/pypi.yml` (the Linux wheel) and `.github/workflows/pypi-macos-arm64.yml` (the macOS arm64
-wheel) through the GitHub environments `testpypi` and `pypi`, by trusted
+published by the top-level workflow
+`.github/workflows/pypi.yml` (the Linux wheel's jobs and the macOS arm64 wheel's jobs, two independent chains of
+one file) through the GitHub environments `testpypi` and `pypi`, by trusted
 publishing with no token, and nothing is uploaded or registered by hand. The owner has given the go to release `komira` from that workflow
 before the DataFrame surfaces exist, so the name is registered on PyPI by the first release the workflow
 makes, and no one registers or uploads it any other way; the package lives in `python/` in this repository; it is published as a wheel first; the wheel
@@ -196,9 +196,19 @@ Behaviour each later pull request implements, fixed here so they agree:
   registers an `os.register_at_fork` hook that marks every session of the parent closed in the child, so
   a call there raises `KomiraError` instead of running on a copied context. The package never forks;
   UDF workers are the engine's, not this package's.
-- **Ctrl-C during a query** is delivered when the query returns: `KeyboardInterrupt` is raised then, the
-  answer the query computed is freed, and the session stays usable. The first release has no cancel and
-  its docs say so.
+- **Ctrl-C during a query** cancels it. A ctypes call keeps its thread in the library, and Python runs a
+  signal's handler only on the main thread between bytecodes, so `Session.sql` makes
+  `komira_sql_stream_run` on a helper thread under a run handle of its own (src/so/README.md, "Cancel
+  and progress") and the calling thread waits for it, waking every 50 ms. Whatever is raised on the
+  calling thread while it waits (the `KeyboardInterrupt`, or the exception of a `progress` callback)
+  cancels the handle; the thread then waits for the call to return, drops a stream the call made,
+  frees the handle and raises the exception again, with the session's lock held throughout, so the
+  context never has two calls at once and the next call finds it free. A second Ctrl-C while the run
+  stops is dropped. On a library older than ABI 1.6 the query runs on the calling thread and Ctrl-C is
+  delivered when it returns, the answer freed.
+- **Progress** is polled, never called back from the library: the waiting thread reads the run handle's
+  segment counts and calls the `progress` callback, on the calling thread, when they change.
+- **Logging** goes to the standard logger `"komira"`, with a `NullHandler`; no query text.
 
 ### 4. What is carried from the earlier SDK, and what is not
 
@@ -261,7 +271,7 @@ visible from every thread, as a module-level name would be.
 
 The macOS arm64 wheel (`//python:komira_wheel_macos_arm64`, macOS 11 or later on Apple silicon, tagged
 `py3-none-macosx_11_0_arm64`) is built from its own `[dist]` directory and its own pinned compiler. It is built
-and tested only by pypi-macos-arm64.yml, never in a pull request (`//python:wheel_install_test_macos_arm64`, on
+and tested only by the macOS jobs of pypi.yml, never in a pull request (`//python:wheel_install_test_macos_arm64`, on
 the farm's macOS workers), and a run publishes it only from main.
 
 - An installed package loads `komira/_lib/libkomira.so`. The wheel carries
@@ -405,7 +415,7 @@ Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
   repository; no internal host, no private repository, no address. The public-boundary lint reads
   `python/` like every file of the cell.
 - **Only what is true.** The `Operating System` classifiers name the release platforms, each of which
-  gets its wheel only after that wheel's install test passes on that platform (in pypi-macos-arm64.yml
+  gets its wheel only after that wheel's install test passes on that platform (in the macOS jobs of pypi.yml
   for macOS, never in a pull request's check). The CPython classifiers name the interpreters the
   package's tests run: 3.11, 3.12, 3.13 and 3.14, each pinned in
   [third_party/python](../../third_party/python/README.md) and listed once in

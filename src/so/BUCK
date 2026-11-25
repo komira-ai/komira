@@ -44,7 +44,7 @@ NATIVE_OWNERS = [
 # test_sources holds the operations on values: a Parquet file registered and
 # its schema bytes, a registered table queried through the session's engine
 # (and an unregistered one refused at bind), the CSV and JSON bindings, a
-# plan rendered, and sql_result, komira_sql_stream's answer on values (rows,
+# plan rendered, sql_result, komira_sql_stream's answer on values (rows,
 # no rows with the schema, a result that outlives its session, and refusals as
 # `<step>: <reason>` with the step and the code recorded on the session);
 # test_register_text holds register_csv and
@@ -52,7 +52,13 @@ NATIVE_OWNERS = [
 # the session's engine, each CSV dialect argument equal to read_csv's (a
 # header-less table refused at lower as read_csv's is) and the JSON table
 # equal to read_json's, an unreadable file, an empty name and a
-# taken name refused with nothing registered; test_credentials holds the three steps of a definition, each
+# taken name refused with nothing registered;
+# test_plan_result holds plan_result, komira_plan_stream's
+# answer on values: a plan built from SQL on one session, serialized and run
+# on a fresh session with no table, equals the SQL answer and parses no SQL
+# statement, and every refusal is `<step>: <reason>` (`decode` for bytes that
+# are not a plan, SQL text among them, and for an envelope with a write target
+# or UDFs; `lower` and `execute` from run_plan); test_credentials holds the three steps of a definition, each
 # kind's fields and every named refusal, word for word, and the generations of
 # a name; test_credentials_reveal reads sealed values through sdk_exec's
 # SecretCapability and reads an object of a fake S3 with them, where a wrong
@@ -155,6 +161,8 @@ mojo_library(
     test_srcs = [
         "tests/test_credentials.mojo",
         "tests/test_credentials_reveal.mojo",
+        "tests/test_plan_result.mojo",
+        "tests/test_register_arrow.mojo",
         "tests/test_register_text.mojo",
         "tests/test_session.mojo",
         "tests/test_sources.mojo",
@@ -167,13 +175,15 @@ mojo_library(
         "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
     ],
     test_data = {
+        "tests/test_plan_result.mojo": ["tests/fixtures/two_columns.parquet"],
+        "tests/test_register_arrow.mojo": ["tests/fixtures/two_columns.parquet"],
         "tests/test_register_text.mojo": ["tests/fixtures/two_columns.parquet"],
         "tests/test_sources.mojo": ["tests/fixtures/two_columns.parquet"],
     },
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): twenty-three exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): twenty-five exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). Every context it creates owns
 # an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
 # komira_sql_stream runs SQL on that engine and answers an Arrow C stream; the
@@ -181,9 +191,13 @@ mojo_library(
 # komira_sql_stream_run is that call under a run handle (komira_run_new), whose
 # komira_run_cancel and komira_run_progress another thread may call while the
 # run is in flight.
+# komira_plan_stream runs a serialized plan on the same engine, with no SQL
+# front end, and answers the same way.
+# komira_register_arrow_stream goes the other way: it drains a caller's
+# Arrow C stream into a table the session holds, and releases it.
 # It is published only if every gate driver passes, each of which dlopens it
 # with RTLD_NOW and calls it as a foreign host would:
-#   gate_version       the version is 1007 (1.7);
+#   gate_version       the version is 1009 (1.9);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op, and a context (with its
 #                      engine's workers) is created and freed again;
@@ -221,6 +235,11 @@ mojo_library(
 #                      empty file and a path that is not UTF-8 -3; a refused
 #                      name stays free and a good call afterwards leaves no
 #                      error.
+#   gate_register_arrow_stream  a released stream (release NULL) is -3 with
+#                      the drain's refusal word for word, an empty name -3
+#                      with TABLE_NAME_EMPTY, a name that is not UTF-8 -3;
+#                      NULL ctx -1, NULL name or stream -2 with the named last
+#                      error; each refusal leaves the name free.
 #   gate_credentials  a credential added, set and sealed is 0 at each step;
 #                      one sealed without its secret, a field of another
 #                      kind, an empty value, a 4097-byte value, an unknown
@@ -256,6 +275,8 @@ _LIBKOMIRA = dict(
         "komira_run_cancel",
         "komira_run_progress",
         "komira_sql_stream_run",
+        "komira_plan_stream",
+        "komira_register_arrow_stream",
     ],
     exports_exact = True,
     gate_srcs = [
@@ -270,6 +291,7 @@ _LIBKOMIRA = dict(
         "tests/gate/gate_json_binding.mojo",
         "tests/gate/gate_parquet_schema.mojo",
         "tests/gate/gate_plan_render.mojo",
+        "tests/gate/gate_register_arrow_stream.mojo",
         "tests/gate/gate_register_csv.mojo",
         "tests/gate/gate_register_json.mojo",
         "tests/gate/gate_register_parquet.mojo",
@@ -332,11 +354,12 @@ export_file(
 # wheel_install_test), which holds komira.abi_version() of the installed
 # library to its `version` line, and by the install page's check
 # (python/smoke/BUCK, install_page_shows_quickstart), which holds the
-# output the page shows to it.
+# output the page shows to it, and by the Node package's test (node/BUCK,
+# package_test), which holds abiVersion() to it.
 export_file(
     name = "abi/komira.tsv",
     src = "abi/komira.tsv",
-    visibility = ["//python:", "//python/smoke:"],
+    visibility = ["//node:", "//python:", "//python/smoke:"],
 )
 
 # The C header of libkomira, komira.h, made from abi/komira.tsv (the golden:
@@ -356,14 +379,14 @@ komira_abi_golden(
 
 staged_files(
     name = "c_driver_files",
-    srcs = ["tests/c/abi_driver.c"],
+    srcs = ["tests/c/abi_driver.c", "tests/c/plan_cases.h"],
 )
 
 # A C host of libkomira that includes komira.h and nothing else of ours.
 cxx_binary(
     name = "abi_driver",
     srcs = [":c_driver_files[tests/c/abi_driver.c]"],
-    headers = {"komira.h": ":komira_abi"},
+    headers = {"komira.h": ":komira_abi", "plan_cases.h": ":c_driver_files[tests/c/plan_cases.h]"},
     header_namespace = "",
     # The run-handle cases call komira_run_cancel and komira_run_progress from
     # a second thread.
@@ -393,6 +416,19 @@ cxx_binary(
 # own, and a file registered with no header is refused at lower when
 # queried; a taken name, an empty one and a missing file are refused with
 # the named last error, and the first table keeps answering.
+# And it is a producer of struct ArrowArrayStream written in C, whose
+# callbacks count the library's releases: komira_register_arrow_stream drains
+# a stream of two chunks into a table that answers a sort, a filter, an
+# aggregate and a join with a registered CSV file after the producer's
+# buffers are overwritten and freed, with the stream, its schema and each
+# chunk released once; a stream of no chunk is a table of no row with the
+# stream's schema; a second registration replaces a table of its name (a CSV
+# one too) and register_csv refuses a name it holds. A failing get_schema, a
+# failing get_next after one chunk and a Null-type column are refused with
+# the named last error word for word, the stream released once and the table
+# under the name kept; an empty or NULL name and a NULL context release the
+# stream without calling get_schema; a NULL stream is -2 and a released one
+# -3; a refused name stays free.
 # Then the run handle: a run cancelled before the
 # call is -6 with the QUERY_CANCELLED last error word for word and *out
 # untouched, its progress done 0 of a total above 0, and the context answers
@@ -401,6 +437,17 @@ cxx_binary(
 # at least the one before with done at most total; a cancel from a second
 # thread while the run is in flight gives 0 or -6 and the context answers
 # after it; NULL run, done or total pointers are -2.
+# And it runs plans through komira_plan_stream:
+# a WirePlanEnvelope it encodes by hand (a scan of a Parquet file, the bytes
+# komira_parquet_schema answers as its schema), run on a context with no table
+# registered, answers what komira_sql_stream answers for the same file (the
+# three-row file and the no-row fixture); SQL text as plan bytes, garbage, an
+# envelope of version 3 and 64 MiB of garbage are -3 at decode, a missing file
+# -3 at lower naming it, NULL plan or out -2, NULL ctx -1, a plan_len over the
+# bound -5 unread; each refusal leaves *out as written, has its step
+# (KOMIRA_STEP_LOWER at lower, KOMIRA_STEP_NONE otherwise), and a good plan
+# follows on the same context with no step or code left; a plan's stream
+# outlives komira_ctx_free.
 komira_c_abi_check(
     name = "c_abi_check",
     driver = ":abi_driver",
