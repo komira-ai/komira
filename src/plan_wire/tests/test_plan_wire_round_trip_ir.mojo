@@ -9069,6 +9069,8 @@ def main() raises:
         test_a_partition_by_round_trips_with_every_expr_field_deviating
     ]()
     suite.test[test_a_partition_by_with_no_exprs_round_trips]()
+    suite.test[test_a_partition_by_with_deviating_null_placement_round_trips]()
+    suite.test[test_a_partition_by_with_one_deviating_key_round_trips_the_full_list]()
     suite.test[
         test_a_partition_topn_round_trips_with_a_rank_over_fetch_and_a_rank_column
     ]()
