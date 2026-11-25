@@ -252,7 +252,7 @@ def _wheel_file_impl(ctx):
     rel = gated_copy("release", release_checked)
 
     # The file name alone, written at analysis: what an index lists the wheel
-    # as, known before anything is built (pypi-macos-arm64.yml asks the index for it
+    # as, known before anything is built (pypi.yml asks the index for it
     # before building a wheel whose build is costly).
     file_name = ctx.actions.write(ctx.label.name + ".file_name", name + "\n")
     return [DefaultInfo(

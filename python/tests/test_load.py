@@ -75,16 +75,22 @@ def main(args):
     want = [
         "BindError",
         "CredentialsError",
+        "DataFrame",
         "KomiraError",
         "LibraryLoadError",
+        "MemoryLimitError",
         "ParseError",
         "Result",
+        "Series",
         "Session",
         "StorageError",
         "UnsupportedCpuError",
         "UnsupportedOperation",
         "__version__",
         "abi_version",
+        "read_csv",
+        "read_json",
+        "read_parquet",
     ]
     assert komira.__all__ == want, komira.__all__
     assert issubclass(LibraryLoadError, KomiraError) and issubclass(KomiraError, Exception)

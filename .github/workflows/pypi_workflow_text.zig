@@ -1,9 +1,9 @@
-//! The reading of the two publish workflows' text that their case files share: pypi.yml, the Linux wheel
-//! (pypi_workflow_contract.zig and pypi_workflow_test.zig, the contract of each line;
-//! pypi_workflow_run.zig, runs played from the text), and pypi-macos-arm64.yml, the macOS arm64 wheel
-//! (pypi_macos_workflow_contract.zig, pypi_macos_workflow_test.zig and pypi_macos_workflow_run.zig);
-//! pypi_workflow_play.zig plays either. The jobs and the top-level keys as lines, the searches over those
-//! lines, the workflows' own bytes (and release.yml's) under KOMIRA_TEST_WORK, and the edits a case writes
+//! The reading of the publish workflow's text that its case files share: pypi.yml, with the jobs of the
+//! Linux wheel (pypi_workflow_contract.zig and pypi_workflow_test.zig, the contract of each line;
+//! pypi_workflow_run.zig, runs played from the text) and the jobs of the macOS arm64 wheel
+//! (pypi_macos_jobs_contract.zig, pypi_macos_jobs_test.zig and pypi_macos_jobs_run.zig);
+//! pypi_workflow_play.zig plays it. The jobs and the top-level keys as lines, the searches over those
+//! lines, the workflow's own bytes (and release.yml's) under KOMIRA_TEST_WORK, and the edits a case writes
 //! into them. Comment lines and blank lines are never returned.
 
 const std = @import("std");
@@ -117,11 +117,6 @@ pub fn countPrefix(lines: []const []const u8, prefix: []const u8) usize {
 /// The bytes of pypi.yml, the zig_test's data under KOMIRA_TEST_WORK/workflows/.
 pub fn readWorkflow(ar: std.mem.Allocator) ![]const u8 {
     return readData(ar, "pypi.yml");
-}
-
-/// The bytes of pypi-macos-arm64.yml, the macOS wheel's workflow, beside pypi.yml.
-pub fn readMacosWorkflow(ar: std.mem.Allocator) ![]const u8 {
-    return readData(ar, "pypi-macos-arm64.yml");
 }
 
 /// The bytes of release.yml, whose push filter pypi.yml's repeats.
