@@ -11,6 +11,11 @@ error. Nothing here holds a pointer.
 - `register_csv`, `register_json`: bind one CSV or newline-delimited JSON
   file into a session's engine under a name, schema inferred now, as
   `read_csv` and `read_json` bind it.
+- `register_arrow`: bind a table already in memory (what
+  `komira_register_arrow_stream` drained from an Arrow C stream) into a
+  session's engine under a name, replacing a table of that name;
+  `check_table_name` is its name check, which the C call makes before it
+  drains the stream.
 - `parquet_schema_bytes`: a Parquet file's schema as `komira.plan.v1`
   `WireSchema` bytes.
 - `csv_binding_bytes`, `json_binding_bytes`: the whole `WireScanBinding` of a
@@ -31,6 +36,8 @@ Every operation but `plan_render_text` first calls `probe_codec_libraries`
 and not an abort of the process when a codec first opens it.
 """
 
+from arrow.arrow_types import ArrowType
+from arrow.table import Table
 from byte_buffer.file_identity import FileIdentity
 from compression.codec_libraries import probe_codec_libraries
 from csv.csv_options import QUOTE_STYLE_TAG_RFC4180
@@ -43,12 +50,18 @@ from sdk.parquet_footer import read_parquet_footer
 from sdk_exec.arrow_result import ArrowResult, arrow_result
 from sdk_exec.engine_catalog import register_parquet as engine_register_parquet
 from sdk_exec.engine_plan import run_plan
+from sdk_exec.engine_context import RegisteredTable
 from sdk_exec.engine_sql import STEP_EXECUTE, run_sql
 from sdk_exec.run_control import RunControl
 from sql.sql_ast import TvfOptions
 from sql.sql_tvf_bind import csv_tvf_schema, json_tvf_schema
 
 from .session import Session, step_number
+
+comptime TABLE_TYPE_UNSUPPORTED = "TABLE_TYPE_UNSUPPORTED"
+"""Refusal of `register_arrow`: a column of a nested type (list, large list,
+fixed-size list, struct, map) or a union. Only flat columns are registered,
+as only flat Parquet files are (`register_parquet`)."""
 
 comptime QUERY_CANCELLED = "QUERY_CANCELLED"
 """The named error of a run its `RunControl` cancelled: `sql_result` raises
@@ -132,13 +145,63 @@ def register_json(mut session: Session, name: String, path: String) raises:
     session.engine.catalog.add_source(name, _json_source(path))
 
 
+def register_arrow(mut session: Session, name: String, var table: Table) raises:
+    """Bind `table`, rows already in memory, into `session`'s engine as the
+    table `name`, replacing the table the session holds under that name, of
+    any kind, as DuckDB's `register` replaces a view of the name.
+
+    The table is resident: its chunks are moved into the catalog and every
+    query reads them, so later changes to whatever the rows were copied from
+    are not seen. A query on the session reads it by name, found without
+    regard to case. A table of no chunk is a table of no row with its schema.
+
+    Raises:
+        `TABLE_NAME_EMPTY` for an empty `name` (`check_table_name`);
+        `TABLE_TYPE_UNSUPPORTED` naming the first column whose type is nested
+        or a union. Nothing is registered or replaced then.
+    """
+    check_table_name(name)
+    for i in range(table.num_columns()):
+        var t = table.schema().field_arrow_type(i)
+        if (
+            t.is_nested()
+            or t == ArrowType.UNION_SPARSE
+            or t == ArrowType.UNION_DENSE
+        ):
+            raise Error(
+                String(TABLE_TYPE_UNSUPPORTED)
+                + ": column '"
+                + table.schema().field_name(i)
+                + "' has type "
+                + String(t)
+                + "; only flat columns are registered"
+            )
+    _ = session.engine.catalog.remove(name)
+    # A Parquet table is also listed with its paths (`EngineContext.tables`),
+    # which lowering reads for every Parquet scan; a replaced one leaves it.
+    var key = name.lower()
+    var kept = List[RegisteredTable]()
+    for i in range(len(session.engine.tables)):
+        if session.engine.tables[i].name != key:
+            kept.append(session.engine.tables[i].copy())
+    session.engine.tables = kept^
+    session.engine.catalog.add_in_memory(name, table^)
+
+
+def check_table_name(name: String) raises:
+    """Refuse a name no table can take: an empty one (`TABLE_NAME_EMPTY`).
+    It is the name check of `register_arrow`, which replaces a taken name
+    instead of refusing it."""
+    if name.byte_length() == 0:
+        raise Error("TABLE_NAME_EMPTY: a table name must not be empty")
+
+
 def _check_name_free(session: Session, name: String) raises:
     """Refuse a name a new table cannot take: an empty one, or one the
     session's catalog already holds. The catalog resolves a name to its first
     registration, so a second table under a taken name would never be read;
     it is refused here instead of being shadowed."""
-    if name.byte_length() == 0:
-        raise Error("TABLE_NAME_EMPTY: a table name must not be empty")
+    check_table_name(name)
     if session.engine.catalog.has(name):
         raise Error(
             "TABLE_ALREADY_REGISTERED: the session already has a table named '"
@@ -251,7 +314,8 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
     every batch checked to cross the Arrow C Stream Interface whole.
 
     The statement reads the tables registered on the session
-    (`register_parquet`, `register_csv`, `register_json`); it is `sdk_exec.run_sql`: a query, or a
+    (`register_parquet`, `register_csv`, `register_json`,
+    `register_arrow`); it is `sdk_exec.run_sql`: a query, or a
     `COPY ... TO` a local file, whose answer is one row of the BIGINT
     `Count`. An answer of no rows is one batch of no rows with the answer's
     schema. The result owns its batches and keeps no reference to the

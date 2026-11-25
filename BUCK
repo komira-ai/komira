@@ -146,25 +146,31 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
-# The cases of pypi.yml, the publish of the Python package's Linux wheel
-# (.github/workflows/pypi_workflow_contract.zig says what the contract of its text holds,
-# pypi_workflow_test.zig writes each defect into the real text, pypi_workflow_run.zig plays runs of it
-# with pypi_workflow_play.zig): a push to main of code with release.yml's paths-ignore, one daily
-# schedule and a manual run, one concurrency group per half that cancels no run, the ten jobs of the two
-# halves (the TestPyPI half on a push, the promotion to PyPI otherwise) with the exact gate, runner,
-# needs, environment and permissions of each and no macOS job, the identity in the build and upload jobs
-# alone, the farm in the build job alone, the record saved only after every TestPyPI smoke passed and
-# restored by the promotion alone, the size of the project printed on both indexes, and every action
-# pinned; and runs played from the file for each event and each answer of the indexes (a push uploads to
-# TestPyPI and never to PyPI, a push of documentation starts no run, the promotion uploads the newest
-# version that passed and names a newer one that did not, a version on PyPI is not uploaded again, two
-# waiting pushes leave the newer, a failed job is a red run naming it). The macOS wheel's workflow is
-# //:pypi_macos_workflow_cases'. A build action.
+# The cases of pypi.yml, the publish of the Python package's Linux x86_64 and macOS arm64 wheels
+# (.github/workflows/pypi_workflow_contract.zig says what the contract of its text and its Linux jobs
+# holds and pypi_macos_jobs_contract.zig what its macOS jobs hold; pypi_workflow_test.zig and
+# pypi_macos_jobs_test.zig write each defect into the real text; pypi_workflow_run.zig and
+# pypi_macos_jobs_run.zig play runs of it with pypi_workflow_play.zig): a push to main of code with
+# release.yml's paths-ignore, one daily schedule and a manual run, one concurrency group per half that
+# cancels no run, the nineteen jobs of the two wheels' two halves (the TestPyPI half on a push, the
+# promotion to PyPI otherwise) with the exact gate, runner, needs, environment and permissions of each,
+# the identity in the build and upload jobs alone, the farm in the build jobs alone, each record saved
+# only after every TestPyPI smoke of its wheel passed and restored by its promotion alone, the size of
+# the project printed on both indexes, and every action pinned; and runs played from the file for each
+# event and each answer of the farm and the indexes (a push uploads to TestPyPI and never to PyPI, a push
+# of documentation starts no run, the promotion uploads the newest version that passed and names a newer
+# one that did not, a version on PyPI is not uploaded again, two waiting pushes leave the newer, a failed
+# job is a red run naming it, and for every pair of a Linux and a macOS outcome each chain uploads and
+# records what its own outcome says and the run is green exactly when both chains are). The independence
+# of the two chains and the macOS build's own steps are //:release_macos_cases'. A build action.
 zig_test(
     name = "pypi_workflow_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/workflows/pypi_workflow_test.zig",
     imports = [
+        ".github/workflows/pypi_macos_jobs_contract.zig",
+        ".github/workflows/pypi_macos_jobs_run.zig",
+        ".github/workflows/pypi_macos_jobs_test.zig",
         ".github/workflows/pypi_workflow_contract.zig",
         ".github/workflows/pypi_workflow_play.zig",
         ".github/workflows/pypi_workflow_run.zig",
@@ -179,43 +185,10 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
-# The cases of pypi-macos-arm64.yml, the publish of the Python package's macOS arm64 wheel, a workflow
-# of its own so that its verdict is a run of its own (.github/workflows/pypi_macos_workflow_contract.zig
-# says what the contract of its text holds, pypi_macos_workflow_test.zig writes each defect into the real
-# text, pypi_macos_workflow_run.zig plays runs of it and of it beside pypi.yml): pypi.yml's triggers line
-# for line, a concurrency group per half of its own, the nine macOS jobs with the exact gate, runner,
-# needs, environment and permissions of each and each one's outputs and steps after the build; runs of
-# the file for each event and each answer of the farm and the indexes; and the two workflows side by
-# side: for every pair of a Linux and a macOS outcome, each workflow's run is green exactly when its own
-# chain passed (a merge whose Linux wheel passed and whose macOS build failed is one green run and one red
-# run), a push starts both or neither, and no run of one waits on, replaces or cancels a run of the
-# other. The macOS build's own steps are //:release_macos_cases'. A build action.
-zig_test(
-    name = "pypi_macos_workflow_cases",
-    exec_compatible_with = LINUX_X86_64,
-    src = ".github/workflows/pypi_macos_workflow_test.zig",
-    imports = [
-        ".github/workflows/pypi_macos_workflow_contract.zig",
-        ".github/workflows/pypi_macos_workflow_run.zig",
-        ".github/workflows/pypi_workflow_contract.zig",
-        ".github/workflows/pypi_workflow_play.zig",
-        ".github/workflows/pypi_workflow_text.zig",
-        ".github/workflows/wheel_user_test_job.zig",
-    ],
-    data = {
-        "workflows/pypi-macos-arm64.yml": ".github/workflows/pypi-macos-arm64.yml",
-        "workflows/pypi.yml": ".github/workflows/pypi.yml",
-        "workflows/release.yml": ".github/workflows/release.yml",
-    },
-    busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
-)
-
 # The cases of the macOS builds of the release workflows (.github/workflows/release_macos_test.zig
 # says what each catches): the workflow release-macos.yml builds the macOS set on the farm, in a
-# concurrency group of its own, and release.yml holds no macOS job; the macOS jobs, in
-# pypi-macos-arm64.yml and not in pypi.yml, build the macOS wheel only when an index lacks it and share
-# no needs with the Linux jobs; the
+# concurrency group of its own, and release.yml holds no macOS job; pypi.yml's macOS jobs build only when
+# TestPyPI lacks the wheel and share no needs, artifact or record with its Linux jobs; the
 # builds hold up nothing, no workflow that runs on a pull request names a macOS platform outside
 # pr.yml's macOS part (which holds its contract: the macOS keys in a file only its build step names,
 # that step bounded and through the buck2-farm action), the check set holds no macOS build or macOS
