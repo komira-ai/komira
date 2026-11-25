@@ -47,6 +47,7 @@ zig_test(
         "assert_remote/fixtures/build_cut_and_compile_error.log",
         "assert_remote/fixtures/build_failed_unknown_target.log",
         "assert_remote/fixtures/build_remote.log",
+        "assert_remote/fixtures/test_cut.log",
         "assert_remote/fixtures/test_failed.log",
     ],
     busybox = "komira//tools/build/toolchains:busybox",
