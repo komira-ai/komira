@@ -20,7 +20,8 @@ install page shows names it.
   aggregates and `.str` functions. `collect()` runs the plan through the engine's plan entry, not
   through SQL, and returns a `Result`; `schema` and `explain()` run nothing. Output names and types
   follow polars 1.44.2, except that a count, `len()`, `str.len_chars()` and the sum of a boolean or a UInt32
-  column are Int64 where polars gives UInt32; what the engine cannot run is refused by name. The wheel does not ship the plan modules this
+  column are Int64 where polars gives UInt32; what the engine cannot run is refused by name (today `median()`, `std()` and `var()` build their
+  plans and the engine refuses them when the frame is collected). The wheel does not ship the plan modules this
   needs yet, so in an installed package the readers raise `ImportError`.
 - **CSV and JSON files.** `Session.register_csv(name, path, *, delimiter=",", header=True,
   all_varchar=False)` and `Session.register_json(name, path)` register a CSV file and a

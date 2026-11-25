@@ -818,7 +818,8 @@ _PLAN_EXPR_RUNTIMES = [
 # entry as through polars 1.44.2, values and dtypes, and the schema komira.pl
 # derives without running is the answer's; plus collect() twice, the plan
 # entry and never the SQL one, explain(), a missing file, frames of two
-# sessions, and the engine's refusal of a CSV scan at lower.
+# sessions, the engine's refusal of a CSV scan at lower, and its refusal at
+# execute of median, std and var, which its aggregation sinks do not serve yet.
 python_binding_test(
     name = "pl_oracle_test",
     src = "test_pl_oracle.py",

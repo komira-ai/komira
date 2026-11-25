@@ -503,17 +503,18 @@ def test_sum_count_len_and_statistics_carry_polars_types():
 
 def test_n_unique_counts_null_as_one_value():
     lf = frame().select(kpl.col("g").n_unique())
-    distinct, nulls = c("__komira_agg_0"), c("__komira_agg_1")
+    distinct, rows, values = c("__komira_agg_0"), c("__komira_agg_1"), c("__komira_agg_2")
     assert lf._plan == Project(
         Aggregate(
             T,
             (),
             (
                 ("__komira_agg_0", Agg("count_distinct", (c("g"),))),
-                ("__komira_agg_1", Agg("count_if", (Unary("is_null", c("g")),))),
+                ("__komira_agg_1", Agg("count")),
+                ("__komira_agg_2", Agg("count", (c("g"),))),
             ),
         ),
-        (("g", Arith("add", distinct, When(((Compare("gt", nulls, Lit(0)), Lit(1)),), Lit(0)))),),
+        (("g", Arith("add", distinct, When(((Compare("gt", rows, values), Lit(1)),), Lit(0)))),),
     )
 
 

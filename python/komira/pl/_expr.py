@@ -488,9 +488,12 @@ class Expr:
 
         def lower(scope):
             arg = inner._lower(scope.row())
+            # The nulls are the rows less the values: count_if is not an
+            # aggregate the engine's sinks serve, and these three are.
             distinct = scope.aggregate(Agg("count_distinct", (arg,)), name)
-            nulls = scope.aggregate(Agg("count_if", (Unary("is_null", arg),)), name)
-            extra = When(((Compare("gt", nulls, Lit(0)), Lit(1)),), Lit(0))
+            rows = scope.aggregate(Agg("count"), name)
+            values = scope.aggregate(Agg("count", (arg,)), name)
+            extra = When(((Compare("gt", rows, values), Lit(1)),), Lit(0))
             return Arith("add", distinct, extra)
 
         return Expr(lower, name, True)
