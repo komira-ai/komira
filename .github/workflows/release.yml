@@ -27,8 +27,8 @@
 #                   asks the registry which versions exist, so it cannot be a
 #                   build action); `release_staged_verify expect` holds S's
 #                   plan to every package on every platform the release
-#                   builds (//release:mopm_plan_expectation); the README e2e of every package runs on the
-#                   farm against S (//release/readme_e2e/verify:all, with
+#                   builds (//release:mopm_plan_expectation); the README e2e
+#                   of every package runs on the farm against S (//release/readme_e2e/verify:all, with
 #                   `-c komira_release.staged=stage` at that version); then
 #                   `mopm publish --staged S --registry prod --dry-run`. It
 #                   sends nothing and holds no token.

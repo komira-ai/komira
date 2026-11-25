@@ -212,6 +212,8 @@ test "an expectation entry with no subdir, a subdir twice, or a subdir that is n
     try refusedExpectation("{\"members\":[{\"name\":\"ns/a\",\"subdirs\":[\"\"]}]}", "the expectation gives ns/a the subdir '', which is not a plain name");
     try refusedExpectation("{\"members\":[{\"name\":\"ns/a\",\"subdirs\":[\"..\"]}]}", "the expectation gives ns/a the subdir '..', which is not a plain name");
     try refusedExpectation("{\"members\":[{\"name\":\"ns/a\",\"subdirs\":[\"linux 64\"]}]}", "the expectation gives ns/a the subdir 'linux 64', which is not a plain name");
+    try refusedExpectation("{\"members\":[{\"name\":\"ns/a\",\"subdirs\":[\"a\\\\b\"]}]}", "the expectation gives ns/a the subdir 'a\\b', which is not a plain name");
+    try refusedExpectation("{\"members\":[{\"name\":\"ns/a\",\"subdirs\":[\"a\\u0001b\"]}]}", "the expectation gives ns/a the subdir 'a\x01b', which is not a plain name");
 }
 
 test "an expectation with a field it does not know is read: the format grows by adding fields" {
@@ -311,6 +313,43 @@ test "expect on the command line: a missing expectation, a missing plan, an empt
             return error.TestWrongRefusal;
         }
     }
+}
+
+test "expect on the command line: an expectation larger than the cap is refused, naming the error" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageDir(&tmp, try planJson(a, &.{.{ .name = "ns/a", .subdirs = BOTH }}));
+    const big = try a.alloc(u8, pe.max_expect_bytes + 1);
+    @memset(big, ' ');
+    try tmp.dir.writeFile(.{ .sub_path = "big.json", .data = big });
+    var out = sink();
+    defer out.deinit();
+    var err = sink();
+    defer err.deinit();
+    const big_path = try tmpPath(a, &tmp, "big.json");
+    const args = [_][]const u8{ "--staged", try tmpPath(a, &tmp, "staged"), "--expect", big_path };
+    try t.expectEqual(@as(u8, 1), try pe.cliExpect(a, &args, &out.writer, &err.writer));
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, "release_staged_verify: EXPECT FAILED: cannot read the expectation {s}: FileTooBig\n", .{big_path}), err.written());
+}
+
+test "expect on the command line: an error that is not a refusal (out of memory) exits 1 with its name" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try stageDir(&tmp, "{}");
+    const args = [_][]const u8{ "--staged", try tmpPath(a, &tmp, "staged"), "--expect", try tmpPath(a, &tmp, "expect.json") };
+    var failing = std.testing.FailingAllocator.init(a, .{ .fail_index = 0 });
+    var out = sink();
+    defer out.deinit();
+    var err = sink();
+    defer err.deinit();
+    try t.expectEqual(@as(u8, 1), try pe.cliExpect(failing.allocator(), &args, &out.writer, &err.writer));
+    try t.expectEqualStrings("release_staged_verify: EXPECT FAILED: OutOfMemory\n", err.written());
 }
 
 test "expect on the command line: an unknown flag, a flag without a value or given twice, and a missing flag exit 2" {

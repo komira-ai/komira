@@ -742,7 +742,7 @@ Five of the six `prod-*` jobs publish the set `mopm-stage` tried to the prod reg
 **commit** (visible all at once). `prod-stage` needs `release` and `mopm-stage`: the set it stages is the one
 the README e2e of `mopm-stage` passed on, at the version of this run (below), so a release build or an e2e
 that failed stops the run before anything is staged in prod. There is no beta stage in front of prod. `//:release_workflow_cases` holds the job graph, the gates, the
-environments, the permissions, the commands and the order of the test's steps, that every upload of `mopm-staged-<sha>` and `mopm-prod-staged-<sha>` is kept 7 to 14 days, and that no beta job and no schedule exists.
+environments, the permissions, the commands and the order of the test's steps, that every upload of `mopm-staged-<sha>` and `mopm-prod-staged-<sha>` is kept 7 to 14 days, and that no beta job and no schedule exists; `//:release_plan_expect_cases` holds that `mopm-stage` checks the staged plan against the expectation as the step right after `mopm stage`, with no condition and no ignored failure.
 
 **A member must be claimed on prod first.** The registry creates a package name only for its claimed owner, so a
 release member whose name is not claimed on the prod registry makes `prod-stage` refuse and turns `main` red. The

@@ -7,7 +7,8 @@
 //!    `mopm stage`;
 //!  - the step `the staged set is every package on every platform` is in `mopm-stage`, once, and is exactly its
 //!    name and its `run:` (`release_staged_verify expect --staged release/staged_set --expect <the expectation
-//!    built>`): no `if:`, no `continue-on-error`, no `|| true`, so a short set fails the job;
+//!    built>`): no `if:`, no `continue-on-error`, no `|| true`, so a short set fails the job, and the job
+//!    itself has no `continue-on-error`;
 //!  - it is the step right after `mopm stage`, so it runs before the README e2e and before the staged set is
 //!    kept for `prod-stage`;
 //!  - `prod-stage` needs `mopm-stage`, so a failed check stops the run before a group is opened on the registry.
@@ -82,6 +83,7 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     var n: usize = 0;
     const job = (try jobLines(ar, text, STAGE_JOB, &n)) orelse return "release.yml has no job mopm-stage";
     if (n != 1) return "mopm-stage is defined more than once";
+    for (job) |l| if (std.mem.startsWith(u8, l, "    continue-on-error")) return "mopm-stage ignores a failure of its own (continue-on-error): a short set would not stop the run";
 
     if (countOf(job, BUILD_EXPECTATION) != 1) return "mopm-stage does not build //release:mopm_plan_expectation exactly once";
     const build_at = lineAt(job, BUILD_EXPECTATION).?;
@@ -168,6 +170,14 @@ test "a whole-set step that ignores its failure is refused" {
     const or_true = EXPECT_RUN[0 .. EXPECT_RUN.len - 1] ++ " || true'";
     try expectRefused(ar, try replaced(ar, text, EXPECT_RUN ++ "\n", or_true ++ "\n"), want);
     try expectRefused(ar, try replaced(ar, text, EXPECT_STEP, EXPECT_NAME ++ "\n        continue-on-error: true\n" ++ EXPECT_RUN ++ "\n"), want);
+}
+
+test "a mopm-stage that ignores a failure of its own is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try readWorkflow(ar);
+    try expectRefused(ar, try replaced(ar, text, "  mopm-stage:\n", "  mopm-stage:\n    continue-on-error: true\n"), "mopm-stage ignores a failure of its own (continue-on-error): a short set would not stop the run");
 }
 
 test "a whole-set step with a condition is refused" {
