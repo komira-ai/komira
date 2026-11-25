@@ -112,21 +112,12 @@ It does three things, in this order:
    (buck2 reads `~/.buckconfig.d/` and `/etc/buckconfig.d/`): the
    `[buck2_re_client]` addresses, instance name, `tls` and
    `execution_concurrency_limit`, and `linux_x86_64_properties` under
-   `[komira_re]`. It also writes the keepalive of the connection to the farm:
-   `grpc_keepalive_time_secs = 30` (buck2's own interval: a PING after 30 s
-   with nothing read) and `grpc_keepalive_timeout_secs`, the input
-   `grpc-keepalive-timeout-secs`, 300 by default and refused unless a whole
-   number from 1 to 839 (under 840 s, the keepalive limit the farm's server is to be given). buck2's default of
-   10 s to answer drops the connection, with every action on it, when the
-   path to the farm goes silent for 40 s, though TCP would carry it across the
-   gap, or when the PING waits behind upload data on a slow connection
-   (through a tailnet relay a few MB/s for all of a job's uploads); with 300 s
-   a connection is kept through a silent gap of up to 330 s, and the actions on
-   one that is really gone fail within 330 s of its last read. The keepalive
-   bounds only a dead connection: an action the farm keeps queued on a live
-   connection waits as long as the farm keeps it. And it writes
-   `max_concurrent_uploads_per_action = 4`, so fewer streams share the
-   connection and each blob finishes sooner.
+   `[komira_re]`. It also writes two keys for a slow connection to the farm
+   (through a tailnet relay it carries a few MB/s for all of a job's
+   uploads): `grpc_keepalive_timeout_secs = 60`, since buck2's default of
+   10 s to answer a PING drops a connection whose PING waits behind upload
+   data, with every stream on it; and `max_concurrent_uploads_per_action = 4`,
+   so fewer streams share the connection and each blob finishes sooner.
    Developers put the addresses, instance name, `tls` and properties in their own gitignored
    `.buckconfig.local` ([DEVELOPMENT.md](../DEVELOPMENT.md)). Optional
    inputs add the rest: `darwin-properties` with `darwin-macos-hosts` (both or
@@ -701,13 +692,30 @@ steps (a documentation-only push does not start the workflow, so it publishes no
 
 | job | when | what it does |
 |---|---|---|
-| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_138`, `MOPM` of `packages.bzl`) and `//release:mopm_release_artifacts`, the packages of both platforms: its osx-arm64 half compiles and runs its welded tests on the farm's macOS workers. The job's farm connection writes the macOS keys to a buckconfig of their own (`darwin-config-file`), which this build alone names with `--config-file`, so no other step of the job configures a macOS platform; it also passes `-c komira_release.mac_tree=true`, without which the target is incompatible (release/BUCK, limit `release-mac-tree`), so that a Linux graph query of `//...` skips it; a red macOS build fails the step, and nothing is staged. **Version:** `release_beta_version --workspace-root src --version 0.1.<run number>` gives every member the version of this run (below, "The version of every release"). **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.1.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)); every locked file of both platforms is checked against the plan, and the linux-64 ones, the farm's, are installed and run. Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as the workflow artifact `mopm-staged-<sha>`, kept 7 days, for the next job: a rerun of a failed prod job on a later day still downloads it. |
+| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_138`, `MOPM` of `packages.bzl`) and `//release:mopm_release_artifacts`, the packages of both platforms: its osx-arm64 half compiles and runs its welded tests on the farm's macOS workers. The job's farm connection writes the macOS keys to a buckconfig of their own (`darwin-config-file`), which this build alone names with `--config-file`, so no other step of the job configures a macOS platform; it also passes `-c komira_release.mac_tree=true`, without which the target is incompatible (release/BUCK, limit `release-mac-tree`), so that a Linux graph query of `//...` skips it; a red macOS build fails the step, and nothing is staged. **Version:** `release_beta_version --workspace-root src --version 0.1.<run number>` gives every member the version of this run (below, "The version of every release"). **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.1.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Whole:** `release_staged_verify expect` holds the plan of S to every package on every platform the release builds (below). **Try:** `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)); every locked file of both platforms is checked against the plan, and the linux-64 ones, the farm's, are installed and run. Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as the workflow artifact `mopm-staged-<sha>`, kept 7 days, for the next job: a rerun of a failed prod job on a later day still downloads it. |
 | `prod-stage` | after `release` and `mopm-stage`, **only on a push to `main`** (a manual run skips all six prod jobs before they start; there is no other switch) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, kept 7 days, even when the step failed. |
 | `prod-test` | after `prod-stage`, on a push to `main` | in the environment `build` (the farm's; `id-token: write` for the tailnet join only), with **no registry identity and no secret**. It downloads the directory `prod-stage` kept, checks every file against `plan.json` (`release_staged_verify verify`: sha256 and size), writes `release/staged_set` from the files that matched and from nothing else, and runs `-c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm. |
 | `prod-commit` | after `prod-test`, on a push to `main` | in the environment `prod`, with `contents: read` and `id-token: write`. The same command without `--no-commit`, on the same directory with its `state.json`, after a fresh OIDC exchange: the same group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-prod-committed-<sha>`. |
 | `prod-abort` | after `prod-stage`, `prod-test` and `prod-commit`, when one of them failed or the run was cancelled, on a push to `main` and with a `prod-stage` that was not skipped | in the environment `prod`, same permissions: `mopm publish --staged S --registry prod --oidc --abort` ends the open group and gives its place back. |
 | `prod-smoke` | after `prod-commit`, on a push to `main` | no environment, no identity, no secret, no farm: `release_staged_verify smoke` downloads the published files from the prod channel and compares each with the plan. On a difference it prints the `mopm yank --group <id> ...` command for a human and fails; it yanks nothing. |
 | `prod-add` | after `prod-commit` and `prod-smoke`, on a push to `main` | no environment, no identity, no secret, no farm (a farm action has no network): `release_staged_verify add` makes a fresh project with the mopm `mopm-stage` built, sets its Mojo to the one this release was built for, runs `mopm add komira-ai/<name> --registry prod` for `json`, `uuid` and `libc` and then `mopm sync`, and checks the lock and the installed files against the plan. It yanks nothing. |
+
+**The staged set is the whole set.** `mopm stage` packs one `.conda` per subdir a member has a library in,
+and the checks after it (`verify`, `smoke`, `add`) read the plan, so a plan that lost a platform or a package
+would pass them all. Right after `mopm stage`, the step `the staged set is every package on every platform` of
+`mopm-stage` runs `release_staged_verify expect --staged release/staged_set --expect <file>`
+([`plan_expect.zig`](../tools/build/ci/release_beta_fetch/plan_expect.zig)) and fails, listing every
+difference at once, when a package is not a member of `plan.json`, a member is not a package, or a member
+lacks a file for a subdir it must have or has one for a subdir it may not have (or two for one). The file is
+`//release:mopm_plan_expectation`, written by [`plan_expectation.bzl`](../release/plan_expectation.bzl) from
+the two lists the release builds and from no other: every package of `PACKAGES`
+([`packages.bzl`](../release/readme_e2e/packages.bzl)) on linux-64, and every package of `DARWIN_PACKAGES`
+([`darwin_libs.bzl`](../release/darwin_libs.bzl): the packages not in `DARWIN_EXCLUDED`) on osx-arm64 as
+well. It runs before the README e2e and before `prod-stage` asks the registry for a group, so a short set
+never reaches the registry. It reads `plan.json` only. **It cannot see the natives:** a package's
+`[native.<id>]` archive is inside its `.conda`, not a file of the plan, so a `.conda` that lacks one passes
+this step (`mopm stage` refuses a member that declares a native with no archive, and the README e2e links
+the linux-64 ones).
 
 **Why `mopm stage` is a step of the job and not a build action.** It asks the
 registry which versions exist, and an action is offline. So the farm takes the
@@ -735,7 +743,7 @@ Five of the six `prod-*` jobs publish the set `mopm-stage` tried to the prod reg
 **commit** (visible all at once). `prod-stage` needs `release` and `mopm-stage`: the set it stages is the one
 the README e2e of `mopm-stage` passed on, at the version of this run (below), so a release build or an e2e
 that failed stops the run before anything is staged in prod. There is no beta stage in front of prod. `//:release_workflow_cases` holds the job graph, the gates, the
-environments, the permissions, the commands and the order of the test's steps, that every upload of `mopm-staged-<sha>` and `mopm-prod-staged-<sha>` is kept 7 to 14 days, and that no beta job and no schedule exists.
+environments, the permissions, the commands and the order of the test's steps, that every upload of `mopm-staged-<sha>` and `mopm-prod-staged-<sha>` is kept 7 to 14 days, and that no beta job and no schedule exists; `//:release_plan_expect_cases` holds that `mopm-stage` checks the staged plan against the expectation as the step right after `mopm stage`, with no condition and no ignored failure.
 
 **A member must be claimed on prod first.** The registry creates a package name only for its claimed owner, so a
 release member whose name is not claimed on the prod registry makes `prod-stage` refuse and turns `main` red. The
@@ -956,8 +964,8 @@ The push filter is `release.yml`'s (`paths-ignore`: `docs/**`, `**.md`, held equ
 cases): a push of documentation alone starts no run. The version is `0.1.<N>`, `<N>` the build number of
 `release_json stamp`, which counts only commits that change more than `docs`, `*.md` and `.github`
 ([below](#the-version-and-documentation-only-commits)), so each code commit is a new version. The wheel
-carries the Mojo runtime libraries and requires no distribution of Modular's; its one requirement is
-pyarrow. A pull request never starts the
+carries the Mojo runtime libraries and requires no distribution of Modular's; its requirements are
+pyarrow and protobuf. A pull request never starts the
 workflow.
 
 | job | half | environment | permissions | what it does |
@@ -1043,7 +1051,7 @@ no space on TestPyPI.
 in place of the index: an empty virtual environment of the runner's Python; the wheel's requirements, if it
 has any, from PyPI; then `komira==<version>` with `--no-deps --no-index --find-links <dist>`, so pip reads no
 index for `komira` and installs the one wheel of the directory; `pip check`, `pip show` and `pip freeze` hold
-the environment to `komira` at the built version and the distributions its `Requires-Dist` names (pyarrow),
+the environment to `komira` at the built version and the distributions its `Requires-Dist` names (pyarrow and protobuf),
 and nothing else; no `modular` package is importable; and
 the quickstart, the program the README and the install page show (held byte for byte by
 `//python/smoke:readme_shows_quickstart` and `//python/smoke:install_page_shows_quickstart`), runs and must
@@ -1255,7 +1263,7 @@ and make no network request; the live indexes are reached only by a run of this 
    nothing but `komira` comes from TestPyPI. For PyPI, `komira==<version>` is one install from PyPI. Every pip
    runs `--isolated`, without a cache. Then `pip check` must pass, `pip show komira` must report the version,
    `pip freeze` must list `komira==<version>` once and otherwise only the distributions the wheel's
-   `Requires-Dist` names, at any version (pyarrow; the wheel carries the Mojo runtime, so no `mojo-compiler`
+   `Requires-Dist` names, at any version (pyarrow and protobuf; the wheel carries the Mojo runtime, so no `mojo-compiler`
    and no other distribution is installed), no package named `modular` may be importable, and
    the quickstart runs with `python -I` in a directory holding only the example (it writes its own Parquet
    file there, so no data file is passed): it must exit 0 and print what `python/examples/quickstart.expected`

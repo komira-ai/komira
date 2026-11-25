@@ -23,7 +23,7 @@
 # version. The two wheels of a commit carry the same stamp (each build job runs the same stamp step on
 # the same commit) and so the same version: komira-0.1.<N>-py3-none-manylinux_2_35_x86_64.whl and
 # komira-0.1.<N>-py3-none-macosx_11_0_arm64.whl. Each wheel carries the Mojo runtime libraries and
-# requires no distribution of Modular's; its one requirement is pyarrow.
+# requires no distribution of Modular's; its requirements are pyarrow and protobuf.
 #
 # TWO CHAINS, ONE RUN. The Linux jobs and the macOS jobs (the ones whose names end in `-macos-arm64`) are
 # two chains that share no job, artifact or record: no job of one needs a job of the other or reads its

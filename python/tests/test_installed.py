@@ -24,9 +24,10 @@ Then, in order:
   macOS, DYLD_LIBRARY_PATH, DYLD_FALLBACK_LIBRARY_PATH and
   DYLD_INSERT_LIBRARIES);
 - the environment holds the distribution komira, the distributions its
-  `--requires-dist` lines name (pyarrow) and no other, and no `modular/`
+  `--requires-dist` lines name (pyarrow, protobuf) and no other, and no `modular/`
   directory: nothing of Modular's;
-- `import komira` is the package installed in `--site`, not a source tree;
+- `import komira` is the package installed in `--site`, not a source tree,
+  and it imports neither protobuf nor the generated plan modules;
 - the installed distribution is `--version`, and `komira.__version__` is it;
 - its `Requires-Dist` lines are the `--requires-dist` values, in that order
   and no other, its `License-Expression` is the
@@ -44,6 +45,10 @@ Then, in order:
 - `Session.sql("SELECT 1 AS n").to_arrow()` is one row, `n` INT32 holding 1,
   and an aggregate over `--readings` (`id` 1 to 5, `value` 10.5 to 50.5) is
   its one row of count, sum, min and max, read with the installed pyarrow;
+- a DataFrame of `--readings` (`komira.read_parquet`), filtered, projected,
+  given a computed column, sorted and cut with `head`, runs through the plan
+  door at `materialize()` with the installed protobuf and answers its two
+  rows in order;
 - the quickstart (`--quickstart`, python/examples/quickstart.py) runs in
   this process (the host libraries are open in it, which a child interpreter
   would not have) from a new empty directory under the working directory, and
@@ -283,6 +288,8 @@ def main(argv):
 
     import komira
 
+    assert "google.protobuf" not in sys.modules, "importing komira imported protobuf"
+    assert "komira.plan.v1.plan_pb2" not in sys.modules, "importing komira imported the plan modules"
     init = os.path.realpath(komira.__file__)
     assert init == os.path.join(site, "komira", "__init__.py"), "komira was imported from {}, not from {}".format(init, site)
 
@@ -316,6 +323,18 @@ def main(argv):
         agg = s.sql("SELECT count(*) AS n, sum(value) AS total, min(id) AS lo, max(id) AS hi FROM readings").to_arrow()
         want = [{"n": 5, "total": 152.5, "lo": 1, "hi": 5}]
         assert agg.to_pylist() == want, "the aggregate over {} is {}, not {}".format(opts["readings"], agg.to_pylist(), want)
+
+        # A DataFrame over the same file, run as a plan with no SQL.
+        df = komira.read_parquet(opts["readings"], session=s)
+        top = (
+            df[df["value"] > 20.0][["id", "value"]]
+            .assign(twice=lambda d: d["value"] * 2)
+            .sort_values("value", ascending=False)
+            .head(2)
+        )
+        rows = top.materialize().to_arrow().to_pylist()
+        want = [{"id": 5, "value": 50.5, "twice": 101.0}, {"id": 4, "value": 40.5, "twice": 81.0}]
+        assert rows == want, "the frame over {} answered {}, not {}".format(opts["readings"], rows, want)
 
     run_quickstart(opts, want_abi)
 
