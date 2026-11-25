@@ -6,18 +6,38 @@
 //! The logs in fixtures/ are recorded buck2 output, excerpts of failed runs on
 //! the farm: build_cut.log (a build whose every failure was a cut, whole but
 //! for its progress lines), build_cut_and_compile_error.log (a build with a
-//! compile error and cuts: the first of each, the run's summary and its end)
-//! and test_failed.log (a test run with one failed test). A log buck2 printed
-//! in another run (a cut beside a test failure, a line quoting the phrase) is
-//! a recorded one with lines added or changed, in the case.
+//! compile error and cuts: the first of each, the run's summary and its end),
+//! test_failed.log (a test run with one failed test) and
+//! build_cut_after_file_changes.log (a build whose every failure was a cut,
+//! started after a step had written files the daemon saw change: its progress
+//! and warning lines cut to two each, the action digests zeroed). A log buck2
+//! printed in another run (a cut beside a test failure, a line quoting the
+//! phrase) is a recorded one with lines added or changed, in the case.
+//! test_cut.log is a test run whose every test failed because the connection
+//! to the farm was cut before it ran: its progress lines cut to two, the
+//! action digests zeroed.
 const std = @import("std");
 const fr = @import("farm_retry.zig");
 const t = std.testing;
 
 const build_cut = @embedFile("fixtures/build_cut.log");
+const build_cut_after_file_changes = @embedFile("fixtures/build_cut_after_file_changes.log");
+const test_cut = @embedFile("fixtures/test_cut.log");
+
 const build_mixed = @embedFile("fixtures/build_cut_and_compile_error.log");
 const test_failed = @embedFile("fixtures/test_failed.log");
 const build_unknown_target = @embedFile("fixtures/build_failed_unknown_target.log");
+
+/// The first failed test of fixtures/test_cut.log and its output, as buck2 printed them.
+const unrun_fail = "[2026-11-25T02:24:32.807+00:00] \xe2\x9c\x97 Fail: komira//tools/build/third_party_srcs:aws_lc_mini_files_check (0.0s)";
+const unrun_stdout = "[2026-11-25T02:24:32.807+00:00] ---- STDOUT ----\n";
+const unrun_stderr = "[2026-11-25T02:24:32.807+00:00] ---- STDERR ----\n";
+const unrun_execute = "[2026-11-25T02:24:32.807+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:147 for ReSession GRPC-SESSION-ID\n";
+const unrun_cut = "[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: \"h2 protocol error: error reading a body from connection\", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: \"stream closed because of a broken pipe\" }) }): error reading a body from connection: stream closed because of a broken pipe)\n";
+/// The second failed test of fixtures/test_cut.log, the line after the first's output.
+const unrun_next = "[2026-11-25T02:24:32.807+00:00] \xe2\x9c\x97 Fail: komira//tests/scan_binding_links:test_scan_binding_links (0.0s)";
+/// A line of the test's own.
+const own = "[2026-11-25T02:24:32.807+00:00] the test's own line\n";
 
 const cut_error = "Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: \"h2 protocol error: error reading a body from connection\", source: None)";
 
@@ -102,6 +122,36 @@ test "CRLF line ends read the same" {
     try expectCut(try std.mem.replaceOwned(u8, arena.allocator(), build_cut, "\n", "\r\n"), 4);
 }
 
+test "a recorded cut build that starts with buck2's changed-file lines is a cut" {
+    // thirteen actions in flight, each printed once as it failed and once under BUILD ERRORS
+    try expectCut(build_cut_after_file_changes, 26);
+}
+
+/// The changed-file lines buck2 printed before the run of fixtures/build_cut_after_file_changes.log.
+const file_changes =
+    "[2026-11-25T00:07:53.435+00:00] File changed: komira//src/anomaly/mopm.toml\n" ++
+    "[2026-11-25T00:07:53.435+00:00] 415 additional file change events\n";
+
+test "buck2's changed-file lines beside the cut are not errors" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try expectCut(try edit(arena.allocator(), build_cut, "[2026-11-21T16:23:14.887+00:00] RE Session", file_changes ++ "[2026-11-21T16:23:14.887+00:00] RE Session"), 4);
+}
+
+test "a recorded test run whose every test failed for a cut before it ran is a cut, counting each test" {
+    try expectCut(test_cut, 56);
+}
+
+test "the list of failed tests that buck2 cuts short is one of its lines" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try expectCut(try edit(a, test_cut, "  ...and 46 more not shown...\n", ""), 56);
+    inline for ([_][]const u8{ "  ...and more not shown...", "  ...and 46 more not shown", "  ...and 46 more not shown... and an error" }) |line| {
+        try expectFinal(try edit(a, test_cut, "  ...and 46 more not shown...", line), .unexplained, line);
+    }
+}
+
 test "a test run whose only failure is a cut build of a test is a cut" {
     const log = "[2026-11-21T16:00:00.000+00:00] Build ID: 00000000-0000-0000-0000-000000000000\n" ++ cut_block ++
         "[2026-11-21T16:00:01.000+00:00] \xe2\x9c\x93 Pass: komira//src/b:test_b (0.4s)\n" ++
@@ -153,6 +203,66 @@ test "a failed test whose own output prints buck2's cut line is final: the line 
     try expectFinal(log, .failure, "[2026-10-25T13:04:11.131+00:00] \xe2\x9c\x97 Fail: komira//src/komira_proto_codec:test_float32_json_binades (9:00.5s)");
 }
 
+test "a cut test with any output of its own is final: the test ran" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const head = unrun_fail ++ "\n" ++ unrun_stdout;
+    // stdout that is not empty
+    try expectFinal(try edit(a, test_cut, head, head ++ own), .failure, unrun_fail);
+    // a line before the two lines of buck2's, between them, after them
+    try expectFinal(try edit(a, test_cut, head ++ "[2026-11-25T02:24:32.807+00:00]\n" ++ unrun_stderr, head ++ "[2026-11-25T02:24:32.807+00:00]\n" ++ unrun_stderr ++ own), .failure, unrun_fail);
+    try expectFinal(try edit(a, test_cut, unrun_execute ++ unrun_cut ++ unrun_next, unrun_execute ++ own ++ unrun_cut ++ unrun_next), .failure, unrun_fail);
+    try expectFinal(try edit(a, test_cut, unrun_execute ++ unrun_cut ++ unrun_next, unrun_execute ++ unrun_cut ++ own ++ unrun_next), .failure, unrun_fail);
+}
+
+test "a failed test whose stderr has only one of buck2's two cut-run lines, or both out of order, is final" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const first = unrun_execute ++ unrun_cut ++ unrun_next;
+    try expectFinal(try edit(a, test_cut, first, unrun_cut ++ unrun_next), .failure, unrun_fail);
+    try expectFinal(try edit(a, test_cut, first, unrun_execute ++ unrun_next), .failure, unrun_fail);
+    try expectFinal(try edit(a, test_cut, first, unrun_cut ++ unrun_execute ++ unrun_next), .failure, unrun_fail);
+}
+
+test "a failed test whose output is only buck2's stderr of a cut run is a cut, with or without its stdout" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // the first test's stdout section dropped: its head goes straight to STDERR
+    try expectCut(try edit(a, test_cut, unrun_fail ++ "\n" ++ unrun_stdout ++ "[2026-11-25T02:24:32.807+00:00]\n", unrun_fail ++ "\n"), 56);
+    // the log ends right after the first test's output, with no counts after it
+    const end = std.mem.indexOf(u8, test_cut, unrun_next).?;
+    try expectCut(test_cut[0..end], 1);
+}
+
+test "a cut test with a line of its own without buck2's prefix is final" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const head = unrun_fail ++ "\n" ++ unrun_stdout;
+    try expectFinal(try edit(a, test_cut, head, head ++ "the test's own line\n"), .failure, unrun_fail);
+    try expectFinal(try edit(a, test_cut, unrun_cut ++ unrun_next, unrun_cut ++ "the test's own line\n" ++ unrun_next), .failure, unrun_fail);
+}
+
+test "a cut test whose two lines are not back to back, or come twice, is final" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try expectFinal(try edit(a, test_cut, unrun_execute ++ unrun_cut ++ unrun_next, unrun_execute ++ "[2026-11-25T02:24:32.807+00:00]\n" ++ unrun_cut ++ unrun_next), .failure, unrun_fail);
+    try expectFinal(try edit(a, test_cut, unrun_execute ++ unrun_cut ++ unrun_next, unrun_execute ++ unrun_cut ++ unrun_cut ++ unrun_next), .failure, unrun_fail);
+    try expectFinal(try edit(a, test_cut, unrun_execute ++ unrun_cut ++ unrun_next, unrun_execute ++ unrun_cut ++ unrun_stdout ++ unrun_next), .failure, unrun_fail);
+}
+
+test "a passing test whose output is buck2's cut-run lines is judged as before: its cut line is outside the block" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const pass = "[2026-11-25T02:24:32.807+00:00] \xe2\x9c\x93 Pass: komira//tools/build/third_party_srcs:aws_lc_mini_files_check (0.0s)";
+    const log = try edit(arena.allocator(), test_cut, unrun_fail ++ "\n", pass ++ "\n");
+    try expectFinal(log, .unexplained, unrun_cut[0 .. unrun_cut.len - 1]);
+}
+
 test "a compile error whose output quotes the phrase is final: an action's output is not buck2's line" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
@@ -193,6 +303,28 @@ test "an error outside every block is final, though every block is a cut" {
     const other = "[2026-11-21T15:40:34.803+00:00] Error: (Failed to make BatchReadBlobs request: code: 'The operation was cancelled', message: \"operation was canceled\")";
     const log = try edit(arena.allocator(), build_cut, "[2026-11-21T16:48:35.702+00:00] Cache hits", other ++ "\n[2026-11-21T16:48:35.702+00:00] Cache hits");
     try expectFinal(log, .unexplained, other);
+}
+
+test "a compile error after buck2's changed-file lines is final: the lines excuse no failure" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try expectFinal(try edit(arena.allocator(), build_mixed, compile_error, file_changes ++ compile_error), .failure, compile_error);
+}
+
+test "a line only shaped like buck2's changed-file lines is final" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const at = "[2026-11-21T16:23:14.887+00:00] RE Session";
+    inline for ([_][]const u8{
+        "[2026-11-25T00:07:53.435+00:00] File changed: ",
+        "[2026-11-25T00:07:53.435+00:00] File changed: komira//src/a/mopm.toml Error: boom",
+        "[2026-11-25T00:07:53.435+00:00] additional file change events",
+        "[2026-11-25T00:07:53.435+00:00] 415 additional file change events, and an error",
+        "[2026-11-25T00:07:53.435+00:00] x415 additional file change events",
+        "File changed: komira//src/anomaly/mopm.toml",
+    }) |line| {
+        try expectFinal(try edit(arena.allocator(), build_cut, at, line ++ "\n" ++ at), .unexplained, line);
+    }
 }
 
 test "a bare cut line outside every block is not a block: the log is final" {

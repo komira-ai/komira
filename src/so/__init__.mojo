@@ -22,15 +22,18 @@
 - `sources.mojo`: what the source and render exports do on values:
   `register_parquet`, `register_csv`, `register_json`, `register_arrow`
   (a table already in memory, replacing one of its name) and its name check
-  `check_table_name`, `parquet_schema_bytes`, `csv_binding_bytes`,
-  `json_binding_bytes`, `plan_render_text` and `sql_result`, the answer of
-  one SQL statement as batches ready for the Arrow C stream.
+  `check_table_name`,
+  `parquet_schema_bytes`, `csv_binding_bytes`,
+  `json_binding_bytes`, `plan_render_text`, `sql_result`, the answer of
+  one SQL statement as batches ready for the Arrow C stream, and
+  `plan_result`, the answer of a serialized plan run with no SQL front end
+  (`STEP_DECODE` names its decode step).
 
 `_c_abi.mojo` is the library's C surface (`komira_abi_version`,
 `komira_ctx_new`, `komira_ctx_new_with_options`, `komira_ctx_free`, `komira_last_error`, `komira_last_error_code`, `komira_last_error_step`, the source and
 render calls, the three credential calls, `komira_sql_stream`,
 `komira_register_csv` and `komira_register_json`, the four run-control
-calls, `komira_sql_stream_run` and `komira_register_arrow_stream`). It is the one file that holds pointers and is not part of this
+calls, `komira_sql_stream_run`, `komira_plan_stream` and `komira_register_arrow_stream`). It is the one file that holds pointers and is not part of this
 Mojo package; `libkomira` is built from it by the `libkomira` target.
 """
 
@@ -52,10 +55,12 @@ from .sources import (
     TABLE_TYPE_UNSUPPORTED,
     check_table_name,
     csv_binding_bytes,
+    STEP_DECODE,
     is_cancelled_error,
     json_binding_bytes,
     parquet_schema_bytes,
     plan_render_text,
+    plan_result,
     register_arrow,
     register_csv,
     register_json,

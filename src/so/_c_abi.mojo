@@ -2,97 +2,66 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of so that holds
 # pointers.
 # =============================================================================
-# Twenty-four `@export abi("C")` functions are the library's whole surface today.
-# Their C prototypes are `komira.h`, made from the golden `abi/komira.tsv`, which
-# the build holds to the `@export` functions below; README.md lists them too.
+# Twenty-five `@export abi("C")` functions are the library's whole surface today. Their C
+# prototypes are komira.h, which `//src/so:komira_abi` makes from the golden `abi/komira.tsv`
+# (one row per export, with its types and the version that added it) and builds only while this
+# file's exports are exactly the golden's rows; `src/so/README.md` lists them in prose.
 #
-# Session options. `komira_ctx_new_with_options` is `komira_ctx_new` with the
-# engine's worker count and memory budget (the bytes the sinks of one query
-# may reserve in total) as arguments; nothing is read from the environment.
-# 0 is the host's own value, which is what `komira_ctx_new` uses for both; a
-# negative value is refused (NULL); a positive one has no upper bound. The
-# options are fixed for the life of the context.
+# Ownership. `komira_ctx_new` (and `komira_ctx_new_with_options`) creates a `Session` (the last
+# error and the engine, whose workers start here) in an `OwnedPointer`, relinquishes the
+# pointer's own free (`unsafe_leak`) and hands the address to the caller as `void *`. When the
+# engine does not start it returns NULL and allocates nothing; with no context to hold it, the
+# engine's message is dropped. The caller owns that handle until it passes it to
+# `komira_ctx_free`, which rebuilds the one `OwnedPointer` over the same allocation and destroys
+# the session, stopping its workers. Freeing a handle twice, or using one after
+# `komira_ctx_free`, is undefined, as for `free(3)`; `komira_ctx_free` of NULL does nothing. A
+# run handle (`komira_run_new`) is the same: a `RunControl` (a cancel token and a progress
+# counter) in an `OwnedPointer` whose free is relinquished, owned by the caller until
+# `komira_run_free`, which rebuilds the one `OwnedPointer`. Unlike a context, a run handle is
+# used from several threads at once: `komira_run_cancel` and `komira_run_progress` may run while
+# `komira_sql_stream_run` given the same handle runs on another thread. They touch only atomic
+# cells and the token's shared slot (whose reason one claimed cancel writes before it stores the
+# flag), and the run works on a second handle of its own (`share`), so the caller's `RunControl`
+# is never written while another thread reads it. A run handle is freed only once no call given
+# it is running. Every other pointer is the caller's: this library reads or writes it during the
+# call and keeps none.
 #
-# Ownership. `komira_ctx_new` (and `komira_ctx_new_with_options`) creates a
-# `Session` (the last error and the engine, whose workers start here) in an
-# `OwnedPointer`, relinquishes the
-# pointer's own free (`unsafe_leak`) and hands the address to the caller as
-# `void *`. When the engine does not start it returns NULL and allocates
-# nothing; with no context to hold it, the engine's message is dropped. The caller owns that handle until it passes it to
-# `komira_ctx_free`, which rebuilds the one `OwnedPointer` over the same
-# allocation and destroys the session, stopping its workers. Freeing a handle twice, or using one
-# after `komira_ctx_free`, is undefined, as for `free(3)`; `komira_ctx_free`
-# of NULL does nothing. A run handle (`komira_run_new`) is the same: a
-# `RunControl` (a cancel token and a progress counter) in an `OwnedPointer`
-# whose free is relinquished, owned by the caller until `komira_run_free`,
-# which rebuilds the one `OwnedPointer`. Unlike a context, a run handle is
-# used from several threads at once: `komira_run_cancel` and
-# `komira_run_progress` may run while `komira_sql_stream_run` given the same
-# handle runs on another thread. They touch only atomic cells and the token's
-# shared slot (whose reason one claimed cancel writes before it stores the
-# flag), and the run works on a second handle of its own (`share`), so the
-# caller's `RunControl` is never written while another thread reads it. A run
-# handle is freed only once no call given it is running. Every other pointer
-# is the caller's: this library reads or writes it during the call and keeps
-# none.
-#
-# The Arrow stream. `komira_sql_stream` fills the caller's
-# `struct ArrowArrayStream` (allocated by the caller) only when it returns
-# `KOMIRA_OK`; on any other status the struct is left exactly as the caller
-# wrote it. After `KOMIRA_OK` the caller owns the stream and calls its
-# `release` once, as the Arrow C Stream Interface requires; the stream owns
-# the answer's batches (`arrow_ipc.build_record_batch_stream`, which holds
-# the stream's own pointers) and no reference to the session, so
-# `komira_ctx_free` may come before the stream's `release`. Its callbacks are
-# code of this library, which must stay loaded until every stream from it is
-# released. `komira_register_arrow_stream` takes a caller's stream, copies its
-# chunks into a table the session holds and calls its `release` once before it
+# The Arrow stream. `komira_sql_stream` and `komira_plan_stream` fill the caller's `struct
+# ArrowArrayStream` (allocated by the caller) only when the call returns `KOMIRA_OK`; on any
+# other status the struct is left exactly as the caller wrote it. After `KOMIRA_OK` the caller
+# owns the stream and calls its `release` once, as the Arrow C Stream Interface requires; the
+# stream owns the answer's batches (`arrow_ipc.build_record_batch_stream`, which holds the
+# stream's own pointers) and no reference to the session, so `komira_ctx_free` may come before
+# the stream's `release`. Its callbacks are code of this library, which must stay loaded until
+# every stream from it is released. `komira_register_arrow_stream` takes a caller's stream,
+# copies its chunks into a table the session holds and calls its `release` once before it
 # returns, whatever the status (unless NULL or released); the caller frees the struct.
 #
-# Errors. A call returns `KOMIRA_OK` (0) or a negative `KOMIRA_ERR_*` code
-# (status.mojo). A run that its run handle's cancel stopped is
-# `KOMIRA_ERR_CANCELLED`, with a `QUERY_CANCELLED: ` last error; the run
-# handle calls touch no context and store no last error. A call refused with `KOMIRA_ERR_NULL_ARG` on a live context
-# stores its refusal as the context's last error; `KOMIRA_ERR_BUFFER_TOO_SMALL`
-# stores nothing. Every source and render call first clears the context's last
-# error, and stores the engine's message when it returns `KOMIRA_ERR_ENGINE`.
+# Errors. A call returns `KOMIRA_OK` (0) or a negative `KOMIRA_ERR_*` code (status.mojo). A run
+# that its run handle's cancel stopped is `KOMIRA_ERR_CANCELLED`, with a `QUERY_CANCELLED: `
+# last error; the run handle calls touch no context and store no last error. A call refused with
+# `KOMIRA_ERR_NULL_ARG` on a live context stores its refusal as the context's last error;
+# `KOMIRA_ERR_BUFFER_TOO_SMALL` stores nothing. Every source and render call first clears the
+# context's last error, and stores the engine's message when it returns `KOMIRA_ERR_ENGINE`.
 # `komira_last_error` does not clear what it reads.
 #
-# The error's code and step (`komira_last_error_code`, `_step`; neither
-# clears): the code is `error_code` (session.mojo) of the reason, empty when
-# it has none; the step is the refusing step of an SQL run, `KOMIRA_STEP_BIND`
-# for a registration, binding or credential call, else `KOMIRA_STEP_NONE`.
+# Strings and byte inputs. A `const char *` is NUL-terminated UTF-8 that the caller keeps alive
+# for the call; the library copies it before using it, and a string that is not valid UTF-8 is
+# refused as `KOMIRA_ERR_ENGINE` with a last error, never used. The SQL text of
+# `komira_sql_stream` is bounded like a byte input: its NUL is looked for in at most
+# `KOMIRA_MAX_INPUT_BYTES + 1` bytes, and a text with none there is `KOMIRA_ERR_TOO_LARGE`. The
+# plan bytes of `komira_plan_render` and `komira_plan_stream` are `plan[0..plan_len]`, with the
+# length an argument because a serialized plan holds NUL bytes; they are copied in full before
+# anything is decoded. The length is bounded: above `KOMIRA_MAX_INPUT_BYTES` (64 MiB) the call
+# returns `KOMIRA_ERR_TOO_LARGE` with a last error, before any byte of `plan` is read or any
+# memory is allocated for it. Exactly 64 MiB is accepted.
 #
-# Strings and byte inputs. A `const char *` is NUL-terminated UTF-8 that the
-# caller keeps alive for the call; the library copies it before using it, and a
-# string that is not valid UTF-8 is refused as `KOMIRA_ERR_ENGINE` with a last
-# error, never used. The SQL text of `komira_sql_stream` is bounded like a
-# byte input: its NUL is looked for in at most `KOMIRA_MAX_INPUT_BYTES + 1`
-# bytes, and a text with none there is `KOMIRA_ERR_TOO_LARGE`. The plan bytes of `komira_plan_render` are
-# `plan[0..plan_len]`, with the length an argument because a serialized plan
-# holds NUL bytes; they are copied in full before anything is decoded. The
-# length is bounded: above `KOMIRA_MAX_INPUT_BYTES` (64 MiB) the call returns
-# `KOMIRA_ERR_TOO_LARGE` with a last error, before any byte of `plan` is read
-# or any memory is allocated for it. Exactly 64 MiB is accepted.
+# The session options, the two-call output protocol, the error's code and step and the
+# credential values are described in src/so/README.md, with each export's docstring below.
 #
-# Credential values. `komira_credential_set` reads `value[0..value_len]`
-# (bytes, not NUL-terminated; NULL is allowed only with a length of 0) in
-# place during the call, and keeps a copy, which the session owns, only of a
-# value it admits: the caller may overwrite or free its buffer once the call
-# returns. The value is never written back to the caller and
-# never appears in an error. `*out_id` of `komira_credential_add` is written
-# only when the call returns `KOMIRA_OK`.
-#
-# The two-call output protocol (`komira_last_error`). The text is not
-# NUL-terminated; `*out_len` is its byte count. `*out_len` is stored before the
-# capacity is tested. The first call passes `out_cap` 0 (and may pass a NULL
-# `out_buf`) to learn the length; the second passes a buffer of at least that
-# many bytes. A buffer that is too small is never written, so a caller never
-# parses a truncated text. An empty text needs no buffer: `out_buf` may be NULL.
-#
-# Pointer types. Only the `comptime` aliases below name a wildcard origin: a
-# `void *` that lives in the host between calls has no Mojo origin, and the
-# Mojo side takes no pointer from the host except through them.
+# Pointer types. Only the `comptime` aliases below name a wildcard origin: a `void *` that lives
+# in the host between calls has no Mojo origin, and the Mojo side takes no pointer from the host
+# except through them.
 # =============================================================================
 
 from std.memory import OwnedPointer, unsafe_memcpy
@@ -109,6 +78,7 @@ from so.sources import (
     json_binding_bytes,
     parquet_schema_bytes,
     plan_render_text,
+    plan_result,
     register_arrow,
     register_csv,
     register_json,
@@ -149,14 +119,15 @@ comptime _Len = UnsafePointer[UInt64, MutUntrackedOrigin]
 # SAFETY: `const char *`, a NUL-terminated string the caller keeps alive for
 # the call; it is copied into a `String` before any use.
 comptime CStr = UnsafePointer[UInt8, MutUntrackedOrigin]
-# SAFETY: `const uint8_t *`, the plan bytes of `komira_plan_render` and the
-# value of `komira_credential_set`: read for their length argument, copied in
-# full, never written.
+# SAFETY: `const uint8_t *`, the plan bytes of `komira_plan_render` and
+# `komira_plan_stream` and the value of `komira_credential_set`: read for their
+# length argument, copied in full, never written.
 comptime ConstBytes = UnsafePointer[UInt8, MutUntrackedOrigin]
-# SAFETY: `struct ArrowArrayStream *`, a stream the caller allocated: as an
-# output never read, and written once, whole, only on `KOMIRA_OK`, then the
-# caller's; as `komira_register_arrow_stream`'s input the caller's live stream,
-# drained and released during the call and kept nowhere.
+# SAFETY: `struct ArrowArrayStream *`, a stream the caller allocated. As an
+# output (`komira_sql_stream`, `komira_plan_stream`) it is never read, and
+# written once, whole, only on `KOMIRA_OK`; from then on the caller owns what
+# it holds. As `komira_register_arrow_stream`'s input it is the caller's live
+# stream, drained and released during the call and kept nowhere.
 comptime ArrowStream = UnsafePointer[CArrowArrayStream, MutUntrackedOrigin]
 
 
@@ -962,38 +933,67 @@ def komira_register_json(ctx: Handle, name: CStr, path: CStr) abi("C") -> Int32:
 
 
 @export
+def komira_plan_stream(
+    ctx: Handle, plan: ConstBytes, plan_len: UInt64, out_stream: ArrowStream
+) abi("C") -> Int32:
+    """Decode the `WirePlanEnvelope` `plan[0..plan_len]`, run it with no SQL
+    front end and fill `*out_stream` as `komira_sql_stream` does: -1 NULL
+    `ctx`, -2 NULL `plan` or `out_stream`, -5 `plan_len` above the bound (not
+    read), -3 a refusal `<step>: <reason>` (`decode`, `optimize`, `lower`,
+    `execute`)."""
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(plan) == 0 or Int(out_stream) == 0:
+        session[].set_error(String("komira_plan_stream: plan or out is NULL"))
+        return KOMIRA_ERR_NULL_ARG
+    if input_length_status(plan_len) != KOMIRA_OK:
+        session[].set_error(
+            String("komira_plan_stream: plan_len is above ")
+            + String(KOMIRA_MAX_INPUT_BYTES)
+            + String(" bytes")
+        )
+        return KOMIRA_ERR_TOO_LARGE
+    try:
+        var result = plan_result(session[], _copy_in(plan, plan_len))
+        # Nothing is written to `*out_stream` before this call, and it writes the
+        # stream whole once its own checks have passed.
+        build_record_batch_stream(result.take_batches(), result.take_schema(), out_stream)
+        return KOMIRA_OK
+    except e:
+        # `plan_result` records a refusal with its step and code; one with
+        # nothing held is the export check's, with neither.
+        if not session[].has_error():
+            session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+
+
+@export
 def komira_register_arrow_stream(
     ctx: Handle, name: CStr, stream: ArrowStream
 ) abi("C") -> Int32:
     """Drain `stream` into a table held in memory and register it as `name`,
-    replacing the session's table of that name (`so.register_arrow`). Its own
-    `release` is called once, whatever the status, unless NULL or released
-    already: here before the drain, or by the drain on every path out. -1 NULL
+    replacing the session's table of that name (`so.register_arrow`). -1 NULL
     `ctx`, -2 NULL `name` or `stream`, else -3 with a last error; nothing is
-    registered or replaced on a refusal (README.md lists each)."""
-    if Int(ctx) == 0:
+    registered or replaced on a refusal (src/so/README.md lists each)."""
+    if Int(ctx) == 0 or Int(name) == 0 or Int(stream) == 0:
         consumer_release_c_stream(stream)
-        return KOMIRA_ERR_NULL_CTX
+        if Int(ctx) == 0:
+            return KOMIRA_ERR_NULL_CTX
+        _session(ctx)[].set_error(String("komira_register_arrow_stream: name or stream is NULL"))
+        return KOMIRA_ERR_NULL_ARG
     var session = _session(ctx)
     session[].clear_error()
-    if Int(name) == 0 or Int(stream) == 0:
-        consumer_release_c_stream(stream)
-        session[].set_error(String("komira_register_arrow_stream: name or stream is NULL"))
-        return KOMIRA_ERR_NULL_ARG
-    var table_name: String
-    try:  # the name is refused before any of the stream is read
-        table_name = _c_string(name)
-        check_table_name(table_name)
-    except e:
-        consumer_release_c_stream(stream)
-        session[].set_error(String(e))
-        return KOMIRA_ERR_ENGINE
     try:
+        var table_name = _c_string(name)
+        check_table_name(table_name)
         # SAFETY: `stream` is non-NULL (tested above) and the caller's live
         # stream for the call; the drain reads it by reference and keeps none.
-        var table = drain_record_batch_stream_table(stream[])
-        register_arrow(session[], table_name, table^)
+        register_arrow(session[], table_name, drain_record_batch_stream_table(stream[]))
         return KOMIRA_OK
     except e:
-        session[].set_error(String(e))
+        # Live only if refused before the drain, which releases it on every path.
+        consumer_release_c_stream(stream)
+        session[].set_error(String(e), KOMIRA_STEP_BIND)
         return KOMIRA_ERR_ENGINE

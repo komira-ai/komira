@@ -37,6 +37,11 @@
  * are overwritten and freed, and the producer counts every release the
  * library makes of the stream, its schema and its chunks.
  *
+ * And it runs plans through komira_plan_stream: a WirePlanEnvelope it encodes
+ * by hand (a scan of a Parquet file, its schema the bytes komira_parquet_schema
+ * answers), run on a context with no table registered, answers what
+ * komira_sql_stream answers for the same file.
+ *
  * Exit 0 only if every check holds; each failure prints one line. */
 #include <dlfcn.h>
 #include <pthread.h>
@@ -81,6 +86,7 @@ DECLARE(komira_run_free);
 DECLARE(komira_run_cancel);
 DECLARE(komira_run_progress);
 DECLARE(komira_sql_stream_run);
+DECLARE(komira_plan_stream);
 DECLARE(komira_register_arrow_stream);
 
 static int bind_all(void *lib) {
@@ -117,6 +123,7 @@ static int bind_all(void *lib) {
     BIND(komira_run_cancel);
     BIND(komira_run_progress);
     BIND(komira_sql_stream_run);
+    BIND(komira_plan_stream);
     BIND(komira_register_arrow_stream);
 #undef BIND
     return missing;
@@ -965,6 +972,7 @@ static void arrow_stream_cases(void) {
        called. */
     CHECK(register_stream(ctx, "", &p, 2, 0, -1, 0) == KOMIRA_ERR_ENGINE);
     CHECK(strcmp(last_error_text(ctx, text, sizeof text), "TABLE_NAME_EMPTY: a table name must not be empty") == 0);
+    CHECK(p_komira_last_error_step(ctx) == KOMIRA_STEP_BIND); /* a registration's refusal, as komira_register_csv's */
     CHECK(p.schema_calls == 0 && p.stream_releases == 1);
     CHECK(register_stream(ctx, NULL, &p, 2, 0, -1, 0) == KOMIRA_ERR_NULL_ARG);
     CHECK(strcmp(last_error_text(ctx, text, sizeof text), "komira_register_arrow_stream: name or stream is NULL") == 0);
@@ -1048,6 +1056,10 @@ static void options_cases(void) {
     CHECK(p_komira_ctx_new_with_options(INT64_MIN, 0) == NULL);
     CHECK(p_komira_ctx_new_with_options(0, INT64_MIN) == NULL);
 }
+
+/* The plan cases of komira_plan_stream, in a file of their own so that each
+   file stays under 1000 lines. */
+#include "plan_cases.h"
 
 int main(void) {
     void *lib = dlopen("./libkomira.so", RTLD_NOW);
@@ -1163,6 +1175,7 @@ int main(void) {
     sql_stream_cases();
     text_source_cases();
     options_cases();
+    plan_stream_cases();
     arrow_stream_cases();
     return failures == 0 ? 0 : 1;
 }

@@ -26,12 +26,16 @@ error. Nothing here holds a pointer.
   under a caller's `RunControl`, whose cancel refuses the run with the named
   error `QUERY_CANCELLED` (`is_cancelled_error`). A refusal is
   recorded on the session as its last error, with the step and the code.
+- `plan_result`: a serialized plan (a `WirePlanEnvelope`) decoded and run on
+  a session's engine, with no SQL text anywhere on the way, its answer as
+  `sql_result`'s is.
 """
 
 from arrow.arrow_types import ArrowType
 from arrow.table import Table
 from byte_buffer.file_identity import FileIdentity
 from csv.csv_options import QUOTE_STYLE_TAG_RFC4180
+from plan_ir.logical_plan import LogicalPlan
 from plan_wire import binding_to_bytes, plan_from_bytes, schema_to_bytes
 from scan_source.csv_source import CsvSource
 from scan_source.json_source import JsonSource
@@ -39,6 +43,7 @@ from scan_source.source_variant import SourceVariant
 from sdk.parquet_footer import read_parquet_footer
 from sdk_exec.arrow_result import ArrowResult, arrow_result
 from sdk_exec.engine_catalog import register_parquet as engine_register_parquet
+from sdk_exec.engine_plan import run_plan
 from sdk_exec.engine_context import RegisteredTable
 from sdk_exec.engine_sql import STEP_EXECUTE, run_sql
 from sdk_exec.run_control import RunControl
@@ -55,6 +60,10 @@ as only flat Parquet files are (`register_parquet`)."""
 comptime QUERY_CANCELLED = "QUERY_CANCELLED"
 """The named error of a run its `RunControl` cancelled: `sql_result` raises
 `QUERY_CANCELLED: execute: <the engine's cancelled error>`."""
+
+comptime STEP_DECODE = "decode"
+"""The step of `plan_result` that turns the plan's bytes into a plan; the
+steps after it are `run_plan`'s (`optimize`, `lower`, `execute`)."""
 
 
 def register_parquet(mut session: Session, name: String, path: String) raises:
@@ -328,3 +337,45 @@ def is_cancelled_error(text: String) -> Bool:
     it starts with `QUERY_CANCELLED: `. No other error of `sql_result` does,
     since those start with a step name or the export check's own words."""
     return text.startswith(String(QUERY_CANCELLED) + ": ")
+
+
+def plan_result(mut session: Session, var plan_bytes: List[UInt8]) raises -> ArrowResult:
+    """Decode the serialized plan `plan_bytes` (an authored `WirePlanEnvelope`)
+    and run it on `session`'s engine, returning its answer as `sql_result`
+    does: every batch checked to cross the Arrow C Stream Interface whole.
+
+    The plan is decoded with `plan_wire.plan_from_bytes` (the wire's admission,
+    value and UDF checks) and then optimized, lowered and run in-process
+    (`sdk_exec.engine_plan.run_plan`); it is never turned into SQL text, and
+    the SQL front end does not run. A scan carries its own source, so the
+    plan needs no table registered on the session. The result owns its
+    batches and keeps no reference to the session.
+
+    Raises:
+        Error `<step>: <reason>`, where `<step>` is `decode` when the bytes are
+        not a plan this build runs (among them an envelope that carries a
+        write target, `PLAN_WIRE_WRITE_TARGET_DROPPED`, or UDFs,
+        `PLAN_WIRE_UDFS_DROPPED`), and otherwise the step of `run_plan` that
+        refused (`optimize`, `lower` or `execute`); `<reason>` is that step's
+        own message, unchanged. The session records the refusal too
+        (`Session.set_refusal`): its step is `step_number(<step>)`, which is
+        `KOMIRA_STEP_NONE` for `decode`, and its code `error_code(<reason>)`.
+        And the export check's error naming the column when a result column
+        cannot cross the stream (`arrow_result`), which the session does not
+        record.
+    """
+    var plan: LogicalPlan
+    try:
+        plan = plan_from_bytes(plan_bytes^)
+    except e:
+        # `decode` is no `KOMIRA_STEP_*` step: `step_number` gives it
+        # `KOMIRA_STEP_NONE`, and the code is the decoder's
+        # (`PLAN_WIRE_WRITE_TARGET_DROPPED`).
+        session.set_refusal(String(STEP_DECODE), String(e))
+        raise Error(session.last_error())
+    var outcome = run_plan(session.engine, plan^)
+    if outcome.refusal:
+        ref refusal = outcome.refusal.value()
+        session.set_refusal(refusal.step, refusal.reason.copy())
+        raise Error(session.last_error())
+    return arrow_result(outcome^)
