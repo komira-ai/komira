@@ -201,6 +201,43 @@ class Session:
         except _arrow.stream_errors() as e:
             raise KomiraError(str(e)) from e
 
+    def _plan_stream(self, plan: bytes) -> Result:
+        """Runs the serialized plan `plan` (`komira_plan_stream`: no SQL front
+        end) and returns its answer as a `Result`, unread. This is the
+        terminal of a DataFrame (komira/_frame.py); a refusal raises the
+        engine's error, as `sql` does."""
+        with self._held():
+            stream = self._native.plan_stream(self._live(), plan)
+        try:
+            return Result(_arrow.import_stream(stream))
+        except _arrow.stream_errors() as e:
+            raise KomiraError(str(e)) from e
+
+    def _plan_render(self, plan: bytes) -> str:
+        """The engine's text of the serialized plan `plan` (`komira_plan_render`)."""
+        with self._held():
+            return self._native.plan_render(self._live(), plan)
+
+    def _parquet_schema(self, path: str) -> bytes:
+        """The `WireSchema` bytes of the local Parquet file at the absolute
+        `path`, read from its footer now (`komira_parquet_schema`)."""
+        with self._held():
+            return self._native.parquet_schema(self._live(), path)
+
+    def _csv_binding(self, path: str, *, delimiter: str, header: bool) -> bytes:
+        """The `WireScanBinding` bytes of the local CSV file at the absolute
+        `path` (`komira_csv_binding`), its columns inferred now."""
+        with self._held():
+            return self._native.csv_binding(
+                self._live(), path, delimiter=delimiter, has_header=header, all_varchar=False
+            )
+
+    def _json_binding(self, path: str) -> bytes:
+        """The `WireScanBinding` bytes of the local newline-delimited JSON
+        file at the absolute `path` (`komira_json_binding`)."""
+        with self._held():
+            return self._native.json_binding(self._live(), path)
+
     def _seal_credential(self, credential: _Credential | _BuiltIn) -> None:
         """Makes `credential` the session's value of its name, replacing any
         earlier one (src/so/README.md, Credentials): `komira_credential_add`,
@@ -279,6 +316,21 @@ class Session:
                 yield
             finally:
                 self._owner = None
+
+
+# The process's default session: the one a reader called without `session=`
+# uses, made by the first such call (docs/design/python_package.md, decision 5).
+_default_lock = threading.Lock()
+_default: Session | None = None
+
+
+def default_session() -> Session:
+    """The process's default session, made now when no call made it yet."""
+    global _default
+    with _default_lock:
+        if _default is None:
+            _default = Session()
+        return _default
 
 
 def _check_name(name: object) -> None:

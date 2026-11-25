@@ -25,8 +25,10 @@
 #                   so every release carries new ones; nothing is pushed back);
 #                   `mopm stage` writes the staged set S on the runner (it
 #                   asks the registry which versions exist, so it cannot be a
-#                   build action); the README e2e of every package runs on the
-#                   farm against S (//release/readme_e2e/verify:all, with
+#                   build action); `release_staged_verify expect` holds S's
+#                   plan to every package on every platform the release
+#                   builds (//release:mopm_plan_expectation); the README e2e
+#                   of every package runs on the farm against S (//release/readme_e2e/verify:all, with
 #                   `-c komira_release.staged=stage` at that version); then
 #                   `mopm publish --staged S --registry prod --dry-run`. It
 #                   sends nothing and holds no token.
@@ -295,12 +297,21 @@ jobs:
         with:
           args: build //tools/build/ci:release_beta_version --out ${{ runner.temp }}/mopm-publish/release_beta_version
           assert-remote: ${{ steps.assert.outputs.path }}
-      # Built here, run by `prod-test`, `prod-smoke` and `prod-add` (the smoke and add jobs
-      # have no farm and no buck2, so they take the tool from this job's artifact).
+      # Built here, run here (`expect`, after `mopm stage`) and by `prod-test`, `prod-smoke` and
+      # `prod-add` (the smoke and add jobs have no farm and no buck2, so they take the tool from
+      # this job's artifact).
       - name: build the staged-set verify tool
         uses: ./.github/actions/buck2-farm
         with:
           args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/mopm-publish/release_staged_verify
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # What the staged set must be: every package of release/readme_e2e/packages.bzl with a file for
+      # linux-64, and for osx-arm64 exactly when it is in release/darwin_libs.bzl's macOS set, written
+      # from those lists (release/plan_expectation.bzl). The check after `mopm stage` reads it.
+      - name: build the plan expectation
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //release:mopm_plan_expectation --out ${{ runner.temp }}/mopm-publish/plan_expectation.json
           assert-remote: ${{ steps.assert.outputs.path }}
       # The packages, for both platforms the release publishes, in the one directory `mopm
       # stage --artifacts` reads (//release:mopm_release_artifacts): the linux-64 tree, and
@@ -333,6 +344,13 @@ jobs:
       # with other bytes, or has yanked, makes the step fail.
       - name: mopm stage
         run: '"$RUNNER_TEMP/mopm-publish/mopm" stage --workspace-root src --artifacts "$RUNNER_TEMP/mopm-publish/artifacts" --compiler 1.1.0 --out release/staged_set --registry prod'
+      # WHOLE. The plan just written stages every package of the release, each with one file for every
+      # platform it builds for and none other (`release_staged_verify expect`, every difference listed
+      # at once), so a set that lost a platform or a package stops here, before `prod-stage` opens a
+      # group on the registry. It reads plan.json only: the natives inside each `.conda` are not files
+      # of the plan, and this step does not see them.
+      - name: the staged set is every package on every platform
+        run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" expect --staged release/staged_set --expect "$RUNNER_TEMP/mopm-publish/plan_expectation.json"'
       # TRY. Every package's README examples, compiled and run on the farm as a
       # user would, against the `.conda` files of the set that was just staged
       # (the e2e installs offline from it, so the closure must be in it).
