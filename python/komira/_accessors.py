@@ -4,7 +4,9 @@
 for a timestamp or date32 column; on a Series of another type the attribute
 raises `AttributeError`, so `hasattr(s, "str")` is False. Every method returns a
 Series of the same frame (`Series._derive`): it builds one expression node over
-the Series' node and runs nothing. A missing value in gives a missing value out.
+the Series' node and runs nothing. A missing value in gives a missing value out
+(`extract` of a string that does not match gives '', as the engine's
+regexp_extract does, where pandas gives NaN).
 
 `.str` builds, with the pandas defaults kept:
 
@@ -16,7 +18,8 @@ the Series' node and runs nothing. A missing value in gives a missing value out.
 - `slice(start, stop)` with non-negative bounds and no step;
 - `pad`, which never cuts a string longer than `width` (the engine's padding
   does, so the node keeps a longer string as it is);
-- `extract(pat, expand=False)` of the one capture group.
+- `extract(pat, expand=False)` of the one capture group; a string that does
+  not match gives '', not a missing value.
 
 `.dt` builds `year`, `quarter`, `month`, `day`, `dayofweek` (Monday is 0),
 `dayofyear` of a timestamp or a date, `hour`, `minute`, `second` and
@@ -305,7 +308,8 @@ class StringMethods(_Accessor):
 
     def extract(self, pat: str, flags: int = 0, expand: bool = True) -> Series:
         """The text of the one capture group of `pat` in each string, as a
-        Series (`expand=False`)."""
+        Series (`expand=False`). A string that does not match gives '' (the
+        engine's regexp_extract), where pandas gives NaN."""
         verb = "str.extract"
         child = self._child()
         _check_text(pat, "pat", f"{verb}()")

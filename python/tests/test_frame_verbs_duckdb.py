@@ -76,23 +76,23 @@ STRINGS = [
     "alpha", "Beta", "", "été", "日本語", None, "  pad  ", "banana", "a1b22", "Été", "x", "banana split",
 ]
 STAMPS = [
-    datetime.datetime(2024, 2, 29, 12, 30, 45, 123456),
-    datetime.datetime(2023, 12, 31, 23, 59, 59, 999999),
-    datetime.datetime(2024, 1, 1, 0, 0, 0, 0),
-    datetime.datetime(2024, 3, 1, 0, 0, 0, 1),
-    datetime.datetime(2020, 2, 29, 6, 5, 4, 300000),
-    datetime.datetime(2021, 7, 15, 13, 0, 0, 500),
-    datetime.datetime(1999, 12, 31, 23, 59, 59, 0),
-    datetime.datetime(2000, 1, 1, 0, 0, 1, 999999),
-    datetime.datetime(2022, 11, 6, 18, 45, 30, 250000),
+    datetime.datetime(2028, 2, 29, 12, 30, 45, 123456),
+    datetime.datetime(2026, 12, 31, 23, 59, 59, 999999),
+    datetime.datetime(2027, 1, 1, 0, 0, 0, 0),
+    datetime.datetime(2028, 3, 1, 0, 0, 0, 1),
+    datetime.datetime(2032, 2, 29, 6, 5, 4, 300000),
+    datetime.datetime(2027, 7, 15, 13, 0, 0, 500),
+    datetime.datetime(2099, 12, 31, 23, 59, 59, 0),
+    datetime.datetime(2100, 1, 1, 0, 0, 1, 999999),
+    datetime.datetime(2026, 11, 6, 18, 45, 30, 250000),
 ]
 DATES = [
-    datetime.date(2024, 2, 29),
-    datetime.date(2023, 12, 31),
-    datetime.date(2024, 1, 1),
-    datetime.date(2020, 2, 29),
-    datetime.date(2021, 7, 15),
-    datetime.date(2000, 1, 1),
+    datetime.date(2028, 2, 29),
+    datetime.date(2026, 12, 31),
+    datetime.date(2027, 1, 1),
+    datetime.date(2032, 2, 29),
+    datetime.date(2027, 7, 15),
+    datetime.date(2100, 1, 1),
 ]
 
 
@@ -1048,8 +1048,8 @@ DTS = [
     dt_case("dt.dayofweek of a date", "d", lambda s: s.dt.dayofweek, "CAST(isodow(d) - 1 AS BIGINT)"),
     Case(
         "a filter on dt.year",
-        lambda d: on(d[["n", "t"]], lambda f: f[f["t"].dt.year == 2024]),
-        "SELECT n, t FROM t WHERE year(t) = 2024",
+        lambda d: on(d[["n", "t"]], lambda f: f[f["t"].dt.year == 2028]),
+        "SELECT n, t FROM t WHERE year(t) = 2028",
     ),
     Case(
         "a filter on dt.dayofweek of a date",

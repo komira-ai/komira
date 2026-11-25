@@ -469,7 +469,10 @@ class DataFrame:
             _ops.require_columns(tuple(names), columns)
         names = tuple(dict.fromkeys(names))
         if not names:
-            return self._derive(self._plan)
+            if how == "any":
+                return self._derive(self._plan)
+            # pandas keeps a row when any of no columns is present: no row.
+            return self._ordered(_ops.filter_(self._plan, _ops.Lit(False)), lambda keys: True)
         dtypes = self.dtypes
         tests = tuple(present(_ops.ColRef(name), dtypes[name]) for name in names)
         predicate = _ops.and_all(tests) if how == "any" else _ops.or_all(tests)

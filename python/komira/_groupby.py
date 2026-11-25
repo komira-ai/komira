@@ -30,7 +30,7 @@ by nothing and give one row. No SQL text is written.
   `value_counts` reads it as missing, as pandas does (ruling 6), through the
   NaN test of komira/_missing.py.
 - `value_counts` of a column is an aggregate of count(*) by that column,
-  over the rows where it is present, sorted by the count.
+  over the rows where it is present (every row with dropna=False), sorted by the count.
 - A Python function as an aggregate is an aggregate UDF, which no query runs
   yet: it is refused by name, as are the choices that need row order.
 """

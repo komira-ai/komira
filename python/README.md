@@ -262,12 +262,14 @@ again. The install test runs this program on the installed wheel.
   `& | ~` over boolean Series, `isin([...])` with at most 64 values, `dtype`
   and `astype(dtype)`. `s.value_counts()` gives a frame of the column and
   `count`, the rows per value, most first (values that tie come out in any
-  order), missing values left out unless `dropna=False`.
+  order), missing values left out unless `dropna=False` (`dropna=False` of a float
+  column is refused).
 - **`s.str`** (a string column): `lower`, `upper`, `len`, `startswith`,
   `endswith`, `contains` (a regular expression unless `regex=False`, and
   `case=False`), `match`, `fullmatch`, `replace` (every occurrence, literal
   unless `regex=True`), `slice(start, stop)` with bounds of 0 or more, `pad`
-  (never cuts a longer string) and `extract(pat, expand=False)` of one group.
+  (never cuts a longer string) and `extract(pat, expand=False)` of one group
+  (a string that does not match gives `''`, where pandas gives NaN).
   A regular expression over a computed Series (`s.str.lower().str.contains(p)`)
   is refused at `materialize()` today: assign the computed column first.
   `strip` and the others pandas has are refused by name.

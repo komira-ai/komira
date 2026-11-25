@@ -371,10 +371,11 @@ def test_dropna_of_a_subset_tests_only_those_columns_once_each():
     assert df.dropna(axis="index", ignore_index=True)._plan == df.dropna()._plan
 
 
-def test_dropna_of_an_empty_subset_adds_no_node():
+def test_dropna_of_an_empty_subset_keeps_every_row_for_any_and_none_for_all():
     df = Env().df
     assert df.dropna(subset=[])._plan == df._plan
-    assert df.dropna(subset=(), how="all")._plan == df._plan
+    assert df.dropna(subset=(), how="any")._plan == df._plan
+    assert df.dropna(subset=(), how="all")._plan == _ops.Filter(SCAN, Lit(False))
 
 
 def test_dropna_of_a_float32_column_compares_it_as_float64():

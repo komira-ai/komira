@@ -618,8 +618,8 @@ def test_floor_refusals_by_message():
 
 def test_a_date_part_used_in_a_filter_and_in_assign_builds_the_expected_plan():
     df = Env().df
-    kept = df[df["t"].dt.year == 2024]
-    assert kept._plan == _ops.filter_(SCAN, Compare("eq", Extract("year", T), Lit(2024)))
+    kept = df[df["t"].dt.year == 2028]
+    assert kept._plan == _ops.filter_(SCAN, Compare("eq", Extract("year", T), Lit(2028)))
     got = df.assign(w=df["d"].dt.dayofweek)
     assert got._plan == _ops.with_columns(SCAN, (("w", Arith("sub", Extract("isodow", D), Lit(1))),))
     assert got.dtypes["w"] == "int64"
