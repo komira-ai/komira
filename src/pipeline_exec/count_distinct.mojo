@@ -55,7 +55,7 @@ from byte_buffer.heap_region import HeapRegion
 from .agg_fold import AggCell
 from .group_keys import float_cell
 from .group_table import GroupTable, MAX_GROUP_CAPACITY, hash_key
-from .segment_pool import SegmentPool, WorkerReservation
+from .segment_pool import MEMORY_BUDGET_EXCEEDED, SegmentPool, WorkerReservation
 from .string_keys import (
     InternTable,
     MAX_INTERN_ENTRIES,
@@ -95,7 +95,9 @@ def distinct_denied(
 ) -> Error:
     """The refusal of a sink whose COUNT(DISTINCT) state the pool denied."""
     return Error(
-        where_
+        String(MEMORY_BUDGET_EXCEEDED)
+        + ": "
+        + where_
         + " was denied "
         + String(bytes)
         + " bytes of the segment's memory pool for its COUNT(DISTINCT)"

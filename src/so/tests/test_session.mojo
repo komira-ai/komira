@@ -149,6 +149,20 @@ def test_error_code_upper_word_prefix() raises:
     assert_equal(error_code(String("A1_B2: x")), String("A1_B2"))
 
 
+def test_error_code_of_a_memory_refusal_wrapped_by_the_worker_runtime() raises:
+    assert_equal(
+        error_code(String("[Processor] MEMORY_BUDGET_EXCEEDED: pipeline_exec: x")),
+        String("MEMORY_BUDGET_EXCEEDED"),
+    )
+    assert_equal(
+        error_code(String("MEMORY_BUDGET_EXCEEDED: pipeline_exec: x")),
+        String("MEMORY_BUDGET_EXCEEDED"),
+    )
+    # Only that code is read through the wrapper.
+    assert_equal(error_code(String("[Processor] LOWERING_WINDOW_UNSERVED: x")), String(""))
+    assert_equal(error_code(String("[Processor] MEMORY_BUDGET_EXCEEDED:x")), String(""))
+
+
 def test_error_code_texts_without_a_code() raises:
     assert_equal(error_code(String("[Processor] pipeline failed")), String(""))
     assert_equal(error_code(String("parquet footer 'x': bad magic")), String(""))
@@ -283,6 +297,7 @@ def main() raises:
     test_move_keeps_step_and_code()
     test_error_code_sql_prefixes()
     test_error_code_upper_word_prefix()
+    test_error_code_of_a_memory_refusal_wrapped_by_the_worker_runtime()
     test_error_code_texts_without_a_code()
     test_step_number()
     test_engine_that_cannot_start_gives_no_session()

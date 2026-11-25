@@ -72,6 +72,16 @@ class UnsupportedOperation(KomiraError):
     gives a spelling that works if there is one."""
 
 
+class MemoryLimitError(KomiraError):
+    """The query needed more memory than the session's `memory_limit` allows:
+    the engine refused it at the execute step (`MEMORY_BUDGET_EXCEEDED`), and
+    its message names the operator that was denied memory, the bytes it asked
+    for and the budget. Nothing of the query is returned, and the session
+    answers the next one. A larger `memory_limit` lets the query run; a query
+    the engine can run in less memory (a GROUP BY that spills) does not raise
+    this error."""
+
+
 class CredentialsError(KomiraError):
     """libkomira refused a credential: the message is its named refusal,
     `CREDENTIALS_INVALID: <operation> ...`, which names the credential and the
@@ -116,6 +126,7 @@ _CODE_CLASSES: dict[str, type[KomiraError]] = {
         ],
         UnsupportedOperation,
     ),
+    **dict.fromkeys(["MEMORY_BUDGET_EXCEEDED"], MemoryLimitError),
     **dict.fromkeys(
         [
             "CREDENTIAL_UNBOUND",

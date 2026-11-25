@@ -47,7 +47,16 @@ class Session:
     """One engine context (`komira_ctx_new`) and its registered tables.
 
     `Session()` loads libkomira on first use and raises `LibraryLoadError`
-    when it cannot. A session is a context manager: `with komira.Session() as
+    when it cannot. `threads` is the engine's worker count and `memory_limit`
+    the bytes the operators of one query may hold in total, each a positive
+    `int` or `None` for the engine's own value. A query that needs more
+    memory than `memory_limit` raises `MemoryLimitError` from `sql`, unless
+    the engine can run it in less (a GROUP BY that spills). A `bool` or other
+    non-`int` raises `TypeError`, and a value below 1 or above 2**63 - 1
+    `ValueError`, before the library is called; naming either option needs
+    libkomira ABI 1.4. The options are fixed for the life of the session.
+
+    A session is a context manager: `with komira.Session() as
     s:` closes it on exit. `close()` frees the context and may be called again;
     any other call on a closed session raises `KomiraError`. A session that is
     never closed is freed when it is garbage collected.
@@ -61,9 +70,14 @@ class Session:
     itself.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, threads: int | None = None, memory_limit: int | None = None) -> None:
+        workers = _option("threads", threads)
+        budget = _option("memory_limit", memory_limit)
         native = _native.load()
-        ctx = native.ctx_new()
+        if workers == 0 and budget == 0:
+            ctx = native.ctx_new()
+        else:
+            ctx = native.ctx_new_with_options(workers, budget)
         self._native = native
         self._ctx: int | None = ctx
         # Held around every call into the library; `_owner` is the thread
@@ -156,7 +170,9 @@ class Session:
         here, with the engine's `<step>: <reason>` message, `status` -3, and
         the refusal's `code` and `step`: a syntax error is a `ParseError`, a
         name that does not resolve a `BindError`, and a construct refused by
-        name an `UnsupportedOperation`; another refusal is a `KomiraError` (a
+        name an `UnsupportedOperation`; a query that needs more memory than the
+        session's `memory_limit` allows is a `MemoryLimitError` (step
+        "execute"); another refusal is a `KomiraError` (a
         stream whose schema cannot be read raises one with no `status`). pyarrow is imported the first time the engine accepts a
         query, when the answer's schema is read. A `query` that is not a
         `str` is a `TypeError`, and one holding a NUL byte or a lone surrogate
@@ -331,6 +347,18 @@ class Session:
                 yield
             finally:
                 self._owner = None
+
+
+def _option(what: str, value: object) -> int:
+    """An engine option argument: a positive `int` of at most 2**63 - 1, or
+    None for the engine's own value, which the C call takes as 0."""
+    if value is None:
+        return 0
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise TypeError("{} must be an int or None, not {}".format(what, type(value).__name__))
+    if value < 1 or value > 2**63 - 1:
+        raise ValueError("{} must be between 1 and 2**63 - 1, not {}".format(what, value))
+    return value
 
 
 # The process's default session: the one a reader called without `session=`
