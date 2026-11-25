@@ -1028,7 +1028,7 @@ no space on TestPyPI.
 in place of the index: an empty virtual environment of the runner's Python; the wheel's requirements, if it
 has any, from PyPI; then `komira==<version>` with `--no-deps --no-index --find-links <dist>`, so pip reads no
 index for `komira` and installs the one wheel of the directory; `pip check`, `pip show` and `pip freeze` hold
-the environment to `komira` at the built version and the distributions its `Requires-Dist` names (pyarrow),
+the environment to `komira` at the built version and the distributions its `Requires-Dist` names (pyarrow and protobuf),
 and nothing else; no `modular` package is importable; and
 the quickstart, the program the README and the install page show (held byte for byte by
 `//python/smoke:readme_shows_quickstart` and `//python/smoke:install_page_shows_quickstart`), runs and must
@@ -1240,7 +1240,7 @@ and make no network request; the live indexes are reached only by a run of this 
    nothing but `komira` comes from TestPyPI. For PyPI, `komira==<version>` is one install from PyPI. Every pip
    runs `--isolated`, without a cache. Then `pip check` must pass, `pip show komira` must report the version,
    `pip freeze` must list `komira==<version>` once and otherwise only the distributions the wheel's
-   `Requires-Dist` names, at any version (pyarrow; the wheel carries the Mojo runtime, so no `mojo-compiler`
+   `Requires-Dist` names, at any version (pyarrow and protobuf; the wheel carries the Mojo runtime, so no `mojo-compiler`
    and no other distribution is installed), no package named `modular` may be importable, and
    the quickstart runs with `python -I` in a directory holding only the example and its data file: it
    must exit 0 and print what `python/examples/quickstart.expected` says, compared exactly, with `<version>`

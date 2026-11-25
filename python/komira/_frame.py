@@ -290,7 +290,12 @@ class DataFrame:
                 f"head({n}) keeps all rows but the last {-n}, which needs the row count: "
                 "sort with sort_values(...) and take the rows you want with head(k)"
             )
-        return self._derive(_ops.limit(self._plan, n))
+        plan = self._plan
+        if isinstance(plan, _ops.Limit) and plan.offset == 0:
+            # head of a head is one limit, so the limit stays over the sort
+            # that orders the frame.
+            return self._derive(_ops.limit(plan.child, min(plan.n, n)))
+        return self._derive(_ops.limit(plan, n))
 
     def copy(self, deep: bool = True) -> DataFrame:
         """An equal frame: the same plan, on the same session. `deep` is

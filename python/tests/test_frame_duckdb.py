@@ -28,9 +28,9 @@ equal (`frame_duckdb_test`, CPython 3.13, the real libkomira).
 - a frame that is not ordered (no sort, or a verb that dropped a sort key)
   answers as a multiset of rows;
 - columns are equal by name and order; ints, strings and bools exactly; floats
-  to a relative 1e-12; NULL equals NULL; Arrow type names equal for the
-  columns read from the file and for computed float and bool columns, and not
-  compared for computed integer columns;
+  to a relative 1e-12; NULL equals NULL; Arrow type names equal for every
+  column but an int literal assigned as a column, which komira types int64
+  and DuckDB int32;
 - the comparator is itself checked on plain lists: it refuses answers that
   differ in one cell, in row order for an ordered case, in a column name, in a
   type, in a row count, and in a float beyond its tolerance, and it accepts
@@ -53,7 +53,6 @@ from komira import _native
 
 ROWS = 40
 FILE_COLUMNS = ("k", "v", "s", "flag", "n")
-INTEGER_TYPES = frozenset({"int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"})
 
 # k at these rows is an outlier, so the first and last three keys are distinct.
 K_OUTLIERS = {7: 100, 19: 90, 28: 80, 36: -100, 2: -90, 11: -80}
@@ -229,9 +228,7 @@ def run_cases(path, cases):
                 case.name, len(want[2]), "no" if case.empty else "some"
             )
             got = komira_answer(session, path, case.program)
-            skip = set(case.untyped) | {
-                name for name, t in zip(want[0], want[1]) if name not in FILE_COLUMNS and t in INTEGER_TYPES
-            }
+            skip = set(case.untyped)
             found = differences(got, want, case.order, skip)
             assert found is None, "{}: komira's answer is not DuckDB's ({}); komira {}, DuckDB {}".format(
                 case.name, found, got, want
@@ -327,7 +324,11 @@ ASSIGNS = [
         lambda d: d.assign(a=d["k"] * d["n"]),
         "SELECT *, k * n AS a FROM t",
     ),
-    Case("negation", lambda d: d.assign(a=-d["k"], b=-d["v"]), "SELECT *, -k AS a, -v AS b FROM t"),
+    Case(
+        "negation",
+        lambda d: d.assign(a=-d["k"], b=-d["v"], c=-d["n"]),
+        "SELECT *, -k AS a, -v AS b, -n AS c FROM t",
+    ),
     Case(
         "true division of ints is DOUBLE",
         lambda d: d.assign(a=d["k"] / 4, b=d["k"] / d["n"], c=100 / d["n"], e=d["n"] / 2),
@@ -350,6 +351,7 @@ ASSIGNS = [
         "literal columns",
         lambda d: d.assign(i=-3, f=2.5, yes=True, no=False, z="x"),
         "SELECT *, -3 AS i, CAST(2.5 AS DOUBLE) AS f, true AS yes, false AS no, 'x' AS z FROM t",
+        untyped=("i",),
     ),
     Case(
         "boolean columns",
@@ -371,7 +373,6 @@ ASSIGNS = [
         "replace int32 in place",
         lambda d: d.assign(n=d["n"] + 1),
         "SELECT * REPLACE (n + 1 AS n) FROM t",
-        untyped=("n",),
     ),
     Case("replace a column by another", lambda d: d.assign(k=d["n"]), "SELECT * REPLACE (n AS k) FROM t"),
     Case(
@@ -384,6 +385,7 @@ ASSIGNS = [
         lambda d: on(d, subscript_assignments),
         "SELECT * REPLACE (v * CAST(2.0 AS DOUBLE) AS v, n AS k), k + 1 AS a, (k + 1) * 2 AS b, 5 AS c, "
         "CAST(0.5 AS DOUBLE) AS f FROM t",
+        untyped=("c",),
     ),
     Case(
         "filter on a computed column",
@@ -548,6 +550,12 @@ HEADS = [
         ("k",),
     ),
     Case("unique key top five", lambda d: d.sort_values("n").head(5), "SELECT * FROM t ORDER BY n LIMIT 5", ("n",)),
+    Case(
+        "a head of a head, then a filter, keeps the sort",
+        lambda d: on(d.sort_values("n").head(9).head(6), lambda e: e[e["n"] > 0]),
+        "SELECT * FROM (SELECT * FROM t ORDER BY n LIMIT 6) WHERE n > 0 ORDER BY n",
+        ("n",),
+    ),
     Case(
         "unique key descending top seven",
         lambda d: d.sort_values("n", ascending=False).head(7),

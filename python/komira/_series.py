@@ -16,8 +16,8 @@ nothing. It is used inside its own frame's verbs: `df[s]` filters by it and
 - Numeric operands of an operator or a comparison are widened to one type
   first, as SQL's binder widens them, since the plan door runs the plan as
   given: integers to the wider integer type (a signed and an unsigned one to
-  the next signed type that holds both), and an integer or a float32 meeting a
-  float64 to float64. An int literal takes the integer type of the other
+  the next signed type that holds both), anything meeting a float64 to
+  float64, and an integer or a float16 meeting a float32 to float32. An int literal takes the integer type of the other
   operand when its value fits that type, as SQL types a literal by its value:
   so `s * 2` and `2 * s` have the type of an int32 `s`. The engine's
   arithmetic runs on int64 and float64, so an operator over a narrower type
@@ -72,10 +72,9 @@ _COMPUTED_IN = {
 
 
 def _computed(node: _ops.Node, wide: str) -> _ops.Node:
-    """`node` as an operand of the type `wide`: an int literal as it is (the
-    wire carries it as int64), anything else cast."""
-    if isinstance(node, _ops.Cast) and node.try_cast is False and _int_literal(node.child) and wide == "int64":
-        return node.child
+    """`node`, an operand as the user gave it, as an operand of the type
+    `wide`: an int literal as it is when `wide` is int64 (the wire carries it
+    as int64), anything else cast."""
     if _int_literal(node) and wide == "int64":
         return node
     return _ops.Cast(node, wide)
@@ -94,7 +93,10 @@ def _common_type(a: str, b: str) -> str | None:
     if a in _FLOATS or b in _FLOATS:
         if not ({a, b} <= _FLOATS | _INTEGERS):
             return None
-        return "float64" if "float64" in (a, b) or a in _INTEGERS or b in _INTEGERS else "float32"
+        # float64 when one side is float64; otherwise the float side is
+        # float16 or float32 and the answer float32, as SQL types FLOAT with
+        # an integer.
+        return "float64" if "float64" in (a, b) else "float32"
     if a in _SIGNED and b in _SIGNED:
         return a if _SIGNED[a] > _SIGNED[b] else b
     if a in _UNSIGNED and b in _UNSIGNED:
@@ -263,14 +265,14 @@ class Series:
             left, right = right, left
         if op == "div" and self._type_of(left) in _INTEGERS and self._type_of(right) in _INTEGERS:
             left = _ops.Cast(left, "float64")
-        left, right = self._widened(left, right)
-        common = self._type_of(left)
+        wide_left, wide_right = self._widened(left, right)
+        common = self._type_of(wide_left)
         wide = _COMPUTED_IN.get(common)
         if wide is None:
-            return self._derive(_ops.Arith(op, left, right))
-        # The engine's arithmetic runs on int64 and float64: a narrower
-        # operand type is computed there and the answer cast back to it, so
-        # the column has the type SQL gives it.
+            return self._derive(_ops.Arith(op, wide_left, wide_right))
+        # The engine's arithmetic runs on int64 and float64: over a narrower
+        # common type each operand is cast there once and the answer cast
+        # back, so the column has the type SQL gives it.
         inner = _ops.Arith(op, _computed(left, wide), _computed(right, wide))
         return self._derive(_ops.Cast(inner, common))
 

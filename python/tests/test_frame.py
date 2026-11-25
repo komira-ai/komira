@@ -145,7 +145,7 @@ def test_filter_select_and_assign_over_a_sorted_frame_go_under_the_sort():
     assert ds._plan == Sort(SCAN, K_A)
     assert ds[ds["b"] > 1]._plan == Sort(Filter(SCAN, GT_B1), K_A)
     assert ds[["a", "b"]]._plan == Sort(Project(SCAN, items(("a", "b"))), K_A)
-    z = Arith("mul", ColRef("x"), Lit(2))
+    z = Arith("mul", ColRef("x"), Cast(Lit(2), "float64"))
     assert ds.assign(z=ds["x"] * 2)._plan == Sort(Project(SCAN, items(COLS, extra=(("z", z),))), K_A)
     assert ds.assign()._plan == ds._plan
 
@@ -218,7 +218,7 @@ def test_a_verb_that_drops_a_key_after_head_over_a_sort_adds_no_sort():
 def test_assign_keeps_a_replaced_column_in_place_appends_new_ones_and_builds_one_projection():
     df = Env().df
     plus = Arith("add", ColRef("a"), Lit(1))
-    times = Arith("mul", ColRef("x"), Lit(2))
+    times = Arith("mul", ColRef("x"), Cast(Lit(2), "float64"))
     out = df.assign(a=df["a"] + 1, z=df["x"] * 2, k=5)
     assert out._plan == Project(SCAN, items(COLS, replace={"a": plus}, extra=(("z", times), ("k", Lit(5)))))
     assert out.columns == list(COLS) + ["z", "k"]
@@ -276,6 +276,89 @@ def test_a_refused_assignment_leaves_the_frame_and_its_series_as_they_were():
     refuses(lambda: setitem(df, "z", other["a"]), UnsupportedOperation, OTHER_FRAME)
     refuses(lambda: setitem(df, "z", object()), TypeError, not_literal("assign()", "object"))
     assert df._plan == plan and s.dtype == "int64"
+
+
+WIDE_FIELDS = (
+    ("i8", "int8"), ("i16", "int16"), ("i32", "int32"), ("i64", "int64"),
+    ("u8", "uint8"), ("u16", "uint16"), ("u32", "uint32"), ("u64", "uint64"),
+    ("f32", "float32"), ("f64", "float64"), ("s", "string"), ("ok", "bool"),
+)
+
+
+def test_every_widening_rule_of_two_numeric_columns():
+    df = Env(WIDE_FIELDS).df
+    c = ColRef
+
+    def cast(name, to):
+        return Cast(c(name), to)
+
+    # Two signed or two unsigned integers: the wider; computed in int64 and
+    # cast back when that type is narrower than 64 bits.
+    assert (df["i8"] + df["i16"])._node == Cast(Arith("add", cast("i8", "int64"), cast("i16", "int64")), "int16")
+    assert (df["i32"] + df["i64"])._node == Arith("add", cast("i32", "int64"), c("i64"))
+    assert (df["u8"] * df["u32"])._node == Cast(Arith("mul", cast("u8", "int64"), cast("u32", "int64")), "uint32")
+    assert (df["u64"] - df["u8"])._node == Arith("sub", c("u64"), cast("u8", "uint64"))
+    # A signed and an unsigned one: the next signed type holding both.
+    assert (df["i16"] + df["u16"])._node == Cast(Arith("add", cast("i16", "int64"), cast("u16", "int64")), "int32")
+    assert (df["i32"] > df["u32"])._node == Compare("gt", cast("i32", "int64"), cast("u32", "int64"))
+    assert (df["i8"] == df["u8"])._node == Compare("eq", cast("i8", "int16"), cast("u8", "int16"))
+    # uint64 with a signed type has no common integer type: left as it is,
+    # for the engine to answer or refuse.
+    assert (df["u64"] + df["i64"])._node == Arith("add", c("u64"), c("i64"))
+    # Floats: float64 wins; an integer meeting float32 is float32, computed in
+    # float64 and cast back.
+    assert (df["f32"] + df["f64"])._node == Arith("add", cast("f32", "float64"), c("f64"))
+    assert (df["i64"] * df["f32"])._node == Cast(Arith("mul", cast("i64", "float64"), cast("f32", "float64")), "float32")
+    assert (df["f32"] * df["f32"])._node == Cast(Arith("mul", cast("f32", "float64"), cast("f32", "float64")), "float32")
+    assert (df["f32"] < df["i8"])._node == Compare("lt", c("f32"), cast("i8", "float32"))
+    # A non-numeric operand is never widened.
+    assert (df["s"] == df["s"])._node == Compare("eq", c("s"), c("s"))
+    assert (df["ok"] == df["i8"])._node == Compare("eq", c("ok"), c("i8"))
+    # The types of the answers.
+    for expr, want in (
+        (df["i8"] + df["i16"], "int16"), (df["u8"] * df["u32"], "uint32"), (df["i16"] + df["u16"], "int32"),
+        (df["i64"] * df["f32"], "float32"), (df["f32"] + df["f64"], "float64"), (df["i8"] / df["i8"], "float64"),
+        (-df["i32"], "int32"), (df["u8"] + 1, "uint8"), (df["u8"] - 1, "uint8"), (df["u8"] + -1, "int64"),
+    ):
+        assert expr.dtype == want, (repr(expr), want)
+
+
+def test_an_unsigned_or_narrow_column_takes_the_int_literals_that_fit_it():
+    df = Env(WIDE_FIELDS).df
+    c = ColRef
+    assert (df["u8"] + 1)._node == Cast(Arith("add", Cast(c("u8"), "int64"), Lit(1)), "uint8")
+    assert (df["u8"] - 1)._node == Cast(Arith("sub", Cast(c("u8"), "int64"), Lit(1)), "uint8")
+    # -1 does not fit uint8: the column meets the literal's int64 as a signed
+    # and an unsigned type do.
+    assert (df["u8"] + -1)._node == Arith("add", Cast(c("u8"), "int64"), Lit(-1))
+    assert (df["u8"] > -1)._node == Compare("gt", Cast(c("u8"), "int64"), Lit(-1))
+    assert (df["i8"] < 127)._node == Compare("lt", c("i8"), Cast(Lit(127), "int8"))
+    assert (df["i8"] < 128)._node == Compare("lt", Cast(c("i8"), "int64"), Lit(128))
+    # A literal above int64 is uint64 already.
+    assert (df["u64"] == 2**64 - 1)._node == Compare("eq", c("u64"), Lit(2**64 - 1))
+    assert (df["f32"] * 2)._node == Cast(Arith("mul", Cast(c("f32"), "float64"), Cast(Lit(2), "float64")), "float32")
+
+
+def test_isin_widens_each_value_as_a_comparison_does():
+    df = Env().df
+    n, x, s = ColRef("n"), ColRef("x"), ColRef("s")
+    assert df["n"].isin([1, 3_000_000_000])._node == BoolOp(
+        "or", Compare("eq", n, Cast(Lit(1), "int32")), Compare("eq", Cast(n, "int64"), Lit(3_000_000_000))
+    )
+    assert df["x"].isin([1, 2.5])._node == BoolOp(
+        "or", Compare("eq", x, Cast(Lit(1), "float64")), Compare("eq", x, Lit(2.5))
+    )
+    assert df["s"].isin(["a"])._node == Compare("eq", s, Lit("a"))
+
+
+def test_a_head_of_a_head_is_one_limit_that_keeps_the_order():
+    df = Env().df
+    ds = df.sort_values("a")
+    assert ds.head(9).head(6)._plan == Limit(Sort(SCAN, K_A), 6)
+    assert ds.head(3).head(6)._plan == Limit(Sort(SCAN, K_A), 3)
+    assert df.head(4).head(2)._plan == Limit(SCAN, 2)
+    twice = ds.head(9).head(6)
+    assert twice[twice["b"] > 1]._plan == Sort(Filter(Limit(Sort(SCAN, K_A), 6), GT_B1), K_A)
 
 
 def test_division_casts_the_left_to_float64_only_when_both_sides_are_integers():
