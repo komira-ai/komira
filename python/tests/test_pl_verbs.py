@@ -216,11 +216,12 @@ def lowered(expr):
     return frame().select(expr.alias("o"))._plan.items[0][1]
 
 
-def test_true_division_is_float64_unless_both_operands_are_float32():
+def test_true_division_is_float64_and_float32_quotients_are_cast_back():
     assert lowered(kpl.col("x") / 2) == Arith("div", Cast(c("x"), "float64"), Lit(2.0))
     assert lowered(kpl.col("i32") / kpl.col("y")) == Arith("div", Cast(c("i32"), "float64"), c("y"))
-    assert lowered(kpl.col("f32") / kpl.col("f32")) == Arith("div", c("f32"), c("f32"))
-    assert lowered(kpl.col("f32") / 2) == Arith("div", c("f32"), Cast(Lit(2.0), "float32"))
+    f64 = Cast(c("f32"), "float64")
+    assert lowered(kpl.col("f32") / kpl.col("f32")) == Cast(Arith("div", f64, f64), "float32")
+    assert lowered(kpl.col("f32") / 2) == Cast(Arith("div", f64, Lit(2.0)), "float32")
     refused(
         lambda: frame().select(kpl.col("g") / 2),
         UnsupportedOperation,
@@ -278,11 +279,20 @@ def test_floats_floor_and_take_the_sign_of_the_divisor():
     )
 
 
-def test_a_literal_beside_an_int32_or_float32_column_takes_its_type():
-    assert lowered(1 + kpl.col("i32")) == Arith("add", Cast(Lit(1), "int32"), c("i32"))
-    assert lowered(kpl.col("f32") * 2.5) == Arith("mul", c("f32"), Cast(Lit(2.5), "float32"))
+def test_int32_and_float32_arithmetic_is_computed_wide_and_cast_back():
+    i64 = Cast(c("i32"), "int64")
+    assert lowered(1 + kpl.col("i32")) == Cast(Arith("add", Lit(1), i64), "int32")
+    assert lowered(kpl.col("i32") * kpl.col("i32")) == Cast(Arith("mul", i64, i64), "int32")
+    assert lowered(kpl.col("f32") * 2.5) == Cast(Arith("mul", Cast(c("f32"), "float64"), Lit(2.5)), "float32")
     assert lowered(kpl.col("x") - 1) == Arith("sub", c("x"), Lit(1))
-    assert lowered(kpl.col("i32") + 2**40) == Arith("add", c("i32"), Lit(2**40))
+    assert lowered(kpl.col("i32") + 2**40) == Arith("add", i64, Lit(2**40))
+    assert lowered(kpl.col("i32") + kpl.col("x")) == Arith("add", i64, c("x"))
+    assert lowered(kpl.col("i32") > 3) == Compare("gt", i64, Lit(3))
+    assert lowered(kpl.col("f32") <= kpl.col("y")) == Compare("le", Cast(c("f32"), "float64"), c("y"))
+    assert lowered(kpl.col("i32").is_in([1])) == Compare("eq", i64, Lit(1))
+    assert lowered(kpl.col("i32").is_between(1, 2)) == BoolOp(
+        "and", Compare("ge", i64, Lit(1)), Compare("le", i64, Lit(2))
+    )
     assert frame().with_columns(big=2**40, small=7)._plan.items[-2:] == (
         ("big", Lit(2**40)),
         ("small", Cast(Lit(7), "int32")),
@@ -473,7 +483,7 @@ def test_sum_count_len_and_statistics_carry_polars_types():
             (),
             (
                 (slots[0], Agg("sum", (c("x"),))),
-                (slots[1], Agg("sum", (c("i32"),))),
+                (slots[1], Agg("sum", (Cast(c("i32"), "int64"),))),
                 (slots[2], Agg("count", (c("x"),))),
                 (slots[3], Agg("count")),
                 (slots[4], Agg("mean", (c("f32"),))),

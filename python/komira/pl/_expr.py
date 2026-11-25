@@ -13,7 +13,7 @@ literal and `len` for `len()`.
 The types are polars 1.44.2's where the engine can give them (komira/pl/
 _types.py): a sum keeps polars' type for a signed or a float input, `mean`,
 `median`, `std` and `var` of a Float32 are Float32, an int literal beside an
-Int32 column is an Int32, and a bare int literal is an Int32. A count, `len()`
+Int32 column gives an Int32, and a bare int literal is an Int32. A count, `len()`
 and `str.len_chars()` are Int64 where polars gives UInt32, as is the sum of a
 boolean or a UInt32 column. The sum of no values is 0 (ruling 10). `/` is true
 division, and `//` and `%` floor as Python does (ruling 9).
@@ -83,14 +83,15 @@ _PYARROW_SPELLING = {"float": "float32", "double": "float64", "date32[day]": "da
 
 # The sum of each input type: (the type the argument is summed as, polars'
 # type of the sum). The plan sums a signed integer or a boolean as INT64 and a
-# float as FLOAT64; an unsigned integer is widened to INT64 first, since the
-# engine's UINT64 sum cannot be coalesced. polars' UInt32 (a boolean's or a
+# float as FLOAT64; an Int32 is widened to INT64 first, as the engine has no
+# arithmetic over Int32, and an unsigned integer too, since the engine's UINT64
+# sum cannot be coalesced. polars' UInt32 (a boolean's or a
 # UInt32's sum) is Int64 here (komira/pl/_types.py).
 _SUMS = {
     "bool": (None, "int64"),
     "int8": (None, "int64"),
     "int16": (None, "int64"),
-    "int32": (None, "int32"),
+    "int32": ("int64", "int32"),
     "int64": (None, "int64"),
     "uint8": ("int64", "int64"),
     "uint16": ("int64", "int64"),
@@ -253,22 +254,22 @@ class Expr:
     # ---- comparisons ----------------------------------------------------------------
 
     def __eq__(self, other: object) -> Expr:  # type: ignore[override]
-        return self._binary(other, lambda a, b, s: Compare("eq", a, b))
+        return self._binary(other, _compare("eq"))
 
     def __ne__(self, other: object) -> Expr:  # type: ignore[override]
-        return self._binary(other, lambda a, b, s: Compare("ne", a, b))
+        return self._binary(other, _compare("ne"))
 
     def __lt__(self, other: object) -> Expr:
-        return self._binary(other, lambda a, b, s: Compare("lt", a, b))
+        return self._binary(other, _compare("lt"))
 
     def __le__(self, other: object) -> Expr:
-        return self._binary(other, lambda a, b, s: Compare("le", a, b))
+        return self._binary(other, _compare("le"))
 
     def __gt__(self, other: object) -> Expr:
-        return self._binary(other, lambda a, b, s: Compare("gt", a, b))
+        return self._binary(other, _compare("gt"))
 
     def __ge__(self, other: object) -> Expr:
-        return self._binary(other, lambda a, b, s: Compare("ge", a, b))
+        return self._binary(other, _compare("ge"))
 
     __hash__ = None  # type: ignore[assignment]
 
@@ -414,7 +415,7 @@ class Expr:
                 f"is_in takes a list or tuple of values, not {type(other).__name__}"
             )
         values = tuple(_literal(v) for v in other)
-        return self._unary(lambda a, s: is_in(a, values))
+        return self._unary(lambda a, s: is_in(_wide(a, _types.kind(a, s)), values))
 
     def is_between(self, lower_bound: object, upper_bound: object, closed: str = "both") -> Expr:
         """Whether the value lies between the bounds; `closed` (`both`, `left`,
@@ -424,7 +425,7 @@ class Expr:
         lo, hi = _as_expr(lower_bound), _as_expr(upper_bound)
         inner = self
         return Expr(
-            lambda s: between(inner._lower(s), lo._lower(s), hi._lower(s), closed),
+            lambda s: _between(inner._lower(s), lo._lower(s), hi._lower(s), closed, s),
             self._name,
             self._has_agg or lo._has_agg or hi._has_agg,
         )
@@ -549,26 +550,57 @@ def _fill(value: Node, fill: Node, scope) -> Node:
 
 
 def _plain(op: str):
-    """`a <op> b` for `+`, `-` and `*`: a dynamic literal beside an Int32 or
-    Float32 column takes the column's type, as in polars."""
+    """`a <op> b` for `+`, `-` and `*`. The engine has no arithmetic over an
+    Int32 or Float32 column, so such an operand is widened to Int64 or Float64;
+    where polars' type is Int32 or Float32 (two such columns, or one beside a
+    dynamic literal) the result is cast back once."""
 
     def build(a: Node, b: Node, scope) -> Node:
         ka, kb = _types.kind(a, scope), _types.kind(b, scope)
-        return Arith(op, _narrowed(a, ka, kb), _narrowed(b, kb, ka))
+        numbers = _types.NUM4 | {_types.DYN_INT, _types.DYN_FLOAT}
+        if ka in numbers and kb in numbers and ("int32" in (ka, kb) or "float32" in (ka, kb)):
+            work, final = _types.case_types([ka, kb], op)
+            if final in ("int32", "float32"):
+                return _narrow_arith(op, a, ka, b, kb, final)
+            return Arith(op, _wide(a, ka), _wide(b, kb))
+        return Arith(op, a, b)
 
     return build
 
 
-def _narrowed(node: Node, k: str, other: str) -> Node:
-    """A dynamic literal `node` beside a column of type `other`, as polars
-    types it: an Int32 or Float32 beside one."""
-    if k == _types.DYN_INT and other == "int32":
-        return Cast(node, "int32")
-    if k == _types.DYN_INT and other == "float32":
-        return Cast(Lit(float(node.value)), "float32")
-    if k == _types.DYN_FLOAT and other == "float32":
-        return Cast(node, "float32")
+def _between(value: Node, lo: Node, hi: Node, closed: str, scope) -> Node:
+    def wide(n):
+        return _wide(n, _types.kind(n, scope))
+
+    return between(wide(value), wide(lo), wide(hi), closed)
+
+
+def _wide(node: Node, k: str) -> Node:
+    """An Int32 or Float32 column as Int64 or Float64; any other node itself."""
+    if k == "int32":
+        return Cast(node, "int64")
+    if k == "float32":
+        return Cast(node, "float64")
     return node
+
+
+def _compare(op: str):
+    """A comparison; an Int32 or Float32 operand is compared as Int64 or
+    Float64, which the engine compares (the answer is the same)."""
+
+    def build(a: Node, b: Node, scope) -> Node:
+        return Compare(op, _wide(a, _types.kind(a, scope)), _wide(b, _types.kind(b, scope)))
+
+    return build
+
+
+def _narrow_arith(op: str, a: Node, ka: str, b: Node, kb: str, final: str) -> Node:
+    """`a <op> b` computed as Int64 (for an Int32 answer) or Float64 (for a
+    Float32 one), then cast to `final`. Float32 `+ - * /` in Float64 then
+    rounded once to Float32 is the Float32 answer itself."""
+    if final == "int32":
+        return Cast(Arith(op, _types.to_work(a, ka, "int64"), _types.to_work(b, kb, "int64")), final)
+    return Cast(Arith(op, _as_float64(a, ka), _as_float64(b, kb)), final)
 
 
 def _numbers(a: Node, b: Node, scope, verb: str) -> tuple[str, str, str]:
@@ -585,11 +617,12 @@ def _numbers(a: Node, b: Node, scope, verb: str) -> tuple[str, str, str]:
 
 
 def _true_div(a: Node, b: Node, scope) -> Node:
-    """`a / b` as true division: both operands as Float64, unless both are
-    Float32 (or a Float32 and a literal), which polars divides as Float32."""
+    """`a / b` as true division: both operands as Float64; when both are
+    Float32 (or a Float32 and a literal), whose quotient polars gives as
+    Float32, the Float64 quotient is cast to Float32."""
     ka, kb, final = _numbers(a, b, scope, "/")
     if final == "float32":
-        return Arith("div", _narrowed(a, ka, kb), _narrowed(b, kb, ka))
+        return _narrow_arith("div", a, ka, b, kb, final)
     return Arith("div", _as_float64(a, ka), _as_float64(b, kb))
 
 
