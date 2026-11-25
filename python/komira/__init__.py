@@ -2,9 +2,14 @@
 
 This is an early release: a `Session` registers Parquet, CSV and
 newline-delimited JSON files and runs SQL over them, and each `Result` reads
-as Arrow (pyarrow). The public names are exactly `__all__`; every other module
-is private (docs/design/python_package.md). Importing the package does not
-load the library: the first `Session()` or `abi_version()` does.
+as Arrow (pyarrow). The pandas-shaped `DataFrame` reads the same files
+(`read_parquet`, `read_csv`, `read_json`) and builds a plan that runs, with no
+SQL, at `materialize()` (docs/design/dataframe_surface.md). The public names
+are exactly `__all__`; every other module is private
+(docs/design/python_package.md). Importing the package does not load the
+library: the first `Session()`, reader or `abi_version()` does. A name the
+package does not define raises `AttributeError`, with a replacement when the
+name is a pandas one komira refuses (komira/_refusals.py).
 """
 
 from importlib import metadata as _metadata
@@ -20,6 +25,10 @@ from ._errors import (
     UnsupportedCpuError,
     UnsupportedOperation,
 )
+from ._frame import DataFrame, read_csv, read_json, read_parquet
+from ._refusals import MODULE as _MODULE_REFUSALS
+from ._refusals import refused as _refused
+from ._series import Series
 from ._session import Result, Session
 
 try:
@@ -36,17 +45,29 @@ def abi_version() -> int:
     return _native.load().abi_version
 
 
+def __getattr__(name: str) -> object:
+    message = None if name.startswith("_") else _refused(_MODULE_REFUSALS, name)
+    if message is None:
+        message = f"module 'komira' has no attribute '{name}'"
+    raise AttributeError(message, name=name)
+
+
 __all__ = [
     "BindError",
     "CredentialsError",
+    "DataFrame",
     "KomiraError",
     "LibraryLoadError",
     "ParseError",
     "Result",
+    "Series",
     "Session",
     "StorageError",
     "UnsupportedCpuError",
     "UnsupportedOperation",
     "__version__",
     "abi_version",
+    "read_csv",
+    "read_json",
+    "read_parquet",
 ]

@@ -1,6 +1,8 @@
 # The Python DataFrame surface: skins, verbs and refusals
 
-Status: design, not built. Nothing under `python/` exists yet. The verbs, the plan each one builds and
+Status: design, partly built. The pandas-shaped skin's readers, subscripts, `assign`, `sort_values`,
+`head`, `materialize` and `explain` are in `python/komira/_frame.py` and `_series.py`, over the node
+tree (`komira/_ops`) and the encoder (`komira/_plan`). The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
 
@@ -585,7 +587,7 @@ package design). D4 to D18 are this design's own.
 
 ## Where is the code?
 
-The code goes in `python/komira/`, which is not built yet: the node tree, the encoder, the pandas-shaped
-skin, and `komira/pl/`. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
+The code is in `python/komira/`: the node tree (`_ops/`), the encoder (`_plan/`) and the first part of
+the pandas-shaped skin (`_frame.py`, `_series.py`, `_refusals.py`); `komira/pl/` is not built yet. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
 `src/plan_expr/col_expr.mojo`. The wire format is in [src/plan_proto](../../src/plan_proto/plan.proto)
 and `src/plan_wire`.
