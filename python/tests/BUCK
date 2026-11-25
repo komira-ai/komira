@@ -876,6 +876,18 @@ _PLAN_EXPR_RUNTIMES = [
 #   engine runs against GROUP BY, the frame's reductions, drop_duplicates
 #   against DISTINCT, and the reductions the engine does not run yet refused
 #   at the terminal with its step.
+# - frame_verbs_test, frame_concat_counts_test and series_accessors_test,
+#   with no library, on the same runtimes: the node trees of fillna, dropna
+#   (a float column's not-NaN test), rename, add_prefix, add_suffix, astype,
+#   tail (a reversed-key top-n under the frame's sort), concat (the union and
+#   the projection that reorders a later frame), value_counts (the count
+#   aggregate and its sort), Series.astype and the .str and .dt methods, their
+#   output types, where the order is kept, every refusal with its full
+#   message, and the accessors' attribute rules.
+# - frame_verbs_duckdb_test, on CPython 3.13: those verbs over a Parquet file
+#   with NaN, float32, timestamp and date columns, each equal to DuckDB's
+#   answer to the SQL that means pandas' answer, and the casts and regular
+#   expressions the engine does not run refused at the terminal with its step.
 [py_test(
     name = "frame_test{}".format(suffix),
     src = "test_frame.py",
@@ -889,6 +901,36 @@ _PLAN_EXPR_RUNTIMES = [
 [py_test(
     name = "frame_groupby_test{}".format(suffix),
     src = "test_frame_groupby.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
+
+[py_test(
+    name = "frame_verbs_test{}".format(suffix),
+    src = "test_frame_verbs.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
+
+[py_test(
+    name = "frame_concat_counts_test{}".format(suffix),
+    src = "test_frame_concat_counts.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
+
+[py_test(
+    name = "series_accessors_test{}".format(suffix),
+    src = "test_series_accessors.py",
     deps = [
         "//python:komira_with_plan_modules",
         _PROTOBUF[p["suffix"]][runtime],
@@ -914,6 +956,18 @@ _PLAN_EXPR_RUNTIMES = [
 python_binding_test(
     name = "frame_duckdb_test",
     src = "test_frame_duckdb.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+)
+
+python_binding_test(
+    name = "frame_verbs_duckdb_test",
+    src = "test_frame_verbs_duckdb.py",
     data = {"libkomira": LIBKOMIRA},
     deps = [
         "//python:komira_with_plan_modules",

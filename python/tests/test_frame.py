@@ -14,7 +14,8 @@ given and has no SQL entry. Checked:
 - the attribute rules for every row of the frame, Series and module refusal
   tables, assignment to an attribute, dir, copy and `in`; a pandas verb the
   skin lacks raises `AttributeError` (so `getattr` with a default returns the
-  default) and is never read as a column, even when a column has its name;
+  default) and is never read as a column, even when a column has its name; a
+  column named after a verb (`fillna`, `dropna`) leaves `df.<verb>` the verb;
 - no dunder runs a query;
 - the terminals send exactly the encoded plan bytes to the session and
   nothing else, each time they are called;
@@ -741,17 +742,32 @@ def test_a_column_is_not_an_attribute_and_a_column_named_count_is_reached_by_sub
 def test_a_pandas_verb_komira_lacks_raises_and_is_never_a_column():
     missing = object()
     df = Env().df
-    for name in ("fillna", "dropna"):
+    for name in ("clip", "combine_first"):
         check_refused(df, name, f"'DataFrame' object has no attribute '{name}'", "frame")
         check_refused(df["a"], name, f"'Series' object has no attribute '{name}'", "series")
         assert getattr(df, name, missing) is missing, name
         assert getattr(df["a"], name, missing) is missing, name
-    named = Env((("fillna", "float64"), ("dropna", "int64"))).df
-    hint = "'DataFrame' object has no attribute '{0}': a column is not an attribute; write df[\"{0}\"]"
+    # The frame has fillna and dropna; a Series has neither.
     for name in ("fillna", "dropna"):
+        check_refused(df["a"], name, f"'Series' object has no attribute '{name}'", "series")
+        assert getattr(df["a"], name, missing) is missing, name
+    named = Env((("clip", "float64"), ("combine_first", "int64"))).df
+    hint = "'DataFrame' object has no attribute '{0}': a column is not an attribute; write df[\"{0}\"]"
+    for name in ("clip", "combine_first"):
         check_refused(named, name, hint.format(name), "frame")
         assert getattr(named, name, missing) is missing, name
+    assert named["clip"]._node == ColRef("clip") and named["clip"].dtype == "float64"
+
+
+def test_a_column_named_after_a_verb_leaves_the_verb_in_place():
+    named = Env((("fillna", "float64"), ("dropna", "int64"))).df
+    # df.fillna and df.dropna are the verbs, never the columns of their names,
+    # which are reached by subscript.
+    assert named.fillna.__name__ == "fillna" and named.dropna.__name__ == "dropna"
     assert named["fillna"]._node == ColRef("fillna") and named["fillna"].dtype == "float64"
+    assert named["dropna"]._node == ColRef("dropna") and named["dropna"].dtype == "int64"
+    kept = named.dropna(subset=["dropna"])
+    assert kept._plan == _ops.filter_(named._plan, Unary("is_not_null", ColRef("dropna")))
 
 
 def test_setting_an_attribute_of_a_frame_or_a_series_is_refused():
@@ -903,13 +919,17 @@ def test_a_chain_of_verbs_reaches_the_session_only_as_plan_bytes():
         assert list(envelope.plan.sort.keys) == ["z", "b"]
 
 
-FRAME_MODULES = ("_frame.py", "_groupby.py", "_series.py", "_refusals.py")
+FRAME_MODULES = (
+    "_frame.py", "_groupby.py", "_series.py", "_refusals.py", "_verbs.py", "_missing.py", "_cast.py", "_accessors.py",
+)
 PRIVATE_SESSION = {"_plan_stream", "_plan_render", "_parquet_schema", "_csv_binding", "_json_binding"}
 ALLOWED_IMPORTS = {
     "__future__:annotations", "collections.abc:Callable", "types:ModuleType", "typing:TYPE_CHECKING",
     ".:_ops", ".:_refusals", ".:_plan", "._errors:UnsupportedOperation", "._series:Series", "._series:operand",
     "._session:Result", "._session:Session", "._session:_local_path", "._session:default_session",
     "._plan:_wire", ".plan.v1:plan_pb2", "._frame:DataFrame", "os", ".:_groupby", "._groupby:GroupBy",
+    ".:_verbs", ".:_cast", ".:_accessors", "._missing:FLOAT_TYPES", "._missing:present", "._series:_fits",
+    "typing:Any", "re",
 }
 
 

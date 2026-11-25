@@ -26,8 +26,11 @@ by nothing and give one row. No SQL text is written.
 - A sum of nothing is 0, as in pandas' `min_count=0` (ruling 10): the sum is
   read through `CASE WHEN s IS NOT NULL THEN s ELSE 0 END` above the
   aggregate. `min_count=1` keeps the missing sum.
-- Missing values are NULL. A NaN is a value here: pandas' NaN-is-missing
-  (ruling 6) needs an `isnan` test the plan's vocabulary lacks.
+- Missing values are NULL. A NaN is a value in these reductions; only
+  `value_counts` reads it as missing, as pandas does (ruling 6), through the
+  NaN test of komira/_missing.py.
+- `value_counts` of a column is an aggregate of count(*) by that column,
+  over the rows where it is present, sorted by the count.
 - A Python function as an aggregate is an aggregate UDF, which no query runs
   yet: it is refused by name, as are the choices that need row order.
 """
@@ -38,6 +41,7 @@ from typing import TYPE_CHECKING
 
 from . import _ops, _refusals
 from ._errors import UnsupportedOperation
+from ._missing import FLOAT_TYPES, present
 
 if TYPE_CHECKING:
     from ._frame import DataFrame
@@ -591,3 +595,59 @@ def drop_duplicates(frame: DataFrame, subset: object, keep: object) -> DataFrame
     # Rows equal on every column are the same row, so "first" and "last"
     # keep the same one.
     return frame._derive(_ops.distinct(frame._plan))
+
+
+def value_counts(
+    frame: DataFrame,
+    column: str,
+    normalize: object,
+    sort: object,
+    ascending: object,
+    bins: object,
+    dropna: object,
+) -> DataFrame:
+    """`s.value_counts(...)` of the column `column` of `frame`: a frame of
+    the column and `count`, the rows per value as int64. `dropna=True` counts
+    only the rows where the column is present (not NULL, and for a float
+    column not NaN); `dropna=False` keeps the NULL group. `sort=True` sorts by
+    `count`, descending unless `ascending`, and ties come out in any order."""
+    verb = "value_counts"
+    for name, value in (("normalize", normalize), ("sort", sort), ("ascending", ascending), ("dropna", dropna)):
+        _check_bool(value, name, verb)
+    if normalize:
+        raise UnsupportedOperation(
+            "value_counts(normalize=True) divides each count by the row total, which this release does not "
+            "build: use normalize=False and divide the count column by its sum"
+        )
+    if bins is not None:
+        raise UnsupportedOperation(
+            "value_counts(bins=...) counts values per numeric range, which this release does not build: "
+            "assign the range of each row as a column, then count that column"
+        )
+    if column == "count":
+        raise UnsupportedOperation(
+            "value_counts() of the column 'count' would give two output columns named 'count': "
+            "rename the column first, as df.rename(columns={'count': 'value'})"
+        )
+    dtype = frame.dtypes[column]
+    plan = frame._plan
+    if dropna:
+        plan = _ops.filter_(plan, present(_ops.ColRef(column), dtype))
+    elif dtype in FLOAT_TYPES:
+        raise UnsupportedOperation(
+            f"value_counts(dropna=False) of the {dtype} column {column!r} would count NULL and NaN as two "
+            "groups, where pandas counts one missing group: use dropna=True, or fill the missing values "
+            "first with fillna()"
+        )
+    counted = _aggregate(
+        frame._derive(plan),
+        (column,),
+        [_Item("count", "size", None)],
+        sort=False,
+        dropna=False,
+        where="value_counts()",
+        hint=_REDUCTION_HINT,
+    )
+    if not sort:
+        return counted
+    return counted._derive(_ops.sort(counted._plan, (_ops.SortKey("count", descending=not ascending),)))

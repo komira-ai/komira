@@ -1,6 +1,6 @@
 # The Python DataFrame surface: verbs, capabilities and refusals
 
-Status: design, not built. This is the verb half of [the DataFrame surface](dataframe_surface.md):
+Status: design, partly built (the rules document's status says which verbs). This is the verb half of [the DataFrame surface](dataframe_surface.md):
 that document gives the rules. This one has three parts:
 
 - for each capability of the [surface capability matrix](../surface_capability_matrix.md), the verbs of
@@ -135,7 +135,8 @@ the same name:
 - `date32`
 
 The pandas-shaped skin also takes pandas' spellings of those: `"Int64"` and the other capitalised
-integer names, `"boolean"`, and `"str"`. `"object"` and `"category"` are refused by name, because neither
+integer and float names (`"UInt8"`, `"Float64"`, ...), `"boolean"`, and `"str"`, and Python's types `bool`, `int` (int64), `float` (float64) and
+`str` (string). `"object"` and `"category"` are refused by name, because neither
 names one Arrow type.
 
 ## The refusal tables

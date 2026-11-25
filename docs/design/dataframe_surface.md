@@ -8,8 +8,11 @@ part of the pandas-shaped skin is built too: its readers, subscripts, `assign`, 
 `materialize` and `explain` are in `python/komira/_frame.py` and `_series.py`, and `materialize` runs
 the plan through `komira_plan_stream`. So are `groupby` with its `GroupBy` reductions and `agg`, the
 frame's own reductions (`agg`, `sum`, `mean`, `median`, `std`, `var`, `min`, `max`, `count`,
-`nunique`) and `drop_duplicates`, in `python/komira/_groupby.py`; NaN as missing (ruling 6) and the
-`Series` reductions are not built yet. `komira.pl` and the other verbs are not built. The verbs, the plan each one builds and
+`nunique`) and `drop_duplicates`, in `python/komira/_groupby.py`. So are `fillna`, `dropna`, `rename`,
+`add_prefix`, `add_suffix`, `astype`, `tail`, `komira.concat`, `Series.value_counts` and the `.str` and
+`.dt` accessors (`_frame.py`, `_verbs.py`, `_missing.py`, `_cast.py`, `_accessors.py`). NaN as missing
+(ruling 6) is built in `fillna`, `dropna` and `value_counts`, not yet in the aggregates; `isna`, `notna`
+and the `Series` reductions are not built yet. `komira.pl` and the other verbs are not built. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
 
@@ -609,6 +612,7 @@ package design). D4 to D18 are this design's own.
 ## Where is the code?
 
 The code is in `python/komira/`: the node tree (`_ops/`), the encoder (`_plan/`) and the first part of
-the pandas-shaped skin (`_frame.py`, `_groupby.py`, `_series.py`, `_refusals.py`); `komira/pl/` is not built yet. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
+the pandas-shaped skin (`_frame.py`, `_groupby.py`, `_series.py`, `_verbs.py`, `_missing.py`, `_cast.py`,
+`_accessors.py`, `_refusals.py`); `komira/pl/` is not built yet. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
 `src/plan_expr/col_expr.mojo`. The wire format is in [src/plan_proto](../../src/plan_proto/plan.proto)
 and `src/plan_wire`.
