@@ -825,7 +825,7 @@ _PLAN_EXPR_RUNTIMES = [
 # entry as through polars 1.44.2, values and dtypes, and the schema komira.pl
 # derives without running is the answer's; plus collect() twice, the plan
 # entry and never the SQL one, explain(), a missing file, frames of two
-# sessions, the engine's refusal of a CSV scan at lower, and its refusal at
+# sessions, a CSV scan against polars', and the engine's refusal at
 # execute of median, std, var and a string min, which its aggregation sinks do
 # not serve yet.
 python_binding_test(

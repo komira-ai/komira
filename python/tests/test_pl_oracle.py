@@ -38,9 +38,8 @@ an empty file of the same columns:
 And the edges the oracle does not cover: collect() twice runs the plan
 twice; collect() calls the plan entry and never the SQL entry; explain()
 renders the plan; a missing file is refused at the reader with the engine's
-message; frames of two sessions are refused by concat; a CSV scan, which the
-engine does not lower yet, is refused at the terminal with the engine's step;
-and median, std, var and the min of a string column, which the engine's
+message; frames of two sessions are refused by concat; a CSV scan, with a
+semicolon separator and an empty field, gives polars' frame; and median, std, var and the min of a string column, which the engine's
 aggregation sinks do not serve yet, are refused at the terminal at execute.
 
     test_pl_oracle.py --lib-dir <dir> --runtime-dir <dir>
@@ -476,15 +475,14 @@ def test_statistics_the_engine_does_not_serve_are_refused_at_the_terminal(sessio
         assert e.step == "execute", (e.step, e.code, str(e))
 
 
-def test_csv_scan_is_refused_at_the_terminal_by_the_engine(session, work):
+def test_csv_scan(session, work):
     path = os.path.join(work, "people.csv")
     with open(path, "w", encoding="utf-8") as f:
-        f.write("name,age\nann,31\nbob,\n")
-    lf = kpl.scan_csv(path, session=session)
-    assert lf.columns == ["name", "age"]
-    e = raised(lf.collect)
-    assert isinstance(e, KomiraError), repr(e)
-    assert e.step == "lower", (e.step, e.code, str(e))
+        f.write("name;age\nann;31\nbob;\ncy;7\n")
+    lf_k = kpl.scan_csv(path, separator=";", session=session)
+    assert lf_k.columns == ["name", "age"]
+    program = lambda P, lf: lf.filter(P.col("name") != "cy").select("name", (P.col("age") + 1).alias("next"))
+    check("csv", program(kpl, lf_k), program(pl, pl.scan_csv(path, separator=";")), False)
 
 
 def main(argv):
@@ -511,7 +509,7 @@ def main(argv):
             test_missing_file_is_refused_at_the_reader(session, work)
             test_two_sessions_never_meet(session, path)
             test_statistics_the_engine_does_not_serve_are_refused_at_the_terminal(session, path)
-            test_csv_scan_is_refused_at_the_terminal_by_the_engine(session, work)
+            test_csv_scan(session, work)
     print("pl_oracle: the edge cases passed")
 
 
