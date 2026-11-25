@@ -12,7 +12,9 @@ given and has no SQL entry. Checked:
 - the types: columns, dtypes and repr of frames and Series after the verbs;
 - every refusal by its class and its full message;
 - the attribute rules for every row of the frame, Series and module refusal
-  tables, assignment to an attribute, dir, copy and `in`;
+  tables, assignment to an attribute, dir, copy and `in`; a pandas verb the
+  skin lacks raises `AttributeError` (so `getattr` with a default returns the
+  default) and is never read as a column, even when a column has its name;
 - no dunder runs a query;
 - the terminals send exactly the encoded plan bytes to the session and
   nothing else, each time they are called;
@@ -721,13 +723,35 @@ def test_a_column_is_not_an_attribute_and_a_column_named_count_is_reached_by_sub
     df = Env((("zeta", "int64"), ("count", "int64"), ("index", "int64"), ("_hidden", "int64"))).df
     hint = "'DataFrame' object has no attribute '{0}': a column is not an attribute; write df[\"{0}\"]"
     check_refused(df, "zeta", hint.format("zeta"), "frame")
-    check_refused(df, "count", hint.format("count"), "frame")
     check_refused(df, "index", "komira frames have no index", "frame")
     check_refused(df, "_hidden", "'DataFrame' object has no attribute '_hidden'", "frame")
     assert df["count"]._node == ColRef("count") and df["count"].dtype == "int64"
     assert "count" in df and "zeta" in df
-    assert not {"zeta", "count", "index", "_hidden"} & set(dir(df))
+    assert not {"zeta", "index", "_hidden"} & set(dir(df))
+    # The verb is not hidden by the column of its name: df.count() counts the
+    # values of every column, the column `count` among them.
+    counted = df.count()
+    assert counted.columns == ["zeta", "count", "index", "_hidden"], counted.columns
+    assert counted._plan == _ops.aggregate(
+        df._plan, (), tuple((c, _ops.Agg("count", (ColRef(c),))) for c in ("zeta", "count", "index", "_hidden"))
+    )
     check_refused(Env().df, "a", hint.format("a"), "frame")
+
+
+def test_a_pandas_verb_komira_lacks_raises_and_is_never_a_column():
+    missing = object()
+    df = Env().df
+    for name in ("fillna", "dropna"):
+        check_refused(df, name, f"'DataFrame' object has no attribute '{name}'", "frame")
+        check_refused(df["a"], name, f"'Series' object has no attribute '{name}'", "series")
+        assert getattr(df, name, missing) is missing, name
+        assert getattr(df["a"], name, missing) is missing, name
+    named = Env((("fillna", "float64"), ("dropna", "int64"))).df
+    hint = "'DataFrame' object has no attribute '{0}': a column is not an attribute; write df[\"{0}\"]"
+    for name in ("fillna", "dropna"):
+        check_refused(named, name, hint.format(name), "frame")
+        assert getattr(named, name, missing) is missing, name
+    assert named["fillna"]._node == ColRef("fillna") and named["fillna"].dtype == "float64"
 
 
 def test_setting_an_attribute_of_a_frame_or_a_series_is_refused():
@@ -879,13 +903,13 @@ def test_a_chain_of_verbs_reaches_the_session_only_as_plan_bytes():
         assert list(envelope.plan.sort.keys) == ["z", "b"]
 
 
-FRAME_MODULES = ("_frame.py", "_series.py", "_refusals.py")
+FRAME_MODULES = ("_frame.py", "_groupby.py", "_series.py", "_refusals.py")
 PRIVATE_SESSION = {"_plan_stream", "_plan_render", "_parquet_schema", "_csv_binding", "_json_binding"}
 ALLOWED_IMPORTS = {
     "__future__:annotations", "collections.abc:Callable", "types:ModuleType", "typing:TYPE_CHECKING",
     ".:_ops", ".:_refusals", ".:_plan", "._errors:UnsupportedOperation", "._series:Series", "._series:operand",
     "._session:Result", "._session:Session", "._session:_local_path", "._session:default_session",
-    "._plan:_wire", ".plan.v1:plan_pb2", "._frame:DataFrame", "os",
+    "._plan:_wire", ".plan.v1:plan_pb2", "._frame:DataFrame", "os", ".:_groupby", "._groupby:GroupBy",
 }
 
 

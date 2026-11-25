@@ -696,7 +696,8 @@ def test_a_pool_too_small_for_a_morsel_fails_the_consume() raises:
     except e:
         assert_equal(
             String(e),
-            "pipeline_exec: the window sink of segment 7 was denied "
+            "MEMORY_BUDGET_EXCEEDED: pipeline_exec: the window sink of segment"
+            " 7 was denied "
             + String(bytes)
             + " bytes for a morsel it keeps (segment pool budget 100,"
             " granted 0); window functions do not spill",
@@ -719,7 +720,8 @@ def test_a_pool_too_small_for_the_concatenation_fails_the_combine() raises:
     except e:
         assert_equal(
             String(e),
-            "pipeline_exec: the window sink of segment 7 was denied "
+            "MEMORY_BUDGET_EXCEEDED: pipeline_exec: the window sink of segment"
+            " 7 was denied "
             + String(kept)
             + " bytes for the concatenation (segment pool budget "
             + String(kept + kept // 2)

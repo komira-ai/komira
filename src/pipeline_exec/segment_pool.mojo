@@ -27,6 +27,12 @@ from std.memory import ArcPointer
 from atomic_alias import AtomicI64
 from containers.slab import Slab
 
+comptime MEMORY_BUDGET_EXCEEDED = "MEMORY_BUDGET_EXCEEDED"
+"""The named code a sink's refusal begins with (`MEMORY_BUDGET_EXCEEDED: `)
+when the segment's memory budget denied it the bytes its state needs, so a
+caller can tell that refusal from any other without reading the sentence after
+it."""
+
 comptime POOL_UNBOUNDED: Int = -1
 comptime POOL_DEFAULT_BLOCK: Int = 64 * 1024
 

@@ -697,7 +697,7 @@ steps (a documentation-only push does not start the workflow, so it publishes no
 | `prod-commit` | after `prod-test`, on a push to `main` | in the environment `prod`, with `contents: read` and `id-token: write`. The same command without `--no-commit`, on the same directory with its `state.json`, after a fresh OIDC exchange: the same group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-prod-committed-<sha>`. |
 | `prod-abort` | after `prod-stage`, `prod-test` and `prod-commit`, when one of them failed or the run was cancelled, on a push to `main` and with a `prod-stage` that was not skipped | in the environment `prod`, same permissions: `mopm publish --staged S --registry prod --oidc --abort` ends the open group and gives its place back. |
 | `prod-smoke` | after `prod-commit`, on a push to `main` | no environment, no identity, no secret, no farm: `release_staged_verify smoke` downloads the published files from the prod channel and compares each with the plan. On a difference it prints the `mopm yank --group <id> ...` command for a human and fails; it yanks nothing. |
-| `prod-add` | after `prod-commit` and `prod-smoke`, on a push to `main` | no environment, no identity, no secret, no farm (a farm action has no network): `release_staged_verify add` makes a fresh project with the mopm `mopm-stage` built, sets its Mojo to the one this release was built for, runs `mopm add komira-ai/<name> --registry prod` for `json`, `uuid` and `libc` and then `mopm sync`, and checks the lock and the installed files against the plan. It yanks nothing. |
+| `prod-add` | after `prod-commit` and `prod-smoke`, on a push to `main` | no environment, no identity, no secret, no farm (a farm action has no network): `release_staged_verify add` makes a fresh project with the mopm `mopm-stage` built, sets its Mojo to the one this release was built for, runs `mopm add komira-ai/<name> --registry prod` for `json`, `uuid` and every package that ships a native archive (`async_api`, `awslc`, `compression`, `crypto`, `libc`, `log`, `metrics`) and then `mopm sync`, and checks the lock and the installed files against the plan. It yanks nothing. |
 
 **The staged set is the whole set.** `mopm stage` packs one `.conda` per subdir a member has a library in,
 and the checks after it (`verify`, `smoke`, `add`) read the plan, so a plan that lost a platform or a package
@@ -757,6 +757,14 @@ dropping of one of them, an unsorted or repeated line, and an empty file. It is 
 committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
 last word.
 
+**Every library not published says why.** Every Mojo library under `src/` (a directory with a `BUCK` file and a
+`.mojo` file outside its `tests/`) is either a member or has a row in
+[`release/UNPUBLISHED.md`](../release/UNPUBLISHED.md) with the reason it is not published, and
+`//release:unpublished_cases` refuses a pull request that leaves a library out of both, keeps the row of a member,
+keeps a row for a deleted directory, keeps a row that names a published library as the one it waits for, or holds a
+row that does not parse, rows out of order, or counts that are not the table's. So the
+pull request that publishes a library deletes its row, and the one that adds a library adds a row.
+
 **The release declaration and the release set agree, and one so package.** `//release:release_checks_cases`
 holds `release/artifacts.textproto` to `tools/build/package/release_set.txt`: the same metapackage, the same
 members in the same order, and the same `--license`, `--summary` and `--home`, so a member listed in one file and
@@ -806,10 +814,15 @@ would be handed two files for one name.
    plan's files (init writes mopm's own default, and `mopm add` resolves the newest version built for the
    project's Mojo, so a project left at that default would get the last release built for it); a plan that
    names two Mojo versions, or a `mopm.toml` without exactly one such line, is refused before `mopm add` runs.
-   Then `mopm add komira-ai/<name> --registry prod` for three
-   packages of [`packages.bzl`](../release/readme_e2e/packages.bzl), a library with no dependency (`json`),
-   one with dependencies (`uuid`: `atomic_alias`, `awslc`, `clock`) and one that ships a native library
-   (`libc`), then `mopm sync --registry prod --cache <its own directory>`. A command that exits other than 0
+   Then `mopm add komira-ai/<name> --registry prod` for packages of
+   [`packages.bzl`](../release/readme_e2e/packages.bzl): a library with no dependency (`json`), one with
+   dependencies (`uuid`: `atomic_alias`, `awslc`, `clock`), and every package that ships a native archive
+   (the keys of `RELEASE_NATIVES` in [`release/BUCK`](../release/BUCK): `async_api`, `awslc`, `compression`,
+   `crypto`, `libc`, `log`, `metrics`), each by its own name; then
+   `mopm sync --registry prod --cache <its own directory>`. `//tools/build/ci:prod_add_set_cases` fails the
+   build when a package of `RELEASE_NATIVES` is not in that list or a name of the list is no package of
+   `packages.bzl`, so a native package that joins the release is added from prod from its first release
+   on. A command that exits other than 0
    fails the job with that command and the first line of its stderr. Then it reads `mopm.lock` and refuses,
    listing every difference: a `lock_version` other than 3, a `channels` other than exactly
    `https://conda.mopm.dev/`, a `mojo` other than exactly the release's Mojo, an entry with a flat name, with a channel other than its namespace's
@@ -839,12 +852,13 @@ the full names under the namespace's channel at this run's version and install e
 **What it does not prove.**
 - The registry's own verdict: a group can still end `rejected` after the tests passed (the commit job
   fails and the group frees its versions); the tests do not read what the registry stored.
-- The registry's derived outputs (repodata, the sparse index) are read only for the three packages
+- The registry's derived outputs (repodata, the sparse index) are read only for the packages
   `prod-add` adds and their dependencies; the other members are checked as files by `prod-smoke`, not
   resolved from the index.
 - A package's own unit tests are not in the `.conda`: they ran when its `.mojoc` was built.
-- Native libraries are loaded as the packages say: `prod-add` installs `libc` and its static library from
-  the registry, but no job builds or runs a program against what it installed.
+- Native libraries are loaded as the packages say: `prod-add` installs every package that ships a native
+  archive, and its static library, from the registry, but no job builds or runs a program against what it
+  installed.
 - A plan member that is not an `upload` (a version the registry already holds) makes the README e2e and
   `release_staged_verify` refuse the set; a release publishes only a set of new versions, which is why every
   run gives the members the version `0.1.<run number>` (below).

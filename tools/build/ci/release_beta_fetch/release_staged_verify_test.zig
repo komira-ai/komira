@@ -337,21 +337,60 @@ const Pkg = struct {
     deps: []const []const u8 = &.{},
 };
 
-/// The prod channel of this release in memory: the three names of `add_set`, and uuid's dependency.
-const SERVED = [_]Pkg{
-    .{ .name = "komira-ai/clock", .bytes = "clock bytes" },
-    .{ .name = "komira-ai/json", .bytes = "json bytes, no dependency" },
-    .{ .name = "komira-ai/libc", .bytes = "libc bytes and its archive" },
-    .{ .name = "komira-ai/uuid", .bytes = "uuid bytes", .deps = &.{"komira-ai/clock"} },
+/// The packages that ship a native archive (`RELEASE_NATIVES` of release/BUCK), in the order `add` adds them;
+/// //tools/build/ci:prod_add_set_cases holds `add_set` to the real table.
+const NATIVES = [_][]const u8{
+    "komira-ai/async_api",
+    "komira-ai/awslc",
+    "komira-ai/compression",
+    "komira-ai/crypto",
+    "komira-ai/libc",
+    "komira-ai/log",
+    "komira-ai/metrics",
 };
 
-/// What prod also holds: the release before, built for the Mojo `mopm init` writes.
-const PRIOR = [_]Pkg{
-    .{ .name = "komira-ai/clock", .version = "0.1.8", .mojo = INIT_MOJO, .bytes = "clock of the release before" },
-    .{ .name = "komira-ai/json", .version = "0.1.8", .mojo = INIT_MOJO, .bytes = "json of the release before" },
-    .{ .name = "komira-ai/libc", .version = "0.1.8", .mojo = INIT_MOJO, .bytes = "libc of the release before" },
-    .{ .name = "komira-ai/uuid", .version = "0.1.8", .mojo = INIT_MOJO, .bytes = "uuid of the release before", .deps = &.{"komira-ai/clock"} },
+/// The prod channel of this release in memory: the names of `add_set` (json, uuid and every native package),
+/// and uuid's dependency clock. uuid also depends on awslc, which is added by its own name too.
+const SERVED = [_]Pkg{
+    .{ .name = "komira-ai/async_api", .bytes = "async_api bytes and its archive" },
+    .{ .name = "komira-ai/awslc", .bytes = "awslc bytes and its archive" },
+    .{ .name = "komira-ai/clock", .bytes = "clock bytes" },
+    .{ .name = "komira-ai/compression", .bytes = "compression bytes and its archive" },
+    .{ .name = "komira-ai/crypto", .bytes = "crypto bytes and its archive" },
+    .{ .name = "komira-ai/json", .bytes = "json bytes, no dependency" },
+    .{ .name = "komira-ai/libc", .bytes = "libc bytes and its archive" },
+    .{ .name = "komira-ai/log", .bytes = "log bytes and its archive" },
+    .{ .name = "komira-ai/metrics", .bytes = "metrics bytes and its archive" },
+    .{ .name = "komira-ai/uuid", .bytes = "uuid bytes", .deps = &.{ "komira-ai/clock", "komira-ai/awslc" } },
 };
+
+/// What prod also holds: the release before, built for the Mojo `mopm init` writes, one for each of `SERVED`.
+const PRIOR = blk: {
+    var out: [SERVED.len]Pkg = undefined;
+    for (SERVED, 0..) |p, i| out[i] = .{ .name = p.name, .version = "0.1.8", .mojo = INIT_MOJO, .bytes = p.name ++ " of the release before", .deps = p.deps };
+    break :blk out;
+};
+
+/// `base` without the package `name`.
+fn without(a: std.mem.Allocator, base: []const Pkg, name: []const u8) ![]Pkg {
+    var out = std.ArrayList(Pkg).empty;
+    for (base) |p| if (!std.mem.eql(u8, p.name, name)) try out.append(a, p);
+    try t.expectEqual(base.len - 1, out.items.len);
+    return out.items;
+}
+
+/// `base` with the package of `p`'s name replaced by `p`, or `p` added when `base` has no such package.
+fn with(a: std.mem.Allocator, base: []const Pkg, p: Pkg) ![]Pkg {
+    var out = std.ArrayList(Pkg).empty;
+    var replaced = false;
+    for (base) |q| {
+        const same = std.mem.eql(u8, q.name, p.name);
+        replaced = replaced or same;
+        try out.append(a, if (same) p else q);
+    }
+    if (!replaced) try out.append(a, p);
+    return out.items;
+}
 
 fn fileName(a: std.mem.Allocator, name: []const u8, version: []const u8, mojo: []const u8) ![]u8 {
     const slash = std.mem.indexOfScalar(u8, name, '/').?;
@@ -360,9 +399,17 @@ fn fileName(a: std.mem.Allocator, name: []const u8, version: []const u8, mojo: [
 
 /// The committed set of this release (plan.json and the READMEs) for `SERVED`, at version RUN.
 fn stageAdd(a: std.mem.Allocator, tmp: *t.TmpDir) !void {
+    return stageAddWithout(a, tmp, null);
+}
+
+/// `stageAdd` with the package `skip` left out of the plan, as a release that did not publish it.
+fn stageAddWithout(a: std.mem.Allocator, tmp: *t.TmpDir, skip: ?[]const u8) !void {
     var plan = std.Io.Writer.Allocating.init(a);
     try plan.writer.writeAll("{\"version\":2,\"members\":[");
-    for (SERVED, 0..) |p, i| {
+    var i: usize = 0;
+    for (SERVED) |p| {
+        if (skip != null and std.mem.eql(u8, skip.?, p.name)) continue;
+        defer i += 1;
         try plan.writer.print("{s}{{\"name\":\"{s}\",\"version\":\"{s}\",\"action\":\"upload\",\"readme\":\"{s}/README.md\",", .{ if (i == 0) "" else ",", p.name, RUN, p.name });
         try plan.writer.print("\"files\":[{{\"subdir\":\"linux-64\",\"filename\":\"{s}\",\"sha256\":\"{s}\",\"size\":{d}}}]}}", .{ try fileName(a, p.name, RUN, RELEASE_MOJO), try sha(a, p.bytes), p.bytes.len });
         try tmp.dir.makePath(try std.fmt.allocPrint(a, "committed/{s}", .{p.name}));
@@ -523,14 +570,20 @@ test "add: prod serves the set; init, an add per package, then sync, and the loc
     defer log.deinit();
     var why: []const u8 = "";
     const rep = try runAdd(a, &tmp, &fake, &why, &log.writer);
-    try t.expectEqual(@as(usize, 3), rep.members);
-    try t.expectEqual(@as(usize, 4), rep.entries);
+    try t.expectEqual(@as(usize, 9), rep.members);
+    try t.expectEqual(@as(usize, 10), rep.entries);
     const cache = try path(a, &tmp, "work/cache");
     const want = [_][]const u8{
         "init --name release-check/prod_add",
         "add komira-ai/json --registry prod",
         "add komira-ai/uuid --registry prod",
+        "add komira-ai/async_api --registry prod",
+        "add komira-ai/awslc --registry prod",
+        "add komira-ai/compression --registry prod",
+        "add komira-ai/crypto --registry prod",
         "add komira-ai/libc --registry prod",
+        "add komira-ai/log --registry prod",
+        "add komira-ai/metrics --registry prod",
         try std.fmt.allocPrint(a, "sync --registry prod --cache {s}", .{cache}),
     };
     try t.expectEqual(want.len, fake.calls.items.len);
@@ -539,6 +592,86 @@ test "add: prod serves the set; init, an add per package, then sync, and the loc
     const clock = try std.fmt.allocPrint(a, "installed {s} komira-ai/clock 0.1.9 mojo-komira-ai.clock-0.1.9-mojo1.1.0_0.conda\n", .{try sha(a, "clock bytes")});
     try t.expect(std.mem.indexOf(u8, log.written(), clock) != null);
     try t.expect(exists(&tmp, "work/project/mopm.toml"));
+}
+
+test "add: every native package is added by its own name, and its kept file, record and metadata are checked" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    {
+        var tmp = t.tmpDir(.{});
+        defer tmp.cleanup();
+        try stageAdd(a, &tmp);
+        var fake = FakeMopm{};
+        var log = sink();
+        defer log.deinit();
+        var why: []const u8 = "";
+        _ = try runAdd(a, &tmp, &fake, &why, &log.writer);
+        for (NATIVES) |n| {
+            const call = try std.fmt.allocPrint(a, "add {s} --registry prod", .{n});
+            var called = false;
+            for (fake.calls.items) |c| called = called or std.mem.eql(u8, c, call);
+            if (!called) std.debug.print("no `mopm {s}`\n", .{call});
+            try t.expect(called);
+            var bytes: []const u8 = "";
+            for (SERVED) |p| if (std.mem.eql(u8, p.name, n)) {
+                bytes = p.bytes;
+            };
+            const line = try std.fmt.allocPrint(a, "installed {s} {s} 0.1.9 {s}\n", .{ try sha(a, bytes), n, try fileName(a, n, RUN, RELEASE_MOJO) });
+            try t.expect(std.mem.indexOf(u8, log.written(), line) != null);
+        }
+    }
+    // each native package's installed files are read: another file in .mopm/pkgs, or no metadata, names it
+    for (NATIVES) |n| {
+        var bytes: []const u8 = "";
+        for (SERVED) |p| if (std.mem.eql(u8, p.name, n)) {
+            bytes = p.bytes;
+        };
+        const file = try fileName(a, n, RUN, RELEASE_MOJO);
+        const label = try std.fmt.allocPrint(a, "{s} 0.1.9", .{n});
+
+        var tmp = t.tmpDir(.{});
+        defer tmp.cleanup();
+        try stageAdd(a, &tmp);
+        var fake = FakeMopm{ .kept_other = n };
+        var log = sink();
+        defer log.deinit();
+        var why: []const u8 = "";
+        try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+        const want = try std.fmt.allocPrint(a, "2 problem(s) with what `mopm add` installed from prod:\n" ++
+            "  {s}: .mopm/pkgs/{s} has size 11, the plan says {d}\n" ++
+            "  {s}: .mopm/pkgs/{s} has sha256 {s}, the plan says {s}", .{ label, file, bytes.len, label, file, try sha(a, "other bytes"), try sha(a, bytes) });
+        try t.expectEqualStrings(want, why);
+
+        var tmp2 = t.tmpDir(.{});
+        defer tmp2.cleanup();
+        try stageAdd(a, &tmp2);
+        var no_meta = FakeMopm{ .no_meta = n };
+        try t.expectError(error.Refused, runAdd(a, &tmp2, &no_meta, &why, &log.writer));
+        const import = n["komira-ai/".len..];
+        const want_meta = try std.fmt.allocPrint(a, "1 problem(s) with what `mopm add` installed from prod:\n  {s}: .mopm/env/lib/mojo/{s}.mopm.json FileNotFound", .{ label, import });
+        try t.expectEqualStrings(want_meta, why);
+    }
+}
+
+test "add: a native package missing from the plan is refused with its name, before anything is made or run" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    for (NATIVES) |n| {
+        var tmp = t.tmpDir(.{});
+        defer tmp.cleanup();
+        try stageAddWithout(a, &tmp, n);
+        var fake = FakeMopm{};
+        var log = sink();
+        defer log.deinit();
+        var why: []const u8 = "";
+        try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
+        const want = try std.fmt.allocPrint(a, "{s} is not a member of plan.json: this release did not publish it, so it cannot be added from prod", .{n});
+        try t.expectEqualStrings(want, why);
+        try t.expectEqual(@as(usize, 0), fake.calls.items.len);
+        try t.expect(!exists(&tmp, "work"));
+    }
 }
 
 test "add: prod also holds the release before, built for the Mojo init writes; the project is set to this release's Mojo and locks this release" {
@@ -553,7 +686,7 @@ test "add: prod also holds the release before, built for the Mojo init writes; t
     defer log.deinit();
     var why: []const u8 = "";
     const rep = try runAdd(a, &tmp, &fake, &why, &log.writer);
-    try t.expectEqual(@as(usize, 4), rep.entries);
+    try t.expectEqual(@as(usize, 10), rep.entries);
     // init's mopm.toml with only the [toolchain] mojo line changed
     const want = try std.mem.replaceOwned(u8, a, INIT_TOML, "mojo = \"" ++ INIT_MOJO ++ "\"", "mojo = \"" ++ RELEASE_MOJO ++ "\"");
     try t.expectEqualStrings(want, try tmp.dir.readFileAlloc(a, "work/project/mopm.toml", 1 << 20));
@@ -575,11 +708,17 @@ test "add: a mopm that locks for the Mojo init wrote gets the release before, an
     defer log.deinit();
     var why: []const u8 = "";
     try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
-    try t.expectEqualStrings("5 problem(s) with what `mopm add` installed from prod:\n" ++
+    try t.expectEqualStrings("11 problem(s) with what `mopm add` installed from prod:\n" ++
         "  mopm.lock is locked for mojo [1.0.0]; this release was built for mojo 1.1.0\n" ++
+        "  komira-ai/async_api: the lock records version 0.1.8; this release published 0.1.9\n" ++
+        "  komira-ai/awslc: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/clock: the lock records version 0.1.8; this release published 0.1.9\n" ++
+        "  komira-ai/compression: the lock records version 0.1.8; this release published 0.1.9\n" ++
+        "  komira-ai/crypto: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/json: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/libc: the lock records version 0.1.8; this release published 0.1.9\n" ++
+        "  komira-ai/log: the lock records version 0.1.8; this release published 0.1.9\n" ++
+        "  komira-ai/metrics: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/uuid: the lock records version 0.1.8; this release published 0.1.9", why);
 }
 
@@ -590,14 +729,13 @@ test "add: a channel with no build of a member for this release's Mojo fails at 
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     try stageAdd(a, &tmp);
-    const lacking = [_]Pkg{ SERVED[0], SERVED[1], SERVED[3] };
-    var fake = FakeMopm{ .served = &lacking };
+    var fake = FakeMopm{ .served = try without(a, &SERVED, "komira-ai/libc") };
     var log = sink();
     defer log.deinit();
     var why: []const u8 = "";
     try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
     try t.expectEqualStrings("`mopm add komira-ai/libc --registry prod` exited with 1: mopm add: no version of komira-ai/libc is built for mojo 1.1.0", why);
-    try t.expectEqual(@as(usize, 4), fake.calls.items.len);
+    try t.expectEqual(@as(usize, 8), fake.calls.items.len);
 }
 
 test "add: a mopm.toml from init with no [toolchain] mojo line, two of them, or none at all is refused before `mopm add` runs" {
@@ -701,14 +839,13 @@ test "add: a channel that lacks a member fails at its `mopm add`, naming it, and
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     try stageAdd(a, &tmp);
-    const lacking = [_]Pkg{ SERVED[0], SERVED[1], SERVED[3] };
-    var fake = FakeMopm{ .served = &lacking, .prior = &.{} };
+    var fake = FakeMopm{ .served = try without(a, &SERVED, "komira-ai/libc"), .prior = &.{} };
     var log = sink();
     defer log.deinit();
     var why: []const u8 = "";
     try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
     try t.expectEqualStrings("`mopm add komira-ai/libc --registry prod` exited with 1: mopm add: komira-ai/libc (required by mopm.toml) is not in the registry's index", why);
-    try t.expectEqual(@as(usize, 4), fake.calls.items.len);
+    try t.expectEqual(@as(usize, 8), fake.calls.items.len);
 }
 
 test "add: a channel that serves a member at another version fails, naming the member and both versions" {
@@ -718,8 +855,7 @@ test "add: a channel that serves a member at another version fails, naming the m
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     try stageAdd(a, &tmp);
-    const older = [_]Pkg{ SERVED[0], SERVED[1], .{ .name = "komira-ai/libc", .version = "0.1.8", .bytes = "libc of the release before" }, SERVED[3] };
-    var fake = FakeMopm{ .served = &older };
+    var fake = FakeMopm{ .served = try with(a, &SERVED, .{ .name = "komira-ai/libc", .version = "0.1.8", .bytes = "libc of the release before" }) };
     var log = sink();
     defer log.deinit();
     var why: []const u8 = "";
@@ -866,8 +1002,7 @@ test "add: a lock that pins other bytes than the plan's fails, naming the file a
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     try stageAdd(a, &tmp);
-    const other = [_]Pkg{ SERVED[0], .{ .name = "komira-ai/json", .bytes = "json bytes, but othe" }, SERVED[2], SERVED[3] };
-    var fake = FakeMopm{ .served = &other };
+    var fake = FakeMopm{ .served = try with(a, &SERVED, .{ .name = "komira-ai/json", .bytes = "json bytes, but othe" }) };
     var log = sink();
     defer log.deinit();
     var why: []const u8 = "";
@@ -973,8 +1108,8 @@ test "add: a locked dependency this release did not publish fails, naming it" {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     try stageAdd(a, &tmp);
-    const stray = [_]Pkg{ SERVED[0], SERVED[1], SERVED[2], .{ .name = "komira-ai/uuid", .bytes = "uuid bytes", .deps = &.{ "komira-ai/clock", "komira-ai/stray" } }, .{ .name = "komira-ai/stray", .bytes = "not in the plan" } };
-    var fake = FakeMopm{ .served = &stray };
+    const uuid = Pkg{ .name = "komira-ai/uuid", .bytes = "uuid bytes", .deps = &.{ "komira-ai/clock", "komira-ai/awslc", "komira-ai/stray" } };
+    var fake = FakeMopm{ .served = try with(a, try with(a, &SERVED, uuid), .{ .name = "komira-ai/stray", .bytes = "not in the plan" }) };
     var log = sink();
     defer log.deinit();
     var why: []const u8 = "";
@@ -996,9 +1131,9 @@ test "add on the command line: exit 0 and the summary when the checks pass, 1 an
     var err = sink();
     defer err.deinit();
     try t.expectEqual(@as(u8, 0), try rsv.cliAdd(a, &args, "linux-64", fake.runner(), &out.writer, &err.writer));
-    try t.expect(std.mem.endsWith(u8, out.written(), "release_staged_verify: `mopm add` of 3 package(s) from https://conda.mopm.dev/ locked 4 package(s) of this release and installed the published bytes (sha256 and size)\n"));
+    try t.expect(std.mem.endsWith(u8, out.written(), "release_staged_verify: `mopm add` of 9 package(s) from https://conda.mopm.dev/ locked 10 package(s) of this release and installed the published bytes (sha256 and size)\n"));
     try t.expectEqualStrings("", err.written());
-    try t.expectEqual(@as(usize, 5), fake.calls.items.len);
+    try t.expectEqual(@as(usize, 11), fake.calls.items.len);
 
     var tmp2 = t.tmpDir(.{});
     defer tmp2.cleanup();
