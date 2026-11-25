@@ -114,8 +114,9 @@ True
 The first line is the version you installed, so a newer release prints a larger number there, and
 `<cwd>` stands for the directory you ran it in: the relative name `no_such_file.parquet` is resolved
 against it, and the error names the file komira looked for. The last two lines before `True` are
-the two mistakes the program makes on purpose: each raises `komira.KomiraError`, and the program
-prints its message.
+the two mistakes the program makes on purpose: the missing file raises `komira.BindError` and the
+syntax error `komira.ParseError`, both kinds of `komira.KomiraError`, and the program prints each
+message.
 
 This program is
 [`python/examples/quickstart.py`](../python/examples/quickstart.py), and what it prints is
@@ -142,9 +143,10 @@ What each call does:
   a CSV file and a newline-delimited JSON file the same way, with the column names and types the
   engine infers from the file.
 - `s.sql(query)` runs one SQL statement over the session's tables and returns a `komira.Result`. A
-  syntax error, an unknown table or column, or a construct the engine does not run yet raises
-  `komira.KomiraError` from `sql`, with the engine's `<step>: <reason>` message; a syntax error's
-  message ends with the line and column where the statement stopped parsing.
+  syntax error (`komira.ParseError`), an unknown table or column (`komira.BindError`), or a construct
+  the engine does not run yet (`komira.UnsupportedOperation`) raises from `sql`, with the engine's
+  `<step>: <reason>` message; a syntax error's message ends with the line and column where the
+  statement stopped parsing.
 - `to_arrow()` reads the whole answer as a `pyarrow.Table`, with its schema. A result is read once;
   `to_reader()` reads it batch by batch instead, and `pyarrow.table(result)` takes it through the
   Arrow PyCapsule interface. `to_pylist()` is pyarrow's, turning the table into Python rows.
@@ -177,7 +179,7 @@ The package's [README](../python/README.md), which is also its PyPI description,
   and the reason. A file of the package that is missing (`pip install --force-reinstall komira` puts it
   back), or a Mojo runtime of another build already loaded in the process (by Mojo code built with
   another Mojo version: one process holds one Mojo runtime), are the usual causes.
-- **`komira.KomiraError`** from `register_parquet`, `register_csv` or `register_json`: the file is
+- **`komira.BindError`** from `register_parquet`, `register_csv` or `register_json`: the file is
   missing, empty, or not a file of that format the engine can read, or (for CSV and JSON) the
   session already has a table of that name. The message is the engine's; for `register_parquet` it
   names the file by its absolute path, a relative path resolved against the working directory.
