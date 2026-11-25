@@ -1,13 +1,14 @@
-//! The play of a publish workflow (pypi.yml, the Linux wheel; pypi-macos-arm64.yml, the macOS arm64
-//! wheel), from the workflow's own text, for each event (a push to main, the daily schedule, a manual
+//! The play of the publish workflow (pypi.yml: the chain of the Linux wheel and the chain of the macOS
+//! arm64 wheel), from the workflow's own text, for each event (a push to main, the daily schedule, a manual
 //! run), each answer an index gives (`absent`, `same`, `differs`) and the failure of a job: which jobs run
 //! and which are skipped, which jobs upload to an index and which save the record of a version, what the
 //! verdict jobs (`result-...`) print, and whether the run ends green. Two more plays read the top of a
 //! file: whether a push of a set of paths starts a run at all (`on.push`'s `paths-ignore`), and which runs
 //! of a sequence of events, of one workflow or of several, start, wait or are replaced (`concurrency:`).
-//! It holds no case: pypi_workflow_run.zig plays pypi.yml (//:pypi_workflow_cases), and
-//! pypi_macos_workflow_run.zig plays pypi-macos-arm64.yml and the two workflows side by side
-//! (//:pypi_macos_workflow_cases).
+//! `chain` gives the run as one wheel's chain sees it (its jobs, the messages under its title, its uploads
+//! and records), so a case can hold one chain to what it does whatever the other does. It holds no
+//! case: pypi_workflow_run.zig plays the Linux chain and pypi_macos_jobs_run.zig the macOS chain and the
+//! two side by side (both //:pypi_workflow_cases).
 //!
 //! The play holds the part of GitHub's rules the files use and refuses anything else by name, so an
 //! edit the play cannot read fails the cases instead of passing them:
@@ -85,6 +86,31 @@ pub const Played = struct {
         return true;
     }
 };
+
+/// The jobs of the macOS arm64 wheel's chain end in this; every other job is the Linux wheel's.
+pub const MACOS_SUFFIX = "-macos-arm64";
+/// The title of the macOS chain's verdict messages; the Linux chain's is `pypi`.
+pub const MACOS_TITLE = "pypi-macos-arm64";
+
+pub const Chain = enum { linux, macos };
+
+fn ofChain(name: []const u8, which: Chain) bool {
+    return std.mem.endsWith(u8, name, MACOS_SUFFIX) == (which == .macos);
+}
+
+/// The run `p` as the chain `which` sees it: its own jobs, the messages under its own title, and the
+/// uploads and records of its own jobs, in order. The view's `green()` is that chain's verdict alone.
+pub fn chain(ar: std.mem.Allocator, p: Played, which: Chain) !Played {
+    var jobs = std.ArrayList(Done).empty;
+    for (p.jobs) |d| if (ofChain(d.name, which)) try jobs.append(ar, d);
+    var messages = std.ArrayList(Message).empty;
+    for (p.messages) |m| if (std.mem.eql(u8, m.title, MACOS_TITLE) == (which == .macos)) try messages.append(ar, m);
+    var uploads = std.ArrayList([]const u8).empty;
+    for (p.uploads) |u| if (ofChain(u, which)) try uploads.append(ar, u);
+    var records = std.ArrayList([]const u8).empty;
+    for (p.records) |r| if (ofChain(r, which)) try records.append(ar, r);
+    return .{ .jobs = try jobs.toOwnedSlice(ar), .messages = try messages.toOwnedSlice(ar), .uploads = try uploads.toOwnedSlice(ar), .records = try records.toOwnedSlice(ar) };
+}
 
 fn unreadable(comptime fmt: []const u8, args: anytype) error{Unreadable} {
     std.debug.print("the play cannot read the workflow: " ++ fmt ++ "\n", args);

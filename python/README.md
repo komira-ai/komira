@@ -219,7 +219,7 @@ version) and on macOS arm64. Everything else is read from it:
 - `//python:supported_pythons[linux-x86_64]` and `[macos-arm64]`, the exact
   versions as JSON lists, from which `pypi_smoke matrix` writes the job matrix
   of the wheel's user test and of the index smoke (in pypi.yml, and in
-  pypi-macos-arm64.yml for the macOS wheel): one job per version. `//python/smoke:supported_pythons_lists` holds both
+  the macOS jobs of the same file for the macOS wheel): one job per version. `//python/smoke:supported_pythons_lists` holds both
   lists to the versions it writes out.
 
 Adding a minor is a line in `pythons.bzl` and its interpreter's pin in
@@ -357,7 +357,7 @@ which is `libkomira.dylib` and, in `lib/`, the three Mojo runtime libraries
 (`libAsyncRTRuntimeGlobals.dylib`, `libKGENCompilerRTShared.dylib`,
 `libMSupportGlobals.dylib`) and no native owner libraries. It is tagged
 `py3-none-macosx_11_0_arm64`. It is
-built and tested only in its release workflow (`.github/workflows/pypi-macos-arm64.yml`),
+built and tested only in the macOS jobs of `.github/workflows/pypi.yml`,
 never in a pull request, and a run publishes it only from main. After the upload, a GitHub-hosted macOS runner installs it from the
 index and runs the smoke test.
 
