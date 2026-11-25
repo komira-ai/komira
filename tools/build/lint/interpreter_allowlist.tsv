@@ -51,6 +51,7 @@ python/tests/test_beside_modular.py	the Python package's tests: the installed wh
 python/tests/test_cpu.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_installed.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
 python/tests/test_load.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_memory_limit.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_minor.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_ops_expr.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_ops_no_sql.py	the Python package's tests: the SDK surface is tested in Python
@@ -79,6 +80,7 @@ python/tests/test_credentials_lib.py	the Python package's tests: the SDK surface
 python/tests/test_errors.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_iceberg.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_runtime.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_session_options.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_upgrade.py	the Python package's tests: the wheel upgraded from its previous release is tested in Python, by the interpreter it is installed for
 python/tests/test_variants.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_register_text.py	the Python package's tests: the SDK surface is tested in Python
