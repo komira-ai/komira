@@ -208,9 +208,13 @@ action in flight at once, each with its own `Error:` line holding
 the same command once more, when every failure in the output is such a cut:
 each failed action (`Action failed:`) or test (`✗ Fail:`) has that line among
 buck2's own lines before its output, no test timed out or was fatal, and no
-other error stands outside them. A log that mixes a real failure with cuts, a
-test whose output only quotes the phrase, and a subcommand other than build,
-test or bxl are never run again. The first output is kept beside the log as
+other error stands outside them. A test whose run was cut before it started
+gets buck2's lines as its output instead: an empty stdout, and a stderr of only
+`Remote Execution Error on Execute with digest ...` with that line right after
+it. That output, with nothing else in it but empty lines around the two, is a
+cut too. A log that mixes a real failure with cuts, a test whose output quotes
+the phrase among output of its own, and a subcommand other than build, test or
+bxl are never run again. The first output is kept beside the log as
 `buck2-farm.first.log`, the job summary gets one line saying the step ran
 again after a cut connection, and the second run is final: when it is cut too,
 the step fails saying so. There is never a third run. The release workflows'
@@ -1241,7 +1245,7 @@ and make no network request; the live indexes are reached only by a run of this 
    the quickstart runs with `python -I` in a directory holding only the example and its data file: it
    must exit 0 and print what `python/examples/quickstart.expected` says, compared exactly, with `<version>`
    replaced by the version and `<abi_version>` by the ABI version of the `--abi-table` file
-   (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.7` is 1007). A failed step names the command, its exit
+   (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.8` is 1008). A failed step names the command, its exit
    status and the last lines of its stderr.
 
 The user test of the wheel file is the first gate: `testpypi` `needs` `wheel-user-test`, so a wheel that does

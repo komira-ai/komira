@@ -31,6 +31,11 @@
  * or after its last check, so either outcome is accepted and each is checked
  * whole.
  *
+ * And it runs plans through komira_plan_stream: a WirePlanEnvelope it encodes
+ * by hand (a scan of a Parquet file, its schema the bytes komira_parquet_schema
+ * answers), run on a context with no table registered, answers what
+ * komira_sql_stream answers for the same file.
+ *
  * Exit 0 only if every check holds; each failure prints one line. */
 #include <dlfcn.h>
 #include <pthread.h>
@@ -75,6 +80,7 @@ DECLARE(komira_run_free);
 DECLARE(komira_run_cancel);
 DECLARE(komira_run_progress);
 DECLARE(komira_sql_stream_run);
+DECLARE(komira_plan_stream);
 
 static int bind_all(void *lib) {
     int missing = 0;
@@ -110,6 +116,7 @@ static int bind_all(void *lib) {
     BIND(komira_run_cancel);
     BIND(komira_run_progress);
     BIND(komira_sql_stream_run);
+    BIND(komira_plan_stream);
 #undef BIND
     return missing;
 }
@@ -769,6 +776,10 @@ static void options_cases(void) {
     CHECK(p_komira_ctx_new_with_options(0, INT64_MIN) == NULL);
 }
 
+/* The plan cases of komira_plan_stream, in a file of their own so that each
+   file stays under 1000 lines. */
+#include "plan_cases.h"
+
 int main(void) {
     void *lib = dlopen("./libkomira.so", RTLD_NOW);
     if (lib == NULL) {
@@ -883,5 +894,6 @@ int main(void) {
     sql_stream_cases();
     text_source_cases();
     options_cases();
+    plan_stream_cases();
     return failures == 0 ? 0 : 1;
 }
