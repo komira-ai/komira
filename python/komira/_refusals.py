@@ -10,7 +10,7 @@ listed here (docs/design/dataframe_surface.md, section 5).
 
 from __future__ import annotations
 
-__all__ = ["FRAME", "MODULE", "SERIES", "refused"]
+__all__ = ["FRAME", "GROUPBY", "MODULE", "SERIES", "refused"]
 
 
 def _rows(*rows: tuple[tuple[str, ...], str]) -> dict[str, str]:
@@ -79,6 +79,16 @@ SERIES = _BOTH | _rows(
         ("cat", "sparse"),
         "the .{name} accessor is not supported: komira has no categorical or sparse dtype",
     ),
+)
+
+GROUPBY = _rows(
+    (("first", "last", "nth", "cumcount"), ".{name}() is not supported yet; use min() or max() of an ordered key"),
+    (("filter",), "GroupBy.filter() is not supported yet; aggregate, then filter the result"),
+    (
+        ("ngroups", "groups", "indices", "get_group"),
+        ".{name} needs a query to run; aggregate with .size() and materialize()",
+    ),
+    (("ohlc", "resample"), ".{name}() is not supported: komira has no time index"),
 )
 
 MODULE = _rows(

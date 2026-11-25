@@ -76,6 +76,7 @@ def main(args):
         "BindError",
         "CredentialsError",
         "DataFrame",
+        "GroupBy",
         "KomiraError",
         "LibraryLoadError",
         "MemoryLimitError",
