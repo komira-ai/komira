@@ -4,8 +4,9 @@ libkomira: a frame over a Parquet scan whose schema is made here, on a session
 stand-in that records the plan bytes it is given. Checked:
 
 - the plan each verb builds, by equality with a hand-built node tree: the
-  CASE `fillna` puts over each filled column (the literal of the column's
-  type, cast for int32 and float32), the filter of `dropna` (any and all,
+  expression `fillna` puts over each filled column (a CASE, computed in
+  int64 or float64 and cast back for an int32 or float32 column, and boolean
+  logic with no CASE for a bool column), the filter of `dropna` (any and all,
   subset), the projection of `rename`, `add_prefix` and `add_suffix`, the
   casts of `astype`, and the TOPN by the reversed keys under the sort of
   `tail`;
@@ -103,8 +104,21 @@ def present(name, dtype):
 
 
 def filled(name, dtype, fill):
-    """The column `name` with `fill` where it holds no value."""
-    return When(((present(name, dtype), ColRef(name)),), fill)
+    """The column `name` with the literal `fill` where it holds no value: a
+    CASE, computed in int64 or float64 for an int32 or float32 column and cast
+    back, since the engine's CASE gives int64, float64 or string; for a bool
+    column, `x IS NULL OR x = true` (True) or `x IS NOT NULL AND x = true`
+    (False)."""
+    column = ColRef(name)
+    if dtype == "bool":
+        is_true = Compare("eq", column, Lit(True))
+        if fill.value:
+            return BoolOp("or", Unary("is_null", column), is_true)
+        return BoolOp("and", Unary("is_not_null", column), is_true)
+    wide = {"int32": "int64", "float32": "float64"}.get(dtype)
+    if wide is None:
+        return When(((present(name, dtype), column),), fill)
+    return Cast(When(((present(name, dtype), Cast(column, wide)),), fill), dtype)
 
 
 def project(columns, replace=None, scan=SCAN):
@@ -121,7 +135,7 @@ def test_fillna_of_int_columns_fills_with_an_int_literal_cast_to_the_columns_wid
     got = env.df.fillna(0)
     expected = project(
         ("a", "n"),
-        {"a": filled("a", "int64", Lit(0)), "n": filled("n", "int32", Cast(Lit(0), "int32"))},
+        {"a": filled("a", "int64", Lit(0)), "n": filled("n", "int32", Lit(0))},
         env.scan,
     )
     assert got._plan == expected
@@ -136,7 +150,7 @@ def test_fillna_of_float_columns_tests_nan_and_fills_with_a_float_literal():
         ("x", "f"),
         {
             "x": filled("x", "float64", Lit(1.0)),
-            "f": filled("f", "float32", Cast(Lit(1.0), "float32")),
+            "f": filled("f", "float32", Lit(1.0)),
         },
         env.scan,
     )
@@ -162,7 +176,8 @@ def test_the_missing_test_of_a_float_column_is_not_null_and_not_nan_from_compari
     assert got.items[0][1].cases[0][0] == expected_x
     # A float32 column is compared as float64, and a column that is not a float only for NULL.
     f64 = Cast(ColRef("f"), "float64")
-    assert got.items[1][1].cases[0][0].right.left.left.left == Compare("gt", f64, MINUS_INF)
+    assert got.items[1][1].child.cases[0][0].right.left.left.left == Compare("gt", f64, MINUS_INF)
+    assert got.items[1][1].child.cases[0][1] == f64 and got.items[1][1].target == "float32"
     assert got.items[2][1] == ColRef("a")
     assert present("a", "int64") == Unary("is_not_null", ColRef("a"))
 
@@ -175,6 +190,20 @@ def test_fillna_of_bool_and_string_columns_by_a_dict_leaves_the_other_columns_al
     )
     assert got._plan == expected
     assert got.dtypes == df.dtypes
+
+
+def test_fillna_of_a_bool_column_is_boolean_logic_with_no_case():
+    df = Env().df
+    ok = ColRef("ok")
+    with_true = df.fillna({"ok": True})
+    assert with_true._plan == project(
+        COLS, {"ok": BoolOp("or", Unary("is_null", ok), Compare("eq", ok, Lit(True)))}
+    )
+    with_false = df.fillna({"ok": False})
+    assert with_false._plan == project(
+        COLS, {"ok": BoolOp("and", Unary("is_not_null", ok), Compare("eq", ok, Lit(True)))}
+    )
+    assert with_true.dtypes["ok"] == "bool" and with_false.dtypes["ok"] == "bool"
 
 
 def test_fillna_of_a_dict_names_unknown_columns_with_a_key_error():

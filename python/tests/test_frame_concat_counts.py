@@ -96,8 +96,21 @@ def present(name, dtype):
 
 
 def filled(name, dtype, fill):
-    """The column `name` with `fill` where it holds no value."""
-    return When(((present(name, dtype), ColRef(name)),), fill)
+    """The column `name` with the literal `fill` where it holds no value: a
+    CASE, computed in int64 or float64 for an int32 or float32 column and cast
+    back, since the engine's CASE gives int64, float64 or string; for a bool
+    column, `x IS NULL OR x = true` (True) or `x IS NOT NULL AND x = true`
+    (False)."""
+    column = ColRef(name)
+    if dtype == "bool":
+        is_true = Compare("eq", column, Lit(True))
+        if fill.value:
+            return BoolOp("or", Unary("is_null", column), is_true)
+        return BoolOp("and", Unary("is_not_null", column), is_true)
+    wide = {"int32": "int64", "float32": "float64"}.get(dtype)
+    if wide is None:
+        return When(((present(name, dtype), column),), fill)
+    return Cast(When(((present(name, dtype), Cast(column, wide)),), fill), dtype)
 
 
 def project(columns, replace=None, scan=SCAN):

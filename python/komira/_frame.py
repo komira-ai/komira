@@ -405,10 +405,7 @@ class DataFrame:
         items = tuple(
             (
                 name,
-                _ops.When(
-                    ((present(_ops.ColRef(name), dtypes[name]), _ops.ColRef(name)),),
-                    _verbs.fill_literal(name, dtypes[name], fills[name], scalar),
-                ),
+                _verbs.fill_column(name, dtypes[name], fills[name], scalar),
             )
             for name in columns
             if name in fills

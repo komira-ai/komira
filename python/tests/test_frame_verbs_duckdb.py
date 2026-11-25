@@ -51,7 +51,9 @@ below is a copy of its own, since a test file cannot import another.
 - the comparator is itself checked on plain lists: it refuses answers that
   differ in one cell, in row order for an ordered case, in a column name, in a
   type, in a row count, and in a float beyond its tolerance; it accepts rows
-  that only move within a tie group and NaN against NaN.
+  that only move within a tie group and NaN against NaN;
+- every case runs even when an earlier one fails, and the test then fails
+  naming each failing case and why.
 
     test_frame_verbs_duckdb.py --lib-dir <dir> --runtime-dir <dir>
 
@@ -276,20 +278,32 @@ def on(frame, step):
     return step(frame)
 
 
+# The cases that failed, each with why: every case runs, and main() fails
+# with the whole list at the end, so one run names every failing case.
+FAILED = []
+
+
 def run_cases(path, cases):
     con = duckdb_for(path)
     with komira.Session() as session:
         for case in cases:
-            want = duckdb_answer(con, case.sql)
-            assert bool(want[2]) != case.empty, "{}: DuckDB's answer has {} rows, not the {} the case expects".format(
-                case.name, len(want[2]), "no" if case.empty else "some"
-            )
-            got = komira_answer(session, path, case.program)
-            skip = set(case.untyped)
-            found = differences(got, want, case.order, skip)
-            assert found is None, "{}: komira's answer is not DuckDB's ({}); komira {}, DuckDB {}".format(
-                case.name, found, got, want
-            )
+            try:
+                check_case(con, session, path, case)
+            except (AssertionError, komira.KomiraError) as e:
+                FAILED.append("{}: {}: {}".format(case.name, type(e).__name__, e))
+
+
+def check_case(con, session, path, case):
+    want = duckdb_answer(con, case.sql)
+    assert bool(want[2]) != case.empty, "{}: DuckDB's answer has {} rows, not the {} the case expects".format(
+        case.name, len(want[2]), "no" if case.empty else "some"
+    )
+    got = komira_answer(session, path, case.program)
+    skip = set(case.untyped)
+    found = differences(got, want, case.order, skip)
+    assert found is None, "{}: komira's answer is not DuckDB's ({}); komira {}, DuckDB {}".format(
+        case.name, found, got, want
+    )
 
 
 def asc(name, nulls="LAST"):
@@ -1157,9 +1171,10 @@ def test_casts_and_regexes_the_engine_does_not_run_are_refused_at_the_terminal(p
                 frame.materialize().to_arrow()
             except komira.KomiraError as e:
                 # The engine's refusal: it names the step of the query that refused.
-                assert e.step is not None, "{}: refused with no engine step: {}".format(name, e)
+                if e.step is None:
+                    FAILED.append("{}: refused with no engine step: {}".format(name, e))
             else:
-                raise AssertionError("{}: the engine answered it; move it to the oracle cases".format(name))
+                FAILED.append("{}: the engine answered it; move it to the oracle cases".format(name))
 
 
 def test_the_file_has_nulls_nan_and_the_strings_and_times_the_cases_need(path):
@@ -1324,6 +1339,7 @@ def main(args):
         path = write_data(os.path.join(work, "frame.parquet"))
         for test in WITH_FILE:
             test(path)
+    assert not FAILED, "{} cases failed:\n".format(len(FAILED)) + "\n".join(FAILED)
     lists = (TYPES, FILLS, DROPS, RENAMES, CASTS, TAILS, CONCATS, COUNTS, STRS, DTS)
     print("frame verbs duckdb: {} cases".format(sum(len(c) for c in lists)))
 

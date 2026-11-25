@@ -1,10 +1,15 @@
 """The argument handling and literals of the pandas-shaped frame's `fillna`,
 `add_prefix`, `add_suffix` and `komira.concat` (komira/_frame.py calls these).
 
-- `fillna` puts a literal of the column's own type where a value is missing:
+- `fillna` puts a value of the column's own type where a value is missing:
   an int for an int32 or int64 column, an int or a float for a float32 or
   float64 one, a bool, a str; a value or column of another type is refused
-  by name rather than changing the column's type.
+  by name rather than changing the column's type. The engine's CASE gives
+  int64, float64 or string only, so an int64, float64 or string column is
+  `CASE WHEN present THEN x ELSE fill END`, an int32 or float32 one is that
+  CASE over the column widened to int64 or float64 and cast back, and a bool
+  one is no CASE: `x IS NULL OR x = true` fills with True and
+  `x IS NOT NULL AND x = true` with False.
 - `concat` checks, before it builds the union, that the frames are on one
   session and have the same column set, one type per column and the same
   nullability, so that the encoder's own refusal is never what a user reads.
@@ -16,12 +21,13 @@ from typing import TYPE_CHECKING
 
 from . import _groupby, _ops
 from ._errors import UnsupportedOperation
+from ._missing import present
 from ._series import Series, _fits
 
 if TYPE_CHECKING:
     from ._frame import DataFrame
 
-__all__ = ["check_label_axis", "concat_frames", "fill_literal", "no_series_fill"]
+__all__ = ["check_label_axis", "concat_frames", "fill_column", "fill_literal", "no_series_fill"]
 
 # What `fillna` fills, and with what: a literal of the column's own type.
 _FILL_TYPES = "int32, int64, float32, float64, bool and string"
@@ -47,7 +53,9 @@ def no_series_fill(value: object) -> None:
 
 def fill_literal(name: str, dtype: str, value: object, scalar: bool) -> _ops.Node:
     """The literal `fillna` puts where the column `name`, of type `dtype`, is
-    missing: `value` as a literal of that type, or the refusal."""
+    missing: `value` as a literal of the type the CASE computes in (int64 for
+    an int column, float64 for a float one, else the column's), or the
+    refusal."""
     if dtype not in _FILL_WITH:
         pick = ", or pass a dict to fill only the other columns" if scalar else ""
         raise UnsupportedOperation(
@@ -76,7 +84,7 @@ def fill_literal(name: str, dtype: str, value: object, scalar: bool) -> _ops.Nod
                 f"fillna() cannot fill the {dtype} column {name!r} with {value}: it is out of the range of "
                 f"{dtype}, so fill it with a value in range, or cast the column first with astype(){pick}"
             )
-        return _ops.Lit(value) if dtype == "int64" else _ops.Cast(_ops.Lit(value), "int32")
+        return _ops.Lit(value)
     if dtype in ("float32", "float64"):
         try:
             number = float(value)
@@ -85,8 +93,28 @@ def fill_literal(name: str, dtype: str, value: object, scalar: bool) -> _ops.Nod
                 f"fillna() cannot fill the {dtype} column {name!r} with an int that is too large for a float: "
                 f"fill it with a smaller value{pick}"
             ) from None
-        return _ops.Lit(number) if dtype == "float64" else _ops.Cast(_ops.Lit(number), "float32")
+        return _ops.Lit(number)
     return _ops.Lit(value)
+
+
+# The type the CASE of a narrower column is computed in.
+_WIDE = {"int32": "int64", "float32": "float64"}
+
+
+def fill_column(name: str, dtype: str, value: object, scalar: bool) -> _ops.Node:
+    """The column `name`, of type `dtype`, with `value` where it is missing,
+    as an expression of the column's type."""
+    fill = fill_literal(name, dtype, value, scalar)
+    column = _ops.ColRef(name)
+    if dtype == "bool":
+        is_true = _ops.Compare("eq", column, _ops.Lit(True))
+        if value:
+            return _ops.BoolOp("or", _ops.Unary("is_null", column), is_true)
+        return _ops.BoolOp("and", _ops.Unary("is_not_null", column), is_true)
+    wide = _WIDE.get(dtype)
+    if wide is None:
+        return _ops.When(((present(column, dtype), column),), fill)
+    return _ops.Cast(_ops.When(((present(column, dtype), _ops.Cast(column, wide)),), fill), dtype)
 
 
 def check_label_axis(axis: object, verb: str) -> None:
