@@ -66,11 +66,24 @@ _COPY_FILES = [
     "nulls_json.json",
     "grouped_json.json.gz",
     "typed_zstd_json.json.zst",
+    "times_default.parquet",
+    "times_csv.csv",
+    "times_json.json",
 ]
 
 _COPY_CASES = [f.split(".")[0] for f in _COPY_FILES]
 
+# The timestamp and integer cases read a Parquet file the pinned DuckDB
+# writes (tests/copy/times.sql says what it holds).
+sql_oracle(
+    name = "copy_times_input",
+    srcs = ["tests/copy/times.sql"],
+    outputs = ["times.parquet"],
+)
+
 _COPY_INPUTS = {f + ".csv": "tests/csv/" + f + ".csv" for f in ["typed", "nulls", "quoted"]}
+
+_COPY_INPUTS["times.parquet"] = ":copy_times_input[times.parquet]"
 
 # The program that runs each COPY line of a cases file through run_sql
 # (copy_runner/main.mojo says how).
@@ -786,21 +799,26 @@ _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".ts
 #   run_sql answers one BIGINT row `Count`; the file read back equals the query
 #   (a table, a query, an empty result, 130,000 rows in two row groups, every
 #   codec as the footer names it, a COPY over the file it reads, a relative
-#   path); an unknown extension, a URL, CREATE TABLE AS and a TIMESTAMP
-#   column are named refusals that touch no file; a missing
+#   path; timestamps of every unit, a zoned one, TINYINT and UBIGINT keep
+#   their types and values, and the footer carries each timestamp's unit);
+#   an unknown extension, a URL, CREATE TABLE AS, a TIME column and a
+#   TIMESTAMP_S value past the microsecond range are named refusals that
+#   touch no file; a missing
 #   directory, a directory at the path and an injected full disk leave no
 #   temporary file and the old file whole.
 # - test_run_sql_copy_text: COPY ... TO a local CSV or newline-delimited JSON
 #   file through run_sql writes the bytes DuckDB writes for the same rows
 #   (NULLs, quoting, the empty string, dates, decimals, doubles), with the
 #   format from the extension or FORMAT, gzip and zstd from the extension or
-#   COMPRESSION, an empty result as DuckDB writes it; lz4, a TIMESTAMP column
-#   and two columns of one name are named refusals that touch no file; a
+#   COMPRESSION, an empty result as DuckDB writes it, timestamps of every unit
+#   and narrow and unsigned integers; lz4, a TIME column and two columns of
+#   one name are named refusals that touch no file; a
 #   full disk leaves the old file and no temporary file.
 # - test_copy_text_encoding: the CSV and JSON encoders on batches of every
 #   type they write give DuckDB's bytes: each type and NULL, doubles across
 #   fixed and exponent notation, NaN and the infinities, FLOATs, dates
-#   before year 1 and after 9999, exact decimals, quoting and escaping;
+#   before year 1 and after 9999, timestamps of each unit, exact decimals,
+#   quoting and escaping;
 #   gzip and zstd decompress to their input; the writable types.
 # - test_run_sql_csv: read_csv through run_sql answers what the pinned DuckDB
 #   answers (the :csv_oracle action below) for each case of tests/csv/cases.sql:
