@@ -384,7 +384,8 @@ def test_a_pool_too_small_for_the_distinct_entries_is_refused_by_name() raises:
     fixed.resize_worker_state(1)
     assert_equal(
         _fixed_feed_error(fixed, 0, 0, _int_pair(0, 3)),
-        "pipeline_exec: the grouped aggregation sink of segment 0 was denied "
+        "MEMORY_BUDGET_EXCEEDED: pipeline_exec: the grouped aggregation sink"
+        " of segment 0 was denied "
         + String(entries)
         + " bytes of the segment's memory pool for its COUNT(DISTINCT) values"
         " (budget "
