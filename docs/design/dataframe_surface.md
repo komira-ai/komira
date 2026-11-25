@@ -3,10 +3,10 @@
 Status: design, partly built. The Python package is under [`python/komira/`](../../python/komira/), and
 its private layers of this surface are built: the plan node tree (`komira._ops`), the plan encoder
 (`komira._plan`), which writes a `komira.plan.v1.WirePlanEnvelope` with each node's output schema, the
-capture of a user function (`komira._capture`) and the UDF worker runtime (`komira._udf`). The public
-frames, the readers, `komira.pl` and the terminals are not built: the package exports `Session`,
-`Result`, the error classes, `__version__` and `abi_version` (`python/komira/__init__.py`), and no part
-of it calls `komira_plan_stream` yet. The verbs, the plan each one builds and
+capture of a user function (`komira._capture`) and the UDF worker runtime (`komira._udf`). The first
+part of the pandas-shaped skin is built too: its readers, subscripts, `assign`, `sort_values`, `head`,
+`materialize` and `explain` are in `python/komira/_frame.py` and `_series.py`, and `materialize` runs
+the plan through `komira_plan_stream`. `komira.pl` and the other verbs are not built. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
 
@@ -599,7 +599,7 @@ package design). D4 to D18 are this design's own.
 
 ## Where is the code?
 
-The code goes in `python/komira/`. The node tree (`komira/_ops/`) and the encoder (`komira/_plan/`) are
-built; the pandas-shaped skin and `komira/pl/` are not. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
+The code is in `python/komira/`: the node tree (`_ops/`), the encoder (`_plan/`) and the first part of
+the pandas-shaped skin (`_frame.py`, `_series.py`, `_refusals.py`); `komira/pl/` is not built yet. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
 `src/plan_expr/col_expr.mojo`. The wire format is in [src/plan_proto](../../src/plan_proto/plan.proto)
 and `src/plan_wire`.
