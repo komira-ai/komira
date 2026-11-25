@@ -4097,7 +4097,7 @@ def test_a_partition_by_with_deviating_null_placement_round_trips() raises:
     both directions, so a codec that dropped the list would render and
     re-derive a different node."""
     var pk: List[String] = [String("a")]
-    var ok: List[String] = [String("b"), String("c")]
+    var ok: List[String] = [String("b"), String("ts")]
     var desc: List[Bool] = [False, True]
     var nf: List[Bool] = [True, True]
     _assert_nulls_first_deviates(String("partition_by"), desc, nf)
@@ -4111,11 +4111,12 @@ def test_a_partition_by_with_deviating_null_placement_round_trips() raises:
 
 
 def test_a_partition_by_with_one_deviating_key_round_trips_the_full_list() raises:
-    """Only the second key deviates; the first sits on the derived default.
-    The whole per-key list is carried, so the default key stays default."""
+    """Only the second key deviates (DESC NULLS FIRST); the first sits on
+    the derived NULLS LAST. The whole per-key list is carried, so the default
+    key stays default."""
     var pk: List[String] = [String("a")]
-    var ok: List[String] = [String("b"), String("c")]
-    var desc: List[Bool] = [True, False]
+    var ok: List[String] = [String("b"), String("ts")]
+    var desc: List[Bool] = [False, True]
     var nf: List[Bool] = [False, True]
     _assert_nulls_first_deviates(String("partition_by"), desc, nf)
     _assert_round_trips(
