@@ -1,10 +1,15 @@
-//! Runs of pypi-macos-arm64.yml, the macOS arm64 wheel's publish workflow, played from its own text by
-//! pypi_workflow_play.zig (its header says which of GitHub's rules the play holds), and runs of it side by
-//! side with pypi.yml, the Linux wheel's: for each event and each answer of the indexes and the farm,
-//! which jobs run, which upload and which save a record, what the verdict jobs print and whether each
-//! workflow's run ends green; whether a push starts both or neither; and that the two workflows' runs
-//! never wait on, replace or cancel each other. Part of //:pypi_macos_workflow_cases
-//! (pypi_macos_workflow_test.zig imports this file).
+//! Runs of the macOS arm64 wheel's nine jobs of pypi.yml, played from the workflow's own text by
+//! pypi_workflow_play.zig (its header says which of GitHub's rules the play holds): for each event and
+//! each answer of the indexes and the farm, which jobs run, which upload and which save a record, what
+//! the verdict jobs print and whether the macOS chain ends green. Every play plays the whole file,
+//! nineteen jobs, and holds the macOS assertions on `chain(.., .macos)`, the run as the macOS wheel's
+//! chain sees it. The last cases play pypi.yml once for each pair of a Linux outcome and a macOS one and
+//! hold the two chains independent: each chain's verdict, uploads and records are its own whatever the
+//! other chain does, and the run is green exactly when both are. Part of //:pypi_workflow_cases
+//! (pypi_macos_jobs_test.zig imports this file). A macOS push is one run with the Linux push now (one
+//! workflow, one concurrency group): the queue of runs of that group is played in
+//! pypi_workflow_run.zig ("two pushes while a run is going ..."); it plays the triggers and the groups,
+//! which the two chains share, not the jobs of either.
 
 const std = @import("std");
 const t = std.testing;
@@ -13,11 +18,12 @@ const p_ = @import("pypi_workflow_play.zig");
 const End = p_.End;
 const Played = p_.Played;
 const Message = p_.Message;
-const play = p_.play;
+
+/// The run of the file as the macOS wheel's chain sees it.
+fn play(ar: std.mem.Allocator, text: []const u8, case: p_.Case) !Played {
+    return p_.chain(ar, try p_.play(ar, text, case), .macos);
+}
 const expanded = p_.expanded;
-const pushStarts = p_.pushStarts;
-const queueOf = p_.queueOf;
-const Arrival = p_.Arrival;
 const state = p_.state;
 const notice = p_.notice;
 const failure = p_.failure;
@@ -35,7 +41,7 @@ const MAC_BUILT = End{ .job = "build-macos-arm64", .outputs = &.{.{ "version", V
 /// the macOS build failed: today, the farm has no Mac that runs build actions
 const MAC_BUILD_FAILED = End{ .job = "build-macos-arm64", .result = "failure" };
 const MAC_PROMOTED = End{ .job = "promote-macos-arm64", .outputs = &.{ .{ "version", V }, .{ "skipped", "" } } };
-/// the Linux build and its TestPyPI answer, for the side-by-side plays
+/// the Linux build and promote, for the plays of both chains
 const BUILT = End{ .job = "build", .outputs = &.{.{ "version", V }} };
 const PROMOTED = End{ .job = "promote", .outputs = &.{ .{ "version", V }, .{ "skipped", "" } } };
 
@@ -55,7 +61,7 @@ test "a macOS push that builds the wheel uploads it to TestPyPI, smokes it and s
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const text = try reader.readMacosWorkflow(ar);
+    const text = try reader.readWorkflow(ar);
     const p = try play(ar, text, .{ .event = "push", .ends = &.{ MAC_BUILT, state("testpypi-macos-arm64", "absent") } });
     try expectPlayed(p, true, try all(ar, &PUSH_JOBS, "success"), &.{});
     try expectPlayed(p, true, try all(ar, &PROMOTE_JOBS, "skipped"), &.{});
@@ -70,7 +76,7 @@ test "a macOS push whose wheel is on TestPyPI already builds, uploads and record
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const text = try reader.readMacosWorkflow(ar);
+    const text = try reader.readWorkflow(ar);
     const p = try play(ar, text, .{ .event = "push", .ends = &.{MAC_NOTHING} });
     try expectPlayed(p, true, &.{ .{ "testpypi-macos-arm64", "skipped" }, .{ "testpypi-smoke-macos-arm64", "skipped" }, .{ "testpypi-passed-macos-arm64", "skipped" }, .{ "result-testpypi-macos-arm64", "success" } }, &.{MAC_ON_TESTPYPI});
     try expectUploads(p, &.{});
@@ -86,7 +92,7 @@ test "a failed macOS build or smoke ends the macOS run red, names the job and sa
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const text = try reader.readMacosWorkflow(ar);
+    const text = try reader.readWorkflow(ar);
     const b = try play(ar, text, .{ .event = "push", .ends = &.{MAC_BUILD_FAILED} });
     try expectPlayed(b, false, &.{ .{ "testpypi-macos-arm64", "skipped" }, .{ "result-testpypi-macos-arm64", "failure" } }, &.{MAC_BUILD_ERROR});
     try expectUploads(b, &.{});
@@ -103,7 +109,7 @@ test "the macOS promotion uploads the newest macOS version that passed, names it
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const text = try reader.readMacosWorkflow(ar);
+    const text = try reader.readWorkflow(ar);
     inline for (.{ "schedule", "workflow_dispatch" }) |event| {
         const q = try play(ar, text, .{ .event = event, .ends = &.{ MAC_PROMOTED, state("pypi-macos-arm64", "absent") } });
         try expectPlayed(q, true, try all(ar, &PROMOTE_JOBS, "success"), &.{});
@@ -135,30 +141,18 @@ test "the macOS push builds the macOS wheel for darwin-arm64 from the stamp; a r
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const text = try reader.readMacosWorkflow(ar);
+    const text = try reader.readWorkflow(ar);
     const stamp = "-c komira.package_stamp=<steps.stamp.outputs.build_number> -c komira.package_commit=<steps.stamp.outputs.source_commit> -c komira.package_timestamp_ms=<steps.stamp.outputs.timestamp_ms>";
     const lines = try expanded(ar, text, .{ .event = "push" }, "build-macos-arm64");
     try t.expect(reader.has(lines, "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 " ++ stamp ++ " //python:komira_wheel_macos_arm64[release] --out <runner.temp>/pypi-macos-arm64/built/komira.whl"));
     try t.expect(reader.has(lines, "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 " ++ stamp ++ " //python:wheel_install_test_macos_arm64"));
     try t.expect(reader.has(lines, "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 " ++ stamp ++ " //python:wheel_libs_macos_arm64 //python:wheel_same_macos_arm64"));
     try t.expectError(error.Unreadable, play(ar, try reader.inJob(ar, text, "build-macos-arm64", "    if: github.ref == 'refs/heads/main' && github.event_name == 'push'\n", "    if: github.ref == 'refs/heads/main' && (inputs.flavour || 'bundled') == 'bundled'\n"), .{ .event = "push", .ends = &.{MAC_NOTHING} }));
-    // a case for a job of pypi.yml is a job this workflow does not have
-    try t.expectError(error.Unreadable, play(ar, text, .{ .event = "push", .ends = &.{ MAC_NOTHING, BUILT } }));
 }
 
-// ---- the two workflows side by side ----------------------------------------------------------------
+// ---- the two chains in one run -----------------------------------------------------------------------
 
-/// The run of each workflow for one event: pypi.yml's with `linux` ends, pypi-macos-arm64.yml's with `macos`.
-const Two = struct { linux: Played, macos: Played };
-
-fn playBoth(ar: std.mem.Allocator, linux_text: []const u8, macos_text: []const u8, event: []const u8, linux: []const End, macos: []const End) !Two {
-    return .{
-        .linux = try play(ar, linux_text, .{ .event = event, .ends = linux }),
-        .macos = try play(ar, macos_text, .{ .event = event, .ends = macos }),
-    };
-}
-
-/// One way a chain's run can end: how its jobs end, and whether the run is then green.
+/// One way a chain's run can end: how its jobs end, and whether the chain is then green.
 const Outcome = struct { what: []const u8, ends: []const End, green: bool };
 
 const LINUX_PUSH = [_]Outcome{
@@ -186,109 +180,107 @@ const MACOS_PROMOTE = [_]Outcome{
     .{ .what = "the macOS PyPI smoke failed", .ends = &.{ MAC_PROMOTED, state("pypi-macos-arm64", "absent"), .{ .job = "pypi-smoke-macos-arm64", .result = "failure" } }, .green = false },
 };
 
-/// Plays every pair of a Linux and a macOS outcome of `event`: each workflow's run is green exactly
-/// when its own chain's outcome is, whatever the other's is.
-fn expectEachOwnVerdict(ar: std.mem.Allocator, linux_text: []const u8, macos_text: []const u8, event: []const u8, linux: []const Outcome, macos: []const Outcome) !void {
+fn joined(ar: std.mem.Allocator, a: []const End, b: []const End) ![]const End {
+    return std.mem.concat(ar, End, &.{ a, b });
+}
+
+fn sameMessages(a: []const Message, b: []const Message) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |x, y| {
+        if (!std.mem.eql(u8, x.kind, y.kind) or !std.mem.eql(u8, x.title, y.title) or !std.mem.eql(u8, x.text, y.text)) return false;
+    }
+    return true;
+}
+
+fn sameNames(a: []const []const u8, b: []const []const u8) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |x, y| {
+        if (!std.mem.eql(u8, x, y)) return false;
+    }
+    return true;
+}
+
+fn sameChain(a: Played, b: Played) bool {
+    return a.green() == b.green() and sameNames(a.uploads, b.uploads) and sameNames(a.records, b.records) and sameMessages(a.messages, b.messages);
+}
+
+/// Plays `text` once for every pair of a Linux and a macOS outcome of `event` and returns what is
+/// wrong with the first pair that breaks the independence of the chains, or null: the Linux view green
+/// exactly when the Linux outcome is, the macOS view exactly when the macOS outcome is, the whole run
+/// green exactly when both are, and each chain's uploads, records and messages the same as when the
+/// other chain ends in its first (successful) outcome.
+fn independence(ar: std.mem.Allocator, text: []const u8, event: []const u8, linux: []const Outcome, macos: []const Outcome) !?[]const u8 {
     for (linux) |l| {
         for (macos) |m| {
-            const two = try playBoth(ar, linux_text, macos_text, event, l.ends, m.ends);
-            if (two.linux.green() == l.green and two.macos.green() == m.green) continue;
-            const got_linux: []const u8 = if (two.linux.green()) "green" else "red";
-            const got_macos: []const u8 = if (two.macos.green()) "green" else "red";
-            std.debug.print("{s}, {s}: pypi.yml's run ended {s}, pypi-macos-arm64.yml's {s}\n", .{ l.what, m.what, got_linux, got_macos });
-            return error.WrongVerdict;
+            const whole = try p_.play(ar, text, .{ .event = event, .ends = try joined(ar, l.ends, m.ends) });
+            const lv = try p_.chain(ar, whole, .linux);
+            const mv = try p_.chain(ar, whole, .macos);
+            if (lv.green() != l.green) return try std.fmt.allocPrint(ar, "{s}, {s}: the Linux chain ended {s}", .{ l.what, m.what, if (lv.green()) "green" else "red" });
+            if (mv.green() != m.green) return try std.fmt.allocPrint(ar, "{s}, {s}: the macOS chain ended {s}", .{ l.what, m.what, if (mv.green()) "green" else "red" });
+            if (whole.green() != (l.green and m.green)) return try std.fmt.allocPrint(ar, "{s}, {s}: the run ended {s}", .{ l.what, m.what, if (whole.green()) "green" else "red" });
+            const alone_l = try p_.chain(ar, try p_.play(ar, text, .{ .event = event, .ends = try joined(ar, l.ends, macos[0].ends) }), .linux);
+            const alone_m = try p_.chain(ar, try p_.play(ar, text, .{ .event = event, .ends = try joined(ar, linux[0].ends, m.ends) }), .macos);
+            if (!sameChain(lv, alone_l)) return try std.fmt.allocPrint(ar, "{s}, {s}: the Linux chain's uploads, records or messages changed with the macOS outcome", .{ l.what, m.what });
+            if (!sameChain(mv, alone_m)) return try std.fmt.allocPrint(ar, "{s}, {s}: the macOS chain's uploads, records or messages changed with the Linux outcome", .{ l.what, m.what });
         }
     }
+    return null;
 }
 
-test "a push gives each wheel its own run: Linux green with the macOS build failing is one green run and one red; a Linux failure is red whatever macOS does" {
+fn expectIndependent(ar: std.mem.Allocator, text: []const u8, event: []const u8, linux: []const Outcome, macos: []const Outcome) !void {
+    if (try independence(ar, text, event, linux, macos)) |why| {
+        std.debug.print("{s} run: {s}\n", .{ event, why });
+        return error.Coupled;
+    }
+}
+
+test "a failure of one wheel's chain never changes the other's verdict, uploads, records or messages, for every pair of outcomes" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const linux = try reader.readWorkflow(ar);
-    const macos = try reader.readMacosWorkflow(ar);
-    // the case of today: the Linux chain passed, the macOS build failed for want of a Mac
-    const today = try playBoth(ar, linux, macos, "push", &.{ BUILT, state("testpypi", "absent") }, &.{MAC_BUILD_FAILED});
-    try expectPlayed(today.linux, true, try all(ar, &.{ "build", "wheel-user-test", "testpypi", "testpypi-smoke", "testpypi-passed", "result-testpypi" }, "success"), &.{});
-    try expectUploads(today.linux, &.{"testpypi"});
-    try expectRecords(today.linux, &.{"testpypi-passed"});
-    try expectPlayed(today.macos, false, &.{.{ "result-testpypi-macos-arm64", "failure" }}, &.{MAC_BUILD_ERROR});
-    // both green: two green runs
-    const both = try playBoth(ar, linux, macos, "push", &.{ BUILT, state("testpypi", "absent") }, &.{ MAC_BUILT, state("testpypi-macos-arm64", "absent") });
-    try t.expect(both.linux.green() and both.macos.green());
-    // every pair of outcomes, the push and the promotion
-    try expectEachOwnVerdict(ar, linux, macos, "push", &LINUX_PUSH, &MACOS_PUSH);
+    const text = try reader.readWorkflow(ar);
+    try expectIndependent(ar, text, "push", &LINUX_PUSH, &MACOS_PUSH);
     inline for (.{ "schedule", "workflow_dispatch" }) |event| {
-        try expectEachOwnVerdict(ar, linux, macos, event, &LINUX_PROMOTE, &MACOS_PROMOTE);
+        try expectIndependent(ar, text, event, &LINUX_PROMOTE, &MACOS_PROMOTE);
     }
 }
 
-test "the macOS jobs back in pypi.yml would make a merge whose Linux wheel passed a red pypi.yml run" {
+test "the Linux wheel passed and the macOS build failed: the Linux wheel is uploaded and recorded, the run is red, and the error is named under the macOS title" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const linux = try reader.readWorkflow(ar);
-    const macos = try reader.readMacosWorkflow(ar);
-    // pypi.yml with the macOS file's jobs appended: the one-file shape the macOS workflow replaces
-    const jobs_at = std.mem.indexOf(u8, macos, "\njobs:\n").? + "\njobs:\n".len;
-    const joined = try std.mem.concat(ar, u8, &.{ linux, "\n", macos[jobs_at..] });
-    const p = try play(ar, joined, .{ .event = "push", .ends = &.{ BUILT, state("testpypi", "absent"), MAC_BUILD_FAILED } });
-    try expectPlayed(p, false, &.{ .{ "result-testpypi", "success" }, .{ "result-testpypi-macos-arm64", "failure" } }, &.{MAC_BUILD_ERROR});
-    // the same answers played as the two files are: one green run and one red
-    try expectEachOwnVerdict(ar, linux, macos, "push", LINUX_PUSH[0..1], MACOS_PUSH[2..3]);
+    const text = try reader.readWorkflow(ar);
+    const whole = try p_.play(ar, text, .{ .event = "push", .ends = &.{ BUILT, state("testpypi", "absent"), MAC_BUILD_FAILED } });
+    const lv = try p_.chain(ar, whole, .linux);
+    try expectPlayed(lv, true, try all(ar, &.{ "build", "wheel-user-test", "testpypi", "testpypi-smoke", "testpypi-passed", "result-testpypi" }, "success"), &.{});
+    try expectUploads(lv, &.{"testpypi"});
+    try expectRecords(lv, &.{"testpypi-passed"});
+    const mv = try p_.chain(ar, whole, .macos);
+    try expectPlayed(mv, false, &.{.{ "result-testpypi-macos-arm64", "failure" }}, &.{MAC_BUILD_ERROR});
+    try expectUploads(mv, &.{});
+    try expectRecords(mv, &.{});
+    try t.expect(!whole.green());
+    // the Linux upload and record are in the whole run too, and the one error is the macOS one
+    try expectUploads(whole, &.{"testpypi"});
+    try expectRecords(whole, &.{"testpypi-passed"});
+    try expectPlayed(whole, false, &.{}, &.{MAC_BUILD_ERROR});
 }
 
-test "a push that starts one workflow starts the other, and one that changes no code starts neither" {
+test "a coupling of one chain to the other is caught by the pairs: a macOS upload that waits for the Linux build is skipped by its failure" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
-    const linux = try reader.readWorkflow(ar);
-    const macos = try reader.readMacosWorkflow(ar);
-    const pushes = [_][]const []const u8{
-        &.{ "docs/ci.md", "python/README.md", "AGENTS.md" },
-        &.{ "docs/ci.md", "src/engine/plan.mojo" },
-        &.{".github/workflows/pypi-macos-arm64.yml"},
-        &.{".github/workflows/pypi.yml"},
-        &.{"python/examples/quickstart.expected"},
-    };
-    const starts = [_]bool{ false, true, true, true, true };
-    for (pushes, starts) |paths, want| {
-        try t.expectEqual(want, try pushStarts(ar, linux, paths));
-        try t.expectEqual(want, try pushStarts(ar, macos, paths));
-    }
-}
-
-fn run(comptime name: []const u8, comptime event: []const u8, comptime file: usize) Arrival {
-    return .{ .run = name, .event = event, .file = file };
-}
-
-fn done(comptime name: []const u8) Arrival {
-    return .{ .run = name };
-}
-
-test "the two workflows' runs never wait on, replace or cancel each other; one shared group would" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const ar = arena.allocator();
-    const linux = try reader.readWorkflow(ar);
-    const macos = try reader.readMacosWorkflow(ar);
-    // two merges and a day: each workflow runs its first push and its promotion at once, and its second
-    // push when its own first one ends
-    const day = [_]Arrival{
-        run("linux-push-1", "push", 0),    run("macos-push-1", "push", 1),
-        run("linux-push-2", "push", 0),    run("macos-push-2", "push", 1),
-        run("linux-daily", "schedule", 0), run("macos-daily", "schedule", 1),
-        done("macos-push-1"),              done("linux-push-1"),
-    };
-    const q = try queueOf(ar, &.{ linux, macos }, &day);
-    try expectList("started", q.started, &.{ "linux-push-1", "macos-push-1", "linux-daily", "macos-daily", "macos-push-2", "linux-push-2" });
-    try expectList("cancelled", q.cancelled, &.{});
-    // the macOS workflow in pypi.yml's group: its push waits behind the Linux one, and each newer push of
-    // either replaces the other's waiting run
-    const shared = try reader.replaced(ar, macos, "  group: pypi-macos-arm64-${{", "  group: pypi-${{");
-    const s = try queueOf(ar, &.{ linux, shared }, day[0..4]);
-    try expectList("started", s.started, &.{"linux-push-1"});
-    try expectList("cancelled", s.cancelled, &.{ "macos-push-1", "linux-push-2" });
-    // a run of a workflow the case does not give is refused
-    try t.expectError(error.Unreadable, queueOf(ar, &.{linux}, &.{run("macos-push-1", "push", 1)}));
+    const text = try reader.readWorkflow(ar);
+    // the macOS upload also needs the Linux build: a Linux build failure skips the macOS upload
+    const macos_waits = try reader.inJob(ar, text, "testpypi-macos-arm64", "    needs: build-macos-arm64\n", "    needs: [build-macos-arm64, build]\n");
+    const linux_failed = [_]End{.{ .job = "build", .result = "failure" }};
+    const skipped = try p_.play(ar, macos_waits, .{ .event = "push", .ends = &(linux_failed ++ .{MAC_BUILT}) });
+    try t.expectEqualStrings("skipped", skipped.resultOf("testpypi-macos-arm64"));
+    const independent = try p_.play(ar, text, .{ .event = "push", .ends = &(linux_failed ++ .{MAC_BUILT}) });
+    try t.expectEqualStrings("success", independent.resultOf("testpypi-macos-arm64"));
+    // and the pairs refuse the edited file: the case that says how that upload ends names a skipped job
+    try t.expectError(error.Unreadable, independence(ar, macos_waits, "push", &LINUX_PUSH, &MACOS_PUSH));
+    // (a Linux job that needs a macOS job is refused by the text: release_macos_test.zig, checkPypiMacos)
+    // the unedited file passes the same pairs
+    try t.expect((try independence(ar, text, "push", &LINUX_PUSH, &MACOS_PUSH)) == null);
 }

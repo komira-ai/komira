@@ -1,6 +1,6 @@
-//! The cases of pypi.yml, the publish of the Python package's Linux wheel, //:pypi_workflow_cases: a
-//! `zig_test` run as a build action (the macOS wheel's workflow, pypi-macos-arm64.yml, is
-//! //:pypi_macos_workflow_cases). The workflow's own bytes are the subject (the zig_test's `data`, under
+//! The cases of pypi.yml, the publish of the Python package's two wheels, //:pypi_workflow_cases: a
+//! `zig_test` run as a build action (the cases of the macOS wheel's nine jobs are
+//! pypi_macos_jobs_test.zig's, imported below). The workflow's own bytes are the subject (the zig_test's `data`, under
 //! KOMIRA_TEST_WORK/workflows/pypi.yml, with release.yml beside it, whose push filter pypi.yml repeats).
 //! pypi_workflow_contract.zig's `check` reads the text and says why it breaks the contract, or null (its
 //! header says what the contract holds); each case here writes one defect into the real text and wants
@@ -148,19 +148,19 @@ test "the workflow permissions are empty and the concurrency is one group per ha
     try expectRefused(ar, x, try replaced(ar, text, c.NO_CANCEL ++ "\n", "  cancel-in-progress: true\n"), conc);
 }
 
-test "the job set is exactly the ten jobs of the Linux wheel, each once: a macOS job is refused" {
+test "the job set is exactly the nineteen jobs of the two wheels, each once, in order: an extra, renamed or misplaced job is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const x = try texts(ar);
     const text = x.pypi;
-    const jobs = "the jobs are not exactly the ten";
+    const jobs = c.FILE.jobs_why;
     try expectRefused(ar, x, try replaced(ar, text, "\n  result-pypi:\n", "\n  extra:\n    runs-on: ubuntu-24.04\n\n  result-pypi:\n"), jobs);
     try expectRefused(ar, x, try replaced(ar, text, "\n  result-pypi:\n", "\n  pypi:\n    runs-on: ubuntu-24.04\n\n  result-pypi:\n"), jobs);
     try expectRefused(ar, x, try replaced(ar, text, "\n  testpypi-passed:\n", "\n  testpypi-record:\n"), jobs);
     try expectRefused(ar, x, try replaced(ar, text, "\n  promote:\n", "\n  pick:\n"), jobs);
     try expectRefused(ar, x, try replaced(ar, text, "\n  wheel-user-test:\n", "\n  wheel-test:\n"), jobs);
-    // the macOS wheel's jobs are pypi-macos-arm64.yml's: one back in this file would put its verdict in this run
+    // a macOS job in the Linux half's place, and one renamed
     try expectRefused(ar, x, try replaced(ar, text, "\n  result-pypi:\n", "\n  build-macos-arm64:\n    runs-on: ubuntu-24.04\n\n  result-pypi:\n"), jobs);
     try expectRefused(ar, x, try replaced(ar, text, "\n  result-testpypi:\n", "\n  result-testpypi-macos-arm64:\n"), jobs);
 }
@@ -212,7 +212,7 @@ test "each job's needs, environment and runner are exact" {
     try expectRefused(ar, x, try inJob(ar, text, "testpypi-smoke", c.UBUNTU ++ "\n", c.MACOS ++ "\n"), "testpypi-smoke: runs-on");
 }
 
-test "id-token is held by the build job and the two upload jobs alone, each holding exactly what it needs" {
+test "among the Linux jobs, id-token is held by the build job and the two upload jobs alone, each holding exactly what it needs" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -238,7 +238,7 @@ test "id-token is held by the build job and the two upload jobs alone, each hold
     try expectRefused(ar, x, try inJob(ar, text, "result-testpypi", "    steps:\n", "    steps:\n      - name: id-token\n        run: echo x\n"), "id-token");
 }
 
-test "the farm, buck2 and a checkout are in the build job alone; the promotion builds nothing" {
+test "among the Linux jobs, the farm, buck2 and a checkout are in the build job alone; the promotion builds nothing" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -456,8 +456,9 @@ test "each verdict job prints exactly its steps, the notice already ... last" {
 }
 
 test {
-    // the contract, the cases that play a run of the file, and the contract of the user test job
+    // the contract, the cases that play a run of the file, the macOS jobs' cases, and the contract of the user test job
     _ = @import("pypi_workflow_contract.zig");
     _ = @import("pypi_workflow_run.zig");
+    _ = @import("pypi_macos_jobs_test.zig");
     _ = @import("wheel_user_test_job.zig");
 }

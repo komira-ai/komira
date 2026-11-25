@@ -1,10 +1,14 @@
 # Design: lowering a bound plan and running it, from SQL text to record batches
 
-Status: design, not built. **EXISTS** names code on `main`; everything marked **PROPOSED** is new. The new names (all
-absent from `main`): the packages `lowering` and `pipeline_exec`; the entry `lower`; `LoweringInputs`,
-`LoweredPlan` and `ParamTable`; the sink capability table (`sink_capability`) and the sink variant (`PipelineSink`); the pure leaf package that
-holds the host profile and morsel sizing (`host_profile`, §2.5); the driver entry `run_plan`; the refining source trait `GrainSourceImpl` (§3.3); `EngineContext` and `EngineOptions` in `sdk_exec`; the door `run_sql`; and the
-`read_parquet` footer reader (`ParquetFooters`). Nothing was built or run to write this document. Citations of code
+Status: built in the steps of §7.3; what a step left out is in its record there. **EXISTS** and **PROPOSED**, and the "State on `main`" column below, record
+`main` as it was when this document was written, before any of it was built. Every name it marked new is on `main` now:
+the packages `lowering` and `pipeline_exec`; the entry `lower`; `LoweringInputs`, `LoweredPlan` and `ParamTable`; the sink
+capability table (`sink_capability`) and the sink variant (`PipelineSink`); the pure leaf package that holds the host
+profile and morsel sizing (`host_profile`, §2.5); the driver entry `run_plan`; `EngineContext` and `EngineOptions` in
+`sdk_exec`; the door `run_sql`; and the `read_parquet` footer reader (`ParquetFooters`). The binder that §1 calls an open
+draft is `sql_binder.bind_statement` on `main`. The refining source trait `GrainSourceImpl` (§3.3) was not built; step
+9's record in §7.3 says why. Where this document and the code differ, the code is right
+([architecture.md](../architecture.md#engine)). Citations of code
 refer to `main`; citations of other designs name the doc and section.
 
 It builds on [plan models](plan_models.md) (§4.2 and decision D7: the pipeline model, lowering as a pure function) and
@@ -929,7 +933,8 @@ split at the line named in its row, not merged into a larger pull request.
 **What step 8 built, against the row above.** `StringGroupAggSink(..., composite=True)` in `pipeline_exec.sink_string_group_agg` serves `(SINK_AGG, COMPOSITE, COLUMNAR)`, over the per-worker tables and serial merge of slice 5, for any count of key columns from 2 (the same row serves `SELECT DISTINCT` over such columns). A STRING column is interned (one cell, content hash); every other column takes the cells of its fixed-width row; the cells are laid out column by column in one group-table row and compared by cells. The group hash mixes the string content hashes and the fixed cells in column order. The merge remaps string ids by value in worker order. `lowering` (`cut_aggregate._agg_triple`) picks the row when a key of two or more columns is not all dictionary-encoded strings, and `RealBuilder` builds it. Not built: the partitioned sink of D8 (the row has no dense class, and the merge is O(workers x groups) on one core as for slice 5), a 2-to-4 column limit (none is imposed), and a row-layout byte encoding of the key.
 
 The hand-built-plan harness of slice 2b gives a measured number at slice 3 (Q6) and slice 6 (Q1) before the binder
-exists; the end-to-end tests over SQL text come last only because the binder is another lane's open draft.
+exists; the end-to-end tests over SQL text come last only because the binder was another lane's open draft
+when this was written (it is `sql_binder.bind_statement` on `main` now).
 
 The binder's own slices are another lane's. This design needs `bind_statement` to produce a plan for Q1 and Q6; it
 does not need the binder's window, correlated-subquery or union arms.

@@ -4,8 +4,7 @@ Licensed under the Apache License, Version 2.0 (see LICENSE).
 This file records third-party material that text committed to this repository
 is derived from, the third-party code compiled into the native files of the
 Python wheel, and, in its last section, the third-party runtime that the
-bundled flavour of the wheel carries and its external flavour and the conda
-packages built from this repository depend on.
+wheel carries and the conda packages built from this repository depend on.
 Material that
 is only built or tested against (the C and C++ libraries of third_party/, the
 toolchains) is fetched from pinned archives at build time and is not
@@ -62,7 +61,7 @@ Third-party code inside the native files
 Four of the native owner libraries that libkomira links, and that the Linux
 wheel carries, hold third-party code compiled in (docs/design/wheel_licence_audit.md
 lists every native file of the wheel). The other native files are komira's own
-code, except the three Mojo runtime libraries the bundled flavour carries,
+code, except the three Mojo runtime libraries the wheel carries,
 which are Modular's (the last section). Redistributed here in binary form, with the notices their licenses
 require.
 
@@ -170,8 +169,8 @@ owner library: its libkomira.dylib links the C archives of its closure (the
 four libraries above among them) statically, so whatever of that third-party
 code it calls is inside libkomira.dylib, under the same notices.
 
-The Mojo runtime: Modular's libraries, carried in the bundled wheel
--------------------------------------------------------------------
+The Mojo runtime: Modular's libraries, carried in the wheel
+-----------------------------------------------------------
 
 komira's libraries, the shared library libkomira among them, are compiled
 by Modular's Mojo compiler and need the Mojo runtime libraries when they are
@@ -180,22 +179,13 @@ libMSupportGlobals; .so on Linux, .dylib on macOS). These libraries are
 Modular's, are not part of this repository, and are not covered by its
 Apache License grant.
 
-The Python wheel `komira` is built in two flavours (python/flavour.bzl), and a
-release publishes one of them.
-
-The bundled flavour carries these three files, unmodified, at
+The Python wheel `komira` carries these three files, unmodified, at
 `komira/_lib/lib/`: libKGENCompilerRTShared.so, libAsyncRTRuntimeGlobals.so
-and libMSupportGlobals.so, taken from the Mojo compiler package that compiled
+and libMSupportGlobals.so (.dylib in the macOS arm64 wheel), taken from the
+Mojo compiler package that compiled
 libkomira (Modular's conda package `mojo-compiler` 1.1.0, pinned by sha256 in
-tools/build/platforms/table.bzl). It carries no other file of Modular's.
-
-The external flavour carries none of them and no other file of Modular's. It
-declares a dependency on Modular's PyPI package `mojo-compiler` at the
-compiler version libkomira was built with, which the user's package installer
-fetches from PyPI under the licence that package declares, and it loads the
-three libraries from where that package installs them. Its
-License-Expression is `Apache-2.0`, and it carries LICENSE and this file
-only. The paragraph below is about the bundled flavour.
+tools/build/platforms/table.bzl). It carries no other file of Modular's and
+requires no distribution of Modular's.
 
 The licence those files are distributed under is the one their package
 states. That package's metadata declares `LicenseRef-Modular-Proprietary`,
@@ -205,7 +195,7 @@ components of Modular's software. Neither file, nor the three libraries,
 states the Apache License: Modular's statement that Mojo is licensed under
 the Apache License v2.0 with LLVM Exceptions is made for the source code it
 publishes, and the package of these binary files does not repeat it. The
-bundled wheel carries both files, unmodified, as `.dist-info/licenses/MODULAR_LICENSE`
+wheel carries both files, unmodified, as `.dist-info/licenses/MODULAR_LICENSE`
 and `.dist-info/licenses/MODULAR_THIRD_PARTY_NOTICES`, and its
 License-Expression is `Apache-2.0 AND LicenseRef-Modular-Proprietary`: komira's
 own files under the first, the three Mojo runtime libraries under the second.

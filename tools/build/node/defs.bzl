@@ -273,15 +273,20 @@ _node_test = rule(
 # ---- node_binding_test -------------------------------------------------------
 
 # `node_act binding-test` runs `node --test` over the staged test files and
-# requires a TAP summary of tests that ran, all passed, none skipped.
+# requires a TAP summary of tests that ran, all passed, none skipped; with
+# `covered_srcs`, also an lcov record of each, and 99% of their lines and of
+# their branches covered.
 
 def _node_binding_test_impl(ctx):
     dist = ctx.attrs.node[NodeDistInfo]
     where = str(ctx.label.raw_target())
     if len(ctx.attrs.srcs) == 0:
         fail("{}: srcs is empty: name the test files node --test runs".format(where))
-    root = _stage(ctx, where, ctx.attrs.srcs)
+    root = _stage(ctx, where, ctx.attrs.srcs + ctx.attrs.covered_srcs)
     out = ctx.actions.declare_output(ctx.label.name + ".pass")
+    covers = []
+    for s in ctx.attrs.covered_srcs:
+        covers += ["--cover", s.short_path]
     ctx.actions.run(
         cmd_args(
             ctx.attrs._node_act[RunInfo],
@@ -294,6 +299,7 @@ def _node_binding_test_impl(ctx):
             out.as_output(),
             "--dir",
             root,
+            covers,
             "--",
             [s.short_path for s in ctx.attrs.srcs],
         ),
@@ -304,8 +310,9 @@ def _node_binding_test_impl(ctx):
 
 _node_binding_test = rule(
     impl = _node_binding_test_impl,
-    doc = "Runs the test files `srcs` (`.mjs`/`.js` using `node:test`, or `.mts`, whose types the pinned node strips) with the pinned `node --test` as a build action; the output (`<name>.pass`) exists only if node exited 0 and its TAP summary reports tests that all passed with none skipped or todo. `data` ({dest: source}, a build output allowed, a built `.node` addon for one) is staged at `dest` and the closure of the npm packages in `deps` under `node_modules/<package>`.",
+    doc = "Runs the test files `srcs` (`.mjs`, `.js`, `.ts` or `.mts` using `node:test`; node strips a TypeScript file's types) with the pinned `node --test` as a build action; the output (`<name>.pass`) exists only if node exited 0 and its TAP summary reports tests that all passed with none skipped or todo. `covered_srcs` are the sources the tests import, staged at their package paths beside them and measured: every one must be loaded, and their lines and branches together must each be at least 99% covered. `data` ({dest: source}, a build output allowed, a built `.node` addon for one) is staged at `dest` and the closure of the npm packages in `deps` under `node_modules/<package>`.",
     attrs = {
+        "covered_srcs": attrs.list(attrs.source(), default = []),
         "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "deps": attrs.list(attrs.dep(providers = [NpmPackageInfo]), default = []),
         "node": attrs.exec_dep(providers = [NodeDistInfo], default = "komira//third_party/node:node"),
