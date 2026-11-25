@@ -430,7 +430,7 @@ test "tls false said outright is the default's buckconfig" {
 test "grpc-keepalive-timeout-secs is written as given, its bounds 1 and 839 included, and 600 said outright is the default's buckconfig" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
-    for ([_][]const u8{ "1", "60", "839" }) |secs| {
+    for ([_][]const u8{ "1", "9", "10", "60", "99", "100", "799", "800", "839" }) |secs| {
         const line = try std.fmt.allocPrint(arena.allocator(), "grpc_keepalive_timeout_secs = {s}\n", .{secs});
         const want = try std.mem.replaceOwned(u8, arena.allocator(), LINUX_ONLY, "grpc_keepalive_timeout_secs = 600\n", line);
         try expectWritten(&.{.{ .name = "grpc-keepalive-timeout-secs", .value = secs }}, want);
@@ -594,7 +594,7 @@ test "an empty required input is refused by name" {
 test "a PING timeout that is no whole number of seconds from 1 to 839 is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
-    for ([_][]const u8{ "", "0", "000", "0600", "840", "841", "999", "1000", "99999999999999999999", "-5", "+5", "600s", "6e2", "1.5", " 600", "600 " }) |bad| {
+    for ([_][]const u8{ "", "0", "000", "0600", "840", "841", "849", "850", "900", "999", "1000", "99999999999999999999", "-5", "+5", "600s", "6e2", "1.5", " 600", "600 " }) |bad| {
         const msg = try std.fmt.allocPrint(arena.allocator(), "grpc-keepalive-timeout-secs is '{s}', not a whole number of seconds from 1 to 839", .{bad});
         try expectRefused(&.{.{ .name = "grpc-keepalive-timeout-secs", .value = bad }}, msg);
     }

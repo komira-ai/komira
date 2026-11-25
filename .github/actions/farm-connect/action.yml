@@ -187,13 +187,13 @@ runs:
           esac
           [ -f "$TLS_CA_CERTS" ] && [ -r "$TLS_CA_CERTS" ] || refuse "tls-ca-certs is not a readable file on this runner"
         fi
-        # At most three digits and no leading zero, so the comparison below never
-        # overflows and never reads the value as octal. Under 840 s, the keepalive
-        # limit the farm's server is to be given, so the client never outwaits it.
+        # 1 to 839 with no leading zero, matched as text (no arithmetic on an
+        # unchecked value): under 840 s, the keepalive limit the farm's server is
+        # to be given, so the client never outwaits it.
         case "$KEEPALIVE_TIMEOUT" in
-          ''|0*|*[!0-9]*|????*) refuse "grpc-keepalive-timeout-secs is '$KEEPALIVE_TIMEOUT', not a whole number of seconds from 1 to 839" ;;
+          [1-9] | [1-9][0-9] | [1-7][0-9][0-9] | 8[0-3][0-9]) ;;
+          *) refuse "grpc-keepalive-timeout-secs is '$KEEPALIVE_TIMEOUT', not a whole number of seconds from 1 to 839" ;;
         esac
-        [ "$KEEPALIVE_TIMEOUT" -lt 840 ] || refuse "grpc-keepalive-timeout-secs is '$KEEPALIVE_TIMEOUT', not a whole number of seconds from 1 to 839"
 
     - name: join the tailnet
       uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
