@@ -427,8 +427,10 @@ class DataFrame:
         """The rows where every one of the `subset` columns (all columns when
         None) holds a value, `how="any"`, the default; or where at least one
         does, `how="all"`. A value is not NULL, and in a float column not NaN.
-        Builds one filter, none for an empty subset. `ignore_index` is
-        accepted and does nothing, since a frame has no index."""
+        Builds one filter. An empty subset keeps every row under
+        `how="any"`, with no node, and no row under `how="all"`, as pandas
+        does. `ignore_index` is accepted and does nothing, since a frame has
+        no index."""
         if inplace is not False:
             raise UnsupportedOperation(
                 "dropna(inplace=True) changes the frame in place, and komira frames do not change: "
