@@ -79,6 +79,7 @@ def main(args):
         "GroupBy",
         "KomiraError",
         "LibraryLoadError",
+        "MemoryLimitError",
         "ParseError",
         "Result",
         "Series",
