@@ -203,7 +203,9 @@ of one name are refused, since the grouping names its columns, and so is a
 column named as one of the helper columns (`#set_side`, `#set_lo`, `#set_hi`),
 which only a file's column can be.
 
-`sql.sql_position` says where a text stopped parsing. `tokenize(sql, starts)`
+`sql.sql_position` holds `SqlPosition`, a place in a text, and imports nothing,
+so `sdk_exec.engine_plan` carries one without the front end;
+`sql.sql_parse_text` says where a text stopped parsing. `tokenize(sql, starts)`
 also appends each token's start byte (the EOF token's being the text's byte
 length); `parse_sql_text(text, stopped_at)` is `parse_sql(tokenize(text))` that,
 before it raises the tokenizer's or parser's own `Error` unchanged, sets

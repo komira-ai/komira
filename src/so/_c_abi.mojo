@@ -2,52 +2,11 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of so that holds
 # pointers.
 # =============================================================================
-# Twenty-three `@export abi("C")` functions are the library's whole surface today:
-#
-#   int32_t  komira_abi_version(void);
-#   void    *komira_ctx_new(void);
-#   void    *komira_ctx_new_with_options(int64_t worker_count,
-#                                        int64_t memory_budget_bytes);
-#   void     komira_ctx_free(void *ctx);
-#   int32_t  komira_last_error(void *ctx, uint8_t *out_buf, uint64_t out_cap,
-#                              uint64_t *out_len);
-#   int32_t  komira_last_error_code(void *ctx, uint8_t *out_buf,
-#                                   uint64_t out_cap, uint64_t *out_len);
-#   int32_t  komira_last_error_step(void *ctx);
-#   int32_t  komira_register_parquet(void *ctx, const char *name,
-#                                    const char *path);
-#   int32_t  komira_parquet_schema(void *ctx, const char *path,
-#                                  uint8_t *out_buf, uint64_t out_cap,
-#                                  uint64_t *out_len);
-#   int32_t  komira_csv_binding(void *ctx, const char *path, uint8_t delimiter,
-#                               int32_t has_header, int32_t all_varchar,
-#                               uint8_t *out_buf, uint64_t out_cap,
-#                               uint64_t *out_len);
-#   int32_t  komira_json_binding(void *ctx, const char *path,
-#                                uint8_t *out_buf, uint64_t out_cap,
-#                                uint64_t *out_len);
-#   int32_t  komira_plan_render(void *ctx, const uint8_t *plan,
-#                               uint64_t plan_len, uint8_t *out_buf,
-#                               uint64_t out_cap, uint64_t *out_len);
-#   int32_t  komira_credential_add(void *ctx, int32_t kind, const char *name,
-#                                  int32_t *out_id);
-#   int32_t  komira_credential_set(void *ctx, int32_t id, int32_t field,
-#                                  const uint8_t *value, uint64_t value_len);
-#   int32_t  komira_credential_seal(void *ctx, int32_t id, int32_t scope);
-#   int32_t  komira_sql_stream(void *ctx, const char *sql,
-#                              struct ArrowArrayStream *out);
-#   int32_t  komira_register_csv(void *ctx, const char *name,
-#                                const char *path, uint8_t delimiter,
-#                                int32_t has_header, int32_t all_varchar);
-#   int32_t  komira_register_json(void *ctx, const char *name,
-#                                 const char *path);
-#   void    *komira_run_new(void);
-#   void     komira_run_free(void *run);
-#   int32_t  komira_run_cancel(void *run);
-#   int32_t  komira_run_progress(void *run, uint64_t *out_done,
-#                                uint64_t *out_total);
-#   int32_t  komira_sql_stream_run(void *ctx, const char *sql, void *run,
-#                                  struct ArrowArrayStream *out);
+# Twenty-four `@export abi("C")` functions are the library's whole surface
+# today. Their C prototypes are komira.h, which `//src/so:komira_abi` makes
+# from the golden `abi/komira.tsv` (one row per export, with its types and
+# the version that added it) and builds only while this file's exports are
+# exactly the golden's rows; `src/so/README.md` lists them in prose.
 #
 # Session options. `komira_ctx_new_with_options` is `komira_ctx_new` with the
 # engine's worker count and memory budget (the bytes the sinks of one query
@@ -79,8 +38,8 @@
 # is the caller's: this library reads or writes it during the call and keeps
 # none.
 #
-# The Arrow stream. `komira_sql_stream` fills the caller's
-# `struct ArrowArrayStream` (allocated by the caller) only when it returns
+# The Arrow stream. `komira_sql_stream` and `komira_plan_stream` fill the caller's
+# `struct ArrowArrayStream` (allocated by the caller) only when the call returns
 # `KOMIRA_OK`; on any other status the struct is left exactly as the caller
 # wrote it. After `KOMIRA_OK` the caller owns the stream and calls its
 # `release` once, as the Arrow C Stream Interface requires; the stream owns
@@ -101,15 +60,18 @@
 #
 # The error's code and step (`komira_last_error_code`, `_step`; neither
 # clears): the code is `error_code` (session.mojo) of the reason, empty when
-# it has none; the step is the refusing step of an SQL run, `KOMIRA_STEP_BIND`
-# for a registration, binding or credential call, else `KOMIRA_STEP_NONE`.
+# it has none; the step is the refusing step of an SQL run or of a plan run
+# (`optimize`, `lower`, `execute`; a plan refused at `decode` has none),
+# `KOMIRA_STEP_BIND` for a registration, binding or credential call, else
+# `KOMIRA_STEP_NONE`.
 #
 # Strings and byte inputs. A `const char *` is NUL-terminated UTF-8 that the
 # caller keeps alive for the call; the library copies it before using it, and a
 # string that is not valid UTF-8 is refused as `KOMIRA_ERR_ENGINE` with a last
 # error, never used. The SQL text of `komira_sql_stream` is bounded like a
 # byte input: its NUL is looked for in at most `KOMIRA_MAX_INPUT_BYTES + 1`
-# bytes, and a text with none there is `KOMIRA_ERR_TOO_LARGE`. The plan bytes of `komira_plan_render` are
+# bytes, and a text with none there is `KOMIRA_ERR_TOO_LARGE`. The plan bytes
+# of `komira_plan_render` and `komira_plan_stream` are
 # `plan[0..plan_len]`, with the length an argument because a serialized plan
 # holds NUL bytes; they are copied in full before anything is decoded. The
 # length is bounded: above `KOMIRA_MAX_INPUT_BYTES` (64 MiB) the call returns
@@ -148,6 +110,7 @@ from so.sources import (
     json_binding_bytes,
     parquet_schema_bytes,
     plan_render_text,
+    plan_result,
     register_csv,
     register_json,
     register_parquet,
@@ -187,13 +150,13 @@ comptime _Len = UnsafePointer[UInt64, MutUntrackedOrigin]
 # SAFETY: `const char *`, a NUL-terminated string the caller keeps alive for
 # the call; it is copied into a `String` before any use.
 comptime CStr = UnsafePointer[UInt8, MutUntrackedOrigin]
-# SAFETY: `const uint8_t *`, the plan bytes of `komira_plan_render` and the
-# value of `komira_credential_set`: read for their length argument, copied in
-# full, never written.
+# SAFETY: `const uint8_t *`, the plan bytes of `komira_plan_render` and
+# `komira_plan_stream` and the value of `komira_credential_set`: read for their
+# length argument, copied in full, never written.
 comptime ConstBytes = UnsafePointer[UInt8, MutUntrackedOrigin]
 # SAFETY: `struct ArrowArrayStream *`, a stream the caller allocated: never
-# read, and written once, whole, only when `komira_sql_stream` returns
-# `KOMIRA_OK`; from then on the caller owns what it holds.
+# read, and written once, whole, only when `komira_sql_stream` or
+# `komira_plan_stream` returns `KOMIRA_OK`; from then on the caller owns what it holds.
 comptime ArrowStream = UnsafePointer[CArrowArrayStream, MutUntrackedOrigin]
 
 
@@ -996,4 +959,41 @@ def komira_register_json(ctx: Handle, name: CStr, path: CStr) abi("C") -> Int32:
         return KOMIRA_OK
     except e:
         session[].set_error(String(e), KOMIRA_STEP_BIND)
+        return KOMIRA_ERR_ENGINE
+
+
+@export
+def komira_plan_stream(
+    ctx: Handle, plan: ConstBytes, plan_len: UInt64, out_stream: ArrowStream
+) abi("C") -> Int32:
+    """Decode the `WirePlanEnvelope` `plan[0..plan_len]`, run it with no SQL
+    front end and fill `*out_stream` as `komira_sql_stream` does: -1 NULL
+    `ctx`, -2 NULL `plan` or `out_stream`, -5 `plan_len` above the bound (not
+    read), -3 a refusal `<step>: <reason>` (`decode`, `optimize`, `lower`,
+    `execute`)."""
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(plan) == 0 or Int(out_stream) == 0:
+        session[].set_error(String("komira_plan_stream: plan or out is NULL"))
+        return KOMIRA_ERR_NULL_ARG
+    if input_length_status(plan_len) != KOMIRA_OK:
+        session[].set_error(
+            String("komira_plan_stream: plan_len is above ")
+            + String(KOMIRA_MAX_INPUT_BYTES)
+            + String(" bytes")
+        )
+        return KOMIRA_ERR_TOO_LARGE
+    try:
+        var result = plan_result(session[], _copy_in(plan, plan_len))
+        # Nothing is written to `*out_stream` before this call, and it writes the
+        # stream whole once its own checks have passed.
+        build_record_batch_stream(result.take_batches(), result.take_schema(), out_stream)
+        return KOMIRA_OK
+    except e:
+        # `plan_result` records a refusal with its step and code; one with
+        # nothing held is the export check's, with neither.
+        if not session[].has_error():
+            session[].set_error(String(e))
         return KOMIRA_ERR_ENGINE

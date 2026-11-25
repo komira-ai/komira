@@ -619,7 +619,8 @@ _WINDOW_FRAMES_TEST_DATA.update({f + ".parquet": ":window_frames_oracle[" + f + 
 _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".tsv]" for c in _WINDOW_FRAMES_CASES})
 
 # The engine-execution layer of the SDK: twelve modules (ten leaves plus the
-# plan gate modules) and the engine context with its SQL door (see README.md). Each module's header says what it is for.
+# plan gate modules) and the engine context with its SQL door and its plan
+# door (see README.md). Each module's header says what it is for.
 #
 # The welded tests (each file's header says which defect it catches):
 # - test_plan_cache_full_sink_hash: the sink kind is part of the Layer 2 cache
@@ -735,6 +736,13 @@ _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".ts
 #   empty; the same budget without one is refused at execute; a query that
 #   fits creates nothing; an empty spill directory option and one that cannot
 #   be created are named refusals.
+# - test_run_plan: run_plan (engine_plan) of a plan bound from SQL on one
+#   context, run on a fresh context with no table registered: a filter with a
+#   sort and an aggregate answer what run_sql answers, directly and through
+#   plan_to_bytes and plan_from_bytes, and parse no statement on that context
+#   (statements_parsed stays 0, while run_sql counts one per statement, a
+#   refused one included); a plan over a file removed after binding is refused
+#   at lower naming the file, and the context runs on.
 # - test_run_sql_multifile: run_sql over a table of several Parquet files: a
 #   directory (files at any depth; a dot-name and a non-Parquet file skipped), a
 #   glob, a brace glob, read_parquet('<glob>') and FROM '<glob>' in SQL text; a
@@ -958,6 +966,7 @@ mojo_library(
         "tests/test_plan_validation_routes_ledger.mojo",
         "tests/test_resolved_cache_lru_eviction_stress.mojo",
         "tests/test_resolved_cache_pin_count.mojo",
+        "tests/test_run_plan.mojo",
         "tests/test_run_control.mojo",
         "tests/test_run_sql_copy_parquet.mojo",
         "tests/test_run_sql_copy_text.mojo",

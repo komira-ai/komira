@@ -22,7 +22,8 @@
 from std.testing import TestSuite, assert_equal
 
 from sql.sql_ast import STMT_QUERY
-from sql.sql_position import SqlPosition, parse_sql_text, position_of
+from sql.sql_parse_text import parse_sql_text
+from sql.sql_position import SqlPosition, position_of
 from sql.sql_token import TK_EOF, tokenize
 
 
