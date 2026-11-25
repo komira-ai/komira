@@ -51,6 +51,13 @@ python/komira/_udf/__init__.py	the Python UDF runtime: the zygote and its worker
 python/komira/_udf/wire.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
 python/komira/_udf/worker.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
 python/komira/_udf/zygote.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
+python/komira/pl/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/pl/_expr.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/pl/_frame.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/pl/_names.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/pl/_schema.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/pl/_scope.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/pl/_types.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/tests/test_analysis_job.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
 python/tests/test_beside_modular.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
 python/tests/test_cpu.py	the Python package's tests: the SDK surface is tested in Python
@@ -64,6 +71,9 @@ python/tests/test_ops_rel.py	the Python package's tests: the SDK surface is test
 python/tests/test_ops_rel_join.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_ops_verbs.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_ops_walk.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_pl_names.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_pl_oracle.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_pl_verbs.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_plan_expr.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_plan_expr_goldens.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_plan_no_sql.py	the Python package's tests: the SDK surface is tested in Python

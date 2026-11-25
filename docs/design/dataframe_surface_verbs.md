@@ -206,7 +206,7 @@ In the `read_*` message, `<format>` is the format of the name looked up (`parque
 | `to_pandas`, `to_polars`, `to_arrow`, `fetch` | `LazyFrame` | `a LazyFrame is a plan: run it with .collect(), then convert the Result` |
 | `with_column` | `LazyFrame` | `with_column() is not a polars verb; use with_columns()` |
 | `unpivot`, `explode` | `LazyFrame` | `.<name>() is not supported yet: the plan has no node for it` |
-| `cache`, `profile`, `collect_async` | `LazyFrame` | `.<name>() is not supported: komira runs a plan only at .collect() and the sink verbs` |
+| `cache`, `profile`, `collect_async` | `LazyFrame` | `.<name>() is not supported: komira runs a plan only at .collect()` |
 | `apply` | `Expr` | `Expr.apply is not a polars verb; use map_elements(f, return_dtype=...)` |
 | `sort_by` | `Expr` | `Expr.sort_by() is not supported: the plan carries no order inside an expression; sort the frame instead` |
 | `first`, `last` | `Expr`, `LazyGroupBy` | `.<name>() is not supported yet; use .min() or .max() of an ordered key` |
