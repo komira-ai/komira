@@ -8,11 +8,13 @@
 # log and to a file (tools/build/ci/assert_remote/farm_retry.zig): when the
 # run fails and every failure in its output is a cut connection to the farm
 # (buck2's `Error:` line with `RE channel error: code:` in each failed action
-# or test, and no other error), it runs the same command once more, keeps the
-# first output as buck2-farm.first.log beside the log, and says so in the job
-# summary; a second failure is final. The second line reads the file the last
-# run wrote. The caller builds the tool first and passes its path; the cases
-# of this file, run against recorded buck2 output, are //:buck2_farm_cases.
+# or test, for a test cut before it started in its stderr right after buck2's
+# `Remote Execution Error on Execute` line, and no other error), it runs the
+# same command once more, keeps the first output as buck2-farm.first.log
+# beside the log, and says so in the job summary; a second failure is final.
+# The second line reads the file the last run wrote. The caller builds the
+# tool first and passes its path; the cases of this file, run against recorded
+# buck2 output, are //:buck2_farm_cases.
 #
 # `args` is split on spaces by the shell and is never a shell script: a
 # pattern is `//path:name`, a list of them is `@file` or `$(cat file)` made

@@ -208,9 +208,13 @@ action in flight at once, each with its own `Error:` line holding
 the same command once more, when every failure in the output is such a cut:
 each failed action (`Action failed:`) or test (`✗ Fail:`) has that line among
 buck2's own lines before its output, no test timed out or was fatal, and no
-other error stands outside them. A log that mixes a real failure with cuts, a
-test whose output only quotes the phrase, and a subcommand other than build,
-test or bxl are never run again. The first output is kept beside the log as
+other error stands outside them. A test whose run was cut before it started
+gets buck2's lines as its output instead: an empty stdout, and a stderr of only
+`Remote Execution Error on Execute with digest ...` with that line right after
+it. That output, with nothing else in it but empty lines around the two, is a
+cut too. A log that mixes a real failure with cuts, a test whose output quotes
+the phrase among output of its own, and a subcommand other than build, test or
+bxl are never run again. The first output is kept beside the log as
 `buck2-farm.first.log`, the job summary gets one line saying the step ran
 again after a cut connection, and the second run is final: when it is cut too,
 the step fails saying so. There is never a third run. The release workflows'
