@@ -501,6 +501,20 @@ def test_sum_count_len_and_statistics_carry_polars_types():
     )
 
 
+def test_the_sum_of_a_boolean_counts_its_trues():
+    lf = frame().select(kpl.col("flag").sum(), (kpl.col("x") > 0).sum().alias("positive"))
+    ones = When(((Compare("eq", c("flag"), Lit(True)), Lit(1)),), Lit(0))
+    positive = When(((Compare("gt", c("x"), Lit(0)), Lit(1)),), Lit(0))
+
+    def zero(ref):
+        return When(((Unary("is_null", ref), Lit(0)),), ref)
+
+    assert lf._plan == Project(
+        Aggregate(T, (), (("__komira_agg_0", Agg("sum", (ones,))), ("__komira_agg_1", Agg("sum", (positive,))))),
+        (("flag", zero(c("__komira_agg_0"))), ("positive", zero(c("__komira_agg_1")))),
+    )
+
+
 def test_n_unique_counts_null_as_one_value():
     lf = frame().select(kpl.col("g").n_unique())
     distinct, rows, values = c("__komira_agg_0"), c("__komira_agg_1"), c("__komira_agg_2")

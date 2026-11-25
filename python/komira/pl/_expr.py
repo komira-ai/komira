@@ -41,6 +41,7 @@ from komira._ops import (
     When,
     between,
     is_in,
+    is_predicate,
 )
 
 from . import _names, _types
@@ -464,7 +465,15 @@ class Expr:
                 total = When(((Unary("is_null", ref), zero),), ref)
                 return _types.finish(total, work, final)
 
-            return Agg("sum", (arg if widen is None else Cast(arg, widen),)), finish
+            if found == "bool":
+                # The engine's SUM takes no boolean; polars' sum of one is the
+                # number of trues, the sum of 1 for each true (a null adds 0).
+                summed = When(((_is_true(arg), Lit(1)),), Lit(0))
+            elif widen is None:
+                summed = arg
+            else:
+                summed = Cast(arg, widen)
+            return Agg("sum", (summed,)), finish
 
         return self._aggregate("sum", build)
 
@@ -534,6 +543,12 @@ class Expr:
 
 def _same(ref: Node) -> Node:
     return ref
+
+
+def _is_true(node: Node) -> Node:
+    """A boolean value as a predicate: itself when it is one, else compared
+    with true."""
+    return node if is_predicate(node) else Compare("eq", node, Lit(True))
 
 
 def _pick(func: str, arg: Node, found: str):

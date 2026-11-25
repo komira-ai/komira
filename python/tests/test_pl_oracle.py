@@ -330,6 +330,7 @@ CASES = [
             P.col("f32").sum(),
             P.col("u16").sum(),
             P.col("flag").sum(),
+            (P.col("x") > 0).sum().alias("positive"),
             P.col("f32").mean().alias("f32_mean"),
             P.col("i32").mean().alias("i32_mean"),
             P.col("i32").min().alias("i32_min"),
