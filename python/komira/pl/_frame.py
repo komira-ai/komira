@@ -13,8 +13,8 @@ knows its frame's columns and their types, and a column the frame lacks is
 refused at the verb that names it.
 
 Row order (rules section 7): `sort` makes a frame ordered; `filter`, a
-projection that keeps every sort key, `rename`, `head`, `limit` and `slice`
-keep it ordered, and the plan's root stays a sort (a filter or projection goes
+projection that keeps every sort key, `rename`, `head`, `limit`, `slice` and
+`tail` keep it ordered, and the plan's root stays a sort (a filter or projection goes
 below it, a limit above it; over a limit, the sort is written again on top).
 Every other verb makes the frame unordered. `tail` and `slice` with an offset
 need an ordered frame.
@@ -417,7 +417,6 @@ class LazyFrame:
         return self._session._render_plan(self._encode())
 
 
-
 def _carried(order: tuple[SortKey, ...], plan, below) -> tuple[SortKey, ...] | None:
     """The sort keys of `order` as the columns of `plan`, a filter or a
     projection over `below`, or None when a key does not reach its output
@@ -448,7 +447,8 @@ def _project(plan, items: tuple) -> object:
 def _column_literal(node):
     """An int literal that is a column of its own is an Int32, as polars
     types `lit(1)`; any other node is itself."""
-    if isinstance(node, Lit) and isinstance(node.value, int) and not isinstance(node.value, bool):
+    v = node.value if isinstance(node, Lit) else None
+    if isinstance(v, int) and not isinstance(v, bool) and -(2**31) <= v < 2**31:
         return Cast(node, "int32")
     return node
 
@@ -569,8 +569,9 @@ def scan_csv(
 def concat(items, *, how: str = "vertical", rechunk: bool = False, parallel: bool = True) -> LazyFrame:
     """The rows of every frame, one frame after another (a UNION ALL). With
     `how="vertical"`, the one supported, every frame has the same column
-    names in the same order and the same types, which is checked here. The frames run on one
-    session. The result is unordered."""
+    names in the same order and the same types, which is checked here. The
+    frames run on one session. The concat of several frames is unordered;
+    of one frame, it is that frame."""
     if how != "vertical":
         raise UnsupportedOperation(f"concat: how={how!r} is not supported; only how='vertical' is")
     frames = list(items)

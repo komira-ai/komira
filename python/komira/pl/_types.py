@@ -29,8 +29,8 @@ from komira._ops import Cast, Lit, Node
 __all__ = [
     "DYN_FLOAT",
     "DYN_INT",
-    "INTEGERS",
     "NUM4",
+    "SMALL_INTEGERS",
     "STRINGS",
     "case_types",
     "finish",
@@ -43,7 +43,6 @@ DYN_FLOAT = "dyn_float"
 NULL = "null"
 
 NUM4 = frozenset({"int32", "int64", "float32", "float64"})
-INTEGERS = frozenset({"int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"})
 SMALL_INTEGERS = frozenset({"int8", "int16", "uint8", "uint16", "uint32"})
 STRINGS = frozenset({"string", "large_string", "string_view", "utf8_view"})
 
@@ -58,7 +57,8 @@ def kind(node: Node, scope) -> str:
         if isinstance(v, bool):
             return "bool"
         if isinstance(v, int):
-            return DYN_INT
+            # A literal outside Int32 is an Int64, as polars types it.
+            return DYN_INT if -(2**31) <= v < 2**31 else "int64"
         if isinstance(v, float):
             return DYN_FLOAT
     return scope.arrow_type(node)
@@ -74,6 +74,10 @@ def case_types(kinds: list[str], verb: str) -> tuple[str, str]:
     if all(k in STRINGS for k in present):
         return "string", "string"
     numeric = NUM4 | {DYN_INT, DYN_FLOAT}
+    if any(k in STRINGS for k in present) and all(k in STRINGS or k in numeric for k in present):
+        raise UnsupportedOperation(
+            f"{verb}: the branches mix strings and numbers; cast them to one type first"
+        )
     for k in present:
         if k not in numeric:
             raise UnsupportedOperation(

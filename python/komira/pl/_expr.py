@@ -31,7 +31,6 @@ from komira._ops import (
     Arith,
     BoolOp,
     Cast,
-    ColRef,
     Compare,
     Lit,
     MathFn,
@@ -78,7 +77,7 @@ _CAST_NUMERIC = frozenset(
         "float64",
     }
 )
-_CAST_ARROW = frozenset({"string", "binary", "date32"})
+_CAST_ARROW = frozenset({"string"})
 # pyarrow's `str()` of a type, where it is not the dtype name.
 _PYARROW_SPELLING = {"float": "float32", "double": "float64", "date32[day]": "date32"}
 
@@ -233,9 +232,9 @@ class Expr:
     def _lower(self, scope) -> Node:
         return self._lower_fn(scope)
 
-    def _unary(self, build, name: str | None = None) -> Expr:
+    def _unary(self, build) -> Expr:
         inner = self
-        return Expr(lambda s: build(inner._lower(s), s), self._name if name is None else name, self._has_agg)
+        return Expr(lambda s: build(inner._lower(s), s), self._name, self._has_agg)
 
     def _binary(self, other: object, build, *, reflected: bool = False) -> Expr:
         right = _as_expr(other)
@@ -638,7 +637,7 @@ def _checked_cast(node: Node, scope, target: str, try_cast: bool) -> Node:
     """`node` cast to `target`, when the engine runs that cast."""
     source = scope.arrow_type(node)
     numbers = _types.NUM4
-    if source == target:
+    if source == target or (source in _types.STRINGS and target == "string"):
         return node
     if source in numbers and target in numbers:
         if source.startswith("float") and target.startswith("int"):

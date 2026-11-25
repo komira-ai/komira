@@ -408,6 +408,8 @@ its number).
     - The integer sum type is INT64 (UINT64 for unsigned) through the DataFrame doors. A total outside
       it is an error naming the column ([query_semantics_rulings.md](query_semantics_rulings.md) §8.1,
       §8.2).
+    - The polars skin sums a UInt8, UInt16 or UInt32 column as INT64, since the engine coalesces no
+      UINT64, and refuses the sum of a UInt64 column by name.
 11. **Counting rows and counting values are different verbs.** Carried, except `groupby().count()` (D6).
     - `count(*)` is polars `kpl.len()` and `group_by(k).len()`, and pandas `size()` and
       `agg(n=("c", "size"))`.

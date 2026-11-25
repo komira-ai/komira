@@ -22,6 +22,7 @@ plan bytes they are given. For each verb and expression:
 """
 
 import os
+import tempfile
 
 import pyarrow as pa
 
@@ -54,7 +55,7 @@ from komira._ops import (
 from komira._plan._wire import arrow_id, field, pb
 
 # Never opened: the stand-in answers its schema.
-PATH = os.path.abspath("t.parquet")
+PATH = os.path.join(tempfile.gettempdir(), "t.parquet")
 TYPES = [
     ("id", "int64"),
     ("x", "int64"),
@@ -281,6 +282,11 @@ def test_a_literal_beside_an_int32_or_float32_column_takes_its_type():
     assert lowered(1 + kpl.col("i32")) == Arith("add", Cast(Lit(1), "int32"), c("i32"))
     assert lowered(kpl.col("f32") * 2.5) == Arith("mul", c("f32"), Cast(Lit(2.5), "float32"))
     assert lowered(kpl.col("x") - 1) == Arith("sub", c("x"), Lit(1))
+    assert lowered(kpl.col("i32") + 2**40) == Arith("add", c("i32"), Lit(2**40))
+    assert frame().with_columns(big=2**40, small=7)._plan.items[-2:] == (
+        ("big", Lit(2**40)),
+        ("small", Cast(Lit(7), "int32")),
+    )
 
 
 def test_operators_and_reflected_operators():
@@ -354,8 +360,8 @@ def test_expression_refusals():
     refused(
         lambda: kpl.col("x").cast("object"),
         UnsupportedOperation,
-        "cast: the dtype 'object' is not supported; use one of: binary, bool, date32, float32, "
-        "float64, int16, int32, int64, int8, string, uint16, uint32, uint64, uint8",
+        "cast: the dtype 'object' is not supported; use one of: bool, float32, float64, int16, "
+        "int32, int64, int8, string, uint16, uint32, uint64, uint8",
     )
     refused(lambda: kpl.col("x").cast(int), TypeError, "cast: a dtype is a pyarrow.DataType or a dtype name, not type")
     refused(
@@ -372,8 +378,7 @@ def test_expression_refusals():
     refused(
         lambda: frame().select(kpl.when(kpl.col("x") > 0).then(kpl.col("g")).otherwise(kpl.col("x"))),
         UnsupportedOperation,
-        "when: a branch of type string is not supported yet; the branches must be numbers "
-        "(int32, int64, float32, float64) or strings",
+        "when: the branches mix strings and numbers; cast them to one type first",
     )
     refused(
         lambda: frame().select(kpl.col("g").sum()),
@@ -673,6 +678,14 @@ def test_collect_hands_the_session_plan_bytes_with_no_sql_text():
     for word in (b"SELECT", b"FROM", b"WHERE", b"ORDER BY", b"LIMIT"):
         assert word not in plan, word
     assert [f.name for f in envelope.plan.output_schema.fields] == ["id"]
+
+
+def test_schema_names_dates_timestamps_and_string_layouts():
+    path = os.path.join(tempfile.gettempdir(), "typed.parquet")
+    session = StandIn({path: [("d", "date32"), ("ts", "timestamp_us"), ("big", "large_string")]})
+    lf = kpl.scan_parquet(path, session=session)
+    assert lf.schema == {"d": pa.date32(), "ts": pa.timestamp("us"), "big": pa.large_string()}
+    assert lf.select(kpl.col("big").cast("string"))._plan.items[0][1] == c("big")
 
 
 def test_schema_is_pyarrow_types_derived_without_running():

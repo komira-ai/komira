@@ -35,16 +35,6 @@ class Scope:
         self._taken = set(self._columns)
 
     @property
-    def verb(self) -> str:
-        """The verb the expression is lowered for, as messages name it."""
-        return self._verb
-
-    @property
-    def fields(self) -> tuple:
-        """The frame's output fields."""
-        return self._fields
-
-    @property
     def aggregates(self) -> tuple[tuple[str, Agg], ...]:
         """The aggregates gathered so far, each under its own name."""
         return tuple(self._aggregates or ())

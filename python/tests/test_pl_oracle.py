@@ -425,7 +425,7 @@ class Spy:
         return getattr(self.native, name)
 
 
-def test_collect_calls_the_plan_entry_and_never_sql(lib_dir, path):
+def test_collect_calls_the_plan_entry_and_never_sql(path):
     s = Session()
     spy = Spy(s._native)
     s._native = spy
@@ -491,7 +491,7 @@ def main(argv):
             test_ndjson_scan(session, work)
             test_default_session(path)
             test_collect_twice_runs_twice(session, path)
-            test_collect_calls_the_plan_entry_and_never_sql(lib_dir, path)
+            test_collect_calls_the_plan_entry_and_never_sql(path)
             test_explain_renders_the_plan(session, path)
             test_missing_file_is_refused_at_the_reader(session, work)
             test_two_sessions_never_meet(session, path)
