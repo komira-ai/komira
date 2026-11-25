@@ -801,11 +801,11 @@ _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".ts
 #   codec as the footer names it, a COPY over the file it reads, a relative
 #   path; timestamps of every unit, a zoned one, TINYINT and UBIGINT keep
 #   their types and values, and the footer carries each timestamp's unit);
-#   an unknown extension, a URL, CREATE TABLE AS, a TIME column and a
-#   TIMESTAMP_S value past the microsecond range are named refusals that
-#   touch no file; a missing
-#   directory, a directory at the path and an injected full disk leave no
-#   temporary file and the old file whole.
+#   an unknown extension, a URL, CREATE TABLE AS and a TIME column are named
+#   refusals that touch no file, and a TIMESTAMP_S value past the microsecond
+#   range fails with the writer's message naming the column, row and value;
+#   a missing directory, a directory at the path and an injected full disk
+#   leave no temporary file and the old file whole.
 # - test_run_sql_copy_text: COPY ... TO a local CSV or newline-delimited JSON
 #   file through run_sql writes the bytes DuckDB writes for the same rows
 #   (NULLs, quoting, the empty string, dates, decimals, doubles), with the
