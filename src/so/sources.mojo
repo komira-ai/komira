@@ -24,7 +24,8 @@ error. Nothing here holds a pointer.
 - `sql_result`: one SQL statement run on a session's engine, its answer as
   batches checked to cross the Arrow C Stream Interface; in its second form,
   under a caller's `RunControl`, whose cancel refuses the run with the named
-  error `QUERY_CANCELLED` (`is_cancelled_error`).
+  error `QUERY_CANCELLED` (`is_cancelled_error`). A refusal is
+  recorded on the session as its last error, with the step and the code.
 """
 
 from arrow.arrow_types import ArrowType
@@ -44,7 +45,7 @@ from sdk_exec.run_control import RunControl
 from sql.sql_ast import TvfOptions
 from sql.sql_tvf_bind import csv_tvf_schema, json_tvf_schema
 
-from .session import Session
+from .session import Session, step_number
 
 comptime TABLE_TYPE_UNSUPPORTED = "TABLE_TYPE_UNSUPPORTED"
 """Refusal of `register_arrow`: a column of a nested type (list, large list,
@@ -282,7 +283,8 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
     session, which may be dropped first.
 
     Raises:
-        Error `<step>: <reason>` when `run_sql` refuses, where `<step>` is the
+        Error `<step>: <reason>` when `run_sql` refuses (the session records
+        it too, with its step and code: `Session.set_refusal`), where `<step>` is the
         step that refused (`parse`, `bind`, `optimize`, `lower` or
         `execute`) and `<reason>` its own message, unchanged; and the export
         check's error naming the column when a result column cannot cross the
@@ -308,10 +310,16 @@ def sql_result(
     var outcome = run_sql(session.engine, sql, control)
     if outcome.refusal:
         ref refusal = outcome.refusal.value()
-        var text = refusal.step + ": " + refusal.reason
         if refusal.step == String(STEP_EXECUTE) and control.is_cancelled():
-            raise Error(String(QUERY_CANCELLED) + ": " + text)
-        raise Error(text)
+            # The cancel's name leads the text, so `error_code` reads it as
+            # the code; the step stays `execute`.
+            session.set_error(
+                String(QUERY_CANCELLED) + ": " + refusal.step + ": " + refusal.reason,
+                step_number(refusal.step),
+            )
+        else:
+            session.set_refusal(refusal.step, refusal.reason.copy())
+        raise Error(session.last_error())
     return arrow_result(outcome^)
 
 

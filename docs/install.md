@@ -5,7 +5,7 @@ program, what it does not do yet, and what to do when something goes wrong. To b
 instead, see [getting started](getting-started.md).
 
 > **This is an early release.** It registers Parquet files as tables and runs SQL over them, with each
-> answer read as pyarrow. A DataFrame API shaped like pandas and one shaped like polars come in later
+> answer read as pyarrow, or as a pandas or polars frame. A DataFrame API shaped like pandas and one shaped like polars come in later
 > releases of this same package. This page changes when they do.
 
 ## Install
@@ -44,7 +44,7 @@ Save this as `quickstart.py`:
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1007 is 1.7
+print(komira.abi_version())   # the engine's C ABI version: 1008 is 1.8
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
@@ -65,7 +65,7 @@ Then `python quickstart.py` prints:
 
 ```text
 0.1.1512
-1007
+1008
 [{'n': 1}]
 [{'n': 5, 'total': 152.5}]
 True
@@ -105,8 +105,6 @@ The package's [README](../python/README.md), which is also its PyPI description,
 
 ## What does not work yet
 
-- **pandas and polars results.** A result reads as pyarrow only; `pyarrow.Table.to_pandas()` and
-  `polars.from_arrow()` convert it.
 - **Cancelling a query.** A query cannot be interrupted while it runs: Ctrl-C during `Session.sql`
   raises `KeyboardInterrupt` when the engine has finished the query. The answer is freed, and the
   session runs the next query.

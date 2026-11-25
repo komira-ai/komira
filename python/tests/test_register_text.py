@@ -10,15 +10,17 @@ back with Session.sql as pyarrow:
 - each dialect argument is the one the file is read with: `delimiter="|"`
   reads people_pipe.csv as the same rows, `all_varchar=True` makes every
   column a string, and a table registered with `header=False` is refused when
-  a query reads it, naming `header=false`;
+  a query reads it, naming `header=false`: an UnsupportedOperation at step
+  "lower" with code LOWERING_UNCUTTABLE_NODE;
 - a `pathlib.Path`, a relative path and a path under `~` are resolved when
   the call is made, so the table still answers after the working directory
   and HOME change back;
-- a missing file and an empty file raise KomiraError, status -3, with the
-  engine's message (its last error), which names the absolute path, and
-  register nothing; a name the session already has, from either call or
-  from register_parquet and in another case, raises TABLE_ALREADY_REGISTERED
-  word for word, and the first table keeps answering with its rows;
+- a missing file and an empty file raise BindError (step "bind"), status
+  -3, with the engine's message (its last error), which names the absolute
+  path, and register nothing; a name the session already has, from either
+  call or from register_parquet and in another case, raises BindError with
+  code TABLE_ALREADY_REGISTERED word for word, and the first table keeps
+  answering with its rows;
 - arguments of the wrong type or value raise TypeError or ValueError before
   the library is called, and a closed session raises KomiraError.
 
@@ -82,10 +84,10 @@ def check_people_schema(schema):
 
 
 def check_refused(s, call, path):
-    """`call` registers nothing and raises the engine's KomiraError, which
-    names the absolute `path`."""
+    """`call` registers nothing and raises the engine's BindError, at step
+    "bind", which names the absolute `path`."""
     e = raised(call)
-    assert type(e) is KomiraError and e.status == -3, repr(e)
+    assert type(e) is komira.BindError and e.status == -3 and e.step == "bind", repr(e)
     assert str(e) == _native.load().last_error(s._ctx), str(e)
     assert "'{}'".format(path) in str(e), str(e)
 
@@ -140,7 +142,8 @@ def main(args):
         assert all(is_text(f.type) for f in t.schema), t.schema
         assert s.register_csv("headless", people, header=False) is None
         e = raised(lambda: s.sql("SELECT * FROM headless"))
-        assert type(e) is KomiraError and e.status == -3, repr(e)
+        assert type(e) is komira.UnsupportedOperation and e.status == -3, repr(e)
+        assert (e.step, e.code) == ("lower", "LOWERING_UNCUTTABLE_NODE"), (e.step, e.code)
         assert str(e).startswith("lower: ") and "header=false" in str(e), str(e)
 
         # A pathlib.Path, a relative path and a path under `~`, resolved
@@ -177,7 +180,8 @@ def main(args):
         check_refused(s, lambda: s.register_json("empty_j", empty), empty)
         for table in ("gone", "gone_j", "empty", "empty_j"):
             e = raised(lambda: s.sql("SELECT * FROM {}".format(table)))
-            assert type(e) is KomiraError and e.status == -3, (table, repr(e))
+            assert type(e) is komira.BindError and e.status == -3, (table, repr(e))
+            assert (e.step, e.code) == ("bind", "SQL_BIND_ERROR"), (table, e.step, e.code)
         # A refused call leaves the session usable: the name is still free.
         assert s.register_csv("gone", people) is None
         got, _ = rows(s, "gone")
@@ -197,7 +201,8 @@ def main(args):
             (lambda: s.register_json("pq", events), "pq"),
         ):
             e = raised(call)
-            assert type(e) is KomiraError and e.status == -3, repr(e)
+            assert type(e) is komira.BindError and e.status == -3, repr(e)
+            assert (e.step, e.code) == ("bind", "TABLE_ALREADY_REGISTERED"), (e.step, e.code)
             assert str(e) == taken.format(name), str(e)
         got, _ = rows(s, "people")
         assert got == PEOPLE, got
@@ -232,7 +237,7 @@ def main(args):
         assert type(e) is TypeError, repr(e)
         # None of them registered "t".
         e = raised(lambda: s.sql("SELECT * FROM t"))
-        assert type(e) is KomiraError and e.status == -3, repr(e)
+        assert type(e) is komira.BindError and e.status == -3, repr(e)
 
     # A closed session refuses both calls.
     assert s.closed

@@ -64,13 +64,16 @@ user's resolution from mopm, and does the unpacking itself:
   [`conda.zig`](conda.zig) reads a package the way a client does and refuses
   anything outside the paths mopm writes).
 
-**Offline, enforced.** With the production registry (mopm's default) and a closure
-the staged set holds entirely, mopm makes no request; with a closure member the set
-lacks it would fetch that member from the network, silently on a machine that has
-one. So `verify` runs mopm with `--registry` set to a loopback server of its own
+**Offline, enforced.** mopm takes every package the staged set holds from the set; with
+a closure member the set lacks it would fetch that member from the network, silently on
+a machine that has one. So `verify` runs mopm with `--registry` set to a loopback server of its own
 ([`offline.zig`](offline.zig)) that answers the one thing mopm asks of a registry that
 is not the production one (`GET /index/config.json`, which names the channel the lock
-records and lists index version 2) and refuses every other request with HTTP 403 (`the README e2e is offline`),
+records and lists index version 2); answers `GET` of the index file of each member the
+plan uploads with HTTP 404 `package_not_found`, as a registry that holds none of the
+package does, without remembering it (mopm 0.0.138 asks for a staged package's index too,
+to add the staged builds to a version the registry already holds, and with a 404 takes
+the package from the set alone); and refuses every other request with HTTP 403 (`the README e2e is offline`),
 remembering it. A package outside the set makes mopm ask for its index, so mopm fails
 with the refusal; and `verify` fails on any remembered refusal (phase `install`,
 naming each `GET <path>`) even when mopm exited 0, so a mopm that ignored the refusal
@@ -196,7 +199,9 @@ read; a link, a path outside `lib/`, a name twice, a deflated member, a missing 
 truncated payload and garbage are each refused), the plan and lock readers and writers
 (round trip; plan version, duplicate, action, namespace and url refusals; lock version and un-namespaced row refusals with their exact messages; a namespaced row's file name and import name), the command line, the
 source root the compile gets, and the offline registry (it serves its configuration,
-refuses and remembers every other request, and answers for no other host), and the native-library helpers
+answers the index of each staged member with 404 every time it is asked and never remembers it,
+refuses and remembers every other request, a member's index asked with another method, a trailing
+slash or a query included, and answers for no other host), and the native-library helpers
 ([`native.zig`](native.zig)): the shell words of mopm's printed command, the linker words in it, and the check that a plan
 names every library the packages declare (a longer name that merely ends the same way is not the library). It also holds `take`
 ([`take.zig`](take.zig)): every file and directory of a set copied at its path with its bytes and
@@ -213,7 +218,7 @@ line and what was and was not written.
 
 | scenario | what it proves |
 |---|---|
-| `passes` | a package whose examples compile and run passes: exit 0, the verdict, the marker, the package unpacked in the prefix |
+| `passes` | a package whose examples compile and run passes: exit 0, the verdict, the marker, the package unpacked in the prefix; the stand-in mopm asks the registry for the staged package's index, as mopm 0.0.138 does, and that request is not a refusal |
 | `dependency` | the plan lists a dependency first (names sorted the other way), holds each file's hash and README, and installing the dependent unpacks both |
 | `compile_error` | an example that does not compile fails the phase `compile`, naming its README line; the one before it passed; no marker |
 | `run_error` | an example that fails when run fails the phase `run`, naming its line; not `compile` |
@@ -222,7 +227,7 @@ line and what was and was not written.
 | `missing_file` | a member whose file is in the plan and not in the set (a lock made from the plan names it) fails `install` with verify's own message, before anything is unpacked |
 | `tampered_file` | a file that is not the one a lock pins (lock from the plan's hashes) is refused before it is unpacked |
 | `changed_file` | a file changed after staging (lock from the file) is not a file of the plan: refused |
-| `closure_member_missing` | a closure member the staged set lacks (a plan with a hole) is asked of the offline registry, which refuses: `install` fails naming the refused `GET /index/v2/...` and mopm's own "HTTP 403"; nothing is unpacked, no marker |
+| `closure_member_missing` | a closure member the staged set lacks (a plan with a hole) is asked of the offline registry, which refuses: `install` fails naming the refused `GET /index/v2/...` of that member alone (the staged `app`'s index, asked too, is not a refusal) and mopm's own "HTTP 403"; nothing is unpacked, no marker |
 | `swallowed_refusal` | a mopm that ignores the refusal and exits 0 with a lock that leaves the member out still fails `install`: the registry remembered the request |
 | `old_mopm`, `old_mopm_usage` | a mopm without `--overlay` (unknown option; the pinned release's usage text) fails `install` loudly, quoting mopm and naming `--overlay`; no marker |
 | `wrong_compiler` | a package built for another Mojo than the release's fails `install` |

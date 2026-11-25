@@ -16,7 +16,7 @@
 //!   mopm add komira-ai/<name> --registry prod      (once for each name of `add_set`)
 //!   mopm sync --registry prod --cache <work>/cache
 //!
-//! `mopm init` writes the Mojo of its own default (`mojo = "1.0.0"` for mopm 0.0.135), and `mopm add` resolves the
+//! `mopm init` writes the Mojo of its own default (`mojo = "1.0.0"` for mopm 0.0.138), and `mopm add` resolves the
 //! newest version built for the project's Mojo, so a project left at that default gets the last release built for
 //! it, not this one. A user who builds for this release's Mojo edits that line, and so does `add`: the version is
 //! the `<mojo>` of the build string `mojo<mojo>_<n>` of every file of `add_set` in the plan (`releaseMojo`), which

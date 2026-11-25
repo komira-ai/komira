@@ -781,16 +781,16 @@ read for identity A.
 ### 8. The C ABI
 
 The three credential rows **EXIST** at ABI 1.2, with session scope only, the eight kinds and the
-thirteen fields below; the other rows are **PROPOSED**, additive, in the first minor that lands
-them, in the golden's spelling ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)):
+thirteen fields below, and the two error rows **EXIST** at ABI 1.7; the other row is **PROPOSED**,
+additive, in the first minor that lands it, in the golden's spelling ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)):
 
 ```text
 komira_credential_add	Int32	Handle,Int32,CStr,UnsafePointer[Int32]	1.2
 komira_credential_set	Int32	Handle,Int32,Int32,ConstBytes,UInt64	1.2
 komira_credential_seal	Int32	Handle,Int32,Int32	1.2
 komira_add_sql_binding	Int32	Handle,CStr,ConstBytes,UInt64,Int32	1.x
-komira_last_error_code	Int32	Handle,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.x
-komira_last_error_step	Int32	Handle	1.x
+komira_last_error_code	Int32	Handle,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.7
+komira_last_error_step	Int32	Handle	1.7
 ```
 
 - **A credential is defined in three calls.** `komira_credential_add(ctx, kind, name, &id)` starts a
@@ -847,15 +847,19 @@ komira_last_error_step	Int32	Handle	1.x
     a staging call.
   - A source whose credential name has no sealed value, on the session or for the next call, is
     refused with `CREDENTIAL_UNBOUND`. `komira_plan_stream` does the same for a plan that names one.
-- **Errors come from two calls, not from parsing the text.**
+- **Errors come from two calls, not from parsing the text** (**EXISTS**, ABI 1.7).
   - `komira_last_error_code` returns the last error's named code (`BIND_NAME_UNBOUND`,
     `SQL_STATEMENT_UNSUPPORTED`), or the empty string when the refusal has none. It uses the
     two-call protocol of `komira_last_error`.
   - `komira_last_error_step` returns one of: `KOMIRA_STEP_NONE` 0, `_PARSE` 1, `_BIND` 2,
     `_OPTIMIZE` 3, `_LOWER` 4, `_EXECUTE` 5 (`constant` rows). A failure in a registration or a bind
     call reports `_BIND`.
-  - The library reads the code from the engine's `CODE: reason` convention in one place, which a test
-    holds. Bindings never parse the text.
+  - The library reads the code in one place, `error_code` in `src/so/session.mojo`, which a test
+    holds: the prose prefixes `SQL syntax error: `, `SQL bind error: ` and `SQL not supported: `
+    give `SQL_SYNTAX_ERROR`, `SQL_BIND_ERROR` and `SQL_NOT_SUPPORTED`; otherwise a leading
+    `CODE: ` of upper-case words joined by underscores is the code; otherwise the code is empty.
+    For `komira_sql_stream` the rule is applied to the text after the `<step>: ` prefix. Bindings
+    never parse the text.
   - A binding loaded against a library without these calls sets `code` and `step` to `None`.
 - **The ABI 1.1 conventions hold for every call:**
   - a NULL `ctx` returns -1, except that `komira_last_error_step` returns `KOMIRA_STEP_NONE`;
@@ -961,11 +965,12 @@ spelling that works.
 
 Every refusal in the table below has a named code, which the library returns through
 `komira_last_error_code` (decision 8). A refusal outside the table may have none, and then the code
-is the empty string. The Python classes below join the error-mapping pull request's
+is the empty string. The Python classes below are the package's
 table ([python_package.md decision 9](python_package.md#9-errors)).
 
-**PROPOSED** public names, each a `KomiraError`: `BindError`, `CredentialsError`, `StorageError`. The
-Iceberg design's `IcebergError` is a `KomiraError` too.
+`BindError`, `CredentialsError` and `StorageError` are public names now (**EXISTS**), each a
+`KomiraError`, as are `ParseError` and `UnsupportedOperation`. The Iceberg design's `IcebergError`
+is a `KomiraError` too and is **PROPOSED**.
 
 | code | when | step | Python class |
 |---|---|---|---|
@@ -1054,7 +1059,7 @@ var result = session.sql("SELECT * FROM sales_catalog.sales.orders LIMIT 10")
 
 | milestone | what |
 |---|---|
-| first release (local only) | `COPY ... TO` a local Parquet, CSV or JSON file: `Count`, the all-or-nothing write, extension inference. `SQL_STATEMENT_UNSUPPORTED` for the refused statements. `komira_last_error_code` and `_step` with the error-mapping pull request. Every remote URL refused with `STORAGE_URL_REFUSED` |
+| first release (local only) | `COPY ... TO` a local Parquet, CSV or JSON file: `Count`, the all-or-nothing write, extension inference. `SQL_STATEMENT_UNSUPPORTED` for the refused statements. `komira_last_error_code` and `_step` (built, ABI 1.7). Every remote URL refused with `STORAGE_URL_REFUSED` |
 | bindings | `komira_add_sql_binding`, `Session.add_sql_binding`, `sql` with call bindings and the unnamed source, `komira.files` for local files and frames, `BIND_NAME_UNBOUND`. `register_parquet` becomes `add_sql_binding` underneath, which fixes its re-registration defect |
 | object stores | credentials and their ABI calls; `WireSourceAccess` on the wire; the S3 read arm with `ambient`; `https://` reads; the S3 write arm; GCS and Azure reads |
 | catalogs | `komira.iceberg` and the Iceberg statements ([the Iceberg design](#reconciling-with-the-iceberg-design)) |

@@ -22,7 +22,8 @@ _ON = {p["suffix"]: ({"python": p["python"]} if p["suffix"] else {}) for p in PY
 # Stand-ins for libkomira (fake_libkomira.c). The loader must refuse a library
 # of ABI major 2, of major 0 (version 0.999), one reporting -1, one without
 # komira_abi_version and a 1.1 one without komira_register_parquet; it must
-# load a 1.0 one (without the calls 1.1 and 1.2 added) and a 1.3 one. `fake_modes`
+# load a 1.0 one (without the calls 1.1 and 1.2 added), a 1.3 one and a 1.7 one
+# (which also answers the last error's code and step). `fake_modes`
 # (version 1.1) answers each call by the mode its register_parquet name set,
 # for the error path, the two-call protocol and the output calls. `fake_store`
 # (version 1.2) records every credential call in its fake store.
@@ -76,6 +77,13 @@ c_shared_lib(
     srcs = ["fake_libkomira.c"],
     copts = ["-DFAKE_VERSION=1003"],
     out = "libkomira_fake_v1_3.so",
+)
+
+c_shared_lib(
+    name = "fake_v1_7",
+    srcs = ["fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=1007"],
+    out = "libkomira_fake_v1_7.so",
 )
 
 c_shared_lib(
@@ -152,6 +160,22 @@ _FAKE_RUNTIME = [
         "fake_v2/libkomira.so": ":fake_v2",
         "libkomira": LIBKOMIRA,
         "two_columns.parquet": PARQUET,
+    },
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# The exception table (komira/_errors.py) on the stand-ins of ABI 1.7 and 1.3:
+# each class by its code, the code before the step, the step when there is no
+# code, a plain KomiraError for the steps with no class, an unknown code, an
+# unknown step number and any status but -3, and no code or step from a 1.3
+# library.
+[python_binding_test(
+    name = "errors_test" + p["suffix"],
+    src = "test_errors.py",
+    data = {
+        "fake_v1_3/libkomira.so": ":fake_v1_3",
+        "fake_v1_7/libkomira.so": ":fake_v1_7",
     },
     deps = ["//python:komira"],
     **_ON[p["suffix"]]
@@ -439,6 +463,38 @@ c_shared_lib(
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# {suffix: the pandas and polars of that minor}: third_party/python pins
+# pandas for CPython 3.13 and 3.14 and polars for 3.13 only, and neither for
+# 3.11 or 3.12, whose to_arrow is held by sql_test above.
+_FRAMES = {
+    "": ["komira//third_party/python:pandas", "komira//third_party/python:polars"],
+    "_py314": ["komira//third_party/python:pandas-cp314"],
+}
+
+# Result.to_pandas and to_polars (test_result_frames.py): on the real library,
+# a pyarrow-written file of every integer width at its edges, nullable
+# integers, strings, a bool, decimals, timestamps (ms, us, ns, UTC) and a
+# date, equal to pyarrow's and polars' own conversion of the file's table,
+# values and dtypes; two million rows over sixteen row groups; no rows; read
+# once against every other terminal; read after the session closed. In new
+# interpreters: the library loaded before pyarrow, pandas or polars is
+# imported, then an engine string column converted (the load-order case);
+# and on the stand-in, every stream released once after a frame, a failing
+# batch raised as KomiraError, and a missing pandas or polars raised as an
+# ImportError that leaves the result unread. `--polars` where polars is
+# installed; elsewhere to_polars must raise that ImportError.
+[python_binding_test(
+    name = "result_frames_test" + p["suffix"],
+    src = "test_result_frames.py",
+    args = ["--polars"] if p["suffix"] == "" else [],
+    data = {
+        "fake_v1_3/libkomira.so": ":fake_v1_3",
+        "libkomira": LIBKOMIRA,
+    },
+    deps = ["//python:komira", _PYARROW[p["suffix"]]] + _FRAMES[p["suffix"]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS if p["suffix"] in _FRAMES]
+
 # The protobuf runtimes the tests below load the generated plan modules under:
 # 7.36.2, the range's upper edge (third_party/python's `:protobuf`), 5.29.1,
 # the lower edge, and 5.28.3, the release below the range
@@ -587,6 +643,23 @@ _CASES = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# The answer check of the TPC-H run through the installed wheel
+# (tpch_compare.py, python/BUCK `tpch_via_wheel_test`): equal answers agree in
+# any row order, and each kind of difference (an integer, a decimal's last
+# digit, a text, a double past the tolerance, a count, a declared type, a
+# mixed column) is named; the HUGEINT departure holds only for equal values;
+# the order check follows directions and NULL placement; a pyarrow table
+# becomes cells and an unsupported Arrow type is refused by name; recorded
+# answers read back as the signature of the rows they describe and a
+# malformed or foreign-format file is refused.
+[py_test(
+    name = "tpch_compare_test" + p["suffix"],
+    src = "test_tpch_compare.py",
+    srcs = ["tpch_compare.py"],
+    deps = [_PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # Capture of a user function (komira._capture), with no library: the `@udf`
 # decorator, return types, the read set (columns=, annotations and the
 # bytecode scan), the package or bundle code form, the deterministic bundle
@@ -680,6 +753,8 @@ _PLAN_EXPR_RUNTIMES = [
     "wheel_install_run.py",
     "test_installed.py",
     "test_analysis_job.py",
+    "test_tpch_installed.py",
+    "tpch_compare.py",
     "test_beside_modular.py",
     "test_upgrade.py",
     "fixtures/scan_plan.hex",

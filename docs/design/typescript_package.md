@@ -155,7 +155,7 @@ Fixed before this design, and not reopened here:
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.7, with twenty-two exports
+- **EXISTS** `libkomira` is at ABI 1.8, with twenty-four exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
   - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream.
     `komira_sql_stream_run` (1.6) runs it under a run handle that another thread cancels
@@ -165,7 +165,9 @@ Fixed before this design, and not reopened here:
     memory budget as arguments (0 is the host's own value).
   - `komira_register_csv` and `komira_register_json` (1.5) bind a CSV or newline-delimited JSON
     file to the session as a table that SQL reads by name.
-  - `komira_register_arrow_stream` (1.7) drains a host's Arrow C stream into a table held in
+  - `komira_last_error_code` and `komira_last_error_step` (1.7) answer the last error's named code and
+    the step that refused it. The addon does not bind them yet.
+  - `komira_register_arrow_stream` (1.8) drains a host's Arrow C stream into a table held in
     memory and registers it by name, replacing a table of that name; it releases the stream.
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).

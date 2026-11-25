@@ -1,15 +1,19 @@
 //! The registry the README e2e points mopm at, so that the install is offline by
 //! enforcement and not by assumption.
 //!
-//! `mopm add <package>@=<version> --overlay <staged set>` needs no request when the set
-//! holds the whole closure and the registry is the production one, whose channel mopm knows.
-//! Left to that default, a closure member the set lacks would be fetched from the network,
-//! silently, on a machine that has one. So `verify` runs mopm with `--registry <this one>`:
-//! a loopback server of its own that
+//! `mopm add <package>@=<version> --overlay <staged set>` takes every package the set holds
+//! from the set. Left to the production registry, a closure member the set lacks would be
+//! fetched from the network, silently, on a machine that has one. So `verify` runs mopm with
+//! `--registry <this one>`: a loopback server of its own that
 //!
 //!   * answers `GET /index/config.json`, the one thing mopm asks of a registry that is not the
 //!     production one (it names the channel the lock records), with a configuration whose
-//!     URLs are this server's, and
+//!     URLs are this server's;
+//!   * answers `GET` of the index file of each member the set uploads (`indexTarget`) with
+//!     HTTP 404 `package_not_found`, as a registry that holds no version of it does, and does
+//!     not remember it: mopm 0.0.138 asks the registry for the index of a staged package too,
+//!     to add the staged builds to a version the registry already holds, and with a 404 it
+//!     takes the package from the set alone (mopm's `spec/staged-set.md`, core/overlay.zig);
 //!   * refuses every other request with HTTP 403 and the contract's error body, and
 //!     remembers it.
 //!
@@ -33,14 +37,29 @@ pub const Registry = struct {
     mutex: std.Thread.Mutex = .{},
     /// `METHOD target` of each request refused, in the order received.
     refused_list: std.ArrayList([]const u8) = .empty,
+    /// The index file of each staged member (`indexTarget`), answered 404 and not remembered. Written by
+    /// `start` before the server's thread exists and never after, so the thread reads it without the mutex.
+    staged_targets: []const []const u8 = &.{},
     port: u16,
 
-    /// Starts serving on an unused port of 127.0.0.1. `stop` ends it.
-    pub fn start() !*Registry {
+    /// Starts serving on an unused port of 127.0.0.1. `stop` ends it. `staged` is the full names
+    /// (`<namespace>/<name>`) of the members the staged set uploads: the request for the index
+    /// file of each is answered and not remembered. The names are copied.
+    pub fn start(staged: []const []const u8) !*Registry {
+        const targets = try log_alloc.alloc([]const u8, staged.len);
+        var made: usize = 0;
+        errdefer {
+            for (targets[0..made]) |t| log_alloc.free(t);
+            log_alloc.free(targets);
+        }
+        for (staged, targets) |name, *t| {
+            t.* = try indexTarget(log_alloc, name);
+            made += 1;
+        }
         const addr = try std.net.Address.parseIp4("127.0.0.1", 0);
         const server = try addr.listen(.{ .reuse_address = true });
         const self = try log_alloc.create(Registry);
-        self.* = .{ .server = server, .port = server.listen_address.getPort() };
+        self.* = .{ .server = server, .port = server.listen_address.getPort(), .staged_targets = targets };
         self.thread = std.Thread.spawn(.{}, serve, .{self}) catch |e| {
             self.server.deinit();
             log_alloc.destroy(self);
@@ -70,6 +89,13 @@ pub const Registry = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         return a.dupe([]const u8, self.refused_list.items);
+    }
+
+    fn isStaged(self: *const Registry, target: []const u8) bool {
+        for (self.staged_targets) |t| {
+            if (std.mem.eql(u8, t, target)) return true;
+        }
+        return false;
     }
 
     fn remember(self: *Registry, method: []const u8, target: []const u8) void {
@@ -110,8 +136,12 @@ fn answer(self: *Registry, stream: std.net.Stream) void {
         reply(stream, "200 OK", body);
         return;
     }
+    if (std.mem.eql(u8, method, "GET") and self.isStaged(target)) {
+        reply(stream, "404 Not Found", "{\"error\":{\"code\":\"package_not_found\",\"message\":\"the README e2e's registry holds no version of a package the staged set uploads: the set is where it comes from\",\"hint\":\"take it from the staged set\"}}");
+        return;
+    }
     self.remember(method, target);
-    reply(stream, "403 Forbidden", "{\"error\":{\"code\":\"offline\",\"message\":\"the README e2e is offline: this registry serves its configuration and nothing else, so a package the staged set lacks cannot be fetched\",\"hint\":\"stage the package\"}}");
+    reply(stream, "403 Forbidden", "{\"error\":{\"code\":\"offline\",\"message\":\"the README e2e is offline: this registry serves its configuration and answers the index of each staged package with 404, and nothing else, so a package the staged set lacks cannot be fetched\",\"hint\":\"stage the package\"}}");
 }
 
 fn reply(stream: std.net.Stream, status: []const u8, body: []const u8) void {

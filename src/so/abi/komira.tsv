@@ -1,4 +1,4 @@
-version	1.7
+version	1.8
 # The C ABI of libkomira. One row per export: symbol, return type, argument types, the version that added it.
 # Types are Mojo's, origins dropped; see tools/build/mojo/abi_golden.bzl. Adding a row raises the minor version.
 # Changing or removing one raises the major version (status.mojo: ABI_MAJOR, ABI_MINOR).
@@ -7,6 +7,8 @@ komira_ctx_new	Handle	-	1.0
 komira_ctx_new_with_options	Handle	Int64,Int64	1.4
 komira_ctx_free	None	Handle	1.0
 komira_last_error	Int32	Handle,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.0
+komira_last_error_code	Int32	Handle,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.7
+komira_last_error_step	Int32	Handle	1.7
 komira_register_parquet	Int32	Handle,CStr,CStr	1.1
 komira_parquet_schema	Int32	Handle,CStr,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.1
 komira_csv_binding	Int32	Handle,CStr,UInt8,Int32,Int32,UnsafePointer[UInt8],UInt64,UnsafePointer[UInt64]	1.1
@@ -23,7 +25,7 @@ komira_run_free	None	Handle	1.6
 komira_run_cancel	Int32	Handle	1.6
 komira_run_progress	Int32	Handle,UnsafePointer[UInt64],UnsafePointer[UInt64]	1.6
 komira_sql_stream_run	Int32	Handle,CStr,Handle,ArrowStream	1.6
-komira_register_arrow_stream	Int32	Handle,CStr,ArrowStream	1.7
+komira_register_arrow_stream	Int32	Handle,CStr,ArrowStream	1.8
 # Status codes (status.mojo): zero is success, every failure is negative.
 constant	KOMIRA_OK	0	1.0
 constant	KOMIRA_ERR_NULL_CTX	-1	1.0
@@ -57,3 +59,10 @@ constant	KOMIRA_FIELD_CLIENT_ID	10	1.2
 constant	KOMIRA_FIELD_CLIENT_SECRET	11	1.2
 constant	KOMIRA_FIELD_SCOPE	12	1.2
 constant	KOMIRA_FIELD_TOKEN_URL	13	1.2
+# The step a refused call stopped at (status.mojo), what komira_last_error_step returns.
+constant	KOMIRA_STEP_NONE	0	1.7
+constant	KOMIRA_STEP_PARSE	1	1.7
+constant	KOMIRA_STEP_BIND	2	1.7
+constant	KOMIRA_STEP_OPTIMIZE	3	1.7
+constant	KOMIRA_STEP_LOWER	4	1.7
+constant	KOMIRA_STEP_EXECUTE	5	1.7
