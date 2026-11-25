@@ -909,9 +909,10 @@ reach one, so that it comes back as a status:
   allocated.
 - libzstd, libz and liblz4, which the codec packages open by soname at first
   use in an initializer that cannot raise, are opened first by a probe that
-  can, at the start of every call that can reach a codec (the register and
-  describe calls, `komira_sql_stream`, `komira_sql_stream_run` and
-  `komira_plan_stream`). A missing library is `compression: cannot load
+  can, at the start of every call that can reach a codec (the Parquet, CSV
+  and JSON register and describe calls, `komira_sql_stream`,
+  `komira_sql_stream_run` and `komira_plan_stream`;
+  `komira_register_arrow_stream` reads no file and is not probed). A missing library is `compression: cannot load
   <soname>: <the loader's error>`, not an abort in the middle of a query.
 
 `tests/c/abort_driver.c` sends each of these inputs from a C host, on its main
