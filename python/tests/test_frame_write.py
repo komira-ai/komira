@@ -364,7 +364,8 @@ def test_an_existing_destination_is_replaced(lib_dir):
         own = komira.read_parquet(mine, session=s)
         own[own["id"] > 3].to_parquet(mine)
         assert by_id(read_parquet_file(mine).to_pylist()) == rows_for([4, 5, 6])
-        assert sorted(os.listdir(p.work)) == ["mine.parquet", "out", "rows.parquet"], os.listdir(p.work)
+        # Each replacement left no temporary file beside its destination.
+        assert sorted(os.listdir(p.out)) == ["mine.parquet", "o.csv", "o.parquet"], os.listdir(p.out)
 
 
 def test_argument_refusals_leave_no_file(lib_dir):
