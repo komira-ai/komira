@@ -17,4 +17,4 @@ from .corpus import (
     query_text,
     run_sql_steps,
 )
-from .runner import E2eReport, check_case, check_corpus, compare_answer, open_session
+from .runner import E2eReport, check_case, check_corpus, compare_answer, has_resident_twin, open_session

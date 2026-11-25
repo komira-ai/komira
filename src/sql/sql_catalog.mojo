@@ -203,6 +203,17 @@ struct SqlCatalog(Copyable, Movable):
     def has(self, name: String) -> Bool:
         return self._find(name) >= 0
 
+    def remove(mut self, name: String) -> Bool:
+        """Drop the table registered under `name` (looked up as `has` looks
+        it up, without regard to case), whatever its kind; the other tables
+        keep their order. Returns whether one was registered. The UDFs are
+        not touched."""
+        var idx = self._find(name)
+        if idx < 0:
+            return False
+        _ = self._tables.pop(idx)
+        return True
+
     def schema_of(self, name: String) raises -> Schema:
         var idx = self._find(name)
         if idx < 0:
