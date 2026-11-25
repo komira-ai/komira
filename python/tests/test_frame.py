@@ -714,9 +714,12 @@ def test_a_name_in_no_table_gets_pythons_own_message():
     check_refused(env.df["a"], "nothing_here", "'Series' object has no attribute 'nothing_here'", "series")
     check_refused(env.df["a"], "count", "'Series' object has no attribute 'count'", "series")
     check_refused(env.df["a"], "_nothing_here", "'Series' object has no attribute '_nothing_here'", "series")
-    for name in ("_repr_html_", "_repr_mimebundle_", "_ipython_display_", "__array_interface__", "__array_struct__"):
+    for name in ("_repr_mimebundle_", "_ipython_display_", "__array_interface__", "__array_struct__"):
         assert not hasattr(env.df, name), name
         assert not hasattr(env.df["a"], name), name
+    # A frame's notebook display is its names and types (test_display.py); a
+    # Series has none.
+    assert not hasattr(env.df["a"], "_repr_html_")
 
 
 def test_a_column_is_not_an_attribute_and_a_column_named_count_is_reached_by_subscript():
@@ -903,13 +906,16 @@ def test_a_chain_of_verbs_reaches_the_session_only_as_plan_bytes():
         assert list(envelope.plan.sort.keys) == ["z", "b"]
 
 
-FRAME_MODULES = ("_frame.py", "_groupby.py", "_series.py", "_refusals.py")
+FRAME_MODULES = ("_frame.py", "_groupby.py", "_series.py", "_refusals.py", "_display.py")
 PRIVATE_SESSION = {"_plan_stream", "_plan_render", "_parquet_schema", "_csv_binding", "_json_binding"}
 ALLOWED_IMPORTS = {
     "__future__:annotations", "collections.abc:Callable", "types:ModuleType", "typing:TYPE_CHECKING",
     ".:_ops", ".:_refusals", ".:_plan", "._errors:UnsupportedOperation", "._series:Series", "._series:operand",
     "._session:Result", "._session:Session", "._session:_local_path", "._session:default_session",
     "._plan:_wire", ".plan.v1:plan_pb2", "._frame:DataFrame", "os", ".:_groupby", "._groupby:GroupBy",
+    # The notebook display (komira/_display.py): it escapes HTML and formats
+    # a result's rows with pyarrow, and reads no stream.
+    ".:_display", "html", "collections.abc:Sequence", "pyarrow", "pyarrow.compute",
 }
 
 

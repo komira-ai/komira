@@ -14,7 +14,8 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
 - The verbs are `df["x"]` (a `Series`), `df[["a", "b"]]` (a projection),
   `df[cond]` (a filter), `assign` and `df["x"] = ...` (computed columns),
   `sort_values` and `head`. Each derives the output schema now, as the engine
-  will, so `columns`, `dtypes` and `repr` run nothing and an unknown column is
+  will, so `columns`, `dtypes`, `repr` and the notebook display
+  (`_repr_html_`, the names and types) run nothing, and an unknown column is
   a `KeyError` at the verb that names it.
 - `groupby` gives a `GroupBy`, and `agg`, `sum`, `mean`, `median`, `std`,
   `var`, `min`, `max`, `count` and `nunique` reduce the whole frame to one
@@ -40,7 +41,7 @@ from collections.abc import Callable
 from types import ModuleType
 from typing import TYPE_CHECKING
 
-from . import _groupby, _ops, _refusals
+from . import _display, _groupby, _ops, _refusals
 from ._errors import UnsupportedOperation
 from ._groupby import GroupBy
 from ._series import Series, operand
@@ -118,6 +119,13 @@ class DataFrame:
     def __repr__(self) -> str:
         listed = ", ".join(f"{name}: {dtype}" for name, dtype in self.dtypes.items())
         return f"<komira.DataFrame {listed}>"
+
+    def _repr_html_(self) -> str:
+        """IPython's HTML display of the frame: its column names, each over
+        its type, and a line saying the frame has not run and
+        `.materialize()` runs it (komira/_display.py). It runs nothing and
+        shows no rows, since a frame is a plan."""
+        return _display.frame_html(self.dtypes)
 
     def __contains__(self, name: object) -> bool:
         """Whether `name` is a column, as `in` asks of a pandas frame; runs nothing."""

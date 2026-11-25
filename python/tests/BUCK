@@ -384,7 +384,9 @@ _PYARROW = {
 # make no stream; a failing get_schema raises KomiraError from sql and a
 # failing get_next from to_arrow (pyarrow's OSError from a reader); the
 # argument checks and a closed session make no call; results left unread at
-# interpreter exit are released without a crash.
+# interpreter exit are released without a crash; a notebook display reads the
+# rows, leaves the result unread and releases each struct once, also when the
+# stream fails while it reads.
 [python_binding_test(
     name = "sql_fake_test" + p["suffix"],
     src = "test_sql_fake.py",
@@ -886,6 +888,29 @@ _PLAN_EXPR_RUNTIMES = [
     ],
     **_ON[p["suffix"]]
 ) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
+
+# The notebook display (komira/_display.py), with no library: a frame shows its
+# names over their types, equal to fixtures/display/frame.html, and calls
+# nothing on its session; a result shows its rows, equal to
+# fixtures/display/result.html, at most ten of them with the line saying there
+# are more, reading the stream only one batch past them, and still reads every
+# row once after; the row limit at its edges, long values cut and escaped, a
+# stream failing while the rows are read or past them, a KeyboardInterrupt
+# during the read, and a terminal on another thread waiting for a display.
+[py_test(
+    name = "display_test" + p["suffix"],
+    src = "test_display.py",
+    srcs = [
+        "fixtures/display/frame.html",
+        "fixtures/display/result.html",
+    ],
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
 
 [py_test(
     name = "frame_groupby_test{}".format(suffix),

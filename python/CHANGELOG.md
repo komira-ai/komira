@@ -12,6 +12,10 @@ install page shows names it.
 
 ## Unreleased
 
+- **Notebook display.** In Jupyter and IPython a `komira.DataFrame` shows as a table of its column
+  names over their types, and runs nothing; a `Result` shows its first ten rows at most, with a line
+  giving the row and column counts or saying there are more. The result is still unread after it is
+  shown: `to_arrow()`, `to_pandas()` and the other terminals read every row, once.
 - **Group-by and aggregates in the pandas-shaped DataFrame.** `df.groupby(by, *, sort=True,
   dropna=True)` gives a `komira.GroupBy` whose `agg(...)`, `sum`, `mean`, `median`, `std`, `var`,
   `min`, `max`, `count`, `size` and `nunique` return a frame of the keys and one column per output,

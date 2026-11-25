@@ -117,6 +117,12 @@ runs only at a **terminal**:
 - **No dunder runs a query.** `len(df)`, `bool(df)`, `iter(df)`, `df.__array__()` and
   `df.__arrow_c_stream__()` raise `UnsupportedOperation`, and the message names the terminal.
   `repr(df)` prints the column names and types, and runs nothing.
+- **A notebook shows a frame as its plan's schema, and a `Result` as its first rows.**
+  `df._repr_html_()` is a table of the column names over their types and a line saying the frame
+  has not run; it runs nothing and shows no SQL. `Result._repr_html_()` shows at most the first ten
+  rows, and says when there are more. It reads them from the stream, at most one batch past them,
+  and keeps them, so the `Result` stays unread: a terminal called after the display still reads
+  every row, once. A `Series` has no HTML display.
 - **A reduction is lazy too.** `df["v"].sum()` is not a number: it is a `Series` aggregate. A
   `Series` aggregate works inside `assign`, inside `df[...]` and inside `agg`. The number comes from a
   terminal: `df.agg(total=("v", "sum")).materialize()`. This is a departure from pandas (section 8,
@@ -516,7 +522,9 @@ no timing assertion and no shell test.
    - `df.<column>` raises, naming `df["<column>"]`.
    - `__dir__` holds only defined members, and `__setattr__` refuses.
    - A column called `count` is reachable as `df["count"]`, while `df.count()` still counts.
-   - A frame survives `copy.copy`, and `hasattr(df, "_repr_html_")` is `False`.
+   - A frame survives `copy.copy`, and `hasattr(df["a"], "_repr_html_")` is `False`.
+   - A frame's `_repr_html_` is its names and types and calls nothing on its session; a `Result`'s
+     shows at most ten rows and leaves the result unread.
 3. **Python bytes equal Mojo plans.**
    - A `python_oracle` build action runs a program in a skin and writes the envelope it encodes.
    - A Mojo test decodes the envelope with `plan_wire`, and compares it field by field with the plan the
