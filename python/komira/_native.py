@@ -2,7 +2,7 @@
 
 `load` opens the library from a directory, once per process, checks that its
 ABI major version is the one this package was written for, and binds the
-calls of `_FUNCTIONS` (the newest from ABI 1.7); every failure is a `LibraryLoadError` that says which
+calls of `_FUNCTIONS` (the newest from ABI 1.8); every failure is a `LibraryLoadError` that says which
 library and why. `Native` holds the bound calls and turns their status codes
 into `KomiraError`, with the context's last error, read with the two-call
 protocol, as the message, and, from ABI 1.7, its code and step as the error's
@@ -54,7 +54,8 @@ Python type yet and no stability promise. So are the three credential calls
 `CREDENTIALS_INVALID`) raises `CredentialsError`. `sql_stream` runs one SQL
 statement and returns its filled `_arrow.ArrowArrayStream`, which
 `Session.sql` hands to pyarrow (`_arrow.import_stream`) and wraps in a
-`Result`. The run handle calls of ABI 1.6 (`run_new`, `run_free`,
+`Result`; `plan_stream` does the same for a serialized plan, which a
+DataFrame's terminal sends (komira/_frame.py). The run handle calls of ABI 1.6 (`run_new`, `run_free`,
 `run_cancel`, `run_progress`) and `sql_stream_run`, which runs a statement
 under a handle that another thread cancels and reads the progress of, are what
 `_run.run_sql` makes; `has` says whether the library has a call.
@@ -157,6 +158,11 @@ _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
         6,
         ctypes.c_int32,
         [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(_arrow.ArrowArrayStream)],
+    ),
+    "komira_plan_stream": (
+        8,
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64, ctypes.POINTER(_arrow.ArrowArrayStream)],
     ),
 }
 
@@ -665,6 +671,22 @@ class Native:
         text = query if isinstance(query, bytes) else _c_string("query", query)
         stream = _arrow.ArrowArrayStream()
         self._check(op, ctx, fn(ctx, text, run, ctypes.byref(stream)))
+        return stream
+
+    def plan_stream(self, ctx: int, plan: bytes) -> _arrow.ArrowArrayStream:
+        """Runs the serialized plan `plan` (a `WirePlanEnvelope`, which may
+        hold NUL bytes) on the context and returns its answer, the Arrow C
+        stream the library filled; the caller releases it. No SQL front end
+        is involved: the library decodes, optimizes, lowers and runs the
+        plan. A refusal raises KomiraError before any stream exists, as
+        `sql_stream`'s does."""
+        op = "komira_plan_stream"
+        fn = self._fn(op)
+        if not isinstance(plan, (bytes, bytearray, memoryview)):
+            raise TypeError("plan must be bytes, not {}".format(type(plan).__name__))
+        data = bytes(plan)
+        stream = _arrow.ArrowArrayStream()
+        self._check(op, ctx, fn(ctx, data, len(data), ctypes.byref(stream)))
         return stream
 
     def _out(self, op: str, ctx: int, call: Callable[[ctypes._CFuncPtr, object, int, object], int]) -> bytes:
