@@ -45,9 +45,15 @@ from std.testing import assert_equal, assert_true, assert_false
 
 from async_rt.ops.waker_sink import NoopSink
 from async_rt.runtime.blocking_runtime import BlockingRuntime
-from async_rt.reactor.socket_setup import close_fd, set_so_rcvbuf, set_so_sndbuf
+from async_rt.reactor.socket_setup import (
+    close_fd,
+    set_so_rcvbuf,
+    set_so_sndbuf,
+    wait_readable,
+)
 from async_rt.runtime.tcp_stream import TcpListener, TcpStream
 from http_core.tls import (
+    TLS_OUTCOME_BLOCKED_ON_READ,
     TLS_OUTCOME_DONE,
     TLS_OUTCOME_ERROR,
     TlsConfig,
@@ -126,10 +132,14 @@ def _client_config() raises -> TlsConfig:
 
 
 def _handshake(mut server: TlsConnection, mut client: TlsConnection) raises:
-    """Alternate the two handshakes until both are DONE."""
+    """Alternate the two handshakes until both are DONE. A side blocked on
+    read waits in poll for the peer's flight, so 256 rounds bounds protocol
+    steps, not how fast loopback delivers."""
     var sv_done = False
     var cl_done = False
     for _ in range(256):
+        var sv_wait = Int32(-1)
+        var cl_wait = Int32(-1)
         if not sv_done:
             var o = server.handshake()
             assert_true(
@@ -137,6 +147,8 @@ def _handshake(mut server: TlsConnection, mut client: TlsConnection) raises:
                 "server handshake: " + s2n_strerror_message(last_s2n_errno()),
             )
             sv_done = o == TLS_OUTCOME_DONE
+            if o == TLS_OUTCOME_BLOCKED_ON_READ:
+                sv_wait = server.fd()
         if not cl_done:
             var o = client.handshake()
             assert_true(
@@ -144,8 +156,12 @@ def _handshake(mut server: TlsConnection, mut client: TlsConnection) raises:
                 "client handshake: " + s2n_strerror_message(last_s2n_errno()),
             )
             cl_done = o == TLS_OUTCOME_DONE
+            if o == TLS_OUTCOME_BLOCKED_ON_READ:
+                cl_wait = client.fd()
         if sv_done and cl_done:
             return
+        if (sv_done or sv_wait >= 0) and (cl_done or cl_wait >= 0):
+            _ = wait_readable(sv_wait, cl_wait, -1)
     assert_true(False, "handshake did not finish in 256 rounds")
 
 

@@ -108,6 +108,15 @@ def _sleep_ms(ms: Int):
     _ = external_call["usleep", Int32](UInt32(ms * 1000))
 
 
+def _exit_zero_argv() -> List[String]:
+    """`sh -c "exit 0"`: a job that succeeds, with no dependence on where the
+    platform keeps `true` (/bin on Linux, /usr/bin on macOS)."""
+    var argv = List[String]()
+    argv.append(String("-c"))
+    argv.append(String("exit 0"))
+    return argv^
+
+
 def _config(
     var binary: String, max_stderr_lines: Int = 100, max_runtime_secs: Int = 0
 ) -> JobSupervisorConfig:
@@ -115,7 +124,7 @@ def _config(
         String("steps"),
         String("instance-1"),
         binary^,
-        List[String](),
+        _exit_zero_argv(),
         String("http://127.0.0.1:1/beat"),
         heartbeat_interval_secs=1,
         max_stderr_lines=max_stderr_lines,
@@ -155,14 +164,14 @@ def test_the_panic_line_is_the_first_match_in_any_case() raises:
 
 
 def test_the_stderr_ring_keeps_the_last_lines() raises:
-    var js = _steps(_config(String("/bin/true"), max_stderr_lines=3))
+    var js = _steps(_config(String("/bin/sh"), max_stderr_lines=3))
     js._absorb(String("e1\ne2\ne3\ne4\ne5\n"), False)
     assert_equal(len(js.stderr_ring), 3, "bounded at three")
     assert_equal(js.stderr_ring[0], String("e3"))
     assert_equal(js.stderr_ring[1], String("e4"))
     assert_equal(js.stderr_ring[2], String("e5"))
     # CONTROL: under the bound nothing is dropped.
-    var wide = _steps(_config(String("/bin/true"), max_stderr_lines=10))
+    var wide = _steps(_config(String("/bin/sh"), max_stderr_lines=10))
     wide._absorb(String("e1\ne2\n"), False)
     assert_equal(len(wide.stderr_ring), 2)
     assert_equal(wide.stderr_ring[0], String("e1"))
@@ -207,12 +216,12 @@ def test_a_cancel_needs_a_request_and_a_running_job() raises:
     _ = live.supervisor.terminate(100)
 
     # A request that comes after the job exited: its result stands.
-    var done = _steps(_config(String("/bin/true")))
+    var done = _steps(_config(String("/bin/sh")))
     done.spawn_child()
     while not done.child_exited:
         done.poll_and_drain()
         _sleep_ms(5)
-    assert_true(done.child_exited, "/bin/true exited")
+    assert_true(done.child_exited, "the job exited")
     done.state.cancel_requested = True
     done.act_on_cancel(100)
     assert_true(
@@ -241,12 +250,12 @@ def test_a_clock_reading_before_the_spawn_stops_nothing() raises:
 def test_a_stop_after_the_job_ended_keeps_its_result() raises:
     install_stop_signal_handler()
     _ = take_stop_signal()  # nothing left over from before
-    var js = _steps(_config(String("/bin/true")))
+    var js = _steps(_config(String("/bin/sh")))
     js.spawn_child()
     while not js.child_exited:
         js.poll_and_drain()
         _sleep_ms(5)
-    assert_true(js.child_exited, "/bin/true exited")
+    assert_true(js.child_exited, "the job exited")
     _ = proc_kill(external_call["getpid", Int32](), SIGTERM)
     assert_true(js.act_on_stop_signal(100), "the stop is taken: the loop ends")
     assert_true(js.state.phase == JobSupervisorPhase.running(), "not CANCELLED")
@@ -261,7 +270,7 @@ def test_a_stop_after_the_job_ended_keeps_its_result() raises:
 def test_the_stream_timer_flushes_a_quiet_chunk() raises:
     var store = SharedInMemoryConditionalStore()
     var view = store.clone()
-    var config = _config(String("/bin/true"))
+    var config = _config(String("/bin/sh"))
     config.log_prefix = String("logs/quiet")
     config.log_chunk_bytes = 1 << 20
     config.log_flush_secs = 1
@@ -296,7 +305,7 @@ def test_the_stream_timer_flushes_a_quiet_chunk() raises:
     var got = view.get(key)
     assert_equal(String(unsafe_from_utf8=Span(got)), String("quiet\n"))
     # CONTROL: with no store the timer is a no-op.
-    var bare = _steps(_config(String("/bin/true")))
+    var bare = _steps(_config(String("/bin/sh")))
     bare._absorb(String("x\n"), True)
     bare._tick_stream_timer()
     assert_false(bare.log_sink.enabled)
@@ -345,7 +354,7 @@ struct Answering(HeartbeatReporter):
 def test_a_terminal_beat_with_no_delay_is_retried_at_once() raises:
     var sends = ArcPointer[Int](0)
     var js = JobSupervisor[Answering, InMemoryConditionalStore](
-        _config(String("/bin/true")), Answering(503, sends), None
+        _config(String("/bin/sh")), Answering(503, sends), None
     )
     var clock = ArcPointer[Int](_CLOCK_START_NS)
     js.set_test_clock(clock)
@@ -367,7 +376,7 @@ def test_a_terminal_beat_with_no_delay_is_retried_at_once() raises:
     assert_equal(expected_ms, 9750, "the default schedule")
     var scheduled_sends = ArcPointer[Int](0)
     var scheduled = JobSupervisor[Answering, InMemoryConditionalStore](
-        _config(String("/bin/true")), Answering(503, scheduled_sends), None
+        _config(String("/bin/sh")), Answering(503, scheduled_sends), None
     )
     var scheduled_clock = ArcPointer[Int](_CLOCK_START_NS)
     scheduled.set_test_clock(scheduled_clock)
@@ -383,7 +392,7 @@ def test_a_terminal_beat_with_no_delay_is_retried_at_once() raises:
     # CONTROL: a 404 cannot change by repeating: one send.
     var once = ArcPointer[Int](0)
     var js404 = JobSupervisor[Answering, InMemoryConditionalStore](
-        _config(String("/bin/true")), Answering(404, once), None
+        _config(String("/bin/sh")), Answering(404, once), None
     )
     _ = js404.finalize_heartbeat_within(60_000, 0, 3)
     assert_equal(once[], 1, "a 404 is sent once")
