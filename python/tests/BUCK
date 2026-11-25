@@ -876,6 +876,18 @@ _PLAN_EXPR_RUNTIMES = [
 #   engine runs against GROUP BY, the frame's reductions, drop_duplicates
 #   against DISTINCT, and the reductions the engine does not run yet refused
 #   at the terminal with its step.
+# - frame_merge_test and frame_window_test, with no library, on the plan
+#   tests' runtimes: the plans of merge (each how, the keys pandas' way, the
+#   renaming projection under the join and the naming one over it, sort=True),
+#   of isin with another frame's column (a semi or anti join, under the sort
+#   of a sorted frame), and of the window verbs (transform, cumsum, cummin,
+#   cummax, rank, rolling) and of a Series that reads windows in assign and in
+#   a filter, by equality with hand-built node trees; their output types,
+#   their wire arms, and every refusal with its full message.
+# - frame_join_window_duckdb_test, on CPython 3.13: merges of two Parquet
+#   files written here, semi and anti joins, and windows, each answered by
+#   komira through the plan door and by DuckDB from the SQL that means the
+#   same, equal row for row (frame_duckdb_test's comparator).
 [py_test(
     name = "frame_test{}".format(suffix),
     src = "test_frame.py",
@@ -896,6 +908,16 @@ _PLAN_EXPR_RUNTIMES = [
     **_ON[p["suffix"]]
 ) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
 
+[py_test(
+    name = "frame_{}_test{}".format(area, suffix),
+    src = "test_frame_{}.py".format(area),
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES for area in ["merge", "window"]]
+
 [python_binding_test(
     name = "frame_run_test" + p["suffix"],
     src = "test_frame_run.py",
@@ -914,6 +936,19 @@ _PLAN_EXPR_RUNTIMES = [
 python_binding_test(
     name = "frame_duckdb_test",
     src = "test_frame_duckdb.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+)
+
+python_binding_test(
+    name = "frame_join_window_duckdb_test",
+    src = "test_frame_join_window_duckdb.py",
+    srcs = ["test_frame_duckdb.py"],
     data = {"libkomira": LIBKOMIRA},
     deps = [
         "//python:komira_with_plan_modules",

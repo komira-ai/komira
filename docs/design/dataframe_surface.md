@@ -8,7 +8,9 @@ part of the pandas-shaped skin is built too: its readers, subscripts, `assign`, 
 `materialize` and `explain` are in `python/komira/_frame.py` and `_series.py`, and `materialize` runs
 the plan through `komira_plan_stream`. So are `groupby` with its `GroupBy` reductions and `agg`, the
 frame's own reductions (`agg`, `sum`, `mean`, `median`, `std`, `var`, `min`, `max`, `count`,
-`nunique`) and `drop_duplicates`, in `python/komira/_groupby.py`; NaN as missing (ruling 6) and the
+`nunique`) and `drop_duplicates`, in `python/komira/_groupby.py`; `merge` and the semi and anti joins of
+`isin` with another frame's column, in `python/komira/_merge.py`; and the window verbs (`transform`,
+`cumsum`, `cummin`, `cummax`, `rank`, `rolling`), in `python/komira/_windows.py`; NaN as missing (ruling 6) and the
 `Series` reductions are not built yet. `komira.pl` and the other verbs are not built. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
@@ -278,7 +280,7 @@ whether the frame is **ordered**.
 
 - **A sort makes a frame ordered:** `sort_values`, `sort`, `nlargest`, `top_k` and the others.
 - **These verbs keep it ordered:**
-  - filters;
+  - filters, the semi and anti joins of `isin` with another frame's column (ruling 16) among them;
   - a projection, rename or `with_columns`/`assign` that keeps every sort key;
   - `head`, `limit` and `slice`.
 
@@ -609,6 +611,6 @@ package design). D4 to D18 are this design's own.
 ## Where is the code?
 
 The code is in `python/komira/`: the node tree (`_ops/`), the encoder (`_plan/`) and the first part of
-the pandas-shaped skin (`_frame.py`, `_groupby.py`, `_series.py`, `_refusals.py`); `komira/pl/` is not built yet. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
+the pandas-shaped skin (`_frame.py`, `_groupby.py`, `_series.py`, `_merge.py`, `_windows.py`, `_refusals.py`); `komira/pl/` is not built yet. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
 `src/plan_expr/col_expr.mojo`. The wire format is in [src/plan_proto](../../src/plan_proto/plan.proto)
 and `src/plan_wire`.

@@ -625,8 +625,9 @@ def test_head_refusals_and_boundaries():
 
 def test_isin_refusals():
     df = Env().df
-    refuses(lambda: df["a"].isin(df["b"]), UnsupportedOperation,
-            "isin() with a Series is a semi join, which this release does not build: pass a list of values")
+    refuses(lambda: (df["a"] + 1).isin(df["b"]), UnsupportedOperation,
+            "isin() with a Series takes a column of the frame, and this Series is an expression: "
+            'assign it as a column first, as df.assign(x=...), then take df["x"]')
     refuses(lambda: df["a"].isin({1, 2}), TypeError, "isin() takes a list or tuple of values, not a set")
     refuses(lambda: df["a"].isin(list(range(65))), UnsupportedOperation,
             "isin() takes at most 64 values, and was given 65")
@@ -903,13 +904,15 @@ def test_a_chain_of_verbs_reaches_the_session_only_as_plan_bytes():
         assert list(envelope.plan.sort.keys) == ["z", "b"]
 
 
-FRAME_MODULES = ("_frame.py", "_groupby.py", "_series.py", "_refusals.py")
+FRAME_MODULES = ("_frame.py", "_groupby.py", "_series.py", "_refusals.py", "_merge.py", "_windows.py")
 PRIVATE_SESSION = {"_plan_stream", "_plan_render", "_parquet_schema", "_csv_binding", "_json_binding"}
 ALLOWED_IMPORTS = {
     "__future__:annotations", "collections.abc:Callable", "types:ModuleType", "typing:TYPE_CHECKING",
     ".:_ops", ".:_refusals", ".:_plan", "._errors:UnsupportedOperation", "._series:Series", "._series:operand",
     "._session:Result", "._session:Session", "._session:_local_path", "._session:default_session",
     "._plan:_wire", ".plan.v1:plan_pb2", "._frame:DataFrame", "os", ".:_groupby", "._groupby:GroupBy",
+    ".:_merge", ".:_windows", "._series:_Membership", "._windows:Windows", "._windows:merged",
+    "._plan._window:window_field", "hashlib",
 }
 
 

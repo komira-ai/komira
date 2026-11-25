@@ -20,12 +20,18 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
   `var`, `min`, `max`, `count` and `nunique` reduce the whole frame to one
   row; each builds one aggregate node (komira/_groupby.py).
   `drop_duplicates` builds a distinct over every column.
+- `merge` joins two frames with one join node, and `df[df["k"].isin(o["k"])]`
+  (`~` for its negation) is a semi (anti) join (komira/_merge.py).
+- A Series may read windows (`cumsum`, `rank`, `rolling`, a group's
+  `transform`, komira/_windows.py): `assign`, `df["x"] = ...` and `df[cond]`
+  compute them in a projection of their own first.
 - Row order (section 7): a sort makes a frame ordered; a filter, a projection
   that keeps the sort keys, an `assign` that replaces none of them and `head`
   keep it ordered, the builder placing filters and projections under the sort
   and a limit above it, and a sort above a limit when a verb comes after one.
-  A reduction and `drop_duplicates` give an unordered frame, except that
-  `groupby(sort=True)` sorts by its keys.
+  A reduction, `drop_duplicates` and `merge` give an unordered frame, except
+  that `groupby(sort=True)` and `merge(sort=True)` sort by their keys; a semi
+  or anti join keeps the order, as a filter does.
 - No dunder runs a query, no attribute is a column, and a name the class does
   not define raises `AttributeError` (komira/_refusals.py).
 
@@ -40,11 +46,12 @@ from collections.abc import Callable
 from types import ModuleType
 from typing import TYPE_CHECKING
 
-from . import _groupby, _ops, _refusals
+from . import _groupby, _merge, _ops, _refusals, _windows
 from ._errors import UnsupportedOperation
 from ._groupby import GroupBy
-from ._series import Series, operand
+from ._series import Series, _Membership, operand
 from ._session import Result, Session, _local_path, default_session
+from ._windows import Windows, merged
 
 if TYPE_CHECKING:
     from .plan.v1 import plan_pb2
@@ -65,6 +72,12 @@ def _wire() -> ModuleType:
     from ._plan import _wire
 
     return _wire
+
+
+def _window_field(name: str, win: _ops.WindowExpr, schema: tuple) -> plan_pb2.WireField:
+    from ._plan._window import window_field
+
+    return window_field(name, win, schema)
 
 
 class DataFrame:
@@ -96,9 +109,13 @@ class DataFrame:
 
     # ---- schema ---------------------------------------------------------
 
-    def _field_of(self, node: _ops.Node) -> plan_pb2.WireField:
-        """The field the engine derives for `node` over this frame's columns."""
-        return _encoder().expr_field(node, self._fields)
+    def _field_of(self, node: _ops.Node, windows: Windows = ()) -> plan_pb2.WireField:
+        """The field the engine derives for `node` over this frame's columns
+        and, by their placeholders, the columns of the windows `windows`."""
+        schema = self._fields
+        if windows:
+            schema = schema + tuple(_window_field(name, win, self._fields) for name, win in windows)
+        return _encoder().expr_field(node, schema)
 
     @staticmethod
     def _type_name(field: plan_pb2.WireField) -> str:
@@ -134,8 +151,14 @@ class DataFrame:
             return plan.keys
         return None
 
-    def _ordered(self, plan: _ops.Plan, keep: Callable[[tuple[_ops.SortKey, ...]], bool]) -> DataFrame:
-        """The frame of `plan`, a verb's plan over this frame: when this frame
+    def _ordered(
+        self,
+        plan: _ops.Plan,
+        keep: Callable[[tuple[_ops.SortKey, ...]], bool],
+        sources: dict[str, object] | None = None,
+    ) -> DataFrame:
+        """The frame of `plan`, a verb's plan over this frame (and over
+        `sources`, when the verb reads another frame too): when this frame
         is ordered, `keep(keys)` says the verb kept its order, and the plan's
         root is a limit or another node the order does not pass, the plan
         gets a sort by the same keys on top."""
@@ -144,6 +167,8 @@ class DataFrame:
             inner = plan.child if isinstance(plan, _ops.Limit) else None
             if not isinstance(inner, (_ops.Sort, _ops.TopN)):
                 plan = _ops.Sort(plan, keys)
+        if sources is not None:
+            return self._new(self._session, plan, sources)
         return self._derive(plan)
 
     # ---- subscripts -----------------------------------------------------
@@ -154,6 +179,9 @@ class DataFrame:
         function of the frame returning one) is true."""
         if callable(key) and not isinstance(key, Series):
             key = key(self)
+        if isinstance(key, _Membership):
+            how, column, values = key._join(self)
+            return _merge.semi_join(self, how, column, values)
         if isinstance(key, Series):
             return self._filter(key)
         if isinstance(key, str):
@@ -177,9 +205,9 @@ class DataFrame:
         )
 
     def _filter(self, cond: Series) -> DataFrame:
-        cond._bound_node(self)
+        _, windows = cond._bound(self)
         predicate = cond._predicate()
-        return self._ordered(_ops.filter_(self._plan, predicate), lambda keys: True)
+        return self._ordered(_windows.filter_plan(self._plan, predicate, windows), lambda keys: True)
 
     def _select(self, names: list | tuple) -> DataFrame:
         for name in names:
@@ -212,22 +240,33 @@ class DataFrame:
         in place, a new one appended, in keyword order. A value is a Series of
         this frame, a literal, or a function called with the frame as the
         earlier keywords left it, returning either; so a later keyword may use
-        an earlier one, as in pandas. Builds one projection."""
+        an earlier one, as in pandas. Builds one projection, and under it one
+        of the windows the values read, if they read any."""
         items: dict[str, _ops.Node] = {}
+        windows: Windows = ()
         for name, value in columns.items():
             if callable(value) and not isinstance(value, Series):
-                current = self._derive(_ops.with_columns(self._plan, tuple(items.items()))) if items else self
+                current = self
+                if items:
+                    current = self._derive(_windows.project_plan(self._plan, tuple(items.items()), windows))
                 result = value(current)
                 if isinstance(result, Series) and result._frame is self:
                     # A Series of this frame, as a plain value would be: it
                     # reads the columns as they were before this call.
-                    node = operand(self, result, "assign()")
+                    node, read = operand(self, result, "assign()")
                 else:
-                    node = _ops.substitute(operand(current, result, "assign()"), items)
+                    node, read = operand(current, result, "assign()")
+                    if read and current is not self:
+                        raise UnsupportedOperation(
+                            f"assign({name}=...) is given a function that returns a window of the frame as the "
+                            "earlier keywords left it: assign the window in an assign() call of its own"
+                        )
+                    node = _ops.substitute(node, items)
             else:
-                node = operand(self, value, "assign()")
+                node, read = operand(self, value, "assign()")
             items[name] = node
-        plan = _ops.with_columns(self._plan, tuple(items.items()))
+            windows = merged(windows, read)
+        plan = _windows.project_plan(self._plan, tuple(items.items()), windows)
         return self._ordered(plan, lambda keys: not any(k.column in items for k in keys))
 
     def sort_values(
@@ -410,6 +449,36 @@ class DataFrame:
         if not isinstance(ignore_index, bool):
             raise TypeError(f"drop_duplicates ignore_index must be a bool, not {type(ignore_index).__name__}")
         return _groupby.drop_duplicates(self, subset, keep)
+
+    # ---- joins (komira/_merge.py) ------------------------------------------
+
+    def merge(
+        self,
+        right: DataFrame,
+        how: str = "inner",
+        on: str | list[str] | None = None,
+        left_on: str | list[str] | None = None,
+        right_on: str | list[str] | None = None,
+        left_index: bool = False,
+        right_index: bool = False,
+        sort: bool = False,
+        suffixes: tuple[str | None, str | None] = ("_x", "_y"),
+        copy: object = None,
+        indicator: bool = False,
+        validate: str | None = None,
+    ) -> DataFrame:
+        """This frame joined with `right`, a frame of the same session, on
+        the key columns `on` (named alike in both) or `left_on` and
+        `right_on` (by default the columns both frames have). `how` is
+        "inner", "left", "right", "outer" or "cross". The answer has this
+        frame's columns, then `right`'s: a key named alike once, and every
+        other name both frames have suffixed by `suffixes`. A missing key
+        matches nothing. The answer has no row order unless `sort=True`
+        sorts it by the keys. `copy` is accepted and does nothing, since a
+        plan holds no rows."""
+        return _merge.merge(
+            self, right, how, on, left_on, right_on, left_index, right_index, sort, suffixes, indicator, validate
+        )
 
     def copy(self, deep: bool = True) -> DataFrame:
         """An equal frame: the same plan, on the same session. `deep` is
