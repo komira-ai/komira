@@ -12,6 +12,10 @@ install page shows names it.
 
 ## Unreleased
 
+- **Notebook display.** In Jupyter and IPython a `komira.DataFrame` shows as a table of its column
+  names over their types, and runs nothing; a `Result` shows its first ten rows at most, with a line
+  giving the row and column counts or saying there are more. The result is still unread after it is
+  shown: `to_arrow()`, `to_pandas()` and the other terminals read every row, once.
 - **The pandas-shaped DataFrame, first part.** `komira.read_parquet(path)`, `komira.read_csv(path, *,
   sep=",", header="infer")` and `komira.read_json(path, lines=True)` make a lazy `komira.DataFrame` of
   a file, its schema read now, on the session given as `session=` or the process's default session.

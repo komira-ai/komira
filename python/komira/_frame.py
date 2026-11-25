@@ -14,7 +14,8 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
 - The verbs are `df["x"]` (a `Series`), `df[["a", "b"]]` (a projection),
   `df[cond]` (a filter), `assign` and `df["x"] = ...` (computed columns),
   `sort_values` and `head`. Each derives the output schema now, as the engine
-  will, so `columns`, `dtypes` and `repr` run nothing and an unknown column is
+  will, so `columns`, `dtypes`, `repr` and the notebook display
+  (`_repr_html_`, the names and types) run nothing, and an unknown column is
   a `KeyError` at the verb that names it.
 - Row order (section 7): a sort makes a frame ordered; a filter, a projection
   that keeps the sort keys, an `assign` that replaces none of them and `head`
@@ -34,7 +35,7 @@ from collections.abc import Callable
 from types import ModuleType
 from typing import TYPE_CHECKING
 
-from . import _ops, _refusals
+from . import _display, _ops, _refusals
 from ._errors import UnsupportedOperation
 from ._series import Series, operand
 from ._session import Result, Session, _local_path, default_session
@@ -111,6 +112,13 @@ class DataFrame:
     def __repr__(self) -> str:
         listed = ", ".join(f"{name}: {dtype}" for name, dtype in self.dtypes.items())
         return f"<komira.DataFrame {listed}>"
+
+    def _repr_html_(self) -> str:
+        """IPython's HTML display of the frame: its column names, each over
+        its type, and a line saying the frame has not run and
+        `.materialize()` runs it (komira/_display.py). It runs nothing and
+        shows no rows, since a frame is a plan."""
+        return _display.frame_html(self.dtypes)
 
     def __contains__(self, name: object) -> bool:
         """Whether `name` is a column, as `in` asks of a pandas frame; runs nothing."""
