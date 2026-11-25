@@ -10,8 +10,15 @@ are exactly `__all__`; every other module is private
 library: the first `Session()`, reader or `abi_version()` does. A name the
 package does not define raises `AttributeError`, with a replacement when the
 name is a pandas one komira refuses (komira/_refusals.py).
+
+The package logs to the standard `logging` logger "komira": at DEBUG the
+library it loaded and each query's plan segments, at INFO a query stopped by
+an exception (a Ctrl-C's `KeyboardInterrupt`). It writes no query text. The
+logger has a `NullHandler`, so nothing is printed unless the application
+configures logging.
 """
 
+import logging as _logging
 from importlib import metadata as _metadata
 
 from . import _native
@@ -30,6 +37,8 @@ from ._refusals import MODULE as _MODULE_REFUSALS
 from ._refusals import refused as _refused
 from ._series import Series
 from ._session import Result, Session
+
+_logging.getLogger("komira").addHandler(_logging.NullHandler())
 
 try:
     __version__: str = _metadata.version("komira")

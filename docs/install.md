@@ -108,9 +108,6 @@ The package's [README](../python/README.md), which is also its PyPI description,
 
 ## What does not work yet
 
-- **Cancelling a query.** A query cannot be interrupted while it runs: Ctrl-C during `Session.sql`
-  raises `KeyboardInterrupt` when the engine has finished the query. The answer is freed, and the
-  session runs the next query.
 - **One session from two threads at once.** Use a session per thread.
 - **Most of the DataFrame APIs**: the pandas-shaped one beyond reading, filtering, selecting,
   computing columns, sorting and `head` (see the [README](../python/README.md)), and the

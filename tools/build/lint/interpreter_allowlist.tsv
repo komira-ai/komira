@@ -14,6 +14,7 @@ python/examples/quickstart.py	the Python package's quickstart: the example the R
 python/komira/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_arrow.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_errors.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_frame.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_native.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_ops/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_ops/_build.py	the Python package: its sources are Python (docs/design/python_package.md)
@@ -40,7 +41,10 @@ python/komira/_plan/_source.py	the Python package: its sources are Python (docs/
 python/komira/_plan/_window.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_plan/_wire.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_plan/_udf.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_refusals.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_runtime.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_run.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_series.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_session.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_udf/__init__.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
 python/komira/_udf/wire.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
@@ -87,9 +91,14 @@ python/tests/test_result_frames.py	the Python package's tests: the SDK surface i
 python/tests/test_tpch_compare.py	the Python package's tests: the answer check of the wheel's TPC-H run is tested in Python
 python/tests/test_tpch_installed.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
 python/tests/tpch_compare.py	the Python package's tests: the answer check of the wheel's TPC-H run, read by the installed wheel's test and by its own, in Python
+python/tests/test_frame.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_frame_duckdb.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_frame_run.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_sql_cancel.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql_fake.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql_interrupt.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_sql_run.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_threads.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_two_call.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/wheel_install_run.py	the Python package's tests: installs the wheel into an empty environment of the pinned interpreter that runs it (python/install_test.bzl), as that interpreter's own installer does

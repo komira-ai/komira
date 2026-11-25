@@ -103,6 +103,32 @@ against the published package.
   engine's `<step>: <reason>` message: `ParseError` for a syntax error,
   `BindError` for an unknown name, `UnsupportedOperation` for a construct the
   engine refuses by name.
+- Ctrl-C while `Session.sql` runs cancels the query: the engine stops at its
+  next check, `sql` raises `KeyboardInterrupt`, nothing the query computed is
+  kept, and the session runs the next query. A second Ctrl-C while the query
+  stops is not raised again. The query runs on a helper thread while the
+  thread that called `sql` waits for it, which is what lets Python run the
+  Ctrl-C handler during the query.
+- `Session.sql(query, progress=callback)` calls `callback(done, total)` on the
+  calling thread with the plan segments the query has finished and the
+  segments its plan has, each time that changes, and once more with `done`
+  equal to `total` when the query has answered. The readings only grow. A
+  query refused before its plan is checked never calls it. An exception the
+  callback raises cancels the query and is raised from `sql`, and calling the
+  session from the callback raises `KomiraError`. For example, a line that
+  rewrites itself:
+
+  ```python
+  def show(done, total):
+      print("\r{}/{} segments".format(done, total), end="", flush=True)
+
+  table = s.sql("SELECT count(*) AS n FROM readings", progress=show).to_arrow()
+  ```
+- komira logs to the standard `logging` logger `"komira"`: at `DEBUG` the
+  library it loaded and the plan segments of each query that answered, at
+  `INFO` a query stopped by an exception, such as the `KeyboardInterrupt` of a
+  Ctrl-C. It never logs query text. Nothing is printed unless the application
+  configures logging, for example with `logging.basicConfig(level=logging.DEBUG)`.
 - A `Result` is read once, by one of:
   - `to_arrow()`, the whole answer as a `pyarrow.Table`;
   - `to_reader()`, a `pyarrow.RecordBatchReader` that reads batches as they
@@ -131,7 +157,8 @@ against the published package.
   call made while another thread's call runs on the same session waits for it
   to return. `close()` waits too, so a session is never freed under a running
   call. Two sessions run their calls at once, so a session per thread is how
-  to run queries in parallel. A call made from a signal handler or a finalizer
+  to run queries in parallel. A call made from a signal handler, a finalizer
+  or a `progress` callback
   while a call of the same thread is running on that session raises
   `KomiraError` instead of waiting for itself. A `Result` reads without the
   session, so reading one never waits for a call on its session; of two
@@ -237,9 +264,6 @@ by `import komira`.
 
 - The module-level `komira.sql` and `komira.register_parquet` on a default
   session.
-- Cancelling a query. A query cannot be interrupted while it runs: Ctrl-C
-  during `Session.sql` raises `KeyboardInterrupt` when the engine has finished
-  the query. The answer is freed, and the session runs the next query.
 - The rest of the pandas-shaped DataFrame (group-by and aggregates, joins,
   windows, missing-value verbs, writing files, `//`, `%` and `**`, `isna`),
   and the polars-shaped one.
@@ -265,7 +289,8 @@ The package's layout and API are designed in
 | `komira/_iceberg.py` | the Iceberg sources (private; nothing public takes one yet): `iceberg(uri, *, warehouse=None, credential=AMBIENT, signing=None, access_delegation="vended-credentials")`, an `IcebergCatalog`; `catalog.table(name)`, an `IcebergTable`, with `name` as `"namespace.table"` or a tuple of namespace levels and the table; and `SigV4(region, service)`. Each is checked when built (an http or https URI with a host and no user, password, query or fragment; a credential that fits the catalog: `AMBIENT` or `AwsKeys` with SigV4, and `AMBIENT`, `ANONYMOUS`, `BearerToken` or `OAuth2ClientCredentials` without; `access_delegation` `vended-credentials` or `none`), does no I/O and loads no library; a catalog or a table shows its credential's secrets as `<set>` and refuses pickle and copy ([docs/design/iceberg_tables.md](https://github.com/komira-ai/komira/blob/main/docs/design/iceberg_tables.md), "What the user sees") |
 | `komira/_arrow.py` | the Arrow C stream of a query: `ArrowArrayStream`, the C struct for `ctypes`, and `import_stream`, which hands a filled stream to pyarrow's public `RecordBatchReader.from_stream` through a PyCapsule with no destructor, and releases it itself if pyarrow did not take it |
 | `komira/_errors.py` | `KomiraError`, its subclasses, and `error_class`, which picks one from an engine refusal's code and step |
-| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.8 (`sql_stream`, `register_csv`, `register_json`, the last error's code and step, and `plan_stream`, the plan door, among them) |
+| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.8 (`sql_stream`, `register_csv`, `register_json`, the run handle calls `run_new`, `run_cancel`, `run_progress` and `sql_stream_run` of 1.6, the last error's code and step, and `plan_stream`, the plan door of 1.8, among them) |
+| `komira/_run.py` | `run_sql`, which `Session.sql` runs a query with on ABI 1.6: the call `komira_sql_stream_run` on a helper thread under a run handle of its own, while the calling thread waits, reads the handle's progress for the `progress` callback, and cancels the handle when anything is raised on it (a Ctrl-C's `KeyboardInterrupt`, the callback's exception) |
 | `komira/_plan/` | the plan encoder: `encode_plan`, a plan of `komira/_ops` as the `komira.plan.v1` `WirePlanEnvelope` the plan door takes, every node with the output schema the engine derives for it and every scan reading a source libkomira described (`parquet_source`, `binding_source`); calls of user functions (`UdfCall`, `MapBatches`) as `WireUdfApply` and `WireMapBatchesNode` over the envelope's `UdfRef` list, one per distinct function, each with the komira/python descriptor; `encode_expr`, an expression node as a `WireExpr`; and `expr_field`, the output field the engine derives for it. It writes no SQL text. It imports the generated plan modules, which the wheel ships at `komira/plan/v1/`; `import komira` does not import it |
 | `komira/_runtime.py` | `check_loaded_runtime`, called before libkomira is opened: it compares the Mojo runtime libraries already loaded in the process with komira's copies by build id, and the GNU build id reader it uses |
 | `komira/_session.py` | `Session` with `register_parquet`, `register_csv`, `register_json` and `sql`, `Result`, and the session's private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal`; the private calls a frame makes (`_parquet_schema`, `_csv_binding`, `_json_binding`, `_plan_stream`, `_plan_render`), each under the session's lock; and `default_session()`, the process's default session |
@@ -388,6 +413,7 @@ The tests below run on Linux x86_64 as build actions, with
 `//python/tests:credentials_test`, `//python/tests:credentials_lib_test`,
 `//python/tests:iceberg_test`, `//python/tests:sql_test`,
 `//python/tests:sql_fake_test`, `//python/tests:sql_interrupt_test`,
+`//python/tests:sql_cancel_test`, `//python/tests:sql_run_test`,
 `//python/tests:errors_test`, `//python/tests:result_frames_test`,
 `//python/tests:register_text_test`, `//python/tests:threads_test`,
 `//python/tests:runtime_test`, `//python/tests:cpu_test`,
@@ -402,7 +428,9 @@ The tests below run on Linux x86_64 as build actions, with
 | `sql_test` | `Session.sql` on the real library: `SELECT 1 AS n`, a GROUP BY over a checked-in Parquet file, an aggregate, an answer of no rows, each terminal, the engine's refusals, and a result read after its session was closed or collected |
 | `register_text_test` | `Session.register_csv` and `register_json` on the real library over checked-in CSV and JSON files: the names, types and rows the engine infers, NULL where a file has no value, the same answer as `read_csv` and `read_json`, the `delimiter`, `all_varchar` and `header` arguments, paths resolved when the call is made, a missing or empty file and a taken name refused with the engine's message, and the argument checks |
 | `sql_fake_test` | `Session.sql` on a stand-in Arrow stream that counts releases: a result read once, each stream, schema and batch released exactly once whoever ends it, a requested schema refused, a schema error raised from `sql` and a batch error from the terminal, the argument checks, and results left unread at exit |
-| `sql_interrupt_test` | Ctrl-C during `Session.sql`, on a stand-in whose `komira_sql_stream` raises SIGINT in the calling thread: `KeyboardInterrupt` once the call returns, the stream it filled released exactly once, the session answering the next query (also after a refusal SIGINT came during), a handler that does not raise running once while `sql` returns the answer, and an ignored SIGINT changing nothing |
+| `sql_interrupt_test` | Ctrl-C during `Session.sql`, on a stand-in whose `komira_sql_stream` raises SIGINT in the calling thread: `KeyboardInterrupt` once the call returns, the stream it filled released exactly once, the session answering the next query (also after a refusal SIGINT came during), a handler that does not raise running once while `sql` returns the answer, and an ignored SIGINT changing nothing; and a `progress` callback on that 1.3 stand-in refused by the ABI version it needs |
+| `sql_cancel_test` | Ctrl-C and progress on a stand-in of ABI 1.6 that holds a run at a gate: Ctrl-C cancels the query's run handle and `sql` raises `KeyboardInterrupt`, the handle freed after the call, the session answering after; a second Ctrl-C while it stops not raised; an answer that stood after the cancel, and a refusal during Ctrl-C, dropped; a handler that does not raise leaving the query running; each progress reading given on the calling thread, from the main thread or another; the callback's exception and its call into the session cancelling the query; refusals with their message; the log lines |
+| `sql_run_test` | progress and Ctrl-C on the real library: the readings of a GROUP BY grow and end at done equal to total, a Ctrl-C and an exception from the callback are raised from `sql` and the session answers after, a refusal never calls the callback |
 | `errors_test` | the exception table on stand-ins of ABI 1.7 and 1.3: each class by its code, the code before the step, the step when there is no code, a plain `KomiraError` otherwise, and no code or step from a 1.3 library |
 | `threads_test` | a session used from several threads, on a stand-in that journals each call and holds one at a gate: a call waits for the call running on its session, each thread gets its own error message, `close` waits for the running call, two sessions run at once, a signal handler calling the session inside a call is refused, a `Result` reads while its session is busy, and of two threads reading one `Result` one reads it |
 | `result_frames_test` | `to_pandas` and `to_polars` on the real library: every integer width at its edges, nullable integers, strings, a bool, decimals, timestamps and a date, equal in values and dtypes to pyarrow's and polars' own conversion of the same table; two million rows; no rows; read once. In new interpreters, the library loaded before pyarrow (the load-order case), and on a stand-in stream, each stream released once, a failing batch and a missing pandas or polars. CPython 3.13 and 3.14 (polars on 3.13 only) |
