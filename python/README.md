@@ -5,8 +5,10 @@ Python binding: it carries `libkomira`, the engine as one shared library, and
 calls it with `ctypes`.
 
 **This is an early release.** It registers Parquet files as tables and runs
-SQL over them, and it hands each answer to pyarrow. The DataFrame APIs come
-later.
+SQL over them, and it hands each answer to pyarrow. A first part of the
+pandas-shaped DataFrame reads the same files, filters, selects, computes
+columns, sorts and takes the first rows, as a plan the engine runs with no
+SQL. The rest of the DataFrame APIs come later.
 
 ## Install
 
@@ -32,8 +34,11 @@ libkomira needs three Mojo runtime libraries, which are Modular's and come
 under Modular's licence. The wheel carries libkomira in `komira/_lib/` and, in `komira/_lib/lib/`,
 its native owner libraries (Linux only: on macOS they are linked into the
 dylib) and those three Mojo runtime libraries, with Modular's licence and
-third-party notices beside komira's own. It requires one other distribution,
-`pyarrow>=25.0.1`, which a result is read as; `pip install komira` installs it.
+third-party notices beside komira's own. It requires two other
+distributions, which `pip install komira` installs: `pyarrow>=25.0.1`, which a
+result is read as, and `protobuf>=5.29.1,<8`, which a DataFrame's plan is
+encoded with (the generated plan modules are in the wheel, at
+`komira/plan/v1/`).
 The runtime libraries add about 2 MB uncompressed.
 
 The Linux wheel and the macOS wheel (macOS 11 or later, Apple silicon) are one
@@ -193,14 +198,78 @@ The engine is loaded on the first `Session()` or `abi_version()` call, and
 pyarrow during the first `Session.sql` call the engine accepts, when the
 answer's schema is read; neither on `import komira`.
 
+### The pandas-shaped DataFrame
+
+```python
+import komira
+
+df = komira.read_parquet("readings.parquet")
+top = (
+    df[df["value"] > 20.0][["id", "value"]]
+    .assign(twice=lambda d: d["value"] * 2)
+    .sort_values("value", ascending=False)
+    .head(2)
+)
+print(top.columns, top.dtypes)            # known now: nothing has run
+print(top.materialize().to_arrow().to_pylist())
+# [{'id': 5, 'value': 50.5, 'twice': 101.0}, {'id': 4, 'value': 40.5, 'twice': 81.0}]
+```
+
+A frame is a plan. No verb runs a query: `materialize()` encodes the plan and
+runs it through the engine's plan entry (`komira_plan_stream`, which takes no
+SQL), and returns a `Result`, read once as above. Every call runs the plan
+again. The install test runs this program on the installed wheel.
+
+- **Readers.** `komira.read_parquet(path)`, `komira.read_csv(path, *, sep=",",
+  header="infer")` (`header=None` for a file with no header line) and
+  `komira.read_json(path, lines=True)` (one object per line; `lines=False` is
+  refused). Each reads the file's schema now, so a missing file raises at the
+  reader; paths are taken as `register_parquet` takes them. Each takes
+  `session=`, the session the frame runs on; without it, the process's
+  default session, made by the first reader called without one. No table name
+  is registered.
+- **Verbs.** `df["x"]` is a `Series`; `df[["a", "b"]]` keeps those columns;
+  `df[cond]` keeps the rows where the boolean Series `cond` is true (a function
+  of the frame is accepted too); `df.assign(x=...)` and `df["x"] = ...` set a
+  column from a Series of the frame, a literal, or a function called with the
+  frame; `df.sort_values(by, ascending=True, na_position="last")` sorts (rows
+  that tie come out in any order); `df.head(n=5)` takes `n` rows; `df.copy()`.
+- **Series.** Comparisons, `+ - * /` (true division, as Python's), unary `-`,
+  `& | ~` over boolean Series, `isin([...])` with at most 64 values, and
+  `dtype`. A Series works only in its own frame's verbs: one of another frame,
+  or one taken before `df["x"] = ...` changed its frame, raises
+  `UnsupportedOperation`.
+- **Schema without a query.** `columns` (a list of names), `dtypes` (each
+  column's Arrow type name, `int64`, `float64`, `string`, `bool`, ...) and
+  `repr` run nothing. An unknown column raises `KeyError` at the verb that
+  names it, with the closest name and the frame's columns.
+- **Row order.** A frame that was not sorted promises no row order, so `head(n)`
+  on it gives some `n` rows. After `sort_values`, a filter, a projection that
+  keeps the sort columns, an `assign` that replaces none of them and `head`
+  keep the order.
+- **No index, and nothing runs by accident.** `len(df)`, `bool(df)`,
+  `iter(df)` and converting a frame or a Series to an array or an Arrow stream
+  raise `UnsupportedOperation` naming `materialize()`. No attribute is a
+  column: `df.value` raises `AttributeError` saying to write `df["value"]`, and
+  a pandas name komira does not have (`df.loc`, `df.query`, `komira.melt`, ...)
+  raises `AttributeError` saying why and what to write instead.
+  `sort_values(inplace=True)`, a stable sort, `head(-n)` and `df[0:5]` raise
+  `UnsupportedOperation`.
+- `explain()` returns the engine's text of the plan and runs nothing.
+
+protobuf and the generated plan modules are imported by the first reader, not
+by `import komira`.
+
 ## What does not work yet
 
 - The module-level `komira.sql` and `komira.register_parquet` on a default
   session.
-- The DataFrame APIs: one shaped like pandas and one shaped like polars.
+- The rest of the pandas-shaped DataFrame (group-by and aggregates, joins,
+  windows, missing-value verbs, writing files, `//`, `%` and `**`, `isna`),
+  and the polars-shaped one.
 - Iceberg tables: reading one, and writing to one by its name in a catalog.
 
-The two DataFrame APIs come in a later release of this same package.
+Those DataFrame verbs come in a later release of this same package.
 
 ## Working on the package
 
@@ -211,22 +280,25 @@ The package's layout and API are designed in
 
 | path | what it is |
 |---|---|
-| `komira/__init__.py` | the public names, exactly `__all__` |
+| `komira/__init__.py` | the public names, exactly `__all__`, and the module's `__getattr__`, which refuses the pandas names of `_refusals.MODULE` with their message |
+| `komira/_frame.py` | the pandas-shaped `DataFrame` and its readers `read_parquet`, `read_csv` and `read_json`: a plan of `komira/_ops` nodes, the sources its scans read and the session it runs on; the verbs build nodes with `_ops`'s builder (with a sort put back above a limit where a verb keeps the order), derive the output schema with the encoder, and `materialize()` sends the encoded plan to the session's plan door. It writes no SQL text, and imports `_plan`, so protobuf, only when the first frame is made |
+| `komira/_series.py` | `Series`: an expression node over its frame's columns and the field the engine derives for it, bound to the frame and its generation; its operators, `isin` and `dtype` |
+| `komira/_refusals.py` | the refusal tables of the frame, the Series and the module ([docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md)) |
 | `komira/_capture/` | the capture of Python user functions (private; no query runs them yet): `udf`, the decorator that records a function's call shape (`scalar`, `map_batches_column`, `row`, `map_batches_frame`), its return type (`return_dtype=`, `schema=` or the type hints) and, for `row` and `map_batches_frame`, its read set (`columns=`, a `TypedDict` or dataclass annotation, or for `row` a scan of the function's bytecode, refused with `UDF_READ_SET_REQUIRED` when the reads are not bounded); `Udf.spec()`, the `UdfSpec` the plan encodes, with the function's code as a bundle named by its sha256 or as a reference into an installed distribution; and `write_code`, which writes each code object under its digest. Calling a decorated function calls the function, which is how the komira/python worker runs it. It imports no `ctypes` |
 | `komira/_credentials.py` | the credential objects (private; nothing public takes one yet): `AwsKeys`, `AwsProfile`, `GcpServiceAccount`, `GcpToken`, `AzureKey`, `AzureSas`, `BearerToken` and `OAuth2ClientCredentials`, each a name and its fields, checked when built (the name's grammar and reserved names; each value a non-empty `str` of at most 4096 bytes of UTF-8), with every secret shown as `<set>` by `repr` and no pickle or copy; and the built-in `AMBIENT` and `ANONYMOUS` ([docs/design/credentials_and_writes.md](https://github.com/komira-ai/komira/blob/main/docs/design/credentials_and_writes.md), decision 1) |
 | `komira/_iceberg.py` | the Iceberg sources (private; nothing public takes one yet): `iceberg(uri, *, warehouse=None, credential=AMBIENT, signing=None, access_delegation="vended-credentials")`, an `IcebergCatalog`; `catalog.table(name)`, an `IcebergTable`, with `name` as `"namespace.table"` or a tuple of namespace levels and the table; and `SigV4(region, service)`. Each is checked when built (an http or https URI with a host and no user, password, query or fragment; a credential that fits the catalog: `AMBIENT` or `AwsKeys` with SigV4, and `AMBIENT`, `ANONYMOUS`, `BearerToken` or `OAuth2ClientCredentials` without; `access_delegation` `vended-credentials` or `none`), does no I/O and loads no library; a catalog or a table shows its credential's secrets as `<set>` and refuses pickle and copy ([docs/design/iceberg_tables.md](https://github.com/komira-ai/komira/blob/main/docs/design/iceberg_tables.md), "What the user sees") |
 | `komira/_arrow.py` | the Arrow C stream of a query: `ArrowArrayStream`, the C struct for `ctypes`, and `import_stream`, which hands a filled stream to pyarrow's public `RecordBatchReader.from_stream` through a PyCapsule with no destructor, and releases it itself if pyarrow did not take it |
 | `komira/_errors.py` | `KomiraError`, its subclasses, and `error_class`, which picks one from an engine refusal's code and step |
-| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.7 (`sql_stream`, `register_csv`, `register_json`, the run handle calls `run_new`, `run_cancel`, `run_progress` and `sql_stream_run` of 1.6, and the last error's code and step among them) |
+| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.8 (`sql_stream`, `register_csv`, `register_json`, the run handle calls `run_new`, `run_cancel`, `run_progress` and `sql_stream_run` of 1.6, the last error's code and step, and `plan_stream`, the plan door of 1.8, among them) |
 | `komira/_run.py` | `run_sql`, which `Session.sql` runs a query with on ABI 1.6: the call `komira_sql_stream_run` on a helper thread under a run handle of its own, while the calling thread waits, reads the handle's progress for the `progress` callback, and cancels the handle when anything is raised on it (a Ctrl-C's `KeyboardInterrupt`, the callback's exception) |
-| `komira/_plan/` | the plan encoder: `encode_plan`, a plan of `komira/_ops` as the `komira.plan.v1` `WirePlanEnvelope` the plan door takes, every node with the output schema the engine derives for it and every scan reading a source libkomira described (`parquet_source`, `binding_source`); calls of user functions (`UdfCall`, `MapBatches`) as `WireUdfApply` and `WireMapBatchesNode` over the envelope's `UdfRef` list, one per distinct function, each with the komira/python descriptor; `encode_expr`, an expression node as a `WireExpr`; and `expr_field`, the output field the engine derives for it. It writes no SQL text. It imports the generated plan modules, which the wheel does not ship yet, so `import komira` does not import it |
+| `komira/_plan/` | the plan encoder: `encode_plan`, a plan of `komira/_ops` as the `komira.plan.v1` `WirePlanEnvelope` the plan door takes, every node with the output schema the engine derives for it and every scan reading a source libkomira described (`parquet_source`, `binding_source`); calls of user functions (`UdfCall`, `MapBatches`) as `WireUdfApply` and `WireMapBatchesNode` over the envelope's `UdfRef` list, one per distinct function, each with the komira/python descriptor; `encode_expr`, an expression node as a `WireExpr`; and `expr_field`, the output field the engine derives for it. It writes no SQL text. It imports the generated plan modules, which the wheel ships at `komira/plan/v1/`; `import komira` does not import it |
 | `komira/_runtime.py` | `check_loaded_runtime`, called before libkomira is opened: it compares the Mojo runtime libraries already loaded in the process with komira's copies by build id, and the GNU build id reader it uses |
-| `komira/_session.py` | `Session` with `register_parquet`, `register_csv`, `register_json` and `sql`, `Result`, and the session's private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal` |
+| `komira/_session.py` | `Session` with `register_parquet`, `register_csv`, `register_json` and `sql`, `Result`, and the session's private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal`; the private calls a frame makes (`_parquet_schema`, `_csv_binding`, `_json_binding`, `_plan_stream`, `_plan_render`), each under the session's lock; and `default_session()`, the process's default session |
 | `komira/py.typed` | the PEP 561 marker |
-| `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the plan encoder's tests; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
+| `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the tests that encode or run a plan; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |
 | `pythons.bzl` | the supported Pythons, the one list of them (Supported Pythons, below) |
-| `tests/` | the tests (`python_binding_test`, and `py_test` for the plan encoder: `test_plan_expr.py`, `test_plan_expr_goldens.py`, `test_plan_rel.py`, `test_plan_rel_goldens.py`, `test_plan_udf.py`, `test_plan_udf_goldens.py` and `test_plan_no_sql.py`), `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, `test_tpch_installed.py` and `tpch_compare.py`, TPC-H q1 to q22 at scale factor 1 through the installed wheel against DuckDB's recorded answers (`:tpch_via_wheel_test`; its answer check is held by `test_tpch_compare.py`), `test_analysis_job.py`, which runs `examples/analysis_job.py` from the installed wheel and compares its answers with DuckDB's (`:analysis_job_test`), and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
+| `tests/` | the tests (`python_binding_test`, and `py_test` for the plan encoder and the frame with no library: `test_plan_expr.py`, `test_plan_expr_goldens.py`, `test_plan_rel.py`, `test_plan_rel_goldens.py`, `test_plan_udf.py`, `test_plan_udf_goldens.py`, `test_plan_no_sql.py` and `test_frame.py`), `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, `test_tpch_installed.py` and `tpch_compare.py`, TPC-H q1 to q22 at scale factor 1 through the installed wheel against DuckDB's recorded answers (`:tpch_via_wheel_test`; its answer check is held by `test_tpch_compare.py`), `test_analysis_job.py`, which runs `examples/analysis_job.py` from the installed wheel and compares its answers with DuckDB's (`:analysis_job_test`), and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
 
 ### Supported Pythons
 
@@ -330,8 +402,8 @@ How the loader behaves:
   older than 1.7 answers only with `CREDENTIALS_INVALID`). The package never
   parses the message to choose the class.
 - **Private calls.** `parquet_schema`, `csv_binding`, `json_binding`,
-  `plan_render`, `credential_add`, `credential_set` and `credential_seal`
-  exist only on `_native.Native`. They have no public API and no stability
+  `plan_render`, `plan_stream`, `credential_add`, `credential_set` and
+  `credential_seal` exist only on `_native.Native`. They have no public API and no stability
   promise.
 
 The tests below run on Linux x86_64 as build actions, with
@@ -344,7 +416,9 @@ The tests below run on Linux x86_64 as build actions, with
 `//python/tests:sql_cancel_test`, `//python/tests:sql_run_test`,
 `//python/tests:errors_test`, `//python/tests:result_frames_test`,
 `//python/tests:register_text_test`, `//python/tests:threads_test`,
-`//python/tests:runtime_test` and `//python/tests:cpu_test`:
+`//python/tests:runtime_test`, `//python/tests:cpu_test`,
+`//python/tests:frame_test`, `//python/tests:frame_run_test` and
+`//python/tests:frame_duckdb_test`:
 
 | test | what it covers |
 |---|---|
@@ -366,13 +440,18 @@ The tests below run on Linux x86_64 as build actions, with
 | `credentials_lib_test` | sealing every kind of credential on the real library, and each of its refusals as a `CredentialsError` with its `CREDENTIALS_INVALID` message |
 | `runtime_test` | the runtime check on stand-in runtime libraries: not loaded, same build id, another build id, no build id, komira's copy unreadable, and the build id reader |
 | `cpu_test` | the CPU check on cpuinfo files written from `tests/fixtures/cpuinfo_x86_64_v3.txt`, and that a refused CPU never opens the library |
+| `frame_test` | the DataFrame with no library: each verb's node tree, where the row-order rules put each node, each output type, every refusal with its full message, the attribute rules of the frame, the Series and the module for every row of the refusal tables, no dunder running a query, and a terminal sending the encoded plan to the plan door and nothing else, with no SQL in the frame's modules |
+| `frame_run_test` | the DataFrame on the real library: the readers over Parquet, CSV and JSON files written by the test, each verb's rows through `komira_plan_stream`, `explain()`, a frame run twice, a missing file and a closed session refused at the reader, the engine's refusal at the terminal, the default session, and an ABI 1.7 stand-in refusing the plan door by the version it needs |
+| `frame_duckdb_test` | frame programs over one Parquet file with NULLs, negative numbers, floats and strings, each equal to DuckDB's answer to the SQL that means the same over the same file, in order where the frame is sorted; CPython 3.13 (the minor with a pinned DuckDB) |
 
 The Linux wheel is `./buck2 build //python:komira_wheel`: the package and, in
 `komira/_lib/`, `libkomira[dist]` whole: `libkomira.so`, and in `lib/` its
 native owner libraries and the three Mojo runtime libraries, taken from the
 toolchain's Mojo package so that runtime and compiler are one build. It is
-tagged `py3-none-manylinux_2_35_x86_64`, declares the one `Requires-Dist`
-`pyarrow>=25.0.1` (`PYARROW_REQUIREMENT`, `dependencies.bzl`), and
+tagged `py3-none-manylinux_2_35_x86_64`, declares the `Requires-Dist` lines
+`pyarrow>=25.0.1` and `protobuf>=5.29.1,<8` (`PYARROW_REQUIREMENT` and
+`PROTOBUF_REQUIREMENT`, `dependencies.bzl`), carries the generated plan
+modules at `komira/plan/v1/`, and
 carries Modular's licence and third-party notices beside komira's own
 (`Apache-2.0 AND LicenseRef-Modular-Proprietary`).
 
@@ -390,8 +469,8 @@ never in a pull request, and a run publishes it only from main. After the upload
 index and runs the smoke test.
 
 `./buck2 build //python:wheel_install_test` (CPython 3.13; `:wheel_install_test_py311`,
-`_py312` and `_py314` on the other supported Pythons) installs the wheel and the pinned pyarrow
-25.0.1 wheel of that Python into an empty virtual environment, the
+`_py312` and `_py314` on the other supported Pythons) installs the wheel, the pinned pyarrow
+25.0.1 wheel of that Python and the pinned protobuf 7.36.2 wheel into an empty virtual environment, the
 way a wheel is installed for the other tests (no pip, no network), and runs
 `tests/test_installed.py` there in isolated mode, from an empty directory, with
 no library path set. `//python:wheel_install_test_macos_arm64` runs the test on
@@ -401,9 +480,9 @@ interpreter pinned), from the release workflow only. That test holds:
 | what | how |
 |---|---|
 | the installed package | `komira` imports from the environment, at the wheel's version |
-| its metadata | the `Requires-Dist` `pyarrow>=25.0.1` and no other; `Requires-Python` `>=3.11` and exactly the classifiers `python/BUCK` writes out (`_PYTHON_METADATA`: the four supported minors); the `License-Expression` given; `.dist-info/licenses/` holding `LICENSE`, `NOTICE`, and Modular's `LICENSE` and `Third-Party-Notices`, each byte-equal to its source, and no other; the description starting with the first line of this README |
-| nothing else | no `modular/` directory and no distribution in the environment but komira and pyarrow |
-| the library | `abi_version()` is the version of `src/so/abi/komira.tsv`; a Parquet file registers, a missing one raises `KomiraError`; `SELECT 1 AS n` and an aggregate over `examples/readings.parquet` answer their rows through pyarrow; a serialized plan renders |
+| its metadata | the `Requires-Dist` lines `pyarrow>=25.0.1` and `protobuf>=5.29.1,<8`, in that order, and no other; `Requires-Python` `>=3.11` and exactly the classifiers `python/BUCK` writes out (`_PYTHON_METADATA`: the four supported minors); the `License-Expression` given; `.dist-info/licenses/` holding `LICENSE`, `NOTICE`, and Modular's `LICENSE` and `Third-Party-Notices`, each byte-equal to its source, and no other; the description starting with the first line of this README |
+| nothing else | no `modular/` directory and no distribution in the environment but komira, pyarrow and protobuf; `import komira` imports neither protobuf nor the plan modules |
+| the library | `abi_version()` is the version of `src/so/abi/komira.tsv`; a Parquet file registers, a missing one raises `KomiraError`; `SELECT 1 AS n` and an aggregate over `examples/readings.parquet` answer their rows through pyarrow; the DataFrame program of "The pandas-shaped DataFrame" above answers its two rows through the plan door; a serialized plan renders |
 | where it loaded from | `/proc/self/maps` (on macOS, the images dyld has loaded) lists libkomira and its owners (none on macOS, where `lib/` holds exactly the three runtime `.dylib` files) from `komira/_lib`, and the three Mojo runtime libraries from `komira/_lib/lib` |
 
 Each `//python:refuses_*` target runs the same install and test on one broken
@@ -414,7 +493,8 @@ wheel (`refuses_missing_runtime_library`), a wheel tagged for another platform
 (`refuses_wheel_of_another_platform`), another distribution installed with the
 wheel (`refuses_other_distribution`), an unmet requirement
 (`refuses_unmet_requirement`), the wheel without pyarrow
-(`refuses_missing_requirement`), a pyarrow wheel of another CPython minor
+(`refuses_missing_requirement`), the wheel beside pyarrow without protobuf
+(`refuses_missing_protobuf`), a pyarrow wheel of another CPython minor
 (`refuses_requirement_of_another_minor`), a wheel whose `Requires-Dist` is
 another range (`refuses_requires_dist_not_the_declared_range`), a wheel whose classifiers leave out 3.11
 (`refuses_classifiers_not_the_supported_pythons`) or whose `Requires-Python`

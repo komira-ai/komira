@@ -12,9 +12,10 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":darwin_libs.bzl", "DARWIN_PACKAGES", "mopm_darwin_libs")
 load(":exec_tools.bzl", "exec_tool_cases")
 load(":mopm_artifacts.bzl", "merge_tree_cases", "mopm_artifacts", "mopm_release_artifacts", "native_ids_json")
+load(":plan_expectation.bzl", "mopm_plan_expectation", "plan_expectation_cases")
 load(":release_set.bzl", "release_set")
 load(":unpublished.bzl", "src_library_paths")
-load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
+load("//release/readme_e2e:packages.bzl", README_E2E_NAMESPACE = "NAMESPACE", README_E2E_PACKAGES = "PACKAGES")
 
 # Fails loading this package if `exec_tool_refusal` (exec_tools.bzl, the check of
 # darwin_analysis.bxl that every Zig tool an action runs is built for the platform the action
@@ -24,6 +25,10 @@ exec_tool_cases()
 # Fails loading this package if `merge_trees` (mopm_artifacts.bzl: the two platforms' trees of the directory the
 # release stages, one per subdir, each path under its own) gets any of its cases wrong.
 merge_tree_cases()
+
+# Fails loading this package if `plan_expectation_members` (plan_expectation.bzl: the packages and subdirs a
+# release's plan.json must stage) gets any of its cases wrong.
+plan_expectation_cases()
 
 # The `[native.<id>]` archive of each package that declares one, `{package: {id: archive target}}`: the target its
 # `mojo_conda` passes to `--native`, so the archive staged is the one linked into its tests. One table for both
@@ -51,6 +56,18 @@ RELEASE_NATIVES = {
 mopm_artifacts(
     name = "mopm_artifacts",
     natives = RELEASE_NATIVES,
+    packages = sorted(README_E2E_PACKAGES.keys()),
+    visibility = ["PUBLIC"],
+)
+
+# The set the plan `mopm stage` writes must be (plan_expectation.bzl): every package of packages.bzl with a
+# file for linux-64, and a file for osx-arm64 exactly when it is one of DARWIN_PACKAGES, written from those
+# lists as JSON. release.yml's `mopm-stage` builds it and runs `release_staged_verify expect` with it on the
+# staged set's plan.json right after `mopm stage`, before anything reaches the registry (docs/ci.md).
+mopm_plan_expectation(
+    name = "mopm_plan_expectation",
+    darwin = DARWIN_PACKAGES,
+    namespace = README_E2E_NAMESPACE,
     packages = sorted(README_E2E_PACKAGES.keys()),
     visibility = ["PUBLIC"],
 )
