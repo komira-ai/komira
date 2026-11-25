@@ -210,6 +210,89 @@ def test_null_comparisons() raises:
     )
 
 
+def _predicate_of(sql: String) raises -> String:
+    """The text of the Filter predicate `_got` binds for `sql`."""
+    var text = _got(sql)
+    var key = String("Filter(predicate=")
+    var at = text.find(key)
+    assert_true(at >= 0, text)
+    var rest = String(text[byte = at + key.byte_length():])
+    var nl = rest.find("\n")
+    return String(rest[byte = 0:nl - 1])
+
+
+def test_boolean_tests() raises:
+    _check(
+        "SELECT b IS TRUE AS a, b IS FALSE AS c, b IS NOT TRUE AS d, b IS NOT FALSE AS e FROM t",
+        "Project(exprs=[Alias(BinaryOp(AND, UnaryOp(IS_NOT_NULL, ColRef(b)), ColRef(b)), \"a\"), Alias(BinaryOp(AND, UnaryOp(IS_NOT_NULL, ColRef(b)), UnaryOp(NOT, ColRef(b))), \"c\"), Alias(BinaryOp(OR, UnaryOp(IS_NULL, ColRef(b)), UnaryOp(NOT, ColRef(b))), \"d\"), Alias(BinaryOp(OR, UnaryOp(IS_NULL, ColRef(b)), ColRef(b)), \"e\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    # A comparison is a BOOLEAN operand; a boolean test is itself one.
+    _check(
+        "SELECT k FROM t WHERE k > 1 IS NOT TRUE",
+        "Project(exprs=[ColRef(k)])\n"
+        "  Filter(predicate=BinaryOp(OR, UnaryOp(IS_NULL, BinaryOp(GT, ColRef(k), Literal(ScalarValue(int64, 1)))), UnaryOp(NOT, BinaryOp(GT, ColRef(k), Literal(ScalarValue(int64, 1))))))\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT b IS TRUE IS NOT NULL AS x FROM t",
+        "Project(exprs=[Alias(UnaryOp(IS_NOT_NULL, BinaryOp(AND, UnaryOp(IS_NOT_NULL, ColRef(b)), ColRef(b))), \"x\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    # A NULL literal tests to a constant.
+    _check(
+        "SELECT NULL IS TRUE AS a, NULL IS FALSE AS b, NULL IS NOT TRUE AS c, NULL IS NOT FALSE AS d FROM t",
+        "Project(exprs=[Alias(Literal(ScalarValue(bool, false)), \"a\"), Alias(Literal(ScalarValue(bool, false)), \"b\"), Alias(Literal(ScalarValue(bool, true)), \"c\"), Alias(Literal(ScalarValue(bool, true)), \"d\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    var refusal = (
+        "ERR: SQL not supported: `IS [NOT] TRUE` / `IS [NOT] FALSE` over an operand that"
+        " is not a BOOLEAN. DuckDB casts the operand to BOOLEAN first (`1 IS TRUE`"
+        " is true), and this engine has no cast to BOOLEAN, so only a BOOLEAN"
+        " operand is served; a column of another type can be compared instead"
+        " (`i <> 0`). An operand whose type is not known here, such as an"
+        " outer-query column inside a subquery, is refused too."
+    )
+    _check("SELECT k IS TRUE FROM t", refusal)
+    _check("SELECT s IS NOT FALSE FROM t", refusal)
+    _check("SELECT k FROM t WHERE k + 1 IS NOT TRUE", refusal)
+
+
+def test_is_distinct_from() raises:
+    var same = "BinaryOp(OR, BinaryOp(AND, UnaryOp(IS_NULL, ColRef(k)), UnaryOp(IS_NULL, ColRef(g))), BinaryOp(AND, BinaryOp(AND, UnaryOp(IS_NOT_NULL, ColRef(k)), UnaryOp(IS_NOT_NULL, ColRef(g))), BinaryOp(EQ, ColRef(k), ColRef(g))))"
+    _check(
+        "SELECT k FROM t WHERE k IS NOT DISTINCT FROM g",
+        "Project(exprs=[ColRef(k)])\n"
+        "  Filter(predicate=" + same + ")\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT k FROM t WHERE k IS DISTINCT FROM g",
+        "Project(exprs=[ColRef(k)])\n"
+        "  Filter(predicate=UnaryOp(NOT, " + same + "))\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    # The comparison inside is the ordinary `=` for the operand types: an
+    # INT32 column against an integer literal, a DECIMAL against a float.
+    var i32_eq = _predicate_of("SELECT k FROM t WHERE i32 = 0")
+    assert_true(i32_eq in _predicate_of("SELECT k FROM t WHERE i32 IS NOT DISTINCT FROM 0"))
+    var dc_eq = _predicate_of("SELECT k FROM t WHERE dc = v")
+    assert_true(dc_eq in _predicate_of("SELECT k FROM t WHERE dc IS DISTINCT FROM v"))
+    var s_eq = _predicate_of("SELECT k FROM t WHERE s = 'x'")
+    assert_true(s_eq in _predicate_of("SELECT k FROM t WHERE s IS DISTINCT FROM 'x'"))
+    # A NULL literal on either side folds to the NULL test of the other side.
+    _check(
+        "SELECT k IS DISTINCT FROM NULL AS a, NULL IS DISTINCT FROM k AS b, k IS NOT DISTINCT FROM NULL AS c, NULL IS NOT DISTINCT FROM k AS d FROM t",
+        "Project(exprs=[Alias(UnaryOp(IS_NOT_NULL, ColRef(k)), \"a\"), Alias(UnaryOp(IS_NOT_NULL, ColRef(k)), \"b\"), Alias(UnaryOp(IS_NULL, ColRef(k)), \"c\"), Alias(UnaryOp(IS_NULL, ColRef(k)), \"d\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT NULL IS DISTINCT FROM NULL AS a, NULL IS NOT DISTINCT FROM NULL AS b FROM t",
+        "Project(exprs=[Alias(Literal(ScalarValue(bool, false)), \"a\"), Alias(Literal(ScalarValue(bool, true)), \"b\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
 def test_integer_literal_past_bigint() raises:
     _check(
         "SELECT k FROM t WHERE u64 = 18446744073709551615",

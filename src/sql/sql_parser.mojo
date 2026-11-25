@@ -47,6 +47,8 @@ from .sql_ast import (
     JoinClause, SqlWindowData, SqlStatement, TvfOptions, FROM_LESS_RELATION,
     SX_COLUMN, SX_STAR, SX_UNARY, SX_BOOL, SX_AGG, SX_CALL, SX_BINARY,
     SXUN_NOT, SXUN_IS_NULL, SXUN_IS_NOT_NULL, SXUN_NEGATE, SXUN_ABS, SXLIKE_LIKE, SXLIKE_ILIKE,
+    SXUN_IS_TRUE, SXUN_IS_NOT_TRUE, SXUN_IS_FALSE, SXUN_IS_NOT_FALSE,
+    SXOP_DISTINCT, SXOP_NOT_DISTINCT,
     JK_CROSS, JK_LEFT, JK_RIGHT, JK_FULL, JK_SEMI, JK_ANTI,
     SUBQ_SCALAR, SUBQ_EXISTS, SUBQ_NOT_EXISTS, SUBQ_IN, SUBQ_NOT_IN, SUBQ_DERIVED,
     SUBQ_UNION_ALL, SUBQ_INTERSECT, SUBQ_EXCEPT, _UNION_RESULT_ALIAS,
@@ -1977,8 +1979,9 @@ struct _Parser(Movable):
 
     def _parse_null_test_suffix(mut self, var operand: SqlExpr) raises -> SqlExpr:
         """Apply every postfix NULL test that follows `operand`: `IS NULL`,
-        `IS NOT NULL`, `ISNULL`, `NOTNULL`, `NOT NULL`. Returns `operand`
-        unchanged when none follows. Chains (`x ISNULL IS NULL`), as DuckDB's
+        `IS NOT NULL`, `ISNULL`, `NOTNULL`, `NOT NULL`, and the other tests
+        that follow `IS [NOT]`: `TRUE`, `FALSE` and `DISTINCT FROM <operand>`.
+        Returns `operand` unchanged when none follows. Chains (`x ISNULL IS NULL`), as DuckDB's
         grammar does.
 
         ★ `IS [NOT] NULL` is how a user asks for missing data, and the only
@@ -1988,8 +1991,9 @@ struct _Parser(Movable):
         ⚠ `IS` IS NOT MADE A RESERVED WORD. The tokenizer lower-folds every
         identifier and the parser classifies by text, so a column named `is`
         keeps working: this arm fires only on `IS` FOLLOWED BY `NULL` or `NOT
-        NULL`, and anything else after `IS` is a syntax error naming what was
-        expected rather than a silently mis-parsed column.
+        NULL`, `TRUE`, `FALSE` or `DISTINCT FROM`, and anything else after `IS`
+        is a syntax error naming what was expected rather than a silently
+        mis-parsed column.
 
         ⛔ `ISNULL` / `NOTNULL` / `x NOT NULL` — the PostgreSQL /
         SQLite spellings of the same two tests, all three accepted by DuckDB
@@ -2011,17 +2015,37 @@ struct _Parser(Movable):
                 if self._is_kw("not"):
                     self._advance()
                     negate = True
-                if not self._is_kw("null"):
-                    raise Error(
-                        "SQL syntax error: expected NULL after IS"
-                        + (" NOT" if negate else "")
-                        + " (only `IS [NOT] NULL` is supported; `IS TRUE` /"
-                        + " `IS DISTINCT FROM` are not)"
+                if self._is_kw("null"):
+                    self._advance()  # consume NULL
+                    e = SqlExpr.unary(
+                        SXUN_IS_NOT_NULL if negate else SXUN_IS_NULL, e^
                     )
-                self._advance()  # consume NULL
-                e = SqlExpr.unary(
-                    SXUN_IS_NOT_NULL if negate else SXUN_IS_NULL, e^
-                )
+                elif self._is_kw("true"):
+                    self._advance()
+                    e = SqlExpr.unary(
+                        SXUN_IS_NOT_TRUE if negate else SXUN_IS_TRUE, e^
+                    )
+                elif self._is_kw("false"):
+                    self._advance()
+                    e = SqlExpr.unary(
+                        SXUN_IS_NOT_FALSE if negate else SXUN_IS_FALSE, e^
+                    )
+                elif self._is_kw("distinct"):
+                    self._advance()
+                    self._expect_kw("from")
+                    # The right operand is read at the level a comparison's
+                    # right side is, so `a IS DISTINCT FROM b + 1` takes the
+                    # sum and a trailing `IS ...` applies to the whole test.
+                    var other = self._parse_op()
+                    e = SqlExpr.binary(
+                        SXOP_NOT_DISTINCT if negate else SXOP_DISTINCT,
+                        e^, other^,
+                    )
+                else:
+                    raise Error(
+                        "SQL syntax error: expected NULL, TRUE, FALSE or"
+                        " DISTINCT FROM after IS" + (" NOT" if negate else "")
+                    )
             elif self._is_kw("isnull"):
                 self._advance()
                 e = SqlExpr.unary(SXUN_IS_NULL, e^)

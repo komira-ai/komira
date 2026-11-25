@@ -8,7 +8,7 @@ The governing rule, same SQL, same result as DuckDB, was ruled by the maintainer
 
 | Item | Topic | Mark | Ruling |
 |---|---|---|---|
-| §1.6 | `IS [NOT] DISTINCT FROM` | PARITY GAP | DuckDB's null-safe equality, as a value and as a join key; refused by name until the plan has it ([komira#1218](https://github.com/komira-ai/komira/issues/1218)). |
+| §1.6 | `IS [NOT] DISTINCT FROM` | PARITY GAP | DuckDB's null-safe equality; served as a value (SELECT, WHERE, HAVING) by lowering, and as a join key it waits for a plan operator ([komira#1218](https://github.com/komira-ai/komira/issues/1218)). |
 | §2.8 | MEDIAN and quantiles over NaN | MATCHES | NaN takes part (it sorts above +inf); an all-NaN group answers NaN. |
 | §2.14 | MEDIAN interpolation | MATCHES | DuckDB's formula `lo + d * (hi - lo)`, including its answers at infinite and near-overflow pairs. |
 | §3.7 | ASOF `NEAREST` | EXTENSION | No DuckDB SQL reaches it; expectations are hand-derived from the item. |

@@ -55,6 +55,8 @@ from sql.sql_ast import (
     SXOP_ADD, SXOP_SUB, SXOP_MUL, SXOP_DIV, SXOP_IDIV, SXOP_MOD, SXOP_POW,
     SXOP_CONCAT, SXOP_STARTS_WITH,
     SXUN_NOT, SXUN_IS_NULL, SXUN_IS_NOT_NULL, SXUN_NEGATE, SXUN_ABS,
+    SXUN_IS_TRUE, SXUN_IS_NOT_TRUE, SXUN_IS_FALSE, SXUN_IS_NOT_FALSE,
+    SXOP_DISTINCT, SXOP_NOT_DISTINCT,
     SXLIKE_LIKE, SXLIKE_ILIKE,
     SXAGG_COUNT, SXAGG_AVG, SXAGG_SUM,
     SUBQ_SCALAR, SUBQ_EXISTS, SUBQ_NOT_EXISTS, SUBQ_IN, SUBQ_NOT_IN,
@@ -351,8 +353,65 @@ def test_null_tests() raises:
     _is_un(_w("a !~ 'x' ISNULL"), SXUN_IS_NULL)
     _is_un(_w("a ~~ 'x' ISNULL"), SXUN_IS_NULL)
     _is_un(_w("a NOT LIKE 'x' ISNULL"), SXUN_IS_NULL)
-    _refuses("a IS 5", "expected NULL after IS (only `IS [NOT] NULL` is supported")
-    _refuses("a IS NOT 5", "expected NULL after IS NOT (only")
+    assert_equal(
+        _err("SELECT a IS 5 FROM t"),
+        "SQL syntax error: expected NULL, TRUE, FALSE or DISTINCT FROM after IS",
+    )
+    assert_equal(
+        _err("SELECT a IS NOT 5 FROM t"),
+        "SQL syntax error: expected NULL, TRUE, FALSE or DISTINCT FROM after IS NOT",
+    )
+
+
+def test_boolean_tests() raises:
+    _is_un(_w("a IS TRUE"), SXUN_IS_TRUE)
+    _is_un(_w("a IS NOT TRUE"), SXUN_IS_NOT_TRUE)
+    _is_un(_w("a IS FALSE"), SXUN_IS_FALSE)
+    _is_un(_w("a IS NOT FALSE"), SXUN_IS_NOT_FALSE)
+    _is_col(_child(_w("a is true")), "a")
+    # A test after a comparison tests the comparison; chains nest outward.
+    var cmp = _w("a = 1 IS TRUE")
+    _is_un(cmp, SXUN_IS_TRUE)
+    _is_bin(_child(cmp), SXOP_EQ)
+    var chain = _w("a IS TRUE IS NOT NULL")
+    _is_un(chain, SXUN_IS_NOT_NULL)
+    _is_un(_child(chain), SXUN_IS_TRUE)
+    # NOT is looser than IS: `NOT a IS TRUE` is `NOT (a IS TRUE)`.
+    var neg = _w("NOT a IS FALSE")
+    _is_un(neg, SXUN_NOT)
+    _is_un(_child(neg), SXUN_IS_FALSE)
+    # `IS` stays an ordinary identifier where no test follows.
+    _is_col(_e("is"), "is")
+
+
+def test_is_distinct_from() raises:
+    var d = _w("a IS DISTINCT FROM b")
+    _is_bin(d, SXOP_DISTINCT)
+    _is_col(_l(d), "a")
+    _is_col(_r(d), "b")
+    var nd = _w("a IS NOT DISTINCT FROM NULL")
+    _is_bin(nd, SXOP_NOT_DISTINCT)
+    assert_equal(Int(_r(nd).tag), Int(SX_NULL))
+    # Arithmetic binds tighter than the test, on both sides.
+    var sum = _w("a + 1 IS DISTINCT FROM b * 2")
+    _is_bin(sum, SXOP_DISTINCT)
+    _is_bin(_l(sum), SXOP_ADD)
+    _is_bin(_r(sum), SXOP_MUL)
+    # A comparison on the left is the test's left operand (`IS` is looser
+    # than `=`), and AND is looser than the test.
+    var eq = _w("a = 1 IS DISTINCT FROM b")
+    _is_bin(eq, SXOP_DISTINCT)
+    _is_bin(_l(eq), SXOP_EQ)
+    var conj = _w("a IS DISTINCT FROM 1 AND b IS NOT DISTINCT FROM 2")
+    _is_bin(conj, SXOP_AND)
+    _is_bin(_l(conj), SXOP_DISTINCT)
+    _is_bin(_r(conj), SXOP_NOT_DISTINCT)
+    # A test after the right operand tests the whole `IS DISTINCT FROM`.
+    var tail = _w("a IS DISTINCT FROM 1 IS TRUE")
+    _is_un(tail, SXUN_IS_TRUE)
+    _is_bin(_child(tail), SXOP_DISTINCT)
+    _refuses("a IS DISTINCT b", "expected keyword 'from'")
+    _refuses("(a IS NOT DISTINCT)", "expected keyword 'from'")
 
 
 def test_extract_position_and_casts() raises:

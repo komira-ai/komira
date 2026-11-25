@@ -7,9 +7,10 @@
 from arrow.schema import Schema
 from sql.sql_ast import (
     SXAGG_COUNT, SXAGG_MAX, SXAGG_MIN, SXAGG_SUM, SXLIKE_ILIKE, SXOP_ADD, SXOP_AND,
-    SXOP_CONCAT, SXOP_EQ, SXOP_GE, SXOP_GT, SXOP_IDIV, SXOP_LE, SXOP_LT, SXOP_MOD,
-    SXOP_MUL, SXOP_NE, SXOP_OR, SXOP_POW, SXOP_STARTS_WITH, SXOP_SUB, SXUN_ABS,
-    SXUN_IS_NOT_NULL, SXUN_IS_NULL, SXUN_NEGATE, SX_AGG, SX_BINARY, SX_BOOL, SX_CALL,
+    SXOP_CONCAT, SXOP_DISTINCT, SXOP_EQ, SXOP_GE, SXOP_GT, SXOP_IDIV, SXOP_LE, SXOP_LT, SXOP_MOD,
+    SXOP_MUL, SXOP_NE, SXOP_NOT_DISTINCT, SXOP_OR, SXOP_POW, SXOP_STARTS_WITH, SXOP_SUB, SXUN_ABS,
+    SXUN_IS_FALSE, SXUN_IS_NOT_FALSE, SXUN_IS_NOT_NULL, SXUN_IS_NOT_TRUE, SXUN_IS_NULL,
+    SXUN_IS_TRUE, SXUN_NEGATE, SX_AGG, SX_BINARY, SX_BOOL, SX_CALL,
     SX_CASE, SX_COLUMN, SX_DATE, SX_FLOAT, SX_INT, SX_LIKE, SX_NULL, SX_STAR, SX_STRING,
     SX_INTERVAL, SX_SUBQUERY, SX_TIMESTAMP, SX_UNARY, SXIVL_DAY, SXIVL_MONTH, SXIVL_WEEK,
     SelectStmt, SqlExpr, TSLIT_AWARE,
@@ -106,6 +107,10 @@ def _sxop_text(op: UInt8) -> StaticString:
         return "||"
     if op == SXOP_STARTS_WITH:
         return "^@"
+    if op == SXOP_DISTINCT:
+        return "IS DISTINCT FROM"
+    if op == SXOP_NOT_DISTINCT:
+        return "IS NOT DISTINCT FROM"
     return "/"
 
 
@@ -341,6 +346,22 @@ def _duckdb_expr_text(sx: SqlExpr) raises -> String:
             uout += uchild + " IS NULL)"
         elif sx.op == SXUN_IS_NOT_NULL:
             uout += uchild + " IS NOT NULL)"
+        elif (
+            sx.op == SXUN_IS_TRUE or sx.op == SXUN_IS_NOT_TRUE
+            or sx.op == SXUN_IS_FALSE or sx.op == SXUN_IS_NOT_FALSE
+        ):
+            # DuckDB reads `x IS TRUE` as `CAST(x AS BOOLEAN) IS NOT DISTINCT
+            # FROM true` and `x IS NOT FALSE` as `CAST(x AS BOOLEAN) IS
+            # DISTINCT FROM false`, and prints that (measured on DuckDB
+            # v1.1.3). `true` / `false` here are lower-case, unlike a
+            # `true` the user writes (`CAST('t' AS BOOLEAN)`).
+            var tested = String("true")
+            if sx.op == SXUN_IS_FALSE or sx.op == SXUN_IS_NOT_FALSE:
+                tested = String("false")
+            var verb = String(" IS NOT DISTINCT FROM ")
+            if sx.op == SXUN_IS_NOT_TRUE or sx.op == SXUN_IS_NOT_FALSE:
+                verb = String(" IS DISTINCT FROM ")
+            return "(CAST(" + uchild + " AS BOOLEAN)" + verb + tested + ")"
         elif sx.op == SXUN_NEGATE:
             # DuckDB v1.5.3: `-a` prints `-(a)`, `-(a + 1)` prints
             # `-((a + 1))` — the prefix and then the operand's own parens.

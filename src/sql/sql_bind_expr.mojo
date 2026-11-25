@@ -29,7 +29,7 @@ from sql.sql_bind_decimal import (
     bind_decimal_comparison, swap_decimal_comparison,
 )
 from sql.sql_bind_ops import (
-    _map_unop, _bind_sql_operator, _bind_like, _BARE_NULL_REFUSAL, _sx_is_big_int,
+    _bind_sql_unary, _lower_null_safe, _bind_sql_operator, _bind_like, _BARE_NULL_REFUSAL, _sx_is_big_int,
     _big_int_literal_refusal, _big_int_cmp_serves, _bind_big_int_uint64,
     _int_cast_base_column, _int_cast_arith_cmp, _int_cast_cmp_side, _is_null_comparison,
     _null_comparison,
@@ -393,6 +393,9 @@ def _bind_scalar(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCata
         )
     if sx.tag == SX_INTERVAL:
         raise Error(INTERVAL_STANDALONE_REFUSAL)
+    var null_safe = _lower_null_safe(sx)
+    if null_safe:
+        return _bind_scalar(null_safe.take(), schema, scope, catalog, cte_scope, prebound)
     if sx.tag == SX_BINARY:
         var ivl_side = interval_operand_side(sx)
         if ivl_side == 2:
@@ -440,9 +443,10 @@ def _bind_scalar(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCata
     if sx.tag == SX_NULL:
         raise Error(_BARE_NULL_REFUSAL)
     if sx.tag == SX_UNARY:
-        return Expr.unary(
-            _map_unop(sx.op),
+        return _bind_sql_unary(
+            sx.op,
             _bind_scalar(sx._agg.value().arg[], schema, scope, catalog, cte_scope, prebound),
+            schema,
         )
     if sx.tag == SX_LIKE:
         var child = _bind_scalar(sx._agg.value().arg[], schema, scope, catalog, cte_scope, prebound)
