@@ -60,7 +60,9 @@
 #                   what a user gets: in a fresh project set to the Mojo this
 #                   release was built for, the pinned mopm runs
 #                   `mopm add komira-ai/<name> --registry prod` for json, uuid
-#                   and libc, then `mopm sync`; the lock must record full names
+#                   and every package that ships a native archive
+#                   (RELEASE_NATIVES of release/BUCK), then `mopm sync`; the
+#                   lock must record full names
 #                   under https://conda.mopm.dev/komira-ai/ at this run's version,
 #                   and the installed files must be the plan's (sha256 and size).
 #                   These jobs need a mopm that has `--no-commit` and `--abort`

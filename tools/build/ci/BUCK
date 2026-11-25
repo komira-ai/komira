@@ -255,7 +255,7 @@ zig_test(
 )
 
 # The names `release_staged_verify add` installs from prod (`add_set` of prod_add.zig) are held to the release's
-# data (prod_add_set_test.zig says what each case catches): every package that ships a native archive
+# data (prod_add_set_test.zig lists its cases): every package that ships a native archive
 # (RELEASE_NATIVES of release/BUCK) is one of them, and each is a package of release/readme_e2e/packages.bzl.
 # //release:release_packages_json hands both lists over, since a BUCK file's table cannot be loaded here.
 zig_test(
