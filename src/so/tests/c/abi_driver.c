@@ -30,6 +30,12 @@
  * what every reading must satisfy, and a cancel racing a run may land before
  * or after its last check, so either outcome is accepted and each is checked
  * whole.
+ * Last, it is a producer of struct ArrowArrayStream, written in C as a host's
+ * Arrow library would be, and hands its streams to
+ * komira_register_arrow_stream: the registered table answers queries (a
+ * join with a registered CSV file among them) after the producer's buffers
+ * are overwritten and freed, and the producer counts every release the
+ * library makes of the stream, its schema and its chunks.
  *
  * And it runs plans through komira_plan_stream: a WirePlanEnvelope it encodes
  * by hand (a scan of a Parquet file, its schema the bytes komira_parquet_schema
@@ -81,6 +87,7 @@ DECLARE(komira_run_cancel);
 DECLARE(komira_run_progress);
 DECLARE(komira_sql_stream_run);
 DECLARE(komira_plan_stream);
+DECLARE(komira_register_arrow_stream);
 
 static int bind_all(void *lib) {
     int missing = 0;
@@ -117,6 +124,7 @@ static int bind_all(void *lib) {
     BIND(komira_run_progress);
     BIND(komira_sql_stream_run);
     BIND(komira_plan_stream);
+    BIND(komira_register_arrow_stream);
 #undef BIND
     return missing;
 }
@@ -714,6 +722,279 @@ static void text_source_cases(void) {
     p_komira_ctx_free(ctx);
 }
 
+/* A producer of struct ArrowArrayStream, as a host's Arrow library is one:
+   up to two chunks of three rows, `id` int64 (1..6) and `s` utf8 of two
+   characters ("an", "bo", "cy", "de", "ev", "fi"), from one heap block the
+   producer owns. Its callbacks count what the library does with them. */
+struct producer {
+    int n_chunks;        /* chunks get_next hands out before the end */
+    int next;            /* chunks handed out so far */
+    int fail_schema;     /* get_schema fails */
+    int fail_at;         /* get_next fails at this chunk, -1 never */
+    int null_column;     /* the schema's second column is of the Null type */
+    int schema_calls, stream_releases, schema_releases, chunk_releases;
+    char error[64];
+    struct data {
+        int64_t ids[6];
+        int32_t offsets[4];
+        char chars[12];
+    } *data;
+};
+
+static void producer_init(struct producer *p, int n_chunks) {
+    memset(p, 0, sizeof *p);
+    p->n_chunks = n_chunks;
+    p->fail_at = -1;
+    p->data = calloc(1, sizeof *p->data);
+    for (int i = 0; i < 6; i++) p->data->ids[i] = i + 1;
+    for (int i = 0; i < 4; i++) p->data->offsets[i] = 2 * i;
+    memcpy(p->data->chars, "anbocydeevfi", 12);
+}
+
+/* Overwrite and free the producer's rows: a table that still answers after
+   this holds its own copy. */
+static void producer_drop_data(struct producer *p) {
+    memset(p->data, 0xFF, sizeof *p->data);
+    free(p->data);
+    p->data = NULL;
+}
+
+struct schema_owner {
+    struct producer *p;
+    struct ArrowSchema *children[2];
+};
+
+static void release_leaf_schema(struct ArrowSchema *s) { s->release = NULL; }
+
+static void release_root_schema(struct ArrowSchema *s) {
+    struct schema_owner *o = s->private_data;
+    o->p->schema_releases++;
+    for (int i = 0; i < 2; i++) {
+        if (o->children[i]->release != NULL) o->children[i]->release(o->children[i]);
+        free(o->children[i]);
+    }
+    free(o);
+    s->release = NULL;
+}
+
+static struct ArrowSchema *leaf_schema(const char *name, const char *format) {
+    struct ArrowSchema *f = calloc(1, sizeof *f);
+    f->format = format;
+    f->name = name;
+    f->flags = ARROW_FLAG_NULLABLE;
+    f->release = release_leaf_schema;
+    return f;
+}
+
+static int producer_get_schema(struct ArrowArrayStream *s, struct ArrowSchema *out) {
+    struct producer *p = s->private_data;
+    p->schema_calls++;
+    if (p->fail_schema) {
+        snprintf(p->error, sizeof p->error, "producer: schema refused");
+        return 5;
+    }
+    struct schema_owner *o = calloc(1, sizeof *o);
+    o->p = p;
+    o->children[0] = leaf_schema("id", "l");
+    o->children[1] = leaf_schema(p->null_column ? "nothing" : "s", p->null_column ? "n" : "u");
+    memset(out, 0, sizeof *out);
+    out->format = "+s";
+    out->name = "";
+    out->n_children = 2;
+    out->children = o->children;
+    out->private_data = o;
+    out->release = release_root_schema;
+    return 0;
+}
+
+struct chunk_owner {
+    struct producer *p;
+    struct ArrowArray *children[2];
+    const void *root_buffers[1], *id_buffers[2], *s_buffers[3];
+};
+
+static void release_leaf_array(struct ArrowArray *a) { a->release = NULL; }
+
+static void release_chunk(struct ArrowArray *a) {
+    struct chunk_owner *o = a->private_data;
+    o->p->chunk_releases++;
+    for (int i = 0; i < 2; i++) {
+        if (o->children[i]->release != NULL) o->children[i]->release(o->children[i]);
+        free(o->children[i]);
+    }
+    free(o);
+    a->release = NULL;
+}
+
+static int producer_get_next(struct ArrowArrayStream *s, struct ArrowArray *out) {
+    struct producer *p = s->private_data;
+    if (p->next == p->fail_at) {
+        snprintf(p->error, sizeof p->error, "producer: chunk %d refused", p->next);
+        return 5;
+    }
+    memset(out, 0, sizeof *out);
+    if (p->next == p->n_chunks) return 0; /* the end: release stays NULL */
+    int k = p->next++;
+    struct chunk_owner *o = calloc(1, sizeof *o);
+    o->p = p;
+    o->id_buffers[1] = p->data->ids + 3 * k;
+    o->s_buffers[1] = p->data->offsets;
+    o->s_buffers[2] = p->data->chars + 6 * k;
+    const void **buffers[2] = {o->id_buffers, o->s_buffers};
+    for (int i = 0; i < 2; i++) {
+        struct ArrowArray *c = calloc(1, sizeof *c);
+        c->length = 3;
+        c->n_buffers = i == 0 ? 2 : 3;
+        c->buffers = buffers[i];
+        c->release = release_leaf_array;
+        o->children[i] = c;
+    }
+    out->length = 3;
+    out->n_buffers = 1;
+    out->buffers = o->root_buffers;
+    out->n_children = 2;
+    out->children = o->children;
+    out->private_data = o;
+    out->release = release_chunk;
+    return 0;
+}
+
+static const char *producer_last_error(struct ArrowArrayStream *s) {
+    return ((struct producer *)s->private_data)->error;
+}
+
+static void producer_release(struct ArrowArrayStream *s) {
+    ((struct producer *)s->private_data)->stream_releases++;
+    s->release = NULL;
+}
+
+static void producer_stream(struct ArrowArrayStream *s, struct producer *p) {
+    s->get_schema = producer_get_schema;
+    s->get_next = producer_get_next;
+    s->get_last_error = producer_last_error;
+    s->release = producer_release;
+    s->private_data = p;
+}
+
+/* Hand a fresh producer's stream of `n_chunks` to the library under `name`,
+   with the producer's failure switches set as given, then check the stream is
+   released and drop the producer's rows. Returns the call's status. */
+static int32_t register_stream(komira_handle ctx, const char *name, struct producer *p, int n_chunks,
+                               int fail_schema, int fail_at, int null_column) {
+    struct ArrowArrayStream s;
+    producer_init(p, n_chunks);
+    p->fail_schema = fail_schema;
+    p->fail_at = fail_at;
+    p->null_column = null_column;
+    producer_stream(&s, p);
+    int32_t rc = p_komira_register_arrow_stream(ctx, name, &s);
+    CHECK(s.release == NULL);
+    producer_drop_data(p);
+    return rc;
+}
+
+/* komira_register_arrow_stream: streams of this file's producer, drained into
+   tables of the session, each release counted. */
+static void arrow_stream_cases(void) {
+    const char *tmp = getenv("TEST_TMPDIR");
+    if (tmp == NULL) return; /* text_source_cases has already failed on it */
+    komira_handle ctx = p_komira_ctx_new();
+    CHECK(ctx != NULL);
+    if (ctx == NULL) return;
+    struct producer p;
+    struct answer a;
+    char text[512], people[512];
+    if (write_file(tmp, "people.csv", "id,name,score\n1,ann,10\n2,bob,20\n3,cy,30\n", people, sizeof people) != 0) return;
+
+    /* Two chunks: the stream, its schema and each chunk released once, and
+       the rows answer after the producer's buffers are overwritten and freed. */
+    CHECK(register_stream(ctx, "rows", &p, 2, 0, -1, 0) == KOMIRA_OK);
+    CHECK(p.schema_calls == 1 && p.stream_releases == 1 && p.schema_releases == 1 && p.chunk_releases == 2);
+    uint64_t len = 99;
+    CHECK(p_komira_last_error(ctx, NULL, 0, &len) == KOMIRA_OK && len == 0);
+    if (query(ctx, "SELECT id, s FROM ROWS ORDER BY id", &a) == 0) {
+        CHECK(a.n_fields == 2 && strcmp(a.names[1], "s") == 0 && strcmp(a.formats[0], "l") == 0 && strcmp(a.formats[1], "u") == 0);
+        CHECK(a.rows == 6 && a.n_values == 6 && a.values[0] == 1 && a.values[5] == 6);
+    }
+    if (query(ctx, "SELECT id FROM rows WHERE s = 'ev'", &a) == 0) {
+        CHECK(a.rows == 1 && a.n_values == 1 && a.values[0] == 5);
+    }
+    if (query(ctx, "SELECT max(id) AS m FROM rows WHERE id < 4", &a) == 0) {
+        CHECK(a.rows == 1 && a.n_values == 1 && a.values[0] == 3);
+    }
+    /* A join with a registered CSV file: ids 1..3 are both tables'. */
+    CHECK(p_komira_register_csv(ctx, "people", people, ',', 1, 0) == KOMIRA_OK);
+    if (query(ctx, "SELECT r.id FROM rows r JOIN people p ON r.id = p.id WHERE p.score >= 20 ORDER BY r.id", &a) == 0) {
+        CHECK(a.rows == 2 && a.n_values == 2 && a.values[0] == 2 && a.values[1] == 3);
+    }
+
+    /* A stream of no chunk: a table of no row with the stream's schema. */
+    CHECK(register_stream(ctx, "none_yet", &p, 0, 0, -1, 0) == KOMIRA_OK);
+    CHECK(p.stream_releases == 1 && p.schema_releases == 1 && p.chunk_releases == 0);
+    if (query(ctx, "SELECT id, s FROM none_yet", &a) == 0) {
+        CHECK(a.n_fields == 2 && strcmp(a.formats[1], "u") == 0 && a.rows == 0);
+    }
+    if (query(ctx, "SELECT count(*) AS n FROM none_yet", &a) == 0) {
+        CHECK(a.rows == 1 && a.n_values == 1 && a.values[0] == 0);
+    }
+
+    /* A second registration of a name replaces its table, a CSV one too. */
+    CHECK(register_stream(ctx, "Rows", &p, 1, 0, -1, 0) == KOMIRA_OK);
+    if (query(ctx, "SELECT count(*) AS n FROM rows", &a) == 0) {
+        CHECK(a.rows == 1 && a.n_values == 1 && a.values[0] == 3);
+    }
+    CHECK(register_stream(ctx, "people", &p, 2, 0, -1, 0) == KOMIRA_OK);
+    if (query(ctx, "SELECT count(*) AS n FROM people", &a) == 0) {
+        CHECK(a.rows == 1 && a.n_values == 1 && a.values[0] == 6);
+    }
+    CHECK(p_komira_register_csv(ctx, "rows", people, ',', 1, 0) == KOMIRA_ERR_ENGINE);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text),
+                 "TABLE_ALREADY_REGISTERED: the session already has a table named 'rows'") == 0);
+
+    /* Refusals: each releases the stream once, names its reason word for word
+       and replaces nothing; `rows` keeps its three rows. */
+    CHECK(register_stream(ctx, "rows", &p, 2, 1, -1, 0) == KOMIRA_ERR_ENGINE);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text),
+                 "from_arrow_c_stream: get_schema failed (rc=5): producer: schema refused") == 0);
+    CHECK(p.stream_releases == 1 && p.schema_releases == 0 && p.chunk_releases == 0);
+    CHECK(register_stream(ctx, "rows", &p, 2, 0, 1, 0) == KOMIRA_ERR_ENGINE);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text),
+                 "from_arrow_c_stream: get_next failed (rc=5): producer: chunk 1 refused") == 0);
+    CHECK(p.stream_releases == 1 && p.schema_releases == 1 && p.chunk_releases == 1);
+    CHECK(register_stream(ctx, "rows", &p, 2, 0, -1, 1) == KOMIRA_ERR_ENGINE);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text),
+                 "UnsupportedArrowCABIType: the Null type ('n') is not in the supported drain subset") == 0);
+    CHECK(p.stream_releases == 1 && p.schema_releases == 1 && p.chunk_releases == 0);
+    if (query(ctx, "SELECT count(*) AS n FROM rows", &a) == 0) {
+        CHECK(a.rows == 1 && a.n_values == 1 && a.values[0] == 3);
+    }
+    /* Refused before the stream is read: released once, get_schema never
+       called. */
+    CHECK(register_stream(ctx, "", &p, 2, 0, -1, 0) == KOMIRA_ERR_ENGINE);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text), "TABLE_NAME_EMPTY: a table name must not be empty") == 0);
+    CHECK(p_komira_last_error_step(ctx) == KOMIRA_STEP_BIND); /* a registration's refusal, as komira_register_csv's */
+    CHECK(p.schema_calls == 0 && p.stream_releases == 1);
+    CHECK(register_stream(ctx, NULL, &p, 2, 0, -1, 0) == KOMIRA_ERR_NULL_ARG);
+    CHECK(strcmp(last_error_text(ctx, text, sizeof text), "komira_register_arrow_stream: name or stream is NULL") == 0);
+    CHECK(p.schema_calls == 0 && p.stream_releases == 1);
+    CHECK(register_stream(NULL, "t", &p, 2, 0, -1, 0) == KOMIRA_ERR_NULL_CTX);
+    CHECK(p.schema_calls == 0 && p.stream_releases == 1);
+    CHECK(p_komira_register_arrow_stream(ctx, "t", NULL) == KOMIRA_ERR_NULL_ARG);
+    {
+        struct ArrowArrayStream released;
+        memset(&released, 0, sizeof released);
+        CHECK(p_komira_register_arrow_stream(ctx, "t", &released) == KOMIRA_ERR_ENGINE);
+        CHECK(strcmp(last_error_text(ctx, text, sizeof text), "from_arrow_c_stream: stream is already released") == 0);
+    }
+    /* A refused name stays free. */
+    CHECK(register_stream(ctx, "t", &p, 1, 0, -1, 0) == KOMIRA_OK);
+    CHECK(p_komira_last_error(ctx, NULL, 0, &len) == KOMIRA_OK && len == 0);
+    if (query(ctx, "SELECT count(*) AS n FROM t", &a) == 0) {
+        CHECK(a.rows == 1 && a.n_values == 1 && a.values[0] == 3);
+    }
+    p_komira_ctx_free(ctx);
+}
+
 /* The session options of komira_ctx_new_with_options, over three.parquet
    (k = 1, 2, 3), which sql_stream_cases wrote under $TEST_TMPDIR. */
 static void options_cases(void) {
@@ -896,5 +1177,6 @@ int main(void) {
     text_source_cases();
     options_cases();
     plan_stream_cases();
+    arrow_stream_cases();
     return failures == 0 ? 0 : 1;
 }

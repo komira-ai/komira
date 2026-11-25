@@ -1,11 +1,14 @@
-//! Runs of pypi.yml, the Linux wheel's publish workflow, played from the workflow's own text by
-//! pypi_workflow_play.zig (its header says which of GitHub's rules the play holds): for each event (a push
-//! to main, the daily schedule, a manual run), each answer an index gives (`absent`, `same`, `differs`)
-//! and the failure of a job, which jobs run, which upload and which save a record, what the two verdict
-//! jobs print and whether the run ends green; whether a push of a set of paths starts a run; and which
-//! runs of a sequence of events start, wait or are replaced. Part of //:pypi_workflow_cases
-//! (pypi_workflow_test.zig imports this file). The macOS wheel's workflow, and the two side by side, are
-//! played in pypi_macos_workflow_run.zig.
+//! Runs of pypi.yml's Linux wheel chain, played from the workflow's own text by pypi_workflow_play.zig
+//! (its header says which of GitHub's rules the play holds): for each event (a push to main, the daily
+//! schedule, a manual run), each answer an index gives (`absent`, `same`, `differs`) and the failure of
+//! a job, which jobs run, which upload and which save a record, what the two verdict jobs print and
+//! whether the run ends green; whether a push of a set of paths starts a run; and which runs of a
+//! sequence of events start, wait or are replaced. Every play here plays the whole file, nineteen jobs, the
+//! macOS jobs with no end of their own (the build finds nothing built and its chain is green), and holds
+//! the Linux assertions on `chain(.., .linux)`, the run as the Linux wheel's chain sees it; the last case
+//! holds that the whole run is green exactly when the Linux chain is, with the macOS chain's default
+//! outcome. Part of //:pypi_workflow_cases (pypi_workflow_test.zig imports this file). The macOS wheel's
+//! chain and the two chains together are played in pypi_macos_jobs_run.zig.
 
 const std = @import("std");
 const t = std.testing;
@@ -14,7 +17,11 @@ const p_ = @import("pypi_workflow_play.zig");
 const End = p_.End;
 const Case = p_.Case;
 const Message = p_.Message;
-const play = p_.play;
+
+/// The run of the file as the Linux wheel's chain sees it.
+fn play(ar: std.mem.Allocator, text: []const u8, case: Case) !p_.Played {
+    return p_.chain(ar, try p_.play(ar, text, case), .linux);
+}
 const expanded = p_.expanded;
 const pushStarts = p_.pushStarts;
 const queue = p_.queue;
@@ -274,4 +281,25 @@ test "the plays refuse a workflow or a case they cannot read" {
     try t.expectError(error.Unreadable, pushStarts(ar, try reader.replaced(ar, text, "      - '**.md'\n", "      - '!docs/keep.md'\n"), &.{"docs/x.md"}));
     try t.expectError(error.Unreadable, queue(ar, try reader.replaced(ar, text, "  cancel-in-progress: false\n", "  cancel-in-progress: ${{ false }}\n"), &.{arrive("a", "push")}));
     try t.expectError(error.Unreadable, queue(ar, text, &.{ arrive("a", "push"), leave("a"), leave("a") }));
+}
+
+test "the whole run is green exactly when the Linux chain is, with the macOS chain at its default outcome" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try reader.readWorkflow(ar);
+    const cases = [_]Case{
+        .{ .event = "push", .ends = &.{ BUILT, state("testpypi", "absent") } },
+        .{ .event = "push", .ends = &.{.{ .job = "build", .result = "failure" }} },
+        .{ .event = "push", .ends = &.{ BUILT, state("testpypi", "absent"), .{ .job = "testpypi-smoke", .result = "failure" } } },
+        .{ .event = "schedule", .ends = &.{ PROMOTED, state("pypi", "absent") } },
+        .{ .event = "schedule", .ends = &.{.{ .job = "promote", .result = "failure" }} },
+    };
+    const green = [_]bool{ true, false, false, true, false };
+    for (cases, green) |case, want| {
+        const whole = try p_.play(ar, text, case);
+        try t.expectEqual(want, (try p_.chain(ar, whole, .linux)).green());
+        try t.expectEqual(want, whole.green());
+        try t.expect((try p_.chain(ar, whole, .macos)).green());
+    }
 }

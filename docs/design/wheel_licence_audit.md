@@ -74,15 +74,16 @@ there), Brotli `//third_party/brotli`, aws-lc `//third_party/aws-lc`, s2n-tls
 
 Verified by reading, not by running anything on a developer machine:
 
-- `libkomira`'s dynamic symbol table is exactly the twenty-four `komira_*` exports
+- `libkomira`'s dynamic symbol table is exactly the twenty-five `komira_*` exports
   (`exports_exact` gate in `src/so/tests/gate/`). None takes a URL, host or
   socket: they take a local file path, a worker count and memory budget, the bytes of a plan, SQL text, or a
-  credential's kind, name and field values, or a run handle, and return bytes,
+  credential's kind, name and field values, a run handle, or an Arrow C stream the caller
+  produced, and return bytes,
   text, an id, a run handle, two counts, an Arrow C stream or a status.
 - The closure holds network code: `async_rt`'s reactor and socket primitives,
   `net`, `http_core` (HTTP and TLS) and `http_client`, which the engine uses
   to read object stores and to call an Iceberg REST catalog. No export of the
-  twenty-four reaches it: `komira_ctx_new` and `komira_ctx_new_with_options`
+  twenty-five reaches it: `komira_ctx_new` and `komira_ctx_new_with_options`
   start the engine's worker threads and open nothing, and `komira_register_parquet` lists and reads local files
   only (`parquet_footers` reads through `LocalFs`), as do `komira_register_csv` and
   `komira_register_json`, which infer a local file's schema; `komira_sql_stream` and
@@ -92,7 +93,8 @@ Verified by reading, not by running anything on a developer machine:
   `_progress`) touch only a cancel flag and two counters in memory; `komira_plan_stream` runs
   `sdk_exec.run_plan`, with the same local-only scans, and the plan decoder
   refuses a scan of a remote file system (`PLAN_WIRE_UNSUPPORTED_REMOTE_FS`)
-  and an envelope with a write target; the other exports read a local file or
+  and an envelope with a write target; `komira_register_arrow_stream` reads only the memory of the stream it is given,
+  through that stream's own callbacks; the other exports read a local file or
   the bytes given.
 - Nothing is sent anywhere. `docs/design/logging_and_telemetry.md` records
   that spans and metrics go to in-process rings and that "nothing exports".

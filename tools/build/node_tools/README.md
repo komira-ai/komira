@@ -31,7 +31,7 @@ Test support: [`tartest.zig`](tartest.zig) builds tar and gzip archives in memor
 node_act dist --archive <tgz> --out <dir> --top <dir> --version <v> --libs <dir>
 node_act npm-package --tarball <tgz> --out <dir> --name <n> --version <v> --integrity <sha512-b64> --exe <path|-> --node <dir> --libs <dir> --js <program>
 node_act node-test --node <dir> --libs <dir> --out <file> --dir <dir> --script <path> --expect <pass|fail> --error <text> -- <args>...
-node_act binding-test --node <dir> --libs <dir> --out <file> --dir <dir> -- <test file>...
+node_act binding-test --node <dir> --libs <dir> --out <file> --dir <dir> [--cover <path>]... -- <test file>...
 node_act esbuild-bundle --esbuild <exe> --dir <dir> --entry <path> --out <file> --format <cjs|esm>
 ```
 
@@ -39,5 +39,11 @@ node_act esbuild-bundle --esbuild <exe> --dir <dir> --entry <path> --out <file> 
 |---|---|---|
 | [`node_act.zig`](node_act.zig) | the five subcommands, their messages and exit statuses (those of the scripts), the environments node is run in | [`node_act_test.zig`](node_act_test.zig) and `tests//functional/node_act:driver` (a stand-in for node, for an npm package's executable and for esbuild) |
 | [`act_util/extract.zig`](../act_util/extract.zig) | `tar -xzf` of the entries below one top directory, kept by a predicate: the archive's modes (executable or 0644), links kept (shared with the python rule) | [`extract_test.zig`](../act_util/extract_test.zig): another top, `..`, links, modes |
+
+`binding-test` with `--cover` (`node_binding_test`'s `covered_srcs`) also has node write an lcov
+report of exactly those files, and fails, printing each file's lines and branches hit of found, unless
+every one has a record (`<path> is to be covered, and no test loaded it`) and their lines and their
+branches together are each at least 99% covered (`the line coverage of the covered sources is <p>% (<h>
+of <f> lines), under 99%`, and the same for branches).
 
 The `c_shared_lib` rule needs no tool of its own: it runs the pinned zig through `zig_launch`.

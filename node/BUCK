@@ -1,4 +1,5 @@
 load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "node_addon", "node_binding_test")
+load("@komira//tools/build/node:modules.bzl", "tsc_build", "tsc_check")
 
 # The Node-API addon over libkomira, built with the pinned zig against the
 # headers of the pinned node. README.md says what it exposes and why it opens
@@ -78,6 +79,140 @@ node_binding_test(
     },
 )
 
+# ---- The TypeScript package (docs/design/typescript_package.md, part 3) -----
+#
+# @komira-ai/komira, not published: its sources (src/), the package.json npm
+# reads, and the declarations and JavaScript tsc compiles from them (dist/).
+# The name is a placeholder until the npm name is decided (the design's D1
+# and D4).
+
+# The TypeScript compiler and Node.js's types (devtools/README.md).
+_DEVTOOLS = "//node/devtools:modules"
+
+_SRCS = [
+    "src/cpu.ts",
+    "src/errors.ts",
+    "src/index.ts",
+    "src/native.ts",
+    "src/platform.ts",
+    "src/session.ts",
+    "src/version.ts",
+]
+
+_TESTS = [
+    "tests/cpu.test.ts",
+    "tests/default_session.test.ts",
+    "tests/errors.test.ts",
+    "tests/exports.test.ts",
+    "tests/load.test.ts",
+    "tests/package.test.ts",
+    "tests/platform.test.ts",
+    "tests/register_args.test.ts",
+    "tests/session.test.ts",
+    "tests/unknown_status.test.ts",
+    "tests/variants.test.ts",
+]
+
+# The modules the tests import that are not tests themselves.
+_TEST_MODULES = [
+    "tests/default_session_worker.ts",
+    "tests/helpers.ts",
+]
+
+# Every source and test, type-checked with strict on.
+tsc_check(
+    name = "typecheck",
+    modules = _DEVTOOLS,
+    srcs = _SRCS + _TESTS + _TEST_MODULES + ["package.json", "tsconfig.json"],
+)
+
+# The JavaScript and .d.ts files the package ships, compiled from src/.
+tsc_build(
+    name = "dist",
+    modules = _DEVTOOLS,
+    srcs = _SRCS + ["package.json", "tsconfig.build.json", "tsconfig.json"],
+)
+
+# Stand-ins for the package's tests: a library of ABI 1.1 that loads, and two
+# whose komira_register_parquet fails, with status -3 (KOMIRA_ERR_ENGINE) and
+# a last error, and with a status libkomira does not define and no last error.
+c_shared_lib(
+    name = "fake_v1_1",
+    srcs = ["tests/fake_libkomira.c"],
+    out = "libkomira_fake_v1_1.so",
+)
+
+c_shared_lib(
+    name = "fake_engine_error",
+    srcs = ["tests/fake_libkomira.c"],
+    copts = ["-DFAKE_REGISTER_STATUS=-3", "-DFAKE_LAST_ERROR=\"IO Error: the stand-in refuses every file\""],
+    out = "libkomira_fake_engine_error.so",
+)
+
+# A stand-in that answers each komira_register_parquet with -3 and the
+# arguments it received as the last error: what the package passed the C call.
+c_shared_lib(
+    name = "fake_echo_register",
+    srcs = ["tests/fake_libkomira.c"],
+    copts = ["-DFAKE_ECHO_REGISTER"],
+    out = "libkomira_fake_echo_register.so",
+)
+
+c_shared_lib(
+    name = "fake_unknown_status",
+    srcs = ["tests/fake_libkomira.c"],
+    copts = ["-DFAKE_REGISTER_STATUS=-42"],
+    out = "libkomira_fake_unknown_status.so",
+)
+
+_ISA_FIXTURES = [
+    "VARIANTS_aarch64",
+    "VARIANTS_macos",
+    "VARIANTS_x86_64_v4",
+    "choices.tsv",
+    "cpuinfo_aarch64_cortex_a72.txt",
+    "cpuinfo_aarch64_neoverse_n1.txt",
+    "cpuinfo_x86_64_core2.txt",
+    "cpuinfo_x86_64_skylake_sp.txt",
+    "cpuinfo_x86_64_westmere.txt",
+]
+
+# The platform package as npm installs it beside the main package: its
+# package.json, the addon, and the self-contained native directory.
+_PLATFORM = "node_modules/@komira-ai/komira-linux-x64-gnu/"
+
+# The package's behaviour tests (tests/*.test.ts, run by the pinned node with
+# its types stripped), each file its own process. The sources are measured:
+# every one must be loaded, with at least 99% of its lines and branches
+# together covered.
+node_binding_test(
+    name = "package_test",
+    srcs = _TESTS,
+    covered_srcs = _SRCS,
+    data = {
+        "dist": ":dist",
+        "fake/echo_register/libkomira.so": ":fake_echo_register",
+        "fake/engine_error/libkomira.so": ":fake_engine_error",
+        "fake/unknown_status/libkomira.so": ":fake_unknown_status",
+        "fake/v1_1/libkomira.so": ":fake_v1_1",
+        "fake/v2/libkomira.so": ":fake_v2",
+        "fixtures/cpuinfo_x86_64_v3.txt": "komira//python/tests:fixtures/cpuinfo_x86_64_v3.txt",
+        "fixtures/isa_variants/VARIANTS_shipped": "komira//tools/build/package/libkomira:libkomira_variants_manifest",
+        "fixtures/komira.tsv": "komira//src/so:abi/komira.tsv",
+        "fixtures/two_columns.parquet": "komira//src/so:tests/fixtures/two_columns.parquet",
+        "package.json": "package.json",
+        _PLATFORM + "komira_addon.node": ":komira_addon",
+        _PLATFORM + "native": "komira//src/so:libkomira[dist]",
+        _PLATFORM + "package.json": "tests/fixtures/platform_package.json",
+    } | {
+        "fixtures/isa_variants/" + f: "komira//python/tests:fixtures/isa_variants/" + f
+        for f in _ISA_FIXTURES
+    } | {
+        m: m
+        for m in _TEST_MODULES
+    },
+)
+
 # The session thread's stand-in (tests/fake_latch.c): its own context per
 # session, a journal of every call with its context and thread, gates that
 # hold a call until the test opens them, and refusals of a call on the
@@ -128,7 +263,7 @@ node_binding_test(
         "komira_addon.node": ":komira_addon",
         "package.json": "package.json",
         "src/arrow_import.mts": "src/arrow_import.mts",
-        "src/errors.mts": "src/errors.mts",
+        "src/errors.ts": "src/errors.ts",
         "tests/arrow_specs.mts": "tests/arrow_specs.mts",
     },
     deps = ["//third_party/node:apache-arrow"],
