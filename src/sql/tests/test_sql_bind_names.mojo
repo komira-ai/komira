@@ -17,6 +17,10 @@
 #      internal call, aggregates by their source token (`mean`, not `avg`),
 #      `count(*)` as `count_star()`; a window prints `?column?`, a subquery
 #      `(SELECT ...)`.
+#   4. Quoted identifiers print as written (`sum("A")` is `sum(A)`), in
+#      double quotes with an inner quote doubled when they hold anything but
+#      letters, digits and `_` or start with a digit; a quoted function name
+#      prints folded to lower case (`"SUM"(a)` is `sum(a)`).
 
 from std.testing import TestSuite, assert_equal
 
@@ -97,6 +101,22 @@ def test_calls_aggregates_and_fallbacks() raises:
     _n("CASE WHEN k > 1 THEN 1 END", "CASE  WHEN ((k > 1)) THEN (1) END")
     _n("(SELECT max(w) FROM u)", "(SELECT ...)")
     _n("rank() OVER (ORDER BY k)", "?column?")
+
+
+def test_quoted_identifiers() raises:
+    _n('"A"', "A")
+    _n('sum("A")', "sum(A)")
+    _n('"A" + 1', "(A + 1)")
+    _n('t."A"', "t.A")
+    _n('"_x9"', "_x9")
+    _n('sum("Total Amount")', 'sum("Total Amount")')
+    _n('"a""b" + 1', '("a""b" + 1)')
+    _n('"1a"', '"1a"')
+    _n('"a-b"', '"a-b"')
+    _n('"Straße"', '"Straße"')
+    _n('"T x"."a b"', '"T x"."a b"')
+    _n('"SUM"(a)', "sum(a)")
+    _n('"Abs"(a)', "abs(a)")
 
 
 def main() raises:

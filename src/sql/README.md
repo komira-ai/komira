@@ -3,7 +3,10 @@
 The analytical SQL front end: a tokenizer, a parser and a binder. `sql.sql_token` lexes a
 SQL string into a flat `List[Token]` that ends in `TK_EOF`: unquoted
 identifiers are lower-folded (keywords and function names are ordinary
-identifiers that the parser classifies by text), a single-quoted literal keeps
+identifiers that the parser classifies by text), a double-quoted identifier
+(`"Total"`) keeps its case and bytes with `""` read as one `"` and is flagged
+in `Token.int_val`, so the parser never reads it as a keyword (an unterminated
+or an empty one is refused), a single-quoted literal keeps
 its bytes with `''` read as one quote, and an integer past `Int64.MAX` keeps
 its decimal digits in `Token.text`. Bad input raises an `Error` that starts
 with `SQL syntax error` (or `SQL not supported` for an operator this dialect

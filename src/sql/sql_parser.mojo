@@ -34,7 +34,7 @@ from .sql_token import (
     TK_COMMA, TK_SEMI, TK_STAR, TK_DOT, TK_PLUS, TK_MINUS, TK_SLASH,
     TK_EQ, TK_NE, TK_LT, TK_LE, TK_GT, TK_GE, TK_DCOLON, TK_DSLASH, TK_PERCENT,
     TK_CARET, TK_CARET_AT, TK_AT, TK_DPIPE, TK_LIKE_SYM, TK_TILDE, TK_NTILDE,
-    signed_decimal_f64,
+    signed_decimal_f64, _IDENT_QUOTED, _tok_is_kw, _tok_is_bare_word,
 )
 from .sql_fn_table import CAST_DESUGAR_NAME as _CAST_DESUGAR_NAME, TRY_CAST_DESUGAR_NAME as _TRY_CAST_DESUGAR_NAME
 from .sql_fn_table import POSITION_IN_DESUGAR_NAME as _POSITION_IN_DESUGAR_NAME
@@ -117,7 +117,15 @@ struct _Parser(Movable):
 
     @always_inline
     def _is_kw(self, word: String) -> Bool:
-        return self.tokens[self.pos].kind == TK_IDENT and self.tokens[self.pos].text == word
+        """The current token is the bare keyword `word`. A double-quoted
+        identifier is a name, never a keyword (`"order"` is not ORDER)."""
+        return _tok_is_kw(self.tokens[self.pos], word)
+
+    @always_inline
+    def _at_bare_word(self) -> Bool:
+        """The current token is an identifier written without quotes, the only
+        kind that can be a keyword."""
+        return _tok_is_bare_word(self.tokens[self.pos])
 
     @always_inline
     def _advance(mut self):
@@ -488,14 +496,15 @@ struct _Parser(Movable):
         return (fmt, codec)
 
     def _copy_option_word(mut self) raises -> String:
-        """Read a COPY option VALUE — a quoted string ('parquet') or a bareword
-        (parquet) — lower-folded, and advance past it."""
+        """Read a COPY option VALUE — a quoted string ('parquet'), a bareword
+        (parquet) or a double-quoted word ("parquet") — lower-folded, and
+        advance past it."""
         if self._kind() == TK_STRING:
             var s = String(self.tokens[self.pos].text).lower()
             self._advance()
             return s
         if self._kind() == TK_IDENT:
-            var s = String(self.tokens[self.pos].text)  # already lower-folded
+            var s = String(self.tokens[self.pos].text).lower()
             self._advance()
             return s
         raise Error("SQL syntax error: expected a COPY option value")
@@ -991,7 +1000,7 @@ struct _Parser(Movable):
         the table-alias position (measured: `SELECT * FROM t qualify` is a
         Parser Error there), so the stop-list rows cost no query DuckDB accepts.
         """
-        if self._kind() != TK_IDENT:
+        if not self._at_bare_word():
             return
         ref w = self.tokens[self.pos].text
         if w == "qualify":
@@ -1014,8 +1023,7 @@ struct _Parser(Movable):
         if w == "tablesample" or (
             w == "using"
             and self.pos + 1 < len(self.tokens)
-            and self.tokens[self.pos + 1].kind == TK_IDENT
-            and self.tokens[self.pos + 1].text == "sample"
+            and _tok_is_kw(self.tokens[self.pos + 1], "sample")
         ):
             raise Error(
                 "SQL not supported: TABLESAMPLE / USING SAMPLE (row sampling)."
@@ -1046,6 +1054,7 @@ struct _Parser(Movable):
         # query dies one token later on "unexpected trailing tokens".
         if (
             name == "lateral"
+            and self._at_bare_word()
             and self.pos + 1 < len(self.tokens)
             and self.tokens[self.pos + 1].kind == TK_LPAREN
         ):
@@ -1626,7 +1635,7 @@ struct _Parser(Movable):
         these names elsewhere is untouched. `_refuse_unsupported_clause` asks the
         same question of the word a statement stops on.
         """
-        if self._kind() != TK_IDENT:
+        if not self._at_bare_word():
             return
         # `after` names the aggregate / function the word follows (the SELECT
         # list passes it); "" where the caller cannot know it.
@@ -1637,7 +1646,7 @@ struct _Parser(Movable):
         var nxt = String("")
         if (
             self.pos + 1 < len(self.tokens)
-            and self.tokens[self.pos + 1].kind == TK_IDENT
+            and _tok_is_bare_word(self.tokens[self.pos + 1])
         ):
             nxt = String(self.tokens[self.pos + 1].text)
         var nxt_lparen = (
@@ -1744,7 +1753,7 @@ struct _Parser(Movable):
     every other word dies on its next token here. The SELECT-expression
     position is `_refuse_unserved_operator_word`'s.
         """
-        if self._kind() != TK_IDENT:
+        if not self._at_bare_word():
             return False
         ref w = self.tokens[self.pos].text
         return (
@@ -1856,7 +1865,7 @@ struct _Parser(Movable):
         """
         if self._is_kw("not") and self.pos + 1 < len(self.tokens):
             ref nx = self.tokens[self.pos + 1]
-            if not (nx.kind == TK_IDENT and nx.text == "exists"):
+            if not _tok_is_kw(nx, "exists"):
                 self._advance()  # consume NOT
                 var operand = self._parse_not()  # right-associative: NOT NOT x
                 # `NOT (x IN (...))` is DuckDB's NOT IN:
@@ -1875,7 +1884,7 @@ struct _Parser(Movable):
             return self._parse_exists_subquery(False)
         if self._is_kw("not") and self.pos + 1 < len(self.tokens):
             ref nx0 = self.tokens[self.pos + 1]
-            if nx0.kind == TK_IDENT and nx0.text == "exists":
+            if _tok_is_kw(nx0, "exists"):
                 self._advance()  # consume NOT
                 return self._parse_exists_subquery(True)
         var left = self._parse_op()
@@ -1934,7 +1943,7 @@ struct _Parser(Movable):
             return self._parse_null_test_suffix(tm^)
         if self._is_kw("not") and self.pos + 1 < len(self.tokens):
             ref nx = self.tokens[self.pos + 1]
-            if nx.kind == TK_IDENT and (
+            if _tok_is_bare_word(nx) and (
                 nx.text == "in" or nx.text == "like" or nx.text == "between"
                 or nx.text == "ilike" or self._is_similar_to_at(self.pos + 1)
             ):
@@ -2022,8 +2031,7 @@ struct _Parser(Movable):
             elif (
                 self._is_kw("not")
                 and self.pos + 1 < len(self.tokens)
-                and self.tokens[self.pos + 1].kind == TK_IDENT
-                and self.tokens[self.pos + 1].text == "null"
+                and _tok_is_kw(self.tokens[self.pos + 1], "null")
             ):
                 self._advance()  # NOT
                 self._advance()  # NULL
@@ -2164,7 +2172,7 @@ struct _Parser(Movable):
                     return False
             elif depth == 1 and t.kind == TK_COMMA:
                 return False
-            elif depth == 1 and t.kind == TK_IDENT and t.text == kw:
+            elif depth == 1 and _tok_is_kw(t, kw):
                 return True
             elif t.kind == TK_EOF:
                 return False
@@ -2177,10 +2185,8 @@ struct _Parser(Movable):
         the pair is the operator."""
         return (
             at + 1 < len(self.tokens)
-            and self.tokens[at].kind == TK_IDENT
-            and self.tokens[at].text == "similar"
-            and self.tokens[at + 1].kind == TK_IDENT
-            and self.tokens[at + 1].text == "to"
+            and _tok_is_kw(self.tokens[at], "similar")
+            and _tok_is_kw(self.tokens[at + 1], "to")
         )
 
     def _parse_exists_subquery(mut self, negate: Bool) raises -> SqlExpr:
@@ -2448,8 +2454,7 @@ struct _Parser(Movable):
         # position, so the reading is unambiguous.
         if (
             ty == "double"
-            and self._kind() == TK_IDENT
-            and self.tokens[self.pos].text == "precision"
+            and self._is_kw("precision")
         ):
             self._advance()
             ty = String("double precision")
@@ -2521,10 +2526,25 @@ struct _Parser(Movable):
             return inner^
         if k == TK_IDENT:
             var name = String(self.tokens[self.pos].text)
+            # ⭐ A DOUBLE-QUOTED WORD IS NEVER A KEYWORD. `kw` is the word the
+            # grammar arms below match on, and it is empty for a quoted token,
+            # so `"case"`, `"true"`, `"date" '...'` and `"extract"(...)` are
+            # names. A quoted word followed by `(` is a FUNCTION call whose
+            # name resolves case-insensitively, as in DuckDB (`"SUM"(x)` is
+            # `sum(x)`), so `name` is lower-folded for that one shape and the
+            # aggregate / window / scalar-call arms see the folded spelling.
+            var quoted = self.tokens[self.pos].int_val == _IDENT_QUOTED
+            var kw = String("") if quoted else name.copy()
+            if (
+                quoted
+                and self.pos + 1 < len(self.tokens)
+                and self.tokens[self.pos + 1].kind == TK_LPAREN
+            ):
+                name = name.lower()
             # CASE expression:  CASE [operand] WHEN c THEN r ... [ELSE d] END.
             # `case` is a reserved word here — the tokenizer lower-folds it, and the
             # corpus never uses `case` as a column name.
-            if name == "case":
+            if kw == "case":
                 self._advance()  # consume 'case'
                 return self._parse_case()
             # ★ boolean literal: TRUE / FALSE.
@@ -2537,7 +2557,7 @@ struct _Parser(Movable):
             # continue — a `.` would make it a qualifier (`true.x`) and a `(`
             # a function call — and everywhere else the identifier reading
             # survives.
-            if name == "true" or name == "false":
+            if kw == "true" or kw == "false":
                 var nk = (
                     self.tokens[self.pos + 1].kind
                     if self.pos + 1 < len(self.tokens)
@@ -2545,11 +2565,11 @@ struct _Parser(Movable):
                 )
                 if nk != TK_DOT and nk != TK_LPAREN:
                     self._advance()
-                    return SqlExpr.bool_lit(name == "true")
+                    return SqlExpr.bool_lit(kw == "true")
             # ★ the NULL literal (SX_NULL) — the same guard as
             # TRUE / FALSE above, for the same reason: `null.x` and `null(...)`
             # keep their column / call readings.
-            if name == "null":
+            if kw == "null":
                 var nk2 = (
                     self.tokens[self.pos + 1].kind
                     if self.pos + 1 < len(self.tokens)
@@ -2559,7 +2579,7 @@ struct _Parser(Movable):
                     self._advance()
                     return SqlExpr.null_lit()
             # date literal:  date 'YYYY-MM-DD'
-            if name == "date" and self.pos + 1 < len(self.tokens) and self.tokens[self.pos + 1].kind == TK_STRING:
+            if kw == "date" and self.pos + 1 < len(self.tokens) and self.tokens[self.pos + 1].kind == TK_STRING:
                 self._advance()  # 'date'
                 var ds = String(self.tokens[self.pos].text)
                 self._advance()  # the quoted date string
@@ -2573,11 +2593,11 @@ struct _Parser(Movable):
             # `SX_TIMESTAMP` for the measurement that makes them two
             # questions rather than two spellings.
             if (
-                (name == "timestamp" or name == "timestamptz")
+                (kw == "timestamp" or kw == "timestamptz")
                 and self.pos + 1 < len(self.tokens)
                 and self.tokens[self.pos + 1].kind == TK_STRING
             ):
-                var aware = name == "timestamptz"
+                var aware = kw == "timestamptz"
                 self._advance()  # 'timestamp' / 'timestamptz'
                 var ts = String(self.tokens[self.pos].text)
                 self._advance()  # the quoted timestamp string
@@ -2607,7 +2627,7 @@ struct _Parser(Movable):
             # binder's name table, and duplicating that list in the parser
             # would give an unsupported field two different error messages.
             if (
-                name == "extract"
+                kw == "extract"
                 and self.pos + 1 < len(self.tokens)
                 and self.tokens[self.pos + 1].kind == TK_LPAREN
             ):
@@ -2657,7 +2677,7 @@ struct _Parser(Movable):
             # this arm takes no name away from the `<name>(<one arg>)` shape
             # `sql_name_claimed_by_grammar` answers for.
             if (
-                name == "position"
+                kw == "position"
                 and self.pos + 1 < len(self.tokens)
                 and self.tokens[self.pos + 1].kind == TK_LPAREN
                 and self._position_in_form(self.pos + 1)
@@ -2676,7 +2696,7 @@ struct _Parser(Movable):
             # reads as `substring(s, start[, length])`. A `FROM` at the top
             # level of the parentheses decides it; `substring(a, b)` is a call.
             if (
-                name == "substring"
+                kw == "substring"
                 and self.pos + 1 < len(self.tokens)
                 and self.tokens[self.pos + 1].kind == TK_LPAREN
                 and self._top_level_keyword(self.pos + 1, "from")
@@ -2711,11 +2731,11 @@ struct _Parser(Movable):
             # DIFFERENT message from `nosuchfn(x)`'s — a parser that refuses
             # everything with one sentence proves nothing about any of them.
             if (
-                (name == "cast" or name == "try_cast")
+                (kw == "cast" or kw == "try_cast")
                 and self.pos + 1 < len(self.tokens)
                 and self.tokens[self.pos + 1].kind == TK_LPAREN
             ):
-                var is_try = name == "try_cast"
+                var is_try = kw == "try_cast"
                 var spelled = String("TRY_CAST") if is_try else String("CAST")
                 self._advance()  # 'cast' / 'try_cast'
                 self._advance()  # '('
@@ -2846,11 +2866,11 @@ struct _Parser(Movable):
                 #
                 # ⚠ AND IT REJECTS NO CALL THAT IS OTHERWISE LEGAL. The guard is
                 # `distinct` FOLLOWED BY SOMETHING THAT IS NOT `,` OR `)`, so a
-                # (bizarre, but legal in this dialect — there is no quoted
-                # identifier syntax) column named `distinct` still parses as
-                # `f(distinct)` / `f(distinct, x)`. Only `DISTINCT <expr>`, the
-                # SQL quantifier form, is intercepted, and that form has no
-                # other parse.
+                # (bizarre, but legal in this dialect) column named `distinct`
+                # still parses as `f(distinct)` / `f(distinct, x)`, and a
+                # quoted `"distinct"` is never the quantifier. Only
+                # `DISTINCT <expr>`, the SQL quantifier form, is intercepted,
+                # and that form has no other parse.
                 if self._is_kw("distinct"):
                     var _dk = self.tokens[self.pos + 1].kind if self.pos + 1 < len(self.tokens) else TK_EOF
                     if _dk != TK_COMMA and _dk != TK_RPAREN:
@@ -3020,8 +3040,7 @@ struct _Parser(Movable):
                 if depth == 0:
                     return (
                         j + 1 < len(self.tokens)
-                        and self.tokens[j + 1].kind == TK_IDENT
-                        and self.tokens[j + 1].text == "over"
+                        and _tok_is_kw(self.tokens[j + 1], "over")
                     )
             j += 1
         return False

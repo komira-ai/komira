@@ -21,7 +21,7 @@ from scalar_arithmetic.decimal_cast import decimal_to_float64
 
 # Token kinds.
 comptime TK_EOF: UInt8 = 0
-comptime TK_IDENT: UInt8 = 1  # identifier (lower-folded) — incl. keywords/agg names
+comptime TK_IDENT: UInt8 = 1  # identifier (unquoted: lower-folded; "quoted": as written) — incl. keywords/agg names
 comptime TK_INT: UInt8 = 2  # integer literal (value in int_val)
 comptime TK_FLOAT: UInt8 = 3  # float literal (value in float_val, digits in text)
 comptime TK_STRING: UInt8 = 4  # single-quoted string literal (text)
@@ -78,16 +78,29 @@ comptime TK_TILDE: UInt8 = 28  # ~  — infix regexp_full_match; PREFIX is DuckD
 comptime TK_NTILDE: UInt8 = 29  # !~ — NOT regexp_full_match
 
 
+# `Token.int_val` of a TK_IDENT written in double quotes (`"Total"`); 0 for a
+# bare word. A quoted word is a plain name and never a keyword: the parser
+# asks `_tok_is_kw` / `_is_kw`, which refuse a flagged token, wherever it
+# classifies an identifier by its text.
+comptime _IDENT_QUOTED: Int64 = 1
+
+
 @fieldwise_init
 struct Token(Copyable, Movable, Deinitable):
     """One lexed token. POD-of-owned.
 
     Field layout:
       var kind: UInt8
-      var text: String       — identifier (lower-folded) / string-literal value.
+      var text: String       — identifier / string-literal value. A bare
+                               identifier is lower-folded; a double-quoted one
+                               keeps its case and bytes, with `""` read as one
+                               `"`.
       var int_val: Int64     — live for TK_INT. For a literal PAST Int64.MAX
                                `text` holds its decimal digits and `int_val`
-                               the wrapped bits (see `tokenize`).
+                               the wrapped bits (see `tokenize`). For
+                               TK_LIKE_SYM it is the operator's flavour; for
+                               TK_IDENT it is `_IDENT_QUOTED` when the word
+                               was written in double quotes, else 0.
       var float_val: Float64 — live for TK_FLOAT, with `text` holding the
                                literal's digits (`0.06`, as written).
     """
@@ -96,6 +109,20 @@ struct Token(Copyable, Movable, Deinitable):
     var text: String
     var int_val: Int64
     var float_val: Float64
+
+
+@always_inline
+def _tok_is_kw(t: Token, word: String) -> Bool:
+    """True when `t` is the BARE identifier `word` (already lower-folded). A
+    double-quoted identifier is never a keyword, so `"order"` is a name."""
+    return t.kind == TK_IDENT and t.int_val != _IDENT_QUOTED and t.text == word
+
+
+@always_inline
+def _tok_is_bare_word(t: Token) -> Bool:
+    """True when `t` is an identifier written without quotes: the only kind of
+    identifier that can be a keyword."""
+    return t.kind == TK_IDENT and t.int_val != _IDENT_QUOTED
 
 
 @always_inline
@@ -245,10 +272,13 @@ def _decimal_value(
 def tokenize(sql: String) raises -> List[Token]:
     """Tokenize `sql` into a `List[Token]` ending with a TK_EOF sentinel.
 
-    Raises a clean `Error` (never a crash) on an unterminated string literal or
-    an unexpected character. Unquoted identifiers are lower-folded (DuckDB-ish
-    case-insensitive dialect); keywords and aggregate names are ordinary
-    identifiers the parser classifies by (lower-cased) text.
+    Raises a clean `Error` (never a crash) on an unterminated string literal,
+    an unterminated or empty quoted identifier, or an unexpected character.
+    Unquoted identifiers are lower-folded (DuckDB-ish case-insensitive
+    dialect); keywords and aggregate names are ordinary identifiers the parser
+    classifies by (lower-cased) text. A double-quoted identifier keeps its case
+    and bytes (`""` inside is one `"`) and is flagged `_IDENT_QUOTED` in
+    `int_val`, which keeps it from ever being read as a keyword.
     """
     var src = sql.as_bytes()
     var n = len(src)
@@ -412,6 +442,38 @@ def tokenize(sql: String) raises -> List[Token]:
                     TK_STRING,
                     String(StringSlice(unsafe_from_utf8=Span[UInt8](sbytes))),
                     Int64(0),
+                    Float64(0.0),
+                )
+            )
+            continue
+        # quoted identifier: "..." keeps its case; `""` inside is one `"`. The
+        # bytes are copied through as in a string literal, so non-ASCII names
+        # survive. DuckDB refuses an empty one too (zero-length delimited
+        # identifier), so it is refused here rather than read as a name.
+        if c == UInt8(ord('"')):
+            i += 1
+            var qbytes = List[UInt8]()
+            var qclosed = False
+            while i < n:
+                if src[i] == UInt8(ord('"')):
+                    if i + 1 < n and src[i + 1] == UInt8(ord('"')):
+                        qbytes.append(UInt8(ord('"')))
+                        i += 2
+                        continue
+                    i += 1
+                    qclosed = True
+                    break
+                qbytes.append(src[i])
+                i += 1
+            if not qclosed:
+                raise Error("SQL syntax error: unterminated quoted identifier")
+            if len(qbytes) == 0:
+                raise Error("SQL syntax error: zero-length quoted identifier")
+            out.append(
+                Token(
+                    TK_IDENT,
+                    String(StringSlice(unsafe_from_utf8=Span[UInt8](qbytes))),
+                    _IDENT_QUOTED,
                     Float64(0.0),
                 )
             )

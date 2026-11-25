@@ -8,7 +8,7 @@ from sql.sql_ast import (
     SXIVL_DAY, SXIVL_MONTH, SXIVL_WEEK, SXIVL_YEAR, SqlExpr,
 )
 from sql.sql_token import (
-    TK_IDENT, TK_INT, TK_MINUS, TK_PLUS, TK_STRING, Token,
+    TK_INT, TK_MINUS, TK_PLUS, TK_STRING, Token, _tok_is_bare_word, _tok_is_kw,
 )
 
 
@@ -31,13 +31,14 @@ def _is_unit_word(w: String) -> Bool:
 
 
 def interval_literal_starts(tokens: List[Token], pos: Int) -> Bool:
-    """True when the token at `pos` is `interval` and what follows is an
+    """True when the token at `pos` is the bare word `interval` (a
+    double-quoted `"interval"` is a name) and what follows is an
     INTERVAL literal rather than a column named `interval`: a string, an
     integer, or a sign then an integer then a unit word (`interval -3 day`;
     without the unit word `interval - 3` is a column minus 3)."""
     if pos + 1 >= len(tokens):
         return False
-    if tokens[pos].kind != TK_IDENT or tokens[pos].text != "interval":
+    if not _tok_is_kw(tokens[pos], "interval"):
         return False
     var k = tokens[pos + 1].kind
     if k == TK_STRING or k == TK_INT:
@@ -45,7 +46,7 @@ def interval_literal_starts(tokens: List[Token], pos: Int) -> Bool:
     if (k == TK_MINUS or k == TK_PLUS) and pos + 3 < len(tokens):
         return (
             tokens[pos + 2].kind == TK_INT
-            and tokens[pos + 3].kind == TK_IDENT
+            and _tok_is_bare_word(tokens[pos + 3])
             and _is_unit_word(tokens[pos + 3].text)
         )
     return False
@@ -98,7 +99,7 @@ def parse_interval_literal(tokens: List[Token], mut pos: Int) raises -> SqlExpr:
             + " is beyond +/-10^9"
         )
     pos += 1  # the count
-    if pos >= len(tokens) or tokens[pos].kind != TK_IDENT:
+    if pos >= len(tokens) or not _tok_is_bare_word(tokens[pos]):
         raise Error(
             "SQL syntax error: INTERVAL needs a unit after the count"
             " (YEAR, MONTH, WEEK or DAY)"

@@ -31,6 +31,15 @@
 #   8. Words DuckDB reads as an operator after an expression are refused by
 #      name in the SELECT list, and are ordinary aliases elsewhere.
 #      (catches: `count(*) EXPORT_STATE` answered as an alias)
+#   9. A double-quoted identifier is a name and never a keyword: a column or an
+#      alias spelled like a keyword, a quoted word where the bare one opens a
+#      literal (`"date" '...'`, `"true"`, `"null"`), a predicate word
+#      (`NOT "exists"`, `NOT "in"`, `SIMILAR "to"`), an `IS NOT "null"` pair,
+#      CAST / EXTRACT / POSITION / SUBSTRING / `DOUBLE "precision"` and
+#      `OVER`; a quoted word keeps its case, a qualified name takes either
+#      part quoted, and `"SUM"(x)` is the aggregate `sum` (a function name
+#      resolves case-insensitively).
+#      (catches: a quoted word taken as the keyword it spells)
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -40,7 +49,7 @@ from sql.sql_ast import (
     SqlStatement,
     SX_COLUMN, SX_INT, SX_FLOAT, SX_STRING, SX_BINARY, SX_AGG, SX_STAR,
     SX_DATE, SX_LIKE, SX_CALL, SX_SUBQUERY, SX_CASE, SX_UNARY, SX_BOOL,
-    SX_TIMESTAMP, SX_NULL,
+    SX_TIMESTAMP, SX_NULL, SX_INTERVAL, SX_WINDOW,
     TSLIT_NAIVE, TSLIT_AWARE,
     SXOP_EQ, SXOP_NE, SXOP_LT, SXOP_LE, SXOP_GT, SXOP_GE, SXOP_AND, SXOP_OR,
     SXOP_ADD, SXOP_SUB, SXOP_MUL, SXOP_DIV, SXOP_IDIV, SXOP_MOD, SXOP_POW,
@@ -469,6 +478,141 @@ def test_select_list_aliases_and_operator_words() raises:
     assert_equal(w.query.select_items[0].out_alias.value(), "filter")
     assert_equal(w.query.select_items[1].out_alias.value(), "at")
     assert_equal(w.query.select_items[2].out_alias.value(), "within")
+
+
+def _wrefuses(pred: String, needle: String) raises:
+    var m = _err("SELECT * FROM t WHERE " + pred)
+    assert_true(needle in m, "WHERE `" + pred + "` raised: " + m)
+
+
+def test_quoted_keywords_are_columns_and_aliases() raises:
+    var st = _parse('SELECT "order", "select" AS "From", "Mixed Case" FROM t')
+    _is_col(st.query.select_items[0].expr, "order")
+    assert_false(Bool(st.query.select_items[0].out_alias))
+    _is_col(st.query.select_items[1].expr, "select")
+    assert_equal(st.query.select_items[1].out_alias.value(), "From")
+    # A quoted word keeps its case; the bare spelling is folded.
+    _is_col(st.query.select_items[2].expr, "Mixed Case")
+    _is_col(_e("Total"), "total")
+    # The words a bare column reading is guarded for stay names when quoted.
+    _is_col(_e('"true"'), "true")
+    _is_col(_e('"false"'), "false")
+    _is_col(_e('"null"'), "null")
+    _is_col(_e('"case"'), "case")
+    _is_col(_e('"date"'), "date")
+    _is_col(_e('"timestamp"'), "timestamp")
+    _is_col(_e('"interval"'), "interval")
+    _is_col(_e('"exists"'), "exists")
+    _is_col(_e('"extract"'), "extract")
+    _is_col(_e('"cast"'), "cast")
+    _is_col(_e('"position"'), "position")
+    _is_col(_e('"substring"'), "substring")
+    _is_col(_e('"sum"'), "sum")
+    _is_col(_e('"rank"'), "rank")
+    # Where the bare word opens a literal, the quoted one is a column and the
+    # string after it is a stray token.
+    assert_equal(Int(_e("date '2020-01-01'").tag), Int(SX_DATE))
+    _refuses("\"date\" '2020-01-01'", "expected keyword 'from'")
+    _refuses("\"timestamp\" '2020-01-01'", "expected keyword 'from'")
+    _refuses("\"timestamptz\" '2020-01-01'", "expected keyword 'from'")
+    assert_equal(Int(_e("interval '1' day").tag), Int(SX_INTERVAL))
+    _refuses("\"interval\" '1' day", "expected keyword 'from'")
+    # Bare `true` is the literal; a quoted `"true"` followed by `.` is a
+    # qualifier.
+    assert_equal(Int(_e("true").tag), Int(SX_BOOL))
+    var qual = _e('"true"."x"')
+    assert_equal(qual.qualifier, "true")
+    assert_equal(qual.text, "x")
+
+
+def test_a_quoted_word_beside_a_predicate_keyword_is_a_name() raises:
+    # Bare `NOT EXISTS (...)` is a subquery predicate; `NOT "exists"` negates
+    # the column called exists.
+    var neg = _w('NOT "exists"')
+    _is_un(neg, SXUN_NOT)
+    _is_col(_child(neg), "exists")
+    _is_col(_w('"exists"'), "exists")
+    _is_bin(_w('"exists" = 1'), SXOP_EQ)
+    # `a NOT <word>` is the postfix predicate only for the bare words; with a
+    # quoted word the NOT is no operator here and the statement is refused.
+    _ = _w("a NOT IN (1)")
+    _ = _w("a NOT LIKE 'x'")
+    _ = _w("a NOT BETWEEN 1 AND 2")
+    _ = _w("a NOT ILIKE 'x'")
+    _ = _w("a NOT SIMILAR TO 'x'")
+    _wrefuses("a NOT \"in\" (1)", "unexpected trailing tokens after query")
+    _wrefuses("a NOT \"like\" 'x'", "unexpected trailing tokens after query")
+    _wrefuses("a NOT SIMILAR \"to\" 'x'", "unexpected trailing tokens after query")
+    _wrefuses("a NOT \"similar\" TO 'x'", "unexpected trailing tokens after query")
+    # `NOT NULL` as a postfix test, and its quoted lookalike.
+    var nn = _e("a NOT NULL")
+    _is_un(nn, SXUN_IS_NOT_NULL)
+    _refuses("a NOT \"null\"", "SQL syntax error")
+    # `ISNULL` / `NOTNULL` are postfix tests bare and aliases quoted.
+    var st = _parse('SELECT a "isnull", b "notnull" FROM t')
+    assert_equal(st.query.select_items[0].out_alias.value(), "isnull")
+    assert_equal(st.query.select_items[1].out_alias.value(), "notnull")
+    _is_un(_e("a ISNULL"), SXUN_IS_NULL)
+
+
+def test_quoted_words_in_the_special_call_grammars_are_plain_names() raises:
+    # Bare, each of these is its own grammar; quoted, it is an ordinary call
+    # (or, where no call can follow, a syntax error at the word).
+    _refuses("cast(a)", "CAST is missing the AS keyword")
+    var c = _e('"cast"(a)')
+    assert_equal(Int(c.tag), Int(SX_CALL))
+    assert_equal(c.text, "cast")
+    _refuses("\"extract\"(year FROM a)", "expected ')'")
+    _refuses("position('a' \"in\" b)", "expected ')'")
+    _refuses("substring(a \"from\" 1)", "expected ')'")
+    _refuses("cast(a AS double \"precision\")", "')' to close CAST(...)")
+    _ = _e("cast(a AS double precision)")
+    # A quoted `"over"` after a call is an alias, not the window clause.
+    var lag = _parse('SELECT lag(a) "over" FROM t')
+    assert_equal(Int(lag.query.select_items[0].expr.tag), Int(SX_CALL))
+    assert_equal(lag.query.select_items[0].out_alias.value(), "over")
+    var win = _e("lag(a) OVER (ORDER BY b)")
+    assert_equal(Int(win.tag), Int(SX_WINDOW))
+
+
+def test_a_quoted_function_name_resolves_case_insensitively() raises:
+    var s = _e('"SUM"(a)')
+    assert_equal(Int(s.tag), Int(SX_AGG))
+    assert_equal(s.text, "sum")
+    var agg = _e('"sum"(a)')
+    assert_equal(Int(agg.tag), Int(SX_AGG))
+    var c = _e('"Abs"(a)')
+    assert_equal(Int(c.tag), Int(SX_CALL))
+    assert_equal(c.text, "abs")
+    # A quoted aggregate name without a call is a column.
+    _is_col(_e('"SUM"'), "SUM")
+
+
+def test_quoted_qualified_names_and_aliases() raises:
+    var a = _e('"t"."c"')
+    assert_equal(a.qualifier, "t")
+    assert_equal(a.text, "c")
+    var b = _e('t."C"')
+    assert_equal(b.qualifier, "t")
+    assert_equal(b.text, "C")
+    var c = _e('"T".c')
+    assert_equal(c.qualifier, "T")
+    assert_equal(c.text, "c")
+    var st = _parse('SELECT a AS "X""y", b "Two Words", c AS "select" FROM t')
+    assert_equal(st.query.select_items[0].out_alias.value(), 'X"y')
+    assert_equal(st.query.select_items[1].out_alias.value(), "Two Words")
+    assert_equal(st.query.select_items[2].out_alias.value(), "select")
+    # A quoted word is an implicit alias even where the bare word is an
+    # operator this grammar refuses by name, or a clause word.
+    var words: List[String] = [
+        "export_state", "collate", "glob", "escape", "filter", "at", "within",
+        "not", "from", "where", "group", "order", "limit", "having", "union",
+        "qualify", "window", "isnull", "notnull",
+    ]
+    for i in range(len(words)):
+        var w = _parse('SELECT a "' + words[i] + '", b FROM t')
+        assert_equal(w.query.select_items[0].out_alias.value(), words[i])
+        _is_col(w.query.select_items[1].expr, "b")
 
 
 def main() raises:

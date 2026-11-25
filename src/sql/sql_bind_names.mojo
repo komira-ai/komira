@@ -210,6 +210,31 @@ def _duckdb_agg_text(sx: SqlExpr) raises -> String:
     return fname^
 
 
+def _duckdb_ident_text(name: String) -> String:
+    """An identifier as DuckDB v1.1.3 prints it inside a derived column name
+    (`sum("Total Amount")`, `t."a b"`): as written, and in double quotes, with
+    an inner `"` doubled, when it starts with a digit or holds a character
+    other than a letter, a digit or `_`. A name that is a keyword in DuckDB's
+    grammar is quoted there as well (`sum("name")`, `sum("order")`); that rule
+    is NOT applied here, for a bare word or a quoted one, so such a name
+    prints unquoted."""
+    var b = name.as_bytes()
+    var plain = True
+    for i in range(len(b)):
+        var c = b[i]
+        var digit = c >= UInt8(ord("0")) and c <= UInt8(ord("9"))
+        var letter = (
+            (c >= UInt8(ord("a")) and c <= UInt8(ord("z")))
+            or (c >= UInt8(ord("A")) and c <= UInt8(ord("Z")))
+            or c == UInt8(ord("_"))
+        )
+        if not (letter or (digit and i > 0)):
+            plain = False
+    if plain:
+        return name.copy()
+    return '"' + name.replace('"', '""') + '"'
+
+
 def _duckdb_expr_text(sx: SqlExpr) raises -> String:
     """DuckDB's canonical printed form of a scalar expression.
 
@@ -245,8 +270,8 @@ def _duckdb_expr_text(sx: SqlExpr) raises -> String:
     expression."""
     if sx.tag == SX_COLUMN:
         if sx.qualifier != "":
-            return sx.qualifier + "." + sx.text
-        return sx.text.copy()
+            return _duckdb_ident_text(sx.qualifier) + "." + _duckdb_ident_text(sx.text)
+        return _duckdb_ident_text(sx.text)
     if sx.tag == SX_INT:
         if _sx_is_big_int(sx):
             return sx.text.copy()
