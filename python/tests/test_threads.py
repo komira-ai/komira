@@ -47,7 +47,7 @@ import pyarrow as pa
 ALREADY_READ = "the result was already read: run the query again to read it again"
 REENTERED = (
     "a call on this session was made while another call on it is running on the same thread "
-    "(from a signal handler or a finalizer): make it after that call returns"
+    "(from a signal handler, a finalizer or a progress callback): make it after that call returns"
 )
 
 
