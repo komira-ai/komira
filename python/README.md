@@ -290,6 +290,14 @@ stats = df[["value"]].median()            # one row, the column value
   the rows no other row equals. `subset` must name every column: to keep one
   row per value of some columns, select those columns first. The answer has
   no row order.
+- **What the engine runs today.** The engine's aggregation computes `sum`,
+  `mean`, `min`, `max`, `count`, `size` and `nunique`. With a group key,
+  `sum` and `mean` take integer and boolean columns but not float ones. `min`
+  and `max` take numbers. `nunique` takes numbers and strings. A reduction
+  outside that (`median`, `std`, `var`, a grouped float sum, the `min` of a
+  string, ...) builds its plan and is refused at `materialize()` with a
+  `KomiraError` naming the engine's step. It runs with no change here once the
+  engine computes it.
 - **Refused by name** with `UnsupportedOperation`: a Python function in
   `agg`, `first`, `last` and the other choices by row order, `ddof` other
   than 1, `skipna=False`, `nunique(dropna=False)` and `axis=1`. A missing
@@ -483,7 +491,7 @@ The tests below run on Linux x86_64 as build actions, with
 | `frame_test` | the DataFrame with no library: each verb's node tree, where the row-order rules put each node, each output type, every refusal with its full message, the attribute rules of the frame, the Series and the module for every row of the refusal tables, no dunder running a query, and a terminal sending the encoded plan to the plan door and nothing else, with no SQL in the frame's modules |
 | `frame_groupby_test` | groupby, the reductions and drop_duplicates with no library: each one's node tree (the filter of missing keys below the aggregate, the key sort above it, the zero of an empty sum), its output types, the encoded aggregate, every refusal with its full message, and the GroupBy's attribute rules |
 | `frame_run_test` | the DataFrame on the real library: the readers over Parquet, CSV and JSON files written by the test, each verb's rows through `komira_plan_stream`, `explain()`, a frame run twice, a missing file and a closed session refused at the reader, the engine's refusal at the terminal, the default session, and an ABI 1.7 stand-in refusing the plan door by the version it needs |
-| `frame_duckdb_test` | frame programs over one Parquet file with NULLs, negative numbers, floats and strings, each equal to DuckDB's answer to the SQL that means the same over the same file, in order where the frame is sorted: the verbs above, groupby and every reduction against GROUP BY, the frame's reductions, and drop_duplicates against DISTINCT; CPython 3.13 (the minor with a pinned DuckDB) |
+| `frame_duckdb_test` | frame programs over one Parquet file with NULLs, negative numbers, floats and strings, each equal to DuckDB's answer to the SQL that means the same over the same file, in order where the frame is sorted: the verbs above, groupby and the reductions the engine runs against GROUP BY, the frame's reductions, drop_duplicates against DISTINCT, and the reductions the engine does not run yet refused at the terminal; CPython 3.13 (the minor with a pinned DuckDB) |
 
 The Linux wheel is `./buck2 build //python:komira_wheel`: the package and, in
 `komira/_lib/`, `libkomira[dist]` whole: `libkomira.so`, and in `lib/` its

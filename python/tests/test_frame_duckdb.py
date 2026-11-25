@@ -25,17 +25,20 @@ equal (`frame_duckdb_test`, CPython 3.13, the real libkomira).
 - head: a sort then `head(n)` with a cut that falls between two distinct keys,
   a filter, projection, assign or sort after it, `head(0)`, a head larger than
   the file, a head of an unsorted frame that keeps every row;
-- groupby: every reduction (sum, mean, median, std, var, min, max, count,
-  size, nunique) over each column type it takes, a bool summed as a count and
-  averaged as a fraction, an all-missing group whose sum is 0 (and missing
-  under min_count=1), one-row groups whose std and var are missing, even
-  groups whose median falls between two values; named, dict and list agg;
-  sort=False (a multiset), dropna=False (the missing group last), two keys,
-  a string and a bool key; after a filter and a computed column; a sort by an
-  output then head, head of the key sort, a filter of the groups, and a
-  groupby of rows that match nothing;
-- the frame's own reductions and agg, one row each, also over no rows (a sum
-  of 0, a count of 0, a missing mean, min and max);
+- groupby, over what the engine's aggregation sinks run: sum, mean, min and
+  max of ints (a bool summed as a count), count and size of every type,
+  nunique of a float, a string and an int; one-row groups, one of them
+  all-missing, whose sum is 0 (and missing under min_count=1); named, dict and
+  list agg; sort=False (a multiset), dropna=False (the missing group last),
+  two keys, string, bool and float keys; after a filter and a computed
+  column; a sort by an output then head, head of the key sort, a filter of
+  the groups, and a groupby of rows that match nothing;
+- the frame's own reductions and agg, one row each (float sums, means, mins
+  and maxes too), also over no rows (a sum of 0, a count of 0, a missing mean
+  and max);
+- the reductions the engine does not run yet (median, std, var, a grouped
+  float sum or mean, min and max of a string or a bool, nunique of a bool)
+  build their plan and are refused at materialize() with the engine's step;
 - drop_duplicates of whole rows over one and several columns, with NULLs,
   keep="last", a subset naming every column, and keep=False (only the rows
   no other row equals);
@@ -667,21 +670,36 @@ EMPTIES = [
 # ---- group-by, reductions and drop_duplicates ----------------------------------
 # The SQL of a pandas groupby: WHERE <keys> IS NOT NULL (dropna=True), GROUP BY,
 # ORDER BY <keys> ASC NULLS LAST (sort=True); a sum is COALESCE(SUM(x), 0).
+#
+# The plan door's aggregation sinks run SUM, AVG, MIN, MAX, COUNT, COUNT(*)
+# and COUNT(DISTINCT): SUM and AVG over integers (a bool is cast to one), and
+# over floats only with no key; MIN and MAX over numbers; COUNT(DISTINCT) over
+# numbers and strings. These cases are those; ENGINE_REFUSED below holds the
+# rest.
 
 GROUPED_BY_K = "FROM t WHERE k IS NOT NULL GROUP BY k ORDER BY k ASC NULLS LAST"
+GROUPED_BY_S = "FROM t WHERE s IS NOT NULL GROUP BY s ORDER BY s ASC NULLS LAST"
 
 GROUPS = [
     Case(
-        "groupby sum of numbers, an all-missing group summing to 0",
-        lambda d: d.groupby("k")[["v", "n"]].sum(),
-        "SELECT k, COALESCE(SUM(v), 0) AS v, CAST(COALESCE(SUM(n), 0) AS BIGINT) AS n " + GROUPED_BY_K,
-        ("k",),
+        "groupby sum of ints with NULLs, by a string key",
+        lambda d: d.groupby("s")[["k", "n"]].sum(),
+        "SELECT s, CAST(COALESCE(SUM(k), 0) AS BIGINT) AS k, CAST(COALESCE(SUM(n), 0) AS BIGINT) AS n "
+        + GROUPED_BY_S,
+        ("s",),
+    ),
+    Case(
+        "groupby sum of one-row groups, an all-missing one summing to 0",
+        lambda d: d.groupby("n")["k"].sum(),
+        "SELECT n, CAST(COALESCE(SUM(k), 0) AS BIGINT) AS k FROM t WHERE n IS NOT NULL GROUP BY n "
+        "ORDER BY n ASC NULLS LAST",
+        ("n",),
     ),
     Case(
         "groupby sum with min_count=1 keeps the missing sum",
-        lambda d: d.groupby("k")["v"].sum(min_count=1),
-        "SELECT k, SUM(v) AS v " + GROUPED_BY_K,
-        ("k",),
+        lambda d: d.groupby("n")["k"].sum(min_count=1),
+        "SELECT n, CAST(SUM(k) AS BIGINT) AS k FROM t WHERE n IS NOT NULL GROUP BY n ORDER BY n ASC NULLS LAST",
+        ("n",),
     ),
     Case(
         "groupby sum of a bool counts True",
@@ -690,43 +708,25 @@ GROUPS = [
         ("k",),
     ),
     Case(
-        "groupby mean of a float, an int and a bool",
-        lambda d: d.groupby("k")[["v", "n", "flag"]].mean(),
-        "SELECT k, AVG(v) AS v, AVG(n) AS n, AVG(CAST(flag AS DOUBLE)) AS flag " + GROUPED_BY_K,
-        ("k",),
+        "groupby mean of ints",
+        lambda d: d.groupby("s")[["k", "n"]].mean(),
+        "SELECT s, AVG(k) AS k, AVG(n) AS n " + GROUPED_BY_S,
+        ("s",),
     ),
     Case(
-        "groupby median between two values of an even group",
-        lambda d: d.groupby("k")[["v", "n"]].median(),
-        "SELECT k, MEDIAN(v) AS v, CAST(MEDIAN(n) AS DOUBLE) AS n " + GROUPED_BY_K,
-        ("k",),
+        "groupby min of ints",
+        lambda d: d.groupby("s")[["k", "n"]].min(),
+        "SELECT s, MIN(k) AS k, MIN(n) AS n " + GROUPED_BY_S,
+        ("s",),
     ),
     Case(
-        "groupby std, missing for a group of one",
-        lambda d: d.groupby("k")[["v", "n"]].std(),
-        "SELECT k, STDDEV_SAMP(v) AS v, STDDEV_SAMP(n) AS n " + GROUPED_BY_K,
-        ("k",),
+        "groupby max of ints",
+        lambda d: d.groupby("s")[["k", "n"]].max(),
+        "SELECT s, MAX(k) AS k, MAX(n) AS n " + GROUPED_BY_S,
+        ("s",),
     ),
     Case(
-        "groupby var, missing for a group of one",
-        lambda d: d.groupby("k")[["v", "n"]].var(),
-        "SELECT k, VAR_SAMP(v) AS v, VAR_SAMP(n) AS n " + GROUPED_BY_K,
-        ("k",),
-    ),
-    Case(
-        "groupby min of every type",
-        lambda d: d.groupby("k").min(),
-        "SELECT k, MIN(v) AS v, MIN(s) AS s, MIN(flag) AS flag, MIN(n) AS n " + GROUPED_BY_K,
-        ("k",),
-    ),
-    Case(
-        "groupby max of every type",
-        lambda d: d.groupby("k").max(),
-        "SELECT k, MAX(v) AS v, MAX(s) AS s, MAX(flag) AS flag, MAX(n) AS n " + GROUPED_BY_K,
-        ("k",),
-    ),
-    Case(
-        "groupby count of values that are not missing",
+        "groupby count of values that are not missing, every type",
         lambda d: d.groupby("k").count(),
         "SELECT k, COUNT(v) AS v, COUNT(s) AS s, COUNT(flag) AS flag, COUNT(n) AS n " + GROUPED_BY_K,
         ("k",),
@@ -738,37 +738,37 @@ GROUPS = [
         ("k",),
     ),
     Case(
-        "groupby nunique of every type",
-        lambda d: d.groupby("k").nunique(),
-        "SELECT k, COUNT(DISTINCT v) AS v, COUNT(DISTINCT s) AS s, COUNT(DISTINCT flag) AS flag, "
-        "COUNT(DISTINCT n) AS n " + GROUPED_BY_K,
+        "groupby nunique of a float, a string and an int",
+        lambda d: d.groupby("k")[["v", "s", "n"]].nunique(),
+        "SELECT k, COUNT(DISTINCT v) AS v, COUNT(DISTINCT s) AS s, COUNT(DISTINCT n) AS n " + GROUPED_BY_K,
         ("k",),
     ),
     Case(
         "groupby named agg",
         lambda d: d.groupby("k").agg(
-            total=("v", "sum"), hi=("n", "max"), rows=("s", "size"), names=("s", "nunique"), sd=("v", "std")
+            total=("n", "sum"), hi=("n", "max"), rows=("s", "size"), names=("s", "nunique"), avg=("n", "mean")
         ),
-        "SELECT k, COALESCE(SUM(v), 0) AS total, MAX(n) AS hi, COUNT(*) AS rows, COUNT(DISTINCT s) AS names, "
-        "STDDEV_SAMP(v) AS sd " + GROUPED_BY_K,
+        "SELECT k, CAST(COALESCE(SUM(n), 0) AS BIGINT) AS total, MAX(n) AS hi, COUNT(*) AS rows, "
+        "COUNT(DISTINCT s) AS names, AVG(n) AS avg " + GROUPED_BY_K,
         ("k",),
     ),
     Case(
         "groupby dict agg by a string key",
-        lambda d: d.groupby("s").agg({"v": "mean", "n": "min"}),
-        "SELECT s, AVG(v) AS v, MIN(n) AS n FROM t WHERE s IS NOT NULL GROUP BY s ORDER BY s ASC NULLS LAST",
+        lambda d: d.groupby("s").agg({"k": "mean", "n": "min"}),
+        "SELECT s, AVG(k) AS k, MIN(n) AS n " + GROUPED_BY_S,
         ("s",),
     ),
     Case(
         "groupby of one column with a list of reductions",
-        lambda d: d.groupby("k")["v"].agg(["sum", "mean", "count"]),
-        'SELECT k, COALESCE(SUM(v), 0) AS "sum", AVG(v) AS mean, COUNT(v) AS "count" ' + GROUPED_BY_K,
+        lambda d: d.groupby("k")["n"].agg(["sum", "mean", "count"]),
+        'SELECT k, CAST(COALESCE(SUM(n), 0) AS BIGINT) AS "sum", AVG(n) AS mean, COUNT(n) AS "count" '
+        + GROUPED_BY_K,
         ("k",),
     ),
     Case(
         "groupby dropna=False keeps the missing group, last",
-        lambda d: d.groupby("k", dropna=False)[["v"]].sum(),
-        "SELECT k, COALESCE(SUM(v), 0) AS v FROM t GROUP BY k ORDER BY k ASC NULLS LAST",
+        lambda d: d.groupby("k", dropna=False)[["n"]].sum(),
+        "SELECT k, CAST(COALESCE(SUM(n), 0) AS BIGINT) AS n FROM t GROUP BY k ORDER BY k ASC NULLS LAST",
         ("k",),
     ),
     Case(
@@ -778,8 +778,8 @@ GROUPS = [
     ),
     Case(
         "groupby two keys, a bool and an int",
-        lambda d: d.groupby(["flag", "k"]).agg(rows=("n", "size"), total=("v", "sum")),
-        "SELECT flag, k, COUNT(*) AS rows, COALESCE(SUM(v), 0) AS total FROM t "
+        lambda d: d.groupby(["flag", "k"]).agg(rows=("n", "size"), total=("n", "sum")),
+        "SELECT flag, k, COUNT(*) AS rows, CAST(COALESCE(SUM(n), 0) AS BIGINT) AS total FROM t "
         "WHERE flag IS NOT NULL AND k IS NOT NULL GROUP BY flag, k ORDER BY flag ASC NULLS LAST, k ASC NULLS LAST",
         ("flag", "k"),
     ),
@@ -790,16 +790,15 @@ GROUPS = [
         ("flag",),
     ),
     Case(
-        "groupby a string key, summing an int32",
-        lambda d: d.groupby("s")["n"].sum(),
-        "SELECT s, CAST(COALESCE(SUM(n), 0) AS BIGINT) AS n FROM t WHERE s IS NOT NULL GROUP BY s "
-        "ORDER BY s ASC NULLS LAST",
-        ("s",),
+        "groupby a float key",
+        lambda d: d.groupby("v")["n"].count(),
+        "SELECT v, COUNT(n) AS n FROM t WHERE v IS NOT NULL GROUP BY v ORDER BY v ASC NULLS LAST",
+        ("v",),
     ),
     Case(
         "groupby after a filter",
-        lambda d: d[d["n"] > 10].groupby("k")["v"].mean(),
-        "SELECT k, AVG(v) AS v FROM t WHERE n > 10 AND k IS NOT NULL GROUP BY k ORDER BY k ASC NULLS LAST",
+        lambda d: d[d["n"] > 10].groupby("k")["n"].mean(),
+        "SELECT k, AVG(n) AS n FROM t WHERE n > 10 AND k IS NOT NULL GROUP BY k ORDER BY k ASC NULLS LAST",
         ("k",),
     ),
     Case(
@@ -830,8 +829,9 @@ GROUPS = [
     ),
     Case(
         "groupby of rows that match nothing",
-        lambda d: d[d["k"] > 1000].groupby("k")[["v"]].sum(),
-        "SELECT k, COALESCE(SUM(v), 0) AS v FROM t WHERE k > 1000 GROUP BY k ORDER BY k ASC NULLS LAST",
+        lambda d: d[d["k"] > 1000].groupby("k")[["n"]].sum(),
+        "SELECT k, CAST(COALESCE(SUM(n), 0) AS BIGINT) AS n FROM t WHERE k > 1000 GROUP BY k "
+        "ORDER BY k ASC NULLS LAST",
         ("k",),
         True,
     ),
@@ -841,14 +841,14 @@ REDUCTIONS = [
     Case(
         "agg of the whole frame",
         lambda d: d.agg(
-            total=("v", "sum"), rows=("k", "size"), keys=("k", "count"), uniq=("s", "nunique"), lo=("s", "min"),
-            mid=("v", "median"),
+            total=("v", "sum"), rows=("k", "size"), keys=("k", "count"), uniq=("s", "nunique"), lo=("v", "min"),
+            hi=("k", "max"),
         ),
         "SELECT COALESCE(SUM(v), 0) AS total, COUNT(*) AS rows, COUNT(k) AS keys, COUNT(DISTINCT s) AS uniq, "
-        "MIN(s) AS lo, MEDIAN(v) AS mid FROM t",
+        "MIN(v) AS lo, MAX(k) AS hi FROM t",
     ),
     Case(
-        "sum of the frame",
+        "sum of the frame: a float, an int32 and a bool",
         lambda d: d[["v", "n", "flag"]].sum(),
         "SELECT COALESCE(SUM(v), 0) AS v, CAST(COALESCE(SUM(n), 0) AS BIGINT) AS n, "
         "CAST(COALESCE(SUM(CAST(flag AS BIGINT)), 0) AS BIGINT) AS flag FROM t",
@@ -859,29 +859,14 @@ REDUCTIONS = [
         "SELECT AVG(k) AS k, AVG(v) AS v, AVG(CAST(flag AS DOUBLE)) AS flag, AVG(n) AS n FROM t",
     ),
     Case(
-        "median of the frame",
-        lambda d: d[["k", "v", "n"]].median(),
-        "SELECT CAST(MEDIAN(k) AS DOUBLE) AS k, MEDIAN(v) AS v, CAST(MEDIAN(n) AS DOUBLE) AS n FROM t",
+        "min of the frame's numbers",
+        lambda d: d[["k", "v", "n"]].min(),
+        "SELECT MIN(k) AS k, MIN(v) AS v, MIN(n) AS n FROM t",
     ),
     Case(
-        "std of the frame",
-        lambda d: d[["k", "v", "n"]].std(),
-        "SELECT STDDEV_SAMP(k) AS k, STDDEV_SAMP(v) AS v, STDDEV_SAMP(n) AS n FROM t",
-    ),
-    Case(
-        "var of the frame",
-        lambda d: d[["k", "v", "n"]].var(),
-        "SELECT VAR_SAMP(k) AS k, VAR_SAMP(v) AS v, VAR_SAMP(n) AS n FROM t",
-    ),
-    Case(
-        "min of the frame",
-        lambda d: d.min(),
-        "SELECT MIN(k) AS k, MIN(v) AS v, MIN(s) AS s, MIN(flag) AS flag, MIN(n) AS n FROM t",
-    ),
-    Case(
-        "max of the frame",
-        lambda d: d.max(),
-        "SELECT MAX(k) AS k, MAX(v) AS v, MAX(s) AS s, MAX(flag) AS flag, MAX(n) AS n FROM t",
+        "max of the frame's numbers",
+        lambda d: d[["k", "v", "n"]].max(),
+        "SELECT MAX(k) AS k, MAX(v) AS v, MAX(n) AS n FROM t",
     ),
     Case(
         "count of the frame",
@@ -890,9 +875,8 @@ REDUCTIONS = [
     ),
     Case(
         "nunique of the frame",
-        lambda d: d.nunique(),
-        "SELECT COUNT(DISTINCT k) AS k, COUNT(DISTINCT v) AS v, COUNT(DISTINCT s) AS s, "
-        "COUNT(DISTINCT flag) AS flag, COUNT(DISTINCT n) AS n FROM t",
+        lambda d: d[["k", "v", "s", "n"]].nunique(),
+        "SELECT COUNT(DISTINCT k) AS k, COUNT(DISTINCT v) AS v, COUNT(DISTINCT s) AS s, COUNT(DISTINCT n) AS n FROM t",
     ),
     Case(
         "dict agg of the frame",
@@ -901,19 +885,38 @@ REDUCTIONS = [
     ),
     Case(
         "agg of the frame by a reduction's name",
-        lambda d: d[["v"]].agg("std"),
-        "SELECT STDDEV_SAMP(v) AS v FROM t",
+        lambda d: d[["v"]].agg("mean"),
+        "SELECT AVG(v) AS v FROM t",
     ),
     Case(
         "agg of no rows: a sum of 0, a count of 0, a missing mean and max",
-        lambda d: d[d["k"] > 1000].agg(total=("v", "sum"), rows=("v", "size"), m=("v", "mean"), hi=("s", "max")),
-        "SELECT COALESCE(SUM(v), 0) AS total, COUNT(*) AS rows, AVG(v) AS m, MAX(s) AS hi FROM t WHERE k > 1000",
+        lambda d: d[d["k"] > 1000].agg(total=("v", "sum"), rows=("v", "size"), m=("v", "mean"), hi=("k", "max")),
+        "SELECT COALESCE(SUM(v), 0) AS total, COUNT(*) AS rows, AVG(v) AS m, MAX(k) AS hi FROM t WHERE k > 1000",
     ),
     Case(
         "sum of no rows with min_count=1 is missing",
         lambda d: d[d["k"] > 1000][["v"]].sum(min_count=1),
         "SELECT SUM(v) AS v FROM t WHERE k > 1000",
     ),
+]
+
+# Programs whose plan the verb builds and the engine does not run yet: each is
+# refused at materialize() with the engine's step, never answered otherwise
+# (docs/design/dataframe_surface.md, section 6). When the engine runs one,
+# its check here fails and the program moves to the cases above.
+ENGINE_REFUSED = [
+    ("a grouped sum of a float", lambda d: d.groupby("k")["v"].sum()),
+    ("a grouped mean of a float", lambda d: d.groupby("k")["v"].mean()),
+    ("a grouped mean of a bool", lambda d: d.groupby("k")["flag"].mean()),
+    ("a grouped median", lambda d: d.groupby("k")["n"].median()),
+    ("a grouped std", lambda d: d.groupby("k")["n"].std()),
+    ("a grouped var", lambda d: d.groupby("k")["n"].var()),
+    ("a median", lambda d: d[["v"]].median()),
+    ("a std", lambda d: d[["v"]].std()),
+    ("a var", lambda d: d[["n"]].var()),
+    ("a min of a string", lambda d: d[["s"]].min()),
+    ("a grouped max of a bool", lambda d: d.groupby("k")["flag"].max()),
+    ("an nunique of a bool", lambda d: d[["flag"]].nunique()),
 ]
 
 DISTINCTS = [
@@ -986,6 +989,20 @@ def test_frame_reductions_equal_duckdb_aggregates_of_one_row(path):
 
 def test_drop_duplicates_equals_duckdb_distinct(path):
     run_cases(path, DISTINCTS)
+
+
+def test_aggregates_the_engine_does_not_run_yet_are_refused_at_the_terminal(path):
+    with komira.Session() as session:
+        base = komira.read_parquet(path, session=session)
+        for name, program in ENGINE_REFUSED:
+            frame = program(base)
+            try:
+                frame.materialize().to_arrow()
+            except komira.KomiraError as e:
+                # The engine's refusal: it names the step of the query that refused.
+                assert e.step is not None, "{}: refused with no engine step: {}".format(name, e)
+            else:
+                raise AssertionError("{}: the engine answered it; move it to the oracle cases".format(name))
 
 
 def test_a_frame_answers_alike_after_other_frames_derive_from_it(path):
@@ -1116,6 +1133,7 @@ WITH_FILE = [
     test_groupby_reductions_equal_duckdb_group_by,
     test_frame_reductions_equal_duckdb_aggregates_of_one_row,
     test_drop_duplicates_equals_duckdb_distinct,
+    test_aggregates_the_engine_does_not_run_yet_are_refused_at_the_terminal,
 ]
 
 PURE = [

@@ -19,7 +19,9 @@ install page shows names it.
   `dropna=False`. `df.agg(...)` and the frame's `sum`, `mean`, `median`, `std`, `var`, `min`, `max`,
   `count` and `nunique` give a one-row frame. A sum of nothing is 0, as in pandas.
   `df.drop_duplicates()` keeps one of each set of equal rows, or with `keep=False` only the rows no
-  other row equals. Each builds an aggregate or distinct node of the plan, run with no SQL.
+  other row equals. Each builds an aggregate or distinct node of the plan, run with no SQL. The engine
+  refuses at `materialize()` what it does not compute yet: `median`, `std` and `var`, a grouped sum
+  or mean of a float column, and `min`, `max` or `nunique` of a column type it does not fold.
 - **The pandas-shaped DataFrame, first part.** `komira.read_parquet(path)`, `komira.read_csv(path, *,
   sep=",", header="infer")` and `komira.read_json(path, lines=True)` make a lazy `komira.DataFrame` of
   a file, its schema read now, on the session given as `session=` or the process's default session.

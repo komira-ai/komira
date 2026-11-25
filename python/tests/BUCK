@@ -841,8 +841,10 @@ _PLAN_EXPR_RUNTIMES = [
 #   strings, each answered by komira through the plan door and by DuckDB from
 #   the SQL that means the same over the same file, equal row for row (in
 #   order when the frame is ordered, as a multiset otherwise), column names
-#   and types included: the verbs above, groupby and its reductions against
-#   GROUP BY, the frame's reductions, and drop_duplicates against DISTINCT.
+#   and types included: the verbs above, groupby and the reductions the
+#   engine runs against GROUP BY, the frame's reductions, drop_duplicates
+#   against DISTINCT, and the reductions the engine does not run yet refused
+#   at the terminal with its step.
 [py_test(
     name = "frame_test{}".format(suffix),
     src = "test_frame.py",
