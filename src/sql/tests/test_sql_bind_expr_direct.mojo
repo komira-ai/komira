@@ -22,7 +22,7 @@
 #      list strips one cast level only.
 #   7. Literals of every kind, DATE validation (day of month, leap years,
 #      malformed text), CASE typing (float promotion, typed NULL arms and
-#      defaults), and the scalar-position refusals (aggregate in WHERE,
+#      defaults, integer arms of different widths), and the scalar-position refusals (aggregate in WHERE,
 #      window nested in an expression).
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -30,8 +30,9 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 from arrow.arrow_types import ArrowType
 from arrow.schema import Field, Schema, SchemaBuilder
 from plan_expr.expr import Expr
+from plan_expr.scalar_value import ScalarValue
 
-from sql.sql_bind_expr import _bind_scalar
+from sql.sql_bind_expr import _bind_scalar, _unify_integer_arms
 from sql.sql_bind_parquet import ParquetFacts
 from sql.sql_bind_scope import CteScope, _build_bind_scope
 from sql.sql_catalog import SqlCatalog
@@ -55,9 +56,9 @@ def _two(
 
 
 def _catalog() raises -> SqlCatalog:
-    """t(k, v, s, g, d, ts, i32, dc, b, f32, u64, j), u(k, w, s), kk(k, a),
-    mm(k, b), up(K, B), kk2(k, k_right): parquet tables with given schemas
-    (no file is opened)."""
+    """t(k, v, s, g, d, ts, i32, dc, b, f32, u64, j), u(k, w, s),
+    iw(i8, i16, i32, i64, u8, u16, u32, u64, s), kk(k, a), mm(k, b), up(K, B),
+    kk2(k, k_right): parquet tables with given schemas (no file is opened)."""
     var cat = SqlCatalog()
     var t = SchemaBuilder()
     t.add_field(Field(String("k"), ArrowType.INT64, False))
@@ -78,6 +79,17 @@ def _catalog() raises -> SqlCatalog:
     u.add_field(Field(String("w"), ArrowType.INT64, True))
     u.add_field(Field(String("s"), ArrowType.STRING, True))
     cat.add_parquet(String("u"), String("u.parquet"), u.build())
+    var iw = SchemaBuilder()
+    iw.add_field(Field(String("i8"), ArrowType.INT8, True))
+    iw.add_field(Field(String("i16"), ArrowType.INT16, True))
+    iw.add_field(Field(String("i32"), ArrowType.INT32, True))
+    iw.add_field(Field(String("i64"), ArrowType.INT64, True))
+    iw.add_field(Field(String("u8"), ArrowType.UINT8, True))
+    iw.add_field(Field(String("u16"), ArrowType.UINT16, True))
+    iw.add_field(Field(String("u32"), ArrowType.UINT32, True))
+    iw.add_field(Field(String("u64"), ArrowType.UINT64, True))
+    iw.add_field(Field(String("s"), ArrowType.STRING, True))
+    cat.add_parquet(String("iw"), String("iw.parquet"), iw.build())
     _two(cat, "kk", "k", ArrowType.INT64, "a", ArrowType.INT64)
     _two(cat, "mm", "k", ArrowType.INT64, "b", ArrowType.INT64)
     _two(cat, "up", "K", ArrowType.INT64, "B", ArrowType.INT64)
@@ -431,6 +443,118 @@ def test_case_without_else_over_non_numeric_arms() raises:
         "SELECT CASE WHEN k > 1 THEN 1 WHEN k > 2 THEN i32 END AS c FROM t",
         "ERR: SQL not supported: a CASE with no ELSE whose THEN arms are neither INT64 nor FLOAT64 (a string, a date, a boolean or a narrower integer). The omitted ELSE is a NULL of the arms' type, the typed NULL values this engine's plan can carry are INT64 and FLOAT64 only, and every CASE arm must share one type. Write an explicit ELSE of the same type."
     )
+
+
+def _case_proj(item: String) -> String:
+    return (
+        "Project(exprs=[" + item + "])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def _c64(col: String) -> String:
+    return "Cast(ColRef(" + col + "), int64)"
+
+
+def _gt(col: String, v: String) -> String:
+    return "BinaryOp(GT, ColRef(" + col + "), Literal(ScalarValue(int64, " + v + ")))"
+
+
+def test_case_over_mixed_integer_widths() raises:
+    # INT8 and INT64 arms: both share INT64, the CASE is BIGINT (no cast back).
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN i8 ELSE i64 END AS c FROM iw",
+        _case_proj(
+            "Alias(When(WHEN " + _gt("i64", "1") + " THEN " + _c64("i8")
+            + ", ELSE ColRef(i64)), \"c\")"
+        ),
+    )
+    # INT16 and INT32 arms: INTEGER, the CASE is cast back to INT32.
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN i16 ELSE i32 END AS c FROM iw",
+        _case_proj(
+            "Alias(Cast(When(WHEN " + _gt("i64", "1") + " THEN " + _c64("i16")
+            + ", ELSE " + _c64("i32") + "), int32), \"c\")"
+        ),
+    )
+    # Several arms and a literal ELSE that fits INTEGER; an INT64 arm with a
+    # literal ELSE; a THEN NULL arm beside INT64 arms.
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN i32 WHEN i64 > 2 THEN u8 ELSE -1 END AS c FROM iw",
+        _case_proj(
+            "Alias(Cast(When(WHEN " + _gt("i64", "1") + " THEN " + _c64("i32")
+            + ", WHEN " + _gt("i64", "2") + " THEN " + _c64("u8")
+            + ", ELSE Literal(ScalarValue(int64, -1))), int32), \"c\")"
+        ),
+    )
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN i8 WHEN i64 > 2 THEN i64 ELSE 5 END AS c FROM iw",
+        _case_proj(
+            "Alias(When(WHEN " + _gt("i64", "1") + " THEN " + _c64("i8")
+            + ", WHEN " + _gt("i64", "2") + " THEN ColRef(i64)"
+            + ", ELSE Literal(ScalarValue(int64, 5))), \"c\")"
+        ),
+    )
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN NULL ELSE i64 END AS c FROM iw",
+        _case_proj(
+            "Alias(When(WHEN " + _gt("i64", "1")
+            + " THEN Literal(ScalarValue(null, int64)), ELSE ColRef(i64)), \"c\")"
+        ),
+    )
+    # A NULL arm or an omitted ELSE beside a narrower integer stays refused.
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN NULL ELSE i32 END AS c FROM iw",
+        "ERR: SQL not supported: a CASE arm `THEN NULL` beside arms that are neither INT64 nor FLOAT64 (a string, a date, a boolean or a narrower integer). DuckDB types the NULL as its sibling arms; the typed NULL values this engine's plan can carry are INT64 and FLOAT64 only, and every CASE arm must share one type. A NULL beside INT64 or FLOAT64 arms is served; so is an omitted ELSE.",
+    )
+    _check(
+        "SELECT CASE WHEN i64 > 1 THEN i8 WHEN i64 > 2 THEN i64 END AS c FROM iw",
+        "ERR: SQL not supported: a CASE with no ELSE whose THEN arms are neither INT64 nor FLOAT64 (a string, a date, a boolean or a narrower integer). The omitted ELSE is a NULL of the arms' type, the typed NULL values this engine's plan can carry are INT64 and FLOAT64 only, and every CASE arm must share one type. Write an explicit ELSE of the same type.",
+    )
+
+
+def _iw_schema() raises -> Schema:
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("i8"), ArrowType.INT8, True))
+    sb.add_field(Field(String("u64"), ArrowType.UINT64, True))
+    return sb.build()
+
+
+def test_unify_integer_arms_directly() raises:
+    var sch = _iw_schema()
+    var null64 = Expr.literal(ScalarValue.null(DType.int64))
+    var narrow = False
+    # A NULL arm adds no type: INT8 beside it is cast to INT64 and stays INT8.
+    var a = List[Expr]()
+    a.append(Expr.col_ref("i8"))
+    a.append(null64.copy())
+    var ua = _unify_integer_arms(a^, sch, narrow)
+    assert_equal(String(ua[0]), "Cast(ColRef(i8), int64)")
+    assert_equal(String(ua[1]), "Literal(ScalarValue(null, int64))")
+    assert_false(narrow)
+    # A column the schema lacks, and a UINT64 column, leave the arms as given.
+    var b = List[Expr]()
+    b.append(Expr.col_ref("i8"))
+    b.append(Expr.col_ref("zz"))
+    narrow = True
+    var ub = _unify_integer_arms(b^, sch, narrow)
+    assert_equal(String(ub[0]), "ColRef(i8)")
+    assert_false(narrow)
+    var c = List[Expr]()
+    c.append(Expr.col_ref("i8"))
+    c.append(Expr.col_ref("u64"))
+    narrow = True
+    var uc = _unify_integer_arms(c^, sch, narrow)
+    assert_equal(String(uc[0]), "ColRef(i8)")
+    assert_false(narrow)
+    # Literals and NULLs alone are not touched.
+    var d = List[Expr]()
+    d.append(Expr.literal(ScalarValue.from_int64(1)))
+    d.append(null64.copy())
+    narrow = True
+    var ud = _unify_integer_arms(d^, sch, narrow)
+    assert_equal(String(ud[0]), "Literal(ScalarValue(int64, 1))")
+    assert_false(narrow)
 
 
 def test_scalar_position_refusals() raises:

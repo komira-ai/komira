@@ -7,8 +7,8 @@
 # `_bind_scalar` against one table's schema; the test compares the bound
 # expression text, or the binder's message.
 #   1. JSON / struct / map extracts.
-#   2. date_diff / date_sub (fold vs column arm), even, fdiv / fmod, nullif and
-#      days_in_month.
+#   2. date_diff / date_sub (fold vs column arm), even, fdiv / fmod, nullif
+#      (also over integer widths) and days_in_month.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -40,9 +40,9 @@ def _two(
 
 
 def _catalog() raises -> SqlCatalog:
-    """t(k, v, s, g, d, ts, i32, dc, b, f32, u64, j), u(k, w, s), kk(k, a),
-    mm(k, b), up(K, B), kk2(k, k_right): parquet tables with given schemas
-    (no file is opened)."""
+    """t(k, v, s, g, d, ts, i32, dc, b, f32, u64, j), u(k, w, s),
+    iw(i8, i16, i32, i64, u8, u16, u32, u64, s), kk(k, a), mm(k, b), up(K, B),
+    kk2(k, k_right): parquet tables with given schemas (no file is opened)."""
     var cat = SqlCatalog()
     var t = SchemaBuilder()
     t.add_field(Field(String("k"), ArrowType.INT64, False))
@@ -63,6 +63,17 @@ def _catalog() raises -> SqlCatalog:
     u.add_field(Field(String("w"), ArrowType.INT64, True))
     u.add_field(Field(String("s"), ArrowType.STRING, True))
     cat.add_parquet(String("u"), String("u.parquet"), u.build())
+    var iw = SchemaBuilder()
+    iw.add_field(Field(String("i8"), ArrowType.INT8, True))
+    iw.add_field(Field(String("i16"), ArrowType.INT16, True))
+    iw.add_field(Field(String("i32"), ArrowType.INT32, True))
+    iw.add_field(Field(String("i64"), ArrowType.INT64, True))
+    iw.add_field(Field(String("u8"), ArrowType.UINT8, True))
+    iw.add_field(Field(String("u16"), ArrowType.UINT16, True))
+    iw.add_field(Field(String("u32"), ArrowType.UINT32, True))
+    iw.add_field(Field(String("u64"), ArrowType.UINT64, True))
+    iw.add_field(Field(String("s"), ArrowType.STRING, True))
+    cat.add_parquet(String("iw"), String("iw.parquet"), iw.build())
     _two(cat, "kk", "k", ArrowType.INT64, "a", ArrowType.INT64)
     _two(cat, "mm", "k", ArrowType.INT64, "b", ArrowType.INT64)
     _two(cat, "up", "K", ArrowType.INT64, "B", ArrowType.INT64)
@@ -202,6 +213,31 @@ def test_date_diff_and_date_sub() raises:
         "SELECT date_sub('day', DATE '2021-01-01', d) FROM t",
         "Project(exprs=[BinaryOp(SUB, Cast(ColRef(d), int64), Cast(Literal(ScalarValue(date32, 18628)), int64))])\n"
         "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def test_nullif_over_integer_widths() raises:
+    var tail = String("  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n")
+    var null64 = String("Literal(ScalarValue(null, int64))")
+    # nullif(INTEGER, 2) is an INTEGER: the ELSE is cast to INT64 beside the
+    # INT64 NULL and the CASE is cast back.
+    _check(
+        "SELECT nullif(i32, 2) AS a FROM iw",
+        "Project(exprs=[Alias(Cast(When(WHEN BinaryOp(EQ, ColRef(i32), Literal(ScalarValue(int64, 2))) THEN "
+        + null64 + ", ELSE Cast(ColRef(i32), int64)), int32), \"a\")])\n" + tail,
+    )
+    # A narrower or unsigned `a` has no executable cast back: INT64 CASE.
+    _check(
+        "SELECT nullif(i8, 2) AS a, nullif(u16, 2) AS b FROM iw",
+        "Project(exprs=[Alias(When(WHEN BinaryOp(EQ, ColRef(i8), Literal(ScalarValue(int64, 2))) THEN "
+        + null64 + ", ELSE Cast(ColRef(i8), int64)), \"a\"), Alias(When(WHEN BinaryOp(EQ, ColRef(u16), Literal(ScalarValue(int64, 2))) THEN "
+        + null64 + ", ELSE Cast(ColRef(u16), int64)), \"b\")])\n" + tail,
+    )
+    # An INT64 `a` over a narrow `b` is bound as before.
+    _check(
+        "SELECT nullif(i64, i32) AS a FROM iw",
+        "Project(exprs=[Alias(When(WHEN BinaryOp(EQ, ColRef(i64), ColRef(i32)) THEN "
+        + null64 + ", ELSE ColRef(i64)), \"a\")])\n" + tail,
     )
 
 
