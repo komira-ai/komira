@@ -76,7 +76,12 @@ from morsel.morsel_sink import MorselSinkImpl
 from morsel.pipeline_execution import PipelineExecution
 from physical_plan.physical_plan import SortSinkData, TopNSinkData
 
-from .segment_pool import POOL_UNBOUNDED, SegmentPool, WorkerReservation
+from .segment_pool import (
+    MEMORY_BUDGET_EXCEEDED,
+    POOL_UNBOUNDED,
+    SegmentPool,
+    WorkerReservation,
+)
 from .sink_collect import CollectSink
 from .sort_nulls import (
     check_sort_keys,
@@ -341,7 +346,9 @@ struct SortSink(MorselSinkImpl):
         return "pipeline_exec: the sort sink of segment " + String(seg_id)
 
     def _denied(self, code: Int, what: String, bytes: Int) -> Error:
-        var head = self._where(self._seg_id)
+        var head = String(MEMORY_BUDGET_EXCEEDED) + ": " + self._where(
+            self._seg_id
+        )
         if code == _BUDGET_DENIED:
             return Error(
                 head

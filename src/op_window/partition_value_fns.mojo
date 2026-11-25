@@ -74,6 +74,7 @@ def _value_sources(
     bounds: List[Int],
     order_keys: List[String],
     descending: List[Bool],
+    nulls_first: List[Bool],
     expr: PartitionExpr,
 ) raises -> List[Int]:
     """Per row, the row whose value `expr` answers with, or `_NO_ROW`."""
@@ -82,7 +83,9 @@ def _value_sources(
         return _offset_sources(bounds, n, -expr.offset)
     elif expr.func == PF_LEAD:
         return _offset_sources(bounds, n, expr.offset)
-    var fi = frame_index(batch, bounds, order_keys, descending, expr.frame)
+    var fi = frame_index(
+        batch, bounds, order_keys, descending, expr.frame, nulls_first
+    )
     var src = List[Int](capacity=n)
     for row in range(n):
         var lo = fi.lo[row]
@@ -180,13 +183,16 @@ def eval_value_fn(
     bounds: List[Int],
     order_keys: List[String],
     descending: List[Bool],
+    nulls_first: List[Bool],
     expr: PartitionExpr,
 ) raises -> Column[HeapRegion]:
     """Evaluate one value function (LAG / LEAD / FIRST_VALUE / LAST_VALUE /
     NTH_VALUE) over `batch`, sorted by (partition keys ++ order keys), whose
     partitions start at `bounds`."""
     ref col = batch.column_at(batch.schema.column_index(expr.column))
-    var src = _value_sources(batch, bounds, order_keys, descending, expr)
+    var src = _value_sources(
+        batch, bounds, order_keys, descending, nulls_first, expr
+    )
     var has_default = value_fn_has_default(expr)
     if col.arrow_type == ArrowType.INT64:
         var dv = Int64(0)

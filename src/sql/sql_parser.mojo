@@ -3188,8 +3188,8 @@ struct _Parser(Movable):
         return w^
 
     def _parse_over_clause(mut self, func: UInt8, arg_col: String) raises -> SqlWindowData:
-        """Parse `OVER ( [PARTITION BY col, ...] [ORDER BY col [ASC|DESC], ...]
-        [ROWS|RANGE <frame>] )` — the `over` keyword is at the current position.
+        """Parse `OVER ( [PARTITION BY col, ...]
+        [ORDER BY col [ASC|DESC] [NULLS FIRST|LAST], ...] [ROWS|RANGE <frame>] )` — the `over` keyword is at the current position.
         Returns the fully-populated `SqlWindowData` (function + arg + keys + frame).
         Partition / order operands are column names only (the corpus never orders a
         window by an expression)."""
@@ -3220,6 +3220,7 @@ struct _Parser(Movable):
         var desc = List[Bool]()
         var pqual = List[String]()
         var oqual = List[String]()
+        var nfirst = List[Optional[Bool]]()
         if self._is_kw("partition"):
             self._advance()
             self._expect_kw("by")
@@ -3244,6 +3245,21 @@ struct _Parser(Movable):
                 elif self._is_kw("desc"):
                     self._advance()
                     d = True
+                var nf = Optional[Bool](None)
+                if self._is_kw("nulls"):
+                    self._advance()
+                    if self._is_kw("first"):
+                        self._advance()
+                        nf = Optional[Bool](True)
+                    elif self._is_kw("last"):
+                        self._advance()
+                        nf = Optional[Bool](False)
+                    else:
+                        raise Error(
+                            "SQL syntax error: ORDER BY ... NULLS expects FIRST"
+                            " or LAST"
+                        )
+                nfirst.append(nf^)
                 oby.append(c)
                 desc.append(d)
                 if self._kind() == TK_COMMA:
@@ -3253,6 +3269,7 @@ struct _Parser(Movable):
         var w = SqlWindowData(func, arg_col, pby^, oby^, desc^)
         w.partition_qual = pqual^
         w.order_qual = oqual^
+        w.nulls_first = nfirst^
         if self._is_kw("rows") or self._is_kw("range"):
             self._parse_frame(w)
         self._expect(TK_RPAREN, "')' to close the OVER clause")

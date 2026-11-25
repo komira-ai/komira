@@ -620,6 +620,8 @@ def test_partition_nodes(mut L: _Ledger) raises:
     _m(L, b, "WirePartitionByNode.partition_exprs", e)
     _m(L, b, "WirePartitionByNode.partition_exprs", second)
     _m(L, b, "WirePartitionByNode.child", _plan(L, 21))
+    _u(L, b, "WirePartitionByNode.nulls_first", 1)
+    _u(L, b, "WirePartitionByNode.nulls_first", 0)
     var pb = decode_proto[WirePartitionByNode](b.copy())
     _strs(pb.partition_keys, "pk", "WirePartitionByNode.partition_keys")
     _strs(pb.order_keys, "ok1 ok2", "WirePartitionByNode.order_keys")
@@ -629,6 +631,8 @@ def test_partition_nodes(mut L: _Ledger) raises:
     assert_equal(pb.partition_exprs[0].alias_name, "lag1", "WirePartitionByNode: pb.partition_exprs[0].alias_name")
     assert_equal(pb.partition_exprs[1].column, "c2", "WirePartitionByNode: pb.partition_exprs[1].column")
     assert_equal(_hash(pb.child[0]), 21, "WirePartitionByNode: _hash(pb.child[0])")
+    assert_equal(len(pb.nulls_first), 2, "WirePartitionByNode: len(pb.nulls_first)")
+    assert_true(pb.nulls_first[0] and not pb.nulls_first[1], "WirePartitionByNode: pb.nulls_first[0] and not pb.nulls_first[1]")
     _same(encode_proto(pb), b, "WirePartitionByNode")
 
     var t = List[UInt8]()
@@ -889,6 +893,7 @@ WirePartitionByNode.order_keys 2
 WirePartitionByNode.descending 3
 WirePartitionByNode.partition_exprs 4
 WirePartitionByNode.child 5
+WirePartitionByNode.nulls_first 6
 WirePartitionTopNNode.partition_keys 1
 WirePartitionTopNNode.sort_keys 2
 WirePartitionTopNNode.descending 3

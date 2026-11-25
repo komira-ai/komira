@@ -113,8 +113,8 @@ python/
 - **Tests live in `python/tests/`**, run as `python_binding_test` targets against
   `//src/so:libkomira`, each script loading the library from the `--lib-dir` it is given. They are the
   only Python tests of the package (rule T11 allows Python tests for the Python SDK surface).
-- **The generated protobuf modules are not in the first release.** They come with the DataFrame plan
-  encoder (decision 4). When they come, they live where their proto package puts them, `komira/plan/v1/`
+- **The generated protobuf modules were not in the first release.** They came with the DataFrame
+  (decision 4), and live where their proto package puts them, `komira/plan/v1/`
   (`package komira.plan.v1;` in [src/plan_proto/plan.proto](../../src/plan_proto/plan.proto)): protoc
   writes `from komira.plan.v1 import ...` into the generated code, and the earlier SDK nested them there
   for that reason. `komira.plan` is then a package without public names: nothing in `__all__` comes from
@@ -378,6 +378,7 @@ classifiers = [
 dependencies = [
   # none for the Mojo runtime (decision 6)
   "pyarrow>=25.0.1",   # with Session.sql's Result; the lower bound is the pyarrow the tests run on
+  "protobuf>=5.29.1,<8",   # with the DataFrame: loads the generated plan modules (python/dependencies.bzl)
 ]
 
 [project.optional-dependencies]
@@ -402,9 +403,11 @@ Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
   time). There is no `License ::` classifier: PEP 639 deprecates them alongside an expression. The wheel
   rule stages the files, so `python/` holds no copy that could drift. The wheel rule's read-back check
   refuses a wheel without them: an absent licence file must not build a wheel with no licence in it.
-- **One `Requires-Dist`, `pyarrow>=25.0.1`.** Release 1 listed none; the release with `Session.sql`
-  requires pyarrow, which a `Result` is read as (python/dependencies.bzl says why the range has no
-  upper bound). None is on `mojo-compiler`: the runtime libraries are in the wheel (decision 6).
+- **Two `Requires-Dist` lines, `pyarrow>=25.0.1` and `protobuf>=5.29.1,<8`.** Release 1 listed none;
+  the release with `Session.sql` requires pyarrow, which a `Result` is read as, and the release with
+  the DataFrame requires protobuf, which loads the generated plan modules a frame's plan is encoded
+  with (python/dependencies.bzl says why each range is what it is). None is on `mojo-compiler`: the
+  runtime libraries are in the wheel (decision 6).
 - **The tag is `py3-none-manylinux_2_35_x86_64`.** `libAsyncRTRuntimeGlobals.so` needs
   `GLIBC_2.35`, so a `manylinux_2_34` tag would promise a glibc the library does not run on; the highest
   C++ runtime versions the three need are `GLIBCXX_3.4.30` and `CXXABI_1.3.11`
@@ -428,8 +431,9 @@ Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
   table, so `pip install ./python` fails, as expected: the package is installed from its wheel. The
   wheel rule's attributes are the metadata, and `license-files` names files the rule stages from the
   repository root, which `python/` does not hold.
-- **protobuf is not a dependency of the first release.** Only the DataFrame plan encoder needs it; it is
-  added, with its range, when that lands.
+- **protobuf was not a dependency of the first release.** Only the DataFrame's plan encoder needs it;
+  it was added, with its range, with the DataFrame. `import komira` does not import it: the first
+  reader that makes a frame does.
 - **The version** is stamped by the wheel rule. Its scheme is in
   [packaging/conda/README.md](../../packaging/conda/README.md) ("Wheels: versioning") and is the wheel
   design's to confirm.
@@ -467,6 +471,13 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
     `LOWERING_WINDOW_UNSERVED`, `LOWERING_UDF_UNSERVED`, `SQL_STATEMENT_UNSUPPORTED`,
     `COPY_OPTION_UNSUPPORTED`, `COPY_FORMAT_NOT_INFERRED`, `STORAGE_URL_REFUSED`,
     `STORAGE_RANGE_NOT_SUPPORTED`, `STORAGE_WRITE_UNSUPPORTED`, `PLAN_URL_QUERY_REFUSED`.
+  - `MemoryLimitError`: `MEMORY_BUDGET_EXCEEDED`, the engine's refusal at step `execute` when the
+    memory budget (`Session(memory_limit=)`) denies an operator the bytes its state needs. The
+    code is the first word of the engine's message, set by `pipeline_exec` at every site that
+    reports a denied draw (the aggregation, grouped aggregation, window and sort sinks and
+    COUNT(DISTINCT)). A query the engine runs in less memory, as a fixed-width GROUP BY that
+    spills, does not raise it; the class and the code stay the same when a spill directory
+    becomes reachable through the ABI, and an operator that does not spill still raises it.
   - `CredentialsError`: `CREDENTIAL_UNBOUND`, `CREDENTIAL_NAME_CONFLICT`,
     `CREDENTIAL_KIND_MISMATCH`, `CREDENTIALS_NOT_FOUND`, `CREDENTIALS_INVALID`; also the default of
     the credential calls.
