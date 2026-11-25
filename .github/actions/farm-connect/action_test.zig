@@ -17,7 +17,7 @@
 //!    says, `tls_ca_certs`, `macos_library_dirs` or the macOS keys written when
 //!    not asked for, or not written when asked for) fails a case; every case's
 //!    buckconfig holds `grpc_keepalive_time_secs = 30`, `grpc_keepalive_timeout_secs`
-//!    (600 unless the case gives `grpc-keepalive-timeout-secs`) and
+//!    (300 unless the case gives `grpc-keepalive-timeout-secs`) and
 //!    `max_concurrent_uploads_per_action = 4`, so a writer that drops one (and leaves
 //!    buck2's 10 s PING answer, which drops every action in flight when the path to
 //!    the farm is silent for 40 s, or unbounded uploads per action) fails every case;
@@ -291,7 +291,7 @@ const LINUX_ONLY =
     \\  tls = false
     \\  execution_concurrency_limit = 256
     \\  grpc_keepalive_time_secs = 30
-    \\  grpc_keepalive_timeout_secs = 600
+    \\  grpc_keepalive_timeout_secs = 300
     \\  max_concurrent_uploads_per_action = 4
     \\[komira_re]
     \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
@@ -318,7 +318,7 @@ test "macOS properties and hosts: both keys under [komira_re], after the linux s
         \\  tls = false
         \\  execution_concurrency_limit = 64
         \\  grpc_keepalive_time_secs = 30
-        \\  grpc_keepalive_timeout_secs = 600
+        \\  grpc_keepalive_timeout_secs = 300
         \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
@@ -342,7 +342,7 @@ test "macOS library directories: written verbatim after the hosts, spaces and co
         \\  tls = false
         \\  execution_concurrency_limit = 256
         \\  grpc_keepalive_time_secs = 30
-        \\  grpc_keepalive_timeout_secs = 600
+        \\  grpc_keepalive_timeout_secs = 300
         \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
@@ -367,7 +367,7 @@ test "macOS properties and hosts without library directories write no macos_libr
         \\  tls = false
         \\  execution_concurrency_limit = 256
         \\  grpc_keepalive_time_secs = 30
-        \\  grpc_keepalive_timeout_secs = 600
+        \\  grpc_keepalive_timeout_secs = 300
         \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
@@ -415,7 +415,7 @@ test "tls true with no CA file: tls = true and no tls_ca_certs (the system's roo
         \\  tls = true
         \\  execution_concurrency_limit = 256
         \\  grpc_keepalive_time_secs = 30
-        \\  grpc_keepalive_timeout_secs = 600
+        \\  grpc_keepalive_timeout_secs = 300
         \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
@@ -427,15 +427,15 @@ test "tls false said outright is the default's buckconfig" {
     try expectWritten(&.{.{ .name = "tls", .value = "false" }}, LINUX_ONLY);
 }
 
-test "grpc-keepalive-timeout-secs is written as given, its bounds 1 and 839 included, and 600 said outright is the default's buckconfig" {
+test "grpc-keepalive-timeout-secs is written as given, its bounds 1 and 839 included, and 300 said outright is the default's buckconfig" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
-    for ([_][]const u8{ "1", "9", "10", "60", "99", "100", "799", "800", "839" }) |secs| {
+    for ([_][]const u8{ "1", "9", "10", "60", "99", "100", "600", "799", "800", "839" }) |secs| {
         const line = try std.fmt.allocPrint(arena.allocator(), "grpc_keepalive_timeout_secs = {s}\n", .{secs});
-        const want = try std.mem.replaceOwned(u8, arena.allocator(), LINUX_ONLY, "grpc_keepalive_timeout_secs = 600\n", line);
+        const want = try std.mem.replaceOwned(u8, arena.allocator(), LINUX_ONLY, "grpc_keepalive_timeout_secs = 300\n", line);
         try expectWritten(&.{.{ .name = "grpc-keepalive-timeout-secs", .value = secs }}, want);
     }
-    try expectWritten(&.{.{ .name = "grpc-keepalive-timeout-secs", .value = "600" }}, LINUX_ONLY);
+    try expectWritten(&.{.{ .name = "grpc-keepalive-timeout-secs", .value = "300" }}, LINUX_ONLY);
 }
 
 const WITH_BATCH =
@@ -447,7 +447,7 @@ const WITH_BATCH =
     \\  tls = false
     \\  execution_concurrency_limit = 256
     \\  grpc_keepalive_time_secs = 30
-    \\  grpc_keepalive_timeout_secs = 600
+    \\  grpc_keepalive_timeout_secs = 300
     \\  max_concurrent_uploads_per_action = 4
     \\  http_headers = x-kbf-qos:batch
     \\[komira_re]
@@ -491,7 +491,7 @@ test "tls true with a CA file: tls_ca_certs names that path" {
         \\  tls_ca_certs = {s}
         \\  execution_concurrency_limit = 256
         \\  grpc_keepalive_time_secs = 30
-        \\  grpc_keepalive_timeout_secs = 600
+        \\  grpc_keepalive_timeout_secs = 300
         \\  max_concurrent_uploads_per_action = 4
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux

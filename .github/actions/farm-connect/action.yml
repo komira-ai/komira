@@ -63,9 +63,9 @@ inputs:
     required: false
     default: ""
   grpc-keepalive-timeout-secs:
-    description: How many seconds buck2 waits for the farm to answer a PING before it drops the connection with every action on it (buck2's `grpc_keepalive_timeout_secs`; buck2 PINGs a connection that has read nothing for 30 s, `grpc_keepalive_time_secs`). A whole number from 1 to 839, under 840 s, the keepalive limit the farm's server is to be given. The default, 600, keeps a connection through a silent outage of the path to the farm of up to 630 s.
+    description: How many seconds buck2 waits for the farm to answer a PING before it drops the connection with every action on it (buck2's `grpc_keepalive_timeout_secs`; buck2 PINGs a connection that has read nothing for 30 s, `grpc_keepalive_time_secs`). A whole number from 1 to 839, under 840 s, the keepalive limit the farm's server is to be given. The default, 300, keeps a connection through a silent outage of the path to the farm of up to 330 s, and fails the actions on a connection that is really gone within 330 s of its last read.
     required: false
-    default: "600"
+    default: "300"
   tls:
     description: Whether the remote-execution service is reached over TLS, `true` or `false`.
     required: false
@@ -279,7 +279,7 @@ runs:
           # PING can also wait behind upload data on a slow connection (through
           # a tailnet relay a few MB/s for all of a job's uploads). The interval
           # stays buck2's 30 s, written here because the timeout is reasoned from
-          # it; the timeout is the input (600 s by default), so a connection is
+          # it; the timeout is the input (300 s by default), so a connection is
           # kept through a silent gap of up to 30 s plus the timeout, and one
           # that is really gone is dropped that long after its last read.
           echo "  grpc_keepalive_time_secs = 30"
