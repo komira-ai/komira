@@ -196,9 +196,19 @@ Behaviour each later pull request implements, fixed here so they agree:
   registers an `os.register_at_fork` hook that marks every session of the parent closed in the child, so
   a call there raises `KomiraError` instead of running on a copied context. The package never forks;
   UDF workers are the engine's, not this package's.
-- **Ctrl-C during a query** is delivered when the query returns: `KeyboardInterrupt` is raised then, the
-  answer the query computed is freed, and the session stays usable. The first release has no cancel and
-  its docs say so.
+- **Ctrl-C during a query** cancels it. A ctypes call keeps its thread in the library, and Python runs a
+  signal's handler only on the main thread between bytecodes, so `Session.sql` makes
+  `komira_sql_stream_run` on a helper thread under a run handle of its own (src/so/README.md, "Cancel
+  and progress") and the calling thread waits for it, waking every 50 ms. Whatever is raised on the
+  calling thread while it waits (the `KeyboardInterrupt`, or the exception of a `progress` callback)
+  cancels the handle; the thread then waits for the call to return, drops a stream the call made,
+  frees the handle and raises the exception again, with the session's lock held throughout, so the
+  context never has two calls at once and the next call finds it free. A second Ctrl-C while the run
+  stops is dropped. On a library older than ABI 1.6 the query runs on the calling thread and Ctrl-C is
+  delivered when it returns, the answer freed.
+- **Progress** is polled, never called back from the library: the waiting thread reads the run handle's
+  segment counts and calls the `progress` callback, on the calling thread, when they change.
+- **Logging** goes to the standard logger `"komira"`, with a `NullHandler`; no query text.
 
 ### 4. What is carried from the earlier SDK, and what is not
 
