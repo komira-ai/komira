@@ -6,12 +6,14 @@
 # (main_red, check_release_ref, release_json), built behind their cases.
 # Changes need the release approver's review (.github/CODEOWNERS).
 
+load("@komira//tools/build/lint:doc_tree.bzl", "docs_checked")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":darwin_libs.bzl", "DARWIN_PACKAGES", "mopm_darwin_libs")
 load(":exec_tools.bzl", "exec_tool_cases")
 load(":mopm_artifacts.bzl", "merge_tree_cases", "mopm_artifacts", "mopm_release_artifacts", "native_ids_json")
 load(":release_set.bzl", "release_set")
+load(":unpublished.bzl", "src_library_paths")
 load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
 
 # Fails loading this package if `exec_tool_refusal` (exec_tools.bzl, the check of
@@ -181,6 +183,36 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
+
+# Every Mojo library under src/ is published (a member of README_E2E_PACKAGES) or has a row in
+# UNPUBLISHED.md with the reason it is not, so that table cannot go stale: a new library, a
+# published one whose row stays, a row for a deleted directory, or a row that says it waits on a
+# library that has since been published fails this build action, naming the library
+# (unpublished_test.zig says what each case catches). The libraries are read from the paths of the
+# cell's root doc_tree (unpublished.bzl), which only komira's own checkout declares.
+[
+    (
+        src_library_paths(
+            name = "src_library_paths",
+            tree = "//:doc_tree",
+        ),
+        zig_test(
+            name = "unpublished_cases",
+            exec_compatible_with = LINUX_X86_64,
+            src = "unpublished_test.zig",
+            data = {
+                "UNPUBLISHED.md": "UNPUBLISHED.md",
+                "packages.bzl": "//release/readme_e2e:packages.bzl",
+                "src_library_paths.txt": ":src_library_paths",
+            },
+            busybox = "komira//tools/build/toolchains:busybox",
+            zig = "komira//tools/build/toolchains:zig_next",
+            visibility = ["PUBLIC"],
+        ),
+    )
+    for _ in [1]
+    if docs_checked()
+]
 
 # The native ids the release reads from each package's unit graph (mopm_native_ids.bzl) are the
 # `[native.<id>]` tables of that package's mopm.toml, for every member, with nothing more or less

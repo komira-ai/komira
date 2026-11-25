@@ -749,6 +749,14 @@ dropping of one of them, an unsorted or repeated line, and an empty file. It is 
 committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
 last word.
 
+**Every library not published says why.** Every Mojo library under `src/` (a directory with a `BUCK` file and a
+`.mojo` file outside its `tests/`) is either a member or has a row in
+[`release/UNPUBLISHED.md`](../release/UNPUBLISHED.md) with the reason it is not published, and
+`//release:unpublished_cases` refuses a pull request that leaves a library out of both, keeps the row of a member,
+keeps a row for a deleted directory, keeps a row that names a published library as the one it waits for, or holds a
+row that does not parse, rows out of order, or counts that are not the table's. So the
+pull request that publishes a library deletes its row, and the one that adds a library adds a row.
+
 **The release declaration and the release set agree, and one so package.** `//release:release_checks_cases`
 holds `release/artifacts.textproto` to `tools/build/package/release_set.txt`: the same metapackage, the same
 members in the same order, and the same `--license`, `--summary` and `--home`, so a member listed in one file and
