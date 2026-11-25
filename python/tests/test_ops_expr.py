@@ -77,10 +77,10 @@ def test_every_node_class_is_listed():
     ], names
 
 
-def test_unsupported_operation_is_a_komira_error_and_not_public():
+def test_unsupported_operation_is_a_public_komira_error():
     assert issubclass(UnsupportedOperation, KomiraError)
-    assert "UnsupportedOperation" not in komira.__all__
-    assert not hasattr(komira, "UnsupportedOperation")
+    assert "UnsupportedOperation" in komira.__all__
+    assert komira.UnsupportedOperation is UnsupportedOperation
 
 
 def test_nodes_are_frozen_and_have_no_instance_dict():
