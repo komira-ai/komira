@@ -290,7 +290,9 @@ def test_to_csv_compression_argument_overrides_the_extension(lib_dir):
         assert all_bytes(none_gz).startswith(b"id,n,x")
         assert head_bytes(gzip_csv, 2) == GZIP_MAGIC
         assert head_bytes(zstd_csv, 4) == ZSTD_MAGIC
-        assert by_id(read_csv_file(none_gz).to_pylist()) == ROWS
+        # pyarrow takes gzip from a `.gz` path; this file is plain text.
+        with pa.input_stream(none_gz, compression=None) as stream:
+            assert by_id(read_csv_file(none_gz, stream).to_pylist()) == ROWS
         with pa.CompressedInputStream(pa.OSFile(gzip_csv), "gzip") as stream:
             assert by_id(read_csv_file(gzip_csv, stream).to_pylist()) == ROWS
 

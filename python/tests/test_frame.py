@@ -897,13 +897,13 @@ def test_a_chain_of_verbs_reaches_the_session_only_as_plan_bytes():
         assert list(envelope.plan.sort.keys) == ["z", "b"]
 
 
-FRAME_MODULES = ("_frame.py", "_series.py", "_refusals.py")
-PRIVATE_SESSION = {"_plan_stream", "_plan_render", "_parquet_schema", "_csv_binding", "_json_binding"}
+FRAME_MODULES = ("_frame.py", "_series.py", "_refusals.py", "_write.py")
+PRIVATE_SESSION = {"_plan_stream", "_plan_render", "_plan_write", "_parquet_schema", "_csv_binding", "_json_binding"}
 ALLOWED_IMPORTS = {
     "__future__:annotations", "collections.abc:Callable", "types:ModuleType", "typing:TYPE_CHECKING",
     ".:_ops", ".:_refusals", ".:_plan", "._errors:UnsupportedOperation", "._series:Series", "._series:operand",
     "._session:Result", "._session:Session", "._session:_local_path", "._session:default_session",
-    "._plan:_wire", ".plan.v1:plan_pb2", "._frame:DataFrame", "os",
+    "._plan:_wire", ".plan.v1:plan_pb2", "._frame:DataFrame", "os", ".:_write", "collections.abc:Mapping",
 }
 
 
@@ -977,7 +977,8 @@ def test_the_frame_modules_import_and_call_nothing_that_reaches_sql_or_the_libra
         assert import_problems(source) == [], (name, import_problems(source))
         on_session, stray = session_attrs(source)
         assert stray == [] and on_session <= PRIVATE_SESSION, (name, on_session, stray)
-    assert session_attrs(sources["_frame.py"])[0] == PRIVATE_SESSION
+    assert session_attrs(sources["_frame.py"])[0] == PRIVATE_SESSION - {"_plan_write"}
+    assert session_attrs(sources["_write.py"])[0] == {"_plan_write"}
     assert session_attrs(sources["_series.py"])[0] == set()
 
 
