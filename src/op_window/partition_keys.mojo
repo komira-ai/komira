@@ -9,7 +9,9 @@
 # and both follow DuckDB (docs/design/query_semantics.md §4, §9):
 #
 #   * Order. Partition keys ascending, order keys in their own direction,
-#     NULLs last in both directions (`derived_nulls_first`, §4.1), floats in
+#     each order key's NULLs where the plan places them (`nulls_first`; when
+#     it is empty, `derived_nulls_first`: last in both directions, §4.1),
+#     partition keys' NULLs last, floats in
 #     the total order of `sort_key_lt` (NaN above +inf, -0.0 equal to +0.0,
 #     §4.3). A DICTIONARY key sorts by the VALUES its codes stand for, not by
 #     the codes.
@@ -351,10 +353,10 @@ def _dict_rank_column(col: Column[HeapRegion]) raises -> Column[HeapRegion]:
 
 
 def _stable_pass(
-    var kb: RecordBatch, key: String, descending: Bool
+    var kb: RecordBatch, key: String, descending: Bool, nulls_first: Bool
 ) raises -> RecordBatch:
     """One stable pass of the key-at-a-time sort: order `kb` by `key`, NULLs
-    where `derived_nulls_first` puts them, keeping every tie (and the NULL
+    first when `nulls_first` and last otherwise, keeping every tie (and the NULL
     rows among themselves) in its current order."""
     var col_idx = kb.schema.column_index(key)
     var nulls = False
@@ -381,7 +383,7 @@ def _stable_pass(
     if valid.num_rows() > 1:
         valid = sort_batch_by_keys(valid^, keys, desc)
     var staged = Slab[RecordBatch]()
-    if derived_nulls_first(descending):
+    if nulls_first:
         if nulls_part.num_rows() > 0:
             staged.append(nulls_part^)
         if valid.num_rows() > 0:
@@ -399,21 +401,40 @@ def sort_partition_batch(
     partition_keys: List[String],
     order_keys: List[String],
     descending: List[Bool],
+    nulls_first: List[Bool] = List[Bool](),
 ) raises -> RecordBatch:
     """Sort `batch` by (partition keys ascending ++ order keys per
-    `descending`), NULLs last, floats by `sort_key_lt`, dictionaries by value.
+    `descending`), floats by `sort_key_lt`, dictionaries by value. Partition
+    keys' NULLs sort last; an order key's NULLs sort first where its
+    `nulls_first` flag says so. An empty `nulls_first` derives every order
+    key's placement (`derived_nulls_first(descending[i])`); a non-empty one
+    must hold one flag per order key.
 
     Stable: rows equal on every key keep their input order. With no keys the
     batch is returned as it is.
     """
     var keys = List[String]()
     var desc = List[Bool]()
+    var nf = List[Bool]()
+    if len(nulls_first) != 0 and len(nulls_first) != len(order_keys):
+        raise Error(
+            "sort_partition_batch: "
+            + String(len(nulls_first))
+            + " NULL placements for "
+            + String(len(order_keys))
+            + " order keys"
+        )
     for k in partition_keys:
         keys.append(k)
         desc.append(False)
+        nf.append(derived_nulls_first(False))
     for i in range(len(order_keys)):
         keys.append(order_keys[i])
         desc.append(descending[i])
+        if len(nulls_first) != 0:
+            nf.append(nulls_first[i])
+        else:
+            nf.append(derived_nulls_first(descending[i]))
     if len(keys) == 0 or batch.num_rows() <= 1:
         return batch^
 
@@ -455,7 +476,7 @@ def sort_partition_batch(
     var kb = kbb.build(sb.build())
 
     for i in range(len(keys) - 1, -1, -1):
-        kb = _stable_pass(kb^, String("k") + String(i), desc[i])
+        kb = _stable_pass(kb^, String("k") + String(i), desc[i], nf[i])
 
     ref row_col = kb.column_at(kb.schema.column_index("row"))
     var perm = List[Int](capacity=n)

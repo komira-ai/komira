@@ -11,7 +11,8 @@
 # partition default), a recursion box that must hold exactly one entry but
 # holds none, a half-written WHEN pair, an argument count off the engine's own
 # arity table, an empty UDF name, a UDF tag outside its dense range, parallel
-# lists of different lengths, an empty parquet path list, and an unset oneof.
+# lists of different lengths (refused as an inconsistent count where the codec
+# names one), an empty parquet path list, and an unset oneof.
 #
 # These bytes are what a version-skewed or foreign producer can send: the
 # generated encoder writes every one of them, so `decode_proto` parses them and
@@ -70,6 +71,7 @@ from plan_proto.plan import (
 
 from plan_wire import plan_to_bytes, plan_from_bytes
 from plan_wire.plan_wire_codec import PLAN_WIRE_MALFORMED
+from plan_wire import PLAN_WIRE_INCONSISTENT_COUNT
 
 
 # =============================================================================
@@ -199,10 +201,15 @@ def _with_project_expr(var w: WirePlan, var e: WireExpr) -> WirePlan:
 
 
 def _assert_refused(
-    what: String, good: LogicalPlan, var env: WirePlanEnvelope, detail: String
+    what: String,
+    good: LogicalPlan,
+    var env: WirePlanEnvelope,
+    detail: String,
+    token: String = PLAN_WIRE_MALFORMED,
 ) raises:
     """`env` re-encoded must differ from `good`'s bytes, and `plan_from_bytes`
-    must refuse it with PLAN_WIRE_MALFORMED naming `detail`."""
+    must refuse it with `token` (PLAN_WIRE_MALFORMED unless a test names
+    another) naming `detail`."""
     var good_bytes = plan_to_bytes(good)
     var bad = encode_proto[WirePlanEnvelope](env)
     assert_true(
@@ -222,8 +229,8 @@ def _assert_refused(
         + " malformed.",
     )
     assert_true(
-        text.startswith(PLAN_WIRE_MALFORMED),
-        what + ": refused, but not as " + PLAN_WIRE_MALFORMED + ". Got: " + text,
+        text.startswith(token),
+        what + ": refused, but not as " + token + ". Got: " + text,
     )
     assert_true(
         detail in text,
@@ -371,6 +378,48 @@ def test_an_absent_partition_default_value_is_refused() raises:
         String("partition default absent"), plan, _with_root(env^, w^),
         String("WirePartitionExpr.default_value is absent"),
     )
+
+
+def test_a_partition_by_with_fewer_nulls_first_flags_than_order_keys_is_refused() raises:
+    var pk: List[String] = [String("a")]
+    var ok: List[String] = [String("ts"), String("b")]
+    var desc: List[Bool] = [False, False]
+    var nf: List[Bool] = [True, True]
+    var xs = List[PartitionExpr]()
+    xs.append(
+        PartitionExpr(
+            PF_LEAD, String("b"), 1, ScalarValue.from_int64(Int64(0)), True,
+            PartitionFrame.default_ordered(), String("next_b"),
+        )
+    )
+    var plan = LogicalPlan.partition_by(pk^, ok^, desc^, xs^, _scan(), Optional(nf^))
+    var env = _env(plan)
+    var w = _root(env)
+    var node = w.partition_by[0].copy()
+    assert_equal(len(node.nulls_first), 2, "the deviating placement is on the wire")
+    node.nulls_first = [True]
+    w.partition_by[0] = node^
+    _assert_refused(
+        String("partition_by nulls_first short"), plan, _with_root(env^, w^),
+        String("PartitionBy carries 2 order keys and 1 `nulls_first` flags"),
+        PLAN_WIRE_INCONSISTENT_COUNT,
+    )
+
+
+def test_a_partition_by_with_derived_placement_writes_no_nulls_first_field() raises:
+    var pk: List[String] = [String("a")]
+    var ok: List[String] = [String("ts"), String("b")]
+    var desc: List[Bool] = [False, True]
+    var plan = LogicalPlan.partition_by(
+        pk^, ok^, desc^, List[PartitionExpr](), _scan()
+    )
+    var env = _env(plan)
+    var w = _root(env)
+    assert_equal(
+        len(w.partition_by[0].nulls_first), 0,
+        "a plan that never asked for a placement leaves the field empty",
+    )
+    assert_equal(len(w.partition_by[0].descending), 2, "descending is still carried")
 
 
 def test_an_absent_pushdown_gate_is_refused() raises:

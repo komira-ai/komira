@@ -21,6 +21,9 @@
 #      under DISTINCT or a window, and a key two items share.
 #   4. NULLS FIRST / LAST: the placement list is built only when a key asks,
 #      a key that does not ask gets the derived default.
+#      The same holds for a window's ORDER BY: a deviating placement shows in
+#      the PartitionBy order, NULLS LAST or an omitted one leaves it as
+#      before, and two windows differing only by placement stay two nodes.
 #   5. LIMIT / OFFSET bind one limit node; OFFSET without LIMIT is refused.
 #   6. A written frame DuckDB refuses raises DuckDB's error, for every
 #      function: the frame shapes its parser refuses, a RANGE offset
@@ -657,6 +660,43 @@ def test_nulls_placement_limit_offset() raises:
         "Distinct(all)\n"
         "  Project(exprs=[ColRef(k)])\n"
         "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def test_window_nulls_placement_in_partition_by_order() raises:
+    _check(
+        "SELECT row_number() OVER (ORDER BY k NULLS FIRST) AS rn FROM t",
+        "Project(exprs=[ColRef(rn)])\n"
+        "  PartitionBy(partition=[], order=[k ASC NULLS FIRST], funcs=[ROW_NUMBER(, offset=0, frame=RANGE[0:0..2:0]) AS rn])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT row_number() OVER (ORDER BY k DESC NULLS FIRST) AS rn FROM t",
+        "Project(exprs=[ColRef(rn)])\n"
+        "  PartitionBy(partition=[], order=[k DESC NULLS FIRST], funcs=[ROW_NUMBER(, offset=0, frame=RANGE[0:0..2:0]) AS rn])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT row_number() OVER (ORDER BY k NULLS LAST) AS rn FROM t",
+        "Project(exprs=[ColRef(rn)])\n"
+        "  PartitionBy(partition=[], order=[k ASC], funcs=[ROW_NUMBER(, offset=0, frame=RANGE[0:0..2:0]) AS rn])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT row_number() OVER (ORDER BY k DESC NULLS LAST) AS rn FROM t",
+        "Project(exprs=[ColRef(rn)])\n"
+        "  PartitionBy(partition=[], order=[k DESC], funcs=[ROW_NUMBER(, offset=0, frame=RANGE[0:0..2:0]) AS rn])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def test_windows_differing_only_by_nulls_placement_stay_separate() raises:
+    _check(
+        "SELECT rank() OVER (ORDER BY k) AS a, rank() OVER (ORDER BY k NULLS FIRST) AS b FROM t",
+        "Project(exprs=[ColRef(a), Alias(ColRef(_w_shadow_1_b), \"b\")])\n"
+        "  PartitionBy(partition=[], order=[k ASC NULLS FIRST], funcs=[RANK(, offset=0, frame=RANGE[0:0..2:0]) AS _w_shadow_1_b])\n"
+        "    PartitionBy(partition=[], order=[k ASC], funcs=[RANK(, offset=0, frame=RANGE[0:0..2:0]) AS a])\n"
+        "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
 
 
