@@ -6,11 +6,17 @@ Release 1's surface is built ([python/README.md](../../python/README.md)): the l
 `register_parquet` and `close`, `abi_version()`, `__version__`, `KomiraError`, `LibraryLoadError`
 and `UnsupportedCpuError`, and their tests. The linux-x86_64 wheel is built and carries `libkomira`, its native
 owners and the Mojo runtime libraries in one directory (decision 6), so `pip install komira` needs no package of
-Modular's. `Session.sql` and `Result` are built, with `to_arrow`, `to_reader` and `__arrow_c_stream__`
-(a result still reads after its session is closed), and the wheel requires pyarrow; `to_pandas`,
-`to_polars`, the default session, the per-session lock and the fork hook are not built, and
-`UnsupportedOperation` is not public yet; the linux-arm64 and macos-arm64
-wheels are not built.
+Modular's. `Session.sql` and `Result` are built, with `to_arrow`, `to_reader`, `to_pandas`, `to_polars` and
+`__arrow_c_stream__` (a result still reads after its session is closed), and the wheel requires pyarrow;
+the wheel declares no `pandas` or `polars` extra yet (its rule writes no `Provides-Extra`), so the
+`ImportError` of a missing one names the distribution (`pip install pandas`) until it does.
+`Session.register_csv(name, path, *, delimiter=",", header=True, all_varchar=False)` and
+`Session.register_json(name, path)` are built (`komira_register_csv` and `komira_register_json`,
+ABI 1.5): decision 4's CSV and NDJSON registration, from the engine's own schema. The default session,
+the per-session lock and the fork hook are not built. The error table of decision 9 is built:
+`KomiraError` carries `status`, `code` and `step` from `libkomira` ABI 1.7, and `ParseError`,
+`BindError`, `UnsupportedOperation`, `CredentialsError` and `StorageError` are public;
+the linux-arm64 and macos-arm64 wheels are not built.
 
 ## Release 1
 
@@ -151,6 +157,10 @@ The whole public surface of the first release is these names in `komira.__all__`
 | `sql(query) -> Result`, `register_parquet(name, path)` | the same two calls on the process's default session (decision 5). `add_sql_binding(name, source)` joins them with the sources and credentials of [credentials_and_writes.md](credentials_and_writes.md), which also gives `sql` its later forms `sql(query, /, **sources)` and `sql(source, query, /, **sources)`; the first release takes the query alone |
 | `KomiraError` | the base class of every error the package raises on purpose (decision 9) |
 | `UnsupportedOperation` | a `KomiraError`: komira refused a construct by name (an SQL feature the engine does not run yet, an option it does not take) |
+| `ParseError` | a `KomiraError`: the SQL text does not parse (`SQL_SYNTAX_ERROR`) |
+| `BindError` | a `KomiraError`: a name in the statement does not resolve, or the statement binds wrongly (`SQL_BIND_ERROR`, `BIND_*`) |
+| `CredentialsError` | a `KomiraError`: a credential is unbound, in conflict, of the wrong kind, not found or invalid (`CREDENTIAL_*`, `CREDENTIALS_*`) |
+| `StorageError` | a `KomiraError`: an object store or a local write failed (`STORAGE_NOT_FOUND`, `STORAGE_ACCESS_DENIED`, `STORAGE_IO` and their kin) |
 | `LibraryLoadError` | a `KomiraError`: `libkomira` or a library it needs could not be loaded, or its ABI major version is not the one this package was written for. That includes a file missing from the package (the message is the loader's and names the file) and a Mojo runtime of another build already loaded in the process (decision 6) |
 | `UnsupportedCpuError` | a `LibraryLoadError`: on Linux x86_64 the CPU lacks a flag of x86-64-v3, the level `libkomira` is compiled for there (or, from a directory of CPU-level variants, a flag of its lowest variant, [isa_variants.md](isa_variants.md)), so the library is not opened; the message names the missing flags |
 | `__version__` | the installed distribution's version, read with `importlib.metadata.version("komira")` (the distribution's name) |
@@ -168,22 +178,27 @@ Behaviour each later pull request implements, fixed here so they agree:
   on, whether or not its consumer reads it. A `requested_schema` other than `None` raises
   `UnsupportedOperation`; casting on request is a later, additive decision.
 - **pandas and polars are optional.** `to_pandas` and `to_polars` import them when called; when one is
-  missing, the `ImportError` names the extra that installs it (`pip install komira[pandas]`).
+  missing, the `ImportError` names the extra that installs it (`pip install komira[pandas]`). Until the
+  wheel declares the extras, it names the distribution (`pip install pandas`).
 - **A closed session refuses every call** with `KomiraError`, and closing a session while a `Result` of
   it is unread never crashes the interpreter. Whether that unread result then still reads, or refuses, is
   the session pull request's choice, held by a test of each case it allows.
 - **One session, any thread.** A `Session` may be used from several threads; it holds a lock around each
-  call into the library, its `Result`s' batch reads included, so one context never runs two calls at
-  once. With call bindings ([credentials_and_writes.md](credentials_and_writes.md) decision 8), the
-  lock is held from the first staged call binding through the `komira_sql_stream` that consumes it (a thread reading a large result holds up a `sql` call on the same session between batches, not
-  for the whole read). Sessions are independent of one another. The lock goes when the ABI design states
+  call into the library, the read of a failed call's last error included, so one context never runs two
+  calls at once. A `Result`'s batch reads take no lock: the stream needs neither the session nor its
+  context ([src/so/README.md](../../src/so/README.md), Running SQL), so a thread reading a result never
+  holds up a call on its session. A call made on the thread that holds the lock (from a signal handler or
+  a finalizer) raises `KomiraError` rather than waiting for itself. With call bindings
+  ([credentials_and_writes.md](credentials_and_writes.md) decision 8), the lock is held from the first
+  staged call binding through the `komira_sql_stream` that consumes it. Sessions are independent of one another. The lock goes when the ABI design states
   that a context is safe to share.
 - **Fork.** A child process made by `os.fork` must not use a session of its parent: the package
   registers an `os.register_at_fork` hook that marks every session of the parent closed in the child, so
   a call there raises `KomiraError` instead of running on a copied context. The package never forks;
   UDF workers are the engine's, not this package's.
-- **Ctrl-C during a query** is delivered when the query returns; the session stays usable. The first
-  release has no cancel and its docs say so.
+- **Ctrl-C during a query** is delivered when the query returns: `KeyboardInterrupt` is raised then, the
+  answer the query computed is freed, and the session stays usable. The first release has no cancel and
+  its docs say so.
 
 ### 4. What is carried from the earlier SDK, and what is not
 
@@ -196,7 +211,7 @@ a pandas-shaped and a polars-shaped DataFrame surface. What happens to each part
 | `Session`: context manager, `close`, one context per session | yes | | the `plan_wire` argument (below) |
 | `Session.sql` | yes, as the official door returning a `Result` | | its status as "escape hatch, goes away with the scaffolding": SQL is now the first release's whole query surface |
 | default session and module-level calls | yes, for `sql` and `register_parquet` (and `add_sql_binding` when it lands) | the DataFrame readers | the public `session()` accessor: a second way to reach the same object |
-| table registration | `register_parquet(name, path)`, with the name required | CSV and NDJSON registration, from the engine's own schema | automatic names (`t1`, `t2`, ...): SQL needs the name the user wrote |
+| table registration | `register_parquet(name, path)`, with the name required; CSV and NDJSON registration, from the engine's own schema (`register_csv(name, path, *, delimiter, header, all_varchar)`, `register_json(name, path)`) | | automatic names (`t1`, `t2`, ...): SQL needs the name the user wrote |
 | `KomiraError` with the engine's status and message | yes, with the fields of decision 9 | | the `PLAN_ENDPOINT_<NAME>(<code>):` message prefix and its generated code table: libkomira's status codes and error text replace them |
 | `UnsupportedOperation` | yes, now a `KomiraError` (it was a `TypeError`) | | |
 | pandas-shaped `DataFrame`, `Column`, `Expr`, `GroupBy`, `MaterializedFrame`; the shared plan builder `Query`; the protobuf plan encoder | | with the DataFrame surface, through the plan door (`komira_plan_stream`) | |
@@ -428,10 +443,31 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
 - A `KomiraError` from the library carries `status` (the ABI's status number), `code` (the engine's
   named code, `ENGINE_OPTIONS_INVALID` for example, or `None`), `step` (the step that refused it:
   `parse`, `bind`, `optimize`, `lower`, `execute`, or `None`) and the library's message as `str(e)`.
-  Which status and code map to which subclass is the error-mapping pull request's table. `code` and
-  `step` come from the library's `komira_last_error_code` and `komira_last_error_step`, never from
-  parsing the message; the rows for credentials, storage and writes are fixed in
-  [credentials_and_writes.md](credentials_and_writes.md#11-error-shapes).
+  `code` and `step` come from the library's `komira_last_error_code` and `komira_last_error_step`
+  (ABI 1.7), never from parsing the message. An empty code from the library is `None`. Against a
+  library older than 1.7, `code` and `step` are `None`.
+- **The table is built** (`python/komira/_errors.py`). A status other than -3 (the engine refused the
+  call) raises `KomiraError`. For -3 the subclass is chosen by `code` first, then by `step`, then by
+  the call's own default, then `KomiraError`:
+  - `ParseError`: `SQL_SYNTAX_ERROR`; step `parse`.
+  - `BindError`: `SQL_BIND_ERROR` and the `BIND_*` codes; step `bind`.
+  - `UnsupportedOperation`: `SQL_NOT_SUPPORTED`, `STATEMENT_NOT_A_QUERY`,
+    `OPTIMIZE_UNRESOLVED_SCALAR`, `LOWERING_UNCUTTABLE_NODE`, `LOWERING_SCAN_NOT_TOTAL`,
+    `LOWERING_SINK_UNSERVED`, `LOWERING_JOIN_UNSERVED`,
+    `LOWERING_WINDOW_UNSERVED`, `LOWERING_UDF_UNSERVED`, `SQL_STATEMENT_UNSUPPORTED`,
+    `COPY_OPTION_UNSUPPORTED`, `COPY_FORMAT_NOT_INFERRED`, `STORAGE_URL_REFUSED`,
+    `STORAGE_RANGE_NOT_SUPPORTED`, `STORAGE_WRITE_UNSUPPORTED`, `PLAN_URL_QUERY_REFUSED`.
+  - `CredentialsError`: `CREDENTIAL_UNBOUND`, `CREDENTIAL_NAME_CONFLICT`,
+    `CREDENTIAL_KIND_MISMATCH`, `CREDENTIALS_NOT_FOUND`, `CREDENTIALS_INVALID`; also the default of
+    the credential calls.
+  - `StorageError`: `STORAGE_REGION_UNKNOWN`, `STORAGE_NOT_FOUND`, `STORAGE_ACCESS_DENIED`,
+    `STORAGE_THROTTLED`, `STORAGE_TRANSPORT`, `STORAGE_MALFORMED`, `STORAGE_OBJECT_CHANGED`,
+    `STORAGE_IO`.
+  - The code rule, in the library (`error_code` in `src/so/session.mojo`): the prose prefixes
+    `SQL syntax error`, `SQL bind error` and `SQL not supported` give `SQL_SYNTAX_ERROR`,
+    `SQL_BIND_ERROR` and `SQL_NOT_SUPPORTED`; otherwise a leading `CODE: ` (upper-case words joined
+    by underscores) is the code; otherwise there is none. The rows for credentials, storage and
+    writes are in [credentials_and_writes.md](credentials_and_writes.md#11-error-shapes).
 - The message is the engine's text, unchanged: a refusal names the construct (rule B21: unsupported
   features are refused by name), and the package does not rewrite it.
 
@@ -460,7 +496,7 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
 
 ## How is it tested?
 
-This document lands with the surface entry only. Each later pull request tests what it builds, in
+Each pull request tests what it builds, in
 `python/tests/` as `python_binding_test` targets, and the wheel rule's read-back check holds the wheel's
 contents. What the first ones must show, in this design's terms: the loader refuses a library of another
 ABI major version and an absent library with `LibraryLoadError`; `SELECT 1 AS n` and a `GROUP BY` over a
@@ -480,8 +516,9 @@ and `_py311`, `_py312` and `_py314` on the other supported minors), alone: the e
   read `PYTHON_SURFACE` instead of a row per file is a question for that lint.
 - Free-threaded CPython (3.14t): the package is not claimed for it in the first release. ctypes works
   there, but no test runs the package on it.
-- `Result.to_polars` and `to_pandas` convert through Arrow; their dtype mapping is the Arrow terminals
-  pull request's tests.
+- `Result.to_polars` and `to_pandas` convert through Arrow, with pyarrow's `Table.to_pandas()` and
+  `polars.from_arrow` and no options of their own; `python/tests/test_result_frames.py` holds the dtype
+  each Arrow type the engine answers becomes.
 
 ## Where is the code?
 

@@ -5,7 +5,7 @@ program, what it does not do yet, and what to do when something goes wrong. To b
 instead, see [getting started](getting-started.md).
 
 > **This is an early release.** It registers Parquet files as tables and runs SQL over them, with each
-> answer read as pyarrow. A DataFrame API shaped like pandas and one shaped like polars come in later
+> answer read as pyarrow, or as a pandas or polars frame. A DataFrame API shaped like pandas and one shaped like polars come in later
 > releases of this same package. This page changes when they do.
 
 ## Install
@@ -47,7 +47,7 @@ import pyarrow.parquet as pq
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1004 is 1.4
+print(komira.abi_version())   # the engine's C ABI version: 1007 is 1.7
 
 # A small Parquet file to query: six days of weather in three cities.
 weather = pa.table({
@@ -95,7 +95,7 @@ pyarrow, which `pip install komira` installed. Then `python quickstart.py` print
 
 ```text
 0.1.1512
-1004
+1007
 [{'days': 6, 'rain': 9.5}]
 city: string
 days: int64 not null
@@ -138,7 +138,9 @@ What each call does:
   it. `close()` can be called again; any other call on a closed session raises `komira.KomiraError`.
 - `register_parquet(name, path)` reads the Parquet file's footer and registers the file as the table
   `name`. `path` is a `str` or a `pathlib.Path`; a relative path is resolved against the working
-  directory and `~` is expanded.
+  directory and `~` is expanded. `register_csv(name, path)` and `register_json(name, path)` register
+  a CSV file and a newline-delimited JSON file the same way, with the column names and types the
+  engine infers from the file.
 - `s.sql(query)` runs one SQL statement over the session's tables and returns a `komira.Result`. A
   syntax error, an unknown table or column, or a construct the engine does not run yet raises
   `komira.KomiraError` from `sql`, with the engine's `<step>: <reason>` message; a syntax error's
@@ -151,12 +153,11 @@ The package's [README](../python/README.md), which is also its PyPI description,
 
 ## What does not work yet
 
-- **pandas and polars results.** A result reads as pyarrow only; `pyarrow.Table.to_pandas()` and
-  `polars.from_arrow()` convert it.
-- **Cancelling a query.** Ctrl-C is delivered when the query returns.
+- **Cancelling a query.** A query cannot be interrupted while it runs: Ctrl-C during `Session.sql`
+  raises `KeyboardInterrupt` when the engine has finished the query. The answer is freed, and the
+  session runs the next query.
 - **One session from two threads at once.** Use a session per thread.
 - **The DataFrame APIs**, pandas-shaped and polars-shaped.
-- **CSV and JSON files.** Only Parquet files can be registered.
 - **Python UDFs.**
 - **Other platforms**: Linux on arm64, macOS, Windows, and Linux with musl (Alpine) have no wheel.
 - **Older systems**: glibc older than 2.35, CPUs older than x86-64-v3 and Python older than 3.11.
@@ -176,12 +177,14 @@ The package's [README](../python/README.md), which is also its PyPI description,
   and the reason. A file of the package that is missing (`pip install --force-reinstall komira` puts it
   back), or a Mojo runtime of another build already loaded in the process (by Mojo code built with
   another Mojo version: one process holds one Mojo runtime), are the usual causes.
-- **`komira.KomiraError`** from `register_parquet`: the file is missing or is not a Parquet file the
-  engine can read. The message is the engine's and names the file by its absolute path; a relative
-  path is resolved against the working directory.
-- **`komira.KomiraError`** from `sql`: the message starts with the step that refused the statement.
-  `parse: ...` is a syntax error, and ends with `at line <L>, column <C>`, where the statement stopped
-  parsing; `bind: ...` names a table or column the session does not have (`register_parquet` it first).
+- **`komira.KomiraError`** from `register_parquet`, `register_csv` or `register_json`: the file is
+  missing, empty, or not a file of that format the engine can read, or (for CSV and JSON) the
+  session already has a table of that name. The message is the engine's; for `register_parquet` it
+  names the file by its absolute path, a relative path resolved against the working directory.
+- **`komira.ParseError`** from `sql`: a syntax error. The message starts with `parse: ` and ends with
+  `at line <L>, column <C>`, where the statement stopped parsing. Other refusals of `sql` start with
+  the step that refused the statement: `bind: ...` (`komira.BindError`) names a table or column the
+  session does not have (register it first).
 
 `komira.KomiraError` is the base class of every error komira raises on purpose, so `except
 komira.KomiraError` catches all of these. Anything else is a bug:

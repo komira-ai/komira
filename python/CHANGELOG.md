@@ -12,13 +12,33 @@ install page shows names it.
 
 ## Unreleased
 
+- **CSV and JSON files.** `Session.register_csv(name, path, *, delimiter=",", header=True,
+  all_varchar=False)` and `Session.register_json(name, path)` register a CSV file and a
+  newline-delimited JSON file as a table for `Session.sql`, with the column names and types the
+  engine infers when the call is made: the table `read_csv` or `read_json` makes of the same file.
+  A relative path is resolved against the working directory and `~` is expanded. A missing, empty or
+  unreadable file, or a name the session already has, raises `KomiraError` with the engine's message.
+  They need libkomira ABI 1.5.
 - **SQL.** `Session.sql(query)` runs one SQL statement over the session's registered tables and returns
   a `Result`, read once as a pyarrow `Table` (`to_arrow()`), a `RecordBatchReader` (`to_reader()`) or
   through the Arrow PyCapsule interface (`__arrow_c_stream__`, so `pyarrow.table(result)` reads it). A
   syntax error, an unknown table or a refused construct raises `KomiraError` from `sql` itself, with the
   engine's message. A result still reads after its session is closed. `komira.Result` is a new public name; a requested
   schema on `__arrow_c_stream__` raises a `KomiraError`.
-- **Where a syntax error is.** A statement the engine cannot parse raises `KomiraError` from `sql`
+- **pandas and polars.** `Result.to_pandas()` and `Result.to_polars()` read the answer as a pandas or
+  polars `DataFrame`, converted through Arrow by pyarrow's `Table.to_pandas()` and `polars.from_arrow`.
+  Neither library is a requirement of the wheel: when one is missing the call raises `ImportError`
+  naming it, and the result stays unread.
+- **Threads.** A `Session` may be used from several threads: its calls run one at a time, a call waiting
+  for the one running on the same session, and `close()` waits for a running call. Two sessions run at
+  once. A call from a signal handler or a finalizer made inside a running call of the same thread raises
+  `KomiraError`. Of two threads reading one `Result`, one reads it and the other gets `KomiraError`. Using
+  one session from two threads at once was not supported.
+- **Ctrl-C.** A query cannot be interrupted while it runs: Ctrl-C during `Session.sql` raises
+  `KeyboardInterrupt` once the engine has finished the query, and the session runs the next query. The
+  answer that query computed is freed; before, it was never freed when the interrupt was raised before
+  pyarrow took it.
+- **Where a syntax error is.** A statement the engine cannot parse raises `ParseError` from `sql`
   with a message that ends with where it stopped parsing, `at line <L>, column <C>`:
   `parse: SQL syntax error: expected keyword 'by' at line 1, column 42`.
 - **The quickstart.** The README and the install page show a new first program that needs no file

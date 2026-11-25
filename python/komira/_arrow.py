@@ -20,6 +20,12 @@ stream is released exactly once either way.
 fails: `ArrowException` for EINVAL, ENOMEM and ENOSYS, and `OSError` for any
 other code, EIO among them.
 
+A struct that is collected while it still holds a stream releases it: the
+`KeyboardInterrupt` of a Ctrl-C during `komira_sql_stream` is raised once the
+call has returned, which may be after the struct was filled and before
+`import_stream` took it (a query cannot be interrupted while it runs; see
+`Session.sql`).
+
 The stream needs neither the session nor its context (src/so/README.md,
 Running SQL): it may be read, or released, after the session is closed. Its
 callbacks are code of libkomira, which is never unloaded.
@@ -45,6 +51,16 @@ class ArrowArrayStream(ctypes.Structure):
         ("release", ctypes.c_void_p),
         ("private_data", ctypes.c_void_p),
     ]
+
+    def __del__(self) -> None:
+        # A stream filled and never handed to pyarrow is released when its
+        # struct is collected. That happens when a KeyboardInterrupt, which
+        # Python raises once the native call has returned, lands after
+        # komira_sql_stream filled the struct and before `import_stream`
+        # took it. pyarrow's import, and `import_stream`, leave `release`
+        # NULL, so this releases nothing a second time.
+        if self.release:
+            _Release(self.release)(ctypes.addressof(self))
 
 
 # The name the Arrow PyCapsule interface gives a stream's capsule. A capsule

@@ -23,10 +23,15 @@
 # source is handed to the builder as one resident batch, in that order, so
 # the builder's handle is the plan's index. A source of several batches is
 # concatenated into one, and a source of none is an empty batch of its schema.
+#
+# The run's cancel token and progress counter are the caller's `RunControl`
+# when it gives one (`run_lowered_plan_with(ctx, lowered, opener, control)`):
+# a cancel on the control stops the run at its next check, and the run counts
+# its segments into the control's progress. Without one, the run has a token
+# of its own that nothing cancels.
 
 from arrow.concat import concat_record_batches_nway_ref
 from arrow.schema import RecordBatch
-from async_api.token import CancellationToken
 from column_kernels.compiler_helpers import empty_batch_like_schema
 from lowering.lowered_plan import LoweredPlan
 from parquet.runtime_footer_cache import ParquetMetadataCache
@@ -50,6 +55,7 @@ from plan_expr.expr_pool import ExprPool
 from scan_source.in_memory_source import InMemorySource
 
 from .engine_context import EngineContext
+from .run_control import RunControl
 
 comptime EXECUTE_POOL_NOT_RELEASED = "EXECUTE_POOL_NOT_RELEASED"
 """Refusal: a run ended with the segment pool not whole (a sink kept its
@@ -78,13 +84,33 @@ def run_lowered_plan_with[
 ](mut ctx: EngineContext, var lowered: LoweredPlan, var opener: R) raises -> RecordBatch:
     """Run `lowered` on `ctx.runtime` with `ctx.host_profile.thread_count`
     workers and return the result segment's batch. A Parquet scan of a remote
-    store reads through the file system `opener` opens on its bucket.
+    store reads through the file system `opener` opens on its bucket. Nothing
+    can cancel the run.
 
     Raises:
         Error starting with `EXECUTE_POOL_NOT_RELEASED` when a run leaves
         bytes granted, `SCAN_FS_UNSERVED` when `opener` does not serve a
         scan's store, and the driver's, a member's or the store's error
         otherwise.
+    """
+    return run_lowered_plan_with(ctx, lowered^, opener^, RunControl())
+
+
+def run_lowered_plan_with[
+    R: ScanFsOpener
+](
+    mut ctx: EngineContext,
+    var lowered: LoweredPlan,
+    var opener: R,
+    control: RunControl,
+) raises -> RecordBatch:
+    """`run_lowered_plan_with` under `control`: the run polls the control's
+    token and counts its segments into the control's progress.
+
+    Raises:
+        `pipeline_exec`'s cancelled error (`pipeline_exec: the query was
+        cancelled: <reason>`) when the control is cancelled before the run's
+        last check; otherwise what the form without a control raises.
     """
     var t_setup = pt_now()
     var cache = ParquetMetadataCache()
@@ -129,7 +155,7 @@ def run_lowered_plan_with[
         reversed_windows.append(lowered.params.window.pop())
     while len(reversed_windows) > 0:
         _ = builder.add_window_sink(reversed_windows.pop())
-    var token = CancellationToken.new()
+    var token = control.token()
     ref dispatch = ctx.runtime.dispatcher()
     pt_record[PH_EXEC_SETUP](t_setup)
     var t_run = pt_now()
@@ -139,6 +165,7 @@ def run_lowered_plan_with[
         dispatch,
         ctx.host_profile.thread_count,
         token,
+        control.progress(),
     )
     pt_record[PH_RUN_PLAN](t_run)
     var result = out.take(lowered.result_seg_id)

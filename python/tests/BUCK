@@ -1,4 +1,4 @@
-load("@komira//python:dependencies.bzl", "PROTOBUF_REQUIREMENT", "PYARROW_MACOS", "PYARROW_WHEELS")
+load("@komira//python:dependencies.bzl", "DUCKDB_WHEEL", "PROTOBUF_REQUIREMENT", "PYARROW_MACOS", "PYARROW_WHEELS")
 load("@komira//python:pythons.bzl", "PYTHONS")
 load("@komira//third_party/python:pins.bzl", "PROTOBUF_EDGES", "WHEELS")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
@@ -22,7 +22,8 @@ _ON = {p["suffix"]: ({"python": p["python"]} if p["suffix"] else {}) for p in PY
 # Stand-ins for libkomira (fake_libkomira.c). The loader must refuse a library
 # of ABI major 2, of major 0 (version 0.999), one reporting -1, one without
 # komira_abi_version and a 1.1 one without komira_register_parquet; it must
-# load a 1.0 one (without the calls 1.1 and 1.2 added) and a 1.3 one. `fake_modes`
+# load a 1.0 one (without the calls 1.1 and 1.2 added), a 1.3 one and a 1.7 one
+# (which also answers the last error's code and step). `fake_modes`
 # (version 1.1) answers each call by the mode its register_parquet name set,
 # for the error path, the two-call protocol and the output calls. `fake_store`
 # (version 1.2) records every credential call in its fake store.
@@ -76,6 +77,13 @@ c_shared_lib(
     srcs = ["fake_libkomira.c"],
     copts = ["-DFAKE_VERSION=1003"],
     out = "libkomira_fake_v1_3.so",
+)
+
+c_shared_lib(
+    name = "fake_v1_7",
+    srcs = ["fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=1007"],
+    out = "libkomira_fake_v1_7.so",
 )
 
 c_shared_lib(
@@ -157,6 +165,22 @@ _FAKE_RUNTIME = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# The exception table (komira/_errors.py) on the stand-ins of ABI 1.7 and 1.3:
+# each class by its code, the code before the step, the step when there is no
+# code, a plain KomiraError for the steps with no class, an unknown code, an
+# unknown step number and any status but -3, and no code or step from a 1.3
+# library.
+[python_binding_test(
+    name = "errors_test" + p["suffix"],
+    src = "test_errors.py",
+    data = {
+        "fake_v1_3/libkomira.so": ":fake_v1_3",
+        "fake_v1_7/libkomira.so": ":fake_v1_7",
+    },
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # The CPU check before the library opens: on Linux x86_64 a cpuinfo of an
 # x86-64-v3 CPU passes, one lacking any of its flags (avx2 among them, on one
 # processor or all, or with no flags line) raises UnsupportedCpuError naming
@@ -221,7 +245,8 @@ _ISA_FIXTURES = [
 ) for p in PYTHONS]
 
 # Any minor of ABI 1 loads: 1.0, whose 1.1, 1.2 and 1.3 calls raise when used,
-# and 1.3, which seals a credential and fills a stand-in stream.
+# and 1.3, which seals a credential and fills a stand-in stream; on both the
+# 1.5 calls register_csv and register_json raise when used.
 [python_binding_test(
     name = "minor0_test" + p["suffix"],
     src = "test_minor.py",
@@ -306,6 +331,16 @@ _ISA_FIXTURES = [
     visibility = ["komira//python:"],
 ) for w in PYARROW_WHEELS.values()]
 
+# The pinned DuckDB wheel, installed beside komira's wheel by the analysis job
+# test (python/BUCK, `analysis_job_test`).
+pinned_file(
+    name = DUCKDB_WHEEL["file"],
+    url = DUCKDB_WHEEL["url"],
+    sha256 = DUCKDB_WHEEL["sha256"],
+    size_bytes = DUCKDB_WHEEL["size"],
+    visibility = ["komira//python:"],
+)
+
 # Read only by the macOS wheel's install test, which runs from
 # pypi-macos-arm64.yml alone, never in a pull request.
 pinned_file(
@@ -351,6 +386,43 @@ _PYARROW = {
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# Ctrl-C during Session.sql, on the stand-in's stream (fake_libkomira.c, whose
+# komira_sql_stream raises SIGINT for a text starting "interrupted:"): sql
+# raises KeyboardInterrupt once the call returns and the stream it filled is
+# released exactly once; the session answers the next query, also after a
+# refusal SIGINT came during; a handler that does not raise runs once and sql
+# returns the answer; an ignored SIGINT changes nothing.
+[python_binding_test(
+    name = "sql_interrupt_test" + p["suffix"],
+    src = "test_sql_interrupt.py",
+    data = {"fake_v1_3/libkomira.so": ":fake_v1_3"},
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# A session used from several threads, on a stand-in (fake_threads.c, ABI 1.3)
+# that journals each call's entry and exit on its context, holds a call at a
+# gate until the test opens it, and counts calls that enter a context another
+# call is inside: a call waits for the call running on its session (each kind
+# of call, a refused one with its own message), a failed call's message is
+# read before another thread's call runs, close waits for the running call and
+# frees once, two sessions run at once, a signal handler calling the session
+# inside a call is refused, a Result reads while a call on its session is
+# held, and of two threads reading one Result one reads it.
+c_shared_lib(
+    name = "fake_threads",
+    srcs = ["fake_threads.c"],
+    out = "libkomira_fake_threads.so",
+)
+
+[python_binding_test(
+    name = "threads_test" + p["suffix"],
+    src = "test_threads.py",
+    data = {"fake_threads/libkomira.so": ":fake_threads"},
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # Session.sql on the real library: SELECT 1 AS n, a GROUP BY over a checked-in
 # Parquet file (3000 rows, five labels, six row groups), an aggregate over the
 # checked-in fixtures/readings.parquet, an answer of no rows, each terminal, an engine
@@ -368,6 +440,60 @@ _PYARROW = {
     deps = ["//python:komira", _PYARROW[p["suffix"]]],
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
+
+# Session.register_csv and register_json on the real library, over the
+# fixtures: the names, types and rows the engine infers, NULL where a file has
+# no value, the same schema and rows as read_csv and read_json; the delimiter,
+# all_varchar and header arguments; a pathlib.Path, a relative path and `~`
+# resolved when the call is made; a missing and an empty file refused with the
+# engine's message naming the absolute path; a taken name refused word for
+# word; the argument checks and a closed session.
+[python_binding_test(
+    name = "register_text_test" + p["suffix"],
+    src = "test_register_text.py",
+    data = {
+        "empty.txt": "fixtures/empty.txt",
+        "events.jsonl": "fixtures/events.jsonl",
+        "libkomira": LIBKOMIRA,
+        "people.csv": "fixtures/people.csv",
+        "people_pipe.csv": "fixtures/people_pipe.csv",
+        "two_columns.parquet": PARQUET,
+    },
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# {suffix: the pandas and polars of that minor}: third_party/python pins
+# pandas for CPython 3.13 and 3.14 and polars for 3.13 only, and neither for
+# 3.11 or 3.12, whose to_arrow is held by sql_test above.
+_FRAMES = {
+    "": ["komira//third_party/python:pandas", "komira//third_party/python:polars"],
+    "_py314": ["komira//third_party/python:pandas-cp314"],
+}
+
+# Result.to_pandas and to_polars (test_result_frames.py): on the real library,
+# a pyarrow-written file of every integer width at its edges, nullable
+# integers, strings, a bool, decimals, timestamps (ms, us, ns, UTC) and a
+# date, equal to pyarrow's and polars' own conversion of the file's table,
+# values and dtypes; two million rows over sixteen row groups; no rows; read
+# once against every other terminal; read after the session closed. In new
+# interpreters: the library loaded before pyarrow, pandas or polars is
+# imported, then an engine string column converted (the load-order case);
+# and on the stand-in, every stream released once after a frame, a failing
+# batch raised as KomiraError, and a missing pandas or polars raised as an
+# ImportError that leaves the result unread. `--polars` where polars is
+# installed; elsewhere to_polars must raise that ImportError.
+[python_binding_test(
+    name = "result_frames_test" + p["suffix"],
+    src = "test_result_frames.py",
+    args = ["--polars"] if p["suffix"] == "" else [],
+    data = {
+        "fake_v1_3/libkomira.so": ":fake_v1_3",
+        "libkomira": LIBKOMIRA,
+    },
+    deps = ["//python:komira", _PYARROW[p["suffix"]]] + _FRAMES[p["suffix"]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS if p["suffix"] in _FRAMES]
 
 # The protobuf runtimes the tests below load the generated plan modules under:
 # 7.36.2, the range's upper edge (third_party/python's `:protobuf`), 5.29.1,
@@ -517,6 +643,23 @@ _CASES = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# The answer check of the TPC-H run through the installed wheel
+# (tpch_compare.py, python/BUCK `tpch_via_wheel_test`): equal answers agree in
+# any row order, and each kind of difference (an integer, a decimal's last
+# digit, a text, a double past the tolerance, a count, a declared type, a
+# mixed column) is named; the HUGEINT departure holds only for equal values;
+# the order check follows directions and NULL placement; a pyarrow table
+# becomes cells and an unsupported Arrow type is refused by name; recorded
+# answers read back as the signature of the rows they describe and a
+# malformed or foreign-format file is refused.
+[py_test(
+    name = "tpch_compare_test" + p["suffix"],
+    src = "test_tpch_compare.py",
+    srcs = ["tpch_compare.py"],
+    deps = [_PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # Capture of a user function (komira._capture), with no library: the `@udf`
 # decorator, return types, the read set (columns=, annotations and the
 # bytecode scan), the package or bundle code form, the deterministic bundle
@@ -610,6 +753,9 @@ _PLAN_EXPR_RUNTIMES = [
 ) for f in [
     "wheel_install_run.py",
     "test_installed.py",
+    "test_analysis_job.py",
+    "test_tpch_installed.py",
+    "tpch_compare.py",
     "test_beside_modular.py",
     "test_upgrade.py",
     "fixtures/scan_plan.hex",

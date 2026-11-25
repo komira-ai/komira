@@ -3,6 +3,7 @@
 # `guard.bxl:check` fails the pull request check when this file is out of date.
 
 TARGETS = [
+    "komira//python:analysis_job_test",
     "komira//python:beside_modular_loaded_after",
     "komira//python:beside_modular_loaded_first",
     "komira//python:beside_other_mojo_loaded_after",

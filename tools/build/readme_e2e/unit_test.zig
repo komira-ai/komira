@@ -334,7 +334,7 @@ test "the compile wrapper's options get the source root, a command without them 
 
 test "the offline registry serves its configuration and refuses and remembers everything else" {
     const a = std.heap.page_allocator;
-    const reg = try offline.Registry.start();
+    const reg = try offline.Registry.start(&.{});
     const base = try reg.url(a);
     try std.testing.expect(std.mem.startsWith(u8, base, "http://127.0.0.1:"));
 
@@ -364,9 +364,77 @@ test "the offline registry serves its configuration and refuses and remembers ev
     try std.testing.expectEqualStrings("GET /", refused[3]);
 }
 
+/// `METHOD target` sent to a loopback registry, for the methods `offline.get` does not send; the status.
+fn sendStatus(a: std.mem.Allocator, port: u16, method: []const u8, target: []const u8) !u16 {
+    const stream = try std.net.tcpConnectToAddress(try std.net.Address.parseIp4("127.0.0.1", port));
+    defer stream.close();
+    try stream.writeAll(try std.fmt.allocPrint(a, "{s} {s} HTTP/1.1\r\nHost: 127.0.0.1:{d}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", .{ method, target, port }));
+    var buf: [64]u8 = undefined;
+    var n: usize = 0;
+    while (n < 12) {
+        const got = try stream.read(buf[n..]);
+        if (got == 0) break;
+        n += got;
+    }
+    if (n < 12) return error.BadAnswer;
+    return std.fmt.parseInt(u16, buf[9..12], 10);
+}
+
+test "the index of each member the staged set uploads is answered 404 package_not_found, every time, and never remembered" {
+    const a = std.heap.page_allocator;
+    const staged = [_][]const u8{ "komira-ai/json", "ab/x1" };
+    const reg = try offline.Registry.start(&staged);
+    const base = try reg.url(a);
+    // mopm 0.0.138 asks for a staged package's index while it resolves, and again to compare the
+    // registry's record with the set: both asks get the same answer.
+    for ([_][]const u8{ "/index/v2/ko/mi/komira-ai/json", "/index/v2/ab/__/ab/x1", "/index/v2/ko/mi/komira-ai/json" }) |target| {
+        const r = try offline.get(a, base, target);
+        try std.testing.expectEqual(@as(u16, 404), r.status);
+        try std.testing.expectEqualStrings("{\"error\":{\"code\":\"package_not_found\",\"message\":\"the README e2e's registry holds no version of a package the staged set uploads: the set is where it comes from\",\"hint\":\"take it from the staged set\"}}", r.body);
+    }
+    _ = try offline.get(a, base, "/index/config.json");
+    reg.stop();
+    try std.testing.expectEqual(@as(usize, 0), (try reg.refused(a)).len);
+}
+
+test "beside staged members, every request but their index GETs and the configuration is still refused and remembered" {
+    const a = std.heap.page_allocator;
+    const staged = [_][]const u8{"komira-ai/json"};
+    const reg = try offline.Registry.start(&staged);
+    const base = try reg.url(a);
+    // A package the set lacks (one whose name only starts like a member's, and one of another
+    // namespace), the namespace's directory, the member's path with a trailing slash or a query,
+    // and the member's channel and file: none is the index of a staged member.
+    const gets = [_][]const u8{
+        "/index/v2/ko/mi/komira-ai/jsonx",
+        "/index/v2/ex/am/example/json",
+        "/index/v2/ko/mi/komira-ai/",
+        "/index/v2/ko/mi/komira-ai/json/",
+        "/index/v2/ko/mi/komira-ai/json?v=2",
+        "/channel/komira-ai/linux-64/repodata.json",
+        "/channel/komira-ai/linux-64/mojo-komira-ai.json-0.1.1-mojo1.1.0_0.conda",
+    };
+    for (gets) |target| {
+        const r = try offline.get(a, base, target);
+        try std.testing.expectEqual(@as(u16, 403), r.status);
+        try std.testing.expect(std.mem.indexOf(u8, r.body, "\"code\":\"offline\"") != null);
+    }
+    // The member's index asked with another method than GET.
+    try std.testing.expectEqual(@as(u16, 403), try sendStatus(a, reg.port, "HEAD", "/index/v2/ko/mi/komira-ai/json"));
+    try std.testing.expectEqual(@as(u16, 403), try sendStatus(a, reg.port, "POST", "/index/v2/ko/mi/komira-ai/json"));
+    reg.stop();
+    const refused = try reg.refused(a);
+    try std.testing.expectEqual(@as(usize, gets.len + 2), refused.len);
+    for (gets, refused[0..gets.len]) |target, line| {
+        try std.testing.expectEqualStrings(try std.fmt.allocPrint(a, "GET {s}", .{target}), line);
+    }
+    try std.testing.expectEqualStrings("HEAD /index/v2/ko/mi/komira-ai/json", refused[gets.len]);
+    try std.testing.expectEqualStrings("POST /index/v2/ko/mi/komira-ai/json", refused[gets.len + 1]);
+}
+
 test "the configuration request alone is not a refusal" {
     const a = std.heap.page_allocator;
-    const reg = try offline.Registry.start();
+    const reg = try offline.Registry.start(&.{});
     const base = try reg.url(a);
     _ = try offline.get(a, base, "/index/config.json");
     reg.stop();
