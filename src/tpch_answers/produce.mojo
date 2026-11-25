@@ -21,6 +21,10 @@ from .record import record_answers, register_tables, tpch_header
 comptime ANSWERS_FILE = "answers.txt"
 """The answers file's name inside the output directory."""
 
+comptime QUERIES_DIR = "queries"
+"""The directory of the output directory that holds the query texts, one
+`<id>.sql` file each (`q1.sql` .. `q22.sql`), the bytes of the corpus text."""
+
 comptime _GIB: Int = 1024 * 1024 * 1024
 
 
@@ -36,9 +40,11 @@ def produce_tpch_sf1_answers[T: DuckDbTransport](
     out_dir: String,
     memory_limit_gib: Int,
 ) raises -> String:
-    """Write `<out_dir>/answers.txt` and `<out_dir>/locks/tpch_sf1.lock` for the
-    TPC-H scale factor 1 files under `cache_dir` and return one line saying
-    what was written.
+    """Write `<out_dir>/answers.txt`, `<out_dir>/locks/tpch_sf1.lock` and the
+    text of every query as `<out_dir>/queries/<id>.sql` for the TPC-H scale
+    factor 1 files under `cache_dir` and return one line saying what was
+    written. A reader of the answers takes the query texts from the same
+    corpus the answers were recorded for.
 
     The staged files are verified against the manifest and locked before
     DuckDB is asked anything; a missing, truncated or altered file raises, and
@@ -70,6 +76,10 @@ def produce_tpch_sf1_answers[T: DuckDbTransport](
     var text = record_answers(session, corpus, tpch_header(corpus, settings.version, lock.fingerprint()))
     makedirs(out_dir, exist_ok=True)
     write_lock_file(out_dir, lock)
+    var queries_dir = out_dir + String("/") + String(QUERIES_DIR)
+    makedirs(queries_dir, exist_ok=True)
+    for i in range(len(corpus.queries)):
+        Path(queries_dir + String("/") + corpus.queries[i].id + String(".sql")).write_text(corpus.queries[i].text)
     Path(target).write_text(text)
     return (
         String("recorded ") + String(len(corpus.queries)) + String(" answers over ")

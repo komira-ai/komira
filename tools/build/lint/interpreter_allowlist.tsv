@@ -80,7 +80,12 @@ python/tests/test_iceberg.py	the Python package's tests: the SDK surface is test
 python/tests/test_runtime.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_upgrade.py	the Python package's tests: the wheel upgraded from its previous release is tested in Python, by the interpreter it is installed for
 python/tests/test_variants.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_register_text.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_session.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_result_frames.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_tpch_compare.py	the Python package's tests: the answer check of the wheel's TPC-H run is tested in Python
+python/tests/test_tpch_installed.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
+python/tests/tpch_compare.py	the Python package's tests: the answer check of the wheel's TPC-H run, read by the installed wheel's test and by its own, in Python
 python/tests/test_sql.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql_fake.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql_interrupt.py	the Python package's tests: the SDK surface is tested in Python

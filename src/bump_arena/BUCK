@@ -54,7 +54,7 @@ mojo_conda(
         "../simd_ops": "//src/simd_ops:mopm.toml",
     },
     mojo = "1.1.0",
-    mopm = "toolchains//:mopm_0_0_135",
+    mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/bump_arena",
     version = "0.1.0",
     visibility = ["PUBLIC"],

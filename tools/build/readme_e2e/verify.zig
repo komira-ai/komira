@@ -7,7 +7,8 @@
 //!   install   a fresh project (a mopm.toml of its own, nothing else) runs
 //!             `mopm add <namespace>/<name>@=<version> --overlay <staged set> --registry
 //!             <a loopback registry that refuses every request but its own
-//!             configuration>` (offline.zig), so a closure member the set lacks
+//!             configuration and the index of each member the set uploads>`
+//!             (offline.zig), so a closure member the set lacks
 //!             is a refusal and not a fetch; the lock
 //!             it writes names the closure, each locked file is the staged
 //!             file byte for byte (sha256 and size) and the plan's, and each of
@@ -277,9 +278,15 @@ fn run(c: *Ctx) !void {
     try env.put("XDG_CONFIG_HOME", home_abs);
 
     const spec = try std.fmt.allocPrint(c.a, "{s}@={s}", .{ opts.package, opts.version });
-    // Offline by enforcement: mopm's registry is a loopback server that serves its configuration
-    // and refuses every other request (offline.zig), so what the staged set lacks cannot be fetched.
-    const registry = offline.Registry.start() catch |e|
+    // Offline by enforcement: mopm's registry is a loopback server that serves its configuration,
+    // answers the index request of each member the set uploads with 404 (mopm asks it of a staged
+    // package too, and takes the package from the set when the registry holds none of it) and refuses
+    // every other request (offline.zig), so what the staged set lacks cannot be fetched.
+    var uploaded: std.ArrayList([]const u8) = .empty;
+    for (plan.members) |m| {
+        if (std.mem.eql(u8, m.action, "upload")) try uploaded.append(c.a, m.name);
+    }
+    const registry = offline.Registry.start(uploaded.items) catch |e|
         return c.fail("install", "cannot start the offline registry: {s}", .{@errorName(e)});
     const registry_url = try registry.url(c.a);
     const add = try concatArgs(c.a, try absolutize(c.a, opts.mopm), &.{ "add", spec, "--overlay", staged_abs, "--registry", registry_url });

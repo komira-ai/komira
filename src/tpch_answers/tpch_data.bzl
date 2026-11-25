@@ -15,13 +15,15 @@ Two actions:
      `answers/answers.txt` (recorded signatures, the text bench_duckdb reads
      as references) and `answers/locks/tpch_sf1.lock` (the size and sha256 of
      every staged file and a fingerprint of them, which the answers file
-     names).
+     names) and `answers/queries/q<N>.sql`, the text of each of the 22 queries
+     as the corpus holds it.
 
 Sub-targets, for a test that consumes the data:
 
   [data]         the directory holding `tpch/sf1/<table>.parquet`
   [answers.txt]  the recorded answers
   [lock]         the data lock
+  [queries]      the directory of `q1.sql` .. `q22.sql`
 
 The default output is the `answers/` directory, so building the target builds
 both actions. Nothing reads an environment variable but the actions' fixed
@@ -82,6 +84,7 @@ def _impl(ctx):
             "answers.txt": [DefaultInfo(default_output = out.project("answers.txt"))],
             "data": [DefaultInfo(default_output = data)],
             "lock": [DefaultInfo(default_output = out.project("locks/tpch_sf1.lock"))],
+            "queries": [DefaultInfo(default_output = out.project("queries"))],
         },
     )]
 

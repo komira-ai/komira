@@ -6,9 +6,14 @@ Release 1's surface is built ([python/README.md](../../python/README.md)): the l
 `register_parquet` and `close`, `abi_version()`, `__version__`, `KomiraError`, `LibraryLoadError`
 and `UnsupportedCpuError`, and their tests. The linux-x86_64 wheel is built and carries `libkomira`, its native
 owners and the Mojo runtime libraries in one directory (decision 6), so `pip install komira` needs no package of
-Modular's. `Session.sql` and `Result` are built, with `to_arrow`, `to_reader` and `__arrow_c_stream__`
-(a result still reads after its session is closed), and the wheel requires pyarrow; `to_pandas`,
-`to_polars`, the default session, the per-session lock and the fork hook are not built, and
+Modular's. `Session.sql` and `Result` are built, with `to_arrow`, `to_reader`, `to_pandas`, `to_polars` and
+`__arrow_c_stream__` (a result still reads after its session is closed), and the wheel requires pyarrow;
+the wheel declares no `pandas` or `polars` extra yet (its rule writes no `Provides-Extra`), so the
+`ImportError` of a missing one names the distribution (`pip install pandas`) until it does.
+`Session.register_csv(name, path, *, delimiter=",", header=True, all_varchar=False)` and
+`Session.register_json(name, path)` are built (`komira_register_csv` and `komira_register_json`,
+ABI 1.5): decision 4's CSV and NDJSON registration, from the engine's own schema. The default session,
+the per-session lock and the fork hook are not built, and
 `UnsupportedOperation` is not public yet; the linux-arm64 and macos-arm64
 wheels are not built.
 
@@ -168,7 +173,8 @@ Behaviour each later pull request implements, fixed here so they agree:
   on, whether or not its consumer reads it. A `requested_schema` other than `None` raises
   `UnsupportedOperation`; casting on request is a later, additive decision.
 - **pandas and polars are optional.** `to_pandas` and `to_polars` import them when called; when one is
-  missing, the `ImportError` names the extra that installs it (`pip install komira[pandas]`).
+  missing, the `ImportError` names the extra that installs it (`pip install komira[pandas]`). Until the
+  wheel declares the extras, it names the distribution (`pip install pandas`).
 - **A closed session refuses every call** with `KomiraError`, and closing a session while a `Result` of
   it is unread never crashes the interpreter. Whether that unread result then still reads, or refuses, is
   the session pull request's choice, held by a test of each case it allows.
@@ -200,7 +206,7 @@ a pandas-shaped and a polars-shaped DataFrame surface. What happens to each part
 | `Session`: context manager, `close`, one context per session | yes | | the `plan_wire` argument (below) |
 | `Session.sql` | yes, as the official door returning a `Result` | | its status as "escape hatch, goes away with the scaffolding": SQL is now the first release's whole query surface |
 | default session and module-level calls | yes, for `sql` and `register_parquet` (and `add_sql_binding` when it lands) | the DataFrame readers | the public `session()` accessor: a second way to reach the same object |
-| table registration | `register_parquet(name, path)`, with the name required | CSV and NDJSON registration, from the engine's own schema | automatic names (`t1`, `t2`, ...): SQL needs the name the user wrote |
+| table registration | `register_parquet(name, path)`, with the name required; CSV and NDJSON registration, from the engine's own schema (`register_csv(name, path, *, delimiter, header, all_varchar)`, `register_json(name, path)`) | | automatic names (`t1`, `t2`, ...): SQL needs the name the user wrote |
 | `KomiraError` with the engine's status and message | yes, with the fields of decision 9 | | the `PLAN_ENDPOINT_<NAME>(<code>):` message prefix and its generated code table: libkomira's status codes and error text replace them |
 | `UnsupportedOperation` | yes, now a `KomiraError` (it was a `TypeError`) | | |
 | pandas-shaped `DataFrame`, `Column`, `Expr`, `GroupBy`, `MaterializedFrame`; the shared plan builder `Query`; the protobuf plan encoder | | with the DataFrame surface, through the plan door (`komira_plan_stream`) | |
@@ -484,8 +490,9 @@ and `_py311`, `_py312` and `_py314` on the other supported minors), alone: the e
   read `PYTHON_SURFACE` instead of a row per file is a question for that lint.
 - Free-threaded CPython (3.14t): the package is not claimed for it in the first release. ctypes works
   there, but no test runs the package on it.
-- `Result.to_polars` and `to_pandas` convert through Arrow; their dtype mapping is the Arrow terminals
-  pull request's tests.
+- `Result.to_polars` and `to_pandas` convert through Arrow, with pyarrow's `Table.to_pandas()` and
+  `polars.from_arrow` and no options of their own; `python/tests/test_result_frames.py` holds the dtype
+  each Arrow type the engine answers becomes.
 
 ## Where is the code?
 

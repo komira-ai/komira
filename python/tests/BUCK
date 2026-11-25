@@ -221,7 +221,8 @@ _ISA_FIXTURES = [
 ) for p in PYTHONS]
 
 # Any minor of ABI 1 loads: 1.0, whose 1.1, 1.2 and 1.3 calls raise when used,
-# and 1.3, which seals a credential and fills a stand-in stream.
+# and 1.3, which seals a credential and fills a stand-in stream; on both the
+# 1.5 calls register_csv and register_json raise when used.
 [python_binding_test(
     name = "minor0_test" + p["suffix"],
     src = "test_minor.py",
@@ -416,6 +417,60 @@ c_shared_lib(
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# Session.register_csv and register_json on the real library, over the
+# fixtures: the names, types and rows the engine infers, NULL where a file has
+# no value, the same schema and rows as read_csv and read_json; the delimiter,
+# all_varchar and header arguments; a pathlib.Path, a relative path and `~`
+# resolved when the call is made; a missing and an empty file refused with the
+# engine's message naming the absolute path; a taken name refused word for
+# word; the argument checks and a closed session.
+[python_binding_test(
+    name = "register_text_test" + p["suffix"],
+    src = "test_register_text.py",
+    data = {
+        "empty.txt": "fixtures/empty.txt",
+        "events.jsonl": "fixtures/events.jsonl",
+        "libkomira": LIBKOMIRA,
+        "people.csv": "fixtures/people.csv",
+        "people_pipe.csv": "fixtures/people_pipe.csv",
+        "two_columns.parquet": PARQUET,
+    },
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# {suffix: the pandas and polars of that minor}: third_party/python pins
+# pandas for CPython 3.13 and 3.14 and polars for 3.13 only, and neither for
+# 3.11 or 3.12, whose to_arrow is held by sql_test above.
+_FRAMES = {
+    "": ["komira//third_party/python:pandas", "komira//third_party/python:polars"],
+    "_py314": ["komira//third_party/python:pandas-cp314"],
+}
+
+# Result.to_pandas and to_polars (test_result_frames.py): on the real library,
+# a pyarrow-written file of every integer width at its edges, nullable
+# integers, strings, a bool, decimals, timestamps (ms, us, ns, UTC) and a
+# date, equal to pyarrow's and polars' own conversion of the file's table,
+# values and dtypes; two million rows over sixteen row groups; no rows; read
+# once against every other terminal; read after the session closed. In new
+# interpreters: the library loaded before pyarrow, pandas or polars is
+# imported, then an engine string column converted (the load-order case);
+# and on the stand-in, every stream released once after a frame, a failing
+# batch raised as KomiraError, and a missing pandas or polars raised as an
+# ImportError that leaves the result unread. `--polars` where polars is
+# installed; elsewhere to_polars must raise that ImportError.
+[python_binding_test(
+    name = "result_frames_test" + p["suffix"],
+    src = "test_result_frames.py",
+    args = ["--polars"] if p["suffix"] == "" else [],
+    data = {
+        "fake_v1_3/libkomira.so": ":fake_v1_3",
+        "libkomira": LIBKOMIRA,
+    },
+    deps = ["//python:komira", _PYARROW[p["suffix"]]] + _FRAMES[p["suffix"]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS if p["suffix"] in _FRAMES]
+
 # The protobuf runtimes the tests below load the generated plan modules under:
 # 7.36.2, the range's upper edge (third_party/python's `:protobuf`), 5.29.1,
 # the lower edge, and 5.28.3, the release below the range
@@ -564,6 +619,23 @@ _CASES = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# The answer check of the TPC-H run through the installed wheel
+# (tpch_compare.py, python/BUCK `tpch_via_wheel_test`): equal answers agree in
+# any row order, and each kind of difference (an integer, a decimal's last
+# digit, a text, a double past the tolerance, a count, a declared type, a
+# mixed column) is named; the HUGEINT departure holds only for equal values;
+# the order check follows directions and NULL placement; a pyarrow table
+# becomes cells and an unsupported Arrow type is refused by name; recorded
+# answers read back as the signature of the rows they describe and a
+# malformed or foreign-format file is refused.
+[py_test(
+    name = "tpch_compare_test" + p["suffix"],
+    src = "test_tpch_compare.py",
+    srcs = ["tpch_compare.py"],
+    deps = [_PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # Capture of a user function (komira._capture), with no library: the `@udf`
 # decorator, return types, the read set (columns=, annotations and the
 # bytecode scan), the package or bundle code form, the deterministic bundle
@@ -657,6 +729,8 @@ _PLAN_EXPR_RUNTIMES = [
     "wheel_install_run.py",
     "test_installed.py",
     "test_analysis_job.py",
+    "test_tpch_installed.py",
+    "tpch_compare.py",
     "test_beside_modular.py",
     "test_upgrade.py",
     "fixtures/scan_plan.hex",
