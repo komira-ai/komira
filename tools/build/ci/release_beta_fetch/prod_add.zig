@@ -13,7 +13,8 @@
 //!
 //!   mopm init --name release-check/prod_add
 //!   (set `[toolchain] mojo` of the mopm.toml init wrote to the Mojo this release was built for)
-//!   mopm add komira-ai/<name> --registry prod      (once for each name of `add_set`)
+//!   mopm add komira-ai/<name> --registry prod      (once for each name of `add_set`: json, uuid and every
+//!                                                   package that ships a native archive)
 //!   mopm sync --registry prod --cache <work>/cache
 //!
 //! `mopm init` writes the Mojo of its own default (`mojo = "1.0.0"` for mopm 0.0.138), and `mopm add` resolves the
@@ -47,9 +48,22 @@ const Allocator = std.mem.Allocator;
 pub const prod_channel = "https://conda.mopm.dev/";
 
 /// The packages `add` installs from prod, from release/readme_e2e/packages.bzl: a library with no
-/// dependency (json), one with dependencies (uuid: atomic_alias, awslc, clock) and one that ships a native
-/// library (libc: `[native.komira_libc_posix]`).
-pub const add_set = [_][]const u8{ "komira-ai/json", "komira-ai/uuid", "komira-ai/libc" };
+/// dependency (json), one with dependencies (uuid: atomic_alias, awslc, clock), then every package that ships a
+/// native archive (the keys of `RELEASE_NATIVES` in release/BUCK), each by its own name, so each one's lock
+/// entry and installed `.conda`, record and metadata are checked against the plan.
+/// //tools/build/ci:prod_add_set_cases fails the build when a package of `RELEASE_NATIVES` is not here, or a
+/// name here is no package of packages.bzl.
+pub const add_set = [_][]const u8{
+    "komira-ai/json",
+    "komira-ai/uuid",
+    "komira-ai/async_api",
+    "komira-ai/awslc",
+    "komira-ai/compression",
+    "komira-ai/crypto",
+    "komira-ai/libc",
+    "komira-ai/log",
+    "komira-ai/metrics",
+};
 
 /// The full name of the project `add` makes. Its namespace is no one's on prod, and nothing is published.
 pub const project_name = "release-check/prod_add";
