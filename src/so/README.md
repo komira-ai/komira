@@ -160,7 +160,7 @@ the call returns NULL, as it does when the engine cannot start. A positive
 value has no upper bound. The options are fixed for the life of the context.
 A query whose aggregation, sort or window state needs more than the budget is
 refused at step `execute`: `komira_sql_stream` returns `KOMIRA_ERR_ENGINE`
-with a last error of the form `execute: [Processor] pipeline_exec: the
+with a last error of the form `execute: [Processor] MEMORY_BUDGET_EXCEEDED: pipeline_exec: the
 aggregation sink of segment <n> was denied <bytes> bytes of the segment's memory pool (budget
 <budget>, granted <bytes>)`, and the context answers the next query.
 

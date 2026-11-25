@@ -72,7 +72,7 @@ def main(args):
             assert type(e) is komira.MemoryLimitError, (name, repr(e))
             assert isinstance(e, komira.KomiraError), name
             assert (e.status, e.code, e.step) == (-3, "MEMORY_BUDGET_EXCEEDED", "execute"), (name, e.status, e.code, e.step)
-            assert str(e).startswith("execute: MEMORY_BUDGET_EXCEEDED: pipeline_exec: the "), (name, str(e))
+            assert str(e).startswith("execute: [Processor] MEMORY_BUDGET_EXCEEDED: pipeline_exec: the "), (name, str(e))
             assert " was denied " in str(e) and "budget 1" in str(e), (name, str(e))
         # The session answers the next query, and other refusals keep their class.
         e = raised(lambda: s.sql("SELEC 1"))

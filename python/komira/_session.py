@@ -49,7 +49,9 @@ class Session:
     the engine can run it in less (a GROUP BY that spills). A `bool` or other
     non-`int` raises `TypeError`, and a value below 1 or above 2**63 - 1
     `ValueError`, before the library is called; naming either option needs
-    libkomira ABI 1.4. The options are fixed for the life of the session. A session is a context manager: `with komira.Session() as
+    libkomira ABI 1.4. The options are fixed for the life of the session.
+
+    A session is a context manager: `with komira.Session() as
     s:` closes it on exit. `close()` frees the context and may be called again;
     any other call on a closed session raises `KomiraError`. A session that is
     never closed is freed when it is garbage collected.

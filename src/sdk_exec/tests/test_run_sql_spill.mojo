@@ -221,7 +221,9 @@ def test_the_same_budget_without_a_spill_directory_is_refused_at_execute() raise
     )
     assert_true(out.refusal.value().reason.find("was denied") >= 0)
     assert_true(
-        out.refusal.value().reason.startswith("MEMORY_BUDGET_EXCEEDED: "),
+        out.refusal.value().reason.startswith(
+            "[Processor] MEMORY_BUDGET_EXCEEDED: "
+        ),
         out.refusal.value().reason,
     )
 

@@ -48,7 +48,7 @@
 #     the registered table is refused at step `lower`, naming the table.
 #   * test_a_tiny_memory_budget_is_refused_at_execute: a budget of 1 byte denies
 #     the sink its state ("was denied"), as a refusal at step `execute` that
-#     begins with the code `MEMORY_BUDGET_EXCEEDED: `.
+#     reads `[Processor] MEMORY_BUDGET_EXCEEDED: ...`.
 #   * test_a_sum_past_int64_is_answered_exactly_and_the_context_runs_on: SUM of
 #     three INT64 values of 2^62 is the DECIMAL(38, 0) 3 * 2^62, and Q6 then
 #     runs on the same context.
@@ -490,7 +490,9 @@ def test_a_tiny_memory_budget_is_refused_at_execute() raises:
     _expect_refusal(out, String(STEP_EXECUTE), "")
     assert_true(out.refusal.value().reason.find("was denied") >= 0)
     assert_true(
-        out.refusal.value().reason.startswith("MEMORY_BUDGET_EXCEEDED: "),
+        out.refusal.value().reason.startswith(
+            "[Processor] MEMORY_BUDGET_EXCEEDED: "
+        ),
         out.refusal.value().reason,
     )
 
