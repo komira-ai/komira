@@ -14,9 +14,12 @@
 //!   node_act node-test --node <dir> --libs <dir> --out <file> --dir <dir>
 //!       --script <path> --expect <pass|fail> --error <text> -- <args>...
 //!   node_act binding-test --node <dir> --libs <dir> --out <file> --dir <dir>
-//!       -- <test file>...
+//!       [--cover <path>]... -- <test file>...
 //!       Runs `node --test` (TAP reporter) over the files in <dir>; passes only
-//!       if the summary reports tests, all passed, none skipped.
+//!       if the summary reports tests, all passed, none skipped. With --cover,
+//!       node measures those files (paths in <dir>) into lcov, and the run
+//!       passes only if every one was loaded and their lines and branches
+//!       together are each at least 99% covered.
 //!   node_act esbuild-bundle --esbuild <exe> --dir <dir> --entry <path>
 //!       --out <file> --format <cjs|esm>
 //!
@@ -308,8 +311,90 @@ pub fn fileIsTheTest(out: []const u8, path: []const u8) bool {
     return false;
 }
 
+/// The line and branch percentage, at least, that the covered sources of a
+/// binding test must each reach over the run as a whole (rule T1).
+pub const cover_floor: u64 = 99;
+
+/// One `SF:` record of an lcov tracefile: its lines found and hit (`LF`,
+/// `LH`) and its branches found and hit (`BRF`, `BRH`).
+pub const FileCover = struct {
+    path: []const u8,
+    lf: u64 = 0,
+    lh: u64 = 0,
+    brf: u64 = 0,
+    brh: u64 = 0,
+};
+
+/// The records of an lcov tracefile, in order. A path under `dir` (absolute)
+/// is made relative to it. A count that is not a number is an error.
+pub fn parseLcov(a: std.mem.Allocator, text: []const u8, dir: []const u8) ![]FileCover {
+    var files = std.ArrayList(FileCover).empty;
+    var cur: ?FileCover = null;
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trimRight(u8, raw, "\r");
+        if (std.mem.startsWith(u8, line, "SF:")) {
+            var p = line[3..];
+            if (dir.len > 0 and p.len > dir.len + 1 and std.mem.startsWith(u8, p, dir) and p[dir.len] == '/') p = p[dir.len + 1 ..];
+            cur = .{ .path = p };
+        } else if (std.mem.eql(u8, line, "end_of_record")) {
+            if (cur) |c| try files.append(a, c);
+            cur = null;
+        } else if (cur) |*c| {
+            const keys = [_][]const u8{ "LF:", "LH:", "BRF:", "BRH:" };
+            const fields = [_]*u64{ &c.lf, &c.lh, &c.brf, &c.brh };
+            for (keys, fields) |k, field| {
+                if (std.mem.startsWith(u8, line, k)) field.* = try std.fmt.parseInt(u64, line[k.len..], 10);
+            }
+        }
+    }
+    return files.toOwnedSlice(a);
+}
+
+/// `hit` of `found` as a percentage with two decimals, rounded down; 0 of 0 is 100.
+fn percent(a: std.mem.Allocator, hit: u64, found: u64) ![]const u8 {
+    const bp = if (found == 0) 10000 else hit * 10000 / found;
+    return std.fmt.allocPrint(a, "{d}.{d:0>2}%", .{ bp / 100, bp % 100 });
+}
+
+/// Why the covered sources `covers` fail their floor in the lcov records
+/// `files`, or null: a source no test loaded (no record), or line or branch
+/// coverage of all of them together under `cover_floor` percent.
+pub fn coverRefusal(a: std.mem.Allocator, files: []const FileCover, covers: []const []const u8) !?[]const u8 {
+    var total = FileCover{ .path = "" };
+    for (covers) |want| {
+        const rec = for (files) |f| {
+            if (std.mem.eql(u8, f.path, want)) break f;
+        } else return try std.fmt.allocPrint(a, "{s} is to be covered, and no test loaded it", .{want});
+        total.lf += rec.lf;
+        total.lh += rec.lh;
+        total.brf += rec.brf;
+        total.brh += rec.brh;
+    }
+    if (total.lh * 100 < cover_floor * total.lf) {
+        return try std.fmt.allocPrint(a, "the line coverage of the covered sources is {s} ({d} of {d} lines), under {d}%", .{ try percent(a, total.lh, total.lf), total.lh, total.lf, cover_floor });
+    }
+    if (total.brh * 100 < cover_floor * total.brf) {
+        return try std.fmt.allocPrint(a, "the branch coverage of the covered sources is {s} ({d} of {d} branches), under {d}%", .{ try percent(a, total.brh, total.brf), total.brh, total.brf, cover_floor });
+    }
+    return null;
+}
+
+/// One line per covered source: its path, lines hit of found and branches
+/// hit of found, for the log of a run that measured them.
+pub fn coverTable(a: std.mem.Allocator, files: []const FileCover, covers: []const []const u8) ![]const u8 {
+    var out = std.ArrayList(u8).empty;
+    for (covers) |want| {
+        for (files) |f| {
+            if (!std.mem.eql(u8, f.path, want)) continue;
+            try out.appendSlice(a, try std.fmt.allocPrint(a, "binding_test: covered {s}: lines {d}/{d} ({s}), branches {d}/{d} ({s})\n", .{ f.path, f.lh, f.lf, try percent(a, f.lh, f.lf), f.brh, f.brf, try percent(a, f.brh, f.brf) }));
+        }
+    }
+    return out.toOwnedSlice(a);
+}
+
 fn cmdBinding(a: std.mem.Allocator, args: []const []const u8) u8 {
-    const spec = [_]U.Spec{ .{ .name = "node" }, .{ .name = "libs" }, .{ .name = "out" }, .{ .name = "dir" } };
+    const spec = [_]U.Spec{ .{ .name = "node" }, .{ .name = "libs" }, .{ .name = "out" }, .{ .name = "dir" }, .{ .name = "cover" } };
     var bad: []const u8 = "";
     const f = U.parseFlags(a, args, &spec, &bad) catch |e| return usage("binding-test: {s}: {s}", .{ @errorName(e), bad });
     const node = f.need("node") catch return usage("binding-test needs --node", .{});
@@ -317,6 +402,9 @@ fn cmdBinding(a: std.mem.Allocator, args: []const []const u8) u8 {
     const out = f.need("out") catch return usage("binding-test needs --out", .{});
     const dir = f.need("dir") catch return usage("binding-test needs --dir", .{});
     if (f.rest.len == 0) return usage("binding-test: no test file", .{});
+    const cover_items = f.all(a, "cover") catch return 2;
+    const covers = a.alloc([]const u8, cover_items.len) catch return 2;
+    for (cover_items, 0..) |it, i| covers[i] = it.vals[0];
 
     const cwd = std.fs.cwd().realpathAlloc(a, ".") catch return usage("cannot resolve the working directory", .{});
     const scratch = U.scratchRoot(a, cwd, std.posix.getenv("BUCK_SCRATCH_PATH")) catch return 2;
@@ -332,6 +420,17 @@ fn cmdBinding(a: std.mem.Allocator, args: []const []const u8) u8 {
     argv.append(a, std.fmt.allocPrint(a, "{s}/bin/node", .{node_abs}) catch return 2) catch return 2;
     argv.append(a, "--test") catch return 2;
     argv.append(a, "--test-reporter=tap") catch return 2;
+    // With covered sources, node also writes an lcov tracefile of exactly
+    // those files (the TAP report stays on stdout, where it is read).
+    const lcov = std.fs.path.join(a, &.{ scratch, "lcov.info" }) catch return 2;
+    if (covers.len > 0) {
+        argv.append(a, "--test-reporter-destination=stdout") catch return 2;
+        argv.append(a, "--test-reporter=lcov") catch return 2;
+        argv.append(a, std.fmt.allocPrint(a, "--test-reporter-destination={s}", .{lcov}) catch return 2) catch return 2;
+        argv.append(a, "--experimental-test-coverage") catch return 2;
+        for (covers) |c| argv.append(a, std.fmt.allocPrint(a, "--test-coverage-include={s}", .{c}) catch return 2) catch return 2;
+    }
+    const first_test = argv.items.len;
     for (f.rest) |t| argv.append(a, std.fs.path.join(a, &.{ dir_abs, t }) catch return 2) catch return 2;
 
     const r = U.runCapture(a, argv.items, &env, dir_abs) catch |e| return usage("cannot run node: {s}", .{@errorName(e)});
@@ -343,11 +442,27 @@ fn cmdBinding(a: std.mem.Allocator, args: []const []const u8) u8 {
         std.debug.print("{s}{s}binding_test: node --test exited 0, but {s}\n", .{ r.stdout, r.stderr, why });
         return 1;
     }
-    for (argv.items[3..]) |p| {
+    for (argv.items[first_test..]) |p| {
         if (fileIsTheTest(r.stdout, p)) {
             std.debug.print("{s}{s}binding_test: node --test exited 0, but {s} registers no test of its own\n", .{ r.stdout, r.stderr, p });
             return 1;
         }
+    }
+    if (covers.len > 0) {
+        const text = std.fs.cwd().readFileAlloc(a, lcov, 1 << 30) catch |e| {
+            std.debug.print("{s}{s}binding_test: node wrote no coverage ({s}: {s})\n", .{ r.stdout, r.stderr, lcov, @errorName(e) });
+            return 1;
+        };
+        const files = parseLcov(a, text, dir_abs) catch |e| {
+            std.debug.print("{s}{s}binding_test: cannot read node's coverage: {s}\n", .{ r.stdout, r.stderr, @errorName(e) });
+            return 1;
+        };
+        const table = coverTable(a, files, covers) catch return 2;
+        if (coverRefusal(a, files, covers) catch return 2) |why| {
+            std.debug.print("{s}{s}{s}binding_test: node --test passed, but {s}\n", .{ r.stdout, r.stderr, table, why });
+            return 1;
+        }
+        std.fs.File.stdout().writeAll(table) catch {};
     }
     std.fs.File.stdout().writeAll(r.stdout) catch {};
     U.writeAll(std.fs.cwd(), out, "") catch |e| return usage("cannot write {s}: {s}", .{ out, @errorName(e) });
