@@ -31,7 +31,8 @@ install page shows names it.
   `UnsupportedOperation` naming `materialize()`. They need libkomira ABI 1.8.
 - **Writing files from a DataFrame.** `df.to_parquet(path, *, compression="snappy")`,
   `df.to_csv(path_or_buf, *, compression="infer", index=True)` and `df.to_json(path_or_buf, *,
-  orient="records", lines=True, compression="infer")` run the plan through the engine's plan entry and
+  orient=None, lines=False, compression="infer")`, which writes only when called with
+  `orient="records", lines=True` (one object per line) and refuses every other form, run the plan through the engine's plan entry and
   write the frame's rows to a local Parquet, CSV (with a header line) or newline-delimited JSON file,
   all or nothing, and return `None`. `compression` is `"snappy"`, `"gzip"`, `"zstd"`, `"lz4"` or
   `None` for Parquet, and `"infer"` (from `.gz` and `.zst`), `"gzip"`, `"zstd"` or `None` for CSV and

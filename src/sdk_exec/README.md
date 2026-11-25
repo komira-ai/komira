@@ -134,6 +134,47 @@ with open(dir + "/n.csv", "r") as f:
     assert_equal(f.read(), "n,s\n1,\"a,b\"\n")
 ```
 
+A plan built without SQL text writes the same file through `run_plan_write`,
+here a CSV file, then a Parquet file through the overload that takes the scan
+opener; a destination URL is refused at `bind` and nothing runs:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from std.tempfile import mkdtemp
+from arrow.write_target import WCOMP_SNAPPY, WCOMP_UNCOMPRESSED, WFMT_CSV, WFMT_PARQUET, WriteTarget
+from pipeline_exec.source_parquet import LocalOnlyScanFs
+from sdk_exec.engine_context import EngineContext
+from sdk_exec.engine_options import EngineOptions
+from sdk_exec.engine_plan import run_plan_write
+from sdk_exec.engine_sql import run_sql
+from sql.sql_frontend import plan_from_sql
+
+var ctx = EngineContext(EngineOptions(worker_count=1))
+var dir = mkdtemp(prefix="komira_plan_write_readme_")
+var query = String("SELECT 1 AS n UNION ALL SELECT 2 ORDER BY n")
+var csv = run_plan_write(
+    ctx, plan_from_sql(query, ctx.catalog, ctx.footers), WriteTarget(dir + "/n.csv", WFMT_CSV, WCOMP_UNCOMPRESSED)
+)
+assert_equal(csv.batches[0].schema.field_name(0), "Count")
+assert_equal(Int(csv.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 2)
+with open(dir + "/n.csv", "r") as f:
+    assert_equal(f.read(), "n\n1\n2\n")
+var pq = run_plan_write(
+    ctx,
+    plan_from_sql(query, ctx.catalog, ctx.footers),
+    WriteTarget(dir + "/n.parquet", WFMT_PARQUET, WCOMP_SNAPPY),
+    LocalOnlyScanFs(),
+)
+assert_equal(Int(pq.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 2)
+var back = run_sql(ctx, "SELECT count(*) AS rows FROM '" + dir + "/n.parquet'")
+assert_equal(Int(back.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 2)
+var url = run_plan_write(
+    ctx, plan_from_sql(query, ctx.catalog, ctx.footers), WriteTarget("s3://bucket/n.parquet", WFMT_PARQUET, WCOMP_SNAPPY)
+)
+assert_equal(url.refusal.value().step, "bind")
+assert_true(url.refusal.value().reason.startswith("STORAGE_URL_REFUSED: "))
+```
+
 The encoders on their own:
 
 <!-- mojo-hidden from std.testing import assert_equal -->

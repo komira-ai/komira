@@ -46,6 +46,7 @@ python/komira/_runtime.py	the Python package: its sources are Python (docs/desig
 python/komira/_run.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_series.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_session.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_write.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_udf/__init__.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
 python/komira/_udf/wire.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
 python/komira/_udf/worker.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
@@ -96,6 +97,7 @@ python/tests/tpch_compare.py	the Python package's tests: the answer check of the
 python/tests/test_frame.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_frame_duckdb.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_frame_run.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_frame_write.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql_cancel.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql_fake.py	the Python package's tests: the SDK surface is tested in Python
