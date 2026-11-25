@@ -86,11 +86,11 @@ Fixed before this design, and not reopened here:
   JavaScript](#arrow-from-the-c-stream-to-javascript), steps 1 to 3, over a stream handed to
   `importArrowStream` as a capsule (an N-API external tagged as an Arrow C stream,
   [node/arrow_c.h](../../node/arrow_c.h)) rather than one `komira_sql_stream` fills. It drains on
-  the JavaScript thread: the session thread does not exist yet. The private module is
+  the JavaScript thread. The private module is
   [node/src/arrow_import.mts](../../node/src/arrow_import.mts) (`readArrowStream`), with
-  `KomiraError` and `UnsupportedOperation` in [node/src/errors.mts](../../node/src/errors.mts).
+  `KomiraError` and `UnsupportedOperation` in [node/src/errors.ts](../../node/src/errors.ts), the package's one errors module.
   [node/package.json](../../node/package.json) is private and declares the `apache-arrow` peer
-  dependency at `^21.2.0`.
+  dependency at `^21.2.0` (part 3 completes it).
 
 ### Tests and CI
 
@@ -117,9 +117,12 @@ Fixed before this design, and not reopened here:
   - `node_binding_test` runs `node --test` as a build action, under `env -i`, with no network.
   - It passes only if TAP reports tests, all passed, and none skipped
     ([tools/build/node/README.md](../../tools/build/node/README.md)).
-- **EXISTS** Nothing measures the coverage of `node/`. `.github/workflows/coverage.yml` and the
-  covcheck README never name it *(inferred from a search of both)*. covcheck does read lcov
-  tracefiles ([tools/build/coverage/README.md](../../tools/build/coverage/README.md)).
+- **EXISTS** The TypeScript sources of `node/src/` are measured by their own test target:
+  `//node:package_test` names them as `covered_srcs`, and `node_binding_test` fails unless every one
+  is loaded and their lines and branches are each at least 99% covered (rule T1). The addon's C is
+  not measured. `.github/workflows/coverage.yml` and the covcheck README never name `node/`
+  *(inferred from a search of both)*; covcheck does read lcov tracefiles
+  ([tools/build/coverage/README.md](../../tools/build/coverage/README.md)).
 
 ### Toolchain
 
@@ -138,8 +141,9 @@ Fixed before this design, and not reopened here:
   pinned lockfile), `tsc_check`, `tsc_build` and `jest_test` (`tools/build/node/modules.bzl`).
   - `npm_modules` is a Zig program and runs no npm. It reads a `package-lock.json` and the pins
     that `kpin lock` writes.
-  - These rules are used only by `src/tests/helpers` and their negative fixtures under
-    `tools/build/tests/negative`.
+  - These rules are used by `src/tests/helpers` and their negative fixtures under
+    `tools/build/tests/negative`, and by `//node:typecheck` and `//node:dist` over the package's
+    own pinned compiler (`node/devtools`).
 - **EXISTS** Pinned npm tarballs include `apache-arrow` 21.2.0. It is used by a test of an Arrow
   IPC round trip in `komira_test_node`.
 - **EXISTS** "Never shipped" ([third_party/node/README.md](../../third_party/node/README.md)): the
@@ -148,15 +152,16 @@ Fixed before this design, and not reopened here:
 
 ### Release state
 
-- **Nothing is released.** The SDK has no npm name, no `.d.ts` and no public TypeScript. Its
-  `package.json` is private, and its only TypeScript is the private Arrow import under
-  `node/src/` and the tests beside it. The other `.ts` files in the repository are test fixtures
-  under `src/tests/helpers` and `tools/build/tests/negative`. No workflow mentions npm publishing. The only use of npm in a workflow is the
-  pin check in `kpin-update.yml`.
+- **Nothing is released.** **EXISTS** The package of part 3 (below, "Where the work lands"):
+  `node/package.json` (`"private": true`, named by D1's option A as a placeholder), the TypeScript
+  sources in `node/src/`, and the `.js` and `.d.ts` files `//node:dist` compiles from them. The
+  private Arrow import of part 2 (`node/src/arrow_import.mts`) is beside them, outside `dist/` until
+  `Result` uses it. No platform package is built and nothing is published. No workflow mentions npm
+  publishing. The only use of npm in a workflow is the pin check in `kpin-update.yml`.
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.8, with twenty-four exports
+- **EXISTS** `libkomira` is at ABI 1.9, with twenty-five exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
   - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream.
     `komira_sql_stream_run` (1.6) runs it under a run handle that another thread cancels
@@ -168,6 +173,8 @@ Fixed before this design, and not reopened here:
     file to the session as a table that SQL reads by name.
   - `komira_last_error_code` and `komira_last_error_step` (1.7) answer the last error's named code and
     the step that refused it. The addon does not bind them yet.
+  - `komira_register_arrow_stream` (1.9) drains a host's Arrow C stream into a table held in
+    memory and registers it by name, replacing a table of that name; it releases the stream.
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,
@@ -517,7 +524,9 @@ top-level `pypi.yml` and the macOS arm64 wheel by `pypi-macos-arm64.yml`, each t
     one fixed mtime, modes 0644 and 0755. A `[twin]` action writes it again from inputs staged
     elsewhere, and the check refuses it unless the bytes are equal.
   - It stamps `version` from `komira.package_stamp` and writes `package.json` from the rule's
-    attributes. There is no `package.json` in the repository that could drift.
+    attributes. **EXISTS** since part 3: `node/package.json`, the manifest the package's tests read
+    (`"private": true`, version `0.0.0`). The rule's change decides whether the rule stamps that file
+    or writes its own, and in the second case adds the check that the two agree.
   - Its native input is the self-contained directory of the libkomira target, the one the wheel
     copies. The rule takes the directory as one input and copies it
     whole; it never assembles the library, owners and runtime from separate targets.
@@ -605,9 +614,8 @@ one publishes by hand otherwise.
 
 All tests are hermetic: no network, no clock, no fixed port (rule T12). The behaviour tests are
 written in TypeScript (rule T11) and run with the pinned Node, which strips types itself, so they
-need no build step. `node_binding_test` runs `.mts` files today (the Arrow import's tests), and
-`.mjs` and `.js`. `tsc_check` checks the tests' types, once `//node` has a lockfile with
-`typescript`.
+need no build step. `node_binding_test` takes `.mjs`, `.js`, `.ts` and `.mts` files (**EXISTS**).
+`tsc_check` checks the package's tests' types (`//node:typecheck`).
 
 ### The package's own tests
 
@@ -644,13 +652,14 @@ linux-x86_64.
   - An unread `Result` of a closed session reads.
   - Arguments of the wrong type or value throw before the library is called.
 - **Coverage.** Node's test runner writes lcov (`--experimental-test-coverage` with the lcov
-  reporter), and covcheck reads it, so `node/` is measured at line and branch level against 99%
-  (rule T1).
+  reporter), so `node/` is measured at line and branch level against 99% (rule T1).
+  - **EXISTS** for the TypeScript: `node_binding_test`'s `covered_srcs` are measured in the test's own
+    action, which fails under 99% or when a listed source was never loaded (node leaves an unloaded
+    file out of its totals). Showing the same numbers in the coverage job's table, through
+    covcheck, is a later step.
   - The addon's C has no measurement yet. covcheck reads lcov, so the addon can be compiled with
     coverage instrumentation and its counts written as lcov. Which instrumentation `zig cc` uses
     for this is that change's to show.
-  - The first change that touches `node/` wires both. Until it does, `node/` is a touched package
-    with no number.
 
 ### From the installed package, on each platform
 
@@ -867,6 +876,6 @@ The Excel SDK and the `ts_polars` builder follow, on a shared plan encoder.
 ## Where is the code?
 
 Today: [node/](../../node/README.md), [tools/build/node](../../tools/build/node/README.md),
-[third_party/node](../../third_party/node/README.md), [src/so](../../src/so/README.md). Later: `node/src/`
-for the TypeScript, `tools/build/package/` for `npm_tarball`, `release/` for the npm set, and
+[third_party/node](../../third_party/node/README.md), [src/so](../../src/so/README.md), and `node/src/`
+for the TypeScript. Later: `tools/build/package/` for `npm_tarball`, `release/` for the npm set, and
 `.github/workflows/npm.yml`.

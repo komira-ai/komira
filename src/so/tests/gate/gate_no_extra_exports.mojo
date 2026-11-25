@@ -1,7 +1,7 @@
-# The dynamic symbol table defines exactly the twenty-four exports, and nothing else.
+# The dynamic symbol table defines exactly the twenty-five exports, and nothing else.
 #
 # A gate driver of //src/so:libkomira. It has no dependency. The
-# exports check proves the twenty-four names resolve; this proves no other name is
+# exports check proves the twenty-five names resolve; this proves no other name is
 # defined. On Linux it reads ./libkomira.so as an ELF64 file, walks the
 # SHT_DYNSYM section and lists every defined symbol: an `@export` the BUCK
 # `exports` list omits, a symbol of a static C dependency, or a linker marker
@@ -93,6 +93,7 @@ def _is_export(name: String) -> Bool:
         or name == "komira_run_progress"
         or name == "komira_sql_stream_run"
         or name == "komira_plan_stream"
+        or name == "komira_register_arrow_stream"
     )
 
 
@@ -115,8 +116,8 @@ def main() raises:
             else:
                 print("UNEXPECTED EXPORT: " + name)
                 extra += 1
-        if seen != 24:
-            raise Error("expected 24 defined exports, the symbol table has " + String(seen))
+        if seen != 25:
+            raise Error("expected 25 defined exports, the symbol table has " + String(seen))
     if extra != 0:
-        raise Error(String(extra) + " symbol(s) outside the twenty-four exports are defined")
+        raise Error(String(extra) + " symbol(s) outside the twenty-five exports are defined")
     print("ok")

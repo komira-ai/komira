@@ -4,7 +4,7 @@ import pyarrow.parquet as pq
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1008 is 1.8
+print(komira.abi_version())   # the engine's C ABI version: 1009 is 1.9
 
 # A small Parquet file to query: six days of weather in three cities.
 weather = pa.table({

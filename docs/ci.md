@@ -1247,7 +1247,7 @@ and make no network request; the live indexes are reached only by a run of this 
    the quickstart runs with `python -I` in a directory holding only the example (it writes its own Parquet
    file there, so no data file is passed): it must exit 0 and print what `python/examples/quickstart.expected`
    says, compared exactly, with `<version>` replaced by the version, `<abi_version>` by the ABI version of the
-   `--abi-table` file (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.8` is 1008) and `<cwd>` by the real
+   `--abi-table` file (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.9` is 1009) and `<cwd>` by the real
    path (symlinks resolved) of that directory, which the missing-file message names. A failed step names the command, its exit
    status and the last lines of its stderr.
 
