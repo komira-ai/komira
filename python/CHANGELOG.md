@@ -12,6 +12,14 @@ install page shows names it.
 
 ## Unreleased
 
+- **Group-by and aggregates in the pandas-shaped DataFrame.** `df.groupby(by, *, sort=True,
+  dropna=True)` gives a `komira.GroupBy` whose `agg(...)`, `sum`, `mean`, `median`, `std`, `var`,
+  `min`, `max`, `count`, `size` and `nunique` return a frame of the keys and one column per output,
+  sorted by the keys unless `sort=False`, with the rows of a missing key left out unless
+  `dropna=False`. `df.agg(...)` and the frame's `sum`, `mean`, `median`, `std`, `var`, `min`, `max`,
+  `count` and `nunique` give a one-row frame. A sum of nothing is 0, as in pandas.
+  `df.drop_duplicates()` keeps one of each set of equal rows, or with `keep=False` only the rows no
+  other row equals. Each builds an aggregate or distinct node of the plan, run with no SQL.
 - **The pandas-shaped DataFrame, first part.** `komira.read_parquet(path)`, `komira.read_csv(path, *,
   sep=",", header="infer")` and `komira.read_json(path, lines=True)` make a lazy `komira.DataFrame` of
   a file, its schema read now, on the session given as `session=` or the process's default session.
