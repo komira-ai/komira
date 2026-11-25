@@ -43,6 +43,7 @@ zig_test(
     imports = [
         "assert_remote/farm_retry.zig",
         "assert_remote/fixtures/build_cut.log",
+        "assert_remote/fixtures/build_cut_after_file_changes.log",
         "assert_remote/fixtures/build_cut_and_compile_error.log",
         "assert_remote/fixtures/build_failed_unknown_target.log",
         "assert_remote/fixtures/build_remote.log",

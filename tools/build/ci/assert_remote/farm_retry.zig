@@ -43,7 +43,9 @@
 //!   * no test timed out, was fatal, failed for the infrastructure or failed
 //!     to list (a block of that kind, or a nonzero count on `Tests finished:`);
 //!   * every line outside a block is one buck2 prints around such a run:
-//!     its progress and summary lines, `BUILD FAILED`, a `Failed to build`
+//!     its progress and summary lines, the files its daemon saw change
+//!     (`File changed: <path>`, `<N> additional file change events`),
+//!     `BUILD FAILED`, a `Failed to build`
 //!     line naming a target that has an `Action failed:` block, the test
 //!     counts. Any other line (an analysis error, a bxl script's error, a line
 //!     of a shape not seen before) is a failure that is not a cut.
@@ -137,8 +139,25 @@ fn progressOrSummary(c: []const u8) bool {
             if (at < 40 and std.mem.indexOfScalar(u8, c[0..at], ' ') == null) return true;
         }
     }
+    if (fileChanges(c)) return true;
     // A warning buck2 prints while it builds a target with no outputs.
     return std.mem.startsWith(u8, c, "Target ") and std.mem.endsWith(u8, c, " does not have any outputs. This means the rule did not define any outputs. See https://buck2.build/docs/users/faq/common_issues/#why-does-my-target-not-have-any-outputs for more information");
+}
+
+/// The lines buck2 prints at the start of a command when its daemon saw files
+/// change since the last one (fixtures/build_cut_after_file_changes.log, after
+/// a step that wrote the packages' mopm.toml): `File changed: <path>` for the
+/// first few, then `<N> additional file change events`. The path is one word:
+/// a line with more after it is not this one.
+fn fileChanges(c: []const u8) bool {
+    const changed = "File changed: ";
+    if (std.mem.startsWith(u8, c, changed)) {
+        const path = c[changed.len..];
+        return path.len > 0 and std.mem.indexOfScalar(u8, path, ' ') == null;
+    }
+    var end: usize = 0;
+    while (end < c.len and std.ascii.isDigit(c[end])) end += 1;
+    return end > 0 and std.mem.eql(u8, c[end..], " additional file change events");
 }
 
 /// buck2's verdict on a build or bxl run, unstamped.

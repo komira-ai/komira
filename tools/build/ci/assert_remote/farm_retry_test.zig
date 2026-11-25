@@ -6,15 +6,19 @@
 //! The logs in fixtures/ are recorded buck2 output, excerpts of failed runs on
 //! the farm: build_cut.log (a build whose every failure was a cut, whole but
 //! for its progress lines), build_cut_and_compile_error.log (a build with a
-//! compile error and cuts: the first of each, the run's summary and its end)
-//! and test_failed.log (a test run with one failed test). A log buck2 printed
-//! in another run (a cut beside a test failure, a line quoting the phrase) is
-//! a recorded one with lines added or changed, in the case.
+//! compile error and cuts: the first of each, the run's summary and its end),
+//! test_failed.log (a test run with one failed test) and
+//! build_cut_after_file_changes.log (a build whose every failure was a cut,
+//! started after a step had written files the daemon saw change: its progress
+//! and warning lines cut to two each, the action digests zeroed). A log buck2
+//! printed in another run (a cut beside a test failure, a line quoting the
+//! phrase) is a recorded one with lines added or changed, in the case.
 const std = @import("std");
 const fr = @import("farm_retry.zig");
 const t = std.testing;
 
 const build_cut = @embedFile("fixtures/build_cut.log");
+const build_cut_after_file_changes = @embedFile("fixtures/build_cut_after_file_changes.log");
 const build_mixed = @embedFile("fixtures/build_cut_and_compile_error.log");
 const test_failed = @embedFile("fixtures/test_failed.log");
 const build_unknown_target = @embedFile("fixtures/build_failed_unknown_target.log");
@@ -100,6 +104,22 @@ test "CRLF line ends read the same" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     try expectCut(try std.mem.replaceOwned(u8, arena.allocator(), build_cut, "\n", "\r\n"), 4);
+}
+
+test "a recorded cut build that starts with buck2's changed-file lines is a cut" {
+    // thirteen actions in flight, each printed once as it failed and once under BUILD ERRORS
+    try expectCut(build_cut_after_file_changes, 26);
+}
+
+/// The changed-file lines buck2 printed before the run of fixtures/build_cut_after_file_changes.log.
+const file_changes =
+    "[2026-11-25T00:07:53.435+00:00] File changed: komira//src/anomaly/mopm.toml\n" ++
+    "[2026-11-25T00:07:53.435+00:00] 415 additional file change events\n";
+
+test "buck2's changed-file lines beside the cut are not errors" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try expectCut(try edit(arena.allocator(), build_cut, "[2026-11-21T16:23:14.887+00:00] RE Session", file_changes ++ "[2026-11-21T16:23:14.887+00:00] RE Session"), 4);
 }
 
 test "a test run whose only failure is a cut build of a test is a cut" {
@@ -193,6 +213,28 @@ test "an error outside every block is final, though every block is a cut" {
     const other = "[2026-11-21T15:40:34.803+00:00] Error: (Failed to make BatchReadBlobs request: code: 'The operation was cancelled', message: \"operation was canceled\")";
     const log = try edit(arena.allocator(), build_cut, "[2026-11-21T16:48:35.702+00:00] Cache hits", other ++ "\n[2026-11-21T16:48:35.702+00:00] Cache hits");
     try expectFinal(log, .unexplained, other);
+}
+
+test "a compile error after buck2's changed-file lines is final: the lines excuse no failure" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try expectFinal(try edit(arena.allocator(), build_mixed, compile_error, file_changes ++ compile_error), .failure, compile_error);
+}
+
+test "a line only shaped like buck2's changed-file lines is final" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const at = "[2026-11-21T16:23:14.887+00:00] RE Session";
+    inline for ([_][]const u8{
+        "[2026-11-25T00:07:53.435+00:00] File changed: ",
+        "[2026-11-25T00:07:53.435+00:00] File changed: komira//src/a/mopm.toml Error: boom",
+        "[2026-11-25T00:07:53.435+00:00] additional file change events",
+        "[2026-11-25T00:07:53.435+00:00] 415 additional file change events, and an error",
+        "[2026-11-25T00:07:53.435+00:00] x415 additional file change events",
+        "File changed: komira//src/anomaly/mopm.toml",
+    }) |line| {
+        try expectFinal(try edit(arena.allocator(), build_cut, at, line ++ "\n" ++ at), .unexplained, line);
+    }
 }
 
 test "a bare cut line outside every block is not a block: the log is final" {
