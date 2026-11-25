@@ -22,7 +22,10 @@
 #   * test_refusals_name_their_step: garbage bytes and an envelope with a
 #     write target (`PLAN_WIRE_WRITE_TARGET_DROPPED`) are refused at
 #     `decode`; a plan whose file was removed after it was built is refused at
-#     `lower`, naming the file; after each the session runs a good plan.
+#     `lower`, naming the file; after each the session runs a good plan. Each
+#     refusal is the session's last error, word for word, with its step
+#     (`KOMIRA_STEP_NONE` at `decode`, `KOMIRA_STEP_LOWER` at `lower`) and
+#     its code (`PLAN_WIRE_WRITE_TARGET_DROPPED` for the write envelope).
 from std.os import remove
 from std.testing import TestSuite, assert_equal, assert_true
 
@@ -43,7 +46,15 @@ from runtime_paths import test_tmpdir
 from sdk_exec.arrow_result import ArrowResult
 from sql.sql_frontend import plan_from_sql
 
-from so import STEP_DECODE, Session, plan_result, register_parquet, sql_result
+from so import (
+    KOMIRA_STEP_LOWER,
+    KOMIRA_STEP_NONE,
+    STEP_DECODE,
+    Session,
+    plan_result,
+    register_parquet,
+    sql_result,
+)
 
 comptime PARQUET = "src/so/tests/fixtures/two_columns.parquet"
 
@@ -201,6 +212,8 @@ def test_refusals_name_their_step() raises:
     garbage.append(UInt8(0x00))
     var decode = _message_of(s, garbage^)
     assert_true(decode.startswith("decode: "), "garbage bytes read: " + decode)
+    assert_equal(s.last_error(), decode)
+    assert_equal(s.last_error_step(), KOMIRA_STEP_NONE)
 
     var plan = plan_from_sql(
         String("select k from gone"), authoring.engine.catalog, authoring.engine.footers
@@ -218,6 +231,9 @@ def test_refusals_name_their_step() raises:
         ),
         "a write envelope reads: " + dropped,
     )
+    assert_equal(s.last_error(), dropped)
+    assert_equal(s.last_error_step(), KOMIRA_STEP_NONE)
+    assert_equal(s.last_error_code(), String(PLAN_WIRE_WRITE_TARGET_DROPPED))
 
     # The session runs a good plan after each refusal.
     assert_equal(len(_int64_rows(plan_result(s, good.copy()))), 3)
@@ -226,6 +242,8 @@ def test_refusals_name_their_step() raises:
     var lower = _message_of(s, good^)
     assert_true(lower.startswith("lower: "), "a removed file reads: " + lower)
     assert_true("plan_removed.parquet" in lower, "the refusal does not name the file: " + lower)
+    assert_equal(s.last_error(), lower)
+    assert_equal(s.last_error_step(), KOMIRA_STEP_LOWER)
     assert_equal(s.engine.statements_parsed, 0)
 
 

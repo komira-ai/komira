@@ -5,15 +5,24 @@
 # progress at done == total, total above 0; under a cancelled control it
 # raises exactly `QUERY_CANCELLED: execute: pipeline_exec: the query was
 # cancelled: the caller cancelled the run`, which is_cancelled_error accepts,
-# and the session answers the next query; a bind refusal under a cancelled
-# control keeps its own `bind: ` text, which is_cancelled_error refuses;
+# and the session records it with step execute and code QUERY_CANCELLED, and
+# answers the next query; a bind refusal under a cancelled control keeps its
+# own `bind: ` text, step bind and code SQL_BIND_ERROR, which
+# is_cancelled_error refuses;
 # is_cancelled_error accepts only the `QUERY_CANCELLED: ` prefix (not the
 # word without its colon and space, not the engine's cancelled text without
 # the word, not the word later in the text).
 from std.testing import assert_equal, assert_false, assert_true
 
 from sdk_exec.run_control import RunControl
-from so import QUERY_CANCELLED, Session, is_cancelled_error, sql_result
+from so import (
+    KOMIRA_STEP_BIND,
+    KOMIRA_STEP_EXECUTE,
+    QUERY_CANCELLED,
+    Session,
+    is_cancelled_error,
+    sql_result,
+)
 
 comptime _CANCELLED = (
     "QUERY_CANCELLED: execute: pipeline_exec: the query was cancelled: the"
@@ -49,6 +58,9 @@ def test_a_cancelled_control_raises_the_named_error() raises:
     assert_equal(message, String(_CANCELLED))
     assert_true(is_cancelled_error(message))
     assert_equal(control.snapshot().done, 0)
+    assert_equal(s.last_error(), String(_CANCELLED))
+    assert_equal(s.last_error_step(), KOMIRA_STEP_EXECUTE)
+    assert_equal(s.last_error_code(), String("QUERY_CANCELLED"))
     # The session answers the next query.
     var result = sql_result(s, String("select 1 as n"))
     assert_equal(result.batches[0].num_rows(), 1)
@@ -61,6 +73,8 @@ def test_a_bind_refusal_keeps_its_own_text() raises:
     var message = _message_of(s, String("select * from nosuch"), control)
     assert_true(message.startswith("bind: "), message)
     assert_false(is_cancelled_error(message))
+    assert_equal(s.last_error_step(), KOMIRA_STEP_BIND)
+    assert_equal(s.last_error_code(), String("SQL_BIND_ERROR"))
 
 
 def test_is_cancelled_error_reads_only_the_prefix() raises:

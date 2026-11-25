@@ -55,9 +55,11 @@ def main(args):
             else:
                 os.environ["HOME"] = home
 
-        # A file the engine cannot read: its message, status -3.
+        # A file the engine cannot read: its message, status -3, a BindError
+        # at the bind step with no code.
         e = raised(lambda: s.register_parquet("gone", "no_such_file.parquet"))
-        assert type(e) is KomiraError and e.status == -3 and str(e), repr(e)
+        assert type(e) is komira.BindError and e.status == -3 and str(e), repr(e)
+        assert (e.step, e.code) == ("bind", None), (e.step, e.code)
         assert str(e) == _native.load().last_error(s._ctx), str(e)
 
         # Arguments are checked before the library is called.

@@ -13,7 +13,7 @@ in this repository ([third_party/node](../third_party/node/README.md)).
 | call | does |
 |---|---|
 | `load(path)` | opens `libkomira` from `path` with `dlopen`, requires `komira_abi_version()` to have major 1, and resolves the functions below. A second `load` of the same path does nothing; of another path is an error |
-| `abiVersion()` | `komira_abi_version()`: `major * 1000 + minor`, 1007 for ABI 1.7 |
+| `abiVersion()` | `komira_abi_version()`: `major * 1000 + minor`, 1008 for ABI 1.8 |
 | `newSession()` | `komira_ctx_new()`, as an N-API external (a handle that is not a number or an object) |
 | `freeSession(session)` | `komira_ctx_free()`, after the calls made before it (below). A Promise of `undefined`. Idempotent: a later call settles with the first |
 | `registerParquet(session, name, path)` | `komira_register_parquet`. A Promise of `undefined` |

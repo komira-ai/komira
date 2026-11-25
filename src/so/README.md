@@ -48,6 +48,9 @@ void    *komira_ctx_new_with_options(int64_t worker_count,
 void     komira_ctx_free(void *ctx);
 int32_t  komira_last_error(void *ctx, uint8_t *out_buf, uint64_t out_cap,
                            uint64_t *out_len);
+int32_t  komira_last_error_code(void *ctx, uint8_t *out_buf,
+                                uint64_t out_cap, uint64_t *out_len);
+int32_t  komira_last_error_step(void *ctx);
 int32_t  komira_register_parquet(void *ctx, const char *name,
                                  const char *path);
 int32_t  komira_parquet_schema(void *ctx, const char *path, uint8_t *out_buf,
@@ -136,7 +139,7 @@ from so import ABI_MAJOR, ABI_MINOR, abi_version
 from std.testing import assert_equal
 
 assert_equal(abi_version(), ABI_MAJOR * 1000 + ABI_MINOR)
-assert_equal(abi_version(), Int32(1007))
+assert_equal(abi_version(), Int32(1008))
 ```
 
 **The handle.** `komira_ctx_new` returns a context the caller owns until it
@@ -145,7 +148,7 @@ start (the host probe or the start of its workers fails); with no context
 there is no last error, so the engine's message is not available. A handle is not safe to use from two threads at
 once, freeing one twice or using it after the free is undefined (as for
 `free(3)`), and `komira_ctx_free(NULL)` does nothing. A context holds a
-`Session`: the text of the last error, empty on a fresh one, and an engine
+`Session`: the last error (its text, its step and its code, all empty or `KOMIRA_STEP_NONE` on a fresh one), and an engine
 (`sdk_exec`'s `EngineContext`) whose catalog holds the tables registered by
 name. The engine's workers (the host's compute thread count) start in
 `komira_ctx_new` and stop in `komira_ctx_free`.
@@ -167,7 +170,15 @@ aggregation sink of segment <n> was denied <bytes> bytes of the segment's memory
 
 ```mojo
 from sdk_exec.engine_options import EngineOptions
-from so import Session, session_options, try_new_session
+from so import (
+    KOMIRA_STEP_BIND,
+    KOMIRA_STEP_NONE,
+    Session,
+    error_code,
+    session_options,
+    step_number,
+    try_new_session,
+)
 from std.testing import assert_equal, assert_false, assert_true
 
 var session = Session()
@@ -175,8 +186,17 @@ assert_false(session.has_error())
 session.set_error(String("the file does not exist"))
 assert_true(session.has_error())
 assert_equal(session.last_error(), String("the file does not exist"))
+assert_equal(session.last_error_step(), KOMIRA_STEP_NONE)
 session.clear_error()
 assert_equal(session.last_error(), String(""))
+# An engine refusal keeps its step and code beside its text.
+session.set_refusal(String("bind"), String("SQL bind error: unknown table 't'"))
+assert_equal(session.last_error(), String("bind: SQL bind error: unknown table 't'"))
+assert_equal(session.last_error_step(), KOMIRA_STEP_BIND)
+assert_equal(session.last_error_code(), String("SQL_BIND_ERROR"))
+assert_equal(step_number(String("bind")), KOMIRA_STEP_BIND)
+assert_equal(error_code(String("ERR: x")), String(""))
+session.clear_error()
 # The engine started with the host's own worker count and holds no table yet.
 assert_true(session.engine.host_profile.thread_count >= 1)
 assert_false(session.engine.catalog.has("t"))
@@ -219,6 +239,36 @@ buffer. A NULL `ctx` is checked first (-1); then a NULL `out_len` (-2); a NULL
 a NULL argument on a live context stores its refusal as that context's last
 error; a too-small buffer stores nothing, so the text a probe measured is the
 text the next call returns.
+
+**`komira_last_error_code` and `komira_last_error_step`.** The text of an
+error is also read as a code and a step, so a caller need not parse it.
+`komira_last_error_code` copies the code, UTF-8 and not NUL-terminated, by the
+same two-call protocol and with the same NULL rules as `komira_last_error` (a
+NULL `ctx` is -1, a NULL `out_len` is -2, a NULL `out_buf` is -2 only when there
+are bytes to write, a short buffer is -4 with the length stored). The code is
+the empty text when the error has none or there is no error; it does not clear
+the error. `komira_last_error_step` returns one of `KOMIRA_STEP_NONE` (0),
+`KOMIRA_STEP_PARSE` (1), `KOMIRA_STEP_BIND` (2), `KOMIRA_STEP_OPTIMIZE` (3),
+`KOMIRA_STEP_LOWER` (4) and `KOMIRA_STEP_EXECUTE` (5); it is `KOMIRA_STEP_NONE`
+for a NULL `ctx`, when no error is held and for an error with no step, and it
+never fails or clears.
+
+The step of an error: an engine refusal of `komira_sql_stream` has the step
+that refused, and so does one of `komira_plan_stream` at `optimize`, `lower`
+or `execute` (one at `decode` has `KOMIRA_STEP_NONE`, as `decode` is no step
+of the SQL pipeline); a `KOMIRA_ERR_ENGINE` of `komira_register_parquet`,
+`komira_parquet_schema`, `komira_csv_binding`, `komira_json_binding` or a
+credential call has `KOMIRA_STEP_BIND`; every other error (a NULL argument, a
+too-long input, a text that is not UTF-8 for `komira_sql_stream`, a column the
+stream cannot carry, `komira_plan_render`) has `KOMIRA_STEP_NONE`. The code is
+computed from the reason by `error_code` (`session.mojo`): `SQL syntax error: `
+is `SQL_SYNTAX_ERROR`, `SQL bind error: ` is `SQL_BIND_ERROR`, `SQL not
+supported: ` is `SQL_NOT_SUPPORTED`; any other reason that starts with an
+upper-case word of two or more underscore-joined parts and `: `
+(`LOWERING_WINDOW_UNSERVED: ...`) has that word; every other reason has no code.
+For a `komira_sql_stream` or `komira_plan_stream` refusal the reason is the
+text after `<step>: `, so an envelope with a write target has the code
+`PLAN_WIRE_WRITE_TARGET_DROPPED`.
 
 **Sources and render.** Each call below takes the context first and returns a
 status code; on `KOMIRA_ERR_ENGINE` the context's last error holds the engine's
@@ -297,7 +347,8 @@ returns.
   `<step>: <reason>`, the step that refused (`parse`, `bind`, `optimize`,
   `lower` or `execute`) and its own message; a result column the stream cannot
   carry is refused by name before `*out` is written. The context answers the
-  next call after any refusal.
+  next call after any refusal. The refusal's step and code are read with
+`komira_last_error_step` and `komira_last_error_code`.
 
 `sql_result` is the call on values: SQL text in, the answer's batches and
 schema out (an `sdk_exec` `ArrowResult`, every batch checked to cross the
@@ -337,15 +388,17 @@ the plan needs no table registered on the session.
   a version it does not speak, and an envelope that carries a write target or
   UDFs, `PLAN_WIRE_WRITE_TARGET_DROPPED` and `PLAN_WIRE_UDFS_DROPPED`), then
   `optimize`, `lower` or `execute`. The context answers the next call after any
-  refusal.
+  refusal. The refusal's step and code are read with `komira_last_error_step`
+  and `komira_last_error_code`.
 
 `plan_result` is the call on values: the plan's bytes in, an `ArrowResult` out,
-or a raise with the `<step>: <reason>` text. The route from the optimizer down
+or a raise with the `<step>: <reason>` text, which it records on the session
+as the last error with its step and code. The route from the optimizer down
 is `sdk_exec.engine_plan.run_plan`, the one `run_sql` takes after it binds.
 
 ```mojo
-from so import STEP_DECODE, Session, plan_result
-from std.testing import assert_true
+from so import KOMIRA_STEP_NONE, STEP_DECODE, Session, plan_result
+from std.testing import assert_equal, assert_true
 
 var session = Session()
 var not_a_plan = List[UInt8]()
@@ -357,6 +410,8 @@ try:
 except e:
     refused = String(e)
 assert_true(refused.startswith(String(STEP_DECODE) + ": "))
+assert_equal(session.last_error(), refused)
+assert_equal(session.last_error_step(), KOMIRA_STEP_NONE)
 ```
 
 **Cancel and progress.** A run handle is a cancel token and a progress
@@ -495,11 +550,14 @@ length of that one call.
 ```
 
 The library is published only if the gate passes: the exports check, then
-sixteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
-foreign host would. Seven cover the skeleton: the version (1007, which is 1.7),
+seventeen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
+foreign host would. Seven cover the skeleton: the version (1008, which is 1.8),
 create and free (distinct handles, separate sessions), no symbol beyond the
-twenty-two, a fresh session's empty error, the two-call protocol (zero capacity, one
-byte short, exact, larger), a NULL context, and a NULL `out_len`. One driver per
+twenty-four, a fresh session's empty error, the two-call protocol (zero capacity, one
+byte short, exact, larger), a NULL context, and a NULL `out_len`. `gate_error_code_step`
+checks that `komira_last_error_code` and `komira_last_error_step` exist and, on a
+fresh session, give an empty code and step 0, and that a NULL context is -1 and
+step 0. One driver per
 new call writes its input file under `$TEST_TMPDIR` and checks a good input,
 NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
 with the message as the last error) and, for the four calls with an output, the
@@ -512,12 +570,12 @@ CSV driver once for each dialect argument), and check a taken name (in any
 case, and taken by the other call) and an empty one word for word, the NULL
 cases, a missing and an empty file and a path that is not UTF-8, and that a
 refused name stays free.
-`exports_exact` makes the twenty-two names above the whole dynamic symbol table.
+`exports_exact` makes the twenty-four names above the whole dynamic symbol table.
 On Linux the eleven C owners in the library's closure (async, async_api,
 compression, crypto, fs, http_core, libc, metrics, objectstore, parquet_codec,
 scan_source) are linked as their own shared libraries (`native_owners`), not
 embedded; on macOS arm64 there are none, and the C archives are linked
-statically into `libkomira.dylib`. On Linux the sixteenth driver, `gate_native_owners`,
+statically into `libkomira.dylib`. On Linux the seventeenth driver, `gate_native_owners`,
 reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
 the SONAME of each of the eleven (`libkomira_<owner>_native.so.1`); an owner
 dropped from `native_owners` leaves its C embedded, and that driver fails.
@@ -661,7 +719,7 @@ the extra `$ORIGIN/../../lib` finds the one `lib/` of the variants directory fro
 
 ## The header and the golden
 
-`abi/komira.tsv` is the golden of the ABI: the version (1.7), one row per export
+`abi/komira.tsv` is the golden of the ABI: the version (1.8), one row per export
 with its return type, argument types and the version that added it, and one row
 per status code, limit and credential kind, field and scope (`constant`). `komira_abi_golden` checks it on every
 build against the `@export abi("C")` functions of `_c_abi.mojo` (names, return and
@@ -685,12 +743,16 @@ headers. The golden does not check that its version was raised when
 a row changed: that compares with the previous release.
 
 `tests/c/abi_driver.c` is a C program that includes `komira.h` and nothing of
-ours. It opens `./libkomira.so`, binds each of the twenty-two functions to a pointer
+ours. It opens `./libkomira.so`, binds each of the twenty-four functions to a pointer
 declared with the header's own prototype, and checks the version in the header
 against `komira_abi_version()`, the status codes, the input bound
 (`KOMIRA_MAX_INPUT_BYTES` plus one is -5), and the last-error round trip (NULL
 context, NULL `out_len`, an engine refusal, a buffer one byte short, an exact
-buffer), and defines a credential with the header's constants, where one sealed
+buffer), the last error's step and code (`komira_last_error_step`,
+`komira_last_error_code`) after a parse error, a bind refusal, an execute
+refusal, a refusal with no code, a missing Parquet file (step bind, no code), a
+text that is not UTF-8 (step none) and a success, with the two-call protocol and
+the NULL rules of the code call, and defines a credential with the header's constants, where one sealed
 without its secret is -3 with the named error. It runs SQL through
 `komira_sql_stream` and reads each answer through the header's structs as an
 Arrow consumer does (the schema, every chunk, the stream released before its

@@ -19,7 +19,8 @@ error. Nothing here holds a pointer.
 - `sql_result`: one SQL statement run on a session's engine, its answer as
   batches checked to cross the Arrow C Stream Interface; in its second form,
   under a caller's `RunControl`, whose cancel refuses the run with the named
-  error `QUERY_CANCELLED` (`is_cancelled_error`).
+  error `QUERY_CANCELLED` (`is_cancelled_error`). A refusal is
+  recorded on the session as its last error, with the step and the code.
 - `plan_result`: a serialized plan (a `WirePlanEnvelope`) decoded and run on
   a session's engine, with no SQL text anywhere on the way, its answer as
   `sql_result`'s is.
@@ -41,7 +42,7 @@ from sdk_exec.run_control import RunControl
 from sql.sql_ast import TvfOptions
 from sql.sql_tvf_bind import csv_tvf_schema, json_tvf_schema
 
-from .session import Session
+from .session import Session, step_number
 
 comptime QUERY_CANCELLED = "QUERY_CANCELLED"
 """The named error of a run its `RunControl` cancelled: `sql_result` raises
@@ -227,7 +228,8 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
     session, which may be dropped first.
 
     Raises:
-        Error `<step>: <reason>` when `run_sql` refuses, where `<step>` is the
+        Error `<step>: <reason>` when `run_sql` refuses (the session records
+        it too, with its step and code: `Session.set_refusal`), where `<step>` is the
         step that refused (`parse`, `bind`, `optimize`, `lower` or
         `execute`) and `<reason>` its own message, unchanged; and the export
         check's error naming the column when a result column cannot cross the
@@ -253,10 +255,16 @@ def sql_result(
     var outcome = run_sql(session.engine, sql, control)
     if outcome.refusal:
         ref refusal = outcome.refusal.value()
-        var text = refusal.step + ": " + refusal.reason
         if refusal.step == String(STEP_EXECUTE) and control.is_cancelled():
-            raise Error(String(QUERY_CANCELLED) + ": " + text)
-        raise Error(text)
+            # The cancel's name leads the text, so `error_code` reads it as
+            # the code; the step stays `execute`.
+            session.set_error(
+                String(QUERY_CANCELLED) + ": " + refusal.step + ": " + refusal.reason,
+                step_number(refusal.step),
+            )
+        else:
+            session.set_refusal(refusal.step, refusal.reason.copy())
+        raise Error(session.last_error())
     return arrow_result(outcome^)
 
 
@@ -285,16 +293,25 @@ def plan_result(mut session: Session, var plan_bytes: List[UInt8]) raises -> Arr
         write target, `PLAN_WIRE_WRITE_TARGET_DROPPED`, or UDFs,
         `PLAN_WIRE_UDFS_DROPPED`), and otherwise the step of `run_plan` that
         refused (`optimize`, `lower` or `execute`); `<reason>` is that step's
-        own message, unchanged. And the export check's error naming the
-        column when a result column cannot cross the stream (`arrow_result`).
+        own message, unchanged. The session records the refusal too
+        (`Session.set_refusal`): its step is `step_number(<step>)`, which is
+        `KOMIRA_STEP_NONE` for `decode`, and its code `error_code(<reason>)`.
+        And the export check's error naming the column when a result column
+        cannot cross the stream (`arrow_result`), which the session does not
+        record.
     """
     var plan: LogicalPlan
     try:
         plan = plan_from_bytes(plan_bytes^)
     except e:
-        raise Error(String(STEP_DECODE) + ": " + String(e))
+        # `decode` is no `KOMIRA_STEP_*` step: `step_number` gives it
+        # `KOMIRA_STEP_NONE`, and the code is the decoder's
+        # (`PLAN_WIRE_WRITE_TARGET_DROPPED`).
+        session.set_refusal(String(STEP_DECODE), String(e))
+        raise Error(session.last_error())
     var outcome = run_plan(session.engine, plan^)
     if outcome.refusal:
         ref refusal = outcome.refusal.value()
-        raise Error(refusal.step + ": " + refusal.reason)
+        session.set_refusal(refusal.step, refusal.reason.copy())
+        raise Error(session.last_error())
     return arrow_result(outcome^)

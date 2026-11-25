@@ -1,14 +1,17 @@
 /* The plan cases of komira_plan_stream, part of the C driver abi_driver.c.
  *
  * abi_driver.c includes this file once, after its own helpers (CHECK, the
- * bound function pointers, struct answer, read_answer, last_error_text and
- * starts_with), and calls plan_stream_cases() from main. It is a header only
+ * bound function pointers, struct answer, read_answer, last_error_text,
+ * expect_error_step_code and starts_with), and calls plan_stream_cases() from main. It is a header only
  * in name: it holds the definitions, and nothing else includes it.
  *
  * The driver encodes a WirePlanEnvelope by hand (src/plan_proto/plan.proto),
  * a scan of a Parquet file whose schema is the bytes komira_parquet_schema
  * answers, runs it on a context with no table registered, and holds the
- * answer to what komira_sql_stream answers for the same file. */
+ * answer to what komira_sql_stream answers for the same file. Each refusal's
+ * step (komira_last_error_step) is held too: KOMIRA_STEP_LOWER for a plan
+ * refused at lower, KOMIRA_STEP_NONE for one refused at decode or for its
+ * arguments; a plan that answers leaves no step and no code. */
 #ifndef KOMIRA_ABI_DRIVER_PLAN_CASES_H
 #define KOMIRA_ABI_DRIVER_PLAN_CASES_H
 
@@ -120,7 +123,7 @@ static int same_answer(const struct answer *a, const struct answer *b) {
    starts with it. Then the good plan `good` on the same context answers
    `expect`. */
 static void expect_plan_refused(komira_handle ctx, const uint8_t *plan, uint64_t len, int32_t want,
-                                const char *error, int exact, const struct buf *good,
+                                const char *error, int exact, int32_t step, const struct buf *good,
                                 const struct answer *expect) {
     struct ArrowArrayStream out, before;
     memset(&out, 0xAB, sizeof out);
@@ -134,9 +137,14 @@ static void expect_plan_refused(komira_handle ctx, const uint8_t *plan, uint64_t
     int ok = exact ? strcmp(got, error) == 0 : starts_with(got, error);
     if (!ok) fprintf(stderr, "FAIL: last error '%s', want '%s'%s\n", got, error, exact ? "" : "...");
     CHECK(ok);
+    int32_t got_step = p_komira_last_error_step(ctx);
+    if (got_step != step) fprintf(stderr, "FAIL: last error step %d, want %d\n", got_step, step);
+    CHECK(got_step == step);
     struct answer a;
     CHECK(p_komira_plan_stream(ctx, good->p, good->n, &out) == KOMIRA_OK);
     CHECK(read_answer(&out, &a) == 0 && same_answer(&a, expect));
+    /* A plan that answers clears the error, its step and its code. */
+    expect_error_step_code(ctx, KOMIRA_STEP_NONE, "");
 }
 
 /* The plan cases of komira_plan_stream. */
@@ -206,14 +214,14 @@ static void plan_stream_cases(void) {
        runs the plan again. Bytes that are SQL text are not a plan. */
     static const char select1[] = "SELECT 1 AS n";
     static const uint8_t garbage[3] = {0xFF, 0x00, 0x01};
-    expect_plan_refused(ctx, (const uint8_t *)select1, sizeof select1 - 1, KOMIRA_ERR_ENGINE, "decode: ", 0,
+    expect_plan_refused(ctx, (const uint8_t *)select1, sizeof select1 - 1, KOMIRA_ERR_ENGINE, "decode: ", 0, KOMIRA_STEP_NONE,
                         &plan, &by_sql);
-    expect_plan_refused(ctx, garbage, sizeof garbage, KOMIRA_ERR_ENGINE, "decode: ", 0, &plan, &by_sql);
+    expect_plan_refused(ctx, garbage, sizeof garbage, KOMIRA_ERR_ENGINE, "decode: ", 0, KOMIRA_STEP_NONE, &plan, &by_sql);
     {
         /* A version this build does not speak. */
         struct buf v3 = {0};
         scan_envelope(&v3, 3, parquet, schema.p, schema.n);
-        expect_plan_refused(ctx, v3.p, v3.n, KOMIRA_ERR_ENGINE, "decode: ", 0, &plan, &by_sql);
+        expect_plan_refused(ctx, v3.p, v3.n, KOMIRA_ERR_ENGINE, "decode: ", 0, KOMIRA_STEP_NONE, &plan, &by_sql);
         free(v3.p);
     }
     {
@@ -224,10 +232,10 @@ static void plan_stream_cases(void) {
         scan_envelope(&gone, 4, missing, schema.p, schema.n);
         CHECK(p_komira_plan_stream(ctx, gone.p, gone.n, &out) == KOMIRA_ERR_ENGINE);
         CHECK(strstr(last_error_text(ctx, text, sizeof text), "plan_missing.parquet") != NULL);
-        expect_plan_refused(ctx, gone.p, gone.n, KOMIRA_ERR_ENGINE, "lower: ", 0, &plan, &by_sql);
+        expect_plan_refused(ctx, gone.p, gone.n, KOMIRA_ERR_ENGINE, "lower: ", 0, KOMIRA_STEP_LOWER, &plan, &by_sql);
         free(gone.p);
     }
-    expect_plan_refused(ctx, NULL, plan.n, KOMIRA_ERR_NULL_ARG, "komira_plan_stream: plan or out is NULL", 1,
+    expect_plan_refused(ctx, NULL, plan.n, KOMIRA_ERR_NULL_ARG, "komira_plan_stream: plan or out is NULL", 1, KOMIRA_STEP_NONE,
                         &plan, &by_sql);
     {
         char msg[128];
@@ -235,9 +243,9 @@ static void plan_stream_cases(void) {
                  (unsigned long long)KOMIRA_MAX_INPUT_BYTES);
         /* The pointer is a 3-byte buffer: a length past the bound is refused
            before any byte is read. */
-        expect_plan_refused(ctx, garbage, (uint64_t)KOMIRA_MAX_INPUT_BYTES + 1, KOMIRA_ERR_TOO_LARGE, msg, 1, &plan,
+        expect_plan_refused(ctx, garbage, (uint64_t)KOMIRA_MAX_INPUT_BYTES + 1, KOMIRA_ERR_TOO_LARGE, msg, 1, KOMIRA_STEP_NONE, &plan,
                             &by_sql);
-        expect_plan_refused(ctx, garbage, UINT64_MAX, KOMIRA_ERR_TOO_LARGE, msg, 1, &plan, &by_sql);
+        expect_plan_refused(ctx, garbage, UINT64_MAX, KOMIRA_ERR_TOO_LARGE, msg, 1, KOMIRA_STEP_NONE, &plan, &by_sql);
     }
     {
         /* Exactly the bound is read: being garbage, it is the decoder's -3. */
@@ -245,7 +253,7 @@ static void plan_stream_cases(void) {
         CHECK(big != NULL);
         if (big != NULL) {
             memset(big, 0xFF, (size_t)KOMIRA_MAX_INPUT_BYTES);
-            expect_plan_refused(ctx, big, (uint64_t)KOMIRA_MAX_INPUT_BYTES, KOMIRA_ERR_ENGINE, "decode: ", 0, &plan,
+            expect_plan_refused(ctx, big, (uint64_t)KOMIRA_MAX_INPUT_BYTES, KOMIRA_ERR_ENGINE, "decode: ", 0, KOMIRA_STEP_NONE, &plan,
                                 &by_sql);
             free(big);
         }
