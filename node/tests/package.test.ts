@@ -6,6 +6,7 @@
 // that no real /proc/cpuinfo is read.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -20,7 +21,11 @@ setHost(LINUX_X64);
 const PARQUET = fixture("two_columns.parquet");
 
 test("the first call loads libkomira from the platform package's native directory", () => {
-  assert.equal(abiVersion(), 1002);
+  // The ABI golden's `version` line (src/so/abi/komira.tsv), major * 1000 + minor.
+  const line = readFileSync(fixture("komira.tsv"), "utf8").split("\n")[0] as string;
+  const match = /^version\t(\d+)\.(\d+)$/.exec(line);
+  assert.ok(match, line);
+  assert.equal(abiVersion(), Number(match[1]) * 1000 + Number(match[2]));
   const native = load();
   assert.deepEqual([native.addonFile, native.dir, native.library], [
     path.join(PLATFORM_DIR, "komira_addon.node"),

@@ -1,4 +1,5 @@
 <version>
 <abi_version>
-registered readings
+[{'n': 1}]
+[{'n': 5, 'total': 152.5}]
 True

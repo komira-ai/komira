@@ -179,7 +179,11 @@ export_file(
 export_file(
     name = "pyarrow_multi_dict_page.parquet",
     src = "tests/fixtures/parquet/pyarrow_multi_dict_page.parquet",
-    visibility = ["//src/parquet:"],
+    # python/tests: the GROUP BY of the Python package's sql_test.
+    visibility = [
+        "//python/tests:",
+        "//src/parquet:",
+    ],
 )
 export_file(
     name = "pyarrow_page_crc_zstd_v2.parquet",

@@ -4,8 +4,9 @@ komira is a SQL query engine that runs in your process. This package is its
 Python binding: it carries `libkomira`, the engine as one shared library, and
 calls it with `ctypes`.
 
-**This is an early release.** It installs, imports and loads the engine, and
-it registers Parquet files as tables. It does not run queries yet.
+**This is an early release.** It registers Parquet files as tables and runs
+SQL over them, and it hands each answer to pyarrow. The DataFrame APIs come
+later.
 
 ## Install
 
@@ -28,11 +29,12 @@ What it needs:
 ### What is in the wheel
 
 libkomira needs three Mojo runtime libraries, which are Modular's and come
-under Modular's licence. The wheel carries libkomira, its native owner
-libraries (Linux only: on macOS they are linked into the dylib) and those
-three Mojo runtime libraries in `komira/_lib/`, with Modular's licence and
-third-party notices beside komira's own. Nothing else is installed with it: it
-declares no dependencies. The runtime libraries add about 2 MB uncompressed.
+under Modular's licence. The wheel carries libkomira in `komira/_lib/` and, in `komira/_lib/lib/`,
+its native owner libraries (Linux only: on macOS they are linked into the
+dylib) and those three Mojo runtime libraries, with Modular's licence and
+third-party notices beside komira's own. It requires one other distribution,
+`pyarrow>=25.0.1`, which a result is read as; `pip install komira` installs it.
+The runtime libraries add about 2 MB uncompressed.
 
 The Linux wheel and the macOS wheel (macOS 11 or later, Apple silicon) are one
 distribution, `komira`, with one version and the same Python API.
@@ -49,11 +51,13 @@ load fails. What each release changed is in the
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1002 is 1.2
+print(komira.abi_version())   # the engine's C ABI version: 1008 is 1.8
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
-    print("registered readings")
+    print(s.sql("SELECT 1 AS n").to_arrow().to_pylist())
+    result = s.sql("SELECT count(*) AS n, sum(value) AS total FROM readings")
+    print(result.to_arrow().to_pylist())   # a pyarrow Table, as Python rows
 print(s.closed)               # True: the session is freed
 ```
 
@@ -69,19 +73,114 @@ against the published package.
   - `path` may be a `str` or a `pathlib.Path`.
   - A relative path is resolved against the working directory, and `~` is
     expanded.
-  - A missing or unreadable file raises `komira.KomiraError` with the engine's
-    message.
-  - Nothing can query the table yet.
+  - A missing or unreadable file raises `komira.BindError` with the engine's
+    message (a plain `KomiraError` from a library older than ABI 1.7).
+  - Registering a name again replaces the table.
+- `register_csv(name, path, *, delimiter=",", header=True, all_varchar=False)`
+  registers a CSV file as the table `name`, the table SQL's `read_csv` makes
+  of the same file, and `register_json(name, path)` a newline-delimited JSON
+  file (one object per line), the table `read_json` makes.
+  - The engine infers the column names and types when the call is made, and
+    every later query reads the file with them. An empty CSV field and a JSON
+    `null` or missing key read as NULL.
+  - `delimiter` is the one ASCII character between fields, and
+    `all_varchar=True` makes every column a string. A table registered with
+    `header=False` raises `KomiraError` when a query reads it: the engine
+    does not name the columns of a file with no header yet.
+  - Paths are taken as `register_parquet` takes them.
+  - A missing, empty or unreadable file raises `komira.KomiraError` with the
+    engine's message, which names the file. So does a name the session
+    already has a table under, in any case, and nothing is registered.
+- `Session.sql(query)` runs one SQL statement over the session's tables and
+  returns a `komira.Result`. The engine turns the text into a plan before
+  `sql` returns, so a syntax error, an unknown table or column, or a construct
+  the engine does not run yet raises a `KomiraError` from `sql`, with the
+  engine's `<step>: <reason>` message: `ParseError` for a syntax error,
+  `BindError` for an unknown name, `UnsupportedOperation` for a construct the
+  engine refuses by name.
+- Ctrl-C while `Session.sql` runs cancels the query: the engine stops at its
+  next check, `sql` raises `KeyboardInterrupt`, nothing the query computed is
+  kept, and the session runs the next query. A second Ctrl-C while the query
+  stops is not raised again. The query runs on a helper thread while the
+  thread that called `sql` waits for it, which is what lets Python run the
+  Ctrl-C handler during the query.
+- `Session.sql(query, progress=callback)` calls `callback(done, total)` on the
+  calling thread with the plan segments the query has finished and the
+  segments its plan has, each time that changes, and once more with `done`
+  equal to `total` when the query has answered. The readings only grow. A
+  query refused before its plan is checked never calls it. An exception the
+  callback raises cancels the query and is raised from `sql`, and calling the
+  session from the callback raises `KomiraError`. For example, a line that
+  rewrites itself:
+
+  ```python
+  def show(done, total):
+      print("\r{}/{} segments".format(done, total), end="", flush=True)
+
+  table = s.sql("SELECT count(*) AS n FROM readings", progress=show).to_arrow()
+  ```
+- komira logs to the standard `logging` logger `"komira"`: at `DEBUG` the
+  library it loaded and the plan segments of each query that answered, at
+  `INFO` a query stopped by an exception, such as the `KeyboardInterrupt` of a
+  Ctrl-C. It never logs query text. Nothing is printed unless the application
+  configures logging, for example with `logging.basicConfig(level=logging.DEBUG)`.
+- A `Result` is read once, by one of:
+  - `to_arrow()`, the whole answer as a `pyarrow.Table`;
+  - `to_reader()`, a `pyarrow.RecordBatchReader` that reads batches as they
+    are asked for;
+  - `to_pandas()`, the whole answer as a `pandas.DataFrame`, converted by
+    pyarrow's `Table.to_pandas()` with its default dtypes (an integer column
+    with nulls becomes `float64`, a decimal holds `decimal.Decimal`, a
+    timestamp keeps its unit);
+  - `to_polars()`, the whole answer as a `polars.DataFrame`, converted by
+    `polars.from_arrow`;
+  - `__arrow_c_stream__()`, the Arrow PyCapsule interface, so
+    `pyarrow.table(result)` and other Arrow libraries read it with no copy. A
+    requested schema raises `KomiraError`.
+
+  pandas and polars are not installed with komira. When one is missing,
+  `to_pandas()` or `to_polars()` raises `ImportError` saying what to install
+  (`pip install pandas`, `pip install polars`), and the result stays unread.
+
+  Reading it a second time raises `KomiraError`: run the query again. A
+  result still reads after its session is closed, and one never read frees
+  its answer when it is garbage collected.
 - A session is a context manager. `close()` frees it and can be called again,
   and `closed` says whether it was. Any other call on a closed session raises
   `KomiraError`.
+- A session may be used from several threads. Its calls run one at a time: a
+  call made while another thread's call runs on the same session waits for it
+  to return. `close()` waits too, so a session is never freed under a running
+  call. Two sessions run their calls at once, so a session per thread is how
+  to run queries in parallel. A call made from a signal handler, a finalizer
+  or a `progress` callback
+  while a call of the same thread is running on that session raises
+  `KomiraError` instead of waiting for itself. A `Result` reads without the
+  session, so reading one never waits for a call on its session; of two
+  threads that read one `Result`, one reads it and the other gets the
+  already-read `KomiraError`.
 - `komira.KomiraError` is the base class of every error komira raises on
-  purpose. Its `status` attribute is the engine's status code, or `None`.
+  purpose. Its `status` attribute is the engine's status code, or `None`; its
+  `code` is the refusal's named code (`SQL_SYNTAX_ERROR`,
+  `LOWERING_WINDOW_UNSERVED`, ...) and its `step` the step that refused
+  (`"parse"`, `"bind"`, `"optimize"`, `"lower"` or `"execute"`), each `None`
+  when the library gave none (an empty code is `None`, never `""`).
+- Its subclasses, chosen from the code and then the step of an engine refusal
+  (status -3; any other status is a plain `KomiraError`): `ParseError`
+  (`SQL_SYNTAX_ERROR`, or any refusal of the parse step), `BindError`
+  (`SQL_BIND_ERROR` and the `BIND_*` codes, or any refusal of the bind step),
+  `UnsupportedOperation` (`SQL_NOT_SUPPORTED`, `STATEMENT_NOT_A_QUERY`,
+  `LOWERING_*_UNSERVED`, `LOWERING_UNCUTTABLE_NODE`, `STORAGE_URL_REFUSED`, ...), `CredentialsError`
+  (`CREDENTIAL_*` and `CREDENTIALS_*`) and `StorageError` (the other
+  `STORAGE_*` codes). The table is `_errors._CODE_CLASSES`; the package never
+  parses a message to choose a class.
 - `komira.LibraryLoadError` is raised when the engine cannot be loaded. Its
   message names the library and the reason. For example, a library built for
   a different ABI major version is refused.
-  A file of the package that is missing is reported the same way, with the
-  loader's message naming the file.
+  A Mojo runtime library missing from the package's `lib/` is reported as an
+  incomplete package: the message names each missing file, says to reinstall
+  komira, and ends with the loader's own text. Another file that is missing is
+  reported with the loader's message naming the file.
 - A process holds one Mojo runtime. `komira.LibraryLoadError` is also raised
   when a Mojo runtime library of another build is already loaded in the
   process, for example by Mojo code built with another Mojo version. Its
@@ -90,19 +189,18 @@ against the published package.
   x86_64 only (the CPU guard does nothing on macOS) when the CPU lacks a flag of x86-64-v3, before the engine is loaded.
   Its message lists the missing flags as `/proc/cpuinfo` spells them.
 
-The engine is loaded on the first `Session()` or `abi_version()` call, not on
-`import komira`.
+The engine is loaded on the first `Session()` or `abi_version()` call, and
+pyarrow during the first `Session.sql` call the engine accepts, when the
+answer's schema is read; neither on `import komira`.
 
 ## What does not work yet
 
-- Running SQL. `Session.sql` arrives with the engine's query call.
-- Results of any kind, such as Arrow tables or pandas and polars frames.
+- The module-level `komira.sql` and `komira.register_parquet` on a default
+  session.
 - The DataFrame APIs: one shaped like pandas and one shaped like polars.
-- Registering CSV and JSON files.
 - Iceberg tables: reading one, and writing to one by its name in a catalog.
 
-SQL comes first in a later release of this same package, followed by the two
-DataFrame APIs.
+The two DataFrame APIs come in a later release of this same package.
 
 ## Working on the package
 
@@ -117,16 +215,18 @@ The package's layout and API are designed in
 | `komira/_capture/` | the capture of Python user functions (private; no query runs them yet): `udf`, the decorator that records a function's call shape (`scalar`, `map_batches_column`, `row`, `map_batches_frame`), its return type (`return_dtype=`, `schema=` or the type hints) and, for `row` and `map_batches_frame`, its read set (`columns=`, a `TypedDict` or dataclass annotation, or for `row` a scan of the function's bytecode, refused with `UDF_READ_SET_REQUIRED` when the reads are not bounded); `Udf.spec()`, the `UdfSpec` the plan encodes, with the function's code as a bundle named by its sha256 or as a reference into an installed distribution; and `write_code`, which writes each code object under its digest. Calling a decorated function calls the function, which is how the komira/python worker runs it. It imports no `ctypes` |
 | `komira/_credentials.py` | the credential objects (private; nothing public takes one yet): `AwsKeys`, `AwsProfile`, `GcpServiceAccount`, `GcpToken`, `AzureKey`, `AzureSas`, `BearerToken` and `OAuth2ClientCredentials`, each a name and its fields, checked when built (the name's grammar and reserved names; each value a non-empty `str` of at most 4096 bytes of UTF-8), with every secret shown as `<set>` by `repr` and no pickle or copy; and the built-in `AMBIENT` and `ANONYMOUS` ([docs/design/credentials_and_writes.md](https://github.com/komira-ai/komira/blob/main/docs/design/credentials_and_writes.md), decision 1) |
 | `komira/_iceberg.py` | the Iceberg sources (private; nothing public takes one yet): `iceberg(uri, *, warehouse=None, credential=AMBIENT, signing=None, access_delegation="vended-credentials")`, an `IcebergCatalog`; `catalog.table(name)`, an `IcebergTable`, with `name` as `"namespace.table"` or a tuple of namespace levels and the table; and `SigV4(region, service)`. Each is checked when built (an http or https URI with a host and no user, password, query or fragment; a credential that fits the catalog: `AMBIENT` or `AwsKeys` with SigV4, and `AMBIENT`, `ANONYMOUS`, `BearerToken` or `OAuth2ClientCredentials` without; `access_delegation` `vended-credentials` or `none`), does no I/O and loads no library; a catalog or a table shows its credential's secrets as `<set>` and refuses pickle and copy ([docs/design/iceberg_tables.md](https://github.com/komira-ai/komira/blob/main/docs/design/iceberg_tables.md), "What the user sees") |
-| `komira/_errors.py` | `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError`, and the private `UnsupportedOperation` and `CredentialsError` |
-| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls of ABI 1.2 |
+| `komira/_arrow.py` | the Arrow C stream of a query: `ArrowArrayStream`, the C struct for `ctypes`, and `import_stream`, which hands a filled stream to pyarrow's public `RecordBatchReader.from_stream` through a PyCapsule with no destructor, and releases it itself if pyarrow did not take it |
+| `komira/_errors.py` | `KomiraError`, its subclasses, and `error_class`, which picks one from an engine refusal's code and step |
+| `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.7 (`sql_stream`, `register_csv`, `register_json`, the run handle calls `run_new`, `run_cancel`, `run_progress` and `sql_stream_run` of 1.6, and the last error's code and step among them) |
+| `komira/_run.py` | `run_sql`, which `Session.sql` runs a query with on ABI 1.6: the call `komira_sql_stream_run` on a helper thread under a run handle of its own, while the calling thread waits, reads the handle's progress for the `progress` callback, and cancels the handle when anything is raised on it (a Ctrl-C's `KeyboardInterrupt`, the callback's exception) |
 | `komira/_plan/` | the plan encoder: `encode_plan`, a plan of `komira/_ops` as the `komira.plan.v1` `WirePlanEnvelope` the plan door takes, every node with the output schema the engine derives for it and every scan reading a source libkomira described (`parquet_source`, `binding_source`); calls of user functions (`UdfCall`, `MapBatches`) as `WireUdfApply` and `WireMapBatchesNode` over the envelope's `UdfRef` list, one per distinct function, each with the komira/python descriptor; `encode_expr`, an expression node as a `WireExpr`; and `expr_field`, the output field the engine derives for it. It writes no SQL text. It imports the generated plan modules, which the wheel does not ship yet, so `import komira` does not import it |
 | `komira/_runtime.py` | `check_loaded_runtime`, called before libkomira is opened: it compares the Mojo runtime libraries already loaded in the process with komira's copies by build id, and the GNU build id reader it uses |
-| `komira/_session.py` | `Session`, and its private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal` |
+| `komira/_session.py` | `Session` with `register_parquet`, `register_csv`, `register_json` and `sql`, `Result`, and the session's private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal` |
 | `komira/py.typed` | the PEP 561 marker |
 | `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the plan encoder's tests; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |
 | `pythons.bzl` | the supported Pythons, the one list of them (Supported Pythons, below) |
-| `tests/` | the tests (`python_binding_test`, and `py_test` for the plan encoder: `test_plan_expr.py`, `test_plan_expr_goldens.py`, `test_plan_rel.py`, `test_plan_rel_goldens.py`, `test_plan_udf.py`, `test_plan_udf_goldens.py` and `test_plan_no_sql.py`), `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
+| `tests/` | the tests (`python_binding_test`, and `py_test` for the plan encoder: `test_plan_expr.py`, `test_plan_expr_goldens.py`, `test_plan_rel.py`, `test_plan_rel_goldens.py`, `test_plan_udf.py`, `test_plan_udf_goldens.py` and `test_plan_no_sql.py`), `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, `test_tpch_installed.py` and `tpch_compare.py`, TPC-H q1 to q22 at scale factor 1 through the installed wheel against DuckDB's recorded answers (`:tpch_via_wheel_test`; its answer check is held by `test_tpch_compare.py`), `test_analysis_job.py`, which runs `examples/analysis_job.py` from the installed wheel and compares its answers with DuckDB's (`:analysis_job_test`), and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
 
 ### Supported Pythons
 
@@ -166,7 +266,8 @@ How the loader behaves:
   on macOS they are linked into the dylib) in `_lib/lib/`, and the three Mojo
   runtime libraries there too. A file of the package that
   is missing is a `LibraryLoadError` with the loader's message, which names
-  the file.
+  the file; when a Mojo runtime library is missing from `_lib/lib/`, the
+  message first says the package is incomplete and names each missing one.
 - **What runs before the library opens.** `load` first checks the CPU, with
   `_native._select_variant(<lib_dir>)` when the directory holds a `VARIANTS`
   manifest and `_native._check_cpu()` when it does not, then calls
@@ -222,9 +323,12 @@ How the loader behaves:
 - **Call errors.** A failed call raises `KomiraError` with its status. The
   message is the context's last error, read with the two-call protocol: the
   first call learns the length, and the second passes a buffer of exactly that
-  length. An engine refusal (-3) of a credential call, which the library
-  answers only with `CREDENTIALS_INVALID`, raises `CredentialsError`, a
-  `KomiraError`; the package never parses the message to choose the class.
+  length. From ABI 1.7 the error also carries `komira_last_error_code` and
+  `komira_last_error_step`, and `_errors.error_class` picks the class of an
+  engine refusal (-3) from them: by code first, then by step, then the call's
+  own default (`CredentialsError` for the credential calls, which a library
+  older than 1.7 answers only with `CREDENTIALS_INVALID`). The package never
+  parses the message to choose the class.
 - **Private calls.** `parquet_schema`, `csv_binding`, `json_binding`,
   `plan_render`, `credential_add`, `credential_set` and `credential_seal`
   exist only on `_native.Native`. They have no public API and no stability
@@ -235,14 +339,27 @@ The tests below run on Linux x86_64 as build actions, with
 `//python/tests:session_test`, `//python/tests:minor0_test`,
 `//python/tests:minor3_test`, `//python/tests:two_call_test`,
 `//python/tests:credentials_test`, `//python/tests:credentials_lib_test`,
-`//python/tests:iceberg_test`,
+`//python/tests:iceberg_test`, `//python/tests:sql_test`,
+`//python/tests:sql_fake_test`, `//python/tests:sql_interrupt_test`,
+`//python/tests:sql_cancel_test`, `//python/tests:sql_run_test`,
+`//python/tests:errors_test`, `//python/tests:result_frames_test`,
+`//python/tests:register_text_test`, `//python/tests:threads_test`,
 `//python/tests:runtime_test` and `//python/tests:cpu_test`:
 
 | test | what it covers |
 |---|---|
 | `load_test` | loading and refusal, then the real `libkomira[runnable]` and its nine calls |
 | `session_test` | the public surface on the real library |
-| `minor0_test`, `minor3_test` | stand-ins of ABI 1.0 and 1.3 |
+| `minor0_test`, `minor3_test` | stand-ins of ABI 1.0 and 1.3: a 1.0 library refuses `sql`, and both refuse `register_csv` and `register_json`, by the ABI version each needs |
+| `sql_test` | `Session.sql` on the real library: `SELECT 1 AS n`, a GROUP BY over a checked-in Parquet file, an aggregate, an answer of no rows, each terminal, the engine's refusals, and a result read after its session was closed or collected |
+| `register_text_test` | `Session.register_csv` and `register_json` on the real library over checked-in CSV and JSON files: the names, types and rows the engine infers, NULL where a file has no value, the same answer as `read_csv` and `read_json`, the `delimiter`, `all_varchar` and `header` arguments, paths resolved when the call is made, a missing or empty file and a taken name refused with the engine's message, and the argument checks |
+| `sql_fake_test` | `Session.sql` on a stand-in Arrow stream that counts releases: a result read once, each stream, schema and batch released exactly once whoever ends it, a requested schema refused, a schema error raised from `sql` and a batch error from the terminal, the argument checks, and results left unread at exit |
+| `sql_interrupt_test` | Ctrl-C during `Session.sql`, on a stand-in whose `komira_sql_stream` raises SIGINT in the calling thread: `KeyboardInterrupt` once the call returns, the stream it filled released exactly once, the session answering the next query (also after a refusal SIGINT came during), a handler that does not raise running once while `sql` returns the answer, and an ignored SIGINT changing nothing; and a `progress` callback on that 1.3 stand-in refused by the ABI version it needs |
+| `sql_cancel_test` | Ctrl-C and progress on a stand-in of ABI 1.6 that holds a run at a gate: Ctrl-C cancels the query's run handle and `sql` raises `KeyboardInterrupt`, the handle freed after the call, the session answering after; a second Ctrl-C while it stops not raised; an answer that stood after the cancel, and a refusal during Ctrl-C, dropped; a handler that does not raise leaving the query running; each progress reading given on the calling thread, from the main thread or another; the callback's exception and its call into the session cancelling the query; refusals with their message; the log lines |
+| `sql_run_test` | progress and Ctrl-C on the real library: the readings of a GROUP BY grow and end at done equal to total, a Ctrl-C and an exception from the callback are raised from `sql` and the session answers after, a refusal never calls the callback |
+| `errors_test` | the exception table on stand-ins of ABI 1.7 and 1.3: each class by its code, the code before the step, the step when there is no code, a plain `KomiraError` otherwise, and no code or step from a 1.3 library |
+| `threads_test` | a session used from several threads, on a stand-in that journals each call and holds one at a gate: a call waits for the call running on its session, each thread gets its own error message, `close` waits for the running call, two sessions run at once, a signal handler calling the session inside a call is refused, a `Result` reads while its session is busy, and of two threads reading one `Result` one reads it |
+| `result_frames_test` | `to_pandas` and `to_polars` on the real library: every integer width at its edges, nullable integers, strings, a bool, decimals, timestamps and a date, equal in values and dtypes to pyarrow's and polars' own conversion of the same table; two million rows; no rows; read once. In new interpreters, the library loaded before pyarrow (the load-order case), and on a stand-in stream, each stream released once, a failing batch and a missing pandas or polars. CPython 3.13 and 3.14 (polars on 3.13 only) |
 | `two_call_test` | the error path, the two-call protocol and the arguments of each call, on a stand-in |
 | `credentials_test` | the credential objects, and what sealing each sends the library, on a stand-in's fake store that records every credential call |
 | `iceberg_test` | the Iceberg catalog, table and SigV4 values, with no library: each argument's checks and refusals with their full messages, which credential fits a catalog with and without SigV4, how a table name splits, repr, and no pickle or copy |
@@ -254,7 +371,8 @@ The Linux wheel is `./buck2 build //python:komira_wheel`: the package and, in
 `komira/_lib/`, `libkomira[dist]` whole: `libkomira.so`, and in `lib/` its
 native owner libraries and the three Mojo runtime libraries, taken from the
 toolchain's Mojo package so that runtime and compiler are one build. It is
-tagged `py3-none-manylinux_2_35_x86_64`, declares no `Requires-Dist`, and
+tagged `py3-none-manylinux_2_35_x86_64`, declares the one `Requires-Dist`
+`pyarrow>=25.0.1` (`PYARROW_REQUIREMENT`, `dependencies.bzl`), and
 carries Modular's licence and third-party notices beside komira's own
 (`Apache-2.0 AND LicenseRef-Modular-Proprietary`).
 
@@ -272,7 +390,8 @@ never in a pull request, and a run publishes it only from main. After the upload
 index and runs the smoke test.
 
 `./buck2 build //python:wheel_install_test` (CPython 3.13; `:wheel_install_test_py311`,
-`_py312` and `_py314` on the other supported Pythons) installs the wheel alone into an empty virtual environment, the
+`_py312` and `_py314` on the other supported Pythons) installs the wheel and the pinned pyarrow
+25.0.1 wheel of that Python into an empty virtual environment, the
 way a wheel is installed for the other tests (no pip, no network), and runs
 `tests/test_installed.py` there in isolated mode, from an empty directory, with
 no library path set. `//python:wheel_install_test_macos_arm64` runs the test on
@@ -282,9 +401,9 @@ interpreter pinned), from the release workflow only. That test holds:
 | what | how |
 |---|---|
 | the installed package | `komira` imports from the environment, at the wheel's version |
-| its metadata | no `Requires-Dist`; `Requires-Python` `>=3.11` and exactly the classifiers `python/BUCK` writes out (`_PYTHON_METADATA`: the four supported minors); the `License-Expression` given; `.dist-info/licenses/` holding `LICENSE`, `NOTICE`, and Modular's `LICENSE` and `Third-Party-Notices`, each byte-equal to its source, and no other; the description starting with the first line of this README |
-| nothing else | no `modular/` directory and no other distribution in the environment |
-| the library | `abi_version()` is the version of `src/so/abi/komira.tsv`; a Parquet file registers, a missing one raises `KomiraError`; a serialized plan renders |
+| its metadata | the `Requires-Dist` `pyarrow>=25.0.1` and no other; `Requires-Python` `>=3.11` and exactly the classifiers `python/BUCK` writes out (`_PYTHON_METADATA`: the four supported minors); the `License-Expression` given; `.dist-info/licenses/` holding `LICENSE`, `NOTICE`, and Modular's `LICENSE` and `Third-Party-Notices`, each byte-equal to its source, and no other; the description starting with the first line of this README |
+| nothing else | no `modular/` directory and no distribution in the environment but komira and pyarrow |
+| the library | `abi_version()` is the version of `src/so/abi/komira.tsv`; a Parquet file registers, a missing one raises `KomiraError`; `SELECT 1 AS n` and an aggregate over `examples/readings.parquet` answer their rows through pyarrow; a serialized plan renders |
 | where it loaded from | `/proc/self/maps` (on macOS, the images dyld has loaded) lists libkomira and its owners (none on macOS, where `lib/` holds exactly the three runtime `.dylib` files) from `komira/_lib`, and the three Mojo runtime libraries from `komira/_lib/lib` |
 
 Each `//python:refuses_*` target runs the same install and test on one broken
@@ -294,7 +413,10 @@ path (`refuses_owners_off_run_path`), a Mojo runtime library missing from the
 wheel (`refuses_missing_runtime_library`), a wheel tagged for another platform
 (`refuses_wheel_of_another_platform`), another distribution installed with the
 wheel (`refuses_other_distribution`), an unmet requirement
-(`refuses_unmet_requirement`), a wheel whose classifiers leave out 3.11
+(`refuses_unmet_requirement`), the wheel without pyarrow
+(`refuses_missing_requirement`), a pyarrow wheel of another CPython minor
+(`refuses_requirement_of_another_minor`), a wheel whose `Requires-Dist` is
+another range (`refuses_requires_dist_not_the_declared_range`), a wheel whose classifiers leave out 3.11
 (`refuses_classifiers_not_the_supported_pythons`) or whose `Requires-Python`
 starts at 3.12 (`refuses_requires_python_not_the_oldest_supported`), and
 CPython 3.10, which the wheel's

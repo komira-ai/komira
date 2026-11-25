@@ -198,6 +198,7 @@ node_binding_test(
         "fake/v2/libkomira.so": ":fake_v2",
         "fixtures/cpuinfo_x86_64_v3.txt": "komira//python/tests:fixtures/cpuinfo_x86_64_v3.txt",
         "fixtures/isa_variants/VARIANTS_shipped": "komira//tools/build/package/libkomira:libkomira_variants_manifest",
+        "fixtures/komira.tsv": "komira//src/so:abi/komira.tsv",
         "fixtures/two_columns.parquet": "komira//src/so:tests/fixtures/two_columns.parquet",
         "package.json": "package.json",
         _PLATFORM + "komira_addon.node": ":komira_addon",

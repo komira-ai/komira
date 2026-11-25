@@ -1,7 +1,8 @@
-# Port: the libkomira calls that run a query (C ABI 1.3)
+# Port: the libkomira calls that run a query (C ABI 1.3 and 1.8)
 
-Status: port document, not built. **EXISTS** names code on `main`; **PROPOSED** is
-new. Statements the author deduced rather than read are marked *(inferred)*.
+Status: port document. `komira_sql_stream` is built (ABI 1.3, with the `ArrowStream`
+golden type and the header's Arrow structs), and so is `komira_plan_stream` (ABI 1.8,
+over `sdk_exec.engine_plan.run_plan`); the abort containment is not. **EXISTS** names code on `main`; **PROPOSED** is new. Statements the author deduced rather than read are marked *(inferred)*.
 
 `libkomira` is komira's one shared library and its flat C ABI
 ([src/so](../../src/so/README.md)). ABI 1.1 registers and describes sources and
@@ -26,7 +27,7 @@ The callers are thin bindings over these calls: the Python package
 | item | port |
 |---|---|
 | run SQL | `komira_sql_stream(ctx, sql, out)`, from the earlier golden. ABI 1.3 |
-| run a plan | `komira_plan_stream(ctx, plan, plan_len, out)`, from the earlier golden. ABI 1.3. The bytes are an authored `WirePlanEnvelope`, the same input `komira_plan_render` takes. libkomira optimizes it in-process |
+| run a plan | `komira_plan_stream(ctx, plan, plan_len, out)`, from the earlier golden. ABI 1.8 (`komira_sql_stream` landed alone as 1.3, and 1.4 to 1.7 are other calls). The bytes are an authored `WirePlanEnvelope`, the same input `komira_plan_render` takes. libkomira optimizes it in-process |
 | result | an Arrow C stream (`struct ArrowArrayStream`), as in the earlier golden. The caller allocates it and libkomira fills it. The caller owns it after `KOMIRA_OK`. It does not depend on the context, which may be freed first |
 | status codes | the six of ABI 1.1. The port adds none. Every engine refusal is `KOMIRA_ERR_ENGINE` (-3), with the reason in the last error |
 | conventions | ABI 1.1's: the two-call `komira_last_error`, the 64 MiB input bound (-5), and `*out` untouched on any refusal |
@@ -34,12 +35,12 @@ The callers are thin bindings over these calls: the Python package
 | not carried | `komira_register_python_udf`, `komira_declare_sql_udf`, `komira_register_builtin_mojo_udf`, the seven `xl_*` calls, `komira_plan_bytes` and `komira_sql_render` (§9) |
 | new relative to the earlier ABI | session options, cancel, progress, a cancelled status code and credentials. Not decided here (§10) |
 
-The rows' `since` is 1.3 when they land together: 1.2 is the credential calls
-(`komira_credential_add`, `_set`, `_seal`; [credentials_and_writes.md](credentials_and_writes.md)
-decision 8), which landed first. Releases come from `main` automatically, so a row's `since` is
-the version of the first change that lands it on `main`. If `komira_sql_stream` lands alone,
-`komira_plan_stream` takes the next minor. The golden (`src/so/abi/komira.tsv`) holds whichever
-version is true.
+1.2 is the credential calls (`komira_credential_add`, `_set`, `_seal`;
+[credentials_and_writes.md](credentials_and_writes.md) decision 8), which landed first. Releases
+come from `main` automatically, so a row's `since` is the version of the first change that lands
+it on `main`: `komira_sql_stream` landed alone, as 1.3, and `komira_plan_stream` followed as 1.8, after the session options (1.4), the CSV and JSON
+registration calls (1.5), the run handle (1.6) and the error code and step calls (1.7).
+The golden (`src/so/abi/komira.tsv`) holds both.
 
 ## 2. What exists today
 
@@ -95,13 +96,13 @@ komira_plan_stream	c_int32	c_void_p,POINTER(c_ubyte),c_uint64,POINTER(ArrowArray
 ```
 
 The same calls as libkomira golden rows (`symbol<TAB>return<TAB>arguments<TAB>since`).
-The rows of 1.1 and 1.2 stay byte for byte. Only these two rows are added, and no type or
-constant changes:
+The rows of 1.1 and 1.2 stay byte for byte. 1.3 added the first row and 1.8 the second, and
+neither changed a type or a constant:
 
 ```text
-version	1.3
+version	1.8
 komira_sql_stream	Int32	Handle,CStr,ArrowStream	1.3
-komira_plan_stream	Int32	Handle,ConstBytes,UInt64,ArrowStream	1.3
+komira_plan_stream	Int32	Handle,ConstBytes,UInt64,ArrowStream	1.8
 ```
 
 The C prototypes in `komira.h`:
@@ -166,7 +167,7 @@ to every later run on the context.
   design also lifts the refusal, into a bound catalog, for `CREATE TABLE ... AS` and `INSERT`, which
   answer what DuckDB returns: a one-row `Count` stream, or no rows for `CREATE TABLE` with a column
   list ([credentials_and_writes.md](credentials_and_writes.md#10-writes)).
-- **The error text.** **PROPOSED:** the last error text is `<step>: <reason>`,
+- **The error text.** **EXISTS:** the last error text is `<step>: <reason>`,
   where the step is the one that refused (parse, bind, optimize, lower or
   execute). That text is for people, and bindings do not parse it (§6).
 
@@ -182,10 +183,20 @@ bytes `komira_plan_render` renders, and the format the SDKs' plan builders write
   by the UDFs' own. `plan_envelope_from_bytes` already decodes both, for the door
   that carries them later.
 - **The route.** It is `plan_from_bytes`, then `optimize`, `lower_for_context` and
-  `run_lowered_plan`: the tail of `run_sql` after bind. **PROPOSED:** `sdk_exec`
-  gets one `run_plan(mut ctx, var plan: LogicalPlan) -> SqlOutcome`, and `run_sql`
-  calls it after binding. SQL and plans then share one route from the optimizer
-  down.
+  `run_lowered_plan`: the tail of `run_sql` after bind. **EXISTS:** `sdk_exec`
+  has one `run_plan(mut ctx, var plan: LogicalPlan) -> SqlOutcome`
+  (`src/sdk_exec/engine_plan.mojo`), and `run_sql` runs its steps
+  (`run_plan_batch`) after binding. SQL and plans share one route from the
+  optimizer down. `run_plan` replaces the footer cache first, as `run_sql` does;
+  `run_sql` calls the steps without that, because its binder has already read
+  the footers lowering uses.
+- **The error text.** `<step>: <reason>`, where the step is `decode` (the bytes
+  are not a plan this build runs) or the step of `run_plan` that refused
+  (`optimize`, `lower` or `execute`).
+- **No SQL front end.** The door never makes SQL text and never calls the
+  tokenizer, parser or binder. `EngineContext.statements_parsed` counts the
+  statements `run_sql` parses on a context, and the door's tests hold it at 0
+  on the context that ran the plan.
 - **Tables.** A scan leaf carries its own binding (path, schema and fingerprint,
   from `komira_parquet_schema` or the binding calls), so a plan needs no
   registered table.
@@ -450,33 +461,47 @@ The earlier golden's 23 rows, and where each one goes:
 
 The earlier golden has no row for any of the items below. **None of them is
 decided here.** Each is settled by its own change:
-- session options, cancel and progress by their feature pull requests;
-- credentials, and the structured error calls `komira_last_error_code` and
-  `komira_last_error_step`, by [credentials_and_writes.md](credentials_and_writes.md).
+- session options (now built, below), cancel and progress by their feature
+  pull requests;
+- credentials, by [credentials_and_writes.md](credentials_and_writes.md). The credential calls
+  (ABI 1.2) and the structured error calls `komira_last_error_code` and `komira_last_error_step`
+  (ABI 1.7, built) have landed; neither is part of this port.
 
 What earlier drafts of this document proposed is kept as input for those
 changes:
 
-- **Session options** (worker count, memory budget). `EngineOptions` already has
-  `worker_count` and `memory_budget_bytes`. The proposal:
-  - Typed setters, one per option: `komira_set_worker_count(ctx, int64)` and
-    `komira_set_memory_budget(ctx, int64)`.
-  - Each setter is accepted until the session's engine is built (§7). Building the
-    engine fixes its options.
-  - Rejected alternatives: an options struct (its layout would become ABI),
-    string key and value pairs, a constructor with arguments, and environment
-    variables (rule S2).
-- **Cancel and progress.** The engine has a `CancellationToken`, but the token is
-  local to `run_lowered_plan` today. The engine has no progress counter. The
-  proposal:
-  - `komira_cancel(ctx)` and `komira_progress(ctx, uint64_t *done, uint64_t *total)`,
-    callable from another thread while a run is in flight.
-  - Both go through one atomic control block that is allocated with the context
-    and never replaced. They do not touch the last error.
-  - A cancel with no run in flight does nothing.
-  - A cancelled run returns a new status code (-6) and leaves `*out` untouched.
-    An incrementally read stream would return `ECANCELED`.
-  - Progress is polled, never called back into the host.
+- **Session options** (worker count, memory budget). **EXISTS**, ABI 1.4:
+  `komira_ctx_new_with_options(int64_t worker_count, int64_t memory_budget_bytes)`,
+  a constructor with arguments ([src/so/README.md](../../src/so/README.md),
+  "Session options"). 0 is the host's own value, a negative value is the NULL
+  handle, and the options are fixed for the life of the context. An earlier
+  draft proposed typed setters accepted until the session's engine is built
+  (§7); the engine is now built in `komira_ctx_new` itself, so there is no
+  window in which a setter could still change it, and the constructor is what
+  remains. Still rejected: an options struct (its layout would become ABI),
+  string key and value pairs, and environment variables (rule S2).
+- **Cancel and progress** (decided and built in ABI 1.6; [src/so/README.md](../../src/so/README.md),
+  "Cancel and progress"). The earlier proposal here was `komira_cancel(ctx)` and
+  `komira_progress(ctx, ...)` on one control block per context, where a cancel with no
+  run in flight did nothing. What was built is a run handle the caller creates and
+  passes to the run instead:
+  - `komira_run_new`, `komira_run_free`, `komira_run_cancel(run)`,
+    `komira_run_progress(run, uint64_t *done, uint64_t *total)` and
+    `komira_sql_stream_run(ctx, sql, run, out)`. Cancel and progress are callable
+    from another thread while the run is in flight, and touch no context and no
+    last error.
+  - Why a handle and not the context: a cancel belongs to the run the caller chose.
+    A Ctrl-C that lands just as one query returns cancels that query's handle, which
+    no later run is given, so it cannot reach the next query. And a cancel that comes
+    before the call reaches the run, so a test cancels without racing the engine.
+  - A cancelled run returns `KOMIRA_ERR_CANCELLED` (-6), leaves `*out` untouched, and
+    sets the last error `QUERY_CANCELLED: execute: <reason>`. A cancel is observed
+    only while the plan runs (before each segment and at each morsel boundary); a
+    statement refused earlier keeps its own refusal.
+  - Progress counts the plan's segments: the total when the plan is checked, and the
+    done count as each segment finishes. It is polled, never called back into the
+    host.
+  - An incrementally read stream, when one exists, would return `ECANCELED`.
 - **Credentials** (decided in [credentials_and_writes.md](credentials_and_writes.md)).
   Constraints from the repository rules that design starts from:
   - Configuration comes as explicit calls. The provider-standard environment

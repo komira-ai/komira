@@ -16,9 +16,9 @@ import { KomiraError, UnsupportedOperation } from "./errors.ts";
 import { call, callAsync, load, type Handle, type Native } from "./native.ts";
 
 /**
- * The options of a session. Neither is settable yet: libkomira has no call
- * that sets them, so giving one is an UnsupportedOperation, and leaving them
- * out takes the engine's defaults.
+ * The options of a session. Neither is settable yet: this package does not
+ * yet bind the libkomira call that sets them, so giving one is an
+ * UnsupportedOperation, and leaving them out takes the engine's defaults.
  */
 export interface SessionOptions {
   /** The engine's worker threads, a positive integer. */
@@ -126,10 +126,10 @@ function filePath(value: unknown): string {
   return path.resolve(p);
 }
 
-/** The refusal of a registration libkomira has no call for. */
+/** The refusal of a registration this package does not bind yet. */
 function noRegistration(method: string, what: string): UnsupportedOperation {
   return new UnsupportedOperation(
-    `${method} is not supported yet: libkomira has no call that registers ${what} by name; ` +
+    `${method} is not supported yet: this package does not yet bind the call that registers ${what} by name; ` +
       `registerParquet registers a Parquet file`,
   );
 }
@@ -155,7 +155,7 @@ export class Session {
     for (const name of ["threads", "memoryLimit"]) {
       if (o[name] !== undefined) {
         throw new UnsupportedOperation(
-          `the session option ${name} is not supported yet: libkomira has no call that sets it; ` +
+          `the session option ${name} is not supported yet: this package does not set it yet; ` +
             `leave it out to take the engine's default`,
         );
       }

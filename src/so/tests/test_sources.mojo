@@ -13,7 +13,14 @@
 # never registered is refused at bind, and a refused registration leaves no
 # table a query could read; a plan
 # is rendered as the text of its scan (the binding's name, kind and path), and bytes that are not a plan are
-# refused.
+# refused; sql_result answers a query over a registered table with its rows
+# and schema, an answer of no rows as one batch of no rows with the schema,
+# an answer that is still whole after its session is dropped, and a refusal
+# as `<step>: <reason>` (parse, bind) after which the session answers again;
+# a refusal is also the session's last error with its step number and code (a
+# syntax error is parse and SQL_SYNTAX_ERROR, an unknown table bind and
+# SQL_BIND_ERROR, INTERSECT ALL parse and SQL_NOT_SUPPORTED), and a later
+# success leaves no error once the caller clears it.
 from std.os import makedirs
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -30,12 +37,15 @@ from runtime_paths import test_tmpdir
 from sdk_exec.engine_sql import STEP_BIND, run_sql
 
 from so import (
+    KOMIRA_STEP_BIND,
+    KOMIRA_STEP_PARSE,
     Session,
     csv_binding_bytes,
     json_binding_bytes,
     parquet_schema_bytes,
     plan_render_text,
     register_parquet,
+    sql_result,
 )
 
 comptime PARQUET = "src/so/tests/fixtures/two_columns.parquet"
@@ -282,6 +292,111 @@ def test_plan_render_refuses_garbage() raises:
     assert_true(raised)
 
 
+def _message_of(mut s: Session, sql: String) -> String:
+    """The message `sql_result` raises for `sql`, or empty when it answers."""
+    try:
+        _ = sql_result(s, sql)
+    except e:
+        return String(e)
+    return String()
+
+
+def test_sql_result_answers_a_query_with_its_rows() raises:
+    var s = Session()
+    register_parquet(
+        s, String("three"), _three_row_parquet(test_tmpdir() + "/sql_rows.parquet")
+    )
+    var result = sql_result(s, String("select k from three where k > 1 order by k"))
+    assert_equal(result.schema.num_columns(), 1)
+    assert_equal(result.schema.field_name(0), String("k"))
+    assert_equal(len(result.batches), 1)
+    assert_equal(result.batches[0].num_rows(), 2)
+    var k = result.batches[0].column_at(0).as_primitive[DType.int64]()
+    assert_equal(k.get(0), Int64(2))
+    assert_equal(k.get(1), Int64(3))
+
+
+def test_sql_result_of_no_rows_keeps_the_schema() raises:
+    var s = Session()
+    register_parquet(
+        s, String("three"), _three_row_parquet(test_tmpdir() + "/sql_none.parquet")
+    )
+    var result = sql_result(s, String("select k from three where k > 9"))
+    assert_equal(result.schema.num_columns(), 1)
+    assert_equal(result.schema.field_name(0), String("k"))
+    assert_equal(len(result.batches), 1)
+    assert_equal(result.batches[0].num_rows(), 0)
+
+
+def test_sql_result_outlives_its_session() raises:
+    var s = Session()
+    register_parquet(
+        s, String("three"), _three_row_parquet(test_tmpdir() + "/sql_after.parquet")
+    )
+    var result = sql_result(s, String("select k from three order by k"))
+    _ = s^
+    assert_equal(result.batches[0].num_rows(), 3)
+    var k = result.batches[0].column_at(0).as_primitive[DType.int64]()
+    assert_equal(k.get(0) + k.get(1) + k.get(2), Int64(6))
+
+
+def test_sql_result_refusal_names_its_step() raises:
+    var s = Session()
+    var parse = _message_of(s, String("selec 1"))
+    assert_true(parse.startswith("parse: "), "a parse refusal reads: " + parse)
+    var bind = _message_of(s, String("select * from nosuch"))
+    assert_true(bind.startswith("bind: "), "a bind refusal reads: " + bind)
+    assert_true("nosuch" in bind, "the bind refusal does not name the table: " + bind)
+    # The session answers the next query.
+    var result = sql_result(s, String("select 1 as n"))
+    assert_equal(result.batches[0].num_rows(), 1)
+    assert_equal(
+        result.batches[0].column_at(0).as_primitive[DType.int32]().get(0), Int32(1)
+    )
+
+
+def test_sql_result_refusal_records_step_and_code() raises:
+    var s = Session()
+    var syntax = _message_of(s, String("selec 1"))
+    assert_true(
+        syntax.startswith("parse: SQL syntax error: "),
+        "a parse refusal reads: " + syntax,
+    )
+    assert_equal(s.last_error(), syntax)
+    assert_equal(s.last_error_step(), KOMIRA_STEP_PARSE)
+    assert_equal(s.last_error_code(), String("SQL_SYNTAX_ERROR"))
+
+    var bind = _message_of(s, String("select * from nosuch"))
+    assert_equal(bind, String("bind: SQL bind error: unknown table 'nosuch'"))
+    assert_equal(s.last_error(), bind)
+    assert_equal(s.last_error_step(), KOMIRA_STEP_BIND)
+    assert_equal(s.last_error_code(), String("SQL_BIND_ERROR"))
+
+    var unsupported = _message_of(
+        s, String("select 1 intersect all select 1")
+    )
+    assert_true(
+        unsupported.startswith("parse: SQL not supported: INTERSECT ALL. "),
+        "an unsupported construct reads: " + unsupported,
+    )
+    assert_equal(s.last_error_step(), KOMIRA_STEP_PARSE)
+    assert_equal(s.last_error_code(), String("SQL_NOT_SUPPORTED"))
+
+
+def test_sql_result_success_records_no_error() raises:
+    var s = Session()
+    _ = _message_of(s, String("selec 1"))
+    assert_true(s.has_error())
+    # A success itself records nothing: the caller (komira_sql_stream) clears
+    # the previous error before the call, and the answer leaves none.
+    s.clear_error()
+    var result = sql_result(s, String("select 1 as n"))
+    assert_equal(result.batches[0].num_rows(), 1)
+    assert_false(s.has_error())
+    assert_equal(s.last_error_step(), Int32(0))
+    assert_equal(s.last_error_code(), String(""))
+
+
 def main() raises:
     test_register_parquet()
     test_register_parquet_refusals()
@@ -295,4 +410,10 @@ def main() raises:
     test_json_binding()
     test_plan_render()
     test_plan_render_refuses_garbage()
+    test_sql_result_answers_a_query_with_its_rows()
+    test_sql_result_of_no_rows_keeps_the_schema()
+    test_sql_result_outlives_its_session()
+    test_sql_result_refusal_names_its_step()
+    test_sql_result_refusal_records_step_and_code()
+    test_sql_result_success_records_no_error()
     print("OK")

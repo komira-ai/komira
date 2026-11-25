@@ -15,8 +15,8 @@ export type { CsvOptions, FilePath, SessionOptions } from "./session.ts";
 export { version } from "./version.ts";
 
 /**
- * The C ABI version of the loaded libkomira, `major * 1000 + minor` (1002 is
- * 1.2). Loads the library if no call has yet; throws LibraryLoadError when it
+ * The C ABI version of the loaded libkomira, `major * 1000 + minor` (1008 is
+ * 1.8). Loads the library if no call has yet; throws LibraryLoadError when it
  * cannot.
  */
 export function abiVersion(): number {

@@ -64,14 +64,14 @@ test('after the refusals the addon is still unloaded', () => {
   assert.throws(() => addon.abiVersion(), { code: 'KOMIRA_NOT_LOADED' });
 });
 
-test('the real library loads, reports ABI 1.2, and loading it again is a no-op', () => {
+test('the real library loads, reports ABI 1.8, and loading it again is a no-op', () => {
   assert.equal(addon.load(REAL), undefined);
-  assert.equal(addon.abiVersion(), 1002);
+  assert.equal(addon.abiVersion(), 1008);
   assert.equal(addon.load(REAL), undefined);
-  assert.equal(addon.abiVersion(), 1002);
+  assert.equal(addon.abiVersion(), 1008);
 });
 
 test('another path is refused once a library is loaded', () => {
   assert.throws(() => addon.load(fake('libkomira_fake_v2.so')), { code: 'KOMIRA_LOADED' });
-  assert.equal(addon.abiVersion(), 1002);
+  assert.equal(addon.abiVersion(), 1008);
 });

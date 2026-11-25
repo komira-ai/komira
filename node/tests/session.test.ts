@@ -4,7 +4,7 @@
 // engine's text as its message. Arguments of the wrong type or value are
 // TypeError or RangeError, raised before the library is called (the stand-in
 // would refuse any call that reached it). Options and the registrations
-// libkomira has no call for are refused by name. Closing is idempotent.
+// this package does not bind yet are refused by name. Closing is idempotent.
 
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -42,15 +42,15 @@ test("session options: wrong types and values, before the library is loaded", ()
   assert.equal(addonOpened(), false);
 });
 
-test("session options of the right type are refused by name: libkomira cannot set them yet", () => {
+test("session options of the right type are refused by name: this package does not set them yet", () => {
   assert.equal(
     refused(() => new Session({ threads: 8 }), UnsupportedOperation),
-    "the session option threads is not supported yet: libkomira has no call that sets it; leave it out to take the " +
+    "the session option threads is not supported yet: this package does not set it yet; leave it out to take the " +
       "engine's default",
   );
   assert.equal(
     refused(() => new Session({ memoryLimit: 1 << 30 }), UnsupportedOperation),
-    "the session option memoryLimit is not supported yet: libkomira has no call that sets it; leave it out to take " +
+    "the session option memoryLimit is not supported yet: this package does not set it yet; leave it out to take " +
       "the engine's default",
   );
   assert.equal(addonOpened(), false);
@@ -103,17 +103,17 @@ test("registerCsv and registerNdjson check their arguments, then are refused by 
   const s = new Session();
   assert.equal(
     await rejected(s.registerCsv("t", "/x.csv"), UnsupportedOperation),
-    "registerCsv is not supported yet: libkomira has no call that registers a CSV file by name; registerParquet " +
+    "registerCsv is not supported yet: this package does not yet bind the call that registers a CSV file by name; registerParquet " +
       "registers a Parquet file",
   );
   assert.equal(
     await rejected(s.registerCsv("t", "/x.csv", { delimiter: "|", header: true, allVarchar: false }), UnsupportedOperation),
-    "registerCsv is not supported yet: libkomira has no call that registers a CSV file by name; registerParquet " +
+    "registerCsv is not supported yet: this package does not yet bind the call that registers a CSV file by name; registerParquet " +
       "registers a Parquet file",
   );
   assert.equal(
     await rejected(s.registerNdjson("t", new URL("file:///x.ndjson")), UnsupportedOperation),
-    "registerNdjson is not supported yet: libkomira has no call that registers a newline-delimited JSON file by " +
+    "registerNdjson is not supported yet: this package does not yet bind the call that registers a newline-delimited JSON file by " +
       "name; registerParquet registers a Parquet file",
   );
   const csv: [unknown[], ErrorConstructor, string][] = [

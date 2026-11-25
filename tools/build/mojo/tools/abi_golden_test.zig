@@ -409,3 +409,172 @@ test "named types: CStr and ConstBytes map to const C pointers and the source mu
     try t.expectEqual(@as(usize, 1), f2.list.items.len);
     try t.expect(has(f2, "`CStr` is declared as `UnsafePointer[Int32]` and must be `UnsafePointer[UInt8]`"));
 }
+
+const arrow_src_prefix = "comptime CStr = UnsafePointer[UInt8, MutUntrackedOrigin]\n";
+const arrow_fn_src = "@export\ndef k_run(ctx: Handle, sql: CStr, out: ArrowStream) abi(\"C\") -> Int32:\n    return 0\n";
+const arrow_golden = "version\t1.0\nkomira_sql_stream\tInt32\tHandle,CStr,ArrowStream\t1.0\n";
+
+test "cValueType: ArrowStream is a pointer to the Arrow stream struct and the bare struct names are unknown" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings("struct ArrowArrayStream *", try G.cValueType(a, "ArrowStream"));
+    try t.expectEqualStrings("struct ArrowArrayStream **", try G.cValueType(a, "UnsafePointer[ArrowStream]"));
+    try t.expectError(error.UnknownType, G.cValueType(a, "CArrowArrayStream"));
+    try t.expectError(error.UnknownType, G.cValueType(a, "ArrowArrayStream"));
+}
+
+test "parseSource: ArrowStream must be declared as a pointer to CArrowArrayStream" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var f = G.Findings{ .a = a };
+    _ = try G.parseSource(a, arrow_src_prefix ++ "comptime ArrowStream = UnsafePointer[CArrowArrayStream, MutUntrackedOrigin]\n" ++ arrow_fn_src, &f);
+    try t.expectEqual(@as(usize, 0), f.list.items.len);
+
+    // Used and never declared.
+    var f1 = G.Findings{ .a = a };
+    _ = try G.parseSource(a, arrow_src_prefix ++ arrow_fn_src, &f1);
+    try t.expectEqual(@as(usize, 1), f1.list.items.len);
+    try t.expect(has(f1, "uses the type `ArrowStream` and the source declares no `comptime ArrowStream = ...`"));
+
+    // Declared as a pointer to something else.
+    var f2 = G.Findings{ .a = a };
+    _ = try G.parseSource(a, arrow_src_prefix ++ "comptime ArrowStream = UnsafePointer[UInt8, MutUntrackedOrigin]\n" ++ arrow_fn_src, &f2);
+    try t.expectEqual(@as(usize, 1), f2.list.items.len);
+    try t.expect(has(f2, "`ArrowStream` is declared as `UnsafePointer[UInt8]` and must be `UnsafePointer[CArrowArrayStream]`"));
+    try t.expect(has(f2, "pointer to struct ArrowArrayStream"));
+}
+
+test "check: an ArrowStream argument agrees with the golden, and an OpaquePointer in its place is an argument-type finding" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const src = arrow_src_prefix ++ "comptime ArrowStream = UnsafePointer[CArrowArrayStream, MutUntrackedOrigin]\n" ++ arrow_fn_src;
+
+    var f = G.Findings{ .a = a };
+    _ = try run(a, src, "version\t1.0\nk_run\tInt32\tHandle,CStr,ArrowStream\t1.0\n", &f);
+    try t.expectEqual(@as(usize, 0), f.list.items.len);
+
+    var f1 = G.Findings{ .a = a };
+    _ = try run(a, src, "version\t1.0\nk_run\tInt32\tHandle,CStr,OpaquePointer\t1.0\n", &f1);
+    try t.expectEqual(@as(usize, 1), f1.list.items.len);
+    try t.expect(has(f1, "`k_run`: the argument types changed: golden (Handle, CStr, OpaquePointer), source (Handle, CStr, ArrowStream)"));
+}
+
+const arrow_schema_text =
+    \\struct ArrowSchema {
+    \\  /* Array type description */
+    \\  const char* format;
+    \\  const char* name;
+    \\  const char* metadata;
+    \\  int64_t flags;
+    \\  int64_t n_children;
+    \\  struct ArrowSchema** children;
+    \\  struct ArrowSchema* dictionary;
+    \\
+    \\  /* Release callback */
+    \\  void (*release)(struct ArrowSchema*);
+    \\  /* Opaque producer-specific data */
+    \\  void* private_data;
+    \\};
+;
+
+const arrow_array_text =
+    \\struct ArrowArray {
+    \\  /* Array data description */
+    \\  int64_t length;
+    \\  int64_t null_count;
+    \\  int64_t offset;
+    \\  int64_t n_buffers;
+    \\  int64_t n_children;
+    \\  const void** buffers;
+    \\  struct ArrowArray** children;
+    \\  struct ArrowArray* dictionary;
+    \\
+    \\  /* Release callback */
+    \\  void (*release)(struct ArrowArray*);
+    \\  /* Opaque producer-specific data */
+    \\  void* private_data;
+    \\};
+;
+
+const arrow_stream_text =
+    \\struct ArrowArrayStream {
+    \\  /* Callbacks providing stream functionality */
+    \\  int (*get_schema)(struct ArrowArrayStream*, struct ArrowSchema* out);
+    \\  int (*get_next)(struct ArrowArrayStream*, struct ArrowArray* out);
+    \\  const char* (*get_last_error)(struct ArrowArrayStream*);
+    \\
+    \\  /* Release callback */
+    \\  void (*release)(struct ArrowArrayStream*);
+    \\
+    \\  /* Opaque producer-specific data */
+    \\  void* private_data;
+    \\};
+;
+
+test "header: a golden using ArrowStream carries the Arrow struct block between the handle typedef and the prototypes" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var f = G.Findings{ .a = a };
+    const g = (try G.parseGolden(a, arrow_golden, &f)).?;
+    const h = try G.header(a, g, "komira.h", "abi.tsv");
+    const proto = "int32_t komira_sql_stream(komira_handle, const char *, struct ArrowArrayStream *);\n";
+    try t.expect(std.mem.indexOf(u8, h, "/* since 1.0 */\n" ++ proto) != null);
+
+    const typedef_at = std.mem.indexOf(u8, h, "typedef struct komira_handle_s *komira_handle;").?;
+    const data_guard = std.mem.indexOf(u8, h, "#ifndef ARROW_C_DATA_INTERFACE\n#define ARROW_C_DATA_INTERFACE\n").?;
+    const flags_at = std.mem.indexOf(u8, h, "#define ARROW_FLAG_DICTIONARY_ORDERED 1\n#define ARROW_FLAG_NULLABLE 2\n#define ARROW_FLAG_MAP_KEYS_SORTED 4\n").?;
+    const schema_at = std.mem.indexOf(u8, h, arrow_schema_text).?;
+    const array_at = std.mem.indexOf(u8, h, arrow_array_text).?;
+    const data_end = std.mem.indexOf(u8, h, "#endif  /* ARROW_C_DATA_INTERFACE */\n").?;
+    const stream_guard = std.mem.indexOf(u8, h, "#ifndef ARROW_C_STREAM_INTERFACE\n#define ARROW_C_STREAM_INTERFACE\n").?;
+    const stream_at = std.mem.indexOf(u8, h, arrow_stream_text).?;
+    const stream_end = std.mem.indexOf(u8, h, "#endif  /* ARROW_C_STREAM_INTERFACE */\n").?;
+    const proto_at = std.mem.indexOf(u8, h, proto).?;
+    try t.expect(typedef_at < data_guard);
+    try t.expect(data_guard < flags_at);
+    try t.expect(flags_at < schema_at);
+    try t.expect(schema_at < array_at);
+    try t.expect(array_at < data_end);
+    try t.expect(data_end < stream_guard);
+    try t.expect(stream_guard < stream_at);
+    try t.expect(stream_at < stream_end);
+    try t.expect(stream_end < proto_at);
+
+    // ArrowStream inside a pointer, or as a return type, also brings the block.
+    var f2 = G.Findings{ .a = a };
+    const nested = try G.header(a, (try G.parseGolden(a, "version\t1.0\nk_n\tNone\tUnsafePointer[ArrowStream]\t1.0\n", &f2)).?, "komira.h", "abi.tsv");
+    try t.expect(std.mem.indexOf(u8, nested, "struct ArrowArrayStream **") != null);
+    try t.expect(std.mem.indexOf(u8, nested, "#ifndef ARROW_C_STREAM_INTERFACE") != null);
+    const ret = try G.header(a, (try G.parseGolden(a, "version\t1.0\nk_r\tArrowStream\t-\t1.0\n", &f2)).?, "komira.h", "abi.tsv");
+    try t.expect(std.mem.indexOf(u8, ret, "struct ArrowArrayStream *k_r(void);\n") != null);
+    try t.expect(std.mem.indexOf(u8, ret, "#ifndef ARROW_C_DATA_INTERFACE") != null);
+}
+
+test "header: a golden without ArrowStream has no Arrow definitions" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var f = G.Findings{ .a = a };
+    const h = try G.header(a, (try G.parseGolden(a, golden, &f)).?, "komira.h", "abi.tsv");
+    try t.expect(std.mem.indexOf(u8, h, "ArrowArrayStream") == null);
+    try t.expect(std.mem.indexOf(u8, h, "ARROW_C_DATA_INTERFACE") == null);
+    try t.expect(std.mem.indexOf(u8, h, "ARROW_FLAG") == null);
+}
+
+test "header: the negative-status comment comes right before the first constant and only with constants" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const note = "/* Every failure is a negative status. A caller treats a negative status this header does not name as a failure. */\n";
+    var f = G.Findings{ .a = a };
+    const with = try G.header(a, (try G.parseGolden(a, consts_golden, &f)).?, "komira.h", "komira.tsv");
+    try t.expect(std.mem.indexOf(u8, with, note ++ "/* since 1.0 */\n#define KOMIRA_OK (0)\n") != null);
+    try t.expectEqual(@as(usize, 1), std.mem.count(u8, with, "Every failure is a negative status"));
+    const without = try G.header(a, (try G.parseGolden(a, golden, &f)).?, "komira.h", "abi.tsv");
+    try t.expect(std.mem.indexOf(u8, without, "Every failure is a negative status") == null);
+}

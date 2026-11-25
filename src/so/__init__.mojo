@@ -1,27 +1,37 @@
 """`so` -- the C ABI of komira's one shared library, `libkomira`.
 
 - `status.mojo`: the status codes every fallible call returns (`KOMIRA_OK`
-  and the five negative `KOMIRA_ERR_*` codes), the credential kinds, fields
+  and the six negative `KOMIRA_ERR_*` codes), the steps of an error
+  (`KOMIRA_STEP_*`), the credential kinds, fields
   and scope (`KOMIRA_CRED_*`, `KOMIRA_FIELD_*`, `KOMIRA_BIND_SESSION`), the
   ABI version
   (`abi_version`, `ABI_MAJOR`, `ABI_MINOR`), `buffer_status`, the test the
   two-call output protocol applies to a caller's buffer, and
   `input_length_status`, the bound on a byte input (`KOMIRA_MAX_INPUT_BYTES`).
-- `session.mojo`: `Session`, the state behind a context handle, and
-  `try_new_session`, the session `komira_ctx_new` hands out or None: the text of
-  the last error, the engine (`sdk_exec`'s `EngineContext`) whose catalog
-  holds the registered tables, and the credentials.
+- `session.mojo`: `Session`, the state behind a context handle,
+  `try_new_session`, the session `komira_ctx_new` hands out or None, and
+  `session_options`, the engine options of `komira_ctx_new_with_options`'s
+  two `int64_t` arguments (0 is the host's own value), `error_code` (the code
+  of an error reason) and `step_number` (the number of a step name). A session
+  holds the last error (text, step and code), the engine (`sdk_exec`'s `EngineContext`) whose
+  catalog holds the registered tables, and the credentials.
 - `credentials.mojo`: `SessionCredentials`, a session's credentials by name:
   defined in three steps (`add`, `set`, `seal`), held in a
   `SessionSecretStore` (`credential_store.mojo`) and read back only through a
   reveal of `secret_bindings` over `secret_store`.
 - `sources.mojo`: what the source and render exports do on values:
-  `register_parquet`, `parquet_schema_bytes`, `csv_binding_bytes`,
-  `json_binding_bytes` and `plan_render_text`.
+  `register_parquet`, `register_csv`, `register_json`,
+  `parquet_schema_bytes`, `csv_binding_bytes`,
+  `json_binding_bytes`, `plan_render_text`, `sql_result`, the answer of
+  one SQL statement as batches ready for the Arrow C stream, and
+  `plan_result`, the answer of a serialized plan run with no SQL front end
+  (`STEP_DECODE` names its decode step).
 
 `_c_abi.mojo` is the library's C surface (`komira_abi_version`,
-`komira_ctx_new`, `komira_ctx_free`, `komira_last_error`, the source and
-render calls and the three credential calls). It is the one file that holds pointers and is not part of this
+`komira_ctx_new`, `komira_ctx_new_with_options`, `komira_ctx_free`, `komira_last_error`, `komira_last_error_code`, `komira_last_error_step`, the source and
+render calls, the three credential calls, `komira_sql_stream`,
+`komira_register_csv` and `komira_register_json`, the four run-control
+calls, `komira_sql_stream_run` and `komira_plan_stream`). It is the one file that holds pointers and is not part of this
 Mojo package; `libkomira` is built from it by the `libkomira` target.
 """
 
@@ -31,13 +41,26 @@ from .credentials import (
     CREDENTIAL_UNBOUND,
     SessionCredentials,
 )
-from .session import Session, try_new_session
+from .session import (
+    Session,
+    error_code,
+    session_options,
+    step_number,
+    try_new_session,
+)
 from .sources import (
+    QUERY_CANCELLED,
     csv_binding_bytes,
+    STEP_DECODE,
+    is_cancelled_error,
     json_binding_bytes,
     parquet_schema_bytes,
     plan_render_text,
+    plan_result,
+    register_csv,
+    register_json,
     register_parquet,
+    sql_result,
 )
 from .status import (
     ABI_MAJOR,
@@ -52,6 +75,7 @@ from .status import (
     KOMIRA_CRED_GCP_TOKEN,
     KOMIRA_CRED_OAUTH2_CLIENT,
     KOMIRA_ERR_BUFFER_TOO_SMALL,
+    KOMIRA_ERR_CANCELLED,
     KOMIRA_ERR_ENGINE,
     KOMIRA_ERR_NULL_ARG,
     KOMIRA_ERR_NULL_CTX,
@@ -71,6 +95,12 @@ from .status import (
     KOMIRA_FIELD_TOKEN_URL,
     KOMIRA_MAX_INPUT_BYTES,
     KOMIRA_OK,
+    KOMIRA_STEP_BIND,
+    KOMIRA_STEP_EXECUTE,
+    KOMIRA_STEP_LOWER,
+    KOMIRA_STEP_NONE,
+    KOMIRA_STEP_OPTIMIZE,
+    KOMIRA_STEP_PARSE,
     abi_version,
     buffer_status,
     input_length_status,

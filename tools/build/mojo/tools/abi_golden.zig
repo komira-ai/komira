@@ -38,6 +38,18 @@
 //! `comptime CStr = UnsafePointer[UInt8, ...]` at the top level, and a
 //! declaration that is any other type is a finding.
 //!
+//! `ArrowStream` (`struct ArrowArrayStream *`) is a named type of the same kind:
+//! a source that uses it must declare `comptime ArrowStream =
+//! UnsafePointer[CArrowArrayStream, ...]` at the top level. When any golden row
+//! uses `ArrowStream` (as a return, an argument or inside a pointer), the header
+//! carries, after the handle typedef and before the prototypes, the Arrow C Data
+//! Interface (`ArrowSchema`, `ArrowArray`) and C Stream Interface
+//! (`ArrowArrayStream`) definitions as the Apache Arrow specification gives them,
+//! each inside its `ARROW_C_*_INTERFACE` guard. A golden without it gets none of
+//! that block. A golden with constants gets one comment before the first one
+//! saying that every failure is a negative status and a status the header does
+//! not name is a failure too.
+//!
 //! Exit status: 0; 1 for findings; 2 for a usage error or a failure of the
 //! tool's own.
 
@@ -219,6 +231,9 @@ const scalar_map = [_][2][]const u8{
     // `named_aliases` holds the source to that.
     .{ "CStr", "const char *" },
     .{ "ConstBytes", "const uint8_t *" },
+    // A pointer to the Arrow C stream struct the header defines; the Mojo side
+    // names the struct `CArrowArrayStream`.
+    .{ "ArrowStream", "struct ArrowArrayStream *" },
 };
 
 /// The C type of a canonical Mojo type that can be an argument or the pointee of
@@ -318,10 +333,18 @@ pub fn parseSource(a: Alloc, text: []const u8, f: *Findings) ![]const Sig {
 }
 
 /// The named C types whose Mojo alias the source must declare, with the
-/// canonical type the alias must be.
-const named_aliases = [_][2][]const u8{
-    .{ "CStr", "UnsafePointer[UInt8]" },
-    .{ "ConstBytes", "UnsafePointer[UInt8]" },
+/// canonical type the alias must be and why.
+const NamedAlias = struct {
+    name: []const u8,
+    canon: []const u8,
+    /// What the header makes of the alias, for the finding's text.
+    reason: []const u8,
+};
+
+const named_aliases = [_]NamedAlias{
+    .{ .name = "CStr", .canon = "UnsafePointer[UInt8]", .reason = "the header makes it a pointer to const" },
+    .{ .name = "ConstBytes", .canon = "UnsafePointer[UInt8]", .reason = "the header makes it a pointer to const" },
+    .{ .name = "ArrowStream", .canon = "UnsafePointer[CArrowArrayStream]", .reason = "the header makes it a pointer to struct ArrowArrayStream" },
 };
 
 fn usesType(s: Sig, name: []const u8) bool {
@@ -339,23 +362,23 @@ fn checkNamedTypes(a: Alloc, text: []const u8, sigs: []const Sig, f: *Findings) 
     for (named_aliases) |na| {
         var used: ?Sig = null;
         for (sigs) |s| {
-            if (usesType(s, na[0])) used = s;
+            if (usesType(s, na.name)) used = s;
         }
         var declared = false;
         var it = std.mem.splitScalar(u8, text, '\n');
         var n: usize = 0;
-        const head = try std.fmt.allocPrint(a, "comptime {s} =", .{na[0]});
+        const head = try std.fmt.allocPrint(a, "comptime {s} =", .{na.name});
         while (it.next()) |raw| {
             n += 1;
             if (!std.mem.startsWith(u8, raw, head)) continue;
             declared = true;
             const got = try canonType(a, trim(stripComment(raw[head.len..])));
-            if (!std.mem.eql(u8, got, na[1])) {
-                try f.add("source line {d}: `{s}` is declared as `{s}` and must be `{s}` (the header makes it a pointer to const)", .{ n, na[0], got, na[1] });
+            if (!std.mem.eql(u8, got, na.canon)) {
+                try f.add("source line {d}: `{s}` is declared as `{s}` and must be `{s}` ({s})", .{ n, na.name, got, na.canon, na.reason });
             }
         }
         if (used) |s| {
-            if (!declared) try f.add("source line {d}: `{s}` uses the type `{s}` and the source declares no `comptime {s} = ...`", .{ s.line, s.symbol, na[0], na[0] });
+            if (!declared) try f.add("source line {d}: `{s}` uses the type `{s}` and the source declares no `comptime {s} = ...`", .{ s.line, s.symbol, na.name, na.name });
         }
     }
 }
@@ -689,6 +712,84 @@ pub fn guardName(a: Alloc, header_name: []const u8) ![]const u8 {
     return out;
 }
 
+/// The Arrow C Data Interface and C Stream Interface, as the Apache Arrow
+/// specification gives them (C comments in place of its `//` ones).
+const arrow_block =
+    \\/* The Arrow C Data Interface and C Stream Interface, as the Apache Arrow
+    \\ * specification gives them. */
+    \\#ifndef ARROW_C_DATA_INTERFACE
+    \\#define ARROW_C_DATA_INTERFACE
+    \\
+    \\#define ARROW_FLAG_DICTIONARY_ORDERED 1
+    \\#define ARROW_FLAG_NULLABLE 2
+    \\#define ARROW_FLAG_MAP_KEYS_SORTED 4
+    \\
+    \\struct ArrowSchema {
+    \\  /* Array type description */
+    \\  const char* format;
+    \\  const char* name;
+    \\  const char* metadata;
+    \\  int64_t flags;
+    \\  int64_t n_children;
+    \\  struct ArrowSchema** children;
+    \\  struct ArrowSchema* dictionary;
+    \\
+    \\  /* Release callback */
+    \\  void (*release)(struct ArrowSchema*);
+    \\  /* Opaque producer-specific data */
+    \\  void* private_data;
+    \\};
+    \\
+    \\struct ArrowArray {
+    \\  /* Array data description */
+    \\  int64_t length;
+    \\  int64_t null_count;
+    \\  int64_t offset;
+    \\  int64_t n_buffers;
+    \\  int64_t n_children;
+    \\  const void** buffers;
+    \\  struct ArrowArray** children;
+    \\  struct ArrowArray* dictionary;
+    \\
+    \\  /* Release callback */
+    \\  void (*release)(struct ArrowArray*);
+    \\  /* Opaque producer-specific data */
+    \\  void* private_data;
+    \\};
+    \\
+    \\#endif  /* ARROW_C_DATA_INTERFACE */
+    \\
+    \\#ifndef ARROW_C_STREAM_INTERFACE
+    \\#define ARROW_C_STREAM_INTERFACE
+    \\
+    \\struct ArrowArrayStream {
+    \\  /* Callbacks providing stream functionality */
+    \\  int (*get_schema)(struct ArrowArrayStream*, struct ArrowSchema* out);
+    \\  int (*get_next)(struct ArrowArrayStream*, struct ArrowArray* out);
+    \\  const char* (*get_last_error)(struct ArrowArrayStream*);
+    \\
+    \\  /* Release callback */
+    \\  void (*release)(struct ArrowArrayStream*);
+    \\
+    \\  /* Opaque producer-specific data */
+    \\  void* private_data;
+    \\};
+    \\
+    \\#endif  /* ARROW_C_STREAM_INTERFACE */
+;
+
+const negative_status_note = "/* Every failure is a negative status. A caller treats a negative status this header does not name as a failure. */\n";
+
+fn usesArrowStream(g: Golden) bool {
+    for (g.rows) |r| {
+        if (std.mem.indexOf(u8, r.ret, "ArrowStream") != null) return true;
+        for (r.args) |t| {
+            if (std.mem.indexOf(u8, t, "ArrowStream") != null) return true;
+        }
+    }
+    return false;
+}
+
 /// The C header of `g`, whose types `check` found all in the type map.
 pub fn header(a: Alloc, g: Golden, header_name: []const u8, golden_name: []const u8) ![]const u8 {
     var o = std.ArrayList(u8).empty;
@@ -700,12 +801,14 @@ pub fn header(a: Alloc, g: Golden, header_name: []const u8, golden_name: []const
     try w.writeAll("#include <stddef.h>\n#include <stdint.h>\n\n");
     try w.writeAll("#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n");
     try w.print("#define KOMIRA_ABI_VERSION_MAJOR {d}\n#define KOMIRA_ABI_VERSION_MINOR {d}\n\n", .{ g.version.major, g.version.minor });
-    for (g.consts) |c| {
+    for (g.consts, 0..) |c, i| {
+        if (i == 0) try w.writeAll(negative_status_note);
         try w.print("/* since {d}.{d} */\n#define {s} ({d}{s})\n", .{ c.since.major, c.since.minor, c.name, c.value, if (c.value > 2147483647) "ULL" else "" });
     }
     if (g.consts.len > 0) try w.writeAll("\n");
     try w.writeAll("/* An opaque handle: never dereferenced by a caller. */\n");
     try w.writeAll("typedef struct komira_handle_s *komira_handle;\n\n");
+    if (usesArrowStream(g)) try w.writeAll(arrow_block ++ "\n\n");
     for (g.rows) |r| {
         const ret = try cReturnType(a, r.ret);
         try w.print("/* since {d}.{d} */\n", .{ r.since.major, r.since.minor });

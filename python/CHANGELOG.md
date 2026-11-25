@@ -12,6 +12,43 @@ install page shows names it.
 
 ## Unreleased
 
+- **CSV and JSON files.** `Session.register_csv(name, path, *, delimiter=",", header=True,
+  all_varchar=False)` and `Session.register_json(name, path)` register a CSV file and a
+  newline-delimited JSON file as a table for `Session.sql`, with the column names and types the
+  engine infers when the call is made: the table `read_csv` or `read_json` makes of the same file.
+  A relative path is resolved against the working directory and `~` is expanded. A missing, empty or
+  unreadable file, or a name the session already has, raises `KomiraError` with the engine's message.
+  They need libkomira ABI 1.5.
+- **SQL.** `Session.sql(query)` runs one SQL statement over the session's registered tables and returns
+  a `Result`, read once as a pyarrow `Table` (`to_arrow()`), a `RecordBatchReader` (`to_reader()`) or
+  through the Arrow PyCapsule interface (`__arrow_c_stream__`, so `pyarrow.table(result)` reads it). A
+  syntax error, an unknown table or a refused construct raises `KomiraError` from `sql` itself, with the
+  engine's message. A result still reads after its session is closed. `komira.Result` is a new public name; a requested
+  schema on `__arrow_c_stream__` raises a `KomiraError`.
+- **pandas and polars.** `Result.to_pandas()` and `Result.to_polars()` read the answer as a pandas or
+  polars `DataFrame`, converted through Arrow by pyarrow's `Table.to_pandas()` and `polars.from_arrow`.
+  Neither library is a requirement of the wheel: when one is missing the call raises `ImportError`
+  naming it, and the result stays unread.
+- **Threads.** A `Session` may be used from several threads: its calls run one at a time, a call waiting
+  for the one running on the same session, and `close()` waits for a running call. Two sessions run at
+  once. A call from a signal handler, a finalizer or a `progress` callback made inside a running call of the same thread raises
+  `KomiraError`. Of two threads reading one `Result`, one reads it and the other gets `KomiraError`. Using
+  one session from two threads at once was not supported.
+- **Ctrl-C.** Ctrl-C during `Session.sql` cancels the query: the engine stops at its next check,
+  `sql` raises `KeyboardInterrupt`, and the session runs the next query. Before, a query could not be
+  interrupted: the `KeyboardInterrupt` came only once the engine had finished it. The query now runs on
+  a helper thread while the calling thread waits for it. Nothing a cancelled query computed is kept.
+  Cancel and progress need libkomira ABI 1.6, which the wheel carries; with an older library a query
+  still cannot be interrupted, and `progress` raises `KomiraError`.
+- **Progress.** `Session.sql(query, progress=callback)` calls `callback(done, total)` on the calling
+  thread with the plan segments the query has finished and the segments its plan has, each time that
+  changes and once more when the query has answered. An exception the callback raises cancels the
+  query and is raised from `sql`.
+- **Logging.** komira logs to the `logging` logger `"komira"`, which has a `NullHandler`: at `DEBUG`
+  the library it loaded and each answered query's plan segments, at `INFO` a query stopped by an
+  exception. It logs no query text.
+- **pyarrow.** The wheel requires `pyarrow>=25.0.1`, so `pip install komira` installs it; it had no
+  requirement.
 - **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its
   `Requires-Python` is `>=3.11` (it was `>=3.13`), and its classifiers name the four. The package's
   tests and the install of each release run on all four.
