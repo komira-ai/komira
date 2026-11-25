@@ -83,7 +83,7 @@ _PYARROW_SPELLING = {"float": "float32", "double": "float64", "date32[day]": "da
 
 # The sum of each input type: (the type the argument is summed as, polars'
 # type of the sum). The plan sums a signed integer or a boolean as INT64 and a
-# float as FLOAT64; an Int32 is widened to INT64 first, as the engine has no
+# float as FLOAT64; an Int32 or a Float32 is widened to INT64 or FLOAT64 first, as the engine has no
 # arithmetic over Int32, and an unsigned integer too, since the engine's UINT64
 # sum cannot be coalesced. polars' UInt32 (a boolean's or a
 # UInt32's sum) is Int64 here (komira/pl/_types.py).
@@ -96,7 +96,7 @@ _SUMS = {
     "uint8": ("int64", "int64"),
     "uint16": ("int64", "int64"),
     "uint32": ("int64", "int64"),
-    "float32": (None, "float32"),
+    "float32": ("float64", "float32"),
     "float64": (None, "float64"),
 }
 
@@ -470,11 +470,11 @@ class Expr:
 
     def min(self) -> Expr:
         """The smallest value; null over no values."""
-        return self._aggregate("min", lambda arg, found: (Agg("min", (arg,)), _same))
+        return self._aggregate("min", lambda arg, found: _pick("min", arg, found))
 
     def max(self) -> Expr:
         """The largest value; null over no values."""
-        return self._aggregate("max", lambda arg, found: (Agg("max", (arg,)), _same))
+        return self._aggregate("max", lambda arg, found: _pick("max", arg, found))
 
     def count(self) -> Expr:
         """The number of values that are not null, an Int64 (polars: UInt32)."""
@@ -504,7 +504,7 @@ class Expr:
 
         def build(arg, found):
             finish = (lambda ref: Cast(ref, "float32")) if found == "float32" else _same
-            return Agg(_STATISTICS[verb], (arg,)), finish
+            return Agg(_STATISTICS[verb], (_wide(arg, found),)), finish
 
         return self._aggregate(verb, build)
 
@@ -534,6 +534,15 @@ class Expr:
 
 def _same(ref: Node) -> Node:
     return ref
+
+
+def _pick(func: str, arg: Node, found: str):
+    """`min` or `max`: over an Int32 or Float32 column the engine picks among
+    Int64 or Float64 values, and the pick is cast back to the column's type;
+    any other type is picked as it is."""
+    if found in ("int32", "float32"):
+        return Agg(func, (_wide(arg, found),)), lambda ref: Cast(ref, found)
+    return Agg(func, (arg,)), _same
 
 
 def _case(cases: tuple, default: Node, scope, verb: str) -> Node:

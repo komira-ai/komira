@@ -486,7 +486,7 @@ def test_sum_count_len_and_statistics_carry_polars_types():
                 (slots[1], Agg("sum", (Cast(c("i32"), "int64"),))),
                 (slots[2], Agg("count", (c("x"),))),
                 (slots[3], Agg("count")),
-                (slots[4], Agg("mean", (c("f32"),))),
+                (slots[4], Agg("mean", (Cast(c("f32"), "float64"),))),
                 (slots[5], Agg("stddev_samp", (c("y"),))),
             ),
         ),
@@ -521,6 +521,26 @@ def test_n_unique_counts_null_as_one_value():
 def test_an_aggregate_name_never_takes_a_column_or_output_name():
     lf = frame().select(kpl.col("x").sum().alias("__komira_agg_0"))
     assert lf._plan.child.aggs[0][0] == "___komira_agg_0"
+
+
+def test_min_and_max_of_int32_and_float32_are_picked_wide_and_cast_back():
+    lf = frame().select(kpl.col("i32").min(), kpl.col("f32").max(), kpl.col("u16").max())
+    assert lf._plan == Project(
+        Aggregate(
+            T,
+            (),
+            (
+                ("__komira_agg_0", Agg("min", (Cast(c("i32"), "int64"),))),
+                ("__komira_agg_1", Agg("max", (Cast(c("f32"), "float64"),))),
+                ("__komira_agg_2", Agg("max", (c("u16"),))),
+            ),
+        ),
+        (
+            ("i32", Cast(c("__komira_agg_0"), "int32")),
+            ("f32", Cast(c("__komira_agg_1"), "float32")),
+            ("u16", c("__komira_agg_2")),
+        ),
+    )
 
 
 def test_aggregate_below_a_sort_drops_the_sort():

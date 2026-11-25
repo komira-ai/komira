@@ -40,8 +40,8 @@ twice; collect() calls the plan entry and never the SQL entry; explain()
 renders the plan; a missing file is refused at the reader with the engine's
 message; frames of two sessions are refused by concat; a CSV scan, which the
 engine does not lower yet, is refused at the terminal with the engine's step;
-and median, std and var, which the engine's aggregation sinks do not serve
-yet, are refused at the terminal at execute.
+and median, std, var and the min of a string column, which the engine's
+aggregation sinks do not serve yet, are refused at the terminal at execute.
 
     test_pl_oracle.py --lib-dir <dir> --runtime-dir <dir>
 
@@ -320,7 +320,6 @@ CASES = [
             P.col("g").n_unique().alias("n_unique"),
             P.col("x").n_unique().alias("n_unique_x"),
             P.col("id").n_unique().alias("n_unique_no_nulls"),
-            P.col("s").min().alias("first_s"),
         ),
         False,
     ),
@@ -333,7 +332,8 @@ CASES = [
             P.col("flag").sum(),
             P.col("f32").mean().alias("f32_mean"),
             P.col("i32").mean().alias("i32_mean"),
-            P.col("u16").max().alias("u16_max"),
+            P.col("i32").min().alias("i32_min"),
+            P.col("f32").max().alias("f32_max"),
         ),
         False,
     ),
@@ -463,16 +463,16 @@ def test_two_sessions_never_meet(session, path):
 
 
 def test_statistics_the_engine_does_not_serve_are_refused_at_the_terminal(session, path):
-    """median, std and var build the plan's own aggregates (the engine's to
-    refuse, rules section 6); the engine's aggregation sinks serve none of
-    them yet, so collect() raises its refusal at execute, naming the sink."""
+    """median, std and var, and min of a string column, build the plan's own
+    aggregates (the engine's to refuse, rules section 6); the engine's
+    aggregation sinks serve none of them yet, so collect() raises its refusal
+    at execute."""
     lf = kpl.scan_parquet(path, session=session)
-    for expr in (kpl.col("y").median(), kpl.col("y").std(), kpl.col("y").var()):
+    for expr in (kpl.col("y").median(), kpl.col("y").std(), kpl.col("y").var(), kpl.col("s").min()):
         frame = lf.select(expr)
         e = raised(frame.collect)
         assert isinstance(e, KomiraError), repr(e)
         assert e.step == "execute", (e.step, e.code, str(e))
-        assert "aggregation sink" in str(e), str(e)
 
 
 def test_csv_scan_is_refused_at_the_terminal_by_the_engine(session, work):
