@@ -44,7 +44,7 @@ Save this as `quickstart.py`:
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1007 is 1.7
+print(komira.abi_version())   # the engine's C ABI version: 1008 is 1.8
 
 with komira.Session() as s:
     s.register_parquet("readings", "readings.parquet")
@@ -65,7 +65,7 @@ Then `python quickstart.py` prints:
 
 ```text
 0.1.1512
-1007
+1008
 [{'n': 1}]
 [{'n': 5, 'total': 152.5}]
 True
@@ -105,9 +105,6 @@ The package's [README](../python/README.md), which is also its PyPI description,
 
 ## What does not work yet
 
-- **Cancelling a query.** A query cannot be interrupted while it runs: Ctrl-C during `Session.sql`
-  raises `KeyboardInterrupt` when the engine has finished the query. The answer is freed, and the
-  session runs the next query.
 - **One session from two threads at once.** Use a session per thread.
 - **The DataFrame APIs**, pandas-shaped and polars-shaped.
 - **Python UDFs.**

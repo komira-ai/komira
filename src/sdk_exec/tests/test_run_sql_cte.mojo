@@ -61,7 +61,8 @@ from sdk_exec.engine_context import EngineContext
 from sdk_exec.engine_execute import run_lowered_plan
 from sdk_exec.engine_lower import lower_for_context
 from sdk_exec.engine_options import EngineOptions
-from sdk_exec.engine_sql import optimize_for_run, run_sql
+from sdk_exec.engine_plan import optimize_for_run
+from sdk_exec.engine_sql import run_sql
 from sql.sql_binder import bind_statement
 from sql.sql_frontend import query_plan
 from sql.sql_parser import parse_sql

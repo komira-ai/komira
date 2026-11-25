@@ -235,7 +235,7 @@ Why an earlier list showed 246 lines: 246 = 236 + 10, so that list carried 10 of
 | pgwire_server | SDK-SURFACE | ABSENT-OUT-OF-SCOPE | serverless Postgres product face; not the SDK query path |
 | pipeline | PLATFORM | ABSENT-OUT-OF-SCOPE | software-factory orchestration of the hosted service; not on the SDK path |
 | pipeline_runtime | PLATFORM | ABSENT-OUT-OF-SCOPE | software-factory orchestration of the hosted service; not on the SDK path |
-| plan_endpoint | SDK-SURFACE | ABSENT-NEEDED | the plan wire front door the native library uses to run plan bytes and return an Arrow IPC result (execute_plan_bytes, result_ipc, scan_frame_producer, sql_producer); no current counterpart |
+| plan_endpoint | SDK-SURFACE | ABSENT-NEEDED | the plan wire front door the native library uses to run plan bytes and return an Arrow IPC result (execute_plan_bytes, result_ipc, scan_frame_producer, sql_producer); counterpart built since: src/so/sources.mojo plan_result and src/sdk_exec/engine_plan.mojo run_plan (`komira_plan_stream`, ABI 1.8), an Arrow C stream instead of IPC |
 | plan_wire | SDK-SURFACE | PRESENT | src/plan_wire |
 | pod_boot | PLATFORM | ABSENT-OUT-OF-SCOPE | cloud deploy or infrastructure code for the hosted service; not on the SDK path |
 | pplan | SDK-SURFACE | ABSENT-OUT-OF-SCOPE | typed Mojo comptime surface; the Python SDK sends plan bytes instead |

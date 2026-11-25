@@ -2,7 +2,8 @@
 // binds, and, when FAKE_VERSION is 1.2 or later, the three credential calls of
 // ABI 1.2 over a fake store, when it is 1.3 or later, komira_sql_stream
 // answering a stand-in Arrow C stream, when it is 1.5 or later,
-// komira_register_csv and komira_register_json, and when it is 1.7 or later,
+// komira_register_csv and komira_register_json, when it is 1.6 or later, the
+// run handle calls and komira_sql_stream_run, and when it is 1.7 or later,
 // komira_last_error_code and komira_last_error_step (all below). The tests load it to reach what the real
 // library never does:
 //
@@ -535,6 +536,38 @@ EXPORT int32_t komira_register_json(void *ctx, const char *name, const char *pat
   (void)path;
   snprintf(mode, sizeof mode, "%s", name);
   return mode_status();
+}
+#endif
+
+#if !defined(FAKE_ABI_1_0) && FAKE_VERSION % 1000 >= 6
+// ABI 1.6: the run handle calls and komira_sql_stream_run, which a loader of
+// that minor requires. A handle is a cancel flag and a progress of 0 of 0
+// segments; komira_sql_stream_run answers as komira_sql_stream does and never
+// reads the flag, so a run here is never cancelled.
+typedef struct {
+  int cancelled;
+} FakeRun;
+
+EXPORT void *komira_run_new(void) { return calloc(1, sizeof(FakeRun)); }
+
+EXPORT void komira_run_free(void *run) { free(run); }
+
+EXPORT int32_t komira_run_cancel(void *run) {
+  if (run == NULL) return -2;
+  ((FakeRun *)run)->cancelled = 1;
+  return 0;
+}
+
+EXPORT int32_t komira_run_progress(void *run, uint64_t *done, uint64_t *total) {
+  if (run == NULL || done == NULL || total == NULL) return -2;
+  *done = 0;
+  *total = 0;
+  return 0;
+}
+
+EXPORT int32_t komira_sql_stream_run(void *ctx, const char *sql, void *run, struct ArrowArrayStream *out) {
+  if (run == NULL) return -2;
+  return komira_sql_stream(ctx, sql, out);
 }
 #endif
 

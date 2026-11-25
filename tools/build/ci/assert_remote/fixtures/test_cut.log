@@ -1,0 +1,356 @@
+[2026-11-25T02:08:22.417+00:00] Build ID: 00000000-0000-0000-0000-000000000000
+[2026-11-25T02:08:23.050+00:00] RE Session: GRPC-SESSION-ID
+[2026-11-25T02:08:30.117+00:00] Waiting on Test srcs_files_drift --  [re_queued], and 55 other actions
+[2026-11-25T02:08:37.117+00:00] Waiting on Test srcs_files_drift --  [re_queued], and 55 other actions
+[2026-11-25T02:24:32.807+00:00] ✗ Fail: komira//tools/build/third_party_srcs:aws_lc_mini_files_check (0.0s)
+[2026-11-25T02:24:32.807+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.807+00:00]
+[2026-11-25T02:24:32.807+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.807+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:147 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.807+00:00] ✗ Fail: komira//tests/scan_binding_links:test_scan_binding_links (0.0s)
+[2026-11-25T02:24:32.807+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.807+00:00]
+[2026-11-25T02:24:32.807+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.807+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.807+00:00] ✗ Fail: komira//src/kg_code/tests/fixtures/repo:kgfix_dot_test (0.0s)
+[2026-11-25T02:24:32.807+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.807+00:00]
+[2026-11-25T02:24:32.807+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.807+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.807+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_43_3 (0.0s)
+[2026-11-25T02:24:32.807+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.807+00:00]
+[2026-11-25T02:24:32.807+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.807+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.807+00:00] ✗ Fail: komira//src/tests/e2e/komira_shuffle_e2e:test_shuffle_elastic_reducers (0.0s)
+[2026-11-25T02:24:32.807+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.807+00:00]
+[2026-11-25T02:24:32.807+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.807+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.807+00:00] ✗ Fail: komira//src/tests/helpers/komira_test_minio:farm_capability_probe (0.0s)
+[2026-11-25T02:24:32.807+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.807+00:00]
+[2026-11-25T02:24:32.807+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.807+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.807+00:00] ✗ Fail: tests//functional/rust_cargo:native_test (0.0s)
+[2026-11-25T02:24:32.807+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.807+00:00]
+[2026-11-25T02:24:32.807+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.807+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.807+00:00] ✗ Fail: komira//tests/kafka_produce_error_tokens:test_kafka_produce_error_tokens (0.0s)
+[2026-11-25T02:24:32.807+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.807+00:00]
+[2026-11-25T02:24:32.807+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.807+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.807+00:00] ✗ Fail: komira//tools/build/third_party_srcs:s2n_mini_drift (0.0s)
+[2026-11-25T02:24:32.807+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.807+00:00]
+[2026-11-25T02:24:32.807+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.807+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:147 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.807+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_254_0 (0.0s)
+[2026-11-25T02:24:32.807+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.807+00:00]
+[2026-11-25T02:24:32.807+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.807+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.807+00:00] ✗ Fail: komira//third_party/aws-lc:srcs_drift (0.0s)
+[2026-11-25T02:24:32.807+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.807+00:00]
+[2026-11-25T02:24:32.807+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.807+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:147 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.807+00:00] ✗ Fail: komira//src/tests/e2e/broker_e2e:test_broker_lifecycle_e2e (0.0s)
+[2026-11-25T02:24:32.807+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.807+00:00]
+[2026-11-25T02:24:32.807+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.807+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.807+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.808+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_43_1 (0.0s)
+[2026-11-25T02:24:32.808+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.808+00:00]
+[2026-11-25T02:24:32.808+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.808+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.808+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.808+00:00] ✗ Fail: komira//tools/build/third_party_srcs:s2n_mini_files_drift (0.0s)
+[2026-11-25T02:24:32.808+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.808+00:00]
+[2026-11-25T02:24:32.808+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.808+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:147 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.808+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.808+00:00] ✗ Fail: tests//functional/proto:test_tasks_db (0.0s)
+[2026-11-25T02:24:32.808+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.808+00:00]
+[2026-11-25T02:24:32.808+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.808+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.808+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.808+00:00] ✗ Fail: tests//functional/proto:test_team (0.0s)
+[2026-11-25T02:24:32.808+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.808+00:00]
+[2026-11-25T02:24:32.808+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.808+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.808+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.810+00:00] ✗ Fail: komira//tools/build/mojo/mojo_test_testdata:mojo_test_data (0.0s)
+[2026-11-25T02:24:32.810+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.810+00:00]
+[2026-11-25T02:24:32.810+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.810+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.810+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.810+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_0_3 (0.0s)
+[2026-11-25T02:24:32.810+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.810+00:00]
+[2026-11-25T02:24:32.810+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.810+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.810+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.810+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_254_2 (0.0s)
+[2026-11-25T02:24:32.810+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.810+00:00]
+[2026-11-25T02:24:32.810+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.810+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.810+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.810+00:00] ✗ Fail: komira//src/tests/helpers/komira_udf_spike_native:native_bench (0.0s)
+[2026-11-25T02:24:32.810+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.810+00:00]
+[2026-11-25T02:24:32.810+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.810+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.810+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.810+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_0_1 (0.0s)
+[2026-11-25T02:24:32.810+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.810+00:00]
+[2026-11-25T02:24:32.810+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.810+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.810+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.810+00:00] ✗ Fail: komira//tools/build/examples/snappy:test_snappy (0.0s)
+[2026-11-25T02:24:32.810+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.810+00:00]
+[2026-11-25T02:24:32.810+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.810+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.810+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.810+00:00] ✗ Fail: komira//third_party/s2n-tls:srcs_drift (0.0s)
+[2026-11-25T02:24:32.810+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.810+00:00]
+[2026-11-25T02:24:32.810+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.810+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:147 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.810+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.810+00:00] ✗ Fail: komira//src/tests/e2e/komira_shuffle_e2e:test_shuffle_dead_map_replay (0.0s)
+[2026-11-25T02:24:32.810+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.810+00:00]
+[2026-11-25T02:24:32.810+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.810+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.810+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.810+00:00] ✗ Fail: komira//src/iceberg_catalog:test_iceberg_foreign_readback (0.0s)
+[2026-11-25T02:24:32.810+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.810+00:00]
+[2026-11-25T02:24:32.810+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.810+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.810+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.810+00:00] ✗ Fail: komira//tools/build/third_party_srcs:s2n_mini_files_check (0.0s)
+[2026-11-25T02:24:32.810+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.810+00:00]
+[2026-11-25T02:24:32.810+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.810+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:147 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.810+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.811+00:00] ✗ Fail: komira//src/tests/e2e/komira_tls_interop_e2e:test_bssl_client_vs_komira_server (0.0s)
+[2026-11-25T02:24:32.811+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.811+00:00]
+[2026-11-25T02:24:32.811+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.811+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.811+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.811+00:00] ✗ Fail: komira//src/bench:bins_smoke (0.0s)
+[2026-11-25T02:24:32.811+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.811+00:00]
+[2026-11-25T02:24:32.811+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.811+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.811+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.811+00:00] ✗ Fail: komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_vs_bssl_server (0.0s)
+[2026-11-25T02:24:32.811+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.811+00:00]
+[2026-11-25T02:24:32.811+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.811+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.811+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.811+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_1_2 (0.0s)
+[2026-11-25T02:24:32.811+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.811+00:00]
+[2026-11-25T02:24:32.811+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.811+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.811+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.811+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_1_1 (0.0s)
+[2026-11-25T02:24:32.811+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.811+00:00]
+[2026-11-25T02:24:32.811+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.811+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.811+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.811+00:00] ✗ Fail: komira//src/iceberg_catalog:test_iceberg_rest_loopback (0.0s)
+[2026-11-25T02:24:32.811+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.811+00:00]
+[2026-11-25T02:24:32.811+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.811+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.811+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.811+00:00] ✗ Fail: komira//third_party/s2n-tls:srcs_files_drift (0.0s)
+[2026-11-25T02:24:32.811+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.811+00:00]
+[2026-11-25T02:24:32.811+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.811+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:147 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.811+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.811+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_43_2 (0.0s)
+[2026-11-25T02:24:32.811+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.811+00:00]
+[2026-11-25T02:24:32.811+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.811+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.811+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.811+00:00] ✗ Fail: komira//src/db_sqlite:test_dbstorable_sqlite_crud (0.0s)
+[2026-11-25T02:24:32.811+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.811+00:00]
+[2026-11-25T02:24:32.811+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.811+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.811+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.811+00:00] ✗ Fail: komira//tools/build/third_party_srcs:aws_lc_mini_drift (0.0s)
+[2026-11-25T02:24:32.811+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.811+00:00]
+[2026-11-25T02:24:32.811+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.811+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:147 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.811+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.811+00:00] ✗ Fail: komira//tools/build/proto-codegen:xml_equiv_verdicts_test (0.0s)
+[2026-11-25T02:24:32.811+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.811+00:00]
+[2026-11-25T02:24:32.811+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.811+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.811+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.811+00:00] ✗ Fail: komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_refuses_bssl_server (0.0s)
+[2026-11-25T02:24:32.811+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.811+00:00]
+[2026-11-25T02:24:32.811+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.811+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.811+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.811+00:00] ✗ Fail: komira//tools/build/examples/cshim:test_add_direct (0.0s)
+[2026-11-25T02:24:32.811+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.811+00:00]
+[2026-11-25T02:24:32.811+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.811+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.811+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_43_0 (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: komira//third_party/aws-lc:srcs_files_check (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:147 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: tests//functional/surface_capability_matrix/src/tests/e2e/pandas_e2e/sub:test_sub (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: komira//third_party/aws-lc:srcs_files_drift (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:147 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_1_0 (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: komira//third_party/s2n-tls:srcs_files_check (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:147 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_254_3 (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: tests//functional/proto:test_person (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_0_2 (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: komira//tools/build/third_party_srcs:aws_lc_mini_files_drift (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:147 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_1_3 (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: tests//functional/assert_level:test_none (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_254_1 (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: komira//src/tests/e2e/komira_shuffle_e2e:test_shuffle_dead_reducer_reread (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: komira//src/proto_codec:test_float32_json_binades_0_0 (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: tests//functional/surface_capability_matrix/src/tests/e2e/pandas_e2e_extra:test_x (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.812+00:00] ✗ Fail: komira//src/proto_codec:test_copy_hazard (0.0s)
+[2026-11-25T02:24:32.812+00:00] ---- STDOUT ----
+[2026-11-25T02:24:32.812+00:00]
+[2026-11-25T02:24:32.812+00:00] ---- STDERR ----
+[2026-11-25T02:24:32.812+00:00] Remote Execution Error on Execute with digest 0000000000000000000000000000000000000000000000000000000000000000:146 for ReSession GRPC-SESSION-ID
+[2026-11-25T02:24:32.812+00:00] Error: (Error was returned on the stream by RE: RE channel error: code: 'Unknown error', message: "h2 protocol error: error reading a body from connection", source: hyper::Error(Body, Error { kind: Io(Custom { kind: BrokenPipe, error: "stream closed because of a broken pipe" }) }): error reading a body from connection: stream closed because of a broken pipe)
+[2026-11-25T02:24:32.816+00:00] Cache hits: 100%
+[2026-11-25T02:24:32.816+00:00] Commands: 5 (cached: 5, remote: 0, local: 0)
+[2026-11-25T02:24:32.816+00:00] Network: up 85KiB  down 369KiB  session GRPC-SESSION-ID
+Tests finished: Pass 0. [38;5;9mFail 56[39m. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0
+56 TESTS FAILED
+  ✗ komira//tools/build/third_party_srcs:aws_lc_mini_files_check (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)
+  ✗ komira//src/kg_code/tests/fixtures/repo:kgfix_dot_test (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)
+  ✗ komira//tests/scan_binding_links:test_scan_binding_links (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)
+  ✗ komira//src/proto_codec:test_float32_json_binades_43_3 (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)
+  ✗ komira//src/tests/e2e/komira_shuffle_e2e:test_shuffle_elastic_reducers (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)
+  ✗ komira//src/tests/helpers/komira_test_minio:farm_capability_probe (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)
+  ✗ tests//functional/rust_cargo:native_test (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)
+  ✗ komira//tests/kafka_produce_error_tokens:test_kafka_produce_error_tokens (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)
+  ✗ komira//tools/build/third_party_srcs:s2n_mini_drift (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)
+  ✗ komira//src/proto_codec:test_float32_json_binades_254_0 (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)
+  ...and 46 more not shown...

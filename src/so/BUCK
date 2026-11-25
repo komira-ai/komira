@@ -43,7 +43,7 @@ NATIVE_OWNERS = [
 # test_sources holds the operations on values: a Parquet file registered and
 # its schema bytes, a registered table queried through the session's engine
 # (and an unregistered one refused at bind), the CSV and JSON bindings, a
-# plan rendered, and sql_result, komira_sql_stream's answer on values (rows,
+# plan rendered, sql_result, komira_sql_stream's answer on values (rows,
 # no rows with the schema, a result that outlives its session, and refusals as
 # `<step>: <reason>` with the step and the code recorded on the session);
 # test_register_text holds register_csv and
@@ -51,7 +51,13 @@ NATIVE_OWNERS = [
 # the session's engine, each CSV dialect argument equal to read_csv's (a
 # header-less table refused at lower as read_csv's is) and the JSON table
 # equal to read_json's, an unreadable file, an empty name and a
-# taken name refused with nothing registered; test_credentials holds the three steps of a definition, each
+# taken name refused with nothing registered;
+# test_plan_result holds plan_result, komira_plan_stream's
+# answer on values: a plan built from SQL on one session, serialized and run
+# on a fresh session with no table, equals the SQL answer and parses no SQL
+# statement, and every refusal is `<step>: <reason>` (`decode` for bytes that
+# are not a plan, SQL text among them, and for an envelope with a write target
+# or UDFs; `lower` and `execute` from run_plan); test_credentials holds the three steps of a definition, each
 # kind's fields and every named refusal, word for word, and the generations of
 # a name; test_credentials_reveal reads sealed values through sdk_exec's
 # SecretCapability and reads an object of a fake S3 with them, where a wrong
@@ -154,6 +160,7 @@ mojo_library(
     test_srcs = [
         "tests/test_credentials.mojo",
         "tests/test_credentials_reveal.mojo",
+        "tests/test_plan_result.mojo",
         "tests/test_register_text.mojo",
         "tests/test_session.mojo",
         "tests/test_sources.mojo",
@@ -166,13 +173,14 @@ mojo_library(
         "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
     ],
     test_data = {
+        "tests/test_plan_result.mojo": ["tests/fixtures/two_columns.parquet"],
         "tests/test_register_text.mojo": ["tests/fixtures/two_columns.parquet"],
         "tests/test_sources.mojo": ["tests/fixtures/two_columns.parquet"],
     },
     visibility = ["PUBLIC"],
 )
 
-# libkomira.so (libkomira.dylib on macOS arm64): twenty-three exports, and nothing else
+# libkomira.so (libkomira.dylib on macOS arm64): twenty-four exports, and nothing else
 # in the dynamic symbol table (`exports_exact`). Every context it creates owns
 # an engine (sdk_exec's EngineContext) whose workers start in komira_ctx_new.
 # komira_sql_stream runs SQL on that engine and answers an Arrow C stream; the
@@ -180,9 +188,11 @@ mojo_library(
 # komira_sql_stream_run is that call under a run handle (komira_run_new), whose
 # komira_run_cancel and komira_run_progress another thread may call while the
 # run is in flight.
+# komira_plan_stream runs a serialized plan on the same engine, with no SQL
+# front end, and answers the same way.
 # It is published only if every gate driver passes, each of which dlopens it
 # with RTLD_NOW and calls it as a foreign host would:
-#   gate_version       the version is 1007 (1.7);
+#   gate_version       the version is 1008 (1.8);
 #   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
 #                      freeing NULL is a no-op, and a context (with its
 #                      engine's workers) is created and freed again;
@@ -255,6 +265,7 @@ _LIBKOMIRA = dict(
         "komira_run_cancel",
         "komira_run_progress",
         "komira_sql_stream_run",
+        "komira_plan_stream",
     ],
     exports_exact = True,
     gate_srcs = [
@@ -352,14 +363,14 @@ komira_abi_golden(
 
 staged_files(
     name = "c_driver_files",
-    srcs = ["tests/c/abi_driver.c"],
+    srcs = ["tests/c/abi_driver.c", "tests/c/plan_cases.h"],
 )
 
 # A C host of libkomira that includes komira.h and nothing else of ours.
 cxx_binary(
     name = "abi_driver",
     srcs = [":c_driver_files[tests/c/abi_driver.c]"],
-    headers = {"komira.h": ":komira_abi"},
+    headers = {"komira.h": ":komira_abi", "plan_cases.h": ":c_driver_files[tests/c/plan_cases.h]"},
     header_namespace = "",
     # The run-handle cases call komira_run_cancel and komira_run_progress from
     # a second thread.
@@ -397,6 +408,17 @@ cxx_binary(
 # at least the one before with done at most total; a cancel from a second
 # thread while the run is in flight gives 0 or -6 and the context answers
 # after it; NULL run, done or total pointers are -2.
+# And it runs plans through komira_plan_stream:
+# a WirePlanEnvelope it encodes by hand (a scan of a Parquet file, the bytes
+# komira_parquet_schema answers as its schema), run on a context with no table
+# registered, answers what komira_sql_stream answers for the same file (the
+# three-row file and the no-row fixture); SQL text as plan bytes, garbage, an
+# envelope of version 3 and 64 MiB of garbage are -3 at decode, a missing file
+# -3 at lower naming it, NULL plan or out -2, NULL ctx -1, a plan_len over the
+# bound -5 unread; each refusal leaves *out as written, has its step
+# (KOMIRA_STEP_LOWER at lower, KOMIRA_STEP_NONE otherwise), and a good plan
+# follows on the same context with no step or code left; a plan's stream
+# outlives komira_ctx_free.
 komira_c_abi_check(
     name = "c_abi_check",
     driver = ":abi_driver",

@@ -15,6 +15,11 @@ the library, so its context never runs two calls at once (the C ABI's rule,
 src/so/README.md): a call waits for the one running on the same session to
 return. Reading a `Result` takes no lock, since its stream needs neither the
 session nor its context.
+
+On a library of ABI 1.6 or later, `sql` runs its statement under a run handle
+(`_run.run_sql`): a Ctrl-C while it runs cancels the run, and a `progress`
+callback is given the run's plan segments. On an older library it runs the
+statement with `komira_sql_stream`, which cannot be interrupted.
 """
 
 from __future__ import annotations
@@ -24,11 +29,11 @@ import importlib
 import os
 import threading
 import weakref
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from types import ModuleType, TracebackType
 from typing import TYPE_CHECKING
 
-from . import _arrow, _native
+from . import _arrow, _native, _run
 from ._credentials import _BuiltIn, _Credential
 from ._errors import KomiraError, UnsupportedOperation
 
@@ -60,8 +65,9 @@ class Session:
     a call made while another runs on the same session waits for that one to
     return, and `close()` waits too, so the context is never freed under a
     running call. Two sessions run their calls at once. A call made on the
-    thread whose call is running, which only a signal handler or a finalizer
-    can do, raises `KomiraError` instead of waiting for itself.
+    thread whose call is running, which only a signal handler, a finalizer or
+    a `progress` callback can do, raises `KomiraError` instead of waiting for
+    itself.
     """
 
     def __init__(self, *, threads: int | None = None, memory_limit: int | None = None) -> None:
@@ -154,7 +160,7 @@ class Session:
         with self._held():
             self._native.register_json(self._live(), name, path)
 
-    def sql(self, query: str) -> Result:
+    def sql(self, query: str, *, progress: Callable[[int, int], object] | None = None) -> Result:
         """Runs the one SQL statement `query` over the session's tables and
         returns its answer as a `Result`, unread.
 
@@ -172,16 +178,40 @@ class Session:
         `str` is a `TypeError`, and one holding a NUL byte or a lone surrogate
         a `ValueError`, both raised before the library is called.
 
-        A query cannot be interrupted while it runs: the engine computes the
-        answer before the call returns, and Python runs a signal's handler
-        only once the call has returned. So Ctrl-C during `sql` raises
-        `KeyboardInterrupt` then, the answer is released, and the session
-        answers the next call.
+        Ctrl-C while the query runs cancels it: the engine stops at its next
+        check (before each segment of the plan, and at each morsel boundary
+        inside one), `sql` raises `KeyboardInterrupt`, nothing the query
+        computed is kept, and the session answers the next call. A second
+        Ctrl-C while the query stops is not raised; the first one is.
+
+        `progress`, when given, is called on the thread that called `sql`, as
+        `progress(done, total)`, with the plan segments the query finished
+        and the segments its plan has, each time that reading changes while
+        the query runs, and once more when it answered with done equal to
+        total, if that reading was not yet given. Readings only grow. A plan
+        is counted once it is checked, so a query refused before that, and a
+        query whose plan has no segment, never calls it. An exception the
+        callback raises cancels the query and is raised from `sql`. Calling
+        the session from the callback raises `KomiraError`. A `progress` that
+        is not callable is a `TypeError`, raised before the library is called.
+
+        The query runs on a helper thread while the calling thread waits for
+        it, so that Python can run a signal's handler on the calling thread.
+        On a library older than ABI 1.6, which has no run handle, the query
+        runs on the calling thread and cannot be interrupted: Ctrl-C raises
+        `KeyboardInterrupt` once it returned, the answer is released, and a
+        `progress` raises `KomiraError`.
         """
         if not isinstance(query, str):
             raise TypeError("query must be a str, not {}".format(type(query).__name__))
+        if progress is not None and not callable(progress):
+            raise TypeError("progress must be callable, not {}".format(type(progress).__name__))
         with self._held():
-            stream = self._native.sql_stream(self._live(), query)
+            ctx = self._live()
+            if progress is not None or self._native.has("komira_sql_stream_run"):
+                stream = _run.run_sql(self._native, ctx, query, progress)
+            else:
+                stream = self._native.sql_stream(ctx, query)
         try:
             return Result(_arrow.import_stream(stream))
         except _arrow.stream_errors() as e:
@@ -246,8 +276,8 @@ class Session:
         context between a failed call and the read of its message.
 
         The thread already holding it is refused rather than left waiting for
-        itself: a signal handler or a finalizer that runs inside a call and
-        calls the session again gets a `KomiraError`. Another thread's
+        itself: a signal handler, a finalizer or a `progress` callback that
+        runs inside a call and calls the session again gets a `KomiraError`. Another thread's
         `_owner` is never this thread's id, so only that thread is refused.
         A handler that runs in the few bytecodes between taking the lock and
         setting `_owner`, or between clearing it and letting go of the lock,
@@ -257,7 +287,7 @@ class Session:
         if self._owner == me:
             raise KomiraError(
                 "a call on this session was made while another call on it is running on the same thread "
-                "(from a signal handler or a finalizer): make it after that call returns"
+                "(from a signal handler, a finalizer or a progress callback): make it after that call returns"
             )
         with self._lock:
             try:
