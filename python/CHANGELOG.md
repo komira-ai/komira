@@ -12,6 +12,16 @@ install page shows names it.
 
 ## Unreleased
 
+- **komira.pl, the polars-shaped frames (core).** `import komira.pl as kpl`: `kpl.scan_parquet`,
+  `scan_ndjson` and `scan_csv` make a lazy `LazyFrame` (reading the file's schema, nothing else), and
+  `select`, `with_columns`, `filter`, `sort`, `head`, `limit`, `slice`, `tail`, `top_k`, `bottom_k`,
+  `drop`, `rename`, `drop_nulls` and `kpl.concat` build its plan, with `kpl.col`, `kpl.lit`,
+  `kpl.when`, `kpl.len` and the expression operators, null tests, `cast`, `is_in`, `is_between`,
+  aggregates and `.str` functions. `collect()` runs the plan through the engine's plan entry, not
+  through SQL, and returns a `Result`; `schema` and `explain()` run nothing. Output names and types
+  follow polars 1.44.2, except that a count, `len()` and `str.len_chars()` are Int64 where polars gives
+  UInt32; what the engine cannot run is refused by name. The wheel does not ship the plan modules this
+  needs yet, so in an installed package the readers raise `ImportError`.
 - **CSV and JSON files.** `Session.register_csv(name, path, *, delimiter=",", header=True,
   all_varchar=False)` and `Session.register_json(name, path)` register a CSV file and a
   newline-delimited JSON file as a table for `Session.sql`, with the column names and types the

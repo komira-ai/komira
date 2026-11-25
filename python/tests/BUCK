@@ -609,7 +609,8 @@ _CASES = [
 # - ops_verbs_test: the verbs the skins call, one per verb, including the
 #   cases that add no node.
 # - ops_no_sql_test: no node, verb or module of komira._ops renders SQL text,
-#   with cases that show each check fails when one does.
+#   and no module, class or source string of komira.pl names or holds it, with
+#   cases that show each check fails when one does.
 # - ops_udf_test: the user-function nodes (UdfSpec, UdfCall, MapBatches), their
 #   refusals, the walkers over a call and the map_batches verb.
 # - ops_dtype_test: the dtype spellings of a user function's return type, their
@@ -739,6 +740,55 @@ _PLAN_EXPR_RUNTIMES = [
     args = ["--golden", "$(location komira//src/plan_wire:golden_fixtures)"] if area in ["rel_goldens", "udf_goldens"] else [],
     **_ON[p["suffix"]]
 ) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES for area in ["rel", "rel_goldens", "no_sql", "udf", "udf_goldens"]]
+
+# The polars-shaped skin, komira.pl (docs/design/dataframe_surface.md):
+#
+# - pl_names_test: with no library and no plan modules: importing komira.pl
+#   loads nothing; its public names; every entry of the module's, LazyFrame's
+#   and Expr's refusal tables raises its AttributeError word for word, any other
+#   name Python's own; no attribute is a column; no attribute can be set; no
+#   dunder runs a query; a frame survives copy.
+# - pl_verbs_test: with the plan modules and no library, over a stand-in
+#   session: each verb's and expression's plan equals a hand-written tree, the
+#   order rules, polars' names and types, every refusal with its full message,
+#   the plan bytes collect() hands the session (no SQL text), and the schema as
+#   pyarrow types.
+[py_test(
+    name = "pl_names_test" + p["suffix"],
+    src = "test_pl_names.py",
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+[py_test(
+    name = "pl_verbs_test" + p["suffix"],
+    src = "test_pl_verbs.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# komira.pl against polars itself (test_pl_oracle.py), on the real library and
+# CPython 3.13, the one minor with a pinned polars: each program, written once
+# for both modules, gives the same frame through komira.pl's plan and the plan
+# entry as through polars 1.44.2, values and dtypes, and the schema komira.pl
+# derives without running is the answer's; plus collect() twice, the plan
+# entry and never the SQL one, explain(), a missing file, frames of two
+# sessions, and the engine's refusal of a CSV scan at lower.
+python_binding_test(
+    name = "pl_oracle_test",
+    src = "test_pl_oracle.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:polars",
+        _PYARROW[""],
+    ],
+)
 
 # The clean-environment install tests of the wheel (python/BUCK,
 # wheel_install_test): the driver that installs the wheels into an empty

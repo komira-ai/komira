@@ -1,6 +1,9 @@
 # The Python DataFrame surface: skins, verbs and refusals
 
-Status: design, not built. Nothing under `python/` exists yet. The verbs, the plan each one builds and
+Status: being built. The node tree (`python/komira/_ops`), the encoder (`python/komira/_plan`) and the
+core of the polars-shaped skin (`python/komira/pl`: the readers of Parquet, NDJSON and CSV, the
+row-wise verbs, sort and its order rules, aggregates without keys, and `concat`) exist; the rest is not
+built. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
 
@@ -424,6 +427,12 @@ its number).
       fixed table in the verbs document. komira adds no dtype classes of its own.
     - pyarrow and protobuf are the package's required dependencies, and pandas and polars are optional.
     - Results arrive as Arrow and convert through the `Result` terminals.
+    - **Count types** (a departure). polars answers a count, `len()`, `str.len_chars()` and the sum
+      of a boolean or a UInt32 column as UInt32. The engine casts to no UInt32 yet, so the polars
+      skin answers these as Int64, the plan's own count type; the values are polars'.
+    - The engine computes a CASE only as INT64, FLOAT64 or STRING. So the polars skin computes a
+      `when`, a `fill_null` and the floor correction of ruling 9 in one of those and casts the result
+      once to polars' type (Int32 or Float32), and refuses branches of another type by name.
 15. **`concat` matches columns by name, and needs one type per column.** New with the verb (D17).
     - The Mojo builder matches by position and takes the first input's names.
     - polars `how="vertical"` needs equal names in equal order, so the polars skin refuses anything
@@ -585,7 +594,7 @@ package design). D4 to D18 are this design's own.
 
 ## Where is the code?
 
-The code goes in `python/komira/`, which is not built yet: the node tree, the encoder, the pandas-shaped
-skin, and `komira/pl/`. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
+The code is in `python/komira/`: the node tree (`_ops`), the encoder (`_plan`) and the polars-shaped
+skin (`pl/`); the pandas-shaped skin is not built yet. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
 `src/plan_expr/col_expr.mojo`. The wire format is in [src/plan_proto](../../src/plan_proto/plan.proto)
 and `src/plan_wire`.
