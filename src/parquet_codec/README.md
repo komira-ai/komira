@@ -76,7 +76,9 @@ runs the code:
 | GZIP | `libz.so.1` (`libz.dylib`) | `compression.zlib` |
 | ZSTD | `libzstd.so.1` (`libzstd.dylib`) | `compression.zstd_frame` |
 
-A missing library aborts the process at the first call that needs it.
+A missing library is a raise at each call that needs it
+(`<package>: cannot load <soname>: <the loader's error>`), not an abort;
+the other codecs, and pages with no compression, are unaffected.
 
 ## Tests
 

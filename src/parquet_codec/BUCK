@@ -188,7 +188,8 @@ export_file(
 export_file(
     name = "pyarrow_page_crc_zstd_v2.parquet",
     src = "tests/fixtures/parquet/pyarrow_page_crc_zstd_v2.parquet",
-    visibility = ["//src/parquet:"],
+    # parquet's decoder tests, and so's test of a host without libzstd.
+    visibility = ["//src/parquet:", "//src/so:"],
 )
 export_file(
     name = "pyarrow_zero_row.parquet",

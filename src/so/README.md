@@ -911,13 +911,15 @@ reach one, so that it comes back as a status:
 - `lpad`, `rpad` and `repeat` whose value for one row would be over 64 MiB
   (`STRING_FN_N_REPEAT_MAX_BYTES`) are refused by name before anything is
   allocated.
-- libzstd, libz and liblz4, which the codec packages open by soname at first
-  use in an initializer that cannot raise, are opened first by a probe that
-  can, at the start of every call that can reach a codec (the Parquet, CSV
-  and JSON register and describe calls, `komira_sql_stream`,
-  `komira_sql_stream_run` and `komira_plan_stream`;
-  `komira_register_arrow_stream` reads no file and is not probed). A missing library is `compression: cannot load
-  <soname>: <the loader's error>`, not an abort in the middle of a query.
+- libzstd, libz and liblz4, which the codec packages open by soname at the
+  first use of a codec in an initializer that cannot raise: the initializer
+  keeps the loader's refusal, and that use and every later one raises
+  `<package>: cannot load <soname>: <the loader's error>` (`compression`,
+  `zlib` or `lz4`), so a missing library is -3 at the call whose run needs it,
+  not an abort in the middle of a query. A call that needs none of it works:
+  macOS ships no libzstd or liblz4, and a snappy Parquet file, a CSV file and
+  a JSON file still register, describe and answer there
+  (`tests/test_sources_without_libzstd.mojo`).
 
 `tests/c/abort_driver.c` sends each of these inputs from a C host, on its main
 thread, and requires the status and the reason as the last error, `*out`

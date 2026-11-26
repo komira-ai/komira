@@ -45,7 +45,6 @@
 
 from std.ffi import OwnedDLHandle, _Global
 from std.memory import alloc
-from std.os import abort
 from std.sys.info import CompilationTarget
 
 
@@ -68,35 +67,75 @@ comptime LIBLZ4_SONAME: StaticString = (
 # -----------------------------------------------------------------------------
 
 
-def _init_lz4_codec_handle() -> OwnedDLHandle:
-    """`_Global` init_fn: dlopen liblz4 exactly once per process (KGEN-serialized).
+struct _Lz4Library(Movable):
+    """What the handle slot holds: the library's handle, or the refusal
+    `_load_lz4_library` made when it could not be loaded (then `handle` is
+    empty)."""
 
-    SAFETY: `_Global`'s init_fn must be non-raising. The OwnedDLHandle ctor
-    raises only when the pinned dylib is unresolvable (a fatal provisioning
-    error), so we `abort`: without the library no LZ4 block can be read.
-    """
+    var handle: Optional[OwnedDLHandle]
+    var refusal: String
+
+    def __init__(out self, var handle: OwnedDLHandle):
+        self.handle = Optional[OwnedDLHandle](handle^)
+        self.refusal = String()
+
+    def __init__(out self, *, var refusal: String):
+        self.handle = None
+        self.refusal = refusal^
+
+
+def _load_lz4_library(soname: String) -> _Lz4Library:
+    """dlopen `soname` as the slot's value: the handle, or the refusal
+    `lz4: cannot load <soname>: <the loader's error>`. A `_Global` init
+    function cannot raise, so the refusal is kept and the accessor raises it
+    at each use: a missing library is a raise at that call, never an abort."""
     try:
-        return OwnedDLHandle(LIBLZ4_SONAME)
+        return _Lz4Library(OwnedDLHandle(soname))
     except e:
-        abort("liblz4 dlopen failed (lz4 raw-block handle init)")
+        return _Lz4Library(
+            refusal="lz4: cannot load " + soname + ": " + String(e)
+        )
 
 
-comptime _LZ4_CODEC_GLOBAL = _Global[
-    "komira_lz4_codec_handle", _init_lz4_codec_handle
-]
+def _init_lz4_codec_handle() -> _Lz4Library:
+    """`_Global` init_fn: dlopen liblz4 exactly once per process (KGEN-serialized)."""
+    return _load_lz4_library(LIBLZ4_SONAME)
+
+
+# The slot's name: one process-wide slot, in every module that spells it.
+comptime _LZ4_SLOT_NAME = "komira_lz4_codec_handle"
+
+comptime _LZ4_CODEC_GLOBAL = _Global[_LZ4_SLOT_NAME, _init_lz4_codec_handle]
+
+
+@always_inline
+def _lz4_library_handle(
+    slot: UnsafePointer[_Lz4Library, MutUntrackedOrigin]
+) raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
+    """The handle `slot` holds; raise its refusal when it holds none.
+
+    SAFETY: FFI boundary. `slot` is a `_Global` slot's pointer, into
+    KGEN-runtime-managed static storage (process-lifetime, never freed); the
+    handle in it is never taken out or replaced, so the returned pointer stays
+    valid for the process.
+    """
+    if not slot[].handle:
+        raise Error(slot[].refusal)
+    return UnsafePointer(to=slot[].handle.value())
 
 
 @always_inline
 def _default_lz4_codec_handle() raises -> UnsafePointer[
     OwnedDLHandle, MutUntrackedOrigin
 ]:
-    """Return the process-lifetime liblz4 handle slot (init-once via `_Global`).
+    """Return the process-lifetime liblz4 handle (init-once via `_Global`), or
+    raise the refusal of a library that could not be loaded.
 
     SAFETY: FFI boundary. Targets KGEN-runtime-managed static storage
     (process-lifetime); `MutUntrackedOrigin` is the stdlib `_Global` API's own
     return type, confined to this FFI helper. No env var, no `unsafe_from_address`.
     """
-    return _LZ4_CODEC_GLOBAL.get_or_create_ptr()
+    return _lz4_library_handle(_LZ4_CODEC_GLOBAL.get_or_create_ptr())
 
 
 # -----------------------------------------------------------------------------

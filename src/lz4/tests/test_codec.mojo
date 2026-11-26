@@ -10,11 +10,20 @@
 # These tests exercise the round-trip `lz4_decompress(lz4_compress(x), len(x))
 # == x` over various blobs (empty / small / large / highly-compressible JSON)
 # + the storage-win property (compressible input shrinks).
+#
+# The handle slot: liblz4 is held as its handle and calls answer through it;
+# a soname that does not exist is held as its refusal, raised at every use.
 # =============================================================================
 
-from std.testing import TestSuite, assert_equal, assert_true
+from std.ffi import OwnedDLHandle, _Global
+from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from lz4.codec import (
+    LIBLZ4_SONAME,
+    _Lz4Library,
+    _default_lz4_codec_handle,
+    _load_lz4_library,
+    _lz4_library_handle,
     lz4_compress,
     lz4_decompress,
     lz4_compress_bound,
@@ -134,6 +143,59 @@ def test_decompress_wrong_len_raises() raises:
     except:
         raised = True
     assert_true(raised, "wrong uncompressed_len should raise")
+
+
+# The handle slot (lz4.codec): a library that loads is held as its handle, and
+# a soname that does not exist as the refusal
+# `lz4: cannot load <soname>: <the loader's error>`, which the slot's
+# accessor raises, word for word, on every call (the slot is filled once; it
+# neither aborts nor opens the library again).
+comptime _ABSENT = "liblz4.so.komira-absent"
+
+
+def _loader_error(soname: String) -> String:
+    """What OwnedDLHandle raises for `soname`, or "" when it opens."""
+    try:
+        _ = OwnedDLHandle(soname)
+    except e:
+        return String(e)
+    return ""
+
+
+def _init_absent() -> _Lz4Library:
+    return _load_lz4_library(_ABSENT)
+
+
+comptime _ABSENT_GLOBAL = _Global["komira_lz4_test_absent", _init_absent]
+
+
+def _handle_message() -> String:
+    """What the accessor of the absent slot raises, or "" when it returns."""
+    try:
+        _ = _lz4_library_handle(_ABSENT_GLOBAL.get_or_create_ptr())
+    except e:
+        return String(e)
+    return ""
+
+
+def test_the_slot_over_the_library_holds_its_handle() raises:
+    var library = _load_lz4_library(LIBLZ4_SONAME)
+    assert_true(Bool(library.handle))
+    assert_equal(library.refusal, "")
+    var handle = _default_lz4_codec_handle()
+    # LZ4_compressBound(0) is 16, the bound of an empty block.
+    assert_equal(handle[].call["LZ4_compressBound", Int32](Int32(0)), Int32(16))
+
+
+def test_a_slot_over_a_missing_library_keeps_the_refusal() raises:
+    var reason = _loader_error(_ABSENT)
+    assert_true(reason.byte_length() > 0, String(_ABSENT) + " opened")
+    var want = "lz4: cannot load " + String(_ABSENT) + ": " + reason
+    var library = _load_lz4_library(_ABSENT)
+    assert_false(Bool(library.handle))
+    assert_equal(library.refusal, want)
+    assert_equal(_handle_message(), want)
+    assert_equal(_handle_message(), want)
 
 
 def main() raises:

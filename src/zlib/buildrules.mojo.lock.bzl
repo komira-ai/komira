@@ -37,14 +37,14 @@ GRAPH_JSON = r'''{
       "kind": "lib",
       "root": "src/zlib/src/zlib",
       "srcs": [
-        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "0119e9a7efc28400ab692b924492d62e240245938f6d92ae6367d7e39891360e"},
-        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "99b80cc1871cce189c06c41127710fe0506af933ea56d2e628c8dfac54d61132"}
+        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "29e0859bc3c2c17077ae9a3582947c060954c755e2d42cfcef749926abfed47c"},
+        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "346b255c8dc934a9ef43196238327971b3787040b65564391ab2ed7f21519bfc"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["zlib.mojoc"],
-      "key": "7d02c10d9cd77530ee779037c24a446cc6ef89c000b61992f590b0285579cabf"
+      "key": "f2e5ec94a9c170fba5ebfc146080b485706d2ad7947d2a95124b0a0bede4ffba"
     },
     {
       "id": "komira-ai/zlib@0.1.0#mojo1.1.0/test:src/zlib/tests/test_zlib_into.mojo",
@@ -53,14 +53,14 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/zlib/tests/test_zlib_into.mojo", "sha256": "71fa37f53bb02cb88759cb5a683762960d760fea2ebeba835d61261339f24420"}
+        {"path": "src/zlib/tests/test_zlib_into.mojo", "sha256": "662b8210ad1746d46075c63a2de1930b4dc980dbfa946308e7d1bffbe783ad7c"}
       ],
       "deps": ["komira-ai/zlib@0.1.0#mojo1.1.0/lib"],
       "natives": [],
       "loads": ["libzlib"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_zlib_into.pass"],
-      "key": "e6c488761312f0ec8931edd58c385cde9fd8d52465baccef6fbdd221ce6f5c65"
+      "key": "6bc5ef670c3adc2588460ab220c09cf8012b6dc7adad4464cb8fa6cad511a99b"
     }
   ]
 }
@@ -94,14 +94,14 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "kind": "lib",
       "root": "src/zlib/src/zlib",
       "srcs": [
-        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "0119e9a7efc28400ab692b924492d62e240245938f6d92ae6367d7e39891360e"},
-        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "99b80cc1871cce189c06c41127710fe0506af933ea56d2e628c8dfac54d61132"}
+        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "29e0859bc3c2c17077ae9a3582947c060954c755e2d42cfcef749926abfed47c"},
+        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "346b255c8dc934a9ef43196238327971b3787040b65564391ab2ed7f21519bfc"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["zlib.mojoc"],
-      "key": "51fdaa6997f4e20e5d97eaf3bfc756b6048e6d5c0745f8ff714e4b0b8f7a49a7"
+      "key": "e13c5804b82f886e3375018e436dbd99586033eeb854d8bc126edf2049d9bbd2"
     },
     {
       "id": "komira-ai/zlib@0.1.0#mojo1.1.0/test:src/zlib/tests/test_zlib_into.mojo",
@@ -110,14 +110,14 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/zlib/tests/test_zlib_into.mojo", "sha256": "71fa37f53bb02cb88759cb5a683762960d760fea2ebeba835d61261339f24420"}
+        {"path": "src/zlib/tests/test_zlib_into.mojo", "sha256": "662b8210ad1746d46075c63a2de1930b4dc980dbfa946308e7d1bffbe783ad7c"}
       ],
       "deps": ["komira-ai/zlib@0.1.0#mojo1.1.0/lib"],
       "natives": [],
       "loads": ["libzlib"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_zlib_into.pass"],
-      "key": "07042c76ebc3524f41c13e9b6b58e01196e35bad4b97698a89f3e2c2d3268a48"
+      "key": "42af597e4730d78ed1c0809fb72c11fef68c4a31e9b47051ee0813c49b63cff9"
     }
   ]
 }
@@ -148,14 +148,14 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "kind": "lib",
       "root": "src/zlib/src/zlib",
       "srcs": [
-        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "0119e9a7efc28400ab692b924492d62e240245938f6d92ae6367d7e39891360e"},
-        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "99b80cc1871cce189c06c41127710fe0506af933ea56d2e628c8dfac54d61132"}
+        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "29e0859bc3c2c17077ae9a3582947c060954c755e2d42cfcef749926abfed47c"},
+        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "346b255c8dc934a9ef43196238327971b3787040b65564391ab2ed7f21519bfc"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["zlib.mojoc"],
-      "key": "a8c64f9c31234a3e55dd63b33dab6d10d52ac5f1a05fab89bbd94da6640da652"
+      "key": "9ea72f4012c2f9960d1277bf609ff5fcd8b50445022721cedec2aad4c3c3eefc"
     },
     {
       "id": "komira-ai/zlib@0.1.0#mojo1.1.0/test:src/zlib/tests/test_zlib_into.mojo",
@@ -164,14 +164,14 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/zlib/tests/test_zlib_into.mojo", "sha256": "71fa37f53bb02cb88759cb5a683762960d760fea2ebeba835d61261339f24420"}
+        {"path": "src/zlib/tests/test_zlib_into.mojo", "sha256": "662b8210ad1746d46075c63a2de1930b4dc980dbfa946308e7d1bffbe783ad7c"}
       ],
       "deps": ["komira-ai/zlib@0.1.0#mojo1.1.0/lib"],
       "natives": [],
       "loads": ["libzlib"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_zlib_into.pass"],
-      "key": "968ca5bae358cd6b9fc9312fb145f03238a2017a467a4b08fcbed68898b89d09"
+      "key": "25ff2986ae7879850975b2faab7477866ad04a54fe7537d5c66d179c750e005a"
     }
   ]
 }

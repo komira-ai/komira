@@ -5,7 +5,7 @@
 # # Why this is its OWN library
 #
 # A consumer that only needs zlib framing must not depend on the query engine.
-# This package is a zero-dependency FFI leaf (std.ffi + std.memory + std.os +
+# This package is a zero-dependency FFI leaf (std.ffi + std.memory +
 # std.sys.info, nothing else). If it lived inside the parquet library, any user
 # of zlib framing (for example, a git server's loose-object framing) would pull
 # parquet, the compiler, the engine operators and runtime, and every format
