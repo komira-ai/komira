@@ -116,7 +116,7 @@ jobs:
       # workers. `--keep-going`: one package's failure does not hide the others'.
       - name: build the macOS set
         id: build
-        timeout-minutes: 65
+        timeout-minutes: 1
         uses: ./.github/actions/buck2-farm
         with:
           args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs //release/manual_fail:fails
