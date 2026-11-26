@@ -346,6 +346,7 @@ const NATIVES = [_][]const u8{
     "komira-ai/crypto",
     "komira-ai/libc",
     "komira-ai/log",
+    "komira-ai/lz4",
     "komira-ai/metrics",
 };
 
@@ -360,6 +361,7 @@ const SERVED = [_]Pkg{
     .{ .name = "komira-ai/json", .bytes = "json bytes, no dependency" },
     .{ .name = "komira-ai/libc", .bytes = "libc bytes and its archive" },
     .{ .name = "komira-ai/log", .bytes = "log bytes and its archive" },
+    .{ .name = "komira-ai/lz4", .bytes = "lz4 bytes and its archive" },
     .{ .name = "komira-ai/metrics", .bytes = "metrics bytes and its archive" },
     .{ .name = "komira-ai/uuid", .bytes = "uuid bytes", .deps = &.{ "komira-ai/clock", "komira-ai/awslc" } },
 };
@@ -583,6 +585,7 @@ test "add: prod serves the set; init, an add per package, then sync, and the loc
         "add komira-ai/crypto --registry prod",
         "add komira-ai/libc --registry prod",
         "add komira-ai/log --registry prod",
+        "add komira-ai/lz4 --registry prod",
         "add komira-ai/metrics --registry prod",
         try std.fmt.allocPrint(a, "sync --registry prod --cache {s}", .{cache}),
     };
@@ -708,7 +711,7 @@ test "add: a mopm that locks for the Mojo init wrote gets the release before, an
     defer log.deinit();
     var why: []const u8 = "";
     try t.expectError(error.Refused, runAdd(a, &tmp, &fake, &why, &log.writer));
-    try t.expectEqualStrings("11 problem(s) with what `mopm add` installed from prod:\n" ++
+    try t.expectEqualStrings("12 problem(s) with what `mopm add` installed from prod:\n" ++
         "  mopm.lock is locked for mojo [1.0.0]; this release was built for mojo 1.1.0\n" ++
         "  komira-ai/async_api: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/awslc: the lock records version 0.1.8; this release published 0.1.9\n" ++
@@ -718,6 +721,7 @@ test "add: a mopm that locks for the Mojo init wrote gets the release before, an
         "  komira-ai/json: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/libc: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/log: the lock records version 0.1.8; this release published 0.1.9\n" ++
+        "  komira-ai/lz4: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/metrics: the lock records version 0.1.8; this release published 0.1.9\n" ++
         "  komira-ai/uuid: the lock records version 0.1.8; this release published 0.1.9", why);
 }
