@@ -7,7 +7,8 @@
 # last in both directions), §4.3 (NaN above +inf, every NaN equal), §4.4
 # (-0.0 equals +0.0), §4.9 (a float ORDER BY key comes back with -0.0 as 0.0),
 # §9.7 (NULL order keys are peers), §9.9 (NULL partition keys form one
-# partition).
+# partition). A DECIMAL128 key (an integer SUM is DECIMAL(38, 0)) orders by
+# its value and ties, NULLs and partitions behave as for any other key.
 #
 # Every NULL slot below holds a value that collides with a real key, so a
 # kernel that reads the slot instead of the validity bit puts the row in the
@@ -20,6 +21,7 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from arrow.arrow_types import ArrowType
 from arrow.column import Column
+from arrow.decimal_array import Decimal128Array
 from arrow.dictionary_array import StringDictionaryArray
 from arrow.primitive_array import PrimitiveArray
 from arrow.record_batch import RecordBatch, RecordBatchBuilder
@@ -464,6 +466,80 @@ def test_dictionary_order_key_sorts_by_value() raises:
     for r in range(4):
         assert_equal(_get_i64(out, 1, r), want_v[r])
         assert_equal(_get_i64(out, 2, r), want_rank[r])
+
+
+# =============================================================================
+# DECIMAL128 keys
+# =============================================================================
+
+
+def _dec(vals: List[Int64], valid: List[Bool], scale: Int) raises -> Column[HeapRegion]:
+    var arr = Decimal128Array[HeapRegion].allocate_nullable(len(vals), 38, scale)
+    for i in range(len(vals)):
+        arr.set_i128(i, vals[i].cast[DType.int128]())
+        if not valid[i]:
+            arr.set_null(i)
+    return Column.from_decimal128(arr)
+
+
+def _dec_and_id(
+    name: String, var dec: Column[HeapRegion], scale: Int
+) raises -> RecordBatch:
+    """(name DECIMAL(38, scale), id BIGINT 0..n-1)."""
+    var n = dec.length()
+    var ids = List[Int64]()
+    for i in range(n):
+        ids.append(Int64(i))
+    var sb = SchemaBuilder()
+    sb.add_field(Field.decimal128(name, 38, scale, True))
+    sb.add_field(Field(String("id"), ArrowType.INT64, False))
+    var bb = RecordBatchBuilder()
+    bb.add_column(dec^)
+    bb.add_column(_i64(ids, _all_valid(n)))
+    return bb.build(sb.build())
+
+
+def test_decimal128_order_key_orders_by_value_with_ties_and_nulls_last() raises:
+    # u: 30, NULL (slot 10), -5, 10, 40, 10. ORDER BY u DESC: 40, 30, 10, 10
+    # (peers, input order), -5, NULL; RANK 1, 2, 3, 3, 5, 6 and DENSE_RANK
+    # 1, 2, 3, 3, 4, 5.
+    var uv: List[Int64] = [30, 10, -5, 10, 40, 10]
+    var uvalid: List[Bool] = [True, False, True, True, True, True]
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.rank())
+    exprs.append(PartitionExpr.dense_rank())
+    var out = _run(
+        _dec_and_id("u", _dec(uv, uvalid, 0), 0), List[String](), _keys("u"),
+        [True], exprs^,
+    )
+    assert_equal(out.num_rows(), 6)
+    var want_id: List[Int64] = [4, 0, 3, 5, 2, 1]
+    var want_rank: List[Int64] = [1, 2, 3, 3, 5, 6]
+    var want_dense: List[Int64] = [1, 2, 3, 3, 4, 5]
+    for r in range(6):
+        assert_equal(_get_i64(out, 1, r), want_id[r], "id at " + String(r))
+        assert_equal(_get_i64(out, 2, r), want_rank[r], "rank at " + String(r))
+        assert_equal(_get_i64(out, 3, r), want_dense[r], "dense_rank at " + String(r))
+        assert_equal(_null(out, 0, r), r == 5)
+
+
+def test_decimal128_partition_key_groups_by_value_null_partition_last() raises:
+    # p (scale 2): 1.00, 2.50, 1.00, 2.50, 2.50, NULL (slot 1.00).
+    # PARTITION BY p ORDER BY id, ROW_NUMBER: 1.00 -> ids 0, 2; 2.50 -> 1, 3,
+    # 4; NULL -> 5.
+    var pv: List[Int64] = [100, 250, 100, 250, 250, 100]
+    var pvalid: List[Bool] = [True, True, True, True, True, False]
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.row_number())
+    var out = _run(
+        _dec_and_id("p", _dec(pv, pvalid, 2), 2), _keys("p"), _keys("id"),
+        [False], exprs^,
+    )
+    var want_id: List[Int64] = [0, 2, 1, 3, 4, 5]
+    var want_rn: List[Int64] = [1, 2, 1, 2, 3, 1]
+    for r in range(6):
+        assert_equal(_get_i64(out, 1, r), want_id[r], "id at " + String(r))
+        assert_equal(_get_i64(out, 2, r), want_rn[r], "row_number at " + String(r))
 
 
 def test_empty_input_keeps_output_schema() raises:

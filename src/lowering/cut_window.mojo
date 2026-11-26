@@ -22,8 +22,9 @@
 #   1. a descending list whose length is not the order keys';
 #   1b. a non-empty nulls_first list whose length is not the order keys';
 #   2. a partition or order key that is not a column of the child, or whose
-#      type is not INT64, INT32, FLOAT64, BOOL or STRING (the types the
-#      window's sort orders);
+#      type is not INT64, INT32, FLOAT64, DECIMAL128, BOOL or STRING (the
+#      types the window's sort orders; DECIMAL128 is also what an integer SUM
+#      gives, so a window can order by one);
 #   3. per function, in the node's order:
 #        ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST: served, the
 #          frame is ignored;
@@ -119,6 +120,7 @@ def _is_sortable_key(t: ArrowType) -> Bool:
         t == ArrowType.INT64
         or t == ArrowType.INT32
         or t == ArrowType.FLOAT64
+        or t == ArrowType.DECIMAL128
         or t == ArrowType.BOOL
         or t == ArrowType.STRING
     )

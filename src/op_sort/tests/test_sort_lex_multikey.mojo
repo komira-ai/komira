@@ -14,12 +14,17 @@
 #   - Mixed INT32 / INT64 / STRING keys (the bit-pack fast path).
 #   - 3-key STRING-only sort.
 #   - Negative INT64 keys (bit-pack offset handling).
+#   - A DECIMAL128 key (an integer SUM is DECIMAL(38, 0)) beside an INT64
+#     key, which takes the key-at-a-time passes: ascending and descending by
+#     the signed 128-bit value, ties kept in input order. (catches: the high
+#     word ignored, a negative value read as unsigned)
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
 
 from arrow.arrow_types import ArrowType
 from arrow.column import Column
+from arrow.decimal_array import Decimal128Array
 from arrow.schema import Field, Schema, SchemaBuilder
 from arrow.primitive_array import PrimitiveArray
 from arrow.record_batch import RecordBatch, RecordBatchBuilder
@@ -258,6 +263,59 @@ def test_negative_int_keys() raises:
     var expect_ids: List[Int] = [4, 2, 0, 3, 1, 5]
     for i in range(6):
         assert_equal(Int(_i64_at(sorted.column_at(2), i)), expect_ids[i])
+
+
+# =============================================================================
+# Test 6 — a DECIMAL128 key beside an INT64 key
+# =============================================================================
+
+
+def _i128(hi: Int64, lo: UInt64) -> SIMD[DType.int128, 1]:
+    var u = (hi.cast[DType.uint128]() << UInt128(64)) | lo.cast[DType.uint128]()
+    return u.cast[DType.int128]()
+
+
+def _decimal_batch() raises -> RecordBatch:
+    """(d DECIMAL(38, 0), b INT64, id INT64). d: 2^64, 5, -1, -2^64, 5,
+    2^64 - 1, so three rows are ordered by the high word, two are negative and
+    two tie."""
+    var d = List[SIMD[DType.int128, 1]]()
+    d.append(_i128(1, 0))
+    d.append(_i128(0, 5))
+    d.append(_i128(-1, UInt64.MAX))
+    d.append(_i128(-1, 0))
+    d.append(_i128(0, 5))
+    d.append(_i128(0, UInt64.MAX))
+    var b: List[Int64] = [Int64(0), 1, 0, 0, 0, 0]
+    var ids: List[Int64] = [Int64(0), 1, 2, 3, 4, 5]
+    var sb = SchemaBuilder()
+    sb.add_field(Field.decimal128("d", 38, 0, False))
+    sb.add_field(Field("b", ArrowType.INT64, False))
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    var rb = RecordBatchBuilder()
+    rb.add_column(Column.from_decimal128(Decimal128Array.from_i128_list(d, 38, 0)))
+    rb.add_column(_i64_col(b^))
+    rb.add_column(_i64_col(ids^))
+    return rb.build(sb.build())
+
+
+def test_decimal128_key_orders_by_signed_value() raises:
+    var keys: List[String] = ["d", "b"]
+    # d ASC, b ASC: -2^64 (r3), -1 (r2), 5 (r4, b=0), 5 (r1, b=1),
+    # 2^64 - 1 (r5), 2^64 (r0).
+    var asc: List[Bool] = [False, False]
+    var up = sort_batch_by_keys(_decimal_batch(), keys, asc)
+    var want_up: List[Int] = [3, 2, 4, 1, 5, 0]
+    for i in range(6):
+        assert_equal(Int(_i64_at(up.column_at(2), i)), want_up[i], "asc row " + String(i))
+    assert_equal(up.column_at(0).as_decimal128().get_i128(0), _i128(-1, 0))
+    # d DESC alone: the tie of 5 keeps its input order (r1 before r4).
+    var one: List[String] = ["d"]
+    var desc: List[Bool] = [True]
+    var down = sort_batch_by_keys(_decimal_batch(), one, desc)
+    var want_down: List[Int] = [0, 5, 1, 4, 2, 3]
+    for i in range(6):
+        assert_equal(Int(_i64_at(down.column_at(2), i)), want_down[i], "desc row " + String(i))
 
 
 def main() raises:

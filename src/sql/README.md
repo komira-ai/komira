@@ -114,7 +114,13 @@ ordinal, alias or expression) and the plain projection. `sql_bind_window_order`
 binds window functions with their `PARTITION BY` and `ORDER BY` (each window
 order key may carry `NULLS FIRST` / `NULLS LAST`; an unwritten one is the
 derived default), and the statement-level `ORDER BY` (column, ordinal, output
-alias or expression, with explicit `NULLS FIRST` / `NULLS LAST`).
+alias or expression, with explicit `NULLS FIRST` / `NULLS LAST`). In a SELECT
+that aggregates, `sql_bind_window_group` runs the windows over the groups: one
+aggregate computes the SELECT items, the columns the windows name (each must be
+a group key) and each computed window key, then the windows run over its
+output. A window key there may be an expression that starts with a call, such
+as `rank() OVER (ORDER BY count(*) DESC, g)` (`sql_window_keys`); in a SELECT
+that does not aggregate a computed key is refused by name at parse.
 
 `sql.sql_binder` turns a parsed statement into a plan:
 `bind_statement(stmt, catalog, footers)` returns a `BoundStatement` whose

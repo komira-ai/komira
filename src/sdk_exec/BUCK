@@ -607,6 +607,12 @@ _WINDOW_CASES = [
     "cte_window_over_group",
     "cte_window_over_union",
     "cte_window_join_shared",
+    "rank_decimal_m",
+    "group_rank_by_count",
+    "group_rank_by_sum",
+    "subquery_rank_by_sum",
+    "group_partition_rank_by_sum",
+    "group_windows_having",
 ]
 
 sql_oracle(

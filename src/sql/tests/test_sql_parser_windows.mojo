@@ -24,6 +24,12 @@
 #   5. Window ORDER BY placement: each key records NULLS FIRST, NULLS LAST or
 #      unwritten on its own, after ASC or DESC and before a frame; a bare
 #      NULLS is refused.
+#   6. Computed window keys: in a SELECT that aggregates (a GROUP BY, a
+#      HAVING, an aggregate item or an aggregate key), a key that starts with
+#      a call is parsed whole into the SELECT's `window_keys` and the window
+#      records its index and hidden name; elsewhere the first such key is
+#      refused by name. A nested SELECT keeps its own keys, and its aggregate
+#      does not make the outer SELECT aggregate.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -32,7 +38,7 @@ from sql.sql_ast import (
     SqlExpr,
     SqlStatement,
     SqlWindowData,
-    SX_WINDOW, SX_INT, SX_FLOAT, SX_STRING, SX_DATE,
+    SX_AGG, SX_CALL, SX_WINDOW, SX_INT, SX_FLOAT, SX_STRING, SX_DATE,
     SXWIN_ROW_NUMBER, SXWIN_RANK, SXWIN_DENSE_RANK,
     SXWIN_SUM, SXWIN_COUNT, SXWIN_MIN, SXWIN_MAX, SXWIN_AVG,
     SXWIN_LAG, SXWIN_LEAD, SXWIN_FIRST_VALUE, SXWIN_LAST_VALUE, SXWIN_NTH_VALUE,
@@ -252,6 +258,75 @@ def test_window_without_order_by_has_no_nulls_placement() raises:
 def test_window_nulls_alone_is_refused() raises:
     _refuses("rank() OVER (ORDER BY k NULLS)", "ORDER BY ... NULLS expects FIRST or LAST")
     _refuses("rank() OVER (ORDER BY k DESC NULLS, j)", "ORDER BY ... NULLS expects FIRST or LAST")
+
+
+def test_a_computed_key_is_kept_where_the_select_aggregates() raises:
+    var st = _parse(
+        "SELECT g, rank() OVER (PARTITION BY min(v) ORDER BY count(*) DESC, q.k)"
+        " AS r FROM t GROUP BY g"
+    )
+    var w = st.query.select_items[1].expr._window.value().copy()
+    assert_equal(len(w.partition_by), 1)
+    assert_equal(w.partition_by[0], "__window_key_0")
+    assert_equal(w.partition_qual[0], "")
+    assert_equal(w.partition_key_expr[0], 0)
+    assert_equal(len(w.order_by), 2)
+    assert_equal(w.order_by[0], "__window_key_1")
+    assert_equal(w.order_key_expr[0], 1)
+    assert_true(w.descending[0])
+    assert_equal(w.order_by[1], "k")
+    assert_equal(w.order_qual[1], "q")
+    assert_equal(w.order_key_expr[1], -1)
+    assert_false(w.descending[1])
+    assert_equal(len(st.query.window_keys), 2)
+    assert_equal(Int(st.query.window_keys[0].tag), Int(SX_AGG))
+    assert_equal(Int(st.query.window_keys[1].tag), Int(SX_AGG))
+    # A plain key records no computed key.
+    var plain = _win("rank() OVER (PARTITION BY g ORDER BY k)")
+    assert_equal(plain.partition_key_expr[0], -1)
+    assert_equal(plain.order_key_expr[0], -1)
+    # Without a GROUP BY: an aggregate key, a HAVING, or an aggregate item.
+    var alone = _parse("SELECT rank() OVER (ORDER BY count(*)) FROM t")
+    assert_equal(len(alone.query.window_keys), 1)
+    var having = _parse(
+        "SELECT rank() OVER (ORDER BY abs(k)) FROM t HAVING count(*) > 1"
+    )
+    assert_equal(len(having.query.window_keys), 1)
+    assert_equal(Int(having.query.window_keys[0].tag), Int(SX_CALL))
+    var item = _parse("SELECT count(*) AS n, rank() OVER (ORDER BY abs(k)) FROM t")
+    assert_equal(len(item.query.window_keys), 1)
+
+
+def test_a_computed_key_is_refused_where_the_select_does_not_aggregate() raises:
+    # The refusal names the first computed key, whatever follows it.
+    assert_equal(
+        _err("SELECT rank() OVER (PARTITION BY f(g) ORDER BY h(k)) FROM t"),
+        "SQL not supported: a window PARTITION BY key must be a plain column"
+        " reference (e.g. `OVER (PARTITION BY g)`) — `f(...)` computes the key,"
+        " which this engine cannot lower yet",
+    )
+    # An aggregate inside a scalar subquery does not make the outer SELECT
+    # aggregate.
+    _refuses(
+        "(SELECT max(k) FROM u) AS m, row_number() OVER (ORDER BY f(g))",
+        "a window ORDER BY key must be a plain column reference",
+    )
+
+
+def test_a_nested_select_keeps_its_own_computed_keys() raises:
+    var derived = _parse(
+        "SELECT r FROM (SELECT g, rank() OVER (ORDER BY count(*)) AS r FROM t"
+        " GROUP BY g) x"
+    )
+    assert_equal(len(derived.query.window_keys), 0)
+    assert_equal(len(derived.query.subqueries[0].body.window_keys), 1)
+    # The outer key parsed before a scalar subquery survives it.
+    var outer = _parse(
+        "SELECT rank() OVER (ORDER BY count(*)) AS r, (SELECT max(k) FROM u) AS m"
+        " FROM t"
+    )
+    assert_equal(len(outer.query.window_keys), 1)
+    assert_equal(len(outer.query.subqueries[0].body.window_keys), 0)
 
 
 def main() raises:

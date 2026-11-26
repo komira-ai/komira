@@ -186,8 +186,6 @@ def test_a_key_of_a_type_the_window_sort_does_not_order_is_refused() raises:
     var tail = ", which the window's sort does not order"
     var date = _window(_names("d"), _names(), _one(PartitionExpr.row_number()), _scan())
     assert_equal(_message(date), _unserved("the PARTITION BY key 'd' has type date32" + tail))
-    var decimal = _window(_names("g"), _names("dec"), _one(PartitionExpr.row_number()), _scan())
-    assert_equal(_message(decimal), _unserved("the ORDER BY key 'dec' has type decimal128" + tail))
     var single = _window(_names("f32"), _names(), _one(PartitionExpr.row_number()), _scan())
     assert_equal(_message(single), _unserved("the PARTITION BY key 'f32' has type float32" + tail))
     var narrow = _window(_names(), _names("i16"), _one(PartitionExpr.row_number()), _scan())
@@ -202,6 +200,10 @@ def test_keys_of_the_types_the_window_sort_orders_are_cut() raises:
     assert_equal(_message(_window(_names("g"), _names("b"), _one(PartitionExpr.row_number()), _scan())), "")
     assert_equal(_message(_window(_names("k", "f"), _names("g"), _one(PartitionExpr.row_number()), _scan())), "")
     assert_equal(_message(_window(_names(), _names(), _one(PartitionExpr.row_number()), _scan())), "")
+    # DECIMAL128, the type of an integer SUM, as an order key and as a
+    # partition key.
+    assert_equal(_message(_window(_names("g"), _names("dec"), _one(PartitionExpr.row_number()), _scan())), "")
+    assert_equal(_message(_window(_names("dec"), _names("k"), _one(PartitionExpr.rank()), _scan())), "")
 
 
 def test_an_ntile_or_nth_value_count_below_one_is_refused_and_one_is_cut() raises:
