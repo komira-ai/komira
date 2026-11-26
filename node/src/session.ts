@@ -16,14 +16,18 @@ import { KomiraError, UnsupportedOperation } from "./errors.ts";
 import { call, callAsync, load, type Handle, type Native } from "./native.ts";
 
 /**
- * The options of a session. Neither is settable yet: this package does not
- * yet bind the libkomira call that sets them, so giving one is an
- * UnsupportedOperation, and leaving them out takes the engine's defaults.
+ * The options of a session, passed to `komira_ctx_new_with_options` as
+ * arguments (never read from the environment) and fixed for the life of the
+ * session. An option left out, or undefined, takes the engine's default.
  */
 export interface SessionOptions {
   /** The engine's worker threads, a positive integer. */
   readonly threads?: number | undefined;
-  /** The engine's memory limit in bytes, a positive integer. */
+  /**
+   * The bytes the operators of one query may hold in total, a positive
+   * integer. A query that needs more is refused at the execute step with the
+   * code `MEMORY_BUDGET_EXCEEDED`.
+   */
   readonly memoryLimit?: number | undefined;
 }
 
@@ -56,10 +60,10 @@ function optionsOf(what: string, value: unknown, known: readonly string[]): Reco
   return value as Record<string, unknown>;
 }
 
-/** Checks a positive integer option that may be left out. */
-function positiveInteger(name: string, value: unknown): void {
+/** A positive integer option that may be left out (undefined). */
+function positiveInteger(name: string, value: unknown): number | undefined {
   if (value === undefined) {
-    return;
+    return undefined;
   }
   if (typeof value !== "number") {
     throw new TypeError(`${name} must be a number`);
@@ -67,6 +71,7 @@ function positiveInteger(name: string, value: unknown): void {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new RangeError(`${name} must be a positive integer, not ${value}`);
   }
+  return value;
 }
 
 /** Checks a boolean option that may be left out. */
@@ -142,27 +147,20 @@ export class Session {
   #freed: Promise<void> | undefined;
 
   /**
-   * A new session. Loads libkomira on the first session or call of this
-   * environment, so it throws LibraryLoadError when the library cannot be
-   * loaded; an option of the wrong type or value throws TypeError or
-   * RangeError, and an option that is given throws UnsupportedOperation,
-   * each before the library is loaded.
+   * A new session. An option of the wrong type or value throws TypeError or
+   * RangeError before the library is loaded. Loads libkomira on the first
+   * session or call of this environment, so it throws LibraryLoadError when
+   * the library cannot be loaded. With an option, it throws KomiraError when
+   * the library is older than ABI 1.4, which cannot take options, or when the
+   * engine cannot start with them.
    */
   constructor(options?: SessionOptions) {
     const o = optionsOf("the session options", options, ["threads", "memoryLimit"]);
-    positiveInteger("threads", o["threads"]);
-    positiveInteger("memoryLimit", o["memoryLimit"]);
-    for (const name of ["threads", "memoryLimit"]) {
-      if (o[name] !== undefined) {
-        throw new UnsupportedOperation(
-          `the session option ${name} is not supported yet: this package does not set it yet; ` +
-            `leave it out to take the engine's default`,
-        );
-      }
-    }
+    const threads = positiveInteger("threads", o["threads"]);
+    const memoryLimit = positiveInteger("memoryLimit", o["memoryLimit"]);
     this.#native = load();
     const native = this.#native;
-    this.#handle = call(() => native.addon.newSession());
+    this.#handle = call(() => native.addon.newSession(threads, memoryLimit));
   }
 
   /** Whether `close` was called. */
