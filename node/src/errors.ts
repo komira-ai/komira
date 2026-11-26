@@ -2,7 +2,7 @@
 // "Errors a user can act on"). Every one is a KomiraError, so `instanceof
 // KomiraError` catches komira's errors and nothing else. A wrong argument is
 // JavaScript's own TypeError or RangeError instead, raised before the library
-// is called. The private Arrow import (arrow_import.mts) raises
+// is called. The private Arrow import (arrow_import.ts) raises
 // UnsupportedOperation for a format it does not map. `errorClass` and
 // `stepOf` are how an engine refusal's code and step pick its class, as the
 // Python package's error table does (python/komira/_errors.py).

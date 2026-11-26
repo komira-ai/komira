@@ -1,21 +1,25 @@
 // The Arrow C stream import of the Node addon: an Arrow C stream drained in C
 // and handed to JavaScript as descriptions over its own memory. apache-arrow
 // has no importer for the C Data Interface, so the addon reads the C structs
-// and the private TypeScript module (src/arrow_import.mts) builds apache-arrow
+// and the private TypeScript module (src/arrow_import.ts) builds apache-arrow
 // data from the descriptions.
 //
 //   importArrowStream(capsule)   Promise of a result: the stream drained
+//   (sql(session, text) in komira_addon.c resolves to a result of the same kind)
 //   arrowSchema(result)          the stream's schema, described
 //   arrowNextBatch(result)       the next batch, described, or null at the end
 //   arrowClose(result)           release what the result still holds; again is a no-op
 //
-// The drain. importArrowStream moves the stream out of its capsule (arrow_c.h),
-// calls get_schema once and get_next until the end of the stream, keeping
-// every ArrowArray it is handed, then calls the stream's release. The arrays
-// stay valid: each has its own release (the C Stream Interface). A non-zero
-// callback status rejects the promise with get_last_error's text, after the
-// arrays taken so far, the schema and the stream are released. The stream is
-// materialized by its producer, so the drain only moves structs.
+// The drain (arrow_drain). It calls get_schema once and get_next until the
+// end of the stream, keeping every ArrowArray it is handed, then calls the
+// stream's release. The arrays stay valid: each has its own release (the C
+// Stream Interface). A non-zero callback status is an error with
+// get_last_error's text, after the arrays taken so far, the schema and the
+// stream are released. The stream is materialized by its producer, so the
+// drain only moves structs. It needs no napi_env: importArrowStream runs it on
+// the JavaScript thread over a stream it moves out of its capsule (arrow_c.h),
+// and the addon's `sql` on the session's thread over the stream
+// komira_sql_stream filled (komira_addon.c).
 //
 // The descriptions. A schema becomes { format, name, flags, metadata,
 // children, dictionary }, metadata as [key, value] pairs or null. A batch
@@ -57,13 +61,14 @@ static const napi_type_tag g_result_tag = {0x6b6f6d6972612e61ULL, 0x72726f772e72
 // The largest length or offset JavaScript holds exactly (2^53).
 #define MAX_EXACT (INT64_C(1) << 53)
 
-typedef struct {
+struct ArrowResult {
   struct ArrowSchema schema;  // release is NULL once released
   struct ArrowArray *arrays;  // the batches get_next handed out, in order
   size_t n_arrays;
   size_t next;  // the batch arrowNextBatch takes next
   bool closed;
-} Result;
+};
+typedef struct ArrowResult Result;
 
 // A batch JavaScript holds: one count for each external ArrayBuffer over its
 // memory, and one for the description while it is being made.
@@ -120,77 +125,144 @@ static void finalize_result(napi_env env, void *data, void *hint) {
   free(r);
 }
 
-// ---- importArrowStream ------------------------------------------------------
+// ---- the drain --------------------------------------------------------------
 
-// The error of a failed callback `op`: `<op> failed (status N): <text>`, with
-// `status` and `lastError` (the stream's get_last_error, read before the
-// stream is released; empty when it gives none).
-static napi_value stream_error(napi_env env, struct ArrowArrayStream *s, const char *op, int status) {
+// A malloc'd copy of `text`, or NULL when there is no memory for it.
+static char *copy_text(const char *text) {
+  size_t n = strlen(text) + 1;
+  char *out = malloc(n);
+  if (out != NULL) memcpy(out, text, n);
+  return out;
+}
+
+// Records a drain error that is not a callback's. Returns false.
+static bool drain_failed(ArrowDrainError *err, const char *code, const char *message) {
+  err->code = code;
+  err->message = copy_text(message);
+  return false;
+}
+
+// Records the failure of callback `op`: `<op> failed (status N): <text>`, with
+// get_last_error's text, read before the stream is released (empty when it
+// gives none). Returns false.
+static bool stream_failed(ArrowDrainError *err, struct ArrowArrayStream *s, const char *op, int status) {
   const char *text = s->get_last_error != NULL ? s->get_last_error(s) : NULL;
   if (text == NULL) text = "";
+  err->code = "KOMIRA_ARROW_STREAM";
+  err->status = status;
+  err->last = copy_text(text);
   size_t cap = strlen(op) + strlen(text) + 64;
-  char *message = malloc(cap);
-  if (message == NULL) return NULL;
-  if (text[0] != '\0') {
-    snprintf(message, cap, "%s failed (status %d): %s", op, status, text);
-  } else {
-    snprintf(message, cap, "%s failed (status %d)", op, status);
+  err->message = malloc(cap);
+  if (err->message != NULL) {
+    if (text[0] != '\0') {
+      snprintf(err->message, cap, "%s failed (status %d): %s", op, status, text);
+    } else {
+      snprintf(err->message, cap, "%s failed (status %d)", op, status);
+    }
   }
-  napi_value err = make_error(env, "KOMIRA_ARROW_STREAM", message);
-  free(message);
-  napi_value status_v, text_v;
-  if (err == NULL || napi_create_int32(env, status, &status_v) != napi_ok ||
-      napi_create_string_utf8(env, text, NAPI_AUTO_LENGTH, &text_v) != napi_ok ||
-      napi_set_named_property(env, err, "status", status_v) != napi_ok ||
-      napi_set_named_property(env, err, "lastError", text_v) != napi_ok) {
-    return NULL;
-  }
-  return err;
+  return false;
 }
 
 // Drains `s` into `r`. Returns true on success; otherwise false with `*err`
-// the error to reject with (NULL when even that could not be made). The
-// stream itself is released by the caller either way.
-static bool drain(napi_env env, struct ArrowArrayStream *s, Result *r, napi_value *err) {
+// filled. The stream itself is released by the caller either way.
+static bool drain(struct ArrowArrayStream *s, Result *r, ArrowDrainError *err) {
   int rc = s->get_schema(s, &r->schema);
-  if (rc != 0) {
-    *err = stream_error(env, s, "get_schema", rc);
-    return false;
-  }
+  if (rc != 0) return stream_failed(err, s, "get_schema", rc);
   if (r->schema.release == NULL) {
-    *err = make_error(env, "KOMIRA_ARROW_INVALID", "get_schema returned a released schema");
-    return false;
+    return drain_failed(err, "KOMIRA_ARROW_INVALID", "get_schema returned a released schema");
   }
   if (r->schema.format == NULL || strcmp(r->schema.format, "+s") != 0) {
     char msg[160];
     snprintf(msg, sizeof msg, "the stream's schema has format \"%.64s\", not a struct (\"+s\")",
              r->schema.format != NULL ? r->schema.format : "");
-    *err = make_error(env, "KOMIRA_ARROW_INVALID", msg);
-    return false;
+    return drain_failed(err, "KOMIRA_ARROW_INVALID", msg);
   }
   size_t cap = 0;
   for (;;) {
     struct ArrowArray a;
     memset(&a, 0, sizeof a);
     rc = s->get_next(s, &a);
-    if (rc != 0) {
-      *err = stream_error(env, s, "get_next", rc);
-      return false;
-    }
+    if (rc != 0) return stream_failed(err, s, "get_next", rc);
     if (a.release == NULL) return true;  // the end of the stream
     if (r->n_arrays == cap) {
       size_t grown = cap == 0 ? 4 : cap * 2;
       struct ArrowArray *more = realloc(r->arrays, grown * sizeof *more);
       if (more == NULL) {
         release_array(&a);
-        *err = make_error(env, "KOMIRA_ERR_NOMEM", "out of memory");
-        return false;
+        return drain_failed(err, "KOMIRA_ERR_NOMEM", "out of memory");
       }
       r->arrays = more;
       cap = grown;
     }
     r->arrays[r->n_arrays++] = a;
   }
+}
+
+ArrowResult *arrow_drain(struct ArrowArrayStream *stream, ArrowDrainError *err) {
+  memset(err, 0, sizeof *err);
+  Result *r = calloc(1, sizeof *r);
+  if (r == NULL) {
+    stream->release(stream);
+    drain_failed(err, "KOMIRA_ERR_NOMEM", "out of memory");
+    return NULL;
+  }
+  bool ok = drain(stream, r, err);
+  stream->release(stream);
+  if (!ok) {
+    result_release(r);
+    free(r);
+    return NULL;
+  }
+  return r;
+}
+
+void arrow_drain_error_free(ArrowDrainError *err) {
+  free(err->message);
+  free(err->last);
+  err->message = NULL;
+  err->last = NULL;
+}
+
+napi_value arrow_drain_error_value(napi_env env, const ArrowDrainError *err) {
+  if (err->message == NULL) return make_error(env, "KOMIRA_ERR_NOMEM", "out of memory");
+  napi_value e = make_error(env, err->code, err->message);
+  if (e == NULL || strcmp(err->code, "KOMIRA_ARROW_STREAM") != 0) return e;
+  napi_value status_v, text_v;
+  if (napi_create_int32(env, err->status, &status_v) != napi_ok ||
+      napi_create_string_utf8(env, err->last != NULL ? err->last : "", NAPI_AUTO_LENGTH, &text_v) != napi_ok ||
+      napi_set_named_property(env, e, "status", status_v) != napi_ok ||
+      napi_set_named_property(env, e, "lastError", text_v) != napi_ok) {
+    return NULL;
+  }
+  return e;
+}
+
+void arrow_result_free(ArrowResult *r) {
+  if (r == NULL) return;
+  result_release(r);
+  free(r);
+}
+
+napi_value arrow_result_value(napi_env env, ArrowResult *r) {
+  napi_value ext = NULL;
+  if (napi_create_external(env, r, finalize_result, NULL, &ext) != napi_ok) {
+    arrow_result_free(r);
+    return NULL;
+  }
+  // From here the external owns `r` through its finalizer.
+  if (napi_type_tag_object(env, ext, &g_result_tag) != napi_ok) return NULL;
+  return ext;
+}
+
+// ---- importArrowStream ------------------------------------------------------
+
+// The exception pending in `env`, or a KOMIRA_NAPI error when there is none.
+static napi_value pending_or_napi(napi_env env) {
+  napi_value pending = NULL;
+  if (napi_get_and_clear_last_exception(env, &pending) != napi_ok || pending == NULL) {
+    pending = make_error(env, "KOMIRA_NAPI", "cannot make the result");
+  }
+  return pending;
 }
 
 static napi_value js_import_arrow_stream(napi_env env, napi_callback_info info) {
@@ -217,42 +289,27 @@ static napi_value js_import_arrow_stream(napi_env env, napi_callback_info info) 
 
   napi_deferred deferred;
   napi_value promise;
-  Result *r = calloc(1, sizeof *r);
-  if (r == NULL || napi_create_promise(env, &deferred, &promise) != napi_ok) {
-    free(r);
+  if (napi_create_promise(env, &deferred, &promise) != napi_ok) {
     stream.release(&stream);
     return throw_error(env, "KOMIRA_NAPI", "cannot make the promise");
   }
-  napi_value err = NULL;
-  bool ok = drain(env, &stream, r, &err);
-  stream.release(&stream);
-  napi_value ext = NULL;
-  if (ok && napi_create_external(env, r, finalize_result, NULL, &ext) != napi_ok) {
-    ok = false;
-    ext = NULL;
-  }
-  if (!ok && ext == NULL) {
-    result_release(r);
-    free(r);
-  }
-  if (ok && napi_type_tag_object(env, ext, &g_result_tag) != napi_ok) {
-    // The external owns `r` through its finalizer.
-    ok = false;
-  }
-  if (ok) {
-    napi_resolve_deferred(env, deferred, ext);
-  } else {
-    if (err == NULL) {
-      // The error could not be made: reject with the pending exception, if any.
-      napi_value pending = NULL;
-      if (napi_get_and_clear_last_exception(env, &pending) != napi_ok || pending == NULL) {
-        pending = make_error(env, "KOMIRA_NAPI", "cannot make the result");
-      }
-      err = pending;
+  ArrowDrainError err;
+  ArrowResult *r = arrow_drain(&stream, &err);
+  napi_value v;
+  if (r != NULL) {
+    v = arrow_result_value(env, r);
+    if (v != NULL) {
+      napi_resolve_deferred(env, deferred, v);
+      return promise;
     }
-    if (err == NULL) napi_get_undefined(env, &err);
-    napi_reject_deferred(env, deferred, err);
+    v = pending_or_napi(env);
+  } else {
+    v = arrow_drain_error_value(env, &err);
+    arrow_drain_error_free(&err);
+    if (v == NULL) v = pending_or_napi(env);
   }
+  if (v == NULL) napi_get_undefined(env, &v);
+  napi_reject_deferred(env, deferred, v);
   return promise;
 }
 
@@ -269,7 +326,7 @@ static Result *get_result(napi_env env, napi_callback_info info, bool allow_clos
       napi_typeof(env, argv[0], &t) != napi_ok || t != napi_external ||
       napi_check_object_type_tag(env, argv[0], &g_result_tag, &tagged) != napi_ok || !tagged ||
       napi_get_value_external(env, argv[0], &data) != napi_ok || data == NULL) {
-    throw_type(env, "the result must be a value importArrowStream resolved to");
+    throw_type(env, "the result must be a value importArrowStream or sql resolved to");
     return NULL;
   }
   Result *r = data;

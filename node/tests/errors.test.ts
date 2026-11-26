@@ -137,6 +137,24 @@ test("the addon refusing its own use has no status and no code", () => {
   assert.equal(fromAddon(Object.assign(new Error("s"), { status: "-3" })).status, null);
 });
 
+test("a stream sql could not drain keeps its message, with no status: its status is the callback's, not the ABI's", () => {
+  const raw = Object.assign(new Error("get_next failed (status 5): stand-in"), {
+    code: "KOMIRA_ARROW_STREAM",
+    status: 5,
+    lastError: "stand-in",
+  });
+  const e = fromAddon(raw);
+  assert.equal(e.constructor, KomiraError);
+  assert.deepEqual([e.message, e.status, e.code, e.step], ["get_next failed (status 5): stand-in", null, null, null]);
+});
+
+test("a KomiraError, an UnsupportedOperation of the Arrow import among them, is returned as it is", () => {
+  const refused = new UnsupportedOperation('column "n": Arrow format "+w:2" is not supported');
+  assert.equal(fromAddon(refused), refused);
+  const plain = new KomiraError("the result was already read");
+  assert.equal(fromAddon(plain), plain);
+});
+
 test("a thrown value that is not an Error becomes a KomiraError with its text", () => {
   assert.equal(fromAddon("plain").message, "plain");
   assert.equal(fromAddon(null).message, "null");
