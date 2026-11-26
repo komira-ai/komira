@@ -27,7 +27,9 @@
 # the arithmetic as NULL, so no operator overflows on an invalid row (a month of
 # 9e18, a year past the range), and a NULL argument stays NULL. The validity
 # test of the whole date is not part of the clamp: it is used once, in the
-# guard below, so the tree grows linearly with the size of the arguments.
+# guard below, so one call copies each argument a fixed number of times and
+# its tree grows linearly with the size of the arguments (a call nested in
+# another's argument is copied that many times again).
 #
 # AN INVALID ROW RAISES, NAMING THE FUNCTION. The engine has no expression that
 # raises a message of its own, and a CASE arm is evaluated over every row of a
@@ -171,7 +173,7 @@ def _guard(var cases: List[WhenCaseData], otherwise: String) -> Expr:
 def days_from_civil_expr(y: Expr, m: Expr, d: Expr) -> Expr:
     """Days from 1970-01-01 of the date y-m-d (INT64 expressions with the year
     in DATE's range, the month 1..12 and the day 1..31: the caller clamps). See
-    the header for the year shift. `y` is copied four times, `m` five."""
+    the header for the year shift. `y` is copied four times, `m` twice."""
     var yy = _when1(
         _bin(BIN_LE, m, _int(2)),
         _bin(BIN_ADD, y, _int(_SHIFT_YEARS - 1)),

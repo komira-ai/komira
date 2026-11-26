@@ -109,9 +109,16 @@ DuckDB's infinite DATE or TIMESTAMP is NULL, as in DuckDB. Refused by name:
 `make_date`'s one-argument overloads, a DOUBLE or DECIMAL `make_date` argument
 (DuckDB refuses those too), a VARCHAR argument (DuckDB casts a string
 literal), and `last_day` of a TIMESTAMP WITH TIME ZONE. A call over columns is
-a tree of `CASE` nodes, and a `WHERE` filter refuses a predicate that holds
-one, by name, at execution (`batch_eval/predicate_null_scope.mojo`); a call of
-constants is a literal and filters. A
+a tree of `CASE` nodes, and a `WHERE` filter refuses at execution a predicate
+that holds one, with a message naming the `CASE` node, not the function
+(`batch_eval/predicate_null_scope.mojo`); a call of constants is a literal and
+filters. Two departures from DuckDB follow from raising outside a `CASE` arm
+and from folding at bind, and both fail the query rather than answer a wrong
+value: invalid constant arguments are refused at bind even where the call sits
+in a branch or a filter that DuckDB would not evaluate, and a call over columns
+inside a user's `CASE`, `COALESCE` or `IF` fails on an invalid row even when
+that row takes another branch (a `CASE` arm is evaluated over every row of the
+batch). A
 shape the engine cannot answer exactly raises an `Error` that names it:
 `SQL not supported` for an unsupported shape, `SQL bind error` for malformed
 input (an arity mismatch, a DECIMAL that does not fit), `SQL internal` for a
