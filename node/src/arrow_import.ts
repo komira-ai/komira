@@ -253,7 +253,8 @@ export function dataOf(type: DataType, a: ArrayDescription): Data {
   let full: Data;
   if (DataType.isDictionary(type)) {
     const dictionary = makeVector(dataOf(type.dictionary, a.dictionary as ArrayDescription));
-    full = make({ ...common, data: view(a, 1, type.indices.ArrayType), dictionary });
+    // The index type's constructor is one of six; each takes an ArrayBuffer.
+    full = make({ ...common, data: view<ArrayBufferView>(a, 1, type.indices.ArrayType), dictionary });
   } else if (DataType.isUnion(type)) {
     const children = childrenOf(type.children);
     const typeIds = view(a, 0, Int8Array);
