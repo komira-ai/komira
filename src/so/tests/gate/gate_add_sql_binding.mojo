@@ -264,7 +264,7 @@ def main() raises:
     )
 
     _expect(_bind_bytes(lib, ctx, name_c, missing, one) == -3, "a missing local file is not -3")
-    _expect(len(_read(lib, ctx, False)) > 0, "a missing local file stored no error")
+    _expect(_read(lib, ctx, False).byte_length() > 0, "a missing local file stored no error")
     _expect(
         lib.call["komira_last_error_step", Int32](ctx) == STEP_BIND,
         "a missing local file's step is not bind",
