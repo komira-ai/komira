@@ -384,7 +384,9 @@ _PYARROW = {
 # make no stream; a failing get_schema raises KomiraError from sql and a
 # failing get_next from to_arrow (pyarrow's OSError from a reader); the
 # argument checks and a closed session make no call; results left unread at
-# interpreter exit are released without a crash.
+# interpreter exit are released without a crash; a notebook display reads the
+# rows, leaves the result unread and releases each struct once, also when the
+# stream fails while it reads.
 [python_binding_test(
     name = "sql_fake_test" + p["suffix"],
     src = "test_sql_fake.py",
@@ -473,7 +475,7 @@ c_shared_lib(
 
 # Session.sql on the real library: SELECT 1 AS n, a GROUP BY over a checked-in
 # Parquet file (3000 rows, five labels, six row groups), an aggregate over the
-# quickstart's readings.parquet, an answer of no rows, each terminal, an engine
+# checked-in fixtures/readings.parquet, an answer of no rows, each terminal, an engine
 # refusal with its message and the session answering after it, and a result
 # read after its session was closed or collected (the stream needs neither),
 # or never read at all, without a crash.
@@ -483,9 +485,40 @@ c_shared_lib(
     data = {
         "labels.parquet": "komira//src/parquet_codec:pyarrow_multi_dict_page.parquet",
         "libkomira": LIBKOMIRA,
-        "readings.parquet": "komira//python:examples/readings.parquet",
+        "readings.parquet": "fixtures/readings.parquet",
     },
     deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Session(memory_limit=) on the real library, over labels.parquet: a limit of
+# one byte raises MemoryLimitError (status -3, code MEMORY_BUDGET_EXCEEDED, step
+# execute) from sql for an aggregate, a GROUP BY over an integer key and over a
+# string key, a COUNT(DISTINCT), a sort and a window function; the session
+# answers the next query, a syntax error is still a ParseError, and the same
+# queries on an unlimited session and on one of 1 GiB and two workers give the
+# same answers.
+[python_binding_test(
+    name = "memory_limit_test" + p["suffix"],
+    src = "test_memory_limit.py",
+    data = {
+        "labels.parquet": "komira//src/parquet_codec:pyarrow_multi_dict_page.parquet",
+        "libkomira": LIBKOMIRA,
+    },
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Session(threads=, memory_limit=) on the ABI 1.7 stand-in: the options reach
+# komira_ctx_new_with_options as given and absent ones as 0, no option calls
+# komira_ctx_new, a wrong type is a TypeError and a value outside 1 to 2**63 - 1
+# a ValueError before the library is called, the options are keyword-only, and
+# an option the library refuses is a KomiraError.
+[python_binding_test(
+    name = "session_options_test" + p["suffix"],
+    src = "test_session_options.py",
+    data = {"fake_v1_7/libkomira.so": ":fake_v1_7"},
+    deps = ["//python:komira"],
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
@@ -672,7 +705,8 @@ _CASES = [
 # - ops_verbs_test: the verbs the skins call, one per verb, including the
 #   cases that add no node.
 # - ops_no_sql_test: no node, verb or module of komira._ops renders SQL text,
-#   with cases that show each check fails when one does.
+#   and no module, class or source string of komira.pl names or holds it, with
+#   cases that show each check fails when one does.
 # - ops_udf_test: the user-function nodes (UdfSpec, UdfCall, MapBatches), their
 #   refusals, the walkers over a call and the map_batches verb.
 # - ops_dtype_test: the dtype spellings of a user function's return type, their
@@ -823,6 +857,12 @@ _PLAN_EXPR_RUNTIMES = [
 #   row of the refusal tables, no dunder runs a query, and a terminal sends the
 #   encoded plan bytes to the session's plan door and nothing else, with no SQL
 #   text anywhere in the frame's modules.
+# - frame_groupby_test, with no library, on the same runtimes: the plans of
+#   groupby and its reductions, the frame's reductions and agg, and
+#   drop_duplicates, by equality with hand-built node trees (the filter of
+#   missing keys below the aggregate, the key sort above it, the zero of an
+#   empty sum), their output types, the encoded aggregate, every refusal with
+#   its full message, and the GroupBy's attribute rules.
 # - frame_run_test, on the real libkomira, per minor: the readers over Parquet,
 #   CSV and newline-delimited JSON files written here, each verb run through
 #   komira_plan_stream with its rows checked, explain()'s text, a frame run
@@ -835,10 +875,88 @@ _PLAN_EXPR_RUNTIMES = [
 #   strings, each answered by komira through the plan door and by DuckDB from
 #   the SQL that means the same over the same file, equal row for row (in
 #   order when the frame is ordered, as a multiset otherwise), column names
-#   and types included.
+#   and types included: the verbs above, groupby and the reductions the
+#   engine runs against GROUP BY, the frame's reductions, drop_duplicates
+#   against DISTINCT, and the reductions the engine does not run yet refused
+#   at the terminal with its step.
+# - frame_verbs_test, frame_concat_test and series_accessors_test,
+#   with no library, on the same runtimes: the node trees of fillna, dropna
+#   (a float column's not-NaN test), rename, add_prefix, add_suffix, astype,
+#   tail (a reversed-key top-n under the frame's sort), concat (the union and
+#   the projection that reorders a later frame), the refusal of value_counts
+#   by name, Series.astype and the .str and .dt methods, their
+#   output types, where the order is kept, every refusal with its full
+#   message, and the accessors' attribute rules.
+# - frame_verbs_duckdb_test, on CPython 3.13: those verbs over a Parquet file
+#   with NaN, float32, timestamp and date columns, each equal to DuckDB's
+#   answer to the SQL that means pandas' answer, and the casts and regular
+#   expressions the engine does not run refused at the terminal with its step.
 [py_test(
     name = "frame_test{}".format(suffix),
     src = "test_frame.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
+
+# The notebook display (komira/_display.py), with no library: a frame shows its
+# names over their types, equal to fixtures/display/frame.html, and calls
+# nothing on its session; a result shows its rows, equal to
+# fixtures/display/result.html, at most ten of them with the line saying there
+# are more, reading the stream only one batch past them, and still reads every
+# row once after; the row limit at its edges, long values cut and escaped, a
+# stream failing while the rows are read or past them, a KeyboardInterrupt
+# during the read, and a terminal on another thread waiting for a display.
+[py_test(
+    name = "display_test" + p["suffix"],
+    src = "test_display.py",
+    srcs = [
+        "fixtures/display/frame.html",
+        "fixtures/display/result.html",
+    ],
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+[py_test(
+    name = "frame_groupby_test{}".format(suffix),
+    src = "test_frame_groupby.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
+
+[py_test(
+    name = "frame_verbs_test{}".format(suffix),
+    src = "test_frame_verbs.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
+
+[py_test(
+    name = "frame_concat_test{}".format(suffix),
+    src = "test_frame_concat.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
+
+[py_test(
+    name = "series_accessors_test{}".format(suffix),
+    src = "test_series_accessors.py",
     deps = [
         "//python:komira_with_plan_modules",
         _PROTOBUF[p["suffix"]][runtime],
@@ -873,12 +991,109 @@ python_binding_test(
     ],
 )
 
+python_binding_test(
+    name = "frame_verbs_duckdb_test",
+    src = "test_frame_verbs_duckdb.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+)
+
+# The polars-shaped skin, komira.pl (docs/design/dataframe_surface.md):
+#
+# - pl_names_test: with no library and no plan modules: importing komira.pl
+#   loads nothing; its public names; every entry of the module's, LazyFrame's
+#   and Expr's refusal tables raises its AttributeError word for word, any other
+#   name Python's own; no attribute is a column; no attribute can be set; no
+#   dunder runs a query; a frame survives copy.
+# - pl_verbs_test: with the plan modules and no library, over a stand-in
+#   session: each verb's and expression's plan equals a hand-written tree, the
+#   order rules, polars' names and types, every refusal with its full message,
+#   the plan bytes collect() hands the session (no SQL text), and the schema as
+#   pyarrow types.
+[py_test(
+    name = "pl_names_test" + p["suffix"],
+    src = "test_pl_names.py",
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+[py_test(
+    name = "pl_verbs_test" + p["suffix"],
+    src = "test_pl_verbs.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# - pl_frames_test: as pl_verbs_test, for group_by, join, unique and the
+#   windows (over, rank, cum_*, rolling_*, an aggregate broadcast beside
+#   row-wise values): each plan equals a hand-written tree, polars' output
+#   names and types, every refusal with its full message, and the plan bytes
+#   collect() hands the session hold no SQL text.
+[py_test(
+    name = "pl_frames_test" + p["suffix"],
+    src = "test_pl_frames.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# komira.pl against polars itself (test_pl_oracle.py), on the real library and
+# CPython 3.13, the one minor with a pinned polars: each program, written once
+# for both modules, gives the same frame through komira.pl's plan and the plan
+# entry as through polars 1.44.2, values and dtypes, and the schema komira.pl
+# derives without running is the answer's; plus collect() twice, the plan
+# entry and never the SQL one, explain(), a missing file, frames of two
+# sessions, a CSV scan against polars', and the engine's refusal at
+# execute of median, std, var and a string min, which its aggregation sinks do
+# not serve yet.
+python_binding_test(
+    name = "pl_oracle_test",
+    src = "test_pl_oracle.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:polars",
+        _PYARROW[""],
+    ],
+)
+
+# group_by, join, unique and the windows of komira.pl against polars itself
+# (test_pl_oracle_frames.py), as pl_oracle_test: each program, written once
+# for both modules, gives the same frame through komira.pl's plan as through
+# polars 1.44.2, values and dtypes, and the schema komira.pl derives is the
+# answer's; and the plan entry is called, never the SQL one.
+python_binding_test(
+    name = "pl_oracle_frames_test",
+    src = "test_pl_oracle_frames.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:polars",
+        _PYARROW[""],
+    ],
+)
+
 # The clean-environment install tests of the wheel (python/BUCK,
 # wheel_install_test): the driver that installs the wheels into an empty
 # prefix and runs a test there, the three tests the installed interpreter runs
 # (the wheel alone, the wheel beside Modular's runtime, and the wheel after an
 # upgrade from the previous release), and the serialized plan the first renders
-# (the scan plan of src/so/tests/gate/gate_plan_render.mojo, as hex).
+# (the scan plan of src/so/tests/gate/gate_plan_render.mojo, as hex) and the
+# Parquet file whose aggregate it answers (fixtures/readings.parquet).
 [export_file(
     name = f,
     visibility = ["komira//python:"],
@@ -891,6 +1106,7 @@ python_binding_test(
     "test_beside_modular.py",
     "test_upgrade.py",
     "fixtures/scan_plan.hex",
+    "fixtures/readings.parquet",
     "fixtures/previous_release_only.txt",
 ]]
 

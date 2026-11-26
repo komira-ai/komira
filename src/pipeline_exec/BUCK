@@ -223,6 +223,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # test_string_group_memory        the pool charged as the string tables grow, refused
 #                                 by name over budget in a worker and in the merge,
 #                                 returned on success, failure and drop.
+# test_sum_avg_over_cast_bool     SUM and AVG over CAST(<boolean> AS <integer or
+#                                 float>): the count and the share of trues over
+#                                 workers, only false, only NULL and no rows, grouped.
 # test_tpch_q1                    Q1 over Parquet, end to end, against an oracle and
 #                                 a hand-computed answer, from dictionary and plain
 #                                 files with both string sinks.
@@ -409,6 +412,7 @@ mojo_library(
         "tests/test_sources.mojo",
         "tests/test_string_group_memory.mojo",
         "tests/test_string_keys.mojo",
+        "tests/test_sum_avg_over_cast_bool.mojo",
         "tests/test_topn_plan.mojo",
         "tests/test_tpch_q1.mojo",
         "tests/test_tpch_q1_concurrent.mojo",

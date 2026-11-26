@@ -279,6 +279,10 @@ test "build builds the wheel, the install test and the driver from one stamp, wr
     try expectRefused(ar, x, try inJob(ar, text, "build", c.BUILD_MATRIX_OUTPUT ++ "\n", ""), lines);
     // the quickstart files not beside the driver
     try expectRefused(ar, x, try replaced(ar, text, c.BUILD_COPY, "        run: cp python/examples/quickstart.py \"$RUNNER_TEMP/pypi/smoke/\""), lines);
+    try expectRefused(ar, x, try replaced(ar, text, c.BUILD_COPY, "        run: cp python/examples/quickstart.py src/so/abi/komira.tsv \"$RUNNER_TEMP/pypi/smoke/\""), lines);
+    try expectRefused(ar, x, try replaced(ar, text, c.BUILD_COPY, "        run: cp python/examples/quickstart.py python/examples/quickstart.expected \"$RUNNER_TEMP/pypi/smoke/\""), lines);
+    // the data file the quickstart no longer reads: copied beside the driver, or passed with --data
+    try expectRefused(ar, x, try replaced(ar, text, c.BUILD_COPY, "        run: cp python/examples/quickstart.py python/examples/quickstart.expected python/tests/fixtures/readings.parquet src/so/abi/komira.tsv \"$RUNNER_TEMP/pypi/smoke/\""), lines);
     // a third artifact, an artifact that may be empty, a shorter life, another name
     try expectRefused(ar, x, try inJob(ar, text, "build", "      - name: Stop buck2\n", c.UPLOAD ++ "\n        with:\n          name: extra\n          path: ${{ runner.temp }}/pypi\n          if-no-files-found: error\n          retention-days: 14\n      - name: Stop buck2\n"), "build: it does not keep exactly");
     try expectRefused(ar, x, try inJob(ar, text, "build", "          if-no-files-found: error\n", "          if-no-files-found: warn\n"), "build: it does not keep exactly");
@@ -355,6 +359,8 @@ test "a smoke job verifies, then sets up one supported Python, then installs wit
     try expectRefused(ar, x, try inJob(ar, text, "testpypi-smoke", "--python \"$PYTHON\"", "--python python3"), "testpypi-smoke: verify, set up Python and install");
     // the quickstart of a checkout, not the record's (a promotion runs the version's own files)
     try expectRefused(ar, x, try inJob(ar, text, "pypi-smoke", "--example \"$RUNNER_TEMP/pypi/smoke/quickstart.py\"", "--example python/examples/quickstart.py"), "pypi-smoke: verify, set up Python and install");
+    // the data flag the install command no longer has
+    try expectRefused(ar, x, try inJob(ar, text, "testpypi-smoke", "--abi-table", "--data \"$RUNNER_TEMP/pypi/smoke/readings.parquet\" --abi-table"), "testpypi-smoke: verify, set up Python and install");
     try expectRefused(ar, x, try inJob(ar, text, "testpypi-smoke", PYTHON_VERSION_LINE, "          python-version: '3.13'"), "testpypi-smoke: verify, set up Python and install");
     // one job per Python of the list of its half's first job: a list written here, the other half's, fail-fast
     const push_list = "      matrix: ${{ fromJSON(needs.build.outputs.matrix) }}\n";

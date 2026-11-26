@@ -139,7 +139,7 @@ from .group_keys import (
 )
 from .group_positions import GroupPositions, merge_positions
 from .group_table import GroupTable, MAX_GROUP_CAPACITY, mix64
-from .segment_pool import SegmentPool, WorkerReservation
+from .segment_pool import MEMORY_BUDGET_EXCEEDED, SegmentPool, WorkerReservation
 from .string_keys import (
     InternTable,
     MAX_INTERN_ENTRIES,
@@ -371,7 +371,9 @@ struct StringGroupAggSink(MorselSinkImpl):
                 + " distinct strings, or a string over 2 GiB)"
             )
         return Error(
-            self._where
+            String(MEMORY_BUDGET_EXCEEDED)
+            + ": "
+            + self._where
             + " was denied "
             + String(denied_bytes)
             + " bytes of the segment's memory pool for its "

@@ -6,7 +6,8 @@
 # NONE, COLUMNAR) whose PartitionBySinkData is the next row of the ParamTable's
 # `window`, and opens a pipeline that reads that segment's output over an E3
 # edge. The sink holds every row, orders them by the partition keys then the
-# order keys (NULLs last in both directions) and appends one column per window
+# order keys (each order key's NULLs where the node places them: last in both
+# directions unless the node says NULLS FIRST) and appends one column per window
 # function. The keys stay column names. One node carries every function of
 # one OVER clause, so a fused node is one segment.
 #
@@ -19,6 +20,7 @@
 # failing check in this order:
 #
 #   1. a descending list whose length is not the order keys';
+#   1b. a non-empty nulls_first list whose length is not the order keys';
 #   2. a partition or order key that is not a column of the child, or whose
 #      type is not INT64, INT32, FLOAT64, BOOL or STRING (the types the
 #      window's sort orders);
@@ -32,8 +34,8 @@
 #          for STRING;
 #        FIRST_VALUE, LAST_VALUE, NTH_VALUE (n above 0): an INT64, FLOAT64 or
 #          STRING argument column and a served frame;
-#        SUM, MIN, MAX, AVG: an INT64 or FLOAT64 argument column and a served
-#          frame;
+#        SUM, MIN, MAX, AVG: an INT8, INT16, INT32, INT64 or FLOAT64 argument
+#          column and a served frame;
 #        COUNT: a column of any type, or "" for COUNT(*), and a served frame;
 #        any other function: refused by name.
 #      Served frames: every ROWS or RANGE frame SQL allows, with the bounds
@@ -284,6 +286,14 @@ def _require_type(
     )
 
 
+def _require_aggregate_type(expr: PartitionExpr, t: ArrowType) raises:
+    """Refuse a SUM, AVG, MIN or MAX argument type that is not INT8, INT16,
+    INT32, INT64 or FLOAT64 (the window sink widens a narrow integer)."""
+    if t == ArrowType.INT8 or t == ArrowType.INT16 or t == ArrowType.INT32:
+        return
+    _require_type(expr, t, False)
+
+
 def _check_default(expr: PartitionExpr, t: ArrowType) raises:
     if not value_fn_has_default(expr):
         return
@@ -340,7 +350,7 @@ def _check_expr(
         _check_frame(expr, order_keys, schema)
         return
     if f == PF_SUM or f == PF_AVG or f == PF_MIN or f == PF_MAX:
-        _require_type(expr, _argument_type(expr, schema), False)
+        _require_aggregate_type(expr, _argument_type(expr, schema))
         _check_frame(expr, order_keys, schema)
         return
     if f == PF_COUNT:
@@ -398,6 +408,14 @@ def _window_data(node: LogicalPlan) raises -> PartitionBySinkData:
             + String(len(pd.descending))
             + " descending flags"
         )
+    if len(pd.nulls_first) != 0 and len(pd.nulls_first) != len(pd.order_keys):
+        raise _unserved(
+            "the node has "
+            + String(len(pd.order_keys))
+            + " order keys and "
+            + String(len(pd.nulls_first))
+            + " nulls_first flags"
+        )
     _check_keys(child, pd.partition_keys, "PARTITION BY")
     _check_keys(child, pd.order_keys, "ORDER BY")
     for i in range(len(pd.partition_exprs)):
@@ -408,6 +426,7 @@ def _window_data(node: LogicalPlan) raises -> PartitionBySinkData:
         pd.descending.copy(),
         pd.partition_exprs.copy(),
         _declared_schema(node, pd.partition_exprs, child),
+        pd.nulls_first.copy(),
     )
 
 

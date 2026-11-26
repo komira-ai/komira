@@ -428,8 +428,8 @@ def test_the_string_sink_refuses_a_denied_position_entry() raises:
             refused = String(e)
     assert_true(
         refused.startswith(
-            "pipeline_exec: the string-keyed aggregation sink of segment 0"
-            " was denied "
+            "MEMORY_BUDGET_EXCEEDED: pipeline_exec: the string-keyed"
+            " aggregation sink of segment 0 was denied "
         ),
         refused,
     )

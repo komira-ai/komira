@@ -747,8 +747,8 @@ def test_a_denied_position_entry_is_refused_by_name() raises:
     )
     assert_true(
         refused.startswith(
-            "pipeline_exec: the grouped aggregation sink of segment 0 was"
-            " denied "
+            "MEMORY_BUDGET_EXCEEDED: pipeline_exec: the grouped aggregation"
+            " sink of segment 0 was denied "
         ),
         refused,
     )

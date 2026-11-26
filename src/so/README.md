@@ -168,7 +168,7 @@ the call returns NULL, as it does when the engine cannot start. A positive
 value has no upper bound. The options are fixed for the life of the context.
 A query whose aggregation, sort or window state needs more than the budget is
 refused at step `execute`: `komira_sql_stream` returns `KOMIRA_ERR_ENGINE`
-with a last error of the form `execute: [Processor] pipeline_exec: the
+with a last error of the form `execute: [Processor] MEMORY_BUDGET_EXCEEDED: pipeline_exec: the
 aggregation sink of segment <n> was denied <bytes> bytes of the segment's memory pool (budget
 <budget>, granted <bytes>)`, and the context answers the next query.
 
@@ -349,14 +349,17 @@ returns.
   past them is read (a text of exactly 64 MiB is run); a text that is not UTF-8,
   and every engine refusal, is -3. The last error of an engine refusal is
   `<step>: <reason>`, the step that refused (`parse`, `bind`, `optimize`,
-  `lower` or `execute`) and its own message; a result column the stream cannot
+  `lower` or `execute`) and its own message; for `parse` the message is
+  followed by ` at line <L>, column <C>` (both from 1; the column counts
+  characters), where the text stopped parsing, as in
+  `parse: SQL syntax error: expected keyword 'by' at line 1, column 42`; a result column the stream cannot
   carry is refused by name before `*out` is written. The context answers the
   next call after any refusal. The refusal's step and code are read with
 `komira_last_error_step` and `komira_last_error_code`.
 
 `sql_result` is the call on values: SQL text in, the answer's batches and
 schema out (an `sdk_exec` `ArrowResult`, every batch checked to cross the
-stream), or a raise with the `<step>: <reason>` text.
+stream), or a raise with the `<step>: <reason>` text (with its position for `parse`).
 
 ```mojo
 from so import Session, sql_result

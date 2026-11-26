@@ -18,3 +18,25 @@ INSERT INTO T VALUES
     (10, 'Ünïcodé', 'Unicode', TIMESTAMP '2015-04-01 06:07:08.090000', 12, 7, TIMESTAMP '2015-03-31 06:07:08.090000', '2.0'::DOUBLE),
     (11, 'abcde', 'abzzzzzzz', TIMESTAMP '2015-05-02 17:18:19.202122', -3, 11, TIMESTAMP '2015-05-01 17:18:19.202122', '-0.25'::DOUBLE),
     (12, 'abcdefgh', 'abcdeXXX', TIMESTAMP '2015-07-03 01:02:03.040506', 6, -2, TIMESTAMP '2015-07-02 01:02:03.040506', '0.75'::DOUBLE);
+-- Edge table E: a BIGINT i at 0, 1, -1, both extremes, the 32-bit extremes and NULL; a DOUBLE f
+-- with 0.0, -0.0, halves either side of zero, NaN, both infinities, a value near the top
+-- of the range and a subnormal negative; a DATE dt and a TIMESTAMP ts on a leap day,
+-- either side of a year boundary (a Sunday 2028-12-31 and a Monday 2029-01-01), in ISO
+-- week 53 of 2020, at the century years 1900, 2000 and 2100, and either side of the epoch;
+-- JSON text j (nested, a JSON null, an array, a key holding a dot, a TAB, an empty string);
+-- and tick counts us, ms, ns for make_timestamp. Row 11 is NULL in dt, ts and j; row 6 in i, us, ms, ns.
+CREATE TABLE E (k INTEGER, i BIGINT, f DOUBLE, dt DATE, ts TIMESTAMP, j VARCHAR, us BIGINT, ms BIGINT, ns BIGINT);
+INSERT INTO E VALUES
+    (0, 0, '0.0'::DOUBLE, DATE '2024-02-29', TIMESTAMP '2024-02-29 23:59:59.999999', '{"a":1,"b":"x","c":{"d":2}}', 0, 0, 0),
+    (1, 1, '-0.0'::DOUBLE, DATE '2028-12-31', TIMESTAMP '2028-12-31 23:59:59', '{"a":"y","b":null}', 1, 1, 1),
+    (2, -1, '0.5'::DOUBLE, DATE '2029-01-01', TIMESTAMP '2029-01-01 00:00:00', '{"a":[1,2],"b":true}', -1, -1, -1),
+    (3, 9223372036854775807, '-0.5'::DOUBLE, DATE '2021-01-03', TIMESTAMP '2021-01-03 12:00:00.5', '{"a.b":5,"a":{"b":6}}', 1700000000000000, 1700000000000, 1700000000123456789),
+    (4, -9223372036854775807, '2.5'::DOUBLE, DATE '2021-01-04', TIMESTAMP '2021-01-04 00:00:00.000001', '{}', 951782400000000, 951782400000, 951782400000000001),
+    (5, -9223372036854775808, '-2.5'::DOUBLE, DATE '2020-12-31', TIMESTAMP '2020-12-31 23:59:59.999999', '[1,2]', -86400000001, -86400001, -86400000000001),
+    (6, NULL, 'nan'::DOUBLE, DATE '2000-02-29', TIMESTAMP '2000-02-29 12:00:00', '{"a":null}', NULL, NULL, NULL),
+    (7, 4294967295, 'inf'::DOUBLE, DATE '1900-03-01', TIMESTAMP '1900-03-01 00:00:00', '{"b":"tab\there"}', 1, 1, 1),
+    (8, -2147483648, '-inf'::DOUBLE, DATE '2100-02-01', TIMESTAMP '2100-02-28 06:00:00', '{"a":1.50}', 2, 2, 2),
+    (9, 2147483647, '1.5'::DOUBLE, DATE '1970-01-01', TIMESTAMP '1970-01-01 00:00:00', '{"a":-0}', 3, 3, 3),
+    (10, 12345, '-1.5'::DOUBLE, DATE '1969-12-31', TIMESTAMP '1969-12-31 23:59:59.999999', '{"b":"Ünïcodé"}', 4, 4, 4),
+    (11, -255, '1e308'::DOUBLE, NULL, NULL, NULL, 5, 5, 5),
+    (12, 255, '-1e-308'::DOUBLE, DATE '2015-01-04', TIMESTAMP '2015-01-04 23:00:00', '{"a":"","b":""}', 6, 6, 6);

@@ -21,6 +21,7 @@ mojo_library(
         "tests/test_expr_walk_refs.mojo",
         "tests/test_fs_descriptor_url_prefix.mojo",
         "tests/test_sdk_expr.mojo",
+        "tests/test_temporal_delta.mojo",
         "tests/test_typed_schema_builders.mojo",
         "tests/test_typed_schema_descriptor.mojo",
         "tests/test_typed_schema_or_returns.mojo",

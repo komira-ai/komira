@@ -156,7 +156,7 @@ from .group_keys import (
 )
 from .group_spill import GroupSpill, SPILL_PARTITIONS, spill_partition
 from .group_table import GroupTable, MAX_GROUP_CAPACITY, hash_key
-from .segment_pool import SegmentPool, WorkerReservation
+from .segment_pool import MEMORY_BUDGET_EXCEEDED, SegmentPool, WorkerReservation
 
 
 struct _GroupSlot(Movable):
@@ -388,7 +388,8 @@ struct GroupAggSink(MorselSinkImpl):
         if self._spill_off != "":
             tail = "; a spill directory is set, and " + self._spill_off
         return Error(
-            "pipeline_exec: the grouped aggregation sink of segment "
+            String(MEMORY_BUDGET_EXCEEDED)
+            + ": pipeline_exec: the grouped aggregation sink of segment "
             + String(self._seg_id)
             + " was denied "
             + String(bytes)

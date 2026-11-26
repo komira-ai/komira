@@ -9,7 +9,8 @@
 #
 # Every line of the cases file that starts with `COPY (` is one statement,
 # ending with `;`. Before it runs, each `read_csv('<name>` becomes
-# `read_csv('<input-dir>/<name>` and its destination `TO '<file>` becomes
+# `read_csv('<input-dir>/<name>` (and `read_parquet('<name>` likewise) and its
+# destination `TO '<file>` becomes
 # `TO '<out-dir>/<file>`. The program creates `<out-dir>`, runs the lines in
 # order on one context, and writes `<out-dir>/counts.tsv`: a header
 # `case<TAB>count`, then each case's name (the destination's file name up to
@@ -54,6 +55,7 @@ def main() raises:
             raise Error("copy_runner: no destination with an extension in: " + line)
         var name = String(line[byte = to + 6 : dot])
         var sql = line.replace("read_csv('", "read_csv('" + inputs + "/")
+        sql = sql.replace("read_parquet('", "read_parquet('" + inputs + "/")
         sql = sql.replace(") TO '", ") TO '" + out + "/")
         var outcome = run_sql(ctx, sql)
         if outcome.refusal:

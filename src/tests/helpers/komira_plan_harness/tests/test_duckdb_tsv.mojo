@@ -12,8 +12,11 @@
 # or `1.0` in an integer column accepted; a decimal whose scale differs;
 # names not held to the schema; a date read off by a day (a leap year, a
 # century, a day before the epoch) or a date that is no day of the calendar
-# accepted; a type the reader cannot read compared as text instead of
-# refused.
+# accepted; a timestamp read off by a tick, in the wrong unit, or with a
+# fraction spelt as DuckDB does not write it accepted; a list item split at
+# the wrong place, a quoted item not unquoted, a NULL item read as the
+# string `NULL`, or the list of one empty string read as the empty list; a
+# type the reader cannot read compared as text instead of refused.
 
 from std.memory import bitcast
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
@@ -241,6 +244,148 @@ def test_dates_are_day_numbers_from_the_epoch() raises:
         _ = _canon("d:date32", "d\n26-09-01\n")
     with assert_raises(contains="'2026/09/01' is not a date YYYY-MM-DD"):
         _ = _canon("d:date32", "d\n2026/09/01\n")
+
+
+def test_timestamps_are_ticks_from_the_epoch_in_the_columns_unit() raises:
+    var c = _canon(
+        "t:timestamp_us?",
+        "t\n2015-09-04 12:30:45.123456\n2015-09-04 12:30:45\n2015-02-28 13:45:30.5\n"
+        + "1970-01-01 00:00:00\n1969-12-31 23:59:59.999999\n2000-02-29 00:00:00.000001\n"
+        + "\n0001-01-01 00:00:00\n2028-12-31 23:59:59.999999\n",
+    )
+    assert_equal(c.rows[0][0], "1441369845123456")
+    assert_equal(c.rows[1][0], "1441369845000000")
+    assert_equal(c.rows[2][0], "1425131130500000")
+    assert_equal(c.rows[3][0], "0")
+    assert_equal(c.rows[4][0], "-1")
+    assert_equal(c.rows[5][0], "951782400000001")
+    assert_equal(c.rows[6][0], "\\N")
+    assert_equal(c.rows[7][0], "-62135596800000000")
+    assert_equal(c.rows[8][0], "1861919999999999")
+    var units = _canon(
+        "s:timestamp_s\tms:timestamp_ms\tns:timestamp_ns",
+        "s\tms\tns\n2015-01-01 00:00:02\t2015-01-01 00:00:01.5\t2023-11-14 22:13:20.123456789\n"
+        + "1969-12-31 23:59:59\t1969-12-31 23:59:59.999\t1677-09-21 00:12:43.145224192\n",
+    )
+    assert_equal(units.rows[0][0], "1420070402")
+    assert_equal(units.rows[0][1], "1420070401500")
+    assert_equal(units.rows[0][2], "1700000000123456789")
+    assert_equal(units.rows[1][0], "-1")
+    assert_equal(units.rows[1][1], "-1")
+    assert_equal(units.rows[1][2], "-9223372036854775808")
+
+
+def test_timestamp_spellings_duckdb_does_not_write_are_refused() raises:
+    with assert_raises(contains="row 1 column t: '2015-09-04 12:30:45.10' has a trailing zero"):
+        _ = _canon("t:timestamp_us", "t\n2015-09-04 12:30:45.10\n")
+    with assert_raises(contains="'2015-09-04 12:30:45.' is not a timestamp"):
+        _ = _canon("t:timestamp_us", "t\n2015-09-04 12:30:45.\n")
+    with assert_raises(contains="'2015-09-04 12:30:45.1234567' has 7 fraction digits, the unit 6"):
+        _ = _canon("t:timestamp_us", "t\n2015-09-04 12:30:45.1234567\n")
+    with assert_raises(contains="'2015-01-01 00:00:01.5' has 1 fraction digits, the unit 0"):
+        _ = _canon("t:timestamp_s", "t\n2015-01-01 00:00:01.5\n")
+    with assert_raises(contains="'2015-09-04T12:30:45' is not a timestamp"):
+        _ = _canon("t:timestamp_us", "t\n2015-09-04T12:30:45\n")
+    with assert_raises(contains="'2015-09-04' is not a timestamp"):
+        _ = _canon("t:timestamp_us", "t\n2015-09-04\n")
+    with assert_raises(contains="'2015-09-04 24:00:00' is not a time of day"):
+        _ = _canon("t:timestamp_us", "t\n2015-09-04 24:00:00\n")
+    with assert_raises(contains="'2015-09-04 12:60:00' is not a time of day"):
+        _ = _canon("t:timestamp_us", "t\n2015-09-04 12:60:00\n")
+    with assert_raises(contains="'2015-09-04 12:30:60' is not a time of day"):
+        _ = _canon("t:timestamp_us", "t\n2015-09-04 12:30:60\n")
+    with assert_raises(contains="'2015-09-04 1:30:00' is not a timestamp"):
+        _ = _canon("t:timestamp_us", "t\n2015-09-04 1:30:00\n")
+    with assert_raises(contains="'2015-02-29' is not a day of the calendar"):
+        _ = _canon("t:timestamp_us", "t\n2015-02-29 00:00:00\n")
+    with assert_raises(contains="'0001-12-31 (BC) 00:00:00' is not read: a timestamp before year 1"):
+        _ = _canon("t:timestamp_us", "t\n0001-12-31 (BC) 00:00:00\n")
+    with assert_raises(contains="'-infinity' is not read: an infinite timestamp"):
+        _ = _canon("t:timestamp_us", "t\n-infinity\n")
+    with assert_raises(contains="'1677-09-21 00:12:43.145224191' is outside the unit's 64-bit range"):
+        _ = _canon("t:timestamp_ns", "t\n1677-09-21 00:12:43.145224191\n")
+    with assert_raises(contains="'2262-04-11 23:47:16.854775808' is outside the unit's 64-bit range"):
+        _ = _canon("t:timestamp_ns", "t\n2262-04-11 23:47:16.854775808\n")
+    with assert_raises(contains="this reader does not read type timestamp_us(UTC)"):
+        _ = _canon("t:timestamp_us(UTC)", "t\n2015-09-04 12:30:45+00\n")
+
+
+def test_a_timestamp_one_tick_off_is_a_different_value() raises:
+    var hand = _like("total", "t:timestamp_us?", "1441369845123456\n\\N\n")
+    var same = duckdb_tsv_canon(parse_duckdb_tsv("t\n2015-09-04 12:30:45.123456\n\n"), hand)
+    assert_equal(compare_canon(hand, same).count(), 0)
+    var off = duckdb_tsv_canon(parse_duckdb_tsv("t\n2015-09-04 12:30:45.123457\n\n"), hand)
+    assert_equal(compare_canon(hand, off).count_of("cell"), 1)
+    var day = duckdb_tsv_canon(parse_duckdb_tsv("t\n2015-09-05 12:30:45.123456\n\n"), hand)
+    assert_equal(compare_canon(hand, day).count_of("cell"), 1)
+
+
+def test_string_lists_are_read_item_by_item() raises:
+    # Each cell as the pinned DuckDB writes it (COPY ... FORMAT csv): a cell
+    # holding a `"` comes CSV-quoted with the quote doubled.
+    var c = _canon(
+        "l:list<string>?",
+        "l\n[a, b]\n[]\n['']\n['', '']\n['  Hello ']\n[Ünïcodé]\n\n[a, NULL, b]\n[NULL]\n"
+        + "['a, b']\n['NULL', 'null', NULL]\n['it\\'s', b\\c, \\, 'a\\'b\\\\c']\n"
+        + "['a]b', '[', '{a}', 'x:y', '(', 'a=b', a b, x;y]\n\"['q\"\"q', '\"\"']\"\n",
+    )
+    assert_equal(c.rows[0][0], "[a,b]")
+    assert_equal(c.rows[1][0], "[]")
+    assert_equal(c.rows[2][0], "[\\e]")
+    assert_equal(c.rows[3][0], "[\\e,\\e]")
+    assert_equal(c.rows[4][0], "[  Hello ]")
+    assert_equal(c.rows[5][0], "[Ünïcodé]")
+    assert_equal(c.rows[6][0], "\\N")
+    assert_equal(c.rows[7][0], "[a,\\N,b]")
+    assert_equal(c.rows[8][0], "[\\N]")
+    assert_equal(c.rows[9][0], "[a\\, b]")
+    assert_equal(c.rows[10][0], "[NULL,null,\\N]")
+    assert_equal(c.rows[11][0], "[it's,b\\\\c,\\\\,a'b\\\\c]")
+    assert_equal(c.rows[12][0], "[a\\]b,\\[,\\{a\\},x\\:y,\\(,a=b,a b,x;y]")
+    assert_equal(c.rows[13][0], "[q\"q,\"]")
+    var large = _canon("l:large_list<large_string>", "l\n[x, '']\n")
+    assert_equal(large.rows[0][0], "[x,\\e]")
+
+
+def test_list_spellings_duckdb_does_not_write_are_refused() raises:
+    with assert_raises(contains="row 1 column l: 'a, b' is not a list"):
+        _ = _canon("l:list<string>", "l\na, b\n")
+    with assert_raises(contains="'[a,b]' does not separate its items with ', '"):
+        _ = _canon("l:list<string>", "l\n[a,b]\n")
+    with assert_raises(contains="'[a, ]' does not separate its items"):
+        _ = _canon("l:list<string>", "l\n[a, ]\n")
+    with assert_raises(contains="'['a]' has an unterminated quoted item"):
+        _ = _canon("l:list<string>", "l\n['a]\n")
+    with assert_raises(contains="'['a,'b]' does not separate its items"):
+        _ = _canon("l:list<string>", "l\n['a,'b]\n")
+    with assert_raises(contains="'['abc']' quotes an item DuckDB writes bare"):
+        _ = _canon("l:list<string>", "l\n['abc']\n")
+    with assert_raises(contains="'[ x]' has a bare item DuckDB would quote"):
+        _ = _canon("l:list<string>", "l\n[ x]\n")
+    with assert_raises(contains="'[null]' has a bare item DuckDB would quote"):
+        _ = _canon("l:list<string>", "l\n[null]\n")
+    with assert_raises(contains="'[a=b]' has a bare item DuckDB would quote"):
+        _ = _canon("l:list<string>", "l\n[a=b]\n")
+    with assert_raises(contains="'['a\\nb']' has an escape DuckDB does not write"):
+        _ = _canon("l:list<string>", "l\n['a\\nb']\n")
+    with assert_raises(contains="this reader does not read type list<int64>"):
+        _ = _canon("l:list<int64>", "l\n[1, 2]\n")
+
+
+def test_a_list_differing_in_one_item_is_a_different_value() raises:
+    var hand = _like("total", "k:int64\tl:list<string>?", "1\t[a,b]\n2\t[\\e]\n3\t[]\n4\t\\N\n")
+    var same = duckdb_tsv_canon(parse_duckdb_tsv("k\tl\n1\t[a, b]\n2\t['']\n3\t[]\n4\t\n"), hand)
+    assert_equal(compare_canon(hand, same).count(), 0)
+    # one item changed, one added, two items joined into one, the one empty
+    # string read as no item, the empty list read as NULL: a cell each.
+    var off = duckdb_tsv_canon(
+        parse_duckdb_tsv("k\tl\n1\t[a, c]\n2\t[]\n3\t\n4\t\n"), hand
+    )
+    assert_equal(compare_canon(hand, off).count_of("cell"), 3)
+    var more = duckdb_tsv_canon(parse_duckdb_tsv("k\tl\n1\t[a, b, c]\n2\t['']\n3\t[]\n4\t\n"), hand)
+    assert_equal(compare_canon(hand, more).count_of("cell"), 1)
+    var joined = duckdb_tsv_canon(parse_duckdb_tsv("k\tl\n1\t['a, b']\n2\t['']\n3\t[]\n4\t\n"), hand)
+    assert_equal(compare_canon(hand, joined).count_of("cell"), 1)
 
 
 def test_unread_types_are_refused() raises:
