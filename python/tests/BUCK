@@ -345,7 +345,7 @@ _ISA_FIXTURES = [
     url = w["url"],
     sha256 = w["sha256"],
     size_bytes = w["size"],
-    visibility = ["komira//python:"],
+    visibility = ["komira//python:", "komira//python/docs/tasks:"],
 ) for w in PYARROW_WHEELS.values()]
 
 # The pinned DuckDB wheel, installed beside komira's wheel by the analysis job
@@ -366,7 +366,7 @@ pinned_file(
     sha256 = PYARROW_MACOS["sha256"],
     size_bytes = PYARROW_MACOS["size"],
     target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
-    visibility = ["komira//python:"],
+    visibility = ["komira//python:", "komira//python/docs/tasks:"],
 )
 
 [python_wheel(
@@ -604,7 +604,7 @@ _PROTOBUF_UPPER = [w for w in WHEELS if w["name"] == "protobuf"]
     url = w["url"],
     sha256 = w["sha256"],
     size_bytes = w["size"],
-    visibility = ["komira//python:"] if w in _PROTOBUF_UPPER else [],
+    visibility = ["komira//python:", "komira//python/docs/tasks:"] if w in _PROTOBUF_UPPER else [],
 ) for w in PROTOBUF_EDGES + _PROTOBUF_UPPER]
 
 # Read only by the macOS wheel's install test, which runs from
@@ -615,7 +615,7 @@ pinned_file(
     sha256 = PROTOBUF_MACOS["sha256"],
     size_bytes = PROTOBUF_MACOS["size"],
     target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
-    visibility = ["komira//python:"],
+    visibility = ["komira//python:", "komira//python/docs/tasks:"],
 )
 
 [python_wheel(
@@ -967,6 +967,34 @@ python_binding_test(
     ],
 )
 
+# One pandas session over TPC-H scale factor 1 lineitem and orders
+# (test_pandas_session_tpch.py): a date cut, a two-key group by, the decimal sums,
+# means, least and greatest of TPC-H q1, a computed decimal column, a sorted first
+# ten rows, and a semi and an anti join; each answer of the pandas skin, of the
+# polars skin where it has the spelling, and of Session.sql over the same files
+# equals DuckDB's answer to the SQL that means the same. A pandas decimal sum
+# that fills a sum of nothing with 0 is refused by the engine, whose CASE has no
+# decimal output yet, and arithmetic with a Decimal literal is refused on the plan
+# route in both skins; each test fails when the engine answers its program. The staged
+# duckdb/test_frame_duckdb.py gives the comparator; the data is the staged
+# `tpch_sf1[data]` at <lib-dir>/tpch/tpch/sf1/<table>.parquet.
+# Derived from TPC-H; not comparable to published TPC-H results.
+python_binding_test(
+    name = "pandas_session_tpch_test",
+    src = "test_pandas_session_tpch.py",
+    srcs = ["duckdb/test_frame_duckdb.py"],
+    data = {
+        "libkomira": LIBKOMIRA,
+        "tpch": "komira//src/tpch_answers:tpch_sf1[data]",
+    },
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+)
+
 # The notebook display (komira/_display.py), with no library: a frame shows its
 # names over their types, equal to fixtures/display/frame.html, and calls
 # nothing on its session; a result shows its rows, equal to
@@ -1018,27 +1046,75 @@ python_binding_test(
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# komira.pl's count types (test_pl_count_types.py), with no library: each
+# count polars answers as UInt32 is an Int64 in the schema komira.pl derives,
+# and the page of python/docs/pl/ that covers it names it in a paragraph that
+# says UInt32; on synthetic pages the finding is exactly the name missing. It
+# reads the three pages python/BUCK exports, on each minor, with the plan
+# modules, protobuf 7.36.2 and pyarrow (the pl/ family's inputs).
+[py_test(
+    name = "pl_count_types_test" + p["suffix"],
+    src = "test_pl_count_types.py",
+    args = [
+        "$(location //python:docs/pl/expressions.md)",
+        "$(location //python:docs/pl/group_by_join_unique.md)",
+        "$(location //python:docs/pl/windows.md)",
+    ],
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # The clean-environment install tests of the wheel (python/BUCK,
 # wheel_install_test): the driver that installs the wheels into an empty
 # prefix and runs a test there, the three tests the installed interpreter runs
 # (the wheel alone, the wheel beside Modular's runtime, and the wheel after an
-# upgrade from the previous release), and the serialized plan the first renders
+# upgrade from the previous release), the test of a UDF from the installed
+# wheel with the host of the UDF runtime's C ABI it runs the runtime through
+# (test_udf_installed.py, udf_host.py), and the serialized plan the first renders
 # (the scan plan of src/so/tests/gate/gate_plan_render.mojo, as hex) and the
 # Parquet file whose aggregate it answers (fixtures/readings.parquet).
 [export_file(
     name = f,
     visibility = ["komira//python:"],
 ) for f in [
-    "wheel_install_run.py",
     "test_installed.py",
     "test_analysis_job.py",
     "test_tpch_installed.py",
+    "test_udf_installed.py",
     "tpch_compare.py",
+    "udf_host.py",
     "test_beside_modular.py",
     "test_upgrade.py",
     "fixtures/scan_plan.hex",
     "fixtures/readings.parquet",
     "fixtures/previous_release_only.txt",
+]]
+
+# The install driver, which every wheel_install_test runs, here and in
+# python/docs/tasks.
+export_file(
+    name = "wheel_install_run.py",
+    visibility = ["komira//python:", "komira//python/docs/tasks:"],
+)
+
+# The driver of the common-task examples (run_task_example.py), and the
+# fixtures its refusing cases run (python/docs/tasks/BUCK): the wrong expected
+# output they hold rank 1's example to, an example that raises, and probes that
+# run to the end or raise another line than their recorded one.
+[export_file(
+    name = f,
+    visibility = ["komira//python/docs/tasks:"],
+) for f in [
+    "run_task_example.py",
+    "fixtures/task_wrong_expected_output.txt",
+    "fixtures/task_example_raises.py",
+    "fixtures/task_probe_raises.py",
+    "fixtures/task_probe_runs.py",
+    "fixtures/task_probe_other_error.txt",
 ]]
 
 # The komira/python UDF runtime (src/udf_python) behind a ctypes host of its C

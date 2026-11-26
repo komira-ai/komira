@@ -206,12 +206,16 @@ zig_test(
 # builds hold up nothing, no workflow that runs on a pull request names a macOS platform outside
 # pr.yml's macOS part (which holds its contract: the macOS keys in a file only its build step names,
 # that step bounded and through the buck2-farm action), the check set holds no macOS build or macOS
-# wheel target, and the set's definition is one list. A build action.
+# wheel target, and the set's definition is one list; release-macos-result's script, run for each
+# result of the build job, passes only a build that succeeded. A build action.
 zig_test(
     name = "release_macos_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/workflows/release_macos_test.zig",
-    imports = [".github/workflows/release_macos_harness_test.zig"],
+    imports = [
+        ".github/workflows/release_macos_harness_test.zig",
+        ".github/workflows/release_macos_result_test.zig",
+    ],
     data = dict(
         {
             "packages.bzl": "//release/readme_e2e:packages.bzl",
@@ -447,7 +451,7 @@ _TESTS_LINTS = [
 [surface_capability_matrix(
     name = "surface_capability_matrix",
     capabilities = CAPABILITIES,
-    floor = 0,
+    floor = 31,
     grounding = {
         "src/arrow/write_target.mojo": ["WFMT_"],
         "src/plan_expr/expr.mojo": ["EXPR_"],

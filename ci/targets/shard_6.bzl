@@ -112,6 +112,8 @@ TARGETS = [
     "tests//functional/mem_cap:lib_under_cap",
     "tests//functional/surface_capability_matrix/src/tests/e2e/pandas_e2e:alias_outside",
     "tests//functional/surface_capability_matrix/src/tests/e2e/pandas_e2e:lib_no_tests",
+    "tests//functional/surface_capability_matrix/src/tests/e2e/pandas_e2e:pandas_e2e",
+    "tests//functional/surface_capability_matrix/src/tests/e2e/pandas_e2e:test_filter",
     "tests//functional/third_party_act:doc_tree",
     "tests//functional/third_party_act:driver",
 ]
@@ -123,5 +125,6 @@ TESTS = [
     "komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_refuses_bssl_server",
     "komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_vs_bssl_server",
     "komira//tools/build/mojo/mojo_test_testdata:mojo_test_data",
+    "tests//functional/surface_capability_matrix/src/tests/e2e/pandas_e2e:test_filter",
 ]
 

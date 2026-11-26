@@ -26,7 +26,8 @@ equal (`frame_duckdb_test`, CPython 3.13, the real libkomira).
   a filter, projection, assign or sort after it, `head(0)`, a head larger than
   the file, a head of an unsorted frame that keeps every row;
 - groupby, over what the engine's aggregation sinks run: sum, mean, min and
-  max of ints (a bool summed as a count), count and size of every type,
+  max of ints and floats (a bool summed as a count, and its mean the share of
+  its trues), count and size of every type,
   nunique of a float, a string and an int; one-row groups, one of them
   all-missing, whose sum is 0 (and missing under min_count=1); named, dict and
   list agg; sort=False (a multiset), dropna=False (the missing group last),
@@ -36,8 +37,7 @@ equal (`frame_duckdb_test`, CPython 3.13, the real libkomira).
 - the frame's own reductions and agg, one row each (float sums, means, mins
   and maxes too, and a mean of a bool, the share of its trues), also over no
   rows (a sum of 0, a count of 0, a missing mean and max);
-- the reductions the engine does not run yet (median, std, var, a grouped
-  float sum or mean, a grouped mean of a bool, min and
+- the reductions the engine does not run yet (median, std, var, min and
   max of a string or a bool, nunique of a bool)
   build their plan and are refused at materialize() with the engine's step;
 - drop_duplicates of whole rows over one and several columns, with NULLs,
@@ -677,8 +677,9 @@ EMPTIES = [
 # ORDER BY <keys> ASC NULLS LAST (sort=True); a sum is COALESCE(SUM(x), 0).
 #
 # The plan door's aggregation sinks run SUM, AVG, MIN, MAX, COUNT, COUNT(*)
-# and COUNT(DISTINCT): SUM and AVG over integers (a bool's sum over the CASE
-# that makes True 1), and over floats only with no key; MIN and MAX over numbers; COUNT(DISTINCT) over
+# and COUNT(DISTINCT): SUM and AVG over integers and floats (a bool's sum over
+# the CASE that makes True 1, its mean over its cast to float64); MIN and MAX
+# over numbers; COUNT(DISTINCT) over
 # numbers and strings. These cases are those; ENGINE_REFUSED below holds the
 # rest.
 
@@ -716,6 +717,30 @@ GROUPS = [
         "groupby sum of a bool counts True",
         lambda d: d.groupby("k")["flag"].sum(),
         "SELECT k, CAST(COALESCE(SUM(CAST(flag AS BIGINT)), 0) AS BIGINT) AS flag " + GROUPED_BY_K,
+        ("k",),
+    ),
+    Case(
+        "groupby sum of a float, an all-missing group summing to 0",
+        lambda d: d.groupby("k")["v"].sum(),
+        "SELECT k, COALESCE(SUM(v), 0) AS v " + GROUPED_BY_K,
+        ("k",),
+    ),
+    Case(
+        "groupby sum of a float with min_count=1 keeps the missing sum",
+        lambda d: d.groupby("k")["v"].sum(min_count=1),
+        "SELECT k, SUM(v) AS v " + GROUPED_BY_K,
+        ("k",),
+    ),
+    Case(
+        "groupby mean, min and max of a float, by a string key",
+        lambda d: d.groupby("s").agg(m=("v", "mean"), lo=("v", "min"), hi=("v", "max")),
+        "SELECT s, AVG(v) AS m, MIN(v) AS lo, MAX(v) AS hi " + GROUPED_BY_S,
+        ("s",),
+    ),
+    Case(
+        "groupby mean of a bool is the share of its trues, NULL left out",
+        lambda d: d.groupby("k")["flag"].mean(),
+        "SELECT k, AVG(CAST(flag AS INTEGER)) AS flag " + GROUPED_BY_K,
         ("k",),
     ),
     Case(
@@ -921,9 +946,6 @@ REDUCTIONS = [
 # (docs/design/dataframe_surface.md, section 6). When the engine runs one,
 # its check here fails and the program moves to the cases above.
 ENGINE_REFUSED = [
-    ("a grouped sum of a float", lambda d: d.groupby("k")["v"].sum()),
-    ("a grouped mean of a float", lambda d: d.groupby("k")["v"].mean()),
-    ("a grouped mean of a bool", lambda d: d.groupby("k")["flag"].mean()),
     ("a grouped median", lambda d: d.groupby("k")["n"].median()),
     ("a grouped std", lambda d: d.groupby("k")["n"].std()),
     ("a grouped var", lambda d: d.groupby("k")["n"].var()),
