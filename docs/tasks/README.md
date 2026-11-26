@@ -58,7 +58,9 @@ Two kinds of target in `python/docs/tasks/BUCK`, both in the pull request's chec
   holds what it prints to `expected_output.txt` byte for byte. A difference fails the target with
   the task and the first line that differs, and both texts in the log.
   `//python/docs/tasks:refuses_wrong_expected_output` runs rank 1's example against an expected
-  output that differs in one line, and passes only when the run fails with that line.
+  output that differs in one line, and passes only when the run fails with that line;
+  `//python/docs/tasks:refuses_example_that_raises` runs an example that raises, and passes only
+  when the run fails naming the task and the error.
 
 **Platforms.** The pull request's check runs every example on linux-x86_64. macOS arm64 is not in
 the pull request's check: a pull request builds no macOS wheel and runs no macOS test (rule B9; the
