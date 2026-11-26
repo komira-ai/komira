@@ -16,11 +16,13 @@ import { ROOT, addonOpened } from "./helpers.ts";
 const PUBLIC_NAMES = [
   "KomiraError",
   "LibraryLoadError",
+  "Result",
   "Session",
   "UnsupportedCpuError",
   "UnsupportedOperation",
   "abiVersion",
   "registerParquet",
+  "sql",
   "version",
 ];
 

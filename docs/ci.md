@@ -1472,8 +1472,8 @@ Apple silicon and macOS 11 or newer takes, of each version, only a file whose ta
 - a version that has only the Linux file does not exist for pip on a Mac: `pip install komira` installs the
   newest version that has a macOS file, `pip install --upgrade komira` stays there, and
   `pip install komira==<that version>` fails with `No matching distribution found`;
-- while no version has a macOS file (today, until the first macOS wheel passes), `pip install komira` on a Mac
-  fails with `No matching distribution found for komira`; on an Intel Mac it always does;
+- while no version had a macOS file (before 0.1.1623, the first with one), `pip install komira` on a Mac
+  failed with `No matching distribution found for komira`; on an Intel Mac it always does;
 - a lock file written on Linux (a pin, `uv lock`, Poetry) can name a version with no macOS file, and installing
   from it on a Mac then fails.
 
