@@ -467,11 +467,11 @@ def _check_size(fs: _Fs) raises -> Int:
 def test_a_refused_add_serves_nothing() raises:
     var o = _Opener(_connectors())
     with assert_raises(
-        contains="s3_endpoint: an S3 endpoint must start with http:// or https://, got 'ftp://x'"
+        contains="s3_endpoint: an S3 endpoint must start with http:// or https://, got 'ftp://store.example.com'"
     ):
         o.add_s3(
             "lake",
-            S3Config.custom_endpoint("us-east-1", "ftp://x"),
+            S3Config.custom_endpoint("us-east-1", "ftp://store.example.com"),
             _aws(_KEY_ID),
         )
     assert_false(o.serves(FS_SCHEME_S3, "lake"))

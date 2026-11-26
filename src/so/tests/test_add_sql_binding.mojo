@@ -534,12 +534,12 @@ def test_each_refusal_is_named_word_for_word() raises:
         " no region",
     )
     assert_equal(
-        _refused(s, "t", _source("s3://lake/t/a.parquet", "s3-etl", "ftp://h", "us-east-1")),
+        _refused(s, "t", _source("s3://lake/t/a.parquet", "s3-etl", "ftp://store.example.com", "us-east-1")),
         "STORAGE_URL_REFUSED: add_sql_binding name=t: an endpoint must start"
         " with http:// or https://",
     )
     assert_equal(
-        _refused(s, "t", _source("s3://lake/t/a.parquet", "s3-etl", "http://h/?a=b", "us-east-1")),
+        _refused(s, "t", _source("s3://lake/t/a.parquet", "s3-etl", "http://store.example.com/?a=b", "us-east-1")),
         "STORAGE_URL_REFUSED: add_sql_binding name=t: an endpoint must not carry"
         " a query or a fragment",
     )
@@ -564,7 +564,7 @@ def test_no_refusal_carries_a_secret() raises:
         _refused(s, "t", _source("s3://AKIDRIGHT:topsecret@lake/a.parquet", "s3-etl"))
     )
     refusals.append(
-        _refused(s, "t", _source("s3://lake/a.parquet", "s3-etl", "http://u:topsecret@h", "us-east-1"))
+        _refused(s, "t", _source("s3://lake/a.parquet", "s3-etl", "http://u:topsecret@store.example.com", "us-east-1"))
     )
     refusals.append(_refused(s, "t", _s3("s3://lake/t/a.parquet", "az-key")))
     refusals.append(_refused(s, "t", _az("az://box/t/a.parquet", "s3-etl")))
@@ -590,7 +590,7 @@ def test_no_refusal_carries_a_secret() raises:
     assert_true(hadoop.startswith("azure_url: "), hadoop)
     refusals.append(hadoop^)
     var user = _refused(
-        s, "t", _az("abfss://u:topsecret@devstoreaccount1.dfs.core.windows.net/a.parquet")
+        s, "t", _az("abfss://u:topsecret@box.example.com/a.parquet")
     )
     assert_true(user.startswith("STORAGE_URL_REFUSED: "), user)
     refusals.append(user^)
