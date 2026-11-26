@@ -1,7 +1,10 @@
-"""komira._ops cannot turn a node into SQL text.
+"""komira._ops cannot turn a node into SQL text, and neither can komira.pl,
+the polars-shaped skin built on it.
 
 Four checks, each with a case that shows it fails when the thing it looks for
-is present:
+is present (the last two also read komira.pl: its modules, classes and an
+expression have no name with "sql" in it, and no string constant of its
+sources, other than a docstring, holds an upper-case SQL keyword):
 
 - the text of every node, support type and plan node is the dataclass repr;
 - no name on any class or module of komira._ops contains "sql";
@@ -402,6 +405,43 @@ def test_the_source_scan_reads_every_file_of_the_ops_package():
     ], names
     for name, source in ops_sources():
         assert source.strip(), name
+
+
+def pl_sources():
+    """(file name, source text) of every module of komira.pl."""
+    import komira.pl
+
+    directory = os.path.dirname(komira.pl.__file__)
+    out = []
+    for name in sorted(os.listdir(directory)):
+        if name.endswith(".py"):
+            with open(os.path.join(directory, name), encoding="utf-8") as f:
+                out.append((name, f.read()))
+    return out
+
+
+def test_the_source_scan_reads_every_file_of_komira_pl():
+    names = [name for name, _ in pl_sources()]
+    assert names == ["__init__.py", "_expr.py", "_frame.py", "_names.py", "_schema.py", "_scope.py", "_types.py"], names
+    for name, source in pl_sources():
+        assert source.strip(), name
+
+
+def test_no_source_of_komira_pl_holds_a_sql_keyword_in_a_string_constant():
+    for name, source in pl_sources():
+        assert sql_strings(source) == [], (name, sql_strings(source))
+
+
+def test_no_name_of_komira_pl_has_sql_in_it():
+    import komira.pl as kpl
+    from komira.pl import _expr, _frame, _names, _schema, _scope, _types
+
+    for mod in (kpl, _expr, _frame, _names, _schema, _scope, _types):
+        assert [n for n in vars(mod) if "sql" in n.lower()] == [], mod.__name__
+    for cls in (kpl.LazyFrame, kpl.Expr, kpl.ExprStringNameSpace, _expr.When_, _expr.Then, _scope.Scope):
+        assert sql_names(cls) == [], (cls, sql_names(cls))
+    assert sql_names(kpl.col("a") + 1) == []
+    assert sql_names(kpl.col("a").str) == []
 
 
 def test_no_source_of_ops_holds_a_sql_keyword_in_a_string_constant():

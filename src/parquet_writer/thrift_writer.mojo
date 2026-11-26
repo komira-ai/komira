@@ -7,6 +7,10 @@
 # chunks, statistics, page headers, page indexes, the bloom filter header),
 # plus serialize_file_metadata(), the footer.
 #
+# A SchemaElement with `logical_timestamp_unit` set carries field 10, the
+# LogicalType union with its TIMESTAMP member; no other LogicalType member is
+# written (every other annotation this package emits is a ConvertedType).
+#
 # Where the HyperLogLog registers go: `Statistics.hll_registers` is not part
 # of the Parquet format, so it is not written as a Statistics field. It
 # travels in the column chunk's `ColumnMetaData.key_value_metadata` (field 8)
@@ -294,7 +298,31 @@ struct ThriftCompactWriter(Movable):
         self.write_optional_i32_field(7, elem.scale)
         self.write_optional_i32_field(8, elem.precision)
         self.write_optional_i32_field(9, elem.field_id)
+        if elem.logical_timestamp_unit:
+            self._write_timestamp_logical_type(
+                elem.logical_timestamp_unit.value(),
+                elem.logical_timestamp_is_utc.or_else(False),
+            )
         self.pop_list_element_struct()
+
+    def _write_timestamp_logical_type(mut self, unit: Int, is_utc: Bool):
+        """Write SchemaElement field 10, the LogicalType union, holding its
+        TIMESTAMP member (union field 8):
+
+            struct TimestampType { 1: bool isAdjustedToUTC; 2: TimeUnit unit }
+            union TimeUnit { 1: MilliSeconds 2: MicroSeconds 3: NanoSeconds }
+
+        `unit` is the TimeUnit member (1, 2 or 3), each an empty struct.
+        """
+        self.write_struct_begin(10)
+        self.write_struct_begin(8)
+        self.write_bool_field(1, is_utc)
+        self.write_struct_begin(2)
+        self.write_struct_begin(unit)
+        self.write_struct_end()
+        self.write_struct_end()
+        self.write_struct_end()
+        self.write_struct_end()
 
     def write_statistics(mut self, stats: Statistics):
         """Serialize Statistics as field 12 of ColumnMetaData.

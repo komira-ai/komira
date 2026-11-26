@@ -19,6 +19,9 @@ rows are compared with the rows worked out by hand:
 - `materialize()` twice gives two Results, each read once; a Result read
   twice raises KomiraError; `explain()` names the file and runs nothing (it
   answers for a file removed after the read);
+- the notebook display: a frame's is its names over their types (also for a
+  file removed after the read), and a sorted frame's Result shows its six
+  rows with NULLs and stays unread, so `to_arrow` reads them all after;
 - read_csv (`sep`, `header`) and read_json(lines=True), and a CSV read with
   no header, which the engine refuses at the terminal with its step and code;
 - failures: a missing file and an empty directory raise at the reader with
@@ -700,6 +703,38 @@ def test_result_reads_once(lib_dir):
         assert by_id(rows_of(df)) == ROWS
 
 
+def test_notebook_display(lib_dir):
+    """A frame's display is its names and types and reads nothing; a Result's
+    shows its rows and stays unread, so `to_arrow` then reads every row."""
+    with workspace() as (s, p):
+        gone = os.path.join(p.work, "gone.parquet")
+        pq.write_table(pq.read_table(p.parquet), gone)
+        df = komira.read_parquet(gone, session=s)[["id", "n", "flag"]].sort_values("id")
+        os.remove(gone)
+        assert df._repr_html_() == (
+            '<div class="komira"><table class="dataframe"><thead><tr><th>id</th><th>n</th><th>flag</th></tr>'
+            "<tr><th>int64</th><th>int64</th><th>bool</th></tr></thead><tbody></tbody></table>"
+            "<p>komira.DataFrame of 3 columns: a plan that has not run; "
+            ".materialize() runs it and returns its rows</p></div>"
+        )
+
+        df = komira.read_parquet(p.parquet, session=s)[["id", "n", "flag"]].sort_values("id")
+        r = df.materialize()
+        cells = "".join(
+            "<tr><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+                i, "<i>null</i>" if n is None else n, "<i>null</i>" if f is None else str(f).lower()
+            )
+            for i, n, f in zip(IDS, N, FLAG)
+        )
+        assert r._repr_html_() == (
+            '<div class="komira"><table class="dataframe"><thead><tr><th>id</th><th>n</th><th>flag</th></tr>'
+            f"<tr><th>int64</th><th>int64</th><th>bool</th></tr></thead><tbody>{cells}</tbody></table>"
+            "<p>6 rows, 3 columns</p></div>"
+        ), r._repr_html_()
+        assert r.to_arrow().to_pylist() == [{"id": i, "n": n, "flag": f} for i, n, f in zip(IDS, N, FLAG)]
+        assert r._repr_html_() is None
+
+
 def test_explain(lib_dir):
     """`explain()` is text that names the file, runs nothing, and differs with the plan."""
     with workspace() as (s, p):
@@ -910,6 +945,7 @@ TESTS = [
     test_head_zero,
     test_materialize_twice,
     test_result_reads_once,
+    test_notebook_display,
     test_explain,
     test_read_csv,
     test_read_csv_without_header_refused_by_engine,

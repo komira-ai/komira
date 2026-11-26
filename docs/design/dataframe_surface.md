@@ -9,7 +9,9 @@ part of the pandas-shaped skin is built too: its readers, subscripts, `assign`, 
 the plan through `komira_plan_stream`. So are `groupby` with its `GroupBy` reductions and `agg`, the
 frame's own reductions (`agg`, `sum`, `mean`, `median`, `std`, `var`, `min`, `max`, `count`,
 `nunique`) and `drop_duplicates`, in `python/komira/_groupby.py`; NaN as missing (ruling 6) and the
-`Series` reductions are not built yet. `komira.pl` and the other verbs are not built. The verbs, the plan each one builds and
+`Series` reductions are not built yet. The core of the polars-shaped skin, `komira.pl`, is built (the readers of Parquet, NDJSON and CSV, the
+row-wise verbs, sort and its order rules, aggregates without keys, and `concat`), and its `collect()` runs
+the plan the same way. The other verbs are not built. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
 
@@ -115,6 +117,12 @@ runs only at a **terminal**:
 - **No dunder runs a query.** `len(df)`, `bool(df)`, `iter(df)`, `df.__array__()` and
   `df.__arrow_c_stream__()` raise `UnsupportedOperation`, and the message names the terminal.
   `repr(df)` prints the column names and types, and runs nothing.
+- **A notebook shows a frame as its plan's schema, and a `Result` as its first rows.**
+  `df._repr_html_()` is a table of the column names over their types and a line saying the frame
+  has not run; it runs nothing and shows no SQL. `Result._repr_html_()` shows at most the first ten
+  rows, and says when there are more. It reads them from the stream, at most one batch past them,
+  and keeps them, so the `Result` stays unread: a terminal called after the display still reads
+  every row, once. A `Series` has no HTML display.
 - **A reduction is lazy too.** `df["v"].sum()` is not a number: it is a `Series` aggregate. A
   `Series` aggregate works inside `assign`, inside `df[...]` and inside `agg`. The number comes from a
   terminal: `df.agg(total=("v", "sum")).materialize()`. This is a departure from pandas (section 8,
@@ -426,6 +434,8 @@ its number).
     - The integer sum type is INT64 (UINT64 for unsigned) through the DataFrame doors. A total outside
       it is an error naming the column ([query_semantics_rulings.md](query_semantics_rulings.md) §8.1,
       §8.2).
+    - The polars skin sums a UInt8, UInt16 or UInt32 column as INT64, since the engine coalesces no
+      UINT64, and refuses the sum of a UInt64 column by name.
 11. **Counting rows and counting values are different verbs.** Carried, except `groupby().count()` (D6).
     - `count(*)` is polars `kpl.len()` and `group_by(k).len()`, and pandas `size()` and
       `agg(n=("c", "size"))`.
@@ -445,6 +455,12 @@ its number).
       fixed table in the verbs document. komira adds no dtype classes of its own.
     - pyarrow and protobuf are the package's required dependencies, and pandas and polars are optional.
     - Results arrive as Arrow and convert through the `Result` terminals.
+    - **Count types** (a departure). polars answers a count, `len()`, `str.len_chars()` and the sum
+      of a boolean or a UInt32 column as UInt32. The engine casts to no UInt32 yet, so the polars
+      skin answers these as Int64, the plan's own count type; the values are polars'.
+    - The engine computes a CASE only as INT64, FLOAT64 or STRING. So the polars skin computes a
+      `when`, a `fill_null` and the floor correction of ruling 9 in one of those and casts the result
+      once to polars' type (Int32 or Float32), and refuses branches of another type by name.
 15. **`concat` matches columns by name, and needs one type per column.** New with the verb (D17).
     - The Mojo builder matches by position and takes the first input's names.
     - polars `how="vertical"` needs equal names in equal order, so the polars skin refuses anything
@@ -506,7 +522,9 @@ no timing assertion and no shell test.
    - `df.<column>` raises, naming `df["<column>"]`.
    - `__dir__` holds only defined members, and `__setattr__` refuses.
    - A column called `count` is reachable as `df["count"]`, while `df.count()` still counts.
-   - A frame survives `copy.copy`, and `hasattr(df, "_repr_html_")` is `False`.
+   - A frame survives `copy.copy`, and `hasattr(df["a"], "_repr_html_")` is `False`.
+   - A frame's `_repr_html_` is its names and types and calls nothing on its session; a `Result`'s
+     shows at most ten rows and leaves the result unread.
 3. **Python bytes equal Mojo plans.**
    - A `python_oracle` build action runs a program in a skin and writes the envelope it encodes.
    - A Mojo test decodes the envelope with `plan_wire`, and compares it field by field with the plan the
@@ -608,6 +626,6 @@ package design). D4 to D18 are this design's own.
 ## Where is the code?
 
 The code is in `python/komira/`: the node tree (`_ops/`), the encoder (`_plan/`) and the first part of
-the pandas-shaped skin (`_frame.py`, `_groupby.py`, `_series.py`, `_refusals.py`); `komira/pl/` is not built yet. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
+the pandas-shaped skin (`_frame.py`, `_groupby.py`, `_series.py`, `_refusals.py`) and the core of the polars-shaped skin (`pl/`). The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
 `src/plan_expr/col_expr.mojo`. The wire format is in [src/plan_proto](../../src/plan_proto/plan.proto)
 and `src/plan_wire`.

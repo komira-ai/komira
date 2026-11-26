@@ -25,6 +25,17 @@
 #     or an infinity spelled otherwise than DuckDB does.
 #   * test_dates_as_duckdb_renders_them: the epoch and the day before it,
 #     year 1, the day before it (1 BC), years past 9999 and BC dates.
+#   * test_timestamps_as_duckdb_renders_them: a column of each timestamp
+#     type (the legacy TIMESTAMP tag, which holds microseconds, TIMESTAMP_MS,
+#     TIMESTAMP_NS and TIMESTAMP_S) and a TIMESTAMP_US field with a time zone,
+#     in CSV and JSON: NULL, the epoch, one tick before it, fractions with
+#     their trailing zeros removed (.5, .12, .000001, .123456789), 1900,
+#     year 1, 1 BC, 45 BC with a fraction, 9999 and 10000, DuckDB's smallest
+#     and largest values of each unit, and INT64's largest and its negation as
+#     `infinity` and `-infinity` (with no `+00` on the zoned column). Catches
+#     a fraction padded or cut, a time of day computed by truncating toward
+#     zero (negative before 1970), `(BC)` put after the time, and `+00`
+#     missing or added where DuckDB has none.
 #   * test_decimals_exactly: every scale digit kept (`12.50`, `0.00`),
 #     `-0.05`, scale 0, and a 38-digit value past what a double holds.
 #   * test_strings_quoted_and_escaped: CSV quotes exactly the empty string
@@ -41,8 +52,8 @@
 #     bytes and decompresses to the input (also for no input); any other
 #     code returns the input.
 #   * test_text_writable: true for every type above and false for a
-#     timestamp, time, duration, DATE64, binary, FLOAT16, DECIMAL256 and the
-#     nested types.
+#     time, duration, DATE64, binary, FLOAT16, DECIMAL256 and the nested
+#     types.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -285,6 +296,113 @@ def test_dates_as_duckdb_renders_them() raises:
     assert_equal(date_text(-2932897), "6061-01-02 (BC)")
 
 
+def _ts_column(
+    mut sb: SchemaBuilder,
+    mut rb: RecordBatchBuilder,
+    name: String,
+    at: ArrowType,
+    tz: String,
+    values: List[Int64],
+) raises:
+    """A nullable timestamp column: a NULL, then `values`."""
+    var arr = PrimitiveArray[DType.int64].allocate_nullable(len(values) + 1)
+    arr._set_null(0)
+    for i in range(len(values)):
+        arr.set(i + 1, values[i])
+    sb.add_field(Field.timestamp(name, at, tz, True))
+    rb.add_column(Column.from_primitive_with_arrow_type[DType.int64](arr^, at))
+
+
+def _lines(header: String, cells: List[String]) -> String:
+    var out = header + "\n"
+    for i in range(len(cells)):
+        out += cells[i] + "\n"
+    return out^
+
+
+def test_timestamps_as_duckdb_renders_them() raises:
+    # The legacy tag: microseconds, as the pinned DuckDB renders a TIMESTAMP.
+    var us: List[Int64] = [
+        0, -1, 1441369845123456, 1441369845500000, 1441369845120000,
+        1441369845000001, -2208985076600000, -62135596800000000,
+        -62135683200000000, -63526982399999999, 253402300799999999,
+        253402300800000000, 9223372036854775806, -9223372022400000000,
+        Int64.MAX, -Int64.MAX,
+    ]
+    var us_text: List[String] = [
+        "1970-01-01 00:00:00", "1969-12-31 23:59:59.999999",
+        "2015-09-04 12:30:45.123456", "2015-09-04 12:30:45.5",
+        "2015-09-04 12:30:45.12", "2015-09-04 12:30:45.000001",
+        "1900-01-01 01:02:03.4", "0001-01-01 00:00:00",
+        "0001-12-31 (BC) 00:00:00", "0045-11-29 (BC) 00:00:00.000001",
+        "9999-12-31 23:59:59.999999", "10000-01-01 00:00:00",
+        "294247-01-10 04:00:54.775806", "290309-12-22 (BC) 00:00:00",
+        "infinity", "-infinity",
+    ]
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    _ts_column(sb, rb, "ts", ArrowType.TIMESTAMP, "", us)
+    var batch = rb.build(sb.build())
+    var csv = List[String]()
+    var json = List[String]()
+    csv.append("")
+    json.append('{"ts":null}')
+    for i in range(len(us_text)):
+        csv.append(us_text[i])
+        json.append('{"ts":"' + us_text[i] + '"}')
+    assert_equal(_text(encode_csv(batch)), _lines("ts", csv))
+    var want_json = String()
+    for i in range(len(json)):
+        want_json += json[i] + "\n"
+    assert_equal(_text(encode_ndjson(batch)), want_json)
+
+    # Milliseconds, nanoseconds, seconds, and a zoned column (DuckDB's
+    # TIMESTAMPTZ in the UTC session), four rows each after the NULL.
+    var sb2 = SchemaBuilder()
+    var rb2 = RecordBatchBuilder()
+    _ts_column(sb2, rb2, "ms", ArrowType.TIMESTAMP_MS, "", [
+        -1, 1441369845120, 9223372036854775, -9223372022400000, Int64.MAX,
+    ])
+    _ts_column(sb2, rb2, "ns", ArrowType.TIMESTAMP_NS, "", [
+        1441369845123456789, -1, 1441369845000000001, -9223286400000000000,
+        -Int64.MAX,
+    ])
+    _ts_column(sb2, rb2, "s", ArrowType.TIMESTAMP_S, "", [
+        -1, 1441369845, 9223372036854, -9223372022400, Int64.MAX,
+    ])
+    _ts_column(sb2, rb2, "tz", ArrowType.TIMESTAMP_US, "UTC", [
+        0, -1, 1441369845123456, -62135683200000000, Int64.MAX,
+    ])
+    var b2 = rb2.build(sb2.build())
+    assert_equal(
+        _text(encode_csv(b2)),
+        "ms,ns,s,tz\n"
+        ",,,\n"
+        "1969-12-31 23:59:59.999,2015-09-04 12:30:45.123456789,"
+        "1969-12-31 23:59:59,1970-01-01 00:00:00+00\n"
+        "2015-09-04 12:30:45.12,1969-12-31 23:59:59.999999999,"
+        "2015-09-04 12:30:45,1969-12-31 23:59:59.999999+00\n"
+        "294247-01-10 04:00:54.775,2015-09-04 12:30:45.000000001,"
+        "294247-01-10 04:00:54,2015-09-04 12:30:45.123456+00\n"
+        "290309-12-22 (BC) 00:00:00,1677-09-22 00:00:00,"
+        "290309-12-22 (BC) 00:00:00,0001-12-31 (BC) 00:00:00+00\n"
+        "infinity,-infinity,infinity,infinity\n",
+    )
+    assert_equal(
+        _text(encode_ndjson(b2)),
+        '{"ms":null,"ns":null,"s":null,"tz":null}\n'
+        '{"ms":"1969-12-31 23:59:59.999","ns":"2015-09-04 12:30:45.123456789",'
+        '"s":"1969-12-31 23:59:59","tz":"1970-01-01 00:00:00+00"}\n'
+        '{"ms":"2015-09-04 12:30:45.12","ns":"1969-12-31 23:59:59.999999999",'
+        '"s":"2015-09-04 12:30:45","tz":"1969-12-31 23:59:59.999999+00"}\n'
+        '{"ms":"294247-01-10 04:00:54.775","ns":"2015-09-04 12:30:45.000000001",'
+        '"s":"294247-01-10 04:00:54","tz":"2015-09-04 12:30:45.123456+00"}\n'
+        '{"ms":"290309-12-22 (BC) 00:00:00","ns":"1677-09-22 00:00:00",'
+        '"s":"290309-12-22 (BC) 00:00:00","tz":"0001-12-31 (BC) 00:00:00+00"}\n'
+        '{"ms":"infinity","ns":"-infinity","s":"infinity","tz":"infinity"}\n',
+    )
+
+
 def test_decimals_exactly() raises:
     comptime I = DType.int128
     assert_equal(decimal_text(Scalar[I](1250), 2), "12.50")
@@ -451,11 +569,15 @@ def test_text_writable() raises:
     yes.append(ArrowType.DICTIONARY)
     yes.append(ArrowType.DATE32)
     yes.append(ArrowType.DECIMAL128)
+    yes.append(ArrowType.TIMESTAMP)
+    yes.append(ArrowType.TIMESTAMP_S)
+    yes.append(ArrowType.TIMESTAMP_MS)
+    yes.append(ArrowType.TIMESTAMP_US)
+    yes.append(ArrowType.TIMESTAMP_NS)
     for i in range(len(yes)):
         assert_true(text_writable(yes[i]), String(yes[i]))
     var no = List[ArrowType]()
-    no.append(ArrowType.TIMESTAMP_US)
-    no.append(ArrowType.TIMESTAMP_NS)
+    no.append(ArrowType.TIME32_S)
     no.append(ArrowType.TIME64_US)
     no.append(ArrowType.DURATION_US)
     no.append(ArrowType.DATE64)
