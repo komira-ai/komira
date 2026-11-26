@@ -1,4 +1,4 @@
-//! komira_wheel: the wheel the rule refuses to write. Every member is held
+//! native_policy: the wheel the rule refuses to write. Every member is held
 //! to these checks, and every ELF member (elf.zig) and Mach-O member
 //! (macho.zig) is read:
 //!

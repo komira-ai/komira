@@ -167,7 +167,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 order (rows, then workers) bit for bit, NaN above
 #                                 every value on every cut, infinities and
 #                                 overflow, -0.0, NULL and no row, declared types
-#                                 and refusals, the grouped sinks' refusal.
+#                                 and refusals.
 # test_sink_float_agg_duckdb      the same aggregates held to the pinned DuckDB's
 #                                 answers (the agg_float_ungrouped corpus) by the
 #                                 README's tolerance rule, through run_plan and
@@ -177,6 +177,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 on 1 to 7 workers and every dealing; chunks of
 #                                 one morsel, two morsels at one position refused,
 #                                 no row, the pool charged per position.
+# test_sink_group_float_agg       the grouped sinks over FLOAT64 and FLOAT32
+#                                 arguments folded by source position: each group's
+#                                 SUM, AVG, MIN and MAX bit for bit on 1, 4 and 16
+#                                 workers and every dealing, int and string keys;
+#                                 all-NULL, NaN, infinities, -0.0, a computed
+#                                 argument, 50,000 groups, the refusals by name.
+# test_sink_group_float_agg_edges the same sinks: chunks of one morsel, origin
+#                                 hints, exact aggregates beside a float one, MIN
+#                                 and MAX folded by worker, a type change and the
+#                                 string sink's denied position entry refused.
 # test_sink_composite_group_agg   the COMPOSITE row: keys of mixed types (INT32,
 #                                 STRING, DATE32; DECIMAL128, BOOL, FLOAT64 beside
 #                                 a STRING) against a dict oracle, NULL per column,
@@ -386,6 +396,8 @@ mojo_library(
         "tests/test_sink_group_agg.mojo",
         "tests/test_sink_group_agg_spill.mojo",
         "tests/test_sink_group_agg_keys.mojo",
+        "tests/test_sink_group_float_agg.mojo",
+        "tests/test_sink_group_float_agg_edges.mojo",
         "tests/test_sink_int_sum_decimal.mojo",
         "tests/test_sink_sort.mojo",
         "tests/test_sink_string_group_agg.mojo",

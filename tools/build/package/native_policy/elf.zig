@@ -1,4 +1,4 @@
-//! komira_wheel: what a shared library asks of the system that loads it,
+//! native_policy: what a shared library asks of the system that loads it,
 //! read from its ELF bytes: its DT_NEEDED names, its DT_RUNPATH and DT_RPATH
 //! entries, and the symbol versions it needs (the vernaux names of
 //! DT_VERNEED: `GLIBC_2.34`, `GLIBCXX_3.4.30`, `CXXABI_1.3.13`).

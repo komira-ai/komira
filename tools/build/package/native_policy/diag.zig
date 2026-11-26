@@ -1,7 +1,7 @@
-//! komira_wheel: how a refusal travels. Every function that can refuse returns
-//! `error.Refused` and leaves the reason in a `Diag`; only the command
-//! (main.zig) turns it into an exit, so each refusal is unit-tested in process
-//! by its exact message.
+//! native_policy: how a refusal travels. Every function that can refuse returns
+//! `error.Refused` and leaves the reason in a `Diag`; only the command (the
+//! tool's main.zig, as komira_wheel's) turns it into an exit, so each refusal
+//! is unit-tested in process by its exact message.
 
 const std = @import("std");
 const Alloc = std.mem.Allocator;

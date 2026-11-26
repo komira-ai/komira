@@ -10,7 +10,7 @@
 
 const std = @import("std");
 const compare = @import("compare.zig");
-const diag = @import("diag.zig");
+const diag = @import("native_policy").diag;
 const wheel = @import("wheel.zig");
 const zip = @import("zip.zig");
 const fixture = @import("testing.zig");
