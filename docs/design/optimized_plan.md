@@ -1,6 +1,14 @@
 # Design: `OptimizedPlan`, a serializable optimized plan
 
-Status: proposed, not built. Scope: komira's plan wire, optimizer, plan cutter, executor admission, user code in
+Status: partly built; the rest is proposed. Built: the schema (`src/plan_proto/optimized_plan.proto`, with
+`DigestTrailer` and `WireJoinNode.build_side`); the header library and admission steps 1-4
+(`src/optimized_plan_header`); the OPTIMIZED decode context in `plan_wire` for `build_side`, `estimated_groups` and
+the scan statistics refusal; and, in `src/optimized_plan` (the package §12 calls `komira_optimized_plan`), the
+canonical encoder, the plan digest, the producer and the host's admission steps 5-7 plus the
+`OPTIMIZED_NEEDS_UNBOUNDED_MISMATCH` check of step 8, for format version 1 with a body of `plan` only. Not built: the
+other §5.2 decisions (aggregate `mode`, `adaptive_allowed`, `exchange`, `boundedness`), shared subplans, snapshot
+pins, advice, UDFs, segments and the cutter, steps 8-12 beyond the above, and an engine door that runs an admitted
+plan. The text below is the design and does not mark which parts exist. Scope: komira's plan wire, optimizer, plan cutter, executor admission, user code in
 plans (UDF nodes and the environment image, §10, specified in [`optimized_plan_udfs.md`](optimized_plan_udfs.md) and
 [`optimized_plan_udf_runtime.md`](optimized_plan_udf_runtime.md)),
 and sources, index access paths and graph operators (§15, specified in
