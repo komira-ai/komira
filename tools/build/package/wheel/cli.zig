@@ -1,5 +1,5 @@
 //! komira_wheel: the command line and the files it names, read into a
-//! wheel.Input. Every refusal is returned (diag.zig), so main.zig only
+//! wheel.Input. Every refusal is returned (native_policy's diag.zig), so main.zig only
 //! forwards.
 //!
 //! Flags are `--flag value` pairs. A command takes:
@@ -16,7 +16,7 @@
 //! (a shared library), a `--file` 0644.
 
 const std = @import("std");
-const diag = @import("diag.zig");
+const diag = @import("native_policy").diag;
 const stamp_mod = @import("stamp.zig");
 const wheel = @import("wheel.zig");
 const Alloc = std.mem.Allocator;

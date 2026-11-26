@@ -5,7 +5,7 @@
 //! a CPython ABI); and each input it cannot carry refused by name.
 
 const std = @import("std");
-const diag = @import("diag.zig");
+const diag = @import("native_policy").diag;
 const stamp = @import("stamp.zig");
 const tag = @import("tag.zig");
 const wheel = @import("wheel.zig");

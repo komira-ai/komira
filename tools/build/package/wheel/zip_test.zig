@@ -4,7 +4,7 @@
 //! zip this writer would not write is refused, each defect by name.
 
 const std = @import("std");
-const diag = @import("diag.zig");
+const diag = @import("native_policy").diag;
 const zip = @import("zip.zig");
 const t = std.testing;
 

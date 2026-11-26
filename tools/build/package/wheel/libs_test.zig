@@ -22,10 +22,10 @@
 //! are each refused by their exact message.
 
 const std = @import("std");
-const diag = @import("diag.zig");
-const elf = @import("elf.zig");
+const diag = @import("native_policy").diag;
+const elf = @import("native_policy").elf;
 const libs = @import("libs.zig");
-const policy = @import("policy.zig");
+const policy = @import("native_policy").policy;
 const zip = @import("zip.zig");
 const fixture = @import("testing.zig");
 const t = std.testing;
