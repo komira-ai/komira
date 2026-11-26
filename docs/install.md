@@ -5,10 +5,10 @@ program, what it does not do yet, and what to do when something goes wrong. To b
 instead, see [getting started](getting-started.md).
 
 > **This is an early release.** It registers Parquet files as tables and runs SQL over them, with each
-> answer read as pyarrow, or as a pandas or polars frame. A first part of the pandas-shaped DataFrame
-> (`komira.read_parquet`, filters, column selection, computed columns, `sort_values` and `head`) runs
-> as a plan with no SQL; the rest of it and the polars-shaped one come in later releases of this same
-> package. This page changes when they do.
+> answer read as pyarrow, or as a pandas or polars frame. Parts of the pandas-shaped DataFrame and
+> of the polars-shaped `komira.pl` run as plans with no SQL; the
+> [DataFrame pages](../python/docs/dataframe/overview.md) say which, and the rest comes in later
+> releases of this same package.
 
 ## Install
 
@@ -129,8 +129,8 @@ wheel file with `pip` into an empty virtual environment on a fresh machine and r
 the upload to TestPyPI, and again after the upload to PyPI, it does the same with the published
 wheel. Each run compares every line it prints with `quickstart.expected`; when one differs before the
 upload nothing is uploaded, and when the TestPyPI run's output differs nothing is uploaded to PyPI.
-The two blocks above are those files (the second with the version of the newest release in the
-[changelog](../python/CHANGELOG.md) and the ABI version filled in), and the build test
+The two blocks above are those files (the second with the version of the newest release
+section in the [changelog](../python/CHANGELOG.md) and the ABI version filled in), and the build test
 `//python/smoke:install_page_shows_quickstart` fails when they differ.
 
 What each call does:
@@ -158,9 +158,9 @@ The package's [README](../python/README.md), which is also its PyPI description,
 
 ## What does not work yet
 
-- **Most of the DataFrame APIs**: the pandas-shaped one beyond reading, filtering, selecting,
-  computing columns, sorting and `head` (see the [README](../python/README.md)), and the
-  polars-shaped one.
+- **Most of the DataFrame APIs**: the verbs of the pandas-shaped and polars-shaped frames that are
+  not built yet; the [capability table](design/dataframe_surface_verbs.md) lists each with
+  its state.
 - **Python UDFs.**
 - **Other platforms**: Linux on arm64, macOS on Intel, Windows, and Linux with musl (Alpine) have no
   wheel.
@@ -210,7 +210,8 @@ Versions are `0.1.<n>`, and a larger `<n>` is a newer release. The package is pr
 ## Keeping this page true
 
 A pull request that changes what the package does, or what it needs, changes this page, the
-[README](../python/README.md), the [quickstart](../python/examples/README.md) and the
-[changelog](../python/CHANGELOG.md) with it: the releases that add the pandas-shaped and
-polars-shaped APIs and Linux on arm64 extend the first program and its output and move their lines
-out of [what does not work yet](#what-does-not-work-yet).
+[README](../python/README.md) and the [quickstart](../python/examples/README.md) with it, and adds
+an entry, a file of [python/changelog.d/](../python/changelog.d/) that the release lists in
+its [changelog](../python/CHANGELOG.md) section ([how](../python/README.md#changelog-entries)): the
+releases that add the pandas-shaped and polars-shaped APIs and Linux on arm64 extend the first
+program and its output and move their lines out of [what does not work yet](#what-does-not-work-yet).

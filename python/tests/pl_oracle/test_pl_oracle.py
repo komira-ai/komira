@@ -39,8 +39,13 @@ And the edges the oracle does not cover: collect() twice runs the plan
 twice; collect() calls the plan entry and never the SQL entry; explain()
 renders the plan; a missing file is refused at the reader with the engine's
 message; frames of two sessions are refused by concat; a CSV scan, with a
-semicolon separator and an empty field, gives polars' frame; and median, std, var and the min of a string column, which the engine's
-aggregation sinks do not serve yet, are refused at the terminal at execute.
+semicolon separator and an empty field, gives polars' frame; and median, std,
+var and the min of a string column, which the engine's aggregation sinks do not
+serve yet, are refused at the terminal at execute.
+
+The test is of the `pl_oracle/` family (python/tests/BUCK): CPython 3.13
+alone, the one minor with a pinned polars (1.44.2), on the real libkomira, with
+the generated plan modules, protobuf, polars and pyarrow.
 
     test_pl_oracle.py --lib-dir <dir> --runtime-dir <dir>
 

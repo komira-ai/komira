@@ -1,6 +1,6 @@
 # The Python DataFrame surface: verbs, capabilities and refusals
 
-Status: design, partly built (the rules document's status says which verbs). This is the verb half of [the DataFrame surface](dataframe_surface.md):
+Status: design, partly built; the pages under [python/docs/](../../python/docs/dataframe/overview.md) say what is built, one page per feature, and this document lists no built verb. This is the verb half of [the DataFrame surface](dataframe_surface.md):
 that document gives the rules. This one has three parts:
 
 - for each capability of the [surface capability matrix](../surface_capability_matrix.md), the verbs of
@@ -79,9 +79,9 @@ the surface has no spelling, and the cell stays empty by decision.
 | `udf_map` | `s.map(f)`, `s.apply(f)`, `df.apply(f, axis=1)` | `expr.map_elements(f, return_dtype=...)`, `expr.map_batches(f, return_dtype=...)` | a `UdfRef` called by `WireUdfApply` | refused at lower; the verbs raise until UDF workers land |
 | `udf_filter` | `df[df["x"].map(f)]` | `lf.filter(expr.map_elements(f, return_dtype="bool"))` | a boolean `WireUdfApply` in a FILTER | as `udf_map` |
 | `udf_agg` | `df.groupby(k).agg(out=("c", f))` | `lf.group_by(k).agg(expr.agg_udf(f, return_dtype=...))` (komira's verb) | `AGG_UDF` over an AGGREGATE `UdfRef` | as `udf_map` |
-| `write_parquet` | `df.to_parquet(path)` | `lf.sink_parquet(path)` | the envelope's `write_target`, Parquet | run by `run_plan_write`; built for the pandas skin (`to_parquet`), `sink_parquet` comes with `komira.pl` |
-| `write_csv` | `df.to_csv(path)`; `index=` has no effect | `lf.sink_csv(path)` | the envelope's `write_target`, CSV | run by `run_plan_write`; built for the pandas skin (`to_csv`), `sink_csv` comes with `komira.pl` |
-| `write_jsonl` | `df.to_json(path, orient="records", lines=True)`; other forms refused | `lf.sink_ndjson(path)` | the envelope's `write_target`, JSON Lines | run by `run_plan_write`; built for the pandas skin (`to_json`), `sink_ndjson` comes with `komira.pl` |
+| `write_parquet` | `df.to_parquet(path)` | `lf.sink_parquet(path)` | the envelope's `write_target`, Parquet | run by `run_plan_write`; built for the pandas skin (`to_parquet`), `sink_parquet` of `komira.pl` is not built |
+| `write_csv` | `df.to_csv(path)`; `index=` has no effect | `lf.sink_csv(path)` | the envelope's `write_target`, CSV | run by `run_plan_write`; built for the pandas skin (`to_csv`), `sink_csv` of `komira.pl` is not built |
+| `write_jsonl` | `df.to_json(path, orient="records", lines=True)`; other forms refused | `lf.sink_ndjson(path)` | the envelope's `write_target`, JSON Lines | run by `run_plan_write`; built for the pandas skin (`to_json`), `sink_ndjson` of `komira.pl` is not built |
 | `null_semantics` | rules section 8, rulings 2, 3, 5, 6, 7, 10, 11, with NaN missing in float columns | the same rulings | contract | contract |
 | `errors` | rules section 6 | rules section 6 | contract | contract |
 | `output_dtypes` | `df.materialize().to_pandas()`, `to_arrow()` | `lf.collect().to_polars()`, `to_arrow()` | contract | contract |

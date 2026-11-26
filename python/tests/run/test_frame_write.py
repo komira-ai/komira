@@ -33,7 +33,15 @@ and compared with the rows worked out by hand:
   directory at execute, a binary column and its untouched destination, and
   the session writing again after each;
 - test_a_closed_session_refuses_a_write: KomiraError "the session is closed";
-- test_each_terminal_returns_none.
+- test_each_terminal_returns_none;
+- test_a_write_answer_other_than_one_count_row_is_refused: a plan-door answer
+  to a write of zero rows, two rows, another column name, an extra column or
+  no columns raises KomiraError with its full message from `_plan_write` and
+  through `to_parquet`, and one row of Count returns its count.
+
+The test is of the `run/` family (python/tests/BUCK): `frame_write_test` runs
+on the real libkomira on each supported minor (`frame_write_test_py311`, ...),
+with the generated plan modules, protobuf 7.36.2 and pyarrow.
 
     test_frame_write.py --lib-dir <dir> --runtime-dir <dir>
 

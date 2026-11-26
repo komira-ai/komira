@@ -2,6 +2,21 @@
 # run_sql: COPY ... TO a local Parquet file
 # =============================================================================
 #
+# Covers: COPY ... TO a local Parquet file through run_sql answers one BIGINT
+# NOT NULL row `Count`; the file read back equals the query that wrote it (a
+# table of BIGINT, DOUBLE, VARCHAR, BOOLEAN, DATE and DECIMAL columns with
+# NULLs, a query, an empty result, 130,000 rows in two row groups, a COPY over
+# the file it reads, a relative path), and its footer names the codec asked
+# for, for each of the six (every codec as the footer names it);
+# TIMESTAMP_US, _MS, _NS and _S columns, a zoned one, TINYINT and UBIGINT read
+# back with their types (seconds as microseconds), time zone and values, and
+# the footer carries each timestamp's unit and UTC flag; an unknown extension,
+# a URL, CREATE TABLE AS and a TIME column are named refusals that touch no
+# file, and a TIMESTAMP_S value past the microsecond range fails with the
+# writer's message naming the column, row and value; a missing directory, a
+# directory at the path and a full disk injected through the file system's
+# test seam are named and leave no temporary file and the old file whole.
+#
 # Each test writes into its own directory under test_tmpdir() and lists it
 # afterwards, so a temporary file left behind, or a file a refused COPY should
 # not have made, fails the test. A file is read back through run_sql (a table
