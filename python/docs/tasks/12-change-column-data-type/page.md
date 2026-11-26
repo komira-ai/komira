@@ -68,6 +68,7 @@ int64
 - SQL `CAST` reaches `INTEGER`, `BIGINT`, `REAL`, `DOUBLE` and, from an integer, `VARCHAR`. Other targets (`DATE`, `TIMESTAMP`, `SMALLINT`, `BOOLEAN`, `DECIMAL` over a column) and `TRY_CAST` are refused by name.
 - Parsing text into a date is a task of its own: it is not done by `astype("date32")` or `cast`, which refuse or fail on text (rank 23).
 - A value that does not convert fails the query; `astype(errors="ignore")` is refused.
+- `DataFrame.astype` and `Series.astype` are newer than the PyPI release 0.1.1623.
 
 ## Related
 

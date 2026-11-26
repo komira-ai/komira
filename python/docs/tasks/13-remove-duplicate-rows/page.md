@@ -68,6 +68,7 @@ Output:
 - Not available: `df.drop_duplicates(subset=[...])` on the pandas-shaped frame is refused by name, and neither `df.duplicated()` nor `df["name"].unique()` exists. `probe_pandas_subset.py` runs the missing form and fails with the line in `probe_pandas_subset.error.txt`; it is tracked by komira-ai/komira#2378. Selecting the columns first, as `df[["name"]].drop_duplicates()`, works when you need only those columns.
 - Also not available: `SELECT DISTINCT ON (...)` and the `QUALIFY` clause are refused by name (komira-ai/komira#2380), and polars `keep="first"` / `"last"` and `maintain_order=True` are refused because a plan has no row order.
 - The result has no promised row order: sort it before printing.
+- `lf.unique(subset=..., keep="none")` is newer than the PyPI release 0.1.1623.
 
 ## Related
 

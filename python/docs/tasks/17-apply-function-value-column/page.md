@@ -56,6 +56,7 @@ Output:
 - SQL cannot call a Python function: komira-ai/komira#2330.
 - Some everyday functions have no method or no form yet: `round(x, digits)` in SQL is refused (only `round(x)` runs), and `Series.round`, `Series.abs` and `Expr.round` do not exist: komira-ai/komira#2383.
 - The day a probe runs to the end, this page's check goes red, and the page and the catalogue status change with it.
+- The `.str` accessor of the pandas-shaped Series is newer than the PyPI release 0.1.1623.
 
 ## Related
 

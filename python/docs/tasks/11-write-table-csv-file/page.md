@@ -24,7 +24,7 @@ print(Path("out.csv").read_text(), end="")
 # The pandas-shaped frame: run it, then write the Arrow table with pyarrow.
 df = komira.read_csv("sales.csv")
 totals = df.groupby("region", as_index=False)["qty"].sum().sort_values("region")
-pacsv.write_csv(totals.materialize().to_arrow(), "totals.csv", pacsv.WriteOptions(quoting_style="needed"))
+pacsv.write_csv(totals.materialize().to_arrow(), "totals.csv")
 print(Path("totals.csv").read_text(), end="")
 ```
 
@@ -48,7 +48,8 @@ id,region,amount
 - `COPY ... TO` writes the bytes DuckDB's `COPY` writes for the same rows: a header row, `,` between cells, NULL as an empty cell, a string quoted only when it needs it. It answers one row, `Count`, the rows written. The write is all or nothing and replaces an existing file.
 - The destination is a local path. A path ending in `.csv` needs no `FORMAT`; a name with no known extension is refused by name. A `.gz` or `.zst` name, or `COMPRESSION gzip` or `zstd`, writes a compressed file.
 - komira's frames have no writer of their own: `df.to_csv(...)` on the pandas-shaped frame and `lf.sink_csv(...)` on the polars-shaped one are not there yet (komira-ai/komira#2372). `probe_frame_to_csv.py` and `probe_lazyframe_sink_csv.py` beside this page try them and must fail with the lines in their `.error.txt` files. The day one runs, this page's check goes red, and the page and the catalogue status change with it.
-- The CSV options of `COPY` are only `FORMAT`, `COMPRESSION` and `HEADER`: a delimiter, quote character or NULL text option is refused by name (komira-ai/komira#2374). `HEADER` written bare, without `true`, is a syntax error today: komira-ai/komira#2322.
+- The CSV options of `COPY` are only `FORMAT`, `COMPRESSION`, `COMPRESSION_LEVEL` and `HEADER`: a delimiter, quote character or NULL text option is refused by name (komira-ai/komira#2374). `HEADER` written bare, without `true`, is a syntax error today: komira-ai/komira#2322.
+- pyarrow's `write_csv` quotes the header and every string cell, as the second file shows; `COPY` quotes a string only when it needs it.
 - `HEADER false` is refused, since the writer always writes the header row.
 - A partitioned write (`PARTITION_BY`) is komira-ai/komira#2346; writing to `s3://`, `gs://` or `az://` is komira-ai/komira#2337.
 

@@ -56,6 +56,7 @@ Output:
 - A frame has no row index, so `ignore_index`, `keys`, `axis=1` and `verify_integrity` of pandas have no use here (`ignore_index` is accepted and does nothing; the others are refused by name). The rows of a concatenation come back in no promised order: sort before printing, as the example does.
 - Polars' `how="diagonal"` and `DataFrame.vstack`, and the removed pandas `DataFrame.append`, are not offered.
 - To stack many files with one name pattern, see the related task below.
+- `komira.concat` is newer than the PyPI release 0.1.1623.
 
 ## Related
 

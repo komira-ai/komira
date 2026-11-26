@@ -27,8 +27,9 @@ with komira.Session() as s:
     print(table.to_pylist())
 
 # pandas-shaped: rename(columns=...) takes a dict of old to new names.
+# A name the frame lacks ("region") is skipped.
 df = komira.read_csv("orders.csv")
-print(df.rename(columns={"order_id": "id", "amount": "total"}).columns)
+print(df.rename(columns={"order_id": "id", "amount": "total", "region": "area"}).columns)
 
 # Or a function of each name, or a prefix on every column.
 print(df.rename(columns=str.upper).columns)
@@ -60,6 +61,7 @@ Output:
 - `rename(index=...)` renames row labels, and komira frames have no index, so it is refused by name.
 - Not built: `set_axis`, a Series `rename`, `pl.all().name.prefix(...)` and the other `name` namespace methods, and DuckDB's `SELECT * RENAME (...)`, `SELECT * EXCLUDE (...)`, the column list of an alias (`FROM t AS x(a, b)`) and `ALTER TABLE ... RENAME COLUMN`. Rename in `SELECT ... AS ...` or with the frame's `rename` instead.
 - A SQL alias is a plain name: a double-quoted identifier such as `AS "Total Amount"` is refused with a syntax error (komira-ai/komira#2382). Give such a name on the frame (`rename(columns={"amount": "Total Amount"})`).
+- `DataFrame.rename` and `add_prefix` are newer than the PyPI release 0.1.1623.
 
 ## Related
 

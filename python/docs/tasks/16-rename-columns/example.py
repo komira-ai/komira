@@ -21,8 +21,9 @@ with komira.Session() as s:
     print(table.to_pylist())
 
 # pandas-shaped: rename(columns=...) takes a dict of old to new names.
+# A name the frame lacks ("region") is skipped.
 df = komira.read_csv("orders.csv")
-print(df.rename(columns={"order_id": "id", "amount": "total"}).columns)
+print(df.rename(columns={"order_id": "id", "amount": "total", "region": "area"}).columns)
 
 # Or a function of each name, or a prefix on every column.
 print(df.rename(columns=str.upper).columns)

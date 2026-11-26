@@ -18,5 +18,5 @@ print(Path("out.csv").read_text(), end="")
 # The pandas-shaped frame: run it, then write the Arrow table with pyarrow.
 df = komira.read_csv("sales.csv")
 totals = df.groupby("region", as_index=False)["qty"].sum().sort_values("region")
-pacsv.write_csv(totals.materialize().to_arrow(), "totals.csv", pacsv.WriteOptions(quoting_style="needed"))
+pacsv.write_csv(totals.materialize().to_arrow(), "totals.csv")
 print(Path("totals.csv").read_text(), end="")
