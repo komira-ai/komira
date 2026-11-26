@@ -537,7 +537,7 @@ def test_every_name_in_the_groupby_table_raises_its_message():
     check_refused(g, "filter", "GroupBy.filter() is not supported yet; aggregate, then filter the result")
     check_refused(g, "ngroups", ".ngroups needs a query to run; aggregate with .size() and materialize()")
     check_refused(g, "ohlc", ".ohlc() is not supported: komira has no time index")
-    check_refused(g, "transform", "'GroupBy' object has no attribute 'transform'")
+    check_refused(g, "pipe", "'GroupBy' object has no attribute 'pipe'")
     check_refused(g, "_hidden", "'GroupBy' object has no attribute '_hidden'")
     # A column is not an attribute of its groups either.
     check_refused(g, "x", "'GroupBy' object has no attribute 'x'")

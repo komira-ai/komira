@@ -458,8 +458,9 @@ tests, which no pull request builds. The rest of this section is about `release-
   `pypi.yml` (the macOS wheel's jobs are in it) to not running on a pull request or a merge group. The five targets of the macOS wheel
   (`//python:komira_wheel_macos_arm64`, `//python:wheel_install_test_macos_arm64`,
   `//python:wheel_libs_macos_arm64`, `//python:wheel_same_macos_arm64`,
-  `//python/smoke:pypi_smoke_macos_arm64`) and the pinned macOS pyarrow wheel its install test reads
-  (`//python/tests:pyarrow-25.0.1-cp313-cp313-macosx_12_0_arm64.whl`) stay out of the check twice: each has an `EXCLUDED` row in
+  `//python/smoke:pypi_smoke_macos_arm64`) and the pinned macOS pyarrow and protobuf wheels its install test reads
+  (`//python/tests:pyarrow-25.0.1-cp313-cp313-macosx_12_0_arm64.whl`,
+  `//python/tests:protobuf-7.36.2-cp310-abi3-macosx_10_9_universal2.whl`) stay out of the check twice: each has an `EXCLUDED` row in
   `tools/build/ci/rules.bzl`, so the pull-request selector never picks it, and each has
   `target_compatible_with = DARWIN_ARM64` (limit `pypi-wheel-macos-arm64` in
   `tools/build/platforms/limits.tsv`), so it builds only with `--target-platforms
@@ -649,7 +650,8 @@ then-current `main`. Nothing is half-done, because the replaced run never starte
 
 kci, the build and deploy CLI the repository once had, was retired and removed: no workflow runs it.
 The `kci_*` libraries are not release members: `release/artifacts.textproto` and the release set list none and their
-source is deleted. Their names stay claimed on the prod registry (`release/prod_claimed_names.txt`).
+source is deleted. Their names stay reserved on the prod registry (`release/prod_claimed_names.txt`) as global
+(flat) names: the prune of the flat names kept them, and prod has no `komira-ai/kci_*` package.
 
 ### The mopm jobs
 
@@ -740,7 +742,7 @@ release/prod_claimed_names.txt: claim it on the prod registry first, then add it
 A maintainer adds a name to the file only after claiming it on the prod registry, in the pull request that adds the
 member or ahead of it: names claimed for libraries not published yet (each with its row in `release/UNPUBLISHED.md`)
 are listed too, and the check accepts a name no member has. The file keeps the names of deleted packages (the
-`kci_*` libraries), whose names stay claimed, and refuses the dropping of one of them, an unsorted or repeated line, and an empty file. It is a
+`kci_*` libraries), whose names stay reserved as flat names, and refuses the dropping of one of them, an unsorted or repeated line, and an empty file. It is a
 committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
 last word.
 

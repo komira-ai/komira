@@ -4,7 +4,8 @@ new one, while contexts of the old generation keep their code until they close.
 
     test_udf_generations.py --lib-dir <dir>
 
-`<dir>/libkomira_udf_python.so` is `//src/udf_python:komira_udf_python`.
+`<dir>/libkomira_udf_python.so` (`libkomira_udf_python.dylib` on macOS) is
+`//src/udf_python:komira_udf_python`.
 """
 
 import os

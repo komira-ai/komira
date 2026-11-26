@@ -5,7 +5,8 @@ serves the next call.
 
     test_udf_cancel.py --lib-dir <dir>
 
-`<dir>/libkomira_udf_python.so` is `//src/udf_python:komira_udf_python`.
+`<dir>/libkomira_udf_python.so` (`libkomira_udf_python.dylib` on macOS) is
+`//src/udf_python:komira_udf_python`.
 
 The UDF under test creates `<dir>/started` in row 0 and waits there until the
 host creates `<dir>/go`. A second thread waits for `started`, fires the cancel
