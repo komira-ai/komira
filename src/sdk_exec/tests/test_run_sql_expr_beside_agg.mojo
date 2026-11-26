@@ -10,9 +10,9 @@
 # a SELECT item that is neither an aggregate nor a GROUP BY key: a literal
 # beside an ungrouped aggregate (also over no row, which is one row, and in
 # each branch of a UNION ALL), a literal beside a grouped one (over no row,
-# which is no row), an integer literal per group, a function or an operator of
-# one key, of two keys and of a computed key, and an item under a WHERE and a
-# HAVING.
+# which is no row, and in each grouped branch of a UNION ALL), an integer
+# literal per group, a function or an operator of one key and of two keys, and
+# an item under a WHERE and a HAVING.
 #
 # The pinned DuckDB writes the table (tests/expr_beside_agg/data.sql: 3000 rows,
 # an INTEGER k, a VARCHAR s holding the empty string, a BIGINT v, each with
@@ -28,15 +28,15 @@
 #   test_a_literal_beside_an_aggregate_equals_duckdb
 #       `SELECT 'o' AS src, count(*), sum(v)` with no GROUP BY; the same over
 #       no row (one row, count 0); the same grouped over no row (no row); a
-#       label per branch of a UNION ALL of three ungrouped counts; `1 AS one`
-#       beside a GROUP BY k (INTEGER, one value per group, the NULL key's
-#       group included).
+#       label per branch of a UNION ALL of three ungrouped counts; a label and
+#       an integer literal per branch of a UNION ALL of two grouped counts
+#       (`one` INTEGER); `1 AS one` beside a GROUP BY k (INTEGER, one value
+#       per group, the NULL key's group included).
 #   test_an_expression_of_the_keys_beside_an_aggregate_equals_duckdb
 #       coalesce(s, 'none') and upper(s) over GROUP BY s (the NULL group and
 #       the empty-string group apart); k + 1 and the unaliased k * 2, named
 #       `(k * 2)` as DuckDB names it, over GROUP BY k; a CASE over two keys;
-#       (k + 1) * 2 over GROUP BY k + 1; coalesce(s, 'none') under a WHERE and
-#       a HAVING.
+#       coalesce(s, 'none') under a WHERE and a HAVING.
 #   test_every_case_is_run
 #       each case of cases.sql belongs to one of the tests above.
 # =============================================================================
@@ -159,6 +159,7 @@ def _literals() -> List[String]:
     out.append("literal_ungrouped_no_row")
     out.append("literal_grouped_no_row")
     out.append("literal_union_labels")
+    out.append("literal_grouped_union")
     out.append("int_literal_grouped")
     return out^
 
@@ -169,7 +170,6 @@ def _expressions() -> List[String]:
     out.append("upper_of_key")
     out.append("arith_of_key")
     out.append("expr_of_two_keys")
-    out.append("expr_of_computed_key")
     out.append("item_under_where_having")
     return out^
 

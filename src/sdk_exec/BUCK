@@ -193,12 +193,12 @@ _EXPR_BESIDE_AGG_CASES = [
     "literal_ungrouped_no_row",
     "literal_grouped_no_row",
     "literal_union_labels",
+    "literal_grouped_union",
     "int_literal_grouped",
     "coalesce_of_key",
     "upper_of_key",
     "arith_of_key",
     "expr_of_two_keys",
-    "expr_of_computed_key",
     "item_under_where_having",
 ]
 

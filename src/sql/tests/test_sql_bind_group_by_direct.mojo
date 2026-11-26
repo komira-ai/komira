@@ -15,11 +15,11 @@
 #      is kept as a zero-key aggregate otherwise; a SELECT item naming an
 #      elided key is re-projected.
 #   4. A SELECT item that is neither a key nor an aggregate is answered when
-#      every column it reads is a key (a literal reads none): over plain
-#      column keys it is computed above the aggregate, over a computed key it
-#      is one more key below it; a bare integer literal there is INT32 for a
-#      result list. An item reading a non-key column, an aggregate or a window
-#      inside GROUP BY, and an unknown key are refused by name.
+#      every column it reads is a column key (a literal reads none), computed
+#      above the aggregate; a bare integer literal there, or one naming an
+#      elided constant key, is INT32 for a result list. An item reading a
+#      non-key column or a computed key, an aggregate or a window inside
+#      GROUP BY, and an unknown key are refused by name.
 #   5. ORDER BY a group key that is not selected is carried and pruned; an
 #      ORDER BY on a non-key column is refused.
 
@@ -527,13 +527,27 @@ def test_items_of_the_group_keys_beside_aggregates() raises:
         "  Aggregate(group_by=[ColRef(s)], aggs=[COUNT(*).alias(\"count_star()\")])\n"
         "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
-    # Over a computed key the item is one more key below the aggregate, and
-    # a second item of the same text reads that key.
+    # A key that shares its name with an aggregate's alias: the item reads
+    # the key, the aggregate is computed under an internal name.
     _check(
-        "SELECT (k + 1) * 2, (k + 1) * 2 AS again, count(*) FROM t GROUP BY k + 1",
-        "Project(exprs=[Alias(ColRef(__grp_key_1), \"((k + 1) * 2)\"), Alias(ColRef(__grp_key_1), \"again\"), ColRef(count_star())])\n"
-        "  Aggregate(group_by=[ColRef(__grp_key_0), ColRef(__grp_key_1)], aggs=[COUNT(*).alias(\"count_star()\")])\n"
-        "    Project(exprs=[ColRef(k), ColRef(v), ColRef(s), ColRef(g), ColRef(d), ColRef(ts), ColRef(i32), ColRef(dc), ColRef(b), ColRef(f32), ColRef(u64), ColRef(j), Alias(BinaryOp(ADD, ColRef(k), Literal(ScalarValue(int64, 1))), \"__grp_key_0\"), Alias(BinaryOp(MUL, BinaryOp(ADD, ColRef(k), Literal(ScalarValue(int64, 1))), Literal(ScalarValue(int64, 2))), \"__grp_key_1\")])\n"
+        "SELECT k + 1 AS k1, count(*) AS k FROM t GROUP BY k",
+        "Project(exprs=[Alias(BinaryOp(ADD, ColRef(k), Literal(ScalarValue(int64, 1))), \"k1\"), Alias(ColRef(_agg_as_1_k), \"k\")])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"_agg_as_1_k\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    # DISTINCT over such items, and ORDER BY a literal item.
+    _check(
+        "SELECT DISTINCT 'o' AS src, k + 1 AS k1 FROM t GROUP BY k",
+        "Distinct(all)\n"
+        "  Project(exprs=[Alias(Literal(ScalarValue(utf8, \"o\")), \"src\"), Alias(BinaryOp(ADD, ColRef(k), Literal(ScalarValue(int64, 1))), \"k1\")])\n"
+        "    Aggregate(group_by=[ColRef(k)], aggs=[])\n"
+        "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT 'o' AS src, k, count(*) AS n FROM t GROUP BY k ORDER BY src, k",
+        "Sort(keys=[src ASC, k ASC])\n"
+        "  Project(exprs=[Alias(Literal(ScalarValue(utf8, \"o\")), \"src\"), ColRef(k), ColRef(n)])\n"
+        "    Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"n\")])\n"
         "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     # HAVING and ORDER BY see the item as they see any output column.
@@ -558,6 +572,14 @@ def test_a_bare_integer_literal_beside_an_aggregate_is_integer() raises:
         "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n",
         int32_literals=True,
     )
+    # A literal naming an elided constant key is INT32 on the same terms.
+    _check(
+        "SELECT 1, k, count(*) AS n FROM t GROUP BY 1, k",
+        "Project(exprs=[Alias(Literal(ScalarValue(int32, 1)), \"1\"), ColRef(k), ColRef(n)])\n"
+        "  Aggregate(group_by=[ColRef(k)], aggs=[COUNT(*).alias(\"n\")])\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n",
+        int32_literals=True,
+    )
     # Not a result list (a CTE body, a subquery): BIGINT.
     _check(
         "SELECT 1 AS one, count(*) AS n FROM t",
@@ -565,6 +587,14 @@ def test_a_bare_integer_literal_beside_an_aggregate_is_integer() raises:
         "  Aggregate(group_by=[], aggs=[COUNT(*).alias(\"n\")])\n"
         "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
+
+
+comptime _EXPR_KEY_REFUSAL = (
+    "SQL not supported: a SELECT item computed from an expression GROUP BY key"
+    " (`(k + 1) * 2` over `GROUP BY k + 1`). The key's own columns are gone"
+    " above the aggregate; group by the item itself, or select the key and"
+    " compute the item in an outer query"
+)
 
 
 def test_an_item_reading_a_column_that_is_not_a_key_is_refused() raises:
@@ -578,10 +608,19 @@ def test_an_item_reading_a_column_that_is_not_a_key_is_refused() raises:
         "SELECT k + 1, count(*) FROM t",
         "ERR: SQL bind error: SELECT column 'k' must appear in GROUP BY"
     )
-    # A computed key covers its own text only.
+    # A computed key covers its own text only, and an item computed from it
+    # is refused by name: its columns are gone above the aggregate.
     _check(
         "SELECT k + 2, count(*) FROM t GROUP BY k + 1",
         "ERR: SQL bind error: SELECT column 'k' must appear in GROUP BY"
+    )
+    _check(
+        "SELECT (k + 1) * 2, count(*) FROM t GROUP BY k + 1",
+        String("ERR: ") + _EXPR_KEY_REFUSAL
+    )
+    _check(
+        "SELECT g + (k + 1), count(*) FROM t GROUP BY g, k + 1",
+        String("ERR: ") + _EXPR_KEY_REFUSAL
     )
     _check(
         "SELECT CASE WHEN s = 'A' THEN k ELSE g END AS c, count(*) FROM t GROUP BY k, g",
