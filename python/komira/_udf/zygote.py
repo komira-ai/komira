@@ -42,7 +42,9 @@ def _parse_args(argv):
 
 
 def thread_count():
-    """The number of OS threads of this process."""
+    """The number of OS threads of this process. On macOS, less the threads of its dispatch
+    workqueue: those the kernel starts for libdispatch, which loading some libraries does
+    (libarrow does: `import pyarrow` leaves one), and which a fork does not copy."""
     if sys.platform.startswith("linux"):
         with open("/proc/self/status", "rb") as f:
             for line in f:
@@ -68,7 +70,13 @@ def thread_count():
         got = proc_pidinfo(os.getpid(), 4, 0, ctypes.byref(info), ctypes.sizeof(info))
         if got != ctypes.sizeof(info):
             raise RuntimeError("proc_pidinfo(PROC_PIDTASKINFO) returned %d" % got)
-        return info.pti_threadnum
+        # PROC_PIDWORKQUEUEINFO (12): pwq_nthreads, pwq_runthreads, pwq_blockedthreads,
+        # pwq_state. It returns 0 bytes for a process that has no workqueue.
+        workqueue = (ctypes.c_uint32 * 4)()
+        got = proc_pidinfo(os.getpid(), 12, 0, ctypes.byref(workqueue), ctypes.sizeof(workqueue))
+        if got not in (0, ctypes.sizeof(workqueue)):
+            raise RuntimeError("proc_pidinfo(PROC_PIDWORKQUEUEINFO) returned %d" % got)
+        return info.pti_threadnum - (workqueue[0] if got else 0)
     import threading
 
     return threading.active_count()
@@ -184,7 +192,8 @@ class Zygote:
                 reply = struct.pack("<I", len(self.registry))
             elif msg.op == w.OP_FORK:
                 reply, pidfd = self._fork(handle, body, msg.fds)
-                reply_fds.append(pidfd)
+                if pidfd is not None:
+                    reply_fds.append(pidfd)
             elif msg.op == w.OP_SHUTDOWN:
                 self._stop_workers()
                 w.send_ok(self.ctl, msg.request_id)
@@ -352,6 +361,10 @@ class Zygote:
                 os._exit(1)
         w._close_all(fds)
         self.workers[pid] = context
+        if not sys.platform.startswith("linux"):
+            # macOS has no pidfd: the reply carries the pid alone, and the library signals
+            # the worker by its pid while its socket is open (docs/design/udf_python_worker.md 5.3).
+            return struct.pack("<I", pid), None
         try:
             # Opened before the worker can be reaped (this loop reaps), so it names this
             # process and no later one with its pid: the library signals the worker only

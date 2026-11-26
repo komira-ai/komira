@@ -24,8 +24,9 @@
  * Supervision (design section 5): the library learns of a worker's end from
  * end of file on its socket and names the end from the zygote's EXIT report,
  * which it waits for under zy_mu (udfpy_await_exit). It stops a worker by
- * force only through the worker's pidfd, grace_ms after it stored the call's
- * id in the cancel word.
+ * force only through the worker's pidfd (on macOS, which has none, by
+ * kill(pid) while the worker's socket is open and no EXIT report names it),
+ * grace_ms after it stored the call's id in the cancel word.
  */
 #ifndef UDFPY_H
 #define UDFPY_H
@@ -165,6 +166,11 @@ typedef struct udfpy_msg {
 int udfpy_send(int sock, uint32_t op, uint64_t request_id, uint32_t flags, uint64_t handle, int64_t deadline_left,
                int64_t call_id, const uint8_t* body, size_t body_len, const int* fds, int nfds);
 
+/* A stream socket pair, both ends close-on-exec (SOCK_CLOEXEC on linux; on
+ * macOS FD_CLOEXEC, and SO_NOSIGPIPE, since macOS has no MSG_NOSIGNAL). 0,
+ * or -1 with errno set and no descriptor left open. */
+int udfpy_socketpair(int sv[2]);
+
 /* One message, with up to UDFPY_MSG_FDS descriptors sent with it (more are
  * closed). 0; -1 at end of file or on an error; -2 when the header breaks the
  * framing (`why` set). On -1 and -2 nothing is left to free. */
@@ -263,7 +269,7 @@ struct komira_udf_context {
   uint32_t slot;
   uint32_t fork_seq;
   pid_t pid;
-  int pidfd; /* the worker's, from the FORK reply: the only way the library signals it */
+  int pidfd; /* the worker's, from the FORK reply: the only way the library signals it (-1 on macOS: no pidfd) */
   int sock;
   volatile int64_t* word; /* the cancel word, shared with the worker */
   uint64_t next_request;
