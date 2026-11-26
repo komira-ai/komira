@@ -6,7 +6,8 @@ written to the code root by `write_code`, and no engine sits between them.
 
     test_udf_plan_run.py --lib-dir <dir>
 
-`<dir>/libkomira_udf_python.so` is `//src/udf_python:komira_udf_python`.
+`<dir>/libkomira_udf_python.so` (`libkomira_udf_python.dylib` on macOS) is
+`//src/udf_python:komira_udf_python`.
 """
 
 import datetime

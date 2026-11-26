@@ -9,6 +9,12 @@ the driver exited 0, so a header that disagrees with the binary (a different
 version, a status code, an argument type that changes a call) goes red here and
 nowhere else.
 
+`driver` may also be a `mojo_binary` (one executable), for a check that needs
+no header and must run where no C program links: on macOS arm64 the C
+toolchain has no linker (cxx.bzl), and
+`//tools/build/examples/shared_lib_native:spike_native_dist_load` loads that
+library's `[dist]`, staged as a `data` directory, from a Mojo driver.
+
 The driver runs from a staged tree like a Mojo gate driver (test_runtime.bzl):
 the library is the one data file, at `share/<file>`, where the program's current
 directory is; each of `native_owners` (the library's own, as in its

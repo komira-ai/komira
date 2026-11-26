@@ -539,6 +539,24 @@ c_shared_lib(
     srcs = ["warns.c"],
 )
 
+# RED "target_os takes the triple from the target platform": analysis
+# refuses target_os with a zig_triple.
+c_shared_lib(
+    name = "target_os_with_triple",
+    srcs = ["warns.c"],
+    target_os = True,
+    zig_triple = "x86_64-linux-gnu.2.34",
+)
+
+# RED "out names the linux file and ends in .so": analysis refuses target_os
+# with an `out` that is not a `.so` name (on macOS its `.so` becomes `.dylib`).
+c_shared_lib(
+    name = "target_os_not_so",
+    srcs = ["warns.c"],
+    target_os = True,
+    out = "addon.node",
+)
+
 # ---- node_binding_test ------------------------------------------------------
 
 # RED "binding_test: node --test exited 1": a test of the file fails.

@@ -15,9 +15,8 @@ is running the test. `esbuild_bundle` bundles an entry module, its sibling
 sources and npm packages into one file with the pinned esbuild.
 `c_shared_lib` builds C sources into a shared library with the pinned zig:
 symbols it does not define (a Node-API addon's `napi_*`) stay undefined, and
-the program that loads it resolves them. It is an ELF library for linux x86_64
-by default, and with `target_os = True` a Mach-O one when the target platform
-is macOS.
+the program that loads it resolves them. It links for the linux x86_64 row,
+or with `target_os = True` for the target platform's OS (Mach-O on macOS).
 
 `node` runs with `LD_LIBRARY_PATH` naming the dist's `native_libs` (the C++
 runtime it links, from the pinned conda-forge packages) and an environment of
@@ -393,9 +392,40 @@ _esbuild_bundle = rule(
 
 # ---- c_shared_lib ------------------------------------------------------------
 
+_MACOS = "prelude//os/constraints:macos"
+
+def _macho(zig_triple):
+    return zig_triple.split("-")[1] == "macos"
+
+def _undefs(zig_triple, basename):
+    """The link flags that leave a symbol the sources do not define for the loading program: `-z undefs` for ELF; for Mach-O, `-undefined dynamic_lookup`, and an install name that holds no build path."""
+    if _macho(zig_triple):
+        return ["-Wl,-undefined,dynamic_lookup", "-Wl,-install_name,@rpath/" + basename]
+    return ["-Wl,-z,undefs"]
+
+def _triple_and_out(ctx):
+    """The zig triple and the output name. By default the linux x86_64 row's
+    triple (the glibc floor every link of that platform targets) and `out`.
+    With `target_os`, for the target platform's OS: on a macOS target the
+    darwin-arm64 row's triple (Mach-O, its macOS floor) and `out` with
+    `.dylib` for its `.so`; `out` must then be a `.so` name and `zig_triple`
+    is not given."""
+    where = ctx.label.raw_target()
+    out = ctx.attrs.out or "lib{}.so".format(ctx.label.name)
+    if not ctx.attrs.target_os:
+        return ctx.attrs.zig_triple or row("linux-x86_64")["zig_triple"], out
+    if ctx.attrs.zig_triple != None:
+        fail("{}: target_os takes the triple from the target platform; leave zig_triple out".format(where))
+    if not out.endswith(".so"):
+        fail("{}: with target_os, out names the linux file and ends in .so; it is {}".format(where, out))
+    if ctx.attrs._on_macos:
+        return row("darwin-arm64")["zig_triple"], out[:-len(".so")] + ".dylib"
+    return row("linux-x86_64")["zig_triple"], out
+
 def _c_shared_lib_impl(ctx):
     staged = ctx.actions.copied_dir(ctx.label.name + ".srcs", {s.short_path: s for s in ctx.attrs.srcs + ctx.attrs.headers})
-    out = ctx.actions.declare_output(ctx.attrs.out or "lib{}.so".format(ctx.label.name))
+    zig_triple, out_name = _triple_and_out(ctx)
+    out = ctx.actions.declare_output(out_name)
     args = [cmd_args(staged, format = "-I{}")]
     for d in ctx.attrs.include_dirs:
         args.append(cmd_args(_out(d), format = "-I{}"))
@@ -403,10 +433,6 @@ def _c_shared_lib_impl(ctx):
     for s in ctx.attrs.srcs:
         args.append(staged.project(s.short_path))
 
-    # `-z undefs` is an ELF linker flag: a Mach-O library (a triple of the
-    # `macos` OS, `aarch64-macos.11.0`) is linked without it, and a symbol it
-    # does not define and libSystem does not either is a link error.
-    undefs = [] if ctx.attrs.zig_triple.split(".")[0].endswith("-macos") else ["-Wl,-z,undefs"]
     # zig_launch (no shell) gives zig a scratch directory for its caches and
     # HOME, and the busybox applets as PATH.
     ctx.actions.run(
@@ -420,14 +446,14 @@ def _c_shared_lib_impl(ctx):
             "--",
             "cc",
             "-target",
-            ctx.attrs.zig_triple,
+            zig_triple,
             "-shared",
             "-fPIC",
             "-O2",
             "-fvisibility=hidden",
             "-Wall",
             "-Werror",
-            undefs,
+            _undefs(zig_triple, out.basename),
             "-o",
             out.as_output(),
             args,
@@ -438,14 +464,16 @@ def _c_shared_lib_impl(ctx):
 
 _c_shared_lib = rule(
     impl = _c_shared_lib_impl,
-    doc = "C `srcs` compiled and linked by the pinned zig (`zig cc -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror`) for `zig_triple` into one shared library (`out`, default `lib<name>.so`). For an ELF triple, symbols it does not define stay undefined (`-z undefs`) for the loading program to resolve; for a macOS triple (`target_os`) the link has no such flag and leaves none undefined. Only symbols marked with default visibility are exported. `headers` are staged with the sources (`-I` their directory); each of `include_dirs` (a directory output) is an `-I`.",
+    doc = "C `srcs` compiled and linked by the pinned zig (`zig cc -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror`) for `zig_triple` (default the linux x86_64 row's) into one shared library (`out`, default `lib<name>.so`). With `target_os`, for the target platform's OS instead: on a macOS target the darwin-arm64 row's triple and `out` with `.dylib` for its `.so`; analysis refuses `target_os` with a `zig_triple`, or with an `out` that is not a `.so` name. Symbols it does not define stay undefined (`-z undefs`; for a macOS triple `-undefined dynamic_lookup`, with the install name `@rpath/<out>`) for the loading program to resolve; only symbols marked with default visibility are exported. `headers` are staged with the sources (`-I` their directory); each of `include_dirs` (a directory output) is an `-I`.",
     attrs = {
         "copts": attrs.list(attrs.string(), default = []),
         "headers": attrs.list(attrs.source(), default = []),
         "include_dirs": attrs.list(attrs.dep(), default = []),
         "out": attrs.option(attrs.string(), default = None),
         "srcs": attrs.list(attrs.source()),
-        "zig_triple": attrs.string(),
+        "target_os": attrs.bool(default = False),
+        "zig_triple": attrs.option(attrs.string(), default = None),
+        "_on_macos": attrs.bool(default = select({_MACOS: True, "DEFAULT": False})),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_zig": attrs.exec_dep(default = "komira//tools/build/toolchains:zig"),
         "_zig_launch": attrs.exec_dep(default = "komira//tools/build/mojo:zig_launch", providers = [RunInfo]),
@@ -473,21 +501,8 @@ def _bundle_macro(**kwargs):
     _esbuild_bundle(**_linux(kwargs))
 
 def _shared_macro(**kwargs):
-    # By default the linux x86_64 row's triple: the glibc floor every link of
-    # that platform targets, in every configuration (a linux `node` loads the
-    # library whatever the target platform). With `target_os = True` the triple
-    # is that of the target platform's OS instead: the macOS row's for a
-    # darwin-arm64 target, so the library is a Mach-O file there. The action
-    # still runs on linux; zig links for macOS from it.
-    target_os = kwargs.pop("target_os", False)
-    if "zig_triple" not in kwargs:
-        if target_os:
-            kwargs["zig_triple"] = select({
-                "prelude//os/constraints:macos": row("darwin-arm64")["zig_triple"],
-                "DEFAULT": row("linux-x86_64")["zig_triple"],
-            })
-        else:
-            kwargs["zig_triple"] = row("linux-x86_64")["zig_triple"]
+    # The triple and the output name are chosen at analysis (_triple_and_out),
+    # so a target_os refusal names its own target only.
     _c_shared_lib(**_linux(kwargs))
 
 def _addon_macro(**kwargs):

@@ -1,10 +1,12 @@
 load("@komira//tools/build/node:defs.bzl", "c_shared_lib")
 
 # komira/python: the UDF runtime library of Python UDFs
-# (docs/design/udf_python_worker.md). C99 and POSIX, linux only in this build.
-# It exports komira_udf_runtime_init_v1 and nothing else.
+# (docs/design/udf_python_worker.md). C11 and POSIX, for the target platform's
+# OS: libkomira_udf_python.so (ELF) on linux, libkomira_udf_python.dylib
+# (Mach-O) on macOS. It exports komira_udf_runtime_init_v1 and nothing else.
 c_shared_lib(
     name = "komira_udf_python",
+    target_os = True,
     srcs = [
         "descriptor.c",
         "ipc.c",

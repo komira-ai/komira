@@ -575,12 +575,14 @@ images, the Rust toolchain, kcov and the ELF checks of `libkomira`. Each is now 
 limit (`tools/build/platforms/limits.tsv`), and what should build on macOS (the C shim and shared
 library examples, `node`'s tests) is fixed. With the fixes it builds 1385, skips 445 and stops on 12
 (`Commands: 1897 (cached: 1776, remote: 121, local: 0)`). `//tools/build/examples:hello` builds a
-Mach-O `hello`. The 12, each a port with its issue:
+Mach-O `hello`. The 12, each a port with its issue, are both fixed on main since that measurement
+(by komira-ai/komira#2299 and komira-ai/komira#2298; inferred from those pull requests, not re-measured
+by this sweep):
 
 | Cause | Targets | Issue |
 | --- | --- | --- |
-| the Python UDF runtime library (`//src/udf_python:komira_udf_python`) is ELF whatever the target, and signals its workers through pidfds and a `memfd_create` cancel word, which macOS does not have | 11 (`//python/tests:udf_*_test`) | komira-ai/komira#2288 |
-| `mojo_shared_lib` refuses `native_owners` for darwin-arm64 at analysis, by name: it neither links nor stages an owner's Mach-O library yet | 1 (`//tools/build/examples/shared_lib_native:spike_native`) | komira-ai/komira#2289 |
+| the Python UDF runtime library (`//src/udf_python:komira_udf_python`) was ELF whatever the target, and signalled its workers through pidfds and a `memfd_create` cancel word, which macOS does not have. Fixed: it builds as Mach-O on macOS (`c_shared_lib`'s `target_os`) and signals its workers without either | 11 (`//python/tests:udf_*_test`) | komira-ai/komira#2288 |
+| `mojo_shared_lib` refused `native_owners` for darwin-arm64 at analysis, by name: it neither linked nor staged an owner's Mach-O library. Fixed: it links each owner by its install name and stages it in `lib/` | 1 (`//tools/build/examples/shared_lib_native:spike_native`) | komira-ai/komira#2289 |
 
 Fixed by the sweeps before this one: tests that assumed Linux's `PATH_MAX`, a `SIGPIPE` that macOS
 raises for the whole process, BSD `yes`, the epoll backend, the `libc.so.6` name, a temporary-file
@@ -671,7 +673,8 @@ then-current `main`. Nothing is half-done, because the replaced run never starte
 
 kci, the build and deploy CLI the repository once had, was retired and removed: no workflow runs it.
 The `kci_*` libraries are not release members: `release/artifacts.textproto` and the release set list none and their
-source is deleted. Their names stay claimed on the prod registry (`release/prod_claimed_names.txt`).
+source is deleted. Their names stay reserved on the prod registry (`release/prod_claimed_names.txt`) as global
+(flat) names: the prune of the flat names kept them, and prod has no `komira-ai/kci_*` package.
 
 ### The mopm jobs
 
@@ -762,7 +765,7 @@ release/prod_claimed_names.txt: claim it on the prod registry first, then add it
 A maintainer adds a name to the file only after claiming it on the prod registry, in the pull request that adds the
 member or ahead of it: names claimed for libraries not published yet (each with its row in `release/UNPUBLISHED.md`)
 are listed too, and the check accepts a name no member has. The file keeps the names of deleted packages (the
-`kci_*` libraries), whose names stay claimed, and refuses the dropping of one of them, an unsorted or repeated line, and an empty file. It is a
+`kci_*` libraries), whose names stay reserved as flat names, and refuses the dropping of one of them, an unsorted or repeated line, and an empty file. It is a
 committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
 last word.
 
