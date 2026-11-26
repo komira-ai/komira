@@ -42,14 +42,15 @@ continuous_publish.md both use that name; `kci.yml` runs it since the staged pip
   [tools/build/mojo/defs.bzl](../../tools/build/mojo/defs.bzl): "links native code"). Every cloud SDK
   package is in the list, and so are eleven `kci_*` libraries, `kci_cli` among them
   (`kci_release_set` computes the set hash with `crypto`'s SHA-256).
-- **Two more open a system library at run time** and link no native code: `lz4`
-  (`liblz4.so.1`, `src/lz4/codec.mojo`) and `zlib` (`libz.so.1`,
-  `src/zlib/zlib_ffi.mojo`) (#1188). Before slice 3 the packer refused them when it read the
+- **One more opens a system library at run time** and links no native code: `zlib` (`libz.so.1`,
+  `src/zlib/zlib_ffi.mojo`) (#1188). Before slice 3 the packer refused it when it read the
   sources ("opens a shared library at run time (OwnedDLHandle); its conda package must depend on the
-  package shipping that library, which this tool does not derive yet"); slice 3 declares their sonames,
-  and their packages now build, requiring `lz4-c` and `libzlib`, but neither is released.
-  `compression` opens zstd, bz2 and lzma the same way
-  (`src/compression/src/compression/codec_libraries.mojo`) and also links snappy, so it is in both lists.
+  package shipping that library, which this tool does not derive yet"); slice 3 declares its soname,
+  and its package now builds, requiring `libzlib`, but it is not released.
+  `compression` opens bz2 and lzma the same way
+  (`src/compression/src/compression/codec_libraries.mojo`) and also links snappy and zstd, so it is in
+  both lists. `lz4` opened liblz4 this way too; it now links lz4 1.10.0 statically
+  (`//third_party/lz4`, prefixed `komira_lz4_`) and opens nothing.
 - The released set today is its member libraries plus the metapackage `komira_all`
   (`release/artifacts.textproto`, held equal to `tools/build/package/release_set.txt`), none with
   native code (no member's directory holds a C or C++ source or opens a library at run time).
@@ -82,7 +83,7 @@ continuous_publish.md both use that name; `kci.yml` runs it since the staged pip
 | glibc floor | **EXISTS:** `os_floor` `glibc-2.34` in `tools/build/platforms/table.bzl` (rows `linux-x86_64` and `linux-arm64`; read by `os_floor_version`), the floor zig links against (`zig_triple` `x86_64-linux-gnu.2.34`, `aarch64-linux-gnu.2.34`). The packer writes only the platform guard `__linux` (`guardFor` in `tools/build/package/pack/conda.zig`), no `__glibc` requirement | the packer writes `__glibc >=2.34` from that cell on each library with C (slice 8); per-library check 5 reads the same cell; kci accepts it (**EXISTS** since #1391, slice 9: `src/kci_release_set/glibc_floor.mojo`). No second floor |
 | conda metadata kinds | **EXISTS:** `library` and `metapackage` only (`src/kci_release_set/conda_metadata.mojo`); kci reads `lib_files` on a `library` since #1391 (slice 9, the reader side) | no new kind. The packer writes `lib_files`, `native_owns`, `native_links`, `dlopen` fields on `library` (slices 3, 8) |
 | kind `native`, `native_link_args` | on #695 and #704 only, both closed unmerged (`lib_files` on `library` is on `main`, above) | `lib_files` survives on `library`; the kind goes |
-| dlopen declarations | **EXISTS:** `mojo_library(dlopen = ...)` (`tools/build/mojo/dlopen.bzl`), the map `tools/build/package/system_libs.bzl`, the packer writing each declared requirement and `dlopen` and refusing sources that open an undeclared soname (`tools/build/package/pack/conda_dlopen.zig`), and kci's acceptance of exactly the map's requirements (`src/kci_release_set/system_libs.mojo`, `closure.mojo`); `lz4` and `zlib` declare their sonames | slice 3 (done); releasing the two is slice 4 |
+| dlopen declarations | **EXISTS:** `mojo_library(dlopen = ...)` (`tools/build/mojo/dlopen.bzl`), the map `tools/build/package/system_libs.bzl`, the packer writing each declared requirement and `dlopen` and refusing sources that open an undeclared soname (`tools/build/package/pack/conda_dlopen.zig`), and kci's acceptance of exactly the map's requirements (`src/kci_release_set/system_libs.mojo`, `closure.mojo`); `zlib` and `compression` declare their sonames (`lz4` declared liblz4's until it linked lz4 statically) | slice 3 (done); releasing them is slice 4 |
 | beta stage, `beta_validate` | **EXISTS** since the switch M2 (#1296): `kci.yml` runs `build → beta → beta_validate → prod` (`gamma` and `validate` before M2); the rest of staged_pipeline.md (merged, with its glossary from #1184) is design only | native install checks run only in `beta_validate` (section "Built once"); gamma runs none |
 
 ## What each library ships
@@ -99,7 +100,8 @@ thread-local storage (async, http_core); async_api, metrics and scan_source had 
 | crypto | aws-lc, prefixed `komira_awslc_`; `komira_crypto_sha256_hw` (the SHA-NI wrapper) | `libkomira_crypto_native.so.1`; and, as a mopm package, `libkomira_crypto_sha256_hw.a` (the wrapper), with aws-lc as the archive of `awslc` | glibc |
 | awslc | aws-lc 1.39.0 as a `native_library` (buildrules), every symbol prefixed `komira_awslc_`; the one aws-lc archive of `crypto` and `uuid` | `libawslc.a` (mopm package, static) | none |
 | http_core | s2n-tls, prefixed `komira_s2n_`, built against the prefixed aws-lc | `libkomira_http_core_native.so.1` | `libkomira_crypto_native.so.1` |
-| compression | snappy 1.3.1 (C API prefixed `komira_snappy_`); in the shared library its C++ runtime is static and local; as a mopm package snappy is the `native_library` `//third_party/snappy:snappy_native`, declared `link = ["c++"]` so every consumer's link ends with `-lc++` | `libkomira_compression_native.so.1`; and, as a mopm package, `libsnappy.a` (static) | glibc; opens system codecs (below) |
+| compression | snappy 1.3.1 (C API prefixed `komira_snappy_`) and zstd 1.5.7 (every symbol prefixed `komira_zstd_`); in the shared library snappy's C++ runtime is static and local; as a mopm package snappy and zstd are the `native_library` targets `//third_party/snappy:snappy_native` (declared `link = ["c++"]` so every consumer's link ends with `-lc++`) and `//third_party/zstd:zstd_native` | `libkomira_compression_native.so.1`; and, as a mopm package, `libsnappy.a` and `libkomira_zstd.a` (static) | glibc; opens libbz2 and liblzma (below) |
+| lz4 | lz4 1.10.0 (every symbol prefixed `komira_lz4_`), the `native_library` `//third_party/lz4:lz4_native` | `libkomira_lz4.a` (static, `native_static`: no shared library of its own) | none |
 | libc / async_rt / async_api / fs | `komira_libc_posix` / `komira_async_posix` / `komira_concurrency_pool_depth` / `komira_fs_posix` | `libkomira_<lib>_native.so.1` | glibc |
 | objectstore / metrics / scan_source / supervisor | `komira_objectstore_posix` / `komira_metrics_ea_flag` / `komira_scan_source_inmem_id` / `komira_supervisor_proc` | `libkomira_<lib>_native.so.1` | glibc |
 | log | `komira_log_holder` (per-library state) | `libkomira_log_holder.a`; with question 2 (A) also `libkomira_log_holder_jit.so.1` and its link name `libkomira_log_holder_jit.so` | none |

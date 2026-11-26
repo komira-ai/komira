@@ -265,7 +265,7 @@ def check_compressed_parquet(s):
         )
 
     out = os.path.join(os.getcwd(), "copied_zstd.parquet")
-    # A Result is read lazily: reading it runs the COPY.
+    # sql runs the COPY; to_arrow reads its answer.
     s.sql("COPY (SELECT id, word FROM zstd_rows WHERE id < 500) TO '{}' (FORMAT parquet, COMPRESSION zstd)".format(out)).to_arrow()
     meta = pq.ParquetFile(out).metadata
     codecs = sorted({meta.row_group(g).column(c).compression for g in range(meta.num_row_groups) for c in range(meta.num_columns)})

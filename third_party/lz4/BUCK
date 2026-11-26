@@ -27,10 +27,11 @@ _SRCS = [
     "lib/xxhash.c",
 ]
 
-# The headers the sources include; lz4hc.c also includes lz4.c itself (with
-# LZ4_COMMONDEFS_ONLY, for its constants and helpers).
+# The headers the sources include. lz4hc.c also includes lz4.c itself (with
+# LZ4_COMMONDEFS_ONLY, for its constants and helpers), so the older compile
+# below takes lz4.c as a header too; it is in the archive's files once, as a
+# source.
 _PRIVATE_HEADERS = [
-    "lib/lz4.c",
     "lib/lz4.h",
     "lib/lz4frame.h",
     "lib/lz4frame_static.h",
@@ -54,7 +55,7 @@ archive_files(
 # (one_tree, raw_headers).
 _LZ4 = dict(
     srcs = [":src[{}]".format(s) for s in _SRCS],
-    raw_headers = [":src[{}]".format(h) for h in _PRIVATE_HEADERS],
+    raw_headers = [":src[{}]".format(h) for h in _PRIVATE_HEADERS + ["lib/lz4.c"]],
     compiler_flags = [
         "-O2",
         "-DNDEBUG",
