@@ -400,8 +400,8 @@ What the rule fixes, so no BUCK file states it:
   from the same inputs staged at another path (`[twin]`), and the check refuses
   the wheel unless the two are the same bytes.
 
-The library checks ([`wheel/policy.zig`](wheel/policy.zig)) read every ELF
-member ([`wheel/elf.zig`](wheel/elf.zig), through its program headers, so a
+The library checks ([`native_policy/policy.zig`](native_policy/policy.zig)) read every ELF
+member ([`native_policy/elf.zig`](native_policy/elf.zig), through its program headers, so a
 stripped library reads the same). A refusal names its check:
 
 - `glibc`: the highest `GLIBC_` version it needs is at most the tag's glibc
@@ -420,7 +420,7 @@ stripped library reads the same). A refusal names its check:
 - `size`: no member over 90 MB (90,000,000 bytes; PyPI takes 100 MB a file).
 
 The same checks read every Mach-O member of a macosx wheel
-([`wheel/macho.zig`](wheel/macho.zig), through its load commands; thin arm64
+([`native_policy/macho.zig`](native_policy/macho.zig), through its load commands; thin arm64
 files only, a universal file is refused), with the manylinux ones above left
 out. For a macOS wheel `max_glibcxx` and `max_cxxabi` have nothing to bound and
 `os_floor` is the macOS the tag promises:
@@ -440,7 +440,7 @@ out. For a macOS wheel `max_glibcxx` and `max_cxxabi` have nothing to bound and
   absolute path under `/usr/lib/` or `/System/Library/`. Any other absolute
   path, `@executable_path` and an `@rpath` name nobody provides are refused;
 - `signature`: the member has a code signature (`LC_CODE_SIGNATURE`) that
-  matches it, as `codesign --verify` checks one ([`wheel/codesign.zig`](wheel/codesign.zig)):
+  matches it, as `codesign --verify` checks one ([`native_policy/codesign.zig`](native_policy/codesign.zig)):
   every CodeDirectory covers the file up to the signature, its hash type is
   SHA-1, SHA-256 or SHA-384, every page hashes to its slot, every special slot
   naming a blob of the signature (requirements, entitlements) holds that blob's
@@ -524,12 +524,16 @@ conda.bzl's test stamp (and its default output waits for `[release]` too).
 number `<N>` (version `0.1.<N>`) and the same test commit and commit time, for a
 build that needs wheels of two versions of one package, such as an upgrade test.
 
-The tests: the Zig scenarios `:wheel_zip_unit`, `:wheel_elf_unit`,
-`:wheel_macho_unit`, `:wheel_codesign_unit`, `:wheel_policy_unit`,
-`:wheel_build_unit`, `:wheel_check_unit`, `:wheel_cli_unit`,
-`:wheel_libs_unit` and `:wheel_compare_unit` in
-[`BUCK`](BUCK), on synthetic files and ELF libraries
-([`wheel/testing.zig`](wheel/testing.zig)). The rule on fixtures: `:wheel_fixture`
+The tests: the Zig scenarios `:wheel_zip_unit`, `:wheel_build_unit`,
+`:wheel_check_unit`, `:wheel_cli_unit`, `:wheel_libs_unit` and
+`:wheel_compare_unit` in [`BUCK`](BUCK), on synthetic files
+([`wheel/testing.zig`](wheel/testing.zig)), and those of the native policy
+module `:native_policy` the tool imports (the library checks and the ELF,
+Mach-O and code signature readers, in
+[`native_policy/`](native_policy/native_policy.zig)): `:native_elf_unit`,
+`:native_macho_unit`, `:native_codesign_unit` and `:native_policy_unit`, on
+synthetic ELF and Mach-O libraries
+([`native_policy/testing.zig`](native_policy/testing.zig)). The rule on fixtures: `:wheel_fixture`
 (a linux-x86_64 wheel holding the example Mojo shared library `plain`, with the
 Mojo runtime as `external_needed`), `:wheel_fixture_aarch64_tag` and
 `:wheel_fixture_macosx_tag` (the linux-arm64 and darwin-arm64 rows' tags; built on
