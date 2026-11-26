@@ -47,7 +47,7 @@ Fixed before this design, and not reopened here:
 
 ### The addon
 
-- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (904 lines) is a Node-API addon in C, with
+- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (998 lines) is a Node-API addon in C, with
   its Arrow import in [node/arrow_import.c](../../node/arrow_import.c).
   - It defines `NAPI_VERSION 8` and uses `NAPI_MODULE_INIT`, so it is context-aware. Its function
     table is process-wide, and a worker thread shares it (the comment at the table). `:thread_test`
@@ -57,7 +57,10 @@ Fixed before this design, and not reopened here:
     `importArrowStream`, `arrowSchema`, `arrowNextBatch` and `arrowClose` (below).
 - **How it binds libkomira.** `load(path)` opens the library with `dlopen(RTLD_NOW | RTLD_LOCAL)`
   and requires `komira_abi_version()` major 1. It then resolves seven symbols by name, and a
-  missing one is named in a `KOMIRA_MISSING_SYMBOL` error.
+  missing one is named in a `KOMIRA_MISSING_SYMBOL` error. It also resolves
+  `komira_ctx_new_with_options` (1.4), `komira_last_error_code` and `komira_last_error_step`
+  (1.7): each is required when the library's minor includes it and may be missing from an older
+  library, where options are refused naming both versions and a refusal has no code or step.
   - The library is never `dlclose`d, because the Mojo runtime cannot be unloaded.
   - There is one library per process: loading the same path again does nothing, and loading
     another path is refused.
@@ -76,10 +79,13 @@ Fixed before this design, and not reopened here:
     A pending call holds its session, so the finalizer never runs under a call, and it joins the
     thread before it frees the context.
 - **Errors.** A non-zero status rejects with an `Error` that carries `status`, `code` (the
-  `KOMIRA_ERR_*` name) and `lastError` (read with the two-call protocol). Misuse of the addon
+  `KOMIRA_ERR_*` name), `lastError` (read with the two-call protocol), `lastErrorCode` and
+  `lastErrorStep` (the last error's named code and `KOMIRA_STEP_*` number). `node/src/native.ts`
+  turns it into a `KomiraError` whose `code` and `step` are the engine's, with the class the error
+  table gives the code. Misuse of the addon
   throws an error with a `code` and no `status`: `KOMIRA_ARG`, `KOMIRA_NOT_LOADED`,
-  `KOMIRA_SESSION_FREED`, `KOMIRA_LOAD_FAILED`, `KOMIRA_ABI_MISMATCH`, `KOMIRA_MISSING_SYMBOL` and
-  `KOMIRA_LOADED`.
+  `KOMIRA_SESSION_FREED`, `KOMIRA_LOAD_FAILED`, `KOMIRA_ABI_MISMATCH`, `KOMIRA_MISSING_SYMBOL`,
+  `KOMIRA_LOADED`, and from `newSession` `KOMIRA_ABI_TOO_OLD` and `KOMIRA_CTX_REFUSED`.
 - **Calls it does not bind.** `komira_csv_binding` and `komira_json_binding` have no function in
   the addon. Nothing in it runs a query.
 - **EXISTS** The Arrow import of [Arrow: from the C stream to
@@ -172,7 +178,7 @@ Fixed before this design, and not reopened here:
   - `komira_register_csv` and `komira_register_json` (1.5) bind a CSV or newline-delimited JSON
     file to the session as a table that SQL reads by name.
   - `komira_last_error_code` and `komira_last_error_step` (1.7) answer the last error's named code and
-    the step that refused it. The addon does not bind them yet.
+    the step that refused it. The addon binds them, and `KomiraError` carries them.
   - `komira_register_arrow_stream` (1.9) drains a host's Arrow C stream into a table held in
     memory and registers it by name, replacing a table of that name; it releases the stream.
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
@@ -208,7 +214,7 @@ The package exports these names and nothing else. The test `exports_test` holds 
 
 | name | what it is |
 |---|---|
-| `new Session(options?)` | one engine context (`komira_ctx_new`) and its tables. The options are `{ threads?: number, memoryLimit?: number }`, both settable once the addon binds `komira_ctx_new_with_options` (ABI 1.4), which takes them as arguments; the addon does not bind it yet. A later option, `caFile?: string`, adds trusted roots for `https://` reads, as Python's `ca_file=` ([credentials_and_writes.md](credentials_and_writes.md) decision 9). `memoryLimit` is in bytes, and an omitted option takes the engine's default. Options are arguments, never environment variables (rule S2) |
+| `new Session(options?)` | one engine context (`komira_ctx_new`) and its tables. The options are `{ threads?: number, memoryLimit?: number }`, passed to `komira_ctx_new_with_options` (ABI 1.4), which takes them as arguments; with neither, the session is `komira_ctx_new`'s. A later option, `caFile?: string`, adds trusted roots for `https://` reads, as Python's `ca_file=` ([credentials_and_writes.md](credentials_and_writes.md) decision 9). `memoryLimit` is in bytes, and an omitted option takes the engine's default. Options are arguments, never environment variables (rule S2) |
 | `session.registerParquet(name, path): Promise<void>` | `komira_register_parquet`. `path` is a `string` or a `file:` `URL`. A relative path resolves against the working directory when the call is made, as Node's `fs` does, and `~` is not expanded. Registering a name again replaces it |
 | `session.registerCsv(name, path, options?)`, `session.registerNdjson(name, path)` | CSV and newline-delimited JSON. They arrive with libkomira calls that register those formats by name. No design has those calls yet: [libkomira_run_abi.md](libkomira_run_abi.md) §7 says only "the later source calls", and today's `komira_csv_binding` and `komira_json_binding` return bindings, not registrations. The CSV options are the ones `komira_csv_binding` takes: `{ delimiter?: string, header?: boolean, allVarchar?: boolean }` |
 | `session.sql(query): Promise<Result>` | runs one SQL statement through `komira_sql_stream`. **The official door of the first release**. A later second argument, `sql(query, bindings?)`, binds sources for one statement ([credentials_and_writes.md](credentials_and_writes.md) decision 12) |
