@@ -15,20 +15,22 @@ Path("sales.csv").write_text(
 )
 
 # SQL: date_trunc cuts each date down to the start of its day, week (Monday) or month.
+# komira cannot sort by a date column yet, so the few buckets are sorted in Python.
 with komira.Session() as s:
     s.register_csv("sales", "sales.csv")
     for unit in ("day", "week", "month"):
         rows = s.sql(
             "SELECT bucket, sum(amount) AS total, count(*) AS n FROM ("
             f"SELECT date_trunc('{unit}', sold_on) AS bucket, amount FROM sales"
-            ") AS b GROUP BY bucket ORDER BY bucket"
+            ") AS b GROUP BY bucket"
         )
-        print(unit, rows.to_arrow().to_pylist())
+        print(unit, sorted(rows.to_arrow().to_pylist(), key=lambda r: r["bucket"]))
 
-# pandas-shaped: group by the date for days, or by its year and month for months.
+# pandas-shaped: group by the date for days (sort=False, as the date is no sort
+# key yet), or by its year and month for months.
 df = komira.read_csv("sales.csv")
-daily = df.groupby("sold_on").agg(total=("amount", "sum"))
-print(daily.materialize().to_arrow().to_pylist())
+daily = df.groupby("sold_on", sort=False).agg(total=("amount", "sum"))
+print(sorted(daily.materialize().to_arrow().to_pylist(), key=lambda r: r["sold_on"]))
 
 df = df.assign(year=df["sold_on"].dt.year, month=df["sold_on"].dt.month)
 monthly = df.groupby(["year", "month"]).agg(total=("amount", "sum"), n=("amount", "size"))

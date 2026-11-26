@@ -21,20 +21,22 @@ Path("sales.csv").write_text(
 )
 
 # SQL: date_trunc cuts each date down to the start of its day, week (Monday) or month.
+# komira cannot sort by a date column yet, so the few buckets are sorted in Python.
 with komira.Session() as s:
     s.register_csv("sales", "sales.csv")
     for unit in ("day", "week", "month"):
         rows = s.sql(
             "SELECT bucket, sum(amount) AS total, count(*) AS n FROM ("
             f"SELECT date_trunc('{unit}', sold_on) AS bucket, amount FROM sales"
-            ") AS b GROUP BY bucket ORDER BY bucket"
+            ") AS b GROUP BY bucket"
         )
-        print(unit, rows.to_arrow().to_pylist())
+        print(unit, sorted(rows.to_arrow().to_pylist(), key=lambda r: r["bucket"]))
 
-# pandas-shaped: group by the date for days, or by its year and month for months.
+# pandas-shaped: group by the date for days (sort=False, as the date is no sort
+# key yet), or by its year and month for months.
 df = komira.read_csv("sales.csv")
-daily = df.groupby("sold_on").agg(total=("amount", "sum"))
-print(daily.materialize().to_arrow().to_pylist())
+daily = df.groupby("sold_on", sort=False).agg(total=("amount", "sum"))
+print(sorted(daily.materialize().to_arrow().to_pylist(), key=lambda r: r["sold_on"]))
 
 df = df.assign(year=df["sold_on"].dt.year, month=df["sold_on"].dt.month)
 monthly = df.groupby(["year", "month"]).agg(total=("amount", "sum"), n=("amount", "size"))
@@ -55,6 +57,7 @@ month [{'bucket': datetime.date(2026, 10, 1), 'total': 55.0, 'n': 6}, {'bucket':
 ## Notes
 
 - `date_trunc('week', ...)` starts the week on Monday: 2026-10-01 and 2026-10-02 fall in the week of 2026-09-28. The other units are `'day'`, `'month'`, `'quarter'` and `'year'`.
+- Sorting by a date column fails today (`ORDER BY bucket`, or `groupby` on a date with its default `sort=True`): komira-ai/komira#2408. Until it is fixed, sort the answer in Python, as the example does, or group by integer parts such as `.dt.year` and `.dt.month`, which sort.
 - A bucket with no rows has no row in the answer: komira does not fill gaps, so a day, week or month without sales is missing rather than 0.
 - The CSV reader infers a date column (`YYYY-MM-DD`) as a date, and `date_trunc` of a date gives a date (DuckDB widens the date and gives a timestamp; the day it names is the same). For a timestamp column (from Parquet, say), `date_trunc` gives a timestamp, and `.dt.floor("D")` on the pandas-shaped frame cuts it to the day, or to `"h"`, `"min"` or `"s"`.
 - The pandas-shaped frame has no `resample`: `df.resample(...)` raises `AttributeError`, since a komira frame has no time index, and `.dt.floor` takes no week or month. Group by the date for days, or by `.dt.year` and `.dt.month` for months; for weeks, use the SQL form. `probe_pandas_resample.py` beside this page tries `df.resample("MS", on=...)` and must fail with the line in `probe_pandas_resample.error.txt`; komira-ai/komira#2392 tracks the frame forms. The day it runs, this page's check goes red, and the page and the catalogue status change with it.

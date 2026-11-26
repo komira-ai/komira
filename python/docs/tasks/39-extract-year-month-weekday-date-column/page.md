@@ -21,7 +21,7 @@ with komira.Session() as s:
     s.register_csv("days", "days.csv")
     parts = s.sql(
         "SELECT d, year(d) AS yr, month(d) AS mon, isodow(d) AS dow"
-        " FROM days ORDER BY d"
+        " FROM days ORDER BY id"
     )
     print(parts.to_arrow().to_pylist())
 
@@ -31,8 +31,8 @@ parts = df.assign(
     year=df["d"].dt.year,
     month=df["d"].dt.month,
     weekday=df["d"].dt.weekday,
-)[["d", "year", "month", "weekday"]]
-print(parts.sort_values("d").materialize().to_arrow().to_pylist())
+).sort_values("id")[["d", "year", "month", "weekday"]]
+print(parts.materialize().to_arrow().to_pylist())
 
 # The parts are ordinary columns: here, the rows that fall on a weekend.
 weekend = df[df["d"].dt.weekday >= 5][["id"]]
@@ -53,6 +53,7 @@ Output:
 - A CSV column whose every value is `YYYY-MM-DD` is read as a date, so no conversion is needed first.
 - The weekday number depends on the spelling: SQL `isodow` counts Monday as 1 and Sunday as 7, while `.dt.weekday` (also `.dt.dayofweek`) counts Monday as 0, as pandas does. SQL `dayofweek` counts Sunday as 0.
 - `.dt` also has `quarter`, `day` and `dayofyear`, and for a timestamp column `hour`, `minute` and `second`. Every part is an int64 column.
+- The example sorts by `id`, not by the date: sorting by a date column (`ORDER BY d`, `sort_values("d")`) fails today, komira-ai/komira#2408.
 - The weekday as a name (`Monday`) is not available yet: `.dt.day_name()` and `.dt.month_name()` are refused, and so are SQL `dayname()` and `monthname()`. `probe_day_name.py` beside this page tries `.dt.day_name()` and must fail with the line in `probe_day_name.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it. komira-ai/komira#2393 tracks it. Until then, map the number to a name in Python.
 
 ## Related
