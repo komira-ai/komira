@@ -533,6 +533,85 @@ class Expr:
         """The sample variance (`ddof=1`)."""
         return self._statistic("var", ddof)
 
+    # ---- windows (komira/pl/_window.py) ---------------------------------------------
+
+    def over(
+        self,
+        partition_by=None,
+        *more_exprs,
+        order_by=None,
+        descending: bool = False,
+        nulls_last: bool = False,
+        mapping_strategy: str = "group_to_rows",
+    ) -> Expr:
+        """This expression computed per partition of the columns
+        `partition_by`: an aggregate is broadcast over its partition's rows.
+        `order_by` (with `descending` and `nulls_last`) is the order the
+        `cum_*` and `rolling_*` windows inside read rows in."""
+        from . import _window
+
+        return _window.over(self, partition_by, more_exprs, order_by, descending, nulls_last, mapping_strategy)
+
+    def rank(self, method: str = "average", *, descending: bool = False, seed: object = None) -> Expr:
+        """The rank of each value among the frame's (or, inside `over`, its
+        partition's): `"average"`, `"min"`, `"max"` or `"dense"`. A null
+        ranks null. An Int64 (polars: UInt32), a Float64 for `"average"`."""
+        from . import _window
+
+        return _window.rank(self, method, descending, seed)
+
+    def cum_sum(self, *, reverse: bool = False) -> Expr:
+        """The running sum in the frame's order (or `over(order_by=...)`),
+        null where the value is null."""
+        from . import _window
+
+        return _window.cumulative(self, "sum", reverse)
+
+    def cum_count(self, *, reverse: bool = False) -> Expr:
+        """The running count of values that are not null, an Int64 (polars:
+        UInt32)."""
+        from . import _window
+
+        return _window.cumulative(self, "count", reverse)
+
+    def cum_min(self, *, reverse: bool = False) -> Expr:
+        """The running minimum, null where the value is null."""
+        from . import _window
+
+        return _window.cumulative(self, "min", reverse)
+
+    def cum_max(self, *, reverse: bool = False) -> Expr:
+        """The running maximum, null where the value is null."""
+        from . import _window
+
+        return _window.cumulative(self, "max", reverse)
+
+    def rolling_sum(self, window_size: int, weights=None, *, min_samples: int | None = None, center: bool = False) -> Expr:
+        """The sum of the `window_size` rows up to this one, in the frame's
+        order (or `over(order_by=...)`); null where fewer than `min_samples`
+        of them (`window_size` when None) are not null."""
+        from . import _window
+
+        return _window.rolling(self, "sum", window_size, weights, min_samples, center)
+
+    def rolling_mean(self, window_size: int, weights=None, *, min_samples: int | None = None, center: bool = False) -> Expr:
+        """The mean of the `window_size` rows up to this one, as `rolling_sum`."""
+        from . import _window
+
+        return _window.rolling(self, "mean", window_size, weights, min_samples, center)
+
+    def rolling_min(self, window_size: int, weights=None, *, min_samples: int | None = None, center: bool = False) -> Expr:
+        """The minimum of the `window_size` rows up to this one, as `rolling_sum`."""
+        from . import _window
+
+        return _window.rolling(self, "min", window_size, weights, min_samples, center)
+
+    def rolling_max(self, window_size: int, weights=None, *, min_samples: int | None = None, center: bool = False) -> Expr:
+        """The maximum of the `window_size` rows up to this one, as `rolling_sum`."""
+        from . import _window
+
+        return _window.rolling(self, "max", window_size, weights, min_samples, center)
+
     # ---- namespaces ------------------------------------------------------------
 
     @property

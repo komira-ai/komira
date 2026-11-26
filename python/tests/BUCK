@@ -979,6 +979,22 @@ python_binding_test(
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# - pl_frames_test: as pl_verbs_test, for group_by, join, unique and the
+#   windows (over, rank, cum_*, rolling_*, an aggregate broadcast beside
+#   row-wise values): each plan equals a hand-written tree, polars' output
+#   names and types, every refusal with its full message, and the plan bytes
+#   collect() hands the session hold no SQL text.
+[py_test(
+    name = "pl_frames_test" + p["suffix"],
+    src = "test_pl_frames.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # komira.pl against polars itself (test_pl_oracle.py), on the real library and
 # CPython 3.13, the one minor with a pinned polars: each program, written once
 # for both modules, gives the same frame through komira.pl's plan and the plan
@@ -991,6 +1007,23 @@ python_binding_test(
 python_binding_test(
     name = "pl_oracle_test",
     src = "test_pl_oracle.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:polars",
+        _PYARROW[""],
+    ],
+)
+
+# group_by, join, unique and the windows of komira.pl against polars itself
+# (test_pl_oracle_frames.py), as pl_oracle_test: each program, written once
+# for both modules, gives the same frame through komira.pl's plan as through
+# polars 1.44.2, values and dtypes, and the schema komira.pl derives is the
+# answer's; and the plan entry is called, never the SQL one.
+python_binding_test(
+    name = "pl_oracle_frames_test",
+    src = "test_pl_oracle_frames.py",
     data = {"libkomira": LIBKOMIRA},
     deps = [
         "//python:komira_with_plan_modules",
