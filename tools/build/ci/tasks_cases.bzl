@@ -8,7 +8,9 @@ such pull requests do not conflict there.
 
 The fixture is two trees declared as python/docs/tasks/BUCK declares the real
 one (python/docs/task_tree_fixture/): `before` with two task directories (one
-with a probe), `after` the same with one directory more. The cases configure
+with a probe), `after` the same with one directory more. A fixture directory
+holds an expected output and, in 2-b, a probe: the macro reads the directory
+names and the probe file names, never their contents. The cases configure
 them (nothing builds them) and hold:
 
   - the generated files: the roots of each tree, written as the real package's
@@ -57,8 +59,14 @@ def generated_files_differ(before, after):
     paths = sorted({p: True for p in before.keys() + after.keys()}.keys())
     return [p for p in paths if before.get(p) != after.get(p)]
 
+def _without_doc_tree(nodes):
+    """`nodes` without the package's `doc_tree`, which every package declares
+    (tools/build/lint/doc_tree.bzl) and which is a root only within one package:
+    in the whole check set the parent package's doc_tree depends on it."""
+    return {l: n for l, n in nodes.items() if l.split(":")[1] != "doc_tree"}
+
 def _fixture_nodes(ctx, package):
-    return check_nodes(ctx, [package + ":"], AGGREGATE.split(":")[0] + ":")
+    return _without_doc_tree(check_nodes(ctx, [package + ":"], AGGREGATE.split(":")[0] + ":"))
 
 def task_tree_cases(ctx):
     """The cases above, over the configured fixture and the real package."""
@@ -92,7 +100,7 @@ def task_tree_cases(ctx):
             out.append("tasks: {}:examples does not reach {}".format(package, ", ".join(lost)))
 
     # the real package: one row for its tasks, beside the targets that never change with the tree
-    real = check_nodes(ctx, [TASKS_PACKAGE + ":"], AGGREGATE.split(":")[0] + ":", [p for p, _ in EXCLUDED])
+    real = _without_doc_tree(check_nodes(ctx, [TASKS_PACKAGE + ":"], AGGREGATE.split(":")[0] + ":", [p for p, _ in EXCLUDED]))
     if roots(real) != _labels(TASKS_PACKAGE, _REAL_ROOTS):
         out.append("tasks: the roots of {} are {}, wanted {}: a task's target must be reached from :examples, not be a row of its own".format(
             TASKS_PACKAGE,
