@@ -59,7 +59,7 @@ const ROWS = [_]lib.Row{
     .{
         .name = "node_install_no_tests",
         .target = "tests//negative/node:install_no_tests",
-        .text = "tests//negative/node:install_no_tests: tests is empty: name the test files node --test runs",
+        .text = "tests//negative/node:install_no_tests: test_files is empty: name the test files node --test runs",
     },
     .{
         .name = "node_install_no_nodes",

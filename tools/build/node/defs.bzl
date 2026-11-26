@@ -333,17 +333,17 @@ _node_binding_test = rule(
 # other tarball an override of the package its package.json names; runs the
 # pinned npm there (`install --offline --ignore-scripts --engine-strict`);
 # refuses a package that npm's package-lock.json says has an install script;
-# then runs `node --test` over `tests` in the project and passes as a
+# then runs `node --test` over `test_files` in the project and passes as a
 # node_binding_test does. One action per Node.js line of `nodes`.
 
 def _npm_install_test_impl(ctx):
     where = str(ctx.label.raw_target())
-    if len(ctx.attrs.tests) == 0:
-        fail("{}: tests is empty: name the test files node --test runs".format(where))
+    if len(ctx.attrs.test_files) == 0:
+        fail("{}: test_files is empty: name the test files node --test runs".format(where))
     if len(ctx.attrs.nodes) == 0:
         fail("{}: nodes is empty: name the Node.js lines the package is installed on".format(where))
     staged = data_map(ctx, where + ": data", ctx.attrs.data)
-    for t in ctx.attrs.tests:
+    for t in ctx.attrs.test_files:
         if t not in staged:
             fail("{}: test {} is not a destination of data".format(where, t))
     for dest in staged:
@@ -380,7 +380,7 @@ def _npm_install_test_impl(ctx):
                 ctx.attrs.install,
                 tarballs,
                 "--",
-                ctx.attrs.tests,
+                ctx.attrs.test_files,
             ),
             env = rerun_env(ctx),
             category = "npm_install_test",
@@ -397,14 +397,14 @@ def _npm_install_test_impl(ctx):
 
 _npm_install_test = rule(
     impl = _npm_install_test_impl,
-    doc = "Installs the npm tarball `install` with the pinned npm (`npm install --offline --ignore-scripts --engine-strict`) into an empty project that depends on it alone, with `tarballs` as the packages npm resolves the names their package.json give to (every other dependency, a platform package or a peer, comes from them, so nothing reaches a registry), then runs the test files `tests` (destinations of `data`, staged in the project with the fixtures, `.mjs`, `.cjs`, `.js`, `.ts`, `.cts` or `.mts`) with `node --test` from the project, so they import the package by its name. One build action per Node.js of `nodes`, each with its output `<name>.node_<major>.pass` (the sub-target `[node_<major>]`), which exists only if the npm install exited 0, no installed package has an install script (as npm's package-lock.json says, `hasInstallScript`; --ignore-scripts kept it from running), and the TAP summary reports tests that all passed with none skipped or todo.",
+    doc = "Installs the npm tarball `install` with the pinned npm (`npm install --offline --ignore-scripts --engine-strict`) into an empty project that depends on it alone, with `tarballs` as the packages npm resolves the names their package.json give to (every other dependency, a platform package or a peer, comes from them, so nothing reaches a registry), then runs the test files `test_files` (destinations of `data`, staged in the project with the fixtures, `.mjs`, `.cjs`, `.js`, `.ts`, `.cts` or `.mts`) with `node --test` from the project, so they import the package by its name. One build action per Node.js of `nodes`, each with its output `<name>.node_<major>.pass` (the sub-target `[node_<major>]`), which exists only if the npm install exited 0, no installed package has an install script (as npm's package-lock.json says, `hasInstallScript`; --ignore-scripts kept it from running), and the TAP summary reports tests that all passed with none skipped or todo.",
     attrs = {
         "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "install": attrs.source(),
         "nodes": attrs.list(attrs.exec_dep(providers = [NodeDistInfo])),
         "npm": attrs.exec_dep(providers = [NpmPackageInfo], default = "komira//third_party/node:npm"),
         "tarballs": attrs.list(attrs.source(), default = []),
-        "tests": attrs.list(attrs.string()),
+        "test_files": attrs.list(attrs.string()),
         "_node_act": attrs.exec_dep(default = "komira//tools/build/node_tools:node_act", providers = [RunInfo]),
     } | RERUN_ATTRS,
 )

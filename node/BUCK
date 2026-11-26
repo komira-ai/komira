@@ -263,7 +263,7 @@ npm_install_test(
     install = ":package",
     tarballs = [":package_linux_x64"] + INSTALL_REGISTRY,
     data = INSTALL_DATA,
-    tests = INSTALL_TESTS,
+    test_files = INSTALL_TESTS,
     nodes = INSTALL_NODES,
 )
 
