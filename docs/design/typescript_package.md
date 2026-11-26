@@ -10,7 +10,8 @@ are the recommended ones, not settled ones.
 
 People should be able to `npm install` komira and run SQL over their local files from Node, with
 Arrow data back. komira has a Node addon over `libkomira` ([node/README.md](../../node/README.md)),
-but it is test-only. It runs no query, returns no Arrow, and nothing of it is published.
+and a private package over it that runs SQL (`Session.sql`) and answers Arrow (`Result`), but both
+are test-only and nothing of them is published.
 
 The Python package ([python_package.md](python_package.md)) is the sibling. Both bind the same
 library through the same C calls ([libkomira_run_abi.md](libkomira_run_abi.md)). This document

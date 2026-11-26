@@ -95,7 +95,7 @@ Everything else in the C ABI (`komira_last_error`, `komira_last_error_code` and
 
 `apache-arrow` has no importer for the Arrow C Data Interface, so the addon
 reads an Arrow C stream itself ([`arrow_import.c`](arrow_import.c)) and a
-private TypeScript module ([`src/arrow_import.mts`](src/arrow_import.mts)) builds
+private TypeScript module ([`src/arrow_import.ts`](src/arrow_import.ts)) builds
 `apache-arrow` data over the stream's own memory
 ([design](../docs/design/typescript_package.md#arrow-from-the-c-stream-to-javascript)).
 
