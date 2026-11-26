@@ -171,14 +171,20 @@
     "slug": "parse-strings-dates",
     "category": "Time",
     "question": "How do I parse strings into dates?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2366"
+    ]
   },
   {
     "rank": 24,
     "slug": "compute-summary-statistics-column",
     "category": "Aggregate",
     "question": "How do I compute summary statistics of a column?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2367"
+    ]
   },
   {
     "rank": 25,
@@ -202,14 +208,20 @@
     "slug": "write-table-parquet",
     "category": "Write",
     "question": "How do I write a table to Parquet?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2368"
+    ]
   },
   {
     "rank": 28,
     "slug": "process-csv-larger-than-memory",
     "category": "Read",
     "question": "How do I process a CSV that does not fit in memory?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2369"
+    ]
   },
   {
     "rank": 29,

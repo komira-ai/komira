@@ -1,0 +1,5 @@
+[{'rows': 6, 'n': 5, 'distinct_n': 4, 'lo': 10, 'hi': 50, 'total': Decimal('130'), 'mean': 26.0}]
+[{'price': 26.0}]
+[{'price': 50}]
+[{'n': 5, 'lo': 10, 'hi': 50, 'mean': 26.0}]
+[{'mean': 26.0, 'hi': 50}]

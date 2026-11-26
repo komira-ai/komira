@@ -1,0 +1,1 @@
+KomiraError: execute: pipeline_exec: the aggregation sink of segment 0 does not serve aggregate tag 10 (SUM, COUNT, COUNT(DISTINCT), MIN, MAX and AVG are)
