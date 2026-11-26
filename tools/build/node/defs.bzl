@@ -12,7 +12,8 @@ is running the test. `esbuild_bundle` bundles an entry module, its sibling
 sources and npm packages into one file with the pinned esbuild.
 `c_shared_lib` builds C sources into a shared library with the pinned zig:
 symbols it does not define (a Node-API addon's `napi_*`) stay undefined, and
-the program that loads it resolves them.
+the program that loads it resolves them. It links for the linux x86_64 row,
+or with `target_os = True` for the target platform's OS (Mach-O on macOS).
 
 `node` runs with `LD_LIBRARY_PATH` naming the dist's `native_libs` (the C++
 runtime it links, from the pinned conda-forge packages) and an environment of
@@ -374,6 +375,15 @@ _esbuild_bundle = rule(
 
 # ---- c_shared_lib ------------------------------------------------------------
 
+def _macho(zig_triple):
+    return zig_triple.split("-")[1] == "macos"
+
+def _undefs(zig_triple, basename):
+    """The link flags that leave a symbol the sources do not define for the loading program: `-z undefs` for ELF; for Mach-O, `-undefined dynamic_lookup`, and an install name that holds no build path."""
+    if _macho(zig_triple):
+        return ["-Wl,-undefined,dynamic_lookup", "-Wl,-install_name,@rpath/" + basename]
+    return ["-Wl,-z,undefs"]
+
 def _c_shared_lib_impl(ctx):
     staged = ctx.actions.copied_dir(ctx.label.name + ".srcs", {s.short_path: s for s in ctx.attrs.srcs + ctx.attrs.headers})
     out = ctx.actions.declare_output(ctx.attrs.out or "lib{}.so".format(ctx.label.name))
@@ -403,7 +413,7 @@ def _c_shared_lib_impl(ctx):
             "-fvisibility=hidden",
             "-Wall",
             "-Werror",
-            "-Wl,-z,undefs",
+            _undefs(ctx.attrs.zig_triple, out.basename),
             "-o",
             out.as_output(),
             args,
@@ -414,7 +424,7 @@ def _c_shared_lib_impl(ctx):
 
 _c_shared_lib = rule(
     impl = _c_shared_lib_impl,
-    doc = "C `srcs` compiled and linked by the pinned zig (`zig cc -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror`) for `zig_triple` into one shared library (`out`, default `lib<name>.so`). Symbols it does not define stay undefined (`-z undefs`) for the loading program to resolve; only symbols marked with default visibility are exported. `headers` are staged with the sources (`-I` their directory); each of `include_dirs` (a directory output) is an `-I`.",
+    doc = "C `srcs` compiled and linked by the pinned zig (`zig cc -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror`) for `zig_triple` into one shared library (`out`, default `lib<name>.so`). Symbols it does not define stay undefined (`-z undefs`; for a macOS triple `-undefined dynamic_lookup`, with the install name `@rpath/<out>`) for the loading program to resolve; only symbols marked with default visibility are exported. `headers` are staged with the sources (`-I` their directory); each of `include_dirs` (a directory output) is an `-I`.",
     attrs = {
         "copts": attrs.list(attrs.string(), default = []),
         "headers": attrs.list(attrs.source(), default = []),
@@ -448,10 +458,24 @@ def _test_macro(**kwargs):
 def _bundle_macro(**kwargs):
     _esbuild_bundle(**_linux(kwargs))
 
-def _shared_macro(**kwargs):
+_MACOS = "prelude//os/constraints:macos"
+
+def _shared_macro(target_os = False, **kwargs):
     # The linux x86_64 row's triple: the glibc floor every link of that
     # platform targets.
-    if "zig_triple" not in kwargs:
+    if target_os:
+        # For the target platform's OS: on a macOS target the darwin-arm64
+        # row's triple (Mach-O, its macOS floor), and `out` (`lib<name>.so`
+        # when not given, and always a `.so` name) with `.dylib` for `.so`.
+        name = kwargs["name"]
+        if "zig_triple" in kwargs:
+            fail("{}: target_os takes the triple from the target platform; leave zig_triple out".format(name))
+        out = kwargs.get("out") or "lib{}.so".format(name)
+        if not out.endswith(".so"):
+            fail("{}: with target_os, out names the linux file and ends in .so; it is {}".format(name, out))
+        kwargs["zig_triple"] = select({_MACOS: row("darwin-arm64")["zig_triple"], "DEFAULT": row("linux-x86_64")["zig_triple"]})
+        kwargs["out"] = select({_MACOS: out[:-len(".so")] + ".dylib", "DEFAULT": out})
+    elif "zig_triple" not in kwargs:
         kwargs["zig_triple"] = row("linux-x86_64")["zig_triple"]
     _c_shared_lib(**_linux(kwargs))
 

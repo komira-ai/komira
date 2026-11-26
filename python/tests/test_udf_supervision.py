@@ -4,7 +4,8 @@ open contexts, and the worker loop's reading of the cancel word.
 
     test_udf_supervision.py --lib-dir <dir>
 
-`<dir>/libkomira_udf_python.so` is `//src/udf_python:komira_udf_python`.
+`<dir>/libkomira_udf_python.so` (`libkomira_udf_python.dylib` on macOS) is
+`//src/udf_python:komira_udf_python`.
 
 A UDF that must be running when the test acts creates `<work>/started` and, where the
 test releases it, waits for `<work>/go`; a helper thread waits for `started`, acts (a
@@ -14,7 +15,6 @@ period of a forced stop passes only when the test moves the host's clock.
 """
 
 import os
-import select
 import signal
 import struct
 import sys
@@ -106,17 +106,6 @@ def forked(env, ctx):
     """The pid of the worker the zygote forked for context `ctx` (1, 2, ... in opening order)."""
     (e,) = [e for e in env.trace.events("fork") if e["ctx"] == str(ctx)]
     return int(e["pid"])
-
-
-def wait_for_exit(pidfd):
-    """Block until the process behind `pidfd` has ended (a pidfd is readable once its
-    process terminates, reaped or not); closes the descriptor."""
-    try:
-        poller = select.poll()
-        poller.register(pidfd, select.POLLIN)
-        poller.poll()
-    finally:
-        os.close(pidfd)
 
 
 def until(cond):
@@ -221,9 +210,9 @@ def a_worker_that_ended_between_calls_is_lost_and_runs_no_user_code(env):
     _, inst = f.instance("counted")
     assert inst.call_ok([ints(4)]).to_pylist() == [4]
     worker = forked(env, 1)
-    pidfd = os.pidfd_open(worker)
+    watch = h.ExitWatch(worker)
     os.kill(worker, signal.SIGTERM)
-    wait_for_exit(pidfd)
+    watch.wait()
     refused(inst.call([ints(5)]), h.ERR_INSTANCE_LOST,
             "the worker (pid %d) is gone: it ended with signal 15 (SIGTERM) while no call was running; "
             "no user code ran" % worker)
@@ -343,7 +332,7 @@ def the_zygote_ending_loses_its_contexts_and_the_next_load_starts_another(env):
     assert idle.call_ok([ints(0)]).to_pylist() == [spawned(env, 1)]
     busy_ctx, busy = f.instance("wait_forever")
     zygote, idle_worker, busy_worker = spawned(env, 1), forked(env, 1), forked(env, 2)
-    pidfds = [os.pidfd_open(p) for p in (idle_worker, busy_worker)]
+    watches = [h.ExitWatch(p) for p in (idle_worker, busy_worker)]
     join = f.during_call(lambda: os.kill(zygote, signal.SIGKILL))
     try:
         r = busy.call([ints(0)])
@@ -353,8 +342,8 @@ def the_zygote_ending_loses_its_contexts_and_the_next_load_starts_another(env):
             "with signal 9 (SIGKILL)" % (busy_worker, zygote))
     refused(idle.call([ints(0)]), h.ERR_INSTANCE_LOST, "the worker (pid %d) is gone: its zygote (pid %d) ended "
             "with signal 9 (SIGKILL); no user code ran" % (idle_worker, zygote))
-    for fd in pidfds:
-        wait_for_exit(fd)
+    for w in watches:
+        w.wait()
     status, ctx, err = f.rt.open_context()
     assert (status, ctx) == (h.ERR_INSTANCE_LOST, None), err
     assert err.message == ("the zygote (pid %d) ended with signal 9 (SIGKILL); load the UDFs again to open a "

@@ -219,7 +219,10 @@ report of one run can wait for another run's load in the same process to finish.
 `fork` copies only the calling thread, so a zygote with a second thread could hand a worker a lock that no thread will
 ever release. The zygote therefore counts its own operating-system threads, not only Python's, after every import and
 unpickle at `LOAD`, and again before every `FORK`: on Linux, the `Threads:` line of `/proc/self/status`; on macOS,
-`pti_threadnum` of `proc_pidinfo(PROC_PIDTASKINFO)`.
+`pti_threadnum` of `proc_pidinfo(PROC_PIDTASKINFO)` less `pwq_nthreads` of `proc_pidinfo(PROC_PIDWORKQUEUEINFO)`.
+Those are the threads of the process's dispatch workqueue, which the kernel starts for libdispatch and a fork does
+not copy. Loading some libraries starts one: loading `libarrow`, as `import pyarrow` does, leaves one in the
+zygote, so counting them would refuse every UDF that imports pyarrow on macOS.
 
 - A `LOAD` after which the count is above 1 fails with `ERR_LOAD` (`OPTIMIZED_UDF_CODE_UNLOADABLE`), naming the
   module or value whose loading started the thread and the count: "importing `mylib` started 3 threads; Python UDFs
@@ -346,8 +349,9 @@ zygote's report follows: an exit status 0-255, or a signal number.
 ### 5.2 Cancel and deadlines: the cancel word
 
 Each context has a **cancel word**: 8 bytes of memory shared by the library and the worker, made at `open_context`
-(`memfd_create` on Linux; on macOS, which has no memfd, `shm_open` of a random name with `O_CREAT | O_EXCL`,
-`shm_unlink` at once, then `ftruncate`) and passed to the worker at `FORK`. It holds the id of the call to cancel, as
+(`memfd_create` on Linux; on macOS, which has no memfd, a file of its own under the `scratch` option made with
+`mkostemp`, unlinked at once, then `ftruncate`; not `shm_open`, which a sandboxed process is refused) and passed to
+the worker at `FORK`. It holds the id of the call to cancel, as
 the prototype's did (`kudfw.h:38-41`):
 
 - Every call carries its `call_id` in the request head. While the library waits on the worker's socket, it reads the
@@ -526,7 +530,7 @@ from them, and none of them ships:
 | Prototype | Taken | Changed |
 |---|---|---|
 | `komira_udf_spike_abi` | `komira_udf_runtime.h`, `komira_udf_wire.h`, the Mojo mirror, the engine-side harness, the case files, the `komira-test/echo` runtime | Moved to `src/udf_abi/` at P0; the header gains the runtime options and `ERR_BAD_OPTION` (§2.2), the wire version becomes 3 (§4.1) |
-| `komira_udf_spike_node_worker` | The engine-side proxy table (`proxy/proxy.c`), the channel (`proxy/channel.c`: spawn, framing, the grace-period kill), the IPC codec (`proxy/ipc.c`), the cancel word holding a call id (`kudfw.h:38-41`) | Spawns one zygote instead of one process per worker; the cancel word is a `shm_open` object on macOS, which lacks the prototype's Linux `memfd` (`channel.c:155`); kills go through a pidfd on Linux; exits come from the zygote's `EXIT` report instead of the proxy's own `waitpid` |
+| `komira_udf_spike_node_worker` | The engine-side proxy table (`proxy/proxy.c`), the channel (`proxy/channel.c`: spawn, framing, the grace-period kill), the IPC codec (`proxy/ipc.c`), the cancel word holding a call id (`kudfw.h:38-41`) | Spawns one zygote instead of one process per worker; the cancel word is an unlinked file under `scratch` on macOS, which lacks the prototype's Linux `memfd` (`channel.c:155`); kills go through a pidfd on Linux; exits come from the zygote's `EXIT` report instead of the proxy's own `waitpid` |
 | `komira_udf_spike_native` | The sha256 check before use | — |
 
 ## 9. Decisions this document makes
