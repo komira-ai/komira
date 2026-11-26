@@ -967,6 +967,33 @@ python_binding_test(
     ],
 )
 
+# One pandas session over TPC-H scale factor 1 lineitem and orders
+# (test_pandas_session_tpch.py): a date cut, a two-key group by, the decimal sums,
+# means, least and greatest of TPC-H q1, a computed decimal column, a sorted first
+# ten rows, and a semi and an anti join; each answer of the pandas skin, of the
+# polars skin where it has the spelling, and of Session.sql over the same files
+# equals DuckDB's answer to the SQL that means the same. A pandas decimal sum
+# that fills a sum of nothing with 0 is refused by the engine, whose CASE has no
+# decimal output yet, and the test fails when the engine answers it. The staged
+# duckdb/test_frame_duckdb.py gives the comparator; the data is the staged
+# `tpch_sf1[data]` at <lib-dir>/tpch/tpch/sf1/<table>.parquet.
+# Derived from TPC-H; not comparable to published TPC-H results.
+python_binding_test(
+    name = "pandas_session_tpch_test",
+    src = "test_pandas_session_tpch.py",
+    srcs = ["duckdb/test_frame_duckdb.py"],
+    data = {
+        "libkomira": LIBKOMIRA,
+        "tpch": "komira//src/tpch_answers:tpch_sf1[data]",
+    },
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+)
+
 # The notebook display (komira/_display.py), with no library: a frame shows its
 # names over their types, equal to fixtures/display/frame.html, and calls
 # nothing on its session; a result shows its rows, equal to
