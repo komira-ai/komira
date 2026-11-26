@@ -10,7 +10,9 @@
 #
 # Inside a nested value (list, struct, map, union) the bracket syntax is also
 # escaped in leaf strings: `\,` `\:` `\[` `\]` `\{` `\}` `\(` `\)`. A NULL
-# inside a nested value is the token `\N`.
+# inside a nested value is the token `\N`, and an empty string (or empty
+# binary) the token `\e`, so a list holding one empty string, `[\e]`, is not
+# the empty list `[]`. A top-level empty string is the empty cell, as before.
 #
 # Names (in the schema line, inside the type tree, as struct keys inside a
 # nested cell, in `order: keys=` and `float[<name>]:`) escape the same control
@@ -106,6 +108,10 @@ def escape_bytes_into(mut res: List[UInt8], bs: Span[UInt8, _], mode: Int):
     ESC_SCALAR, ESC_NESTED or ESC_NAME (see the module header)."""
     var i = 0
     var n = len(bs)
+    if n == 0 and mode == ESC_NESTED:
+        res.append(92)
+        res.append(101)  # \e: an empty value inside a nested cell
+        return
     while i < n:
         var b = bs[i]
         if b == 92:  # backslash
@@ -283,12 +289,15 @@ def check_nested_cell(cell: String) raises:
             if i + 1 >= n:
                 raise Error("canon: nested cell '" + cell + "' ends inside an escape")
             var c = bs[i + 1]
-            if c == 78:  # \N: a NULL value, whole
+            if c == 78 or c == 101:  # \N a NULL value, \e an empty one: whole
                 var nxt: UInt8 = 0
                 if i + 2 < n:
                     nxt = bs[i + 2]
                 if not (_null_left_ok(prev) and _null_right_ok(nxt)):
-                    raise Error("canon: nested cell '" + cell + "' holds \\N inside a value")
+                    raise Error(
+                        "canon: nested cell '" + cell + "' holds \\" + chr(Int(c))
+                        + " inside a value"
+                    )
                 prev = 78
                 i += 2
                 continue

@@ -302,9 +302,9 @@ def _project_cast(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion]:
         # Targeting INT64 makes the pair symmetric: the INT32-stamped
         # column takes the `INT32 -> int64` widen a few arms up, the
         # DATE32-stamped one takes this arm, and both answer the same
-        # INT64 column. `date_diff('day', a, b)` / `date_sub` lower to
-        # exactly that subtraction (`sql_binder._date_delta_days_over_
-        # columns`).
+        # INT64 column. `date_diff('day', a, b)` / `date_sub` over two
+        # DATEs lower to exactly that subtraction
+        # (`plan_expr.temporal_delta`).
         #
         # ⚠ `as_primitive[int32]` ADMITS A DATE32-STAMPED COLUMN — a DATE32
         # IS an int32 of days (`column.mojo` storage
