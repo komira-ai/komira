@@ -749,9 +749,10 @@ after its window. It answers `2xx` once it has recorded the notice. What it then
 
 - **Outbound address rules.** The `removal_notice_url` is `https`, port 443 (none written, or `:443`), with no
   userinfo or fragment. On every attempt the issuer resolves the host once, refuses the attempt when any resolved
-  address is loopback (`127.0.0.0/8`, `::1`), unspecified, link-local (`169.254.0.0/16`, `fe80::/10`), private
-  (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`), shared (`100.64.0.0/10`), multicast or broadcast
-  (an IPv4-mapped IPv6 address is judged as its IPv4 address), and connects to one checked address itself, with the
+  address is loopback (IPv4 and IPv6), unspecified, link-local (RFC 3927 and the IPv6 link-local prefix), private
+  (the three RFC 1918 ranges and RFC 4193 unique local addresses), shared (RFC 6598), multicast or broadcast (an
+  IPv4-mapped IPv6 address is judged as its IPv4 address; the exact list is the IANA special-purpose address
+  registries' ranges of those kinds), and connects to one checked address itself, with the
   original host name for SNI, certificate verification and `Host`, so a second DNS answer cannot redirect it. It
   sends no cookie and no credential, does not follow redirects, and reads at most 4 KiB of the reply and ignores it.
   The same rules apply to a client's `jwks_uri`. A refused address is a permanent failure. An app on a private
