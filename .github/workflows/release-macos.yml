@@ -63,7 +63,7 @@ jobs:
   release-macos:
     runs-on: ubuntu-24.04
     environment: build
-    timeout-minutes: 1
+    timeout-minutes: 90
     permissions:
       contents: read
       # for farm-connect only: the token Tailscale trusts
@@ -78,8 +78,6 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: temporary stall for a manual run
-        run: sleep 300
       - uses: ./.github/actions/farm-connect
         with:
           ts-client-id: ${{ vars.TS_CLIENT_ID }}
@@ -116,7 +114,7 @@ jobs:
         id: build
         uses: ./.github/actions/buck2-farm
         with:
-          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs
+          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs //release/manual_fail:fails
           assert-remote: ${{ steps.assert.outputs.path }}
       # The Python test harness on macOS arm64: the macOS CPython and macOS wheels install on a macOS
       # worker and the hello binding test (pyarrow, and a Mojo shared library loaded by path) runs
