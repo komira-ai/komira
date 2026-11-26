@@ -14,7 +14,7 @@
 
 const std = @import("std");
 const deflate = @import("pack_deflate");
-const diag = @import("diag.zig");
+const diag = @import("native_policy").diag;
 const Alloc = std.mem.Allocator;
 const Diag = diag.Diag;
 const Refused = diag.Refused;

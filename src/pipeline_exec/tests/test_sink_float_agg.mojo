@@ -37,7 +37,8 @@
 #     are refused by name when the output is built.
 #   * A FLOAT32 column after a FLOAT64 one for the same aggregate is refused,
 #     in one worker and across two.
-#   * A grouped sink refuses a float aggregate argument by name.
+#
+# The grouped sinks' float folds are tested in test_sink_group_float_agg.
 
 from std.math import inf, nan
 from std.memory import bitcast
@@ -55,16 +56,9 @@ from arrow.schema import (
 from containers.slab import Slab
 from morsel.morsel import Morsel
 from morsel.pipeline_execution import PipelineExecution
-from physical_plan.physical_plan import KEY_DTYPE_I64
-from pipeline_exec.group_harness import float_batch
-from pipeline_exec.plan_harness import (
-    agg_list,
-    grouped_agg_data,
-    ungrouped_agg_data,
-)
+from pipeline_exec.plan_harness import agg_list, ungrouped_agg_data
 from pipeline_exec.segment_pool import SegmentPool
 from pipeline_exec.sink_agg import AggSink
-from pipeline_exec.sink_group_agg import GroupAggSink
 from plan_expr.agg_expr import (
     AGG_COUNT,
     AGG_MAX,
@@ -555,26 +549,6 @@ def test_float32_after_float64_for_one_aggregate_is_refused() raises:
         two.combine(pipeline)
 
 
-def test_a_grouped_sink_refuses_a_float_argument_by_name() raises:
-    var keys = Slab[Expr]()
-    keys.append(Expr.col_ref("v"))
-    var sb = SchemaBuilder()
-    sb.add_field(Field("k", ArrowType.INT64, True))
-    sb.add_field(Field("s", ArrowType.FLOAT64, True))
-    var sink = GroupAggSink(
-        grouped_agg_data(keys^, agg_list(_agg(AGG_SUM, "kf")), sb.build()),
-        KEY_DTYPE_I64,
-        SegmentPool(),
-        0,
-    )
-    sink.resize_worker_state(1)
-    with assert_raises(
-        contains="over a float column (float64) is served by the ungrouped"
-        " aggregation sink only"
-    ):
-        sink.consume(0, Morsel(float_batch(0, 10), 0, 0))
-
-
 def main() raises:
     var suite = TestSuite()
     suite.test[test_float64_aggregates_equal_the_row_fold_on_one_worker]()
@@ -587,5 +561,4 @@ def main() raises:
     suite.test[test_only_null_and_no_row_give_null_and_a_zero_count]()
     suite.test[test_the_declared_output_types_of_float_aggregates]()
     suite.test[test_float32_after_float64_for_one_aggregate_is_refused]()
-    suite.test[test_a_grouped_sink_refuses_a_float_argument_by_name]()
     suite^.run()

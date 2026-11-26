@@ -10,7 +10,8 @@ are the recommended ones, not settled ones.
 
 People should be able to `npm install` komira and run SQL over their local files from Node, with
 Arrow data back. komira has a Node addon over `libkomira` ([node/README.md](../../node/README.md)),
-but it is test-only. It runs no query, returns no Arrow, and nothing of it is published.
+and a private package over it that runs SQL (`Session.sql`) and answers Arrow (`Result`), but both
+are test-only and nothing of them is published.
 
 The Python package ([python_package.md](python_package.md)) is the sibling. Both bind the same
 library through the same C calls ([libkomira_run_abi.md](libkomira_run_abi.md)). This document
@@ -47,20 +48,20 @@ Fixed before this design, and not reopened here:
 
 ### The addon
 
-- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (998 lines) is a Node-API addon in C, with
+- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (1059 lines) is a Node-API addon in C, with
   its Arrow import in [node/arrow_import.c](../../node/arrow_import.c).
   - It defines `NAPI_VERSION 8` and uses `NAPI_MODULE_INIT`, so it is context-aware. Its function
     table is process-wide, and a worker thread shares it (the comment at the table). `:thread_test`
     loads it in worker threads.
-  - It exports twelve functions: `load`, `abiVersion`, `newSession`, `freeSession`,
-    `registerParquet`, `parquetSchema`, `planRender`, `sessionStats`, and the Arrow import's
+  - It exports thirteen functions: `load`, `abiVersion`, `newSession`, `freeSession`,
+    `registerParquet`, `parquetSchema`, `planRender`, `sql`, `sessionStats`, and the Arrow import's
     `importArrowStream`, `arrowSchema`, `arrowNextBatch` and `arrowClose` (below).
 - **How it binds libkomira.** `load(path)` opens the library with `dlopen(RTLD_NOW | RTLD_LOCAL)`
   and requires `komira_abi_version()` major 1. It then resolves seven symbols by name, and a
   missing one is named in a `KOMIRA_MISSING_SYMBOL` error. It also resolves
-  `komira_ctx_new_with_options` (1.4), `komira_last_error_code` and `komira_last_error_step`
+  `komira_sql_stream` (1.3), `komira_ctx_new_with_options` (1.4), `komira_last_error_code` and `komira_last_error_step`
   (1.7): each is required when the library's minor includes it and may be missing from an older
-  library, where options are refused naming both versions and a refusal has no code or step.
+  library, where `sql` and options are refused naming both versions and a refusal has no code or step.
   - The library is never `dlclose`d, because the Mojo runtime cannot be unloaded.
   - There is one library per process: loading the same path again does nothing, and loading
     another path is refused.
@@ -85,27 +86,33 @@ Fixed before this design, and not reopened here:
   table gives the code. Misuse of the addon
   throws an error with a `code` and no `status`: `KOMIRA_ARG`, `KOMIRA_NOT_LOADED`,
   `KOMIRA_SESSION_FREED`, `KOMIRA_LOAD_FAILED`, `KOMIRA_ABI_MISMATCH`, `KOMIRA_MISSING_SYMBOL`,
-  `KOMIRA_LOADED`, and from `newSession` `KOMIRA_ABI_TOO_OLD` and `KOMIRA_CTX_REFUSED`.
+  `KOMIRA_LOADED`, and from `newSession` `KOMIRA_ABI_TOO_OLD` and `KOMIRA_CTX_REFUSED`, and from `sql`
+  `KOMIRA_ABI_TOO_OLD`.
+- **`sql`.** `sql(session, text)` runs `komira_sql_stream` on the session thread into a zeroed
+  stream and drains it there (step 1 of [Arrow: from the C stream to
+  JavaScript](#arrow-from-the-c-stream-to-javascript)). Its Promise resolves with the drained result
+  the Arrow import's calls read, which needs no context, so it reads after `freeSession`.
 - **Calls it does not bind.** `komira_csv_binding` and `komira_json_binding` have no function in
-  the addon. Nothing in it runs a query.
+  the addon, nor do `komira_sql_stream_run`'s run handle and `komira_plan_stream`.
 - **EXISTS** The Arrow import of [Arrow: from the C stream to
-  JavaScript](#arrow-from-the-c-stream-to-javascript), steps 1 to 3, over a stream handed to
+  JavaScript](#arrow-from-the-c-stream-to-javascript), steps 1 to 3, over the stream
+  `komira_sql_stream` fills (drained on the session thread) and over a stream handed to
   `importArrowStream` as a capsule (an N-API external tagged as an Arrow C stream,
-  [node/arrow_c.h](../../node/arrow_c.h)) rather than one `komira_sql_stream` fills. It drains on
-  the JavaScript thread. The private module is
-  [node/src/arrow_import.mts](../../node/src/arrow_import.mts) (`readArrowStream`), with
+  [node/arrow_c.h](../../node/arrow_c.h)), which it drains on the JavaScript thread. The private
+  module is [node/src/arrow_import.ts](../../node/src/arrow_import.ts) (`tableOf`, `openBatches`,
+  and `readArrowStream` for the tests), with
   `KomiraError` and `UnsupportedOperation` in [node/src/errors.ts](../../node/src/errors.ts), the package's one errors module.
   [node/package.json](../../node/package.json) is private and declares the `apache-arrow` peer
   dependency at `^21.2.0` (part 3 completes it).
 
 ### Tests and CI
 
-- **EXISTS** [node/BUCK](../../node/BUCK) has four `node_binding_test` targets.
+- **EXISTS** [node/BUCK](../../node/BUCK) has five `node_binding_test` targets.
   - `:load_test` runs [load.test.mjs](../../node/load.test.mjs) and
     [capacity.test.mjs](../../node/capacity.test.mjs). They cover the load refusals, using
     stand-ins built from [tests/fake_libkomira.c](../../node/tests/fake_libkomira.c): ABI 2.0,
-    ABI 0.999, a missing `komira_plan_render`, and a library that records the capacity it was
-    given.
+    ABI 0.999, a missing `komira_plan_render`, ABI 1.3 without `komira_sql_stream`, ABI 1.7
+    without `komira_last_error_code`, and a library that records the capacity it was given.
   - `:session_test` runs [session.test.mjs](../../node/session.test.mjs). It covers errors with
     their last error, the frozen schema bytes of `two_columns.parquet`, plan text, wrong-kind
     arguments, a foreign external, double free, and finalizers counted with `gc()` with no clock.
@@ -118,14 +125,21 @@ Fixed before this design, and not reopened here:
     [arrow_import.test.mts](../../node/arrow_import.test.mts) over streams of a stand-in producer
     ([tests/arrow_stand_in.c](../../node/tests/arrow_stand_in.c)) that counts each release: the
     round trip of every type of the exporter's set, with nulls, offsets and a dictionary, an empty
-    stream, failing callbacks, a misaligned buffer, malformed arrays and unmapped formats.
-- **EXISTS** The four tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
+    stream, failing callbacks, a misaligned buffer, malformed arrays and unmapped formats. It
+    measures `node/src/arrow_import.ts`: at least 99% of its lines and branches covered.
+  - `:package_test` runs the package's tests, `sql` and `Result` among them, over the real
+    library (a Parquet file of three rows the engine writes, a syntax error and an unknown table
+    with their codes and steps) and over a stand-in of ABI 1.9
+    ([tests/fake_sql.c](../../node/tests/fake_sql.c)) whose `komira_sql_stream` answers fixed
+    queries.
+- **EXISTS** The tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
   - `node_binding_test` runs `node --test` as a build action, under `env -i`, with no network.
   - It passes only if TAP reports tests, all passed, and none skipped
     ([tools/build/node/README.md](../../tools/build/node/README.md)).
-- **EXISTS** The TypeScript sources of `node/src/` are measured by their own test target:
-  `//node:package_test` names them as `covered_srcs`, and `node_binding_test` fails unless every one
-  is loaded and their lines and branches are each at least 99% covered (rule T1). The addon's C is
+- **EXISTS** The TypeScript sources of `node/src/` are measured by their own test targets:
+  `//node:package_test` names them, the Arrow import aside, as `covered_srcs`, and `:arrow_test`
+  names the Arrow import; `node_binding_test` fails unless every one is loaded and their lines and
+  branches are each at least 99% covered (rule T1). The addon's C is
   not measured. `.github/workflows/coverage.yml` and the covcheck README never name `node/`
   *(inferred from a search of both)*; covcheck does read lcov tracefiles
   ([tools/build/coverage/README.md](../../tools/build/coverage/README.md)).
@@ -158,11 +172,12 @@ Fixed before this design, and not reopened here:
 
 ### Release state
 
-- **Nothing is released.** **EXISTS** The package of part 3 (below, "Where the work lands"):
+- **Nothing is released.** **EXISTS** The package of parts 3 and 4 (below, "Where the work lands"):
   `node/package.json` (`"private": true`, named by D1's option A as a placeholder), the TypeScript
-  sources in `node/src/`, and the `.js` and `.d.ts` files `//node:dist` compiles from them. The
-  private Arrow import of part 2 (`node/src/arrow_import.mts`) is beside them, outside `dist/` until
-  `Result` uses it. No platform package is built and nothing is published. No workflow mentions npm
+  sources in `node/src/`, `Session.sql` and `Result` among them, and the `.js` and `.d.ts` files
+  `//node:dist` compiles from them. The private Arrow import of part 2
+  (`node/src/arrow_import.ts`) is one of those sources, read by `Result`. No platform package is
+  built and nothing is published. No workflow mentions npm
   publishing. The only use of npm in a workflow is the pin check in `kpin-update.yml`.
 
 ### The library under it
@@ -544,8 +559,9 @@ top-level `pypi.yml` and the macOS arm64 wheel by `pypi-macos-arm64.yml`, each t
     libraries are members; no other file of Modular's distribution; a size cap.
   - The rule refuses a package whose `repository.url` is not `https://github.com/komira-ai/komira`,
     because trusted publishing requires that it match.
-  - The policy code moves into a module both tools import, in a refactor of its own before the npm
-    rule (rule P7).
+  - The policy code is a module both tools import: **EXISTS** as the zig_module
+    `//tools/build/package:native_policy` (`tools/build/package/native_policy/`), moved out of the
+    wheel tool in a refactor of its own before the npm rule (rule P7).
   - Its sub-targets are `[check]`, `[release]` and `[release_check]`, as for the wheel. The
     `[release]` target refuses an unstamped package.
 - **The targets.** `//node:package` (the main package) and

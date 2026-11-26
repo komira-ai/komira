@@ -6,7 +6,7 @@
 //! the usage line.
 
 const std = @import("std");
-const diag = @import("diag.zig");
+const diag = @import("native_policy").diag;
 const cli = @import("cli.zig");
 const wheel = @import("wheel.zig");
 const t = std.testing;

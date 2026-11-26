@@ -5,7 +5,7 @@
 // which a library older than ABI 1.7 cannot give. Arguments of the wrong type
 // or value are TypeError or RangeError, raised before the library is called
 // (the stand-in would refuse any call that reached it). Session options need
-// ABI 1.4, so this library refuses them by both versions. The registrations
+// ABI 1.4 and `sql` ABI 1.3, so this library refuses them by both versions. The registrations
 // this package does not bind yet are refused by name. Closing is idempotent.
 
 import assert from "node:assert/strict";
@@ -76,6 +76,34 @@ test("the stand-in loads, and an engine refusal carries its status and text, wit
     );
   }
   assert.equal(stats().created, made);
+});
+
+test("sql on a library older than ABI 1.3 is refused naming both versions, and the session still works", async () => {
+  const native = load();
+  const s = new Session();
+  const e = await s.sql("SELECT 1").catch((err: unknown) => err);
+  assert.ok(e instanceof KomiraError);
+  assert.deepEqual(
+    [e.constructor, e.message, e.status, e.code, e.step],
+    [KomiraError, `komira_sql_stream needs libkomira ABI version 1.3; the library at ${native.library} is 1.1`, null, null, null],
+  );
+  assert.equal(await rejected(s.registerParquet("t", "/nonexistent/t.parquet"), KomiraError), FAKE_ENGINE_TEXT);
+  await s[Symbol.asyncDispose]();
+});
+
+test("sql: a query that is not a string is a TypeError, and a NUL byte or a lone surrogate a RangeError", async () => {
+  const s = new Session();
+  const cases: [unknown, ErrorConstructor, string][] = [
+    [1, TypeError, "the query must be a string"],
+    [undefined, TypeError, "the query must be a string"],
+    [Buffer.from("SELECT 1"), TypeError, "the query must be a string"],
+    ["SELECT 1\0", RangeError, "the query holds a NUL byte"],
+    ["SELECT '\ud800'", RangeError, "the query holds a lone surrogate, which UTF-8 cannot spell"],
+  ];
+  for (const [query, cls, message] of cases) {
+    assert.equal(await rejected(s.sql(query as string), cls), message, message);
+  }
+  await s[Symbol.asyncDispose]();
 });
 
 test("registerParquet: a wrong argument is a TypeError or RangeError, and the library is not called", async () => {
@@ -163,6 +191,7 @@ test("close frees the context once, and a closed session refuses every call", as
     s.registerParquet("t", "/x.parquet"),
     s.registerCsv("t", "/x.csv"),
     s.registerNdjson("t", "/x.ndjson"),
+    s.sql("SELECT 1"),
   ]) {
     const e = await call.catch((err: unknown) => err);
     assert.ok(e instanceof KomiraError);
@@ -171,6 +200,7 @@ test("close frees the context once, and a closed session refuses every call", as
   }
   // An argument of the wrong type is still a TypeError on a closed session.
   assert.equal(await rejected(s.registerParquet(1 as never, "/x"), TypeError), "the table name must be a string");
+  assert.equal(await rejected(s.sql(1 as never), TypeError), "the query must be a string");
 });
 
 test("Symbol.dispose and Symbol.asyncDispose close the session, and so do using and await using", async () => {

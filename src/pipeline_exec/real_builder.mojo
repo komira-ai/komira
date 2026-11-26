@@ -52,6 +52,9 @@
 #            SINK_AGG, key        `StringGroupAggSink` built `composite`, from
 #            COMPOSITE (COLUMNAR) that data too, behind `AnyAggSink`: a key of
 #                                 several columns of mixed types
+#                                 A grouped sink folds its float aggregates by
+#                                 source position when the segment is
+#                                 ORDER_ROW_RANGE
 #            SINK_SORT, key NONE  `SortSink` (`sink_sort`), from the `SortSinkData`
 #                                 the descriptor's `sink_param_id` names
 #            SINK_TOPN, key NONE  `SortSink` keeping a range of its order, from
@@ -621,6 +624,7 @@ struct RealBuilder[
                         self._segment_pool.share(),
                         desc.seg_id,
                         composite=composite,
+                        by_position=(desc.order_key_kind == ORDER_ROW_RANGE),
                     )
                 )
             )
@@ -662,6 +666,9 @@ struct RealBuilder[
                                 self._segment_pool.share(),
                                 desc.seg_id,
                                 spill_dir=self._spill_dir,
+                                by_position=(
+                                    desc.order_key_kind == ORDER_ROW_RANGE
+                                ),
                             )
                         )
                     )

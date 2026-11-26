@@ -5,11 +5,11 @@
 //! `<dist>-<version>.dist-info/` METADATA, WHEEL, `licenses/<name>` for each
 //! licence file (sorted; PEP 639), and RECORD last. Every member is dated with
 //! the stamp's commit time (zip.zig). Before anything is written, the files
-//! are held to policy.zig.
+//! are held to native_policy's policy.zig.
 
 const std = @import("std");
-const diag = @import("diag.zig");
-const policy = @import("policy.zig");
+const diag = @import("native_policy").diag;
+const policy = @import("native_policy").policy;
 const tag_mod = @import("tag.zig");
 const zip = @import("zip.zig");
 const Alloc = std.mem.Allocator;
@@ -196,7 +196,7 @@ pub fn checkPath(alloc: Alloc, d: *Diag, path: []const u8) Refused!void {
     }
 }
 
-/// The policy of `in`, for its files (policy.zig).
+/// The policy of `in`, for its files (native_policy's policy.zig).
 pub fn policyOf(t: tag_mod.Tag, in: Input) policy.Policy {
     return .{ .glibc = t.glibc, .macos = t.macos, .arch = t.arch, .max_glibcxx = in.max_glibcxx, .max_cxxabi = in.max_cxxabi, .external_needed = in.external_needed };
 }

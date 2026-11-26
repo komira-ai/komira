@@ -20,9 +20,9 @@ python3 -m venv .venv
 pip install komira
 ```
 
-That is the whole install. The wheel is about 2.4 MB, and `pip` installs two other packages with it
-(`pip show komira` lists `Requires: protobuf, pyarrow`): pyarrow, which a query's answer is read as, and
-protobuf, which a DataFrame's plan is encoded with.
+That is the whole install. The wheel is about 11 MB on Linux and 8 MB on macOS, and `pip` installs
+two other packages with it (`pip show komira` lists `Requires: protobuf, pyarrow`): pyarrow, which a
+query's answer is read as, and protobuf, which a DataFrame's plan is encoded with.
 
 ## What it needs
 

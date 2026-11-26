@@ -20,6 +20,7 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 
+import type { ArrowAddon } from "./arrow_import.ts";
 import { isFile, libraryPath, type Host } from "./cpu.ts";
 import { KomiraError, LibraryLoadError, errorClass, stepOf } from "./errors.ts";
 import { ADDON, NATIVE, defaultHost, platformPackage, platformPackageDir } from "./platform.ts";
@@ -28,7 +29,7 @@ import { ADDON, NATIVE, defaultHost, platformPackage, platformPackageDir } from 
 export type Handle = object;
 
 /** The calls of the addon this package makes (node/README.md, "The calls"). */
-export interface Addon {
+export interface Addon extends ArrowAddon {
   load(path: string): void;
   abiVersion(): number;
   /**
@@ -40,6 +41,8 @@ export interface Addon {
   freeSession(session: Handle): Promise<void>;
   /** Runs on the session's own thread; the Promise rejects with the call's status. */
   registerParquet(session: Handle, name: string, path: string): Promise<void>;
+  /** komira_sql_stream on the session's thread, its stream drained there: a result the Arrow calls read. */
+  sql(session: Handle, query: string): Promise<object>;
   sessionStats(): { created: number; freed: number };
 }
 
@@ -132,18 +135,25 @@ export function loadFrom(addonFile: string, nativeDir: string, h: Host): Native 
  * (the addon's own message when the library gave no text), its named code the
  * error's `code` (null when empty) and its step number the error's `step`
  * (null for none or a number this package does not know). The status and the
- * code pick the class (`errorClass`). Anything else is the addon refusing its
- * own use, or a session the library could not make, and keeps its message
- * with no status.
+ * code pick the class (`errorClass`). A stream `sql` could not drain keeps
+ * its message with no status: its status is the stream callback's errno
+ * value, not the ABI's. Anything else is the addon refusing its own use, a
+ * session the library could not make, or a call the library is too old for,
+ * and keeps its message with no status. A KomiraError (UnsupportedOperation
+ * from the Arrow import) is returned as it is.
  */
 export function fromAddon(e: unknown): KomiraError {
+  if (e instanceof KomiraError) {
+    return e;
+  }
   const fields = (typeof e === "object" && e !== null ? e : {}) as {
     status?: unknown;
+    code?: unknown;
     lastError?: unknown;
     lastErrorCode?: unknown;
     lastErrorStep?: unknown;
   };
-  if (typeof fields.status !== "number") {
+  if (typeof fields.status !== "number" || fields.code === "KOMIRA_ARROW_STREAM") {
     return new KomiraError(messageOf(e));
   }
   const text = typeof fields.lastError === "string" && fields.lastError !== "" ? fields.lastError : messageOf(e);
