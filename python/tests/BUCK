@@ -987,7 +987,8 @@ _PLAN_EXPR_RUNTIMES = [
 #   existing destination replaced, the refusals made before the library is
 #   called, and the engine's refusals with their code and step (a URL, a
 #   missing directory, a column type the writer does not write) leaving the
-#   destination as it was.
+#   destination as it was, and a write answer other than one "Count" row
+#   refused.
 [python_binding_test(
     name = "frame_write_test" + p["suffix"],
     src = "test_frame_write.py",

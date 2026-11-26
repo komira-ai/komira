@@ -524,6 +524,36 @@ def test_each_terminal_returns_none(lib_dir):
         assert df.to_json(p.join("a.jsonl"), orient="records", lines=True) is None
 
 
+def answering(table):
+    """A stand-in for `Session._plan_stream` that answers every plan with
+    `table`, read as the engine's stream would be."""
+    return lambda plan: komira.Result(pa.RecordBatchReader.from_batches(table.schema, table.to_batches()))
+
+
+def test_a_write_answer_other_than_one_count_row_is_refused(lib_dir):
+    count = pa.schema([("Count", pa.int64())])
+    malformed = [
+        (pa.Table.from_pydict({"Count": []}, schema=count), "0 rows of the columns (Count)"),
+        (pa.Table.from_pydict({"Count": [3, 3]}, schema=count), "2 rows of the columns (Count)"),
+        (pa.Table.from_pydict({"rows": [6]}), "1 rows of the columns (rows)"),
+        (pa.Table.from_pydict({"Count": [6], "x": [1]}), "1 rows of the columns (Count, x)"),
+        (pa.Table.from_pydict({}), "0 rows of the columns ()"),
+    ]
+    with workspace() as (s, p):
+        df = frame(s, p)
+        for table, part in malformed:
+            s._plan_stream = answering(table)
+            message = "the plan door answered a write with {}, not one row of Count".format(part)
+            refused(lambda: s._plan_write(b""), KomiraError, message)
+            path = p.join("malformed.parquet")
+            refused(lambda: df.to_parquet(path), KomiraError, message)
+            assert not os.path.exists(path)
+        s._plan_stream = answering(pa.Table.from_pydict({"Count": [6]}, schema=count))
+        assert s._plan_write(b"") == 6
+        del s._plan_stream
+        good_write(s, p)
+
+
 TESTS = [
     test_to_parquet_default_is_snappy_and_equals_the_source,
     test_to_parquet_codecs,
@@ -541,6 +571,7 @@ TESTS = [
     test_engine_refusals_name_their_code_and_step,
     test_a_closed_session_refuses_a_write,
     test_each_terminal_returns_none,
+    test_a_write_answer_other_than_one_count_row_is_refused,
 ]
 
 
