@@ -1,0 +1,3 @@
+[{'name': 'Ana', 'city': 'Oslo', 'phone': '555-0101', 'score': 8}, {'name': 'Bo', 'city': None, 'phone': None, 'score': -1}, {'name': 'Cy', 'city': 'Lima', 'phone': '555-0103', 'score': 6}, {'name': 'Di', 'city': None, 'phone': None, 'score': -1}]
+[{'name': 'Ana', 'score': 8}, {'name': 'Bo', 'score': None}, {'name': 'Cy', 'score': 6}, {'name': 'Di', 'score': None}]
+[{'mean': 7.0}]

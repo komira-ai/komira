@@ -382,42 +382,63 @@
     "slug": "make-pivot-table",
     "category": "Aggregate",
     "question": "How do I make a pivot table?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2399",
+      "komira-ai/komira#2400"
+    ]
   },
   {
     "rank": 52,
     "slug": "melt-wide-data-long",
     "category": "Transform",
     "question": "How do I melt (unpivot) wide data to long?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2399",
+      "komira-ai/komira#2400"
+    ]
   },
   {
     "rank": 53,
     "slug": "reshape-long-data-wide",
     "category": "Transform",
     "question": "How do I reshape long data to wide?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2399",
+      "komira-ai/komira#2400"
+    ]
   },
   {
     "rank": 54,
     "slug": "cross-tabulate-two-columns",
     "category": "Transform",
     "question": "How do I cross-tabulate two columns?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2400"
+    ]
   },
   {
     "rank": 55,
     "slug": "replace-values-with-null",
     "category": "Clean",
     "question": "How do I replace specific values such as 'N/A' with null?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2401"
+    ]
   },
   {
     "rank": 56,
     "slug": "detect-outliers",
     "category": "Clean",
     "question": "How do I detect outliers?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2367"
+    ]
   },
   {
     "rank": 57,
@@ -445,7 +466,10 @@
     "slug": "convert-column-to-numbers",
     "category": "Clean",
     "question": "How do I convert a column to numbers, turning bad values into null?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2402"
+    ]
   },
   {
     "rank": 61,
