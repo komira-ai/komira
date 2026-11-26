@@ -14,7 +14,7 @@ one from our other repositories.
 2. **No third-party runner as the base.** None runs a Mojo block as a welded Buck2 action, and
    those that check "the page equals the file" are tied to their own site stack. We use
    [lychee](https://github.com/lycheeverse/lychee) for outside links (scheduled, not in the gate),
-   the [llms.txt](https://llmstxt.org/) shape, and each language's own interpreter.
+   the `llms.txt` page shape, and each language's own interpreter.
 3. **What is new for us is the task page:** a real source file, its recorded output, one section per
    language, and a status the test run writes.
 4. **Two tiers.** The first tier is what the komira.dev examples gate needs and can be accepted on
