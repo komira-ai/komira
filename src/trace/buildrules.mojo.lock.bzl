@@ -286,7 +286,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/trace/tests/test_tracer_parallelize.mojo", "sha256": "7166b0c27fade2e8832168c61a1b7ad660eabe3916ed6290eae683898ca03989"}
+        {"path": "src/trace/tests/test_tracer_parallelize.mojo", "sha256": "69f5d98f49efeafc19d39109877943e5903ad4f291eb5652fe225d06c10e9f7c"}
       ],
       "deps": ["komira-ai/trace@0.1.0#mojo1.1.0/lib", "komira-ai/fork_join@0.1.0#mojo1.1.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -566,7 +566,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/trace/tests/test_tracer_parallelize.mojo", "sha256": "7166b0c27fade2e8832168c61a1b7ad660eabe3916ed6290eae683898ca03989"}
+        {"path": "src/trace/tests/test_tracer_parallelize.mojo", "sha256": "69f5d98f49efeafc19d39109877943e5903ad4f291eb5652fe225d06c10e9f7c"}
       ],
       "deps": ["komira-ai/trace@0.1.0#mojo1.1.0/lib", "komira-ai/fork_join@0.1.0#mojo1.1.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -843,7 +843,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/trace/tests/test_tracer_parallelize.mojo", "sha256": "7166b0c27fade2e8832168c61a1b7ad660eabe3916ed6290eae683898ca03989"}
+        {"path": "src/trace/tests/test_tracer_parallelize.mojo", "sha256": "69f5d98f49efeafc19d39109877943e5903ad4f291eb5652fe225d06c10e9f7c"}
       ],
       "deps": ["komira-ai/trace@0.1.0#mojo1.1.0/lib", "komira-ai/fork_join@0.1.0#mojo1.1.0/lib", "komira-ai/runtime_paths@0.1.0#mojo1.1.0/lib"],
       "natives": [],

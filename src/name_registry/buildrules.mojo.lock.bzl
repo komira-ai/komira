@@ -47,8 +47,8 @@ GRAPH_JSON = r'''{
       "kind": "lib",
       "root": "src/name_registry/src/name_registry",
       "srcs": [
-        {"path": "src/name_registry/src/name_registry/__init__.mojo", "sha256": "31d424ac06bee48da2ecf62656bf828ecf9dee7a01ba4fee47643e8a081895e7"},
-        {"path": "src/name_registry/src/name_registry/registry.mojo", "sha256": "e9ae158f58f768e0a9953147356865ad7b52c823239ec90b38dda651a01ddc09"}
+        {"path": "src/name_registry/src/name_registry/__init__.mojo", "sha256": "832a6ff2fb19d9660ec949028da57b4b6368caf7cd46a3da624f84f945d37406"},
+        {"path": "src/name_registry/src/name_registry/registry.mojo", "sha256": "6a74e0966f2b5dcab527fdf6b21589383753bf889b7afa79ca64e7004dc0e378"}
       ],
       "deps": ["komira-ai/hashing@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -62,7 +62,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/name_registry/tests/test_name_registry.mojo", "sha256": "a37bd5c8a4e07b2e942fcfd05d7f7aabf2b90c2914b7029377bd8b06269d0fb1"}
+        {"path": "src/name_registry/tests/test_name_registry.mojo", "sha256": "1a6f20fe7d2f6f31b9ecfb695b465c4b3c7a39714568d7671a83a92248358f5d"}
       ],
       "deps": ["komira-ai/name_registry@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -76,7 +76,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/name_registry/tests/test_name_registry_full.mojo", "sha256": "f517707e658fae7ee3eac55bfbf66fcc12c9abe5a9cdbe0f66a995b74c3c1e00"}
+        {"path": "src/name_registry/tests/test_name_registry_full.mojo", "sha256": "cbde4a59db766250083beae0847206819f6aec3854ab4b441279905bd48bc3ca"}
       ],
       "deps": ["komira-ai/name_registry@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -124,8 +124,8 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "kind": "lib",
       "root": "src/name_registry/src/name_registry",
       "srcs": [
-        {"path": "src/name_registry/src/name_registry/__init__.mojo", "sha256": "31d424ac06bee48da2ecf62656bf828ecf9dee7a01ba4fee47643e8a081895e7"},
-        {"path": "src/name_registry/src/name_registry/registry.mojo", "sha256": "e9ae158f58f768e0a9953147356865ad7b52c823239ec90b38dda651a01ddc09"}
+        {"path": "src/name_registry/src/name_registry/__init__.mojo", "sha256": "832a6ff2fb19d9660ec949028da57b4b6368caf7cd46a3da624f84f945d37406"},
+        {"path": "src/name_registry/src/name_registry/registry.mojo", "sha256": "6a74e0966f2b5dcab527fdf6b21589383753bf889b7afa79ca64e7004dc0e378"}
       ],
       "deps": ["komira-ai/hashing@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -139,7 +139,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/name_registry/tests/test_name_registry.mojo", "sha256": "a37bd5c8a4e07b2e942fcfd05d7f7aabf2b90c2914b7029377bd8b06269d0fb1"}
+        {"path": "src/name_registry/tests/test_name_registry.mojo", "sha256": "1a6f20fe7d2f6f31b9ecfb695b465c4b3c7a39714568d7671a83a92248358f5d"}
       ],
       "deps": ["komira-ai/name_registry@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -153,7 +153,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/name_registry/tests/test_name_registry_full.mojo", "sha256": "f517707e658fae7ee3eac55bfbf66fcc12c9abe5a9cdbe0f66a995b74c3c1e00"}
+        {"path": "src/name_registry/tests/test_name_registry_full.mojo", "sha256": "cbde4a59db766250083beae0847206819f6aec3854ab4b441279905bd48bc3ca"}
       ],
       "deps": ["komira-ai/name_registry@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -198,8 +198,8 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "kind": "lib",
       "root": "src/name_registry/src/name_registry",
       "srcs": [
-        {"path": "src/name_registry/src/name_registry/__init__.mojo", "sha256": "31d424ac06bee48da2ecf62656bf828ecf9dee7a01ba4fee47643e8a081895e7"},
-        {"path": "src/name_registry/src/name_registry/registry.mojo", "sha256": "e9ae158f58f768e0a9953147356865ad7b52c823239ec90b38dda651a01ddc09"}
+        {"path": "src/name_registry/src/name_registry/__init__.mojo", "sha256": "832a6ff2fb19d9660ec949028da57b4b6368caf7cd46a3da624f84f945d37406"},
+        {"path": "src/name_registry/src/name_registry/registry.mojo", "sha256": "6a74e0966f2b5dcab527fdf6b21589383753bf889b7afa79ca64e7004dc0e378"}
       ],
       "deps": ["komira-ai/hashing@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -213,7 +213,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/name_registry/tests/test_name_registry.mojo", "sha256": "a37bd5c8a4e07b2e942fcfd05d7f7aabf2b90c2914b7029377bd8b06269d0fb1"}
+        {"path": "src/name_registry/tests/test_name_registry.mojo", "sha256": "1a6f20fe7d2f6f31b9ecfb695b465c4b3c7a39714568d7671a83a92248358f5d"}
       ],
       "deps": ["komira-ai/name_registry@0.1.0#mojo1.1.0/lib"],
       "natives": [],
@@ -227,7 +227,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/name_registry/tests/test_name_registry_full.mojo", "sha256": "f517707e658fae7ee3eac55bfbf66fcc12c9abe5a9cdbe0f66a995b74c3c1e00"}
+        {"path": "src/name_registry/tests/test_name_registry_full.mojo", "sha256": "cbde4a59db766250083beae0847206819f6aec3854ab4b441279905bd48bc3ca"}
       ],
       "deps": ["komira-ai/name_registry@0.1.0#mojo1.1.0/lib"],
       "natives": [],

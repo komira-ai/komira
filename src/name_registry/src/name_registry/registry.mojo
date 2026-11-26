@@ -9,16 +9,22 @@
 #      open-addressing table (at most `MAX_REGISTERED_NAMES` names).
 #   3. A drain reads the table back by id (`lookup`, `contains`).
 #
-# CONCURRENCY CONTRACT. `n_registered` is atomic, but the slot claim and the
-# name-byte stores are plain writes: two threads registering at the same time
-# can interleave, and a concurrent `lookup` can observe an id whose bytes are
-# not yet written. Register from one thread at a time (or under the caller's
-# own lock); once registration has finished, any number of threads may call
-# `lookup`, `contains` and `count` concurrently. Registering the same name
-# twice is harmless (the second call is a no-op).
+# CONCURRENCY CONTRACT. Any number of threads may call `try_register` at
+# once. A registration claims its slot with one compare-and-swap of the
+# slot's id from 0 to the name's id, so the check that a slot is free and the
+# claim are one atomic step: of all the calls that register one name, at most
+# one returns True and the name is stored in one slot and counted once, and a
+# registration never overwrites a slot another name claimed (it probes on).
+# The name's bytes are plain stores made after the claim, so a `lookup` that
+# runs while the name is being registered can see the id before its bytes:
+# call `lookup` once the registrations it must see have returned. `contains`
+# and `count` read only atomics (a slot's id, the count), so they may run at
+# any time; `contains` reports a name from the moment its slot is claimed.
+# Registering the same name twice is harmless (the second call is a no-op).
 # =============================================================================
 
-from std.atomic import Atomic
+from std.atomic import Atomic, Ordering
+from std.memory import UnsafePointer
 from hashing import fnv1a_32
 
 
@@ -74,6 +80,34 @@ struct NameRegistryEntry(Copyable, Movable, Deinitable):
 
 
 # -----------------------------------------------------------------------------
+# The claim window -- what runs inside `try_register` between seeing a slot
+# empty and claiming it. Production runs nothing there (`_NoClaimWindow`); a
+# test runs a whole second registration there, which is the interleaving of two
+# threads that register at once, made deterministic.
+# -----------------------------------------------------------------------------
+
+
+trait _ClaimWindow:
+    """What runs in a claim window of `NameRegistry._try_register_at`."""
+
+    def in_window(mut self, mut registry: NameRegistry):
+        """Called after a probe saw a slot empty, before the claim of it.
+        `registry` is the registry being registered into."""
+        ...
+
+
+struct _NoClaimWindow(_ClaimWindow):
+    """The window of `try_register`: runs nothing."""
+
+    def __init__(out self):
+        pass
+
+    @always_inline
+    def in_window(mut self, mut registry: NameRegistry):
+        pass
+
+
+# -----------------------------------------------------------------------------
 # NameRegistry -- open-addressing table with linear probing. See the
 # concurrency contract in the file header.
 # -----------------------------------------------------------------------------
@@ -86,8 +120,9 @@ struct NameRegistry(Deinitable):
     linear probing. Max load 50% -- at MAX_REGISTERED_NAMES/2 entries the
     probe-chain length stays bounded.
 
-    Concurrency: see the contract in the file header (register serially,
-    read concurrently once registration is done).
+    Concurrency: see the contract in the file header (any number of threads
+    may register at once; `lookup` once the registrations it must see have
+    returned).
     """
 
     var entries: Array[NameRegistryEntry, MAX_REGISTERED_NAMES]
@@ -108,7 +143,19 @@ struct NameRegistry(Deinitable):
         already present.
 
         Returns True on first-time success, False if the slot was already
-        owned by `name_id` or the table is full.
+        owned by `name_id` or the table is full. Safe to call from any number
+        of threads at once (see the contract in the file header).
+        """
+        var no_window = _NoClaimWindow()
+        return self._try_register_at[name](no_window)
+
+    def _try_register_at[
+        name: StringLiteral, W: _ClaimWindow
+    ](mut self, mut window: W) -> Bool:
+        """`try_register`, with `window.in_window(self)` run in each claim
+        window: after a probe has seen a slot empty and before the
+        compare-and-swap that claims it. Tests put a second registration
+        there; `try_register` passes `_NoClaimWindow`, which runs nothing.
         """
         comptime h = _name_id_compute(name)
         var name_id = h
@@ -120,12 +167,29 @@ struct NameRegistry(Deinitable):
         var probe = 0
 
         while probe < MAX_REGISTERED_NAMES:
-            var existing = self.entries[idx].name_id
+            # SAFETY: the pointer is to `name_id` of `self.entries[idx]`, a
+            # field of this registry's own inline array (origin: `self`), with
+            # `idx` masked into `[0, MAX_REGISTERED_NAMES)`. It is used for this
+            # one atomic load and does not outlive the statement.
+            var existing = Atomic[UInt32].load(
+                UnsafePointer(to=self.entries[idx].name_id)
+            )
+            var claimed = False
+            if existing == UInt32(0):
+                window.in_window(self)
+                # Claim the slot only if it is still empty: the check and the
+                # claim are this one compare-and-swap. On failure `existing`
+                # becomes the id the slot now holds, which is never 0.
+                # SAFETY: as for the load above; the pointer is made after
+                # `in_window` returns and does not outlive the statement.
+                claimed = Atomic[UInt32].compare_exchange(
+                    UnsafePointer(to=self.entries[idx].name_id),
+                    existing,
+                    name_id,
+                )
             if existing == name_id:
                 return False
-            if existing == UInt32(0):
-                # Claim the slot (callers serialise registration).
-                self.entries[idx].name_id = name_id
+            if claimed:
                 var s = String(name)
                 var sb = s.as_bytes()
                 var slen = len(sb)
@@ -158,7 +222,14 @@ struct NameRegistry(Deinitable):
         var probe = 0
 
         while probe < MAX_REGISTERED_NAMES:
-            var entry_id = self.entries[idx].name_id
+            # SAFETY: the pointer is to `name_id` of `self.entries[idx]`, a
+            # field of this registry's own inline array (origin: `self`), with
+            # `idx` masked into `[0, MAX_REGISTERED_NAMES)`. It is used for this
+            # one atomic load and does not outlive the statement. Relaxed: only
+            # the id is compared, and a registration may claim slots meanwhile.
+            var entry_id = Atomic[UInt32].load[ordering=Ordering.RELAXED](
+                UnsafePointer(to=self.entries[idx].name_id)
+            )
             if entry_id == name_id:
                 var slen = Int(self.entries[idx].name_len)
                 # Copy the stored bytes verbatim. Re-encoding each byte as a
@@ -189,7 +260,14 @@ struct NameRegistry(Deinitable):
         var probe = 0
 
         while probe < MAX_REGISTERED_NAMES:
-            var entry_id = self.entries[idx].name_id
+            # SAFETY: the pointer is to `name_id` of `self.entries[idx]`, a
+            # field of this registry's own inline array (origin: `self`), with
+            # `idx` masked into `[0, MAX_REGISTERED_NAMES)`. It is used for this
+            # one atomic load and does not outlive the statement. Relaxed: only
+            # the id is compared, and a registration may claim slots meanwhile.
+            var entry_id = Atomic[UInt32].load[ordering=Ordering.RELAXED](
+                UnsafePointer(to=self.entries[idx].name_id)
+            )
             if entry_id == name_id:
                 return True
             if entry_id == UInt32(0):

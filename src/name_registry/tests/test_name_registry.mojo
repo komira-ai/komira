@@ -11,6 +11,10 @@
 #   5. NameRegistry.lookup returns None for an unknown name_id.
 #   6. A name whose id is 0 (the empty-slot marker) is refused.
 #   7. Names sharing a home slot probe to the next slot, wrapping 255 -> 0.
+#   8. A registration whose slot is claimed by another registration between
+#      its check and its claim (a second registration run whole inside the
+#      first one's claim window) neither overwrites that slot nor counts a
+#      name twice: the same name returns False, another name probes on.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -22,6 +26,37 @@ from name_registry import (
     name_id,
     name_id_of,
 )
+from name_registry.registry import _ClaimWindow, _name_id_compute
+
+
+struct _CountWindow(_ClaimWindow):
+    """Counts the claim windows of a registration and runs nothing in them."""
+
+    var opened: Int
+
+    def __init__(out self):
+        self.opened = 0
+
+    def in_window(mut self, mut registry: NameRegistry):
+        self.opened += 1
+
+
+struct _RegisterInWindow[other: StringLiteral](_ClaimWindow):
+    """Registers `other` whole inside the first claim window: what a second
+    thread does when it registers between this registration's check that a
+    slot is empty and its claim of the slot."""
+
+    var opened: Int
+    var other_registered: Bool
+
+    def __init__(out self):
+        self.opened = 0
+        self.other_registered = False
+
+    def in_window(mut self, mut registry: NameRegistry):
+        self.opened += 1
+        if self.opened == 1:
+            self.other_registered = registry.try_register[Self.other]()
 
 
 def test_fnv1a_comptime_literal() raises:
@@ -137,6 +172,13 @@ def test_name_id_is_the_shared_fnv1a_digest() raises:
     # Published FNV-1a 32-bit vectors: "" is the offset basis, "a" is 0xE40C292C.
     assert_equal(name_id[""](), UInt32(2166136261))
     assert_equal(name_id["a"](), UInt32(0xE40C292C))
+    # The function `name_id` folds at compile time gives the same digest
+    # when it runs at run time.
+    assert_equal(_name_id_compute("a"), UInt32(0xE40C292C))
+    assert_equal(
+        _name_id_compute("engine.segment.execute"),
+        name_id["engine.segment.execute"](),
+    )
     print("  test_name_id_is_the_shared_fnv1a_digest PASS")
 
 
@@ -219,6 +261,88 @@ def test_registry_probe_wraps_past_the_last_slot() raises:
     print("  test_registry_probe_wraps_past_the_last_slot PASS")
 
 
+def test_registry_claim_window_opens_only_at_an_empty_slot() raises:
+    """The claim window opens once per empty slot a registration reaches:
+    once for a new name, never for a name already registered or for the
+    refused id-0 name, and only at the free slot when the home slot is
+    taken."""
+    var reg = NameRegistry()
+    var window = _CountWindow()
+    assert_true(reg._try_register_at["scan.rows"](window), "new name")
+    assert_equal(window.opened, 1, "one window, at the home slot")
+    assert_false(reg._try_register_at["scan.rows"](window), "no-op")
+    assert_equal(window.opened, 1, "no window for a registered name")
+    assert_false(reg._try_register_at["qzs0UD"](window), "id 0 refused")
+    assert_equal(window.opened, 1, "no window for the id-0 name")
+    assert_true(reg._try_register_at["w443"](window), "w443 takes 255")
+    assert_true(reg._try_register_at["w757"](window), "w757 wraps to 0")
+    assert_equal(window.opened, 3, "w757 opened one window, at slot 0")
+    assert_equal(reg.count(), Int(3))
+    assert_equal(reg.lookup(name_id["w757"]()).value(), String("w757"))
+    print("  test_registry_claim_window_opens_only_at_an_empty_slot PASS")
+
+
+def test_registry_same_name_claimed_in_the_window_registers_once() raises:
+    """Two registrations of one name, the second run whole between the
+    first's check and its claim: the second claims the slot and returns
+    True, the first returns False, and the name is stored and counted once."""
+    var reg = NameRegistry()
+    var window = _RegisterInWindow["scan.rows"]()
+    var first = reg._try_register_at["scan.rows"](window)
+    assert_equal(window.opened, 1, "the first registration's one window")
+    assert_true(window.other_registered, "the second registration won")
+    assert_false(first, "the overtaken registration is a no-op")
+    assert_equal(reg.count(), Int(1), "one name, registered once")
+    assert_equal(reg.lookup(name_id["scan.rows"]()).value(), String("scan.rows"))
+    assert_false(reg.try_register["scan.rows"](), "still a no-op afterwards")
+    assert_equal(reg.count(), Int(1))
+    print("  test_registry_same_name_claimed_in_the_window_registers_once PASS")
+
+
+def test_registry_other_name_claimed_in_the_window_probes_on() raises:
+    """Two names with one home slot (d1.finalize and d1.insert_batch, the
+    tracer's colliding pair, both slot 210), the second registered whole
+    inside the first's claim window: the first does not overwrite the slot
+    the second claimed but takes the next one, and both read back."""
+    assert_equal(Int(name_id["d1.finalize"]()) & 255, 210)
+    assert_equal(Int(name_id["d1.insert_batch"]()) & 255, 210)
+    var reg = NameRegistry()
+    var window = _RegisterInWindow["d1.finalize"]()
+    assert_true(
+        reg._try_register_at["d1.insert_batch"](window), "takes slot 211"
+    )
+    assert_true(window.other_registered, "d1.finalize took slot 210")
+    assert_equal(window.opened, 2, "windows at slot 210 and slot 211")
+    assert_equal(reg.count(), Int(2))
+    assert_equal(
+        reg.lookup(name_id["d1.finalize"]()).value(), String("d1.finalize")
+    )
+    assert_equal(
+        reg.lookup(name_id["d1.insert_batch"]()).value(),
+        String("d1.insert_batch"),
+    )
+    assert_false(reg.try_register["d1.finalize"](), "d1.finalize is a no-op")
+    assert_false(reg.try_register["d1.insert_batch"](), "so is the other")
+    assert_equal(reg.count(), Int(2))
+    print("  test_registry_other_name_claimed_in_the_window_probes_on PASS")
+
+
+def test_registry_claim_lost_on_the_last_slot_wraps_to_slot_0() raises:
+    """w757 and w443 share home slot 255. w443, registered inside w757's
+    claim window at 255, takes it; w757 wraps and claims slot 0."""
+    var reg = NameRegistry()
+    var window = _RegisterInWindow["w443"]()
+    assert_true(reg._try_register_at["w757"](window), "w757 wraps to 0")
+    assert_true(window.other_registered, "w443 took slot 255")
+    assert_equal(window.opened, 2, "windows at slot 255 and slot 0")
+    assert_equal(reg.count(), Int(2))
+    assert_equal(reg.lookup(name_id["w443"]()).value(), String("w443"))
+    # A probe from 255 stops at the first empty slot, so w757 reads back
+    # only if it sits in slot 0.
+    assert_equal(reg.lookup(name_id["w757"]()).value(), String("w757"))
+    print("  test_registry_claim_lost_on_the_last_slot_wraps_to_slot_0 PASS")
+
+
 def main() raises:
     print("test_name_registry")
     print("==================")
@@ -236,5 +360,9 @@ def main() raises:
     test_registry_owns_independent_state()
     test_registry_rejects_a_name_whose_id_is_zero()
     test_registry_probe_wraps_past_the_last_slot()
+    test_registry_claim_window_opens_only_at_an_empty_slot()
+    test_registry_same_name_claimed_in_the_window_registers_once()
+    test_registry_other_name_claimed_in_the_window_probes_on()
+    test_registry_claim_lost_on_the_last_slot_wraps_to_slot_0()
     print()
     print("ALL TESTS PASS")
