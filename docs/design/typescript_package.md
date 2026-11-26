@@ -161,7 +161,7 @@ Fixed before this design, and not reopened here:
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.9, with twenty-five exports
+- **EXISTS** `libkomira` is at ABI 1.10, with twenty-six exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
   - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream.
     `komira_sql_stream_run` (1.6) runs it under a run handle that another thread cancels
@@ -175,6 +175,8 @@ Fixed before this design, and not reopened here:
     the step that refused it. The addon does not bind them yet.
   - `komira_register_arrow_stream` (1.9) drains a host's Arrow C stream into a table held in
     memory and registers it by name, replacing a table of that name; it releases the stream.
+  - `komira_add_sql_binding` (1.10) binds a table name to the protobuf bytes of a
+    `WireBoundSource` (a Parquet location), replacing a table of that name.
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,

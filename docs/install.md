@@ -50,7 +50,7 @@ import pyarrow.parquet as pq
 import komira
 
 print(komira.__version__)     # the installed version
-print(komira.abi_version())   # the engine's C ABI version: 1009 is 1.9
+print(komira.abi_version())   # the engine's C ABI version: 1010 is 1.10
 
 # A small Parquet file to query: six days of weather in three cities.
 weather = pa.table({
@@ -98,7 +98,7 @@ pyarrow, which `pip install komira` installed. Then `python quickstart.py` print
 
 ```text
 0.1.1512
-1009
+1010
 [{'days': 6, 'rain': 9.5}]
 city: string
 days: int64 not null

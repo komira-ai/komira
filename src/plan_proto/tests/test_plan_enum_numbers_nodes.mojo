@@ -2,12 +2,14 @@
 # test_plan_enum_numbers_nodes.mojo
 # =============================================================================
 #
-# THE ENUM-VALUE CENSUS of `komira.plan.v1` (plan_vocabulary.proto),
-# part 1 of 2: the plan and expression tag spaces and the join, window,
-# source and operator enums: PlanTag, ExprTag, AggFn, WindowFn,
+# THE ENUM-VALUE CENSUS of `komira.plan.v1` (plan_vocabulary.proto and
+# bound_source.proto), part 1 of 2: the plan and expression tag spaces and the
+# join, window, source and operator enums: PlanTag, ExprTag, AggFn, WindowFn,
 # FrameUnits, FrameBound, JoinType, JoinAlgo, AsofDirection, AsofToleranceKind,
 # CorrelatedKind, SourceType, SourceOrientation, SourceVariantTag, BinaryOp,
-# UnaryOp. The other part is test_plan_enum_numbers_functions.mojo.
+# UnaryOp, and AddressingStyleWire (bound_source.proto, held under
+# `WireSourceAccess.addressing`). The other part is
+# test_plan_enum_numbers_functions.mojo.
 #
 # An enum value's number is what is stored, like a field's: renumbering
 # `COL_SIDE_LEFT = 2` in the .proto moves the generated encoder and decoder
@@ -27,6 +29,7 @@
 from std.testing import assert_equal, assert_true
 
 from proto_codec import ProtoEnum, decode_proto, encode_proto
+from plan_proto.bound_source import AddressingStyleWire, WireSourceAccess
 from plan_proto.plan import (
     WireAggFn,
     WireAsofJoinNode,
@@ -422,6 +425,11 @@ def _check(enum: String, v: String, n: Int) raises:
         var b = _rec(1, n)  # WireUnaryOp.op
         var m = decode_proto[WireUnaryOp](b.copy())
         _host(m.op.json_name(), encode_proto(m), b, v, q)
+    elif enum == "AddressingStyleWire":
+        _names_agree[AddressingStyleWire](v, n, q)
+        var b = _rec(4, n)  # WireSourceAccess.addressing
+        var m = decode_proto[WireSourceAccess](b.copy())
+        _host(m.addressing.json_name(), encode_proto(m), b, v, q)
     else:
         raise Error("no check for enum " + enum + ": add it to `_check`")
 
@@ -631,4 +639,7 @@ UnaryOp.UN_SIGN 6
 UnaryOp.UN_TRUNC 7
 UnaryOp.UN_ROUND 8
 UnaryOp.UN_BIT_COUNT 9
+AddressingStyleWire.ADDRESSING_STYLE_WIRE_UNSPECIFIED 0
+AddressingStyleWire.ADDRESSING_STYLE_WIRE_VHOST 1
+AddressingStyleWire.ADDRESSING_STYLE_WIRE_PATH 2
 """
