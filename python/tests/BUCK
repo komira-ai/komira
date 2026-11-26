@@ -974,7 +974,8 @@ python_binding_test(
 # polars skin where it has the spelling, and of Session.sql over the same files
 # equals DuckDB's answer to the SQL that means the same. A pandas decimal sum
 # that fills a sum of nothing with 0 is refused by the engine, whose CASE has no
-# decimal output yet, and the test fails when the engine answers it. The staged
+# decimal output yet, and arithmetic with a Decimal literal is refused on the plan
+# route in both skins; each test fails when the engine answers its program. The staged
 # duckdb/test_frame_duckdb.py gives the comparator; the data is the staged
 # `tpch_sf1[data]` at <lib-dir>/tpch/tpch/sf1/<table>.parquet.
 # Derived from TPC-H; not comparable to published TPC-H results.

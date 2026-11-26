@@ -21,9 +21,10 @@ into Python:
 3. the means, least and greatest of the decimal(15,2) columns and the count by the
    two flag columns under the ship-date cut (the shape of TPC-H q1), and, in the
    pandas skin and the SQL entry, the decimal sums (`sum(min_count=1)`, SQL's SUM);
-4. a computed decimal column, `l_extendedprice * (1 - l_discount)` with a `Decimal`
-   literal, summed (the pandas skin and the SQL entry) and averaged by the two
-   flag columns under the cut;
+4. a computed decimal column, the price net of its discount, written over columns
+   alone in the skins (`price - price * discount`) and as
+   `l_extendedprice * (1 - l_discount)` in SQL, summed (the pandas skin and the
+   SQL entry) and averaged by the two flag columns under the cut;
 5. the first ten rows by (l_orderkey, l_linenumber) of the lines of the orders up
    to 1000, a decimal column riding through a projection, a sort and a head;
 6. a semi join and an anti join against the orders before 1993-03-01 (`isin` with a
@@ -40,8 +41,10 @@ What is held:
   message, so the steps of decimal sums have no polars program;
 - the pandas sum with its default `min_count=0` (a sum of nothing is 0, filled
   by a CASE) of a decimal column is refused by the engine with a `KomiraError`,
-  whose CASE has no decimal output yet; the test fails when the engine answers
-  it, so the program moves into the steps;
+  whose CASE has no decimal output yet; arithmetic with a `Decimal` literal
+  (`price * (Decimal("1") - discount)`) is refused in both skins on the plan
+  route, by the code PLAN_WIRE_INCOMPARABLE_LITERAL; each test fails when the
+  engine answers its program, so the program moves into the steps;
 - a run does not stop at its first difference: it raises once, listing every
   step and route whose answer differs or that raised, with the error;
 - without the library: every step has a pandas program, a SQL text, a polars
@@ -107,9 +110,17 @@ def shipped_lazy(lf):
 
 
 def with_disc_price(f):
-    """`f` with the price net of the discount; the `Decimal` literal is a
-    decimal(1, 0), so the product's type does not hang on an integer literal."""
-    return f.assign(disc_price=f["l_extendedprice"] * (D("1") - f["l_discount"]))
+    """`f` with the price net of the discount, `price - price * discount`: the
+    value of SQL's `l_extendedprice * (1 - l_discount)` to the last digit, by
+    arithmetic over columns alone. The plan route refuses arithmetic with a
+    decimal literal (DECIMAL_LITERAL_ARITHMETIC below)."""
+    return f.assign(disc_price=f["l_extendedprice"] - f["l_extendedprice"] * f["l_discount"])
+
+
+def with_disc_price_lazy(lf):
+    return lf.with_columns(
+        (kpl.col("l_extendedprice") - kpl.col("l_extendedprice") * kpl.col("l_discount")).alias("disc_price")
+    )
 
 
 def early_orders(o):
@@ -190,9 +201,10 @@ STEP_3_SUMS = Step(
 )
 
 # The computed column is held through its sum (decimal(38, 4) in both engines
-# whatever width the product has) and its mean (double), not through its least or
-# greatest, whose precision is the product's own width, which the two engines
-# derive by their own rules.
+# whatever width the expression has) and its mean (double), not through its least
+# or greatest, whose precision is the expression's own width, which the two
+# engines derive by their own rules. The SQL is the text a user writes, with the
+# literal 1, which the SQL entry runs.
 STEP_4_SUM = Step(
     "computed decimal column summed by the two flags under the cut",
     lambda li, o: with_disc_price(shipped(li)).groupby(FLAGS)["disc_price"].sum(min_count=1),
@@ -209,8 +221,7 @@ STEP_4_MEAN = Step(
     lambda li, o: with_disc_price(shipped(li))
     .groupby(FLAGS)
     .agg(avg_disc_price=("disc_price", "mean"), n=("disc_price", "size")),
-    lambda lf, lo: shipped_lazy(lf)
-    .with_columns((kpl.col("l_extendedprice") * (kpl.lit(D("1")) - kpl.col("l_discount"))).alias("disc_price"))
+    lambda lf, lo: with_disc_price_lazy(shipped_lazy(lf))
     .group_by(*FLAGS)
     .agg(kpl.col("disc_price").mean().alias("avg_disc_price"), kpl.len().alias("n"))
     .sort(*FLAGS),
@@ -374,28 +385,73 @@ def test_polars_skin_refuses_the_sum_of_a_decimal_column_by_name(lib_dir):
             raise AssertionError("the polars skin summed a decimal column")
 
 
+# Programs the engine does not run on the plan route yet, each refused with a
+# `KomiraError` whose message names the refusal. When the engine answers one, its
+# test fails, and the program moves into the session's steps.
+#
 # The sum a pandas user writes first, `agg(total=(column, "sum"))`, fills a sum
 # of nothing with 0 (min_count=0) by a CASE, and the engine's CASE has no
-# decimal output yet; until it has, the engine refuses this program with an
-# error of the library (a `KomiraError`). When the engine answers it, this test
-# fails and the program moves into the session's steps beside STEP_3_SUMS.
-ENGINE_REFUSED = [
+# decimal output yet; STEP_3_SUMS and STEP_4_SUM sum with min_count=1 instead.
+ZERO_FILLED_DECIMAL_SUM = [
     ("a named decimal sum", lambda li: shipped(li).groupby(FLAGS).agg(sum_qty=("l_quantity", "sum"))),
     ("a decimal sum of one column", lambda li: shipped(li).groupby(FLAGS)["l_extendedprice"].sum()),
 ]
+
+# `price * (Decimal("1") - discount)`, the form of q1, is arithmetic with a
+# decimal literal, which the plan's scalar arithmetic carries only for an int or
+# a float; the decoder refuses it by this code. with_disc_price writes the same
+# value over columns alone.
+DECIMAL_LITERAL_ARITHMETIC = [
+    (
+        "the pandas skin's price net of discount with a Decimal literal",
+        lambda li, lf: shipped(li)
+        .assign(disc_price=lambda d: d["l_extendedprice"] * (D("1") - d["l_discount"]))
+        .groupby(FLAGS)
+        .agg(n=("disc_price", "size")),
+    ),
+    (
+        "the polars skin's price net of discount with a Decimal literal",
+        lambda li, lf: shipped_lazy(lf)
+        .with_columns((kpl.col("l_extendedprice") * (kpl.lit(D("1")) - kpl.col("l_discount"))).alias("disc_price"))
+        .group_by(*FLAGS)
+        .agg(kpl.col("disc_price").max()),
+    ),
+]
+LITERAL_REFUSAL = "PLAN_WIRE_INCOMPARABLE_LITERAL"
+
+
+def refused(name, run):
+    """The `KomiraError` `run()` raises; fails when the engine answers."""
+    try:
+        result = run()
+        if hasattr(result, "to_arrow"):
+            result.to_arrow()
+    except komira.KomiraError as e:
+        return e
+    raise AssertionError("{}: the engine answered it; move it into the session's steps".format(name))
 
 
 def test_the_zero_filled_decimal_sum_is_refused_by_the_engine(lib_dir):
     path = tpch_path(lib_dir, "lineitem")
     with komira.Session() as session:
         li = komira.read_parquet(path, session=session)
-        for name, program in ENGINE_REFUSED:
-            try:
-                program(li).materialize().to_arrow()
-            except komira.KomiraError:
-                pass
-            else:
-                raise AssertionError("{}: the engine answered it; move it into the session's steps".format(name))
+        for name, program in ZERO_FILLED_DECIMAL_SUM:
+            refused(name, lambda: program(li).materialize())
+
+
+def test_arithmetic_with_a_decimal_literal_is_refused_by_name_on_the_plan_route(lib_dir):
+    path = tpch_path(lib_dir, "lineitem")
+    with komira.Session() as session:
+        li = komira.read_parquet(path, session=session)
+        lf = kpl.scan_parquet(path, session=session)
+        for name, program in DECIMAL_LITERAL_ARITHMETIC:
+
+            def run():
+                frame = program(li, lf)
+                return frame.materialize() if isinstance(frame, komira.DataFrame) else frame.collect()
+
+            e = refused(name, run)
+            assert LITERAL_REFUSAL in str(e), "{}: refused, but not as {}: {}".format(name, LITERAL_REFUSAL, e)
 
 
 PURE = [test_every_step_has_programs_sql_and_order_keys_that_name_columns]
@@ -404,6 +460,7 @@ WITH_LIBRARY = [
     test_pandas_polars_and_sql_answers_of_the_session_equal_duckdb,
     test_polars_skin_refuses_the_sum_of_a_decimal_column_by_name,
     test_the_zero_filled_decimal_sum_is_refused_by_the_engine,
+    test_arithmetic_with_a_decimal_literal_is_refused_by_name_on_the_plan_route,
 ]
 
 
