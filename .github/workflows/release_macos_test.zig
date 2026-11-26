@@ -73,6 +73,7 @@
 //!  - the step `build the macOS Python harness tests` builds DARWIN_PYTHON_HARNESS of darwin_libs.bzl, the
 //!    list pr.yml analyses with the set (release_macos_harness_test.zig).
 //! Every defect above is written into the real text and must be refused with its message.
+//! The result step's script is also run, for each result of the build job (release_macos_result_test.zig).
 
 const std = @import("std");
 const t = std.testing;
@@ -80,6 +81,12 @@ const t = std.testing;
 // The harness step builds the list pr.yml analyses (release_macos_harness_test.zig says what each case catches).
 test {
     _ = @import("release_macos_harness_test.zig");
+}
+
+// The result step's script, run for each result of the build job (release_macos_result_test.zig says what each
+// case catches).
+test {
+    _ = @import("release_macos_result_test.zig");
 }
 
 const JOB = "release-macos";
