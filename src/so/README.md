@@ -900,6 +900,56 @@ published library:
 The header is not part of the library's conda package yet; that waits on the
 packaging change that lists it.
 
+## What an abort does to the host
+
+A raise inside the library is a value: every export catches it and returns a
+status (`KOMIRA_ERR_ENGINE` with the message as the last error), and no raise
+crosses the boundary. An `abort()`, a failed `debug_assert`, a fault, stack
+exhaustion or an out-of-memory kill is not a value. Mojo has no unwinding, so
+nothing in the library can turn one into a status: it ends the host process
+(the Python interpreter, the Node process) at once. The library installs no
+signal handler and never `longjmp`s: a handler that jumped back into the export
+would leave other engine threads holding locks over half-written state, skip
+Mojo destructors, and replace the host's own handler (Python's `faulthandler`,
+Node's).
+
+What the library does instead is refuse, before running, every input known to
+reach one, so that it comes back as a status:
+
+- A statement nested more than 100 levels deep (parentheses, prefix operators,
+  function calls, `CASE`, subqueries, derived tables; `src/sql/README.md` lists
+  what counts as a level) is `parse: SQL syntax error: the statement nests
+  deeper than 100 levels at line <L>, column <C>`, where the text stopped
+  parsing. The parser recursed once per level on the
+  caller's stack, so a deep enough text exhausted it.
+- `lpad`, `rpad` and `repeat` whose value for one row would be over 64 MiB
+  (`STRING_FN_N_REPEAT_MAX_BYTES`) are refused by name before anything is
+  allocated.
+- libzstd, libz and liblz4, which the codec packages open by soname at first
+  use in an initializer that cannot raise, are opened first by a probe that
+  can, at the start of every call that can reach a codec (the Parquet, CSV
+  and JSON register and describe calls, `komira_sql_stream`,
+  `komira_sql_stream_run` and `komira_plan_stream`;
+  `komira_register_arrow_stream` reads no file and is not probed). A missing library is `compression: cannot load
+  <soname>: <the loader's error>`, not an abort in the middle of a query.
+
+`tests/c/abort_driver.c` sends each of these inputs from a C host, on its main
+thread, and requires the status and the reason as the last error, `*out`
+untouched, and a good query on the same context afterwards. Each form nested to
+exactly the limit still runs, except nested scalar subqueries, which the
+optimizer refuses by name:
+
+```sh
+./buck2 build komira//src/so:abort_check     # exit 0 of the driver, or red
+```
+
+What is left ends the host process, and the bindings say so. The library is
+built at the compiler's default assert level (`safe`): the `debug_assert`s
+declared `assert_mode="safe"` are kept and abort when they fail. The rest of the
+abort sites in the library's closure and the inputs still known to end the
+process are listed, each with why, in §8 of
+[docs/design/libkomira_run_abi.md](https://github.com/komira-ai/komira/blob/main/docs/design/libkomira_run_abi.md).
+
 ## Not done
 
 No release-over-release version check and no packaged header yet; the session
@@ -910,6 +960,5 @@ write target, but no call runs a UDF yet (the plan door refuses an envelope
 with UDFs); no session
 options beyond the worker count and the memory budget (no spill directory); the one language binding is the Node addon ([`node/`](https://github.com/komira-ai/komira/blob/main/node/README.md)).
 The calls that run a query, ported from the earlier SDK, their result as an Arrow
-C stream, and what an abort does at the boundary (not contained yet: an abort
-inside the library ends the host process) are described in
+C stream, and the abort-prone paths the library does not refuse yet are described in
 [docs/design/libkomira_run_abi.md](https://github.com/komira-ai/komira/blob/main/docs/design/libkomira_run_abi.md).

@@ -1,10 +1,12 @@
 # Series
 
 Comparisons, `+ - * /` (true division, as Python's), unary `-`,
-`& | ~` over boolean Series, `isin([...])` with at most 64 values, `dtype`
-and `astype(dtype)` ([names and types](names_and_types.md)). The
+`& | ~` over boolean Series, `isin([...])` with at most 64 values (and
+`isin(other["k"])`, a [semi join](merge.md)), the [window verbs](windows.md),
+`dtype` and `astype(dtype)` ([names and types](names_and_types.md)). The
 [`.str`](str_accessor.md) and [`.dt`](dt_accessor.md) accessors have pages of
-their own. A Series works only in its own frame's verbs: one of another frame,
+their own. A Series works only in its own frame's verbs (`isin(other["k"])`
+aside): one of another frame,
 or one taken before `df["x"] = ...` changed its frame, raises
 `UnsupportedOperation`.
 

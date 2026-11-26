@@ -382,7 +382,11 @@ komira_abi_golden(
 
 staged_files(
     name = "c_driver_files",
-    srcs = ["tests/c/abi_driver.c", "tests/c/plan_cases.h"],
+    srcs = [
+        "tests/c/abi_driver.c",
+        "tests/c/abort_driver.c",
+        "tests/c/plan_cases.h",
+    ],
 )
 
 # A C host of libkomira that includes komira.h and nothing else of ours.
@@ -457,4 +461,32 @@ komira_c_abi_check(
     lib = ":libkomira",
     native_owners = NATIVE_OWNERS,
     data = {"two_columns.parquet": "tests/fixtures/two_columns.parquet"},
+)
+
+# A C host that sends the inputs that end the host process inside the library
+# unless they are refused first (README, "What an abort does to the host"),
+# against komira.h only.
+cxx_binary(
+    name = "abort_driver",
+    srcs = [":c_driver_files[tests/c/abort_driver.c]"],
+    headers = {"komira.h": ":komira_abi"},
+    header_namespace = "",
+)
+
+# Runs abort_driver against libkomira on the process's main thread, so a crash
+# is a red check: statements nested one level past the parser's limit
+# (parentheses, NOT, unary minus, function calls, scalar subqueries, derived
+# tables, derived tables in a UNION) and a hundred times past it are
+# KOMIRA_ERR_ENGINE with the parser's reason and the line and column it stopped
+# at, and each form nested to exactly
+# the limit runs (nested scalar subqueries are the optimizer's named refusal
+# instead); lpad and rpad with a count of 2^63 - 1 and repeat with one of
+# 2^31 - 1 are KOMIRA_ERR_ENGINE naming the per-row ceiling.
+# After each refusal *out is as the driver wrote it and SELECT 1 on the same
+# context answers.
+komira_c_abi_check(
+    name = "abort_check",
+    driver = ":abort_driver",
+    lib = ":libkomira",
+    native_owners = NATIVE_OWNERS,
 )

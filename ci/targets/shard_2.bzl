@@ -74,6 +74,7 @@ TARGETS = [
     "komira//src/snapshotter:conda_holds",
     "komira//src/snapshotter:coverage_floor",
     "komira//src/snapshotter:table",
+    "komira//src/so:abort_check",
     "komira//src/so:c_abi_check",
     "komira//src/so:so_conda",
     "komira//src/telemetry_read:telemetry_read_conda",

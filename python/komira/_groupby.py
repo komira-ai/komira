@@ -29,17 +29,23 @@ by nothing and give one row. No SQL text is written.
 - Missing values are NULL. A NaN is a value in these reductions (ruling 6).
 - A Python function as an aggregate is an aggregate UDF, which no query runs
   yet: it is refused by name, as are the choices that need row order.
+- On one selected column, `transform`, `cumsum`, `cummin`, `cummax` and
+  `rank` give a Series of the frame `groupby` was called on, one value per
+  row, computed over the row's group by a window (komira/_windows.py). Under
+  `dropna=True` a row whose key is missing is in no group, and its value is
+  missing, as in pandas.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import _ops, _refusals
+from . import _ops, _refusals, _windows
 from ._errors import UnsupportedOperation
 
 if TYPE_CHECKING:
     from ._frame import DataFrame
+    from ._series import Series
 
 __all__ = ["GroupBy", "reduce_frame"]
 
@@ -360,7 +366,7 @@ class GroupBy:
     `df.groupby(by)`: each reduction is a frame of the keys and one column
     per output, and runs nothing."""
 
-    __slots__ = ("_frame", "_keys", "_sort", "_dropna", "_selection", "_single")
+    __slots__ = ("_frame", "_keys", "_sort", "_dropna", "_selection", "_single", "_origin")
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         raise TypeError('a komira GroupBy is made by a frame: df.groupby("key")')
@@ -374,6 +380,7 @@ class GroupBy:
         dropna: bool,
         selection: tuple[str, ...] | None = None,
         single: bool = False,
+        origin: tuple[DataFrame, int] | None = None,
     ) -> GroupBy:
         out = object.__new__(cls)
         object.__setattr__(out, "_frame", frame)
@@ -382,6 +389,9 @@ class GroupBy:
         object.__setattr__(out, "_dropna", dropna)
         object.__setattr__(out, "_selection", selection)
         object.__setattr__(out, "_single", single)
+        # The frame groupby() was called on and its generation then: a
+        # window verb's Series is a Series of that frame.
+        object.__setattr__(out, "_origin", origin)
         return out
 
     @classmethod
@@ -393,7 +403,7 @@ class GroupBy:
         _ops.require_columns(keys, frame._plan.columns)
         # The frame's plan as it is now: a later df["x"] = ... does not reach
         # this GroupBy.
-        return cls._of(frame.copy(), keys, sort, dropna)
+        return cls._of(frame.copy(), keys, sort, dropna, origin=(frame, frame._generation))
 
     # ---- the columns it reduces ------------------------------------------
 
@@ -421,7 +431,7 @@ class GroupBy:
                 raise ValueError(f"the column {name!r} is a group key, and its groups already hold it once")
         if len(set(names)) != len(names):
             raise ValueError("a GroupBy subscript names a column twice: " + ", ".join(names))
-        return GroupBy._of(self._frame, self._keys, self._sort, self._dropna, names, single)
+        return GroupBy._of(self._frame, self._keys, self._sort, self._dropna, names, single, self._origin)
 
     # ---- agg -------------------------------------------------------------
 
@@ -512,6 +522,68 @@ class GroupBy:
     def size(self) -> DataFrame:
         """Each group's row count, as the int64 column `size`."""
         return self._run([_Item("size", "size", None)], "size()", _REDUCTION_HINT)
+
+    # ---- windows: one value per row (komira/_windows.py) -------------------
+
+    def _window_column(self, verb: str) -> tuple[DataFrame, str]:
+        """The frame groupby() was called on and the selected column, for a
+        window verb."""
+        if not self._single:
+            raise UnsupportedOperation(
+                f"{verb} of a GroupBy gives one value per row, as a Series of one column: "
+                f'select the column first, as df.groupby(...)["column"].{verb}'
+            )
+        frame, generation = self._origin
+        if frame._generation != generation:
+            raise UnsupportedOperation(
+                'this GroupBy was made before df["name"] = ... replaced the frame\'s columns: '
+                "group the frame again"
+            )
+        return frame, self._selection[0]
+
+    def _windowed(self, frame: DataFrame, built: object) -> Series:
+        from ._series import Series
+
+        return Series._of(frame, built.node, built.windows)
+
+    def transform(self, func: object) -> Series:
+        """Each row's group reduced by `func` ("sum", "mean", "min", "max" or
+        "count"), as a Series of the frame: a sum of a group with no values
+        is 0."""
+        frame, column = self._window_column("transform()")
+        return self._windowed(frame, _windows.transform(frame, column, self._keys, self._dropna, func))
+
+    def cumsum(self, skipna: bool = True) -> Series:
+        """The running sum of the column within each row's group, in the
+        frame's sort order (the frame must be sorted); a missing value stays
+        missing."""
+        return self._cumulative("sum", skipna)
+
+    def cummin(self, skipna: bool = True) -> Series:
+        """The running least value within each row's group, in the frame's
+        sort order."""
+        return self._cumulative("min", skipna)
+
+    def cummax(self, skipna: bool = True) -> Series:
+        """The running greatest value within each row's group, in the
+        frame's sort order."""
+        return self._cumulative("max", skipna)
+
+    def _cumulative(self, how: str, skipna: object) -> Series:
+        frame, column = self._window_column(f"cum{how}()")
+        return self._windowed(
+            frame, _windows.cumulative(frame, column, self._keys, self._dropna, how, skipna)
+        )
+
+    def rank(
+        self, method: str = "average", ascending: bool = True, na_option: str = "keep", pct: bool = False
+    ) -> Series:
+        """The rank of each value within its group, as float64, with the
+        methods and options of `Series.rank`."""
+        frame, column = self._window_column("rank()")
+        return self._windowed(
+            frame, _windows.rank(frame, column, self._keys, self._dropna, method, ascending, na_option, pct)
+        )
 
     def __repr__(self) -> str:
         return "<komira.GroupBy by " + ", ".join(self._keys) + ">"

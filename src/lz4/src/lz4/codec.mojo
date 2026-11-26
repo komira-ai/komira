@@ -53,7 +53,7 @@ from std.sys.info import CompilationTarget
 # Per-OS soname.
 # -----------------------------------------------------------------------------
 
-comptime _LIBLZ4: StaticString = (
+comptime LIBLZ4_SONAME: StaticString = (
     "liblz4.dylib" if CompilationTarget.is_macos() else "liblz4.so.1"
 )
 
@@ -76,7 +76,7 @@ def _init_lz4_codec_handle() -> OwnedDLHandle:
     error), so we `abort`: without the library no LZ4 block can be read.
     """
     try:
-        return OwnedDLHandle(_LIBLZ4)
+        return OwnedDLHandle(LIBLZ4_SONAME)
     except e:
         abort("liblz4 dlopen failed (lz4 raw-block handle init)")
 

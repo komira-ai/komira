@@ -1,5 +1,5 @@
 """A ctypes host of the UDF runtime C ABI (src/udf_abi/komira_udf_runtime.h), for the
-tests of libkomira_udf_python.so: it loads the library, hands it options, a
+tests of libkomira_udf_python.so (libkomira_udf_python.dylib on macOS): it loads the library, hands it options, a
 clock and a memory hook it controls, and drives validate, load, open_context,
 open_instance and call_batch with Arrow data exported by pyarrow.
 
@@ -12,6 +12,7 @@ import ctypes
 import hashlib
 import importlib.util
 import os
+import select
 import shutil
 import sys
 import sysconfig
@@ -299,8 +300,27 @@ def runtime_sys_path():
             if p and os.path.isdir(p) and os.path.realpath(p) not in skip]
 
 
+# The library's file in the --lib-dir: the staged name on this platform.
+LIB_FILE = "libkomira_udf_python.dylib" if sys.platform == "darwin" else "libkomira_udf_python.so"
+
+
+def _darwin_status(pid):
+    """macOS: pbi_status of proc_pidinfo(PROC_PIDTBSDINFO), None once libproc has no
+    such process (<sys/proc_info.h>; the reading tools/build/run/proctab_darwin.zig makes)."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, c_void_p, ctypes.c_int]
+    info = (c_uint8 * 136)()
+    got = libc.proc_pidinfo(pid, 3, 0, info, sizeof(info))
+    if got != sizeof(info):
+        return None
+    return int.from_bytes(bytes(info[4:8]), "little")
+
+
 def process_gone(pid):
     """True once the process has ended, reaped or not: a zombie has ended."""
+    if sys.platform == "darwin":
+        status = _darwin_status(pid)
+        return status is None or status == 5  # SZOMB
     try:
         with open("/proc/%d/stat" % pid, encoding="ascii", errors="replace") as f:
             stat = f.read()
@@ -309,12 +329,88 @@ def process_gone(pid):
     return stat.rpartition(")")[2].split()[0] in ("Z", "X")
 
 
+# The source of `fd_names()`, for a probe that runs in a worker: its open descriptors,
+# by number (a str), each named by what it is. On Linux the target of
+# /proc/self/fd/<n> ("/dev/null", "socket:[...]", "/memfd:<name> (deleted)"). On macOS,
+# which has neither, the numbers listed in /dev/fd, each named "socket:" when fstat says
+# it is a socket, else by its path (fcntl F_GETPATH), else "mode:<st_mode in octal>".
+# No "%" in it: the probes are %-formatted.
+FD_NAMES = """
+
+def fd_names():
+    import os
+    import sys
+    fds = {}
+    if sys.platform == "darwin":
+        import fcntl
+        import stat
+        for name in os.listdir("/dev/fd"):
+            try:
+                mode = os.fstat(int(name)).st_mode
+            except OSError:
+                continue  # the listing's own descriptor, closed by now
+            if stat.S_ISSOCK(mode):
+                fds[name] = "socket:"
+                continue
+            try:
+                fds[name] = fcntl.fcntl(int(name), fcntl.F_GETPATH, bytes(1024)).split(b"\\0")[0].decode()
+            except OSError:
+                fds[name] = "mode:" + format(mode, "o")
+        return fds
+    for name in os.listdir("/proc/self/fd"):
+        try:
+            fds[name] = os.readlink("/proc/self/fd/" + name)
+        except FileNotFoundError:
+            pass
+    return fds
+"""
+
+
+class ExitWatch:
+    """Opened on a process known to be running; wait() returns once it has ended, reaped
+    or not. A pidfd on Linux (readable once its process terminates); on macOS a kqueue
+    with an EVFILT_PROC NOTE_EXIT filter for the pid, where a registration refused with
+    ESRCH is a process that has already ended."""
+
+    def __init__(self, pid):
+        self.pid = pid
+        if sys.platform == "darwin":
+            self._fd = None
+            self._kq = select.kqueue()
+            try:
+                self._kq.control([select.kevent(pid, select.KQ_FILTER_PROC, select.KQ_EV_ADD,
+                                                select.KQ_NOTE_EXIT)], 0, 0)
+            except ProcessLookupError:
+                self._kq.close()
+                self._kq = None
+        else:
+            self._kq = None
+            self._fd = os.pidfd_open(pid)
+
+    def wait(self):
+        """Block until the process has ended; releases the watch."""
+        if self._fd is not None:
+            try:
+                poller = select.poll()
+                poller.register(self._fd, select.POLLIN)
+                poller.poll()
+            finally:
+                os.close(self._fd)
+                self._fd = None
+        elif self._kq is not None:
+            try:
+                self._kq.control(None, 1)
+            finally:
+                self._kq.close()
+                self._kq = None
+
+
 class Env:
     """A fresh scratch tree: code_root, the runtime's scratch, a trace file."""
 
     def __init__(self, lib_dir, check_leaks=True):
         self.check_leaks = check_leaks
-        self.lib = os.path.join(os.path.abspath(lib_dir), "libkomira_udf_python.so")
+        self.lib = os.path.join(os.path.abspath(lib_dir), LIB_FILE)
         self.dir = os.path.realpath(tempfile.mkdtemp(prefix="udf-"))
         self.code_root = self._mk("code")
         self.scratch = self._mk("rt")

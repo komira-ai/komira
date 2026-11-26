@@ -949,6 +949,24 @@ _FAMILY_FILES = {d: glob([d + "/test_*.py"]) for d in _FAMILIES}
     ],
 ) for f in _FAMILY_FILES["pl_oracle"]]
 
+# Merges, semi and anti joins, and windows of the pandas-shaped frame against
+# DuckDB (test_frame_join_window_duckdb.py): the duckdb/ family's inputs, and
+# duckdb/test_frame_duckdb.py staged beside it, whose comparator, left file and
+# Case type it uses; each program equals DuckDB's answer to the SQL that means
+# the same over two Parquet files written in the test.
+python_binding_test(
+    name = "frame_join_window_duckdb_test",
+    src = "test_frame_join_window_duckdb.py",
+    srcs = ["duckdb/test_frame_duckdb.py"],
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+)
+
 # The notebook display (komira/_display.py), with no library: a frame shows its
 # names over their types, equal to fixtures/display/frame.html, and calls
 # nothing on its session; a result shows its rows, equal to
@@ -1025,7 +1043,13 @@ _FAMILY_FILES = {d: glob([d + "/test_*.py"]) for d in _FAMILIES}
 
 # The komira/python UDF runtime (src/udf_python) behind a ctypes host of its C
 # ABI (udf_host.py), on the two minors that have a pinned pyarrow: CPython 3.13
-# and 3.14. The library is staged as `libkomira_udf_python.so` in --lib-dir.
+# and 3.14. The library is staged in --lib-dir as `libkomira_udf_python.so`
+# (`libkomira_udf_python.dylib` on macOS, the name udf_host.LIB_FILE opens).
+_UDF_LIB = select({
+    "DEFAULT": {"libkomira_udf_python.so": "komira//src/udf_python:komira_udf_python"},
+    "prelude//os/constraints:macos": {"libkomira_udf_python.dylib": "komira//src/udf_python:komira_udf_python"},
+})
+
 _UDF_PYARROW = {
     "": "komira//third_party/python:pyarrow",
     "_py314": "komira//third_party/python:pyarrow-cp314",
@@ -1035,7 +1059,7 @@ _UDF_PYARROW = {
     name = test[5:] + "_test" + p["suffix"],
     src = test + ".py",
     srcs = ["udf_host.py"],
-    data = {"libkomira_udf_python.so": "komira//src/udf_python:komira_udf_python"},
+    data = _UDF_LIB,
     deps = ["//python:komira", _UDF_PYARROW[p["suffix"]]],
     **_ON[p["suffix"]]
 ) for test in [
@@ -1064,7 +1088,7 @@ _UDF_PYARROW = {
         "fixtures/udfs/__init__.py",
         "fixtures/udfs/runtime.py",
     ],
-    data = {"libkomira_udf_python.so": "komira//src/udf_python:komira_udf_python"},
+    data = _UDF_LIB,
     deps = [
         "//python:komira_with_plan_modules",
         _PROTOBUF[p["suffix"]]["7.36.2"],
