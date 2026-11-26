@@ -229,6 +229,40 @@ _TOPN_TEST_DATA.update({
     for c in _TOPN_CASES
 })
 
+# The make_date, last_day and make_timestamp cases of komira_sql_conformance's
+# scalar_fn corpus: test_run_sql_make_date runs each SELECT over the corpus's
+# table T and holds it to DuckDB's answer.
+_MAKE_DATE_CASES = [
+    "last_day_date_column",
+    "last_day_literals",
+    "last_day_of_make_date",
+    "last_day_timestamp_columns",
+    "make_date_columns",
+    "make_date_from_k",
+    "make_date_in_where",
+    "make_date_integer_columns",
+    "make_date_literals",
+    "make_date_null_argument",
+    "make_timestamp_columns",
+    "make_timestamp_epoch_micros",
+    "make_timestamp_integer_seconds",
+    "make_timestamp_literals",
+]
+
+_MAKE_DATE_TEST_DATA = {
+    "scalar_fn_t.parquet": "//src/tests/conformance/komira_sql_conformance:scalar_fn_t[scalar_fn_t.parquet]",
+}
+
+_MAKE_DATE_TEST_DATA.update({
+    "sql/" + c + ".sql": "//src/tests/conformance/komira_sql_conformance:scalar_fn_sql/" + c
+    for c in _MAKE_DATE_CASES
+})
+
+_MAKE_DATE_TEST_DATA.update({
+    "duckdb/" + c + ".tsv": "//src/tests/conformance/komira_sql_conformance:scalar_fn/" + c
+    for c in _MAKE_DATE_CASES
+})
+
 # DuckDB's tables and answers for test_run_sql_join_kinds:
 # tests/join_kinds/data.sql writes l, r, n, e and big (Parquet, small row
 # groups), and each line of tests/join_kinds/cases.sql runs one join over them
@@ -815,6 +849,14 @@ _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".ts
 #   comparison reports a reordered, changed, missing and added row; every
 #   staged case is run or listed as refused (an OFFSET with no LIMIT is refused
 #   at bind by name); a negative LIMIT is refused at parse.
+# - test_run_sql_make_date: make_date, last_day and the six-argument
+#   make_timestamp through run_sql on 1 and 3 workers: the fourteen cases of the
+#   scalar_fn corpus answer the pinned DuckDB's values; constant invalid
+#   arguments are refused at bind with DuckDB's text, invalid column arguments
+#   at execute with the function's guard text; a NULL argument gives NULL; the
+#   stored day numbers of dates before year 1 and at the ends of the range, the
+#   microseconds of a timestamp in year -1 and last_day of an infinite
+#   timestamp equal DuckDB's.
 # - test_run_sql_cte: WITH queries through run_sql answer what the pinned
 #   DuckDB answers (the :cte_oracle action above) for each case of
 #   tests/cte/cases.sql: a CTE read once (filtered, chained, unread, with NULL
@@ -982,6 +1024,7 @@ mojo_library(
         "tests/test_run_sql_int_sum.mojo",
         "tests/test_run_sql_join_kinds.mojo",
         "tests/test_run_sql_joins.mojo",
+        "tests/test_run_sql_make_date.mojo",
         "tests/test_run_sql_multifile.mojo",
         "tests/test_run_sql_s3.mojo",
         "tests/test_run_sql_no_from.mojo",
@@ -1014,6 +1057,7 @@ mojo_library(
         "tests/test_run_sql_csv.mojo": _CSV_TEST_DATA,
         "tests/test_run_sql_cte.mojo": _CTE_TEST_DATA,
         "tests/test_run_sql_group_keys_mixed.mojo": _MIXED_TEST_DATA,
+        "tests/test_run_sql_make_date.mojo": _MAKE_DATE_TEST_DATA,
         "tests/test_run_sql_topn.mojo": _TOPN_TEST_DATA,
         "tests/test_run_sql_window.mojo": _WINDOW_TEST_DATA,
         "tests/test_run_sql_window_frames.mojo": _WINDOW_FRAMES_TEST_DATA,

@@ -12,6 +12,8 @@
 # or `1.0` in an integer column accepted; a decimal whose scale differs;
 # names not held to the schema; a date read off by a day (a leap year, a
 # century, a day before the epoch) or a date that is no day of the calendar
+# accepted; a timestamp whose time of day is subtracted before the epoch, whose
+# fraction is mis-scaled or whose hour, minute or second is out of range
 # accepted; a type the reader cannot read compared as text instead of
 # refused.
 
@@ -241,6 +243,59 @@ def test_dates_are_day_numbers_from_the_epoch() raises:
         _ = _canon("d:date32", "d\n26-09-01\n")
     with assert_raises(contains="'2026/09/01' is not a date YYYY-MM-DD"):
         _ = _canon("d:date32", "d\n2026/09/01\n")
+
+
+def test_timestamps_are_microseconds_from_the_epoch() raises:
+    var c = _canon(
+        "t:timestamp_us?",
+        "t\n2024-02-29 01:02:03\n2024-02-29 01:02:03.5\n2015-09-04 00:00:00\n"
+        + "2024-02-29 00:00:00.000001\n2024-02-29 23:59:59.999999\n"
+        + "1969-12-31 23:59:59.5\n1969-12-31 00:00:01\n\n"
+        + "294247-01-10 04:00:54.775806\n1970-01-01 00:00:00\n",
+    )
+    assert_equal(c.rows[0][0], "1709168523000000")
+    assert_equal(c.rows[1][0], "1709168523500000")
+    assert_equal(c.rows[2][0], "1441324800000000")
+    assert_equal(c.rows[3][0], "1709164800000001")
+    assert_equal(c.rows[4][0], "1709251199999999")
+    assert_equal(c.rows[5][0], "-500000")
+    assert_equal(c.rows[6][0], "-86399000000")
+    assert_equal(c.rows[7][0], "\\N")
+    assert_equal(c.rows[8][0], "9223372036854775806")
+    assert_equal(c.rows[9][0], "0")
+
+
+def test_malformed_timestamps_are_refused() raises:
+    with assert_raises(
+        contains="row 1 column t: '0044-03-15 10:00:00 (BC)' is not a timestamp YYYY-MM-DD HH:MM:SS[.ffffff]"
+    ):
+        _ = _canon("t:timestamp_us", "t\n0044-03-15 10:00:00 (BC)\n")
+    with assert_raises(
+        contains="row 1 column t: '2024-02-29 24:00:00' is not a time of day"
+    ):
+        _ = _canon("t:timestamp_us", "t\n2024-02-29 24:00:00\n")
+    with assert_raises(contains="'2024-02-29 00:60:00' is not a time of day"):
+        _ = _canon("t:timestamp_us", "t\n2024-02-29 00:60:00\n")
+    with assert_raises(contains="'2024-02-29 00:00:60' is not a time of day"):
+        _ = _canon("t:timestamp_us", "t\n2024-02-29 00:00:60\n")
+    with assert_raises(
+        contains="row 1 column t: '2024-02-29 01:02:03.1234567' is not a timestamp YYYY-MM-DD HH:MM:SS[.ffffff]"
+    ):
+        _ = _canon("t:timestamp_us", "t\n2024-02-29 01:02:03.1234567\n")
+    with assert_raises(contains="'2024-02-29 01:02:03.' is not a timestamp"):
+        _ = _canon("t:timestamp_us", "t\n2024-02-29 01:02:03.\n")
+    with assert_raises(contains="'2024-02-30 01:02:03' is not a timestamp"):
+        _ = _canon("t:timestamp_us", "t\n2024-02-30 01:02:03\n")
+    with assert_raises(
+        contains="row 1 column t: 'garbage' is not a timestamp YYYY-MM-DD HH:MM:SS[.ffffff]"
+    ):
+        _ = _canon("t:timestamp_us", "t\ngarbage\n")
+    with assert_raises(contains="'2024-02-29' is not a timestamp"):
+        _ = _canon("t:timestamp_us", "t\n2024-02-29\n")
+    with assert_raises(contains="this reader does not read type timestamp_us(UTC)"):
+        _ = _canon("t:timestamp_us(UTC)", "t\n2024-02-29 01:02:03\n")
+    with assert_raises(contains="this reader does not read type timestamp_ms"):
+        _ = _canon("t:timestamp_ms", "t\n2024-02-29 01:02:03\n")
 
 
 def test_unread_types_are_refused() raises:

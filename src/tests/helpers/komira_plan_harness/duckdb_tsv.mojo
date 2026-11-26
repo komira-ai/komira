@@ -40,6 +40,13 @@
 #                             or more digits, a month and a day that exist in
 #                             the proleptic Gregorian calendar); a date
 #                             DuckDB writes with ` (BC)` is refused
+#   timestamp_us              the microseconds from 1970-01-01 00:00:00, as
+#                             canon spells a timestamp_us, read from
+#                             `<date> HH:MM:SS` with an optional `.` and 1 to 6
+#                             fraction digits (the date as for date32; the
+#                             hour below 24, the minute and second below 60);
+#                             a zone-less type only, a timestamp DuckDB writes
+#                             with ` (BC)` is refused
 #   string, large_string      the cell's text, escaped as canon escapes it
 #
 # NULL is `\N` in any column whose schema entry ends in `?`, and refused in
@@ -327,6 +334,48 @@ def _date_cell(cell: String) raises -> String:
     return String(era * 146097 + doe - 719468)
 
 
+def _timestamp_cell(cell: String) raises -> String:
+    """The microseconds of `<date> HH:MM:SS[.f]` from 1970-01-01 00:00:00,
+    as decimal text; the time of day is added to the day's start, before
+    the epoch as well."""
+    var bs = cell.as_bytes()
+    var n = len(bs)
+    var sp = cell.find(" ")
+    var bad = "'" + cell + "' is not a timestamp YYYY-MM-DD HH:MM:SS[.ffffff]"
+    if sp < 0 or n - sp - 1 < 8:
+        raise Error(bad)
+    var t = sp + 1
+    if (
+        bs[t + 2] != 58
+        or bs[t + 5] != 58
+        or not _is_digits(bs, t, t + 2)
+        or not _is_digits(bs, t + 3, t + 5)
+        or not _is_digits(bs, t + 6, t + 8)
+    ):
+        raise Error(bad)
+    var micros = 0
+    if n - t > 8:
+        var nfrac = n - t - 9
+        if bs[t + 8] != 46 or nfrac < 1 or nfrac > 6 or not _is_digits(bs, t + 9, n):
+            raise Error(bad)
+        micros = atol(String(cell[byte = t + 9 : n]))
+        for _ in range(6 - nfrac):
+            micros *= 10
+    var days: Int
+    try:
+        days = atol(_date_cell(String(cell[byte = 0 : sp])))
+    except e:
+        raise Error(bad + ": " + String(e))
+    var hh = atol(String(cell[byte = t : t + 2]))
+    var mi = atol(String(cell[byte = t + 3 : t + 5]))
+    var ss = atol(String(cell[byte = t + 6 : t + 8]))
+    if hh > 23 or mi > 59 or ss > 59:
+        raise Error("'" + cell + "' is not a time of day")
+    return String(
+        days * 86400000000 + ((hh * 60 + mi) * 60 + ss) * 1000000 + micros
+    )
+
+
 def _float_width(t: String) -> Int:
     if t == "float16":
         return 16
@@ -454,6 +503,8 @@ def duckdb_tsv_canon(tsv: DuckdbTsv, like: CanonText) raises -> CanonText:
                     row.append(escape_string(cell, False))
                 elif t == "date32":
                     row.append(_date_cell(cell))
+                elif t == "timestamp_us":
+                    row.append(_timestamp_cell(cell))
                 else:
                     raise Error("this reader does not read type " + t)
             except e:
