@@ -1,0 +1,4 @@
+[{'n': 5, 'scored': 4}]
+[{'n': 5}]
+[{'region': 'east', 'size': 2}, {'region': 'north', 'size': 1}, {'region': 'west', 'size': 2}]
+[{'len': 5}]
