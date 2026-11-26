@@ -333,6 +333,41 @@ def test_scratch_dir_refuses_without_a_test_tmpdir() raises:
     print("PASS test_scratch_dir_refuses_without_a_test_tmpdir")
 
 
+def _row_number_filter_with_placement(nulls_first: Bool) raises -> LogicalPlan:
+    """Filter(rn <= 5) over PartitionBy(ROW_NUMBER, ORDER BY b ASC) with the
+    stated NULL placement for b."""
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.row_number())
+    var nf = _bool_list1(nulls_first)
+    var pb = LogicalPlan.partition_by(
+        _str_list1("a"), _str_list1("b"), _bool_list1(False), exprs^,
+        _scan_node(), Optional(nf^),
+    )
+    var rn_name = _rn_col_name(pb)
+    var pred = Expr.binary(
+        BIN_LE,
+        Expr.col_ref(rn_name),
+        Expr.literal(ScalarValue.from_int(5)),
+    )
+    return LogicalPlan.filter(pred^, pb^)
+
+
+def test_no_fire_when_order_key_is_nulls_first() raises:
+    """ROW_NUMBER over ORDER BY b NULLS FIRST filtered rn <= 5 is not fused:
+    the top-N states are NULLS LAST, so the Filter stays over the PartitionBy."""
+    var optimized = fuse_partition_topn(_row_number_filter_with_placement(True))
+    assert_equal(Int(optimized.tag), Int(PLAN_FILTER))
+    print("PASS test_no_fire_when_order_key_is_nulls_first")
+
+
+def test_fires_when_order_key_placement_is_the_derived_nulls_last() raises:
+    """The same plan with an explicit NULLS LAST (the derived placement)
+    still fuses into a PartitionTopN."""
+    var optimized = fuse_partition_topn(_row_number_filter_with_placement(False))
+    assert_equal(Int(optimized.tag), Int(PLAN_PARTITION_TOPN))
+    print("PASS test_fires_when_order_key_placement_is_the_derived_nulls_last")
+
+
 def main() raises:
     test_basic_lteq()
     test_lt()
@@ -341,6 +376,8 @@ def main() raises:
     test_no_fire_multi_expr()
     test_no_fire_wrong_column()
     test_no_fire_wrong_op()
+    test_no_fire_when_order_key_is_nulls_first()
+    test_fires_when_order_key_placement_is_the_derived_nulls_last()
     test_output_schema_no_rn_column()
     print("All fuse_partition_topn tests passed")
     test_scratch_dir_refuses_without_a_test_tmpdir()

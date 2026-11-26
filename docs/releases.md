@@ -4,24 +4,28 @@ What komira publishes today, and how another repository pins a version of it.
 
 ## What exists today
 
-**komira publishes to no channel for now.** A push to `main` builds the release
+**komira publishes to two channels: the mopm registry and PyPI.** A push to `main` builds the release
 set (`.github/workflows/release.yml`: the packages, `release.json` and its set
 hash, kept as a workflow artifact, [docs/ci.md](ci.md#releaseyml-the-release))
-and nothing more; the earlier conda channels on prefix.dev are no longer
-published to, and publishing will move to mopm. (The libraries that
-already moved to mopm are the exception: every push to `main` publishes them to the mopm
+and publishes the libraries that moved to mopm to the mopm
 registry `prod`, as one group at the version `0.1.<run number>`, through the jobs
-`mopm-stage` and `prod-*` of the same workflow, each package built for linux-64 and osx-arm64;
-[docs/ci.md](ci.md#the-mopm-jobs).) Two checks that the retired build stage made are not
+`mopm-stage` and `prod-*` of the same workflow, each package built for linux-64 and osx-arm64
+([docs/ci.md](ci.md#the-mopm-jobs)). The Python package `komira` is published by `pypi.yml` (the
+Linux x86_64 wheel) and `pypi-macos-arm64.yml` (the macOS arm64 wheel): to TestPyPI on a push to
+`main` that changes more than documentation, and to PyPI by their daily promotion
+([docs/ci.md](ci.md#pypiyml-publishing-the-python-package), [install.md](install.md)). Nothing is
+published for linux-arm64, and no workflow builds for it. The earlier conda channels on prefix.dev are no longer
+published to. Two checks that the retired build stage made are not
 made by this build and are not enforced until mopm's publish path re-creates
 them: that every package's requirements are inside the set (requirement
 closure), and the refusal of a duplicate key in a JSON file; the header of
 `release/ci/release_lib/set_json.zig` lists what was dropped. Read the sections below about uploading, channels and the
 publish step as the design of that step, not as something a push does today.
 
-Komira has no release tags and no version number of its own, and this
-repository does not yet contain the step that uploads to a package registry.
-A version of komira is a commit. What the build produces from a program is
+Komira has no release tags and no version number of its own: a version of
+komira is a commit, and the packages above carry `0.1.<n>`, numbered by the
+workflow that publishes them. The uploads that exist are the mopm and PyPI
+jobs above. What the build produces from a program is
 described in release machines: a relocatable
 bundle, a reproducible tarball of it, and an OCI image layout. The build rules
 only write these files; publishing them is the step a release machine runs

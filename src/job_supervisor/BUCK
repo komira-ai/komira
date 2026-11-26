@@ -157,6 +157,7 @@ _E2E_DEPS = [
             "tests/e2e/{}.mojo".format(name),
         ],
         main = "tests/e2e/{}.mojo".format(name),
+        target_compatible_with = ["prelude//os/constraints:linux"],  # komira-limit:s3-adapter-runner-linux
         deps = _E2E_DEPS,
     )
     for name in [

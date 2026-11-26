@@ -12,6 +12,65 @@ install page shows names it.
 
 ## Unreleased
 
+- **More verbs of the pandas-shaped DataFrame.** `df.fillna(value or {col: value})` and
+  `df.dropna(how="any"|"all", subset=None)`, where a NaN in a float column is missing as NULL is;
+  `df.rename(columns=dict or function, errors="ignore"|"raise")`, `df.add_prefix` and
+  `df.add_suffix`; `df.astype(dtype or {col: dtype})` and `s.astype(dtype)`, a dtype being a pyarrow
+  type, a name of the design's table, a pandas spelling (`"Int64"`, `"boolean"`, `"str"`) or `int`,
+  `float`, `bool` and `str`; `df.tail(n)` of a sorted frame; `komira.concat(frames)` of frames with
+  the same columns and types; `s.value_counts()` is refused by name, since a komira Series has no index to
+  hold the values (count them with `df.groupby(column).size()`); and the `s.str`
+  (`lower`, `upper`, `len`, `startswith`, `endswith`, `contains`, `match`, `fullmatch`, `replace`,
+  `slice`, `pad`, `extract`) and `s.dt` (`year`, `quarter`, `month`, `day`, `hour`, `minute`,
+  `second`, `microsecond`, `dayofweek`, `dayofyear`, `floor`) accessors. Each builds plan nodes and
+  runs with no SQL. The engine refuses at `materialize()` a cast it does not run (to `bool`, or a
+  timestamp or a date to a string) and a regular expression over a computed Series. Arguments that
+  need an index or row positions (`axis=1`, `inplace=True`, `thresh=`, ...) raise
+  `UnsupportedOperation` naming what to write instead; `str.strip` and the other pandas methods not
+  built raise `AttributeError` saying why.
+- **Notebook display.** In Jupyter and IPython a `komira.DataFrame` shows as a table of its column
+  names over their types, and runs nothing; a `Result` shows its first ten rows at most, with a line
+  giving the row and column counts or saying there are more. The result is still unread after it is
+  shown: `to_arrow()`, `to_pandas()` and the other terminals read every row, once.
+- **Group-by and aggregates in the pandas-shaped DataFrame.** `df.groupby(by, *, sort=True,
+  dropna=True)` gives a `komira.GroupBy` whose `agg(...)`, `sum`, `mean`, `median`, `std`, `var`,
+  `min`, `max`, `count`, `size` and `nunique` return a frame of the keys and one column per output,
+  sorted by the keys unless `sort=False`, with the rows of a missing key left out unless
+  `dropna=False`. `df.agg(...)` and the frame's `sum`, `mean`, `median`, `std`, `var`, `min`, `max`,
+  `count` and `nunique` give a one-row frame. A sum of nothing is 0, as in pandas.
+  `df.drop_duplicates()` keeps one of each set of equal rows, or with `keep=False` only the rows no
+  other row equals. Each builds an aggregate or distinct node of the plan, run with no SQL. The engine
+  refuses at `materialize()` what it does not compute yet: `median`, `std` and `var`, a grouped sum
+  or mean of a float column, the mean of a boolean column, and `min`, `max` or `nunique` of a column type it does not fold.
+- **Memory limit.** `Session(*, threads=None, memory_limit=None)` sets the engine's worker count and
+  the bytes the operators of one query may hold in total, each a positive `int` or `None` for the
+  engine's own value (`ValueError` for a value below 1 or above 2**63 - 1, `TypeError` for a
+  non-`int`, before the library is called; they need libkomira ABI 1.4). A query that needs more
+  memory than `memory_limit` raises the new `komira.MemoryLimitError` from `Session.sql`, with
+  `status` -3, `code` `"MEMORY_BUDGET_EXCEEDED"` and `step` `"execute"`; the session answers the
+  next query. The engine's message names the operator that was denied memory and the budget. Code
+  that catches `KomiraError` still catches it.
+- **The pandas-shaped DataFrame, first part.** `komira.read_parquet(path)`, `komira.read_csv(path, *,
+  sep=",", header="infer")` and `komira.read_json(path, lines=True)` make a lazy `komira.DataFrame` of
+  a file, its schema read now, on the session given as `session=` or the process's default session.
+  `df["x"]` (a `komira.Series`), `df[["a", "b"]]`, `df[cond]`, `assign`, `df["x"] = ...`,
+  `sort_values`, `head` and `copy` build a plan and run nothing; `materialize()` runs it through the
+  engine's plan entry, with no SQL, and returns a `Result`; `explain()` returns the engine's text of
+  the plan. `columns`, `dtypes` and `repr` run nothing. A pandas name komira does not have raises
+  `AttributeError` saying what to write instead, and `len(df)` and the other conversions raise
+  `UnsupportedOperation` naming `materialize()`. They need libkomira ABI 1.8.
+- **protobuf.** The wheel requires `protobuf>=5.29.1,<8`, so `pip install komira` installs it, and
+  ships the generated plan modules a DataFrame encodes its plan with. `import komira` imports neither.
+- **komira.pl, the polars-shaped frames (core).** `import komira.pl as kpl`: `kpl.scan_parquet`,
+  `scan_ndjson` and `scan_csv` make a lazy `LazyFrame` (reading the file's schema, nothing else), and
+  `select`, `with_columns`, `filter`, `sort`, `head`, `limit`, `slice`, `tail`, `top_k`, `bottom_k`,
+  `drop`, `rename`, `drop_nulls` and `kpl.concat` build its plan, with `kpl.col`, `kpl.lit`,
+  `kpl.when`, `kpl.len` and the expression operators, null tests, `cast`, `is_in`, `is_between`,
+  aggregates and `.str` functions. `collect()` runs the plan through the engine's plan entry, not
+  through SQL, and returns a `Result`; `schema` and `explain()` run nothing. Output names and types
+  follow polars 1.44.2, except that a count, `len()`, `str.len_chars()` and the sum of a boolean or a UInt32
+  column are Int64 where polars gives UInt32; what the engine cannot run is refused by name (today `median()`, `std()`, `var()` and `min()` or `max()` of a string column build their
+  plans and the engine refuses them when the frame is collected).
 - **CSV and JSON files.** `Session.register_csv(name, path, *, delimiter=",", header=True,
   all_varchar=False)` and `Session.register_json(name, path)` register a CSV file and a
   newline-delimited JSON file as a table for `Session.sql`, with the column names and types the

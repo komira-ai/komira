@@ -186,9 +186,9 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
-# The same driver for the hosted macOS runner of pypi-macos-arm64.yml's smoke jobs (`verify` and `install`
+# The same driver for the hosted macOS runner of pypi.yml's smoke jobs (`verify` and `install`
 # run on the Apple silicon runner, where the macOS wheel can be installed), cross-built by the Linux zig.
-# pypi-macos-arm64.yml's build-macos-arm64 builds it with --target-platforms darwin-arm64; no pull request builds it
+# pypi.yml's job build-macos-arm64 builds it with --target-platforms darwin-arm64; no pull request builds it
 # (tools/build/ci/rules.bzl EXCLUDED).
 zig_exe(
     name = "pypi_smoke_macos_arm64",

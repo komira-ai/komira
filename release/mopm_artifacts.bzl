@@ -128,6 +128,20 @@ def _native_ids_json_impl(ctx):
 # holds to the `[native.<id>]` tables of each package's `mopm.toml`.
 native_ids_json = rule(impl = _native_ids_json_impl, attrs = {})
 
+def _release_packages_json_impl(ctx):
+    data = {"namespace": ctx.attrs.namespace, "natives": sorted(ctx.attrs.natives), "packages": sorted(ctx.attrs.packages)}
+    return [DefaultInfo(default_output = ctx.actions.write_json("release_packages.json", data))]
+
+# The release's package names as JSON, `{"namespace": ..., "natives": [...], "packages": [...]}`: the packages of
+# //release/readme_e2e:packages.bzl and those of them that ship a native archive (the keys of `RELEASE_NATIVES` in
+# release/BUCK, a table no other package can load). //tools/build/ci:prod_add_set_cases holds the names
+# `release_staged_verify add` installs from prod to it.
+release_packages_json = rule(impl = _release_packages_json_impl, attrs = {
+    "namespace": attrs.string(),
+    "natives": attrs.list(attrs.string()),
+    "packages": attrs.list(attrs.string()),
+})
+
 # The subdirs of a release, in the order their trees are merged: the platforms the release publishes.
 RELEASE_SUBDIRS = ["linux-64", "osx-arm64"]
 

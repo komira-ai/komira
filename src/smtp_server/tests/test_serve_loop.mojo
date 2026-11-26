@@ -36,6 +36,8 @@ from async_rt.reactor.socket_setup import (
     inet_loopback_be,
     set_so_rcvbuf,
     set_so_sndbuf,
+    socket_unsent_bytes,
+    wait_readable,
 )
 from http_core.tls import TlsConfig
 from mail_auth import TestAuthVerifier
@@ -140,6 +142,32 @@ def _noop(mut rig: _Rig, mut peer: Peer) raises:
     _ = peer.take_through(String("250 2.0.0"))
 
 
+def _server_has_input(mut rig: _Rig) raises -> Bool:
+    """True when any accepted socket has bytes (or an end) waiting to be read:
+    async_rt's `wait_readable` with a zero timeout, over each one."""
+    var ids = rig.reg.all_conn_ids()
+    for i in range(len(ids)):
+        if wait_readable(rig.reg.fd_of(ids[i]), Int32(-1), 0):
+            return True
+    return False
+
+
+def _noop_at(mut rig: _Rig, mut peer: Peer, now_ms: Int) raises:
+    """One NOOP round trip served at `now_ms`. The clock moves only once the
+    NOOP has reached the server's socket, so the step that reads it sees the
+    connection as active at `now_ms` whether or not the kernel delivers
+    loopback bytes synchronously (macOS may not)."""
+    peer.send(String("NOOP\r\n"))
+    while not _server_has_input(rig):
+        _ = peer.poll()
+        if peer.eof:
+            raise Error("the server closed the connection before the NOOP reached it")
+        yield_cpu()
+    rig.now_ms = now_ms
+    _wait_for(rig, peer, String("250 2.0.0"))
+    _ = peer.take_through(String("250 2.0.0"))
+
+
 def test_max_conns_refuses_the_extra_connection() raises:
     var limits = SmtpLimits()
     limits.max_conns = 2
@@ -188,16 +216,14 @@ def test_expiry_is_decided_by_now_ms() raises:
     _wait_for(rig, busy, String("220 mx.test"))
 
     # At 1900 nobody is past idle_ms (1000 after the connect); `busy` speaks.
-    rig.now_ms = 1900
-    _noop(rig, busy)
+    _noop_at(rig, busy, 1900)
     _ = idle.poll()
     assert_equal(rig.expired, 0)
     assert_false(idle.has("421"))
     assert_equal(rig.reg.conn_count(), 2)
     # At 2800 `idle` has been quiet for 1800: it is answered 421 4.4.2 and
     # closed. `busy` speaks again and is left alone.
-    rig.now_ms = 2800
-    _noop(rig, busy)
+    _noop_at(rig, busy, 2800)
     # The step that served `busy` also expired `idle`.
     assert_equal(rig.expired, 1)
     _wait_for(rig, idle, String("421 4.4.2"))
@@ -205,12 +231,9 @@ def test_expiry_is_decided_by_now_ms() raises:
     assert_true(idle.text().startswith("220 mx.test ESMTP ready\r\n421 4.4.2"))
     assert_equal(rig.reg.conn_count(), 1)
     # `busy` keeps speaking, so it is never idle.
-    rig.now_ms = 3700
-    _noop(rig, busy)
-    rig.now_ms = 4600
-    _noop(rig, busy)
-    rig.now_ms = 5500
-    _noop(rig, busy)
+    _noop_at(rig, busy, 3700)
+    _noop_at(rig, busy, 4600)
+    _noop_at(rig, busy, 5500)
     assert_equal(rig.expired, 1)
 
     # Past max_session_ms of age `busy` is closed although it spoke at 5500.
@@ -242,24 +265,18 @@ def test_expiry_boundaries_are_exact() raises:
     assert_equal(rig.reg.conn_count(), 2)
     # `busy` speaks within idle_ms of its last word up to 5500, so only its
     # age can end it.
-    rig.now_ms = 2001
-    _noop(rig, busy)
+    _noop_at(rig, busy, 2001)
     # The step that served `busy` at 2001 also found `idle` one millisecond
     # past idle_ms.
     assert_equal(rig.expired, 1)
     _wait_for(rig, idle, String("421 4.4.2"))
     _wait_eof(rig, idle)
-    rig.now_ms = 3000
-    _noop(rig, busy)
-    rig.now_ms = 4000
-    _noop(rig, busy)
-    rig.now_ms = 5000
-    _noop(rig, busy)
-    rig.now_ms = 5900
-    _noop(rig, busy)
+    _noop_at(rig, busy, 3000)
+    _noop_at(rig, busy, 4000)
+    _noop_at(rig, busy, 5000)
+    _noop_at(rig, busy, 5900)
     # Exactly max_session_ms old (accepted at 1000) is not too old.
-    rig.now_ms = 6000
-    _noop(rig, busy)
+    _noop_at(rig, busy, 6000)
     assert_equal(rig.expired, 1)
     assert_equal(rig.reg.conn_count(), 1)
     # One millisecond more is.
@@ -289,22 +306,41 @@ def test_expiry_with_a_full_send_window_drops_on_the_next_step() raises:
     var cid = ids[0]
     set_so_sndbuf(rig.reg.fd_of(cid), Int32(4096))
     set_so_rcvbuf(p.fd, Int32(4096))
-    var rounds = 400
+    # The peer sends batches of 400 rounds and reads nothing, until a reply
+    # waits unwritten: the kernel's buffers between the two are full. How many
+    # replies they hold is the kernel's choice (macOS can keep the receive window
+    # it set up at connect, larger than the 4096 asked for above), so the test
+    # sends until they are full rather than a fixed count. The loop ends: the
+    # buffers are finite and every round has replies.
+    var rounds = 0
     var batch = String("")
-    for _ in range(rounds):
+    for _ in range(400):
         batch += "EHLO c.test\r\nNOOP\r\nVRFY x\r\n"
     var bytes = batch.as_bytes()
-    var sent = 0
-    while sent < len(bytes):
-        var end = sent + 2000
-        if end > len(bytes):
-            end = len(bytes)
-        p.send_bytes(bytes[sent:end])
-        sent = end
+    while rig.reg.tx_len(cid) == 0:
+        if rig.reg.conn_count() == 0:
+            raise Error("the server closed the connection before a reply waited")
+        var sent = 0
+        while sent < len(bytes):
+            var end = sent + 2000
+            if end > len(bytes):
+                end = len(bytes)
+            p.send_bytes(bytes[sent:end])
+            sent = end
+            rig.step()
+        rounds += 400
+        # The server reads what has reached its socket; loopback may deliver
+        # after the sends return (macOS).
         rig.step()
-    # The server has read everything and the peer reads nothing: replies wait.
-    rig.step()
-    rig.step()
+        while rig.reg.tx_len(cid) == 0 and _server_has_input(rig):
+            rig.step()
+            yield_cpu()
+    # The peer sends no more. Bytes still on their way to the server would
+    # be read by the step at the deadline and make the connection active
+    # again, so the server reads until the peer's send queue is empty.
+    while socket_unsent_bytes(p.fd) > 0 or _server_has_input(rig):
+        rig.step()
+        yield_cpu()
     assert_true(rig.reg.tx_len(cid) > 0)
     assert_equal(rig.expired, 0)
 

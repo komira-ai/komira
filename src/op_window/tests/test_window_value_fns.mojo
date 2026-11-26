@@ -65,6 +65,7 @@ def _run(
     pkeys: List[String],
     okeys: List[String],
     var exprs: List[PartitionExpr],
+    nulls_first: List[Bool] = List[Bool](),
 ) raises -> RecordBatch:
     var sb = SchemaBuilder()
     for i in range(batch.schema.num_columns()):
@@ -74,7 +75,9 @@ def _run(
     var desc = List[Bool]()
     for _ in range(len(okeys)):
         desc.append(False)
-    var spec = PartitionBySinkData(pkeys.copy(), okeys.copy(), desc^, exprs^, sb.build())
+    var spec = PartitionBySinkData(
+        pkeys.copy(), okeys.copy(), desc^, exprs^, sb.build(), nulls_first.copy()
+    )
     return _execute_partition_by_sink(batch^, spec)
 
 
@@ -162,6 +165,60 @@ def test_string_lag_respects_nulls() raises:
     assert_true(lead_col.is_null(0))
     assert_equal(lead_col.get(1), "c")
     assert_equal(lead_col.get(2), "z")
+
+
+def _nullable_order_key_batch() raises -> RecordBatch:
+    # o: 3, NULL(slot 5), 1, NULL(slot 9); v: 10, 20, 30, 40.
+    var o: List[Int64] = [3, 5, 1, 9]
+    var ovalid: List[Bool] = [True, False, True, False]
+    var v: List[Int64] = [10, 20, 30, 40]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_i64(o, ovalid))
+    cols.append(_plain_i64(v))
+    var names: List[String] = ["o", "v"]
+    return _batch(names, cols^)
+
+
+def test_lag_lead_follow_the_order_when_the_null_order_keys_come_first() raises:
+    # ORDER BY o NULLS FIRST orders the rows (NULL,20) (NULL,40) (1,30) (3,10).
+    # LAG(v): NULL, 20, 40, 30. LEAD(v): 40, 30, 10, NULL.
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.lag("v"))
+    exprs.append(PartitionExpr.lead("v"))
+    var ok: List[String] = ["o"]
+    var nf: List[Bool] = [True]
+    var out = _run(
+        _nullable_order_key_batch(), List[String](), ok, exprs^, nf
+    )
+    _check(out, 1, [20, 40, 30, 10], [False, False, False, False])
+    _check(out, 2, [0, 20, 40, 30], [True, False, False, False])
+    _check(out, 3, [40, 30, 10, 0], [False, False, False, True])
+
+
+def test_first_and_last_value_frame_the_leading_null_peer_group() raises:
+    # Default RANGE frame under NULLS FIRST: the two NULL-key rows are peers
+    # at the start. FIRST_VALUE(v) is 20 everywhere; LAST_VALUE(v) is 40 on
+    # both NULL rows (the last peer), then 30 and 10.
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.first_value("v"))
+    exprs.append(PartitionExpr.last_value("v"))
+    var ok: List[String] = ["o"]
+    var nf: List[Bool] = [True]
+    var out = _run(
+        _nullable_order_key_batch(), List[String](), ok, exprs^, nf
+    )
+    _check(out, 2, [20, 20, 20, 20], [False, False, False, False])
+    _check(out, 3, [40, 40, 30, 10], [False, False, False, False])
+
+
+def test_first_value_without_a_stated_placement_starts_at_the_smallest_key() raises:
+    # The same rows with no placement: NULLs last, so FIRST_VALUE(v) is 30
+    # (the row with o = 1) on every row.
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.first_value("v"))
+    var ok: List[String] = ["o"]
+    var out = _run(_nullable_order_key_batch(), List[String](), ok, exprs^)
+    _check(out, 2, [30, 30, 30, 30], [False, False, False, False])
 
 
 def test_last_value_default_frame_is_last_peer() raises:

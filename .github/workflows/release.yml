@@ -26,8 +26,10 @@
 #                   so every release carries new ones; nothing is pushed back);
 #                   `mopm stage` writes the staged set S on the runner (it
 #                   asks the registry which versions exist, so it cannot be a
-#                   build action); the README e2e of every package runs on the
-#                   farm against S (//release/readme_e2e/verify:all, with
+#                   build action); `release_staged_verify expect` holds S's
+#                   plan to every package on every platform and for every Mojo
+#                   the release builds (//release:mopm_plan_expectation); the README e2e
+#                   of every package runs on the farm against S (//release/readme_e2e/verify:all, with
 #                   `-c komira_release.staged=stage` at that version); then
 #                   `mopm publish --staged S --registry prod --dry-run`. It
 #                   sends nothing and holds no token.
@@ -62,7 +64,9 @@
 #                   and 1.2.0, two steps): in a fresh project set to that Mojo, the
 #                   pinned mopm runs
 #                   `mopm add komira-ai/<name> --registry prod` for json, uuid
-#                   and libc, then `mopm sync`; the lock must record full names
+#                   and every package that ships a native archive
+#                   (RELEASE_NATIVES of release/BUCK), then `mopm sync`; the
+#                   lock must record full names
 #                   under https://conda.mopm.dev/komira-ai/ at this run's version,
 #                   and the installed files must be the plan's (sha256 and size).
 #                   These jobs need a mopm that has `--no-commit` and `--abort`
@@ -295,12 +299,21 @@ jobs:
         with:
           args: build //tools/build/ci:release_beta_version --out ${{ runner.temp }}/mopm-publish/release_beta_version
           assert-remote: ${{ steps.assert.outputs.path }}
-      # Built here, run by `prod-test`, `prod-smoke` and `prod-add` (the smoke and add jobs
-      # have no farm and no buck2, so they take the tool from this job's artifact).
+      # Built here, run here (`expect`, after `mopm stage`) and by `prod-test`, `prod-smoke` and
+      # `prod-add` (the smoke and add jobs have no farm and no buck2, so they take the tool from
+      # this job's artifact).
       - name: build the staged-set verify tool
         uses: ./.github/actions/buck2-farm
         with:
           args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/mopm-publish/release_staged_verify
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # What the staged set must be: every package of release/readme_e2e/packages.bzl with a file for
+      # linux-64, and for osx-arm64 exactly when it is in release/darwin_libs.bzl's macOS set, written
+      # from those lists (release/plan_expectation.bzl). The check after `mopm stage` reads it.
+      - name: build the plan expectation
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //release:mopm_plan_expectation --out ${{ runner.temp }}/mopm-publish/plan_expectation.json
           assert-remote: ${{ steps.assert.outputs.path }}
       # The packages, for both platforms the release publishes, in the one directory `mopm
       # stage --artifacts` reads (//release:mopm_release_artifacts): the linux-64 tree, and
@@ -345,6 +358,13 @@ jobs:
       # with other bytes, or has yanked, makes the step fail.
       - name: mopm stage
         run: '"$RUNNER_TEMP/mopm-publish/mopm" stage --workspace-root src --artifacts "1.1.0=$RUNNER_TEMP/mopm-publish/artifacts-1.1.0" --artifacts "1.2.0=$RUNNER_TEMP/mopm-publish/artifacts-1.2.0" --out release/staged_set --registry prod'
+      # WHOLE. The plan just written stages every package of the release, each with one file for every
+      # platform and every Mojo (1.1.0 and 1.2.0, the two builds above) it builds for and none other
+      # (`release_staged_verify expect`, every difference listed at once), so a set that lost a platform,
+      # a Mojo build or a package stops here, before `prod-stage` opens a group on the registry. It reads plan.json only: the natives inside each `.conda` are not files
+      # of the plan, and this step does not see them.
+      - name: the staged set is every package on every platform
+        run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" expect --staged release/staged_set --expect "$RUNNER_TEMP/mopm-publish/plan_expectation.json"'
       # TRY. Every package's README examples, compiled and run on the farm as a
       # user would, against the `.conda` files of the set that was just staged
       # (the e2e installs offline from it, so the closure must be in it), once with
@@ -600,12 +620,15 @@ jobs:
 
   # ADD. What a user gets. `release_staged_verify add` makes a fresh project with the
   # pinned mopm (the one that staged and committed the set), runs `mopm add
-  # komira-ai/<name> --registry prod` for a library, one with dependencies and one that
-  # ships a native library, then `mopm sync`, and checks the lock they wrote (full names,
+  # komira-ai/<name> --registry prod` for json, uuid and every package that ships a native
+  # archive (RELEASE_NATIVES of release/BUCK), then `mopm sync`, in a project set to one
+  # Mojo, and checks the lock they wrote (full names,
   # each namespace's channel under https://conda.mopm.dev/, the version of this run, the
   # plan's sha256 and size) and the files sync installed against the plan. It runs after
-  # `prod-smoke`, so the channel already serves every file. Like the smoke job it holds no
-  # identity, no secret and no farm (farm actions have no network), and it yanks nothing.
+  # `prod-smoke`, so the channel already serves every file. It runs once for each Mojo the
+  # release publishes (1.1.0, then 1.2.0), each in its own work directory and against that Mojo's
+  # files only. Like the smoke job it holds no identity, no secret and no farm (farm actions have
+  # no network), and it yanks nothing.
   prod-add:
     needs: [prod-commit, prod-smoke]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

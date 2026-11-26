@@ -244,33 +244,38 @@ def test_sort_redundancy_predicate_each_return() raises:
     var tf: List[Bool] = [True, False]
     var fff: List[Bool] = [False, False, False]
     # Lengths of keys and directions differ.
-    assert_false(_sort_keys_redundant_after_partition_by(a, eb, f, a, b, f))
+    assert_false(_sort_keys_redundant_after_partition_by(a, eb, f, a, b, f, f))
     # Empty Sort.
-    assert_false(_sort_keys_redundant_after_partition_by(e, eb, eb, a, b, f))
+    assert_false(_sort_keys_redundant_after_partition_by(e, eb, eb, a, b, f, f))
     # No partition and no order keys: the sink does not sort.
-    assert_false(_sort_keys_redundant_after_partition_by(a, f, f, e, e, eb))
+    assert_false(_sort_keys_redundant_after_partition_by(a, f, f, e, e, eb, eb))
     # Order keys and their directions differ in length.
-    assert_false(_sort_keys_redundant_after_partition_by(a, f, f, a, b, eb))
+    assert_false(_sort_keys_redundant_after_partition_by(a, f, f, a, b, eb, eb))
     # Sort longer than (P ++ O).
-    assert_false(_sort_keys_redundant_after_partition_by(abc, fff, fff, a, b, f))
+    assert_false(_sort_keys_redundant_after_partition_by(abc, fff, fff, a, b, f, f))
     # A partition key sorted DESC: the sink sorts it ASC.
-    assert_false(_sort_keys_redundant_after_partition_by(a, t, f, a, b, f))
+    assert_false(_sort_keys_redundant_after_partition_by(a, t, f, a, b, f, f))
     # A partition key that is not the first partition key.
-    assert_false(_sort_keys_redundant_after_partition_by(b, f, f, a, b, f))
+    assert_false(_sort_keys_redundant_after_partition_by(b, f, f, a, b, f, f))
     # Exact (P ++ O) with the order key's direction.
-    assert_true(_sort_keys_redundant_after_partition_by(ab, ft, ff, a, b, t))
+    assert_true(_sort_keys_redundant_after_partition_by(ab, ft, ff, a, b, t, f))
     # The order key differs.
-    assert_false(_sort_keys_redundant_after_partition_by(ac, ft, ff, a, b, t))
+    assert_false(_sort_keys_redundant_after_partition_by(ac, ft, ff, a, b, t, f))
     # The order key's direction differs.
-    assert_false(_sort_keys_redundant_after_partition_by(ab, ff, ff, a, b, t))
+    assert_false(_sort_keys_redundant_after_partition_by(ab, ff, ff, a, b, t, f))
     # No partition keys: the first Sort key is checked against order key 0.
-    assert_true(_sort_keys_redundant_after_partition_by(b, t, f, e, b, t))
+    assert_true(_sort_keys_redundant_after_partition_by(b, t, f, e, b, t, f))
     # Keys and NULL placements differ in length.
-    assert_false(_sort_keys_redundant_after_partition_by(ab, ft, f, a, b, t))
+    assert_false(_sort_keys_redundant_after_partition_by(ab, ft, f, a, b, t, f))
     # A partition key's NULL placement is not the sink's derived one.
-    assert_false(_sort_keys_redundant_after_partition_by(ab, ft, tf, a, b, t))
+    assert_false(_sort_keys_redundant_after_partition_by(ab, ft, tf, a, b, t, f))
     # The order key's NULL placement is not the sink's derived one.
-    assert_false(_sort_keys_redundant_after_partition_by(ab, ft, ft, a, b, t))
+    assert_false(_sort_keys_redundant_after_partition_by(ab, ft, ft, a, b, t, f))
+    # The window's own order-key placement is the one compared.
+    assert_true(_sort_keys_redundant_after_partition_by(ab, ft, ft, a, b, t, t))
+    assert_false(_sort_keys_redundant_after_partition_by(ab, ft, ff, a, b, t, t))
+    # The window's placement list is not one entry per order key.
+    assert_false(_sort_keys_redundant_after_partition_by(ab, ft, ff, a, b, t, eb))
 
 
 # =============================================================================
@@ -666,6 +671,84 @@ def test_mismatched_outer_partition_by_lowers_a_window_below() raises:
     ref mid = out.partition_by_data_ref().child[]
     assert_equal(Int(mid.tag), Int(PLAN_PARTITION_BY))
     _assert_lowered(mid.partition_by_data_ref().child[], "under the inner PB")
+
+
+def _pb_nf(
+    pk: List[String],
+    ok: List[String],
+    desc: List[Bool],
+    nf: List[Bool],
+    var pexpr: PartitionExpr,
+    var child: LogicalPlan,
+) raises -> LogicalPlan:
+    """A PartitionBy with one PartitionExpr and an explicit NULL placement."""
+    var px = List[PartitionExpr]()
+    px.append(pexpr^)
+    return LogicalPlan.partition_by(
+        pk.copy(), ok.copy(), desc.copy(), px^, child^, Optional(nf.copy()),
+    )
+
+
+def test_adjacent_windows_differing_only_in_null_placement_stay_separate() raises:
+    """Two adjacent PartitionBys over the same keys and directions, one ORDER
+    BY v NULLS FIRST and one with the derived placement, are not fused, and
+    each keeps its own placement."""
+    var g: List[String] = ["g"]
+    var v: List[String] = ["v"]
+    var asc: List[Bool] = [False]
+    var first: List[Bool] = [True]
+    var last: List[Bool] = [False]
+    var rn = PartitionExpr.row_number().with_alias(String("rn"))
+    var rk = PartitionExpr.rank().with_alias(String("rk"))
+    var inner = _pb_nf(g, v, asc, first, rn^, _scan2("g", "v"))
+    var plan = _pb_nf(g, v, asc, last, rk^, inner^)
+
+    var out = optimize_window_rewrite(plan^)
+
+    assert_equal(Int(out.tag), Int(PLAN_PARTITION_BY))
+    ref outer = out.partition_by_data_ref()
+    assert_equal(len(outer.partition_exprs), 1)
+    assert_false(outer.nulls_first[0])
+    assert_equal(Int(outer.child[].tag), Int(PLAN_PARTITION_BY))
+    ref inner_out = outer.child[].partition_by_data_ref()
+    assert_equal(len(inner_out.partition_exprs), 1)
+    assert_true(inner_out.nulls_first[0])
+
+
+def test_fused_adjacent_windows_keep_their_null_placement() raises:
+    """Two adjacent PartitionBys with the same keys, directions and NULLS
+    FIRST placement fuse into one node that is still ordered NULLS FIRST."""
+    var g: List[String] = ["g"]
+    var v: List[String] = ["v"]
+    var asc: List[Bool] = [False]
+    var first: List[Bool] = [True]
+    var rn = PartitionExpr.row_number().with_alias(String("rn"))
+    var rk = PartitionExpr.rank().with_alias(String("rk"))
+    var inner = _pb_nf(g, v, asc, first, rn^, _scan2("g", "v"))
+    var plan = _pb_nf(g, v, asc, first, rk^, inner^)
+
+    var out = optimize_window_rewrite(plan^)
+
+    assert_equal(Int(out.tag), Int(PLAN_PARTITION_BY))
+    ref fused = out.partition_by_data_ref()
+    assert_equal(len(fused.partition_exprs), 2)
+    assert_true(fused.nulls_first[0])
+    assert_equal(Int(fused.child[].tag), Int(PLAN_SCAN))
+
+
+def test_single_window_rebuild_keeps_its_null_placement() raises:
+    """A lone PartitionBy ordered NULLS FIRST is rebuilt by the
+    walk with its NULLS FIRST placement intact."""
+    var g: List[String] = ["g"]
+    var v: List[String] = ["v"]
+    var asc: List[Bool] = [True]
+    var first: List[Bool] = [True]
+    var rn = PartitionExpr.row_number().with_alias(String("rn"))
+    var out = optimize_window_rewrite(
+        _pb_nf(g, v, asc, first, rn^, _scan2("g", "v"))
+    )
+    assert_equal(Int(out.tag), Int(PLAN_PARTITION_BY))
+    assert_true(out.partition_by_data_ref().nulls_first[0])
 
 
 def main() raises:

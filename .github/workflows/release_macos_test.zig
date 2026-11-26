@@ -7,7 +7,7 @@
 //! the macOS set a change reaches, on the farm's Macs, through a config file no other step names, bounded),
 //! and the release workflows build it after the merge:
 //! release-macos.yml once per release (a push to main, a manual run), in a concurrency group of its own
-//! so that a stalled Mac build never holds the next release, and pypi-macos-arm64.yml's build-macos-arm64 on
+//! so that a stalled Mac build never holds the next release, and pypi.yml's build-macos-arm64 on
 //! a push to main, building only when TestPyPI lacks that version's macOS wheel; the daily promotion builds
 //! nothing.
 //! What the cases catch:
@@ -59,12 +59,13 @@
 //!    macOS key or config file in them;
 //!  - pr.yml does analyse the macOS set: that line is there once, in a buck2-farm step with its remote
 //!    assertion, so a change that makes the set unanalysable fails its own pull request;
-//!  - pypi-macos-arm64.yml, the other release workflow with a macOS build (the macOS wheel), and pypi.yml,
-//!    the Linux wheel's, run on no pull request or merge group; the nine macOS jobs (build, testpypi,
-//!    testpypi-smoke, testpypi-passed, result-testpypi on a push; promote, pypi, pypi-smoke, result-pypi on
-//!    the promotion) exist once each in pypi-macos-arm64.yml and not at all in pypi.yml, each gated on its
-//!    half's event, and the macOS and Linux chains are independent (no needs, no read of a result, record or
-//!    artifact of the other, no macOS word in a job of pypi.yml); build-macos-arm64 runs on ubuntu, joins the farm
+//!  - pypi.yml, the release workflow of both wheels, runs on no pull request or merge group; its ten Linux jobs
+//!    and its nine macOS jobs (build, testpypi, testpypi-smoke, testpypi-passed, result-testpypi on a push;
+//!    promote, pypi, pypi-smoke, result-pypi on the promotion) exist once each, each macOS job gated on its
+//!    half's event, and the two chains are independent inside the file (no needs, no read of a result, record
+//!    or artifact of the other, no macOS word in a Linux job); both builds run the same stamp step and pass
+//!    the same three stamp flags to every //python build, so the two wheels of a run carry one version;
+//!    build-macos-arm64 runs on ubuntu, joins the farm
 //!    with the macOS worker set and hosts, `farm-qos: batch` and the tls literal, builds on a push to main,
 //!    asks TestPyPI only (one `present` step) after building the file name, and every Mac build and later
 //!    step but Stop buck2 carries exactly that gate; the list of the supported Pythons is built into the
@@ -678,25 +679,54 @@ fn isDarwinBuild(step: []const []const u8) bool {
     return startsWithAny(step, "          args: build") and mentions(step, DARWIN_PLATFORM);
 }
 
-/// Null if the macOS wheel's jobs (pypi-macos-arm64.yml, `text`) hold their contract and the Linux
-/// wheel's workflow (pypi.yml, `linux_text`) neither holds nor touches them, else the refusal. The exact
-/// job lists of the two files are pypi_workflow_test.zig's and pypi_macos_workflow_test.zig's.
-fn checkPypiMacos(ar: std.mem.Allocator, linux_text: []const u8, text: []const u8) !?[]const u8 {
-    if (runsOnPullRequest(linux_text)) return "pypi.yml runs on a pull request (pull_request, pull_request_target or merge_group): it builds the wheel that pypi-macos-arm64.yml builds for macOS, and runs on main alone";
-    if (runsOnPullRequest(text)) return "pypi-macos-arm64.yml runs on a pull request (pull_request, pull_request_target or merge_group): a macOS build is only in a release workflow";
+/// The three flags every stamped build passes, so that both wheels of a run carry one version.
+const STAMP_FLAGS = [_][]const u8{ "-c komira.package_stamp=${{ steps.stamp.outputs.build_number }}", "-c komira.package_commit=${{ steps.stamp.outputs.source_commit }}", "-c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }}" };
+const STAMP_RUN_TAIL = "/release_json\" stamp --revision \"$GITHUB_SHA\" --github-output \"$GITHUB_OUTPUT\"'";
+
+/// Null if the job `name` of pypi.yml (`text`) stamps as the other build does, else the refusal: a step
+/// "the stamp" that runs `release_json stamp --revision "$GITHUB_SHA"`, and every build of a //python
+/// target but the Pythons' list passes the three stamp flags.
+fn checkStamp(ar: std.mem.Allocator, text: []const u8, name: []const u8) !?[]const u8 {
+    const job = try jobOf(ar, text, name);
+    var stamp_step = false;
+    for (try stepsOf(ar, job)) |step| {
+        if (!has(step, "      - name: the stamp")) continue;
+        for (step) |l| {
+            if (std.mem.startsWith(u8, l, "        run: '\"$RUNNER_TEMP/") and std.mem.endsWith(u8, l, STAMP_RUN_TAIL)) stamp_step = true;
+        }
+    }
+    if (!stamp_step) return try std.fmt.allocPrint(ar, "{s} has no step `the stamp` that runs release_json stamp --revision \"$GITHUB_SHA\": the two wheels of a run would not carry one version", .{name});
+    var stamped: usize = 0;
+    for (job) |l| {
+        if (!std.mem.startsWith(u8, l, "          args: build") or std.mem.indexOf(u8, l, "//python") == null or std.mem.indexOf(u8, l, "supported_pythons") != null) continue;
+        for (STAMP_FLAGS) |flag| {
+            if (std.mem.indexOf(u8, l, flag) == null) return try std.fmt.allocPrint(ar, "{s} builds a //python target without the stamp flag `{s}`: the two wheels of a run would not carry one version", .{ name, flag });
+        }
+        stamped += 1;
+    }
+    if (stamped == 0) return try std.fmt.allocPrint(ar, "{s} builds no stamped //python target", .{name});
+    return null;
+}
+
+/// Null if pypi.yml (`text`) holds the contract of the macOS wheel's nine jobs beside the Linux wheel's ten,
+/// two independent chains in one file, else the refusal. The exact job list is pypi_workflow_test.zig's.
+fn checkPypiMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
+    if (runsOnPullRequest(text)) return "pypi.yml runs on a pull request (pull_request, pull_request_target or merge_group): it builds the wheels on main alone";
     for (MACOS_JOBS) |name| {
         var n: usize = 0;
         _ = try jobLines(ar, text, name, &n);
-        if (n != 1) return try std.fmt.allocPrint(ar, "pypi-macos-arm64.yml does not define the macOS job {s} exactly once", .{name});
-        var ln: usize = 0;
-        _ = try jobLines(ar, linux_text, name, &ln);
-        if (ln != 0) return try std.fmt.allocPrint(ar, "pypi.yml defines the macOS job {s}: the macOS chain is pypi-macos-arm64.yml, so that its verdict is a run of its own", .{name});
+        if (n != 1) return try std.fmt.allocPrint(ar, "pypi.yml does not define the macOS job {s} exactly once", .{name});
+    }
+    for (LINUX_JOBS) |name| {
+        var n: usize = 0;
+        _ = try jobLines(ar, text, name, &n);
+        if (n != 1) return try std.fmt.allocPrint(ar, "pypi.yml does not define the Linux job {s} exactly once", .{name});
     }
 
-    // the two chains do not touch: no needs, no read of a result, no macOS word in a job of pypi.yml
-    for ([_][]const u8{ linux_text, text }, [_]bool{ false, true }) |file, own_macos| {
-        for (try jobNames(ar, file)) |name| {
-            const lines = try jobOf(ar, file, name);
+    // the two chains do not touch: no needs, no read of a result, no macOS word in a Linux job
+    for ([_][]const []const u8{ &LINUX_JOBS, &MACOS_JOBS }, [_]bool{ false, true }) |own, own_macos| {
+        for (own) |name| {
+            const lines = try jobOf(ar, text, name);
             const others: []const []const u8 = if (own_macos) &LINUX_JOBS else &MACOS_JOBS;
             for (others) |other| {
                 const reads = try std.fmt.allocPrint(ar, "needs.{s}.", .{other});
@@ -706,10 +736,14 @@ fn checkPypiMacos(ar: std.mem.Allocator, linux_text: []const u8, text: []const u
                 }
             }
             if (!own_macos) {
-                for (lines) |l| if (namesMacos(l)) return try std.fmt.allocPrint(ar, "{s} names a macOS platform, worker set or runner: only the jobs of pypi-macos-arm64.yml do", .{name});
+                for (lines) |l| if (namesMacos(l)) return try std.fmt.allocPrint(ar, "{s} names a macOS platform, worker set or runner: only the macOS jobs do", .{name});
             }
         }
     }
+
+    // both builds stamp the same way, so the two wheels of a run carry one version
+    if (try checkStamp(ar, text, "build")) |why| return why;
+    if (try checkStamp(ar, text, PYPI_MACOS_BUILD)) |why| return why;
 
     // each half's jobs run on their half's event only, and a chain keeps to its own record and artifacts
     for (MACOS_JOBS) |name| {
@@ -1060,10 +1094,9 @@ test "a workflow that runs on a pull request holds no macOS build, and the real 
             return error.MacosInPullRequest;
         }
         if (runsOnPullRequest(text)) on_pr += 1;
-        // release-macos.yml and pypi-macos-arm64.yml are the ones with a macOS build, and they run on no pull request
+        // release-macos.yml is the one with a macOS build of the release, and it runs on no pull request
         if (std.mem.eql(u8, name, "release-macos.yml")) try t.expect(!runsOnPullRequest(text));
-        if (std.mem.eql(u8, name, "pypi-macos-arm64.yml")) try t.expect(!runsOnPullRequest(text));
-        // and so is pypi.yml, which builds the same wheel for Linux
+        // and so is pypi.yml, which builds both wheels
         if (std.mem.eql(u8, name, "pypi.yml")) try t.expect(!runsOnPullRequest(text));
     }
     // the check reads pr.yml and coverage.yml: were the trigger reader broken, nothing would be read
@@ -1143,16 +1176,16 @@ test "the reader of pull request workflows sees each macOS line added to the rea
     try t.expect(!runsOnPullRequest("name: x\non:\n  push:\n    branches: [main]\n  # pull_request\njobs:\n  a:\n    steps:\n      - run: echo pull_request\n"));
 }
 
-/// Fails unless pypi.yml's text `linux` beside pypi-macos-arm64.yml's text `macos` is refused with `want`.
-fn expectRefusedPypi(ar: std.mem.Allocator, linux: []const u8, macos: []const u8, want: []const u8) !void {
-    return expectMsg(try checkPypiMacos(ar, linux, macos), want);
+/// Fails unless the pypi.yml text `text` is refused with `want`.
+fn expectRefusedPypi(ar: std.mem.Allocator, text: []const u8, want: []const u8) !void {
+    return expectMsg(try checkPypiMacos(ar, text), want);
 }
 
-/// The two publish workflows, as the zig_test's data holds them.
-const Pypi = struct { linux: []const u8, macos: []const u8 };
+/// The publish workflow of both wheels, as the zig_test's data holds it.
+const Pypi = struct { text: []const u8 };
 
 fn readPypi(ar: std.mem.Allocator) !Pypi {
-    return .{ .linux = try readData(ar, &.{ "workflows", "pypi.yml" }), .macos = try readData(ar, &.{ "workflows", "pypi-macos-arm64.yml" }) };
+    return .{ .text = try readData(ar, &.{ "workflows", "pypi.yml" }) };
 }
 
 /// `text` with the first `from` at or after the header of the job `job` replaced by `to`.
@@ -1169,169 +1202,185 @@ fn inJob(ar: std.mem.Allocator, text: []const u8, job: []const u8, from: []const
     return try std.mem.concat(ar, u8, &.{ text[0..at], to, text[at + from.len ..] });
 }
 
-test "pypi-macos-arm64.yml holds the contract of the macOS jobs, pypi.yml holds none, and neither runs on a pull request" {
+test "pypi.yml holds the contract of the macOS jobs beside the Linux ones, independent of them, and runs on no pull request" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const w = try readPypi(ar);
-    if (try checkPypiMacos(ar, w.linux, w.macos)) |why| {
-        std.debug.print("pypi.yml, pypi-macos-arm64.yml: {s}\n", .{why});
+    if (try checkPypiMacos(ar, w.text)) |why| {
+        std.debug.print("pypi.yml: {s}\n", .{why});
         return error.Refused;
     }
-    try t.expect(!runsOnPullRequest(w.linux));
-    try t.expect(!runsOnPullRequest(w.macos));
-    // a comment of pypi.yml may speak of the macOS jobs
-    try t.expect((try checkPypiMacos(ar, try std.fmt.allocPrint(ar, "{s}\n# the macOS wheel has its own workflow\n", .{w.linux}), w.macos)) == null);
+    try t.expect(!runsOnPullRequest(w.text));
+    // a comment of a Linux job may speak of the macOS jobs
+    try t.expect((try checkPypiMacos(ar, try inJob(ar, w.text, "build", "    steps:\n", "    steps:\n      # the macOS wheel's jobs are below, darwin-arm64\n"))) == null);
 }
 
-test "an edit that joins the Linux chain and the macOS chain, puts a macOS job in pypi.yml, or runs either on a pull request, is refused" {
+test "an edit that gives one build a stamp of its own, so the two wheels of a run would not carry one version, is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const w = try readPypi(ar);
+    const run_tail = "stamp --revision \"$GITHUB_SHA\" --github-output";
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "build", run_tail, "stamp --revision \"$GITHUB_REF\" --github-output"), "build has no step `the stamp`");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "build-macos-arm64", run_tail, "stamp --revision HEAD --github-output"), "build-macos-arm64 has no step `the stamp`");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "build-macos-arm64", "      - name: the stamp\n", "      - name: the stamp of the Mac\n"), "build-macos-arm64 has no step `the stamp`");
+    for (STAMP_FLAGS) |flag| {
+        const with_space = try std.fmt.allocPrint(ar, "{s} ", .{flag});
+        try expectRefusedPypi(ar, try inJob(ar, w.text, "build", with_space, ""), "build builds a //python target without the stamp flag");
+        try expectRefusedPypi(ar, try inJob(ar, w.text, "build-macos-arm64", with_space, ""), "build-macos-arm64 builds a //python target without the stamp flag");
+    }
+}
+
+test "an edit that joins the Linux chain and the macOS chain, drops or doubles a job of pypi.yml, or runs it on a pull request, is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const w = try readPypi(ar);
     // on a pull request or a merge group
-    try expectRefusedPypi(ar, try replaced(ar, w.linux, "\n  workflow_dispatch:\n", "\n  pull_request:\n  workflow_dispatch:\n"), w.macos, "pypi.yml runs on a pull request");
-    try expectRefusedPypi(ar, try replaced(ar, w.linux, "\n  workflow_dispatch:\n", "\n  merge_group:\n  workflow_dispatch:\n"), w.macos, "pypi.yml runs on a pull request");
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, w.macos, "\n  workflow_dispatch:\n", "\n  pull_request:\n  workflow_dispatch:\n"), "pypi-macos-arm64.yml runs on a pull request");
-    // a macOS job back in pypi.yml would put the macOS verdict in the Linux run
-    try expectRefusedPypi(ar, try replaced(ar, w.linux, "\n  result-pypi:\n", "\n  build-macos-arm64:\n    runs-on: ubuntu-24.04\n\n  result-pypi:\n"), w.macos, "pypi.yml defines the macOS job build-macos-arm64");
+    try expectRefusedPypi(ar, try replaced(ar, w.text, "\n  workflow_dispatch:\n", "\n  pull_request:\n  workflow_dispatch:\n"), "pypi.yml runs on a pull request");
+    try expectRefusedPypi(ar, try replaced(ar, w.text, "\n  workflow_dispatch:\n", "\n  merge_group:\n  workflow_dispatch:\n"), "pypi.yml runs on a pull request");
+    // a job of either half missing from pypi.yml, or defined twice, is a chain that is not the contract's
+    try expectRefusedPypi(ar, try replaced(ar, w.text, "\n  build-macos-arm64:\n", "\n  build-macos:\n"), "pypi.yml does not define the macOS job build-macos-arm64 exactly once");
+    try expectRefusedPypi(ar, try replaced(ar, w.text, "\n  result-pypi:\n", "\n  result-pypi:\n    runs-on: ubuntu-24.04\n\n  result-pypi:\n"), "pypi.yml does not define the Linux job result-pypi exactly once");
+    try expectRefusedPypi(ar, try replaced(ar, w.text, "\n  wheel-user-test:\n", "\n  wheel-user:\n"), "pypi.yml does not define the Linux job wheel-user-test exactly once");
     // a Linux job that waits on the macOS build, or on a macOS job in a list
-    try expectRefusedPypi(ar, try inJob(ar, w.linux, "testpypi", "    needs: [build, wheel-user-test]\n", "    needs: [build, wheel-user-test, build-macos-arm64]\n"), w.macos, "testpypi needs build-macos-arm64");
-    try expectRefusedPypi(ar, try inJob(ar, w.linux, "result-testpypi", "    needs: [build, wheel-user-test, testpypi, testpypi-smoke, testpypi-passed]\n", "    needs: [build, wheel-user-test, testpypi, testpypi-smoke, testpypi-passed, result-testpypi-macos-arm64]\n"), w.macos, "result-testpypi needs result-testpypi-macos-arm64");
-    try expectRefusedPypi(ar, try inJob(ar, w.linux, "pypi", "    needs: promote\n", "    needs: [promote, promote-macos-arm64]\n"), w.macos, "pypi needs promote-macos-arm64");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "testpypi", "    needs: [build, wheel-user-test]\n", "    needs: [build, wheel-user-test, build-macos-arm64]\n"), "testpypi needs build-macos-arm64");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "result-testpypi", "    needs: [build, wheel-user-test, testpypi, testpypi-smoke, testpypi-passed]\n", "    needs: [build, wheel-user-test, testpypi, testpypi-smoke, testpypi-passed, result-testpypi-macos-arm64]\n"), "result-testpypi needs result-testpypi-macos-arm64");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "pypi", "    needs: promote\n", "    needs: [promote, promote-macos-arm64]\n"), "pypi needs promote-macos-arm64");
     // the Linux user test of the wheel file is a Linux job: the macOS chain does not wait on it
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "testpypi-macos-arm64", "    needs: build-macos-arm64\n", "    needs: [build-macos-arm64, wheel-user-test]\n"), "testpypi-macos-arm64 needs wheel-user-test");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "testpypi-macos-arm64", "    needs: build-macos-arm64\n", "    needs: [build-macos-arm64, wheel-user-test]\n"), "testpypi-macos-arm64 needs wheel-user-test");
     // a Linux job that reads a macOS job's output or result
-    try expectRefusedPypi(ar, try inJob(ar, w.linux, "result-testpypi", "    steps:\n", "    steps:\n      - run: echo \"$X\"\n        env:\n          X: ${{ needs.build-macos-arm64.outputs.version }}\n"), w.macos, "result-testpypi reads the result of build-macos-arm64");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "result-testpypi", "    steps:\n", "    steps:\n      - run: echo \"$X\"\n        env:\n          X: ${{ needs.build-macos-arm64.outputs.version }}\n"), "result-testpypi reads the result of build-macos-arm64");
     // a macOS job that waits on the Linux build, on a Linux upload, or reads one's output
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "build-macos-arm64", "    runs-on: ubuntu-24.04\n", "    needs: build\n    runs-on: ubuntu-24.04\n"), "build-macos-arm64 needs build");
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, w.macos, "    needs: [promote-macos-arm64, pypi-macos-arm64]\n", "    needs: [promote-macos-arm64, pypi-macos-arm64, pypi]\n"), "pypi-smoke-macos-arm64 needs pypi");
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, w.macos, "needs.testpypi-macos-arm64.outputs.state == 'differs'\n", "needs.testpypi.outputs.state == 'differs'\n"), "result-testpypi-macos-arm64 reads the result of testpypi");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "build-macos-arm64", "    runs-on: ubuntu-24.04\n", "    needs: build\n    runs-on: ubuntu-24.04\n"), "build-macos-arm64 needs build");
+    try expectRefusedPypi(ar, try replaced(ar, w.text, "    needs: [promote-macos-arm64, pypi-macos-arm64]\n", "    needs: [promote-macos-arm64, pypi-macos-arm64, pypi]\n"), "pypi-smoke-macos-arm64 needs pypi");
+    try expectRefusedPypi(ar, try replaced(ar, w.text, "needs.testpypi-macos-arm64.outputs.state == 'differs'\n", "needs.testpypi.outputs.state == 'differs'\n"), "result-testpypi-macos-arm64 reads the result of testpypi");
     // the promotion chain: promote-macos-arm64 waits on the Linux promotion, pypi-macos-arm64 takes the Linux artifact or record
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "promote-macos-arm64", "    runs-on: ubuntu-24.04\n", "    needs: promote\n    runs-on: ubuntu-24.04\n"), "promote-macos-arm64 needs promote");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "pypi-macos-arm64", "    needs: promote-macos-arm64\n", "    needs: [promote-macos-arm64, promote]\n"), "pypi-macos-arm64 needs promote");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "pypi-macos-arm64", "needs.promote-macos-arm64.outputs.version }}-macos-arm64-dist", "needs.promote.outputs.version }}-dist"), "pypi-macos-arm64 reads the result of promote");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "pypi-macos-arm64", "-macos-arm64-dist", "-dist"), "pypi-macos-arm64 reads an artifact that is not a macOS one");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "pypi-smoke-macos-arm64", "-macos-arm64-smoke", "-smoke"), "pypi-smoke-macos-arm64 reads an artifact that is not a macOS one");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "promote-macos-arm64", "pypi-passed-macos-arm64-", "pypi-passed-linux-x86_64-"), "promote-macos-arm64 reads or writes a record that is not the macOS one");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "testpypi-passed-macos-arm64", "key: pypi-passed-macos-arm64-", "key: pypi-passed-"), "testpypi-passed-macos-arm64 reads or writes a record that is not the macOS one");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "promote-macos-arm64", "key: pypi-passed-macos-arm64-", "key: pypi-passed-macos-arm64-0.1.1"), "promote-macos-arm64 does not restore the newest macOS record");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "promote-macos-arm64", "    runs-on: ubuntu-24.04\n", "    needs: promote\n    runs-on: ubuntu-24.04\n"), "promote-macos-arm64 needs promote");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "pypi-macos-arm64", "    needs: promote-macos-arm64\n", "    needs: [promote-macos-arm64, promote]\n"), "pypi-macos-arm64 needs promote");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "pypi-macos-arm64", "needs.promote-macos-arm64.outputs.version }}-macos-arm64-dist", "needs.promote.outputs.version }}-dist"), "pypi-macos-arm64 reads the result of promote");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "pypi-macos-arm64", "-macos-arm64-dist", "-dist"), "pypi-macos-arm64 reads an artifact that is not a macOS one");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "pypi-smoke-macos-arm64", "-macos-arm64-smoke", "-smoke"), "pypi-smoke-macos-arm64 reads an artifact that is not a macOS one");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "promote-macos-arm64", "pypi-passed-macos-arm64-", "pypi-passed-linux-x86_64-"), "promote-macos-arm64 reads or writes a record that is not the macOS one");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "testpypi-passed-macos-arm64", "key: pypi-passed-macos-arm64-", "key: pypi-passed-"), "testpypi-passed-macos-arm64 reads or writes a record that is not the macOS one");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "promote-macos-arm64", "key: pypi-passed-macos-arm64-", "key: pypi-passed-macos-arm64-0.1.1"), "promote-macos-arm64 does not restore the newest macOS record");
     // macOS text in a Linux job: a platform word, a runner, a worker set
-    try expectRefusedPypi(ar, try inJob(ar, w.linux, "testpypi", "      - name: the driver is executable\n", "      - run: echo macos\n      - name: the driver is executable\n"), w.macos, "testpypi names a macOS platform");
-    try expectRefusedPypi(ar, try inJob(ar, w.linux, "pypi-smoke", "    runs-on: ubuntu-24.04\n", "    runs-on: macos-15\n"), w.macos, "pypi-smoke names a macOS platform");
-    try expectRefusedPypi(ar, try inJob(ar, w.linux, "build", "      - name: Stop buck2\n", "      - name: darwin\n        run: echo darwin-arm64\n      - name: Stop buck2\n"), w.macos, "build names a macOS platform");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "testpypi", "      - name: the driver is executable\n", "      - run: echo macos\n      - name: the driver is executable\n"), "testpypi names a macOS platform");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "pypi-smoke", "    runs-on: ubuntu-24.04\n", "    runs-on: macos-15\n"), "pypi-smoke names a macOS platform");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "build", "      - name: Stop buck2\n", "      - name: darwin\n        run: echo darwin-arm64\n      - name: Stop buck2\n"), "build names a macOS platform");
     // each half runs on its own event: the promotion on a push, the TestPyPI chain off a push, or no condition
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "promote-macos-arm64", "github.event_name != 'push'", "github.event_name == 'push'"), "promote-macos-arm64 is not gated on github.event_name != 'push'");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "testpypi-smoke-macos-arm64", "github.event_name == 'push'", "github.event_name != 'push'"), "testpypi-smoke-macos-arm64 is not gated on github.event_name == 'push'");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "result-pypi-macos-arm64", "    if: always() && github.ref == 'refs/heads/main' && github.event_name != 'push'\n", "    if: always()\n"), "result-pypi-macos-arm64 is not gated on");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, w.macos, "testpypi-passed-macos-arm64", "    if: github.ref == 'refs/heads/main' && github.event_name == 'push'\n", ""), "testpypi-passed-macos-arm64 has no condition");
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, w.macos, "\n  result-pypi-macos-arm64:\n", "\n  result-pypi-macos-arm64:\n    runs-on: ubuntu-24.04\n\n  result-pypi-macos-arm64:\n"), "result-pypi-macos-arm64 exactly once");
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, w.macos, "\n  promote-macos-arm64:\n", "\n  promote-macos:\n"), "promote-macos-arm64 exactly once");
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, w.macos, "\n  pypi-macos-arm64:\n", "\n  pypi-macos:\n"), "pypi-macos-arm64 exactly once");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "promote-macos-arm64", "github.event_name != 'push'", "github.event_name == 'push'"), "promote-macos-arm64 is not gated on github.event_name != 'push'");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "testpypi-smoke-macos-arm64", "github.event_name == 'push'", "github.event_name != 'push'"), "testpypi-smoke-macos-arm64 is not gated on github.event_name == 'push'");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "result-pypi-macos-arm64", "    if: always() && github.ref == 'refs/heads/main' && github.event_name != 'push'\n", "    if: always()\n"), "result-pypi-macos-arm64 is not gated on");
+    try expectRefusedPypi(ar, try inJob(ar, w.text, "testpypi-passed-macos-arm64", "    if: github.ref == 'refs/heads/main' && github.event_name == 'push'\n", ""), "testpypi-passed-macos-arm64 has no condition");
+    try expectRefusedPypi(ar, try replaced(ar, w.text, "\n  result-pypi-macos-arm64:\n", "\n  result-pypi-macos-arm64:\n    runs-on: ubuntu-24.04\n\n  result-pypi-macos-arm64:\n"), "result-pypi-macos-arm64 exactly once");
+    try expectRefusedPypi(ar, try replaced(ar, w.text, "\n  promote-macos-arm64:\n", "\n  promote-macos:\n"), "promote-macos-arm64 exactly once");
+    try expectRefusedPypi(ar, try replaced(ar, w.text, "\n  pypi-macos-arm64:\n", "\n  pypi-macos:\n"), "pypi-macos-arm64 exactly once");
 }
 
-test "an edit of the real pypi-macos-arm64.yml that moves the macOS build off the farm's connection is refused" {
+test "an edit of the real pypi.yml that moves the macOS build off the farm's connection is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const w = try readPypi(ar);
-    const text = w.macos;
+    const text = w.text;
     // a hosted macOS runner is refused for the build; the Macs are the farm's workers
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "    runs-on: ubuntu-24.04\n", "    runs-on: macos-15\n"), "build-macos-arm64 does not run on ubuntu-24.04");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "    environment: build\n", ""), "not in the environment build");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", PYPI_MACOS_BUILD_GATE ++ "\n", "    if: always()\n"), "does not run on a push to main alone");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", PYPI_MACOS_BUILD_GATE ++ "\n", "    if: github.ref == 'refs/heads/main'\n"), "does not run on a push to main alone");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "result-testpypi-macos-arm64", "        if: needs.build-macos-arm64.result != 'success'\n", "        if: inputs.flavour == 'bundled' && needs.build-macos-arm64.result != 'success'\n"), "does not fail a run whose macOS build did not succeed");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "pypi-macos-arm64", "    environment: pypi\n", "    environment: pypi\n    env:\n      FLAVOUR: ${{ inputs.flavour }}\n"), "reads a run input");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "    runs-on: ubuntu-24.04\n", "    runs-on: macos-15\n"), "build-macos-arm64 does not run on ubuntu-24.04");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "    environment: build\n", ""), "not in the environment build");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", PYPI_MACOS_BUILD_GATE ++ "\n", "    if: always()\n"), "does not run on a push to main alone");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", PYPI_MACOS_BUILD_GATE ++ "\n", "    if: github.ref == 'refs/heads/main'\n"), "does not run on a push to main alone");
+    try expectRefusedPypi(ar, try inJob(ar, text, "result-testpypi-macos-arm64", "        if: needs.build-macos-arm64.result != 'success'\n", "        if: inputs.flavour == 'bundled' && needs.build-macos-arm64.result != 'success'\n"), "does not fail a run whose macOS build did not succeed");
+    try expectRefusedPypi(ar, try inJob(ar, text, "pypi-macos-arm64", "    environment: pypi\n", "    environment: pypi\n    env:\n      FLAVOUR: ${{ inputs.flavour }}\n"), "reads a run input");
     // the farm connection: the macOS worker set and hosts, batch priority, tls as every caller passes it
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", DARWIN_PROPS ++ "\n", ""), "darwin-properties");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", DARWIN_HOSTS ++ "\n", ""), "darwin-macos-hosts");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", QOS ++ "\n", ""), "farm-qos: batch");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "          tls: ${{ vars.FARM_TLS || 'false' }}\n", ""), "tls from FARM_TLS");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", FARM_CONNECT ++ "\n", "      - name: an early build\n" ++ BUCK2_FARM ++ "\n        with:\n          args: build //python:komira\n" ++ ASSERT ++ "\n" ++ FARM_CONNECT ++ "\n"), "builds before it joins the farm");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      - name: build the farm assertion\n", "      - name: a check\n        run: |\n          true\n      - name: build the farm assertion\n"), "multi-line run step");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      - name: build the macOS smoke driver\n" ++ PRESENT_GATE ++ "\n        uses: ./.github/actions/buck2-farm\n", "      - name: build the macOS smoke driver\n" ++ PRESENT_GATE ++ "\n        uses: ./.github/actions/other\n"), "outside the buck2-farm action");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", DARWIN_PROPS ++ "\n", ""), "darwin-properties");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", DARWIN_HOSTS ++ "\n", ""), "darwin-macos-hosts");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", QOS ++ "\n", ""), "farm-qos: batch");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "          tls: ${{ vars.FARM_TLS || 'false' }}\n", ""), "tls from FARM_TLS");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", FARM_CONNECT ++ "\n", "      - name: an early build\n" ++ BUCK2_FARM ++ "\n        with:\n          args: build //release/ci:release_json\n" ++ ASSERT ++ "\n" ++ FARM_CONNECT ++ "\n"), "builds before it joins the farm");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: build the farm assertion\n", "      - name: a check\n        run: |\n          true\n      - name: build the farm assertion\n"), "multi-line run step");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: build the macOS smoke driver\n" ++ PRESENT_GATE ++ "\n        uses: ./.github/actions/buck2-farm\n", "      - name: build the macOS smoke driver\n" ++ PRESENT_GATE ++ "\n        uses: ./.github/actions/other\n"), "outside the buck2-farm action");
     // the smoke jobs run on a Mac with the macOS driver, the upload jobs on Linux with the Linux one
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "testpypi-smoke-macos-arm64", "smoke/pypi_smoke_macos_arm64\" verify", "smoke/pypi_smoke\" verify"), "testpypi-smoke-macos-arm64 runs the Linux driver on a macOS runner");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "pypi-smoke-macos-arm64", "    runs-on: macos-15\n", "    runs-on: ubuntu-24.04\n"), "pypi-smoke-macos-arm64 does not run on macos-15");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "pypi-macos-arm64", "smoke/pypi_smoke\" state", "smoke/pypi_smoke_macos_arm64\" state"), "pypi-macos-arm64 runs the macOS driver on a Linux runner");
+    try expectRefusedPypi(ar, try inJob(ar, text, "testpypi-smoke-macos-arm64", "smoke/pypi_smoke_macos_arm64\" verify", "smoke/pypi_smoke\" verify"), "testpypi-smoke-macos-arm64 runs the Linux driver on a macOS runner");
+    try expectRefusedPypi(ar, try inJob(ar, text, "pypi-smoke-macos-arm64", "    runs-on: macos-15\n", "    runs-on: ubuntu-24.04\n"), "pypi-smoke-macos-arm64 does not run on macos-15");
+    try expectRefusedPypi(ar, try inJob(ar, text, "pypi-macos-arm64", "smoke/pypi_smoke\" state", "smoke/pypi_smoke_macos_arm64\" state"), "pypi-macos-arm64 runs the macOS driver on a Linux runner");
 }
 
-test "an edit of the real pypi-macos-arm64.yml that loses the macOS smoke's one job per supported Python is refused" {
+test "an edit of the real pypi.yml that loses the macOS smoke's one job per supported Python is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const w = try readPypi(ar);
-    const text = w.macos;
+    const text = w.text;
     // a smoke job with a list of its own, with another job's list, cancelling the others on a failure, or
     // setting up another Python
     const list_line = "      matrix: ${{ fromJSON(needs.build-macos-arm64.outputs.matrix) }}\n";
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "testpypi-smoke-macos-arm64", list_line, "      matrix:\n        python: ['3.13.16']\n"), "testpypi-smoke-macos-arm64 is not one job per Python of build-macos-arm64's list");
+    try expectRefusedPypi(ar, try inJob(ar, text, "testpypi-smoke-macos-arm64", list_line, "      matrix:\n        python: ['3.13.16']\n"), "testpypi-smoke-macos-arm64 is not one job per Python of build-macos-arm64's list");
     // each smoke takes the matrix of its own chain: the PyPI smoke's is promote-macos-arm64's, not the build's or the upload's
     const promote_line = "      matrix: ${{ fromJSON(needs.promote-macos-arm64.outputs.matrix) }}\n";
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "pypi-smoke-macos-arm64", promote_line, list_line), "pypi-smoke-macos-arm64 is not one job per Python of promote-macos-arm64's list");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "pypi-smoke-macos-arm64", promote_line, "      matrix: ${{ fromJSON(needs.pypi-macos-arm64.outputs.matrix) }}\n"), "pypi-smoke-macos-arm64 is not one job per Python of promote-macos-arm64's list");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "testpypi-smoke-macos-arm64", list_line, promote_line), "testpypi-smoke-macos-arm64 is not one job per Python of build-macos-arm64's list");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "pypi-smoke-macos-arm64", "      fail-fast: false\n", ""), "pypi-smoke-macos-arm64 is not one job per Python of promote-macos-arm64's list");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "testpypi-smoke-macos-arm64", "          python-version: ${{ matrix.python }}\n", "          python-version: '3.13'\n"), "testpypi-smoke-macos-arm64 is not one job per Python of build-macos-arm64's list");
+    try expectRefusedPypi(ar, try inJob(ar, text, "pypi-smoke-macos-arm64", promote_line, list_line), "pypi-smoke-macos-arm64 is not one job per Python of promote-macos-arm64's list");
+    try expectRefusedPypi(ar, try inJob(ar, text, "pypi-smoke-macos-arm64", promote_line, "      matrix: ${{ fromJSON(needs.pypi-macos-arm64.outputs.matrix) }}\n"), "pypi-smoke-macos-arm64 is not one job per Python of promote-macos-arm64's list");
+    try expectRefusedPypi(ar, try inJob(ar, text, "testpypi-smoke-macos-arm64", list_line, promote_line), "testpypi-smoke-macos-arm64 is not one job per Python of build-macos-arm64's list");
+    try expectRefusedPypi(ar, try inJob(ar, text, "pypi-smoke-macos-arm64", "      fail-fast: false\n", ""), "pypi-smoke-macos-arm64 is not one job per Python of promote-macos-arm64's list");
+    try expectRefusedPypi(ar, try inJob(ar, text, "testpypi-smoke-macos-arm64", "          python-version: ${{ matrix.python }}\n", "          python-version: '3.13'\n"), "testpypi-smoke-macos-arm64 is not one job per Python of build-macos-arm64's list");
     // the promotion writes its matrix from the record's list, for the macOS platform
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "promote-macos-arm64", "--platform macos-arm64", "--platform linux-x86_64"), "promote-macos-arm64 does not write the macOS job matrix");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "promote-macos-arm64", "passed/pythons.json", "passed/other.json"), "promote-macos-arm64 does not write the macOS job matrix");
+    try expectRefusedPypi(ar, try inJob(ar, text, "promote-macos-arm64", "--platform macos-arm64", "--platform linux-x86_64"), "promote-macos-arm64 does not write the macOS job matrix");
+    try expectRefusedPypi(ar, try inJob(ar, text, "promote-macos-arm64", "passed/pythons.json", "passed/other.json"), "promote-macos-arm64 does not write the macOS job matrix");
     // the quickstart is the smoke artifact's: a checkout, or a path of the checkout, is refused
     const checkout = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n";
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "testpypi-smoke-macos-arm64", "    steps:\n", "    steps:\n" ++ checkout), "testpypi-smoke-macos-arm64 takes the quickstart from a checkout");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "pypi-smoke-macos-arm64", "--example \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.py\"", "--example python/examples/quickstart.py"), "pypi-smoke-macos-arm64 takes the quickstart from a checkout");
+    try expectRefusedPypi(ar, try inJob(ar, text, "testpypi-smoke-macos-arm64", "    steps:\n", "    steps:\n" ++ checkout), "testpypi-smoke-macos-arm64 takes the quickstart from a checkout");
+    try expectRefusedPypi(ar, try inJob(ar, text, "pypi-smoke-macos-arm64", "--example \"$RUNNER_TEMP/pypi-macos-arm64/smoke/quickstart.py\"", "--example python/examples/quickstart.py"), "pypi-smoke-macos-arm64 takes the quickstart from a checkout");
     // the build: no list, the Linux list, no output, or the list behind the present gate (after the asking)
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, PYTHONS_BUILD, "          args: build //python:supported_pythons[linux-x86_64] --out ${{ runner.temp }}/pypi-macos-arm64/smoke/pythons.json"), "does not build the list of the supported Pythons for macOS");
+    try expectRefusedPypi(ar, try replaced(ar, text, PYTHONS_BUILD, "          args: build //python:supported_pythons[linux-x86_64] --out ${{ runner.temp }}/pypi-macos-arm64/smoke/pythons.json"), "does not build the list of the supported Pythons for macOS");
     // the list built outside the smoke directory is not in the artifact the smoke jobs and the record carry
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, PYTHONS_BUILD, "          args: build //python:supported_pythons[macos-arm64] --out ${{ runner.temp }}/pypi-macos-arm64/pythons.json"), "does not build the list of the supported Pythons for macOS");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", PYTHONS_OUTPUT ++ "\n", ""), "does not publish the job matrix of the supported Pythons as its output `matrix`");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", PYTHONS_STEP_ID ++ "\n", ""), "does not write the job matrix of the supported Pythons to its step output `matrix`");
+    try expectRefusedPypi(ar, try replaced(ar, text, PYTHONS_BUILD, "          args: build //python:supported_pythons[macos-arm64] --out ${{ runner.temp }}/pypi-macos-arm64/pythons.json"), "does not build the list of the supported Pythons for macOS");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", PYTHONS_OUTPUT ++ "\n", ""), "does not publish the job matrix of the supported Pythons as its output `matrix`");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", PYTHONS_STEP_ID ++ "\n", ""), "does not write the job matrix of the supported Pythons to its step output `matrix`");
     const list_steps = "      - name: build the list of the supported Pythons\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ PYTHONS_BUILD ++ "\n" ++ ASSERT ++ "\n      - name: the Pythons of the macOS smoke\n" ++ PYTHONS_STEP_ID ++ "\n" ++ PYTHONS_RUN ++ "\n";
     // the matrix written from another list than the one built, or for the Linux runner
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "matrix --pythons \"$RUNNER_TEMP/pypi-macos-arm64/smoke/pythons.json\"", "matrix --pythons python/pythons.json"), "does not write the job matrix of the supported Pythons to its step output `matrix`");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "--platform macos-arm64 --github-output", "--platform linux-x86_64 --github-output"), "does not write the job matrix of the supported Pythons to its step output `matrix`");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "matrix --pythons \"$RUNNER_TEMP/pypi-macos-arm64/smoke/pythons.json\"", "matrix --pythons python/pythons.json"), "does not write the job matrix of the supported Pythons to its step output `matrix`");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "--platform macos-arm64 --github-output", "--platform linux-x86_64 --github-output"), "does not write the job matrix of the supported Pythons to its step output `matrix`");
     const out_step = "      - name: the Pythons of the macOS smoke\n" ++ PYTHONS_STEP_ID ++ "\n" ++ PYTHONS_RUN ++ "\n";
     const build_step = "      - name: build the list of the supported Pythons\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ PYTHONS_BUILD ++ "\n" ++ ASSERT ++ "\n";
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", build_step ++ out_step, out_step ++ build_step), "after the indexes are asked");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", build_step ++ out_step, out_step ++ build_step), "after the indexes are asked");
     // moved after the asking, behind the present gate as every step there must be
     const gated = "      - name: build the list of the supported Pythons\n" ++ PRESENT_GATE ++ "\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ PYTHONS_BUILD ++ "\n" ++ ASSERT ++ "\n      - name: the Pythons of the macOS smoke\n" ++ PRESENT_GATE ++ "\n" ++ PYTHONS_STEP_ID ++ "\n" ++ PYTHONS_RUN ++ "\n";
     const moved = try replaced(ar, try inJob(ar, text, "build-macos-arm64", list_steps, ""), PRESENT_STEPS, PRESENT_STEPS ++ gated);
-    try expectRefusedPypi(ar, w.linux, moved, "after the indexes are asked");
+    try expectRefusedPypi(ar, moved, "after the indexes are asked");
 }
 
-test "an edit of the real pypi-macos-arm64.yml that lets a Mac build start before the indexes are asked, or run ungated, is refused" {
+test "an edit of the real pypi.yml that lets a Mac build start before the indexes are asked, or run ungated, is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const w = try readPypi(ar);
-    const text = w.macos;
+    const text = w.text;
     // the wheel build without the present gate, the install test and the driver with another one
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      - name: build the macOS wheel\n" ++ PRESENT_GATE ++ "\n", "      - name: build the macOS wheel\n"), "a Mac build of build-macos-arm64 does not carry the present gate");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      - name: the install test on the macOS wheel\n" ++ PRESENT_GATE ++ "\n", "      - name: the install test on the macOS wheel\n        if: github.event_name == 'push'\n"), "a Mac build of build-macos-arm64 does not carry the present gate");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      - name: build the macOS smoke driver\n" ++ PRESENT_GATE ++ "\n", "      - name: build the macOS smoke driver\n        if: always()\n"), "a Mac build of build-macos-arm64 does not carry the present gate");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: build the macOS wheel\n" ++ PRESENT_GATE ++ "\n", "      - name: build the macOS wheel\n"), "a Mac build of build-macos-arm64 does not carry the present gate");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: the install test on the macOS wheel\n" ++ PRESENT_GATE ++ "\n", "      - name: the install test on the macOS wheel\n        if: github.event_name == 'push'\n"), "a Mac build of build-macos-arm64 does not carry the present gate");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: build the macOS smoke driver\n" ++ PRESENT_GATE ++ "\n", "      - name: build the macOS smoke driver\n        if: always()\n"), "a Mac build of build-macos-arm64 does not carry the present gate");
     // the gate is exactly TestPyPI's: the two-index gate of an earlier shape, or one more clause, is no longer it
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      - name: build the macOS wheel\n" ++ PRESENT_GATE ++ "\n", "      - name: build the macOS wheel\n" ++ PRESENT_GATE ++ " || steps.pypi_file.outputs.present != 'true'\n"), "a Mac build of build-macos-arm64 does not carry the present gate");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      - name: keep the dist directory\n" ++ PRESENT_GATE ++ "\n", "      - name: keep the dist directory\n" ++ PRESENT_GATE ++ " && github.ref == 'refs/heads/main'\n"), "a step of build-macos-arm64 after the present steps does not carry the present gate");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: build the macOS wheel\n" ++ PRESENT_GATE ++ "\n", "      - name: build the macOS wheel\n" ++ PRESENT_GATE ++ " || steps.pypi_file.outputs.present != 'true'\n"), "a Mac build of build-macos-arm64 does not carry the present gate");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: keep the dist directory\n" ++ PRESENT_GATE ++ "\n", "      - name: keep the dist directory\n" ++ PRESENT_GATE ++ " && github.ref == 'refs/heads/main'\n"), "a step of build-macos-arm64 after the present steps does not carry the present gate");
     // a step after the asking that is not a build and runs ungated: the dist directory, an artifact
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      - name: the dist directory and the record\n        id: dist\n" ++ PRESENT_GATE ++ "\n", "      - name: the dist directory and the record\n        id: dist\n"), "a step of build-macos-arm64 after the present steps does not carry the present gate");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      - name: keep the drivers and the record\n" ++ PRESENT_GATE ++ "\n", "      - name: keep the drivers and the record\n"), "a step of build-macos-arm64 after the present steps does not carry the present gate");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      - name: build the file name of the macOS wheel\n", "      - name: build the file name of the macOS wheel\n" ++ PRESENT_GATE ++ "\n"), "builds the wheel's file name behind the present gate");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: the dist directory and the record\n        id: dist\n" ++ PRESENT_GATE ++ "\n", "      - name: the dist directory and the record\n        id: dist\n"), "a step of build-macos-arm64 after the present steps does not carry the present gate");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: keep the drivers and the record\n" ++ PRESENT_GATE ++ "\n", "      - name: keep the drivers and the record\n"), "a step of build-macos-arm64 after the present steps does not carry the present gate");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: build the file name of the macOS wheel\n", "      - name: build the file name of the macOS wheel\n" ++ PRESENT_GATE ++ "\n"), "builds the wheel's file name behind the present gate");
     // the present steps moved after the Mac builds
     const moved = try inJob(ar, try replaced(ar, text, PRESENT_STEPS, ""), "build-macos-arm64", "      - name: Stop buck2\n", PRESENT_STEPS ++ "      - name: Stop buck2\n");
-    try expectRefusedPypi(ar, w.linux, moved, "starts a Mac build before the present step");
+    try expectRefusedPypi(ar, moved, "starts a Mac build before the present step");
     // the present step that is gone, or asks before the file name exists
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, "      - name: the macOS wheel on TestPyPI\n        id: testpypi_file\n" ++ PRESENT_TESTPYPI_RUN ++ "\n", ""), "does not ask TestPyPI");
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, try replaced(ar, text, PRESENT_STEPS, ""), "      - name: build the file name of the macOS wheel\n", PRESENT_STEPS ++ "      - name: build the file name of the macOS wheel\n"), "asks the indexes before it has built the wheel's file name");
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, "//python:wheel_install_test_macos_arm64\n", "//python:wheel_install_test\n"), "not the wheel, its install test, its read-back checks, its driver or the wheel's file name");
+    try expectRefusedPypi(ar, try replaced(ar, text, "      - name: the macOS wheel on TestPyPI\n        id: testpypi_file\n" ++ PRESENT_TESTPYPI_RUN ++ "\n", ""), "does not ask TestPyPI");
+    try expectRefusedPypi(ar, try replaced(ar, try replaced(ar, text, PRESENT_STEPS, ""), "      - name: build the file name of the macOS wheel\n", PRESENT_STEPS ++ "      - name: build the file name of the macOS wheel\n"), "asks the indexes before it has built the wheel's file name");
+    try expectRefusedPypi(ar, try replaced(ar, text, "//python:wheel_install_test_macos_arm64\n", "//python:wheel_install_test\n"), "not the wheel, its install test, its read-back checks, its driver or the wheel's file name");
     // the read-back checks dropped from their step, or built twice
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, " //python:wheel_libs_macos_arm64 //python:wheel_same_macos_arm64\n", " //python:wheel_libs_macos_arm64\n"), "exactly once");
+    try expectRefusedPypi(ar, try replaced(ar, text, " //python:wheel_libs_macos_arm64 //python:wheel_same_macos_arm64\n", " //python:wheel_libs_macos_arm64\n"), "exactly once");
     const read_back = "      - name: the macOS wheel read back\n";
     const read_back_step = text[std.mem.indexOf(u8, text, read_back).?..std.mem.indexOf(u8, text, "      - name: build the macOS smoke driver\n").?];
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, read_back_step, try std.mem.concat(ar, u8, &.{ read_back_step, read_back_step })), "exactly once");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      - name: the macOS wheel read back\n" ++ PRESENT_GATE ++ "\n", "      - name: the macOS wheel read back\n"), "a Mac build of build-macos-arm64 does not carry the present gate");
-    try expectRefusedPypi(ar, w.linux, try replaced(ar, text, "//python/smoke:pypi_smoke_macos_arm64 --out", "//python:komira_wheel_macos_arm64[release] --out"), "exactly once");
-    try expectRefusedPypi(ar, w.linux, try inJob(ar, text, "build-macos-arm64", "      version: ${{ steps.dist.outputs.version }}\n", "      version: 0.1.0\n"), "does not publish the version");
+    try expectRefusedPypi(ar, try replaced(ar, text, read_back_step, try std.mem.concat(ar, u8, &.{ read_back_step, read_back_step })), "exactly once");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      - name: the macOS wheel read back\n" ++ PRESENT_GATE ++ "\n", "      - name: the macOS wheel read back\n"), "a Mac build of build-macos-arm64 does not carry the present gate");
+    try expectRefusedPypi(ar, try replaced(ar, text, "//python/smoke:pypi_smoke_macos_arm64 --out", "//python:komira_wheel_macos_arm64[release] --out"), "exactly once");
+    try expectRefusedPypi(ar, try inJob(ar, text, "build-macos-arm64", "      version: ${{ steps.dist.outputs.version }}\n", "      version: 0.1.0\n"), "does not publish the version");
 }
 
 test "pr.yml analyses the macOS set once, through the buck2-farm action, and each edit that loses it is refused" {

@@ -26,7 +26,7 @@ from komira_plan_harness import (
     parse_duckdb_tsv,
     render_table,
 )
-from so import Session, register_parquet, sql_result
+from so import Session, register_arrow, register_parquet, sql_result
 
 from .corpus import Corpus, SqlCase, query_text
 
@@ -45,9 +45,21 @@ struct E2eReport(Movable):
         self.problems = List[String]()
 
 
+def has_resident_twin(name: String) -> Bool:
+    """Whether the table `name` is also registered from memory, as
+    `<name>_mem`: lj_customer and lj_orders, the LEFT JOIN pair of
+    sql/regression_tables.sql. sql/tables.sql names the same twins for
+    DuckDB, as views of the same files."""
+    return name == "lj_customer" or name == "lj_orders"
+
+
 def open_session(tables_dir: String) raises -> Session:
     """A session with every `<table>.parquet` of `tables_dir` registered as
-    `<table>`. Raises when the directory holds no Parquet file."""
+    `<table>`, and each table with a resident twin (`has_resident_twin`)
+    registered a second time as `<table>_mem`: its rows read from the file
+    through the session and registered with `register_arrow`, the table a
+    host's Arrow stream becomes. Raises when the directory holds no Parquet
+    file."""
     var session = Session()
     var registered = 0
     for entry in listdir(tables_dir):
@@ -56,6 +68,13 @@ def open_session(tables_dir: String) raises -> Session:
             var name = String(f[byte = 0 : f.byte_length() - 8])
             register_parquet(session, name, tables_dir + "/" + f)
             registered += 1
+            if has_resident_twin(name):
+                var rows = sql_result(session, "SELECT * FROM " + name)
+                register_arrow(
+                    session,
+                    name + "_mem",
+                    Table.from_chunks(rows.take_batches(), rows.take_schema()),
+                )
     if registered == 0:
         raise Error("sql_e2e: no .parquet table in " + tables_dir)
     return session^

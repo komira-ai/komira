@@ -87,6 +87,12 @@
 #
 # Edge case: two windows with the same partition_by but a different
 # order_by (or descending) are separate groups; they are not merged.
+#
+# NULL placement: an `EXPR_WINDOW_FN` carries no per-key placement, so Pattern A
+# always builds PartitionBys with the derived one. Pattern B fuses two adjacent
+# PartitionBys only when their per-order-key `nulls_first` lists are equal, and
+# the fused and rebuilt nodes carry it; Pattern C compares a Sort against the
+# window's own placement.
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -505,11 +511,12 @@ def _fuse_adjacent_partition_bys(var plan: LogicalPlan) raises -> LogicalPlan:
     if _triples_equal(
         outer.partition_keys, outer.order_keys, outer.descending,
         inner.partition_keys, inner.order_keys, inner.descending,
-    ):
+    ) and _bool_lists_equal(outer.nulls_first, inner.nulls_first):
         # Triples match: fuse into one PartitionBy.
         var fused_pkeys = outer.partition_keys.copy()
         var fused_okeys = outer.order_keys.copy()
         var fused_desc = outer.descending.copy()
+        var fused_nf = Optional(outer.nulls_first.copy())
         # Inner pexprs first (executed first in original plan), then
         # outer pexprs.
         var fused_pexprs = List[PartitionExpr]()
@@ -531,7 +538,7 @@ def _fuse_adjacent_partition_bys(var plan: LogicalPlan) raises -> LogicalPlan:
         var grandchild = _copy_plan(inner.child[])
         var fused = LogicalPlan.partition_by(
             fused_pkeys^, fused_okeys^, fused_desc^,
-            fused_pexprs^, grandchild^,
+            fused_pexprs^, grandchild^, fused_nf^,
         )
         return optimize_window_rewrite(fused^)
 
@@ -541,12 +548,13 @@ def _fuse_adjacent_partition_bys(var plan: LogicalPlan) raises -> LogicalPlan:
     var outer_pkeys = outer.partition_keys.copy()
     var outer_okeys = outer.order_keys.copy()
     var outer_desc = outer.descending.copy()
+    var outer_nf = Optional(outer.nulls_first.copy())
     var outer_pexprs = List[PartitionExpr]()
     for i in range(len(outer.partition_exprs)):
         outer_pexprs.append(outer.partition_exprs[i].copy())
     return LogicalPlan.partition_by(
         outer_pkeys^, outer_okeys^, outer_desc^,
-        outer_pexprs^, rewritten_inner^,
+        outer_pexprs^, rewritten_inner^, outer_nf^,
     )
 
 
@@ -576,8 +584,8 @@ def _fuse_adjacent_partition_bys(var plan: LogicalPlan) raises -> LogicalPlan:
 #
 # A subsequent `Sort(K, A)` is a no-op when K is a PREFIX of (P ++ O)
 # AND A matches the corresponding prefix of the implied direction list
-# AND each key's NULL placement is the sink's derived one
-# (`derived_nulls_first` of the key's direction). In that case the Sort can be dropped entirely.
+# AND each key's NULL placement is the sink's: derived for a partition key,
+# the window's own `nulls_first` for an order key. In that case the Sort can be dropped entirely.
 #
 # Conservative gate -- when this rule does NOT fire:
 #   * Sort node is NOT directly above PartitionBy (intermediate Project
@@ -586,8 +594,9 @@ def _fuse_adjacent_partition_bys(var plan: LogicalPlan) raises -> LogicalPlan:
 #   * K is not a prefix of (P ++ O), e.g. K reorders P or includes a
 #     column not in (P ++ O).
 #   * Direction mismatch on any key in K.
-#   * NULL placement mismatch on any key in K (an explicit NULLS FIRST /
-#     NULLS LAST the sink's derived placement does not produce).
+#   * NULL placement mismatch on any key in K (a Sort NULLS FIRST over a
+#     window ordered with the derived placement, or a plain Sort over a
+#     window ordered NULLS FIRST).
 #   * P or O is empty (degenerate cases; the partition-by sort path
 #     skips the sort when `len(sort_keys) == 0`, so the post-window
 #     order isn't guaranteed).
@@ -616,13 +625,14 @@ def _sort_keys_redundant_after_partition_by(
     partition_keys: List[String],
     order_keys: List[String],
     pb_desc: List[Bool],
+    pb_nulls_first: List[Bool],
 ) -> Bool:
     """True iff `(sort_keys, sort_desc, sort_nulls_first)` is a prefix of
     the row order implied by `_execute_partition_by_sink`'s internal sort:
     `(partition_keys ++ order_keys)` with directions
     `([False]*|partition_keys| ++ pb_desc)` and, per key, the NULL placement
-    `derived_nulls_first(direction)` (a PartitionBy carries no explicit NULL
-    placement, so its sink derives it).
+    `derived_nulls_first(False)` for a partition key and `pb_nulls_first[j]`
+    for the j-th order key (the window's own ORDER BY placement).
 
     Returns False on:
       * `PARTITION_BY_SINK_EMITS_GLOBAL_KEY_ORDER` being False — the sink
@@ -633,7 +643,8 @@ def _sort_keys_redundant_after_partition_by(
       * sort_keys longer than (partition_keys ++ order_keys).
       * Any sort_keys[i] != implied_keys[i].
       * Any sort_desc[i] != implied_desc[i].
-      * Any sort_nulls_first[i] != derived_nulls_first(implied_desc[i]).
+      * Any sort_nulls_first[i] != the implied placement of that key.
+      * pb_nulls_first not one entry per order key.
     """
     # ⛔ THE PREMISE, READ FROM THE OPERATORS PACKAGE RATHER THAN ASSUMED.
     # This rule is only sound because every PartitionBy sink driver emits
@@ -662,7 +673,7 @@ def _sort_keys_redundant_after_partition_by(
         # = batch^` in partition_scan_sink). Output order is NOT
         # guaranteed; cannot elide.
         return False
-    if len(pb_desc) != n_ok:
+    if len(pb_desc) != n_ok or len(pb_nulls_first) != n_ok:
         # Defensive: the SDK guarantees this invariant, but guard
         # against malformed plans.
         return False
@@ -674,17 +685,20 @@ def _sort_keys_redundant_after_partition_by(
     for i in range(n_sort):
         var implied_key: String
         var implied_dir: Bool
+        var implied_nf: Bool
         if i < n_pk:
             implied_key = partition_keys[i]
             implied_dir = False  # partition keys always ASC
+            implied_nf = derived_nulls_first(False)
         else:
             implied_key = order_keys[i - n_pk]
             implied_dir = pb_desc[i - n_pk]
+            implied_nf = pb_nulls_first[i - n_pk]
         if sort_keys[i] != implied_key:
             return False
         if sort_desc[i] != implied_dir:
             return False
-        if sort_nulls_first[i] != derived_nulls_first(implied_dir):
+        if sort_nulls_first[i] != implied_nf:
             return False
     return True
 
@@ -701,7 +715,7 @@ def _elide_sort_over_partition_by(var plan: LogicalPlan) raises -> LogicalPlan:
 
     if _sort_keys_redundant_after_partition_by(
         sd.keys, sd.descending, sd.nulls_first,
-        pb.partition_keys, pb.order_keys, pb.descending,
+        pb.partition_keys, pb.order_keys, pb.descending, pb.nulls_first,
     ):
         # Drop the Sort. Re-run the rule on the resulting PartitionBy
         # plan so any deeper Pattern A / B / C triggers (e.g. a
@@ -868,10 +882,11 @@ def _recurse_into_children(var plan: LogicalPlan) raises -> LogicalPlan:
         var pk = plan.partition_by_data_ref().partition_keys.copy()
         var ok = plan.partition_by_data_ref().order_keys.copy()
         var desc = plan.partition_by_data_ref().descending.copy()
+        var nf = Optional(plan.partition_by_data_ref().nulls_first.copy())
         var pexprs = List[PartitionExpr]()
         for i in range(len(plan.partition_by_data_ref().partition_exprs)):
             pexprs.append(plan.partition_by_data_ref().partition_exprs[i].copy())
-        return LogicalPlan.partition_by(pk^, ok^, desc^, pexprs^, child^)
+        return LogicalPlan.partition_by(pk^, ok^, desc^, pexprs^, child^, nf^)
 
     if plan.tag == PLAN_PARTITION_TOPN:
         var child = optimize_window_rewrite(_copy_plan(plan._partition_topn.value()[].child[]))

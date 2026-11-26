@@ -3021,6 +3021,18 @@ def drain_record_batch_stream(
     `get_last_error` text appended) or if any inbound column type is outside
     the supported drain subset.
     """
+    var schema = Schema()
+    return _drain_stream(stream, schema)
+
+
+def _drain_stream(
+    stream: UnsafePointer[CArrowArrayStream, MutUntrackedOrigin],
+    mut schema: Schema,
+) raises -> Slab[RecordBatch]:
+    """`drain_record_batch_stream`, which also sets `schema` to the stream's
+    schema once `get_schema` has been read: a stream of no chunk still has
+    one (`c_stream_table.drain_record_batch_stream_table`). The stream is
+    released on every path out, as there."""
     if _is_null(stream):
         raise Error("from_arrow_c_stream: stream pointer is NULL")
     ref st = stream[]
@@ -3049,6 +3061,7 @@ def drain_record_batch_stream(
     var info: _ImportedSchemaInfo
     try:
         info = _read_root_schema(sch_box)
+        schema = _build_schema_from_info(info)
     except e:
         consumer_release_c_schema(sch_box)
         sch_box.free()

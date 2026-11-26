@@ -15,7 +15,7 @@ import vm from 'node:vm';
 import { Decimal, Union, UnionMode, type Table } from 'apache-arrow';
 
 import { readArrowStream, type ArrowAddon } from './src/arrow_import.mts';
-import { KomiraError, UnsupportedOperation } from './src/errors.mts';
+import { KomiraError, UnsupportedOperation } from './src/errors.ts';
 import {
   NULLABLE,
   bitmap,

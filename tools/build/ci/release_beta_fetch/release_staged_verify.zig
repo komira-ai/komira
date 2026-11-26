@@ -1,11 +1,17 @@
-//! release_staged_verify: the three checks of the prod publish of release.yml that make no write to a registry.
+//! release_staged_verify: the four checks of the mopm publish of release.yml that make no write to a registry.
 //!
 //!   release_staged_verify verify --staged <dir> --out <dir>
 //!   release_staged_verify smoke  --staged <dir> --config-url <https url> [--attempts <n>] [--delay <seconds>]
 //!   release_staged_verify add    --staged <dir> --mopm <file> --work <dir> --mojo <version>
+//!   release_staged_verify expect --staged <dir> --expect <file>
 //!
 //! It shares the plan reader and the client of release_beta_fetch.zig (the file beside this one) and
 //! holds no credential.
+//!
+//! `expect` is what the job `mopm-stage` runs right after `mopm stage`, before `prod-stage` opens a group on
+//! the registry: it holds `plan.json` to the set the release builds (every package, each with a file for every
+//! subdir and Mojo version it builds for and none other), from the file //release:mopm_plan_expectation writes. plan_expect.zig
+//! (beside this file) says what it reads and refuses.
 //!
 //! `verify` is what the job `prod-test` runs between `prod-stage` and `prod-commit`. `--staged` is the
 //! staged set `prod-stage` uploaded: `plan.json`, each member's README and each `.conda` file, with the
@@ -37,6 +43,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const rbf = @import("release_beta_fetch.zig");
 const prod_add = @import("prod_add.zig");
+const plan_expect = @import("plan_expect.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -163,6 +170,7 @@ const usage =
     \\usage: release_staged_verify verify --staged <dir> --out <dir>
     \\       release_staged_verify smoke --staged <dir> --config-url <https url> [--attempts <n>] [--delay <seconds>]
     \\       release_staged_verify add --staged <dir> --mopm <file> --work <dir> --mojo <version>
+    \\       release_staged_verify expect --staged <dir> --expect <file>
     \\
 ;
 
@@ -234,6 +242,11 @@ pub fn main() !u8 {
         for (rest, args[2..]) |*r, arg| r.* = arg;
         var proc = prod_add.Process{};
         return cliAdd(a, rest, prod_add.subdirOf(builtin.os.tag, builtin.cpu.arch), proc.runner(), &out.interface, &err.interface);
+    }
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "expect")) {
+        const rest = try a.alloc([]const u8, args.len - 2);
+        for (rest, args[2..]) |*r, arg| r.* = arg;
+        return plan_expect.cliExpect(a, rest, &out.interface, &err.interface);
     }
     if (args.len < 2 or !(std.mem.eql(u8, args[1], "verify") or std.mem.eql(u8, args[1], "smoke"))) {
         try err.interface.writeAll(usage);
