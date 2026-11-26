@@ -14,8 +14,8 @@
 //!       [--only-in-wheel <member path>]... [--only-in-like <member path>]...
 //!       --out <marker>
 //! cli.zig lists the flags of `write` and `check`. `write` refuses to write a
-//! wheel native_policy's policy.zig refuses; `check` writes `ok` to --out only if check.zig
-//! refuses nothing. `libs` reads the wheel
+//! wheel that native_policy's policy.zig refuses; `check` writes `ok` to
+//! --out only if check.zig refuses nothing. `libs` reads the wheel
 //! alone (libs.zig): --out gets the libraries the entry loads, in load order,
 //! one member path a line, only if libs.zig refuses nothing (with
 //! --expect-refusal, `refused: <text>` only if it refuses the wheel with
