@@ -57,7 +57,7 @@ Output:
 - A pandas-shaped `groupby` leaves out the rows whose key is missing; `dropna=False` keeps them as one group, last. SQL and the polars-shaped `group_by` keep a NULL key as a group of its own.
 - Missing values are skipped by `sum`. A group with no values sums to 0 in the pandas-shaped frame; `sum(min_count=1)` leaves it missing.
 - The key columns come first in the answer and are always columns: a komira frame has no index, so `as_index` changes nothing.
-- A SQL `sum()` of an integer column comes back as `DECIMAL(38, 0)`, which Python reads as `Decimal`; the pandas-shaped and polars-shaped frames keep `int64` and refuse a total that does not fit. The example sums a float column, whose total is a float in all three.
+- A SQL `sum()` of an integer column comes back as `DECIMAL(38, 0)`, which Python reads as `Decimal`; the pandas-shaped and polars-shaped frames keep `int64`. The example sums a float column, whose total is a float in all three.
 - `agg` takes the name of a reduction (`"sum"`, `"mean"`, `"min"`, `"max"`, `"count"`, `"size"`, `"nunique"`), not a Python function. `komira.NamedAgg` is refused: use a tuple, `agg(out=("column", "func"))`.
 
 ## Related
