@@ -319,8 +319,10 @@ def _bind_window_projection(stmt: SelectStmt, schema: Schema, scope: BindScope, 
     column is named by the item's alias (or a synthesized `_w<n>`); the item
     projects a col_ref to that output. Non-window items bind as ordinary
     scalars over the input schema (they pass through the row-preserving
-    window nodes). The final Project emits the SELECT columns in order. The
-    caller refuses window functions beside GROUP BY / aggregation."""
+    window nodes). The final Project emits the SELECT columns in order. In a
+    SELECT that aggregates, `sql_bind_window_group._bind_grouped_windows`
+    calls this over the aggregate's output, with every name rewritten to a
+    column of it."""
     var plan = child^
     var proj = ExprArray()
     var win_counter = 0

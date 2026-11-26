@@ -22,9 +22,11 @@
 #   5. With no GROUP BY, an aggregate window key makes one group; a SELECT of
 #      windows that name no column gets a count(*) so each group is a row,
 #      with a GROUP BY and with only a HAVING.
-#   6. Output names: an unaliased column is named as the input spells it (a
-#      qualified one by its column), an unaliased aggregate by DuckDB's text,
-#      a repeated one with `_1`.
+#   6. Output names: an aliased item keeps its alias in the aggregate, so a
+#      HAVING can name it, and a repeated alias falls back to a hidden name;
+#      an unaliased column is named as the input spells it (a qualified one
+#      by its column), an unaliased aggregate by DuckDB's text, a repeated
+#      one with `_1`.
 #   7. A statement-level ORDER BY sorts the projected output.
 #   8. Refused by name: `*` beside a window (grouped or not) and a window
 #      function used as a window's key.
@@ -84,12 +86,12 @@ def test_a_window_ordered_by_count_star_runs_over_the_groups() raises:
         " row_number() OVER (ORDER BY g) AS rn FROM t GROUP BY g"
     )
     _in_order(plan, [
-        String("Project(exprs=[Alias(ColRef(__sel_0), \"g\"), Alias(ColRef(__sel_1), \"n\"), ColRef(rk), ColRef(rn)])"),
+        String("Project(exprs=[Alias(ColRef(__sel_0), \"g\"), ColRef(n), ColRef(rk), ColRef(rn)])"),
         String("PartitionBy(partition=[], order=[__wcol_0 ASC], funcs=[ROW_NUMBER("),
         String("PartitionBy(partition=[], order=[__window_key_0 DESC, __wcol_0 ASC], funcs=[RANK("),
         String("Alias(ColRef(g), \"__sel_0\")"),
         String("Alias(ColRef(g), \"__wcol_0\")"),
-        String("Aggregate(group_by=[ColRef(g)], aggs=[COUNT(*).alias(\"__sel_1\"), COUNT(*).alias(\"__window_key_0\")])"),
+        String("Aggregate(group_by=[ColRef(g)], aggs=[COUNT(*).alias(\"n\"), COUNT(*).alias(\"__window_key_0\")])"),
         String("Scan(path=\"t.parquet\""),
     ])
 
@@ -195,6 +197,29 @@ def test_output_names_follow_the_aggregate_binder() raises:
     ])
 
 
+def test_a_having_can_name_a_select_alias_beside_a_window() raises:
+    var plan = _plan(
+        "SELECT s, count(*) AS n, rank() OVER (ORDER BY count(*)) AS r FROM t"
+        " GROUP BY s HAVING n > 1"
+    )
+    _in_order(plan, [
+        String("Project(exprs=[Alias(ColRef(__sel_0), \"s\"), ColRef(n), ColRef(r)])"),
+        String("PartitionBy(partition=[], order=[__window_key_0 ASC], funcs=[RANK("),
+        String("Filter(predicate=BinaryOp(GT, ColRef(n)"),
+        String("Aggregate(group_by=[ColRef(s)]"),
+    ])
+    # The first item of a repeated alias keeps it; the second is hidden and
+    # aliased back above the windows.
+    var twice = _plan(
+        "SELECT s AS x, count(*) AS x, rank() OVER (ORDER BY s) AS r FROM t"
+        " GROUP BY s"
+    )
+    assert_true(
+        "Project(exprs=[ColRef(x), Alias(ColRef(__sel_1), \"x\"), ColRef(r)])" in twice,
+        twice,
+    )
+
+
 def test_a_statement_order_by_sorts_the_projected_output() raises:
     var plan = _plan(
         "SELECT s, count(*) AS n, rank() OVER (ORDER BY count(*) DESC) AS r"
@@ -202,7 +227,7 @@ def test_a_statement_order_by_sorts_the_projected_output() raises:
     )
     _in_order(plan, [
         String("Sort(keys=[r ASC, s ASC])"),
-        String("Project(exprs=[Alias(ColRef(__sel_0), \"s\"), Alias(ColRef(__sel_1), \"n\"), ColRef(r)])"),
+        String("Project(exprs=[Alias(ColRef(__sel_0), \"s\"), ColRef(n), ColRef(r)])"),
         String("PartitionBy(partition=[], order=[__window_key_0 DESC], funcs=[RANK("),
         String("Aggregate(group_by=[ColRef(s)]"),
     ])

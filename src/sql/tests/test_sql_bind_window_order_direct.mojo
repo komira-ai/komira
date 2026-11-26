@@ -11,8 +11,8 @@
 #      `PF_*` function; with no ORDER BY the default frame is the whole
 #      partition and with one it is RANGE ... CURRENT ROW; a written frame is
 #      kept; value windows carry their offset and DEFAULT; an unknown
-#      column, a window beside GROUP BY or `*`, and a missing argument are
-#      refused.
+#      column, a window beside GROUP BY over a column that is not a group
+#      key, `*`, and a missing argument are refused.
 #   2. A window named like an input column is computed under an internal
 #      name; a qualified window column resolves through the join scope.
 #   3. ORDER BY: a column key, an ordinal (range-checked), a SELECT item's
@@ -48,7 +48,9 @@ from sql.sql_bind_window_order import (
     _OK_COLUMN, _OK_OUTPUT, _bind_order, _bind_window_projection,
     _classify_order_keys, _has_window, _order_key_name, _order_output_column,
 )
+from sql.sql_bind_window_group import _bind_grouped_windows
 from sql.sql_catalog import SqlCatalog
+from sql.sql_window_keys import _select_is_grouped
 from sql.sql_parser import parse_sql
 from sql.sql_token import tokenize
 
@@ -144,12 +146,10 @@ def _select(stmt: SelectStmt, cat: SqlCatalog) raises -> LogicalPlan:
         order_expr_names,
     )
     if has_window:
-        if has_agg or grouped:
-            raise Error(
-                "SQL not supported: a window function combined with GROUP BY /"
-                " aggregation in the same SELECT"
-            )
-        plan = _bind_window_projection(stmt, schema, scope, plan^, cat, cte, prebound)
+        if _select_is_grouped(stmt):
+            plan = _bind_grouped_windows(stmt, schema, scope, plan^, cat, cte, prebound)
+        else:
+            plan = _bind_window_projection(stmt, schema, scope, plan^, cat, cte, prebound)
     elif has_agg or grouped:
         plan = _bind_aggregate(
             stmt, schema, scope, plan^, cat, cte, prebound, order_names,
@@ -310,7 +310,7 @@ def test_window_refusals() raises:
     )
     _check(
         "SELECT k, sum(v) OVER () FROM t GROUP BY k",
-        "ERR: SQL not supported: a window function combined with GROUP BY / aggregation in the same SELECT"
+        "ERR: SQL bind error: SELECT column 'v' must appear in GROUP BY"
     )
     _check(
         "SELECT lag(v, 1, DATE '2021-02-30') OVER (ORDER BY k) FROM t",

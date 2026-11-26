@@ -15,8 +15,10 @@
 # stages:
 #
 #   1. One aggregate (`_bind_aggregate`) over a rebuilt SELECT list:
-#        * each SELECT item that is not a window, named `__sel_<i>` (i its
-#          position in the SELECT list);
+#        * each SELECT item that is not a window, named by its alias (so a
+#          HAVING that names the alias reads it, as without a window) or, with
+#          no alias or an alias an earlier item already took, `__sel_<i>` (i
+#          its position in the SELECT list);
 #        * each column a window names (its argument, a PARTITION BY or an
 #          ORDER BY column), once per distinct qualifier and name, named
 #          `__wcol_<j>`;
@@ -60,9 +62,24 @@ from sql.sql_window_keys import _window_key_name
 from arrow.schema import Schema
 
 
-def _sel_name(i: Int) -> String:
-    """The aggregate's name for SELECT item `i` (not a window)."""
-    return String("__sel_") + String(i)
+def _sel_names(stmt: SelectStmt) -> List[String]:
+    """The aggregate's name for each SELECT item that is not a window ("" for
+    a window): its alias, unless an earlier item has the same alias, and
+    otherwise `__sel_<i>`. The first item of an alias keeps it because a
+    HAVING reads an alias as its first item, as the aggregate binder does
+    without a window (`_select_alias_index`)."""
+    var out = List[String]()
+    var aliases = List[String]()
+    for i in range(len(stmt.select_items)):
+        ref item = stmt.select_items[i]
+        if item.expr.tag == SX_WINDOW:
+            out.append(String(""))
+        elif item.out_alias and not _group_has(aliases, item.out_alias.value()):
+            aliases.append(String(item.out_alias.value()))
+            out.append(String(item.out_alias.value()))
+        else:
+            out.append(String("__sel_") + String(i))
+    return out^
 
 
 def _wcol_name(j: Int) -> String:
@@ -217,12 +234,13 @@ def _bind_grouped_windows(
             windows.append(_rename_window(item.expr._window.value(), cols))
 
     # 1. The aggregate.
+    var sel = _sel_names(stmt)
     var inner = SelectStmt()
     for i in range(len(stmt.select_items)):
         ref item = stmt.select_items[i]
         if item.expr.tag != SX_WINDOW:
             inner.select_items.append(
-                SelectItem(item.expr.copy(), Optional[String](_sel_name(i)), False)
+                SelectItem(item.expr.copy(), Optional[String](sel[i]), False)
             )
     for j in range(len(cols.names)):
         inner.select_items.append(
@@ -274,12 +292,14 @@ def _bind_grouped_windows(
             )
             wi += 1
         else:
+            # An item the aggregate already names as it is output needs no
+            # alias above it.
+            var out_name = _item_name(item, schema, taken)
+            var renamed = Optional[String](None)
+            if out_name != sel[i]:
+                renamed = Optional[String](out_name^)
             outer.select_items.append(
-                SelectItem(
-                    SqlExpr.column(_sel_name(i)),
-                    Optional[String](_item_name(item, schema, taken)),
-                    False,
-                )
+                SelectItem(SqlExpr.column(sel[i]), renamed^, False)
             )
     var agg_schema = agg.output_schema.copy()
     return _bind_window_projection(
