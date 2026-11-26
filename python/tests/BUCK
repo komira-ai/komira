@@ -1,4 +1,4 @@
-load("@komira//python:dependencies.bzl", "DUCKDB_WHEEL", "PROTOBUF_REQUIREMENT", "PYARROW_MACOS", "PYARROW_WHEELS")
+load("@komira//python:dependencies.bzl", "DUCKDB_WHEEL", "PROTOBUF_MACOS", "PROTOBUF_REQUIREMENT", "PYARROW_MACOS", "PYARROW_WHEELS")
 load("@komira//python:pythons.bzl", "PYTHONS")
 load("@komira//third_party/python:pins.bzl", "PROTOBUF_EDGES", "WHEELS")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
@@ -349,7 +349,7 @@ pinned_file(
 )
 
 # Read only by the macOS wheel's install test, which runs from
-# pypi-macos-arm64.yml alone, never in a pull request.
+# the macOS jobs of pypi.yml alone, never in a pull request.
 pinned_file(
     name = PYARROW_MACOS["file"],
     url = PYARROW_MACOS["url"],
@@ -489,6 +489,37 @@ c_shared_lib(
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# Session(memory_limit=) on the real library, over labels.parquet: a limit of
+# one byte raises MemoryLimitError (status -3, code MEMORY_BUDGET_EXCEEDED, step
+# execute) from sql for an aggregate, a GROUP BY over an integer key and over a
+# string key, a COUNT(DISTINCT), a sort and a window function; the session
+# answers the next query, a syntax error is still a ParseError, and the same
+# queries on an unlimited session and on one of 1 GiB and two workers give the
+# same answers.
+[python_binding_test(
+    name = "memory_limit_test" + p["suffix"],
+    src = "test_memory_limit.py",
+    data = {
+        "labels.parquet": "komira//src/parquet_codec:pyarrow_multi_dict_page.parquet",
+        "libkomira": LIBKOMIRA,
+    },
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Session(threads=, memory_limit=) on the ABI 1.7 stand-in: the options reach
+# komira_ctx_new_with_options as given and absent ones as 0, no option calls
+# komira_ctx_new, a wrong type is a TypeError and a value outside 1 to 2**63 - 1
+# a ValueError before the library is called, the options are keyword-only, and
+# an option the library refuses is a KomiraError.
+[python_binding_test(
+    name = "session_options_test" + p["suffix"],
+    src = "test_session_options.py",
+    data = {"fake_v1_7/libkomira.so": ":fake_v1_7"},
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # Session.register_csv and register_json on the real library, over the
 # fixtures: the names, types and rows the engine infers, NULL where a file has
 # no value, the same schema and rows as read_csv and read_json; the delimiter,
@@ -551,6 +582,9 @@ _FRAMES = {
 # is third_party/python's; for each other minor all three are installed here,
 # as `:protobuf-<version><suffix>` (`:protobuf-7.36.2_py311`). Each wheel is
 # `abi3`, one file for every minor.
+# The 7.36.2 file is also the one the wheel's install tests (python/BUCK)
+# install beside komira's wheel (`PROTOBUF_WHEEL`, python/dependencies.bzl),
+# and `PROTOBUF_MACOS` the one the macOS wheel's install test installs.
 _PROTOBUF_UPPER = [w for w in WHEELS if w["name"] == "protobuf"]
 
 [pinned_file(
@@ -558,7 +592,19 @@ _PROTOBUF_UPPER = [w for w in WHEELS if w["name"] == "protobuf"]
     url = w["url"],
     sha256 = w["sha256"],
     size_bytes = w["size"],
+    visibility = ["komira//python:"] if w in _PROTOBUF_UPPER else [],
 ) for w in PROTOBUF_EDGES + _PROTOBUF_UPPER]
+
+# Read only by the macOS wheel's install test, which runs from
+# the macOS jobs of pypi.yml alone, never in a pull request.
+pinned_file(
+    name = PROTOBUF_MACOS["file"],
+    url = PROTOBUF_MACOS["url"],
+    sha256 = PROTOBUF_MACOS["sha256"],
+    size_bytes = PROTOBUF_MACOS["size"],
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
+    visibility = ["komira//python:"],
+)
 
 [python_wheel(
     name = "protobuf-" + w["version"] + p["suffix"],
@@ -708,6 +754,16 @@ _CASES = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# The wheel tags the install driver (wheel_install_run.py) installs and
+# refuses, as pip does: exact tags on their own minor, the stable ABI
+# (`cp3<k>-abi3`, protobuf's wheels) on its minor and later ones, the machine,
+# the C library's version, and on macOS `universal2`.
+py_test(
+    name = "wheel_install_run_test",
+    src = "test_wheel_install_run.py",
+    srcs = ["wheel_install_run.py"],
+)
+
 # Capture of a user function (komira._capture), with no library: the `@udf`
 # decorator, return types, the read set (columns=, annotations and the
 # bytecode scan), the package or bundle code form, the deterministic bundle
@@ -787,6 +843,85 @@ _PLAN_EXPR_RUNTIMES = [
     args = ["--golden", "$(location komira//src/plan_wire:golden_fixtures)"] if area in ["rel_goldens", "udf_goldens"] else [],
     **_ON[p["suffix"]]
 ) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES for area in ["rel", "rel_goldens", "no_sql", "udf", "udf_goldens"]]
+
+# The pandas-shaped DataFrame (komira/_frame.py, komira/_series.py):
+#
+# - frame_test, with no library, on the plan tests' runtimes: each verb's plan
+#   equals a hand-built node tree (a filter, projection, computed column or
+#   head under or over a sort as the row-order rules place it), each output
+#   type is the engine's, each refusal raises its class with its full message,
+#   the attribute rules of the frame, the Series and the module hold for every
+#   row of the refusal tables, no dunder runs a query, and a terminal sends the
+#   encoded plan bytes to the session's plan door and nothing else, with no SQL
+#   text anywhere in the frame's modules.
+# - frame_groupby_test, with no library, on the same runtimes: the plans of
+#   groupby and its reductions, the frame's reductions and agg, and
+#   drop_duplicates, by equality with hand-built node trees (the filter of
+#   missing keys below the aggregate, the key sort above it, the zero of an
+#   empty sum), their output types, the encoded aggregate, every refusal with
+#   its full message, and the GroupBy's attribute rules.
+# - frame_run_test, on the real libkomira, per minor: the readers over Parquet,
+#   CSV and newline-delimited JSON files written here, each verb run through
+#   komira_plan_stream with its rows checked, explain()'s text, a frame run
+#   twice, failures at the reader (a missing file, a closed session) and at the
+#   terminal (the engine's refusal with its step and code), the default
+#   session, and an ABI 1.7 stand-in refusing the plan door by the version it
+#   needs.
+# - frame_duckdb_test, on CPython 3.13 (the minor with a pinned DuckDB): frame
+#   programs over a Parquet file with NULLs, negative and float values and
+#   strings, each answered by komira through the plan door and by DuckDB from
+#   the SQL that means the same over the same file, equal row for row (in
+#   order when the frame is ordered, as a multiset otherwise), column names
+#   and types included: the verbs above, groupby and the reductions the
+#   engine runs against GROUP BY, the frame's reductions, drop_duplicates
+#   against DISTINCT, and the reductions the engine does not run yet refused
+#   at the terminal with its step.
+[py_test(
+    name = "frame_test{}".format(suffix),
+    src = "test_frame.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
+
+[py_test(
+    name = "frame_groupby_test{}".format(suffix),
+    src = "test_frame_groupby.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
+
+[python_binding_test(
+    name = "frame_run_test" + p["suffix"],
+    src = "test_frame_run.py",
+    data = {
+        "fake_v1_7/libkomira.so": ":fake_v1_7",
+        "libkomira": LIBKOMIRA,
+    },
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+python_binding_test(
+    name = "frame_duckdb_test",
+    src = "test_frame_duckdb.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+)
 
 # The clean-environment install tests of the wheel (python/BUCK,
 # wheel_install_test): the driver that installs the wheels into an empty

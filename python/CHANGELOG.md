@@ -12,6 +12,35 @@ install page shows names it.
 
 ## Unreleased
 
+- **Group-by and aggregates in the pandas-shaped DataFrame.** `df.groupby(by, *, sort=True,
+  dropna=True)` gives a `komira.GroupBy` whose `agg(...)`, `sum`, `mean`, `median`, `std`, `var`,
+  `min`, `max`, `count`, `size` and `nunique` return a frame of the keys and one column per output,
+  sorted by the keys unless `sort=False`, with the rows of a missing key left out unless
+  `dropna=False`. `df.agg(...)` and the frame's `sum`, `mean`, `median`, `std`, `var`, `min`, `max`,
+  `count` and `nunique` give a one-row frame. A sum of nothing is 0, as in pandas.
+  `df.drop_duplicates()` keeps one of each set of equal rows, or with `keep=False` only the rows no
+  other row equals. Each builds an aggregate or distinct node of the plan, run with no SQL. The engine
+  refuses at `materialize()` what it does not compute yet: `median`, `std` and `var`, a grouped sum
+  or mean of a float column, the mean of a boolean column, and `min`, `max` or `nunique` of a column type it does not fold.
+- **Memory limit.** `Session(*, threads=None, memory_limit=None)` sets the engine's worker count and
+  the bytes the operators of one query may hold in total, each a positive `int` or `None` for the
+  engine's own value (`ValueError` for a value below 1 or above 2**63 - 1, `TypeError` for a
+  non-`int`, before the library is called; they need libkomira ABI 1.4). A query that needs more
+  memory than `memory_limit` raises the new `komira.MemoryLimitError` from `Session.sql`, with
+  `status` -3, `code` `"MEMORY_BUDGET_EXCEEDED"` and `step` `"execute"`; the session answers the
+  next query. The engine's message names the operator that was denied memory and the budget. Code
+  that catches `KomiraError` still catches it.
+- **The pandas-shaped DataFrame, first part.** `komira.read_parquet(path)`, `komira.read_csv(path, *,
+  sep=",", header="infer")` and `komira.read_json(path, lines=True)` make a lazy `komira.DataFrame` of
+  a file, its schema read now, on the session given as `session=` or the process's default session.
+  `df["x"]` (a `komira.Series`), `df[["a", "b"]]`, `df[cond]`, `assign`, `df["x"] = ...`,
+  `sort_values`, `head` and `copy` build a plan and run nothing; `materialize()` runs it through the
+  engine's plan entry, with no SQL, and returns a `Result`; `explain()` returns the engine's text of
+  the plan. `columns`, `dtypes` and `repr` run nothing. A pandas name komira does not have raises
+  `AttributeError` saying what to write instead, and `len(df)` and the other conversions raise
+  `UnsupportedOperation` naming `materialize()`. They need libkomira ABI 1.8.
+- **protobuf.** The wheel requires `protobuf>=5.29.1,<8`, so `pip install komira` installs it, and
+  ships the generated plan modules a DataFrame encodes its plan with. `import komira` imports neither.
 - **CSV and JSON files.** `Session.register_csv(name, path, *, delimiter=",", header=True,
   all_varchar=False)` and `Session.register_json(name, path)` register a CSV file and a
   newline-delimited JSON file as a table for `Session.sql`, with the column names and types the

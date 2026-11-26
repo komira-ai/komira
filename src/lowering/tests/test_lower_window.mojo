@@ -166,9 +166,11 @@ def _window(
     descending: List[Bool],
     var exprs: List[PartitionExpr],
     var child: LogicalPlan,
+    var nulls_first: Optional[List[Bool]] = None,
 ) raises -> LogicalPlan:
     return LogicalPlan.partition_by(
-        partition.copy(), order.copy(), descending.copy(), exprs^, child^
+        partition.copy(), order.copy(), descending.copy(), exprs^, child^,
+        nulls_first^,
     )
 
 
@@ -564,6 +566,54 @@ def test_a_window_over_an_aggregation_reads_the_aggregate_output() raises:
     assert_equal(
         render_lowered_plan(_lowered(plan, _inputs(500))),
         _plan_text(segments, params, 1),
+    )
+
+
+def _window_param_row(var plan: LogicalPlan) raises -> String:
+    var text = render_lowered_plan(_lowered(plan, _inputs(500)))
+    for line in text.split("\n"):
+        if String(line).startswith("  window 0:"):
+            return String(line)
+    return String("")
+
+
+def test_a_placement_that_is_not_the_derived_one_is_rendered_and_carried() raises:
+    var placed = _window(
+        _names("g"), _names("o"), _flags(False), _exprs(_rn()), _scan(),
+        Optional(_flags(True)),
+    )
+    assert_equal(
+        _window_param_row(placed^),
+        "  window 0: partition=[g] order=[o asc nulls_first] exprs=["
+        + String(_rn()) + "]",
+    )
+    var desc = _window(
+        _names("g"), _names("o", "v"), _flags(True, False, 2), _exprs(_rn()),
+        _scan(), Optional(_flags(True, False, 2)),
+    )
+    assert_equal(
+        _window_param_row(desc^),
+        "  window 0: partition=[g] order=[o desc nulls_first, v asc] exprs=["
+        + String(_rn()) + "]",
+    )
+    var carried = _window(
+        _names("g"), _names("o", "v"), _flags(False, True, 2), _exprs(_rn()),
+        _scan(), Optional(_flags(False, True, 2)),
+    )
+    var lp = _lowered(carried, _inputs(500))
+    assert_equal(len(lp.params.window[0].nulls_first), 2)
+    assert_false(lp.params.window[0].nulls_first[0])
+    assert_true(lp.params.window[0].nulls_first[1])
+
+
+def test_a_placement_equal_to_the_derived_one_renders_as_no_placement() raises:
+    var stated = _window(
+        _names("g"), _names("o"), _flags(True), _exprs(_rn()), _scan(),
+        Optional(_flags(False)),
+    )
+    assert_equal(
+        _window_param_row(stated^),
+        "  window 0: partition=[g] order=[o desc] exprs=[" + String(_rn()) + "]",
     )
 
 

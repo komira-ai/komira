@@ -1,28 +1,28 @@
-//! The cases of pypi-macos-arm64.yml, the publish of the Python package's macOS arm64 wheel,
-//! //:pypi_macos_workflow_cases: a `zig_test` run as a build action. The workflow's own bytes are the
-//! subject (the zig_test's `data`, under KOMIRA_TEST_WORK/workflows/, with pypi.yml, whose triggers it
-//! repeats, and release.yml, whose push filter both repeat). pypi_macos_workflow_contract.zig's `check`
-//! reads the text and says why it breaks the contract, or null (its header says what the contract holds);
-//! each case here writes one defect into the real text and wants it refused with its message. What a run
-//! of the file does, alone and beside pypi.yml's, is played in pypi_macos_workflow_run.zig. The macOS
-//! build job's own steps (the present step, the gates of the Mac builds) are //:release_macos_cases'.
+//! The cases of the macOS arm64 wheel's nine jobs of pypi.yml, the publish of the Python package's two
+//! wheels, part of //:pypi_workflow_cases: a `zig_test` run as a build action. pypi.yml's own bytes are
+//! the subject (the zig_test's `data`, under KOMIRA_TEST_WORK/workflows/, with release.yml, whose push
+//! filter it repeats). pypi_workflow_contract.zig's `check` reads the text, runs the contract of the
+//! file and the ten Linux jobs, then pypi_macos_jobs_contract.zig's of the nine macOS jobs, and says why
+//! it breaks the contract, or null; each case here writes one defect of the macOS jobs into the real text
+//! and wants it refused with its message. What a run of the file does for the macOS chain is played in
+//! pypi_macos_jobs_run.zig. The macOS build job's own steps (the present step, the gates of the Mac
+//! builds) are //:release_macos_cases'.
 
 const std = @import("std");
 const t = std.testing;
 const reader = @import("pypi_workflow_text.zig");
 const linux = @import("pypi_workflow_contract.zig");
-const c = @import("pypi_macos_workflow_contract.zig");
 const replaced = reader.replaced;
 const inJob = reader.inJob;
 
-const Texts = struct { macos: []const u8, pypi: []const u8, release: []const u8 };
+const Texts = struct { pypi: []const u8, release: []const u8 };
 
 fn texts(ar: std.mem.Allocator) !Texts {
-    return .{ .macos = try reader.readMacosWorkflow(ar), .pypi = try reader.readWorkflow(ar), .release = try reader.readRelease(ar) };
+    return .{ .pypi = try reader.readWorkflow(ar), .release = try reader.readRelease(ar) };
 }
 
 fn expectRefused(ar: std.mem.Allocator, x: Texts, text: []const u8, want: []const u8) !void {
-    const got = (try c.check(ar, text, x.pypi, x.release)) orelse {
+    const got = (try linux.check(ar, text, x.release)) orelse {
         std.debug.print("accepted a workflow that must be refused with: {s}\n", .{want});
         return error.Accepted;
     };
@@ -32,66 +32,41 @@ fn expectRefused(ar: std.mem.Allocator, x: Texts, text: []const u8, want: []cons
     }
 }
 
-fn expectHolds(ar: std.mem.Allocator, text: []const u8, pypi: []const u8, release: []const u8) !void {
-    if (try c.check(ar, text, pypi, release)) |why| {
-        std.debug.print("pypi-macos-arm64.yml: {s}\n", .{why});
+test "pypi.yml holds the contract of the macOS wheel's jobs, with the Linux jobs'" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const x = try texts(ar);
+    if (try linux.check(ar, x.pypi, x.release)) |why| {
+        std.debug.print("pypi.yml: {s}\n", .{why});
+        return error.Refused;
+    }
+    // a comment may talk about what the file does not hold
+    const commented = try replaced(ar, x.pypi, "\njobs:\n", "\n# no secrets, no twine, no inputs.flavour: a comment says so\njobs:\n");
+    if (try linux.check(ar, commented, x.release)) |why| {
+        std.debug.print("pypi.yml with a comment: {s}\n", .{why});
         return error.Refused;
     }
 }
 
-test "pypi-macos-arm64.yml holds the contract of the macOS wheel's publish workflow" {
+test "the macOS jobs are in pypi.yml in the order of the nineteen: removed, renamed, duplicated or moved is refused" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
     const x = try texts(ar);
-    try expectHolds(ar, x.macos, x.pypi, x.release);
-    // a comment may talk about what the file does not hold
-    try expectHolds(ar, try replaced(ar, x.macos, "name: pypi-macos-arm64\n", "name: pypi-macos-arm64\n# no secrets, no twine, no schedule, no inputs.flavour: a comment says so\n"), x.pypi, x.release);
-}
-
-test "the triggers are pypi.yml's, line for line: each drift of either file is refused" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const ar = arena.allocator();
-    const x = try texts(ar);
-    const text = x.macos;
-    const other = "on: is not pypi.yml's, line for line";
-    // another daily time, in either file: one workflow's promotion would run without the other's
-    try expectRefused(ar, x, try replaced(ar, text, "'17 5 * * *'", "'17 6 * * *'"), other);
-    try t.expect((try c.check(ar, text, try replaced(ar, x.pypi, "'17 5 * * *'", "'5 17 * * *'"), x.release)) != null);
-    // the two moved together hold
-    try expectHolds(ar, try replaced(ar, text, "'17 5 * * *'", "'5 17 * * *'"), try replaced(ar, x.pypi, "'17 5 * * *'", "'5 17 * * *'"), x.release);
-    // the push filter, the schedule, the manual run: what every publish workflow holds
-    const on = "on: is not exactly a push to main";
-    try expectRefused(ar, x, try replaced(ar, text, "      - '**.md'\n", ""), on);
-    try expectRefused(ar, x, try replaced(ar, text, "  schedule:\n    - cron: '17 5 * * *'\n", ""), on);
-    try expectRefused(ar, x, try replaced(ar, text, "  workflow_dispatch:\n", "  workflow_dispatch:\n    inputs:\n      index:\n        type: string\n"), on);
-    try expectRefused(ar, x, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  pull_request:\n  workflow_dispatch:\n"), "a pull request trigger");
-}
-
-test "the concurrency is a group per half of its own, never pypi.yml's, and cancels nothing" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const ar = arena.allocator();
-    const x = try texts(ar);
-    const text = x.macos;
-    const conc = "concurrency is not exactly one group per half of its own";
-    try expectRefused(ar, x, try replaced(ar, text, c.GROUP ++ "\n", linux.GROUP ++ "\n"), conc);
-    try expectRefused(ar, x, try replaced(ar, text, c.GROUP ++ "\n", "  group: pypi-macos-arm64\n"), conc);
-    try expectRefused(ar, x, try replaced(ar, text, linux.NO_CANCEL ++ "\n", "  cancel-in-progress: true\n"), conc);
-    try expectRefused(ar, x, try replaced(ar, text, "\npermissions: {}\n", "\npermissions:\n  contents: write\n"), "top-level permissions");
-}
-
-test "the job set is exactly the nine jobs of the macOS wheel, each once: a Linux job is refused" {
-    var arena = std.heap.ArenaAllocator.init(t.allocator);
-    defer arena.deinit();
-    const ar = arena.allocator();
-    const x = try texts(ar);
-    const text = x.macos;
-    const jobs = "the jobs are not exactly the nine";
-    try expectRefused(ar, x, try replaced(ar, text, "\n  result-pypi-macos-arm64:\n", "\n  build:\n    runs-on: ubuntu-24.04\n\n  result-pypi-macos-arm64:\n"), jobs);
+    const text = x.pypi;
+    const jobs = linux.FILE.jobs_why;
     try expectRefused(ar, x, try replaced(ar, text, "\n  pypi-smoke-macos-arm64:\n", "\n  pypi-smoke-macos:\n"), jobs);
-    try expectRefused(ar, x, try replaced(ar, text, "\n  result-testpypi-macos-arm64:\n", "\n  result-testpypi:\n"), jobs);
+    try expectRefused(ar, x, try replaced(ar, text, "\n  result-testpypi-macos-arm64:\n", "\n  result-testpypi-mac:\n"), jobs);
+    // a macOS job removed from its place: its header line gone makes its lines another job's
+    try expectRefused(ar, x, try replaced(ar, text, "\n  build-macos-arm64:\n", "\n"), jobs);
+    // a macOS job twice
+    try expectRefused(ar, x, try replaced(ar, text, "\n  result-pypi-macos-arm64:\n", "\n  result-pypi-macos-arm64:\n    runs-on: ubuntu-24.04\n\n  result-pypi-macos-arm64:\n"), jobs);
+    // a macOS job of the TestPyPI half in the promotion half's place, and the other way
+    try expectRefused(ar, x, try replaced(ar, text, "\n  promote-macos-arm64:\n", "\n  testpypi-passed-macos-arm64:\n    runs-on: ubuntu-24.04\n\n  promote-macos-arm64:\n"), jobs);
+    try expectRefused(ar, x, try replaced(ar, text, "\n  promote:\n", "\n  promote-macos-arm64:\n    runs-on: ubuntu-24.04\n\n  promote:\n"), jobs);
+    // a job of neither wheel
+    try expectRefused(ar, x, try replaced(ar, text, "\n  result-pypi-macos-arm64:\n", "\n  extra:\n    runs-on: ubuntu-24.04\n\n  result-pypi-macos-arm64:\n"), jobs);
 }
 
 test "each macOS job is in its half, with its needs, environment, runner and permissions" {
@@ -99,7 +74,7 @@ test "each macOS job is in its half, with its needs, environment, runner and per
     defer arena.deinit();
     const ar = arena.allocator();
     const x = try texts(ar);
-    const text = x.macos;
+    const text = x.pypi;
     const main_only = "    if: github.ref == 'refs/heads/main'\n";
     for ([_][]const u8{ "build-macos-arm64", "testpypi-passed-macos-arm64" }) |job| {
         try expectRefused(ar, x, try inJob(ar, text, job, linux.PUSH_GATE ++ "\n", main_only), try std.fmt.allocPrint(ar, "{s}: its if:", .{job}));
@@ -122,6 +97,10 @@ test "each macOS job is in its half, with its needs, environment, runner and per
     // the environment each index trusts, and none on the promote job
     try expectRefused(ar, x, try inJob(ar, text, "testpypi-macos-arm64", "    environment: testpypi\n", "    environment: build\n"), "testpypi-macos-arm64: its environment");
     try expectRefused(ar, x, try inJob(ar, text, "pypi-macos-arm64", "    environment: pypi\n", ""), "pypi-macos-arm64: its environment");
+    // the environments the indexes' trusted publisher for pypi.yml names: another name is refused
+    try expectRefused(ar, x, try inJob(ar, text, "testpypi-macos-arm64", "    environment: testpypi\n", "    environment: testpypi-macos\n"), "testpypi-macos-arm64: its environment");
+    try expectRefused(ar, x, try inJob(ar, text, "pypi-macos-arm64", "    environment: pypi\n", "    environment: pypi-macos-arm64\n"), "pypi-macos-arm64: its environment");
+    try expectRefused(ar, x, try inJob(ar, text, "pypi-macos-arm64", "    environment: pypi\n", "    environment: testpypi\n"), "pypi-macos-arm64: its environment");
     try expectRefused(ar, x, try inJob(ar, text, "promote-macos-arm64", "    timeout-minutes: 30\n", "    timeout-minutes: 30\n    environment: pypi\n"), "promote-macos-arm64: an environment");
     // hosted runners: the smokes on macos-15, the rest on ubuntu-24.04
     try expectRefused(ar, x, try inJob(ar, text, "pypi-smoke-macos-arm64", linux.MACOS ++ "\n", "    runs-on: macos-latest\n"), "pypi-smoke-macos-arm64: runs-on");
@@ -140,7 +119,7 @@ test "the farm, buck2, a cache write and an upload stay in their own macOS jobs;
     defer arena.deinit();
     const ar = arena.allocator();
     const x = try texts(ar);
-    const text = x.macos;
+    const text = x.pypi;
     try expectRefused(ar, x, try inJob(ar, text, "promote-macos-arm64", "      - name: the driver is executable\n", "      - run: ./buck2 build //python:komira_wheel_macos_arm64\n      - name: the driver is executable\n"), "promote-macos-arm64: runs buck2");
     try expectRefused(ar, x, try inJob(ar, text, "testpypi-macos-arm64", "      - name: the driver is executable\n", linux.FARM_CONNECT ++ "\n      - name: the driver is executable\n"), "testpypi-macos-arm64: farm-connect");
     try expectRefused(ar, x, try inJob(ar, text, "testpypi-smoke-macos-arm64", "    steps:\n", "    steps:\n" ++ linux.CHECKOUT ++ "\n"), "testpypi-smoke-macos-arm64: checks out");
@@ -159,7 +138,7 @@ test "the macOS jobs after the build hold their outputs and steps exactly: each 
     defer arena.deinit();
     const ar = arena.allocator();
     const x = try texts(ar);
-    const text = x.macos;
+    const text = x.pypi;
     const exact = ": its outputs and steps are not exactly the contract's";
     // the promotion restores the Linux record, goes on without a record, or restores another directory
     try expectRefused(ar, x, try inJob(ar, text, "promote-macos-arm64", "          restore-keys: pypi-passed-macos-arm64-\n", "          restore-keys: pypi-passed-linux-x86_64-\n"), "promote-macos-arm64" ++ exact);
@@ -180,7 +159,7 @@ test "the macOS jobs after the build hold their outputs and steps exactly: each 
 }
 
 test {
-    // the contract and the cases that play a run of the file, alone and beside pypi.yml
-    _ = @import("pypi_macos_workflow_contract.zig");
-    _ = @import("pypi_macos_workflow_run.zig");
+    // the contract and the cases that play a run of the file
+    _ = @import("pypi_macos_jobs_contract.zig");
+    _ = @import("pypi_macos_jobs_run.zig");
 }

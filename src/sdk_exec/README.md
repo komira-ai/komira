@@ -206,7 +206,7 @@ package lists (`HIVE_PARTITION_*`).
 **Refused here, by name.** The COPY refusals above, `CREATE TABLE ... AS`
 (`STATEMENT_NOT_A_QUERY`, step `bind`); the door also refuses with `OPTIMIZE_UNRESOLVED_SCALAR` a plan whose optimization
 asks for a scalar to be executed first (a scalar subquery whose body is not provably one row, see Subqueries below); a sink denied its memory by the
-budget (unless it spills, see Spill below), a sum outside its declared type and a pool not whole after a run (step
+budget (unless it spills, see Spill below; the reason begins with the code `MEMORY_BUDGET_EXCEEDED`, `pipeline_exec.segment_pool`), a sum outside its declared type and a pool not whole after a run (step
 `execute`); and whatever lowering, the binder or the parser refuses (INNER, LEFT, RIGHT, FULL, SEMI, ANTI and CROSS joins are served, a scalar
 subquery being a CROSS join against its one-row aggregate; a join with a
 residual predicate, a SEMI or ANTI join that builds its left side and a join
@@ -356,9 +356,9 @@ The tests run when the package is built.
   running and whole-partition aggregates, `first_value`, `last_value` and
   `nth_value`, with no, one or two partition keys, several windows in one
   SELECT, a WHERE and an outer ORDER BY, on one and three workers, each column
-  of its documented type; a sum over an INTEGER, a DATE partition key, a
-  DECIMAL order key and a float default over a BIGINT lag are
-  `LOWERING_WINDOW_UNSERVED` refusals at `lower`.
+  of its documented type, `sum`, `avg`, `min` and `max` over an INTEGER
+  among them; a DATE partition key, a DECIMAL order key and a float default
+  over a BIGINT lag are `LOWERING_WINDOW_UNSERVED` refusals at `lower`.
 - `test_run_sql_window_frames`: `run_sql` over two Parquet tables DuckDB wrote
   (the `:window_frames_oracle` build action) answers what the pinned DuckDB
   answers for every case of `tests/window_frames/cases.sql`, on one and three

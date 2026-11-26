@@ -874,7 +874,8 @@ def test_a_pool_too_small_for_the_distinct_values_is_refused_by_name() raises:
             0,
             _int_batch[DType.int64](ArrowType.INT64, List[Int]([1, 2, 3])),
         ),
-        "pipeline_exec: the aggregation sink of segment 0 was denied "
+        "MEMORY_BUDGET_EXCEEDED: pipeline_exec: the aggregation sink of"
+        " segment 0 was denied "
         + String(entries)
         + " bytes of the segment's memory pool for its COUNT(DISTINCT) values"
         " (budget "

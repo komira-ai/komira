@@ -667,7 +667,7 @@ def _validate_partition_by(plan: LogicalPlan, mut report: PlanValidationReport) 
     Checks:
     - Child is valid (recursive).
     - Partition keys + order keys exist in child schema.
-    - descending has same length as order_keys.
+    - descending and nulls_first have the same length as order_keys.
     - Each partition expression's column (if any) exists in child schema.
     """
     _validate_plan_node(plan.partition_by_data_ref().child[], report)
@@ -691,6 +691,10 @@ def _validate_partition_by(plan: LogicalPlan, mut report: PlanValidationReport) 
     if len(plan.partition_by_data_ref().order_keys) != len(plan.partition_by_data_ref().descending):
         raise Error(
             "PartitionBy validation: order_keys and descending have mismatched lengths"
+        )
+    if len(plan.partition_by_data_ref().order_keys) != len(plan.partition_by_data_ref().nulls_first):
+        raise Error(
+            "PartitionBy validation: order_keys and nulls_first have mismatched lengths"
         )
 
     for k in plan.partition_by_data_ref().order_keys:
