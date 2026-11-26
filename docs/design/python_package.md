@@ -391,7 +391,7 @@ polars = ["polars"]
 [project.urls]
 Source = "https://github.com/komira-ai/komira"
 Issues = "https://github.com/komira-ai/komira/issues"
-Documentation = "https://github.com/komira-ai/komira/blob/main/docs/install.md"
+Documentation = "https://github.com/komira-ai/komira/blob/main/docs/install.md"   # a stamped build: blob/<its commit>/
 Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
 ```
 
