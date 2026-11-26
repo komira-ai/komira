@@ -5,7 +5,7 @@ from pathlib import Path
 
 import komira
 
-Path("orders.csv").write_text("id,shipped\n1,09/15/2026\n2,10/01/2026\n")
+Path("orders.csv").write_text("id,shipped\n1,09/15/2026\n2,10/20/2026\n")
 
 with komira.Session() as s:
     s.register_csv("orders", "orders.csv")

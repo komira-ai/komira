@@ -30,7 +30,7 @@ with komira.Session() as s:
     print(result.to_pylist())
 
 # Any other format: parse the text with pyarrow, then give komira the dates.
-text = pa.table({"id": [1, 2, 3], "shipped": ["09/15/2026", "10/01/2026", "12/31/2026"]})
+text = pa.table({"id": [1, 2, 3], "shipped": ["09/15/2026", "10/20/2026", "12/31/2026"]})
 parsed = pc.strptime(text["shipped"], format="%m/%d/%Y", unit="s").cast(pa.date32())
 pq.write_table(text.set_column(1, "shipped", parsed), "us_orders.parquet")
 with komira.Session() as s:
@@ -50,7 +50,7 @@ Output:
 date32[day]
 [{'id': 2, 'shipped': datetime.date(2026, 10, 1), 'month': 10, 'days': 30}, {'id': 3, 'shipped': datetime.date(2026, 12, 31), 'month': 12, 'days': 121}]
 date32[day]
-[{'id': 1, 'shipped': datetime.date(2026, 9, 15), 'year': 2026}, {'id': 2, 'shipped': datetime.date(2026, 10, 1), 'year': 2026}]
+[{'id': 1, 'shipped': datetime.date(2026, 9, 15), 'year': 2026}, {'id': 2, 'shipped': datetime.date(2026, 10, 20), 'year': 2026}]
 ```
 
 ## Notes
