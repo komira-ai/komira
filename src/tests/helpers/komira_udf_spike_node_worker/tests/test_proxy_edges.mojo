@@ -327,6 +327,10 @@ def _cwd() raises -> String:
     descriptor of "." on macOS, where realpath(".") is refused with EPERM on
     the farm's workers)."""
     var buf = List[UInt8](length=4096, fill=0)
+    # FFI-BOUNDARY: kudfw_probe_cwd (proxy/channel_probe.c) borrows buf for
+    # the call only and writes into it; this frame owns buf and frees it when
+    # it returns. The function allocates nothing, so the caller frees nothing
+    # else, and the path comes back as a String copied out of buf.
     # SAFETY: buf is 4096 bytes owned by this frame and borrowed for the call;
     # C writes at most 4096 bytes, the terminator included, and keeps no
     # pointer.
