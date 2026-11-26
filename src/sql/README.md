@@ -37,7 +37,7 @@ period tables; the function names and the specifier names are different sets.
 
 `sql.sql_parser` is a hand-written recursive-descent parser:
 `parse_sql(tokenize(sql))` returns a `SqlStatement`, a query (`WITH`,
-`SELECT`, `UNION ALL`, `INTERSECT`, `EXCEPT`), a `COPY ... TO` or a `CREATE TABLE ... AS`. Every
+`SELECT`, `UNION ALL`, `UNION`, `INTERSECT`, `EXCEPT`), a `COPY ... TO` or a `CREATE TABLE ... AS`. Every
 subquery body (scalar, `[NOT] EXISTS`, `[NOT] IN (SELECT ...)`, a derived
 table, a set-operation branch) is parked in the statement's flat `subqueries`
 table, and the expression node holds its index. Input the grammar has no
@@ -118,8 +118,8 @@ grouped query; a correlated scalar in a WHERE or the SELECT list of an
 ungrouped query, see below; `[NOT] EXISTS`; `[NOT] IN`, NULL-aware, its body
 either one table projecting one bare column or, uncorrelated, any query of
 one column),
-window functions, ORDER BY, LIMIT / OFFSET, DISTINCT, UNION ALL, INTERSECT
-and EXCEPT; and
+window functions, ORDER BY, LIMIT / OFFSET, DISTINCT, UNION ALL, UNION,
+INTERSECT and EXCEPT; and
 raises an `Error` starting `SQL bind error` or `SQL not supported`, naming
 the construct, for what it does not bind. The parquet facts a binding needs
 (the `ParquetSource` a `read_parquet('path')` relation scans, which may be
@@ -174,9 +174,11 @@ unsigned width (an unsigned 64-bit one with a signed integer is refused, since
 DuckDB's HUGEINT has no Arrow type); an integer or decimal with a float the
 float; two decimals the larger scale with the larger integer digits (refused
 above 38 digits); an integer with a decimal the decimal that holds the integer;
-two zone-less timestamps the finer unit. A pair with no such rule (a string with
-a number, a date with a timestamp, ...) raises `SQL not supported: UNION ALL
-column <i> (<name>)` naming both types. The union's names are the first
+two zone-less timestamps the finer unit; an INTEGER or BIGINT with a VARCHAR the
+VARCHAR (the integer cast to its plain decimal spelling, so 3 and `'3'` are one
+value). A pair with no such rule (a string with any other type, a date with a
+timestamp, ...) raises `SQL not supported: UNION ALL column <i> (<name>)`
+naming both types. The union's names are the first
 branch's, and a column is nullable when any branch's is. A branch whose names or
 types differ from the union's gets one projection that casts and renames its
 columns; a branch needing that projection with two columns of one name is
@@ -185,13 +187,27 @@ refused. Bare integer literals of every branch are INT32 when they fit, so
 `OFFSET` after the last branch apply to the whole union: the parser rewrites the
 query to `SELECT * FROM (<union>) ORDER BY ... LIMIT ...`, so the sort and the
 row window bind above the union node. On any other branch they are a
-`SQL syntax error` naming the clause and the operator after it.
+`SQL syntax error` naming the clause and the operator after it. A CTE body may
+hold a chain of any set operator; ORDER BY, LIMIT or OFFSET after its last
+branch is refused by name (`SQL not supported: <clause> after the last branch
+of a set operation in a WITH body`), because the rewrite's derived table would
+bind after the CTE.
+
+`UNION` and `UNION DISTINCT` (`sql.sql_bind_set_op`) are the deduplicating
+union: the union of the branches, with the same common column types and names
+as UNION ALL, under a `PLAN_DISTINCT` over every column, so whole rows compare
+with NULLs equal, every NaN is one value, and 0.0 and -0.0 are one value, as in
+SELECT DISTINCT. A UNION takes everything to its left as its left input:
+`a UNION ALL b UNION c` is one distinct over `union(a, b, c)`, while
+`a UNION b UNION ALL c` keeps `c`'s rows, duplicates included, outside the
+distinct of `a UNION b`. Errors name `UNION` and the branch numbers. Two result
+columns of one name are refused, since the distinct names its columns.
 
 `INTERSECT` and `EXCEPT` (`sql.sql_bind_set_op`) are the set forms: whole rows compared with NULLs equal, each result
 row once. `INTERSECT DISTINCT` and `EXCEPT DISTINCT` spell the same;
-`INTERSECT ALL`, `EXCEPT ALL` and bare `UNION` are refused by name. A chain
-takes DuckDB's precedence: INTERSECT binds tighter than UNION ALL and EXCEPT,
-and each level folds left to right, so `a UNION ALL b INTERSECT c EXCEPT d` is
+`INTERSECT ALL` and `EXCEPT ALL` are refused by name. A chain takes DuckDB's
+precedence: INTERSECT binds tighter than UNION, UNION ALL and EXCEPT, and each
+level folds left to right, so `a UNION ALL b INTERSECT c EXCEPT d` is
 `(a UNION ALL (b INTERSECT c)) EXCEPT d`; adjacent UNION ALL inputs stay one
 union node. The two inputs of an INTERSECT or EXCEPT take the common column
 types and the left input's names as UNION ALL's branches do (errors name the

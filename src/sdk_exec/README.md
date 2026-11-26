@@ -356,7 +356,7 @@ COUNT, AVG, MIN and MAX over any `ROWS` or `RANGE` frame SQL allows, a
 `RANGE` offset over one INT64, INT32 or FLOAT64 order key, with INT64, INT32,
 FLOAT64, BOOL or STRING partition and order keys)
 and UNION ALL, the
-concatenation of its branches. The post-rewrite gate and
+concatenation of its branches (UNION is a distinct over that concatenation). The post-rewrite gate and
 the plan validation gate are not called from `run_sql`.
 
 `post_rewrite_gate` is a free-standing check; its call sites belong to the
