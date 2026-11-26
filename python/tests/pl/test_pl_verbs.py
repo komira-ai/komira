@@ -20,6 +20,10 @@ plan bytes they are given. For each verb and expression:
 - `collect()` hands the session the bytes of a `WirePlanEnvelope` that holds
   no SQL text, and `schema` gives pyarrow types.
 
+The test loads no library and is of the `pl/` family (python/tests/BUCK): it
+runs on each supported minor, with the generated plan modules, protobuf 7.36.2
+and pyarrow.
+
     test_pl_verbs.py
 """
 

@@ -3,6 +3,20 @@
 # answers
 # =============================================================================
 #
+# Covers: run_sql over eight TPC-H-typed Parquet tables DuckDB wrote (the
+# :correlated_oracle action in BUCK; orders with no lineitem, customers with no
+# order, NULL keys, ties) answers what the pinned DuckDB answers for each case
+# of tests/correlated/cases.sql, on one and three workers: the corpus texts of
+# TPC-H Q4, Q17, Q20 and Q22, and Q2's body without its ORDER BY and LIMIT;
+# correlated scalars over no row (count 0, NULL), with NULL outer and inner
+# keys, two keys, two in one WHERE, under OR and BETWEEN (in a WHERE anywhere),
+# in a SELECT list and a derived table; a DECIMAL compared with a DOUBLE;
+# EXISTS and NOT EXISTS with NULL keys. Q21 and an EXISTS correlated by > are
+# refused at lower, Q2 (its ORDER BY is a DECIMAL key, which the sort sink
+# refuses) at execute, an EXISTS over a join and the unserved correlated scalar
+# shapes at bind, each by name at its step; the TPC-H cases are the corpus
+# texts; every case is run.
+#
 # The pinned DuckDB writes the eight tables of the TPC-H schema
 # (tests/correlated/data.sql: small row groups, orders with no lineitem,
 # customers with no order, a NULL o_custkey and l_suppkey, ties at q2's

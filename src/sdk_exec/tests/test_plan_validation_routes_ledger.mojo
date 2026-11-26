@@ -2,6 +2,10 @@
 # The route ledger and the scan-binding wiring that is checked against it
 # =============================================================================
 #
+# Covers: The route ledger's self check, token lookup and status names, and the
+# scan-binding wiring's refusal of an unregistered token and of a handle from
+# another epoch.
+#
 # `plan_validation_routes` is the list of terminal execution routes and what
 # the plan validation gate does about each; `scan_binding_gate_wiring` runs the
 # scan-binding gate at a route and refuses a route the ledger does not name.
