@@ -3,13 +3,12 @@
 Status: design, partly built. The Python package is under [`python/komira/`](../../python/komira/), and
 its private layers of this surface are built: the plan node tree (`komira._ops`), the plan encoder
 (`komira._plan`), which writes a `komira.plan.v1.WirePlanEnvelope` with each node's output schema, the
-capture of a user function (`komira._capture`) and the UDF worker runtime (`komira._udf`). The first
-part of the pandas-shaped skin is built too: its readers, subscripts, `assign`, `sort_values`, `head`,
-`materialize` and `explain` are in `python/komira/_frame.py` and `_series.py`, and `materialize` runs
-the plan through `komira_plan_stream`. So are `groupby` with its `GroupBy` reductions and `agg`, the
-frame's own reductions (`agg`, `sum`, `mean`, `median`, `std`, `var`, `min`, `max`, `count`,
-`nunique`) and `drop_duplicates`, in `python/komira/_groupby.py`; NaN as missing (ruling 6) and the
-`Series` reductions are not built yet. `komira.pl` and the other verbs are not built. The verbs, the plan each one builds and
+capture of a user function (`komira._capture`) and the UDF worker runtime (`komira._udf`). Both skins are built
+in part, in `python/komira/_frame.py` and `python/komira/pl/`, and `materialize` and `collect` run the plan
+through `komira_plan_stream`. What each skin does today is one page per feature under
+[python/docs/](../../python/docs/dataframe/overview.md), and what each capability has and lacks is its
+row of the capability map in [dataframe_surface_verbs.md](dataframe_surface_verbs.md); this paragraph lists
+neither. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
 
@@ -115,6 +114,12 @@ runs only at a **terminal**:
 - **No dunder runs a query.** `len(df)`, `bool(df)`, `iter(df)`, `df.__array__()` and
   `df.__arrow_c_stream__()` raise `UnsupportedOperation`, and the message names the terminal.
   `repr(df)` prints the column names and types, and runs nothing.
+- **A notebook shows a frame as its plan's schema, and a `Result` as its first rows.**
+  `df._repr_html_()` is a table of the column names over their types and a line saying the frame
+  has not run; it runs nothing and shows no SQL. `Result._repr_html_()` shows at most the first ten
+  rows, and says when there are more. It reads them from the stream, at most one batch past them,
+  and keeps them, so the `Result` stays unread: a terminal called after the display still reads
+  every row, once. A `Series` has no HTML display.
 - **A reduction is lazy too.** `df["v"].sum()` is not a number: it is a `Series` aggregate. A
   `Series` aggregate works inside `assign`, inside `df[...]` and inside `agg`. The number comes from a
   terminal: `df.agg(total=("v", "sum")).materialize()`. This is a departure from pandas (section 8,
@@ -278,7 +283,7 @@ whether the frame is **ordered**.
 
 - **A sort makes a frame ordered:** `sort_values`, `sort`, `nlargest`, `top_k` and the others.
 - **These verbs keep it ordered:**
-  - filters;
+  - filters, the semi and anti joins of `isin` with another frame's column (ruling 16) among them;
   - a projection, rename or `with_columns`/`assign` that keeps every sort key;
   - `head`, `limit` and `slice`.
 
@@ -301,7 +306,10 @@ The rules that follow from this:
   `cummin`/`cum_min`, `cummax`/`cum_max`, `rolling`, and `rolling_*`.
 - `rank` orders by the ranked values. `method="min"` and `method="dense"` are supported. `method="first"`
   (pandas) and `method="ordinal"` (polars) break ties by row order, so they are refused. pandas'
-  default `method="average"` and `method="max"` have no plan function yet, so they are refused too.
+  default `method="average"` and `method="max"` have no plan function yet, so the pandas skin refuses
+  them. The polars skin builds both from plan functions: `"max"` is the count of the values less the
+  descending `RANK`, plus 1, and `"average"` is the mean of the `"min"` and `"max"` ranks. A null
+  ranks null in the polars skin, as in polars.
 - **Ties picked by row order.** pandas `drop_duplicates(subset=...)` and `nlargest`/`nsmallest`, and
   polars `unique(subset=...)` and `top_k`/`bottom_k`, choose which of several tied rows to return.
   - The library's default choice is accepted, and the skin returns any one of the tied rows. This is a
@@ -310,6 +318,10 @@ The rules that follow from this:
   - An explicit choice that needs row order is refused: `keep="first"` and `keep="last"` in polars, and
     `keep="last"` in pandas. So are the choices that need a window first: `keep=False` in
     `drop_duplicates`, and `keep="all"` in `nlargest`.
+  - The polars skin builds `unique(subset=...)` over fewer than every column with a window: the rows
+    numbered 1 by `ROW_NUMBER` over each value of the subset (`keep="any"`). Its `keep="none"` keeps
+    the rows whose count over their value is 1, a window too. A null is a value of its own, as in
+    polars.
   - Over whole rows (no `subset`, or one that names every column) no choice is made, since equal rows
     are the same row. So pandas `drop_duplicates()` answers `keep="first"` and `keep="last"` alike
     with a DISTINCT, and `keep=False` with an AGGREGATE by every column whose `count(*)` is 1. The
@@ -334,7 +346,7 @@ ruling. Section 7's departures belong to this list as well.
 Each ruling is marked **carried** (the earlier SDK's answer) or **differs** (a ruling of section 12, by
 its number).
 
-1. **There is no index.** Carried, except the integer subscript (D9) and `value_counts` (D16).
+1. **There is no index.** Carried, except the integer subscript (D9).
    - `loc`, `iloc`, `at`, `iat`, `index`, `set_index`, `reset_index`, `sort_index`, `reindex`, and
      pandas' index `join` are refused (use `merge`).
    - A slice subscript `df[0:5]` raises `UnsupportedOperation`.
@@ -348,8 +360,9 @@ its number).
        gives a frame indexed by the output names.
      - `df.sum()` and the other frame reductions give a one-row frame, where pandas gives a `Series`
        indexed by column.
-     - `s.value_counts()` gives a frame with the value column and `count`, where pandas gives a
-       `Series` named `count` indexed by value.
+     - `s.value_counts()` is refused by name: pandas gives a `Series` indexed by value, and a komira
+       `Series` has no index to hold the values. Count the rows per value with
+       `df.groupby(column).size()`, and sort them with `sort_values("size", ascending=False)`.
      - `s.sum()` and the other `Series` reductions are lazy aggregates (section 2), where pandas gives
        a number.
 2. **pandas sorts its groups; polars does not.** Carried; the NULL placement of the sort differs (D4).
@@ -374,9 +387,8 @@ its number).
      (`na_position="last"`). polars puts nulls first in both directions (`nulls_last=False`).
    - An explicit `na_position` or `nulls_last` is honoured per key. No sort is refused for its NULL
      placement.
-   - A window's ORDER BY cannot carry a placement yet
-     ([komira-ai/komira#1227](https://github.com/komira-ai/komira/issues/1227)). So a window whose
-     library default differs from the plan's raises at the terminal until that lands.
+   - A window's ORDER BY carries the same placement per key (`nulls_first` on the PartitionBy node),
+     so no window is refused for its NULL placement either.
 6. **Missing values.** Differs (D7).
    - polars keeps NULL and NaN apart, as the plan does: `is_null` and `drop_nulls` test NULL only, and
      `is_nan` and `fill_nan` test NaN only.
@@ -427,6 +439,8 @@ its number).
     - The integer sum type is INT64 (UINT64 for unsigned) through the DataFrame doors. A total outside
       it is an error naming the column ([query_semantics_rulings.md](query_semantics_rulings.md) §8.1,
       §8.2).
+    - The polars skin sums a UInt8, UInt16 or UInt32 column as INT64, since the engine coalesces no
+      UINT64, and refuses the sum of a UInt64 column by name.
 11. **Counting rows and counting values are different verbs.** Carried, except `groupby().count()` (D6).
     - `count(*)` is polars `kpl.len()` and `group_by(k).len()`, and pandas `size()` and
       `agg(n=("c", "size"))`.
@@ -446,6 +460,13 @@ its number).
       fixed table in the verbs document. komira adds no dtype classes of its own.
     - pyarrow and protobuf are the package's required dependencies, and pandas and polars are optional.
     - Results arrive as Arrow and convert through the `Result` terminals.
+    - **Count types** (a departure). polars answers a count, `len()`, `str.len_chars()`, a rank
+      other than `"average"`, `cum_count()` and the sum of a boolean or a UInt32 column as UInt32.
+      The engine casts to no UInt32 yet, so the polars skin answers these as Int64, the plan's own
+      count type; the values are polars'.
+    - The engine computes a CASE only as INT64, FLOAT64 or STRING. So the polars skin computes a
+      `when`, a `fill_null` and the floor correction of ruling 9 in one of those and casts the result
+      once to polars' type (Int32 or Float32), and refuses branches of another type by name.
 15. **`concat` matches columns by name, and needs one type per column.** New with the verb (D17).
     - The Mojo builder matches by position and takes the first input's names.
     - polars `how="vertical"` needs equal names in equal order, so the polars skin refuses anything
@@ -507,7 +528,9 @@ no timing assertion and no shell test.
    - `df.<column>` raises, naming `df["<column>"]`.
    - `__dir__` holds only defined members, and `__setattr__` refuses.
    - A column called `count` is reachable as `df["count"]`, while `df.count()` still counts.
-   - A frame survives `copy.copy`, and `hasattr(df, "_repr_html_")` is `False`.
+   - A frame survives `copy.copy`, and `hasattr(df["a"], "_repr_html_")` is `False`.
+   - A frame's `_repr_html_` is its names and types and calls nothing on its session; a `Result`'s
+     shows at most ten rows and leaves the result unread.
 3. **Python bytes equal Mojo plans.**
    - A `python_oracle` build action runs a program in a skin and writes the envelope it encodes.
    - A Mojo test decodes the envelope with `plan_wire`, and compares it field by field with the plan the
@@ -608,7 +631,8 @@ package design). D4 to D18 are this design's own.
 
 ## Where is the code?
 
-The code is in `python/komira/`: the node tree (`_ops/`), the encoder (`_plan/`) and the first part of
-the pandas-shaped skin (`_frame.py`, `_groupby.py`, `_series.py`, `_refusals.py`); `komira/pl/` is not built yet. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
+The code is in `python/komira/`: the node tree (`_ops/`), the encoder (`_plan/`), the pandas-shaped skin
+(the frame, series and group-by modules, and `_refusals.py`) and the polars-shaped skin (`pl/`). The
+pages that say what each skin does are in `python/docs/`. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
 `src/plan_expr/col_expr.mojo`. The wire format is in [src/plan_proto](../../src/plan_proto/plan.proto)
 and `src/plan_wire`.

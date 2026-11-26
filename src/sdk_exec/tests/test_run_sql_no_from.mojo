@@ -2,6 +2,16 @@
 # run_sql: a SELECT with no FROM, and plans that scan an in-memory batch
 # =============================================================================
 #
+# Covers: SELECT 1 AS n is one row, an INT32 column n holding 1, as in DuckDB;
+# a result literal is INT32 from -2147483647 to 2147483647 and INT64 past
+# either bound and at -2147483648, as DuckDB types it; one past BIGINT is
+# refused at bind; a literal a derived table holds stays INT64 (n + 5000000000
+# over a derived `1 AS n` is the INT64 5000000001) and a UNION ALL of literals
+# (SELECT 1 AS n UNION ALL SELECT 2) binds to INT32; FROM-less expressions (7 /
+# 2), count(*) and a false WHERE run; SELECT 1 FROM a Parquet table; in-memory
+# sources: one of two batches is read whole and one of none gives no rows with
+# its schema.
+#
 # A FROM-less SELECT reads the binder's one-row in-memory relation, so its plan
 # carries the batch in `params.batches` and `run_lowered_plan` hands it to the
 # builder as a resident batch. The expected answers are DuckDB's for the

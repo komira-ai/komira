@@ -391,6 +391,57 @@ int komira_fcntl_set_cloexec(int fd) {
 }
 
 // =============================================================================
+// Socket readiness and send queue, with the platform's own constants.
+// =============================================================================
+#include <errno.h>
+#include <poll.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#if defined(__linux__)
+#include <linux/sockios.h>  // SIOCOUTQ
+#endif
+
+// ---------------------------------------------------------------------------
+// komira_wait_readable -- wait up to `timeout_ms` (negative: without limit)
+// until `fd_a` or `fd_b` has data, an end of stream or an error to read. A
+// negative fd is not watched; with neither watched it returns -EINVAL rather
+// than wait for nothing. Returns 1 when a read of one would not block, 0 on
+// timeout, -EBADF when a watched fd is not open (POLLNVAL), -errno when poll
+// fails. Scalars only: the pollfd array is a local.
+// ---------------------------------------------------------------------------
+int komira_wait_readable(int fd_a, int fd_b, int timeout_ms) {
+    if (fd_a < 0 && fd_b < 0) return -EINVAL;
+    struct pollfd p[2];
+    p[0].fd = fd_a;
+    p[0].events = POLLIN;
+    p[0].revents = 0;
+    p[1].fd = fd_b;
+    p[1].events = POLLIN;
+    p[1].revents = 0;
+    int r = poll(p, 2, timeout_ms);
+    if (r < 0) return -errno;
+    if ((p[0].revents | p[1].revents) & POLLNVAL) return -EBADF;
+    return r > 0 ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// komira_socket_unsent -- the bytes in socket `fd`'s send queue that the peer
+// has not acknowledged (on loopback: not yet in the peer's receive buffer).
+// Linux: ioctl SIOCOUTQ. macOS: getsockopt(SOL_SOCKET, SO_NWRITE). Returns
+// the count, or -errno. Scalars only: the int it reads into is a local.
+// ---------------------------------------------------------------------------
+long long komira_socket_unsent(int fd) {
+    int n = 0;
+#if defined(__APPLE__)
+    socklen_t len = sizeof(n);
+    if (getsockopt(fd, SOL_SOCKET, SO_NWRITE, &n, &len) < 0) return -(long long)errno;
+#else
+    if (ioctl(fd, SIOCOUTQ, &n) < 0) return -(long long)errno;
+#endif
+    return (long long)n;
+}
+
+// =============================================================================
 // Mach / Darwin probes for leak-detection tests.
 // =============================================================================
 //

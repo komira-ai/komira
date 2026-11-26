@@ -106,21 +106,25 @@ sql_oracle(
 ]]
 
 # Which scalar functions run, and which only bind (README.md, "Function coverage"). The
-# test runs every scalar_fn case through run_sql over the corpus's table T
-# (scalar_fn_t, written as Parquet by the pinned DuckDB from tables.sql) and
-# holds the result of each function row of src/sql/sql_fn_table.mojo to the
-# committed function_coverage.tsv.
+# test runs every scalar_fn case through run_sql over the corpus's tables T
+# and E (scalar_fn_t, written as Parquet by the pinned DuckDB from
+# tables.sql) and holds the result of each function row of
+# src/sql/sql_fn_table.mojo to the committed function_coverage.tsv.
 sql_oracle(
     name = "scalar_fn_t",
     srcs = [
         "cases/scalar_fn/tables.sql",
         "sql/write_scalar_fn_t.sql",
     ],
-    outputs = ["scalar_fn_t.parquet"],
+    outputs = [
+        "scalar_fn_t.parquet",
+        "scalar_fn_e.parquet",
+    ],
 )
 
 _COVERAGE_DATA = {
     "scalar_fn_t.parquet": ":scalar_fn_t[scalar_fn_t.parquet]",
+    "scalar_fn_e.parquet": ":scalar_fn_t[scalar_fn_e.parquet]",
     "sql_fn_table.mojo": "//src/sql:sql_fn_table_source",
     "function_coverage.tsv": "function_coverage.tsv",
 }

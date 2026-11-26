@@ -1420,6 +1420,13 @@ message WirePartitionByNode {
   repeated bool descending = 3;
   repeated WirePartitionExpr partition_exprs = 4;
   WirePlan child = 5;
+  // One flag per order key (NULLS FIRST when true). EMPTY means every order
+  // key takes the placement derived from its `descending` flag, which is how
+  // a producer that never wrote this field is read; a producer writes the
+  // list only when some key's placement differs from that derived one. When
+  // non-empty it is parallel to `order_keys`, and the door enforces the pairing
+  // under `PLAN_WIRE_INCONSISTENT_COUNT`.
+  repeated bool nulls_first = 6;
 }
 
 message WirePartitionTopNNode {

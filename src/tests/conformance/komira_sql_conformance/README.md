@@ -94,7 +94,7 @@ them, then copy them over the committed ones and review the diff:
 ## The corpora
 
 Counts are of the case files (`ls cases/<corpus>/*.sql`, less
-`tables.sql`); 6273 in all, 2283 of them `order: query`.
+`tables.sql`); 6393 in all, 2283 of them `order: query`.
 
 | corpus | cases | what it probes |
 |---|---|---|
@@ -108,7 +108,7 @@ Counts are of the case files (`ls cases/<corpus>/*.sql`, less
 | `null_pattern_n<rows>`, `null_adversarial_n<rows>` | 882, 2100 | filters, aggregates and sorts over a table of `<rows>` rows (5 to 257, either side of 8, 16, 32, 64, 128, 192 and 256) whose text column mixes NULLs and empty strings |
 | `aggregate_modifiers`, `aggregate_names`, `agg_exact_floats` | 55, 31, 17 | DISTINCT and FILTER on aggregates, grouping forms; median, quantiles and the other aggregate names with their output names; float aggregates over 50000 rows of dyadic rationals, whose sums are exact in any order |
 | `agg_float_ungrouped` | 22 | SUM, AVG, MIN, MAX, COUNT and COUNT(*) of a DOUBLE and a FLOAT column with no GROUP BY: 4096 rows of non-dyadic values with NULLs, and small sets holding NaN (first, among values, only), +inf, -inf, both infinities, a sum past the double range, only NULLs, no row, and -0.0 |
-| `scalar_fn`, `string_domain` | 293, 52 | the scalar functions (math, string, date part) over a row each of edge inputs; string functions over Unicode, combining marks, NUL and empty strings |
+| `scalar_fn`, `string_domain` | 413, 52 | the scalar functions (math, string, date part) over a row each of edge inputs; string functions over Unicode, combining marks, NUL and empty strings |
 | `numeric_domain`, `numeric_envelope` | 103, 42 | arithmetic over every integer width signed and unsigned, FLOAT and DOUBLE, at their extremes (the rows that overflow are left out); comparisons and promotion across types |
 | `cast_boundaries`, `temporal_domain` | 108, 96 | CAST between types at their boundaries; date and timestamp parts, truncation and arithmetic, at the ends of months, leap years and before year 1 |
 | `fn_positions`, `fn_postagg_positions` | 136, 57 | the same function in each place a query can hold it: SELECT, WHERE, GROUP BY, HAVING, ORDER BY, over an aggregate, in a CTE |
@@ -140,10 +140,14 @@ function table and for a list of common analysis functions, what running it
 measured. A count of the table's lines or rows says none of this: a row can
 bind and never run, or run and answer another value than DuckDB.
 `tests/test_function_coverage.mojo` writes the table by running the
-`scalar_fn` cases through `run_sql` over the corpus's table T (written as
-Parquet by the pinned DuckDB, `:scalar_fn_t`) and fails unless the text equals
-the committed file; the failure message holds the measured table, which is
-what to copy over the file after a change. Its rows come from the source text
+`scalar_fn` cases through `run_sql` over the corpus's tables T and E
+(written as Parquet by the pinned DuckDB, `:scalar_fn_t`; E holds the edge
+values: integer extremes, ±0.0, NaN, ±inf, leap days, year ends, a Sunday
+and a Monday, days before the epoch, JSON documents) and fails unless the text equals
+the committed file; the failure message holds each line that changes it
+(`- ` the committed line, `+ ` the measured one), which is what to apply to
+the file after a change (the test runner prints only the last 200 lines of a
+failing test, fewer than the table has). Its rows come from the source text
 of `sql_scalar_fn_spec`, so a row added to the table is a line here.
 
 Columns: `name`; `row`, the lowering kind of the name's row (`FNK_*`),
@@ -158,7 +162,7 @@ Columns: `name`; `row`, the lowering kind of the name's row (`FNK_*`),
 | `differs:n` | n cases ran and an answer differs from DuckDB's |
 | `refused_<step>:n` | n cases ended at that `run_sql` step (parse, bind, optimize, lower, execute) with a refusal: at bind the name does not bind, at a later step it bound and could not run |
 | `batches_n` | the case ran but answered n result batches, not one |
-| `unreadable:n` | n cases ran and answered one batch, and the comparison raised (any raise lands here; today it is an answer type the answer parser does not read, such as a list or a timestamp): the function executes, its values are not yet compared |
+| `unreadable:n` | n cases ran and answered one batch, and the comparison raised (any raise lands here: an answer type the answer parser does not read, such as a list of a type other than strings, or a spelling of a value DuckDB does not write): the function executes, its values are not yet compared |
 | `no_case` | the row lowers, and no case calls the name: bound by the table, never run by this measurement |
 | `probe:refused_bind` | a refusal row or a name with no row: the call `SELECT name(k) FROM T` (one BIGINT argument) is refused at bind; for a refusal row this is the row's refusal, for a name with no row it only says that this call does not bind (a wrong arity or type would be refused too) |
 | `probe:ok` | the same probe ran: a name the table refuses, or has no row for, that nevertheless executes |
@@ -173,29 +177,29 @@ column is named.
 ### What the committed table says
 
 Counts of the names in `function_coverage.tsv` (731 names), each from
-`awk -F'\t' 'NR>2 { if ($2=="FNK_REFUSED") r++; else if ($2=="NO_ROW") n++; else if ($6=="no_case") nc++; else if ($6=="internal") i++; else if ($6 ~ /unreadable/) u++; else if ($6 ~ /refused_/) rb++; else if ($6 ~ /within/) w++; else if ($6 ~ /^equal:/) e++ }'` over the committed file (r, n, nc, i, u, rb, w, e are the rows below from the last):
+`awk -F'\t' 'NR>2 { if ($2=="FNK_REFUSED") r++; else if ($2=="NO_ROW") n++; else if ($6=="no_case") nc++; else if ($6=="internal") i++; else if ($6 ~ /unreadable/) u++; else if ($6 ~ /refused_/) rb++; else if ($6 ~ /within/) w++; else if ($6 ~ /differs/) d++; else if ($6 ~ /^equal:/) e++ }'` over the committed file (r, n, nc, i, u, rb, d, w, e are the rows below from the last; u is 0 and has no row):
 
 | names | what was measured |
 |---|---|
-| 120 | lowering rows whose cases all ran and equal DuckDB's answers |
+| 173 | lowering rows whose cases all ran and equal DuckDB's answers |
 | 4 | lowering rows that run and differ from DuckDB only in floats, within 4 ulps (`cos`, `exp`, `log`, `log10`) |
-| 10 | lowering rows that run but whose answer the comparison cannot read yet: `date_trunc` and `datetrunc` (timestamp results), `string_split`, `str_split`, `split`, `string_to_array` and the four `regexp` / `string_split_regex` spellings (list results) |
-| 4 | lowering rows refused at bind by every case that calls them: `date_diff`, `datediff`, `date_sub`, `datesub` (the table binds the row; the cases' calls do not bind; the reason is not recorded in this table) |
-| 50 | lowering rows no `scalar_fn` case calls, so only the binder has seen them: among the common ones `abs`, `round`, `sign`, `trunc`, `floor`, `ceil`, `sqrt`, `pow`, `power`, `year`, `month`, `day`, `week`, `second`, `coalesce`, `nullif`, `ifnull`, `greatest`, `least`, `isnan`, `json_extract`, `json_extract_string`, `make_timestamp` (cases for some of them exist in other corpora, such as `fn_positions`, and are not run here) |
+| 2 | lowering rows with a case whose answer differs from DuckDB's: `json_extract` and `json_extract_string` answer the bytes of the value as the document spells it, where DuckDB writes the value again (`1.50` as `1.5`, `-0` as `0`, a nested value without its spaces) |
+| 1 | lowering rows refused at execute by every case that calls them: `to_hex`, whose row is the VARCHAR overload; DuckDB's `to_hex` of an integer is a second overload, refused by name |
+| 8 | lowering rows no `scalar_fn` case calls: the catalog constants `current_role`, `current_user`, `session_user`, `user` and `pg_table_is_visible` (their answer is the session's, not a function of the row), and `struct_extract`, `struct_extract_at` and `map_extract_value`, which no SQL here can reach (the Parquet scan reads flat columns only, and `struct_pack`, `row` and `map` are refusal rows) |
 | 3 | rows keyed by a constant (`internal`) |
 | 538 | refusal rows; every one is refused at bind by `SELECT name(k) FROM T` |
 | 2 | common names with no row at all (`initcap`, `current_timestamp`), refused at bind |
 
-So the rows that execute and are checked against DuckDB are 124 of the 188
-lowering-row names (the first two lines); 14 execute or bind without a
-verified answer; 50 are unmeasured. The gap list of common analysis
+So the rows that execute and are checked against DuckDB are 177 of the 188
+lowering-row names (the first two lines); 3 run without DuckDB's answer (two
+differ, one is refused at execute); 8 are unmeasured, each for the reason its
+line gives. The gap list of common analysis
 functions is the `common = yes` lines whose `row` is `FNK_REFUSED` or
 `NO_ROW`: for example `split_part`, `strftime`, `strptime`, `epoch`, `age`,
 `current_date`, `now`, `dayname`, `monthname`, `make_date`, `to_timestamp`,
 `random`, `gcd`, `lcm`, `list_*` and `array_length`, `date_add`, `typeof`,
 `position`, `format` and `printf`, `chr`, `initcap`, `current_timestamp`;
-each carries its reason family in `detail`. The 50 unmeasured names are the
-next measurement: a `scalar_fn` case each, with DuckDB's committed answer.
+each carries its reason family in `detail`.
 
 ### Layout of the function coverage files
 
@@ -204,4 +208,4 @@ next measurement: a `scalar_fn` case each, with DuckDB's committed answer.
 | `function_coverage.mojo` | the measurement: reads the rows of `sql_scalar_fn_spec`, runs the cases, writes the table |
 | `function_coverage.tsv` | the committed table |
 | `tests/test_function_coverage.mojo` | the gated test; `./buck2 test` on `:komira_sql_conformance` runs it |
-| `sql/write_scalar_fn_t.sql` | writes the corpus table T as Parquet (`:scalar_fn_t`) |
+| `sql/write_scalar_fn_t.sql` | writes the corpus tables T and E as Parquet (`:scalar_fn_t`) |

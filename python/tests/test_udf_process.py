@@ -4,7 +4,8 @@ shutdown leaves behind.
 
     test_udf_process.py --lib-dir <dir>
 
-`<dir>/libkomira_udf_python.so` is `//src/udf_python:komira_udf_python`.
+`<dir>/libkomira_udf_python.so` (`libkomira_udf_python.dylib` on macOS) is
+`//src/udf_python:komira_udf_python`.
 """
 
 import errno
@@ -157,12 +158,7 @@ PROBE = """import json, os, sys
 OUT = %r
 
 def probe(x):
-    fds = {}
-    for name in os.listdir("/proc/self/fd"):
-        try:
-            fds[name] = os.readlink("/proc/self/fd/" + name)
-        except FileNotFoundError:
-            pass
+    fds = fd_names()
     info = {
         "environ": dict(os.environ), "cwd": os.getcwd(), "cwd_list": os.listdir("."),
         "isolated": sys.flags.isolated, "utf8": sys.flags.utf8_mode, "fds": fds,
@@ -170,7 +166,7 @@ def probe(x):
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(info, f)
     return x
-"""
+""" + h.FD_NAMES
 
 
 def the_worker_runs_isolated_with_its_own_environment_directories_and_fds(env):
@@ -184,6 +180,11 @@ def the_worker_runs_isolated_with_its_own_environment_directories_and_fds(env):
     environ = info["environ"]
     home = environ.pop("HOME")
     tmp = environ.pop("TMPDIR")
+    if sys.platform == "darwin":
+        # CoreFoundation sets this one in its own process as it starts (libarrow links it):
+        # "0x<uid>:<encoding>:<region>", not the engine's.
+        cf = environ.pop("__CF_USER_TEXT_ENCODING")
+        assert cf.startswith("0x%X:" % os.getuid()), cf
     assert environ == {
         "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
         "VECLIB_MAXIMUM_THREADS": "1", "NUMEXPR_NUM_THREADS": "1",
@@ -204,8 +205,16 @@ def the_worker_runs_isolated_with_its_own_environment_directories_and_fds(env):
     # interpreter's, not one the runtime passed down.
     exe = os.path.realpath(sys.executable)
     rest = sorted(v for k, v in fds.items() if k > 2 and v != exe)
-    assert len(rest) == 2 and rest[0].startswith("/memfd:komira-udf-cancel") and \
-        rest[1].startswith("socket:"), fds
+    if sys.platform == "darwin":
+        # The cancel word, a file under the runtime's scratch that is unlinked already
+        # (F_GETPATH still names it); the kqueue of the thread that ends the worker with its
+        # zygote, which fstat reports as S_IFIFO; and the worker's socket.
+        assert len(rest) == 3 and os.path.dirname(rest[0]) == env.scratch and \
+            os.path.basename(rest[0]).startswith("cancel-") and not os.path.exists(rest[0]) and \
+            rest[1:] == ["mode:10000", "socket:"], fds
+    else:
+        assert len(rest) == 2 and rest[0].startswith("/memfd:komira-udf-cancel") and \
+            rest[1].startswith("socket:"), fds
 
 
 NOISY = """import sys

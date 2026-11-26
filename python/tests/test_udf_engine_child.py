@@ -4,18 +4,19 @@ the engine's signal handling, and a fork of the engine's process.
 
     test_udf_engine_child.py --lib-dir <dir>
 
-`<dir>/libkomira_udf_python.so` is `//src/udf_python:komira_udf_python`.
+`<dir>/libkomira_udf_python.so` (`libkomira_udf_python.dylib` on macOS) is
+`//src/udf_python:komira_udf_python`.
 
 Each case starts this file again as the engine (`--child <scenario>`), with the test's
 interpreter, `sys.path` and temporary directory, in a process group of its own. The engine
 reports to the test as JSON lines on a pipe and waits on a second pipe for the test's
 `go`; the test watches the processes it did not start (the zygote, the workers) through
-pidfds it opens while they are known to be running. Nothing here measures time.
+exit watches it opens while they are known to be running (`udf_host.ExitWatch`: a pidfd on
+Linux, a kqueue on macOS). Nothing here measures time.
 """
 
 import json
 import os
-import select
 import signal
 import subprocess
 import sys
@@ -56,12 +57,7 @@ def ask(x):
 def probe(x):
     import json
     import tempfile
-    fds = {}
-    for name in os.listdir("/proc/self/fd"):
-        try:
-            fds[name] = os.readlink("/proc/self/fd/" + name)
-        except FileNotFoundError:
-            pass
+    fds = fd_names()
     info = {"environ": dict(os.environ), "fds": fds, "tmp": tempfile.gettempdir(), "cwd": os.listdir(".")}
     with open(os.path.join(WORK, "probe.json"), "w", encoding="utf-8") as f:
         json.dump(info, f)
@@ -72,7 +68,7 @@ def wait_forever(x):
     open(os.path.join(WORK, "started"), "w").close()
     while True:
         time.sleep(0.001)
-"""
+""" + h.FD_NAMES
 
 _BOOT = (
     "import json, runpy, sys, tempfile\n"
@@ -87,18 +83,30 @@ def ints(*values):
     return pa.array(list(values), I64)
 
 
-def wait_for_exit(pidfd):
-    """Block until the process behind `pidfd` has ended; closes the descriptor."""
-    try:
-        poller = select.poll()
-        poller.register(pidfd, select.POLLIN)
-        poller.poll()
-    finally:
-        os.close(pidfd)
-
-
 def proc_masks():
-    """The signals this process ignores and catches, as the kernel reports them."""
+    """The signals this process ignores and catches, as the kernel reports them: the SigIgn
+    and SigCgt lines of /proc/self/status on Linux; on macOS, which has no /proc, the same two
+    masks (bit n-1 for signal n) from the handler sigaction() reports for each signal."""
+    if sys.platform == "darwin":
+        import ctypes
+
+        class Sigaction(ctypes.Structure):  # <sys/signal.h>, struct sigaction
+            _fields_ = [("handler", ctypes.c_void_p), ("mask", ctypes.c_uint32), ("flags", ctypes.c_int)]
+
+        sigaction = ctypes.CDLL(None, use_errno=True).sigaction
+        sigaction.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
+        masks = {"SigIgn": 0, "SigCgt": 0}
+        for sig in range(1, signal.NSIG):
+            if sig in (signal.SIGKILL, signal.SIGSTOP):
+                continue  # never ignored or caught; macOS refuses even to report them (EINVAL)
+            act = Sigaction()
+            if sigaction(sig, None, ctypes.byref(act)) != 0:
+                raise OSError(ctypes.get_errno(), "sigaction(%d)" % sig)
+            if act.handler == 1:  # SIG_IGN
+                masks["SigIgn"] |= 1 << (sig - 1)
+            elif act.handler:  # neither SIG_DFL nor SIG_IGN
+                masks["SigCgt"] |= 1 << (sig - 1)
+        return {k: "%016x" % v for k, v in masks.items()}
     with open("/proc/self/status", encoding="ascii") as f:
         return {k: v.strip() for k, _, v in (line.partition(":") for line in f) if k in ("SigIgn", "SigCgt")}
 
@@ -183,9 +191,9 @@ def engine_signals(e):
     # An unload writes to the control socket without looking first: with the zygote gone,
     # that write meets a closed peer, which must be an error and never a SIGPIPE.
     (zygote,) = e.env.trace.pids("spawn")
-    pidfd = os.pidfd_open(zygote)
+    watch = h.ExitWatch(zygote)
     os.kill(zygote, signal.SIGKILL)
-    wait_for_exit(pidfd)
+    watch.wait()
     e.rt.table.unload(pid.handle)
     e.tell(before=before, after=proc_masks(), calls=calls)
 
@@ -329,10 +337,10 @@ def no_runtime_process_outlives_the_engine(env):
     try:
         got = child.read()
         assert len(got["workers"]) == 2, got
-        pidfds = [os.pidfd_open(p) for p in [got["zygote"]] + got["workers"]]
+        watches = [h.ExitWatch(p) for p in [got["zygote"]] + got["workers"]]
         child.kill()
-        for fd in pidfds:
-            wait_for_exit(fd)
+        for w in watches:
+            w.wait()
     finally:
         child.close()
 
@@ -342,9 +350,9 @@ def a_zygote_reaped_by_another_part_of_the_engine_is_named_with_an_unknown_statu
     try:
         got = child.read()
         (worker,) = got["workers"]
-        pidfd = os.pidfd_open(worker)
+        watch = h.ExitWatch(worker)
         os.kill(got["zygote"], signal.SIGKILL)
-        wait_for_exit(pidfd)
+        watch.wait()
         child.go()
         done = child.read()
         assert done["reaped"] == [got["zygote"]], done
@@ -385,9 +393,9 @@ def a_fork_of_the_engine_cannot_reach_the_runtime_and_leaves_the_parent_working(
             "open_context": {"status": h.ERR_INSTANCE_LOST, "ctx": False, "message": "komira/python: " + forked_why},
         }, got
         assert got["in_parent"] == {"status": h.OK, "message": None, "values": [got["zygote"]]}, got
-        pidfd = os.pidfd_open(got["zygote"])
+        watch = h.ExitWatch(got["zygote"])
         child.kill()
-        wait_for_exit(pidfd)
+        watch.wait()
     finally:
         child.close()
 
@@ -430,6 +438,11 @@ def a_worker_sees_none_of_the_engines_environment_or_descriptors(env):
         environ = info["environ"]
         home = environ.pop("HOME")
         tmp = environ.pop("TMPDIR")
+        if sys.platform == "darwin":
+            # CoreFoundation sets this one in its own process as it starts (libarrow links it):
+            # "0x<uid>:<encoding>:<region>", not the engine's.
+            cf = environ.pop("__CF_USER_TEXT_ENCODING")
+            assert cf.startswith("0x%X:" % os.getuid()), cf
         assert environ == {
             "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
             "VECLIB_MAXIMUM_THREADS": "1", "NUMEXPR_NUM_THREADS": "1",
@@ -439,10 +452,18 @@ def a_worker_sees_none_of_the_engines_environment_or_descriptors(env):
         assert os.path.basename(os.path.dirname(home)).startswith("worker-"), home
         assert info["tmp"] == tmp and info["cwd"] == [], info
         exe = os.path.realpath(sys.executable)
-        # Descriptors 0 to 2 are the worker's own; above them only its cancel word and its socket.
+        # Descriptors 0 to 2 are the worker's own; above them only its cancel word and its socket,
+        # and on macOS the kqueue of the thread that ends the worker with its zygote (fstat
+        # reports a kqueue as S_IFIFO). The cancel word there is an unlinked file under the
+        # runtime's scratch.
         rest = sorted(v for k, v in info["fds"].items() if int(k) > 2 and v != exe)
-        assert len(rest) == 2 and rest[0].startswith("/memfd:komira-udf-cancel") and \
-            rest[1].startswith("socket:"), info["fds"]
+        if sys.platform == "darwin":
+            assert len(rest) == 3 and os.path.basename(rest[0]).startswith("cancel-") and \
+                os.path.basename(os.path.dirname(rest[0])) == "rt" and not os.path.exists(rest[0]) and \
+                rest[1:] == ["mode:10000", "socket:"], info["fds"]
+        else:
+            assert len(rest) == 2 and rest[0].startswith("/memfd:komira-udf-cancel") and \
+                rest[1].startswith("socket:"), info["fds"]
         assert info["fds"]["0"] == "/dev/null", info["fds"]
         assert got["extra_fd_path"] not in info["fds"].values(), info["fds"]
     finally:

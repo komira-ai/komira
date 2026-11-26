@@ -563,6 +563,42 @@ def test_partition_by_renders_keys_directions_and_every_function() raises:
     )
 
 
+def test_partition_by_renders_null_placement_only_where_it_deviates() raises:
+    var fs = List[PartitionExpr]()
+    fs.append(_pexpr(String("r1")))
+    var nf = List[Bool]()
+    nf.append(True)
+    nf.append(False)
+    var head = (
+        String("PartitionBy(partition=[a, b], order=[a ASC NULLS FIRST, b DESC], funcs=[")
+        + String(_pexpr(String("r1")))
+        + String("])\n")
+    )
+    _both(
+        LogicalPlan.partition_by(
+            _keys(), _keys(), _asc_desc(), fs^, _im(), Optional(nf^)
+        ),
+        head,
+    )
+    # A placement equal to the derived one renders exactly as no placement.
+    var derived = List[Bool]()
+    derived.append(False)
+    derived.append(False)
+    var fs2 = List[PartitionExpr]()
+    fs2.append(_pexpr(String("r1")))
+    var plain = (
+        String("PartitionBy(partition=[a, b], order=[a ASC, b DESC], funcs=[")
+        + String(_pexpr(String("r1")))
+        + String("])\n")
+    )
+    _both(
+        LogicalPlan.partition_by(
+            _keys(), _keys(), _asc_desc(), fs2^, _im(), Optional(derived^)
+        ),
+        plain,
+    )
+
+
 def test_partition_topn_function_names_and_rank_column() raises:
     _both(
         LogicalPlan.partition_topn(_keys(), _keys(), _asc_desc(), 1, _im()),

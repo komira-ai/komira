@@ -3,6 +3,18 @@
 # Interface by a consumer written in C
 # =============================================================================
 #
+# Covers: run_sql answers over a Parquet table with NULLs (a projection of
+# INT64, INT32, VARCHAR and DECIMAL(10, 2) columns, ints, strings, NULLs and
+# decimals, count and sums, a filter that keeps no row and so an empty answer)
+# are read back value for value by a consumer written in C
+# (src/tests/helpers/komira_test_arrow_c_consumer,
+# komira_test_arrow_c_consumer) after the context is dropped; the consumer
+# releases the stream before it reads the chunks and calls every release twice;
+# afterwards every buffer is released and each result buffer is held by nothing
+# else. A refusal raises with its step, an outcome with no batch is refused, a
+# selection mask is applied, batches keep their order, and a column the export
+# cannot carry is refused naming it.
+#
 # Each SQL test writes a Parquet table t(k INT64, i INT32, s VARCHAR,
 # d DECIMAL(10, 2)) with NULLs in i, s and d, runs SQL text through `run_sql`,
 # turns the outcome into an `ArrowResult`, drops the `EngineContext`, and then

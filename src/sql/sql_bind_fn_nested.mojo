@@ -4,16 +4,18 @@
 #   float divide / mod, nullif and days_in_month.
 # =============================================================================
 
+from containers.slab import Slab
 from arrow.arrow_types import ArrowType
 from arrow.schema import Schema
 from plan_expr.expr import (
     BIN_DIV, BIN_EQ, BIN_MUL, BIN_SUB, EXPR_ALIAS, EXPR_COL_REF, EXPR_JSON_EXTRACT,
-    EXPR_LITERAL, Expr, MATH_FLOOR, WhenCaseData, parse_json_path,
+    EXPR_LITERAL, EXTRACT_TRUNC_DAY, Expr, MATH_FLOOR, WhenCaseData, parse_json_path,
 )
 from plan_expr.scalar_desugar import (
     days_in_month_of, even_of,
 )
 from plan_expr.scalar_value import ScalarValue
+from plan_expr.temporal_delta import date_diff_of, date_sub_of
 from sql.sql_ast import (
     SX_DATE, SX_STRING, SqlExpr,
 )
@@ -26,7 +28,7 @@ from sql.sql_bind_scope import (
     CteScope, _date_to_days, BindScope,
 )
 from sql.sql_catalog import SqlCatalog
-from sql.sql_fn_table import DSG_FDIV
+from sql.sql_fn_table import DSG_FDIV, sql_date_trunc_unit
 
 
 def _bind_json_extract(
@@ -228,11 +230,11 @@ def _date_sub_days(sx: SqlExpr) raises -> Int64:
     """Constant-fold `date_sub('day', DATE d0, DATE d1)` to `days(d1) -
     days(d0)`.
 
-    A separate function from `_date_diff_days` on purpose: in DuckDB v1.5.3,
-    over 2021-01-31 -> 2021-03-01, `date_diff('month', ...)` = 2 (boundaries
-    crossed) and `date_sub('month', ...)` = 1 (complete periods). They agree
-    only for 'day', the one unit served, so widening either fold to months
-    must be done twice, deliberately.
+    A separate function from `_date_diff_days` on purpose: over 2021-01-31
+    -> 2021-03-01, `date_diff('month', ...)` = 2 (boundaries crossed) and
+    `date_sub('month', ...)` = 1 (complete periods). Over two DATEs they
+    agree for 'day', the one unit folded here; every other call is lowered
+    by `plan_expr.temporal_delta`.
     """
     ref args = sx._call.value().args
     if len(args) != 3:
@@ -242,11 +244,9 @@ def _date_sub_days(sx: SqlExpr) raises -> Int64:
     ref unit = args[0]
     if unit.tag != SX_STRING or unit.text.lower() != "day":
         raise Error(
-            "SQL not supported: only date_sub('day', ...) is supported."
-            " date_sub counts COMPLETE periods and date_diff counts"
-            " boundaries CROSSED — in DuckDB v1.5.3 they differ for every"
-            " unit above 'day' (1 vs 2 over 2021-01-31 -> 2021-03-01), so the"
-            " other units are not the neighbouring function's to answer"
+            "SQL bind error: the bind-time fold of date_sub reads only the"
+            " unit 'day'; date_sub over another unit is lowered by"
+            " plan_expr.temporal_delta (`_bind_date_sub`)"
         )
     ref d0 = args[1]
     ref d1 = args[2]
@@ -275,13 +275,9 @@ def _col_arrow_type_by_name(schema: Schema, name: String) -> ArrowType:
 
 def _bound_expr_is_date32(e: Expr, schema: Schema) -> Bool:
     """True iff the already-bound value Expr `e` produces a DATE32 over
-    `schema`: a date literal, a DATE column, or an alias over either.
-
-    A TIMESTAMP is not admitted, for two reasons: the day lowering subtracts
-    day numbers, and a TIMESTAMP_US value is int64 microseconds (an answer
-    ~8.64e10 times too large); and `date_diff` and `date_sub` disagree on
-    `'day'` once the operands carry a time-of-day, so the lowering they share
-    would answer one function's rule under the other's name."""
+    `schema`: a date literal, a DATE column, or an alias over either. The
+    Arrow type is read, not the DType: a DATE32 and an ordinary int32 column
+    have the same DType."""
     if e.tag == EXPR_LITERAL:
         return e.literal_value().is_date32()
     if e.tag == EXPR_COL_REF:
@@ -291,125 +287,118 @@ def _bound_expr_is_date32(e: Expr, schema: Schema) -> Bool:
     return False
 
 
-def _date_delta_days_over_columns(var a: Expr, var b: Expr) -> Expr:
-    """`b - a` in DAYS, as an INT64 expression, over two DATE32-typed operands.
-
-    An Arrow DATE32 is days-since-epoch stored as an int32, so the day
-    difference is the integer difference:
-
-        CAST(b AS BIGINT) - CAST(a AS BIGINT)
-
-    The target is BIGINT, not INT32: a DATE column may reach the evaluator
-    stamped INT32 (its physical type) or DATE32, and both widen to int64,
-    preserving validity, so a NULL operand gives NULL as in DuckDB. BIGINT is
-    also `date_diff`'s DuckDB return type.
-
-    Shared by `date_diff` and `date_sub`, which is safe only because both
-    callers have established that the unit is `'day'` and that both operands
-    are DATE32: over two DATEs the two functions agree on `'day'`, but over
-    operands carrying a time-of-day they do not (`date_diff` counts boundaries
-    crossed, `date_sub` complete periods), which is why
-    `_bound_expr_is_date32` refuses a TIMESTAMP. Each caller raises its own
-    unit message before reaching here."""
-    var a_i = Expr.cast(a^, DType.int64)
-    var b_i = Expr.cast(b^, DType.int64)
-    return Expr.binary(BIN_SUB, b_i^, a_i^)
+def _bound_expr_is_timestamp_us(e: Expr, schema: Schema) raises -> Bool:
+    """True iff the already-bound value Expr `e` produces a TIMESTAMP in
+    microseconds with no time zone over `schema`: a timestamp literal, such a
+    column, or an alias over either. A TIMESTAMPTZ is not one: its calendar
+    fields are those of the session's time zone, which this lowering does not
+    read. Raises only if the schema cannot rebuild a field it lists."""
+    if e.tag == EXPR_LITERAL:
+        return e.literal_value().is_timestamp()
+    if e.tag == EXPR_COL_REF:
+        var t = e.col_ref_name().lower()
+        for i in range(schema.num_columns()):
+            if schema.field_name(i).lower() == t:
+                var at = schema.field_arrow_type(i)
+                if at != ArrowType.TIMESTAMP and at != ArrowType.TIMESTAMP_US:
+                    return False
+                return schema.field_at(i).timezone().byte_length() == 0
+        return False
+    if e.tag == EXPR_ALIAS:
+        return _bound_expr_is_timestamp_us(e.alias_child_ref(), schema)
+    return False
 
 
-def _bind_date_delta(sx: SqlExpr, fname: String, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:
-    """The column arm of `date_diff('day', a, b)` / `date_sub('day', a, b)`.
+def _date_delta_unit(sx: SqlExpr, fname: String) raises -> UInt8:
+    """The `EXTRACT_TRUNC_*` period of a `date_diff` / `date_sub` call's unit:
+    a constant string DuckDB accepts for both functions with the meaning of
+    one of the ten served periods (the aliases are `date_trunc`'s,
+    `sql_date_trunc_unit`, which the pinned DuckDB maps the same way for these
+    two functions). Raises for a wrong arity, a unit that is not a constant
+    string, and a unit outside the ten (decade, century, millennium, isoyear:
+    DuckDB units this lowering does not serve)."""
+    ref args = sx._call.value().args
+    if len(args) != 3:
+        raise Error(
+            "SQL bind error: " + fname + " expects 3 arguments (unit, start, end)"
+        )
+    ref unit = args[0]
+    if unit.tag != SX_STRING:
+        raise Error(
+            "SQL not supported: " + fname + "(unit, a, b) needs the unit as a"
+            " constant string; a unit read from a column or an expression is"
+            " not served"
+        )
+    var code = sql_date_trunc_unit(unit.text.lower())
+    if not code:
+        raise Error(
+            "SQL not supported: " + fname + " unit '" + unit.text + "' is not"
+            " served; the units are microsecond, millisecond, second, minute,"
+            " hour, day, week, month, quarter and year (and their DuckDB"
+            " aliases)"
+        )
+    return code.value()
 
-    Two DATE literals fold to an INT64 at bind time in the callers; any other
-    operand shape reaches here and lowers to a day subtraction over DATE32
-    values (`_date_delta_days_over_columns`).
 
-    A non-DATE operand is refused by name, not reinterpreted:
-    `date_diff('day', d, <an INT32 column>)` would subtract integers and
-    answer a plausible day count over whatever the column means.
-    `_bound_expr_is_date32` reads the Arrow type, not the DType, under which a
-    DATE32 and an ordinary int32 column are indistinguishable."""
+def _bind_date_delta(sx: SqlExpr, fname: String, unit: UInt8, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:
+    """The column arm of `date_diff` / `date_sub`: both operands DATEs, or
+    both TIMESTAMPs in microseconds with no time zone, lowered by
+    `plan_expr.temporal_delta` (`date_diff_of` counts the boundaries crossed,
+    `date_sub_of` the complete units: two functions, two lowerings).
+
+    Any other operand is refused by name, not reinterpreted: an integer
+    column has no days in it, a DATE beside a TIMESTAMP would need a cast
+    this lowering does not insert, and a TIMESTAMPTZ's fields depend on the
+    session's time zone."""
     ref args = sx._call.value().args
     var a = _bind_scalar(args[1], schema, scope, catalog, cte_scope, prebound)
     var b = _bind_scalar(args[2], schema, scope, catalog, cte_scope, prebound)
-    if not _bound_expr_is_date32(a, schema):
+    var dates = _bound_expr_is_date32(a, schema) and _bound_expr_is_date32(b, schema)
+    var stamps = _bound_expr_is_timestamp_us(a, schema) and _bound_expr_is_timestamp_us(
+        b, schema
+    )
+    if not dates and not stamps:
         raise Error(
-            "SQL not supported: " + fname + "('day', a, b) requires DATE"
-            " operands — argument 2 is not a DATE literal and not a DATE32"
-            " column. THE MISSING PRIMITIVE IS A UNIT-AWARE, PER-FUNCTION"
-            " TEMPORAL DELTA. The lowering here subtracts DAY NUMBERS, and"
-            " it is refused over anything else for two separate reasons: a"
-            " TIMESTAMP is int64 MICROSECONDS, so the subtraction answers a"
-            " number ~8.64e10 times too large, and date_diff and date_sub"
-            " DISAGREE on 'day' itself once the operands carry a"
-            " time-of-day (DuckDB v1.5.3: 247 vs 246 over one pair) — so one"
-            " shared lowering would answer one function's rule under the"
-            " other's name. A bare integer column is refused for a third: it"
-            " has no days in it, and the subtraction would answer a plausible"
-            " day count anyway rather than raising"
+            "SQL not supported: " + fname + "(unit, a, b) needs two DATE or two"
+            " TIMESTAMP operands (a literal, a column or an alias over one);"
+            " got another type, a TIMESTAMP WITH TIME ZONE, or a DATE beside a"
+            " TIMESTAMP (cast one to the other's type)"
         )
-    if not _bound_expr_is_date32(b, schema):
-        raise Error(
-            "SQL not supported: " + fname + "('day', a, b) requires DATE"
-            " operands — argument 3 is not a DATE literal and not a DATE32"
-            " column. THE MISSING PRIMITIVE IS A UNIT-AWARE, PER-FUNCTION"
-            " TEMPORAL DELTA. The lowering here subtracts DAY NUMBERS, and"
-            " it is refused over anything else for two separate reasons: a"
-            " TIMESTAMP is int64 MICROSECONDS, so the subtraction answers a"
-            " number ~8.64e10 times too large, and date_diff and date_sub"
-            " DISAGREE on 'day' itself once the operands carry a"
-            " time-of-day (DuckDB v1.5.3: 247 vs 246 over one pair) — so one"
-            " shared lowering would answer one function's rule under the"
-            " other's name. A bare integer column is refused for a third: it"
-            " has no days in it, and the subtraction would answer a plausible"
-            " day count anyway rather than raising"
-        )
-    return _date_delta_days_over_columns(a^, b^)
+    if fname == "date_diff":
+        return date_diff_of(unit, a, b, dates)
+    return date_sub_of(unit, a, b, dates)
+
+
+def _folds(args: Slab[SqlExpr], unit: UInt8) -> Bool:
+    """Is the call `(<'day'>, DATE literal, DATE literal)`, which the
+    bind-time folds (`_date_diff_days`, `_date_sub_days`) answer?"""
+    return (
+        unit == EXTRACT_TRUNC_DAY and args[0].text.lower() == "day"
+        and args[1].tag == SX_DATE and args[2].tag == SX_DATE
+    )
 
 
 def _bind_date_diff(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:
-    """`date_diff(unit, a, b)`: the fold arm and the column arm, chosen on the
-    operand shape (see `_bind_date_delta`).
-
-    The unit check is here and not shared with `_bind_date_sub`: `date_diff`
-    counts boundaries crossed and `date_sub` counts complete periods (DuckDB
-    v1.5.3 over 2021-01-31 -> 2021-03-01: 2 and 1), so they agree only on
-    `'day'`."""
+    """`date_diff(unit, a, b)`: the `unit` boundaries crossed from `a` to `b`.
+    Two DATE literals with the unit 'day' fold at bind time; everything else
+    is the column arm (`_bind_date_delta`)."""
+    var unit = _date_delta_unit(sx, String("date_diff"))
     ref args = sx._call.value().args
-    if len(args) != 3:
-        raise Error("SQL bind error: date_diff expects 3 arguments (unit, start, end)")
-    ref unit = args[0]
-    if unit.tag != SX_STRING or unit.text.lower() != "day":
-        raise Error(
-            "SQL not supported: only date_diff('day', ...) is supported"
-            " (got unit that is not the constant 'day'). THE MISSING PRIMITIVE"
-            " IS CIVIL-CALENDAR BOUNDARY ARITHMETIC OVER A COLUMN: this"
-            " function counts BOUNDARIES CROSSED, which for month/year is not"
-            " expressible as the int32 day subtraction that serves 'day'"
-        )
-    if args[1].tag == SX_DATE and args[2].tag == SX_DATE:
+    if _folds(args, unit):
         # Both operands constant -> one INT64 literal, folded at bind time.
         return Expr.literal(ScalarValue.from_int64(_date_diff_days(sx)))
-    return _bind_date_delta(sx, String("date_diff"), schema, scope, catalog, cte_scope, prebound)
+    return _bind_date_delta(sx, String("date_diff"), unit, schema, scope, catalog, cte_scope, prebound)
 
 
 def _bind_date_sub(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:
-    """`date_sub(unit, a, b)`: the twin of `_bind_date_diff`, with its own
-    unit check and its own fold (not an alias; see `_date_sub_days`)."""
+    """`date_sub(unit, a, b)`: the complete `unit`s from `a` to `b`, the
+    twin of `_bind_date_diff` with its own lowering (`date_sub_of`; see
+    `_date_sub_days`)."""
+    var unit = _date_delta_unit(sx, String("date_sub"))
     ref args = sx._call.value().args
-    if len(args) != 3:
-        raise Error("SQL bind error: date_sub expects 3 arguments (unit, start, end)")
-    ref unit = args[0]
-    if unit.tag != SX_STRING or unit.text.lower() != "day":
-        raise Error(
-            "SQL not supported: only date_sub('day', ...) is supported."
-            " date_sub counts COMPLETE periods and date_diff counts"
-            " boundaries CROSSED — in DuckDB v1.5.3 they differ for every"
-            " unit above 'day' (1 vs 2 over 2021-01-31 -> 2021-03-01), so the"
-            " other units are not the neighbouring function's to answer"
-        )
-    if args[1].tag == SX_DATE and args[2].tag == SX_DATE:
+    if _folds(args, unit):
         return Expr.literal(ScalarValue.from_int64(_date_sub_days(sx)))
-    return _bind_date_delta(sx, String("date_sub"), schema, scope, catalog, cte_scope, prebound)
+    return _bind_date_delta(sx, String("date_sub"), unit, schema, scope, catalog, cte_scope, prebound)
 
 
 def _bind_even(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:

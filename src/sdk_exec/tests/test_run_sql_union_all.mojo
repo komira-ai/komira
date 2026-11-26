@@ -2,6 +2,18 @@
 # run_sql: UNION ALL over Parquet tables, with DuckDB's type widening
 # =============================================================================
 #
+# Covers: UNION ALL over six small Parquet tables equals DuckDB for the same
+# SQL: INTEGER with BIGINT is BIGINT, INTEGER with FLOAT is FLOAT, BIGINT or
+# FLOAT or a DECIMAL with DOUBLE is DOUBLE, DECIMAL(12,2) with DECIMAL(10,4) is
+# DECIMAL(14,4) and with INTEGER DECIMAL(12,2) (branches widened to DuckDB's
+# common type), values exact and NULLs kept; three branches with a FROM-less
+# one (a literal branch), count(*), sum, aggregates, GROUP BY and WHERE over
+# `FROM (... UNION ALL ...) u`, an empty branch, the first branch's names,
+# LIMIT, integer literal branches (INTEGER, or BIGINT when one needs it); a
+# VARCHAR with an INTEGER (no common type) is refused at bind and an ORDER BY
+# before UNION ALL at parse; and an ORDER BY with no union (the sort sinks'
+# data reaches the builder).
+#
 # Six one-column Parquet tables are written here and registered on a context:
 #
 #   t_i32 (a INTEGER, s VARCHAR)  (1, 'x'), (NULL, 'y'), (3, 'z')
@@ -54,7 +66,7 @@
 #     directions. Catches run_lowered_plan not handing the builder the sort
 #     sinks' data (every ORDER BY was refused at execute).
 #   * test_unions_with_no_common_type_or_misplaced_clauses_are_refused: a
-#     VARCHAR with an INTEGER is refused at bind naming the column; an ORDER BY
+#     VARCHAR with a DOUBLE is refused at bind naming the column; an ORDER BY
 #     before UNION ALL is refused at parse; the context runs the next query.
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -439,7 +451,7 @@ def test_an_order_by_runs_through_run_sql() raises:
 
 def test_unions_with_no_common_type_or_misplaced_clauses_are_refused() raises:
     var ctx = _context()
-    var mixed = run_sql(ctx, "select s from t_i32 union all select a from t_i32")
+    var mixed = run_sql(ctx, "select s from t_i32 union all select d from t_f64")
     assert_true(Bool(mixed.refusal))
     assert_equal(mixed.refusal.value().step, String(STEP_BIND))
     assert_true(

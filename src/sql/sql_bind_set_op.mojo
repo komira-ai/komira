@@ -1,18 +1,31 @@
 # =============================================================================
 # sql/sql_bind_set_op.mojo
-#   Set-operation chains: `<select> UNION ALL | INTERSECT | EXCEPT <select> ...`
-#   bound with DuckDB's precedence, and INTERSECT / EXCEPT bound onto a union,
-#   a grouped aggregation and a filter.
+#   Set-operation chains: `<select> UNION [ALL] | INTERSECT | EXCEPT <select>`
+#   bound with DuckDB's precedence; UNION bound onto a distinct over a union,
+#   INTERSECT / EXCEPT onto a union, a grouped aggregation and a filter.
 # =============================================================================
 #
 # The parser leaves a chain flat: the head SELECT and a linked list of branches
 # in the top-level subquery table, each branch's `kind` the operator joining it
 # to the branches before it. `_bind_set_chain` binds every branch, then folds
-# as DuckDB does: INTERSECT binds tighter than UNION ALL and EXCEPT, and each
-# level folds left to right, so `a UNION ALL b INTERSECT c EXCEPT d` is
+# as DuckDB does: INTERSECT binds tighter than UNION, UNION ALL and EXCEPT, and
+# each level folds left to right, so `a UNION ALL b INTERSECT c EXCEPT d` is
 # `(a UNION ALL (b INTERSECT c)) EXCEPT d`. Adjacent UNION ALL inputs make one
 # `PLAN_UNION` with a child each, and a chain of UNION ALL alone binds exactly
 # as it did before INTERSECT and EXCEPT existed.
+#
+# UNION (bare, or UNION DISTINCT) takes everything to its left as its left
+# input, as EXCEPT does: the run of inputs before it and its right input make
+# one `PLAN_UNION`, under a `PLAN_DISTINCT` over every column (no column list,
+# as SELECT DISTINCT binds). So `a UNION ALL b UNION c` is
+# `Distinct(Union(a, b, c))` and `a UNION b UNION ALL c` is
+# `Union(Distinct(Union(a, b)), c)`: a UNION ALL after a UNION keeps its
+# duplicates. `a UNION b UNION c` is `Distinct(Union(Distinct(Union(a, b)),
+# c))`. The distinct compares whole rows with NULLs equal; every NaN is one key
+# and 0.0 and -0.0 are one key, as in SELECT DISTINCT (lowering's
+# `cut_distinct` groups on every column). Two result columns of one name are
+# refused by name, as for INTERSECT and EXCEPT below: the distinct names its
+# columns.
 #
 # INTERSECT and EXCEPT (the set forms; the parser refuses the ALL forms) bind
 # each pair to plan nodes the engine already runs:
@@ -47,7 +60,7 @@ from plan_expr.agg_expr import AGG_MAX, AGG_MIN, AggExpr
 from plan_expr.expr import BIN_AND, BIN_EQ, Expr
 from plan_expr.scalar_value import ScalarValue
 from plan_ir.logical_plan import AggExprArray, ExprArray, LogicalPlan, PLAN_SCAN
-from sql.sql_ast import SUBQ_INTERSECT, SUBQ_UNION_ALL, SelectStmt
+from sql.sql_ast import SUBQ_INTERSECT, SUBQ_UNION, SUBQ_UNION_ALL, SelectStmt
 from sql.sql_bind_scope import CteScope
 from sql.sql_bind_union import _union_conform_branch, _union_merge_schema
 from sql.sql_binder import _bind_select
@@ -146,16 +159,31 @@ def _bind_set_chain(
             term_kinds.append(kinds[i])
             term_first.append(i + 1)
 
-    # Then UNION ALL and EXCEPT, left to right: a run of UNION ALL terms is one
-    # union node, and an EXCEPT takes everything to its left as its left input.
+    # Then UNION ALL, UNION and EXCEPT, left to right: a run of UNION ALL
+    # terms is one union node; a UNION closes the run with its right input
+    # under a distinct, and an EXCEPT takes everything to its left as its left
+    # input.
     var run = List[OwnedPointer[LogicalPlan]]()
     var run_first = List[Int]()
+    var run_ops = List[String]()
     for j in range(len(terms)):
         if j == 0 or term_kinds[j] == SUBQ_UNION_ALL:
             run.append(OwnedPointer(_take(terms[j][])))
             run_first.append(term_first[j])
+            run_ops.append(String("UNION ALL"))
+        elif term_kinds[j] == SUBQ_UNION:
+            run.append(OwnedPointer(_take(terms[j][])))
+            run_first.append(term_first[j])
+            run_ops.append(String("UNION"))
+            var deduped = _union_distinct_of(run^, run_first, run_ops)
+            run = List[OwnedPointer[LogicalPlan]]()
+            run.append(OwnedPointer(deduped^))
+            run_first = List[Int]()
+            run_first.append(1)
+            run_ops = List[String]()
+            run_ops.append(String("UNION ALL"))
         else:
-            var left = _union_all_of(run^, run_first)
+            var left = _union_all_of(run^, run_first, run_ops)
             var right = _take(terms[j][])
             var pair = _bind_set_pair(
                 term_kinds[j], left^, 1, right^, term_first[j]
@@ -164,27 +192,54 @@ def _bind_set_chain(
             run.append(OwnedPointer(pair^))
             run_first = List[Int]()
             run_first.append(1)
-    return _union_all_of(run^, run_first)
+            run_ops = List[String]()
+            run_ops.append(String("UNION ALL"))
+    return _union_all_of(run^, run_first, run_ops)
 
 
 def _union_all_of(
-    var inputs: List[OwnedPointer[LogicalPlan]], firsts: List[Int]
+    var inputs: List[OwnedPointer[LogicalPlan]],
+    firsts: List[Int],
+    ops: List[String],
 ) raises -> LogicalPlan:
     """The UNION ALL of `inputs` (the first starting at branch 1, input `k` at
-    branch `firsts[k]`): the one input itself, else one `PLAN_UNION` with a
-    child per input, each conformed to the common column types and the first
-    input's names."""
+    branch `firsts[k]`, joined to the inputs before it by the operator
+    `ops[k]`, which errors name): the one input itself, else one `PLAN_UNION`
+    with a child per input, each conformed to the common column types and the
+    first input's names."""
     if len(inputs) == 1:
         return _take(inputs[0][])
     var out_schema = inputs[0][].output_schema.copy()
     for k in range(1, len(inputs)):
         out_schema = _union_merge_schema(
-            out_schema, inputs[k][].output_schema, firsts[k]
+            out_schema, inputs[k][].output_schema, firsts[k], ops[k]
         )
     for k in range(len(inputs)):
         var taken = _take(inputs[k][])
         inputs[k][] = _union_conform_branch(taken^, out_schema, firsts[k])
     return LogicalPlan.union(inputs^, out_schema^)
+
+
+def _union_distinct_of(
+    var inputs: List[OwnedPointer[LogicalPlan]],
+    firsts: List[Int],
+    ops: List[String],
+) raises -> LogicalPlan:
+    """`inputs` (two or more, the last joined by a UNION) as one union under a
+    `PLAN_DISTINCT` over every column (module header)."""
+    var union = _union_all_of(inputs^, firsts, ops)
+    var schema = union.output_schema.copy()
+    for i in range(schema.num_columns()):
+        for j in range(i + 1, schema.num_columns()):
+            if schema.field_name(i) == schema.field_name(j):
+                raise Error(
+                    "SQL not supported: UNION over two columns named `"
+                    + String(schema.field_name(i)) + "`. Rows are compared by"
+                    " column name, so the second would be read as the first."
+                    " Give the two columns distinct aliases."
+                )
+    var all_columns: Optional[List[String]] = None
+    return LogicalPlan.distinct(all_columns^, union^)
 
 
 def _bind_set_pair(

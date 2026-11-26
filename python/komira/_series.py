@@ -9,10 +9,20 @@ nothing. It is used inside its own frame's verbs: `df[s]` filters by it and
 
 - A Series of another frame, or of a frame whose plan `df["x"] = ...` replaced
   after the Series was taken (a stale one), raises `UnsupportedOperation` where
-  it is used: a frame has no index to align two plans by.
+  it is used: a frame has no index to align two plans by. The one exception is
+  `isin(other["k"])`, a semi join of the two frames (komira/_merge.py).
 - Operators build expressions: comparisons, `+ - * /` (true division: the left
   operand of an integer division is cast to float64, as Python divides), unary
-  `-`, and `& | ~` over boolean Series. `isin` takes a list of values.
+  `-`, and `& | ~` over boolean Series. `isin` takes a list of values, or a
+  Series of a frame of the same session (a semi join, which only `df[...]`
+  takes).
+- `astype(dtype)` casts to one Arrow type (komira/_cast.py). `s.str` gives the
+  string methods of a string Series and `s.dt` the date and time methods of a
+  timestamp or date32 Series (komira/_accessors.py); on a Series of another
+  type each raises `AttributeError`, so `hasattr(s, "str")` is False.
+- The window verbs (`cumsum`, `cummin`, `cummax`, `rank`, `rolling`) give a
+  Series that reads windows (komira/_windows.py); operators combine it with
+  others as any Series, carrying the windows along.
 - Numeric operands of an operator or a comparison are widened to one type
   first, as SQL's binder widens them, since the plan door runs the plan as
   given: integers to the wider integer type (a signed and an unsigned one to
@@ -31,8 +41,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import _ops, _refusals
+from . import _accessors, _cast, _ops, _refusals, _windows
 from ._errors import UnsupportedOperation
+from ._windows import Windows, merged
 
 if TYPE_CHECKING:
     from ._frame import DataFrame
@@ -123,34 +134,37 @@ class Series:
     same frame, never by calling the class.
     """
 
-    __slots__ = ("_frame", "_generation", "_node", "_field")
+    __slots__ = ("_frame", "_generation", "_node", "_field", "_windows")
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         raise TypeError('a komira Series is taken from a frame: df["column"]')
 
     @classmethod
-    def _of(cls, frame: DataFrame, node: _ops.Node) -> Series:
-        """The Series of `node` over the columns of `frame` as it is now; the
-        field is derived here, so a type the engine would refuse fails now."""
+    def _of(cls, frame: DataFrame, node: _ops.Node, windows: Windows = ()) -> Series:
+        """The Series of `node` over the columns of `frame` as it is now, and
+        the windows `windows` it reads by their placeholders
+        (komira/_windows.py); the field is derived here, so a type the
+        engine would refuse fails now."""
         out = object.__new__(cls)
         object.__setattr__(out, "_frame", frame)
         object.__setattr__(out, "_generation", frame._generation)
         object.__setattr__(out, "_node", node)
-        object.__setattr__(out, "_field", frame._field_of(node))
+        object.__setattr__(out, "_windows", windows)
+        object.__setattr__(out, "_field", frame._field_of(node, windows))
         return out
 
     # ---- binding --------------------------------------------------------
 
-    def _bound_node(self, frame: DataFrame) -> _ops.Node:
-        """The node, for a verb of `frame`: refused unless this Series is of
-        that frame, as the frame is now."""
+    def _bound(self, frame: DataFrame) -> tuple[_ops.Node, Windows]:
+        """The node and its windows, for a verb of `frame`: refused unless
+        this Series is of that frame, as the frame is now."""
         if self._frame is not frame:
             raise UnsupportedOperation(
                 "this Series belongs to another frame, and a komira frame has no index to align two frames by: "
                 'take the column from the frame you use it with, or pass a function, as in assign(name=lambda d: d["column"])'
             )
         self._check_current()
-        return self._node
+        return self._node, self._windows
 
     def _check_current(self) -> None:
         if self._generation != self._frame._generation:
@@ -159,20 +173,38 @@ class Series:
                 "take it from the frame again"
             )
 
-    def _derive(self, node: _ops.Node) -> Series:
-        return Series._of(self._frame, node)
+    def _derive(self, node: _ops.Node, windows: Windows = ()) -> Series:
+        """A Series of this one's frame: `node`, reading this Series' windows
+        and `windows`."""
+        return Series._of(self._frame, node, merged(self._windows, windows))
 
-    def _other(self, other: object) -> _ops.Node:
-        """The node of the right-hand side of an operator: a Series of the same
-        frame, or a literal."""
+    def _windowed(self, node: _ops.Node, windows: Windows) -> Series:
+        """The Series of a window verb of this one: `node` over the frame,
+        reading `windows` (and not this Series' own expression)."""
+        self._check_current()
+        return Series._of(self._frame, node, windows)
+
+    def _other(self, other: object) -> tuple[_ops.Node, Windows]:
+        """The node and windows of the right-hand side of an operator: a
+        Series of the same frame, or a literal."""
         self._check_current()
         if isinstance(other, Series):
-            return other._bound_node(self._frame)
-        return _literal(other, "a komira Series")
+            return other._bound(self._frame)
+        return _literal(other, "a komira Series"), ()
 
     @property
     def _type(self) -> str:
         return self._frame._type_name(self._field)
+
+    def _column(self, verb: str) -> str:
+        """The name of this Series' column, for a window verb of one column."""
+        self._check_current()
+        if self._windows or not isinstance(self._node, _ops.ColRef):
+            raise UnsupportedOperation(
+                f"{verb} takes a column of the frame, and this Series is an expression: "
+                'assign it as a column first, as df.assign(x=...), then take df["x"]'
+            )
+        return self._node.name
 
     def _predicate(self) -> _ops.Node:
         return _predicate_of(self)
@@ -186,15 +218,51 @@ class Series:
         self._check_current()
         return self._type
 
+    def astype(self, dtype: object, copy: bool | None = None, errors: str = "raise") -> Series:
+        """The Series cast to `dtype` (komira/_cast.py): a name, a pandas
+        spelling, a builtin or a pyarrow type of one of the Arrow types it
+        lists. A value that does not convert is the engine's error when the
+        frame runs. A Series that has the type already is returned as an
+        equal one. `copy` changes nothing, and `errors="ignore"` is refused."""
+        self._check_current()
+        _cast.check_astype_args(copy, errors, "astype")
+        node = _cast.cast_node(self._node, self._type, dtype, "astype")
+        return self._derive(self._node if node is None else node)
+
+    @property
+    def str(self) -> _accessors.StringMethods:
+        """The string methods of a string Series (komira/_accessors.py);
+        `AttributeError` for a Series of another type."""
+        self._check_current()
+        if not _accessors.is_string(self._type):
+            raise AttributeError(_accessors.accessor_message("str", self._type), name="str", obj=self)
+        return _accessors.StringMethods._of(self)
+
+    @property
+    def dt(self) -> _accessors.DatetimeMethods:
+        """The date and time methods of a timestamp or date32 Series
+        (komira/_accessors.py); `AttributeError` for a Series of another type."""
+        self._check_current()
+        if not _accessors.is_datetimelike(self._type):
+            raise AttributeError(_accessors.accessor_message("dt", self._type), name="dt", obj=self)
+        return _accessors.DatetimeMethods._of(self)
+
     def isin(self, values: object) -> Series:
         """Whether each value equals one of `values`, a list or tuple of at
         most 64 literals, as the OR of one comparison per value (each widened
-        as a comparison is); an empty list is false everywhere."""
+        as a comparison is); an empty list is false everywhere.
+
+        `values` may instead be a Series of a frame of the same session (this
+        frame or another): `df[df["k"].isin(other["k"])]` is then the rows of
+        `df` whose `k` equals a value of `other["k"]`, a semi join, and
+        `df[~df["k"].isin(other["k"])]` the other rows, an anti join (rules
+        section 8, ruling 16). That form is a condition of `df[...]` and
+        nothing else: it is not combined with `&` or `|`, assigned or
+        compared. A missing key equals nothing, so `isin` leaves out a row
+        whose key is missing and `~isin` keeps it (ruling 7)."""
         self._check_current()
         if isinstance(values, Series):
-            raise UnsupportedOperation(
-                "isin() with a Series is a semi join, which this release does not build: pass a list of values"
-            )
+            return _Membership._new(self, values)
         if not isinstance(values, (list, tuple)):
             raise TypeError(f"isin() takes a list or tuple of values, not a {type(values).__name__}")
         if len(values) > _ops.IN_LIST_MAX:
@@ -202,9 +270,87 @@ class Series:
                 f"isin() takes at most {_ops.IN_LIST_MAX} values, and was given {len(values)}"
             )
         tests = tuple(
-            _ops.Compare("eq", *self._widened(self._node, _literal(v, "isin()"))) for v in values
+            _ops.Compare("eq", *self._widened(self._node, _literal(v, "isin()"), self._windows)) for v in values
         )
         return self._derive(_ops.or_all(tests) if tests else _ops.Lit(False))
+
+    # ---- windows (komira/_windows.py) -----------------------------------
+
+    def cumsum(self, axis: object = None, skipna: bool = True) -> Series:
+        """The running sum of the column in the frame's sort order: each
+        row's value is the sum of the values from the first row to it. The
+        frame must be sorted (`sort_values`); a missing value stays missing."""
+        _check_axis(axis, "cumsum")
+        return self._cumulative("sum", skipna)
+
+    def cummin(self, axis: object = None, skipna: bool = True) -> Series:
+        """The running least value of the column in the frame's sort order."""
+        _check_axis(axis, "cummin")
+        return self._cumulative("min", skipna)
+
+    def cummax(self, axis: object = None, skipna: bool = True) -> Series:
+        """The running greatest value of the column in the frame's sort order."""
+        _check_axis(axis, "cummax")
+        return self._cumulative("max", skipna)
+
+    def _cumulative(self, how: str, skipna: object) -> Series:
+        built = _windows.cumulative(self._frame, self._column(f"cum{how}()"), (), False, how, skipna)
+        return self._windowed(built.node, built.windows)
+
+    def rank(
+        self,
+        axis: object = 0,
+        method: str = "average",
+        numeric_only: bool = False,
+        na_option: str = "keep",
+        ascending: bool = True,
+        pct: bool = False,
+    ) -> Series:
+        """The rank of each value among the column's values, as float64:
+        `method="min"` gives tied values the lowest rank of their run,
+        `method="dense"` numbers the distinct values 1, 2, ...; pandas'
+        default `method="average"` is refused (no window function computes
+        it). A missing value has a missing rank (`na_option="keep"`), or
+        ranks after every value (`"bottom"`) or before every value
+        (`"top"`)."""
+        _check_axis(axis, "rank")
+        if numeric_only is not False:
+            raise UnsupportedOperation("rank(numeric_only=True) is for a frame's columns; a Series ranks its own values")
+        column = self._column("rank()")
+        built = _windows.rank(self._frame, column, (), False, method, ascending, na_option, pct)
+        return self._windowed(built.node, built.windows)
+
+    def rolling(
+        self,
+        window: int,
+        min_periods: int | None = None,
+        center: bool = False,
+        win_type: object = None,
+        on: object = None,
+        closed: object = None,
+        step: object = None,
+        method: str = "single",
+    ) -> _windows.Rolling:
+        """The windows of `window` rows, each row and the ones before it in
+        the frame's sort order, for `sum()`, `mean()`, `min()` and `max()`;
+        a row's answer is missing when fewer than `min_periods` (by default
+        `window`) of its window's rows hold a value."""
+        column = self._column("rolling()")
+        if center is not False:
+            raise UnsupportedOperation(
+                "rolling(center=True) centres each window on its row, which this release does not build: "
+                "use center=False, a window of the row and the ones before it"
+            )
+        for name, value, default in (
+            ("win_type", win_type, None),
+            ("on", on, None),
+            ("closed", closed, None),
+            ("step", step, None),
+            ("method", method, "single"),
+        ):
+            if value != default:
+                raise UnsupportedOperation(f"rolling({name}={value!r}) is not supported: leave {name} at its default")
+        return _windows.Rolling._of(self, column, window, min_periods)
 
     def __repr__(self) -> str:
         if self._generation != self._frame._generation:
@@ -213,10 +359,12 @@ class Series:
 
     # ---- comparisons ----------------------------------------------------
 
-    def _widened(self, left: _ops.Node, right: _ops.Node) -> tuple[_ops.Node, _ops.Node]:
+    def _widened(
+        self, left: _ops.Node, right: _ops.Node, windows: Windows
+    ) -> tuple[_ops.Node, _ops.Node]:
         """`left` and `right`, each cast to their common numeric type when
-        they differ (`_common_type`)."""
-        lt, rt = self._type_of(left), self._type_of(right)
+        they differ (`_common_type`); they read the windows `windows`."""
+        lt, rt = self._type_of(left, windows), self._type_of(right, windows)
         if _int_literal(left) and rt in _INTEGERS and _fits(left.value, rt):
             return (left if lt == rt else _ops.Cast(left, rt)), right
         if _int_literal(right) and lt in _INTEGERS and _fits(right.value, lt):
@@ -229,12 +377,14 @@ class Series:
             right if rt == target else _ops.Cast(right, target),
         )
 
-    def _type_of(self, node: _ops.Node) -> str:
-        return self._frame._type_name(self._frame._field_of(node))
+    def _type_of(self, node: _ops.Node, windows: Windows) -> str:
+        return self._frame._type_name(self._frame._field_of(node, windows))
 
     def _compare(self, op: str, other: object) -> Series:
-        left, right = self._widened(self._node, self._other(other))
-        return self._derive(_ops.Compare(op, left, right))
+        right, theirs = self._other(other)
+        windows = merged(self._windows, theirs)
+        left, right = self._widened(self._node, right, windows)
+        return self._derive(_ops.Compare(op, left, right), theirs)
 
     def __eq__(self, other: object) -> Series:  # type: ignore[override]
         return self._compare("eq", other)
@@ -259,22 +409,23 @@ class Series:
     # ---- arithmetic -----------------------------------------------------
 
     def _arith(self, op: str, other: object, reflected: bool = False) -> Series:
-        right = self._other(other)
+        right, theirs = self._other(other)
+        windows = merged(self._windows, theirs)
         left = self._node
         if reflected:
             left, right = right, left
-        if op == "div" and self._type_of(left) in _INTEGERS and self._type_of(right) in _INTEGERS:
+        if op == "div" and self._type_of(left, windows) in _INTEGERS and self._type_of(right, windows) in _INTEGERS:
             left = _ops.Cast(left, "float64")
-        wide_left, wide_right = self._widened(left, right)
-        common = self._type_of(wide_left)
+        wide_left, wide_right = self._widened(left, right, windows)
+        common = self._type_of(wide_left, windows)
         wide = _COMPUTED_IN.get(common)
         if wide is None:
-            return self._derive(_ops.Arith(op, wide_left, wide_right))
+            return self._derive(_ops.Arith(op, wide_left, wide_right), theirs)
         # The engine's arithmetic runs on int64 and float64: over a narrower
         # common type each operand is cast there once and the answer cast
         # back, so the column has the type SQL gives it.
         inner = _ops.Arith(op, _computed(left, wide), _computed(right, wide))
-        return self._derive(_ops.Cast(inner, common))
+        return self._derive(_ops.Cast(inner, common), theirs)
 
     def __add__(self, other: object) -> Series:
         return self._arith("add", other)
@@ -308,8 +459,9 @@ class Series:
 
     def _logic(self, op: str, other: object, reflected: bool = False) -> Series:
         mine = self._predicate()
+        windows: Windows = ()
         if isinstance(other, Series):
-            other._bound_node(self._frame)
+            _, windows = other._bound(self._frame)
             theirs = _predicate_of(other)
         elif isinstance(other, bool):
             theirs = _ops.Lit(other)
@@ -318,7 +470,7 @@ class Series:
                 f"& and | combine boolean Series (or True and False), not a {type(other).__name__}"
             )
         left, right = (theirs, mine) if reflected else (mine, theirs)
-        return self._derive(_ops.BoolOp(op, left, right))
+        return self._derive(_ops.BoolOp(op, left, right), windows)
 
     def __and__(self, other: object) -> Series:
         return self._logic("and", other)
@@ -355,6 +507,10 @@ class Series:
     # ---- attributes never fall through ----------------------------------
 
     def __getattr__(self, name: str) -> object:
+        # Python calls this after the `str` or `dt` property raised its
+        # AttributeError: the message is the accessor's, not "no attribute".
+        if name in ("str", "dt"):
+            raise AttributeError(_accessors.accessor_message(name, self._type), name=name, obj=self)
         message = None if name.startswith("_") else _refusals.refused(_refusals.SERIES, name)
         if message is None:
             message = f"'Series' object has no attribute '{name}'"
@@ -395,9 +551,80 @@ def _literal(value: object, what: str) -> _ops.Lit:
         ) from None
 
 
-def operand(frame: DataFrame, value: object, verb: str) -> _ops.Node:
-    """The node of a value given to a verb of `frame`: a Series of that frame,
-    or a literal."""
+def operand(frame: DataFrame, value: object, verb: str) -> tuple[_ops.Node, Windows]:
+    """The node of a value given to a verb of `frame`, and the windows it
+    reads: a Series of that frame, or a literal."""
     if isinstance(value, Series):
-        return value._bound_node(frame)
-    return _literal(value, verb)
+        return value._bound(frame)
+    return _literal(value, verb), ()
+
+
+def _check_axis(axis: object, verb: str) -> None:
+    if axis not in (None, 0, "index") or isinstance(axis, bool):
+        raise UnsupportedOperation(f"{verb}(axis={axis!r}) runs along a row, and a Series has one column: use axis=0")
+
+
+_MEMBERSHIP = (
+    "isin() with another Series is a semi join, which is a condition of df[...] and nothing else: "
+    'filter with it alone, as df[df["k"].isin(other["k"])], and filter that frame by the other conditions'
+)
+
+
+class _Membership(Series):
+    """`s.isin(t)` for a Series `t`: whether each value of the column `s` is a
+    value of `t`, a semi join of `s`'s frame with `t`'s (an anti join when
+    negated by `~`), which only `df[...]` takes (ruling 16)."""
+
+    __slots__ = ("_values", "_negated")
+
+    @classmethod
+    def _new(cls, series: Series, values: Series) -> _Membership:
+        frame = series._frame
+        column = series._column("isin() with a Series")
+        if isinstance(values, _Membership):
+            raise UnsupportedOperation(_MEMBERSHIP)
+        values._check_current()
+        if values._windows:
+            raise UnsupportedOperation(
+                "isin() with a Series of windows is not supported: assign the windows as a column of their frame "
+                "first, and pass that column"
+            )
+        if values._frame._session is not frame._session:
+            raise UnsupportedOperation(
+                "isin() with a Series of a frame on another session: frames of two sessions never meet; "
+                "read both frames on one session"
+            )
+        out = object.__new__(cls)
+        object.__setattr__(out, "_frame", frame)
+        object.__setattr__(out, "_generation", frame._generation)
+        object.__setattr__(out, "_node", _ops.ColRef(column))
+        object.__setattr__(out, "_windows", ())
+        object.__setattr__(out, "_field", frame._field_of(_ops.Lit(True)))
+        object.__setattr__(out, "_values", values)
+        object.__setattr__(out, "_negated", False)
+        return out
+
+    def _join(self, frame: DataFrame) -> tuple[str, str, Series]:
+        """For `frame[self]`: the join kind, the key column of `frame` and the
+        Series of values; refused unless this is of that frame, as it is now."""
+        Series._bound(self, frame)
+        self._values._check_current()
+        return ("anti" if self._negated else "semi"), self._node.name, self._values
+
+    def __invert__(self) -> Series:
+        self._check_current()
+        out = object.__new__(_Membership)
+        for name in ("_frame", "_generation", "_node", "_windows", "_field", "_values"):
+            object.__setattr__(out, name, getattr(self, name))
+        object.__setattr__(out, "_negated", not self._negated)
+        return out
+
+    def __repr__(self) -> str:
+        what = "not in" if self._negated else "in"
+        return f"<komira.Series {self._node.name} {what} another Series' values>"
+
+    def _refuse(self, *args: object, **kwargs: object):
+        raise UnsupportedOperation(_MEMBERSHIP)
+
+    _bound = _predicate = _compare = _arith = _refuse
+    __neg__ = isin = astype = cumsum = cummin = cummax = rank = rolling = _refuse

@@ -1,42 +1,66 @@
 # The quickstart
 
 `quickstart.py` is the smallest program that uses the published `komira`
-package: it prints the installed version and the engine's C ABI version,
-opens a session, registers `readings.parquet` as the table `readings`, runs
-`SELECT 1 AS n` and an aggregate over the table (its row count and the sum of
-`value`, 5 and 152.5) and prints each answer's rows through pyarrow, and
-closes the session. It runs from this directory.
+package the way a new user does, and `quickstart.expected` is what it prints.
+It needs no file beside it and runs in an empty directory:
 
-- The user test of the wheel runs it on every push to main that changes code.
-  The job `wheel-user-test` of `.github/workflows/pypi.yml` (before any
-  upload) `pip install`s the wheel file the build made into an
-  empty virtual environment on a fresh runner, once per supported Python
-  (`python/pythons.bzl`), and runs `quickstart.py` there as below.
-- The index smoke runs it. The jobs `testpypi-smoke` (every push to main
-  that changes code) and `pypi-smoke` (the daily promotion) of
-  `.github/workflows/pypi.yml` `pip install` the published wheel into an empty
-  virtual environment, run `quickstart.py` there with `readings.parquet` beside
-  it, and compare what it prints with `quickstart.expected` exactly, after
-  replacing `<version>` with the installed version and `<abi_version>` with the
-  ABI version of `src/so/abi/komira.tsv` (`1.9` is `1009`).
-- The "What works" block of [the package README](../README.md) is the same
-  text as `quickstart.py`, byte for byte. The test
-  `//python/smoke:readme_shows_quickstart` fails when the two differ.
+- it prints the installed version and the engine's C ABI version;
+- it writes `weather.parquet` with pyarrow (six rows: `city`, `temp` as
+  INT64 and `rain` as DOUBLE), opens a session and registers the file as the
+  table `weather`;
+- it runs an aggregate (6 days, 9.5 of rain) and reads it as rows;
+- it runs a GROUP BY with an aggregate and an ORDER BY (per city: the number
+  of days, the mean and the highest temperature), reads it as a pyarrow
+  Table and prints its schema and each row;
+- it reads a filtered, ordered query with `to_reader()` and through the
+  Arrow PyCapsule interface (`pyarrow.table(result)`);
+- it makes two mistakes and prints each `komira.KomiraError`: a missing file
+  (`komira.BindError`), whose message names the file by its absolute path,
+  and a SQL syntax error (`komira.ParseError`), whose message names the line
+  and column;
+- it closes the session.
+
+Every value it prints can be checked by eye against the six rows it wrote.
+In `quickstart.expected`, `<version>` stands for the installed version,
+`<abi_version>` for the ABI version of `src/so/abi/komira.tsv` (`1.9` is
+`1009`) and `<cwd>` for the real path of the directory the program ran in.
+
+Where it runs, each time compared with `quickstart.expected` exactly, every
+line, with those three filled in:
+
+- In the pull request check. `//python:wheel_install_test` (and its
+  `_py311`, `_py312` and `_py314` siblings) installs the wheel into an empty
+  environment and `python/tests/test_installed.py` runs the program there,
+  from an empty directory.
+- In the user test of the wheel, on every push to main that changes code. The
+  job `wheel-user-test` of `.github/workflows/pypi.yml` (before any upload)
+  `pip install`s the wheel file the build made into an empty virtual
+  environment on a fresh runner, once per supported Python
+  (`python/pythons.bzl`), and runs the program with `python -I` in a
+  directory that holds only it.
+- In the index smoke. The jobs `testpypi-smoke` (every push to main that
+  changes code) and `pypi-smoke` (the daily promotion) of
+  `.github/workflows/pypi.yml` do the same with the wheel `pip` installs from
+  the index, and its `-macos-arm64` jobs do it for the macOS wheel.
+
+The docs show the same text:
+
+- The "What works" section of [the package README](../README.md), which is
+  also the package's description on PyPI, shows `quickstart.py` byte for
+  byte and what it prints: `quickstart.expected` with the version of the
+  newest release section in [the changelog](../CHANGELOG.md) and the ABI
+  version filled in, and `<cwd>` as written. The test
+  `//python/smoke:readme_shows_quickstart` fails when either block differs,
+  and the install test holds the wheel's description, the README followed by
+  the assembled changelog, to `//python:changelog[description]` byte for
+  byte.
 - The install page, [docs/install.md](../../docs/install.md), shows the same
-  program and what it prints: `quickstart.expected` with the version of the
-  newest release in [the changelog](../CHANGELOG.md) and the ABI version
-  filled in. The test `//python/smoke:install_page_shows_quickstart` fails
-  when either block differs.
-- `readings.parquet` is a byte copy of
-  [`pyarrow_gzip_plain.parquet`](../../src/parquet_codec/tests/fixtures/parquet/pyarrow_gzip_plain.parquet),
-  written by
-  [`gen_pyarrow_fixtures.py`](../../src/parquet_codec/tests/fixtures/parquet/gen_pyarrow_fixtures.py).
-  It holds five rows of two columns: `id` (INT64, 1 to 5) and `value`
-  (DOUBLE, 10.5 to 50.5).
+  two blocks. The test `//python/smoke:install_page_shows_quickstart` fails
+  when either differs.
 
 A change that lands a capability, for example the pandas terminal of a
-result, extends `quickstart.py`, the README block, the install page's two
-blocks and `quickstart.expected` in the same pull request.
+result, extends `quickstart.py`, `quickstart.expected`, the README's two
+blocks and the install page's two blocks in the same pull request.
 
 # The analysis job
 

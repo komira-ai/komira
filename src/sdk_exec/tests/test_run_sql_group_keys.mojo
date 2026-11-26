@@ -2,6 +2,15 @@
 # run_sql: GROUP BY one DATE32, BOOL or DECIMAL column answers like DuckDB
 # =============================================================================
 #
+# Covers: run_sql over a Parquet table of DATE32, BOOL, DECIMAL(12, 2),
+# DECIMAL(30, 4) and INT64 columns in six row groups: GROUP BY one DATE32, BOOL
+# or DECIMAL column equals an oracle computed in the test (the NULL key is one
+# group; count(*), count(v) and sum(v) per group; the key keeps its type,
+# precision and scale; decimal keys past INT64 exact); min and max of dates and
+# the sum of decimals run under a BOOL key; a WHERE before the grouping keeps
+# only the passing rows; an all-NULL key is one group; `group by d, b` (a key
+# of a DATE32 and a BOOL column) groups by the pair and equals the oracle too.
+#
 # Each test writes a Parquet table t(d DATE32, b BOOL, m DECIMAL(12, 2),
 # w DECIMAL(30, 4), v INT64) of 203 rows in row groups of 37 (six row groups,
 # so several morsels and several workers' partial tables), runs SQL text

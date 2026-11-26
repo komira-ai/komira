@@ -1,6 +1,7 @@
 //! The cases of the install step (install.zig) with a command runner in memory: the commands it runs, in order
 //! and exactly, for each index and for a dist directory, how each failing step is reported, that only the install of komira is tried
-//! again, and that the example's output is held to the expected file with the version and the ABI version put in.
+//! again, and that the example's output is held to the expected file with the version, the ABI version and the
+//! real path of the run directory put in.
 const std = @import("std");
 const lib = @import("pypi_smoke_lib");
 const h = @import("testing.zig");
@@ -12,7 +13,7 @@ const FLAGS = " install --no-cache-dir --only-binary=:all:";
 const PROBE = "import importlib.util as u; s = u.find_spec('modular'); print(list(s.submodule_search_locations or [s.origin]) if s else 'none')";
 const EXPECTED = "0.1.7\n1001\nregistered readings\nTrue\n";
 
-/// The scratch directory a case runs in: the example, its data, the expected file and the ABI table.
+/// The scratch directory a case runs in: the example, the expected file and the ABI table.
 const Scene = struct {
     tmp: t.TmpDir,
     work: []const u8,
@@ -27,18 +28,14 @@ const Scene = struct {
         s.tmp = t.tmpDir(.{});
         try s.tmp.dir.makePath("in");
         try s.tmp.dir.writeFile(.{ .sub_path = "in/quickstart.py", .data = "print('x')\n" });
-        try s.tmp.dir.writeFile(.{ .sub_path = "in/readings.parquet", .data = "PAR1" });
         try s.tmp.dir.writeFile(.{ .sub_path = "in/quickstart.expected", .data = "<version>\n<abi_version>\nregistered readings\nTrue\n" });
         try s.tmp.dir.writeFile(.{ .sub_path = "in/komira.tsv", .data = "version\t1.1\n# the rest of the table\n" });
         s.work = try h.path(a, &s.tmp, "work");
-        const data = try a.alloc([]const u8, 1);
-        data[0] = try h.path(a, &s.tmp, "in/readings.parquet");
         s.opts = .{
             .source = source,
             .python = "/py/python3.13",
             .example = try h.path(a, &s.tmp, "in/quickstart.py"),
             .expect = try h.path(a, &s.tmp, "in/quickstart.expected"),
-            .data = data,
             .abi_table = try h.path(a, &s.tmp, "in/komira.tsv"),
             .work = s.work,
             .attempts = 3,
@@ -203,7 +200,7 @@ test "dist: a wheel that does not install is refused with pip's stderr, and the 
     try t.expectEqual(@as(usize, 2), fake.calls.items.len);
 }
 
-test "the example and its data are copied into the run directory under their base names" {
+test "the example alone is copied into the run directory under its base name" {
     var ar = std.heap.ArenaAllocator.init(t.allocator);
     defer ar.deinit();
     const a = ar.allocator();
@@ -214,7 +211,13 @@ test "the example and its data are copied into the run directory under their bas
     var why: []const u8 = "";
     try runWith(a, &why, &fake, s, .{}, &log.writer);
     try t.expectEqualStrings("print('x')\n", try h.readAll(a, &s.tmp, "work/run/quickstart.py"));
-    try t.expectEqualStrings("PAR1", try h.readAll(a, &s.tmp, "work/run/readings.parquet"));
+    try s.tmp.dir.writeFile(.{ .sub_path = "in/readings.parquet", .data = "PAR1" });
+    var seen = try s.tmp.dir.openDir("work/run", .{ .iterate = true });
+    defer seen.close();
+    var it = seen.iterate();
+    var count: usize = 0;
+    while (try it.next()) |_| count += 1;
+    try t.expectEqual(@as(usize, 1), count);
 }
 
 test "a virtual environment that cannot be made is refused naming the step, the command, the status and the stderr" {
@@ -417,11 +420,11 @@ test "a malformed ABI table stops the install before any command runs" {
     try t.expectEqual(@as(usize, 0), fake.calls.items.len);
 }
 
-test "the expected text has the version and the ABI version put in" {
+test "the expected text has the version, the ABI version and the directory put in" {
     var ar = std.heap.ArenaAllocator.init(t.allocator);
     defer ar.deinit();
     const a = ar.allocator();
-    try t.expectEqualStrings("v 0.1.7 abi 1001 0.1.7\n", try lib.install.expectedText(a, "v <version> abi <abi_version> <version>\n", "0.1.7", 1001));
+    try t.expectEqualStrings("v 0.1.7 abi 1001 0.1.7 in /r/run /r/run\n", try lib.install.expectedText(a, "v <version> abi <abi_version> <version> in <cwd> <cwd>\n", "0.1.7", 1001, "/r/run"));
 }
 
 test "a work directory that is not empty is refused and nothing runs" {
@@ -440,41 +443,50 @@ test "a work directory that is not empty is refused and nothing runs" {
     try t.expectEqual(@as(usize, 0), fake.calls.items.len);
 }
 
-test "two files to copy with one base name are refused before any command runs" {
+test "an example that does not exist is refused naming the copy" {
     var ar = std.heap.ArenaAllocator.init(t.allocator);
     defer ar.deinit();
     const a = ar.allocator();
     const s = try Scene.init(a, lib.common.testpypi);
     defer s.tmp.cleanup();
-    try s.tmp.dir.makePath("more");
-    try s.tmp.dir.writeFile(.{ .sub_path = "more/readings.parquet", .data = "other" });
-    const both = try a.alloc([]const u8, 2);
-    both[0] = s.opts.data[0];
-    both[1] = try h.path(a, &s.tmp, "more/readings.parquet");
-    s.opts.data = both;
+    const missing = try h.path(a, &s.tmp, "in/absent.py");
+    s.opts.example = missing;
     var fake = s.runner(a, &.{});
     var log = h.sink(a);
     var why: []const u8 = "";
     try t.expectError(error.Refused, runWith(a, &why, &fake, s, .{}, &log.writer));
-    try t.expectEqualStrings("two files to copy are named readings.parquet", why);
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, "cannot copy {s} to {s}/run/absent.py: FileNotFound", .{ missing, s.work }), why);
     try t.expectEqual(@as(usize, 0), fake.calls.items.len);
 }
 
-test "a data file that does not exist is refused naming it" {
+test "an expected file holding <cwd> is compared with the real path of the run directory" {
     var ar = std.heap.ArenaAllocator.init(t.allocator);
     defer ar.deinit();
     const a = ar.allocator();
     const s = try Scene.init(a, lib.common.testpypi);
     defer s.tmp.cleanup();
-    const missing = try h.path(a, &s.tmp, "in/absent.parquet");
-    const only = try a.alloc([]const u8, 1);
-    only[0] = missing;
-    s.opts.data = only;
+    try s.tmp.dir.writeFile(.{ .sub_path = "in/quickstart.expected", .data = "<version>\nno such file: <cwd>/missing.parquet\n" });
     var fake = s.runner(a, &.{});
+    fake.example_output = try std.fmt.allocPrint(a, "0.1.7\nno such file: {s}/run/missing.parquet\n", .{s.work});
+    var log = h.sink(a);
+    var why: []const u8 = "";
+    try runWith(a, &why, &fake, s, .{}, &log.writer);
+    try t.expectEqualStrings("", why);
+}
+
+test "an example that names another directory than the run directory is refused showing both texts" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const s = try Scene.init(a, lib.common.testpypi);
+    defer s.tmp.cleanup();
+    try s.tmp.dir.writeFile(.{ .sub_path = "in/quickstart.expected", .data = "no such file: <cwd>/missing.parquet\n" });
+    var fake = s.runner(a, &.{});
+    fake.example_output = "no such file: /elsewhere/missing.parquet\n";
     var log = h.sink(a);
     var why: []const u8 = "";
     try t.expectError(error.Refused, runWith(a, &why, &fake, s, .{}, &log.writer));
-    try t.expectEqualStrings(try std.fmt.allocPrint(a, "cannot copy {s} to {s}/run/absent.parquet: FileNotFound", .{ missing, s.work }), why);
+    try t.expectEqualStrings(try std.fmt.allocPrint(a, "quickstart.py printed other text than {s} says\nexpected:\nno such file: {s}/run/missing.parquet\n\noutput:\nno such file: /elsewhere/missing.parquet\n\nstderr:\n", .{ s.opts.expect, s.work }), why);
 }
 
 test "an environment that holds a distribution besides komira is refused, naming what is installed" {

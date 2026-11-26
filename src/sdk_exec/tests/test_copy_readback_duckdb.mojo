@@ -2,6 +2,13 @@
 # The pinned DuckDB reads back the Parquet, CSV and JSON files COPY writes
 # =============================================================================
 #
+# Covers: The pinned DuckDB reads every Parquet, CSV and JSON file run_sql's
+# COPY wrote for tests/copy/cases.sql (the :copy_readback_oracle action in
+# BUCK) and finds the same rows, column names and types as in the file DuckDB
+# writes for the same line, and as many rows as the COPY's `Count`; an
+# uncompressed CSV or JSON file holds the same bytes as DuckDB's; every case of
+# cases.sql is checked.
+#
 # A test of the `copy_readback` library (src/sdk_exec/BUCK). `:copy_komira` ran
 # every COPY line of tests/copy/cases.sql through run_sql and wrote
 # `counts.tsv`, each case's `Count`. `:copy_readback_oracle` ran the same lines
@@ -24,14 +31,21 @@
 #     FORMAT named or inferred. Columns: BIGINT, DOUBLE, DATE, VARCHAR
 #     (quotes, a comma, a line break, padding, a multi-byte character, the
 #     empty string beside NULL) and BOOLEAN; NULLs in every column but one;
-#     an aggregate with an integer sum; and an empty result (Parquet and
-#     CSV). Catches a file DuckDB cannot open, a column it reads as another
-#     type (a string without its UTF8 annotation reads as BLOB, a DATE
-#     without its annotation as INTEGER, a CSV date written as a day count
-#     as BIGINT, a JSON decimal written as a string as VARCHAR), a value or
-#     NULL lost (the empty string written unquoted reads as NULL), a cell
-#     quoted, escaped or formatted otherwise than DuckDB does it, and a
-#     `Count` that is not the rows written.
+#     an aggregate with an integer sum; an empty result (Parquet and
+#     CSV); and, read from a Parquet file DuckDB wrote (tests/copy/times.sql),
+#     TIMESTAMP, TIMESTAMP_MS, TIMESTAMP_NS and TIMESTAMPTZ columns (the
+#     epoch, a tick before it, fractions, BC years, each unit's extremes,
+#     infinity and -infinity) and TINYINT, SMALLINT, UTINYINT, USMALLINT,
+#     UINTEGER and UBIGINT at their extremes, to Parquet, CSV and JSON.
+#     Catches a file DuckDB cannot open, a column it reads as another type
+#     (a string without its UTF8 annotation reads as BLOB, a DATE without its
+#     annotation as INTEGER, a CSV date written as a day count as BIGINT, a
+#     JSON decimal written as a string as VARCHAR, a TIMESTAMPTZ without its
+#     UTC flag as TIMESTAMP, an unsigned column without its annotation as a
+#     signed one), a timestamp whose footer unit is off by 1000 (other
+#     instants), a value or NULL lost (the empty string written unquoted
+#     reads as NULL), a cell quoted, escaped or formatted otherwise than
+#     DuckDB does it, and a `Count` that is not the rows written.
 #   * test_the_readers_of_the_files: `case_files` keeps only `COPY (` lines
 #     and ends a file name at its quote, `case_name` ends a name at its first
 #     `.` (or keeps a name with none), `tsv_row` of a header alone is empty
@@ -51,7 +65,7 @@ def _uncompressed_text(file: String) -> Bool:
 
 def test_duckdb_reads_each_file_as_its_own() raises:
     var files = case_files(read_data("cases.sql"))
-    assert_equal(len(files), 19)
+    assert_equal(len(files), 22)
     var counts = tsv_pairs(read_data("counts.tsv"))
     assert_equal(len(counts), len(files))
     var same_bytes = 0
@@ -69,7 +83,7 @@ def test_duckdb_reads_each_file_as_its_own() raises:
         assert_equal(row["differing_rows"], "0", c)
         assert_equal(row["komira_rows"], row["duckdb_rows"], c)
         assert_equal(counts[c], row["duckdb_rows"], c + ": Count")
-    assert_equal(same_bytes, 8)
+    assert_equal(same_bytes, 10)
     assert_equal(tsv_row(read_data("empty.check.tsv"))["komira_rows"], "0")
     assert_equal(tsv_row(read_data("empty_csv.check.tsv"))["komira_rows"], "0")
 

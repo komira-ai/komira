@@ -997,12 +997,15 @@ struct PartitionByData(Movable):
         descending: Per-order-key sort direction (same length as order_keys).
         partition_exprs: Window function expressions to evaluate.
         child: Heap-allocated child plan.
+        nulls_first: Per-order-key NULL placement, always one flag per order
+            key. Omitted at construction means the derived default per key.
     """
     var partition_keys: List[String]
     var order_keys: List[String]
     var descending: List[Bool]
     var partition_exprs: List[PartitionExpr]
     var child: OwnedPointer[LogicalPlan]
+    var nulls_first: List[Bool]
 
     def __init__(
         out self,
@@ -1011,7 +1014,9 @@ struct PartitionByData(Movable):
         var descending: List[Bool],
         var partition_exprs: List[PartitionExpr],
         var child: LogicalPlan,
+        var nulls_first: Optional[List[Bool]] = None,
     ):
+        self.nulls_first = _resolve_nulls_first(descending, nulls_first^)
         self.partition_keys = partition_keys^
         self.order_keys = order_keys^
         self.descending = descending^
@@ -1026,6 +1031,7 @@ struct PartitionByData(Movable):
             self.descending.copy(),
             self.partition_exprs.copy(),
             self.child[].copy(),
+            Optional(self.nulls_first.copy()),
         )
 
     # PORT(1.0.0): explicit destructor breaks the non-co-inductive
