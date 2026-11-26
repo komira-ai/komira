@@ -2,6 +2,18 @@
 # run_sql over an Iceberg table with no snapshot: iceberg_scan and registration
 # =============================================================================
 #
+# Covers: run_sql over an Iceberg table written in the test (format version 2,
+# three columns, no snapshot): iceberg_scan of a table directory and of its
+# metadata file answers the schema and no row, under a projection, a filter, an
+# ORDER BY and count(*); allow_moved_paths is accepted; a snapshot the table
+# lacks, a directory with no version hint and an s3:// path are named refusals
+# at step bind; every other DuckDB option is refused at step parse by its exact
+# message; register_iceberg_table over a StorageBasedCatalog (a bare path and a
+# file:/// URI) is queried by name without regard to case, passes
+# allow_moved_paths, and refuses an unknown table and a location off the local
+# file system by exact message; an Iceberg and a Parquet table join in either
+# order; the kind name lowering cuts an Iceberg scan by is the binding's.
+#
 # Each test writes a format-version 2 table under `test_tmpdir()` (a directory
 # of its own per test) that has three columns (id BIGINT, name VARCHAR, amount
 # DOUBLE) and no snapshot, so it holds no file and needs no manifest. Tables

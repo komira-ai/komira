@@ -2,6 +2,9 @@
 # Unit test -- plan_compile_cache full sink hash
 # =============================================================================
 #
+# Covers: The sink kind is part of the Layer 2 cache key, the path is not, and
+# the key is deterministic.
+#
 # Validates `compose_full_cache_key` and its sink-config salt in
 # `plan_compile_cache.mojo`:
 #

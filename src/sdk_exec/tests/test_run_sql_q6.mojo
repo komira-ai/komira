@@ -2,6 +2,18 @@
 # run_sql over an EngineContext: TPC-H Q6 from its SQL text
 # =============================================================================
 #
+# Covers: run_sql over an EngineContext. TPC-H Q6's text from bench_corpus over
+# a lineitem-shaped Parquet file gives the integer oracle's DECIMAL(38,4); a
+# self-join counts the key pairs of the oracle; a LEFT self-join counts the
+# matched pairs and the unmatched rows of the oracle and a scalar subquery
+# gives the oracle's count; a LEFT JOIN with a residual over both sides, a
+# syntax error, an unknown table, a missing file, CREATE TABLE AS and a
+# replaced file are named refusals, as are a tiny memory budget and an INT64
+# sum out of range; the context runs on after a refusal; the footer cache reads
+# each file once per query and shares it between bind and lower; a file
+# replaced between queries is read again; options are validated; contexts are
+# created and dropped repeatedly, the segment pool whole after each run.
+#
 # The query is the text of bench_corpus (`tpch/q6`), unedited. The table
 # is a lineitem-shaped Parquet file written here (DECIMAL(15,2) money and
 # quantity, DATE32 ship date, several row groups) from

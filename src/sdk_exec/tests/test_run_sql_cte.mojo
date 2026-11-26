@@ -2,6 +2,16 @@
 # test_run_sql_cte: WITH queries through run_sql answer what DuckDB answers
 # =============================================================================
 #
+# Covers: WITH queries through run_sql answer what the pinned DuckDB answers
+# (the :cte_oracle action in BUCK) for each case of tests/cte/cases.sql: a CTE
+# read once (filtered, chained, unread, with NULL counts, sorted, inside a
+# derived table) and read more than once (a grouped aggregation, the same under
+# two filters, a distinct three times, a filtered scan, a limit, a subquery
+# reading a CTE twice, an ungrouped aggregation); every case is run; a grouped
+# aggregation read twice is lowered to one aggregation segment both branches
+# read, a subquery holding a repeat written twice to one aggregation segment,
+# and a filtered scan read twice to two scans.
+#
 # The cases are the lines of tests/cte/cases.sql: the pinned DuckDB runs each
 # query over the committed tests/cte/sales.csv as a build action
 # (`sql_oracle`) and writes its answer as a TSV; this test reads the same file

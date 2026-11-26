@@ -33,6 +33,10 @@ rows are compared with the rows worked out by hand:
   message that names the call, the version it needs and the library;
 - importing komira imports no protobuf; the first reader does.
 
+The test is of the `run/` family (python/tests/BUCK): `frame_run_test` runs
+on the real libkomira on each supported minor (`frame_run_test_py311`, ...),
+with the generated plan modules, protobuf 7.36.2 and pyarrow.
+
     test_frame_run.py --lib-dir <dir> --runtime-dir <dir>
 
 `<dir>/libkomira/` is `//src/so:libkomira[runnable]` and
