@@ -37,20 +37,28 @@ c_shared_lib(
     out = "libkomira_fake_no_render.so",
 )
 
-# Libraries whose minor version promises a call they lack: ABI 1.3 without
-# komira_sql_stream, and ABI 1.7 with it but without komira_last_error_code.
+# Stand-ins whose ABI minor promises a call they lack: 1.3 without
+# komira_sql_stream, 1.4 without komira_ctx_new_with_options, and 1.7 without
+# komira_last_error_code.
 c_shared_lib(
     name = "fake_v1_3_no_sql",
     srcs = ["tests/fake_libkomira.c"],
-    copts = ["-DFAKE_VERSION=1003"],
+    copts = ["-DFAKE_VERSION=1003", "-DFAKE_OMIT_SQL_STREAM"],
     out = "libkomira_fake_v1_3_no_sql.so",
 )
 
 c_shared_lib(
-    name = "fake_v1_7_no_code",
+    name = "fake_v1_4_no_options",
     srcs = ["tests/fake_libkomira.c"],
-    copts = ["-DFAKE_VERSION=1007", "-DFAKE_SQL_STREAM"],
-    out = "libkomira_fake_v1_7_no_code.so",
+    copts = ["-DFAKE_VERSION=1004"],
+    out = "libkomira_fake_v1_4_no_options.so",
+)
+
+c_shared_lib(
+    name = "fake_v1_7_no_codes",
+    srcs = ["tests/fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=1007", "-DFAKE_OPTIONS"],
+    out = "libkomira_fake_v1_7_no_codes.so",
 )
 
 # A stand-in whose parquet_schema and plan_render results hold the capacity the
@@ -62,7 +70,8 @@ c_shared_lib(
     out = "libkomira_fake_capacity.so",
 )
 
-# The addon before and while the library loads: the refusals of load().
+# The addon before and while the library loads: the refusals of load(),
+# a missing symbol of each later minor among them.
 node_binding_test(
     name = "load_test",
     srcs = ["load.test.mjs", "capacity.test.mjs"],
@@ -73,8 +82,9 @@ node_binding_test(
         "fake/libkomira_fake_v0.so": ":fake_v0",
         "fake/libkomira_fake_no_render.so": ":fake_no_render",
         "fake/libkomira_fake_v1_3_no_sql.so": ":fake_v1_3_no_sql",
-        "fake/libkomira_fake_v1_7_no_code.so": ":fake_v1_7_no_code",
         "fake/libkomira_fake_capacity.so": ":fake_capacity",
+        "fake/libkomira_fake_v1_4_no_options.so": ":fake_v1_4_no_options",
+        "fake/libkomira_fake_v1_7_no_codes.so": ":fake_v1_7_no_codes",
     },
 )
 
@@ -85,7 +95,8 @@ node_addon(
 )
 
 # The calls on the real library: the version, an error with its last error,
-# the Parquet schema, the plan text, and the session's lifetime.
+# code and step, the session options, the Parquet schema, the plan text, and
+# the session's lifetime.
 node_binding_test(
     name = "session_test",
     srcs = ["session.test.mjs"],
@@ -124,13 +135,16 @@ _SRCS = [
 _ARROW_IMPORT = "src/arrow_import.ts"
 
 _TESTS = [
+    "tests/abi_1_4.test.ts",
     "tests/cpu.test.ts",
     "tests/default_session.test.ts",
+    "tests/engine_errors.test.ts",
     "tests/errors.test.ts",
     "tests/exports.test.ts",
     "tests/load.test.ts",
     "tests/package.test.ts",
     "tests/platform.test.ts",
+    "tests/options.test.ts",
     "tests/register_args.test.ts",
     "tests/session.test.ts",
     "tests/sql.test.ts",
@@ -193,6 +207,25 @@ c_shared_lib(
     out = "libkomira_fake_echo_register.so",
 )
 
+# A stand-in of ABI 1.9 with the 1.4 and 1.7 calls whose komira_register_parquet
+# answers by the table name (tests/fake_libkomira.c, FAKE_SCRIPTED): a scripted
+# refusal with a status, a step and a code, or the text of how the session's
+# context was made. And one of ABI 1.4, with komira_ctx_new_with_options and
+# without the calls that read a refusal's code and step.
+c_shared_lib(
+    name = "fake_scripted",
+    srcs = ["tests/fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=1009", "-DFAKE_OPTIONS", "-DFAKE_ERROR_CODES", "-DFAKE_SCRIPTED"],
+    out = "libkomira_fake_scripted.so",
+)
+
+c_shared_lib(
+    name = "fake_v1_4",
+    srcs = ["tests/fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=1004", "-DFAKE_OPTIONS", "-DFAKE_SCRIPTED"],
+    out = "libkomira_fake_v1_4.so",
+)
+
 # A stand-in of ABI 1.9 whose komira_sql_stream answers fixed queries with
 # Arrow C streams, and refusals with the code and step the query names.
 c_shared_lib(
@@ -238,9 +271,11 @@ node_binding_test(
         "dist": ":dist",
         "fake/echo_register/libkomira.so": ":fake_echo_register",
         "fake/engine_error/libkomira.so": ":fake_engine_error",
+        "fake/scripted/libkomira.so": ":fake_scripted",
         "fake/sql/libkomira.so": ":fake_sql",
         "fake/unknown_status/libkomira.so": ":fake_unknown_status",
         "fake/v1_1/libkomira.so": ":fake_v1_1",
+        "fake/v1_4/libkomira.so": ":fake_v1_4",
         "fake/v2/libkomira.so": ":fake_v2",
         "fixtures/cpuinfo_x86_64_v3.txt": "komira//python/tests:fixtures/cpuinfo_x86_64_v3.txt",
         "fixtures/isa_variants/VARIANTS_shipped": "komira//tools/build/package/libkomira:libkomira_variants_manifest",

@@ -11,9 +11,10 @@
 // needs the library does. A refused library stays mapped (the Mojo runtime
 // cannot be unloaded), and the next call tries again.
 //
-// The addon's own error codes (KOMIRA_ARG, KOMIRA_LOAD_FAILED, ...) stay in
-// this module: `fromAddon` turns an error the addon threw, or a session call's
-// rejection, into a KomiraError. A session's calls run on a native thread of
+// The addon's own error codes (KOMIRA_ARG, KOMIRA_LOAD_FAILED, ...) and the
+// KOMIRA_ERR_* names of the statuses stay in this module: `fromAddon` turns
+// an error the addon threw, or a session call's rejection, into a KomiraError
+// of the class the engine's code picks. A session's calls run on a native thread of
 // its own (node/README.md, "The session thread") and return Promises.
 
 import { createRequire } from "node:module";
@@ -21,7 +22,7 @@ import path from "node:path";
 
 import type { ArrowAddon } from "./arrow_import.ts";
 import { isFile, libraryPath, type Host } from "./cpu.ts";
-import { KomiraError, LibraryLoadError, type Step } from "./errors.ts";
+import { KomiraError, LibraryLoadError, errorClass, stepOf } from "./errors.ts";
 import { ADDON, NATIVE, defaultHost, platformPackage, platformPackageDir } from "./platform.ts";
 
 /** A session of the addon: an external it made, opaque to JavaScript. */
@@ -31,7 +32,11 @@ export type Handle = object;
 export interface Addon extends ArrowAddon {
   load(path: string): void;
   abiVersion(): number;
-  newSession(): Handle;
+  /**
+   * A context: `komira_ctx_new`, or `komira_ctx_new_with_options` when an
+   * option is given and not 0 (0 or undefined is the engine's own value).
+   */
+  newSession(threads?: number, memoryLimit?: number): Handle;
   /** Refuses later calls at once; the Promise settles once the context is freed, after the calls made before it. */
   freeSession(session: Handle): Promise<void>;
   /** Runs on the session's own thread; the Promise rejects with the call's status. */
@@ -124,20 +129,18 @@ export function loadFrom(addonFile: string, nativeDir: string, h: Host): Native 
   return loaded;
 }
 
-/** komira_last_error_step's numbers (KOMIRA_STEP_*), as the step's name; 0 is none. */
-const STEPS: readonly (Step | null)[] = [null, "parse", "bind", "optimize", "lower", "execute"];
-
 /**
- * The KomiraError for an error the addon threw or rejected with. A failed C
- * call (an error with a status) carries its status and the
- * context's last error, which becomes the message unchanged (the addon's own
- * message when the library gave no text), and the engine's named code and
- * step (komira_last_error_code and _step, ABI 1.7), each null when the
- * library gave none or is older. `sql` on a library older than ABI 1.3 is a
- * LibraryLoadError naming both versions. Anything else (a stream the Arrow
- * import could not drain or read, or the addon refusing its own use) keeps
- * its message with no status. A KomiraError (UnsupportedOperation from the
- * Arrow import) is returned as it is.
+ * The KomiraError for an error the addon threw. A failed C call carries its
+ * status and the context's last error: its text becomes the message unchanged
+ * (the addon's own message when the library gave no text), its named code the
+ * error's `code` (null when empty) and its step number the error's `step`
+ * (null for none or a number this package does not know). The status and the
+ * code pick the class (`errorClass`). A stream `sql` could not drain keeps
+ * its message with no status: its status is the stream callback's errno
+ * value, not the ABI's. Anything else is the addon refusing its own use, a
+ * session the library could not make, or a call the library is too old for,
+ * and keeps its message with no status. A KomiraError (UnsupportedOperation
+ * from the Arrow import) is returned as it is.
  */
 export function fromAddon(e: unknown): KomiraError {
   if (e instanceof KomiraError) {
@@ -147,20 +150,16 @@ export function fromAddon(e: unknown): KomiraError {
     status?: unknown;
     code?: unknown;
     lastError?: unknown;
-    errorCode?: unknown;
-    errorStep?: unknown;
+    lastErrorCode?: unknown;
+    lastErrorStep?: unknown;
   };
-  if (fields.code === "KOMIRA_ABI_TOO_OLD") {
-    return new LibraryLoadError(messageOf(e));
-  }
-  // A failed callback of an Arrow C stream has an errno value as its status, not the ABI's.
   if (typeof fields.status !== "number" || fields.code === "KOMIRA_ARROW_STREAM") {
     return new KomiraError(messageOf(e));
   }
   const text = typeof fields.lastError === "string" && fields.lastError !== "" ? fields.lastError : messageOf(e);
-  const code = typeof fields.errorCode === "string" && fields.errorCode !== "" ? fields.errorCode : null;
-  const step = typeof fields.errorStep === "number" ? (STEPS[fields.errorStep] ?? null) : null;
-  return new KomiraError(text, { status: fields.status, code, step });
+  const code = typeof fields.lastErrorCode === "string" && fields.lastErrorCode !== "" ? fields.lastErrorCode : null;
+  const cls = errorClass(fields.status, code);
+  return new cls(text, { status: fields.status, code, step: stepOf(fields.lastErrorStep) });
 }
 
 /** `f()`, with an error the addon throws turned into a KomiraError. */

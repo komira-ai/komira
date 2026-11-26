@@ -140,22 +140,22 @@ test("a stream whose get_next fails rejects sql with the stream's text and no st
   await s[Symbol.asyncDispose]();
 });
 
-test("a refusal carries status -3, the engine's text, and the code and step komira_last_error_code and _step give", async () => {
+test("a refusal carries status -3, the engine's text, the code and step the library gives, and the class its code picks", async () => {
   const s = new Session();
-  const cases: [string, string | null, Step | null][] = [
-    ["refuse SQL_SYNTAX_ERROR 1", "SQL_SYNTAX_ERROR", "parse"],
-    ["refuse SQL_BIND_ERROR 2", "SQL_BIND_ERROR", "bind"],
-    ["refuse OPTIMIZE_UNRESOLVED_SCALAR 3", "OPTIMIZE_UNRESOLVED_SCALAR", "optimize"],
-    ["refuse LOWERING_WINDOW_UNSERVED 4", "LOWERING_WINDOW_UNSERVED", "lower"],
-    ["refuse MEMORY_BUDGET_EXCEEDED 5", "MEMORY_BUDGET_EXCEEDED", "execute"],
-    ["refuse - 5", null, "execute"],
-    ["refuse - 0", null, null],
-    ["refuse SOME_FUTURE_CODE 9", "SOME_FUTURE_CODE", null],
+  const cases: [string, typeof KomiraError, string | null, Step | null][] = [
+    ["refuse SQL_SYNTAX_ERROR 1", KomiraError, "SQL_SYNTAX_ERROR", "parse"],
+    ["refuse SQL_BIND_ERROR 2", KomiraError, "SQL_BIND_ERROR", "bind"],
+    ["refuse OPTIMIZE_UNRESOLVED_SCALAR 3", UnsupportedOperation, "OPTIMIZE_UNRESOLVED_SCALAR", "optimize"],
+    ["refuse LOWERING_WINDOW_UNSERVED 4", UnsupportedOperation, "LOWERING_WINDOW_UNSERVED", "lower"],
+    ["refuse MEMORY_BUDGET_EXCEEDED 5", KomiraError, "MEMORY_BUDGET_EXCEEDED", "execute"],
+    ["refuse - 5", KomiraError, null, "execute"],
+    ["refuse - 0", KomiraError, null, null],
+    ["refuse SOME_FUTURE_CODE 9", KomiraError, "SOME_FUTURE_CODE", null],
   ];
-  for (const [query, code, step] of cases) {
+  for (const [query, cls, code, step] of cases) {
     const e = await s.sql(query).catch((err: unknown) => err);
     assert.ok(e instanceof KomiraError, query);
-    assert.deepEqual([e.constructor, e.message, e.status, e.code, e.step], [KomiraError, query, -3, code, step]);
+    assert.deepEqual([e.constructor, e.message, e.status, e.code, e.step], [cls, query, -3, code, step]);
   }
   const unknown = await s.sql("SELECT 1").catch((err: unknown) => err);
   assert.ok(unknown instanceof KomiraError);

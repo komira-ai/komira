@@ -3,7 +3,8 @@
 // hands back: a stream of two batches, one of none, a batch that breaks the C
 // Data Interface, a column of a format the package does not map, a get_next
 // that fails, and refusals whose code and step the test chooses. Every other
-// call the addon resolves does nothing, except komira_register_parquet, which
+// call the addon resolves does nothing (komira_ctx_new_with_options makes the
+// same context as komira_ctx_new), except komira_register_parquet, which
 // refuses with the bind step and no code.
 //
 // The queries (exact text):
@@ -50,6 +51,10 @@ static int32_t two_call(const char *text, uint8_t *b, uint64_t cap, uint64_t *n)
 
 EXPORT int32_t komira_abi_version(void) { return 1009; }
 EXPORT void *komira_ctx_new(void) { return &the_ctx; }
+EXPORT void *komira_ctx_new_with_options(int64_t workers, int64_t budget) {
+  (void)workers; (void)budget;
+  return &the_ctx;
+}
 EXPORT void komira_ctx_free(void *ctx) { (void)ctx; }
 EXPORT int32_t komira_last_error(void *ctx, uint8_t *b, uint64_t cap, uint64_t *n) {
   (void)ctx;

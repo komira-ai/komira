@@ -1,19 +1,19 @@
 // Session against a stand-in libkomira of ABI 1.1 whose
 // komira_register_parquet fails with status -3 (KOMIRA_ERR_ENGINE) and the
 // last error FAKE_ENGINE_TEXT: an engine refusal is a KomiraError carrying the
-// status and the engine's text as its message, with no code or step (the
-// library predates komira_last_error_code), and `sql` is refused as needing
-// ABI 1.3. Arguments of the wrong type or value are TypeError or RangeError,
-// raised before the library is called (the stand-in would refuse any call
-// that reached it). Options and the registrations this package does not bind
-// yet are refused by name. Closing is idempotent.
+// status and the engine's text as its message, with no code and no step,
+// which a library older than ABI 1.7 cannot give. Arguments of the wrong type
+// or value are TypeError or RangeError, raised before the library is called
+// (the stand-in would refuse any call that reached it). Session options need
+// ABI 1.4 and `sql` ABI 1.3, so this library refuses them by both versions. The registrations
+// this package does not bind yet are refused by name. Closing is idempotent.
 
 import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { KomiraError, LibraryLoadError, UnsupportedOperation } from "../src/errors.ts";
+import { KomiraError, UnsupportedOperation } from "../src/errors.ts";
 import { load, loadFrom, setHost } from "../src/native.ts";
 import { Session } from "../src/session.ts";
 import { ADDON_FILE, LINUX_X64, addonOpened, fake, refused, rejected } from "./helpers.ts";
@@ -37,6 +37,9 @@ test("session options: wrong types and values, before the library is loaded", ()
     [{ memoryLimit: -1 }, RangeError, "memoryLimit must be a positive integer, not -1"],
     [{ memoryLimit: 2 ** 53 }, RangeError, "memoryLimit must be a positive integer, not 9007199254740992"],
     [{ memoryLimit: 1n }, TypeError, "memoryLimit must be a number"],
+    [{ memoryLimit: Number.POSITIVE_INFINITY }, RangeError, "memoryLimit must be a positive integer, not Infinity"],
+    [{ threads: 8, memoryLimit: 0 }, RangeError, "memoryLimit must be a positive integer, not 0"],
+    [{ threads: null }, TypeError, "threads must be a number"],
   ];
   for (const [options, cls, message] of cases) {
     assert.equal(refused(() => new Session(options as never), cls), message, String(options));
@@ -44,22 +47,8 @@ test("session options: wrong types and values, before the library is loaded", ()
   assert.equal(addonOpened(), false);
 });
 
-test("session options of the right type are refused by name: this package does not set them yet", () => {
-  assert.equal(
-    refused(() => new Session({ threads: 8 }), UnsupportedOperation),
-    "the session option threads is not supported yet: this package does not set it yet; leave it out to take the " +
-      "engine's default",
-  );
-  assert.equal(
-    refused(() => new Session({ memoryLimit: 1 << 30 }), UnsupportedOperation),
-    "the session option memoryLimit is not supported yet: this package does not set it yet; leave it out to take " +
-      "the engine's default",
-  );
-  assert.equal(addonOpened(), false);
-});
-
 test("the stand-in loads, and an engine refusal carries its status and text, with no code or step before ABI 1.7", async () => {
-  loadFrom(ADDON_FILE, fake("engine_error"), LINUX_X64);
+  const native = loadFrom(ADDON_FILE, fake("engine_error"), LINUX_X64);
   const s = new Session({});
   const before = await s.registerParquet("t", "/nonexistent/t.parquet").catch((e: unknown) => e);
   assert.ok(before instanceof KomiraError);
@@ -67,6 +56,53 @@ test("the stand-in loads, and an engine refusal carries its status and text, wit
   assert.deepEqual([before.message, before.status, before.code, before.step], [FAKE_ENGINE_TEXT, -3, null, null]);
   // Options left out, or given as undefined, are the engine's defaults.
   new Session({ threads: undefined, memoryLimit: undefined }).close();
+  await s[Symbol.asyncDispose]();
+  // An option needs komira_ctx_new_with_options, which ABI 1.1 lacks: the
+  // refusal names both versions, and no context is made.
+  const stats = (): { created: number; freed: number } => native.addon.sessionStats();
+  const made = stats().created;
+  for (const options of [{ threads: 8 }, { memoryLimit: 1 << 30 }, { threads: 2, memoryLimit: 1 << 20 }]) {
+    assert.throws(
+      () => new Session(options),
+      (e: unknown) => {
+        assert.ok(e instanceof KomiraError);
+        assert.equal(e.constructor, KomiraError);
+        assert.deepEqual(
+          [e.message, e.status, e.code, e.step],
+          [`komira_ctx_new_with_options needs libkomira ABI version 1.4; the library at ${native.library} is 1.1`, null, null, null],
+        );
+        return true;
+      },
+    );
+  }
+  assert.equal(stats().created, made);
+});
+
+test("sql on a library older than ABI 1.3 is refused naming both versions, and the session still works", async () => {
+  const native = load();
+  const s = new Session();
+  const e = await s.sql("SELECT 1").catch((err: unknown) => err);
+  assert.ok(e instanceof KomiraError);
+  assert.deepEqual(
+    [e.constructor, e.message, e.status, e.code, e.step],
+    [KomiraError, `komira_sql_stream needs libkomira ABI version 1.3; the library at ${native.library} is 1.1`, null, null, null],
+  );
+  assert.equal(await rejected(s.registerParquet("t", "/nonexistent/t.parquet"), KomiraError), FAKE_ENGINE_TEXT);
+  await s[Symbol.asyncDispose]();
+});
+
+test("sql: a query that is not a string is a TypeError, and a NUL byte or a lone surrogate a RangeError", async () => {
+  const s = new Session();
+  const cases: [unknown, ErrorConstructor, string][] = [
+    [1, TypeError, "the query must be a string"],
+    [undefined, TypeError, "the query must be a string"],
+    [Buffer.from("SELECT 1"), TypeError, "the query must be a string"],
+    ["SELECT 1\0", RangeError, "the query holds a NUL byte"],
+    ["SELECT '\ud800'", RangeError, "the query holds a lone surrogate, which UTF-8 cannot spell"],
+  ];
+  for (const [query, cls, message] of cases) {
+    assert.equal(await rejected(s.sql(query as string), cls), message, message);
+  }
   await s[Symbol.asyncDispose]();
 });
 
@@ -98,31 +134,6 @@ test("registerParquet: a wrong argument is a TypeError or RangeError, and the li
   for (const file of [pathToFileURL("/nonexistent/t.parquet"), "t.parquet", path.join("..", "t.parquet")]) {
     assert.equal(await rejected(s.registerParquet("t", file), KomiraError), FAKE_ENGINE_TEXT);
   }
-  await s[Symbol.asyncDispose]();
-});
-
-test("sql: a query that is not a string is a TypeError, and a NUL byte or a lone surrogate a RangeError", async () => {
-  const s = new Session();
-  const cases: [unknown, ErrorConstructor, string][] = [
-    [1, TypeError, "the query must be a string"],
-    [undefined, TypeError, "the query must be a string"],
-    [Buffer.from("SELECT 1"), TypeError, "the query must be a string"],
-    ["SELECT 1\0", RangeError, "the query holds a NUL byte"],
-    ["SELECT '\ud800'", RangeError, "the query holds a lone surrogate, which UTF-8 cannot spell"],
-  ];
-  for (const [query, cls, message] of cases) {
-    assert.equal(await rejected(s.sql(query as string), cls), message, message);
-  }
-  await s[Symbol.asyncDispose]();
-});
-
-test("sql on a library older than ABI 1.3 is a LibraryLoadError naming both versions, and the session still works", async () => {
-  const s = new Session();
-  assert.equal(
-    await rejected(s.sql("SELECT 1"), LibraryLoadError),
-    "libkomira has ABI version 1.1; sql needs komira_sql_stream, which ABI 1.3 added",
-  );
-  assert.equal(await rejected(s.registerParquet("t", "/nonexistent/t.parquet"), KomiraError), FAKE_ENGINE_TEXT);
   await s[Symbol.asyncDispose]();
 });
 
