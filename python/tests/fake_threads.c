@@ -333,6 +333,13 @@ EXPORT int32_t komira_sql_stream(void *ctx, const char *sql, struct ArrowArraySt
 #ifdef FAKE_RUN
 // ---- the run handle of ABI 1.6 ---------------------------------------------------
 
+// komira_ctx_new_with_options of ABI 1.4, which the loader requires of a 1.6
+// library: it makes a context as komira_ctx_new does and ignores the options.
+EXPORT void *komira_ctx_new_with_options(int64_t worker_count, int64_t memory_budget_bytes) {
+  (void)worker_count, (void)memory_budget_bytes;
+  return komira_ctx_new();
+}
+
 #define QUERY_CANCELLED_TEXT "QUERY_CANCELLED: execute: the stand-in's run was cancelled"
 
 // The registration calls of ABI 1.5, which the loader requires of a 1.6

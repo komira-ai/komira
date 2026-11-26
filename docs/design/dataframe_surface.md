@@ -6,7 +6,10 @@ its private layers of this surface are built: the plan node tree (`komira._ops`)
 capture of a user function (`komira._capture`) and the UDF worker runtime (`komira._udf`). The first
 part of the pandas-shaped skin is built too: its readers, subscripts, `assign`, `sort_values`, `head`,
 `materialize` and `explain` are in `python/komira/_frame.py` and `_series.py`, and `materialize` runs
-the plan through `komira_plan_stream`. `komira.pl` and the other verbs are not built. The verbs, the plan each one builds and
+the plan through `komira_plan_stream`. So are `groupby` with its `GroupBy` reductions and `agg`, the
+frame's own reductions (`agg`, `sum`, `mean`, `median`, `std`, `var`, `min`, `max`, `count`,
+`nunique`) and `drop_duplicates`, in `python/komira/_groupby.py`; NaN as missing (ruling 6) and the
+`Series` reductions are not built yet. `komira.pl` and the other verbs are not built. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
 
@@ -307,6 +310,12 @@ The rules that follow from this:
   - An explicit choice that needs row order is refused: `keep="first"` and `keep="last"` in polars, and
     `keep="last"` in pandas. So are the choices that need a window first: `keep=False` in
     `drop_duplicates`, and `keep="all"` in `nlargest`.
+  - Over whole rows (no `subset`, or one that names every column) no choice is made, since equal rows
+    are the same row. So pandas `drop_duplicates()` answers `keep="first"` and `keep="last"` alike
+    with a DISTINCT, and `keep=False` with an AGGREGATE by every column whose `count(*)` is 1. The
+    pandas skin does not build `drop_duplicates(subset=...)` over fewer columns yet: neither the plan
+    encoder nor lowering takes a DISTINCT over a column list, so the verb refuses it, naming
+    `df[subset].drop_duplicates()`.
 - `sort(maintain_order=True)`, `sort_values(kind="stable")` and `unique(maintain_order=True)` are
   refused. No sort in the plan is stable.
 
@@ -365,9 +374,8 @@ its number).
      (`na_position="last"`). polars puts nulls first in both directions (`nulls_last=False`).
    - An explicit `na_position` or `nulls_last` is honoured per key. No sort is refused for its NULL
      placement.
-   - A window's ORDER BY cannot carry a placement yet
-     ([komira-ai/komira#1227](https://github.com/komira-ai/komira/issues/1227)). So a window whose
-     library default differs from the plan's raises at the terminal until that lands.
+   - A window's ORDER BY carries the same placement per key (`nulls_first` on the PartitionBy node),
+     so no window is refused for its NULL placement either.
 6. **Missing values.** Differs (D7).
    - polars keeps NULL and NaN apart, as the plan does: `is_null` and `drop_nulls` test NULL only, and
      `is_nan` and `fill_nan` test NaN only.
@@ -600,6 +608,6 @@ package design). D4 to D18 are this design's own.
 ## Where is the code?
 
 The code is in `python/komira/`: the node tree (`_ops/`), the encoder (`_plan/`) and the first part of
-the pandas-shaped skin (`_frame.py`, `_series.py`, `_refusals.py`); `komira/pl/` is not built yet. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
+the pandas-shaped skin (`_frame.py`, `_groupby.py`, `_series.py`, `_refusals.py`); `komira/pl/` is not built yet. The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
 `src/plan_expr/col_expr.mojo`. The wire format is in [src/plan_proto](../../src/plan_proto/plan.proto)
 and `src/plan_wire`.

@@ -533,6 +533,7 @@ def eval_sliding_agg(
     bounds: List[Int],
     order_keys: List[String],
     descending: List[Bool],
+    nulls_first: List[Bool],
     expr: PartitionExpr,
 ) raises -> Column[HeapRegion]:
     """Evaluate an aggregate whose frame is not the running one.
@@ -544,7 +545,9 @@ def eval_sliding_agg(
     """
     if expr.frame.is_full_partition():
         return eval_full_partition_agg(batch, bounds, expr)
-    var fidx = frame_index(batch, bounds, order_keys, descending, expr.frame)
+    var fidx = frame_index(
+        batch, bounds, order_keys, descending, expr.frame, nulls_first
+    )
     if expr.func == PF_SUM:
         return eval_sliding_sum(batch, bounds, expr.column, fidx.lo, fidx.hi)
     elif expr.func == PF_COUNT:

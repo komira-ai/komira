@@ -3,8 +3,9 @@
 This is an early release: a `Session` registers Parquet, CSV and
 newline-delimited JSON files and runs SQL over them, and each `Result` reads
 as Arrow (pyarrow). The pandas-shaped `DataFrame` reads the same files
-(`read_parquet`, `read_csv`, `read_json`) and builds a plan that runs, with no
-SQL, at `materialize()` (docs/design/dataframe_surface.md). The public names
+(`read_parquet`, `read_csv`, `read_json`), groups and reduces them
+(`groupby`, `agg`), and builds a plan that runs, with no SQL, at
+`materialize()` (docs/design/dataframe_surface.md). The public names
 are exactly `__all__`; every other module is private
 (docs/design/python_package.md). Importing the package does not load the
 library: the first `Session()`, reader or `abi_version()` does. A name the
@@ -27,12 +28,14 @@ from ._errors import (
     CredentialsError,
     KomiraError,
     LibraryLoadError,
+    MemoryLimitError,
     ParseError,
     StorageError,
     UnsupportedCpuError,
     UnsupportedOperation,
 )
 from ._frame import DataFrame, read_csv, read_json, read_parquet
+from ._groupby import GroupBy
 from ._refusals import MODULE as _MODULE_REFUSALS
 from ._refusals import refused as _refused
 from ._series import Series
@@ -65,8 +68,10 @@ __all__ = [
     "BindError",
     "CredentialsError",
     "DataFrame",
+    "GroupBy",
     "KomiraError",
     "LibraryLoadError",
+    "MemoryLimitError",
     "ParseError",
     "Result",
     "Series",

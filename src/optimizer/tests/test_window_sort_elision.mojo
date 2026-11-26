@@ -332,6 +332,57 @@ def test_sort_explicit_nulls_last_matching_sink_elides() raises:
     assert_equal(Int(rewritten.tag), Int(PLAN_PARTITION_BY))
 
 
+def _build_nulls_first_running_total_pb(var child: LogicalPlan) raises -> LogicalPlan:
+    """PartitionBy(pkeys=[user_id], okeys=[ts] NULLS FIRST, desc=[False])."""
+    var pkeys: List[String] = ["user_id"]
+    var okeys: List[String] = ["ts"]
+    var desc: List[Bool] = [False]
+    var nf: List[Bool] = [True]
+    var pexprs = List[PartitionExpr]()
+    pexprs.append(
+        PartitionExpr.running_sum(String("value")).with_alias(String("running_total"))
+    )
+    return LogicalPlan.partition_by(
+        pkeys^, okeys^, desc^, pexprs^, child^, Optional(nf^),
+    )
+
+
+def test_sort_nulls_first_over_window_nulls_first_elides() raises:
+    """A Sort (user_id ASC NULLS LAST, ts ASC NULLS FIRST) over a window
+    ordered by ts NULLS FIRST is redundant and is dropped."""
+    var schema = _three_col_schema()
+    var child = _scan_plan(schema^)
+    var pb = _build_nulls_first_running_total_pb(child^)
+
+    var sort_keys: List[String] = ["user_id", "ts"]
+    var sort_desc: List[Bool] = [False, False]
+    var nf: List[Bool] = [False, True]
+    var plan = LogicalPlan.sort(sort_keys^, sort_desc^, pb^, Optional(nf^))
+
+    var rewritten = optimize_window_rewrite(plan^)
+    assert_equal(_count_sort(rewritten), 0)
+    assert_equal(Int(rewritten.tag), Int(PLAN_PARTITION_BY))
+    assert_true(rewritten.partition_by_data_ref().nulls_first[0])
+
+
+def test_plain_sort_over_window_nulls_first_preserved() raises:
+    """A plain Sort (derived NULLS LAST on ts) over a window ordered by ts
+    NULLS FIRST keeps the Sort: the window's row order differs."""
+    var schema = _three_col_schema()
+    var child = _scan_plan(schema^)
+    var pb = _build_nulls_first_running_total_pb(child^)
+
+    var sort_keys: List[String] = ["user_id", "ts"]
+    var sort_desc: List[Bool] = [False, False]
+    var plan = LogicalPlan.sort(sort_keys^, sort_desc^, pb^)
+
+    var rewritten = optimize_window_rewrite(plan^)
+    assert_equal(_count_sort(rewritten), 1)
+    assert_equal(Int(rewritten.tag), Int(PLAN_SORT))
+    var inner = rewritten.sort_data_ref().child[].partition_by_data_ref().nulls_first.copy()
+    assert_true(inner[0])
+
+
 # =============================================================================
 # Section 3 -- Compositional cases
 # =============================================================================

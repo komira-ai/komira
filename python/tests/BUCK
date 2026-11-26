@@ -489,6 +489,37 @@ c_shared_lib(
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# Session(memory_limit=) on the real library, over labels.parquet: a limit of
+# one byte raises MemoryLimitError (status -3, code MEMORY_BUDGET_EXCEEDED, step
+# execute) from sql for an aggregate, a GROUP BY over an integer key and over a
+# string key, a COUNT(DISTINCT), a sort and a window function; the session
+# answers the next query, a syntax error is still a ParseError, and the same
+# queries on an unlimited session and on one of 1 GiB and two workers give the
+# same answers.
+[python_binding_test(
+    name = "memory_limit_test" + p["suffix"],
+    src = "test_memory_limit.py",
+    data = {
+        "labels.parquet": "komira//src/parquet_codec:pyarrow_multi_dict_page.parquet",
+        "libkomira": LIBKOMIRA,
+    },
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Session(threads=, memory_limit=) on the ABI 1.7 stand-in: the options reach
+# komira_ctx_new_with_options as given and absent ones as 0, no option calls
+# komira_ctx_new, a wrong type is a TypeError and a value outside 1 to 2**63 - 1
+# a ValueError before the library is called, the options are keyword-only, and
+# an option the library refuses is a KomiraError.
+[python_binding_test(
+    name = "session_options_test" + p["suffix"],
+    src = "test_session_options.py",
+    data = {"fake_v1_7/libkomira.so": ":fake_v1_7"},
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # Session.register_csv and register_json on the real library, over the
 # fixtures: the names, types and rows the engine infers, NULL where a file has
 # no value, the same schema and rows as read_csv and read_json; the delimiter,
@@ -823,6 +854,12 @@ _PLAN_EXPR_RUNTIMES = [
 #   row of the refusal tables, no dunder runs a query, and a terminal sends the
 #   encoded plan bytes to the session's plan door and nothing else, with no SQL
 #   text anywhere in the frame's modules.
+# - frame_groupby_test, with no library, on the same runtimes: the plans of
+#   groupby and its reductions, the frame's reductions and agg, and
+#   drop_duplicates, by equality with hand-built node trees (the filter of
+#   missing keys below the aggregate, the key sort above it, the zero of an
+#   empty sum), their output types, the encoded aggregate, every refusal with
+#   its full message, and the GroupBy's attribute rules.
 # - frame_run_test, on the real libkomira, per minor: the readers over Parquet,
 #   CSV and newline-delimited JSON files written here, each verb run through
 #   komira_plan_stream with its rows checked, explain()'s text, a frame run
@@ -835,10 +872,23 @@ _PLAN_EXPR_RUNTIMES = [
 #   strings, each answered by komira through the plan door and by DuckDB from
 #   the SQL that means the same over the same file, equal row for row (in
 #   order when the frame is ordered, as a multiset otherwise), column names
-#   and types included.
+#   and types included: the verbs above, groupby and the reductions the
+#   engine runs against GROUP BY, the frame's reductions, drop_duplicates
+#   against DISTINCT, and the reductions the engine does not run yet refused
+#   at the terminal with its step.
 [py_test(
     name = "frame_test{}".format(suffix),
     src = "test_frame.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
+
+[py_test(
+    name = "frame_groupby_test{}".format(suffix),
+    src = "test_frame_groupby.py",
     deps = [
         "//python:komira_with_plan_modules",
         _PROTOBUF[p["suffix"]][runtime],

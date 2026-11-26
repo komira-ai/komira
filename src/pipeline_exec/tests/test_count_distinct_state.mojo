@@ -374,7 +374,8 @@ def _too_many(max_entries: Int) -> String:
 
 def _denied(bytes: Int, budget: Int, granted: Int) -> String:
     return (
-        String(WHERE)
+        String("MEMORY_BUDGET_EXCEEDED: ")
+        + String(WHERE)
         + " was denied "
         + String(bytes)
         + " bytes of the segment's memory pool for its COUNT(DISTINCT)"
