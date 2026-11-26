@@ -567,8 +567,8 @@ generic: the packages' own targets are declared with the package
 - **Reproducible bytes**: a gzip stream (no name, no time, OS 255; the packer's
   `deflate.zig`) over a ustar archive of `package/package.json` and every file at
   `package/<path>`, sorted bytewise; regular files only, owner and group 0
-  with no names, one mtime (1985-10-26 08:15:00 UTC, the date `npm pack`
-  writes), modes 0644 and 0755, two zero blocks at the end. A second action
+  with no names, one mtime (499162500 seconds after the epoch, the time
+  `npm pack` writes), modes 0644 and 0755, two zero blocks at the end. A second action
   writes the tarball again from the same inputs staged at another path
   (`[twin]`), and the check refuses it unless the two are the same bytes.
 

@@ -4,10 +4,10 @@
 //! Written: a gzip stream (no name, no time, OS 255; the packer's deflate.zig,
 //! a pure function of its input) over a ustar archive of the members in the
 //! order given, each a regular file under `package/`, with mode 0644 or 0755,
-//! owner and group 0 with no names, and one fixed mtime: 1985-10-26 08:15:00
-//! UTC, the date `npm pack` gives every member. No directory, link, PAX or
-//! GNU entry; a name over 100 bytes is refused rather than split. The archive
-//! ends with two zero blocks.
+//! owner and group 0 with no names, and one fixed mtime: 499162500 seconds
+//! after the epoch, the time `npm pack` gives every member. No directory,
+//! link, PAX or GNU entry; a name over 100 bytes is refused rather than split.
+//! The archive ends with two zero blocks.
 //!
 //! Read: the gzip header must be the one written, the inflated bytes must
 //! match the trailer's CRC-32 and length, and every header must be exactly
@@ -23,7 +23,7 @@ const Diag = diag.Diag;
 const Refused = diag.Refused;
 const refuse = diag.refuse;
 
-/// 1985-10-26 08:15:00 UTC in seconds: what `npm pack` dates every member with.
+/// Seconds after the epoch: the fixed time `npm pack` dates every member with.
 pub const mtime: u64 = 499162500;
 
 /// Every member's path starts with it: npm drops the first component.
@@ -167,7 +167,7 @@ pub fn readTar(alloc: Alloc, d: *Diag, tar: []const u8) Refused![]Member {
         const mode = parseOctal(h[100..108]) orelse return refuse(d, alloc, "tar: {s} has a mode field that is not octal", .{name});
         const size = parseOctal(h[124..136]) orelse return refuse(d, alloc, "tar: {s} has a size field that is not octal", .{name});
         const when = parseOctal(h[136..148]) orelse return refuse(d, alloc, "tar: {s} has an mtime field that is not octal", .{name});
-        if (when != mtime) return refuse(d, alloc, "tar: {s} is dated {d}, not {d} (1985-10-26 08:15:00 UTC, npm pack's date)", .{ name, when, mtime });
+        if (when != mtime) return refuse(d, alloc, "tar: {s} is dated {d}, not {d}, the fixed time npm pack gives every member", .{ name, when, mtime });
         if (!std.mem.startsWith(u8, name, root)) return refuse(d, alloc, "tar: {s} is not under {s}", .{ name, root });
         const want = try header(alloc, d, name, @intCast(mode & 0o7777), size);
         if (mode > 0o7777 or !std.mem.eql(u8, h, &want)) return refuse(d, alloc, "tar: the header of {s} is not the one this tool writes for its name, mode and size (another owner, checksum, format or field)", .{name});

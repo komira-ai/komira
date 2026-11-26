@@ -91,7 +91,7 @@ test "repository: a missing one, one without a url string, and another url are r
     const no_url = "repository: the manifest's `repository` is not an object with a `url` string, and trusted publishing needs its url to be https://github.com/komira-ai/komira";
     try t.expectEqualStrings(no_url, try refusal(a, try edited(a, repo, "\"repository\": \"github:komira-ai/komira\",\n"), main_want));
     try t.expectEqualStrings(no_url, try refusal(a, try edited(a, "\"url\": \"https://github.com/komira-ai/komira\"", "\"uri\": \"https://github.com/komira-ai/komira\""), main_want));
-    for ([_][]const u8{ "git+https://github.com/komira-ai/komira.git", "https://github.com/komira-ai/komira/", "https://github.com/komira-ai/komira-internal", "" }) |url| {
+    for ([_][]const u8{ "git+https://github.com/komira-ai/komira.git", "https://github.com/komira-ai/komira/", "https://github.com/komira-ai/komira-fork", "" }) |url| {
         const src = try edited(a, "\"url\": \"https://github.com/komira-ai/komira\"", try std.fmt.allocPrint(a, "\"url\": \"{s}\"", .{url}));
         try t.expectEqualStrings(try std.fmt.allocPrint(a, "repository: the manifest's repository.url is `{s}`, not https://github.com/komira-ai/komira, which trusted publishing requires", .{url}), try refusal(a, src, main_want));
     }

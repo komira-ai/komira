@@ -151,7 +151,7 @@ test "tar: a link, a directory, another date, a member outside package/, another
     const dated = try a.dupe(u8, good);
     @memcpy(dated[136..148], "00000000000\x00");
     rechecksum(dated[0..512]);
-    try t.expectEqualStrings("tar: package/package.json is dated 0, not 499162500 (1985-10-26 08:15:00 UTC, npm pack's date)", try tarRefusal(a, dated));
+    try t.expectEqualStrings("tar: package/package.json is dated 0, not 499162500, the fixed time npm pack gives every member", try tarRefusal(a, dated));
 
     const outside = try a.dupe(u8, good);
     @memcpy(outside[0..8], "elsewhr/");
