@@ -27,7 +27,8 @@
 #       (kind=2) in the post-aggregate expression.
 #   test_a_predicate_subquery_above_an_aggregate_is_refused_by_name
 #       EXISTS, IN and NOT IN in HAVING, and EXISTS as a SELECT item of a
-#       grouped query, are refused naming the position.
+#       grouped query, are refused naming the position; so is a scalar
+#       subquery inside a grouped SELECT item that is not an aggregate.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -300,6 +301,13 @@ def test_a_predicate_subquery_above_an_aggregate_is_refused_by_name() raises:
     _check(
         "SELECT k, EXISTS (SELECT 1 FROM t) AS e FROM u GROUP BY k",
         _POST_AGG_REFUSAL,
+    )
+    # A scalar subquery inside a grouped item that is not an aggregate.
+    _check(
+        "SELECT k + (SELECT max(k) FROM t) AS x, count(*) FROM u GROUP BY k",
+        "ERR: SQL not supported: a subquery inside a non-aggregate SELECT item"
+        " of a grouped query (a scalar subquery that is the whole item is"
+        " served)",
     )
 
 
