@@ -743,9 +743,9 @@ release/prod_claimed_names.txt: claim it on the prod registry first, then add it
 A maintainer adds a name to the file only after claiming it on the prod registry, in the pull request that adds the
 member or ahead of it: names claimed for libraries not published yet (each with its row in `release/UNPUBLISHED.md`)
 are listed too, and the check accepts a name no member has. The file keeps the names of deleted packages (the
-`kci_*` libraries), whose names are reserved in the file only, and refuses the dropping of one of them, an unsorted or repeated line, and an empty file. It is a
-committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
-last word.
+`kci_*` libraries), whose names are reserved in the file only, and refuses the dropping of one of them, an unsorted
+or repeated line, and an empty file. It is a committed claim, not a live read: it does not notice a claim the
+registry lost, and `prod-stage` stays the last word.
 
 **Every library not published says why.** Every Mojo library under `src/` (a directory with a `BUCK` file and a
 `.mojo` file outside its `tests/`) is either a member or has a row in

@@ -11,9 +11,9 @@
 //!  - a list that is not sorted, holds a name twice, or holds a line that is no package name,
 //!    so a merge cannot leave it unreadable;
 //!  - an empty PACKAGES, or an empty list, which would make the check vacuous;
-//!  - a dropped line of KEPT: a name once claimed on prod stays claimed after its package leaves the
-//!    release, so the list may hold names no member has (the deleted libraries of KEPT, and names
-//!    claimed ahead of a library that is not published yet).
+//!  - a dropped line of KEPT: the names of the deleted libraries of KEPT stay in the list, which is
+//!    the only place they are reserved (prod serves none of them), so the list may hold names no
+//!    member has (those, and names claimed ahead of a library that is not published yet).
 //! The cases plant each defect in the text of the real files and expect the exact message.
 
 const std = @import("std");
@@ -21,7 +21,7 @@ const t = std.testing;
 
 const FILE = "release/prod_claimed_names.txt";
 
-/// Names claimed on prod whose packages left the release: they stay in the list.
+/// Names of packages that left the release, reserved in the list only: they stay in it.
 const KEPT = [_][]const u8{
     "kci_api",
     "kci_artifact",
