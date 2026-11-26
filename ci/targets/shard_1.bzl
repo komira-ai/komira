@@ -78,6 +78,7 @@ TARGETS = [
     "komira//tools/build/examples/rust/ext:both_markers",
     "komira//tools/build/examples/rust/ext:ext_consumer",
     "komira//tools/build/examples/rust/ext:ext_markers",
+    "komira//tools/build/lint/surface_grounding:surface_grounding",
     "komira//tools/build/mojo:act_darwin",
     "komira//tools/build/mojo:mojo_compile_darwin",
     "komira//tools/build/mojo:mojo_compile_darwin_ticked",

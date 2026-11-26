@@ -10,6 +10,15 @@ and a polars-shaped one (`komira.pl`), read files and build plans the engine
 runs with no SQL; The DataFrames, below, says where each is described. More
 DataFrame APIs come later.
 
+This README, and the pages it links to, describe the package at one commit.
+On PyPI that is the commit the release was built from, and every link of a
+release's page opens the files of that commit. On GitHub's `main` it can be
+newer than the newest release: what `main` has and 0.1.1623 does not says
+"newer than 0.1.1623", and the
+[changelog](https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md)
+lists what each release added (on PyPI it follows this README, with the
+release's own section first).
+
 ## Install
 
 ```sh
@@ -105,7 +114,7 @@ print(s.closed)               # True: the session is freed
 It prints:
 
 ```text
-0.1.1512
+0.1.1623
 1010
 [{'days': 6, 'rain': 9.5}]
 city: string
@@ -124,7 +133,9 @@ True
 
 The first line is the installed version, and `<cwd>` stands for the
 directory the program ran in: a relative path is resolved against it, and
-the error names the file it looked for.
+the error names the file it looked for. The syntax error's message ends with
+` at line 1, column 42` in releases newer than 0.1.1623; 0.1.1623 and older
+print it without that part.
 
 The program is the file `python/examples/quickstart.py` of the source tree,
 and the text it prints is `python/examples/quickstart.expected` (shown here
@@ -176,7 +187,7 @@ package, and each compares what it prints with that file, every line.
   engine refuses by name. A refusal of the `parse` step ends with where the
   statement stopped parsing, `at line <L>, column <C>` (both from 1, the
   column counted in characters; the end of the text when the statement ends
-  early).
+  early; newer than 0.1.1623).
 - Ctrl-C while `Session.sql` runs cancels the query: the engine stops at its
   next check, `sql` raises `KeyboardInterrupt`, nothing the query computed is
   kept, and the session runs the next query. A second Ctrl-C while the query
@@ -296,8 +307,8 @@ by `import komira`.
   `KomiraError`, but an abort, a fault, running out of stack, or running out
   of memory that the session's `memory_limit` does not catch (a query over it
   raises `MemoryLimitError`) ends the Python process. Inputs known to cause
-  one are refused with `KomiraError` first, for example a statement nested
-  more than 100 levels deep.
+  one are refused with `KomiraError` first (newer than 0.1.1623), for example
+  a statement nested more than 100 levels deep.
 - The DataFrame verbs not built yet, for both skins: what each capability
   has and lacks is recorded in
   [docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md).
@@ -307,7 +318,8 @@ The DataFrame verbs not built yet come in later releases of this same package.
 
 ## Working on the package
 
-Most readers can skip this section.
+Most readers can skip this section. It describes the source tree of the
+commit it is read at, files and tests a release does not ship among them.
 
 The package's layout and API are designed in
 [docs/design/python_package.md](https://github.com/komira-ai/komira/blob/main/docs/design/python_package.md).
@@ -363,9 +375,24 @@ unstamped build calls it `## Unreleased`. The section a release ships therefore
 lists every change merged since the newest section kept in `CHANGELOG.md`. The
 wheel's description is this README followed by that changelog with its headings
 one level down (`//python:changelog[description]`), so the page of version
-0.1.`<N>` on PyPI shows its own section. To keep a section in `CHANGELOG.md`,
-move the entries of `changelog.d/` under a `## <version>` heading of it and
-delete their files, in one change.
+0.1.`<N>` on PyPI shows its own section. A stamped build also gives the
+description its commit, `-c komira.package_commit=<sha>`, and every link of it
+to the repository's `main` (`.../blob/main/...`, `.../tree/main/...`) opens
+that commit instead, so the pages a release's PyPI page links to describe that
+release; the wheel's `Documentation` URL is the install page of that commit.
+The tool refuses a stamp with no commit, a commit with no stamp, and a commit
+that is not 40 lower-case hexadecimal digits.
+
+`CHANGELOG.md` keeps a section for each version on PyPI. Once a version
+0.1.`<N>` is on PyPI, one change keeps its section: it moves the entries
+that `changelog.d/` held at the commit that version was built from (the
+`<N>`th commit of `main`'s first-parent history, `git rev-list --first-parent
+--reverse main | sed -n <N>p`) under a heading `## 0.1.<N>`, above the
+sections already kept, and deletes their files. A version that added nothing
+gets the line the tool writes for no entry. A page or a sentence of the docs
+that describes a change no kept section holds says so: "newer than
+0.1.`<K>`", `K` the newest section kept, and the change that keeps the
+section holding it drops those words.
 
 Building the changelog is the check of the entries: it refuses, naming the
 file and the line, a file whose name is not a slug and `.md`, an empty file, a
