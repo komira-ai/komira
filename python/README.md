@@ -302,6 +302,7 @@ by `import komira`.
   has and lacks is recorded in
   [docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md).
 - Iceberg tables: reading one, and writing to one by its name in a catalog.
+- Python user functions: no verb takes one and no query runs one yet.
 
 The DataFrame verbs not built yet come in later releases of this same package.
 
