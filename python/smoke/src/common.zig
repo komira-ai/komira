@@ -14,7 +14,7 @@ pub fn refuse(a: Allocator, why: *[]const u8, comptime fmt: []const u8, args: an
     return error.Refused;
 }
 
-/// The diagnostic type of the wheel zip reader (wheel/diag.zig), named through the reader's own signature: the
+/// The diagnostic type of the wheel zip reader (tools/build/package/native_policy/diag.zig), named through the reader's own signature: the
 /// module exports `read` and `write` but not the type they take.
 pub const Diag = @typeInfo(@typeInfo(@TypeOf(zip.read)).@"fn".params[1].type.?).pointer.child;
 

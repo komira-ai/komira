@@ -1,4 +1,4 @@
-//! komira_wheel: the code signature of a Mach-O file, checked against the
+//! native_policy: the code signature of a Mach-O file, checked against the
 //! file's bytes as `codesign --verify` checks an ad hoc signature. macOS on
 //! arm64 refuses to map code whose signature is missing or does not match its
 //! pages, so a wheel member that fails here is a library a Mac will not load.
