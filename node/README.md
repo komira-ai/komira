@@ -254,6 +254,13 @@ that loads plants its host, so no real `/proc/cpuinfo` is read.
 | [`default_session.test.ts`](tests/default_session.test.ts) | a worker thread makes a default session of its own, once for two calls, and the main thread's is untouched |
 | [`missing_runtime.test.ts`](tests/missing_runtime.test.ts) | a native directory of the real library with `libMSupportGlobals.so`, one of the three Mojo runtime libraries, left out (`//tools/build/package/libkomira:dist_without_msupport`) is a `LibraryLoadError`, no other class, whose message names the library it tried and the missing file |
 
+`:sql_conformance_test` runs every case of the SQL conformance corpus
+([`src/tests/conformance/komira_sql_conformance`](../src/tests/conformance/komira_sql_conformance/README.md))
+through `Session.sql` on the real engine and holds each answer to the one the pinned DuckDB
+committed, or to its line in the corpus's `refusals.tsv` or `differences.tsv`; with it, the runner's
+own tests and a fixture corpus with one wrong answer that must fail the run
+([`tests/conformance`](tests/conformance/README.md)).
+
 The addon's own tests:
 
 | target | what it proves | the defect it catches |
