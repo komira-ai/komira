@@ -504,7 +504,7 @@ lives:
 **In the wheel** *(the layout itself belongs to the wheel design; these are the names this runtime needs)*:
 
 - `komira/_lib/libkomira_udf_python.so` (`.dylib` on macOS), beside `libkomira`; it links only the C library and
-  needs no Mojo runtime.
+  needs no Mojo runtime. The Linux wheel carries it; the macOS wheel does not yet (komira-ai/komira#2333).
 - `komira/_udf/zygote.py`, `worker.py`, `wire.py`, `formats.py` and `rows.py`: the zygote, the worker loop, the
   wire codec, the batch formats and the row proxy.
 - `cloudpickle` and `pyarrow` are dependencies of the wheel; the worker uses the ones of the user's environment,

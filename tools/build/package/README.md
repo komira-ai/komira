@@ -453,14 +453,15 @@ out. For a macOS wheel `max_glibcxx` and `max_cxxabi` have nothing to bound and
 
 `wheel_libs_check` (also [`wheel.bzl`](wheel.bzl)) is a second reader of a
 finished wheel: `komira_wheel libs` ([`wheel/libs.zig`](wheel/libs.zig)) reads
-the wheel's bytes, a few names (the entry library, the Mojo runtime's file
-names, its licence files and the distributions that carry it) and the
+the wheel's bytes, a few names (the entry library, the `opened` libraries the
+package opens itself beside it, the Mojo runtime's file names, its licence
+files and the distributions that carry it) and the
 toolchain's copies of the runtime libraries, and nothing else the rule that
 wrote the wheel was given. It reads the zip as `zip.zig` reads it, so the wheel
 is one this writer wrote: the build's, or the same bytes as an index serves them
 after an upload. Where `needed` above asks only that a name be a member somewhere, this
 check walks the libraries as the loader would load them from an install: from
-the entry library, each DT_NEEDED is a manylinux system library, a library
+the entry library, and from each `opened` library on its own, each DT_NEEDED is a manylinux system library, a library
 already loaded, or the member at one of the needing library's own run path
 entries with `$ORIGIN` its directory. For a Mach-O entry (a macOS wheel) the
 walk is dyld's: each load command names an operating system library (under
@@ -477,7 +478,10 @@ names its check:
   no `\`, no empty, `.` or `..` part);
 - `layout`: every member is under the import package (the entry's top
   directory) or the one `.dist-info`, so no `modular/` beside it;
-- `entry`: the entry is a member and an ELF or a Mach-O file;
+- `entry`: the entry is a member and an ELF or a Mach-O file, and so is each
+  `opened` library (a library the package opens itself beside the entry, such
+  as komira's UDF runtime): a member under the same package, of the entry's
+  format, named once;
 - `runtime`: each Mojo runtime library is in the wheel exactly once, with the
   bytes of the toolchain's runtime: a second copy, one of another build, or none
   is refused;
@@ -486,12 +490,13 @@ names its check:
 - `needed`: every DT_NEEDED of a loaded library resolves as above (a name
   holding `/`, which the loader opens as a path, is refused), and a refusal
   says where in the wheel the library is when the run path misses it;
-- `stray`: every ELF and Mach-O member is one the entry loads;
+- `stray`: every ELF and Mach-O member is one the entry or an `opened`
+  library loads, each walked on its own as the entry is;
 - `licence`: each runtime licence file is a non-empty `.dist-info/licenses/`
   member and a `License-File` of METADATA;
 - `requires`: no Requires-Dist names a distribution that carries the runtime.
 
-The output lists the loaded libraries in load order; with `expect_refusal` the
+The output lists the loaded libraries in load order, the entry's first; with `expect_refusal` the
 target builds only while the wheel is refused with exactly that line.
 python/BUCK runs it on komira's wheel (`:wheel_libs`), on the macOS wheel
 (`:wheel_libs_macos_arm64`), and on four wheels it refuses: a second
