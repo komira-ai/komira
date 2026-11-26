@@ -1,0 +1,1 @@
+BindError: bind: SQL bind error: unknown table 'df'
