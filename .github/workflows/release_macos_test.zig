@@ -978,9 +978,9 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     try expectRefused(ar, try replaced(ar, text, arm, "            canceled)\n              echo \"::error title=release-macos::" ++ CANCELLED_REASON), "does not handle a cancelled build");
     try expectRefused(ar, try replaced(ar, text, arm, CANCELLED_ARM ++ "\n              echo \"::warning title=release-macos::" ++ CANCELLED_REASON), "does not fail a cancelled build");
     try expectRefused(ar, try replaced(ar, text, arm, CANCELLED_ARM ++ "\n              echo \"::error title=release-macos::the macOS build was cancelled"), "does not fail a cancelled build");
-    try expectRefused(ar, try replaced(ar, text, "(a stalled build), or its runner was stopped\"\n" ++ CANCELLED_EXIT ++ "\n", "(a stalled build), or its runner was stopped\" ;;\n"), "does not fail a cancelled build");
+    try expectRefused(ar, try replaced(ar, text, "(a stalled build)\"\n" ++ CANCELLED_EXIT ++ "\n", "(a stalled build)\" ;;\n"), "does not fail a cancelled build");
     // the arm as it was: a warning that blamed a newer push, and no failure
-    try expectRefused(ar, try replaced(ar, text, "              echo \"::error title=release-macos::" ++ CANCELLED_REASON ++ ": it ran past its timeout-minutes (a stalled build), or its runner was stopped\"\n" ++ CANCELLED_EXIT ++ "\n", "              echo \"::warning title=release-macos::the macOS build was cancelled (a newer push replaces a running build)\" ;;\n"), "does not fail a cancelled build");
+    try expectRefused(ar, try replaced(ar, text, "              echo \"::error title=release-macos::" ++ CANCELLED_REASON ++ ": it ran past its timeout-minutes (a stalled build)\"\n" ++ CANCELLED_EXIT ++ "\n", "              echo \"::warning title=release-macos::the macOS build was cancelled (a newer push replaces a running build)\" ;;\n"), "does not fail a cancelled build");
 
     // nothing publishes from it
     try expectRefused(ar, try replaced(ar, text, "      - name: the macOS build failed\n", "      - run: mopm publish --staged x --registry prod --oidc\n      - name: the macOS build failed\n"), "publishes");

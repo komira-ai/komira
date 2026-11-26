@@ -171,7 +171,7 @@ jobs:
               echo "::error title=release-macos::the macOS build did not run: its job was skipped (a condition of the job was false, or an earlier job it waits on did not succeed)"
               exit 1 ;;
             cancelled)
-              echo "::error title=release-macos::the macOS build was cancelled while the run went on: it ran past its timeout-minutes (a stalled build), or its runner was stopped"
+              echo "::error title=release-macos::the macOS build was cancelled while the run went on: it ran past its timeout-minutes (a stalled build)"
               exit 1 ;;
             *)
               echo "::error title=release-macos::the macOS build did not pass: ${REPORT:-its job ended $BUILD_RESULT before the buckconfig check (the checkout or farm-connect failed; the log of the job says why)}"

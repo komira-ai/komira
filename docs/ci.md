@@ -524,7 +524,8 @@ tests, which no pull request builds. The rest of this section is about `release-
   pass. A build job that ran out its `timeout-minutes` is cancelled by GitHub while the run
   goes on, so `release-macos-result` runs and fails with "the macOS build was cancelled while
   the run went on". Only when the run itself was cancelled (a newer push, or by hand) does
-  `release-macos-result` not run: the run ends cancelled and the newer run builds. Its message says what happened rather than guessing: when a buck2 step failed (the build
+  `release-macos-result` not run: the run ends cancelled and the newer run builds.
+  Its message says what happened rather than guessing: when a buck2 step failed (the build
   of the set, or of the Python harness tests), `//release/ci:buck2_failure` (built before them)
   reads that step's buck2 output and the message is buck2's own lines after `BUILD FAILED`
   (also written to the run's summary);
