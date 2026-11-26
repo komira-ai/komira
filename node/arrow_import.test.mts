@@ -14,7 +14,7 @@ import vm from 'node:vm';
 
 import { Decimal, Union, UnionMode, type Table } from 'apache-arrow';
 
-import { readArrowStream, type ArrowAddon } from './src/arrow_import.ts';
+import { readArrowStream, schemaOf, type ArrowAddon, type SchemaDescription } from './src/arrow_import.ts';
 import { KomiraError, UnsupportedOperation } from './src/errors.ts';
 import {
   NULLABLE,
@@ -594,6 +594,39 @@ test('a failing get_next rejects readArrowStream with the get_last_error text', 
     lastError: 'stand-in: batch 2 cannot be read',
     message: 'get_next failed (status 5): stand-in: batch 2 cannot be read',
   });
+});
+
+// A schema node as arrowSchema describes it, with no name unless given.
+function node(format: string, children: SchemaDescription[] = [], name: string | null = null): SchemaDescription {
+  return { format, name, flags: NULLABLE, metadata: null, children, dictionary: null };
+}
+
+test('a field with no name is the empty name, in the schema, in a nested field and in a refusal', () => {
+  const schema = schemaOf(node('+s', [node('i'), node('+s', [node('u')], 'outer')]));
+  assert.deepEqual(
+    schema.fields.map((f) => [f.name, String(f.type)]),
+    [['', 'Int32'], ['outer', 'Struct<{:Utf8}>']],
+  );
+  for (const [field, message] of [
+    [node('+w:2'), 'column "": Arrow format "+w:2" is not supported'],
+    [node('+s', [node('+w:2')], 'outer'), 'column "outer.": Arrow format "+w:2" is not supported'],
+  ] as const) {
+    assert.throws(() => schemaOf(node('+s', [field])), (err: unknown) => {
+      assert.ok(err instanceof UnsupportedOperation, String(err));
+      assert.equal(err.message, message);
+      return true;
+    });
+  }
+});
+
+test('a union with no type id has no child: "+us:" and "+ud:" are unions of no member', () => {
+  const schema = schemaOf(node('+s', [node('+us:', [], 'sparse'), node('+ud:', [], 'dense')]));
+  const [sparse, dense] = schema.fields.map((f) => f.type);
+  assert.ok(sparse instanceof Union && dense instanceof Union);
+  assert.deepEqual(
+    [sparse.mode, [...sparse.typeIds], sparse.children.length, dense.mode, [...dense.typeIds], dense.children.length],
+    [UnionMode.Sparse, [], 0, UnionMode.Dense, [], 0],
+  );
 });
 
 test('the pinned apache-arrow the tests run satisfies the package peer range ^21.2.0', () => {
