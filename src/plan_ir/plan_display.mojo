@@ -662,7 +662,9 @@ def _write_plan_node[
         # EngineContext that differ only in `descending` or in a function
         # (kind, column, offset, default, frame, alias) share one compiled
         # plan: the second query would answer the FIRST one's ranks. Every
-        # field of `PartitionByData` and of each `PartitionExpr` is emitted.
+        # field of `PartitionByData` and of each `PartitionExpr` is emitted;
+        # an order key's NULL placement is written only when it deviates from
+        # the derived default (`_write_nulls_first`).
         ref pb = plan._partition_by.value()[]
         writer.write("PartitionBy(partition=[")
         for i in range(len(pb.partition_keys)):
@@ -679,6 +681,7 @@ def _write_plan_node[
                     writer.write(" DESC")
                 else:
                     writer.write(" ASC")
+                _write_nulls_first(writer, pb.descending, pb.nulls_first, i)
         writer.write("], funcs=[")
         for i in range(len(pb.partition_exprs)):
             if i > 0:

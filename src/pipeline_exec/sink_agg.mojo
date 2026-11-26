@@ -87,7 +87,7 @@ from .count_distinct import (
     admit_distinct,
     read_distinct_column,
 )
-from .segment_pool import SegmentPool, WorkerReservation
+from .segment_pool import MEMORY_BUDGET_EXCEEDED, SegmentPool, WorkerReservation
 
 
 def _fresh_cells(n_aggs: Int) -> List[AggCell]:
@@ -136,7 +136,8 @@ def _draw(
     fail the query by name."""
     if not slot.reservation.try_grow(bytes):
         raise Error(
-            "pipeline_exec: the aggregation sink of segment "
+            String(MEMORY_BUDGET_EXCEEDED)
+            + ": pipeline_exec: the aggregation sink of segment "
             + String(seg_id)
             + " was denied "
             + String(bytes)

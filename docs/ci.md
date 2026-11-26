@@ -540,47 +540,32 @@ tests, which no pull request builds. The rest of this section is about `release-
 Not built yet. `//release:mopm_darwin_libs` covers the mopm packages only. Most of `//src` is
 not a mopm package, so a change that breaks one of those libraries on macOS is seen by nobody.
 Measured: a `uquery` of `kind(...)` for the library rules (`mojo_library`, gated, shared,
-system, native and `cxx_library`) over the `src` directory lists 422 targets. One
-`build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going
---skip-incompatible-targets` of that list on the farm (`Commands: 15971 (cached: 12379, remote:
-3592, local: 0)`) built 288, skipped 4 as incompatible (the connect, git pack, git protocol and
-HTTP conformance suites) and stopped on 130. With the `bench_data` and `phase_timers` fixes
-below, the same build built 291, skipped the same 4 and stopped on 127. Every target that
-stops has an open issue, one per cause. A target is counted under the first failing action
-its build report names:
+system, native and `cxx_library`) over the `src` directory lists 425 targets. One `build --target-platforms komira//tools/build/platforms:darwin-arm64
+--keep-going --skip-incompatible-targets` of that list on the farm, on main after the `http_core`
+macOS test fixes and the Mach-O native shared library (`Commands: 18849 (cached: 16445, remote:
+2404, local: 0)`), built 405, skipped 4 as incompatible (the connect, git pack, git protocol and
+HTTP conformance suites) and stopped on 16. With the fixes below the same build builds 415, skips
+7 and stops on 3. A target is counted under the first failing action its build report names:
 
-| Cause | Targets | Issue |
-| --- | --- | --- |
-| `http_core`'s s2n shim test expects `ECONNRESET` where macOS reads end of stream | 107 (`http_core` and what depends on it) | komira-ai/komira#2206 |
-| `http_core`'s partial-send test never sees a partial send on macOS (hidden behind the test above in the same package) | the same 107 | komira-ai/komira#2207 |
-| a library's native shared library was ELF only; fixed: `native_shared_library` links a Mach-O `.dylib` for darwin-arm64 (tools/build/native/README.md, "On macOS (Mach-O)"), and a farm build of the nine `_native` targets for darwin-arm64 built all nine with checks 1 to 7 green (measured: `build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going --skip-incompatible-targets` of the nine, `Commands: 477 (cached: 0, remote: 477, local: 0)`); the other 4 of the 13 counted here were dependents of those nine (inferred, not rebuilt for this row) | 13 | komira-ai/komira#2197 |
-| the UDF spike helpers' C used Linux-only APIs; since it was ported (below), their welded tests stop instead: the native runtime has no macOS rule for loading a verified library, and the node worker's tests need a darwin-arm64 `node` and read `/proc` | 7 in the sweep; 2 since the port (`komira_udf_spike_native`, `komira_udf_spike_node_worker`) | komira-ai/komira#2199 |
+| Cause | Targets on main | After the fixes | Issue |
+| --- | --- | --- | --- |
+| the mail servers' serve-loop tests moved the clock before the peer's bytes had reached the server, and stepped a fixed number of times; macOS loopback can deliver after the send returns. Fixed: they wait, with `poll`, for the bytes to arrive | 3 (`smtp_server`, `imap_server`, `smtp_client`) | 0 | |
+| `db_postgres`'s TLS handshake test alternated 256 busy rounds over TCP loopback. Fixed: a side blocked on read waits in `poll` | 2 (`db_postgres`, `komira_db_conformance`) | 0 | |
+| `job_supervisor`'s tests started `/bin/true`, which macOS keeps in `/usr/bin`. Fixed: they start `/bin/sh -c "exit 0"` | 2 (`job_supervisor`, `komira_job_supervisor_loopback`) | 0 | |
+| on macOS `//third_party/aws-lc:crypto` re-exports `//src/awslc`'s archive and had no `[static-pic]` for `native_shared_library`, and `komira_crypto_native` listed ELF-only weak names. Fixed: `checked_cxx_library` takes that archive (`archive`) and the weak list is per OS | 2 (`komira_crypto_native`, `komira_http_core_native`) | 0 | |
+| the per-CPU-level links of `libkomira` failed analysis instead of being skipped. Fixed: they are linux-x86_64 only (`komira-limit:isa-variants-linux-x86-64`) | 2 | 0 (skipped) | |
+| `phase_timers` counted a usage sample that macOS cannot take (no per-thread `getrusage`) as a dropped record | 1 (`bench_q6_phases`) | 0 | |
+| `komira_test_s3_adapter`'s runner starts MinIO through setpriv and `PR_SET_PDEATHSIG` and refuses every start elsewhere. It is Linux only, with its two end-to-end binaries (`komira-limit:s3-adapter-runner-linux`) | 1 | 0 (skipped) | |
+| `cbrt` answers one ulp from the expected ones, which come from the Linux DuckDB (`decimal_compare` conformance) | 1 | 1 | komira-ai/komira#2233 |
+| the UDF spike helpers' welded tests: the native runtime has no macOS rule for loading a verified library, and the node worker's tests need a darwin-arm64 `node` | 2 (`komira_udf_spike_native`, `komira_udf_spike_node_worker`) | 2 | komira-ai/komira#2199 |
 
-Since that sweep, `http_core`'s welded tests pass on macOS: the s2n shim test makes its reset
-happen there too (a TCP loopback connection closed with `SO_LINGER` zero, komira-ai/komira#2206),
-and the partial-send test passes on macOS. The targets of its two rows now build, or stop on a
-cause of their own that the next sweep counts.
-
-`bench_runner` stopped on `bench_data` before and now stops on `http_core`, which it also
-depends on. No target stopped on aws-lc and s2n-tls (komira-ai/komira#2196), on `so_exports`
-(komira-ai/komira#2198) or on a read of `/proc/self/status` (komira-ai/komira#2201). The UDF
-spike helpers' C (`probe.c`, `channel.c`, `engine_loop.c`) has a macOS branch for each Linux-only
-API it used (`dl_iterate_phdr` and `mallinfo2`, `SOCK_CLOEXEC` and `memfd_create`,
-`sched_getaffinity` and `pthread_barrier_t`). Measured: a `build --target-platforms
-komira//tools/build/platforms:darwin-arm64 --keep-going` on the farm of the two helper libraries,
-their C libraries and their runtime shared libraries (`native`, `native_c`, `node_worker`,
-`node_worker_corrupt`): every C library and shared library built, the welded tests `test_probe`,
-`test_channel`, `test_engine_barrier` and `test_no_node` passed on a farm Mac, and the other 13
-welded tests stopped on the two gaps in that row (`test_native_io` also on its 4095-byte path,
-longer than macOS allows): `Commands: 1244 (cached: 1204, remote: 40, local: 0)`, and the 13 are
-the `mojo_gated_test` actions its build report lists as failed. Nine
-causes were ours and are fixed: tests that assumed Linux's `PATH_MAX`, a `SIGPIPE` that macOS
-raises for the whole process, BSD `yes`, the epoll backend, the `libc.so.6` name, a
-temporary-file name that two threads could draw alike on macOS's coarser clock, an NFD file
-name that APFS treats as the same file as its NFC form, `bench_data`'s Snappy digests pinned
-once for both cpus where Snappy's bytes differ by cpu (komira-ai/komira#2208), and
-`phase_timers`' fork stamp, which macOS's clock could read equal to a task's end stamp
-(komira-ai/komira#2200).
+Fixed by the sweeps before this one: tests that assumed Linux's `PATH_MAX`, a `SIGPIPE` that macOS
+raises for the whole process, BSD `yes`, the epoll backend, the `libc.so.6` name, a temporary-file
+name that two threads could draw alike on macOS's coarser clock, an NFD file name that APFS treats
+as the same file as its NFC form, `bench_data`'s Snappy digests (komira-ai/komira#2208),
+`phase_timers`' fork stamp (komira-ai/komira#2200), `http_core`'s s2n shim reset and partial-send
+tests (komira-ai/komira#2206, komira-ai/komira#2207), the ELF-only native shared library
+(komira-ai/komira#2197) and the UDF spike helpers' C (`probe.c`, `channel.c`, `engine_loop.c`).
 
 The proposal keeps this set built, in the same way as the mopm set:
 
@@ -752,8 +737,9 @@ refuses a pull request in which a member (every `src/<name>` with a `mopm.toml`,
 `release/readme_e2e/packages.bzl`) is missing from it: "<name> is a member of the release and is not in
 release/prod_claimed_names.txt: claim it on the prod registry first, then add it to release/prod_claimed_names.txt".
 A maintainer adds a name to the file only after claiming it on the prod registry, in the pull request that adds the
-member. The file keeps the names of deleted packages (the `kci_*` libraries), whose names stay claimed, and refuses the
-dropping of one of them, an unsorted or repeated line, and an empty file. It is a
+member or ahead of it: names claimed for libraries not published yet (each with its row in `release/UNPUBLISHED.md`)
+are listed too, and the check accepts a name no member has. The file keeps the names of deleted packages (the
+`kci_*` libraries), whose names stay claimed, and refuses the dropping of one of them, an unsorted or repeated line, and an empty file. It is a
 committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
 last word.
 

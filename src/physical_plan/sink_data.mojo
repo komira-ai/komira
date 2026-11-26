@@ -238,12 +238,17 @@ struct PartitionBySinkData(Movable):
         descending: Per-order-key sort direction.
         partition_exprs: Window function expressions.
         output_schema: Expected output schema (child + window cols).
+        nulls_first: Per-order-key NULL placement, or EMPTY for "derive"
+            (`derived_nulls_first(descending[i])` per key). Non-empty must
+            hold one flag per order key; the window sink refuses any other
+            length by name. Partition keys always sort NULLs last.
     """
     var partition_keys: List[String]
     var order_keys: List[String]
     var descending: List[Bool]
     var partition_exprs: List[PartitionExpr]
     var output_schema: Schema
+    var nulls_first: List[Bool]
 
     def __init__(
         out self,
@@ -252,12 +257,14 @@ struct PartitionBySinkData(Movable):
         var descending: List[Bool],
         var partition_exprs: List[PartitionExpr],
         var output_schema: Schema,
+        var nulls_first: List[Bool] = List[Bool](),
     ):
         self.partition_keys = partition_keys^
         self.order_keys = order_keys^
         self.descending = descending^
         self.partition_exprs = partition_exprs^
         self.output_schema = output_schema^
+        self.nulls_first = nulls_first^
 
 # =============================================================================
 # PartitionTopNSinkData -- configuration for per-partition Top-K sink

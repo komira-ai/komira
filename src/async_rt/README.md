@@ -132,3 +132,34 @@ from async_rt.reactor.graceful_shutdown import ignore_sigpipe, shutdown_requeste
 assert_true(ignore_sigpipe())
 assert_false(shutdown_requested())
 ```
+
+Waiting for a socket to have something to read, through this package's C
+(`reactor/socket_setup.mojo` over its poll shim): a zero timeout answers at
+once, a negative one waits without limit. `socket_unsent_bytes` reads how many
+sent bytes the peer has not taken yet (0 once they reached its socket):
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
+```mojo
+from async_rt.ops.waker_sink import NoopSink
+from async_rt.reactor.socket_io import try_send
+from async_rt.reactor.socket_setup import close_fd, socket_unsent_bytes, wait_readable
+from async_rt.runtime.blocking_runtime import BlockingRuntime
+from async_rt.runtime.tcp_stream import TcpListener, TcpStream
+
+var rt = BlockingRuntime[NoopSink].new(NoopSink(_placeholder=UInt8(0)))
+ref reactor = rt.reactor()
+var listener = TcpListener.bind_loopback(port=UInt16(0), backlog=Int32(1))
+var client = TcpStream.connect_loopback[NoopSink](reactor, listener.local_port())
+var server = listener.accept[NoopSink](reactor)
+var server_fd = server.release_fd()
+var client_fd = client.release_fd()
+_ = rt^
+
+assert_false(wait_readable(server_fd, Int32(-1), 0))  # nothing sent yet
+assert_equal(socket_unsent_bytes(client_fd), 0)
+var byte = List[UInt8](length=1, fill=UInt8(120))
+_ = try_send(client_fd, Span(byte))
+assert_true(wait_readable(server_fd, Int32(-1), -1))  # the byte arrived
+close_fd(server_fd)
+close_fd(client_fd)
+```

@@ -77,8 +77,14 @@ def error_code(reason: String) -> String:
     (`SQL not supported: `). Any other reason that starts with an upper-case
     word of two or more underscore-joined parts followed by `: `
     (`LOWERING_WINDOW_UNSERVED: ...`) has that word as its code. Anything else
-    (`[Processor] ...`, `ERR: x`, a text with no prefix) has no code.
+    (`[Processor] ...`, `ERR: x`, a text with no prefix) has no code, with
+    one exception: a sink's memory refusal, which the worker runtime wraps as
+    `[Processor] MEMORY_BUDGET_EXCEEDED: ...`, has the code
+    `MEMORY_BUDGET_EXCEEDED`.
     """
+    var wrapped = "[Processor] MEMORY_BUDGET_EXCEEDED: "
+    if reason.startswith(wrapped):
+        return String("MEMORY_BUDGET_EXCEEDED")
     if reason.startswith("SQL syntax error: "):
         return String("SQL_SYNTAX_ERROR")
     if reason.startswith("SQL bind error: "):

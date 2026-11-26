@@ -202,7 +202,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** AVG of an integer or DECIMAL column sums exactly (as §8.1 does) and divides at the end, as DuckDB does. It must not accumulate in DOUBLE: a BIGINT sum above 2^53 would lose digits before the division. The division is DuckDB's: of an INTEGER, BIGINT or DECIMAL wider than 4 digits, the total converted to an 80-bit long double, divided by `count * 10^scale` (the product and the quotient each rounded to a 64-bit mantissa), then rounded once to a double; of a SMALLINT or a DECIMAL of 4 digits or fewer, a division in double.
 - **DuckDB.** Sums integers into a 128-bit accumulator, then divides in `long double` (`IntegerAverageOperationHugeint` and `HugeintAverageOperation`, `GetAverageDivident` and `BindDecimalAvg`, `extension/core_functions/aggregate/algebraic/avg.cpp:92-124`, `:140-149`, `:269-278` at v1.5.6; the 128-bit to long double conversion is `CastBigintToFloating`, `src/common/types/hugeint.cpp:649-661`).
-- **Current behaviour.** `scalar_arithmetic.decimal_avg` emulates those roundings in integers, and the grouped and ungrouped SQL sinks (`src/pipeline_exec/agg_output.mojo`), the window AVG of an INT64 column, the COUNT(DISTINCT) driver's fixed AVG over an INT32 or INT64 column and `AvgOp` over an INT32 or INT64 column call it. Not changed, and so not DuckDB's in the last bit for a total past 2^53 or a count past 2^11: AVG on the paths that hold an INT64 or FLOAT64 sum (the mixed COUNT(DISTINCT) fold, the COUNT(DISTINCT) sink's fixed lane, the scalar-broadcast fold, the flat hash aggregate, the row-block cells) and over an unsigned column. The Float64 channel that carries integer aggregates in multi-aggregate shapes is exact only below 2^53 (`src/kernels/runtime_expr.mojo:592-600`); which AVG routes use it is not established here.
+- **Current behaviour.** `scalar_arithmetic.decimal_avg` emulates those roundings in integers, and the grouped and ungrouped SQL sinks (`src/pipeline_exec/agg_output.mojo`), the window AVG of an INT8, INT16, INT32 or INT64 column (a narrow column is widened, an INT8 or INT16 one averaged in double), the COUNT(DISTINCT) driver's fixed AVG over an INT32 or INT64 column and `AvgOp` over an INT32 or INT64 column call it. Not changed, and so not DuckDB's in the last bit for a total past 2^53 or a count past 2^11: AVG on the paths that hold an INT64 or FLOAT64 sum (the mixed COUNT(DISTINCT) fold, the COUNT(DISTINCT) sink's fixed lane, the scalar-broadcast fold, the flat hash aggregate, the row-block cells) and over an unsigned column. The Float64 channel that carries integer aggregates in multi-aggregate shapes is exact only below 2^53 (`src/kernels/runtime_expr.mojo:592-600`); which AVG routes use it is not established here.
 - **Mark.** MATCHES for the SQL sinks, the window AVG of INT64 and the AVG listed above; the paths named as not changed do not follow.
 
 ### 2.13 BOOLEAN aggregates
@@ -768,10 +768,10 @@ The type of every result column is in [the result-type table](query_semantics_ty
 
 ### 9.6 NULL placement in a window's ORDER BY
 
-- **Rule.** A window ORDER BY key with no stated placement uses §4.1's default; an explicit `NULLS FIRST` or `NULLS LAST` inside `OVER (...)` answers as DuckDB does. The plan cannot express a placement yet, so a frontend refuses `NULLS FIRST` inside `OVER` by name (`NULLS LAST` is the default, so it may be accepted).
+- **Rule.** A window ORDER BY key with no stated placement uses §4.1's default; an explicit `NULLS FIRST` or `NULLS LAST` inside `OVER (...)` answers as DuckDB does. The plan carries the placement per order key (`PartitionByData.nulls_first`, wire field `WirePartitionByNode.nulls_first`, written only when some key deviates from the default), and the window's sort, its peer boundaries and its frames read it.
 - **DuckDB.** Accepts an explicit placement in `OVER`.
-- **Current behaviour.** The PARTITION_BY node carries no per-key placement (its wire arm has no such field), so the window key takes `derived_nulls_first` (`src/plan_expr/null_order_policy.mojo:80-93`).
-- **Mark.** PARITY GAP ([komira#1227](https://github.com/komira-ai/komira/issues/1227)).
+- **Current behaviour.** An omitted placement takes `derived_nulls_first` (`src/plan_expr/null_order_policy.mojo:80-93`); a written one is carried per key to the window sink.
+- **Mark.** MATCHES.
 
 ### 9.7 NULL order keys are peers
 
@@ -881,7 +881,7 @@ Excel semantics are not part of the plan; they belong to the Excel surface, whic
 
 ## Counts
 
-MATCHES 133, REPRESENTATION DEPARTURE 4, PARITY GAP 11, EXTENSION 2: 150 marks, across this file, [the result-type table](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 42 rows of "Rulings" ([rulings, parity gaps and code status](query_semantics_rulings.md)) are the items settled under the governing rule: 25 MATCHES, 4 REPRESENTATION DEPARTURE, 11 PARITY GAP and 2 EXTENSION. The parity-gap table there has 15 rows: the 11 PARITY GAP items and 4 refused cases inside items that otherwise MATCH (§7.1, §8.15, §9.8, §13.5).
+MATCHES 134, REPRESENTATION DEPARTURE 4, PARITY GAP 10, EXTENSION 2: 150 marks, across this file, [the result-type table](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 42 rows of "Rulings" ([rulings, parity gaps and code status](query_semantics_rulings.md)) are the items settled under the governing rule: 26 MATCHES, 4 REPRESENTATION DEPARTURE, 10 PARITY GAP and 2 EXTENSION. The parity-gap table there has 14 rows: the 10 PARITY GAP items and 4 refused cases inside items that otherwise MATCH (§7.1, §8.15, §9.8, §13.5).
 
 ## What are its limits and open questions?
 

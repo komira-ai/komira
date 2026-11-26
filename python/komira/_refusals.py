@@ -10,7 +10,7 @@ listed here (docs/design/dataframe_surface.md, section 5).
 
 from __future__ import annotations
 
-__all__ = ["FRAME", "MODULE", "SERIES", "refused"]
+__all__ = ["DATETIME", "FRAME", "GROUPBY", "MODULE", "SERIES", "STRING", "refused"]
 
 
 def _rows(*rows: tuple[tuple[str, ...], str]) -> dict[str, str]:
@@ -79,6 +79,21 @@ SERIES = _BOTH | _rows(
         ("cat", "sparse"),
         "the .{name} accessor is not supported: komira has no categorical or sparse dtype",
     ),
+    (
+        ("value_counts",),
+        ".{name}() gives a Series indexed by the values in pandas, and a komira Series has no index: "
+        'count the rows per value with df.groupby(column).size(), and sort them with sort_values("size", ascending=False)',
+    ),
+)
+
+GROUPBY = _rows(
+    (("first", "last", "nth", "cumcount"), ".{name}() is not supported yet; use min() or max() of an ordered key"),
+    (("filter",), "GroupBy.filter() is not supported yet; aggregate, then filter the result"),
+    (
+        ("ngroups", "groups", "indices", "get_group"),
+        ".{name} needs a query to run; aggregate with .size() and materialize()",
+    ),
+    (("ohlc", "resample"), ".{name}() is not supported: komira has no time index"),
 )
 
 MODULE = _rows(
@@ -93,6 +108,104 @@ MODULE = _rows(
     ),
     (("to_datetime", "to_numeric"), "komira.{name}() is not supported; cast a column with s.astype(...)"),
     (("NamedAgg",), 'use a tuple: agg(out=("column", "func"))'),
+)
+
+
+# The names the `.str` accessor of a Series does not define.
+STRING = _rows(
+    (
+        ("strip", "lstrip", "rstrip"),
+        ".str.{name}() is not supported yet: the engine trims spaces only, and pandas trims all whitespace",
+    ),
+    (
+        ("split", "rsplit", "cat", "get", "join", "findall", "extractall", "get_dummies", "partition", "rpartition"),
+        ".str.{name}() is not supported yet: the plan has no node for it",
+    ),
+    (
+        ("ljust", "rjust"),
+        ".str.{name}() is not supported yet: use .str.pad(width, side=...), which pads to one side",
+    ),
+    (
+        ("center", "zfill", "wrap", "normalize", "translate", "slice_replace", "encode", "decode"),
+        ".str.{name}() is not supported yet: the plan has no node for it",
+    ),
+    (
+        ("title", "capitalize", "swapcase", "casefold"),
+        ".str.{name}() is not supported yet: use .str.lower() or .str.upper()",
+    ),
+    (
+        ("count", "find", "rfind", "index", "rindex", "repeat", "removeprefix", "removesuffix"),
+        ".str.{name}() is not supported yet",
+    ),
+    (
+        (
+            "isalpha",
+            "isdigit",
+            "isalnum",
+            "isnumeric",
+            "isdecimal",
+            "isspace",
+            "islower",
+            "isupper",
+            "istitle",
+        ),
+        ".str.{name}() is not supported yet: test the text with .str.fullmatch(pattern)",
+    ),
+)
+
+# The names the `.dt` accessor of a Series does not define.
+DATETIME = _rows(
+    (
+        ("date", "time", "timetz"),
+        ".dt.{name} is not supported yet: the engine cannot cast a timestamp to a date or a time of day; "
+        '.dt.floor("D") cuts the time off and stays a timestamp',
+    ),
+    (
+        ("tz", "tz_localize", "tz_convert"),
+        ".dt.{name} is not supported: a komira timestamp carries no time zone to convert",
+    ),
+    (
+        ("strftime", "day_name", "month_name"),
+        ".dt.{name}() is not supported yet: the engine does not format a timestamp as text",
+    ),
+    (
+        ("round", "ceil"),
+        ".dt.{name}() is not supported yet: only .dt.floor() has a plan node",
+    ),
+    (
+        ("normalize",),
+        '.dt.normalize() is not supported yet: use .dt.floor("D")',
+    ),
+    (
+        ("to_period", "to_pydatetime", "to_pytimedelta", "as_unit"),
+        ".dt.{name}() is not supported: a komira Series is part of a plan, and has no such object",
+    ),
+    (
+        ("total_seconds", "days", "seconds", "microseconds", "nanoseconds", "components"),
+        ".dt.{name} is of a timedelta, and komira has no timedelta type",
+    ),
+    (
+        ("nanosecond",),
+        ".dt.nanosecond is not supported yet: the plan's extract has no nanosecond part",
+    ),
+    (
+        ("week", "weekofyear", "isocalendar", "isocalendar_week"),
+        ".dt.{name} is not supported yet",
+    ),
+    (
+        (
+            "is_month_start",
+            "is_month_end",
+            "is_quarter_start",
+            "is_quarter_end",
+            "is_year_start",
+            "is_year_end",
+            "is_leap_year",
+            "days_in_month",
+            "daysinmonth",
+        ),
+        ".dt.{name} is not supported yet: the plan has no node for it",
+    ),
 )
 
 

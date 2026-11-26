@@ -35,7 +35,7 @@
 #   * test_batches_whose_column_types_differ_are_refused,
 #     test_a_short_element_list_is_refused_by_the_date_patch: error paths.
 #   * test_refusals: no batch, no column, a batch with another column count, a
-#     non-positive row group size, an unsigned column, a REQUIRED field that
+#     non-positive row group size, a FLOAT16 column, a REQUIRED field that
 #     holds a null.
 from std.math import nan
 from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
@@ -541,14 +541,14 @@ def test_refusals() raises:
     mismatch.append(_batch(10, 10, True))
     with assert_raises(contains="schema mismatch at batch 1"):
         _ = write_record_batches_to_parquet_bytes(mismatch^)
-    # An unsigned column has no writer: refused up front, not written as a
-    # signed one.
-    var usb = SchemaBuilder()
-    usb.add_field(Field("u", ArrowType.UINT32, False))
-    var ub = RecordBatchBuilder()
-    ub.add_column(Column.from_primitive[DType.uint32](PrimitiveArray[DType.uint32].from_list([UInt32(1), UInt32(2)])))
+    # A half-precision float has no writer: refused up front, not written as
+    # another type.
+    var hsb = SchemaBuilder()
+    hsb.add_field(Field("h", ArrowType.FLOAT16, False))
+    var hb = RecordBatchBuilder()
+    hb.add_column(Column.from_primitive[DType.float16](PrimitiveArray[DType.float16].from_list([Float16(1), Float16(2)])))
     with assert_raises(contains="no encoding for Arrow type"):
-        _ = write_record_batch_to_parquet_bytes(ub.build(usb.build()))
+        _ = write_record_batch_to_parquet_bytes(hb.build(hsb.build()))
     # A REQUIRED field whose column holds a null.
     var rsb = SchemaBuilder()
     rsb.add_field(Field("r", ArrowType.INT64, False))
