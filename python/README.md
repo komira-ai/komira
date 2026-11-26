@@ -292,6 +292,12 @@ by `import komira`.
 
 - The module-level `komira.sql` and `komira.register_parquet` on a default
   session.
+- Surviving a crash inside the engine. An error the engine reports raises
+  `KomiraError`, but an abort, a fault, running out of stack, or running out
+  of memory that the session's `memory_limit` does not catch (a query over it
+  raises `MemoryLimitError`) ends the Python process. Inputs known to cause
+  one are refused with `KomiraError` first, for example a statement nested
+  more than 100 levels deep.
 - The DataFrame verbs not built yet, for both skins: what each capability
   has and lacks is recorded in
   [docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md).
@@ -551,9 +557,9 @@ interpreter pinned), from the release workflow only. That test holds:
 | what | how |
 |---|---|
 | the installed package | `komira` imports from the environment, at the wheel's version |
-| its metadata | the `Requires-Dist` lines `pyarrow>=25.0.1` and `protobuf>=5.29.1,<8`, in that order, and no other; `Requires-Python` `>=3.11` and exactly the classifiers `python/BUCK` writes out (`_PYTHON_METADATA`: the four supported minors); the `License-Expression` given; `.dist-info/licenses/` holding `LICENSE`, `NOTICE`, and Modular's `LICENSE` and `Third-Party-Notices`, each byte-equal to its source, and no other; the description equal to `//python:changelog[description]` (this README followed by the assembled changelog) byte for byte, so PyPI shows the same quickstart |
+| its metadata | the `Requires-Dist` lines `pyarrow>=25.0.1` and `protobuf>=5.29.1,<8`, in that order, and no other; `Requires-Python` `>=3.11` and exactly the classifiers `python/BUCK` writes out (`_PYTHON_METADATA`: the four supported minors); the `License-Expression` given; `.dist-info/licenses/` holding `LICENSE`, `NOTICE`, `AWS_LC_LICENSE`, `S2N_TLS_LICENSE`, `MODULAR_LICENSE` and `MODULAR_THIRD_PARTY_NOTICES`, each byte-equal to its source, and no other; the description equal to `//python:changelog[description]` (this README followed by the assembled changelog) byte for byte, so PyPI shows the same quickstart |
 | nothing else | no `modular/` directory and no distribution in the environment but komira, pyarrow and protobuf; `import komira` imports neither protobuf nor the plan modules |
-| the library | `abi_version()` is the version of `src/so/abi/komira.tsv`; a Parquet file registers, a missing one raises `KomiraError`; `SELECT 1 AS n` and an aggregate over `tests/fixtures/readings.parquet` answer their rows through pyarrow; the DataFrame program of "The pandas-shaped DataFrame" above answers its two rows through the plan door; a serialized plan renders |
+| the library | `abi_version()` is the version of `src/so/abi/komira.tsv`; a Parquet file registers, a missing one raises `KomiraError`; `SELECT 1 AS n` and an aggregate over `tests/fixtures/readings.parquet` answer their rows through pyarrow; a DataFrame of `tests/fixtures/readings.parquet`, filtered, projected, given a computed column, sorted and cut with `head`, answers its two rows through the plan door; a serialized plan renders |
 | the quickstart | `examples/quickstart.py`, run in an empty directory, prints exactly `examples/quickstart.expected` (its version, ABI version and directory filled in) and leaves only the `weather.parquet` it wrote |
 | where it loaded from | `/proc/self/maps` (on macOS, the images dyld has loaded) lists libkomira and its owners (none on macOS, where `lib/` holds exactly the three runtime `.dylib` files) from `komira/_lib`, and the three Mojo runtime libraries from `komira/_lib/lib` |
 

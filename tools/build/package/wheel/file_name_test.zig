@@ -10,7 +10,7 @@
 //! wheel (the other fixture's) is refused, so the agreement is read and not assumed.
 
 const std = @import("std");
-const diag = @import("diag.zig");
+const diag = @import("native_policy").diag;
 const zip = @import("zip.zig");
 const t = std.testing;
 

@@ -15,13 +15,13 @@
 //!   * METADATA's Requires-Dist lines are exactly the requirements given, and
 //!     METADATA as a whole is the one the attributes give;
 //!   * each licence member is byte-equal to its licence file;
-//!   * the members pass policy.zig again;
+//!   * the members pass native_policy's policy.zig again;
 //!   * with a twin (the same wheel built again by a second action from inputs
 //!     staged elsewhere), the two are the same bytes.
 
 const std = @import("std");
-const diag = @import("diag.zig");
-const policy = @import("policy.zig");
+const diag = @import("native_policy").diag;
+const policy = @import("native_policy").policy;
 const stamp_mod = @import("stamp.zig");
 const tag_mod = @import("tag.zig");
 const wheel = @import("wheel.zig");
