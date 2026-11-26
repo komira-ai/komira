@@ -74,6 +74,6 @@ Output:
 ## Related
 
 - [How do I look at the first rows, row count and columns of a dataset?](../5-look-at-first-rows-and-columns/page.md) (rank 5, works)
-- How do I take the first or last N rows? (rank 65, works; no page yet)
+- [How do I take the first or last N rows?](../65-take-first-last-n-rows/page.md) (rank 65, works)
 - How do I get the top N rows per group? (rank 47, works; no page yet)
 - How do I rank rows within a group? (rank 49, works; no page yet)
