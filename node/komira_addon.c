@@ -11,7 +11,7 @@
 //   registerParquet(session, name, path)  Promise<undefined>
 //   parquetSchema(session, path)       Promise<Buffer>: the file's schema as komira.plan.v1 WireSchema bytes
 //   planRender(session, bytes)         Promise<string>: the text of a serialized plan; the plan is not run
-//   sessionStats()                     { created, freed }: komira_ctx_new and komira_ctx_free calls made here
+//   sessionStats()                     { created, freed }: contexts made and freed here
 //   importArrowStream(capsule), arrowSchema(result), arrowNextBatch(result), arrowClose(result)
 //                                      an Arrow C stream drained and described (arrow_import.c)
 //

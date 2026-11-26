@@ -84,8 +84,8 @@ Fixed before this design, and not reopened here:
   turns it into a `KomiraError` whose `code` and `step` are the engine's, with the class the error
   table gives the code. Misuse of the addon
   throws an error with a `code` and no `status`: `KOMIRA_ARG`, `KOMIRA_NOT_LOADED`,
-  `KOMIRA_SESSION_FREED`, `KOMIRA_LOAD_FAILED`, `KOMIRA_ABI_MISMATCH`, `KOMIRA_MISSING_SYMBOL` and
-  `KOMIRA_LOADED`.
+  `KOMIRA_SESSION_FREED`, `KOMIRA_LOAD_FAILED`, `KOMIRA_ABI_MISMATCH`, `KOMIRA_MISSING_SYMBOL`,
+  `KOMIRA_LOADED`, and from `newSession` `KOMIRA_ABI_TOO_OLD` and `KOMIRA_CTX_REFUSED`.
 - **Calls it does not bind.** `komira_csv_binding` and `komira_json_binding` have no function in
   the addon. Nothing in it runs a query.
 - **EXISTS** The Arrow import of [Arrow: from the C stream to
