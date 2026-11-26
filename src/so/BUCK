@@ -2,6 +2,7 @@ load("@komira//tools/build/mojo:abi_golden.bzl", "komira_abi_golden")
 load("@komira//tools/build/mojo:c_abi_check.bzl", "komira_c_abi_check")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:isa_variants.bzl", "floor_variant", "variant_label_name")
 load("@komira//tools/build/platforms:table.bzl", "row")
 load("@komira//tools/build/toolchains:defs.bzl", "variant_toolchain")
@@ -330,11 +331,14 @@ mojo_shared_lib(
 # installed at the plain path of the native directory and keeps the run path of
 # `:libkomira`; every other level is installed at `variants/<level>/` and also
 # looks in `$ORIGIN/../../lib`, the directory's one lib/
-# (//tools/build/package/libkomira:libkomira_variants).
+# (//tools/build/package/libkomira:libkomira_variants). They are x86-64
+# machine code, so they are compatible with linux-x86_64 only and another
+# platform's build skips them as incompatible.
 [
     mojo_shared_lib(
         name = "libkomira_" + variant_label_name(v),
         toolchain = variant_toolchain(v),
+        target_compatible_with = LINUX_X86_64,  # komira-limit:isa-variants-linux-x86-64
         extra_runpath = [] if v == floor_variant(row("linux-x86_64")) else ["$ORIGIN/../../lib"],
         visibility = ["komira//tools/build/package/libkomira:"],
         **_LIBKOMIRA

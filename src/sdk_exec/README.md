@@ -397,9 +397,9 @@ The tests run when the package is built.
   running and whole-partition aggregates, `first_value`, `last_value` and
   `nth_value`, with no, one or two partition keys, several windows in one
   SELECT, a WHERE and an outer ORDER BY, on one and three workers, each column
-  of its documented type; a sum over an INTEGER, a DATE partition key, a
-  DECIMAL order key and a float default over a BIGINT lag are
-  `LOWERING_WINDOW_UNSERVED` refusals at `lower`.
+  of its documented type, `sum`, `avg`, `min` and `max` over an INTEGER
+  among them; a DATE partition key, a DECIMAL order key and a float default
+  over a BIGINT lag are `LOWERING_WINDOW_UNSERVED` refusals at `lower`.
 - `test_run_sql_window_frames`: `run_sql` over two Parquet tables DuckDB wrote
   (the `:window_frames_oracle` build action) answers what the pinned DuckDB
   answers for every case of `tests/window_frames/cases.sql`, on one and three

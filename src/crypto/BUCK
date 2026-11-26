@@ -109,16 +109,22 @@ native_shared_library(
     weak_undefined = [
         # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
         "__gmon_start__",
-        # aws-lc's allocator hooks, prefixed, which a program may define
-        # to take over aws-lc's allocator; -Bsymbolic does not bind an
-        # undefined symbol, so they stay unbound (third_party/aws-lc/BUCK).
-        "komira_awslc_OPENSSL_memory_alloc",
-        "komira_awslc_OPENSSL_memory_free",
-        "komira_awslc_OPENSSL_memory_get_size",
-        "komira_awslc_OPENSSL_memory_realloc",
-        # jemalloc's sized free, which aws-lc calls only when the process's
-        # malloc defines it (third_party/aws-lc/BUCK, :crypto_symbols).
-        "sdallocx",
-    ],
+    ] + select({
+        "DEFAULT": [
+            # aws-lc's allocator hooks, prefixed, which a program may define
+            # to take over aws-lc's allocator; -Bsymbolic does not bind an
+            # undefined symbol, so they stay unbound (third_party/aws-lc/BUCK).
+            "komira_awslc_OPENSSL_memory_alloc",
+            "komira_awslc_OPENSSL_memory_free",
+            "komira_awslc_OPENSSL_memory_get_size",
+            "komira_awslc_OPENSSL_memory_realloc",
+            # jemalloc's sized free, which aws-lc calls only when the process's
+            # malloc defines it (third_party/aws-lc/BUCK, :crypto_symbols).
+            "sdallocx",
+        ],
+        # The macOS archive (//src/awslc) holds the hooks as static NULLs
+        # and does not reference sdallocx: no weak undefined symbol.
+        "prelude//os/constraints:macos": [],
+    }),
     visibility = ["PUBLIC"],
 )

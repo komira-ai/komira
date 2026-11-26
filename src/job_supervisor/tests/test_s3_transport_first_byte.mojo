@@ -258,13 +258,22 @@ def _credential_dial(scheme: String, port: Int) -> String:
         return String("raised: ") + String(e)
 
 
+def _exit_zero_argv() -> List[String]:
+    """`sh -c "exit 0"`: a job that succeeds, with no dependence on where the
+    platform keeps `true` (/bin on Linux, /usr/bin on macOS)."""
+    var argv = List[String]()
+    argv.append(String("-c"))
+    argv.append(String("exit 0"))
+    return argv^
+
+
 def _entry_run(scheme: String, port: Int) -> String:
     var beats = ArcPointer[List[String]](List[String]())
     var config = JobSupervisorConfig(
         String("s3-first-byte-") + scheme,
         String("instance-1"),
-        String("/bin/true"),
-        List[String](),
+        String("/bin/sh"),
+        _exit_zero_argv(),
         String("http://127.0.0.1:1/beat"),
         heartbeat_interval_secs=1,
     )

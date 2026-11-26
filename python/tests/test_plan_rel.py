@@ -717,14 +717,18 @@ def test_a_shadow_name_the_input_has_is_refused():
     )
 
 
-def test_a_window_ordered_with_nulls_first_is_refused():
+def test_a_window_ordered_with_nulls_first_carries_the_placement_of_every_key():
     win = WindowExpr("rank", order_by=(SortKey("o_id"), SortKey("s", nulls_first=True)))
-    refuses(
-        lambda: encode_plan(Project(ORDERS, (("r", win),)), ORDERS_SOURCES),
-        UnsupportedOperation,
-        "the window 'r' orders 's' with NULLs first, and the engine orders a partition with "
-        "NULLs last; sort by a NULL test first instead",
-    )
+    node = stack(window_plan(("r", win)))[0]
+    assert list(node.order_keys) == ["o_id", "s"]
+    assert list(node.nulls_first) == [False, True]
+
+
+def test_a_window_with_the_default_null_placement_leaves_nulls_first_empty():
+    win = WindowExpr("rank", order_by=(SortKey("o_id"), SortKey("s", descending=True)))
+    node = stack(window_plan(("r", win)))[0]
+    assert list(node.descending) == [False, True]
+    assert list(node.nulls_first) == []
 
 
 def test_an_aggregate_window_with_an_offset_is_refused():

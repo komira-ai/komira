@@ -1645,8 +1645,12 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         var descending: List[Bool],
         var partition_exprs: List[PartitionExpr],
         var child: LogicalPlan,
+        var nulls_first: Optional[List[Bool]] = None,
     ) raises -> LogicalPlan:
         """Create a PartitionBy (window function) node.
+
+        `nulls_first` is the per-order-key NULL placement; None derives it
+        from `descending`.
 
         Output schema = child schema + one column per partition expression.
         Row count is preserved: every input row gets the computed window
@@ -1666,7 +1670,8 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         var out_schema = builder.build()
         var plan = LogicalPlan(PLAN_PARTITION_BY, out_schema^)
         plan._partition_by = OwnedPointer(PartitionByData(
-            partition_keys^, order_keys^, descending^, partition_exprs^, child^
+            partition_keys^, order_keys^, descending^, partition_exprs^, child^,
+            nulls_first^,
         ))
         return plan^
 

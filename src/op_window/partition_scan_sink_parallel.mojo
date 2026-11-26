@@ -22,7 +22,8 @@
 # keys holding no NULL, it takes the scatter driver
 # (`partition_scan_sink_hash_scatter`), which also sorts in parallel. Every
 # route emits rows in (partition keys ASC ++ order keys per direction) order
-# (`exec_types.partition_by_output_contract`), NULLs last.
+# (`exec_types.partition_by_output_contract`), each order key's NULLs placed by
+# `nulls_first` (last when it is empty).
 #
 # Bucket assignment is a range split, so the result does not depend on the
 # worker count or the scheduling.
@@ -284,7 +285,11 @@ def _execute_partition_by_sink_parallel(
         )
 
     var sorted_batch = sort_partition_batch(
-        batch^, sink_data.partition_keys, sink_data.order_keys, sink_data.descending
+        batch^,
+        sink_data.partition_keys,
+        sink_data.order_keys,
+        sink_data.descending,
+        sink_data.nulls_first,
     )
     var bounds = _detect_partition_boundaries(sorted_batch, sink_data.partition_keys)
     var num_partitions = len(bounds)

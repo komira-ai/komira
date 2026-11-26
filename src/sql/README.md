@@ -101,9 +101,10 @@ inside a larger expression into a hidden output, one accumulator per distinct
 aggregate; an aggregate inside an aggregate, or in a position that cannot hold
 one, is refused. `sql_bind_aggregate` plans a `GROUP BY` and `HAVING` (keys by
 ordinal, alias or expression) and the plain projection. `sql_bind_window_order`
-binds window functions with their `PARTITION BY` and `ORDER BY`, and the
-statement-level `ORDER BY` (column, ordinal, output alias or expression, with
-explicit `NULLS FIRST` / `NULLS LAST`).
+binds window functions with their `PARTITION BY` and `ORDER BY` (each window
+order key may carry `NULLS FIRST` / `NULLS LAST`; an unwritten one is the
+derived default), and the statement-level `ORDER BY` (column, ordinal, output
+alias or expression, with explicit `NULLS FIRST` / `NULLS LAST`).
 
 `sql.sql_binder` turns a parsed statement into a plan:
 `bind_statement(stmt, catalog, footers)` returns a `BoundStatement` whose

@@ -12,7 +12,8 @@
 //!    so a merge cannot leave it unreadable;
 //!  - an empty PACKAGES, or an empty list, which would make the check vacuous;
 //!  - a dropped line of KEPT: a name once claimed on prod stays claimed after its package leaves the
-//!    release, so the list may hold names no member has (the deleted libraries of KEPT).
+//!    release, so the list may hold names no member has (the deleted libraries of KEPT, and names
+//!    claimed ahead of a library that is not published yet).
 //! The cases plant each defect in the text of the real files and expect the exact message.
 
 const std = @import("std");

@@ -4,7 +4,8 @@
 #
 # The window functions of a segment: the rows are collected into one batch and
 # `op_window`'s partition-scan kernel sorts them by the plan's partition keys
-# and order keys (NULLs last in both directions) and appends one column per
+# and order keys (each order key's NULLs where `nulls_first` places them, last
+# in both directions when it is empty) and appends one column per
 # window expression. The output is the sorted input columns followed by those
 # columns, under the `output_schema` of the plan's `PartitionBySinkData`.
 #
@@ -85,6 +86,7 @@ def _copy_data(ref data: PartitionBySinkData) -> PartitionBySinkData:
         data.descending.copy(),
         exprs^,
         data.output_schema.copy(),
+        data.nulls_first.copy(),
     )
 
 
@@ -161,6 +163,17 @@ struct WindowSink(MorselSinkImpl):
                 + " lists "
                 + String(len(data.descending))
                 + " directions for "
+                + String(len(data.order_keys))
+                + " order keys"
+            )
+        if len(data.nulls_first) != 0 and len(data.nulls_first) != len(
+            data.order_keys
+        ):
+            raise Error(
+                where_
+                + " lists "
+                + String(len(data.nulls_first))
+                + " NULL placements for "
                 + String(len(data.order_keys))
                 + " order keys"
             )
