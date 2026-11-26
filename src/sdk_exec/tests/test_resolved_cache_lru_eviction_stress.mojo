@@ -5,6 +5,10 @@
 # (factory_hash, stats_hash) tuples through the public cache API and
 # verifies that the oldest unpinned entry is evicted.
 # =============================================================================
+#
+# Covers: Past the cap the oldest unpinned entry is evicted and the rest stay
+# reachable.
+#
 
 from std.testing import (
     TestSuite,

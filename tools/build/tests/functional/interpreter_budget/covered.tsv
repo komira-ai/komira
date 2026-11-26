@@ -1,0 +1,4 @@
+# A file row under a glob row that covers it.
+# path	reason
+tools/**/*.py	a glob row of the case
+tools/gen.py	a Python file of the case

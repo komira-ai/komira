@@ -84,6 +84,9 @@ Python UDFs run in zygote worker processes ([udf_runtime_interface.md](udf_runti
 python/
   BUCK              the package's sources as one target, its tests' targets, later the wheel target
   README.md         what the package is, how it is built and tested (the package doc, like node/README.md)
+  CHANGELOG.md      the releases it keeps, newest first (decision 7, The changelog)
+  changelog.d/      one file `<slug>.md` of bullets for each change no kept release holds yet
+  changelog/        the Zig tool that assembles them and the wheel's description
   komira/           the import package
     __init__.py     the public names, and nothing else (decision 3)
     py.typed        the PEP 561 marker (decision 8)
@@ -355,7 +358,7 @@ later designs fill marked:
 name = "komira"
 dynamic = ["version"]   # stamped by the wheel rule
 description = "SQL over local files, with libkomira, the komira query engine, in process"
-readme = "README.md"
+readme = "README.md"   # the wheel's description is this file followed by the assembled changelog (below)
 requires-python = ">=3.11"   # the oldest CPython the package's tests run (python/pythons.bzl)
 license = "Apache-2.0 AND LicenseRef-Modular-Proprietary"
 license-files = ["LICENSE", "NOTICE", "MODULAR_LICENSE", "MODULAR_THIRD_PARTY_NOTICES"]
@@ -392,6 +395,28 @@ Documentation = "https://github.com/komira-ai/komira/blob/main/docs/install.md"
 Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
 ```
 
+- **The changelog.** Every change to the package adds a file, `python/changelog.d/<slug>.md`, and never a
+  line of `python/CHANGELOG.md`: ten pull requests that each add a bullet at the head of one file conflict
+  with each other in the merge queue, and ten that each add a file do not. A file holds Markdown bullets
+  (`- **Title.** text`, a continuation indented two spaces, no heading). A release's version is `0.1.<N>`
+  from the stamp, which a pull request cannot know, so the release writes its section: the changelog tool
+  (`python/changelog`, Zig, with its own cases; the rule is `changelog_file`, target `//python:changelog`)
+  puts `## 0.1.<N>` before the first release heading of `CHANGELOG.md`, holding the bullets of every file in
+  file-name order, so a release lists every change merged since the newest section `CHANGELOG.md` keeps
+  (a section is kept by moving its files' bullets under their own heading in one change). The wheel's
+  description, `METADATA`'s body, is `README.md` followed by that changelog with each heading one level
+  down, so the page of version 0.1.`<N>` on PyPI shows its own section; both wheels read the one target,
+  so their `METADATA` is the same. The tool refuses, naming the file and the line, a file that is not a
+  slug and `.md`, an empty file, a line that is neither a bullet nor an indented continuation, a heading,
+  a `## Unreleased` heading in `CHANGELOG.md` and a `CHANGELOG.md` with no release heading; the wheel
+  depends on the target, so a pull request that builds the wheel builds the check. Nothing else fails when
+  an entry is missing, so `python/tests/test_changelog_names.py` holds every public name of `komira` and
+  `komira.pl` (each module's `__all__`, and the public attributes of each public class) to an entry: the
+  name is an identifier inside a backticked code span of `CHANGELOG.md` or of a file of `changelog.d/`.
+  It holds the names, not the change: a name whose last part is already in a span passes, and a change of
+  behaviour that adds no name needs a fragment by review.
+  A change that touches only `changelog.d/` is documentation-only to the release workflow (`**.md`), so it
+  starts no release; its entry reaches the page of the next release that changes code.
 - **PEP 639 licence metadata.** `license` is an SPDX expression with two terms: `Apache-2.0` for the
   repository's code and `LicenseRef-Modular-Proprietary` for the three Mojo runtime libraries the wheel
   carries. The pinned `mojo-compiler` conda package states `LicenseRef-Modular-Proprietary` in its
@@ -532,9 +557,10 @@ and `_py311`, `_py312` and `_py314` on the other supported minors), alone: the e
 ## What are the limits and open questions?
 
 - The interpreter list ([tools/build/lint/interpreter_allowlist.tsv](../../tools/build/lint/interpreter_allowlist.tsv))
-  needs a row for each `.py` file today, and `third_party/python`'s `_TEST_ONLY` and `src/so`'s visibility
-  each need a line for `python/`; the loader added them. Whether the interpreter list should
-  read `PYTHON_SURFACE` instead of a row per file is a question for that lint.
+  holds two glob rows for the package, `python/komira/**/*.py` and `python/tests/**/*.py`, so a new `.py` file
+  there needs no row; a file of another kind under `python/` (a shell script, or a file with only a `#!` line)
+  still needs its own. `third_party/python`'s `_TEST_ONLY` and `src/so`'s visibility each need a line for
+  `python/`; the loader added them.
 - Free-threaded CPython (3.14t): the package is not claimed for it in the first release. ctypes works
   there, but no test runs the package on it.
 - An abort inside libkomira ends the interpreter. A raise is a status and becomes a Python exception,

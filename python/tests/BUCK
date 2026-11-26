@@ -1,10 +1,20 @@
 load("@komira//python:dependencies.bzl", "DUCKDB_WHEEL", "PROTOBUF_MACOS", "PROTOBUF_REQUIREMENT", "PYARROW_MACOS", "PYARROW_WHEELS")
 load("@komira//python:pythons.bzl", "PYTHONS")
 load("@komira//third_party/python:pins.bzl", "PROTOBUF_EDGES", "WHEELS")
+load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/node:defs.bzl", "c_shared_lib")
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
-load("@komira//tools/build/python:defs.bzl", "py_test", "python_binding_test", "python_wheel")
+load("@komira//tools/build/python:defs.bzl", _py_test = "py_test", _python_binding_test = "python_binding_test", "python_wheel")
+load(":families.bzl", "register", "require_all_run", "test_target_name")
+
+# Every `py_test` and `python_binding_test` below is declared through these two,
+# which record its name and its file in `_SUITE` ({name: src}) before they
+# declare it: `:all` (the end of this file) depends on all of them, and a name
+# declared twice fails the load naming both files (families.bzl).
+_SUITE = {}
+py_test = register(_py_test, _SUITE)
+python_binding_test = register(_python_binding_test, _SUITE)
 
 # libkomira with the Mojo runtime and its native owners in lib/ beside it: the
 # directory the loader is given.
@@ -847,59 +857,97 @@ _PLAN_EXPR_RUNTIMES = [
     **_ON[p["suffix"]]
 ) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES for area in ["rel", "rel_goldens", "no_sql", "udf", "udf_goldens"]]
 
-# The pandas-shaped DataFrame (komira/_frame.py, komira/_series.py):
+# ---- the test families ----------------------------------------------------------
 #
-# - frame_test, with no library, on the plan tests' runtimes: each verb's plan
-#   equals a hand-built node tree (a filter, projection, computed column or
-#   head under or over a sort as the row-order rules place it), each output
-#   type is the engine's, each refusal raises its class with its full message,
-#   the attribute rules of the frame, the Series and the module hold for every
-#   row of the refusal tables, no dunder runs a query, and a terminal sends the
-#   encoded plan bytes to the session's plan door and nothing else, with no SQL
-#   text anywhere in the frame's modules.
-# - frame_groupby_test, with no library, on the same runtimes: the plans of
-#   groupby and its reductions, the frame's reductions and agg, and
-#   drop_duplicates, by equality with hand-built node trees (the filter of
-#   missing keys below the aggregate, the key sort above it, the zero of an
-#   empty sum), their output types, the encoded aggregate, every refusal with
-#   its full message, and the GroupBy's attribute rules.
-# - frame_run_test, on the real libkomira, per minor: the readers over Parquet,
-#   CSV and newline-delimited JSON files written here, each verb run through
-#   komira_plan_stream with its rows checked, explain()'s text, a frame run
-#   twice, failures at the reader (a missing file, a closed session) and at the
-#   terminal (the engine's refusal with its step and code), the default
-#   session, and an ABI 1.7 stand-in refusing the plan door by the version it
-#   needs.
-# - frame_duckdb_test, on CPython 3.13 (the minor with a pinned DuckDB): frame
-#   programs over a Parquet file with NULLs, negative and float values and
-#   strings, each answered by komira through the plan door and by DuckDB from
-#   the SQL that means the same over the same file, equal row for row (in
-#   order when the frame is ordered, as a multiset otherwise), column names
-#   and types included: the verbs above, groupby and the reductions the
-#   engine runs against GROUP BY, the frame's reductions, drop_duplicates
-#   against DISTINCT, and the reductions the engine does not run yet refused
-#   at the terminal with its step.
-# - frame_verbs_test, frame_concat_test and series_accessors_test,
-#   with no library, on the same runtimes: the node trees of fillna, dropna
-#   (a float column's not-NaN test), rename, add_prefix, add_suffix, astype,
-#   tail (a reversed-key top-n under the frame's sort), concat (the union and
-#   the projection that reorders a later frame), the refusal of value_counts
-#   by name, Series.astype and the .str and .dt methods, their
-#   output types, where the order is kept, every refusal with its full
-#   message, and the accessors' attribute rules.
-# - frame_verbs_duckdb_test, on CPython 3.13: those verbs over a Parquet file
-#   with NaN, float32, timestamp and date columns, each equal to DuckDB's
-#   answer to the SQL that means pandas' answer, and the casts and regular
-#   expressions the engine does not run refused at the terminal with its step.
+# A test of one of these shapes is a file `<dir>/test_<name>.py` and no stanza:
+# the globs below declare its targets, `<name>_test` with the suffix the family
+# gives (`_py311`, ..., `_protobuf_lower_edge`), so adding a test of the shape
+# is adding the file, and its docstring says what it covers. The name is the
+# file stem without `test_`, then `_test` (families.bzl, `test_target_name`):
+# two files that give one name fail the load, naming both. The directories
+# are in package python/tests (no BUCK file in them). What a family runs with
+# is its stanza here, the same for every test in it; a test that needs other
+# inputs gets a stanza of its own anywhere in this file, with its `src`. A
+# `test_*.py` that no stanza names and no family directory holds fails the
+# load (the end of this file).
+_FAMILIES = ["plan", "run", "duckdb", "pl", "pl_oracle"]
+
+_FAMILY_FILES = {d: glob([d + "/test_*.py"]) for d in _FAMILIES}
+
+# plan/: tests of the plan side with no library, on the plan tests'
+# runtimes (_PLAN_EXPR_RUNTIMES): the plan modules and a protobuf runtime, and
+# nothing else: each minor under 7.36.2, and CPython 3.13 under 5.29.1 too
+# (`<name>_test_protobuf_lower_edge`).
 [py_test(
-    name = "frame_test{}".format(suffix),
-    src = "test_frame.py",
+    name = test_target_name(f, suffix),
+    src = f,
     deps = [
         "//python:komira_with_plan_modules",
         _PROTOBUF[p["suffix"]][runtime],
     ],
     **_ON[p["suffix"]]
-) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES for f in _FAMILY_FILES["plan"]]
+
+# run/: tests on the real libkomira (`libkomira`, and `fake_v1_7/libkomira.so`,
+# the ABI 1.7 stand-in that refuses the plan door), per minor, with the plan
+# modules, protobuf 7.36.2 and pyarrow.
+[python_binding_test(
+    name = test_target_name(f, p["suffix"]),
+    src = f,
+    data = {
+        "fake_v1_7/libkomira.so": ":fake_v1_7",
+        "libkomira": LIBKOMIRA,
+    },
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS for f in _FAMILY_FILES["run"]]
+
+# duckdb/: tests of the real libkomira against DuckDB, on CPython 3.13 alone
+# (the minor with a pinned DuckDB): the plan modules, duckdb, protobuf and
+# pyarrow.
+[python_binding_test(
+    name = test_target_name(f),
+    src = f,
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+) for f in _FAMILY_FILES["duckdb"]]
+
+# pl/: tests of komira.pl with no library, per minor: the plan modules,
+# protobuf 7.36.2 and pyarrow.
+[py_test(
+    name = test_target_name(f, p["suffix"]),
+    src = f,
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS for f in _FAMILY_FILES["pl"]]
+
+# pl_oracle/: tests of komira.pl against polars, on the real libkomira and
+# CPython 3.13 alone (the minor with a pinned polars): the plan modules,
+# protobuf, polars and pyarrow.
+[python_binding_test(
+    name = test_target_name(f),
+    src = f,
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:polars",
+        _PYARROW[""],
+    ],
+) for f in _FAMILY_FILES["pl_oracle"]]
 
 # The notebook display (komira/_display.py), with no library: a frame shows its
 # names over their types, equal to fixtures/display/frame.html, and calls
@@ -924,97 +972,12 @@ _PLAN_EXPR_RUNTIMES = [
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
-[py_test(
-    name = "frame_groupby_test{}".format(suffix),
-    src = "test_frame_groupby.py",
-    deps = [
-        "//python:komira_with_plan_modules",
-        _PROTOBUF[p["suffix"]][runtime],
-    ],
-    **_ON[p["suffix"]]
-) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
-
-[py_test(
-    name = "frame_verbs_test{}".format(suffix),
-    src = "test_frame_verbs.py",
-    deps = [
-        "//python:komira_with_plan_modules",
-        _PROTOBUF[p["suffix"]][runtime],
-    ],
-    **_ON[p["suffix"]]
-) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
-
-[py_test(
-    name = "frame_concat_test{}".format(suffix),
-    src = "test_frame_concat.py",
-    deps = [
-        "//python:komira_with_plan_modules",
-        _PROTOBUF[p["suffix"]][runtime],
-    ],
-    **_ON[p["suffix"]]
-) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
-
-[py_test(
-    name = "series_accessors_test{}".format(suffix),
-    src = "test_series_accessors.py",
-    deps = [
-        "//python:komira_with_plan_modules",
-        _PROTOBUF[p["suffix"]][runtime],
-    ],
-    **_ON[p["suffix"]]
-) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
-
-[python_binding_test(
-    name = "frame_run_test" + p["suffix"],
-    src = "test_frame_run.py",
-    data = {
-        "fake_v1_7/libkomira.so": ":fake_v1_7",
-        "libkomira": LIBKOMIRA,
-    },
-    deps = [
-        "//python:komira_with_plan_modules",
-        _PROTOBUF[p["suffix"]]["7.36.2"],
-        _PYARROW[p["suffix"]],
-    ],
-    **_ON[p["suffix"]]
-) for p in PYTHONS]
-
-python_binding_test(
-    name = "frame_duckdb_test",
-    src = "test_frame_duckdb.py",
-    data = {"libkomira": LIBKOMIRA},
-    deps = [
-        "//python:komira_with_plan_modules",
-        "komira//third_party/python:duckdb",
-        "komira//third_party/python:protobuf",
-        "komira//third_party/python:pyarrow",
-    ],
-)
-
-python_binding_test(
-    name = "frame_verbs_duckdb_test",
-    src = "test_frame_verbs_duckdb.py",
-    data = {"libkomira": LIBKOMIRA},
-    deps = [
-        "//python:komira_with_plan_modules",
-        "komira//third_party/python:duckdb",
-        "komira//third_party/python:protobuf",
-        "komira//third_party/python:pyarrow",
-    ],
-)
-
-# The polars-shaped skin, komira.pl (docs/design/dataframe_surface.md):
-#
-# - pl_names_test: with no library and no plan modules: importing komira.pl
-#   loads nothing; its public names; every entry of the module's, LazyFrame's
-#   and Expr's refusal tables raises its AttributeError word for word, any other
-#   name Python's own; no attribute is a column; no attribute can be set; no
-#   dunder runs a query; a frame survives copy.
-# - pl_verbs_test: with the plan modules and no library, over a stand-in
-#   session: each verb's and expression's plan equals a hand-written tree, the
-#   order rules, polars' names and types, every refusal with its full message,
-#   the plan bytes collect() hands the session (no SQL text), and the schema as
-#   pyarrow types.
+# The polars-shaped skin's names (komira.pl, docs/design/dataframe_surface.md):
+# with no library and no plan modules, importing komira.pl loads nothing; its
+# public names; every entry of the module's, LazyFrame's and Expr's refusal
+# tables raises its AttributeError word for word, any other name Python's own;
+# no attribute is a column; no attribute can be set; no dunder runs a query; a
+# frame survives copy.
 [py_test(
     name = "pl_names_test" + p["suffix"],
     src = "test_pl_names.py",
@@ -1022,70 +985,20 @@ python_binding_test(
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# The changelog's entries (python/CHANGELOG.md, python/changelog.d/), with no
+# library: every public name of komira and komira.pl (each module's `__all__`,
+# and each public class's own public attributes) is an identifier inside a
+# backticked code span of the changelog or of a fragment, the failure lists the
+# names without one, and on a synthetic changelog that leaves a name out the
+# finding is that name alone, in the failure's own words. It reads the files as
+# the tree of `//python:changelog[sources]`, the rule that assembles them.
 [py_test(
-    name = "pl_verbs_test" + p["suffix"],
-    src = "test_pl_verbs.py",
-    deps = [
-        "//python:komira_with_plan_modules",
-        _PROTOBUF[p["suffix"]]["7.36.2"],
-        _PYARROW[p["suffix"]],
-    ],
+    name = "changelog_names_test" + p["suffix"],
+    src = "test_changelog_names.py",
+    args = ["$(location //python:changelog[sources])"],
+    deps = ["//python:komira"],
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
-
-# - pl_frames_test: as pl_verbs_test, for group_by, join, unique and the
-#   windows (over, rank, cum_*, rolling_*, an aggregate broadcast beside
-#   row-wise values): each plan equals a hand-written tree, polars' output
-#   names and types, every refusal with its full message, and the plan bytes
-#   collect() hands the session hold no SQL text.
-[py_test(
-    name = "pl_frames_test" + p["suffix"],
-    src = "test_pl_frames.py",
-    deps = [
-        "//python:komira_with_plan_modules",
-        _PROTOBUF[p["suffix"]]["7.36.2"],
-        _PYARROW[p["suffix"]],
-    ],
-    **_ON[p["suffix"]]
-) for p in PYTHONS]
-
-# komira.pl against polars itself (test_pl_oracle.py), on the real library and
-# CPython 3.13, the one minor with a pinned polars: each program, written once
-# for both modules, gives the same frame through komira.pl's plan and the plan
-# entry as through polars 1.44.2, values and dtypes, and the schema komira.pl
-# derives without running is the answer's; plus collect() twice, the plan
-# entry and never the SQL one, explain(), a missing file, frames of two
-# sessions, a CSV scan against polars', and the engine's refusal at
-# execute of median, std, var and a string min, which its aggregation sinks do
-# not serve yet.
-python_binding_test(
-    name = "pl_oracle_test",
-    src = "test_pl_oracle.py",
-    data = {"libkomira": LIBKOMIRA},
-    deps = [
-        "//python:komira_with_plan_modules",
-        "komira//third_party/python:protobuf",
-        "komira//third_party/python:polars",
-        _PYARROW[""],
-    ],
-)
-
-# group_by, join, unique and the windows of komira.pl against polars itself
-# (test_pl_oracle_frames.py), as pl_oracle_test: each program, written once
-# for both modules, gives the same frame through komira.pl's plan as through
-# polars 1.44.2, values and dtypes, and the schema komira.pl derives is the
-# answer's; and the plan entry is called, never the SQL one.
-python_binding_test(
-    name = "pl_oracle_frames_test",
-    src = "test_pl_oracle_frames.py",
-    data = {"libkomira": LIBKOMIRA},
-    deps = [
-        "//python:komira_with_plan_modules",
-        "komira//third_party/python:protobuf",
-        "komira//third_party/python:polars",
-        _PYARROW[""],
-    ],
-)
 
 # The clean-environment install tests of the wheel (python/BUCK,
 # wheel_install_test): the driver that installs the wheels into an empty
@@ -1159,3 +1072,26 @@ _UDF_PYARROW = {
     ],
     **_ON[p["suffix"]]
 ) for p in PYTHONS if p["suffix"] in _UDF_PYARROW]
+
+# ---- the suite --------------------------------------------------------------
+#
+# Every test file is run by a target: the `src` of one of the targets above (a
+# family's, found by its glob, or a stanza's) or an `export_file` of the wheel's
+# install tests (//python's BUCK file runs those); any other `test_*.py` fails the
+# load, naming the file. This part comes after every test is declared.
+_TEST_FILES = glob(["**/test_*.py"])
+
+require_all_run(
+    _TEST_FILES,
+    _SUITE.values(),
+    [f for f in _TEST_FILES if rule_exists(f)],
+    _FAMILIES,
+)
+
+# `:all` builds, and so runs, every test of the package, and is the one row of
+# this package in the check set (ci/targets.bzl): a test added as a file of a
+# family, or as a stanza, joins it without touching a generated list.
+ci_aggregate(
+    name = "all",
+    deps = [":" + name for name in sorted(_SUITE.keys())],
+)

@@ -3,6 +3,18 @@
 # what DuckDB answers
 # =============================================================================
 #
+# Covers: run_sql over small Parquet tables DuckDB wrote (the
+# :join_kinds_oracle action in BUCK; several row groups, NULL, duplicate and
+# unmatched keys, an empty table) answers what the pinned DuckDB answers for
+# each case of tests/join_kinds/cases.sql, on one and three workers: LEFT,
+# RIGHT and FULL joins on BIGINT, VARCHAR, INTEGER = BIGINT, DOUBLE and
+# two-column keys, under counts, filters and chained joins, and against an
+# empty table on either side; SEMI and ANTI joins as EXISTS, NOT EXISTS, IN,
+# NOT IN (NULL-aware) and the SEMI JOIN and ANTI JOIN keywords; CROSS joins
+# (also past one output chunk), a comma join and uncorrelated scalar
+# subqueries; a LEFT JOIN with a residual over both sides is still refused at
+# lower; every case is run.
+#
 # The pinned DuckDB writes the tables (tests/join_kinds/data.sql: l and r in
 # small row groups, each with NULL, duplicate and unmatched keys of BIGINT,
 # VARCHAR, INTEGER and DOUBLE; n, a BIGINT column without NULL; e, the columns

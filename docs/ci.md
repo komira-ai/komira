@@ -649,7 +649,8 @@ then-current `main`. Nothing is half-done, because the replaced run never starte
 
 kci, the build and deploy CLI the repository once had, was retired and removed: no workflow runs it.
 The `kci_*` libraries are not release members: `release/artifacts.textproto` and the release set list none and their
-source is deleted. Their names stay claimed on the prod registry (`release/prod_claimed_names.txt`).
+source is deleted. Their names stay reserved on the prod registry (`release/prod_claimed_names.txt`) as global
+(flat) names: the prune of the flat names kept them, and prod has no `komira-ai/kci_*` package.
 
 ### The mopm jobs
 
@@ -740,7 +741,7 @@ release/prod_claimed_names.txt: claim it on the prod registry first, then add it
 A maintainer adds a name to the file only after claiming it on the prod registry, in the pull request that adds the
 member or ahead of it: names claimed for libraries not published yet (each with its row in `release/UNPUBLISHED.md`)
 are listed too, and the check accepts a name no member has. The file keeps the names of deleted packages (the
-`kci_*` libraries), whose names stay claimed, and refuses the dropping of one of them, an unsorted or repeated line, and an empty file. It is a
+`kci_*` libraries), whose names stay reserved as flat names, and refuses the dropping of one of them, an unsorted or repeated line, and an empty file. It is a
 committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
 last word.
 
@@ -967,6 +968,24 @@ cases): a push of documentation alone starts no run. The version is `0.1.<N>`, `
 carries the Mojo runtime libraries and requires no distribution of Modular's; its requirements are
 pyarrow and protobuf. A pull request never starts the
 workflow.
+
+**The wheel's description.** The body of `METADATA`, which is the page of the version on PyPI, is
+[`python/README.md`](../python/README.md) followed by the assembled changelog, `//python:changelog[description]`.
+The tool is [`python/changelog`](../python/changelog/BUCK) (Zig, with its own cases): it puts the section
+`## 0.1.<N>` (`<N>` the stamp the wheel takes its version from; `## Unreleased` with none) before the first
+release heading of [`python/CHANGELOG.md`](../python/CHANGELOG.md), holding the bullets of every file of
+`python/changelog.d/` in file-name order, and writes every heading of the result one level down so that it
+nests under the README. A change to the package adds a file there and never a line of `CHANGELOG.md`
+([the working guide](../python/README.md#changelog-entries)), so queued pull requests edit no common line,
+and the section a release ships lists every change merged since the newest section `CHANGELOG.md` keeps.
+The Linux and the macOS wheel read the one target, so their `METADATA` is the same
+(`//python:wheel_same_macos_arm64`). The wheel depends on the target, so a malformed file of `changelog.d/`
+(a name that is not a slug and `.md`, an empty file, a line that is neither a bullet nor an indented
+continuation, a heading), a `## Unreleased` heading in `CHANGELOG.md` and a `CHANGELOG.md` with no release
+heading fail the build of the wheel, naming the file and the line; `//python/tests:changelog_names_test`
+fails, listing the names, when a public name of `komira` or `komira.pl` appears in no code span of the
+changelog or of a fragment; that a change of behaviour has a fragment of its own is left to review. The workflow runs
+the same targets as before.
 
 | job | half | environment | permissions | what it does |
 |---|---|---|---|---|
@@ -1287,7 +1306,7 @@ is the same text, and the README's output block is `quickstart.expected`, both h
 wheel on the farm, `//python:wheel_install_test` (`python/tests/test_installed.py`), which compares its stdout with
 `quickstart.expected` and uploads nothing. The install page,
 [docs/install.md](install.md), shows the same program and what it prints, `quickstart.expected` with the
-newest release of [python/CHANGELOG.md](../python/CHANGELOG.md) and the ABI version put in, held by
+newest release `python/CHANGELOG.md` keeps ([python/CHANGELOG.md](../python/CHANGELOG.md)) and the ABI version put in, held by
 `//python/smoke:install_page_shows_quickstart`.
 
 **What the macOS smokes prove.** The same two checks, `verify` and `install`, on the macOS wheel: on the
@@ -1345,7 +1364,7 @@ documentation (`docs`, `*.md`, `.github`). A push of `docs/**` and `*.md` alone 
 filter). A push that changes `.github` alone starts a run that builds the version of the last code commit:
 when its bytes are the ones on TestPyPI (`same`), nothing is uploaded, the smoke runs and the run is green with
 `already on TestPyPI`; when they differ (`differs`: the wheel's `METADATA` holds the package's description,
-`python/README.md`, and a README edit that landed with no code since the version was uploaded changes it),
+`python/README.md` and the assembled changelog, and a README edit, or a file of `python/changelog.d/`, that landed with no code since the version was uploaded changes it),
 nothing is uploaded, the smoke does not run, and the run is green with a notice that says the version's bytes
 differ. The fix reaches the index with the next commit that changes code, which has the next version.
 

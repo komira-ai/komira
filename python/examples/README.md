@@ -48,10 +48,11 @@ The docs show the same text:
 - The "What works" section of [the package README](../README.md), which is
   also the package's description on PyPI, shows `quickstart.py` byte for
   byte and what it prints: `quickstart.expected` with the version of the
-  newest release in [the changelog](../CHANGELOG.md) and the ABI version
-  filled in, and `<cwd>` as written. The test
+  newest release section in [the changelog](../CHANGELOG.md) and the ABI
+  version filled in, and `<cwd>` as written. The test
   `//python/smoke:readme_shows_quickstart` fails when either block differs,
-  and the install test holds the wheel's description to the README byte for
+  and the install test holds the wheel's description, the README followed by
+  the assembled changelog, to `//python:changelog[description]` byte for
   byte.
 - The install page, [docs/install.md](../../docs/install.md), shows the same
   two blocks. The test `//python/smoke:install_page_shows_quickstart` fails

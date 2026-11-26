@@ -2,6 +2,12 @@
 # The plan-validation gate and the glob-options mapping, driven directly.
 # =============================================================================
 #
+# Covers: The gate's outcome for a scan, for a union under either child of a
+# join (not validated, naming PLAN_UNION) and for a filter on a missing column
+# (failed); the entry token must be a ledger row; validate_plan_at_entry raises
+# only on a failure; the 16 tag names; the glob-options mapping; the switch
+# defaults off.
+#
 # What each test proves, and the defect it catches:
 #   * an entry token that is not a row of the route ledger raises
 #     PLAN_VALIDATION_UNREGISTERED_ENTRY, and the ledger's "unit-test" token is
