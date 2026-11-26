@@ -54,6 +54,9 @@ commits nothing and never rewrites history. The plan:
    `release/mopm_native_ids.bzl` (the `load` and the row). It does not edit `ci/targets.bzl` or its
    shards: those are generated (see below). It does not delete the library's row in
    `release/UNPUBLISHED.md`: `//release:unpublished_cases` refuses the change until the author deletes it.
+   It does not edit the package's row in `release/README_COVERAGE.md` either: the graph check
+   `//release:readme_coverage` prints the row it must be (`mopm.toml`, e2e and the `mojo_adopted_library`
+   gate), and the author copies it.
 
 What it leaves to the farm, and prints: `buildrules.mojo.bzl` and `buildrules.mojo.lock.bzl`
 (`buildrules mojo sync`, the recipe's step 4), `coverage_floor.txt` (a measure), and the regeneration of the

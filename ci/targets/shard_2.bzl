@@ -10,6 +10,7 @@ TARGETS = [
     "komira//release:mac_tree_off",
     "komira//release:native_ids_cases",
     "komira//release:prod_claimed_names_cases",
+    "komira//release:readme_coverage",
     "komira//release:release_checks_cases",
     "komira//release:release_set",
     "komira//release:unpublished_cases",

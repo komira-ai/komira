@@ -1,5 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "TOOL_EXEC")
 load("@komira//tools/build/platforms:table.bzl", "row")
 
@@ -61,6 +61,19 @@ zig_exe(
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
     visibility = ["PUBLIC"],
+)
+
+# The reader of a README's examples (examples.zig) as a module, for a Zig
+# tool that asks what the tool's `generate` would take from a README without
+# making programs of it: the graph check `readme_coverage`
+# (tools/build/selftest/graph/readme_coverage.zig) counts each README's
+# examples with it. Imported only once `:readme_examples_unit` passed.
+zig_module(
+    name = "examples",
+    src = "examples.zig",
+    deps = ["//tools/build/markdown:markdown"],
+    unit_tests = [":readme_examples_unit"],
+    visibility = ["//tools/build/selftest/graph:"],
 )
 
 # What is left in Mojo: the Markdown reader `buildtools.doc_links`

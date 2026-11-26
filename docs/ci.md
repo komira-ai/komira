@@ -754,6 +754,16 @@ keeps a row for a deleted directory, keeps a row that names a published library 
 row that does not parse, rows out of order, or counts that are not the table's. So the
 pull request that publishes a library deletes its row, and the one that adds a library adds a row.
 
+**Every README says who runs its examples.** [`release/README_COVERAGE.md`](../release/README_COVERAGE.md) lists
+every `src/<name>/README.md`: whether the package has a `mopm.toml`, whether `//release/readme_e2e/verify:<name>`
+exists, which README gate (`mojo_adopted_library` or `mojo_library`) runs its examples in the build, whether it holds
+an example, and so who runs them (the release e2e, a build gate, both, or nobody). The graph check
+`//release:readme_coverage`, run by the pull request check as `checks.bxl:check` like every graph check, writes that
+text from the build graph (a `uquery` of `//src/...` and `//release/readme_e2e/verify:`) and the READMEs (read by
+the README examples tool's own reader) and fails when the committed file is not it byte for byte, printing each line
+that differs with the line it must be. So a pull request that adds a README, moves a package to mopm, or gives a
+README its first example (or takes its last away) changes the row in the same change.
+
 **The release declaration and the release set agree, and one so package.** `//release:release_checks_cases`
 holds `release/artifacts.textproto` to `tools/build/package/release_set.txt`: the same metapackage, the same
 members in the same order, and the same `--license`, `--summary` and `--home`, so a member listed in one file and
