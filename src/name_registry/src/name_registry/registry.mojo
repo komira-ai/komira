@@ -102,7 +102,6 @@ struct _NoClaimWindow(_ClaimWindow):
     def __init__(out self):
         pass
 
-    @always_inline
     def in_window(mut self, mut registry: NameRegistry):
         pass
 
