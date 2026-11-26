@@ -30,7 +30,8 @@
 #   union_sparse, union_dense     (<type code>:<v>)
 #   null                          \N
 #
-# Inside brackets each <v> is a cell of the child type, `\N` for a NULL, with
+# Inside brackets each <v> is a cell of the child type, `\N` for a NULL and
+# `\e` for an empty string or binary (so `[\e]` is not the empty list `[]`), with
 # the bracket characters escaped in strings and struct names escaped as names
 # (escape.mojo). The schema entry spells the whole type tree (type_text.mojo),
 # so two columns whose cells could read alike never share a schema line. The view types (binary_view,
@@ -144,6 +145,8 @@ def _bytes_cell(col: Column[HeapRegion], start: Int, end: Int, hex: Bool, nested
     var view = col.values_view_native()
     var res = List[UInt8]()
     if hex:
+        if nested and start == end:
+            return String("\\e")  # an empty value inside a nested cell
         for i in range(start, end):
             _hex_into(res, view.read_u8_at(i))
         return _bytes_to_string(res)

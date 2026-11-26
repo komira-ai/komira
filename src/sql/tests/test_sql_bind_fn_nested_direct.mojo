@@ -40,7 +40,7 @@ def _two(
 
 
 def _catalog() raises -> SqlCatalog:
-    """t(k, v, s, g, d, ts, i32, dc, b, f32, u64, j), u(k, w, s), kk(k, a),
+    """t(k, v, s, g, d, ts, tz, i32, dc, b, f32, u64, j), u(k, w, s), kk(k, a),
     mm(k, b), up(K, B), kk2(k, k_right): parquet tables with given schemas
     (no file is opened)."""
     var cat = SqlCatalog()
@@ -51,6 +51,7 @@ def _catalog() raises -> SqlCatalog:
     t.add_field(Field(String("g"), ArrowType.INT64, True))
     t.add_field(Field(String("d"), ArrowType.DATE32, True))
     t.add_field(Field.timestamp(String("ts"), ArrowType.TIMESTAMP_US, String(""), True))
+    t.add_field(Field.timestamp(String("tz"), ArrowType.TIMESTAMP_US, String("UTC"), True))
     t.add_field(Field(String("i32"), ArrowType.INT32, True))
     t.add_field(Field.decimal128(String("dc"), 12, 2, True))
     t.add_field(Field(String("b"), ArrowType.BOOL, True))
@@ -174,29 +175,51 @@ def test_date_diff_and_date_sub() raises:
         "Project(exprs=[Alias(Literal(ScalarValue(int64, 30)), \"a\"), Alias(BinaryOp(SUB, Cast(ColRef(d), int64), Cast(ColRef(d), int64)), \"b\"), Alias(Literal(ScalarValue(int64, 30)), \"c\"), Alias(BinaryOp(SUB, Cast(ColRef(d), int64), Cast(ColRef(d), int64)), \"e\")])\n"
         "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
+    # Over two DATEs a unit above the day reads the calendar fields: the
+    # years and months crossed for date_diff.
     _check(
         "SELECT date_diff('month', d, d) FROM t",
-        "ERR: SQL not supported: only date_diff('day', ...) is supported (got unit that is not the constant 'day'). THE MISSING PRIMITIVE IS CIVIL-CALENDAR BOUNDARY ARITHMETIC OVER A COLUMN: this function counts BOUNDARIES CROSSED, which for month/year is not expressible as the int32 day subtraction that serves 'day'"
+        "Project(exprs=[BinaryOp(ADD, BinaryOp(MUL, BinaryOp(SUB, Extract(unit=0, ColRef(d)), Extract(unit=0, ColRef(d))), Literal(ScalarValue(int64, 12))), BinaryOp(SUB, Extract(unit=2, ColRef(d)), Extract(unit=2, ColRef(d))))])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
         "SELECT date_diff('day', d) FROM t",
         "ERR: SQL bind error: date_diff expects 3 arguments (unit, start, end)"
     )
     _check(
-        "SELECT date_sub('month', d, d) FROM t",
-        "ERR: SQL not supported: only date_sub('day', ...) is supported. date_sub counts COMPLETE periods and date_diff counts boundaries CROSSED — in DuckDB v1.5.3 they differ for every unit above 'day' (1 vs 2 over 2021-01-31 -> 2021-03-01), so the other units are not the neighbouring function's to answer"
-    )
-    _check(
         "SELECT date_sub('day', d) FROM t",
         "ERR: SQL bind error: date_sub expects 3 arguments (unit, start, end)"
     )
+    # Two TIMESTAMPs: the day boundaries crossed are the difference of the
+    # two values truncated to the day, in days.
     _check(
-        "SELECT date_diff('day', k, d) FROM t",
-        "ERR: SQL not supported: date_diff('day', a, b) requires DATE operands — argument 2 is not a DATE literal and not a DATE32 column. THE MISSING PRIMITIVE IS A UNIT-AWARE, PER-FUNCTION TEMPORAL DELTA. The lowering here subtracts DAY NUMBERS, and it is refused over anything else for two separate reasons: a TIMESTAMP is int64 MICROSECONDS, so the subtraction answers a number ~8.64e10 times too large, and date_diff and date_sub DISAGREE on 'day' itself once the operands carry a time-of-day (DuckDB v1.5.3: 247 vs 246 over one pair) — so one shared lowering would answer one function's rule under the other's name. A bare integer column is refused for a third: it has no days in it, and the subtraction would answer a plausible day count anyway rather than raising"
+        "SELECT date_diff('days', ts, ts) FROM t",
+        "Project(exprs=[Cast(BinaryOp(DIV, Cast(BinaryOp(SUB, Cast(Extract(unit=20, ColRef(ts)), int64), Cast(Extract(unit=20, ColRef(ts)), int64)), float64), Literal(ScalarValue(float64, 86400000000.0))), int64)])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
-        "SELECT date_diff('day', d, ts) FROM t",
-        "ERR: SQL not supported: date_diff('day', a, b) requires DATE operands — argument 3 is not a DATE literal and not a DATE32 column. THE MISSING PRIMITIVE IS A UNIT-AWARE, PER-FUNCTION TEMPORAL DELTA. The lowering here subtracts DAY NUMBERS, and it is refused over anything else for two separate reasons: a TIMESTAMP is int64 MICROSECONDS, so the subtraction answers a number ~8.64e10 times too large, and date_diff and date_sub DISAGREE on 'day' itself once the operands carry a time-of-day (DuckDB v1.5.3: 247 vs 246 over one pair) — so one shared lowering would answer one function's rule under the other's name. A bare integer column is refused for a third: it has no days in it, and the subtraction would answer a plausible day count anyway rather than raising"
+        "SELECT date_diff('decade', d, d) FROM t",
+        "ERR: SQL not supported: date_diff unit 'decade' is not served; the units are microsecond, millisecond, second, minute, hour, day, week, month, quarter and year (and their DuckDB aliases)"
+    )
+    _check(
+        "SELECT date_sub('isoyear', ts, ts) FROM t",
+        "ERR: SQL not supported: date_sub unit 'isoyear' is not served; the units are microsecond, millisecond, second, minute, hour, day, week, month, quarter and year (and their DuckDB aliases)"
+    )
+    _check(
+        "SELECT date_diff(s, d, d) FROM t",
+        "ERR: SQL not supported: date_diff(unit, a, b) needs the unit as a constant string; a unit read from a column or an expression is not served"
+    )
+    _check(
+        "SELECT date_diff('day', k, d) FROM t",
+        "ERR: SQL not supported: date_diff(unit, a, b) needs two DATE or two TIMESTAMP operands (a literal, a column or an alias over one); got another type, a TIMESTAMP WITH TIME ZONE, or a DATE beside a TIMESTAMP (cast one to the other's type)"
+    )
+    _check(
+        "SELECT date_sub('hour', d, ts) FROM t",
+        "ERR: SQL not supported: date_sub(unit, a, b) needs two DATE or two TIMESTAMP operands (a literal, a column or an alias over one); got another type, a TIMESTAMP WITH TIME ZONE, or a DATE beside a TIMESTAMP (cast one to the other's type)"
+    )
+    _check(
+        "SELECT date_diff('hour', tz, tz) FROM t",
+        "ERR: SQL not supported: date_diff(unit, a, b) needs two DATE or two TIMESTAMP operands (a literal, a column or an alias over one); got another type, a TIMESTAMP WITH TIME ZONE, or a DATE beside a TIMESTAMP (cast one to the other's type)"
     )
     _check(
         "SELECT date_sub('day', DATE '2021-01-01', d) FROM t",

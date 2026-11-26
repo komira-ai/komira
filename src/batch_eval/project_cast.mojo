@@ -28,6 +28,7 @@ from kernels.cast_to_varchar_kernels import (
 )
 from plan_expr.expr import Expr
 
+from .cast_bool import _cast_from_bool, _cast_to_bool, _is_bool_cast_numeric
 from .column_decimal import (
     _eval_cast_from_decimal128,
     _eval_cast_to_decimal128,
@@ -202,7 +203,9 @@ def _project_cast(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion]:
     # served only as the SOURCE of an exact widening (to a wider integer of
     # either sign that holds every value, or to a float); they go through
     # `_widen_small_int` below, which keeps validity. Narrowing and
-    # same-width sign changes among them stay unserved and raise.
+    # same-width sign changes among them stay unserved and raise. They, and
+    # the four types of the matrix, are also either side of a BOOLEAN cast
+    # (below the matrix).
     #
     #          target ->    I32        I64        F32        F64
     #   source I32          no-op      eval_cast  eval_cast  eval_cast
@@ -210,6 +213,14 @@ def _project_cast(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion]:
     #          F32          ROUND      ROUND      no-op      eval_cast
     #          F64          ROUND      ROUND      CHECKED    no-op
     #
+    # BOOLEAN casts to and from every integer of either sign and both floats
+    # (`cast_bool.mojo`): true is 1, false is 0, and a value is true when it
+    # is not zero (NaN true, -0.0 false). No value fails, so TRY_CAST answers
+    # the same. NULL stays NULL both ways.
+    if src_at == ArrowType.BOOL and target_arrow == ArrowType.from_dtype(target) and _is_bool_cast_numeric(target_arrow):
+        return _cast_from_bool(child_col, target)
+    if target_arrow == ArrowType.BOOL and _is_bool_cast_numeric(src_at):
+        return _cast_to_bool(child_col, src_at)
     # --- Small-integer widenings (exact, validity kept) ---
     if target_arrow == ArrowType.from_dtype(target) and _is_small_int_widening(src_at, target):
         return _widen_small_int(child_col, src_at, target)
@@ -302,9 +313,9 @@ def _project_cast(expr: Expr, batch: RecordBatch) raises -> Column[HeapRegion]:
         # Targeting INT64 makes the pair symmetric: the INT32-stamped
         # column takes the `INT32 -> int64` widen a few arms up, the
         # DATE32-stamped one takes this arm, and both answer the same
-        # INT64 column. `date_diff('day', a, b)` / `date_sub` lower to
-        # exactly that subtraction (`sql_binder._date_delta_days_over_
-        # columns`).
+        # INT64 column. `date_diff('day', a, b)` / `date_sub` over two
+        # DATEs lower to exactly that subtraction
+        # (`plan_expr.temporal_delta`).
         #
         # ⚠ `as_primitive[int32]` ADMITS A DATE32-STAMPED COLUMN — a DATE32
         # IS an int32 of days (`column.mojo` storage

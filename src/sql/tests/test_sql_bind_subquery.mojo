@@ -560,6 +560,11 @@ def test_correlated_predicate_edges() raises:
         "SELECT k FROM t WHERE EXISTS (SELECT 1 FROM u WHERE date_diff('month', DATE '2021-01-01', DATE '2021-02-01') > u.w AND u.k = t.k)",
         "ERR: SQL not supported: only date_diff('day', ...) is supported (got unit that is not the constant 'day')"
     )
+    # A unit read from a column is not the constant 'day'.
+    _check(
+        "SELECT k FROM t WHERE EXISTS (SELECT 1 FROM u WHERE date_diff(u.w, DATE '2021-01-01', DATE '2021-02-01') > u.w AND u.k = t.k)",
+        "ERR: SQL not supported: only date_diff('day', ...) is supported (got unit that is not the constant 'day')"
+    )
     _check(
         "SELECT k FROM t WHERE EXISTS (SELECT 1 FROM u WHERE date_diff('day', DATE '2021-01-01', t.d) > u.w AND u.k = t.k)",
         "ERR: SQL not supported: date_diff('day', a, b) requires constant DATE literal operands here. This function only constant-folds two DATE literals and binds no column operand."

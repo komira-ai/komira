@@ -303,7 +303,9 @@ def sql_result(mut session: Session, sql: String) raises -> ArrowResult:
         Error `<step>: <reason>` when `run_sql` refuses (the session records
         it too, with its step and code: `Session.set_refusal`), where `<step>` is the
         step that refused (`parse`, `bind`, `optimize`, `lower` or
-        `execute`) and `<reason>` its own message, unchanged; and the export
+        `execute`) and `<reason>` its own message, unchanged, followed by
+        ` at line <L>, column <C>` (both from 1) for a refusal of the parse
+        step, where the text stopped parsing; and the export
         check's error naming the column when a result column cannot cross the
         stream (`arrow_result`).
     """
@@ -335,7 +337,10 @@ def sql_result(
                 step_number(refusal.step),
             )
         else:
-            session.set_refusal(refusal.step, refusal.reason.copy())
+            var reason = refusal.reason.copy()
+            if refusal.position:
+                reason += " at " + String(refusal.position.value())
+            session.set_refusal(refusal.step, reason^)
         raise Error(session.last_error())
     return arrow_result(outcome^)
 

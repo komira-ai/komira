@@ -29,6 +29,7 @@ from komira._ops import (
     Aggregate,
     Cast,
     ColRef,
+    Compare,
     Filter,
     Limit,
     Lit,
@@ -36,7 +37,9 @@ from komira._ops import (
     Sort,
     SortKey,
     TopN,
+    WindowExpr,
     and_all,
+    distinct,
     drop_nulls,
     filter_,
     rename,
@@ -48,11 +51,12 @@ from komira._ops import (
 )
 from komira._session import Result, Session, _local_path, default_session
 
-from . import _names
+from . import _join, _names, _window
 from ._expr import Expr, col, lit
-from ._scope import Scope
+from ._group import LazyGroupBy, group_keys
+from ._scope import Broadcast, Scope, Windows
 
-__all__ = ["LazyFrame", "concat", "scan_csv", "scan_ndjson", "scan_parquet"]
+__all__ = ["LazyFrame", "LazyGroupBy", "concat", "scan_csv", "scan_ndjson", "scan_parquet"]
 
 
 def _encoder():
@@ -206,22 +210,28 @@ class LazyFrame:
     def select(self, *exprs: object, **named: Expr) -> LazyFrame:
         """A frame of the given columns and expressions, in order, each under
         polars' output name. A select of aggregates only is one row (the
-        AGGREGATE of the plan); an aggregate beside a row-wise value is not
-        supported yet."""
+        AGGREGATE of the plan); an aggregate beside a row-wise value is
+        broadcast over the rows (a window over the whole frame)."""
         items = self._exprs("select", exprs, named)
         if not items:
             raise ValueError("select needs at least one column or expression")
         names = _unique_names("select", items)
         if any(e._has_agg for e in items):
-            return self._aggregate(items, names)
-        scope = self._scope("select")
+            try:
+                return self._aggregate(items, names)
+            except Broadcast:
+                pass
+        scope, windows = self._rows_scope("select", names)
         nodes = tuple(_column_literal(e._lower(scope)) for e in items)
         if not any(_reads_columns(n) for n in nodes):
             raise UnsupportedOperation(
                 "select: an expression of literals only has no rows of the frame to "
                 "give it; add it to the frame with with_columns(...)"
             )
-        return self._row_verb(_project(self._plan, tuple(zip(names, nodes))))
+        items = tuple(zip(names, nodes))
+        if windows.pre or windows.wins:
+            return self._windowed(windows, lambda p: Project(p, items), items)
+        return self._row_verb(_project(self._plan, items))
 
     def _aggregate(self, items: list[Expr], names: list[str]) -> LazyFrame:
         scope = self._scope("select", aggregates=True)
@@ -236,39 +246,63 @@ class LazyFrame:
             plan = Project(Aggregate(child, (), aggs), tuple(zip(names, nodes)))
         return self._with(plan, None)
 
+    def _rows_scope(self, verb: str, names) -> tuple[Scope, Windows]:
+        """A scope of the frame's columns that gathers windows, and its
+        windows (komira/pl/_window.py)."""
+        fields = self._wire_fields()
+        windows = Windows(fields, self._order, verb)
+        scope = Scope(fields, verb, windows=windows)
+        scope.reserve(names)
+        return scope, windows
+
+    def _windowed(self, windows: Windows, build, items) -> LazyFrame:
+        """The frame of `build(plan)` over the frame's plan below its sort
+        with the columns `windows` gathered; ordered when the outputs `items`
+        keep every sort key (sorted again on top)."""
+        base = self._plan.child if isinstance(self._plan, Sort) else self._plan
+        plan = build(_window.windowed(base, windows))
+        keys = _window.carried(self._order, items)
+        if keys is None:
+            return self._with(plan, None)
+        return self._with(Sort(plan, keys), keys)
+
     def with_columns(self, *exprs: object, **named: Expr) -> LazyFrame:
         """The frame with the given expressions added as columns, or in place
         of the column of the same name (the plan of `build_with_columns_plan`:
-        one PROJECT, the input columns in order, new ones appended)."""
+        one PROJECT, the input columns in order, new ones appended). An
+        aggregate is broadcast over the rows (a window over the whole frame, or
+        over the partitions of its `over(...)`)."""
         items = self._exprs("with_columns", exprs, named)
         if not items:
             return self
         names = _unique_names("with_columns", items)
-        for e in items:
-            if e._has_agg:
-                raise UnsupportedOperation(
-                    f"with_columns: '{e._name}' is an aggregate, which would be broadcast over "
-                    "the rows (a window); that is not supported yet"
-                )
-        scope = self._scope("with_columns")
+        scope, windows = self._rows_scope("with_columns", names)
         nodes = [_column_literal(e._lower(scope)) for e in items]
+        if windows.pre or windows.wins:
+            by_name = dict(zip(names, nodes))
+            out = [(c, by_name.get(c, ColRef(c))) for c in self._plan.columns]
+            out += [(n, node) for n, node in zip(names, nodes) if n not in self._plan.columns]
+            out = tuple(out)
+            return self._windowed(windows, lambda p: Project(p, out), out)
         return self._row_verb(with_columns(self._plan, list(zip(names, nodes))))
 
     def filter(self, *predicates: Expr) -> LazyFrame:
-        """The rows for which every predicate is true (a null is not true)."""
+        """The rows for which every predicate is true (a null is not true). An
+        aggregate in a predicate is over the whole frame (or the partitions of
+        its `over(...)`), as polars broadcasts it."""
         if not predicates:
             raise ValueError("filter needs at least one predicate")
-        scope = self._scope("filter")
+        scope, windows = self._rows_scope("filter", ())
         nodes = []
         for p in predicates:
             if not isinstance(p, Expr):
                 raise TypeError(f"filter takes komira.pl expressions, not {type(p).__name__}")
-            if p._has_agg:
-                raise UnsupportedOperation(
-                    "filter: a predicate over an aggregate needs a window, which is not supported yet"
-                )
             nodes.append(scope.predicate(p._lower(scope), "filter"))
-        return self._row_verb(filter_(self._plan, and_all(tuple(nodes))))
+        predicate = and_all(tuple(nodes))
+        if windows.pre or windows.wins:
+            out = tuple((c, ColRef(c)) for c in self._plan.columns)
+            return self._windowed(windows, lambda p: Project(filter_(p, predicate), out), out)
+        return self._row_verb(filter_(self._plan, predicate))
 
     def drop(self, *columns: str, strict: bool = True) -> LazyFrame:
         """The frame without the named columns. With `strict=False` a name the
@@ -361,6 +395,79 @@ class LazyFrame:
         flip = _per_key(verb, "reverse", reverse, len(columns))
         keys = tuple(SortKey(c, largest != r, False) for c, r in zip(columns, flip))
         return self._with(TopN(self._plan, keys, n), None)
+
+    def group_by(self, *by, maintain_order: bool = False, **named_by) -> LazyGroupBy:
+        """The groups of the frame by the columns `by`, to aggregate with
+        `agg(...)` (komira/pl/_group.py). The groups come out in no order:
+        `maintain_order=True` is refused."""
+        if maintain_order:
+            raise UnsupportedOperation(
+                "group_by: maintain_order=True keeps the groups in input order, and a plan has "
+                "no row order; sort the result instead"
+            )
+        if named_by:
+            raise UnsupportedOperation(
+                "group_by: a named key expression is not supported; add it with "
+                "with_columns(...) and group by its name"
+            )
+        return LazyGroupBy(self, group_keys(self, "group_by", by))
+
+    def join(
+        self,
+        other: LazyFrame,
+        on=None,
+        how: str = "inner",
+        *,
+        left_on=None,
+        right_on=None,
+        suffix: str = "_right",
+        validate: str = "m:m",
+        nulls_equal: bool = False,
+        coalesce: bool | None = None,
+        maintain_order: str | None = None,
+        allow_parallel: bool = True,
+        force_parallel: bool = False,
+    ) -> LazyFrame:
+        """This frame joined with `other`, a frame of the same session, on
+        the key columns `on` (or `left_on` and `right_on`), with polars'
+        output columns (komira/pl/_join.py). The frame is unordered.
+        `allow_parallel` and `force_parallel` have no effect."""
+        return _join.join(
+            self, other, on, how, left_on, right_on, suffix, validate, nulls_equal, coalesce, maintain_order
+        )
+
+    def unique(self, subset=None, *, keep: str = "any", maintain_order: bool = False) -> LazyFrame:
+        """The frame with one row for each distinct value of the columns
+        `subset` (every column when None). `keep="any"` keeps any one of the
+        rows of a value (a DISTINCT over every column, else the row numbered 1
+        by a window per value); `keep="none"` keeps the rows whose value no
+        other row has. `keep="first"` and `"last"`, and `maintain_order=True`,
+        need row order and are refused (rules section 7). The frame is
+        unordered."""
+        if maintain_order:
+            raise UnsupportedOperation(
+                "unique: maintain_order=True keeps rows in input order, and a plan has no row "
+                "order; sort the result instead"
+            )
+        if keep not in ("any", "first", "last", "none"):
+            raise ValueError(f"unique: keep must be 'any', 'first', 'last' or 'none', not {keep!r}")
+        if keep in ("first", "last"):
+            raise UnsupportedOperation(
+                f"unique: keep={keep!r} picks a row by row order, which a plan does not have; "
+                "use keep='any'"
+            )
+        names = self._plan.columns if subset is None else group_keys(self, "unique", (subset,))
+        base = self._plan.child if isinstance(self._plan, Sort) else self._plan
+        if keep == "any" and set(names) == set(base.columns):
+            return self._with(distinct(base), None)
+        windows = Windows(self._wire_fields(), None, "unique")
+        if keep == "any":
+            win = WindowExpr("row_number", None, 0, tuple(names), (SortKey(names[0]),))
+        else:
+            win = WindowExpr("count", windows.column(Lit(1)), 0, tuple(names))
+        ref = windows.window(win)
+        kept = filter_(_window.windowed(base, windows), Compare("eq", ref, Lit(1)))
+        return self._with(Project(kept, tuple((c, ColRef(c)) for c in base.columns)), None)
 
     def head(self, n: int = 5) -> LazyFrame:
         """The first `n` rows of an ordered frame; of an unordered one, some
