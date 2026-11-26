@@ -91,4 +91,4 @@ as of 20260903 [(1, 2), (2, 1), (3, 2)]
 - How do I upsert rows into a database table? (rank 85, gap; no page yet)
 - How do I append rows to an existing database table? (rank 88, gap; no page yet)
 - How do I read a JSON file and write the records to a database? (rank 22, partial)
-- How do I compare two datasets and show the differences? (rank 70, works; no page yet)
+- How do I compare two datasets and show the differences? (rank 70, works)
