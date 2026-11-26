@@ -1,6 +1,9 @@
-# Temporary: an action that hangs past its step bound, built by a manual run of release-macos.yml in its macOS step.
-genrule(
+# Temporary: a test that fails, built by a manual run of release-macos.yml in its macOS step.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+zig_test(
     name = "fails",
-    out = "fails.txt",
-    cmd = "sleep 240; touch $OUT",
+    exec_compatible_with = LINUX_X86_64,
+    src = "fails_test.zig",
 )
