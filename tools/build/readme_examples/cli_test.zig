@@ -116,7 +116,8 @@ test "usage: every flag required, none unknown or twice, a value for each; exit 
         const o = cli.run(a, tmp.dir, c.argv);
         try t.expectEqual(@as(u8, 2), o.code);
         try t.expect(std.mem.startsWith(u8, o.stdout, c.first));
-        try t.expect(std.mem.endsWith(u8, o.stdout, "       tool release-check --out F [--expect-refusal TEXT] (--member NAME DISPLAY F | --no-readme NAME DISPLAY)...\n"));
+        try t.expect(std.mem.indexOf(u8, o.stdout, "       tool release-check --out F [--expect-refusal TEXT] (--member NAME DISPLAY F | --no-readme NAME DISPLAY)...\n") != null);
+        try t.expect(std.mem.endsWith(u8, o.stdout, "       tool tasks-check --catalogue F --catalogue-display NAME --root D --display D --out F\n"));
     }
     // A README it cannot read.
     const args = generateArgs("missing.md", "allow");
