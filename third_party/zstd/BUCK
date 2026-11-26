@@ -7,8 +7,10 @@ load("@komira//tools/build/native:defs.bzl", "checked_cxx_library", "prefix_head
 
 # facebook/zstd 1.5.7, the release tarball, dual-licensed BSD-3-Clause or
 # GPL-2.0; komira takes it under BSD-3-Clause (LICENSE in the archive).
-# Nothing of it is committed here: the archive is fetched at build time,
-# checked against its sha256, and the files below extracted from it.
+# The archive is fetched at build time, checked against its sha256, and the
+# files below extracted from it; the one file of it committed here is
+# zstd_common.c, six of upstream's functions rebuilt so the prefix renames
+# them (the file says why).
 pinned_file(
     name = "zstd-1.5.7.tar.gz",
     url = "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz",
@@ -19,7 +21,9 @@ pinned_file(
 # The library's C sources: the frame format's common code, the compressor
 # and the decompressor. The dictionary builder (lib/dictBuilder), the legacy
 # formats (lib/legacy) and the x86-64 assembly decoder
-# (lib/decompress/huf_decompress_amd64.S) are left out.
+# (lib/decompress/huf_decompress_amd64.S) are left out, and so is
+# lib/common/zstd_common.c: zstd_common.c of this package defines its six
+# functions in its place (that file says why).
 _SRCS = ["lib/common/{}.c".format(s) for s in [
     "debug",
     "entropy_common",
@@ -28,7 +32,6 @@ _SRCS = ["lib/common/{}.c".format(s) for s in [
     "pool",
     "threading",
     "xxhash",
-    "zstd_common",
 ]] + ["lib/compress/{}.c".format(s) for s in [
     "fse_compress",
     "hist",
@@ -103,6 +106,7 @@ archive_files(
     one_tree = True,
     files = ["LICENSE"] + _SRCS + _PRIVATE_HEADERS,
     strip_prefix = "zstd-1.5.7",
+    tree_dirs = ["lib"],
     visibility = ["PUBLIC"],
 )
 
@@ -126,9 +130,11 @@ _DEFINES = [
 # path from the including source, found at their real paths in :src
 # (one_tree, raw_headers).
 _ZSTD = dict(
-    srcs = [":src[{}]".format(s) for s in _SRCS],
+    srcs = [":src[{}]".format(s) for s in _SRCS] + ["zstd_common.c"],
     raw_headers = [":src[{}]".format(h) for h in _PRIVATE_HEADERS],
     compiler_flags = ["-O2"] + _DEFINES,
+    # zstd_common.c includes "common/error_private.h" and "zstd.h" from lib/.
+    preprocessor_flags = ["-I$(location :src[lib])"],
     exported_headers = {
         "zstd.h": ":src[lib/zstd.h]",
         "zstd_errors.h": ":src[lib/zstd_errors.h]",
@@ -200,7 +206,7 @@ native_library(
         "strip": "zstd-1.5.7",
         "files": ["LICENSE"] + _SRCS + _PRIVATE_HEADERS,
     },
-    srcs = _SRCS,
+    srcs = _SRCS + ["zstd_common.c"],
     includes = ["lib"],
     exported_includes = ["lib"],
     cflags = _DEFINES,
