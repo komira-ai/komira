@@ -55,6 +55,10 @@ equal (`frame_duckdb_test`, CPython 3.13, the real libkomira).
   type, in a row count, and in a float beyond its tolerance, and it accepts
   rows that only move within a tie group.
 
+The test is of the `duckdb/` family (python/tests/BUCK): CPython 3.13 alone,
+the minor with a pinned DuckDB, on the real libkomira, with the generated plan
+modules, duckdb, protobuf and pyarrow.
+
     test_frame_duckdb.py --lib-dir <dir> --runtime-dir <dir>
 
 `<dir>/libkomira/` is `//src/so:libkomira[runnable]` (`--runtime-dir`, which the

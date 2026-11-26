@@ -2,6 +2,15 @@
 # run_sql_with over Parquet objects in S3: the answer the local file gives
 # =============================================================================
 #
+# Covers: run_sql_with over catalog tables whose ParquetSource names an S3
+# bucket, read through S3ScanFs over the fake S3 (objectstore_s3, aws_core and
+# komira_test_fake_s3 are test_deps for it): a filter and a projection, a GROUP
+# BY and a count, a table of two keys, and one key in two buckets under UNION
+# ALL each answer what the same files answer locally through run_sql; a missing
+# and a refused object are the store's NOT_FOUND and PERMISSION_DENIED at step
+# execute; run_sql refuses the S3 scan with SCAN_FS_UNSERVED, and so does the
+# S3 opener a gs:// table.
+#
 # Each test writes Parquet files under `test_tmpdir()` and seeds the same
 # bytes as objects of a fake S3 (komira_test_fake_s3: objects in memory, no
 # socket), registers the local files with `register_parquet` and the objects

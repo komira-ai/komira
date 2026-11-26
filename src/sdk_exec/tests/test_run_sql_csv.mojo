@@ -2,6 +2,13 @@
 # test_run_sql_csv: read_csv through run_sql answers what DuckDB answers
 # =============================================================================
 #
+# Covers: read_csv through run_sql answers what the pinned DuckDB answers (the
+# :csv_oracle action in BUCK) for every case of tests/csv/cases.sql: the
+# inferred types and the rows of typed, quoted, NULL-bearing and |-delimited
+# files and of a header with no row, filters, grouped and ungrouped aggregates
+# and all_varchar, each over the committed file and over a gzip copy; every
+# case is run; a missing file is refused at bind and header=false at lowering.
+#
 # The cases are the lines of tests/csv/cases.sql: the pinned DuckDB runs each
 # query over the committed CSV files as a build action (`sql_oracle`) and
 # writes its answer as a TSV; this test reads the same file for the query

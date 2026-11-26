@@ -2,6 +2,9 @@
 # Tests for the resolved cache's pin count: a pinned entry is protected from
 # LRU eviction.
 #
+# Covers: A pinned entry survives an eviction wave, pins are counted, and a
+# cache whose entries are all pinned refuses an insert.
+#
 # The pin/unpin API is the contract an open paginated result relies on. Tests:
 #   1. Pin survives an eviction wave at cap+1.
 #   2. Multiple pins (refcount > 1) require matching unpins.

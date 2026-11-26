@@ -3,6 +3,15 @@
 # answers
 # =============================================================================
 #
+# Covers: INTERSECT and EXCEPT through run_sql answer what the pinned DuckDB
+# answers (the :set_ops_oracle action in BUCK) for each case of
+# tests/set_ops/cases.sql, on one worker and on three: NULL rows equal, an
+# all-NULL and an empty input, repeated rows, several columns of mixed types,
+# one column of each key type, NaN, inputs widened to a common type, INTERSECT
+# binding tighter than UNION ALL and EXCEPT, a sort and an aggregation over the
+# result; every case is run; INTERSECT ALL and EXCEPT ALL are refused at parse
+# by name.
+#
 # The pinned DuckDB writes the tables (tests/set_ops/data.sql: the four
 # two-column arms of the conformance corpus's set_operations cases, NULL keys
 # and an all-NULL and an empty arm among them, and two files of mixed column

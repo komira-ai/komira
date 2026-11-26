@@ -9,7 +9,8 @@ given and has no SQL entry. Checked:
   the sort above a limit when a verb keeps the order and none when it drops a
   key; the operators of a Series (comparisons, arithmetic with true division
   and reflected integer literals, `& | ~`, isin);
-- the types: columns, dtypes and repr of frames and Series after the verbs;
+- the types: columns, dtypes and repr of frames and Series after the verbs,
+  and each output type, which is the engine's;
 - every refusal by its class and its full message;
 - the attribute rules for every row of the frame, Series and module refusal
   tables, assignment to an attribute, dir, copy and `in`; a pandas verb the
@@ -21,6 +22,11 @@ given and has no SQL entry. Checked:
 - no SQL: the frame modules import and call nothing that reaches SQL, and a
   chain of verbs reaches the session only as plan bytes;
 - the argument checks of the readers that fail before any library call.
+
+The test loads no library. It is of the `plan/` family (python/tests/BUCK):
+`frame_test` runs on each supported minor under protobuf 7.36.2, the newest
+runtime the range admits, and `frame_test_protobuf_lower_edge` on CPython 3.13
+under 5.29.1, the oldest.
 
     test_frame.py
 """

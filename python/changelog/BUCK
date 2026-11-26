@@ -1,0 +1,69 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# changelog: assembles the Python package's changelog (python/CHANGELOG.md, python/changelog.d/) for the
+# release, and writes the wheel's description from it; src/changelog.zig says what each part is and src/cli.zig
+# the command. defs.bzl's `changelog_file` is the rule that runs it (python/BUCK, `:changelog`).
+# src/main.zig only forwards to the library (changelog_lib).
+#
+# Each scenario of its cases is its own test, over texts in memory or a scratch directory, and the tool is
+# built only behind all of them:
+#   fragments_unit    what a fragment may be: a file `<slug>.md` of bullets with indented continuation lines
+#                     is taken as it is, its blank lines before the first bullet and after the last cut; a
+#                     name that is no slug (upper case, underscore, a leading hyphen, no .md, a path), an
+#                     empty file, a line that is neither a bullet nor a continuation, a heading of any level,
+#                     an indented line before the first bullet and a carriage return are each refused naming
+#                     the file and the line, and of two bad files the one first by name;
+#   assemble_unit     the new section: its heading from the stamp (`## 0.1.<n>`, `## Unreleased` for none, a
+#                     stamp that is no build number refused), the bullets of every fragment in file-name
+#                     order whatever order they arrive in, its place before the first release heading with
+#                     every other byte kept, the line it holds when there is no fragment; a CHANGELOG.md with
+#                     a `## Unreleased` heading (anywhere), with no release heading, or whose first
+#                     second-level heading is no version is refused naming the line, before a fragment is read;
+#   description_unit  the wheel's description: the README, a blank line, the changelog with every heading one
+#                     level down, a fenced block and a line that only looks like a heading left alone, a level
+#                     6 heading refused naming the line;
+#   cli_unit          the command: `assemble` and `description` over a scratch root write the file and exit 0
+#                     (stamped, unstamped, no changelog.d); a malformed fragment, a directory in changelog.d,
+#                     an Unreleased heading, a bad stamp and an unreadable root, CHANGELOG.md, README or output
+#                     exit 1 with the reason on stderr and write nothing; each usage error exits 2.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_BUSYBOX = "komira//tools/build/toolchains:busybox"
+
+_SRCS = [
+    "src/changelog.zig",
+    "src/cli.zig",
+]
+
+zig_module(
+    name = "changelog_lib",
+    src = "src/lib.zig",
+    imports = _SRCS,
+)
+
+_SCENARIOS = ["fragments", "assemble", "description", "cli"]
+
+[
+    zig_test(
+        name = "{}_unit".format(scenario),
+        exec_compatible_with = LINUX_X86_64,
+        src = "src/{}_test.zig".format(scenario),
+        deps = [":changelog_lib"],
+        busybox = _BUSYBOX,
+        zig = _ZIG,
+    )
+    for scenario in _SCENARIOS
+]
+
+zig_exe(
+    name = "changelog",
+    exec_compatible_with = LINUX_X86_64,
+    src = "src/main.zig",
+    deps = [":changelog_lib"],
+    unit_tests = [":{}_unit".format(s) for s in _SCENARIOS] + [
+        "komira//tools/build/toolchains:zig_next_version",
+    ],
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+    visibility = ["komira//python:"],
+)

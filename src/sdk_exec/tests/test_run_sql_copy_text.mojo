@@ -2,6 +2,15 @@
 # run_sql: COPY ... TO a local CSV or newline-delimited JSON file
 # =============================================================================
 #
+# Covers: COPY ... TO a local CSV or newline-delimited JSON file through
+# run_sql writes the bytes DuckDB writes for a table of BIGINT, DOUBLE,
+# VARCHAR, BOOLEAN, DATE and DECIMAL columns with NULLs (the empty string,
+# quoting) and for a filtered query; the format from .csv, .json, .ndjson,
+# .jsonl or FORMAT; gzip and zstd from the extension or COMPRESSION; an empty
+# result as DuckDB writes it; lz4, a TIMESTAMP column and two columns of one
+# name are refused by name with no file made; a full disk and a missing
+# directory leave the old file and no temporary file.
+#
 # Each test writes into its own directory under test_tmpdir() and lists it
 # afterwards, so a temporary file left behind, or a file a refused COPY should
 # not have made, fails the test. Each file is read back as bytes and compared

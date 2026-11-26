@@ -2,6 +2,13 @@
 # The pinned DuckDB reads back the Parquet, CSV and JSON files COPY writes
 # =============================================================================
 #
+# Covers: The pinned DuckDB reads every Parquet, CSV and JSON file run_sql's
+# COPY wrote for tests/copy/cases.sql (the :copy_readback_oracle action in
+# BUCK) and finds the same rows, column names and types as in the file DuckDB
+# writes for the same line, and as many rows as the COPY's `Count`; an
+# uncompressed CSV or JSON file holds the same bytes as DuckDB's; every case of
+# cases.sql is checked.
+#
 # A test of the `copy_readback` library (src/sdk_exec/BUCK). `:copy_komira` ran
 # every COPY line of tests/copy/cases.sql through run_sql and wrote
 # `counts.tsv`, each case's `Count`. `:copy_readback_oracle` ran the same lines

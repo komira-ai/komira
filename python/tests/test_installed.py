@@ -36,7 +36,8 @@ Then, in order:
   pinned aws-lc and s2n-tls archives' LICENSE files, and `MODULAR_LICENSE`
   and `MODULAR_THIRD_PARTY_NOTICES`, byte for byte the pinned compiler
   package's, and no other; its description is
-  README.md, which starts with the line `# komira`;
+  README.md followed by the assembled changelog, and starts with the line
+  `# komira`;
 - `komira.abi_version()` is the `version` line of the ABI golden;
 - `Session().register_parquet` registers the Parquet fixture, and a missing
   file raises `KomiraError` with the engine's status;

@@ -24,7 +24,7 @@ closes the session. It runs from this directory.
   `//python/smoke:readme_shows_quickstart` fails when the two differ.
 - The install page, [docs/install.md](../../docs/install.md), shows the same
   program and what it prints: `quickstart.expected` with the version of the
-  newest release in [the changelog](../CHANGELOG.md) and the ABI version
+  newest release [the changelog](../CHANGELOG.md) keeps and the ABI version
   filled in. The test `//python/smoke:install_page_shows_quickstart` fails
   when either block differs.
 - `readings.parquet` is a byte copy of

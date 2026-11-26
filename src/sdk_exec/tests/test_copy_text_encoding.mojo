@@ -2,6 +2,12 @@
 # The CSV and JSON bytes a COPY writes are DuckDB's bytes
 # =============================================================================
 #
+# Covers: The CSV and JSON encoders on batches of every type they write give
+# DuckDB's bytes: each type and NULL, doubles across fixed and exponent
+# notation, NaN and the infinities, FLOATs, dates before year 1 (BC dates) and
+# after 9999, exact decimals, quoting and escaping; gzip and zstd decompress to
+# their input; the writable types.
+#
 # `engine_write_text` called directly on record batches built here. Every
 # expected text below is what the pinned DuckDB's COPY writes for the same
 # value (the module header lists the rules); DuckDB reading back the files

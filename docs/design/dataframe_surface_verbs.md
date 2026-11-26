@@ -1,6 +1,6 @@
 # The Python DataFrame surface: verbs, capabilities and refusals
 
-Status: design, not built. This is the verb half of [the DataFrame surface](dataframe_surface.md):
+Status: design, partly built; the pages under [python/docs/](../../python/docs/dataframe/overview.md) say what is built, one page per feature, and this document lists no built verb. This is the verb half of [the DataFrame surface](dataframe_surface.md):
 that document gives the rules. This one has three parts:
 
 - for each capability of the [surface capability matrix](../surface_capability_matrix.md), the verbs of

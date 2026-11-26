@@ -3,13 +3,23 @@
 The engine-execution layer of the SDK: twelve modules, ten leaves that need
 nothing from the rest of the package except each other, and the plan gates
 (`plan_validation_gate`, `parquet_glob_options`), which build on `sdk`;
-and the engine context with its SQL door and its plan door (`engine_*` below),
-which run a SQL query, or a logical plan built without SQL, over Parquet files, over CSV files named by `read_csv` (plain or
-`.gz`, `.zst`, `.lz4`) and over local Iceberg tables (`iceberg_scan`, or a table
-registered from a catalog), from text to record batches; `arrow_result`, which
-readies those batches for the Arrow C stream; and writes a query's result to a
-local Parquet, CSV or newline-delimited JSON file with `COPY ... TO`. Views, other writes, the plan cache and
-the plan gates' call sites are not wired into the context yet.
+and the engine context with its SQL door and its plan door (`engine_*` below).
+The context runs a SQL query, or a logical plan built without SQL, from text to
+record batches:
+
+- over Parquet files;
+- over CSV files named by `read_csv` (plain or `.gz`, `.zst`, `.lz4`);
+- over local Iceberg tables (`iceberg_scan`, or a table registered from a
+  catalog).
+
+Around the context:
+
+- `arrow_result` readies those batches for the Arrow C stream.
+- `COPY ... TO` writes a query's result to a local Parquet, CSV or
+  newline-delimited JSON file.
+
+Views, other writes, the plan cache and the plan gates' call sites are not wired
+into the context yet.
 
 | module | does |
 |---|---|
@@ -91,24 +101,30 @@ DuckDB answers: one row, one BIGINT NOT NULL column `Count`, the rows written.
   any other failure (no space, a directory at the path, ...) is `STORAGE_IO`
   naming the step and the errno; both at `execute`. A destination URL
   (`s3://...`) is `STORAGE_URL_REFUSED` at `bind`.
-- A Parquet file: the result's column names in order; a nullable column OPTIONAL and
-  a NOT NULL one REQUIRED; one row group per 122,880 rows; DATE annotated
-  DATE, DECIMAL as FIXED_LEN_BYTE_ARRAY(16) with its precision and scale,
-  strings UTF8. An empty result writes the schema with no rows. A column of a
-  type the writer cannot annotate (TIMESTAMP, TIME, INTERVAL and the like, the
-  unsigned and narrow integers, BLOB, nested) is `COPY_TYPE_UNSUPPORTED` at
-  `execute`, before any file is touched.
+- A Parquet file holds:
+  - the result's column names in order;
+  - a nullable column OPTIONAL and a NOT NULL one REQUIRED;
+  - one row group per 122,880 rows;
+  - DATE annotated DATE;
+  - DECIMAL as FIXED_LEN_BYTE_ARRAY(16) with its precision and scale;
+  - strings UTF8;
+  - no rows, only the schema, for an empty result.
+- A column of a type the Parquet writer cannot annotate (TIMESTAMP, TIME,
+  INTERVAL and the like, the unsigned and narrow integers, BLOB, nested) is
+  `COPY_TYPE_UNSUPPORTED` at `execute`, before any file is touched.
 - A CSV or JSON file holds the bytes DuckDB's COPY writes for the same rows
-  (`engine_write_text`'s header has each rule). CSV: a header row, `,`
-  between cells, `\n` after each line, NULL as an empty cell, a string
-  quoted only when it is empty or holds `,`, `"` or a line break, DATE as
-  `YYYY-MM-DD`, DECIMAL exact, DOUBLE in its shortest digits. JSON: one
-  object per row in column order, NULL as `null`, DATE as a string, DECIMAL
-  as a number. An empty result is the header row alone (CSV) or an empty
-  file (JSON). A timestamp, time, interval, BLOB or nested column is
+  (`engine_write_text`'s header has each rule).
+  - CSV: a header row, `,` between cells, `\n` after each line, NULL as an
+    empty cell, a string quoted only when it is empty or holds `,`, `"` or a
+    line break, DATE as `YYYY-MM-DD`, DECIMAL exact, DOUBLE in its shortest
+    digits.
+  - JSON: one object per row in column order, NULL as `null`, DATE as a
+    string, DECIMAL as a number.
+  - An empty result is the header row alone (CSV) or an empty file (JSON).
+- A timestamp, time, interval, BLOB or nested column in a CSV or JSON file is
   `COPY_TYPE_UNSUPPORTED`, and two columns of one name (which DuckDB renames)
   `COPY_DUPLICATE_COLUMN`, both at `execute` before any file is touched.
-  DELIMITER, QUOTE, HEADER false and the other CSV and JSON options are
+- DELIMITER, QUOTE, HEADER false and the other CSV and JSON options are
   refused by name at `parse`.
 - `CREATE TABLE ... AS` writes into a catalog table, and no catalog is bound:
   it is refused with `STATEMENT_NOT_A_QUERY` at `bind`, naming the COPY that
@@ -304,222 +320,11 @@ assert_equal(refusal, "run_sql refused at step bind: no column nope")
 
 ## Tests
 
-The tests run when the package is built.
-
-- `test_run_sql_copy_parquet`: `COPY ... TO` a local Parquet file answers one
-  BIGINT NOT NULL row `Count`; the file read back equals the query that wrote
-  it (a table of BIGINT, DOUBLE, VARCHAR, BOOLEAN, DATE and DECIMAL columns with
-  NULLs, a query, an empty result, 130,000 rows in two row groups, a COPY over
-  the file it reads, a relative path), and its footer names the codec asked
-  for, for each of the six; an unknown extension, a URL, CREATE TABLE AS and
-  a TIMESTAMP column are named refusals that create no file; a missing
-  directory, a directory at the path and a full disk injected through the
-  file system's test seam are named and leave no temporary file and the old
-  file whole.
-- `test_run_sql_copy_text`: `COPY ... TO` a local CSV or JSON file writes the
-  bytes DuckDB writes for a table of BIGINT, DOUBLE, VARCHAR, BOOLEAN, DATE
-  and DECIMAL columns with NULLs and for a filtered query; the format from
-  `.csv`, `.json`, `.ndjson`, `.jsonl` or FORMAT; gzip and zstd from the
-  extension or COMPRESSION; an empty result; lz4, a TIMESTAMP column and two
-  columns of one name refused by name with no file made; a full disk and a
-  missing directory leave the old file and no temporary file.
-- `test_copy_text_encoding`: the CSV and JSON encoders give DuckDB's text
-  for every type they write and NULL, doubles in fixed and exponent
-  notation, NaN and the infinities, FLOATs, BC dates and years past 9999,
-  exact decimals, quoting and escaping; gzip and zstd decompress to their
-  input.
-
-- `test_plan_cache_full_sink_hash`: the sink kind is part of the Layer 2 key
-  and the path is not.
-- `test_resolved_cache_pin_count`: a pinned entry survives an eviction wave,
-  pins are counted, and a cache of only pinned entries refuses an insert.
-- `test_resolved_cache_lru_eviction_stress`: past the cap the oldest unpinned
-  entry is evicted.
-- `test_plan_validation_gate_direct`: the gate's outcome for a scan, for a union
-  under either child of a join (not validated, naming `PLAN_UNION`) and for a
-  filter on a missing column (failed); the entry token must be a ledger row;
-  `validate_plan_at_entry` raises only on a failure; the 16 tag names; the
-  glob-options mapping; the switch defaults off.
-- `test_plan_validation_routes_ledger`: the ledger's self check and lookups,
-  and the wiring's refusal of an unregistered token and of a handle from
-  another epoch.
-- `test_run_sql_csv`: `read_csv` through `run_sql` answers what the pinned
-  DuckDB answers (the `:csv_oracle` build action) for every case of
-  `tests/csv/cases.sql`: the inferred types and the rows of typed, quoted,
-  NULL-bearing and `|`-delimited files and of a header with no row, filters,
-  grouped and ungrouped aggregates and `all_varchar`, each over the committed
-  file and over a gzip copy; a missing file is refused at bind and
-  `header=false` at lowering.
-- `test_run_sql_window`: `run_sql` over a Parquet table DuckDB wrote (the
-  `:window_oracle` build action) answers what the pinned DuckDB answers for
-  every case of `tests/window/cases.sql`: ranking functions, `lag` and `lead`,
-  running and whole-partition aggregates, `first_value`, `last_value` and
-  `nth_value`, with no, one or two partition keys, several windows in one
-  SELECT, a WHERE and an outer ORDER BY, on one and three workers, each column
-  of its documented type, `sum`, `avg`, `min` and `max` over an INTEGER
-  among them; a DATE partition key, a DECIMAL order key and a float default
-  over a BIGINT lag are `LOWERING_WINDOW_UNSERVED` refusals at `lower`.
-- `test_run_sql_window_frames`: `run_sql` over two Parquet tables DuckDB wrote
-  (the `:window_frames_oracle` build action) answers what the pinned DuckDB
-  answers for every case of `tests/window_frames/cases.sql`, on one and three
-  workers: `ROWS` frames (sliding, empty at a partition's edge, running and
-  tail, descending, offsets past the partition) and `RANGE` frames with
-  offsets over a BIGINT key with ties and NULLs, an INTEGER key and a DOUBLE
-  key with NaN, infinities, -0.0 and NULL, with keys at the ends of BIGINT and
-  INTEGER; a `RANGE` bound that leaves the key's type fails at `execute` with
-  DuckDB's overflow error, and a frame DuckDB refuses fails at `bind` with
-  DuckDB's reason.
-- `test_run_sql_s3`: catalog tables whose `ParquetSource` names an S3 bucket,
-  read by `run_sql_with` through `S3ScanFs` over the fake S3, answer what the
-  same files answer locally through `run_sql`: a filter and a projection, a
-  GROUP BY and a count, a table of two keys, one key in two buckets under
-  UNION ALL; a missing and a refused object are the store's NOT_FOUND and
-  PERMISSION_DENIED at step `execute`; `run_sql` refuses the S3 scan with
-  `SCAN_FS_UNSERVED`, and so does the S3 opener a `gs://` table.
-- `test_run_sql_gcs_azure`: catalog tables whose `ParquetSource` names a GCS
-  bucket or an Azure container (its scheme as `source_url` reads a `gs://` or
-  `az://` URL), read by `run_sql_with` through `GcsScanFs` over
-  objectstore_gcs's in-memory fake and through `AzureScanFs` over
-  komira_test_fake_azure's fake Blob service, answer what the same files
-  answer locally through `run_sql`: a filter and a projection, a GROUP BY and
-  a count, a table of two keys, one key in two buckets (two containers) under
-  UNION ALL; a missing and a refused object are the store's NOT_FOUND and
-  PERMISSION_DENIED at step `execute`; `run_sql`, and the opener of the other
-  store, refuse each with `SCAN_FS_UNSERVED` naming the store.
-- `test_run_sql_q6`: TPC-H Q6's text from `bench_corpus` over a lineitem-shaped
-  Parquet file gives the integer oracle's DECIMAL(38,4); a LEFT self-join counts the matched pairs and the unmatched rows of the
-  oracle and a scalar subquery gives the oracle's count; a LEFT JOIN with a
-  residual over both sides, a syntax error, an unknown table, a missing file,
-  CREATE TABLE AS and a replaced file are named refusals, as are a tiny memory
-  budget and an INT64 sum out of range; the context runs on after a refusal; the
-  footer cache reads each file once per query and shares it between bind and
-  lower; a file replaced between queries is read again; options are validated;
-  contexts are created and dropped repeatedly, the segment pool whole after
-  each run.
-- `test_run_sql_subquery`: over Parquet tables the pinned DuckDB writes
-  (`:subquery_oracle`, several row groups, NULLs, duplicate and unmatched
-  values in BIGINT, INTEGER, DECIMAL, DATE and VARCHAR columns, an empty
-  table), each query of `tests/subquery/cases.sql` answers what DuckDB
-  answers, on one and three workers: scalar subqueries in a WHERE (=, <, >,
-  BIGINT, DOUBLE, DECIMAL, DATE; the TPC-H Q15 shape over a CTE), over an
-  empty table and as a LIMIT body with no row (NULL), in a SELECT list, under
-  CASE and coalesce, in a grouped SELECT list, beside an aggregate, in a
-  HAVING (the Q11 shape) and nested; IN and NULL-aware NOT IN over one-table
-  bodies and over DISTINCT, GROUP BY / HAVING (the Q18 shape), join and
-  expression bodies, with and without NULL, over the empty table, and IN and
-  NOT IN lists with NULL; a scalar body of several rows and a VARCHAR LIMIT
-  body are refused at `optimize`, DECIMAL and DATE IN keys at `lower`, an
-  expression left of IN at `parse` and IN in a HAVING at `bind`; every case
-  is run.
-- `test_run_sql_correlated`: over the eight TPC-H-typed tables the pinned
-  DuckDB writes (`:correlated_oracle`: orders with no lineitem, customers with
-  no order, NULL keys, ties), each query of `tests/correlated/cases.sql`
-  answers what DuckDB answers, on one and three workers: the corpus texts of
-  TPC-H Q4, Q17, Q20 and Q22, and Q2's body without its ORDER BY and LIMIT;
-  correlated scalars over no row (count 0, NULL), with NULL outer and inner
-  keys, two keys, two in one WHERE, under OR and BETWEEN, in a SELECT list
-  and a derived table; a DECIMAL compared with a DOUBLE; EXISTS and NOT
-  EXISTS with NULL keys. Q21 and an EXISTS correlated by `>` are refused at
-  `lower`, Q2 (its ORDER BY is a DECIMAL key, which the sort sink refuses)
-  at `execute`, an EXISTS over a join and the unserved correlated scalar
-  shapes at `bind`; the TPC-H lines are the corpus texts; every case is run.
-- `test_run_sql_distinct`: SELECT DISTINCT over an INT64 and a STRING column
-  gives each value once and one NULL row (NULL and the empty string are two
-  rows), below a filter and with ORDER BY; COUNT(DISTINCT x) ignores NULL, is
-  an INT64 that is 0 for no rows and for all NULL, counts per group (the NULL
-  key and an all-NULL group included), runs beside SUM and over a STRING;
-  SELECT DISTINCT over two INT64 columns is refused at `lower` with
-  `LOWERING_SINK_UNSERVED`.
-- `test_run_sql_group_keys`: GROUP BY one DATE32, BOOL, DECIMAL(12, 2) or
-  DECIMAL(30, 4) column over a Parquet table of six row groups equals an oracle
-  computed in the test, the NULL key being one group (count(*), count(v) and
-  sum(v) per group; the key keeps its type, precision and scale; decimal keys
-  past INT64 are exact); min and max of dates and the sum of decimals run under
-  a BOOL key; a WHERE before the grouping keeps only the passing rows; an
-  all-NULL key is one group; `group by d, b` groups by the pair.
-- `test_run_sql_group_keys_mixed`: over a Parquet table the pinned DuckDB
-  writes (`:group_keys_mixed_oracle`, five row groups, NULLs in every column,
-  the empty string), each query of `tests/group_keys_mixed/cases.sql` answers
-  what DuckDB answers, on one and on three workers: GROUP BY an INTEGER, a
-  VARCHAR and a DATE (in both orders, with count, sum, min and max), a BIGINT
-  and an INTEGER, a BOOLEAN, a DECIMAL and a VARCHAR; under a WHERE and a
-  HAVING; count(DISTINCT) per mixed key; SELECT DISTINCT over three columns;
-  an all-NULL key; no row.
-- `test_run_sql_join_kinds`: over small Parquet tables the pinned DuckDB writes
-  (`:join_kinds_oracle`, several row groups, NULL, duplicate and unmatched
-  keys, an empty table), each query of `tests/join_kinds/cases.sql` answers what
-  DuckDB answers, on one and on three workers: LEFT, RIGHT and FULL joins on
-  INT64, STRING, INT32 = INT64 and two-column keys, against an empty table on
-  either side; SEMI and ANTI joins as EXISTS, NOT EXISTS, IN, NOT IN (NULL-aware)
-  and the SEMI JOIN and ANTI JOIN keywords; CROSS joins, a comma join, and
-  uncorrelated scalar subqueries. A LEFT JOIN with a residual over both sides is
-  still refused at `lower`.
-- `test_run_sql_int_sum`: an integer `sum()` over INT64 and INT32 columns is
-  DECIMAL(38, 0) and exact past the INT64 range; an empty or all-NULL sum is
-  NULL; expressions, CASE and HAVING over the sum run.
-- `test_run_sql_spill`: a GROUP BY of 60,001 groups (two rows each, a NULL
-  key, NULL values) on a context whose memory budget the group tables
-  outgrow and which has a spill directory answers an oracle computed in the
-  test (count, exact sum, min, max, NULL where a group has no value) on one
-  and two workers, as the same query with no budget does; the spill directory
-  exists afterwards and is empty; the same budget with no spill directory is
-  refused at `execute`; an ungrouped count and a GROUP BY of ten groups under
-  the budget do not create the directory; an empty `spill_directory` is
-  `ENGINE_OPTIONS_INVALID`; a directory that cannot be created fails the
-  spilling query at `execute` and the context runs the next one.
-- `test_run_sql_multifile`: a table of several Parquet files from a directory
-  (files at any depth; a dot-name and a non-Parquet file skipped), a glob, a
-  brace glob, `read_parquet('<glob>')` and `FROM '<glob>'`; a Hive tree whose
-  keys are columns after the data columns, with filters on a key (files
-  pruned) and on a data column, GROUP BY a key, count(*), ORDER BY and LIMIT;
-  `hive_partitioning = false`; a glob with no file, a directory in SQL text and
-  files of different schemas are named refusals at their step; a replaced file
-  is read again.
-- `test_run_sql_no_from`: `SELECT 1 AS n` is one row, an INT32 column `n`
-  holding 1, DuckDB's answer; a result literal is INT32 from -2147483647 to
-  2147483647 and INT64 past either bound and at -2147483648 (as in DuckDB);
-  one past BIGINT is refused at bind; a literal a derived table holds stays
-  INT64 (`n + 5000000000` over a derived `1 AS n` is the INT64 5000000001)
-  and `SELECT 1 AS n UNION ALL SELECT 2` binds to INT32, as in DuckDB; `7 / 2`, `count(*)` and a false WHERE with no FROM;
-  `SELECT 1 FROM` a Parquet table; an in-memory source of two batches is read
-  whole and one of none gives no rows with its schema.
-- `test_arrow_result`: `run_sql` answers over a Parquet table with NULLs
-  (a projection of INT64, INT32, VARCHAR and DECIMAL(10, 2) columns, count
-  and sums, a filter that keeps no row) read back value for value by a
-  consumer written in C (`src/tests/helpers/komira_test_arrow_c_consumer`)
-  after the context is dropped, which releases the stream before it reads
-  the chunks and calls every release twice; afterwards each result buffer is
-  held by nothing else. A refusal raises with its step, an outcome with no
-  batch is refused, a selection mask is applied, batches keep their order,
-  and a column the export cannot carry is refused naming it.
-- `test_run_sql_union_all`: UNION ALL over six small Parquet tables answers
-  what DuckDB answers for the same SQL: INTEGER with BIGINT is BIGINT,
-  INTEGER with FLOAT is FLOAT, BIGINT or FLOAT or a DECIMAL with DOUBLE is
-  DOUBLE, DECIMAL(12,2) with DECIMAL(10,4) is DECIMAL(14,4) and with INTEGER
-  DECIMAL(12,2), values exact and NULLs kept; three branches with a FROM-less
-  one, count(*), sum, GROUP BY and WHERE over `FROM (... UNION ALL ...) u`, an
-  empty branch, the first branch's names, LIMIT, integer literal branches
-  (INTEGER, or BIGINT when one needs it); a VARCHAR with an INTEGER is refused
-  at bind and an ORDER BY before UNION ALL at parse.
-- `test_run_sql_topn`: ORDER BY with LIMIT and OFFSET through `run_sql` over
-  Parquet tables in small row groups on 1, 3 and 7 workers: every case of the
-  `order_by_limit` corpus with a LIMIT or an OFFSET (ties at the cut, NULLS
-  FIRST and LAST in both directions, NaN above inf, a 20000-row table, total
-  orders carrying `k`) answers the pinned DuckDB's rows in its order; the
-  comparison reports a reordered, changed, missing and added row; an OFFSET with
-  no LIMIT is refused at bind by name (the two corpus cases that have one are
-  listed, not skipped); a negative LIMIT is refused at parse.
-- `test_run_sql_set_ops`: INTERSECT and EXCEPT through `run_sql` answer what
-  the pinned DuckDB answers for each case of `tests/set_ops/cases.sql`, on one
-  worker and on three: NULL rows equal, an all-NULL and an empty input,
-  repeated rows, several columns of mixed types, one column of each key type,
-  NaN, inputs widened to a common type, INTERSECT binding tighter than UNION
-  ALL and EXCEPT, a sort and an aggregation over the result; every
-  case is run; INTERSECT ALL and EXCEPT ALL are refused at parse by name.
-- `test_secret_capability_reveal`: a capability reveals exactly the secret
-  bound to its own node id, once and after one store resolve; two capabilities
-  over one bindings table each reveal their own value; an unbound node or a
-  removed ref raises before the consumer is called.
+The tests are every `tests/test_*.mojo` file of the package. They run when the
+package is built (the `sdk_exec` target), and each file's header says what it
+covers. A new test is a new file there, with no list to extend. The one test
+that needs DuckDB to read back the files `COPY` wrote,
+`tests/test_copy_readback_duckdb.mojo`, runs with the `copy_readback` target.
 
 ## Limits
 

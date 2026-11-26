@@ -1,5 +1,6 @@
 load("@komira//python:dependencies.bzl", "DUCKDB_WHEEL", "PROTOBUF_MACOS", "PROTOBUF_REQUIREMENT", "PROTOBUF_WHEEL", "PYARROW_MACOS", "PYARROW_REQUIREMENT", "PYARROW_WHEELS")
 load("@komira//python:install_test.bzl", "picked_files", "python_versions", "wheel_install_test")
+load("@komira//python/changelog:defs.bzl", "changelog_file")
 load("@komira//python:pythons.bzl", "CLASSIFIERS", "HOSTED", "PYTHONS", "REQUIRES_PYTHON")
 load("@komira//third_party/modular:pins.bzl", "OTHER_MOJO", "TOOLCHAIN_MOJO", "is_newer", "modular_wheel")
 load("@komira//tools/build/package:wheel.bzl", "wheel_file", "wheel_file_at_stamp", "wheel_libs_check", "wheel_same_check", "wheel_version")
@@ -62,6 +63,32 @@ python_versions(
     visibility = ["komira//python/smoke:"],
 )
 
+# ---- The changelog -----------------------------------------------------------
+#
+# CHANGELOG.md holds the sections of the releases it keeps, and each change to
+# the package adds a file to changelog.d/ instead of a line to it
+# (CHANGELOG.md says how). `:changelog` is CHANGELOG.md with the section of this
+# build in front of them: `## 0.1.<N>` from the stamp (`-c
+# komira.package_stamp=<N>`, the one the wheel reads), `## Unreleased` without
+# one, holding the bullets of every file of changelog.d/ in file-name order.
+# The tool (changelog/) refuses a file that is no `<slug>.md`, an empty one, a
+# line that is neither a bullet nor an indented continuation, a heading, a
+# CHANGELOG.md with a `## Unreleased` heading and one with no release heading,
+# naming the file and the line, so a malformed entry fails the build that
+# reaches the wheel. `[description]` is README.md followed by that changelog,
+# its headings one level down: the wheel's description, so the page of version
+# 0.1.<N> on PyPI shows its own section. `[sources]` is the tree of
+# CHANGELOG.md and changelog.d/ as the tool reads it, for
+# tests/test_changelog_names.py, which holds every public name of the package
+# to an entry.
+changelog_file(
+    name = "changelog",
+    changelog = "CHANGELOG.md",
+    fragments = glob(["changelog.d/**"]),
+    readme = "README.md",
+    visibility = ["//python/tests:"],
+)
+
 # ---- The wheel ---------------------------------------------------------------
 #
 # `pip install komira`: the import package, and `//src/so:libkomira[dist]` as it
@@ -76,7 +103,8 @@ python_versions(
 # the bounds below, a run path not under `$ORIGIN`, or a NEEDED library that is
 # neither in the wheel nor a manylinux system library (the C++ runtime,
 # libstdc++ and libgcc_s, is one: the host provides it). The description is
-# README.md. Its requirements are pyarrow (`PYARROW_REQUIREMENT`,
+# README.md followed by the assembled changelog (`:changelog[description]`,
+# below). Its requirements are pyarrow (`PYARROW_REQUIREMENT`,
 # dependencies.bzl), which a `Result` reads as, and protobuf
 # (`PROTOBUF_REQUIREMENT`), which loads the generated plan modules a DataFrame
 # encodes its plan with; the wheel ships those at komira/plan/v1/. Unstamped the version is 0.0.0; the release set's stamp gives
@@ -195,7 +223,7 @@ _SHARED_METADATA = {
         "Issues": "https://github.com/komira-ai/komira/issues",
         "Source": "https://github.com/komira-ai/komira",
     },
-    "readme": "README.md",
+    "readme": ":changelog[description]",
     "requires_dist": [PYARROW_REQUIREMENT, PROTOBUF_REQUIREMENT],
     "requires_python": REQUIRES_PYTHON,
     "summary": "SQL over local files, with the komira query engine in process",
