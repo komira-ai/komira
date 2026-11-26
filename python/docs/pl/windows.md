@@ -1,5 +1,7 @@
 # komira.pl: windows
 
+> **Newer than 0.1.1623.** komira 0.1.1623 and older releases do not have what this page describes. [The changelog](../../CHANGELOG.md) lists what each release added.
+
 `expr.over(keys, order_by=...)` computes an expression per partition; an
 aggregate beside row-wise values in `select`, `with_columns` or `filter` is
 broadcast over the rows, as in polars. `rank` (`"average"`, `"min"`, `"max"`,

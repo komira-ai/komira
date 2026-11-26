@@ -979,7 +979,11 @@ release heading of [`python/CHANGELOG.md`](../python/CHANGELOG.md), holding the 
 nests under the README. A change to the package adds a file there and never a line of `CHANGELOG.md`
 ([the working guide](../python/README.md#changelog-entries)), so queued pull requests edit no common line,
 and the section a release ships lists every change merged since the newest section `CHANGELOG.md` keeps.
-The Linux and the macOS wheel read the one target, so their `METADATA` is the same
+The build is stamped with its commit too (`-c komira.package_commit`), and every link of the description to
+the repository's `main` (`.../blob/main/...`, `.../tree/main/...`) opens that commit instead, so the pages a
+version's PyPI page links to describe that version; the `Documentation` URL is the install page of that
+commit, and the `Changelog` URL stays `main`'s `CHANGELOG.md`, which keeps a section for every version on
+PyPI. The Linux and the macOS wheel read the one target, so their `METADATA` is the same
 (`//python:wheel_same_macos_arm64`). The wheel depends on the target, so a malformed file of `changelog.d/`
 (a name that is not a slug and `.md`, an empty file, a line that is neither a bullet nor an indented
 continuation, a heading), a `## Unreleased` heading in `CHANGELOG.md` and a `CHANGELOG.md` with no release
