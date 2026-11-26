@@ -3,142 +3,23 @@
 # Ruby: by its extension or its `#!` line), by path, and why it is still one. A
 # new interpreter file fails the build until it has a row; a row whose file is
 # deleted (or is no longer an interpreter file) fails until the row is removed,
-# so the list only shrinks. Editing a listed file never touches this file. A new
-# row needs a reason review accepts.
+# so the list only shrinks. Editing a listed file never touches this file.
+# One row per line, sorted by path in byte order (LC_ALL=C sort): a row out of
+# order, or twice, fails. A row is a file's path, or a glob row of exactly the
+# form `<dir>/**/*.<ext>`, which covers every interpreter file under <dir>/ at
+# any depth with that extension, so a new such file needs no row; any other
+# wildcard fails, a glob row covering no file is stale and fails, and a file
+# row for a file a glob row covers fails (delete the file row). A file under
+# <dir>/ with another extension, or with only a `#!` line, needs its own row.
+# A new row needs a reason review accepts.
 # path	reason
 .github/ci/coverage_measure.sh	coverage and mutation tooling: to port to Zig
 .github/ci/tests/coverage_ci_cases.sh	coverage and mutation tooling: to port to Zig
 buck2	a thin wrapper: runs the pinned buck2 release
 python/examples/analysis_job.py	the Python package's analysis job example: run from the installed wheel and compared with DuckDB (python/examples/README.md)
 python/examples/quickstart.py	the Python package's quickstart: the example the README shows and the release smoke runs (python/examples/README.md)
-python/komira/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_accessors.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_arrow.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_errors.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_display.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_frame.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_groupby.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_native.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_ops/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_ops/_build.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_ops/_columns.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_ops/_dtype.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_ops/_expr.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_ops/_rel.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_ops/_vocab.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_ops/_walk.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_capture/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_capture/_code.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_capture/_decorator.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_capture/_readset.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_capture/_types.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_cast.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_credentials.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_iceberg.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_missing.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_plan/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_plan/_agg.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_plan/_expr.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_plan/_field.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_plan/_rel.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_plan/_scalar.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_plan/_source.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_plan/_window.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_plan/_wire.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_plan/_udf.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_refusals.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_runtime.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_run.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_series.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_verbs.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_session.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/_udf/__init__.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
-python/komira/_udf/wire.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
-python/komira/_udf/worker.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
-python/komira/_udf/zygote.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
-python/komira/pl/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/pl/_expr.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/pl/_frame.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/pl/_names.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/pl/_schema.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/pl/_scope.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/komira/pl/_types.py	the Python package: its sources are Python (docs/design/python_package.md)
-python/tests/test_analysis_job.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
-python/tests/test_beside_modular.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
-python/tests/test_cpu.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_installed.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
-python/tests/test_load.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_memory_limit.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_minor.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_ops_expr.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_ops_no_sql.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_ops_rel.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_ops_rel_join.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_ops_verbs.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_ops_walk.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_pl_names.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_pl_oracle.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_pl_verbs.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_plan_expr.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_plan_expr_goldens.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_plan_no_sql.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_plan_pb2.py	SDK test: the Python package's generated plan modules are tested in Python, under the protobuf runtimes users install
-python/tests/test_plan_rel.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_plan_rel_goldens.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_capture.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_ops_udf.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_ops_dtype.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_plan_udf.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_plan_udf_goldens.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/fixtures/udfs/__init__.py	the Python package's tests: the user functions the capture tests capture, which must be Python modules
-python/tests/fixtures/udfs/future.py	the Python package's tests: the user functions the capture tests capture, which must be Python modules
-python/tests/fixtures/udfs/rows.py	the Python package's tests: the user functions the capture tests capture, which must be Python modules
-python/tests/fixtures/udfs/runtime.py	the Python package's tests: the user functions the capture tests capture, which must be Python modules
-python/tests/fixtures/udfs/scalars.py	the Python package's tests: the user functions the capture tests capture, which must be Python modules
-python/tests/test_credentials.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_credentials_lib.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_errors.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_iceberg.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_runtime.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_session_options.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_upgrade.py	the Python package's tests: the wheel upgraded from its previous release is tested in Python, by the interpreter it is installed for
-python/tests/test_variants.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_register_text.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_session.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_result_frames.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_tpch_compare.py	the Python package's tests: the answer check of the wheel's TPC-H run is tested in Python
-python/tests/test_tpch_installed.py	the Python package's tests: the installed wheel is tested in Python, by the interpreter it is installed for
-python/tests/tpch_compare.py	the Python package's tests: the answer check of the wheel's TPC-H run, read by the installed wheel's test and by its own, in Python
-python/tests/test_display.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_frame.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_frame_concat.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_frame_duckdb.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_frame_groupby.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_frame_run.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_frame_verbs.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_frame_verbs_duckdb.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_series_accessors.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_sql.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_sql_cancel.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_sql_fake.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_sql_interrupt.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_sql_run.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_threads.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_two_call.py	the Python package's tests: the SDK surface is tested in Python
-python/tests/test_wheel_install_run.py	the Python package's tests: the install driver's wheel-tag check, which runs in the interpreter it installs for, is tested in Python
-python/tests/wheel_install_run.py	the Python package's tests: installs the wheel into an empty environment of the pinned interpreter that runs it (python/install_test.bzl), as that interpreter's own installer does
-python/tests/udf_host.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
-python/tests/test_udf_calls.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
-python/tests/test_udf_cancel.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
-python/tests/test_udf_contract.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
-python/tests/test_udf_generations.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
-python/tests/test_udf_lifecycle.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
-python/tests/test_udf_supervision.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
-python/tests/test_udf_types.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
-python/tests/test_udf_ipc.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
-python/tests/test_udf_engine_child.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
-python/tests/test_udf_process.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
-python/tests/test_udf_plan_run.py	the Python UDF runtime's tests: a ctypes host drives libkomira_udf_python on the interpreter its zygote runs (docs/design/udf_python_worker.md)
+python/komira/**/*.py	the Python package and its UDF runtime: their sources are Python (docs/design/python_package.md)
+python/tests/**/*.py	the Python package's tests, drivers and fixtures: the SDK surface is tested in Python (AGENTS.md T11)
 src/arrow_ipc/tests/fixtures/arrow_ipc/gen_fixtures.py	fixture provenance: the pyarrow program that wrote the Arrow IPC fixtures beside it (a third-party writer is the point)
 src/arrow_ipc/tests/fixtures/arrow_ipc/gen_pyarrow_interop_fixtures.py	fixture provenance: the pyarrow program that wrote the Arrow IPC fixtures beside it (a third-party writer is the point)
 src/parquet_codec/tests/fixtures/parquet/gen_pyarrow_fixtures.py	fixture provenance: the pyarrow program that wrote the Parquet fixtures beside it (a third-party writer is the point)

@@ -41,6 +41,22 @@
 #                             the proleptic Gregorian calendar); a date
 #                             DuckDB writes with ` (BC)` is refused
 #   string, large_string      the cell's text, escaped as canon escapes it
+#   timestamp_s/ms/us/ns      the ticks of the unit from 1970-01-01 00:00:00,
+#                             as canon spells a timestamp, read from
+#                             `YYYY-MM-DD HH:MM:SS[.f]`: the date as for
+#                             date32, a time of day that exists, and a
+#                             fraction as DuckDB writes it (no trailing zero,
+#                             none on a whole second, at most the unit's
+#                             digits); a time zone, ` (BC)` and an infinite
+#                             timestamp are refused
+#   list, large_list of       DuckDB's list text (`[a, 'b c', NULL]`: items
+#   string or large_string    joined by `, `, an item quoted with `'` exactly
+#                             when DuckDB quotes it: the empty string, any
+#                             case of `null`, leading or trailing whitespace,
+#                             or one of `,[]{}():'"=`; `\\` and `\'` inside
+#                             quotes; `NULL` bare for a NULL item) as canon
+#                             spells a list, `[a,b c,\N]`, `\e` for an empty
+#                             string item; any other item type is refused
 #
 # NULL is `\N` in any column whose schema entry ends in `?`, and refused in
 # one that does not. Any other type is refused by name: a value this reader
@@ -301,6 +317,11 @@ def _days_in_month(y: Int, m: Int) -> Int:
 
 def _date_cell(cell: String) raises -> String:
     """The day number of `YYYY-MM-DD` from 1970-01-01, as decimal text."""
+    return String(_date_days(cell))
+
+
+def _date_days(cell: String) raises -> Int:
+    """The day number of `YYYY-MM-DD` from 1970-01-01."""
     var bs = cell.as_bytes()
     var n = len(bs)
     if (
@@ -324,7 +345,189 @@ def _date_cell(cell: String) raises -> String:
     var mp = m - 3 if m > 2 else m + 9
     var doy = (153 * mp + 2) // 5 + d - 1
     var doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
-    return String(era * 146097 + doe - 719468)
+    return era * 146097 + doe - 719468
+
+
+def _timestamp_digits(t: String) -> Int:
+    """The fraction digits a timestamp type without a time zone holds (0, 3,
+    6, 9), or -1 for any other type."""
+    if t == "timestamp_s":
+        return 0
+    if t == "timestamp_ms":
+        return 3
+    if t == "timestamp_us":
+        return 6
+    if t == "timestamp_ns":
+        return 9
+    return -1
+
+
+def _timestamp_cell(cell: String, digits: Int) raises -> String:
+    """`YYYY-MM-DD HH:MM:SS[.f]` as the count of the unit's ticks from
+    1970-01-01 00:00:00 (`digits` fraction digits a second), as decimal text.
+    The fraction is DuckDB's: no trailing zero, none at all on a whole
+    second, at most the unit's digits."""
+    if cell == "infinity" or cell == "-infinity":
+        raise Error("'" + cell + "' is not read: an infinite timestamp")
+    if " (BC)" in cell:
+        raise Error("'" + cell + "' is not read: a timestamp before year 1")
+    var sp = cell.find(" ")
+    if sp < 0:
+        raise Error("'" + cell + "' is not a timestamp YYYY-MM-DD HH:MM:SS")
+    var days = _date_days(String(cell[byte=0:sp]))
+    var time = String(cell[byte = sp + 1 : cell.byte_length()])
+    var bs = time.as_bytes()
+    var n = len(bs)
+    if (
+        n < 8
+        or bs[2] != 58
+        or bs[5] != 58
+        or not _is_digits(bs, 0, 2)
+        or not _is_digits(bs, 3, 5)
+        or not _is_digits(bs, 6, 8)
+    ):
+        raise Error("'" + cell + "' is not a timestamp YYYY-MM-DD HH:MM:SS")
+    var h = atol(String(time[byte=0:2]))
+    var mi = atol(String(time[byte=3:5]))
+    var sec = atol(String(time[byte=6:8]))
+    if h > 23 or mi > 59 or sec > 59:
+        raise Error("'" + cell + "' is not a time of day")
+    var frac = String("")
+    if n > 8:
+        if bs[8] != 46 or not _is_digits(bs, 9, n):
+            raise Error("'" + cell + "' is not a timestamp YYYY-MM-DD HH:MM:SS[.f]")
+        frac = String(time[byte=9:n])
+        if bs[n - 1] == 48:
+            raise Error("'" + cell + "' has a trailing zero in its fraction")
+        if n - 9 > digits:
+            raise Error(
+                "'" + cell + "' has " + String(n - 9) + " fraction digits, the unit "
+                + String(digits)
+            )
+    var scale = 1
+    for _ in range(digits):
+        scale *= 10
+    var sub = 0
+    if frac.byte_length() > 0:
+        sub = atol(frac)
+        for _ in range(digits - frac.byte_length()):
+            sub *= 10
+    var secs = days * 86400 + h * 3600 + mi * 60 + sec
+    # The Int64 range in the unit (a nanosecond timestamp spans 1677 to
+    # 2262), checked before any product can overflow.
+    var out_of_range = Error("'" + cell + "' is outside the unit's 64-bit range")
+    if secs >= 0:
+        if secs > (Int(Int64.MAX) - sub) // scale:
+            raise out_of_range^
+        return String(secs * scale + sub)
+    # Below the epoch: the magnitude secs * scale - sub, in UInt64.
+    var m = UInt64(-secs)
+    if m > UInt64.MAX // UInt64(scale):
+        raise out_of_range^
+    var mag = m * UInt64(scale) - UInt64(sub)
+    if mag > UInt64(1) << 63:
+        raise out_of_range^
+    return "-" + String(mag)
+
+
+def _list_item_type(t: String) -> String:
+    """The item type of `list<...>` or `large_list<...>`, else ""."""
+    if not t.endswith(">"):
+        return String("")
+    var open = t.find("<")
+    if open < 0:
+        return String("")
+    var base = String(t[byte=0:open])
+    if base != "list" and base != "large_list":
+        return String("")
+    return String(t[byte = open + 1 : t.byte_length() - 1])
+
+
+def _is_space(b: UInt8) -> Bool:
+    return b == 32 or (b >= 9 and b <= 13)
+
+
+def _duckdb_quotes(s: String) -> Bool:
+    """Does DuckDB write `s` quoted inside a list: the empty string, any case
+    of `null`, a string that starts or ends with whitespace, or one holding
+    one of `,[]{}():'"=`?"""
+    var bs = s.as_bytes()
+    var n = len(bs)
+    if n == 0 or s.lower() == "null":
+        return True
+    if _is_space(bs[0]) or _is_space(bs[n - 1]):
+        return True
+    for i in range(n):
+        var b = bs[i]
+        if (
+            b == 44 or b == 91 or b == 93 or b == 123 or b == 125 or b == 40
+            or b == 41 or b == 58 or b == 39 or b == 34 or b == 61
+        ):
+            return True
+    return False
+
+
+def _list_cell(cell: String) raises -> String:
+    """A list of strings as DuckDB writes it (`[a, 'b c', NULL]`: items
+    joined by `, `, an item quoted with `'` exactly when _duckdb_quotes says
+    so, `\\` and `\'` inside the quotes, `NULL` bare for a NULL item) as
+    canon spells it (`[a,b c,\\N]`)."""
+    var bs = cell.as_bytes()
+    var n = len(bs)
+    if n < 2 or bs[0] != 91 or bs[n - 1] != 93:
+        raise Error("'" + cell + "' is not a list [...]")
+    if n == 2:
+        return String("[]")
+    var items = String("[")
+    var i = 1
+    var first = True
+    while True:
+        if not first:
+            items += ","
+        first = False
+        if bs[i] == 39:  # a quoted item
+            var raw = List[UInt8]()
+            var j = i + 1
+            var closed = False
+            while j < n - 1:
+                var b = bs[j]
+                if b == 92:
+                    if j + 1 >= n - 1 or (bs[j + 1] != 92 and bs[j + 1] != 39):
+                        raise Error("'" + cell + "' has an escape DuckDB does not write")
+                    raw.append(bs[j + 1])
+                    j += 2
+                    continue
+                if b == 39:
+                    closed = True
+                    j += 1
+                    break
+                raw.append(b)
+                j += 1
+            if not closed:
+                raise Error("'" + cell + "' has an unterminated quoted item")
+            var item = String(unsafe_from_utf8=Span(raw))
+            if not _duckdb_quotes(item):
+                raise Error("'" + cell + "' quotes an item DuckDB writes bare")
+            items += escape_string(item, True)
+            i = j
+        else:  # a bare item: up to the next `,` or the closing bracket
+            var j = i
+            while j < n - 1 and bs[j] != 44:
+                j += 1
+            var item = _cell_text(bs, i, j)
+            if item == "NULL":
+                items += "\\N"
+            elif _duckdb_quotes(item):
+                raise Error("'" + cell + "' has a bare item DuckDB would quote")
+            else:
+                items += escape_string(item, True)
+            i = j
+        if i == n - 1:
+            break
+        if i + 2 >= n - 1 or bs[i] != 44 or bs[i + 1] != 32:
+            raise Error("'" + cell + "' does not separate its items with ', '")
+        i += 2
+    return items + "]"
 
 
 def _float_width(t: String) -> Int:
@@ -454,6 +657,13 @@ def duckdb_tsv_canon(tsv: DuckdbTsv, like: CanonText) raises -> CanonText:
                     row.append(escape_string(cell, False))
                 elif t == "date32":
                     row.append(_date_cell(cell))
+                elif _timestamp_digits(t) >= 0:
+                    row.append(_timestamp_cell(cell, _timestamp_digits(t)))
+                elif (
+                    _list_item_type(t) == "string"
+                    or _list_item_type(t) == "large_string"
+                ):
+                    row.append(_list_cell(cell))
                 else:
                     raise Error("this reader does not read type " + t)
             except e:

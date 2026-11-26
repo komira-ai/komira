@@ -9,7 +9,7 @@
 //!  - its steps, in order: the dist and the smoke artifacts downloaded into the runner's temporary directory, the
 //!    driver made executable, the pinned setup-python with the matrix entry's Python, then one step that runs
 //!    `pypi_smoke install --index dist` on the dist directory with that interpreter and the quickstart, its
-//!    expected output, its data and the ABI table from the smoke artifact (no file of a checkout).
+//!    expected output and the ABI table from the smoke artifact (no file of a checkout).
 //! The build job's side (the copy of those files and the matrix step) is in pypi_workflow_contract.zig.
 
 const std = @import("std");
@@ -32,7 +32,7 @@ pub const PYTHON_VERSION = "          python-version: ${{ matrix.python }}";
 pub const PYTHON_ENV = "          PYTHON: ${{ steps.python.outputs.python-path }}";
 pub const CHMOD = "        run: chmod +x \"$RUNNER_TEMP/wheel/smoke/pypi_smoke\"";
 pub const INSTALL_STEP = "      - name: pip installs the wheel file into an empty environment and the quickstart prints what it should";
-pub const INSTALL_RUN = "        run: '\"$RUNNER_TEMP/wheel/smoke/pypi_smoke\" install --index dist --dist \"$RUNNER_TEMP/wheel/dist\" --python \"$PYTHON\" --example \"$RUNNER_TEMP/wheel/smoke/quickstart.py\" --expect \"$RUNNER_TEMP/wheel/smoke/quickstart.expected\" --data \"$RUNNER_TEMP/wheel/smoke/readings.parquet\" --abi-table \"$RUNNER_TEMP/wheel/smoke/komira.tsv\" --work \"$RUNNER_TEMP/wheel/install\"'";
+pub const INSTALL_RUN = "        run: '\"$RUNNER_TEMP/wheel/smoke/pypi_smoke\" install --index dist --dist \"$RUNNER_TEMP/wheel/dist\" --python \"$PYTHON\" --example \"$RUNNER_TEMP/wheel/smoke/quickstart.py\" --expect \"$RUNNER_TEMP/wheel/smoke/quickstart.expected\" --abi-table \"$RUNNER_TEMP/wheel/smoke/komira.tsv\" --work \"$RUNNER_TEMP/wheel/install\"'";
 pub const DIST_PATH = "          path: ${{ runner.temp }}/wheel/dist";
 pub const SMOKE_PATH = "          path: ${{ runner.temp }}/wheel/smoke";
 

@@ -2,6 +2,14 @@
 # run_sql: SELECT DISTINCT and COUNT(DISTINCT x) over Parquet tables
 # =============================================================================
 #
+# Covers: run_sql over Parquet tables in several row groups: SELECT DISTINCT
+# over an INT64 and a STRING column gives each value once and one NULL row
+# (NULL and the empty string are two rows), below a filter and with ORDER BY
+# (NULLs last); COUNT(DISTINCT x) ignores NULL, is an INT64 that is 0 for no
+# rows and for all NULL, counts per group (the NULL key and an all-NULL group
+# included), runs beside SUM and over a STRING; SELECT DISTINCT over two INT64
+# columns gives each pair once.
+#
 # Each test writes a Parquet table t(k INT64, v INT64, s STRING) with small row
 # groups (several morsels, so several workers' partial states to merge), runs
 # SQL text through `run_sql` on a context of three workers, and compares the

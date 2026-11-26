@@ -38,7 +38,9 @@
 # file write after the run does not either.
 #
 # Parse and bind are the steps `sql.sql_frontend.plan_from_sql` composes; they
-# are called one by one here so a refusal names the step that refused.
+# are called one by one here so a refusal names the step that refused. A refusal
+# of the parse step also carries the line and column where the text stopped
+# parsing (`sql.sql_parse_text.parse_sql_text`).
 # `STATEMENT_NOT_A_QUERY` is `sql.sql_frontend`'s refusal, named here too so a
 # caller of this module finds it beside the `STEP_*` names. `SqlOutcome`,
 # `SqlRefusal`, `OPTIMIZE_UNRESOLVED_SCALAR` and the steps from `optimize` on
@@ -51,8 +53,8 @@ from sql.sql_binder import bind_statement
 from sql.sql_frontend import (
     STATEMENT_NOT_A_QUERY as _SQL_STATEMENT_NOT_A_QUERY,
 )
-from sql.sql_parser import parse_sql
-from sql.sql_token import tokenize
+from sql.sql_parse_text import parse_sql_text
+from sql.sql_position import SqlPosition
 from fs.scan_fs import ScanFsOpener
 from pipeline_exec.source_parquet import LocalOnlyScanFs
 
@@ -124,9 +126,10 @@ def run_sql_with[
     ctx.begin_query()
     ctx.statements_parsed += 1
     var step = String(STEP_PARSE)
+    var stopped_at = SqlPosition(0, 0)
     try:
         var t_parse = pt_now()
-        var stmt = parse_sql(tokenize(text))
+        var stmt = parse_sql_text(text, stopped_at)
         pt_record[PH_PARSE](t_parse)
         step = String(STEP_BIND)
         var t_bind = pt_now()
@@ -153,4 +156,6 @@ def run_sql_with[
             outcome.batches.append(batch^)
         return outcome^
     except e:
+        if step == STEP_PARSE:
+            return SqlOutcome(step^, String(e), Optional(stopped_at.copy()))
         return SqlOutcome(step^, String(e))

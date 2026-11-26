@@ -263,6 +263,17 @@ def _bind_corr_scalar(
         # every alias of the row reaches this arm.
         var cs_spec = sql_scalar_fn_spec(sx.text)
         if cs_spec.kind == FNK_DESUGAR and cs_spec.op == DSG_DATE_DIFF:
+            # This arm folds only `date_diff('day', DATE, DATE)`; the other
+            # units are lowered by `plan_expr.temporal_delta` from the
+            # BindScope this binder does not have, so they are refused here.
+            ref cs_args = sx._call.value().args
+            if len(cs_args) == 3 and (
+                cs_args[0].tag != SX_STRING or cs_args[0].text.lower() != "day"
+            ):
+                raise Error(
+                    "SQL not supported: only date_diff('day', ...) is supported"
+                    + " (got unit that is not the constant 'day')"
+                )
             return Expr.literal(ScalarValue.from_int64(_date_diff_days(sx)))
         raise Error(
             "SQL not supported: scalar function '" + sx.text
