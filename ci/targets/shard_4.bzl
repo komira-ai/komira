@@ -4,9 +4,14 @@
 
 TARGETS = [
     "komira//python/docs/tasks:1-read-csv-file",
+    "komira//python/docs/tasks:100-read-csv-odd-delimiter-no-header",
+    "komira//python/docs/tasks:100-read-csv-odd-delimiter-no-header__probe_no_header",
+    "komira//python/docs/tasks:100-read-csv-odd-delimiter-no-header__probe_skip_lines",
     "komira//python/docs/tasks:2-select-columns-filter-rows",
     "komira//python/docs/tasks:22-read-json-file-write-records-database",
     "komira//python/docs/tasks:22-read-json-file-write-records-database__probe_native_insert",
+    "komira//python/docs/tasks:98-read-partitioned-dataset-skip-partitions-need",
+    "komira//python/docs/tasks:99-convert-folder-csv-files-parquet",
     "komira//python/docs/tasks:pages",
     "komira//python/docs/tasks:refuses_example_that_raises",
     "komira//python/docs/tasks:refuses_probe_that_runs",
