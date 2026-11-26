@@ -181,17 +181,17 @@ Counts of the names in `function_coverage.tsv` (731 names), each from
 
 | names | what was measured |
 |---|---|
-| 171 | lowering rows whose cases all ran and equal DuckDB's answers |
+| 173 | lowering rows whose cases all ran and equal DuckDB's answers |
 | 4 | lowering rows that run and differ from DuckDB only in floats, within 4 ulps (`cos`, `exp`, `log`, `log10`) |
-| 4 | lowering rows with a case whose answer differs from DuckDB's: `json_extract` and `json_extract_string` answer the bytes of the value as the document spells it, where DuckDB writes the value again (`1.50` as `1.5`, `-0` as `0`, a nested value without its spaces); `greatest` and `least` over floats compare by IEEE, where DuckDB orders NaN above every float and keeps the first argument of a tie (`greatest(-0.0, 0.0)` is `-0.0`) |
+| 2 | lowering rows with a case whose answer differs from DuckDB's: `json_extract` and `json_extract_string` answer the bytes of the value as the document spells it, where DuckDB writes the value again (`1.50` as `1.5`, `-0` as `0`, a nested value without its spaces) |
 | 1 | lowering rows refused at execute by every case that calls them: `to_hex`, whose row is the VARCHAR overload; DuckDB's `to_hex` of an integer is a second overload, refused by name |
 | 8 | lowering rows no `scalar_fn` case calls: the catalog constants `current_role`, `current_user`, `session_user`, `user` and `pg_table_is_visible` (their answer is the session's, not a function of the row), and `struct_extract`, `struct_extract_at` and `map_extract_value`, which no SQL here can reach (the Parquet scan reads flat columns only, and `struct_pack`, `row` and `map` are refusal rows) |
 | 3 | rows keyed by a constant (`internal`) |
 | 538 | refusal rows; every one is refused at bind by `SELECT name(k) FROM T` |
 | 2 | common names with no row at all (`initcap`, `current_timestamp`), refused at bind |
 
-So the rows that execute and are checked against DuckDB are 175 of the 188
-lowering-row names (the first two lines); 5 run without DuckDB's answer (four
+So the rows that execute and are checked against DuckDB are 177 of the 188
+lowering-row names (the first two lines); 3 run without DuckDB's answer (two
 differ, one is refused at execute); 8 are unmeasured, each for the reason its
 line gives. The gap list of common analysis
 functions is the `common = yes` lines whose `row` is `FNK_REFUSED` or
