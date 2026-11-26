@@ -14,7 +14,7 @@ Refused by name: what needs row order the plan does not have
 (`maintain_order=True`, `keep="first"`/`"last"`), `nulls_equal=True`, a key
 that is an expression, and a join of keys of two types. `len()`, `count()`
 and `n_unique()` are Int64 where polars gives UInt32 (see
-[count types](expressions.md)). The engine refuses when the query runs what it does not
-compute yet, such as a grouped sum or mean of a float column.
+[count types](expressions.md)). The engine refuses when the query runs what
+it does not compute yet, such as a grouped sum or mean of a float column.
 
 Back to [lazy frames](frames.md).
