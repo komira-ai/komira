@@ -140,3 +140,18 @@ mojo_shared_lib(
     gate_srcs = ["owner_embedded_driver.mojo"],
     deps = ["komira//src/libc:libc"],
 )
+
+# The same library as owner_embedded, named `spike_native` so that the driver of
+# examples/shared_lib_native:spike_native runs against it unchanged. The driver
+# reads the library before it opens the owner, so it is red on the symbol table:
+# on Linux the owner's names are defined in the library, on macOS the library
+# has no load command for the owner's install name.
+mojo_shared_lib(
+    name = "owner_embedded_bound",
+    out_name = "spike_native",
+    srcs = ["owner_embedded_abi.mojo"],
+    exports = ["native_owner_write_probe"],
+    exports_exact = True,
+    gate_srcs = ["komira//tools/build/examples/shared_lib_native:call_driver.mojo"],
+    deps = ["komira//src/libc:libc"],
+)

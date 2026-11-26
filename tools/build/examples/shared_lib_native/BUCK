@@ -13,3 +13,10 @@ mojo_shared_lib(
     deps = ["//src/libc:libc"],
     native_owners = ["//src/libc:komira_libc_native"],
 )
+
+# The gate driver, for its negative twin
+# tests//negative/shared_lib:owner_embedded_bound.
+export_file(
+    name = "call_driver.mojo",
+    visibility = ["PUBLIC"],
+)
