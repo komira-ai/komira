@@ -54,22 +54,85 @@ load fails. What each release changed is in the
 ## What works
 
 ```python
+import pyarrow as pa
+import pyarrow.parquet as pq
+
 import komira
 
 print(komira.__version__)     # the installed version
 print(komira.abi_version())   # the engine's C ABI version: 1009 is 1.9
 
+# A small Parquet file to query: six days of weather in three cities.
+weather = pa.table({
+    "city": ["Oslo", "Lima", "Oslo", "Pune", "Lima", "Oslo"],
+    "temp": [3, 18, 1, 31, 20, 5],
+    "rain": [1.5, 0.0, 2.5, 4.0, 0.5, 1.0],
+})
+pq.write_table(weather, "weather.parquet")
+
 with komira.Session() as s:
-    s.register_parquet("readings", "readings.parquet")
-    print(s.sql("SELECT 1 AS n").to_arrow().to_pylist())
-    result = s.sql("SELECT count(*) AS n, sum(value) AS total FROM readings")
-    print(result.to_arrow().to_pylist())   # a pyarrow Table, as Python rows
+    s.register_parquet("weather", "weather.parquet")
+
+    # An answer is a pyarrow Table; to_pylist() gives its rows.
+    total = s.sql("SELECT count(*) AS days, sum(rain) AS rain FROM weather")
+    print(total.to_arrow().to_pylist())
+
+    # A group-by with an aggregate and an order.
+    table = s.sql(
+        "SELECT city, count(*) AS days, avg(temp) AS mean, max(temp) AS hottest"
+        " FROM weather GROUP BY city ORDER BY city"
+    ).to_arrow()
+    print(table.schema)
+    for row in table.to_pylist():
+        print(row)
+
+    # Batch by batch with to_reader(), or by any Arrow library.
+    hot = "SELECT city, temp FROM weather WHERE temp > 10 ORDER BY temp DESC"
+    print(s.sql(hot).to_reader().read_all().to_pylist())
+    print(pa.table(s.sql(hot)).column("city").to_pylist())
+
+    # A mistake raises komira.KomiraError, naming the file or the place.
+    try:
+        s.register_parquet("missing", "no_such_file.parquet")
+    except komira.KomiraError as e:
+        print(e)
+    try:
+        s.sql("SELECT city, count(*) FROM weather GROUP city")
+    except komira.KomiraError as e:
+        print(e)
 print(s.closed)               # True: the session is freed
 ```
 
-This block is the file `python/examples/quickstart.py` of the source tree
-(next to the `readings.parquet` it registers), which the release checks run
-against the published package.
+It prints:
+
+```text
+0.1.1512
+1009
+[{'days': 6, 'rain': 9.5}]
+city: string
+days: int64 not null
+mean: double
+hottest: int64
+{'city': 'Lima', 'days': 2, 'mean': 19.0, 'hottest': 20}
+{'city': 'Oslo', 'days': 3, 'mean': 3.0, 'hottest': 5}
+{'city': 'Pune', 'days': 1, 'mean': 31.0, 'hottest': 31}
+[{'city': 'Pune', 'temp': 31}, {'city': 'Lima', 'temp': 20}, {'city': 'Lima', 'temp': 18}]
+['Pune', 'Lima', 'Lima']
+parquet footer '<cwd>/no_such_file.parquet': no such file, or it cannot be read
+parse: SQL syntax error: expected keyword 'by' at line 1, column 42
+True
+```
+
+The first line is the installed version, and `<cwd>` stands for the
+directory the program ran in: a relative path is resolved against it, and
+the error names the file it looked for.
+
+The program is the file `python/examples/quickstart.py` of the source tree,
+and the text it prints is `python/examples/quickstart.expected` (shown here
+with the version of the newest release in the changelog). The pull request
+check runs it on the wheel installed into an empty environment, the release
+checks run it after `pip install` of the wheel file and of the published
+package, and each compares what it prints with that file, every line.
 
 - `komira.__version__` is the installed distribution's version.
 - `komira.abi_version()` loads the engine and returns its C ABI version as
@@ -86,7 +149,9 @@ against the published package.
   - A relative path is resolved against the working directory, and `~` is
     expanded.
   - A missing or unreadable file raises `komira.BindError` with the engine's
-    message (a plain `KomiraError` from a library older than ABI 1.7).
+    message (a plain `KomiraError` from a library older than ABI 1.7), which
+    names the file by its absolute path:
+    `parquet footer '<path>': no such file, or it cannot be read`.
   - Registering a name again replaces the table.
 - `register_csv(name, path, *, delimiter=",", header=True, all_varchar=False)`
   registers a CSV file as the table `name`, the table SQL's `read_csv` makes
@@ -109,7 +174,10 @@ against the published package.
   the engine does not run yet raises a `KomiraError` from `sql`, with the
   engine's `<step>: <reason>` message: `ParseError` for a syntax error,
   `BindError` for an unknown name, `UnsupportedOperation` for a construct the
-  engine refuses by name.
+  engine refuses by name. A refusal of the `parse` step ends with where the
+  statement stopped parsing, `at line <L>, column <C>` (both from 1, the
+  column counted in characters; the end of the text when the statement ends
+  early).
 - Ctrl-C while `Session.sql` runs cancels the query: the engine stops at its
   next check, `sql` raises `KeyboardInterrupt`, nothing the query computed is
   kept, and the session runs the next query. A second Ctrl-C while the query
@@ -525,7 +593,7 @@ The tests below run on Linux x86_64 as build actions, with
 | `load_test` | loading and refusal, then the real `libkomira[runnable]` and its nine calls |
 | `session_test` | the public surface on the real library |
 | `minor0_test`, `minor3_test` | stand-ins of ABI 1.0 and 1.3: a 1.0 library refuses `sql`, and both refuse `register_csv` and `register_json`, by the ABI version each needs |
-| `sql_test` | `Session.sql` on the real library: `SELECT 1 AS n`, a GROUP BY over a checked-in Parquet file, an aggregate, an answer of no rows, each terminal, the engine's refusals, and a result read after its session was closed or collected |
+| `sql_test` | `Session.sql` on the real library: `SELECT 1 AS n`, a GROUP BY over a checked-in Parquet file, an aggregate, an answer of no rows, each terminal, the engine's refusals (a syntax error's message naming its line and column, compared whole), and a result read after its session was closed or collected |
 | `register_text_test` | `Session.register_csv` and `register_json` on the real library over checked-in CSV and JSON files: the names, types and rows the engine infers, NULL where a file has no value, the same answer as `read_csv` and `read_json`, the `delimiter`, `all_varchar` and `header` arguments, paths resolved when the call is made, a missing or empty file and a taken name refused with the engine's message, and the argument checks |
 | `sql_fake_test` | `Session.sql` on a stand-in Arrow stream that counts releases: a result read once, each stream, schema and batch released exactly once whoever ends it, a requested schema refused, a schema error raised from `sql` and a batch error from the terminal, the argument checks, and results left unread at exit |
 | `sql_interrupt_test` | Ctrl-C during `Session.sql`, on a stand-in whose `komira_sql_stream` raises SIGINT in the calling thread: `KeyboardInterrupt` once the call returns, the stream it filled released exactly once, the session answering the next query (also after a refusal SIGINT came during), a handler that does not raise running once while `sql` returns the answer, and an ignored SIGINT changing nothing; and a `progress` callback on that 1.3 stand-in refused by the ABI version it needs |
@@ -586,9 +654,10 @@ interpreter pinned), from the release workflow only. That test holds:
 | what | how |
 |---|---|
 | the installed package | `komira` imports from the environment, at the wheel's version |
-| its metadata | the `Requires-Dist` lines `pyarrow>=25.0.1` and `protobuf>=5.29.1,<8`, in that order, and no other; `Requires-Python` `>=3.11` and exactly the classifiers `python/BUCK` writes out (`_PYTHON_METADATA`: the four supported minors); the `License-Expression` given; `.dist-info/licenses/` holding `LICENSE`, `NOTICE`, and Modular's `LICENSE` and `Third-Party-Notices`, each byte-equal to its source, and no other; the description starting with the first line of this README |
+| its metadata | the `Requires-Dist` lines `pyarrow>=25.0.1` and `protobuf>=5.29.1,<8`, in that order, and no other; `Requires-Python` `>=3.11` and exactly the classifiers `python/BUCK` writes out (`_PYTHON_METADATA`: the four supported minors); the `License-Expression` given; `.dist-info/licenses/` holding `LICENSE`, `NOTICE`, and Modular's `LICENSE` and `Third-Party-Notices`, each byte-equal to its source, and no other; the description equal to this README byte for byte, so PyPI shows the same quickstart |
 | nothing else | no `modular/` directory and no distribution in the environment but komira, pyarrow and protobuf; `import komira` imports neither protobuf nor the plan modules |
-| the library | `abi_version()` is the version of `src/so/abi/komira.tsv`; a Parquet file registers, a missing one raises `KomiraError`; `SELECT 1 AS n` and an aggregate over `examples/readings.parquet` answer their rows through pyarrow; the DataFrame program of "The pandas-shaped DataFrame" above answers its two rows through the plan door; a serialized plan renders |
+| the library | `abi_version()` is the version of `src/so/abi/komira.tsv`; a Parquet file registers, a missing one raises `KomiraError`; `SELECT 1 AS n` and an aggregate over `tests/fixtures/readings.parquet` answer their rows through pyarrow; the DataFrame program of "The pandas-shaped DataFrame" above answers its two rows through the plan door; a serialized plan renders |
+| the quickstart | `examples/quickstart.py`, run in an empty directory, prints exactly `examples/quickstart.expected` (its version, ABI version and directory filled in) and leaves only the `weather.parquet` it wrote |
 | where it loaded from | `/proc/self/maps` (on macOS, the images dyld has loaded) lists libkomira and its owners (none on macOS, where `lib/` holds exactly the three runtime `.dylib` files) from `komira/_lib`, and the three Mojo runtime libraries from `komira/_lib/lib` |
 
 Each `//python:refuses_*` target runs the same install and test on one broken

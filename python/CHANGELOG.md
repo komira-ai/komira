@@ -106,6 +106,14 @@ install page shows names it.
 - **Logging.** komira logs to the `logging` logger `"komira"`, which has a `NullHandler`: at `DEBUG`
   the library it loaded and each answered query's plan segments, at `INFO` a query stopped by an
   exception. It logs no query text.
+- **Where a syntax error is.** A statement the engine cannot parse raises `ParseError` from `sql`
+  with a message that ends with where it stopped parsing, `at line <L>, column <C>`:
+  `parse: SQL syntax error: expected keyword 'by' at line 1, column 42`.
+- **The quickstart.** The README and the install page show a new first program that needs no file
+  beside it: it writes a small Parquet file with pyarrow, runs an aggregate and a GROUP BY, reads the
+  answers as rows, as a pyarrow Table, with `to_reader()` and with `pyarrow.table(result)`, and shows
+  the message of a missing file and of a syntax error. Both pages show what it prints. The
+  `readings.parquet` the earlier program downloaded is no longer needed.
 - **pyarrow.** The wheel requires `pyarrow>=25.0.1`, so `pip install komira` installs it; it had no
   requirement.
 - **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its

@@ -16,7 +16,8 @@
 # refused; sql_result answers a query over a registered table with its rows
 # and schema, an answer of no rows as one batch of no rows with the schema,
 # an answer that is still whole after its session is dropped, and a refusal
-# as `<step>: <reason>` (parse, bind) after which the session answers again;
+# as `<step>: <reason>` (parse, bind; a parse refusal also names the line and
+# column where the text stopped) after which the session answers again;
 # a refusal is also the session's last error with its step number and code (a
 # syntax error is parse and SQL_SYNTAX_ERROR, an unknown table bind and
 # SQL_BIND_ERROR, INTERSECT ALL parse and SQL_NOT_SUPPORTED), and a later
@@ -342,11 +343,18 @@ def test_sql_result_outlives_its_session() raises:
 
 def test_sql_result_refusal_names_its_step() raises:
     var s = Session()
-    var parse = _message_of(s, String("selec 1"))
-    assert_true(parse.startswith("parse: "), "a parse refusal reads: " + parse)
+    assert_equal(
+        _message_of(s, String("selec 1")),
+        "parse: SQL syntax error: expected keyword 'select' at line 1, column 1",
+    )
+    assert_equal(
+        _message_of(s, String("select 1\nfrom (select 2) x group x")),
+        "parse: SQL syntax error: expected keyword 'by' at line 2, column 25",
+    )
     var bind = _message_of(s, String("select * from nosuch"))
     assert_true(bind.startswith("bind: "), "a bind refusal reads: " + bind)
     assert_true("nosuch" in bind, "the bind refusal does not name the table: " + bind)
+    assert_false(" at line " in bind, "a bind refusal has no position: " + bind)
     # The session answers the next query.
     var result = sql_result(s, String("select 1 as n"))
     assert_equal(result.batches[0].num_rows(), 1)
