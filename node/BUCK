@@ -1,5 +1,7 @@
 load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "node_addon", "node_binding_test")
 load("@komira//tools/build/node:modules.bzl", "tsc_build", "tsc_check")
+load("@komira//tools/build/package:npm.bzl", "npm_tarball")
+load("@komira//tools/build/package/libkomira:packaged.bzl", "DIST_LICENSE_EXPRESSION", "DIST_LICENSE_FILES", "DIST_NATIVE_NEEDS")
 
 # The Node-API addon over libkomira, built with the pinned zig against the
 # headers of the pinned node. README.md says what it exposes and why it opens
@@ -142,6 +144,7 @@ _TESTS = [
     "tests/errors.test.ts",
     "tests/exports.test.ts",
     "tests/load.test.ts",
+    "tests/missing_runtime.test.ts",
     "tests/package.test.ts",
     "tests/platform.test.ts",
     "tests/options.test.ts",
@@ -180,6 +183,50 @@ tsc_build(
     modules = _DEVTOOLS,
     srcs = _SRCS + ["package.json", "tsconfig.build.json", "tsconfig.json"],
     data = _ARROW_TYPES,
+)
+
+# ---- The npm packages (docs/design/typescript_package.md, section 4) -------
+#
+# The tarballs `npm pack` would write, by `npm_tarball`
+# (tools/build/package/README.md, "The npm packages"): byte for byte
+# reproducible, each read back by its [check], and refused when a file is not
+# one the manifest's `files` names, when a native library needs what the
+# platform does not give (a Mojo runtime library missing among them), or when
+# the manifest's repository.url is not komira's. The package.json each carries
+# is its manifest here stamped: package.json for the main package, and
+# platforms/<npm platform>/package.json for a platform package. Unstamped (a
+# pull request) they are 0.0.0 and stay `"private": true`; the release stamp
+# gives 0.1.<N>, the wheel's version. Nothing here publishes them.
+
+# @komira-ai/komira: the compiled JavaScript and declarations, LICENSE and
+# NOTICE.
+npm_tarball(
+    name = "package",
+    package = "@komira-ai/komira",
+    manifest = "package.json",
+    license = "Apache-2.0",
+    files = {
+        "LICENSE": "komira//:LICENSE",
+        "NOTICE": "komira//:NOTICE",
+        "dist": ":dist",
+    },
+)
+
+# @komira-ai/komira-linux-x64-gnu: the addon, libkomira's self-contained native
+# directory as it is at native/ (where the main package loads it from:
+# src/platform.ts), and the wheel's licence files, under the wheel's licence
+# expression and native bounds (tools/build/package/libkomira/packaged.bzl).
+npm_tarball(
+    name = "package_linux_x64",
+    package = "@komira-ai/komira-linux-x64-gnu",
+    manifest = "platforms/linux-x64-gnu/package.json",
+    license = DIST_LICENSE_EXPRESSION,
+    platform = "linux-x86_64",
+    files = {
+        "komira_addon.node": ":komira_addon",
+        "native": "komira//src/so:libkomira[dist]",
+    } | DIST_LICENSE_FILES,
+    **DIST_NATIVE_NEEDS["linux-x86_64"]
 )
 
 # Stand-ins for the package's tests: a library of ABI 1.1 that loads, and two
@@ -280,6 +327,7 @@ node_binding_test(
         "fixtures/cpuinfo_x86_64_v3.txt": "komira//python/tests:fixtures/cpuinfo_x86_64_v3.txt",
         "fixtures/isa_variants/VARIANTS_shipped": "komira//tools/build/package/libkomira:libkomira_variants_manifest",
         "fixtures/komira.tsv": "komira//src/so:abi/komira.tsv",
+        "fixtures/native_without_msupport": "komira//tools/build/package/libkomira:dist_without_msupport",
         "fixtures/two_columns.parquet": "komira//src/so:tests/fixtures/two_columns.parquet",
         "package.json": "package.json",
         _PLATFORM + "komira_addon.node": ":komira_addon",
