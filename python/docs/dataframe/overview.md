@@ -37,6 +37,8 @@ again. The install test runs this program on the installed wheel.
 - [Group-by and aggregates](groupby.md), with
   [what the engine runs today](aggregates_engine.md) and
   [drop_duplicates](drop_duplicates.md).
+- [merge, and isin with another frame](merge.md): joins.
+- [Windows](windows.md): `transform`, `cumsum`, `cummin`, `cummax`, `rolling`, `rank`.
 - [In a notebook](display.md).
 
 The polars-shaped surface, `komira.pl`, is in [../pl/](../pl/frames.md).

@@ -949,6 +949,24 @@ _FAMILY_FILES = {d: glob([d + "/test_*.py"]) for d in _FAMILIES}
     ],
 ) for f in _FAMILY_FILES["pl_oracle"]]
 
+# Merges, semi and anti joins, and windows of the pandas-shaped frame against
+# DuckDB (test_frame_join_window_duckdb.py): the duckdb/ family's inputs, and
+# duckdb/test_frame_duckdb.py staged beside it, whose comparator, left file and
+# Case type it uses; each program equals DuckDB's answer to the SQL that means
+# the same over two Parquet files written in the test.
+python_binding_test(
+    name = "frame_join_window_duckdb_test",
+    src = "test_frame_join_window_duckdb.py",
+    srcs = ["duckdb/test_frame_duckdb.py"],
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+)
+
 # The notebook display (komira/_display.py), with no library: a frame shows its
 # names over their types, equal to fixtures/display/frame.html, and calls
 # nothing on its session; a result shows its rows, equal to

@@ -283,7 +283,7 @@ whether the frame is **ordered**.
 
 - **A sort makes a frame ordered:** `sort_values`, `sort`, `nlargest`, `top_k` and the others.
 - **These verbs keep it ordered:**
-  - filters;
+  - filters, the semi and anti joins of `isin` with another frame's column (ruling 16) among them;
   - a projection, rename or `with_columns`/`assign` that keeps every sort key;
   - `head`, `limit` and `slice`.
 
