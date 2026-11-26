@@ -11,7 +11,8 @@ from plan_ir.logical_plan import (
     AggExprArray, ExprArray, LogicalPlan,
 )
 from sql.sql_ast import (
-    SX_CALL, SX_COLUMN, SX_INT, SX_SUBQUERY, SX_WINDOW, SelectStmt, SqlExpr,
+    SX_CALL, SX_COLUMN, SX_INT, SX_STAR, SX_SUBQUERY, SX_WINDOW, SelectStmt,
+    SqlExpr,
     sql_call_is_aggregate,
 )
 from sql.sql_bind_agg_expr import (
@@ -30,10 +31,101 @@ from sql.sql_bind_scope import (
 from sql.sql_catalog import SqlCatalog
 
 
-def _bind_aggregate(stmt: SelectStmt, schema: Schema, scope: BindScope, var child: LogicalPlan, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr], order_names: List[String], mut order_carry: List[String], order_expr_idx: List[Int], order_expr_names: List[String]) raises -> LogicalPlan:
+comptime _KEYS_COVERED = 0
+"""Every column the expression reads is a group key (or it reads none)."""
+comptime _KEYS_MISS_COLUMN = 1
+"""A column the expression reads is not a group key; `missing` names it."""
+comptime _KEYS_MISS_NODE = 2
+"""The expression holds a subquery, a window or a `*` below its top, which a
+grouped SELECT item does not take apart. A nested window or `*` is refused by
+`_bind_scalar`'s own message (the trial bind runs first); a nested subquery by
+`_NESTED_SUBQUERY_REFUSAL`."""
+
+comptime _NESTED_SUBQUERY_REFUSAL = (
+    "SQL not supported: a subquery inside a non-aggregate SELECT item of a"
+    " grouped query (a scalar subquery that is the whole item is served)"
+)
+
+
+def _keys_cover(
+    sx: SqlExpr,
+    schema: Schema,
+    scope: BindScope,
+    group_canon: List[String],
+    group_is_col: List[Bool],
+    mut via_expr_key: Bool,
+    mut missing: String,
+) raises -> Int:
+    """Whether `sx`, a SELECT item that is not an aggregate, reads only the
+    group keys: `_KEYS_COVERED`, `_KEYS_MISS_COLUMN` or `_KEYS_MISS_NODE`, for
+    the first leaf (left to right) that decides it.
+
+    A column leaf is covered when it is a column key, matched the way the
+    SELECT-list loop matches a bare column item (`_canon_index`, a column
+    compared case-insensitively). A compound subtree is covered whole when its
+    canonical form is a computed key's (`k + 1` inside `(k + 1) * 2` over
+    `GROUP BY k + 1`), and that sets `via_expr_key`: such an item cannot be
+    bound over the aggregate's output. A literal leaf reads nothing and is
+    covered. The item holds no aggregate (`contains_aggregate()` routed those
+    elsewhere), so an `_agg` child is a LIKE's or a unary predicate's."""
+    if sx.tag == SX_COLUMN:
+        var cn = _resolve_col(sx, schema, scope) if sx.qualifier != "" else String(sx.text)
+        if _canon_index(group_canon, group_is_col, cn, True) >= 0:
+            return _KEYS_COVERED
+        missing = cn^
+        return _KEYS_MISS_COLUMN
+    if sx.tag == SX_SUBQUERY or sx.tag == SX_WINDOW or sx.tag == SX_STAR:
+        return _KEYS_MISS_NODE
+    if not (sx._binary or sx._agg or sx._call or sx._case):
+        return _KEYS_COVERED
+    if _canon_index(group_canon, group_is_col, _duckdb_expr_text(sx), False) >= 0:
+        via_expr_key = True
+        return _KEYS_COVERED
+    var r = _KEYS_COVERED
+    if sx._binary:
+        r = _keys_cover(sx._binary.value().left[], schema, scope, group_canon, group_is_col, via_expr_key, missing)
+        if r != _KEYS_COVERED:
+            return r
+        r = _keys_cover(sx._binary.value().right[], schema, scope, group_canon, group_is_col, via_expr_key, missing)
+        if r != _KEYS_COVERED:
+            return r
+    if sx._agg:
+        r = _keys_cover(sx._agg.value().arg[], schema, scope, group_canon, group_is_col, via_expr_key, missing)
+        if r != _KEYS_COVERED:
+            return r
+    if sx._call:
+        ref ca = sx._call.value().args
+        for i in range(len(ca)):
+            r = _keys_cover(ca[i], schema, scope, group_canon, group_is_col, via_expr_key, missing)
+            if r != _KEYS_COVERED:
+                return r
+    if sx._case:
+        ref cd = sx._case.value()
+        for i in range(len(cd.conds)):
+            r = _keys_cover(cd.conds[i], schema, scope, group_canon, group_is_col, via_expr_key, missing)
+            if r != _KEYS_COVERED:
+                return r
+        for i in range(len(cd.results)):
+            r = _keys_cover(cd.results[i], schema, scope, group_canon, group_is_col, via_expr_key, missing)
+            if r != _KEYS_COVERED:
+                return r
+        for i in range(len(cd.otherwise)):
+            r = _keys_cover(cd.otherwise[i], schema, scope, group_canon, group_is_col, via_expr_key, missing)
+            if r != _KEYS_COVERED:
+                return r
+    return _KEYS_COVERED
+
+
+def _bind_aggregate(stmt: SelectStmt, schema: Schema, scope: BindScope, var child: LogicalPlan, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr], order_names: List[String], mut order_carry: List[String], order_expr_idx: List[Int], order_expr_names: List[String], result_int_literals: Bool = False) raises -> LogicalPlan:
     """Build AGGREGATE(group_by, aggs) then a reorder Project that emits the
     columns in SELECT order / names, so aggregates may appear in any position
-    in the SELECT list and GROUP BY columns need not all be selected."""
+    in the SELECT list and GROUP BY columns need not all be selected.
+
+    A SELECT item that is neither an aggregate nor a group key is a value per
+    group when every column it reads is a group key (`SELECT 'o', count(*)`,
+    `SELECT coalesce(s, 'none'), count(*) ... GROUP BY s`); see
+    `_keys_cover`. With `result_int_literals` (as for `_bind_projection`) a
+    bare integer literal item of that kind is INT32, as in DuckDB."""
     # =======================================================================
     # GROUP BY resolution: one question with four spellings.
     # =======================================================================
@@ -196,9 +288,10 @@ def _bind_aggregate(stmt: SelectStmt, schema: Schema, scope: BindScope, var chil
 
     # Aggregates (in SELECT order among aggs), each forced to a unique output
     # name; plus the final post-aggregate projection (in SELECT order). A
-    # SELECT item may be a bare aggregate call, a bare GROUP BY column, or a
+    # SELECT item may be a bare aggregate call, a bare GROUP BY column, a
     # scalar expression that contains aggregates (`100.0*sum(a)/sum(b)`,
-    # `max(v1)-min(v2)`).
+    # `max(v1)-min(v2)`), or a scalar expression of the group keys alone (a
+    # literal, `coalesce(s, 'none')` over `GROUP BY s`).
     var agg_exprs = AggExprArray()
     var proj = ExprArray()
     var proj_names = List[String]()  # output name of each `proj` entry, in order
@@ -270,7 +363,8 @@ def _bind_aggregate(stmt: SelectStmt, schema: Schema, scope: BindScope, var chil
             proj_names.append(String(sq_name))
             proj.append(Expr.alias(_post_agg_scalar_subquery(item.expr, prebound), sq_name))
         else:
-            # Bare non-aggregate SELECT item — must name a GROUP BY key.
+            # Bare non-aggregate SELECT item — a GROUP BY key, or an
+            # expression of the keys alone (the `_keys_cover` arm below).
             # Ask "is this item one of the group keys?" first, the same way
             # for every tag (a plain column is the case where the canonical
             # form is a name). The group-key match runs first, the trial bind
@@ -310,19 +404,79 @@ def _bind_aggregate(stmt: SelectStmt, schema: Schema, scope: BindScope, var chil
 
             if gi < 0:
                 if item.expr.tag != SX_COLUMN:
+                    # An item every column of which is a group key is one value
+                    # per group, which DuckDB v1.5.3 answers:
+                    #
+                    #     SELECT 'o' AS src, count(*) FROM t;              -> (o, 3)
+                    #     SELECT coalesce(s, 'none'), count(*) FROM t GROUP BY s;
+                    #     SELECT (k + 1) * 2, count(*) FROM t GROUP BY k + 1;
+                    #
+                    # An item over plain column keys only (or over no column at
+                    # all, a literal) is bound over the aggregate's output: a
+                    # column key keeps its input name and type there, so the
+                    # same `_bind_scalar` answers it in the reorder Project. An
+                    # item that reads a computed key (`(k + 1) * 2` over the
+                    # key `k + 1`) cannot be, because the key's own columns are
+                    # gone above the aggregate; it is computed below the
+                    # aggregate as one more key. The item is a function of the
+                    # keys alone, so the extra key splits no group (a volatile
+                    # function is refused by the function table and a UDF in a
+                    # projection by the lowering, so the function is
+                    # deterministic), and a computed key exists, so this is
+                    # never the zero-key aggregate whose empty input answers
+                    # one row.
+                    var via_expr_key = False
+                    var missing = String("")
+                    var cover = _keys_cover(
+                        item.expr, schema, scope, group_canon, group_is_col,
+                        via_expr_key, missing,
+                    )
+                    if cover == _KEYS_COVERED:
+                        var vout: String
+                        if item.out_alias:
+                            vout = String(item.out_alias.value())
+                        else:
+                            vout = item_canon.copy()
+                        proj_names.append(String(vout))
+                        if via_expr_key:
+                            var vname = String("__grp_key_") + String(len(derived))
+                            var ve = _bind_scalar(item.expr, schema, scope, catalog, cte_scope, prebound)
+                            derived.append(Expr.alias(ve^, vname))
+                            group_by.append(Expr.col_ref(vname))
+                            group_names.append(String(vname))
+                            group_canon.append(item_canon.copy())
+                            group_is_col.append(False)
+                            proj.append(Expr.alias(Expr.col_ref(vname), vout))
+                            continue
+                        var narrowed = Optional[Expr](None)
+                        if result_int_literals:
+                            narrowed = _result_int_literal(item.expr)
+                        var pe: Expr
+                        if narrowed:
+                            pe = narrowed.take()
+                        else:
+                            pe = _bind_scalar(item.expr, schema, scope, catalog, cte_scope, prebound)
+                        proj.append(Expr.alias(pe^, vout))
+                        continue
                     # Ask whether the item can be bound at all before naming
                     # GROUP BY: an unresolvable call (`nosuchfn(v)`, a refused
                     # function, `covar_pop(a, b)` declined by every table) is
                     # not an aggregate and lands here, and its own error is the
                     # true one. The trial bind uses the one resolver that knows
                     # every namespace (builtins, refusal rows, declared UDFs).
-                    # A bind that succeeds (`a + 1`, `sqrt(x)`, a literal)
-                    # falls through to the GROUP BY refusal. A top-level window
-                    # item cannot reach here: the SELECT binder routes those to
+                    # A bind that succeeds (`v + 1`, `sqrt(v)`) falls through
+                    # to the GROUP BY refusal, which names the column that is
+                    # not a key, as DuckDB's does. A top-level window item
+                    # cannot reach here: the SELECT binder routes those to
                     # `_bind_window_projection`.
                     var _probe = _bind_scalar(item.expr, schema, scope, catalog, cte_scope, prebound)
                     _ = _probe^
-                    raise Error("SQL not supported: non-aggregate SELECT item must be a GROUP BY column")
+                    if cover == _KEYS_MISS_COLUMN:
+                        raise Error(
+                            "SQL bind error: SELECT column '" + missing
+                            + "' must appear in GROUP BY"
+                        )
+                    raise Error(_NESTED_SUBQUERY_REFUSAL)
                 raise Error(
                     "SQL bind error: SELECT column '" + item_canon
                     + "' must appear in GROUP BY"
