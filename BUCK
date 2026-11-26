@@ -447,7 +447,7 @@ _TESTS_LINTS = [
 [surface_capability_matrix(
     name = "surface_capability_matrix",
     capabilities = CAPABILITIES,
-    floor = 0,
+    floor = 31,
     grounding = {
         "src/arrow/write_target.mojo": ["WFMT_"],
         "src/plan_expr/expr.mojo": ["EXPR_"],

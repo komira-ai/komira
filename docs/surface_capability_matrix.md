@@ -171,7 +171,7 @@ build fails on:
   `NOT_CAPABILITIES` row names, or that is declared in a form the lint
   cannot read.
 - **The floor**: fewer filled cells than `floor` (the root `BUCK`, today
-  0), so a change that empties a cell or loses its test fails. That the
+  31), so a change that empties a cell or loses its test fails. That the
   floor only rises is a **review rule**, not something the lint enforces: the
   change that fills cells raises it to the new count, and review refuses a
   change that lowers it. More filled cells than the floor is not a finding
@@ -206,6 +206,10 @@ read, naming the attribute.
    own: one target filling two cells of a surface is a finding.
 4. Raise `floor` in `//:surface_capability_matrix` to the new number of
    filled cells (review holds this), and refresh the census below.
+5. Regenerate the check set's lists (`ci/targets.bzl`, the command in its
+   first line): the edge from the lint to a test it names is not counted
+   (`tools/build/ci/ci_graph.bzl`, `roots`), so the test stays a root of
+   `//ci:pr`, built by it and run by `buck2 test`.
 
 The lint proves the target exists, lives in the surface's package and is a
 test; whether it exercises what its row claims is for review. The target's
@@ -213,22 +217,26 @@ own build (or `buck2 test`) is what runs it: the lint only analyses it.
 
 ## Census
 
-The census of 2026-10-07: `./buck2 build '//:surface_capability_matrix[report]'`
-on the farm over the tree of that day. A dated snapshot, written by hand from
-`[report]`: the lint's `[report]` and `[matrix]` are the source of truth, so
-rebuild them for today's numbers.
+The census of 2026-11-26, written by hand from the ledger of that day and held
+by the lint: the pull request that filled the `sql` cells raised `floor` to
+31, so `./buck2 build //:surface_capability_matrix` fails with fewer filled
+cells. The lint's `[report]` and `[matrix]` are the source of truth, so
+rebuild them for today's numbers:
+`./buck2 build '//:surface_capability_matrix[report]' --show-full-output`.
 
 **Totals.** 6 surfaces x 52 capabilities = 312 cells;
-**0 filled (0.0%)**; 312 missing; floor 0. No surface e2e package
-existed then (`src/tests/e2e/<surface>_e2e`), so every cell is `-`. That is
-the starting point. Since then `src/tests/e2e/sql_e2e` exists; no cell names
-one of its targets yet.
+**31 filled (9.9%)**; 281 missing; floor 31. Every filled cell is a `sql`
+cell, named by its own `test_sql_<capability>` target of
+`src/tests/e2e/sql_e2e`. No `pandas_e2e` or `polars_e2e` package exists
+yet: a cell takes a test (a Python test is not one to the lint today), and
+the Python closure check admits Python in those packages only by a ruling
+([dataframe_surface.md](design/dataframe_surface.md), section 10).
 
 | Surface | Filled | Cells | % |
 |---|---:|---:|---:|
 | `pandas` | 0 | 52 | 0.0% |
 | `polars` | 0 | 52 | 0.0% |
-| `sql` | 0 | 52 | 0.0% |
+| `sql` | 31 | 52 | 59.6% |
 | `mojo_polars` | 0 | 52 | 0.0% |
 | `ts_polars` | 0 | 52 | 0.0% |
 | `excel` | 0 | 52 | 0.0% |
@@ -237,47 +245,47 @@ Every cell, `yes` when filled and `-` when missing:
 
 | Capability | `pandas` | `polars` | `sql` | `mojo_polars` | `ts_polars` | `excel` |
 |---|---|---|---|---|---|---|
-| `scan_parquet` | - | - | - | - | - | - |
+| `scan_parquet` | - | - | yes | - | - | - |
 | `scan_csv` | - | - | - | - | - | - |
 | `scan_jsonl` | - | - | - | - | - | - |
 | `scan_orc` | - | - | - | - | - | - |
 | `scan_avro` | - | - | - | - | - | - |
 | `scan_arrow_ipc` | - | - | - | - | - | - |
-| `scan_in_memory` | - | - | - | - | - | - |
+| `scan_in_memory` | - | - | yes | - | - | - |
 | `scan_s3` | - | - | - | - | - | - |
 | `scan_gs` | - | - | - | - | - | - |
 | `scan_az` | - | - | - | - | - | - |
-| `filter` | - | - | - | - | - | - |
-| `project` | - | - | - | - | - | - |
-| `computed_column` | - | - | - | - | - | - |
-| `cast` | - | - | - | - | - | - |
-| `case_when` | - | - | - | - | - | - |
-| `in_list` | - | - | - | - | - | - |
-| `between` | - | - | - | - | - | - |
-| `string_functions` | - | - | - | - | - | - |
-| `regexp` | - | - | - | - | - | - |
-| `temporal_extract` | - | - | - | - | - | - |
-| `math_functions` | - | - | - | - | - | - |
+| `filter` | - | - | yes | - | - | - |
+| `project` | - | - | yes | - | - | - |
+| `computed_column` | - | - | yes | - | - | - |
+| `cast` | - | - | yes | - | - | - |
+| `case_when` | - | - | yes | - | - | - |
+| `in_list` | - | - | yes | - | - | - |
+| `between` | - | - | yes | - | - | - |
+| `string_functions` | - | - | yes | - | - | - |
+| `regexp` | - | - | yes | - | - | - |
+| `temporal_extract` | - | - | yes | - | - | - |
+| `math_functions` | - | - | yes | - | - | - |
 | `nested_access` | - | - | - | - | - | - |
 | `json_extract` | - | - | - | - | - | - |
-| `join_inner` | - | - | - | - | - | - |
-| `join_left` | - | - | - | - | - | - |
-| `join_right` | - | - | - | - | - | - |
-| `join_full` | - | - | - | - | - | - |
-| `join_semi` | - | - | - | - | - | - |
-| `join_anti` | - | - | - | - | - | - |
-| `join_cross` | - | - | - | - | - | - |
+| `join_inner` | - | - | yes | - | - | - |
+| `join_left` | - | - | yes | - | - | - |
+| `join_right` | - | - | yes | - | - | - |
+| `join_full` | - | - | yes | - | - | - |
+| `join_semi` | - | - | yes | - | - | - |
+| `join_anti` | - | - | yes | - | - | - |
+| `join_cross` | - | - | yes | - | - | - |
 | `join_asof` | - | - | - | - | - | - |
-| `aggregate` | - | - | - | - | - | - |
-| `group_by` | - | - | - | - | - | - |
-| `window` | - | - | - | - | - | - |
-| `sort` | - | - | - | - | - | - |
-| `topn` | - | - | - | - | - | - |
+| `aggregate` | - | - | yes | - | - | - |
+| `group_by` | - | - | yes | - | - | - |
+| `window` | - | - | yes | - | - | - |
+| `sort` | - | - | yes | - | - | - |
+| `topn` | - | - | yes | - | - | - |
 | `topn_per_group` | - | - | - | - | - | - |
-| `limit` | - | - | - | - | - | - |
-| `distinct` | - | - | - | - | - | - |
-| `union` | - | - | - | - | - | - |
-| `subquery` | - | - | - | - | - | - |
+| `limit` | - | - | yes | - | - | - |
+| `distinct` | - | - | yes | - | - | - |
+| `union` | - | - | yes | - | - | - |
+| `subquery` | - | - | yes | - | - | - |
 | `view` | - | - | - | - | - | - |
 | `udf_map` | - | - | - | - | - | - |
 | `udf_filter` | - | - | - | - | - | - |
@@ -285,10 +293,10 @@ Every cell, `yes` when filled and `-` when missing:
 | `write_parquet` | - | - | - | - | - | - |
 | `write_csv` | - | - | - | - | - | - |
 | `write_jsonl` | - | - | - | - | - | - |
-| `null_semantics` | - | - | - | - | - | - |
+| `null_semantics` | - | - | yes | - | - | - |
 | `errors` | - | - | - | - | - | - |
 | `output_dtypes` | - | - | - | - | - | - |
-| `output_nan_null` | - | - | - | - | - | - |
+| `output_nan_null` | - | - | yes | - | - | - |
 
 ## Tests
 
