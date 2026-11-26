@@ -188,7 +188,7 @@ def _rem(unit: UInt8, x: Expr) -> Expr:
     return _bin(BIN_SUB, _i64(x), _i64(Expr.date_trunc(unit, x.copy())))
 
 
-def _forward(a: Expr, b: Expr, is_date: Bool) -> Expr:
+def _forward(a: Expr, b: Expr) -> Expr:
     """`b >= a`."""
     return _bin(BIN_GE, _i64(b), _i64(a))
 
@@ -220,7 +220,7 @@ def _complete(unit: UInt8, var diff: Expr, a: Expr, b: Expr) -> Expr:
     var rb = _rem(unit, b)
     return _adjusted(
         diff^,
-        _forward(a, b, False),
+        _forward(a, b),
         _bin(BIN_LT, rb.copy(), ra.copy()),
         _bin(BIN_LT, ra^, rb^),
     )
@@ -292,21 +292,21 @@ def date_sub_of(unit: UInt8, a: Expr, b: Expr, is_date: Bool) raises -> Expr:
     if unit == EXTRACT_TRUNC_MONTH:
         return _adjusted(
             _month_diff(a, b),
-            _forward(a, b, is_date),
+            _forward(a, b),
             _borrows_month(a, b, is_date),
             _borrows_month(b, a, is_date),
         )
     if unit == EXTRACT_TRUNC_QUARTER:
         return _adjusted(
             _quarter_diff(a, b),
-            _forward(a, b, is_date),
+            _forward(a, b),
             _place_short(_quarter_place(b), _quarter_place(a), a, b, is_date),
             _place_short(_quarter_place(a), _quarter_place(b), b, a, is_date),
         )
     if unit == EXTRACT_TRUNC_YEAR:
         return _adjusted(
             _field_diff(EXTRACT_YEAR, a, b),
-            _forward(a, b, is_date),
+            _forward(a, b),
             _place_short(_ex(EXTRACT_MONTH, b), _ex(EXTRACT_MONTH, a), a, b, is_date),
             _place_short(_ex(EXTRACT_MONTH, a), _ex(EXTRACT_MONTH, b), b, a, is_date),
         )
