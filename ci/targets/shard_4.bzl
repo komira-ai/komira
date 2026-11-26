@@ -3,6 +3,15 @@
 # `guard.bxl:check` fails the pull request check when this file is out of date.
 
 TARGETS = [
+    "komira//python/docs/tasks:1-read-csv-file",
+    "komira//python/docs/tasks:2-select-columns-filter-rows",
+    "komira//python/docs/tasks:22-read-json-file-write-records-database",
+    "komira//python/docs/tasks:22-read-json-file-write-records-database__probe_native_insert",
+    "komira//python/docs/tasks:pages",
+    "komira//python/docs/tasks:refuses_example_that_raises",
+    "komira//python/docs/tasks:refuses_probe_that_runs",
+    "komira//python/docs/tasks:refuses_probe_with_another_error",
+    "komira//python/docs/tasks:refuses_wrong_expected_output",
     "komira//src/avro:avro_conda",
     "komira//src/aws_dynamodb:aws_dynamodb_conda",
     "komira//src/aws_ecs:aws_ecs_conda",

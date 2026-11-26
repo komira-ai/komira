@@ -258,6 +258,8 @@ wheel_file(
     name = "komira_wheel",
     files = _PY_FILES | _NATIVE_FILES,
     executable = sorted(_NATIVE_FILES.keys()),
+    # The examples of the common tasks run on it (python/docs/tasks/BUCK).
+    visibility = ["komira//python/docs/tasks:"],
     **_WHEEL
 )
 
@@ -267,6 +269,8 @@ wheel_file(
     name = "komira_wheel_macos_arm64",
     files = _PY_FILES | _NATIVE_FILES,
     executable = sorted(_NATIVE_FILES.keys()),
+    # The examples of the common tasks run on it (python/docs/tasks/BUCK).
+    visibility = ["komira//python/docs/tasks:"],
     target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
     **_METADATA["darwin-arm64"]
 )
