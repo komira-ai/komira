@@ -5,12 +5,13 @@
 //
 //   load(libraryPath)                  open libkomira from `libraryPath`
 //   abiVersion()                       the library's komira_abi_version()
-//   newSession()                       a session handle (an external)
+//   newSession(threads?, memoryLimit?) a session handle (an external): komira_ctx_new, or
+//                                      komira_ctx_new_with_options when either is not 0
 //   freeSession(session)               Promise<undefined>: destroy it once the calls made before it finish
 //   registerParquet(session, name, path)  Promise<undefined>
 //   parquetSchema(session, path)       Promise<Buffer>: the file's schema as komira.plan.v1 WireSchema bytes
 //   planRender(session, bytes)         Promise<string>: the text of a serialized plan; the plan is not run
-//   sessionStats()                     { created, freed }: komira_ctx_new and komira_ctx_free calls made here
+//   sessionStats()                     { created, freed }: contexts made and freed here
 //   importArrowStream(capsule), arrowSchema(result), arrowNextBatch(result), arrowClose(result)
 //                                      an Arrow C stream drained and described (arrow_import.c)
 //
@@ -21,7 +22,11 @@
 // A NEEDED edge would fix the library's place at build time and make a missing
 // or wrong library a loader error before any JavaScript runs. With dlopen the
 // host gives the path, the addon checks `komira_abi_version` (major 1) and
-// names a missing symbol, and every failure is a JavaScript Error. The library
+// names a missing symbol, and every failure is a JavaScript Error. A call a
+// later minor of ABI 1 added (komira_ctx_new_with_options in 1.4,
+// komira_last_error_code and komira_last_error_step in 1.7) must be there when
+// the library's minor includes it, and may be missing from an older library:
+// newSession with options then throws, naming both versions. The library
 // is never dlclose'd: the Mojo runtime does not support unloading, and a
 // session finalizer may run late.
 //
@@ -36,9 +41,11 @@
 // loop alive and an idle session does not.
 //
 // Errors. A call whose status is not zero rejects with an Error with `status`
-// (the number), `code` (the KOMIRA_ERR_* name) and `lastError` (the session's
-// last error text, read on the session thread with komira_last_error's
-// two-call protocol right after the call). Misuse of the addon itself (wrong
+// (the number), `code` (the KOMIRA_ERR_* name), and, read on the session
+// thread right after the call, `lastError` (the last error text, by the
+// two-call protocol), `lastErrorCode` (its named code, empty for none) and
+// `lastErrorStep` (its KOMIRA_STEP_* number, 0 for none; a library older than
+// ABI 1.7 has neither call, so the code is empty and the step 0). Misuse of the addon itself (wrong
 // argument types, a freed session, a library not loaded, a path with a NUL
 // byte) throws TypeError or Error with `code` and no `status`, synchronously,
 // before anything is queued.
@@ -84,10 +91,14 @@
 typedef struct {
   void *lib;
   char *path;
+  int32_t version;  // komira_abi_version(): major * 1000 + minor
   int32_t (*abi_version)(void);
   void *(*ctx_new)(void);
+  void *(*ctx_new_with_options)(int64_t, int64_t);  // ABI 1.4; NULL from an older library
   void (*ctx_free)(void *);
   int32_t (*last_error)(void *, uint8_t *, uint64_t, uint64_t *);
+  int32_t (*last_error_code)(void *, uint8_t *, uint64_t, uint64_t *);  // ABI 1.7; NULL from an older library
+  int32_t (*last_error_step)(void *);  // ABI 1.7; NULL from an older library
   int32_t (*register_parquet)(void *, const char *, const char *);
   int32_t (*parquet_schema)(void *, const char *, uint8_t *, uint64_t, uint64_t *);
   int32_t (*plan_render)(void *, const uint8_t *, uint64_t, uint8_t *, uint64_t, uint64_t *);
@@ -119,11 +130,14 @@ typedef struct Job {
   uint8_t *plan;  // OP_RENDER: a copy of the caller's bytes, never NULL
   uint64_t plan_len;
   // The outcome. `code` set: the addon failed (no status), with `message`.
-  // Otherwise `status` is the library's; `last` its last error when not zero.
+  // Otherwise `status` is the library's; when it is not zero, `last` is the
+  // last error's text, `last_code` its named code and `last_step` its step.
   int32_t status;
   const char *code;
   const char *message;
   char *last;
+  char *last_code;
+  int32_t last_step;
   uint8_t *out;  // OP_SCHEMA, OP_RENDER: the result bytes
   uint64_t out_len;
   // JavaScript thread only.
@@ -176,18 +190,23 @@ static napi_value fail_type(napi_env env, const char *code, const char *message)
   return NULL;
 }
 
-// The session's last error text, read with the two-call protocol. Returns a
-// malloc'd NUL-terminated string (empty when there is none or it cannot be
-// read), or NULL when there is no memory for it; the caller frees it.
-static char *read_last_error(void *ctx) {
+typedef int32_t (*TextCall)(void *, uint8_t *, uint64_t, uint64_t *);
+
+// The session's last error text (`read` is komira_last_error) or its code
+// (komira_last_error_code), read with the two-call protocol. Returns a
+// malloc'd NUL-terminated string (empty when there is none, `read` is NULL
+// because the library is older than the call, or it cannot be read), or NULL
+// when there is no memory for it; the caller frees it.
+static char *read_last_text(TextCall read, void *ctx) {
+  if (read == NULL) return calloc(1, 1);
   uint64_t n = 0;
-  int32_t rc = g_api.last_error(ctx, NULL, 0, &n);
+  int32_t rc = read(ctx, NULL, 0, &n);
   if (rc == KOMIRA_OK || n == 0) return calloc(1, 1);
   if (rc != KOMIRA_ERR_BUFFER_TOO_SMALL) return calloc(1, 1);
   char *text = malloc((size_t)n + 1);
   if (text == NULL) return calloc(1, 1);
   uint64_t got = 0;
-  if (g_api.last_error(ctx, (uint8_t *)text, n, &got) != KOMIRA_OK || got > n) {
+  if (read(ctx, (uint8_t *)text, n, &got) != KOMIRA_OK || got > n) {
     free(text);
     return calloc(1, 1);
   }
@@ -195,10 +214,12 @@ static char *read_last_error(void *ctx) {
   return text;
 }
 
-// The Error of a failed call `op`: message, `code`, `status` and `lastError`.
-// NULL if it cannot be made.
-static napi_value status_error(napi_env env, const char *op, int32_t status, const char *last) {
+// The Error of a failed call `op`: message, `code`, `status`, `lastError`,
+// `lastErrorCode` and `lastErrorStep`. NULL if it cannot be made.
+static napi_value status_error(napi_env env, const char *op, int32_t status, const char *last,
+                               const char *last_code, int32_t last_step) {
   if (last == NULL) last = "";
+  if (last_code == NULL) last_code = "";
   size_t cap = strlen(op) + strlen(last) + 64;
   char *message = malloc(cap);
   if (message == NULL) return NULL;
@@ -207,15 +228,19 @@ static napi_value status_error(napi_env env, const char *op, int32_t status, con
   } else {
     snprintf(message, cap, "%s failed (status %d)", op, (int)status);
   }
-  napi_value code, msg, err, status_v, last_v;
+  napi_value code, msg, err, status_v, last_v, last_code_v, last_step_v;
   napi_value out = NULL;
   if (napi_create_string_utf8(env, status_code(status), NAPI_AUTO_LENGTH, &code) == napi_ok &&
       napi_create_string_utf8(env, message, NAPI_AUTO_LENGTH, &msg) == napi_ok &&
       napi_create_error(env, code, msg, &err) == napi_ok &&
       napi_create_int32(env, status, &status_v) == napi_ok &&
       napi_create_string_utf8(env, last, NAPI_AUTO_LENGTH, &last_v) == napi_ok &&
+      napi_create_string_utf8(env, last_code, NAPI_AUTO_LENGTH, &last_code_v) == napi_ok &&
+      napi_create_int32(env, last_step, &last_step_v) == napi_ok &&
       napi_set_named_property(env, err, "status", status_v) == napi_ok &&
-      napi_set_named_property(env, err, "lastError", last_v) == napi_ok) {
+      napi_set_named_property(env, err, "lastError", last_v) == napi_ok &&
+      napi_set_named_property(env, err, "lastErrorCode", last_code_v) == napi_ok &&
+      napi_set_named_property(env, err, "lastErrorStep", last_step_v) == napi_ok) {
     out = err;
   }
   free(message);
@@ -323,15 +348,21 @@ static Session *get_session(napi_env env, napi_value v) {
 
 // ---- load, abiVersion -------------------------------------------------------
 
-static int resolve(napi_env env, void *lib, const char *name, void **out) {
+// The symbol `name`, which ABI 1.`minor` added, of a library of `version`:
+// required when the library's minor includes it, else NULL when it is missing.
+static int resolve_since(napi_env env, void *lib, int32_t version, int32_t minor, const char *name, void **out) {
   *out = dlsym(lib, name);
-  if (*out == NULL) {
+  if (*out == NULL && version % 1000 >= minor) {
     char msg[160];
     snprintf(msg, sizeof msg, "libkomira has no symbol %s", name);
     fail(env, "KOMIRA_MISSING_SYMBOL", msg);
     return 0;
   }
   return 1;
+}
+
+static int resolve(napi_env env, void *lib, const char *name, void **out) {
+  return resolve_since(env, lib, 0, 0, name, out);
 }
 
 static napi_value js_load(napi_env env, napi_callback_info info) {
@@ -373,12 +404,19 @@ static napi_value js_load(napi_env env, napi_callback_info info) {
     fail(env, "KOMIRA_ABI_MISMATCH", msg);
     goto closed;
   }
+  api.version = version;
   if (!resolve(env, lib, "komira_ctx_new", &fn)) goto closed;
   api.ctx_new = (void *(*)(void))fn;
+  if (!resolve_since(env, lib, version, 4, "komira_ctx_new_with_options", &fn)) goto closed;
+  api.ctx_new_with_options = (void *(*)(int64_t, int64_t))fn;
   if (!resolve(env, lib, "komira_ctx_free", &fn)) goto closed;
   api.ctx_free = (void (*)(void *))fn;
   if (!resolve(env, lib, "komira_last_error", &fn)) goto closed;
   api.last_error = (int32_t(*)(void *, uint8_t *, uint64_t, uint64_t *))fn;
+  if (!resolve_since(env, lib, version, 7, "komira_last_error_code", &fn)) goto closed;
+  api.last_error_code = (int32_t(*)(void *, uint8_t *, uint64_t, uint64_t *))fn;
+  if (!resolve_since(env, lib, version, 7, "komira_last_error_step", &fn)) goto closed;
+  api.last_error_step = (int32_t(*)(void *))fn;
   if (!resolve(env, lib, "komira_register_parquet", &fn)) goto closed;
   api.register_parquet = (int32_t(*)(void *, const char *, const char *))fn;
   if (!resolve(env, lib, "komira_parquet_schema", &fn)) goto closed;
@@ -416,6 +454,7 @@ static void free_job(Job *j) {
   free(j->path);
   free(j->plan);
   free(j->last);
+  free(j->last_code);
   free(j->out);
   for (Waiter *w = j->waiters; w != NULL;) {
     Waiter *next = w->next;
@@ -484,7 +523,11 @@ static void run_job(Session *s, Job *j) {
       free_ctx(s);
       return;
   }
-  if (j->code == NULL && j->status != KOMIRA_OK) j->last = read_last_error(s->ctx);
+  if (j->code == NULL && j->status != KOMIRA_OK) {
+    j->last = read_last_text(g_api.last_error, s->ctx);
+    j->last_code = read_last_text(g_api.last_error_code, s->ctx);
+    j->last_step = g_api.last_error_step != NULL ? g_api.last_error_step(s->ctx) : 0;
+  }
 }
 
 // The session thread: runs the queued calls in order until it is stopped or
@@ -560,7 +603,7 @@ static napi_value outcome(napi_env env, Job *j, bool *reject) {
   napi_value v = NULL;
   *reject = true;
   if (j->code != NULL) return code_error(env, j->code, j->message);
-  if (j->status != KOMIRA_OK) return status_error(env, ops[j->op], j->status, j->last);
+  if (j->status != KOMIRA_OK) return status_error(env, ops[j->op], j->status, j->last, j->last_code, j->last_step);
   *reject = false;
   switch (j->op) {
     case OP_REGISTER:
@@ -723,9 +766,60 @@ static void finalize_session(napi_env env, void *data, void *hint) {
   drop_owner(s);
 }
 
+// An engine option argument of newSession: undefined is 0 (the engine's own
+// value), else an integer number from 0 to 2**53 - 1, the largest a number
+// holds exactly. Returns 0 with an exception pending for anything else.
+static int get_option(napi_env env, napi_value v, const char *what, int64_t *out) {
+  napi_valuetype t = napi_undefined;
+  double d = 0;
+  if (napi_typeof(env, v, &t) == napi_ok && t == napi_undefined) {
+    *out = 0;
+    return 1;
+  }
+  if (t != napi_number || napi_get_value_double(env, v, &d) != napi_ok || !(d >= 0 && d <= 9007199254740991.0) ||
+      d != (double)(int64_t)d) {
+    char msg[128];
+    snprintf(msg, sizeof msg, "%s must be an integer from 0 to 2**53 - 1", what);
+    fail_type(env, "KOMIRA_ARG", msg);
+    return 0;
+  }
+  *out = (int64_t)d;
+  return 1;
+}
+
+// A new context: komira_ctx_new when both options are 0, else
+// komira_ctx_new_with_options. NULL with an exception pending on failure.
+static void *new_ctx(napi_env env, int64_t workers, int64_t budget) {
+  if (workers == 0 && budget == 0) {
+    void *ctx = g_api.ctx_new();
+    if (ctx == NULL) fail(env, "KOMIRA_ERR_NOMEM", "komira_ctx_new returned NULL");
+    return ctx;
+  }
+  char msg[4096 + 160];  // the library's path and the numbers
+  if (g_api.ctx_new_with_options == NULL) {
+    snprintf(msg, sizeof msg, "komira_ctx_new_with_options needs libkomira ABI version %d.4; the library at %s is %d.%d",
+             ABI_MAJOR, g_api.path, (int)(g_api.version / 1000), (int)(g_api.version % 1000));
+    fail(env, "KOMIRA_ABI_TOO_OLD", msg);
+    return NULL;
+  }
+  void *ctx = g_api.ctx_new_with_options(workers, budget);
+  if (ctx == NULL) {
+    snprintf(msg, sizeof msg, "komira_ctx_new_with_options returned NULL for %lld workers and a budget of %lld bytes",
+             (long long)workers, (long long)budget);
+    fail(env, "KOMIRA_CTX_REFUSED", msg);
+  }
+  return ctx;
+}
+
 static napi_value js_new_session(napi_env env, napi_callback_info info) {
-  (void)info;
-  if (!require_loaded(env)) return NULL;
+  size_t argc = 2;
+  napi_value argv[2];  // threads and memoryLimit, each optional
+  int64_t workers = 0, budget = 0;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok) return fail(env, "KOMIRA_NAPI", "cannot read the arguments");
+  if (!require_loaded(env) || (argc > 0 && !get_option(env, argv[0], "threads", &workers)) ||
+      (argc > 1 && !get_option(env, argv[1], "memoryLimit", &budget))) {
+    return NULL;
+  }
   Session *s = calloc(1, sizeof *s);
   if (s == NULL) return fail(env, "KOMIRA_ERR_NOMEM", "out of memory");
   if (pthread_mutex_init(&s->lock, NULL) != 0) {
@@ -738,10 +832,10 @@ static napi_value js_new_session(napi_env env, napi_callback_info info) {
     return fail(env, "KOMIRA_ERR_NOMEM", "cannot make the session's condition");
   }
   s->owners = 1;
-  s->ctx = g_api.ctx_new();
+  s->ctx = new_ctx(env, workers, budget);
   if (s->ctx == NULL) {
     drop_owner(s);
-    return fail(env, "KOMIRA_ERR_NOMEM", "komira_ctx_new returned NULL");
+    return NULL;
   }
   atomic_fetch_add(&g_created, 1);
   napi_value ext = NULL;

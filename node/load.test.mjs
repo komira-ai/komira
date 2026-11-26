@@ -60,6 +60,20 @@ test('a library without komira_plan_render names the missing symbol', () => {
   });
 });
 
+test('a library whose minor promises komira_ctx_new_with_options (1.4) and lacks it names the missing symbol', () => {
+  assert.throws(() => addon.load(fake('libkomira_fake_v1_4_no_options.so')), {
+    code: 'KOMIRA_MISSING_SYMBOL',
+    message: 'libkomira has no symbol komira_ctx_new_with_options',
+  });
+});
+
+test('a library whose minor promises komira_last_error_code (1.7) and lacks it names the missing symbol', () => {
+  assert.throws(() => addon.load(fake('libkomira_fake_v1_7_no_codes.so')), {
+    code: 'KOMIRA_MISSING_SYMBOL',
+    message: 'libkomira has no symbol komira_last_error_code',
+  });
+});
+
 test('after the refusals the addon is still unloaded', () => {
   assert.throws(() => addon.abiVersion(), { code: 'KOMIRA_NOT_LOADED' });
 });
