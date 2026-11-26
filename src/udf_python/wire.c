@@ -6,7 +6,17 @@
  * here, never a SIGPIPE in the engine. Every receive is a recvmsg with
  * MSG_CMSG_CLOEXEC, so a descriptor a peer sends (the zygote's pidfd of a
  * new worker) is never inherited by a process the engine starts.
+ *
+ * macOS has neither flag (design section 2.3): every socket the library
+ * makes is made by udfpy_socketpair, which sets SO_NOSIGPIPE on both ends
+ * and FD_CLOEXEC at once, and a descriptor a peer sends is made
+ * close-on-exec as it is taken. The library's own spawn of a zygote sets
+ * POSIX_SPAWN_CLOEXEC_DEFAULT, which covers the window before FD_CLOEXEC.
  */
+#ifdef __APPLE__
+#include <ctype.h>
+#include <fcntl.h>
+#endif
 #include <errno.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -20,6 +30,54 @@
 
 #include "udfpy.h"
 
+#ifdef __APPLE__
+#define SEND_FLAGS 0
+#define RECV_FLAGS 0
+
+/* FD_CLOEXEC and SO_NOSIGPIPE on both ends; 0, or -1 with errno. */
+static int both_nosigpipe_cloexec(int sv[2]) {
+  int one = 1;
+  for (int i = 0; i < 2; i++)
+    if (fcntl(sv[i], F_SETFD, FD_CLOEXEC) != 0 || setsockopt(sv[i], SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one)) != 0)
+      return -1;
+  return 0;
+}
+
+int udfpy_socketpair(int sv[2]) {
+  if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) return -1;
+  if (both_nosigpipe_cloexec(sv) != 0) {
+    int e = errno;
+    close(sv[0]);
+    close(sv[1]);
+    sv[0] = sv[1] = -1;
+    errno = e;
+    return -1;
+  }
+  return 0;
+}
+
+/* sigabbrev_np is glibc's; macOS has sys_signame, in lower case. */
+static const char* sig_abbrev(int sig, char* buf, size_t n) {
+  if (sig <= 0 || sig >= NSIG || n == 0) return NULL;
+  const char* s = sys_signame[sig];
+  size_t i = 0;
+  for (; s[i] != 0 && i + 1 < n; i++) buf[i] = (char)toupper((unsigned char)s[i]);
+  buf[i] = 0;
+  return buf;
+}
+#else
+#define SEND_FLAGS MSG_NOSIGNAL
+#define RECV_FLAGS MSG_CMSG_CLOEXEC
+
+int udfpy_socketpair(int sv[2]) { return socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv); }
+
+static const char* sig_abbrev(int sig, char* buf, size_t n) {
+  (void)buf;
+  (void)n;
+  return sigabbrev_np(sig);
+}
+#endif
+
 int64_t udfpy_mono_ns(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -28,7 +86,8 @@ int64_t udfpy_mono_ns(void) {
 
 void udfpy_how_text(int how, int value, char* out, size_t n) {
   if (how == 1) {
-    const char* abbrev = sigabbrev_np(value);
+    char name[32];
+    const char* abbrev = sig_abbrev(value, name, sizeof(name));
     if (abbrev != NULL)
       snprintf(out, n, "signal %d (SIG%s)", value, abbrev);
     else
@@ -167,7 +226,7 @@ int udfpy_send(int sock, uint32_t op, uint64_t request_id, uint32_t flags, uint6
       c->cmsg_len = CMSG_LEN(sizeof(int) * (size_t)nfds);
       memcpy(CMSG_DATA(c), fds, sizeof(int) * (size_t)nfds);
     }
-    ssize_t k = sendmsg(sock, &m, MSG_NOSIGNAL);
+    ssize_t k = sendmsg(sock, &m, SEND_FLAGS);
     if (k < 0) {
       if (errno == EINTR) continue;
       return -1;
@@ -200,6 +259,9 @@ static void take_fds(struct msghdr* h, udfpy_msg* m) {
     for (size_t i = 0; i < k; i++) {
       int fd;
       memcpy(&fd, CMSG_DATA(c) + i * sizeof(int), sizeof(fd));
+#ifdef __APPLE__
+      fcntl(fd, F_SETFD, FD_CLOEXEC);
+#endif
       if (m->nfds < UDFPY_MSG_FDS)
         m->fds[m->nfds++] = fd;
       else
@@ -222,7 +284,7 @@ static int recv_all(int fd, void* dst, size_t n, udfpy_msg* m) {
     h.msg_iovlen = 1;
     h.msg_control = ctl.buf;
     h.msg_controllen = sizeof(ctl.buf);
-    ssize_t k = recvmsg(fd, &h, MSG_CMSG_CLOEXEC);
+    ssize_t k = recvmsg(fd, &h, RECV_FLAGS);
     if (k < 0) {
       if (errno == EINTR) continue;
       return -1;

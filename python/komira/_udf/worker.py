@@ -81,6 +81,8 @@ def _setup(sock_fd, cancel_fd, ctl_sock, wakeup_fds, zygote_pid, scratch):
         libc.prctl(_PR_SET_PDEATHSIG, int(signal.SIGKILL), 0, 0, 0)
         if os.getppid() != zygote_pid:
             os._exit(0)
+    elif sys.platform == "darwin":
+        _end_with_the_zygote(zygote_pid)
     root = tempfile.mkdtemp(dir=scratch, prefix="worker-")
     for sub in ("home", "tmp", "cwd"):
         os.mkdir(os.path.join(root, sub), 0o700)
@@ -95,6 +97,29 @@ def _setup(sock_fd, cancel_fd, ctl_sock, wakeup_fds, zygote_pid, scratch):
     cancel = mmap.mmap(cancel_fd, 8, mmap.MAP_SHARED, mmap.PROT_READ)
     os.close(cancel_fd)
     return sock, cancel
+
+
+def _end_with_the_zygote(zygote_pid):
+    """macOS, which has no PR_SET_PDEATHSIG: one thread that ends this worker when the
+    zygote ends, waiting on a kqueue EVFILT_PROC NOTE_EXIT filter for its pid. The parent
+    is checked once the filter is registered, so an end before that is seen too; a
+    registration refused with ESRCH is a zygote already gone."""
+    import select
+    import threading
+
+    kq = select.kqueue()
+    try:
+        kq.control([select.kevent(zygote_pid, select.KQ_FILTER_PROC, select.KQ_EV_ADD, select.KQ_NOTE_EXIT)], 0, 0)
+    except ProcessLookupError:
+        os._exit(0)
+    if os.getppid() != zygote_pid:
+        os._exit(0)
+
+    def watch():
+        kq.control(None, 1)
+        os._exit(0)
+
+    threading.Thread(target=watch, name="komira-udf-zygote-watch", daemon=True).start()
 
 
 def _decode_schemas(entry):
