@@ -44,6 +44,13 @@ from .float_text import (
     parse_float_cell,
     ulp_distance,
 )
+from .libm_rule import (
+    OFF_ORACLE_HOST_ULPS,
+    TRANSCENDENTAL_FUNCTIONS,
+    calls_transcendental,
+    is_oracle_host,
+    transcendental_tolerance,
+)
 from .parse import parse_canon
 from .render import render_batch, render_column, render_table
 from .type_text import arrow_type_name

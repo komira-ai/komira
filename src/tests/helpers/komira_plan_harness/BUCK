@@ -15,6 +15,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 # stream) and Door B (Arrow IPC bytes, probe then fill), returning a Table
 # or a named error; door_ipc.mojo reads Door B's IPC stream.
 #
+# libm_rule.mojo holds the rule for an answer a transcendental function
+# computes: bit-exact on Linux, the oracle DuckDB's platform, and within a few
+# ulp elsewhere, where the platform's libm is not glibc.
+#
 # duckdb_tsv.mojo reads an expected result as the oracle's DuckDB writes it
 # (komira_test_oracle) and converts it by value to canonical text under a
 # given schema and policy.
@@ -30,6 +34,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 #                     that disagrees with its bits refused (ties to even);
 #                     NaN and -0.0
 #                     compared by bits; ulps and rel tolerances.
+#   test_libm_rule    a query that calls a transcendental function is held
+#                     within OFF_ORACLE_HOST_ULPS off the oracle's platform
+#                     and bit-exact on it; any other query is bit-exact
+#                     everywhere; a name inside a longer word or not followed
+#                     by `(` is no call.
 #   test_compare      order total / keys / none; every mismatch reported, not
 #                     only the first; schema and row-count mismatches; the
 #                     escapes, nested cells and nested float bits a parser
@@ -79,6 +88,7 @@ mojo_library(
         "tests/test_door_stub.mojo",
         "tests/test_duckdb_tsv.mojo",
         "tests/test_float.mojo",
+        "tests/test_libm_rule.mojo",
         "tests/test_render.mojo",
         "tests/test_round_trip.mojo",
         "tests/test_types_and_slices.mojo",
