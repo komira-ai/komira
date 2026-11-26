@@ -11,7 +11,8 @@ frame's sort or `over(order_by=...)`.
 
 Each builds a window node run with no SQL. Refused by name: `rank("ordinal")`,
 a running or rolling window of an unsorted frame without `order_by`, and a
-window of a window. A rank and `cum_count()` are Int64 where polars gives
-UInt32.
+window of a window. `rank()` (but for `"average"`, a Float64) and
+`cum_count()` are Int64 where polars gives UInt32 (see
+[count types](expressions.md)).
 
 Back to [expressions](expressions.md).

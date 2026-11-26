@@ -91,6 +91,17 @@ changelog_file(
     visibility = ["//python/tests:"],
 )
 
+# The pages of the polars-shaped skin's docs that state its count types, which
+# tests/test_pl_count_types.py reads (tests/BUCK, `pl_count_types_test`).
+[export_file(
+    name = f,
+    visibility = ["//python/tests:"],
+) for f in [
+    "docs/pl/expressions.md",
+    "docs/pl/group_by_join_unique.md",
+    "docs/pl/windows.md",
+]]
+
 # ---- The wheel ---------------------------------------------------------------
 #
 # `pip install komira`: the import package, and `//src/so:libkomira[dist]` as it
