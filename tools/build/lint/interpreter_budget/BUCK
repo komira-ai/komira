@@ -14,7 +14,9 @@ _SRCS = glob(["src/*.zig"])
 # The unit tests (a clean tree; an unlisted shell, Python, awk, Perl, Ruby or
 # sed file, by its extension or its `#!` line, through env and busybox; a
 # node or dotslash `#!` line not counted; a listed script grown by 50 lines
-# passing unchanged; a stale row after a delete; a scope; malformed rows; the
+# passing unchanged; a stale row after a delete; glob rows (any depth, another
+# extension or a `#!`-only file under the dir, stale, a covered file row, refused
+# wildcard forms); unsorted and repeated rows; a scope; malformed rows; the
 # verdict of a planted case): `zig test` of main.zig, run as a build action.
 zig_test(
     name = "interpreter_budget_unit",

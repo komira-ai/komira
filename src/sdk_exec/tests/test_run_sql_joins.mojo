@@ -2,6 +2,13 @@
 # run_sql over inner equi-joins: the shapes of TPC-H Q3, Q5 and Q10
 # =============================================================================
 #
+# Covers: run_sql over six TPC-H-typed Parquet tables (INT32 and INT64 keys
+# with NULLs and unmatched keys, DECIMAL(15,2) money, DATE32): the shapes of
+# Q3, Q5 (a six-table join on two keys) and Q10 as comma joins in WHERE, with a
+# revenue sum by one column, and their count(*), equal an oracle computed row
+# by row in the test; JOIN ... ON counts the key pairs over INT32, INT64 and
+# mixed keys; the unedited Q3 text is a named LOWERING_ refusal at step lower.
+#
 # Six TPC-H-typed tables (customer, orders, lineitem, supplier, nation, region)
 # are written here as Parquet files in several row groups and registered on an
 # EngineContext. Every cell is a function of its row number. Join keys are

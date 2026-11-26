@@ -3,7 +3,8 @@ DuckDB: each frame program runs through komira's plan door (no SQL), and the SQL
 that means the same pandas answer runs in DuckDB over the same two Parquet files;
 the two answers must be equal (`frame_join_window_duckdb_test`, CPython 3.13, the
 real libkomira). The comparator, the left file and the Case type are
-`test_frame_duckdb`'s, staged next to this file.
+those of `duckdb/test_frame_duckdb.py`, staged beside this file
+(python/tests/BUCK).
 
 - the files: the left one is `test_frame_duckdb.write_data` (k int64 with NULLs,
   v float64, s string, flag bool, n int32 unique); the right one is written here,
@@ -50,11 +51,24 @@ real libkomira). The comparator, the left file and the Case type are
 `<dir>/libkomira/` is `//src/so:libkomira[runnable]`.
 """
 
+import importlib.util
 import os
 import sys
 import tempfile
 
-import test_frame_duckdb as base
+
+def _load_base():
+    """duckdb/test_frame_duckdb.py, staged beside this file (python/tests/BUCK):
+    its comparator, its left file and its Case type."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "duckdb", "test_frame_duckdb.py")
+    spec = importlib.util.spec_from_file_location("test_frame_duckdb", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["test_frame_duckdb"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+base = _load_base()
 
 import komira
 from komira import _native

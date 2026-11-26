@@ -4,7 +4,8 @@ load("@komira//tools/build/lint:interpreter_budget.bzl", "interpreter_budget")
 # from a cell other than komira, as a repository using komira as a cell uses
 # it: each case checks this package's own doc_tree (`:doc_tree`, declared by
 # the rule's macro) plus files staged at the paths `files` names, against
-# listed.tsv (one row, tools/gen.py). A case with `expect` builds green only
+# listed.tsv (one row, tools/gen.py), or the other .tsv files for the glob and
+# order cases. A case with `expect` builds green only
 # while the check refuses its planted defect with that text; one without
 # passes only with no finding. tests//functional/... (the pull request
 # check's functional_tests unit) builds them. The planted files are
@@ -61,5 +62,66 @@ interpreter_budget(
     allowlist = _LIST,
     expect = [_LIST + ":3: tools/gen.py: outside the scope of the check: remove the row"],
     scope = ["other/"],
+    tree = ":doc_tree",
+)
+
+# A glob row covers files at any depth of its dir.
+interpreter_budget(
+    name = "glob_listed",
+    allowlist = "functional/interpreter_budget/glob.tsv",
+    files = {
+        "tools/a/b/deep.py": "plain.txt",
+        "tools/gen.py": "plain.txt",
+    },
+    tree = ":doc_tree",
+)
+
+# A glob row that covers no file is stale.
+interpreter_budget(
+    name = "glob_stale",
+    allowlist = "functional/interpreter_budget/glob.tsv",
+    expect = ["functional/interpreter_budget/glob.tsv:3: tools/**/*.py: no `.py` interpreter file under `tools/`: remove the row"],
+    tree = ":doc_tree",
+)
+
+# A file of another extension under the glob's dir still needs its own row.
+interpreter_budget(
+    name = "glob_other_extension",
+    allowlist = "functional/interpreter_budget/glob.tsv",
+    expect = ["tools/sum.awk: an interpreter file (a `.awk` file) with no row in functional/interpreter_budget/glob.tsv"],
+    files = {
+        "tools/gen.py": "plain.txt",
+        "tools/sum.awk": "plain.txt",
+    },
+    tree = ":doc_tree",
+)
+
+# A file row for a file a glob row covers.
+interpreter_budget(
+    name = "file_row_under_glob",
+    allowlist = "functional/interpreter_budget/covered.tsv",
+    expect = ["functional/interpreter_budget/covered.tsv:4: tools/gen.py: also covered by the glob row tools/**/*.py (line 3): remove the file row"],
+    files = {"tools/gen.py": "plain.txt"},
+    tree = ":doc_tree",
+)
+
+# A wildcard of another form.
+interpreter_budget(
+    name = "wildcard_refused",
+    allowlist = "functional/interpreter_budget/wildcard.tsv",
+    expect = ["functional/interpreter_budget/wildcard.tsv:3: tools/*.py: a wildcard other than `<dir>/**/*.<ext>` (an interpreter extension) is not allowed"],
+    files = {"tools/gen.py": "plain.txt"},
+    tree = ":doc_tree",
+)
+
+# Rows out of order.
+interpreter_budget(
+    name = "rows_out_of_order",
+    allowlist = "functional/interpreter_budget/unsorted.tsv",
+    expect = ["functional/interpreter_budget/unsorted.tsv:4: other/run.py: out of order: it sorts before tools/gen.py (line 3)"],
+    files = {
+        "other/run.py": "plain.txt",
+        "tools/gen.py": "plain.txt",
+    },
     tree = ":doc_tree",
 )

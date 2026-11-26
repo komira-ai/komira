@@ -302,3 +302,137 @@ test "the verdict: no finding passes; with expected texts, only their findings p
     // An expected defect that the check did not refuse fails.
     try std.testing.expect(!budget.verdict(clean, "", &.{"x.py"}).ok);
 }
+
+// A package tree: Python files at several depths, a shell script and an
+// extensionless Python script beside them, and a file of another kind.
+const pkg_tree = [_][2][]const u8{
+    .{ "pkg/a.py", "x = 1\n" },
+    .{ "pkg/sub/deep/b.py", "x = 2\n" },
+    .{ "pkg/Up.PY", "x = 3\n" },
+    .{ "pkg/data.json", "{}\n" },
+};
+const pkg_glob = "pkg/**/*.py\tthe package: its sources are Python\n";
+
+test "a glob row covers every file of its extension under the dir at any depth" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const r = try run(arena.allocator(), &pkg_tree, pkg_glob);
+    try expectClean(r);
+    try std.testing.expectEqual(@as(usize, 3), r.result.files);
+}
+
+test "a file under the glob dir with another extension still needs its own row" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const tree = pkg_tree ++ [_][2][]const u8{.{ "pkg/run.sh", "true\n" }};
+    const r = try run(arena.allocator(), &tree, pkg_glob);
+    try std.testing.expectEqual(@as(usize, 1), r.result.findings);
+    try expectFinding(r, "pkg/run.sh: an interpreter file (a `.sh` file) with no row in " ++ al);
+    try expectClean(try run(arena.allocator(), &tree, pkg_glob ++ "pkg/run.sh\ta wrapper\n"));
+}
+
+test "a file under the glob dir with only a #! line still needs its own row" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const tree = pkg_tree ++ [_][2][]const u8{.{ "pkg/tool", "#!/usr/bin/env python3\nprint(1)\n" }};
+    const r = try run(arena.allocator(), &tree, pkg_glob);
+    try std.testing.expectEqual(@as(usize, 1), r.result.findings);
+    try expectFinding(r, "pkg/tool: an interpreter file (its `#!` line runs `python3`) with no row in " ++ al);
+}
+
+test "a file with the extension outside the glob dir needs its own row" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const tree = pkg_tree ++ [_][2][]const u8{ .{ "pkg2/c.py", "x = 4\n" }, .{ "other/d.py", "x = 5\n" } };
+    const r = try run(arena.allocator(), &tree, pkg_glob);
+    try std.testing.expectEqual(@as(usize, 2), r.result.findings);
+    try expectFinding(r, "pkg2/c.py: an interpreter file (a `.py` file) with no row in " ++ al);
+    try expectFinding(r, "other/d.py: an interpreter file (a `.py` file) with no row in " ++ al);
+}
+
+test "a glob row that covers no interpreter file is stale" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const tree = [_][2][]const u8{.{ "pkg/data.json", "{}\n" }};
+    const r = try run(arena.allocator(), &tree, pkg_glob);
+    try std.testing.expectEqual(@as(usize, 1), r.result.findings);
+    try expectFinding(r, al ++ ":1: pkg/**/*.py: no `.py` interpreter file under `pkg/`: remove the row");
+    // A glob of another extension than the files under its dir is stale too.
+    const r2 = try run(arena.allocator(), &pkg_tree, pkg_glob ++ "pkg/**/*.sh\twhy\n");
+    try std.testing.expectEqual(@as(usize, 1), r2.result.findings);
+    try expectFinding(r2, al ++ ":2: pkg/**/*.sh: no `.sh` interpreter file under `pkg/`: remove the row");
+}
+
+test "a file row whose file a glob row covers is refused" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const r = try run(arena.allocator(), &pkg_tree, pkg_glob ++ "pkg/sub/deep/b.py\twhy\n");
+    try std.testing.expectEqual(@as(usize, 1), r.result.findings);
+    try expectFinding(r, al ++ ":2: pkg/sub/deep/b.py: also covered by the glob row pkg/**/*.py (line 1): remove the file row");
+}
+
+test "wildcards other than <dir>/**/*.<ext> are refused by name" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const bad = [_][]const u8{
+        "pkg/*.py",
+        "pkg/**/*",
+        "pkg/**/a.py",
+        "*/**/*.py",
+        "pkg/*/**/*.py",
+        "**/*.py",
+        "pkg/**/*.p?",
+        "pkg/**/*.{py,sh}",
+        "pkg/[a]/**/*.py",
+        "pkg/**/*.txt",
+        "pkg/**/*.",
+        "pkg/**/*.py/x",
+    };
+    var text = std.ArrayList(u8).empty;
+    for (bad) |b| try text.writer(arena.allocator()).print("{s}\twhy\n", .{b});
+    const r = try run(arena.allocator(), &pkg_tree, text.items);
+    for (bad, 1..) |b, n| {
+        const want = try std.fmt.allocPrint(arena.allocator(), "{s}:{d}: {s}: a wildcard other than `<dir>/**/*.<ext>` (an interpreter extension) is not allowed\n", .{ al, n, b });
+        try expectFinding(r, want);
+    }
+    // Refused rows cover nothing: the three files are unlisted too.
+    try std.testing.expectEqual(@as(usize, bad.len + 3), r.result.findings);
+}
+
+test "a sorted list passes and a row before its predecessor is refused naming both" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const tree = clean_tree ++ pkg_tree;
+    try expectClean(try run(arena.allocator(), &tree, "buck2\tw\npkg/**/*.py\tw\ntools/a.sh\tw\ntools/gen.py\tw\ntools/sum.awk\tw\n"));
+    const r = try run(arena.allocator(), &tree, "buck2\tw\npkg/**/*.py\tw\ntools/gen.py\tw\ntools/a.sh\tw\ntools/sum.awk\tw\n");
+    try std.testing.expectEqual(@as(usize, 1), r.result.findings);
+    try expectFinding(r, al ++ ":4: tools/a.sh: out of order: it sorts before tools/gen.py (line 3); rows are one per line, sorted by path in byte order");
+    // Byte order, not locale order: an upper-case path sorts before a lower-case one.
+    const lib = tree ++ [_][2][]const u8{.{ "tools/Lib.pm", "1;\n" }};
+    const ok = "buck2\tw\npkg/**/*.py\tw\ntools/Lib.pm\tw\ntools/a.sh\tw\ntools/gen.py\tw\ntools/sum.awk\tw\n";
+    try expectClean(try run(arena.allocator(), &lib, ok));
+    const up = try run(arena.allocator(), &lib, "buck2\tw\npkg/**/*.py\tw\ntools/a.sh\tw\ntools/Lib.pm\tw\ntools/gen.py\tw\ntools/sum.awk\tw\n");
+    try std.testing.expectEqual(@as(usize, 1), up.result.findings);
+    try expectFinding(up, al ++ ":4: tools/Lib.pm: out of order: it sorts before tools/a.sh (line 3)");
+}
+
+test "a repeated row is refused as a second row, not as out of order" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const r = try run(arena.allocator(), &pkg_tree, pkg_glob ++ pkg_glob);
+    try std.testing.expectEqual(@as(usize, 1), r.result.findings);
+    try expectFinding(r, al ++ ":2: pkg/**/*.py: a second row (the first is line 1)");
+}
+
+test "a glob row is in scope when its dir overlaps a scope prefix" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try write(tmp.dir, &pkg_tree);
+    try expectClean(try checkScoped(arena.allocator(), tmp.dir, pkg_glob, &.{"pkg/"}));
+    try expectClean(try checkScoped(arena.allocator(), tmp.dir, pkg_glob, &.{"pkg/sub/"}));
+    const r = try checkScoped(arena.allocator(), tmp.dir, pkg_glob, &.{"other/"});
+    try std.testing.expectEqual(@as(usize, 1), r.result.findings);
+    try expectFinding(r, al ++ ":1: pkg/**/*.py: outside the scope of the check: remove the row");
+}

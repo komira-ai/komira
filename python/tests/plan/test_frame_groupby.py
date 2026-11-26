@@ -9,7 +9,8 @@ records the plan bytes it is given. Checked:
   sum of nothing 0 (min_count=0 only), the casts of a boolean column, the
   engine aggregate of each pandas reduction, and the plans of
   drop_duplicates (a DISTINCT, or for keep=False an AGGREGATE with count = 1);
-- the output columns and types of every reduction, grouped and ungrouped;
+- the output columns and types of every reduction, grouped and ungrouped, the
+  frame's own reductions and `agg` among them;
 - the order rules: a group-by over a sorted frame, a head after
   groupby(sort=True), a frame changed by df["x"] = ... after its groupby();
 - the wire: the encoded aggregate's functions and the sort's NULL placement;
@@ -17,6 +18,10 @@ records the plan bytes it is given. Checked:
 - the GroupBy's attribute rules for every row of its refusal table, and no
   dunder of it runs a query;
 - a reduced frame reaches the session only as plan bytes, at its terminal.
+
+The test loads no library. It is of the `plan/` family (python/tests/BUCK), on
+the same runtimes as `frame_test`: each supported minor under protobuf 7.36.2
+and CPython 3.13 also under 5.29.1 (`frame_groupby_test_protobuf_lower_edge`).
 
     test_frame_groupby.py
 """

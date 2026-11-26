@@ -128,7 +128,9 @@ zig_exe(
 # The interpreter list (interpreter_budget.bzl): every interpreter file of the
 # repository (shell, Python, Perl, awk, sed, Ruby: by its extension or by a
 # `#!` line naming one) has a row in interpreter_allowlist.tsv (path, reason),
-# and every row names one. Existence only: a file's size is never checked.
+# and every row names one. A row may be a glob row `<dir>/**/*.<ext>` (every
+# file of that extension under <dir>/, at any depth); rows are one per line,
+# sorted by path in byte order. Existence only: a file's size is never checked.
 # The tree is every file of the cell (`//:doc_tree`), the files under
 # .github/ (`//:github_tree`) and the tests cell's tree. A row comes out when
 # its file is written in Zig or deleted; a row is added only with a reason
