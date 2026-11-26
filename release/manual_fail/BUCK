@@ -6,4 +6,6 @@ zig_test(
     name = "fails",
     exec_compatible_with = LINUX_X86_64,
     src = "fails_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
