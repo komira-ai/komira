@@ -8,13 +8,14 @@
 //! It shares the plan reader and the client of release_beta_fetch.zig (the file beside this one) and
 //! holds no credential.
 //!
-//! `expect` is what the job `mopm-stage` runs right after `mopm stage`, before `prod-stage` opens a group on
-//! the registry: it holds `plan.json` to the set the release builds (every package, each with a file for every
+//! `expect` is what the job `mopm-stage` runs right after `mopm stage`, before `beta-stage` or `prod-stage` opens a
+//! group on a registry: it holds `plan.json` to the set the release builds (every package, each with a file for every
 //! subdir it builds for and none other), from the file //release:mopm_plan_expectation writes. plan_expect.zig
 //! (beside this file) says what it reads and refuses.
 //!
-//! `verify` is what the job `prod-test` runs between `prod-stage` and `prod-commit`. `--staged` is the
-//! staged set `prod-stage` uploaded: `plan.json`, each member's README and each `.conda` file, with the
+//! `verify` is what the jobs `beta-test` and `prod-test` run between their registry's stage and commit
+//! (`beta-stage` and `beta-commit`, `prod-stage` and `prod-commit`). `--staged` is the staged set that
+//! registry's stage uploaded: `plan.json`, each member's README and each `.conda` file, with the
 //! `state.json` and `report.json` that `mopm publish --staged --no-commit` wrote. The registry holds
 //! exactly the bytes of that directory (it pinned each file's sha256 when the group was opened), and
 //! will copy them when the group is committed. So `verify` reads `plan.json`, refuses a plan it cannot

@@ -62,8 +62,8 @@ release_packages_json(
 # //:readme_e2e_complete holds to the src/ packages that have a mopm.toml.
 # release.yml's `mopm-stage` job builds it, as the linux-64 half of
 # :mopm_release_artifacts (below), stages it, tries the README examples against the
-# staged set and dry-runs the publish on every push to main; the `prod-*` jobs publish
-# the set (docs/ci.md).
+# staged set and dry-runs the publish on every push to main; the `beta-*` and then the
+# `prod-*` jobs publish the set (docs/ci.md).
 mopm_artifacts(
     name = "mopm_artifacts",
     natives = RELEASE_NATIVES,

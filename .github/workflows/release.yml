@@ -1,4 +1,4 @@
-# The release build of komira's conda packages and the continuous prod publish of its mopm
+# The release build of komira's conda packages and the continuous beta and prod publish of its mopm
 # packages (docs/ci.md, "release.yml").
 #
 # komira publishes its conda release set to NO channel for now, and publishing will move to mopm
@@ -14,10 +14,11 @@
 # release set, each built for linux-64 and osx-arm64 (//release:mopm_release_artifacts:
 # //release:mopm_artifacts and the macOS set, built on the farm's macOS workers), the two
 # files of a package in the same group at the same version. The publish is CONTINUOUS:
-# EVERY push to main runs it, to the registry `prod`, in seven jobs: build and
-# stage, stage in prod, test the staged bytes, commit, smoke, add from prod, and
-# (when one of them failed or the run was cancelled) abort. This workflow publishes to no other
-# registry (no beta stage), and no repository variable switches it.
+# EVERY push to main runs it, first to the registry `beta` and then to the registry `prod`,
+# the same set S (the same versions of the same bytes) to both: build and stage S once; in
+# beta, stage, test the staged bytes, commit, and (when one of them failed or the run was
+# cancelled) abort; then the same in prod, followed by a smoke and an add from prod. Prod
+# starts only when beta committed. No repository variable switches either.
 #   `mopm-stage`    on every push to main (and on a manual run, which only
 #                   stages): builds the packages and the pinned mopm on the
 #                   farm; gives every member the version 0.1.<run number> on
@@ -31,13 +32,30 @@
 #                   of every package runs on the farm against S (//release/readme_e2e/verify:all, with
 #                   `-c komira_release.staged=stage` at that version); then
 #                   `mopm publish --staged S --registry prod --dry-run`. It
-#                   sends nothing and holds no token.
+#                   sends nothing and holds no token. S is planned against prod;
+#                   every member is a new version (0.1.<run number>), so the same
+#                   plan is the plan for beta too.
+#   `beta-stage`, `beta-test`, `beta-commit`, `beta-abort`
+#                   the beta publish, in four jobs, ONLY on a push to main (never
+#                   on a manual run), the shape of the first four prod jobs below
+#                   with the registry `beta` and the environment `beta`:
+#     beta-stage    (needs release and mopm-stage; environment `beta`, `id-token:
+#                   write`, no secret) `mopm publish --staged S --registry beta
+#                   --oidc --no-commit`; the directory, with its `state.json`, is
+#                   kept as `mopm-beta-staged-<sha>`.
+#     beta-test     (needs beta-stage; environment `build`; no registry identity)
+#                   checks every file of that directory against `plan.json` and
+#                   runs the README e2e on exactly the files that matched.
+#     beta-commit   (needs beta-test; environment `beta`) the same command
+#                   without `--no-commit`: the beta group is committed.
+#     beta-abort    (needs the three above; only when one failed or the run was
+#                   cancelled) `--abort` ends the open beta group.
 #   `prod-stage`, `prod-test`, `prod-commit`, `prod-abort`, `prod-smoke`, `prod-add`
 #                   the prod publish, in six jobs, ONLY on a push to main (never on a
 #                   manual run). It stages the set the e2e of `mopm-stage`
-#                   passed on, tests the files the registry now holds in
-#                   quarantine, and only then commits:
-#     prod-stage    (needs release and mopm-stage; environment `prod`, `id-token:
+#                   passed on and beta committed, tests the files the registry now
+#                   holds in quarantine, and only then commits:
+#     prod-stage    (needs release, mopm-stage and beta-commit; environment `prod`, `id-token:
 #                   write`, no secret) `mopm publish --staged S --registry prod
 #                   --oidc --no-commit`: the registry opens a group, holds every
 #                   file, and nothing is visible. The directory, with the
@@ -68,8 +86,11 @@
 #                   under https://conda.mopm.dev/komira-ai/ at this run's version,
 #                   and the installed files must be the plan's (sha256 and size).
 #                   These jobs need a mopm that has `--no-commit` and `--abort`
-#                   (0.0.66 and later) and a registry whose prod CI identity may
-#                   act for the package owner; docs/ci.md, "The prod publish".
+#                   (0.0.66 and later), and each registry, beta and prod, must
+#                   trust this workflow's identity in its environment as a CI
+#                   publisher for the package owner; until beta does, beta-stage
+#                   fails and nothing reaches prod (docs/ci.md, "Before the first
+#                   release").
 #
 # NO WHEEL HERE. The Python wheel is built and installed as a user installs it by pypi.yml on every
 # push (docs/ci.md, "pypi.yml: publishing the Python package"), so this file holds no wheel job.
@@ -111,7 +132,7 @@
 #
 # ONE RELEASE AT A TIME (concurrency). A PUSH to main is in the group
 # `release-main`: a running release is NEVER cancelled, so two pushes never
-# publish to prod at once; GitHub keeps at most
+# publish to beta or prod at once; GitHub keeps at most
 # one PENDING run per group, and a newer one cancels the pending one and takes
 # its place, so the newest pushed revision wins and queued pushes coalesce
 # (main moves forward only, so the newer push carries the older one's
@@ -362,7 +383,7 @@ jobs:
       # Reads plan.json and hashes every file; sends nothing and reads no token.
       - name: mopm publish --staged --dry-run
         run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged release/staged_set --registry prod --dry-run'
-      # What `prod-stage` uploads: the set the e2e just passed on, byte for
+      # What `beta-stage` and `prod-stage` upload: the set the e2e just passed on, byte for
       # byte, the mopm that stages and commits it (and that `prod-add` adds
       # with), and the verify tool the smoke and add jobs run (they need no farm).
       - name: keep the staged set
@@ -380,11 +401,180 @@ jobs:
         if: always()
         run: ./buck2 kill || true
 
+  # THE BETA PUBLISH, in four jobs (see the header): the shape of the first four prod jobs
+  # below, with the registry `beta` and the environment `beta`. Every one runs only on a
+  # push to main (a manual run never reaches the environment `beta`), and `beta-stage`
+  # needs the set `mopm-stage` tried and passed the README e2e on. `prod-stage` needs
+  # `beta-commit`, so prod publishes only a set beta staged, tested and committed. No job
+  # holds a registry token: the beta registry must trust the identity of `beta-stage`,
+  # `beta-commit` and `beta-abort` (this repository's release.yml, run on main from a
+  # push, in the environment `beta`) to act for the owner of the packages; until it does,
+  # beta-stage fails and nothing reaches prod (docs/ci.md, "Before the first release").
+
+  # STAGE IN BETA. Uploads S, the set `mopm-stage` tried and kept, to the beta registry and
+  # stops with the group open (`--no-commit`). S was planned against prod, and every member
+  # is a version no registry holds yet (0.1.<run number>), so the plan is beta's as well.
+  # The directory, now with `state.json` (the beta group) and `report.json`, is kept as its
+  # own artifact, even when this step fails, for `beta-test`, `beta-commit` and
+  # `beta-abort`; `prod-stage` downloads the set again from `mopm-staged-<sha>`, with no
+  # beta state in it. It joins no farm and runs no buck2.
+  beta-stage:
+    needs: [release, mopm-stage]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: beta
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish
+      - name: mopm is executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
+      - name: mopm publish --staged --registry beta --oidc --no-commit
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-publish/staged" --registry beta --oidc --no-commit'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: mopm-beta-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish/staged
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  # TEST IN BETA. As `prod-test`: the directory `beta-stage` kept, every file checked
+  # against `plan.json` (`release_staged_verify verify`), `release/staged_set` written from
+  # the files that matched and from nothing else, and the README e2e of every package on
+  # it, on the farm. NO registry identity and no secret: the environment is `build`, which
+  # no registry trusts; `id-token: write` is for farm-connect only.
+  beta-test:
+    needs: beta-stage
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-beta-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/beta-test/staged
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      - name: build the staged-set verify tool
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/beta-test/release_staged_verify
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: check the files beta holds against the plan
+        run: '"$RUNNER_TEMP/beta-test/release_staged_verify" verify --staged "$RUNNER_TEMP/beta-test/staged" --out release/staged_set'
+      - name: the README e2e against the files beta holds
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
+  # COMMIT IN BETA. The command of `beta-stage` without `--no-commit`, in the directory with
+  # its `state.json`, with a fresh OIDC exchange: the same beta group is committed and the
+  # job waits until it is visible. Its `plan.json`, `state.json` and `report.json` are kept
+  # (no package file), for whoever has to yank the beta group.
+  beta-commit:
+    needs: beta-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: beta
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-beta-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-beta/staged
+      - name: mopm is executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
+      - name: mopm publish --staged --registry beta --oidc
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-beta/staged" --registry beta --oidc'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mopm-beta-committed-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/mopm-beta/staged/plan.json
+            ${{ runner.temp }}/mopm-beta/staged/state.json
+            ${{ runner.temp }}/mopm-beta/staged/report.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  # ABORT IN BETA. As `prod-abort`, for the beta group: when the beta stage, test or commit
+  # failed or the run was cancelled, ends the open group (`--abort`). It does not run when
+  # `beta-stage` was skipped (an earlier job failed: there is no group). A group that was
+  # already committed is not ended: mopm refuses and says to yank it.
+  beta-abort:
+    needs: [beta-stage, beta-test, beta-commit]
+    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.beta-stage.result != 'skipped'
+    runs-on: ubuntu-24.04
+    environment: beta
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-beta-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-beta/staged
+      - name: mopm is executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
+      - name: mopm publish --staged --registry beta --oidc --abort
+        run: |
+          if [ -f "$RUNNER_TEMP/mopm-beta/staged/state.json" ]; then
+            "$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-beta/staged" --registry beta --oidc --abort
+          else
+            echo "no state.json: the beta stage failed before it asked the registry for a group; nothing to end"
+          fi
+
   # THE PROD PUBLISH, in six jobs (see the header). Every one runs only on a
   # push to main (a manual run never reaches the environment `prod`), and
-  # `prod-stage` needs the set `mopm-stage` tried and passed the README e2e on, so a set
-  # that did not pass is never staged in prod (docs/ci.md, "The prod publish", says
-  # what must exist first). No job
+  # `prod-stage` needs the set `mopm-stage` tried and passed the README e2e on, and
+  # `beta-commit`, so a set that did not pass, or that beta did not commit, is never staged
+  # in prod (docs/ci.md, "The prod publish", says what must exist first). No job
   # holds a registry token: the registry trusts the identity
   # of `prod-stage`, `prod-commit` and `prod-abort` (this repository's
   # release.yml, run on main from a push, in the environment `prod`) to act for
@@ -392,14 +582,14 @@ jobs:
   # talk to the registry are in `prod`, the one that needs the farm is in
   # `build`, whose identity the registry does not trust.
 
-  # STAGE. Uploads the set `mopm-stage` tried to the prod registry and stops
+  # STAGE. Uploads the set `mopm-stage` tried and beta committed to the prod registry and stops
   # with the group open (`--no-commit`): the registry holds every file in
   # quarantine, where nothing reads it, and no package is visible. The
   # directory, now with `state.json` (the group) and `report.json`, is kept
   # even when this step fails, so `prod-abort` can end a group a failed run
   # opened. It joins no farm and runs no buck2.
   prod-stage:
-    needs: [release, mopm-stage]
+    needs: [release, mopm-stage, beta-commit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment: prod
