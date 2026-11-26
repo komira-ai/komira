@@ -17,7 +17,7 @@ It needs no file beside it and runs in an empty directory:
 - it makes two mistakes and prints each `komira.KomiraError`: a missing file
   (`komira.BindError`), whose message names the file by its absolute path,
   and a SQL syntax error (`komira.ParseError`), whose message names the line
-  and column;
+  and column (newer than 0.1.1623);
 - it closes the session.
 
 Every value it prints can be checked by eye against the six rows it wrote.

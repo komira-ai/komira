@@ -221,6 +221,20 @@ def _roots_cases():
     }
     if roots(plain) != ["k//p:top"]:
         out.append("roots: an ordinary dependent still removes its dependency from the roots: got {}".format(roots(plain)))
+    # The surface capability matrix names each cell's test and builds none:
+    # the tests stay roots beside it. The library a test compiles against is
+    # an ordinary dependency, so it is no root.
+    matrix_kind = "komira//tools/build/lint/surface_capability_matrix.bzl:_surface_capability_matrix_rule"
+    test_kind = "komira//tools/build/mojo/defs.bzl:mojo_test_rule"
+    lib_kind = "komira//tools/build/mojo/defs.bzl:mojo_library_rule"
+    named = {
+        "k//:matrix": _fake("k//:matrix", matrix_kind, ["k//e:test_a", "k//e:test_b"]),
+        "k//e:lib": _fake("k//e:lib", lib_kind),
+        "k//e:test_a": _fake("k//e:test_a", test_kind, ["k//e:lib"]),
+        "k//e:test_b": _fake("k//e:test_b", test_kind, ["k//e:lib"]),
+    }
+    if roots(named) != ["k//:matrix", "k//e:test_a", "k//e:test_b"]:
+        out.append("roots: the tests the surface capability matrix names stay roots, the library they compile against is not: got {}".format(roots(named)))
     return out
 
 def _registration_cases(ctx):

@@ -6,7 +6,9 @@
 //! changelog: `assemble` puts a new section, `## 0.1.<n>` for the release the build is stamped as or
 //! `## Unreleased` for an unstamped build, before the first release heading of CHANGELOG.md, holding the
 //! bullets of every file in file-name order. `description` is the text of the wheel's page: the README,
-//! then the assembled changelog with each heading one level down so that it nests under the README.
+//! then the assembled changelog with each heading one level down so that it nests under the README, and in a
+//! stamped build every link to the repository's `main` pinned to the commit the wheel was built from, so the
+//! pages its PyPI page links to describe that wheel and not a later `main`.
 //!
 //! Every function that can refuse returns `error.Refused` and leaves the reason in the `why` it was given,
 //! naming the file and, when a line is at fault, its number.
@@ -181,10 +183,74 @@ pub fn nest(a: Allocator, why: *[]const u8, path: []const u8, text: []const u8) 
     return out.toOwnedSlice(a);
 }
 
+/// The prefix of a link to the repository's files on `main`, before `blob/main/` or `tree/main/`.
+pub const repository = "https://github.com/komira-ai/komira/";
+
+/// The branch part of the two link forms `pin` rewrites, after `repository`.
+const branch_links = [_][]const u8{ "blob/main/", "tree/main/" };
+
+fn isCommit(commit: []const u8) bool {
+    if (commit.len != 40) return false;
+    for (commit) |c| {
+        if (!((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f'))) return false;
+    }
+    return true;
+}
+
+/// `text` with every link to a file or directory of the repository on `main` (`<repository>blob/main/...`,
+/// `<repository>tree/main/...`) pinned to `commit`, the 40 lower-case hexadecimal digits of the commit the
+/// build is stamped with (`-c komira.package_commit`); `commit` in any other spelling is refused. Every other
+/// byte is kept, a link inside a fenced block too.
+pub fn pin(a: Allocator, why: *[]const u8, text: []const u8, commit: []const u8) Error![]u8 {
+    if (!isCommit(commit)) return refuse(a, why, "the commit `{s}` is not 40 lower-case hexadecimal digits", .{commit});
+    var out = std.ArrayList(u8).empty;
+    var rest = text;
+    while (std.mem.indexOf(u8, rest, repository)) |at| {
+        const after = rest[at + repository.len ..];
+        try out.appendSlice(a, rest[0 .. at + repository.len]);
+        rest = after;
+        for (branch_links) |link| {
+            if (!std.mem.startsWith(u8, after, link)) continue;
+            // `blob/` or `tree/`, the commit, and the path after `main/`
+            try out.appendSlice(a, link[0.."blob/".len]);
+            try out.appendSlice(a, commit);
+            try out.append(a, '/');
+            rest = after[link.len..];
+            break;
+        }
+    }
+    try out.appendSlice(a, rest);
+    return out.toOwnedSlice(a);
+}
+
+/// Where the description's links point: `main` for an unstamped build, or the commit a stamped build is
+/// stamped with.
+pub const Links = union(enum) { main, commit: []const u8 };
+
+/// Where the description of a build stamped `stamp` (as `headingOf` reads it) links to, given the commit the
+/// build is stamped with (`-c komira.package_commit`) or null: `main` for an unstamped build, the commit for a
+/// stamped one. A stamped build with no commit, or an unstamped one with a commit, is refused: the wheel's
+/// stamp is all of its parts or none (tools/build/package/wheel/stamp.zig).
+pub fn linksOf(a: Allocator, why: *[]const u8, stamp: []const u8, commit: ?[]const u8) Error!Links {
+    const stamped = !std.mem.eql(u8, try headingOf(a, why, stamp), "Unreleased");
+    if (commit) |c| {
+        if (!stamped) return refuse(a, why, "the commit `{s}` is given for an unstamped build, whose description links to `main`: a commit needs a stamp", .{c});
+        if (!isCommit(c)) return refuse(a, why, "the commit `{s}` is not 40 lower-case hexadecimal digits", .{c});
+        return .{ .commit = c };
+    }
+    if (stamped) return refuse(a, why, "the stamp `{s}` is given with no commit: a stamped description pins its links to the commit the wheel is built from", .{stamp});
+    return .main;
+}
+
 /// The wheel's description: `readme`, a blank line, then the assembled changelog `changelog` (named `path` in
-/// refusals) with its headings one level down.
-pub fn description(a: Allocator, why: *[]const u8, readme: []const u8, path: []const u8, changelog: []const u8) Error![]u8 {
+/// refusals) with its headings one level down; with `links` a commit, every link to the repository's `main`
+/// pinned to it (`pin`).
+pub fn description(a: Allocator, why: *[]const u8, readme: []const u8, path: []const u8, changelog: []const u8, links: Links) Error![]u8 {
     const nested = try nest(a, why, path, changelog);
     const head = std.mem.trimRight(u8, readme, "\n");
-    return std.fmt.allocPrint(a, "{s}\n\n{s}", .{ head, nested });
+    const text = try std.fmt.allocPrint(a, "{s}\n\n{s}", .{ head, nested });
+    return switch (links) {
+        .main => text,
+        .commit => |commit| pin(a, why, text, commit),
+    };
 }

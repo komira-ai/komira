@@ -513,15 +513,24 @@ tests, which no pull request builds. The rest of this section is about `release-
   needs no ordering with the release (nothing waits on it), and `workflow_run` would
   start it only after the whole release finished, build the default branch's head
   instead of the pushed commit, and run for a pull request's `release.yml` run too if
-  that ever changed. `timeout-minutes: 90` still bounds a stalled build.
+  that ever changed. `timeout-minutes: 90` still bounds a stalled build, and the steps that
+  wait on the farm have bounds of their own inside it (farm-connect 5 minutes, the macOS set
+  65, the Python harness tests 10):
+  a step past its bound fails, so the run ends failed, where a job past its `timeout-minutes`
+  is cancelled and GitHub ends its run cancelled.
 - **Reported, not blocking (for now).** A red macOS build is a failed run of
   `release-macos.yml`, with a line in its summary, and the release run, the prod publish and
   `main_red.yml` do not see it: none of them `needs` it or reads its result. The job is not
   `continue-on-error`, which would end a failed build green. The last job,
-  `release-macos-result` (`needs: release-macos`, `if: always()`), fails with "the macOS build
+  `release-macos-result` (`needs: release-macos`, `if: ${{ !cancelled() }}`), fails with "the macOS build
   did not run" when the build job was skipped, and with "did not pass" when it failed, so the
   run list, the commit status and the badge never read green for a Mac build that did not
-  pass. Its message says what happened rather than guessing: when a buck2 step failed (the build
+  pass. A build job that ran out its `timeout-minutes` is cancelled by GitHub while the run
+  goes on, so `release-macos-result` runs and fails with "the macOS build was cancelled while
+  the run went on" (the run itself still reads cancelled, which is why the farm steps carry
+  their own bounds). Only when the run itself was cancelled (a newer push, or by hand) does
+  `release-macos-result` not run: the run ends cancelled and the newer run builds.
+  Its message says what happened rather than guessing: when a buck2 step failed (the build
   of the set, or of the Python harness tests), `//release/ci:buck2_failure` (built before them)
   reads that step's buck2 output and the message is buck2's own lines after `BUILD FAILED`
   (also written to the run's summary);
@@ -979,7 +988,11 @@ release heading of [`python/CHANGELOG.md`](../python/CHANGELOG.md), holding the 
 nests under the README. A change to the package adds a file there and never a line of `CHANGELOG.md`
 ([the working guide](../python/README.md#changelog-entries)), so queued pull requests edit no common line,
 and the section a release ships lists every change merged since the newest section `CHANGELOG.md` keeps.
-The Linux and the macOS wheel read the one target, so their `METADATA` is the same
+The build is stamped with its commit too (`-c komira.package_commit`), and every link of the description to
+the repository's `main` (`.../blob/main/...`, `.../tree/main/...`) opens that commit instead, so the pages a
+version's PyPI page links to describe that version; the `Documentation` URL is the install page of that
+commit, and the `Changelog` URL stays `main`'s `CHANGELOG.md`, which keeps a section for every version on
+PyPI. The Linux and the macOS wheel read the one target, so their `METADATA` is the same
 (`//python:wheel_same_macos_arm64`). The wheel depends on the target, so a malformed file of `changelog.d/`
 (a name that is not a slug and `.md`, an empty file, a line that is neither a bullet nor an indented
 continuation, a heading), a `## Unreleased` heading in `CHANGELOG.md` and a `CHANGELOG.md` with no release

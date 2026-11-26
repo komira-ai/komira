@@ -37,7 +37,9 @@ archive_files(
         "info/licenses/LICENSE",
         "info/licenses/Third-Party-Notices",
     ],
-    visibility = ["komira//python:"],
+    # The wheel (python/BUCK) and the npm platform packages (node/BUCK) carry
+    # them beside the runtime libraries.
+    visibility = ["komira//node:", "komira//python:"],
 )
 
 # ---- Modular's own wheels, for the tests beside them --------------------------

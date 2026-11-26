@@ -1,0 +1,782 @@
+[
+  {
+    "rank": 1,
+    "slug": "read-csv-file",
+    "category": "Read",
+    "question": "How do I read a CSV file?",
+    "status": "works"
+  },
+  {
+    "rank": 2,
+    "slug": "select-columns-filter-rows",
+    "category": "Read",
+    "question": "How do I select columns and filter rows?",
+    "status": "works"
+  },
+  {
+    "rank": 3,
+    "slug": "add-computed-column",
+    "category": "Transform",
+    "question": "How do I add a new column computed from other columns?",
+    "status": "works"
+  },
+  {
+    "rank": 4,
+    "slug": "group-by-column-and-sum",
+    "category": "Aggregate",
+    "question": "How do I group by a column and sum another column?",
+    "status": "works"
+  },
+  {
+    "rank": 5,
+    "slug": "look-at-first-rows-and-columns",
+    "category": "Read",
+    "question": "How do I look at the first rows, row count and columns of a dataset?",
+    "status": "works"
+  },
+  {
+    "rank": 6,
+    "slug": "find-fill-missing-values",
+    "category": "Clean",
+    "question": "How do I find and fill missing values?",
+    "status": "works"
+  },
+  {
+    "rank": 7,
+    "slug": "drop-rows-missing-values",
+    "category": "Clean",
+    "question": "How do I drop rows with missing values?",
+    "status": "works"
+  },
+  {
+    "rank": 8,
+    "slug": "sort-rows-by-columns",
+    "category": "Transform",
+    "question": "How do I sort rows by one or more columns?",
+    "status": "works"
+  },
+  {
+    "rank": 9,
+    "slug": "count-each-value",
+    "category": "Aggregate",
+    "question": "How do I count how many times each value appears?",
+    "status": "works"
+  },
+  {
+    "rank": 10,
+    "slug": "join-two-tables-on-key",
+    "category": "Join",
+    "question": "How do I join two tables on a key?",
+    "status": "works"
+  },
+  {
+    "rank": 11,
+    "slug": "write-table-csv-file",
+    "category": "Write",
+    "question": "How do I write a table to a CSV file?",
+    "status": "partial"
+  },
+  {
+    "rank": 12,
+    "slug": "change-column-data-type",
+    "category": "Clean",
+    "question": "How do I change a column's data type?",
+    "status": "works"
+  },
+  {
+    "rank": 13,
+    "slug": "remove-duplicate-rows",
+    "category": "Clean",
+    "question": "How do I remove duplicate rows?",
+    "status": "works"
+  },
+  {
+    "rank": 14,
+    "slug": "read-json-file-table",
+    "category": "Read",
+    "question": "How do I read a JSON file into a table?",
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2338"
+    ]
+  },
+  {
+    "rank": 15,
+    "slug": "read-parquet-file",
+    "category": "Read",
+    "question": "How do I read a Parquet file?",
+    "status": "works"
+  },
+  {
+    "rank": 16,
+    "slug": "rename-columns",
+    "category": "Transform",
+    "question": "How do I rename columns?",
+    "status": "works"
+  },
+  {
+    "rank": 17,
+    "slug": "apply-function-value-column",
+    "category": "Transform",
+    "question": "How do I apply a function to every value in a column?",
+    "status": "partial"
+  },
+  {
+    "rank": 18,
+    "slug": "concatenate-tables-same-columns",
+    "category": "Join",
+    "question": "How do I concatenate (stack) tables with the same columns?",
+    "status": "works"
+  },
+  {
+    "rank": 19,
+    "slug": "read-many-files-matching-pattern-table",
+    "category": "Read",
+    "question": "How do I read many files matching a pattern into one table?",
+    "status": "partial"
+  },
+  {
+    "rank": 20,
+    "slug": "load-database-query-result-dataframe",
+    "category": "Databases",
+    "question": "How do I load a database query result into a DataFrame?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2334"
+    ]
+  },
+  {
+    "rank": 21,
+    "slug": "write-dataframe-database-table",
+    "category": "Databases",
+    "question": "How do I write a DataFrame to a database table?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2335"
+    ]
+  },
+  {
+    "rank": 22,
+    "slug": "read-json-file-write-records-database",
+    "category": "Nested/JSON",
+    "question": "How do I read a JSON file and write the records to a database?",
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2335",
+      "komira-ai/komira#2338"
+    ]
+  },
+  {
+    "rank": 23,
+    "slug": "parse-strings-dates",
+    "category": "Time",
+    "question": "How do I parse strings into dates?",
+    "status": "partial"
+  },
+  {
+    "rank": 24,
+    "slug": "compute-summary-statistics-column",
+    "category": "Aggregate",
+    "question": "How do I compute summary statistics of a column?",
+    "status": "works"
+  },
+  {
+    "rank": 25,
+    "slug": "compute-aggregates-once-named-outputs",
+    "category": "Aggregate",
+    "question": "How do I compute several aggregates at once with named outputs?",
+    "status": "works"
+  },
+  {
+    "rank": 26,
+    "slug": "read-excel-file",
+    "category": "Read",
+    "question": "How do I read an Excel file?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2336"
+    ]
+  },
+  {
+    "rank": 27,
+    "slug": "write-table-parquet",
+    "category": "Write",
+    "question": "How do I write a table to Parquet?",
+    "status": "partial"
+  },
+  {
+    "rank": 28,
+    "slug": "process-csv-larger-than-memory",
+    "category": "Read",
+    "question": "How do I process a CSV that does not fit in memory?",
+    "status": "partial"
+  },
+  {
+    "rank": 29,
+    "slug": "filter-rows-value-list",
+    "category": "Clean",
+    "question": "How do I filter rows where a value is in a list?",
+    "status": "works"
+  },
+  {
+    "rank": 30,
+    "slug": "add-column-if-else-logic",
+    "category": "Clean",
+    "question": "How do I add a column with if/else (case when) logic?",
+    "status": "works"
+  },
+  {
+    "rank": 31,
+    "slug": "read-parquet-csv-files-s3",
+    "category": "Cloud storage",
+    "question": "How do I read Parquet or CSV files from S3?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2337"
+    ]
+  },
+  {
+    "rank": 32,
+    "slug": "write-query-results-s3-parquet",
+    "category": "Cloud storage",
+    "question": "How do I write query results to S3 as Parquet?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2337"
+    ]
+  },
+  {
+    "rank": 33,
+    "slug": "turn-query-result-pandas-polars-arrow",
+    "category": "Reporting/export",
+    "question": "How do I turn a query result into pandas, polars or Arrow?",
+    "status": "works"
+  },
+  {
+    "rank": 34,
+    "slug": "select-drop-columns",
+    "category": "Transform",
+    "question": "How do I select or drop columns?",
+    "status": "works"
+  },
+  {
+    "rank": 35,
+    "slug": "count-rows-per-group",
+    "category": "Aggregate",
+    "question": "How do I count rows per group?",
+    "status": "works"
+  },
+  {
+    "rank": 36,
+    "slug": "left-join-keep-unmatched-rows",
+    "category": "Join",
+    "question": "How do I left join and keep unmatched rows?",
+    "status": "works"
+  },
+  {
+    "rank": 37,
+    "slug": "run-sql-csv-parquet-file",
+    "category": "Performance",
+    "question": "How do I run SQL on a CSV or Parquet file (or a DataFrame)?",
+    "status": "partial"
+  },
+  {
+    "rank": 38,
+    "slug": "resample-time-series-daily-weekly-monthly",
+    "category": "Time",
+    "question": "How do I resample a time series to daily, weekly or monthly?",
+    "status": "works"
+  },
+  {
+    "rank": 39,
+    "slug": "extract-year-month-weekday-date-column",
+    "category": "Time",
+    "question": "How do I extract year, month and weekday from a date column?",
+    "status": "works"
+  },
+  {
+    "rank": 40,
+    "slug": "extract-part-string-regex",
+    "category": "Strings",
+    "question": "How do I extract part of a string with a regex?",
+    "status": "works"
+  },
+  {
+    "rank": 41,
+    "slug": "filter-rows-text-column-contains-substring",
+    "category": "Strings",
+    "question": "How do I filter rows where a text column contains a substring?",
+    "status": "works"
+  },
+  {
+    "rank": 42,
+    "slug": "lowercase-trim-replace-text-column",
+    "category": "Strings",
+    "question": "How do I lowercase, trim and replace text in a column?",
+    "status": "works"
+  },
+  {
+    "rank": 43,
+    "slug": "concatenate-string-columns",
+    "category": "Strings",
+    "question": "How do I concatenate string columns?",
+    "status": "works"
+  },
+  {
+    "rank": 44,
+    "slug": "split-string-column-columns",
+    "category": "Strings",
+    "question": "How do I split a string column into several columns?",
+    "status": "partial"
+  },
+  {
+    "rank": 45,
+    "slug": "flatten-nested-json-columns",
+    "category": "Nested/JSON",
+    "question": "How do I flatten nested JSON into columns?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2338"
+    ]
+  },
+  {
+    "rank": 46,
+    "slug": "explode-list-column-row-per-element",
+    "category": "Nested/JSON",
+    "question": "How do I explode a list column into one row per element?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2339"
+    ]
+  },
+  {
+    "rank": 47,
+    "slug": "get-top-n-rows-per-group",
+    "category": "Aggregate",
+    "question": "How do I get the top N rows per group?",
+    "status": "works"
+  },
+  {
+    "rank": 48,
+    "slug": "compute-running-total-per-group",
+    "category": "Aggregate",
+    "question": "How do I compute a running total per group?",
+    "status": "works"
+  },
+  {
+    "rank": 49,
+    "slug": "rank-rows-within-group",
+    "category": "Aggregate",
+    "question": "How do I rank rows within a group?",
+    "status": "works"
+  },
+  {
+    "rank": 50,
+    "slug": "percent-of-group-total",
+    "category": "Aggregate",
+    "question": "How do I compute each row's percent of its group total?",
+    "status": "works"
+  },
+  {
+    "rank": 51,
+    "slug": "make-pivot-table",
+    "category": "Aggregate",
+    "question": "How do I make a pivot table?",
+    "status": "partial"
+  },
+  {
+    "rank": 52,
+    "slug": "melt-wide-data-long",
+    "category": "Transform",
+    "question": "How do I melt (unpivot) wide data to long?",
+    "status": "partial"
+  },
+  {
+    "rank": 53,
+    "slug": "reshape-long-data-wide",
+    "category": "Transform",
+    "question": "How do I reshape long data to wide?",
+    "status": "partial"
+  },
+  {
+    "rank": 54,
+    "slug": "cross-tabulate-two-columns",
+    "category": "Transform",
+    "question": "How do I cross-tabulate two columns?",
+    "status": "partial"
+  },
+  {
+    "rank": 55,
+    "slug": "replace-values-with-null",
+    "category": "Clean",
+    "question": "How do I replace specific values such as 'N/A' with null?",
+    "status": "works"
+  },
+  {
+    "rank": 56,
+    "slug": "detect-outliers",
+    "category": "Clean",
+    "question": "How do I detect outliers?",
+    "status": "partial"
+  },
+  {
+    "rank": 57,
+    "slug": "find-duplicate-rows",
+    "category": "Clean",
+    "question": "How do I find (not drop) duplicate rows?",
+    "status": "works"
+  },
+  {
+    "rank": 58,
+    "slug": "standardize-inconsistent-category-spellings",
+    "category": "Clean",
+    "question": "How do I standardize inconsistent category spellings?",
+    "status": "works"
+  },
+  {
+    "rank": 59,
+    "slug": "validate-data-nulls-uniqueness-ranges",
+    "category": "Clean",
+    "question": "How do I validate data: nulls, uniqueness, ranges?",
+    "status": "works"
+  },
+  {
+    "rank": 60,
+    "slug": "convert-column-to-numbers",
+    "category": "Clean",
+    "question": "How do I convert a column to numbers, turning bad values into null?",
+    "status": "works"
+  },
+  {
+    "rank": 61,
+    "slug": "bucket-numeric-values-bins",
+    "category": "Transform",
+    "question": "How do I bucket numeric values into bins?",
+    "status": "works"
+  },
+  {
+    "rank": 62,
+    "slug": "count-rows-table",
+    "category": "Transform",
+    "question": "How do I count the rows of a table?",
+    "status": "works"
+  },
+  {
+    "rank": 63,
+    "slug": "get-distinct-values-column",
+    "category": "Transform",
+    "question": "How do I get the distinct values of a column?",
+    "status": "works"
+  },
+  {
+    "rank": 64,
+    "slug": "sample-random-rows-split-train-test",
+    "category": "Transform",
+    "question": "How do I sample random rows or split train and test?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2340"
+    ]
+  },
+  {
+    "rank": 65,
+    "slug": "take-first-last-n-rows",
+    "category": "Transform",
+    "question": "How do I take the first or last N rows?",
+    "status": "works"
+  },
+  {
+    "rank": 66,
+    "slug": "reorder-columns",
+    "category": "Transform",
+    "question": "How do I reorder columns?",
+    "status": "works"
+  },
+  {
+    "rank": 67,
+    "slug": "turn-table-list-dicts",
+    "category": "Transform",
+    "question": "How do I turn a table into a list of dicts?",
+    "status": "works"
+  },
+  {
+    "rank": 68,
+    "slug": "loop-over-rows-table",
+    "category": "Transform",
+    "question": "How do I loop over the rows of a table?",
+    "status": "works"
+  },
+  {
+    "rank": 69,
+    "slug": "anti-join-rows-in-a-not-in-b",
+    "category": "Join",
+    "question": "How do I find rows in A that are not in B (anti-join)?",
+    "status": "works"
+  },
+  {
+    "rank": 70,
+    "slug": "compare-two-datasets-show-differences",
+    "category": "Join",
+    "question": "How do I compare two datasets and show the differences?",
+    "status": "works"
+  },
+  {
+    "rank": 71,
+    "slug": "cross-join-two-tables",
+    "category": "Join",
+    "question": "How do I cross join two tables?",
+    "status": "works"
+  },
+  {
+    "rank": 72,
+    "slug": "match-row-nearest-earlier-timestamp",
+    "category": "Join",
+    "question": "How do I match each row to the nearest earlier timestamp (as-of join)?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2341"
+    ]
+  },
+  {
+    "rank": 73,
+    "slug": "join-multiple-columns",
+    "category": "Join",
+    "question": "How do I join on multiple columns?",
+    "status": "works"
+  },
+  {
+    "rank": 74,
+    "slug": "join-many-tables-query",
+    "category": "Join",
+    "question": "How do I join many tables in one query?",
+    "status": "works"
+  },
+  {
+    "rank": 75,
+    "slug": "join-value-falls-two-bounds",
+    "category": "Join",
+    "question": "How do I join where a value falls between two bounds?",
+    "status": "works"
+  },
+  {
+    "rank": 76,
+    "slug": "compute-rolling-average",
+    "category": "Time",
+    "question": "How do I compute a rolling average?",
+    "status": "works"
+  },
+  {
+    "rank": 77,
+    "slug": "compare-row-previous-row",
+    "category": "Time",
+    "question": "How do I compare each row with the previous row (lag, lead, change)?",
+    "status": "works"
+  },
+  {
+    "rank": 78,
+    "slug": "convert-time-zones",
+    "category": "Time",
+    "question": "How do I convert time zones?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2342"
+    ]
+  },
+  {
+    "rank": 79,
+    "slug": "add-days-date-take-difference-dates",
+    "category": "Time",
+    "question": "How do I add days to a date or take the difference between dates?",
+    "status": "partial"
+  },
+  {
+    "rank": 80,
+    "slug": "group-month-week",
+    "category": "Time",
+    "question": "How do I group by month or week?",
+    "status": "works"
+  },
+  {
+    "rank": 81,
+    "slug": "fill-gaps-time-series-date-present",
+    "category": "Time",
+    "question": "How do I fill gaps in a time series so every date is present?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2343"
+    ]
+  },
+  {
+    "rank": 82,
+    "slug": "convert-unix-timestamp-datetime-back",
+    "category": "Time",
+    "question": "How do I convert a Unix timestamp to a datetime and back?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2344"
+    ]
+  },
+  {
+    "rank": 83,
+    "slug": "filter-rows-date-range",
+    "category": "Time",
+    "question": "How do I filter rows by a date range?",
+    "status": "works"
+  },
+  {
+    "rank": 84,
+    "slug": "split-events-sessions-time-gap",
+    "category": "Time",
+    "question": "How do I split events into sessions by time gap?",
+    "status": "works"
+  },
+  {
+    "rank": 85,
+    "slug": "upsert-rows-database-table",
+    "category": "Databases",
+    "question": "How do I upsert rows into a database table?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2335"
+    ]
+  },
+  {
+    "rank": 86,
+    "slug": "read-whole-table-postgres-mysql-sqlite",
+    "category": "Databases",
+    "question": "How do I read a whole table from Postgres, MySQL or SQLite?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2334"
+    ]
+  },
+  {
+    "rank": 87,
+    "slug": "copy-table-database-another",
+    "category": "Databases",
+    "question": "How do I copy a table from one database to another?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2334",
+      "komira-ai/komira#2335"
+    ]
+  },
+  {
+    "rank": 88,
+    "slug": "append-rows-existing-database-table",
+    "category": "Databases",
+    "question": "How do I append rows to an existing database table?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2335"
+    ]
+  },
+  {
+    "rank": 89,
+    "slug": "bulk-load-large-file-database",
+    "category": "Databases",
+    "question": "How do I bulk-load a large file into a database?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2335"
+    ]
+  },
+  {
+    "rank": 90,
+    "slug": "keep-history-changing-rows",
+    "category": "Databases",
+    "question": "How do I keep history of changing rows (slowly changing dimension)?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2335"
+    ]
+  },
+  {
+    "rank": 91,
+    "slug": "query-sqlite-file-sql",
+    "category": "Databases",
+    "question": "How do I query a SQLite file with SQL?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2334"
+    ]
+  },
+  {
+    "rank": 92,
+    "slug": "export-table-sqlite-duckdb-file",
+    "category": "Databases",
+    "question": "How do I export a table to a SQLite or DuckDB file?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2335"
+    ]
+  },
+  {
+    "rank": 93,
+    "slug": "read-files-google-cloud-storage-azure",
+    "category": "Cloud storage",
+    "question": "How do I read files from Google Cloud Storage or Azure Blob?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2337"
+    ]
+  },
+  {
+    "rank": 94,
+    "slug": "query-iceberg-table",
+    "category": "Cloud storage",
+    "question": "How do I query an Iceberg table?",
+    "status": "partial"
+  },
+  {
+    "rank": 95,
+    "slug": "read-csv-parquet-file-url",
+    "category": "Cloud storage",
+    "question": "How do I read a CSV or Parquet file from a URL?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2345"
+    ]
+  },
+  {
+    "rank": 96,
+    "slug": "list-files-bucket-prefix",
+    "category": "Cloud storage",
+    "question": "How do I list the files in a bucket or prefix?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2337"
+    ]
+  },
+  {
+    "rank": 97,
+    "slug": "write-dataset-partitioned-column",
+    "category": "Cloud storage",
+    "question": "How do I write a dataset partitioned by a column?",
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2346"
+    ]
+  },
+  {
+    "rank": 98,
+    "slug": "read-partitioned-dataset-skip-partitions-need",
+    "category": "Cloud storage",
+    "question": "How do I read a partitioned dataset and skip partitions you do not need?",
+    "status": "works"
+  },
+  {
+    "rank": 99,
+    "slug": "convert-folder-csv-files-parquet",
+    "category": "Cloud storage",
+    "question": "How do I convert a folder of CSV files to Parquet?",
+    "status": "works"
+  },
+  {
+    "rank": 100,
+    "slug": "read-csv-odd-delimiter-no-header",
+    "category": "Read",
+    "question": "How do I read a CSV with an odd delimiter, no header or extra lines?",
+    "status": "partial"
+  }
+]

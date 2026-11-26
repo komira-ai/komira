@@ -33,15 +33,29 @@ def is_registration(node):
     """Whether `node` is an execution-platform registration."""
     return node.rule_type.split(":")[-1] in REGISTRATION_KINDS
 
+# The lints that depend on tests only to analyse them: the surface capability
+# matrix (tools/build/lint/surface_capability_matrix.bzl) names a test target
+# for each filled cell, and its analysis reads the target's providers, but it
+# never builds or runs the test. `roots` does not follow those edges either,
+# or filling a cell would drop its test from the check set and from TESTS,
+# the list `buck2 test //ci:pr` runs.
+NAMING_KINDS = ["_surface_capability_matrix_rule"]
+
+def names_only(node):
+    """Whether `node` is a lint that names its dependencies without building them."""
+    return node.rule_type.split(":")[-1] in NAMING_KINDS
+
 def roots(nodes):
     """The sorted labels of the checks no other check depends on, not counting
     the edges of an execution-platform registration (REGISTRATION_KINDS): which
     platforms it names depends on the checkout's `[komira_re]`, and a list that
     depended on it would lose the platform row of a checkout that names a macOS
-    worker, which the check of a checkout that names none still builds."""
+    worker, which the check of a checkout that names none still builds. Nor
+    the edges of a lint that names tests without building them (NAMING_KINDS),
+    so that each test stays a root, built and run by the check set."""
     depended = {}
     for node in nodes.values():
-        if is_registration(node):
+        if is_registration(node) or names_only(node):
             continue
         for d in node.deps():
             depended[str(d.label.raw_target())] = True

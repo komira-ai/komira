@@ -16,16 +16,17 @@ _ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 # block (the link commands the packer writes) and `link-check` compares it
 # with what the packer wrote (cli.zig, link.zig); `release-check` refuses a
 # release member that packages no README or one with no example
-# (tools/build/package/release_set.bzl). mojo_library runs it on its package's
-# README.md as an action, and so do the coverage build and the README API
+# (tools/build/package/release_set.bzl); `tasks-check` holds the catalogue of
+# common tasks to a language's task pages (tasks.zig; python/docs/tasks/BUCK).
+# mojo_library runs `generate` on its package's README.md as an action, and so do the coverage build and the README API
 # census. Zig, as every build tool under tools/build is;
 # what is code, a fence and a link is the shared Markdown reader's
 # (//tools/build/markdown:markdown).
 
 _SRCS = glob(["*.zig"])
 
-# The unit tests (examples_test.zig, program_test.zig, cli_test.zig): `zig
-# test` of main.zig, run as a build action.
+# The unit tests (examples_test.zig, program_test.zig, cli_test.zig,
+# link_test.zig, tasks_test.zig): `zig test` of main.zig, run as a build action.
 zig_test(
     name = "readme_examples_unit",
     exec_compatible_with = TOOL_EXEC,

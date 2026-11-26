@@ -110,6 +110,12 @@ repository's targets but the toolchains cell's directory, and the tests
 cell's `functional` tree) that no other check depends on; building them builds
 the others as dependencies. A check is a target of any kind but a source
 (`export_file`, `filegroup`). `TESTS` is the roots Buck2 can run as a test.
+Two kinds of edge do not count (`ci_graph.bzl` `roots`): those of an
+execution-platform registration, whose platforms depend on the checkout's
+configuration, and those of the surface capability matrix
+(`//:surface_capability_matrix`), which names a test for each filled cell
+and only analyses it. A test a cell names therefore stays a root, built by
+`//ci:pr` and run by `buck2 test`.
 
 `guard.bxl` is the completeness guard:
 
