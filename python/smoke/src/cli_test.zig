@@ -357,7 +357,6 @@ test "install prints that pip installed komira and the example printed what the 
     const dist = try withDist(a, &tmp, try h.makeWheel(a, .{}));
     try tmp.dir.makePath("in");
     try tmp.dir.writeFile(.{ .sub_path = "in/quickstart.py", .data = "print('x')\n" });
-    try tmp.dir.writeFile(.{ .sub_path = "in/readings.parquet", .data = "PAR1" });
     try tmp.dir.writeFile(.{ .sub_path = "in/quickstart.expected", .data = "<version>\n<abi_version>\nregistered readings\nTrue\n" });
     try tmp.dir.writeFile(.{ .sub_path = "in/komira.tsv", .data = "version\t1.1\n" });
     const work = try h.path(a, &tmp, "work");
@@ -365,14 +364,12 @@ test "install prints that pip installed komira and the example printed what the 
     const expect = try h.path(a, &tmp, "in/quickstart.expected");
     var fake = h.Fake{ .alloc = a, .routes = &.{} };
     var runner = h.FakeRunner{ .alloc = a, .work = work };
-    const data = try h.path(a, &tmp, "in/readings.parquet");
     const table = try h.path(a, &tmp, "in/komira.tsv");
     const r = try exec(a, &.{
         "install",  "--index",        "testpypi",   "--dist",      dist,
         "--python", "/py/python3.13", "--example",  example,       "--expect",
-        expect,     "--data",         data,         "--abi-table", table,
-        "--work",   work,             "--attempts", "2",           "--delay",
-        "0",
+        expect,     "--abi-table",    table,        "--work",      work,
+        "--attempts", "2",            "--delay",    "0",
     }, &fake, &runner);
     try t.expectEqual(@as(u8, 0), r.code);
     try t.expectEqualStrings("", r.err);
@@ -389,7 +386,6 @@ test "install fails with exit 1 and the step's failure when a command fails" {
     const dist = try withDist(a, &tmp, try h.makeWheel(a, .{}));
     try tmp.dir.makePath("in");
     try tmp.dir.writeFile(.{ .sub_path = "in/quickstart.py", .data = "print('x')\n" });
-    try tmp.dir.writeFile(.{ .sub_path = "in/readings.parquet", .data = "PAR1" });
     try tmp.dir.writeFile(.{ .sub_path = "in/quickstart.expected", .data = "x\n" });
     try tmp.dir.writeFile(.{ .sub_path = "in/komira.tsv", .data = "version\t1.1\n" });
     const work = try h.path(a, &tmp, "work");
@@ -398,12 +394,11 @@ test "install fails with exit 1 and the step's failure when a command fails" {
     var runner = h.FakeRunner{ .alloc = a, .work = work, .rules = &rules };
     const example = try h.path(a, &tmp, "in/quickstart.py");
     const expect = try h.path(a, &tmp, "in/quickstart.expected");
-    const data = try h.path(a, &tmp, "in/readings.parquet");
     const table = try h.path(a, &tmp, "in/komira.tsv");
     const r = try exec(a, &.{
         "install",  "--index",        "pypi",      "--dist",      dist,
         "--python", "/py/python3.13", "--example", example,       "--expect",
-        expect,     "--data",         data,        "--abi-table", table,
+        expect,     "--abi-table",    table,
         "--work",   work,
     }, &fake, &runner);
     try t.expectEqual(@as(u8, 1), r.code);
@@ -412,11 +407,10 @@ test "install fails with exit 1 and the step's failure when a command fails" {
     try t.expect(std.mem.endsWith(u8, r.out, try std.fmt.allocPrint(a, "::error title=pypi::create the virtual environment: `/py/python3.13 -m venv {s}/venv` exited with 3; last lines of stderr: | no venv module\n", .{work})));
 }
 
-/// A scratch directory with the example, its data, the expected file and the ABI table under `in/`.
+/// A scratch directory with the example, the expected file and the ABI table under `in/`.
 fn withInputs(tmp: *t.TmpDir) !void {
     try tmp.dir.makePath("in");
     try tmp.dir.writeFile(.{ .sub_path = "in/quickstart.py", .data = "print('x')\n" });
-    try tmp.dir.writeFile(.{ .sub_path = "in/readings.parquet", .data = "PAR1" });
     try tmp.dir.writeFile(.{ .sub_path = "in/quickstart.expected", .data = "<version>\n<abi_version>\nregistered readings\nTrue\n" });
     try tmp.dir.writeFile(.{ .sub_path = "in/komira.tsv", .data = "version\t1.1\n" });
 }
@@ -434,8 +428,6 @@ fn installFromDist(a: Alloc, tmp: *t.TmpDir, dist: []const u8, work: []const u8,
         try h.path(a, tmp, "in/quickstart.py"),
         "--expect",
         try h.path(a, tmp, "in/quickstart.expected"),
-        "--data",
-        try h.path(a, tmp, "in/readings.parquet"),
         "--abi-table",
         try h.path(a, tmp, "in/komira.tsv"),
         "--work",
@@ -592,17 +584,17 @@ test "a usage error is exit 2 with its message, and reaches neither the index no
         .{ .args = &.{ "verify", "--index", "testpypi", "--dist", "d", "--delay", "-1" }, .want = "pypi_smoke: --delay is a number of seconds from 0 to 300\n" },
         .{ .args = &.{ "verify", "--index", "npm", "--dist", "d" }, .want = "pypi_smoke: --index is testpypi or pypi\n" },
         .{ .args = &.{ "state", "--index", "", "--dist", "d", "--github-output", "g" }, .want = "pypi_smoke: --index is testpypi or pypi\n" },
-        .{ .args = &.{ "install", "--index", "pip", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--data", "f", "--abi-table", "t", "--work", "w" }, .want = "pypi_smoke: --index is testpypi, pypi or dist\n" },
-        .{ .args = &.{ "install", "--index", "dist", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--data", "f", "--abi-table", "t", "--work", "w", "--attempts", "2" }, .want = "pypi_smoke: --attempts and --delay are for an index; --index dist installs once\n" },
-        .{ .args = &.{ "install", "--index", "dist", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--data", "f", "--abi-table", "t", "--work", "w", "--delay", "0" }, .want = "pypi_smoke: --attempts and --delay are for an index; --index dist installs once\n" },
+        .{ .args = &.{ "install", "--index", "pip", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--abi-table", "t", "--work", "w" }, .want = "pypi_smoke: --index is testpypi, pypi or dist\n" },
+        .{ .args = &.{ "install", "--index", "dist", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--abi-table", "t", "--work", "w", "--attempts", "2" }, .want = "pypi_smoke: --attempts and --delay are for an index; --index dist installs once\n" },
+        .{ .args = &.{ "install", "--index", "dist", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--abi-table", "t", "--work", "w", "--delay", "0" }, .want = "pypi_smoke: --attempts and --delay are for an index; --index dist installs once\n" },
         .{ .args = &.{ "state", "--index", "dist", "--dist", "d", "--github-output", "g" }, .want = "pypi_smoke: --index is testpypi or pypi\n" },
         .{ .args = &.{ "verify", "--index", "dist", "--dist", "d" }, .want = "pypi_smoke: --index is testpypi or pypi\n" },
         .{ .args = &.{ "matrix", "--pythons", "s", "--platform", "linux-x86_64" }, .want = USAGE },
         .{ .args = &.{ "matrix", "--pythons", "s", "--platform", "windows-x86_64", "--github-output", "g" }, .want = "pypi_smoke: --platform is one of linux-x86_64, macos-arm64\n" },
         .{ .args = &.{ "matrix", "--pythons", "s", "--platform", "linux-x86_64", "--github-output", "g", "--python", "3.13" }, .want = "pypi_smoke: unknown argument --python\n" ++ USAGE },
         .{ .args = &.{ "matrix", "--supported", "s", "--platform", "linux-x86_64", "--github-output", "g" }, .want = "pypi_smoke: unknown argument --supported\n" ++ USAGE },
-        .{ .args = &.{ "install", "--index", "pypi", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--abi-table", "t", "--work", "w" }, .want = USAGE },
-        .{ .args = &.{ "install", "--index", "pypi", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--abi-table", "t", "--work", "w", "--data" }, .want = "pypi_smoke: --data needs one value\n" },
+        .{ .args = &.{ "install", "--index", "pypi", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--abi-table", "t" }, .want = USAGE },
+        .{ .args = &.{ "install", "--index", "pypi", "--dist", "d", "--python", "p", "--example", "e", "--expect", "x", "--abi-table", "t", "--work", "w", "--data", "f" }, .want = "pypi_smoke: unknown argument --data\n" ++ USAGE },
     };
     for (cases) |c| {
         var fake = h.Fake{ .alloc = a, .routes = &.{} };

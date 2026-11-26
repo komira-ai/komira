@@ -485,7 +485,7 @@ c_shared_lib(
 
 # Session.sql on the real library: SELECT 1 AS n, a GROUP BY over a checked-in
 # Parquet file (3000 rows, five labels, six row groups), an aggregate over the
-# quickstart's readings.parquet, an answer of no rows, each terminal, an engine
+# checked-in fixtures/readings.parquet, an answer of no rows, each terminal, an engine
 # refusal with its message and the session answering after it, and a result
 # read after its session was closed or collected (the stream needs neither),
 # or never read at all, without a crash.
@@ -495,7 +495,7 @@ c_shared_lib(
     data = {
         "labels.parquet": "komira//src/parquet_codec:pyarrow_multi_dict_page.parquet",
         "libkomira": LIBKOMIRA,
-        "readings.parquet": "komira//python:examples/readings.parquet",
+        "readings.parquet": "fixtures/readings.parquet",
     },
     deps = ["//python:komira", _PYARROW[p["suffix"]]],
     **_ON[p["suffix"]]
@@ -1005,7 +1005,8 @@ _FAMILY_FILES = {d: glob([d + "/test_*.py"]) for d in _FAMILIES}
 # prefix and runs a test there, the three tests the installed interpreter runs
 # (the wheel alone, the wheel beside Modular's runtime, and the wheel after an
 # upgrade from the previous release), and the serialized plan the first renders
-# (the scan plan of src/so/tests/gate/gate_plan_render.mojo, as hex).
+# (the scan plan of src/so/tests/gate/gate_plan_render.mojo, as hex) and the
+# Parquet file whose aggregate it answers (fixtures/readings.parquet).
 [export_file(
     name = f,
     visibility = ["komira//python:"],
@@ -1018,6 +1019,7 @@ _FAMILY_FILES = {d: glob([d + "/test_*.py"]) for d in _FAMILIES}
     "test_beside_modular.py",
     "test_upgrade.py",
     "fixtures/scan_plan.hex",
+    "fixtures/readings.parquet",
     "fixtures/previous_release_only.txt",
 ]]
 

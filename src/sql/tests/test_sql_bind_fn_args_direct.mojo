@@ -5,7 +5,8 @@
 # Each query is parsed and its select items and WHERE predicate are bound with
 # `_bind_scalar` against one table's schema; the test compares the bound
 # expression text, or the binder's message.
-#   1. greatest / least, coalesce / ifnull (a NULL argument dropped, all-NULL
+#   1. greatest / least (over floats a NaN is the greatest and a tie keeps the
+#      first argument), coalesce / ifnull (a NULL argument dropped, all-NULL
 #      refused).
 #   2. date_part / date_trunc and their unit refusals; left / right /
 #      substring; the year-derived parts, nanosecond, the float classes and
@@ -115,7 +116,14 @@ def _check(sql: String, want: String) raises:
 def test_greatest_least_coalesce() raises:
     _check(
         "SELECT greatest(k, v) AS g1, least(k, 2) AS l1 FROM t",
-        "Project(exprs=[Alias(When(WHEN UnaryOp(IS_NULL, ColRef(k)) THEN ColRef(v), WHEN UnaryOp(IS_NULL, ColRef(v)) THEN ColRef(k), WHEN BinaryOp(GT, ColRef(k), ColRef(v)) THEN ColRef(k), ELSE ColRef(v)), \"g1\"), Alias(When(WHEN UnaryOp(IS_NULL, ColRef(k)) THEN Literal(ScalarValue(int64, 2)), WHEN UnaryOp(IS_NULL, Literal(ScalarValue(int64, 2))) THEN ColRef(k), WHEN BinaryOp(LT, ColRef(k), Literal(ScalarValue(int64, 2))) THEN ColRef(k), ELSE Literal(ScalarValue(int64, 2))), \"l1\")])\n"
+        "Project(exprs=[Alias(When(WHEN UnaryOp(IS_NULL, ColRef(k)) THEN ColRef(v), WHEN UnaryOp(IS_NULL, ColRef(v)) THEN ColRef(k), WHEN BinaryOp(AND, UnaryOp(NOT, BinaryOp(AND, BinaryOp(GT, ColRef(v), Literal(ScalarValue(float64, -inf))), BinaryOp(LT, ColRef(v), Literal(ScalarValue(float64, inf))))), UnaryOp(NOT, BinaryOp(OR, BinaryOp(EQ, ColRef(v), Literal(ScalarValue(float64, inf))), BinaryOp(EQ, ColRef(v), Literal(ScalarValue(float64, -inf)))))) THEN ColRef(v), WHEN BinaryOp(GT, ColRef(v), ColRef(k)) THEN ColRef(v), ELSE ColRef(k)), \"g1\"), Alias(When(WHEN UnaryOp(IS_NULL, ColRef(k)) THEN Literal(ScalarValue(int64, 2)), WHEN UnaryOp(IS_NULL, Literal(ScalarValue(int64, 2))) THEN ColRef(k), WHEN BinaryOp(LT, ColRef(k), Literal(ScalarValue(int64, 2))) THEN ColRef(k), ELSE Literal(ScalarValue(int64, 2))), \"l1\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    # Over floats DuckDB's NaN is the greatest and a tie keeps the first
+    # argument: least(v, 0.5) of a NaN is 0.5, of -0.0 and 0.0 is -0.0.
+    _check(
+        "SELECT least(v, 0.5) AS l2 FROM t",
+        "Project(exprs=[Alias(When(WHEN UnaryOp(IS_NULL, ColRef(v)) THEN Literal(ScalarValue(float64, 0.5)), WHEN UnaryOp(IS_NULL, Literal(ScalarValue(float64, 0.5))) THEN ColRef(v), WHEN BinaryOp(AND, UnaryOp(NOT, BinaryOp(AND, BinaryOp(GT, ColRef(v), Literal(ScalarValue(float64, -inf))), BinaryOp(LT, ColRef(v), Literal(ScalarValue(float64, inf))))), UnaryOp(NOT, BinaryOp(OR, BinaryOp(EQ, ColRef(v), Literal(ScalarValue(float64, inf))), BinaryOp(EQ, ColRef(v), Literal(ScalarValue(float64, -inf)))))) THEN Literal(ScalarValue(float64, 0.5)), WHEN BinaryOp(AND, UnaryOp(NOT, BinaryOp(AND, BinaryOp(GT, Literal(ScalarValue(float64, 0.5)), Literal(ScalarValue(float64, -inf))), BinaryOp(LT, Literal(ScalarValue(float64, 0.5)), Literal(ScalarValue(float64, inf))))), UnaryOp(NOT, BinaryOp(OR, BinaryOp(EQ, Literal(ScalarValue(float64, 0.5)), Literal(ScalarValue(float64, inf))), BinaryOp(EQ, Literal(ScalarValue(float64, 0.5)), Literal(ScalarValue(float64, -inf)))))) THEN ColRef(v), WHEN BinaryOp(LT, Literal(ScalarValue(float64, 0.5)), ColRef(v)) THEN Literal(ScalarValue(float64, 0.5)), ELSE ColRef(v)), \"l2\")])\n"
         "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(

@@ -11,10 +11,12 @@ plan bytes they are given. For each verb and expression:
 - the types it lowers by (floor division over integers and over floats, a
   boolean column as a predicate, the types polars gives a sum, a mean and a
   count) and the output names polars gives;
+- an aggregate beside a row-wise value in select, with_columns and filter is
+  a window over the whole frame (a broadcast);
 - each refusal raises its class with its full message: an unknown column, an
-  aggregate beside a row-wise value, an order-dependent verb on an unordered
-  frame, a stable sort, a regular expression, a negative count, frames of
-  two sessions or of different columns;
+  order-dependent verb on an unordered frame, a stable sort, a regular
+  expression, a negative count, frames of two sessions or of different
+  columns;
 - `collect()` hands the session the bytes of a `WirePlanEnvelope` that holds
   no SQL text, and `schema` gives pyarrow types.
 
@@ -55,6 +57,7 @@ from komira._ops import (
     Unary,
     Union,
     When,
+    WindowExpr,
 )
 from komira._plan._wire import arrow_id, field, pb
 
@@ -204,13 +207,21 @@ def test_with_columns_replaces_in_place_and_appends():
     assert frame().with_columns()._plan == T
 
 
-def test_with_columns_refuses_an_aggregate():
-    refused(
-        lambda: frame().with_columns(kpl.col("x").sum().alias("t")),
-        UnsupportedOperation,
-        "with_columns: 't' is an aggregate, which would be broadcast over the rows (a window); "
-        "that is not supported yet",
-    )
+def broadcast_sum_of_x():
+    """The plan below a verb with one broadcast sum of x: the frame's columns
+    and the sum's window over the whole frame, and the sum's reference (0
+    where the window has no value)."""
+    ref = c("__komira_win_0")
+    below = Project(T, tuple((n, c(n)) for n, _ in TYPES) + (("__komira_win_0", WindowExpr("sum", "x")),))
+    return below, When(((Unary("is_null", ref), Lit(0)),), ref)
+
+
+def test_with_columns_broadcasts_an_aggregate_over_the_rows():
+    below, total = broadcast_sum_of_x()
+    lf = frame().with_columns(kpl.col("x").sum().alias("t"))
+    assert lf._plan == Project(below, tuple((n, c(n)) for n, _ in TYPES) + (("t", total),))
+    assert lf.columns == [n for n, _ in TYPES] + ["t"]
+    assert lf._order is None
 
 
 # ---- expressions ---------------------------------------------------------------
@@ -566,17 +577,13 @@ def test_aggregate_below_a_sort_drops_the_sort():
     assert lf._plan == Aggregate(T, (), (("x", Agg("max", (c("x"),))),))
 
 
-def test_an_aggregate_beside_a_row_wise_value_is_refused():
-    refused(
-        lambda: frame().select(kpl.col("x").sum(), kpl.col("y")),
-        UnsupportedOperation,
-        "select: the column 'y' is used beside an aggregate; an aggregate broadcast over rows "
-        "(a window) is not supported yet, so aggregate every column of this select()",
-    )
-    refused(
-        lambda: frame().filter(kpl.col("x").sum() > 1),
-        UnsupportedOperation,
-        "filter: a predicate over an aggregate needs a window, which is not supported yet",
+def test_an_aggregate_beside_a_row_wise_value_is_broadcast_over_the_rows():
+    below, total = broadcast_sum_of_x()
+    lf = frame().select(kpl.col("x").sum(), kpl.col("y"))
+    assert lf._plan == Project(below, (("x", total), ("y", c("y"))))
+    lf = frame().filter(kpl.col("x").sum() > 1)
+    assert lf._plan == Project(
+        Filter(below, Compare("gt", total, Lit(1))), tuple((n, c(n)) for n, _ in TYPES)
     )
 
 

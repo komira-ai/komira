@@ -5,7 +5,8 @@ tables of dataframe_surface_verbs.md), with no library and no plan modules:
   polars, pandas nor the plan encoder;
 - `komira.pl.__all__` is the module's public names, `dir()` lists exactly
   them, and every one is defined;
-- for every name in each refusal table (the module, `LazyFrame`, `Expr`),
+- for every name in each refusal table (the module, `LazyFrame`, `Expr`,
+  `LazyGroupBy`),
   `hasattr` is False and the `AttributeError` message equals the table's text
   word for word;
 - a name in no table raises Python's own message, and a name starting with
@@ -14,7 +15,8 @@ tables of dataframe_surface_verbs.md), with no library and no plan modules:
 - `lf.<column>` raises, naming `komira.pl.col("<column>")`, and a column
   named like a verb (`head`) is reached only by `col`, while `lf.head()` is
   still the verb;
-- setting an attribute is refused on a frame and an expression;
+- setting an attribute is refused on a frame, an expression and the groups
+  of a frame;
 - `len()`, `bool()`, `iter()` and the array protocols of a frame raise
   `UnsupportedOperation` naming `collect()`, and a frame survives
   `copy.copy`.
@@ -35,6 +37,7 @@ for module in ("pyarrow", "google.protobuf", "polars", "pandas", "komira._plan",
 assert _loaded is None, "importing komira.pl loaded the library"
 
 from komira.pl._frame import LazyFrame  # noqa: E402
+from komira.pl._group import LazyGroupBy  # noqa: E402
 
 PUBLIC = [
     "Expr",
@@ -82,6 +85,11 @@ FRAME_TABLE = {
 EXPR_TABLE = {
     "apply": "Expr.apply is not a polars verb; use map_elements(f, return_dtype=...)",
     "sort_by": "Expr.sort_by() is not supported: the plan carries no order inside an expression; sort the frame instead",
+    "first": ".first() is not supported yet; use .min() or .max() of an ordered key",
+    "last": ".last() is not supported yet; use .min() or .max() of an ordered key",
+}
+
+GROUPBY_TABLE = {
     "first": ".first() is not supported yet; use .min() or .max() of an ordered key",
     "last": ".last() is not supported yet; use .min() or .max() of an ordered key",
 }
@@ -138,10 +146,20 @@ def test_expr_refusal_table_and_python_message():
     for name, message in EXPR_TABLE.items():
         assert not hasattr(e, name), name
         refused(lambda: getattr(e, name), AttributeError, message)
-    refused(lambda: e.rank, AttributeError, "'Expr' object has no attribute 'rank'")
+    refused(lambda: e.shift, AttributeError, "'Expr' object has no attribute 'shift'")
     refused(lambda: e.str.split, AttributeError, "'ExprStringNameSpace' object has no attribute 'split'")
     refused(lambda: kpl.when(e > 1).else_, AttributeError, "'When' object has no attribute 'else_'")
     refused(lambda: kpl.when(e > 1).then(1).else_, AttributeError, "'Then' object has no attribute 'else_'")
+
+
+def test_group_by_refusal_table_and_python_message():
+    groups = LazyGroupBy(frame(), ("x",))
+    for name, message in GROUPBY_TABLE.items():
+        assert not hasattr(groups, name), name
+        refused(lambda: getattr(groups, name), AttributeError, message)
+    refused(lambda: groups.head, AttributeError, "'LazyGroupBy' object has no attribute 'head'")
+    refused(lambda: groups._repr_html_, AttributeError, "_repr_html_")
+    assert repr(groups) == "<komira.pl.LazyGroupBy by [x]>"
 
 
 def test_no_attribute_is_a_column():
@@ -165,6 +183,9 @@ def test_setting_an_attribute_is_refused():
     def set_expr():
         kpl.col("x").name = "y"
 
+    def set_groups():
+        LazyGroupBy(frame(), ("x",)).keys = ("head",)
+
     refused(
         set_frame,
         AttributeError,
@@ -174,6 +195,11 @@ def test_setting_an_attribute_is_refused():
         set_expr,
         AttributeError,
         "cannot set the attribute 'name' of an Expr: an Expr is immutable; build a new one with its methods",
+    )
+    refused(
+        set_groups,
+        AttributeError,
+        "cannot set the attribute 'keys' of a LazyGroupBy; aggregate it with agg(...)",
     )
 
 

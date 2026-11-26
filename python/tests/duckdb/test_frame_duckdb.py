@@ -34,10 +34,10 @@ equal (`frame_duckdb_test`, CPython 3.13, the real libkomira).
   column; a sort by an output then head, head of the key sort, a filter of
   the groups, and a groupby of rows that match nothing;
 - the frame's own reductions and agg, one row each (float sums, means, mins
-  and maxes too), also over no rows (a sum of 0, a count of 0, a missing mean
-  and max);
+  and maxes too, and a mean of a bool, the share of its trues), also over no
+  rows (a sum of 0, a count of 0, a missing mean and max);
 - the reductions the engine does not run yet (median, std, var, a grouped
-  float sum or mean, a mean of a bool and its sum under min_count=1, min and
+  float sum or mean, a grouped mean of a bool, min and
   max of a string or a bool, nunique of a bool)
   build their plan and are refused at materialize() with the engine's step;
 - drop_duplicates of whole rows over one and several columns, with NULLs,
@@ -707,6 +707,12 @@ GROUPS = [
         ("n",),
     ),
     Case(
+        "groupby sum of a bool with min_count=1 keeps the missing sum",
+        lambda d: d.groupby("k")["flag"].sum(min_count=1),
+        "SELECT k, CAST(SUM(CAST(flag AS BIGINT)) AS BIGINT) AS flag " + GROUPED_BY_K,
+        ("k",),
+    ),
+    Case(
         "groupby sum of a bool counts True",
         lambda d: d.groupby("k")["flag"].sum(),
         "SELECT k, CAST(COALESCE(SUM(CAST(flag AS BIGINT)), 0) AS BIGINT) AS flag " + GROUPED_BY_K,
@@ -859,6 +865,11 @@ REDUCTIONS = [
         "CAST(COALESCE(SUM(CAST(flag AS BIGINT)), 0) AS BIGINT) AS flag FROM t",
     ),
     Case(
+        "mean of a bool is the share of its trues, NULL left out",
+        lambda d: d[["flag"]].mean(),
+        "SELECT AVG(CAST(flag AS INTEGER)) AS flag FROM t",
+    ),
+    Case(
         "mean of the frame's numbers",
         lambda d: d[["k", "v", "n"]].mean(),
         "SELECT AVG(k) AS k, AVG(v) AS v, AVG(n) AS n FROM t",
@@ -913,8 +924,6 @@ ENGINE_REFUSED = [
     ("a grouped sum of a float", lambda d: d.groupby("k")["v"].sum()),
     ("a grouped mean of a float", lambda d: d.groupby("k")["v"].mean()),
     ("a grouped mean of a bool", lambda d: d.groupby("k")["flag"].mean()),
-    ("a mean of a bool", lambda d: d[["flag"]].mean()),
-    ("a sum of a bool that keeps a missing sum", lambda d: d.groupby("k")["flag"].sum(min_count=1)),
     ("a grouped median", lambda d: d.groupby("k")["n"].median()),
     ("a grouped std", lambda d: d.groupby("k")["n"].std()),
     ("a grouped var", lambda d: d.groupby("k")["n"].var()),
