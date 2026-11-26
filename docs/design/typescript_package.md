@@ -713,8 +713,9 @@ linux-x86_64.
   - the version;
   - the public names;
   - the load of `libkomira` from the installed platform package alone, with no Mojo toolchain, no
-    `mojo-compiler` and no library path in the test's environment, which is what a user's machine
-    has;
+    `mojo-compiler` and no library path in the test's environment but the one naming node's own
+    C++ runtime (`libstdc++`, `libgcc_s`, which a user's system has and the build workers do
+    not), which is what a user's machine has;
   - `SELECT 1`;
   - a `GROUP BY` over Parquet, CSV and NDJSON fixtures: the Parquet one registered, the CSV and
     NDJSON ones through `read_csv` and `read_json` until those registrations exist;

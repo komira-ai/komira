@@ -4,9 +4,8 @@
 
 TARGETS = [
     "komira//node:arrow_test",
+    "komira//node:install_test",
     "komira//node:load_test",
-    "komira//node:package",
-    "komira//node:package_linux_x64",
     "komira//node:package_test",
     "komira//node:session_test",
     "komira//node:thread_test",
