@@ -13,8 +13,10 @@ its context, so a result still reads after its session is closed or collected
 A session may be used from any thread. It holds a lock around each call into
 the library, so its context never runs two calls at once (the C ABI's rule,
 src/so/README.md): a call waits for the one running on the same session to
-return. Reading a `Result` takes no lock, since its stream needs neither the
-session nor its context.
+return. Reading a `Result` takes no lock of the session, since its stream
+needs neither the session nor its context; a result has a lock of its own,
+held while a notebook display reads its first rows, which a terminal that
+finds the stream taken waits for.
 
 On a library of ABI 1.6 or later, `sql` runs its statement under a run handle
 (`_run.run_sql`): a Ctrl-C while it runs cancels the run, and a `progress`
@@ -33,7 +35,7 @@ from collections.abc import Callable, Iterator
 from types import ModuleType, TracebackType
 from typing import TYPE_CHECKING
 
-from . import _arrow, _native, _run
+from . import _arrow, _display, _native, _run
 from ._credentials import _BuiltIn, _Credential
 from ._errors import KomiraError, UnsupportedOperation
 
@@ -393,13 +395,45 @@ class Result:
     Reading does not need the session: a result still reads after its session
     is closed, and while another call runs on it. Of two threads that read one
     result at once, one reads it and the other gets the `KomiraError`.
+
+    In a notebook, a result shows its first rows (`_repr_html_`) and stays
+    unread: a terminal called after that still reads the whole answer.
     """
 
     def __init__(self, reader: pyarrow.RecordBatchReader) -> None:
         # The reader, until a terminal takes it. `list.pop` takes it in one
         # step, so of two threads reading one result, one gets it and the
-        # other the error.
+        # other the error, and neither waits for the other. `_repr_html_`
+        # takes it and puts back the reader that replays it while it holds
+        # `_lock`; a terminal that finds no reader takes `_lock` before it
+        # looks again, so a terminal called while a display reads waits for
+        # the display and then reads. The lock is reentrant, so a signal
+        # handler that reads the result during a display on its own thread
+        # gets the error rather than waiting for itself.
         self._reader: list[pyarrow.RecordBatchReader] = [reader]
+        self._lock = threading.RLock()
+
+    def _repr_html_(self) -> str | None:
+        """IPython's HTML display of the answer: its first rows, at most ten,
+        under the column names and types, and a line with the row and column
+        counts or saying there are more rows (komira/_display.py). The rows
+        are read from the stream and kept, so the result stays unread and a
+        terminal still reads all of it, once.
+
+        Once the result has been read, this returns None, and IPython shows
+        the plain `repr`. A failure while the rows are read raises
+        `KomiraError` with the engine's message, and a terminal called after
+        it raises the same failure. A Ctrl-C while they are read leaves the
+        result read."""
+        with self._lock:
+            if not self._reader:
+                return None
+            reader = self._reader.pop()
+            batches, more, error = _read_head(reader)
+            self._reader.append(_replay(reader, batches, error))
+        if error is not None:
+            raise KomiraError(str(error)) from error
+        return _display.result_html(reader.schema, batches, more)
 
     def __arrow_c_stream__(self, requested_schema: object | None = None) -> object:
         """The Arrow PyCapsule interface: a PyCapsule named
@@ -469,7 +503,53 @@ class Result:
         try:
             return self._reader.pop()
         except IndexError:
-            raise KomiraError("the result was already read: run the query again to read it again") from None
+            pass
+        # No reader: the result was read, or a display holds the reader under
+        # `_lock` and puts back the one that replays it before it lets go.
+        with self._lock:
+            try:
+                return self._reader.pop()
+            except IndexError:
+                raise KomiraError("the result was already read: run the query again to read it again") from None
+
+
+def _read_head(
+    reader: pyarrow.RecordBatchReader,
+) -> tuple[list[pyarrow.RecordBatch], bool, BaseException | None]:
+    """Reads batches from `reader` until they hold more than
+    `_display.MAX_ROWS` rows or the stream ends: the batches read, whether the
+    stream had more than that many rows, and the error the stream raised (one
+    of `_arrow.stream_errors()`), None when it raised none. Any other
+    exception, a Ctrl-C's `KeyboardInterrupt` among them, propagates."""
+    batches: list[pyarrow.RecordBatch] = []
+    rows = 0
+    try:
+        while rows <= _display.MAX_ROWS:
+            batch = reader.read_next_batch()
+            batches.append(batch)
+            rows += batch.num_rows
+    except StopIteration:
+        return batches, False, None
+    except _arrow.stream_errors() as e:
+        return batches, False, e
+    return batches, True, None
+
+
+def _replay(
+    reader: pyarrow.RecordBatchReader, batches: list[pyarrow.RecordBatch], error: BaseException | None
+) -> pyarrow.RecordBatchReader:
+    """A reader of `reader`'s schema that yields `batches`, the batches
+    `_read_head` read from it, and then raises `error` when it is not None,
+    or else yields the rest of `reader`."""
+    import pyarrow as pa
+
+    def batches_then_rest() -> Iterator[pyarrow.RecordBatch]:
+        yield from batches
+        if error is not None:
+            raise error
+        yield from reader
+
+    return pa.RecordBatchReader.from_batches(reader.schema, batches_then_rest())
 
 
 def _import_optional(name: str, terminal: str) -> ModuleType:

@@ -216,6 +216,11 @@ alias(
 # prefixed, no original name is referenced).
 checked_cxx_library(
     name = "crypto",
+    # The macOS archive is //src/awslc's; :crypto_macos only adds the prefix header.
+    archive = select({
+        "DEFAULT": None,
+        "prelude//os/constraints:macos": "//src/awslc:awslc_native_cxx",
+    }),
     checks = select({
         "DEFAULT": [":crypto_symbols"],
         "prelude//os/constraints:macos": ["//src/awslc:awslc_native_archive"],
