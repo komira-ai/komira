@@ -278,7 +278,7 @@ const Block = struct {
     /// `Remote Execution Error on Execute with digest ...` line and, on the
     /// next line, its cut line; empty lines only before the first and after
     /// the second. A test that printed exactly those two lines itself, with
-    /// nothing else, would read as a cut and run once more; nothing else does.
+    /// nothing else, would read as a cut and run again; nothing else does.
     unrun: enum {
         /// Before the test's first output marker.
         start,

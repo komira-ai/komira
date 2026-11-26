@@ -1,5 +1,5 @@
 //! The cases of farm_retry.zig's `classify`, //tools/build/ci:farm_retry_unit:
-//! which failed runs are a cut connection to the farm, run once more, and
+//! which failed runs are a cut connection to the farm, run again, and
 //! which are final. Each case is a log the tool must read right; the ones that
 //! must be final are the ones a wrong reading would pass over.
 //!
