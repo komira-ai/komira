@@ -1,0 +1,14 @@
+k	COALESCE(s, u)
+0	""
+1	abc
+10	Ünïcodé
+11	abcde
+12	abcdefgh
+2	  Hello 
+3	Ünïcodé
+4	abc
+5	kitten
+6	flaw
+7	a
+8	ab
+9	a,b
