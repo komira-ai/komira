@@ -384,8 +384,8 @@ struct _Parser(Movable):
             FORMAT <parquet|csv|json>       value: quoted OR bareword, lower-folded
             COMPRESSION <codec-word>
             COMPRESSION_LEVEL <int>
-            HEADER <true|false>             csv only
-            ARRAY <true|false>              json only
+            HEADER [true|false]             csv only; bare HEADER is true
+            ARRAY [true|false]              json only; bare ARRAY is true
 
         TWO PASSES, deliberately. Every option is COLLECTED first and validated
         only once the list is closed, because the meaning of HEADER / ARRAY /
@@ -552,7 +552,11 @@ struct _Parser(Movable):
 
     def _copy_option_bool(mut self, opt: String) raises -> Bool:
         """Read a BOOLEAN COPY option value (`HEADER true` / `ARRAY false`),
-        accepting the bareword and the quoted spellings DuckDB accepts."""
+        accepting the bareword and the quoted spellings DuckDB accepts. An
+        option written with no value (`HEADER` followed by `,` or `)`) is true,
+        as in DuckDB; nothing is consumed then."""
+        if self._kind() == TK_COMMA or self._kind() == TK_RPAREN:
+            return True
         var w = self._copy_option_word()
         if w == "true" or w == "1" or w == "on":
             return True

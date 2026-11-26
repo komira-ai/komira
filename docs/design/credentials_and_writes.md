@@ -912,12 +912,12 @@ catalog, with `write_table`. There is no
 - **Both doors return the same stream.** A run with a write target answers its one-row `Count` stream,
   and the write terminals read it and return `None`.
 - **`COPY` options.**
-  - Accepted: `FORMAT`, `COMPRESSION`, `COMPRESSION_LEVEL`, `HEADER true` and `ARRAY false`, as the
-    parser accepts them today. The pairs are `write_target_supported`'s 13.
+  - Accepted: `FORMAT`, `COMPRESSION`, `COMPRESSION_LEVEL`, `HEADER true` (or bare `HEADER`) and
+    `ARRAY false`, as the parser accepts them today. The pairs are `write_target_supported`'s 13.
   - Every other DuckDB option is refused by name with `COPY_OPTION_UNSUPPORTED`: `PARTITION_BY`,
     `OVERWRITE`, `OVERWRITE_OR_IGNORE`, `APPEND`, `FILE_SIZE_BYTES`, `PER_THREAD_OUTPUT`,
-    `USE_TMP_FILE`, `RETURN_FILES`, `DELIMITER`, `HEADER false` and `ARRAY true`. Each can later become
-    an optional field of `WireWriteTarget` (rule B8).
+    `USE_TMP_FILE`, `RETURN_FILES`, `DELIMITER`, `HEADER false` and `ARRAY true` (bare `ARRAY`
+    included). Each can later become an optional field of `WireWriteTarget` (rule B8).
   - The Python write terminals take one keyword, `compression=`. A value they cannot honour raises
     `UnsupportedOperation` by the DataFrame design's policy
     ([dataframe_surface.md §6](dataframe_surface.md#6-how-a-skin-refuses)). A keyword they do not have

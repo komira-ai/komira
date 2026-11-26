@@ -22,7 +22,8 @@
 #      (catches: the qualifier dropping the last component; a wrong default)
 #   4. COPY options: FORMAT / COMPRESSION / CODEC / COMPRESSION_LEVEL /
 #      HEADER / ARRAY in any order, each value spelled quoted or bare, every
-#      codec word, every refusal of the validation pass. (catches: a codec
+#      codec word, every refusal of the validation pass; a bare HEADER or ARRAY
+#      (no value) is true, as in DuckDB. (catches: a codec
 #      word mapped to the wrong code; a level other than the wired one
 #      accepted; an option validated before FORMAT is known)
 #   5. CREATE [OR REPLACE] TABLE [IF NOT EXISTS] <name> AS [(]<query>[)] and
@@ -448,6 +449,24 @@ def test_copy_options() raises:
         "the COPY option value 99999999999999999999 is out of range for BIGINT (DuckDB v1.5.3 raises a Conversion Error",
     )
     _refuses("COPY t TO 'o.parquet' (FORMAT csv", "')' to close COPY options")
+
+
+def test_copy_bare_boolean_option_is_true() raises:
+    # DuckDB reads a boolean COPY option written with no value as true:
+    # `(FORMAT csv, HEADER)` writes the header row, `(FORMAT json, ARRAY)`
+    # writes one JSON array. HEADER is accepted at the end of the list, before
+    # a comma and before FORMAT; bare ARRAY is ARRAY true, which the JSONL sink
+    # refuses by name. The validation pass still applies to a bare option.
+    _copy_pair("(FORMAT csv, HEADER)", WFMT_CSV, WCOMP_UNCOMPRESSED)
+    _copy_pair("(FORMAT csv, HEADER, COMPRESSION zstd)", WFMT_CSV, WCOMP_ZSTD)
+    _copy_pair("(HEADER, FORMAT 'csv')", WFMT_CSV, WCOMP_UNCOMPRESSED)
+    var st = _parse("COPY (SELECT a FROM t) TO 'out.csv' (HEADER)")
+    assert_equal(Int(st.kind), Int(STMT_COPY))
+    assert_equal(Int(st.fmt), Int(WFMT_CSV))
+    _refuses("COPY t TO 'o.parquet' (FORMAT json, ARRAY)", "(ARRAY true)")
+    _refuses("COPY t TO 'o.parquet' (HEADER)", "HEADER applies to FORMAT 'csv', not 'parquet'")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER", "expected a COPY option value")
+    _refuses("COPY t TO 'o.parquet' (FORMAT csv, HEADER,)", "expected a COPY option (FORMAT")
 
 
 def test_create_table_as() raises:
