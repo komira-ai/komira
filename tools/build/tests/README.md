@@ -44,6 +44,11 @@ do:
   tested in the graph: [`negative/native_reach`](negative/native_reach/BUCK)
   holds such cases, each green only while refused with its named error, and
   `tests//functional/native_reach:cases` builds them in the pull request check.
+  It also holds fixtures that are configured and never built:
+  [`negative/python_platform`](negative/python_platform/BUCK) is the python
+  macros' platform default, whose targets `tools/build/ci/cases.bxl`
+  configures for darwin-arm64 and linux-x86_64 and compares with the answer
+  each must give.
 
 A test with both halves keeps one package name in each, for example
 `tests//functional/test_data` (the test runtime contract that works) and

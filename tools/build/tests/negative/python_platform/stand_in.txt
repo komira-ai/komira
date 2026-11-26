@@ -1,0 +1,2 @@
+A checked-in file the fixtures of BUCK name as an interpreter archive, a
+script and a tzdata site. Nothing reads it: the fixtures are only configured.

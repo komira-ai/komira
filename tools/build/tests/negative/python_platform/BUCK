@@ -1,0 +1,79 @@
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/python:defs.bzl", "py_test", "python_dist")
+load("//negative/python_oracle:stand_in.bzl", "stand_in_tzdata")
+
+# Fixtures of the python macros' platform default (tools/build/python/defs.bzl,
+# `_pinned_python`): a `python` given as a plain label is a linux x86_64
+# interpreter, so the target is configured for linux x86_64 only, unless the
+# label is `:cpython_macos`. komira//tools/build/ci/cases.bxl reads the
+# target_compatible_with each fixture gets and configures each for
+# darwin-arm64 and linux-x86_64. Nothing here is built or run: the package is
+# outside the pull request check's query universe.
+#
+# The real interpreters are visible only to the test-only packages, so the
+# interpreters here are stand-ins named as the real ones are (the default
+# keys on the label's name), over a checked-in file that is no archive. Each
+# test runs on linux x86_64 (`exec_compatible_with`), so configuring one for
+# darwin-arm64 needs no macOS worker: only its own compatibility decides.
+
+export_file(
+    name = "not_an_archive",
+    src = "stand_in.txt",
+)
+
+stand_in_tzdata(
+    name = "tzdata",
+    site = "stand_in.txt",
+)
+
+python_dist(
+    name = "cpython_3_11",
+    archive = ":not_an_archive",
+    version = "3.11.9",
+)
+
+python_dist(
+    name = "cpython_macos",
+    archive = ":not_an_archive",
+    version = "3.13.0",
+)
+
+# A linux interpreter's label: compatible with linux-x86_64 only.
+py_test(
+    name = "linux_label",
+    src = "stand_in.txt",
+    python = ":cpython_3_11",
+    tzdata = ":tzdata",
+    exec_compatible_with = LINUX_X86_64,
+)
+
+# `:cpython_macos`: no default, so it configures for darwin-arm64.
+py_test(
+    name = "macos_label",
+    src = "stand_in.txt",
+    python = ":cpython_macos",
+    tzdata = ":tzdata",
+    exec_compatible_with = LINUX_X86_64,
+)
+
+# A `select` names each platform's own interpreter: no default.
+py_test(
+    name = "select_label",
+    src = "stand_in.txt",
+    python = select({
+        "prelude//os/constraints:macos": ":cpython_macos",
+        "DEFAULT": ":cpython_3_11",
+    }),
+    tzdata = ":tzdata",
+    exec_compatible_with = LINUX_X86_64,
+)
+
+# A target_compatible_with given is kept: the default never replaces it.
+py_test(
+    name = "linux_label_given",
+    src = "stand_in.txt",
+    python = ":cpython_3_11",
+    tzdata = ":tzdata",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = ["prelude//os/constraints:macos"],
+)
