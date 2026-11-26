@@ -436,8 +436,7 @@ c_shared_lib(
 # (fake_threads.c with FAKE_RUN), whose komira_sql_stream_run holds the run at a
 # gate until the test opens it or the run is cancelled: Ctrl-C cancels the
 # run's handle and sql raises KeyboardInterrupt once the run returned, the
-# handle freed after the call; a second Ctrl-C while it stops is not raised, and
-# cancels again only when it lands between the cancel and stop noting it; an
+# handle freed after the call; a second Ctrl-C while it stops is not raised; an
 # answer that stood after the cancel and a refusal during Ctrl-C are dropped; a
 # handler that does not raise leaves the query running; progress gets each
 # reading on the calling thread, never for a plan with no segment; the
