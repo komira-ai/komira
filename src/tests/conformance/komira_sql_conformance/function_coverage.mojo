@@ -21,11 +21,18 @@ Two limits of what a line says. A case is credited to every function it
 calls (`called_names` reads every identifier before a parenthesis), so a count
 is per case, not per function. `unreadable` is any raise of the comparison
 (render, parse or compare), which today is a result type the answer parser
-does not read. `measure_table` returns the table as text, one line per name; the test holds
+does not read. `measure` returns the table as text, one line per name; the test holds
 it to the committed file, so the file cannot say more or less than the engine
 does. The rows are read from the table's source text, not from a list kept
 beside it: a row added to the table is a new line here and fails the test
 until the committed file has it.
+
+The committed file is measured where the pinned DuckDB runs (linux-x86_64,
+glibc's libm). Elsewhere a transcendental function's answer is held to the
+oracle within 4 ulp, not bit for bit (komira_plan_harness.libm_rule), so on a
+line whose every case calls one, `equal` and `equal_within_4_ulps` say the
+same there: `fold_libm_outcomes` counts them as one `equal`, in the measured
+and the committed table alike. `differs` stays `differs`.
 """
 
 from std.os import listdir
@@ -33,6 +40,7 @@ from arrow.schema import RecordBatch
 from komira_plan_harness import (
     CanonPolicy,
     FloatTolerance,
+    calls_transcendental,
     compare_canon,
     duckdb_tsv_canon,
     parse_duckdb_tsv,
@@ -282,15 +290,18 @@ def case_names() raises -> List[String]:
 
 
 struct CaseRun(Copyable, Movable):
-    """One case: the names it calls and how it ended."""
+    """One case: the names it calls, whether it calls a transcendental
+    function (libm_rule.calls_transcendental) and how it ended."""
 
     var name: String
     var calls: List[String]
+    var calls_libm: Bool
     var outcome: String
 
-    def __init__(out self, name: String, var calls: List[String], outcome: String):
+    def __init__(out self, name: String, var calls: List[String], calls_libm: Bool, outcome: String):
         self.name = name
         self.calls = calls^
+        self.calls_libm = calls_libm
         self.outcome = outcome
 
 
@@ -302,7 +313,7 @@ def run_cases(mut ctx: EngineContext) raises -> List[CaseRun]:
         var sql = _query_of(text)
         var ordered = text.startswith("-- order: query")
         var tsv = read_data("duckdb/" + names[i] + ".tsv")
-        runs.append(CaseRun(names[i], called_names(sql), _outcome(ctx, sql, tsv, ordered)))
+        runs.append(CaseRun(names[i], called_names(sql), calls_transcendental(sql), _outcome(ctx, sql, tsv, ordered)))
     return runs^
 
 
@@ -367,9 +378,106 @@ def _line(
     )
 
 
-def measure_table(source: String) raises -> String:
+def libm_line_names(runs: List[CaseRun]) -> List[String]:
+    """The names every case of which calls a transcendental function, in the
+    order first credited; a name credited by one case that calls none is not
+    one of them."""
+    var credited = List[String]()
+    var mixed = List[Bool]()
+    for i in range(len(runs)):
+        for j in range(len(runs[i].calls)):
+            var at = -1
+            for k in range(len(credited)):
+                if credited[k] == runs[i].calls[j]:
+                    at = k
+            if at < 0:
+                credited.append(runs[i].calls[j])
+                mixed.append(not runs[i].calls_libm)
+            elif not runs[i].calls_libm:
+                mixed[at] = True
+    var out = List[String]()
+    for k in range(len(credited)):
+        if not mixed[k]:
+            out.append(credited[k])
+    return out^
+
+
+def _folded_outcome(outcome: String) raises -> String:
+    """`outcome` (`label:n` parts sorted by label) with the `equal` and
+    `equal_within_4_ulps` counts summed into one `equal` part, in its sorted
+    place; unchanged when it has neither."""
+    var equal = 0
+    var any_equal = False
+    var parts = List[String]()
+    for part in outcome.split(","):
+        var p = String(part)
+        var colon = p.rfind(":")
+        var label = String(p[byte = 0 : colon]) if colon >= 0 else p
+        if label == "equal" or label == "equal_within_4_ulps":
+            if colon < 0:
+                raise Error("an outcome count without a number: " + outcome)
+            equal += Int(String(p[byte = colon + 1 : p.byte_length()]))
+            any_equal = True
+        else:
+            parts.append(p)
+    if not any_equal:
+        return outcome
+    var folded = String("equal:") + String(equal)
+    var at = 0
+    while at < len(parts) and parts[at] < folded:
+        at += 1
+    parts.insert(at, folded)
+    var out = String("")
+    for i in range(len(parts)):
+        if i > 0:
+            out += ","
+        out += parts[i]
+    return out^
+
+
+def fold_libm_outcomes(table: String, names: List[String]) raises -> String:
+    """`table` with, on each line of a name in `names`, the `equal` and
+    `equal_within_4_ulps` counts of its outcome summed into one `equal` part
+    (in label order, as `_count_text` writes it). Comment lines, other names
+    and outcomes with neither count are unchanged. Raises on an `equal` count
+    that is not a number."""
+    var out = String("")
+    var lines = table.split("\n")
+    for li in range(len(lines)):
+        var line = String(lines[li])
+        if li > 0:
+            out += "\n"
+        var fields = line.split("\t")
+        var listed = False
+        if not line.startswith("#") and len(fields) == 6:
+            for n in range(len(names)):
+                if names[n] == String(fields[0]):
+                    listed = True
+        if not listed:
+            out += line
+            continue
+        for f in range(5):
+            out += String(fields[f]) + "\t"
+        out += _folded_outcome(String(fields[5]))
+    return out^
+
+
+struct Measurement(Movable):
+    """The measured table and the names whose every case calls a
+    transcendental function (`libm_line_names`)."""
+
+    var table: String
+    var libm_names: List[String]
+
+    def __init__(out self, var table: String, var libm_names: List[String]):
+        self.table = table^
+        self.libm_names = libm_names^
+
+
+def measure(source: String) raises -> Measurement:
     """The committed table's text: a line per name of the table's rows and of
-    the common-analysis list, sorted by name."""
+    the common-analysis list, sorted by name; with the names a host other
+    than the oracle's folds (`fold_libm_outcomes`)."""
     var ctx = new_context()
     var runs = run_cases(ctx)
     var rows = ladder_rows(source)
@@ -405,4 +513,4 @@ def measure_table(source: String) raises -> String:
     for i in range(len(order)):
         var at = order[i]
         text += _line(ctx, runs, common, names[at], kinds[at], families[at]) + "\n"
-    return text^
+    return Measurement(text^, libm_line_names(runs))

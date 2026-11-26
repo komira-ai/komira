@@ -10,7 +10,19 @@
 #     name of sql_scalar_fn_spec and of the common-analysis list) is exactly
 #     the committed file. A function that starts or stops running, a row
 #     added or removed, and a case added to the corpus each change a line and
-#     fail it; the failure message holds the table to copy.
+#     fail it; the failure message holds the table to copy. Where the
+#     oracle runs (linux-x86_64) the table is held byte for byte; elsewhere
+#     both tables are first folded on the lines whose every case calls a
+#     transcendental function (fold_libm_outcomes), as libm_rule holds such
+#     an answer within 4 ulp there.
+#   * test_a_libm_fold_sums_exact_and_within_4_ulps: on a listed line,
+#     `equal` and `equal_within_4_ulps` become one `equal` count in label
+#     order, mixed with `differs` and alone; `differs` alone, a probe outcome,
+#     an unlisted line, the comment lines and the trailing newline are
+#     unchanged; a count that is not a number is refused.
+#   * test_libm_lines_are_the_names_only_libm_cases_credit: a name credited
+#     by cases that each call a transcendental function is listed, one also
+#     credited by a case that calls none is not, and no case lists nothing.
 #   * test_the_ladder_reader_reads_each_row_shape: aliases share a line, a
 #     refusal row names its family, an inline reason is named, a name held in
 #     a constant is kept, and a source without the function, a row without a
@@ -27,13 +39,17 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
+from komira_plan_harness import is_oracle_host
 from komira_sql_conformance.function_coverage import (
     TABLE_HEADER,
+    CaseRun,
     called_names,
     case_names,
     compare_answer,
+    fold_libm_outcomes,
     ladder_rows,
-    measure_table,
+    libm_line_names,
+    measure,
     new_context,
     probe,
     run_cases,
@@ -43,14 +59,63 @@ from sdk_exec.engine_sql import run_sql
 
 
 def test_function_table_is_what_the_engine_measures() raises:
-    var measured = measure_table(read_data("sql_fn_table.mojo"))
+    var m = measure(read_data("sql_fn_table.mojo"))
+    var measured = m.table.copy()
     var committed = read_data("function_coverage.tsv")
+    var where = String("")
+    if not is_oracle_host():
+        measured = fold_libm_outcomes(measured, m.libm_names)
+        committed = fold_libm_outcomes(committed, m.libm_names)
+        where = " (measured off the oracle host: commit a table measured on linux-x86_64)"
     if measured != committed:
         assert_true(
             False,
-            "function_coverage.tsv is not what the engine measures; the"
-            " measured table is\n<<<<\n" + measured + ">>>>",
+            "function_coverage.tsv is not what the engine measures" + where + "; the"
+            " measured table is\n<<<<\n" + m.table + ">>>>",
         )
+
+
+def test_a_libm_fold_sums_exact_and_within_4_ulps() raises:
+    var table = (
+        "# a comment\tequal_within_4_ulps:1\n"
+        "sin\tFNK_MATH_FN\t-\tyes\t1\tequal_within_4_ulps:1\n"
+        "cos\tFNK_MATH_FN\t-\tyes\t3\tequal:1,equal_within_4_ulps:2\n"
+        "ln\tFNK_MATH_FN\t-\tyes\t3\tdiffers:1,equal:1,equal_within_4_ulps:1\n"
+        "exp\tFNK_MATH_FN\t-\tyes\t1\tdiffers:1\n"
+        "nextafter\tFNK_REFUSED\t_R_MATH2\t-\t1\tprobe:refused_bind\n"
+        "tan\tFNK_MATH_FN\t-\tyes\t1\tequal_within_4_ulps:1\n"
+    )
+    var names: List[String] = ["sin", "cos", "ln", "exp", "nextafter"]
+    assert_equal(
+        fold_libm_outcomes(table, names),
+        "# a comment\tequal_within_4_ulps:1\n"
+        "sin\tFNK_MATH_FN\t-\tyes\t1\tequal:1\n"
+        "cos\tFNK_MATH_FN\t-\tyes\t3\tequal:3\n"
+        "ln\tFNK_MATH_FN\t-\tyes\t3\tdiffers:1,equal:2\n"
+        "exp\tFNK_MATH_FN\t-\tyes\t1\tdiffers:1\n"
+        "nextafter\tFNK_REFUSED\t_R_MATH2\t-\t1\tprobe:refused_bind\n"
+        "tan\tFNK_MATH_FN\t-\tyes\t1\tequal_within_4_ulps:1\n",
+    )
+    assert_equal(fold_libm_outcomes(table, List[String]()), table)
+    var caught = False
+    try:
+        _ = fold_libm_outcomes("sin\tFNK_MATH_FN\t-\tyes\t1\tequal:x\n", names)
+    except:
+        caught = True
+    assert_true(caught, "an equal count that is not a number is refused")
+
+
+def test_libm_lines_are_the_names_only_libm_cases_credit() raises:
+    var runs = List[CaseRun]()
+    runs.append(CaseRun("sin", ["sin", "round"], True, "equal"))
+    runs.append(CaseRun("cos", ["cos"], True, "equal_within_4_ulps"))
+    runs.append(CaseRun("round", ["round"], False, "equal"))
+    runs.append(CaseRun("sin_again", ["sin"], True, "equal"))
+    var names = libm_line_names(runs)
+    assert_equal(len(names), 2)
+    assert_equal(names[0], "sin")
+    assert_equal(names[1], "cos")
+    assert_equal(len(libm_line_names(List[CaseRun]())), 0)
 
 
 def _def_source(rows: String) -> String:
