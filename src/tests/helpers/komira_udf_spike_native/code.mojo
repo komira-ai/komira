@@ -116,7 +116,8 @@ def heap_in_use() -> Int:
 
 
 def open_fds() -> Int:
-    """The file descriptors open in this process (native/probe.c)."""
+    """The file descriptors open in this process (native/probe.c): the
+    entries of /proc/self/fd on Linux, of /dev/fd on macOS."""
     return Int(external_call["komira_udf_spike_open_fds", Int64]())
 
 
@@ -131,10 +132,27 @@ def stdin_open() -> Bool:
     return external_call["komira_udf_spike_stdin_open", Int64]() == 1
 
 
-def stdin_is_library_memfd() -> Bool:
-    """Descriptor 0 names the native runtime's library memory file
+def stdin_is_library_copy() -> Bool:
+    """Descriptor 0 is the native runtime's private copy of a verified
+    library (native/probe.c): on Linux its memory file, on macOS its file in
+    the runtime's private directory."""
+    return external_call["komira_udf_spike_stdin_is_library_copy", Int64]() == 1
+
+
+def private_copies() -> Int:
+    """The files the native runtimes of this process hold as private copies
+    of a library (native/probe.c): on macOS those in their private
+    directories under the scratch directory, on Linux 0 (the copy is a
+    memory file, counted by open_fds). -1 when the scratch directory is not
+    readable."""
+    return Int(external_call["komira_udf_spike_private_copies", Int64]())
+
+
+def path_max() -> Int:
+    """The longest path the system takes, with its terminator: PATH_MAX,
+    which is also the size of the native runtime's path buffer
     (native/probe.c)."""
-    return external_call["komira_udf_spike_stdin_is_library_memfd", Int64]() == 1
+    return Int(external_call["komira_udf_spike_path_max", Int64]())
 
 
 def with_batch_twins(cases: List[Case]) -> List[Case]:

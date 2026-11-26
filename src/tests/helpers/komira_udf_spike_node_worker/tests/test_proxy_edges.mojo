@@ -30,7 +30,12 @@
 #   - an aggregate whose finish raises is ERR_RAISED with the worker's
 #     message (an error reply decoded as an output);
 #   - after shutdown no descriptor and no child process of the runtime is
-#     left (the channel or the cancel word not closed, a worker not reaped);
+#     left (the channel or the cancel word not closed, a worker not reaped):
+#     descriptors are counted by kudfw_probe_open_fds and children by
+#     kudfw_probe_children (proxy/channel_probe.c), which reaps every child
+#     that already ended and counts it, counts a running child once, and
+#     returns 0 only when waitpid(-1) reports no child (ECHILD); both work
+#     the same on Linux and macOS;
 #   - a frame abandoned by the proxy leaves its worker usable;
 #   - the library opened by its absolute path finds the worker beside it.
 #
@@ -50,7 +55,7 @@
 # channel.c refusing only a negative remaining time (m0610).
 # Each red on the farm.
 
-from std.os import listdir
+from std.ffi import external_call
 from std.os.path import realpath
 from std.testing import assert_equal, assert_true
 
@@ -306,16 +311,16 @@ def _aggregates(mut rt: UdfRuntime) raises:
 
 
 def _fds() raises -> Int:
-    return len(listdir("/proc/self/fd"))
+    """The descriptors open in this process (channel_probe.c, the same count
+    on Linux and macOS)."""
+    return Int(external_call["kudfw_probe_open_fds", Int64]())
 
 
-def _children() raises -> String:
-    """The pids of this process's children, from every thread's list."""
-    var out = String("")
-    for t in listdir("/proc/self/task"):
-        with open("/proc/self/task/" + t + "/children", "r") as f:
-            out += f.read()
-    return out^
+def _children() raises -> Int:
+    """The children this process has left: those that ended unreaped, each
+    reaped and counted, plus one for a child still running; 0 when none is
+    left (channel_probe.c, waitpid(-1) with WNOHANG)."""
+    return Int(external_call["kudfw_probe_children", Int64]())
 
 
 def main() raises:
@@ -338,5 +343,5 @@ def main() raises:
     assert_equal(l.streams_exported, l.streams_released, "streams exported vs released")
     rt.shutdown()
     assert_equal(_fds(), fds0, "descriptors open after shutdown, against before open")
-    assert_equal(_children().strip(), "", "child processes left after shutdown")
+    assert_equal(_children(), 0, "child processes left after shutdown")
     print("test_proxy_edges: ok")

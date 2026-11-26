@@ -1,8 +1,9 @@
 //! analysis_refusals_node: the Node.js rules' analysis refusals
 //! (tools/build/node/defs.bzl), each with its exact message: an empty
 //! expect_error or exe, a source or bundle entry listed twice, a data
-//! destination that is a source or a package, conflicting pins, and a
-//! package in its own deps. Catches the staged-twice check deleted.
+//! destination that is a source or a package, conflicting pins, a package in
+//! its own deps, and a node_dist with both or neither of native_libs and
+//! foreign. Catches the staged-twice check deleted.
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -46,6 +47,16 @@ const ROWS = [_]lib.Row{
         .name = "node_own_dep",
         .target = "tests//negative/node:own_dep",
         .text = "tests//negative/node:own_dep: tslib is in its own deps",
+    },
+    .{
+        .name = "node_foreign_with_libs",
+        .target = "tests//negative/node:foreign_with_libs",
+        .text = "tests//negative/node:foreign_with_libs: native_libs is for the node that runs here; a foreign dist is not run and has none",
+    },
+    .{
+        .name = "node_libs_missing",
+        .target = "tests//negative/node:libs_missing",
+        .text = "tests//negative/node:libs_missing: native_libs is empty: name the directory whose lib/ holds the libraries node links, or set foreign",
     },
     .{
         .name = "node_binding_no_srcs",

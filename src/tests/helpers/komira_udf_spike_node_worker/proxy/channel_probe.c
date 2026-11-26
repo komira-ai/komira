@@ -2,17 +2,22 @@
  * channel_probe.c: what the proxy's tests read about the channel a worker
  * is given (kudfw_channel_open, channel.c), with no worker process: the
  * probe holds the worker's end itself. Test-only; linked into the welded
- * tests (test_channel), never into a runtime library.
+ * tests of the library (test_channel, test_proxy_edges), never into a
+ * runtime library.
  *
- * Each probe opens its own channel and closes every descriptor it opened
- * before it returns. A probe whose channel could not be opened returns -1.
+ * Each channel probe opens its own channel and closes every descriptor it
+ * opened before it returns. A probe whose channel could not be opened
+ * returns -1. kudfw_probe_open_fds and kudfw_probe_children read the
+ * process, not a channel.
  */
 #define _GNU_SOURCE
+#include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "kudfw.h"
@@ -175,4 +180,26 @@ int64_t kudfw_probe_open_fds(void) {
   for (int fd = 0; fd < 4096; fd++)
     if (fcntl(fd, F_GETFD) != -1) n++;
   return n;
+}
+
+/* How many child processes this process has left: it reaps every child that
+ * already ended and counts it, and counts a child still running once (a
+ * running child cannot be reaped, so the count stops there). 0 means no
+ * child is left, none ended unreaped and none is running (waitpid(-1)
+ * failing with ECHILD); -1 when waitpid fails with anything else. It reaps
+ * with waitpid(-1, WNOHANG), so a caller that wants its own children to be
+ * waited for by others must not call it. */
+int64_t kudfw_probe_children(void) {
+  int64_t n = 0;
+  for (;;) {
+    int status = 0;
+    pid_t r = waitpid(-1, &status, WNOHANG);
+    if (r > 0) {
+      n++;
+      continue;
+    }
+    if (r == 0) return n + 1;
+    if (errno == EINTR) continue;
+    return errno == ECHILD ? n : -1;
+  }
 }

@@ -2,14 +2,15 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_libs")
 load("@komira//tools/build/node:defs.bzl", "node_dist", "npm_package")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
-load(":pins.bzl", "NODE", "NPM", "npm_target")
+load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "setting_name")
+load(":pins.bzl", "NODE", "NODE_DARWIN_ARM64", "NPM", "npm_target")
 
 # The hermetic Node.js of the tests (README.md): the Node 24 LTS runtime from
-# its linux-x64 release archive and the npm packages the tests bundle, every
-# file pinned by sha256 and size in pins.bzl and fetched like any other pinned
-# download; each npm tarball's registry integrity is checked again when it is
-# unpacked. Nothing here is shipped: the runtime and the packages are visible
+# its linux-x64 release archive (and, for a macOS target platform, its
+# darwin-arm64 archive: `node_runtime`) and the npm packages the tests bundle,
+# every file pinned by sha256 and size in pins.bzl and fetched like any other
+# pinned download; each npm tarball's registry integrity is checked again when
+# it is unpacked. Nothing here is shipped: the runtime and the packages are visible
 # only to the test-only packages listed in _TEST_ONLY, and a node_test hands
 # its dependents nothing but its pass marker (README.md, Never shipped). A new
 # consumer is a new line here.
@@ -67,6 +68,40 @@ node_dist(
     top = NODE["top"],
     version = NODE["version"],
     visibility = _TEST_ONLY + _NEGATIVE,
+)
+
+# The darwin-arm64 runtime, for what a macOS target platform bundles
+# (`:node_runtime`). No action runs it: the dist is unpacked on the linux
+# execution platform and checked there without running it. `:node` stays the
+# linux runtime every action (`exec_dep`) runs.
+pinned_file(
+    name = NODE_DARWIN_ARM64["archive"],
+    url = NODE_DARWIN_ARM64["url"],
+    sha256 = NODE_DARWIN_ARM64["sha256"],
+    size_bytes = NODE_DARWIN_ARM64["size"],
+    visibility = _NEGATIVE,
+)
+
+# Node's darwin build links only system libraries, so it has no native_libs.
+node_dist(
+    name = NODE_DARWIN_ARM64["name"],
+    archive = ":" + NODE_DARWIN_ARM64["archive"],
+    foreign = "macho-arm64",
+    top = NODE_DARWIN_ARM64["top"],
+    version = NODE_DARWIN_ARM64["version"],
+    visibility = _TEST_ONLY + _NEGATIVE,
+)
+
+# The node a target platform bundles: the darwin-arm64 dist for a macOS
+# target, `:node` for every other. Only for a bundle's contents; an action
+# that runs node takes `:node`.
+alias(
+    name = "node_runtime",
+    actual = select({
+        "DEFAULT": ":" + NODE["name"],
+        "komira//tools/build/toolchains:" + setting_name("darwin-arm64"): ":" + NODE_DARWIN_ARM64["name"],
+    }),
+    visibility = _TEST_ONLY,
 )
 
 [pinned_file(

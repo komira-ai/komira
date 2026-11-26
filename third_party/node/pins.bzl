@@ -1,4 +1,4 @@
-"""The hermetic Node.js of the tests: the runtime and the npm packages, each pinned twice.
+"""The hermetic Node.js of the tests: the runtime (linux-x64, and darwin-arm64 for a macOS target) and the npm packages, each pinned twice.
 
 Read by this package's BUCK, which declares the downloads and the unpacked
 targets, and by the tests that hold the runtime to its pin
@@ -21,6 +21,23 @@ NODE = {
     "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.gz",
     "sha256": "6e1db87ef58b8819e5d5402eff1536491b18edd8eb7bee5ef7897876e88dc5ff",
     "size": 58088022,
+    "license": "MIT",
+}
+
+# The same release's darwin-arm64 archive, for the node of a macOS target
+# platform (BUCK, `node_runtime`). Its sha256 is the one the same release's
+# signed `SHASUMS256.txt` lists for `node-v24.21.0-darwin-arm64.tar.gz`; the
+# size is the archive's Content-Length. It is never run by an action (the
+# execution platform is linux): `node_dist` checks its `bin/node` is a Mach-O
+# arm64 executable and that `include/node/node_version.h` states `version`.
+NODE_DARWIN_ARM64 = {
+    "name": "node_darwin_arm64",
+    "version": NODE["version"],
+    "archive": "node-v24.21.0-darwin-arm64.tar.gz",
+    "top": "node-v24.21.0-darwin-arm64",
+    "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-darwin-arm64.tar.gz",
+    "sha256": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057",
+    "size": 52909993,
     "license": "MIT",
 }
 

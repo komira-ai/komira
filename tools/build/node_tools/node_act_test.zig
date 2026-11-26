@@ -180,3 +180,103 @@ test "coverTable: one line per covered source, in the order given" {
         try A.coverTable(a, files, &.{ "src/b.ts", "src/a.ts", "src/none.ts" }),
     );
 }
+
+const macho_arm64 = [_]u8{ 0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00 };
+
+test "machoArm64Refusal accepts the Mach-O 64-bit arm64 header" {
+    try t.expectEqual(@as(?[]const u8, null), A.machoArm64Refusal(&macho_arm64));
+    try t.expectEqual(@as(?[]const u8, null), A.machoArm64Refusal(macho_arm64[0..8]));
+}
+
+test "machoArm64Refusal names an ELF file" {
+    const elf = "\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00";
+    try t.expectEqualStrings("it is an ELF file", A.machoArm64Refusal(elf).?);
+}
+
+test "machoArm64Refusal refuses a Mach-O of another cputype" {
+    var x86_64 = macho_arm64;
+    x86_64[4] = 0x07;
+    try t.expectEqualStrings("its Mach-O cputype is not arm64", A.machoArm64Refusal(&x86_64).?);
+    var wrong_cpu = macho_arm64;
+    wrong_cpu[7] = 0x00;
+    try t.expectEqualStrings("its Mach-O cputype is not arm64", A.machoArm64Refusal(&wrong_cpu).?);
+}
+
+test "machoArm64Refusal refuses a file that is no Mach-O or too short to be one" {
+    try t.expectEqualStrings("it does not start with the Mach-O 64-bit magic", A.machoArm64Refusal("#!/bin/sh\necho\n").?);
+    var swapped = macho_arm64;
+    swapped[0] = 0xfe;
+    try t.expectEqualStrings("it does not start with the Mach-O 64-bit magic", A.machoArm64Refusal(&swapped).?);
+    try t.expectEqualStrings("it is shorter than a Mach-O header", A.machoArm64Refusal(macho_arm64[0..7]).?);
+    try t.expectEqualStrings("it is shorter than a Mach-O header", A.machoArm64Refusal("").?);
+}
+
+const version_h = "#ifndef SRC_NODE_VERSION_H_\n#define SRC_NODE_VERSION_H_\n\n#define NODE_MAJOR_VERSION 24\r\n#define NODE_MINOR_VERSION 21\n#define NODE_PATCH_VERSION\t0\n\n#define NODE_VERSION_IS_RELEASE 1\n#endif\n";
+
+test "headerVersion reads the three defines, tolerating tabs, CRLF and other defines" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    var missing: []const u8 = "";
+    try t.expectEqualStrings("24.21.0", try A.headerVersion(arena.allocator(), version_h, &missing));
+}
+
+test "headerVersion names the define a header lacks or leaves without a number" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var missing: []const u8 = "";
+    try t.expectError(error.NoDefine, A.headerVersion(a, "#define NODE_MAJOR_VERSION 24\n#define NODE_PATCH_VERSION 0\n", &missing));
+    try t.expectEqualStrings("NODE_MINOR_VERSION", missing);
+    try t.expectError(error.NoDefine, A.headerVersion(a, "", &missing));
+    try t.expectEqualStrings("NODE_MAJOR_VERSION", missing);
+    // A longer name, a comment and a value that is no number are not the define.
+    try t.expectError(error.NoDefine, A.headerVersion(a, "#define NODE_MAJOR_VERSION_X 24\n// #define NODE_MAJOR_VERSION 24\n#define NODE_MAJOR_VERSION abc\n#define NODE_MAJOR_VERSION\n", &missing));
+    try t.expectEqualStrings("NODE_MAJOR_VERSION", missing);
+    try t.expectError(error.NoDefine, A.headerVersion(a, "#define NODE_MAJOR_VERSION 24\n#define NODE_MINOR_VERSION 21\n#define NODE_PATCH_VERSION x\n", &missing));
+    try t.expectEqualStrings("NODE_PATCH_VERSION", missing);
+}
+
+test "foreignRefusal accepts the pinned release: a Mach-O arm64 node and the version its header states" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try t.expectEqual(@as(?[]const u8, null), try A.foreignRefusal(arena.allocator(), "a.tgz", &macho_arm64, version_h, "24.21.0"));
+}
+
+test "foreignRefusal refuses an ELF node by name" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try t.expectEqualStrings(
+        "node_dist: the bin/node in a.tgz is not a Mach-O 64-bit arm64 executable: it is an ELF file\n",
+        (try A.foreignRefusal(arena.allocator(), "a.tgz", "\x7fELF\x02\x01\x01\x00", version_h, "24.21.0")).?,
+    );
+}
+
+test "foreignRefusal refuses a header whose version is not the pin, a prefix or suffix of it included" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings(
+        "node_dist: include/node/node_version.h in a.tgz states v24.21.0, the pin says v24.20.0\n",
+        (try A.foreignRefusal(a, "a.tgz", &macho_arm64, version_h, "24.20.0")).?,
+    );
+    try t.expect((try A.foreignRefusal(a, "a.tgz", &macho_arm64, version_h, "24.21")) != null);
+    try t.expect((try A.foreignRefusal(a, "a.tgz", &macho_arm64, version_h, "4.21.0")) != null);
+}
+
+test "foreignRefusal names a define the header lacks" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try t.expectEqualStrings(
+        "node_dist: include/node/node_version.h in a.tgz does not define NODE_PATCH_VERSION as a number\n",
+        (try A.foreignRefusal(arena.allocator(), "a.tgz", &macho_arm64, "#define NODE_MAJOR_VERSION 24\n#define NODE_MINOR_VERSION 21\n", "24.21.0")).?,
+    );
+}
+
+test "foreignRefusal checks the executable before the header" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    try t.expectEqualStrings(
+        "node_dist: the bin/node in a.tgz is not a Mach-O 64-bit arm64 executable: it is shorter than a Mach-O header\n",
+        (try A.foreignRefusal(arena.allocator(), "a.tgz", "", "", "24.21.0")).?,
+    );
+}
