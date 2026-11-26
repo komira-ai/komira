@@ -411,7 +411,7 @@ otherwise fail fast. The port keeps that answer and makes it explicit:
    - **EXISTS:** every call that can reach a codec (the Parquet, CSV and JSON
      register calls, the three describe calls, `komira_sql_stream`,
      `komira_sql_stream_run` and `komira_plan_stream`; not
-     `komira_register_arrow_stream`, which reads no file) first opens libzstd, libz and liblz4 through a
+     `komira_register_arrow_stream`, which reads no file) first opens libz through a
      raising probe (`probe_codec_libraries` in `compression.codec_libraries`),
      so a missing library is -3 at that call. Today the engine is built by `komira_ctx_new`, and the probe runs
      per call instead of there: a context on a host
@@ -446,10 +446,9 @@ call paths from the exports; nothing here was measured unless it says so.
 | `lpad` / `rpad` with a count such as 2^63 - 1 | `_pad_bytes` (`batch_eval/string_bytes.mojo`) appended the pad with no ceiling | refused over the 64 MiB per-row ceiling `repeat` already had (`STRING_FN_N_REPEAT_MAX_BYTES`) |
 | `repeat` with a count such as 2^31 - 1 | not an abort: refused before the change too; kept as a case | the same refusal |
 
-**Refused, without a C driver case:** libzstd, libz or liblz4 missing on the
-host. `compression/codec_libraries.mojo` (`_open_or_abort`),
-`zlib/zlib_ffi.mojo` and `lz4/codec.mojo` open them in `_Global` initializers,
-which cannot raise, at the first zstd, gzip or lz4 page or file, at a Parquet
+**Refused, without a C driver case:** libz missing on the host.
+`zlib/zlib_ffi.mojo` opens it in a `_Global` initializer, which cannot raise,
+at the first gzip page or file, at a Parquet
 page CRC (libz's `crc32`), or at a `COPY ... TO` with that compression. The
 probe above makes it -3 first. A C driver cannot hide a host library without
 an environment variable or a container, so the probe's refusal is a welded test

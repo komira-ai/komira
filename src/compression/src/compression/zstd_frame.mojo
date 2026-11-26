@@ -2,9 +2,10 @@
 # zstd_frame.mojo: zstd frames, through libzstd's one-shot API
 # =============================================================================
 #
-# FFI-BOUNDARY: libzstd, through the process-lifetime handle of
-# codec_libraries.mojo. Stateless one-shot calls: libzstd keeps no pointer
-# past a call and owns no memory a caller sees.
+# FFI-BOUNDARY: zstd 1.5.7, statically linked from //third_party/zstd with
+# every symbol renamed komira_zstd_* (ZSTD_compress is komira_zstd_compress),
+# and declared here with `external_call`. Stateless one-shot calls: libzstd
+# keeps no pointer past a call and owns no memory a caller sees.
 #
 #   size_t ZSTD_compress(void* dst, size_t dstCapacity,
 #                        const void* src, size_t srcSize, int level);
@@ -34,7 +35,7 @@
 # (refuse empty input, bound a declared size) applies it around the call.
 # =============================================================================
 
-from compression.codec_libraries import _zstd_handle
+from std.ffi import external_call
 
 
 comptime ZSTD_DEFAULT_LEVEL: Int32 = 3
@@ -106,9 +107,8 @@ def zstd_compress_bound(src_len: Int) raises -> Int:
     (libzstd's `ZSTD_compressBound`)."""
     if src_len < 0:
         raise Error("zstd_compress_bound: negative src_len " + String(src_len))
-    var handle_ptr = _zstd_handle()
     # SAFETY: a pure function of its integer argument; no pointer crosses.
-    return handle_ptr[].call["ZSTD_compressBound", Int](src_len)
+    return external_call["komira_zstd_compressBound", Int](src_len)
 
 
 def zstd_compress_into[
@@ -124,12 +124,11 @@ def zstd_compress_into[
     var dst_capacity = len(dst)
     var src_scratch = Array[UInt8, 1](fill=UInt8(0))
     var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
-    var handle_ptr = _zstd_handle()
     # SAFETY: libzstd reads `src_size` bytes at the source address and writes
     # at most `dst_capacity` (= `len(dst)`) bytes at the destination address;
     # both buffers are alive across this synchronous call and libzstd keeps
     # neither pointer.
-    var result = handle_ptr[].call["ZSTD_compress", Int](
+    var result = external_call["komira_zstd_compress", Int](
         _dst_ptr(dst, dst_scratch),
         dst_capacity,
         _src_ptr(src, src_scratch),
@@ -138,7 +137,7 @@ def zstd_compress_into[
     )
     # `unsigned ZSTD_isError(size_t)`: declared UInt32, so the unspecified
     # upper half of the 64-bit return register is not read.
-    if handle_ptr[].call["ZSTD_isError", UInt32](result) != 0:
+    if external_call["komira_zstd_isError", UInt32](result) != 0:
         raise Error(
             "ZSTD_compress failed (result=" + String(result)
             + ", input_len=" + String(src_size)
@@ -161,18 +160,17 @@ def zstd_decompress_into[
     var dst_capacity = len(dst)
     var src_scratch = Array[UInt8, 1](fill=UInt8(0))
     var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
-    var handle_ptr = _zstd_handle()
     # SAFETY: libzstd reads `src_size` bytes at the source address and writes
     # at most `dst_capacity` (= `len(dst)`) bytes at the destination address;
     # both buffers are alive across this synchronous call and libzstd keeps
     # neither pointer.
-    var result = handle_ptr[].call["ZSTD_decompress", Int](
+    var result = external_call["komira_zstd_decompress", Int](
         _dst_ptr(dst, dst_scratch),
         dst_capacity,
         _src_ptr(src, src_scratch),
         src_size,
     )
-    if handle_ptr[].call["ZSTD_isError", UInt32](result) != 0:
+    if external_call["komira_zstd_isError", UInt32](result) != 0:
         raise Error(
             "ZSTD_decompress failed (result=" + String(result)
             + ", input_len=" + String(src_size)
@@ -203,20 +201,19 @@ def zstd_decompress_once[
     var dst_capacity = len(dst)
     var src_scratch = Array[UInt8, 1](fill=UInt8(0))
     var dst_scratch = Array[UInt8, 1](fill=UInt8(0))
-    var handle_ptr = _zstd_handle()
     # SAFETY: as `zstd_decompress_into`: libzstd reads `src_size` bytes and
     # writes at most `dst_capacity` (= `len(dst)`) bytes; both buffers are
     # alive across this synchronous call and libzstd keeps neither pointer.
-    var result = handle_ptr[].call["ZSTD_decompress", Int](
+    var result = external_call["komira_zstd_decompress", Int](
         _dst_ptr(dst, dst_scratch),
         dst_capacity,
         _src_ptr(src, src_scratch),
         src_size,
     )
-    if handle_ptr[].call["ZSTD_isError", UInt32](result) != 0:
+    if external_call["komira_zstd_isError", UInt32](result) != 0:
         # SAFETY: a pure function of its integer argument. `ZSTD_ErrorCode`
         # is a C enum, read as a 32-bit int.
-        var code = handle_ptr[].call["ZSTD_getErrorCode", Int32](result)
+        var code = external_call["komira_zstd_getErrorCode", Int32](result)
         return ZstdDecodeOutcome(0, Int(code))
     return ZstdDecodeOutcome(
         _check_written("ZSTD_decompress", result, dst_capacity), 0
@@ -229,9 +226,8 @@ def zstd_frame_content_size(src: Span[UInt8, _]) raises -> UInt64:
     `ZSTD_CONTENTSIZE_ERROR` (no valid header). The claim is the stream's,
     unchecked: a caller that allocates it bounds it first."""
     var src_scratch = Array[UInt8, 1](fill=UInt8(0))
-    var handle_ptr = _zstd_handle()
     # SAFETY: libzstd reads at most `len(src)` bytes at the source address,
     # alive across this synchronous call, and keeps no pointer.
-    return handle_ptr[].call["ZSTD_getFrameContentSize", UInt64](
+    return external_call["komira_zstd_getFrameContentSize", UInt64](
         _src_ptr(src, src_scratch), len(src)
     )

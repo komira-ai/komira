@@ -46,6 +46,12 @@ Then, in order:
 - `Session.sql("SELECT 1 AS n").to_arrow()` is one row, `n` INT32 holding 1,
   and an aggregate over `--readings` (`id` 1 to 5, `value` 10.5 to 50.5) is
   its one row of count, sum, min and max, read with the installed pyarrow;
+- a Parquet file the installed pyarrow wrote with zstd, and one it wrote
+  with lz4 (pyarrow's LZ4_RAW), each 1000 rows, are registered and read back
+  equal to what pyarrow wrote, and `COPY ... TO ... (FORMAT parquet,
+  COMPRESSION zstd)` writes a file pyarrow reads back equal to its query,
+  with every column chunk ZSTD: the codecs are linked into libkomira, so
+  neither needs a libzstd or a liblz4 on the host (macOS has neither);
 - a DataFrame of `--readings` (`komira.read_parquet`), filtered, projected,
   given a computed column, sorted and cut with `head`, runs through the plan
   door at `materialize()` with the installed protobuf and answers its two
@@ -238,6 +244,36 @@ def check_metadata(dist, opts):
         raise AssertionError("the wheel's description is not --readme byte for byte: it differs at offset {} (description {} characters, --readme {})".format(at, len(body), len(readme)))
 
 
+def check_compressed_parquet(s):
+    """zstd and lz4 Parquet through the session `s`: a file pyarrow wrote
+    with each codec reads back as written, and a zstd COPY writes a file
+    pyarrow reads back as the query answered."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    rows = [{"id": i, "word": "w{}".format(i % 7)} for i in range(1000)]
+    table = pa.Table.from_pylist(rows, schema=pa.schema([("id", pa.int64()), ("word", pa.string())]))
+    for codec, stored in (("zstd", "ZSTD"), ("lz4", "LZ4_RAW")):
+        path = os.path.join(os.getcwd(), codec + ".parquet")
+        pq.write_table(table, path, compression=codec)
+        written = pq.ParquetFile(path).metadata.row_group(0).column(0).compression
+        assert written == stored, "pyarrow wrote {} for compression={}, not {}".format(written, codec, stored)
+        s.register_parquet(codec + "_rows", path)
+        got = s.sql("SELECT id, word FROM {}_rows ORDER BY id".format(codec)).to_arrow().to_pylist()
+        assert got == rows, "the {} Parquet file read back {} rows, the first differing at {}".format(
+            codec, len(got), next((i for i, (a, b) in enumerate(zip(got, rows)) if a != b), min(len(got), len(rows)))
+        )
+
+    out = os.path.join(os.getcwd(), "copied_zstd.parquet")
+    # A Result is read lazily: reading it runs the COPY.
+    s.sql("COPY (SELECT id, word FROM zstd_rows WHERE id < 500) TO '{}' (FORMAT parquet, COMPRESSION zstd)".format(out)).to_arrow()
+    meta = pq.ParquetFile(out).metadata
+    codecs = sorted({meta.row_group(g).column(c).compression for g in range(meta.num_row_groups) for c in range(meta.num_columns)})
+    assert codecs == ["ZSTD"], "COPY ... COMPRESSION zstd wrote column chunks {}".format(codecs)
+    back = pq.read_table(out).sort_by("id").to_pylist()
+    assert back == rows[:500], "the zstd file COPY wrote reads back {} rows, not the 500 it was given".format(len(back))
+
+
 def run_quickstart(opts, abi):
     """Runs the quickstart in a new empty directory under the working
     directory and compares what it prints with the expected text."""
@@ -336,6 +372,8 @@ def main(argv):
         rows = top.materialize().to_arrow().to_pylist()
         want = [{"id": 5, "value": 50.5, "twice": 101.0}, {"id": 4, "value": 40.5, "twice": 81.0}]
         assert rows == want, "the frame over {} answered {}, not {}".format(opts["readings"], rows, want)
+
+        check_compressed_parquet(s)
 
     run_quickstart(opts, want_abi)
 

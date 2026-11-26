@@ -17,9 +17,10 @@
 #   - All conformer compress/decompress methods accept `Span[UInt8, _]`
 #     (origin-polymorphic, safe surface — encapsulation rule).
 #   - The Zstd conformer's `compress` goes through zstd_frame.mojo; it
-#     calls libzstd through `_zstd_handle()` (codec_libraries.mojo) for its
-#     decompression contexts (each boxed with the handle as a `_ZstdDCtx`)
-#     and its pointer-taking `*_into` methods; helpers use `.unsafe_ptr()` +
+#     calls zstd (statically linked from //third_party/zstd, every symbol
+#     renamed komira_zstd_*) with `external_call` for its decompression
+#     contexts (each boxed as a `_ZstdDCtx`) and its pointer-taking
+#     `*_into` methods; helpers use `.unsafe_ptr()` +
 #     `.unsafe_origin_cast[MutUntrackedOrigin]()` ONLY at those call sites,
 #     with `# FFI-BOUNDARY:` comments.
 #   - The Zstd / Uncompressed conformers each build a
@@ -27,15 +28,14 @@
 #     then set the final length. Lz4Frame hands a Span of its output List
 #     to the lz4 Span API.
 #
-# HANDLES: no library is opened here. libzstd's process-lifetime handle is
-# codec_libraries.mojo's; libz and liblz4 are zlib's and lz4's,
-# with their own process-lifetime singletons and known-answer tests.
+# HANDLES: no library is opened here. zstd and lz4 are linked into the
+# program; libz is zlib's, with its own process-lifetime singleton and
+# known-answer tests.
 # =============================================================================
 
-from std.ffi import OwnedDLHandle
+from std.ffi import external_call
 from std.memory import OwnedPointer, unsafe_memcpy, alloc
 
-from compression.codec_libraries import _zstd_handle
 from compression.compression import ArrowIpcCompression
 from compression.span_codecs import (
     Brotli,
@@ -271,7 +271,7 @@ struct Uncompressed(ArrowIpcCompression):
 
 
 # =============================================================================
-# Zstd[level] — libzstd through codec_libraries.mojo's handle (Parquet codec id 6)
+# Zstd[level] — zstd, linked statically as komira_zstd_* (Parquet codec id 6)
 # =============================================================================
 #
 # zstd.h API used:
@@ -286,16 +286,12 @@ struct Uncompressed(ArrowIpcCompression):
 
 @fieldwise_init
 struct _ZstdDCtx(Movable):
-    """What `Zstd.create_dctx` boxes: a `ZSTD_DCtx*` and the libzstd handle
-    that made it. `free_dctx` frees the context through `_handle`, so the
-    path that cannot raise needs no handle lookup (which raises)."""
+    """What `Zstd.create_dctx` boxes: a `ZSTD_DCtx*`, freed by
+    `free_dctx`."""
 
     # SAFETY: the context `ZSTD_createDCtx` returned, owned by the box until
     # `Zstd.free_dctx` frees it; only libzstd dereferences it.
     var _dctx: UnsafePointer[UInt8, MutUntrackedOrigin]
-    # SAFETY: the process-lifetime libzstd handle slot of codec_libraries.mojo
-    # (`_zstd_handle()`), which is never freed.
-    var _handle: UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]
 
 
 @fieldwise_init
@@ -343,15 +339,14 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
                 + String(expected_size) + ")"
             )
         var out = List[UInt8](capacity=expected_size)
-        var handle_ptr = _zstd_handle()
         # FFI-BOUNDARY:
-        var result = handle_ptr[].call["ZSTD_decompress", Int](
+        var result = external_call["komira_zstd_decompress", Int](
             _list_ptr(out),
             expected_size,
             _span_ptr(input),
             n,
         )
-        var is_err = handle_ptr[].call["ZSTD_isError", Int](result)
+        var is_err = external_call["komira_zstd_isError", Int](result)
         if is_err != 0:
             raise Error(
                 "Zstd.decompress: ZSTD_decompress failed (result="
@@ -362,16 +357,15 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
 
     @staticmethod
     def create_dctx() raises -> UnsafePointer[UInt8, MutUntrackedOrigin]:
-        """Create a `ZSTD_DCtx*` via `ZSTD_createDCtx()`, boxed with the
-        libzstd handle as a `_ZstdDCtx`. The returned pointer is opaque to
+        """Create a `ZSTD_DCtx*` via `ZSTD_createDCtx()`, boxed as a
+        `_ZstdDCtx`. The returned pointer is opaque to
         the caller; pass through `free_dctx` / `decompress_into_with_dctx`.
         Raises on alloc failure (null return from libzstd, indicates OOM).
         """
-        var handle_ptr = _zstd_handle()
         # FFI-BOUNDARY: ZSTD_createDCtx() returns a ZSTD_DCtx* (opaque);
         # we hold it as UInt8* for cross-codec uniformity. NULL = OOM.
-        var dctx = handle_ptr[].call[
-            "ZSTD_createDCtx",
+        var dctx = external_call[
+            "komira_zstd_createDCtx",
             UnsafePointer[UInt8, MutUntrackedOrigin],
         ]()
         _require_dctx(
@@ -381,13 +375,13 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
         # line before any read. Its single owner is the returned pointer until
         # `free_dctx` reclaims it.
         var box = alloc[_ZstdDCtx](1)
-        box.unsafe_write(_ZstdDCtx(dctx, handle_ptr))
+        box.unsafe_write(_ZstdDCtx(dctx))
         return box.bitcast[UInt8]().unsafe_origin_cast[MutUntrackedOrigin]()
 
     @staticmethod
     def free_dctx(var dctx: UnsafePointer[UInt8, MutUntrackedOrigin]):
         """Release a context from `create_dctx`: `ZSTD_freeDCtx` on the
-        context, through the handle boxed with it, then the box. Null-safe.
+        context, then the box. Null-safe.
         """
         if Int(dctx) == 0:
             return
@@ -401,7 +395,7 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
         # FFI-BOUNDARY: ZSTD_freeDCtx returns a size_t result; for the
         # well-formed pointer case it returns 0, but we don't check
         # (destructor path, can't raise).
-        var _rc = owned[]._handle[].call["ZSTD_freeDCtx", Int](owned[]._dctx)
+        var _rc = external_call["komira_zstd_freeDCtx", Int](owned[]._dctx)
         _ = owned^
 
     @staticmethod
@@ -437,26 +431,25 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
         # time.
         var boxed = dctx.bitcast[_ZstdDCtx]()
         var zdctx = boxed[]._dctx
-        var handle_ptr = boxed[]._handle
         # FFI-BOUNDARY: ZSTD_DCtx_reset(dctx, 1) where
         # ZSTD_reset_session_only = 1 per zstd.h `ZSTD_ResetDirective`
         # enum. Resets the streaming session but preserves any cached
         # parameters/dictionaries (which we don't use; the call is
         # cheap regardless).
-        var _reset_rc = handle_ptr[].call["ZSTD_DCtx_reset", Int](
+        var _reset_rc = external_call["komira_zstd_DCtx_reset", Int](
             zdctx, Int32(1)
         )
         # FFI-BOUNDARY: ZSTD_decompressDCtx is the dctx-using variant of
         # ZSTD_decompress; same semantics, but reuses the passed context
         # instead of allocating a fresh one.
-        var result = handle_ptr[].call["ZSTD_decompressDCtx", Int](
+        var result = external_call["komira_zstd_decompressDCtx", Int](
             zdctx,
             dst.unsafe_origin_cast[MutUntrackedOrigin](),
             dst_capacity,
             _span_ptr(src),
             n,
         )
-        var is_err = handle_ptr[].call["ZSTD_isError", Int](result)
+        var is_err = external_call["komira_zstd_isError", Int](result)
         if is_err != 0:
             raise Error(
                 "Zstd.decompress_into_with_dctx: ZSTD_decompressDCtx"
@@ -487,16 +480,15 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
                 "Zstd.decompress_into: dst_capacity must be > 0 (got "
                 + String(dst_capacity) + ")"
             )
-        var handle_ptr = _zstd_handle()
         # FFI-BOUNDARY: `dst` lifetime guaranteed by caller per
         # SAFETY contract on the trait method (synchronous FFI).
-        var result = handle_ptr[].call["ZSTD_decompress", Int](
+        var result = external_call["komira_zstd_decompress", Int](
             dst.unsafe_origin_cast[MutUntrackedOrigin](),
             dst_capacity,
             _span_ptr(src),
             n,
         )
-        var is_err = handle_ptr[].call["ZSTD_isError", Int](result)
+        var is_err = external_call["komira_zstd_isError", Int](result)
         if is_err != 0:
             raise Error(
                 "Zstd.decompress_into: ZSTD_decompress failed (result="
@@ -508,8 +500,7 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
     @staticmethod
     def compress_bound(src_size: Int) raises -> Int:
         """Worst-case ZSTD compressed size via `ZSTD_compressBound`."""
-        var handle_ptr = _zstd_handle()
-        return handle_ptr[].call["ZSTD_compressBound", Int](src_size)
+        return external_call["komira_zstd_compressBound", Int](src_size)
 
     @staticmethod
     def compress_into[
@@ -534,17 +525,16 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
                 "Zstd.compress_into: dst_capacity must be > 0 (got "
                 + String(dst_capacity) + ")"
             )
-        var handle_ptr = _zstd_handle()
         # FFI-BOUNDARY: `dst` lifetime guaranteed by caller per
         # SAFETY contract on the trait method (synchronous FFI).
-        var result = handle_ptr[].call["ZSTD_compress", Int](
+        var result = external_call["komira_zstd_compress", Int](
             dst.unsafe_origin_cast[MutUntrackedOrigin](),
             dst_capacity,
             _span_ptr(src),
             n,
             Int32(Self.level),
         )
-        var is_err = handle_ptr[].call["ZSTD_isError", Int](result)
+        var is_err = external_call["komira_zstd_isError", Int](result)
         if is_err != 0:
             raise Error(
                 "Zstd.compress_into: ZSTD_compress failed (result="
@@ -805,7 +795,7 @@ struct Lz4Frame(ArrowIpcCompression):
 #     handle slot `tid` is touched only by worker `tid`. No cross-thread
 #     access to one handle.
 #   - The `_raw` pointer is opaque (a boxed `Lz4FrameDecoder` or a boxed
-#     `_ZstdDCtx`, the `ZSTD_DCtx*` with its libzstd handle);
+#     `_ZstdDCtx`, the `ZSTD_DCtx*`);
 #     the codec's own methods are the SOLE site that dereferences it. The handle
 #     does not pointer-arithmetic on it.
 # =============================================================================

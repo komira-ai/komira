@@ -343,9 +343,12 @@ Each codec is opened at first use by soname, with `OwnedDLHandle`, by its owning
 
 | library | soname | conda-forge requirement (from #685's `system_libs.bzl`) |
 |---|---|---|
-| compression | `libzstd.so.1`, `libbz2.so.1.0`, `liblzma.so.5` | `zstd >=1.5.2,<2`, `bzip2 >=1.0.8,<2`, `xz >=5.2.5,<6` (question 10: the library-only names) |
+| compression | `libbz2.so.1.0`, `liblzma.so.5` | `bzip2 >=1.0.8,<2`, `xz >=5.2.5,<6` (question 10: the library-only names) |
 | zlib | `libz.so.1` | `libzlib >=1.2.13,<2` |
-| lz4 | `liblz4.so.1` | `lz4-c >=1.9.3,<2` |
+
+zstd and lz4 were opened this way too, by compression (`libzstd.so.1`) and lz4 (`liblz4.so.1`); they are now linked
+statically from `//third_party/zstd` and `//third_party/lz4`, as snappy is, so a host without them (macOS has neither)
+reads and writes those codecs.
 
 No other library under `src/` (tests aside) calls `OwnedDLHandle`.
 
