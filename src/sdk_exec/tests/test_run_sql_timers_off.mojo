@@ -2,6 +2,10 @@
 # run_sql with the phase timers compiled out (the default build)
 # =============================================================================
 #
+# Covers: Q6 through run_sql on four workers in the default build gives the
+# oracle's answer and leaves every phase timer (phase_timers) unregistered and
+# at zero.
+#
 # The engine's parse, bind, optimize, lower, execute, scan, filter and sink
 # code carries phase-timer calls (phase_timers) that exist only in a
 # build with -D KOMIRA_PHASE_TIMERS=1. This test runs TPC-H Q6 through

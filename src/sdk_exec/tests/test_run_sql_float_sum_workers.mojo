@@ -2,6 +2,13 @@
 # run_sql: a FLOAT / DOUBLE sum() or avg() is the same bits on every worker count
 # =============================================================================
 #
+# Covers: run_sql over a DOUBLE and a FLOAT column in small row groups on 1, 2,
+# 3 and 7 workers, several runs each: an ungrouped sum() and avg() have the
+# same bits on every worker count, equal to a model that adds each row group
+# from +0.0 in row order and the row groups in file order (exact 1.0 / 0.25 for
+# 1e16, 1, -1e16, 1; mixed magnitudes with NULLs; under a WHERE), and an
+# integer sum beside them stays an exact DECIMAL(38, 0).
+#
 # Adding floats is not associative, so a sum that each worker folds over the
 # morsels it happened to take would change with the worker count. An ungrouped
 # SUM / AVG over FLOAT32 / FLOAT64 is lowered ordered by source position

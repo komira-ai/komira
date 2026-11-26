@@ -1,5 +1,12 @@
 """The check of a Mojo runtime already in the process (komira/_runtime.py), on
-stand-in libraries, and the GNU build id reader it compares files with.
+stand-in libraries, and the GNU build id reader it compares files with. The
+cases are: no runtime loaded by the name, komira's own copy loaded, another
+copy of the same build id (accepted), another build id and a copy with no
+build id (refused, naming the library, where it is loaded from and komira's
+copy), komira's copy missing while another is loaded (refused, naming the
+missing file), a loaded copy that cannot be read back, and nothing checked off
+Linux; then the build id reader, on the stand-ins and on hand-written ELF
+headers.
 
     test_runtime.py --lib-dir <dir> --runtime-dir <dir>
 
