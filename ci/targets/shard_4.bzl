@@ -4,9 +4,18 @@
 
 TARGETS = [
     "komira//python/docs/tasks:1-read-csv-file",
+    "komira//python/docs/tasks:10-join-two-tables-on-key",
     "komira//python/docs/tasks:2-select-columns-filter-rows",
     "komira//python/docs/tasks:22-read-json-file-write-records-database",
     "komira//python/docs/tasks:22-read-json-file-write-records-database__probe_native_insert",
+    "komira//python/docs/tasks:3-add-computed-column",
+    "komira//python/docs/tasks:4-group-by-column-and-sum",
+    "komira//python/docs/tasks:5-look-at-first-rows-and-columns",
+    "komira//python/docs/tasks:6-find-fill-missing-values",
+    "komira//python/docs/tasks:6-find-fill-missing-values__probe_isna",
+    "komira//python/docs/tasks:7-drop-rows-missing-values",
+    "komira//python/docs/tasks:8-sort-rows-by-columns",
+    "komira//python/docs/tasks:9-count-each-value",
     "komira//python/docs/tasks:pages",
     "komira//python/docs/tasks:refuses_example_that_raises",
     "komira//python/docs/tasks:refuses_probe_that_runs",

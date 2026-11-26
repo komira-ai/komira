@@ -39,7 +39,10 @@
     "slug": "find-fill-missing-values",
     "category": "Clean",
     "question": "How do I find and fill missing values?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2362"
+    ]
   },
   {
     "rank": 7,
