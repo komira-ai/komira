@@ -1426,7 +1426,7 @@ macOS smoke jobs run the macOS driver, that each macOS job is in its half.
 
 **What the macOS wheel holds, read back.** Before anything is uploaded, the build holds the wheel to what a
 Mac loads (python/BUCK, "The macOS wheel, read back"). The wheel rule refuses, on every member
-(`tools/build/package/wheel/policy.zig`, `codesign.zig`): an ELF file (a Linux library), a Mach-O file for a
+(`tools/build/package/native_policy/policy.zig`, `codesign.zig`): an ELF file (a Linux library), a Mach-O file for a
 CPU other than arm64 or a universal one, a minimum macOS (LC_BUILD_VERSION) above the tag's `macosx_11_0`,
 an install name that is not `@rpath/<file>`, a run path that is not `@loader_path`-relative, a load that is
 neither a member nor under `/usr/lib` or `/System/Library`, and a code signature that is missing or whose
