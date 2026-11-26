@@ -20,7 +20,7 @@ with komira.Session() as s:
 # and reads the rows when the frame runs.
 df = komira.read_csv("people.csv")
 print(df.columns)
-print(df.dtypes)
+print(df.dtypes["id"], df.dtypes["score"])
 print(df.sort_values("id").materialize().to_arrow().to_pylist())
 
 # Another delimiter: one ASCII character between fields.

@@ -75,6 +75,25 @@ wheel_install_test(
                      "\"{'id': 2, 'name': 'Bo', 'city': 'Lima', 'score': 7.0}\", expected \"{'id': 2, 'name': 'Bo', 'city': 'Lima', 'score': 7.5}\"",
 )
 
+# An example that raises: the run must fail naming the task and the error.
+filegroup(
+    name = "tree_example_raises",
+    srcs = {
+        "1-read-csv-file/example.py": "komira//python/tests:fixtures/task_example_raises.py",
+        "1-read-csv-file/expected_output.txt": "1-read-csv-file/expected_output.txt",
+    },
+)
+
+wheel_install_test(
+    name = "refuses_example_that_raises",
+    python = "komira//third_party/python:cpython",
+    wheels = _WHEELS,
+    script = _DRIVER,
+    args = ["--task", "1-read-csv-file"],
+    files = {"--tasks-dir": ":tree_example_raises"},
+    expect_failure = "AssertionError: python/docs/tasks/1-read-csv-file raised ValueError: the input has no column amount",
+)
+
 # Every example on the macOS arm64 wheel, one run on the farm's macOS
 # workers: built by release-macos.yml's step `build the macOS Python harness
 # tests` (DARWIN_PYTHON_HARNESS, release/darwin_libs.bzl), never by a pull

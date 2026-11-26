@@ -7,6 +7,7 @@ TARGETS = [
     "komira//python/docs/tasks:2-select-columns-filter-rows",
     "komira//python/docs/tasks:22-read-json-file-write-records-database",
     "komira//python/docs/tasks:pages",
+    "komira//python/docs/tasks:refuses_example_that_raises",
     "komira//python/docs/tasks:refuses_wrong_expected_output",
     "komira//src/avro:avro_conda",
     "komira//src/aws_dynamodb:aws_dynamodb_conda",

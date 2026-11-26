@@ -16,8 +16,8 @@
 //!     a "gap" entry must have it.
 //!
 //! A task directory is named `<rank>-<slug>` after an entry that is not a
-//! gap: the slug finds the entry, and the rank must be the entry's. It holds exactly `example.py`, `expected_output.txt` and
-//! `page.md`. The page's first line is `# ` and the entry's question; its
+//! gap: the slug finds the entry, and the rank must be the entry's. It
+//! holds exactly `example.py`, `expected_output.txt` and `page.md`. The page's first line is `# ` and the entry's question; its
 //! first `python` fence holds `example.py` byte for byte and its first
 //! `text` fence `expected_output.txt` (fences opened at the line's start;
 //! an indented one, inside a list, is the page's own). What the program

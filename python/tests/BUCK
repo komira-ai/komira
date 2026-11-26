@@ -1057,7 +1057,6 @@ python_binding_test(
     name = f,
     visibility = ["komira//python:"],
 ) for f in [
-    "wheel_install_run.py",
     "test_installed.py",
     "test_analysis_job.py",
     "test_tpch_installed.py",
@@ -1069,15 +1068,23 @@ python_binding_test(
     "fixtures/previous_release_only.txt",
 ]]
 
-# The driver of the common-task examples (run_task_example.py) and the wrong
-# expected output its refusing case holds rank 1's example to
-# (python/docs/tasks/BUCK).
+# The install driver, which every wheel_install_test runs, here and in
+# python/docs/tasks.
+export_file(
+    name = "wheel_install_run.py",
+    visibility = ["komira//python:", "komira//python/docs/tasks:"],
+)
+
+# The driver of the common-task examples (run_task_example.py), and the two
+# fixtures its refusing cases run (python/docs/tasks/BUCK): the wrong expected
+# output they hold rank 1's example to, and an example that raises.
 [export_file(
     name = f,
     visibility = ["komira//python/docs/tasks:"],
 ) for f in [
     "run_task_example.py",
     "fixtures/task_wrong_expected_output.txt",
+    "fixtures/task_example_raises.py",
 ]]
 
 # The komira/python UDF runtime (src/udf_python) behind a ctypes host of its C

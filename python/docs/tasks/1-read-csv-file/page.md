@@ -25,7 +25,7 @@ with komira.Session() as s:
 # and reads the rows when the frame runs.
 df = komira.read_csv("people.csv")
 print(df.columns)
-print(df.dtypes)
+print(df.dtypes["id"], df.dtypes["score"])
 print(df.sort_values("id").materialize().to_arrow().to_pylist())
 
 # Another delimiter: one ASCII character between fields.
@@ -41,7 +41,7 @@ Output:
 {'id': 2, 'name': 'Bo', 'city': 'Lima', 'score': 7.0}
 {'id': 3, 'name': 'Cy', 'city': 'Oslo', 'score': None}
 ['id', 'name', 'city', 'score']
-{'id': 'int64', 'name': 'string', 'city': 'string', 'score': 'float64'}
+int64 float64
 [{'id': 1, 'name': 'Ana', 'city': 'Oslo', 'score': 9.5}, {'id': 2, 'name': 'Bo', 'city': 'Lima', 'score': 7.0}, {'id': 3, 'name': 'Cy', 'city': 'Oslo', 'score': None}]
 [{'id': 1, 'name': 'Ana'}, {'id': 2, 'name': 'Bo'}]
 ```

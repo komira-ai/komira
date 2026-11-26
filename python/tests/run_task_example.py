@@ -10,7 +10,7 @@ which installed komira's wheel and its requirements into `--site` and starts
 this from an empty working directory outside the checkout. Each `--host-lib`
 is opened by path first: the C++ runtime a user's system provides, which the
 build workers do not (test_installed.py says the same). `--tasks-dir` holds
-the task directories (python/BUCK, `:task_tree`). Then each `--task`, in the
+the task directories (python/docs/tasks/BUCK, `:tree`). Then each `--task`, in the
 order given, runs in this process as `python example.py` runs it
 (`__name__` is "__main__"), from a new empty directory of its own, so the
 files it makes are its own; what it writes to stdout is captured.
