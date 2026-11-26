@@ -600,7 +600,10 @@
     "slug": "group-month-week",
     "category": "Time",
     "question": "How do I group by month or week?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2408"
+    ]
   },
   {
     "rank": 81,

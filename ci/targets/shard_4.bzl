@@ -17,6 +17,7 @@ TARGETS = [
     "komira//python/docs/tasks:79-add-days-date-take-difference-dates",
     "komira//python/docs/tasks:79-add-days-date-take-difference-dates__probe_column_plus_interval",
     "komira//python/docs/tasks:80-group-month-week",
+    "komira//python/docs/tasks:80-group-month-week__probe_order_by_date",
     "komira//python/docs/tasks:pages",
     "komira//python/docs/tasks:refuses_example_that_raises",
     "komira//python/docs/tasks:refuses_probe_that_runs",
