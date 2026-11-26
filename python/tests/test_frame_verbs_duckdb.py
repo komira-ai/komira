@@ -26,7 +26,8 @@ below is a copy of its own, since a test file cannot import another.
   and int64 to string, int64 to int32, float32 to float64, pandas spellings and
   builtin types, a whole projection, no-op casts, a Series cast inside assign, a
   string of digits cast back to int64 and float64, a float of whole numbers cast
-  to int64, astype on a sorted frame (keeping and casting the sort key);
+  to int64, int64 and float32 to bool (non-zero and NaN are true), bool to
+  int64, astype on a sorted frame (keeping and casting the sort key);
 - tail of a sorted frame: one key, two keys, mixed directions, NULLs first and
   last (the tail reaching the NULL rows), n of 0, n beyond the rows, a filter
   before the sort, a sort of a head; the answer is in the frame's order;
@@ -528,7 +529,8 @@ RENAMES = [
 # ---- astype ------------------------------------------------------------------
 # The casts the engine runs: int32 and int64 to each other, to float64 and to
 # string, float32 to float64, float of whole numbers to int64, string of digits
-# to int64 and float64. The others are in ENGINE_REFUSED.
+# to int64 and float64, the numbers to bool and bool to the numbers. The others
+# are in ENGINE_REFUSED.
 
 CASTS = [
     Case(
@@ -560,6 +562,21 @@ CASTS = [
         "astype float32 to float64",
         lambda d: d.astype({"w": "float64"}),
         "SELECT * REPLACE (CAST(w AS DOUBLE) AS w) FROM t",
+    ),
+    Case(
+        "astype int64 to bool: non-zero is true, NULL stays NULL",
+        lambda d: d.astype({"k": "bool"}),
+        "SELECT * REPLACE (CAST(k AS BOOLEAN) AS k) FROM t",
+    ),
+    Case(
+        "astype float32 to bool: NaN and non-zero are true",
+        lambda d: d.astype({"w": "bool"}),
+        "SELECT * REPLACE (CAST(w AS BOOLEAN) AS w) FROM t",
+    ),
+    Case(
+        "astype bool to int64",
+        lambda d: d.astype({"flag": "int64"}),
+        "SELECT * REPLACE (CAST(flag AS BIGINT) AS flag) FROM t",
     ),
     Case(
         "astype of two columns",
@@ -1030,13 +1047,12 @@ TYPES = [
 # Programs whose plan the verb builds and the engine does not run: each is
 # refused at materialize() with the engine's step, never answered otherwise.
 # When the engine runs one, its check fails and the program moves to a case list.
-#   - a cast to bool, from a bool to a string, from a date or timestamp to a
+#   - a cast from a bool to a string, from a date or timestamp to a
 #     string, from a timestamp to a date, from a string to a date: the engine's
 #     cast has no arm for those pairs;
 #   - a regex over a computed string (the lowered Series): the engine's regex
 #     operations take a column as their input, not an expression.
 ENGINE_REFUSED = [
-    ("a cast of an int to bool", lambda d: d.astype({"k": "bool"})),
     ("a cast of a bool to a string", lambda d: d.astype({"flag": "string"})),
     ("a cast of a timestamp to a string", lambda d: d.astype({"t": "string"})),
     ("a cast of a date to a string", lambda d: d.astype({"d": "string"})),

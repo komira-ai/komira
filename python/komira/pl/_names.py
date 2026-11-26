@@ -67,6 +67,10 @@ TABLES = {
         "first": _ORDERED_KEY,
         "last": _ORDERED_KEY,
     },
+    "LazyGroupBy": {
+        "first": _ORDERED_KEY,
+        "last": _ORDERED_KEY,
+    },
 }
 
 

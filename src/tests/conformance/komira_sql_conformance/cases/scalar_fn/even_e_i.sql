@@ -1,0 +1,2 @@
+-- order: rows
+SELECT k, even(i) FROM E WHERE i BETWEEN -1000000 AND 1000000

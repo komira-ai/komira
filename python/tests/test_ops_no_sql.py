@@ -422,7 +422,18 @@ def pl_sources():
 
 def test_the_source_scan_reads_every_file_of_komira_pl():
     names = [name for name, _ in pl_sources()]
-    assert names == ["__init__.py", "_expr.py", "_frame.py", "_names.py", "_schema.py", "_scope.py", "_types.py"], names
+    assert names == [
+        "__init__.py",
+        "_expr.py",
+        "_frame.py",
+        "_group.py",
+        "_join.py",
+        "_names.py",
+        "_schema.py",
+        "_scope.py",
+        "_types.py",
+        "_window.py",
+    ], names
     for name, source in pl_sources():
         assert source.strip(), name
 

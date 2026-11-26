@@ -6,7 +6,7 @@ table (or its rows) says none of them:
 
   * a row that lowers (`FNK_MATH_FN` and the other lowering kinds) and a case
     of the `scalar_fn` corpus calls it: the case is run through `run_sql` over
-    the corpus's table T and its rows are compared with the committed answer
+    the corpus's tables T and E and its rows are compared with the committed answer
     of the pinned DuckDB (`equal`, `equal_within_4_ulps`, `differs`), or the
     run refuses at a step (`refused_<step>`: the name bound or did not, and
     the step says where it stopped);
@@ -20,8 +20,9 @@ table (or its rows) says none of them:
 Two limits of what a line says. A case is credited to every function it
 calls (`called_names` reads every identifier before a parenthesis), so a count
 is per case, not per function. `unreadable` is any raise of the comparison
-(render, parse or compare), which today is a result type the answer parser
-does not read. `measure_table` returns the table as text, one line per name; the test holds
+(render, parse or compare): a result type the answer parser does not read
+(it reads timestamps and lists of strings, komira_plan_harness/duckdb_tsv.mojo),
+or a cell spelt as DuckDB does not write it. `measure_table` returns the table as text, one line per name; the test holds
 it to the committed file, so the file cannot say more or less than the engine
 does. The rows are read from the table's source text, not from a list kept
 beside it: a row added to the table is a new line here and fails the test
@@ -258,9 +259,11 @@ def probe(mut ctx: EngineContext, name: String) -> String:
 
 
 def new_context() raises -> EngineContext:
-    """A context with the corpus's table T registered as `t`."""
+    """A context with the corpus's tables T and E registered as `t` and
+    `e`."""
     var ctx = EngineContext(EngineOptions(worker_count=2))
     register_parquet(ctx, "t", data_path("scalar_fn_t.parquet"))
+    register_parquet(ctx, "e", data_path("scalar_fn_e.parquet"))
     return ctx^
 
 
