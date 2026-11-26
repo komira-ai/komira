@@ -8,8 +8,11 @@ part of the pandas-shaped skin is built too: its readers, subscripts, `assign`, 
 `materialize` and `explain` are in `python/komira/_frame.py` and `_series.py`, and `materialize` runs
 the plan through `komira_plan_stream`, and so do the write terminals `to_parquet`, `to_csv` and `to_json`. So are `groupby` with its `GroupBy` reductions and `agg`, the
 frame's own reductions (`agg`, `sum`, `mean`, `median`, `std`, `var`, `min`, `max`, `count`,
-`nunique`) and `drop_duplicates`, in `python/komira/_groupby.py`; NaN as missing (ruling 6) and the
-`Series` reductions are not built yet. The core of the polars-shaped skin, `komira.pl`, is built (the readers of Parquet, NDJSON and CSV, the
+`nunique`) and `drop_duplicates`, in `python/komira/_groupby.py`. So are `fillna`, `dropna`, `rename`,
+`add_prefix`, `add_suffix`, `astype`, `tail`, `komira.concat` and the `.str` and
+`.dt` accessors (`_frame.py`, `_verbs.py`, `_missing.py`, `_cast.py`, `_accessors.py`). NaN as missing
+(ruling 6) is built in `fillna` and `dropna`, not yet in the aggregates; `isna`, `notna`
+and the `Series` reductions are not built yet. The core of the polars-shaped skin, `komira.pl`, is built (the readers of Parquet, NDJSON and CSV, the
 row-wise verbs, sort and its order rules, aggregates without keys, and `concat`), and its `collect()` runs
 the plan the same way. The other verbs are not built. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
@@ -345,7 +348,7 @@ ruling. Section 7's departures belong to this list as well.
 Each ruling is marked **carried** (the earlier SDK's answer) or **differs** (a ruling of section 12, by
 its number).
 
-1. **There is no index.** Carried, except the integer subscript (D9) and `value_counts` (D16).
+1. **There is no index.** Carried, except the integer subscript (D9).
    - `loc`, `iloc`, `at`, `iat`, `index`, `set_index`, `reset_index`, `sort_index`, `reindex`, and
      pandas' index `join` are refused (use `merge`).
    - A slice subscript `df[0:5]` raises `UnsupportedOperation`.
@@ -359,8 +362,9 @@ its number).
        gives a frame indexed by the output names.
      - `df.sum()` and the other frame reductions give a one-row frame, where pandas gives a `Series`
        indexed by column.
-     - `s.value_counts()` gives a frame with the value column and `count`, where pandas gives a
-       `Series` named `count` indexed by value.
+     - `s.value_counts()` is refused by name: pandas gives a `Series` indexed by value, and a komira
+       `Series` has no index to hold the values. Count the rows per value with
+       `df.groupby(column).size()`, and sort them with `sort_values("size", ascending=False)`.
      - `s.sum()` and the other `Series` reductions are lazy aggregates (section 2), where pandas gives
        a number.
 2. **pandas sorts its groups; polars does not.** Carried; the NULL placement of the sort differs (D4).
@@ -629,6 +633,7 @@ package design). D4 to D18 are this design's own.
 ## Where is the code?
 
 The code is in `python/komira/`: the node tree (`_ops/`), the encoder (`_plan/`) and the first part of
-the pandas-shaped skin (`_frame.py`, `_groupby.py`, `_series.py`, `_refusals.py`) and the core of the polars-shaped skin (`pl/`). The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
+the pandas-shaped skin (`_frame.py`, `_groupby.py`, `_series.py`, `_verbs.py`, `_missing.py`, `_cast.py`,
+`_accessors.py`, `_refusals.py`) and the core of the polars-shaped skin (`pl/`). The Mojo builders it mirrors are in [src/sdk](../../src/sdk/README.md) and
 `src/plan_expr/col_expr.mojo`. The wire format is in [src/plan_proto](../../src/plan_proto/plan.proto)
 and `src/plan_wire`.

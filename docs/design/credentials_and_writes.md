@@ -995,7 +995,7 @@ is a `KomiraError` too and is **PROPOSED**.
 | `STORAGE_IO` | a local write failed for another reason (no space, a read-only file system, a directory at the path); the message names the `errno` | `execute` | `StorageError` |
 | `STORAGE_URL_REFUSED` | `http://`, an unknown scheme, a URL with user information, a glob over `https://`, and every remote URL in the first release | `bind` | `UnsupportedOperation` |
 | `STORAGE_RANGE_NOT_SUPPORTED` | an `https://` server ignored `Range` | `execute` | `UnsupportedOperation` |
-| `COPY_TYPE_UNSUPPORTED`, `COPY_COMPRESSION_UNSUPPORTED` | a column type the file format cannot carry (a TIMESTAMP, unsigned and narrow integers, BLOB, nested), or lz4 for CSV or JSON, refused by name before any file is touched or replaced; `COPY` and the write terminals refuse alike | `bind` or `execute` | `UnsupportedOperation` |
+| `COPY_TYPE_UNSUPPORTED`, `COPY_COMPRESSION_UNSUPPORTED` | a column type the file format cannot carry (BLOB, TIME, INTERVAL, nested), or lz4 for CSV or JSON, refused by name before any file is touched or replaced; `COPY` and the write terminals refuse alike | `bind` or `execute` | `UnsupportedOperation` |
 | `STORAGE_WRITE_UNSUPPORTED` | a `gs://`, `az://` or `https://` destination | `bind` | `UnsupportedOperation` |
 | `PLAN_URL_QUERY_REFUSED` | a plan exported for a job manager has a URL with a query string | none: the export call is the job manager's milestone | `UnsupportedOperation` |
 | `SQL_STATEMENT_UNSUPPORTED`, `COPY_OPTION_UNSUPPORTED`, `COPY_FORMAT_NOT_INFERRED` | decision 10 | `parse` or `bind` | `UnsupportedOperation` |

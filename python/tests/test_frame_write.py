@@ -30,7 +30,7 @@ and compared with the rows worked out by hand:
 - test_argument_refusals_leave_no_file: each refusal made before the library is
   called, by exact type and message, with the directory listing unchanged;
 - test_engine_refusals_name_their_code_and_step: a URL at bind, a missing
-  directory at execute, a timestamp column and its untouched destination, and
+  directory at execute, a binary column and its untouched destination, and
   the session writing again after each;
 - test_a_closed_session_refuses_a_write: KomiraError "the session is closed";
 - test_each_terminal_returns_none.
@@ -484,16 +484,16 @@ def test_engine_refusals_name_their_code_and_step(lib_dir):
 
         # A column type the writer does not write: nothing is written, and an
         # existing destination is left as it was.
-        stamps = os.path.join(p.work, "stamps.parquet")
-        pq.write_table(pa.table({"t": pa.array([1, 2], pa.timestamp("us"))}), stamps)
-        ts = komira.read_parquet(stamps, session=s)
+        raw = os.path.join(p.work, "raw.parquet")
+        pq.write_table(pa.table({"t": pa.array([b"\xff", b"ok"], pa.binary())}), raw)
+        blobs = komira.read_parquet(raw, session=s)
         dest = p.join("keep.parquet")
         df.to_parquet(dest)
         kept = all_bytes(dest)
-        e = raised(lambda: ts.to_parquet(dest))
+        e = raised(lambda: blobs.to_parquet(dest))
         assert type(e) is UnsupportedOperation and e.code == "COPY_TYPE_UNSUPPORTED", repr(e)
         assert all_bytes(dest) == kept
-        e = raised(lambda: ts.to_parquet(p.join("new.parquet")))
+        e = raised(lambda: blobs.to_parquet(p.join("new.parquet")))
         assert type(e) is UnsupportedOperation and e.code == "COPY_TYPE_UNSUPPORTED", repr(e)
         assert not os.path.exists(p.join("new.parquet"))
         good_write(s, p, "after_type.parquet")
