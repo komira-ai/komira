@@ -716,8 +716,8 @@ holds `tables.sql`, `<case>.sql` and the committed DuckDB answer `<case>.tsv`
 ([README](../../src/tests/conformance/komira_sql_conformance/README.md)). Nothing runs komira on
 them yet. A Python end-to-end runner over them is planned but not built. The Mojo package
 `src/tests/e2e/sql_e2e` holds komira's SQL to DuckDB through `so.sql_result` over a corpus of its
-own, on `komira_test_oracle`'s datasets and its own regression tables; no matrix cell names one
-of its targets yet. The Node runner reads **the same files through Buck2 targets**,
+own, on `komira_test_oracle`'s datasets and its own regression tables; its `test_sql_<capability>`
+targets fill the `sql` cells of the matrix. The Node runner reads **the same files through Buck2 targets**,
 and copies none of them.
 - **Tables.** Both runners register the same Parquet export of each corpus's `tables.sql`, built
   once by DuckDB as a target beside the corpus. Neither runner executes `CREATE TABLE`.
@@ -728,8 +728,10 @@ and copies none of them.
   refusal each expects, so the two languages cannot disagree on what is supported.
 - **Negatives.** A fixture corpus with one wrong committed answer must fail the Node runner, the
   negative case of rule T15.
-- **The matrix.** The `sql` cells of `tests/surface_capability_matrix.bzl` are to be filled by the
-  Python runner's targets. The Node runner checks the binding, not a new surface: SQL is one surface,
+- **The matrix.** The `sql` cells of `tests/surface_capability_matrix.bzl` are filled by the
+  per-capability tests of `src/tests/e2e/sql_e2e`, which run each case through `so.sql_result`, the
+  call libkomira's `komira_sql_stream` wraps. The Python runner's targets can fill a cell once the
+  matrix lint counts a Python test as a test. The Node runner checks the binding, not a new surface: SQL is one surface,
   however it is reached. The `ts_polars` and `excel` cells are filled by those SDKs.
 
 ## 6. The Excel SDK
