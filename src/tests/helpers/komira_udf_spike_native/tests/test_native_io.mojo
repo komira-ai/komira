@@ -113,8 +113,11 @@ def _no_copy_left(mut rt: UdfRuntime, tmp: String) raises:
     # dlopen is copied and the copy removed. Either way no copy remains, and
     # one that loads keeps its copy (and descriptor) for the process.
     var root = tmp + "/copies"
-    var want = digest_of("./native_c.so")
-    var mismatch = _spec(root, [stage_under("./native_mojo.so", root, host_role(), want)])
+    # The mismatch names a digest no load has kept: the runtime keeps a
+    # verified library by its sha256, so a digest already loaded (the C
+    # library's, by `_path`) is answered from that and its bytes never read.
+    var want = digest_of("./native_mojo.so")
+    var mismatch = _spec(root, [stage_under("./native_c.so", root, host_role(), want)])
     var junk = _junk(64)
     var unloadable = _spec(root, [stage_data(junk, root, host_role(), sha256_of(junk))])
     var good = _spec(root, [stage("./native_c.so", root, host_role())])

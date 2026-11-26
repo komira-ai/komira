@@ -56,7 +56,6 @@
 # Each red on the farm.
 
 from std.ffi import external_call
-from std.os.path import realpath
 from std.testing import assert_equal, assert_true
 
 from komira_udf_spike_abi.contract import *
@@ -323,12 +322,25 @@ def _children() raises -> Int:
     return Int(external_call["kudfw_probe_children", Int64]())
 
 
+def _cwd() raises -> String:
+    """The working directory's absolute path (channel_probe.c reads it from a
+    descriptor of "." on macOS, where realpath(".") is refused with EPERM on
+    the farm's workers)."""
+    var buf = List[UInt8](length=4096, fill=0)
+    # SAFETY: buf is 4096 bytes owned by this frame and borrowed for the call;
+    # C writes at most 4096 bytes, the terminator included, and keeps no
+    # pointer.
+    var n = Int(external_call["kudfw_probe_cwd", Int64](buf.unsafe_ptr(), Int64(len(buf))))
+    assert_true(n > 0, "the working directory cannot be read")
+    return String(from_utf8=Span(buf)[0:n])
+
+
 def main() raises:
     arm_watchdog()
     var fds0 = _fds()
     # By its absolute path: the library finds node_worker/ beside the path
     # dladdr reports, absolute here and relative in the other tests.
-    var rt = UdfRuntime.open(realpath(".") + "/" + LIB)
+    var rt = UdfRuntime.open(_cwd() + "/" + LIB)
     _spec_refusals(rt)
     _load_refusal(rt)
     _udfs_per_context(rt)
