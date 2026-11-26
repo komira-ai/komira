@@ -611,7 +611,7 @@
     "slug": "convert-unix-timestamp-datetime-back",
     "category": "Time",
     "question": "How do I convert a Unix timestamp to a datetime and back?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
       "komira-ai/komira#2344"
     ]
@@ -676,7 +676,7 @@
     "slug": "bulk-load-large-file-database",
     "category": "Databases",
     "question": "How do I bulk-load a large file into a database?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
       "komira-ai/komira#2335"
     ]
@@ -686,8 +686,9 @@
     "slug": "keep-history-changing-rows",
     "category": "Databases",
     "question": "How do I keep history of changing rows (slowly changing dimension)?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
+      "komira-ai/komira#2334",
       "komira-ai/komira#2335"
     ]
   },
