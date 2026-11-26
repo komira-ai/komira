@@ -1,8 +1,9 @@
 # Hermetic Node.js
 
 [`defs.bzl`](defs.bzl) holds the rules that give tests a hermetic Node.js:
-the pinned runtime, npm packages, a test rule, a bundler rule and a rule for
-C shared libraries such as Node-API addons. The runtime and the packages are
+the pinned runtime, npm packages, test rules (one of them installs built npm
+tarballs with the pinned npm), a bundler rule and a rule for C shared
+libraries such as Node-API addons. The runtime and the packages are
 pinned in [`third_party/node`](../../../third_party/node/README.md); the
 tests of all of it are
 [`src/tests/helpers/komira_test_node`](../../../src/tests/helpers/komira_test_node/README.md).
@@ -22,6 +23,7 @@ Node.js here is test-only. Nothing built with these rules is shipped
 | `esbuild_bundle(name, entry, srcs, deps, format, out, esbuild)` | `entry` bundled by the pinned esbuild (`--bundle --platform=node`) into one file, `out` (default `<name>.js`), in `format` (`cjs`, the default, or `esm`). `srcs` (JavaScript or TypeScript; esbuild strips the types) are staged next to `entry` at their package paths, and the closure of the `npm_package` targets in `deps` under `node_modules/<package>`. An import of anything else fails the build. A `node_test` runs the bundle as its `src`. |
 | `c_shared_lib(name, srcs, headers, include_dirs, copts, out, zig_triple, target_os)` | C `srcs` compiled and linked into one shared library by the pinned zig: `zig cc -target <zig_triple> -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror -Wl,-z,undefs` (for a macOS triple `-Wl,-undefined,dynamic_lookup -Wl,-install_name,@rpath/<out>` in place of `-Wl,-z,undefs`). A symbol the sources use and do not define stays undefined, for the program that loads the library to resolve: a Node-API addon's `napi_*` functions are `node`'s. Only symbols with default visibility are exported (a Node-API module's `napi_register_module_v1`). `headers` are staged with the sources, and their directory is an `-I`; each of `include_dirs` is a directory output, an `-I` (`//third_party/node:node[include]`). `out` defaults to `lib<name>.so`; a Node addon names it `<x>.node`. `zig_triple` defaults to the linux x86_64 row's (its glibc floor, [platform table](../platforms/table.bzl)). `target_os = True` builds for the target platform's OS instead: on a macOS target the darwin-arm64 row's triple (Mach-O, its macOS floor) and `out` with `.dylib` for its `.so` (`out` must then end in `.so`; `zig_triple` is not given). The Python UDF runtime library (`//src/udf_python:komira_udf_python`) is built so. |
 | `node_binding_test(name, srcs, covered_srcs, data, deps, node)` | runs the test files `srcs` (`.mjs`, `.js`, `.ts` or `.mts` files using the built-in `node:test`; node strips a TypeScript file's types itself; no npm install) with the pinned `node --test --test-reporter=tap` as a build action, from the staged directory (`srcs` and `covered_srcs` at their package paths, `data` at its destinations, the `deps` closure under `node_modules/`). The output (`<name>.pass`) exists only if node exited 0 **and** the TAP summary reports tests that all passed, with none skipped or todo and no file standing in as its own test (node reports a file that registers no test as one passing test named by its path). `covered_srcs` are the sources the tests import, which node measures (`--experimental-test-coverage`, with an lcov report of exactly those files): the target also fails unless every one of them has a record (a file no test loaded has none, and node would leave it out of its totals) and their lines and their branches, summed over all of them, are each at least 99% covered (rule T1); each one's counts are printed. `data` is where a built `.node` addon goes, so the test loads it with `require()`. `node` defaults to `komira//third_party/node:node`. |
+| `npm_install_test(name, install, tarballs, data, tests, nodes, npm)` | installs the npm tarball `install` with the pinned npm into an empty project, as a user's `npm install <package>` does, and runs the test files `tests` there with `node --test --test-reporter=tap`, once per Node.js of `nodes` (one action each, its output `<name>.node_<major>.pass`, the sub-target `[node_<major>]`; analysis refuses two releases of one line). `node_act install-test` copies `data` (`{dest: source}`: the tests and their fixtures) into the project and every tarball into its `tarballs/`, and writes its `package.json`: `{"dependencies": {<install's name>: "file:<project>/tarballs/<file>"}, "overrides": {<name>: "file:<project>/tarballs/<file>"}}` for each of `tarballs` (absolute paths: npm reads an override's relative path against the dependent package first), each name read from the tarball's own top `package.json` as npm reads it. npm then resolves every dependency of the installed package to those tarballs: a platform package among its `optionalDependencies` (npm picks the one whose `os`, `cpu` and `libc` match), its peer and the peer's dependencies. The pinned npm (`npm`, default `komira//third_party/node:npm`) runs `install --offline --ignore-scripts --engine-strict --no-audit --no-fund --no-update-notifier` with its cache and config files in the action's scratch directory, so it fetches nothing and runs no script, and a package whose `engines` exclude the running node fails. The output exists only if npm exited 0, npm's `package-lock.json` marks no package `hasInstallScript` (a `preinstall`, `install` or `postinstall` script, or a `binding.gyp`: `install_test: npm reports an install script in <path>, and npm install is the only step: a package runs nothing at install`), and the run passes as `node_binding_test`'s does. The tests import the package by its name, so they load what npm laid out under the project's `node_modules`. Analysis refuses no tests, no nodes, a test that is not a destination of `data`, and a destination npm or the action writes or npm would read as configuration (`package.json`, `tarballs/`, `package-lock.json`, `node_modules/`, `.npmrc`). |
 | `node_addon(name, srcs, headers, copts, node_include)` | a Node-API addon: `c_shared_lib` named `<name>.node`, compiled against the Node-API headers of the pinned node (`node_include`, default `komira//third_party/node:node[include]`, the `include/node` directory of the same archive as the runtime). |
 
 The macros set `exec_compatible_with` to the linux x86_64 execution
@@ -46,6 +48,11 @@ env -i LC_ALL=C TZ=UTC0 HOME=<scratch>/home TMPDIR=<scratch>/tmp \
   into the binary, so no locale or zone data is read from the worker.
 - The script's directory is staged under `buck-out` with its `srcs` and
   `data`; the action's input is that whole directory.
+- `npm_install_test` runs npm (`node <npm>/bin/npm-cli.js install ...`) and
+  then the tests in the same environment, from the project in the action's
+  scratch directory. npm reads no `npmrc` of the worker (`--userconfig` and
+  `--globalconfig` are empty files there) and asks no registry
+  (`--offline`, and no audit, funding or update check).
 - esbuild (a static executable) runs with an empty environment from the
   staged directory, so the path comments in a bundle are paths in it
   (`main.mjs`, `node_modules/apache-arrow/...`).
@@ -98,6 +105,9 @@ requires each one's exact message:
 | `binding_under_covered_lines` | every test passes, and lines of a covered source never run (5 of 8): the target fails on its line coverage |
 | `binding_under_covered_branches` | every line of a covered source runs, and one arm of a conditional does not (3 of 4 branches): the target fails on its branch coverage, which is held apart from lines |
 | `binding_cover_not_loaded` | a covered source that no test imports fails the target by name, though the other source is fully covered: node measures only what was loaded |
+| `install_no_tests`, `install_no_nodes`, `install_test_not_staged`, `install_reserved_destination`, `install_npmrc`, `install_two_of_a_line` | analysis refuses an `npm_install_test` of no test file or no Node.js, of a test that is not a destination of `data`, of a file staged under `node_modules/` or as `.npmrc` (npm would install over it or read it as configuration), and of two releases of one Node.js line (`[node_24]` would name two actions) |
+| `install_missing_runtime`: //node:install_test with the platform package written again without `native/lib/libMSupportGlobals.so` | npm installs it, and the first call of the installed package fails to load libkomira, naming the missing file: the test loads libkomira from the installed platform package alone |
+| `install_postinstall`, `install_binding_gyp`: the main package with a `postinstall` script, and the platform package with a `binding.gyp` | the target fails before any test runs, naming the package npm marked `hasInstallScript`: a script `--ignore-scripts` kept from running still fails the test |
 
 The fixtures name the pinned runtime, packages and downloads, which
 [`third_party/node/BUCK`](../../../third_party/node/BUCK) makes visible to
@@ -107,7 +117,12 @@ that package only where the `tests` cell exists; the archives of
 tarballs of `name_nested`, `name_absent`, `version_nested`, `version_number`,
 `nested_distractors` and `exe_other_version` are checked in (`package_json/`)
 and pinned at their own sha512: a tarball built in the action would carry
-the worker's file owner and times, so it would have no fixed digest.
+the worker's file owner and times, so it would have no fixed digest. The
+tarballs of the `install_*` cases are //node:package and
+//node:package_linux_x64 written again by `npm_repack` (`tests_act
+npm-repack`), since `npm_tarball` refuses to write a package without a
+runtime library or with an install script; the install test reads no digest
+of them.
 
 ## node_modules from a package-lock.json
 

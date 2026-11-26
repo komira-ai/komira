@@ -1,5 +1,6 @@
 """Hermetic Node.js for tests: `node_dist`, `npm_package`, `node_test`,
-`esbuild_bundle`, `c_shared_lib`, `node_binding_test` and `node_addon` (README.md).
+`esbuild_bundle`, `c_shared_lib`, `node_binding_test`, `npm_install_test` and
+`node_addon` (README.md).
 
 `node_dist` unpacks a sha256-pinned Node.js release archive (linux-x64) into
 a directory holding `bin/node`, `include/node` (the Node-API headers) and the
@@ -8,7 +9,9 @@ licence, and fails unless that `node` runs and reports the pinned version.
 registry integrity (`sha512-<base64>`) and the top-level `name` and `version`
 of its `package.json`, which the pinned `node` parses. `node_test` runs one script with the pinned `node` as a build
 action; its output exists only if the script passed, so building the target
-is running the test. `esbuild_bundle` bundles an entry module, its sibling
+is running the test. `npm_install_test` installs built npm tarballs with
+the pinned npm into an empty project, offline and with no install script,
+and runs `node --test` there, once per pinned Node.js line. `esbuild_bundle` bundles an entry module, its sibling
 sources and npm packages into one file with the pinned esbuild.
 `c_shared_lib` builds C sources into a shared library with the pinned zig:
 symbols it does not define (a Node-API addon's `napi_*`) stay undefined, and
@@ -322,6 +325,90 @@ _node_binding_test = rule(
     } | RERUN_ATTRS,
 )
 
+# ---- npm_install_test --------------------------------------------------------
+
+# `node_act install-test` copies the staged `data` into an empty project in
+# its scratch directory and the tarballs into its tarballs/; writes the
+# project's package.json, which depends on `install` alone and makes every
+# other tarball an override of the package its package.json names; runs the
+# pinned npm there (`install --offline --ignore-scripts --engine-strict`);
+# refuses a package that npm's package-lock.json says has an install script;
+# then runs `node --test` over `tests` in the project and passes as a
+# node_binding_test does. One action per Node.js line of `nodes`.
+
+def _npm_install_test_impl(ctx):
+    where = str(ctx.label.raw_target())
+    if len(ctx.attrs.tests) == 0:
+        fail("{}: tests is empty: name the test files node --test runs".format(where))
+    if len(ctx.attrs.nodes) == 0:
+        fail("{}: nodes is empty: name the Node.js lines the package is installed on".format(where))
+    staged = data_map(ctx, where + ": data", ctx.attrs.data)
+    for t in ctx.attrs.tests:
+        if t not in staged:
+            fail("{}: test {} is not a destination of data".format(where, t))
+    for dest in staged:
+        if dest in ("package.json", "package-lock.json", ".npmrc") or dest.split("/")[0] in ("node_modules", "tarballs"):
+            fail("{}: data destination {} is the project's own: install-test writes package.json and tarballs/, npm writes package-lock.json and node_modules/ and would read .npmrc".format(where, dest))
+    root = ctx.actions.copied_dir(ctx.label.name + ".srcs", staged)
+    npm = ctx.attrs.npm[NpmPackageInfo]
+    tarballs = []
+    for t in ctx.attrs.tarballs:
+        tarballs += ["--tarball", t]
+    markers = {}
+    for n in ctx.attrs.nodes:
+        dist = n[NodeDistInfo]
+        line = "node_" + dist.version.split(".")[0]
+        if line in markers:
+            fail("{}: nodes names two Node.js {} releases".format(where, dist.version.split(".")[0]))
+        out = ctx.actions.declare_output("{}.{}.pass".format(ctx.label.name, line))
+        ctx.actions.run(
+            cmd_args(
+                ctx.attrs._node_act[RunInfo],
+                "install-test",
+                "--node",
+                dist.root,
+                "--libs",
+                dist.native_libs,
+                "--npm",
+                npm.closure[npm.name][1],
+                "--out",
+                out.as_output(),
+                # The staged directory, not projections of the files in it.
+                "--dir",
+                root,
+                "--install",
+                ctx.attrs.install,
+                tarballs,
+                "--",
+                ctx.attrs.tests,
+            ),
+            env = rerun_env(ctx),
+            category = "npm_install_test",
+            identifier = line,
+        )
+        markers[line] = out
+    return [
+        DefaultInfo(
+            default_outputs = markers.values(),
+            sub_targets = {k: [DefaultInfo(default_output = v)] for k, v in markers.items()},
+        ),
+        rerun_info(ctx),
+    ]
+
+_npm_install_test = rule(
+    impl = _npm_install_test_impl,
+    doc = "Installs the npm tarball `install` with the pinned npm (`npm install --offline --ignore-scripts --engine-strict`) into an empty project that depends on it alone, with `tarballs` as the packages npm resolves the names their package.json give to (every other dependency, a platform package or a peer, comes from them, so nothing reaches a registry), then runs the test files `tests` (destinations of `data`, staged in the project with the fixtures, `.mjs`, `.cjs`, `.js`, `.ts`, `.cts` or `.mts`) with `node --test` from the project, so they import the package by its name. One build action per Node.js of `nodes`, each with its output `<name>.node_<major>.pass` (the sub-target `[node_<major>]`), which exists only if the npm install exited 0, no installed package has an install script (as npm's package-lock.json says, `hasInstallScript`; --ignore-scripts kept it from running), and the TAP summary reports tests that all passed with none skipped or todo.",
+    attrs = {
+        "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
+        "install": attrs.source(),
+        "nodes": attrs.list(attrs.exec_dep(providers = [NodeDistInfo])),
+        "npm": attrs.exec_dep(providers = [NpmPackageInfo], default = "komira//third_party/node:npm"),
+        "tarballs": attrs.list(attrs.source(), default = []),
+        "tests": attrs.list(attrs.string()),
+        "_node_act": attrs.exec_dep(default = "komira//tools/build/node_tools:node_act", providers = [RunInfo]),
+    } | RERUN_ATTRS,
+)
+
 # ---- esbuild_bundle ----------------------------------------------------------
 
 # `node_act esbuild-bundle` runs esbuild from the staged directory, so the
@@ -479,6 +566,9 @@ def _binding_macro(**kwargs):
 def _test_macro(**kwargs):
     _node_test(**_linux(kwargs))
 
+def _install_macro(**kwargs):
+    _npm_install_test(**_linux(kwargs))
+
 def _bundle_macro(**kwargs):
     _esbuild_bundle(**_linux(kwargs))
 
@@ -506,6 +596,7 @@ node_dist = declares_docs(_dist_macro)
 npm_package = declares_docs(_npm_macro)
 node_test = declares_docs(_test_macro)
 node_binding_test = declares_docs(_binding_macro)
+npm_install_test = declares_docs(_install_macro)
 esbuild_bundle = declares_docs(_bundle_macro)
 c_shared_lib = declares_docs(_shared_macro)
 node_addon = declares_docs(_addon_macro)
