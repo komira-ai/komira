@@ -20,7 +20,8 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist/**/*.js",
-    "dist/**/*.d.ts"
+    "dist/**/*.d.ts",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=22.12"

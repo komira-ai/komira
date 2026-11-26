@@ -1,5 +1,7 @@
 # komira.pl: group-by, joins and unique
 
+> **Newer than 0.1.1623.** komira 0.1.1623 and older releases do not have what this page describes. [The changelog](../../CHANGELOG.md) lists what each release added.
+
 - **`lf.group_by(keys)`** gives a `LazyGroupBy`: `agg(...)`, `len`, `sum`,
   `mean`, `median`, `min`, `max` and `n_unique` give one row per group, the
   null key a group of its own.

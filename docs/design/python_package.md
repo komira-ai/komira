@@ -391,7 +391,7 @@ polars = ["polars"]
 [project.urls]
 Source = "https://github.com/komira-ai/komira"
 Issues = "https://github.com/komira-ai/komira/issues"
-Documentation = "https://github.com/komira-ai/komira/blob/main/docs/install.md"
+Documentation = "https://github.com/komira-ai/komira/blob/main/docs/install.md"   # a stamped build: blob/<its commit>/
 Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
 ```
 
@@ -403,9 +403,12 @@ Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
   (`python/changelog`, Zig, with its own cases; the rule is `changelog_file`, target `//python:changelog`)
   puts `## 0.1.<N>` before the first release heading of `CHANGELOG.md`, holding the bullets of every file in
   file-name order, so a release lists every change merged since the newest section `CHANGELOG.md` keeps
-  (a section is kept by moving its files' bullets under their own heading in one change). The wheel's
+  (a section is kept by moving its files' bullets under their own heading in one change; every version on
+  PyPI gets one, the files `changelog.d/` held at the commit it was built from). The wheel's
   description, `METADATA`'s body, is `README.md` followed by that changelog with each heading one level
-  down, so the page of version 0.1.`<N>` on PyPI shows its own section; both wheels read the one target,
+  down, so the page of version 0.1.`<N>` on PyPI shows its own section, and with every link to the
+  repository's `main` pinned to the commit the build is stamped with (`-c komira.package_commit`), so the
+  pages it links to describe that version and not a later `main`; both wheels read the one target,
   so their `METADATA` is the same. The tool refuses, naming the file and the line, a file that is not a
   slug and `.md`, an empty file, a line that is neither a bullet nor an indented continuation, a heading,
   a `## Unreleased` heading in `CHANGELOG.md` and a `CHANGELOG.md` with no release heading; the wheel
