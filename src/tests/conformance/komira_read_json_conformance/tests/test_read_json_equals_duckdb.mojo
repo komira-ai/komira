@@ -15,8 +15,6 @@
 #     DuckDB's read_json gives that column HUGEINT, while the binder here
 #     infers BIGINT (values equal, type not). An inference difference
 #     (src/jsonl, the SQL binder), not of the scan.
-#   * A grouped MAX of a DOUBLE: the grouped aggregation sink refuses a float
-#     MIN/MAX by name; GROUP BY here folds integers.
 #
 #   * test_the_columns_and_their_types_are_duckdbs: the names, order and types
 #     of `SELECT *` are the ones DuckDB's read_json gives (types.tsv).
