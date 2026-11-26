@@ -1,5 +1,9 @@
+load("@komira//tools/build/mojo:c_abi_check.bzl", "komira_c_abi_check")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_shared_lib")
+load("@komira//tools/build/mojo:shared_lib.bzl", "HOST_CXX_RUNTIME")
+load("@komira//tools/build/package/libkomira:dist.bzl", "picked_dir")
+load("@komira//tools/build/platforms:table.bzl", "row")
 
 # Every mojo_shared_lib below must FAIL to build. All but two have an
 # [ungated] library that builds, so their red comes from the gate, not from
@@ -154,4 +158,23 @@ mojo_shared_lib(
     exports_exact = True,
     gate_srcs = ["komira//tools/build/examples/shared_lib_native:call_driver.mojo"],
     deps = ["komira//src/libc:libc"],
+)
+
+# examples/shared_lib_native:spike_native's `[dist]` with the owner's library
+# left out, and the example's dist check on it: the C host's open fails, since
+# nothing else in the run tree holds the owner.
+picked_dir(
+    name = "dist_without_owner_dir",
+    dir = "komira//tools/build/examples/shared_lib_native:spike_native[dist]",
+    paths = select({
+        "DEFAULT": ["spike_native.so"] + ["lib/" + n for n in row("linux-x86_64")["runtime_libs"] if n not in HOST_CXX_RUNTIME],
+        "prelude//os/constraints:macos": ["spike_native.dylib"] + ["lib/" + n for n in row("darwin-arm64")["runtime_libs"]],
+    }),
+)
+
+komira_c_abi_check(
+    name = "dist_without_owner",
+    driver = "komira//tools/build/examples/shared_lib_native:dist_load",
+    lib = "komira//tools/build/examples/shared_lib_native:spike_native",
+    data = {"dist": ":dist_without_owner_dir"},
 )

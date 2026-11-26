@@ -40,6 +40,19 @@ darwin-arm64:
   owner's shared library`, on macOS `has no load command for
   @rpath/libkomira_libc_native.1.dylib`.
 
+## The `[dist]` check
+
+`:spike_native_dist_load` (a `komira_c_abi_check`) stages `[dist]`, the
+directory a language package copies, at `./dist` of a run tree that holds no
+other copy of the owner. [`dist_load.mojo`](dist_load.mojo) opens
+`./dist/spike_native.so` (on macOS `./dist/spike_native.dylib`) with `RTLD_NOW`,
+requires `native_owner_write_probe(100)` to be 100, and reads the owner's file in
+`dist/lib/`. Since the owner is nowhere else,
+the open resolves the library's edge on the owner only through `[dist]`.
+`tests//negative/shared_lib:dist_without_owner` runs the same driver on
+`[dist]` with the owner's file left out, and it fails on Linux and on
+darwin-arm64.
+
 ## Measured (linux-x86_64)
 
 | | `spike_native.so` | the same without `native_owners` |
