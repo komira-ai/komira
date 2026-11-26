@@ -580,6 +580,14 @@ Read in the mopm repository at the head of its `main`.
   matter to this design, since no release triggers a site deploy.
 - Node, `tsc` and `apache-arrow` are pinned with SHA-256 (`third_party/node/pins.bzl`,
   `node/devtools`). The browser script and the TypeScript extractor need nothing more.
+- The lints that read every file of the repository take their files from the cell's
+  `:doc_tree`, which `package_docs()` declares for each package by itself
+  ([doc_tree.bzl](../../tools/build/lint/doc_tree.bzl)). Among them are the Markdown link check
+  (`//:docs`) and the public-boundary check (`//:public_boundary`: no date before the public
+  history, no URL host outside its allow-list, no email address or commit id). So the pages and
+  examples under `site/` are checked by them as soon as `site/BUCK` exists, with no change to either
+  lint. The first file with a full URL whose host is komira.dev adds a `komira.dev` row to
+  [tests/public_boundary_hosts.tsv](../../tests/public_boundary_hosts.tsv), as `mopm.dev` has.
 
 ## 14. What this design leaves out
 
