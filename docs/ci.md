@@ -515,7 +515,7 @@ tests, which no pull request builds. The rest of this section is about `release-
   instead of the pushed commit, and run for a pull request's `release.yml` run too if
   that ever changed. `timeout-minutes: 90` still bounds a stalled build, and the steps that
   wait on the farm have bounds of their own inside it (farm-connect 5 minutes, the macOS set
-  65, the Python harness tests 10; the macOS set took at most 72 seconds over the last runs):
+  65, the Python harness tests 10):
   a step past its bound fails, so the run ends failed, where a job past its `timeout-minutes`
   is cancelled and GitHub ends its run cancelled.
 - **Reported, not blocking (for now).** A red macOS build is a failed run of

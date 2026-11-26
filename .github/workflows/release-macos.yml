@@ -35,9 +35,10 @@
 # The last job, release-macos-result, makes a build that never ran (its job skipped) end the run
 # failed too, with "the macOS build did not run", and for a failed build says which step failed and,
 # when it was a buck2 step, what buck2 said (release/ci:buck2_failure reads the step's log). A build
-# that ran out its 90 minutes is cancelled by GitHub while the run goes on: that fails the run too,
-# with "the macOS build was cancelled while the run went on"; only a cancelled run (a newer push)
-# skips that job and ends cancelled.
+# job that ran out its 90 minutes is cancelled by GitHub while the run goes on: release-macos-result
+# fails then too, with "the macOS build was cancelled while the run went on" (the run itself reads
+# cancelled, which is why the steps above carry bounds of their own); a cancelled run (a newer push)
+# skips that job.
 #
 # It needs the repository variables FARM_DARWIN_ARM64_PROPERTIES and FARM_DARWIN_MACOS_HOSTS (and may
 # take FARM_MACOS_LIBRARY_DIRS), docs/ci.md; without them the step after the connection fails the job
