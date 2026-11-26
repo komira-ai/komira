@@ -96,7 +96,9 @@ changelog_file(
 # directory given), and in komira/_lib/lib/ (its run path, `$ORIGIN/lib`) its
 # native owner libraries and the three Mojo runtime libraries of the pinned
 # compiler that built it, with the licence texts of their package
-# (third_party/modular/BUCK; NOTICE says which files each covers). The wheel
+# (third_party/modular/BUCK; NOTICE says which files each covers). Beside
+# libkomira is the komira/python UDF runtime, libkomira_udf_python.so
+# (`_UDF_RUNTIME`; the Linux wheel only). The wheel
 # requires no distribution of Modular's. Written by `wheel_file`
 # (tools/build/package/README.md, "The Python wheel"), which refuses a library
 # that needs a newer glibc than the tag's, a GLIBCXX_ or CXXABI_ version above
@@ -150,6 +152,15 @@ _PY_FILES = {f: f for f in glob(["komira/**/*.py"]) + ["komira/py.typed"]} | {
 _DIST = "komira//src/so:libkomira[dist]"
 
 _NATIVE_FILES = {"komira/_lib": _DIST}
+
+# The komira/python UDF runtime (src/udf_python, `libkomira_udf_python.so`),
+# beside libkomira at komira/_lib/. Nothing libkomira loads needs it: the
+# package opens it itself, as the test of a UDF from the installed wheel does
+# (`udf_installed_test`, below), so the libs check names it `opened`. The Linux
+# wheels carry it; the macOS wheel does not yet.
+_UDF_RUNTIME = {"komira/_lib/libkomira_udf_python.so": "komira//src/udf_python:komira_udf_python"}
+
+_LINUX_NATIVE_FILES = _NATIVE_FILES | _UDF_RUNTIME
 
 # The Mojo runtime libraries, as libkomira's NEEDED entries and their own name
 # them: libkomira needs the first, which needs the other two (the order of
@@ -237,8 +248,8 @@ _WHEEL = _METADATA[_PLATFORM]
 
 wheel_file(
     name = "komira_wheel",
-    files = _PY_FILES | _NATIVE_FILES,
-    executable = sorted(_NATIVE_FILES.keys()),
+    files = _PY_FILES | _LINUX_NATIVE_FILES,
+    executable = sorted(_LINUX_NATIVE_FILES.keys()),
     **_WHEEL
 )
 
@@ -427,6 +438,25 @@ wheel_install_test(
     files = {"--example": "examples/analysis_job.py"},
 )
 
+# A Python UDF from the installed wheel on CPython 3.13
+# (tests/test_udf_installed.py): a module of the user's own declares `@udf`
+# functions, their calls over a frame of a Parquet file encode as UdfRefs with
+# the module as a bundle (a row function's explicit read set its UdfRef's),
+# and the komira/python runtime the wheel carries at
+# komira/_lib/libkomira_udf_python.so, hosted through its C ABI by
+# tests/udf_host.py in the engine's place, runs each in a worker forked from a
+# zygote of the installed package; every answer equals a Python loop over the
+# same rows, and a code object whose function answers otherwise is found
+# unequal by the same comparison. The engine's refusals of the frame and of SQL
+# naming the function are held to their exact messages.
+wheel_install_test(
+    name = "udf_installed_test",
+    python = "komira//third_party/python:cpython",
+    wheels = [":komira_wheel", _PYARROW_WHL[""], _PROTOBUF_WHL],
+    script = "komira//python/tests:test_udf_installed.py",
+    files = {"--udf-host": "komira//python/tests:udf_host.py"},
+)
+
 # The same test on installs that must fail, each with the line it fails with
 # (on CPython 3.13, beside its pyarrow unless the case says otherwise; `refuses_python_outside_requires_python`, after them, on
 # CPython 3.10). The first wheels below are the wheel with one thing wrong
@@ -444,7 +474,7 @@ wheel_file(
 # The owner libraries beside libkomira's run path instead of on it: every
 # NEEDED name is a member of the wheel, so the rule writes it, and the loader
 # finds none of the owners.
-_MISPLACED = _LIBKOMIRA | {"komira/_lib/lib/" + n: ":dist_files[" + n + "]" for n in _RUNTIME} | {
+_MISPLACED = _LIBKOMIRA | _UDF_RUNTIME | {"komira/_lib/lib/" + n: ":dist_files[" + n + "]" for n in _RUNTIME} | {
     "komira/_lib/misplaced/" + n: ":dist_files[" + n + "]"
     for n in _OWNERS
 }
@@ -459,7 +489,7 @@ wheel_file(
 # A damaged install: one of the three Mojo runtime libraries left out. The
 # rule writes it only because `external_needed` says another package provides
 # the file; nothing does, and the loader's error names it.
-_WITHOUT_MSUPPORT = _LIBKOMIRA | {
+_WITHOUT_MSUPPORT = _LIBKOMIRA | _UDF_RUNTIME | {
     "komira/_lib/lib/" + n: ":dist_files[" + n + "]"
     for n in _OWNERS + _RUNTIME
     if n != "libMSupportGlobals.so"
@@ -636,12 +666,14 @@ wheel_install_test(
 # komira/_lib/libkomira.so, the library _native.load opens, every DT_NEEDED is
 # a manylinux system library or a member its run path reaches, every run path
 # entry stays under `$ORIGIN` inside komira/, and every shared library in the
-# wheel is one libkomira loads. The wheel carries the three Mojo runtime
+# wheel is one libkomira or the UDF runtime beside it
+# (komira/_lib/libkomira_udf_python.so, `opened`) loads. The wheel carries the three Mojo runtime
 # libraries once each, with the bytes of the toolchain's runtime and with
 # their licence texts, and requires no distribution of Modular's. The output
 # lists the libraries in the loader's order.
 _LIBS_CHECK = {
     "entry": "komira/_lib/libkomira.so",
+    "opened": sorted(_UDF_RUNTIME.keys()),
     "runtime_dists": ["mojo", "mojo-compiler", "mojo-compiler-mojo-libs"],
     "runtime_libs": _RUNTIME,
     "runtime_licenses": sorted(_MODULAR_LICENSE_FILES.keys()),
@@ -656,7 +688,7 @@ wheel_libs_check(
 # A second libKGENCompilerRTShared.so beside libkomira in the wheel, the copy a
 # bundling step would leave: every NEEDED name is a member, so the wheel rule
 # writes it.
-_SECOND_RUNTIME = {"komira/_lib": _DIST, "komira/_lib/libKGENCompilerRTShared.so": ":dist_files[libKGENCompilerRTShared.so]"}
+_SECOND_RUNTIME = _LINUX_NATIVE_FILES | {"komira/_lib/libKGENCompilerRTShared.so": ":dist_files[libKGENCompilerRTShared.so]"}
 
 wheel_file(
     name = "komira_wheel_second_runtime",
@@ -755,7 +787,7 @@ wheel_same_check(
     wheel = ":komira_wheel_macos_arm64",
     like = ":komira_wheel_linux_x86_64",
     only_in_wheel = ["komira/_lib/libkomira.dylib"] + ["komira/_lib/lib/" + n for n in _RUNTIME_MACOS],
-    only_in_like = ["komira/_lib/libkomira.so"] + ["komira/_lib/lib/" + n for n in _OWNERS + _RUNTIME],
+    only_in_like = ["komira/_lib/libkomira.so"] + ["komira/_lib/lib/" + n for n in _OWNERS + _RUNTIME] + sorted(_UDF_RUNTIME.keys()),
     target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
 )
 
@@ -786,8 +818,8 @@ _PREVIOUS_ONLY = {
 
 [wheel_file_at_stamp(
     name = "komira_wheel_" + release,
-    files = _PY_FILES | _NATIVE_FILES | (_PREVIOUS_ONLY if release == "previous" else {}),
-    executable = sorted(_NATIVE_FILES.keys()),
+    files = _PY_FILES | _LINUX_NATIVE_FILES | (_PREVIOUS_ONLY if release == "previous" else {}),
+    executable = sorted(_LINUX_NATIVE_FILES.keys()),
     stamp = stamp,
     **_WHEEL
 ) for release, stamp in [("previous", "999999998"), ("current", "999999999")]]

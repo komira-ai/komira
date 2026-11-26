@@ -95,7 +95,8 @@ python/
     _session.py     Session, Result, the default session
     _errors.py      KomiraError and its subclasses
     _arrow.py       the Arrow C stream import
-    _lib/           not in the repository: the wheel rule copies libkomira's directory here (decision 6)
+    _lib/           not in the repository: the wheel rule copies libkomira's directory here (decision 6),
+                    and, in the Linux wheel, the UDF runtime libkomira_udf_python.so beside libkomira
   tests/
     BUCK            python_binding_test targets
     test_*.py
@@ -285,6 +286,9 @@ the farm's macOS workers), and a run publishes it only from main.
   because build workers have none. On macOS arm64 `[dist]` is `libkomira.dylib` and, in `lib/`, the three
   runtime `.dylib` files, with no owners (the C archives are linked into the dylib) and no C++ runtime; its
   run path is `@loader_path/lib`.
+- The Linux wheel also carries the komira/python UDF runtime at `komira/_lib/libkomira_udf_python.so`.
+  libkomira does not load it, so the wheel's libs check names it `opened`; the macOS wheel does not carry it
+  yet (komira-ai/komira#2333).
 - The library's run path (`$ORIGIN/lib:$ORIGIN`,
   [tools/build/mojo/README.md](../../tools/build/mojo/README.md)) resolves the owners and the runtime in
   `_lib/lib/`, so the loader sets no search path and preloads nothing. It opens `<dir>/libkomira.so` with

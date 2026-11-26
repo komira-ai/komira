@@ -34,7 +34,9 @@ libkomira needs three Mojo runtime libraries, which are Modular's and come
 under Modular's licence. The wheel carries libkomira in `komira/_lib/` and, in `komira/_lib/lib/`,
 its native owner libraries (Linux only: on macOS they are linked into the
 dylib) and those three Mojo runtime libraries, with Modular's licence and
-third-party notices beside komira's own. It requires two other
+third-party notices beside komira's own. The Linux wheel also carries, beside
+libkomira, `libkomira_udf_python.so`, the runtime that will run Python UDFs in
+worker processes; no query opens it yet. It requires two other
 distributions, which `pip install komira` installs: `pyarrow>=25.0.1`, which a
 result is read as, and `protobuf>=5.29.1,<8`, which a DataFrame's plan is
 encoded with (the generated plan modules are in the wheel, at
@@ -524,7 +526,10 @@ target and a new test changes no generated list.
 The Linux wheel is `./buck2 build //python:komira_wheel`: the package and, in
 `komira/_lib/`, `libkomira[dist]` whole: `libkomira.so`, and in `lib/` its
 native owner libraries and the three Mojo runtime libraries, taken from the
-toolchain's Mojo package so that runtime and compiler are one build. It is
+toolchain's Mojo package so that runtime and compiler are one build; beside
+`libkomira.so`, the komira/python UDF runtime `libkomira_udf_python.so`
+(`//src/udf_python:komira_udf_python`), which no query opens yet
+(`//python:udf_installed_test` runs a UDF through it from the installed wheel). It is
 tagged `py3-none-manylinux_2_35_x86_64`, declares the `Requires-Dist` lines
 `pyarrow>=25.0.1` and `protobuf>=5.29.1,<8` (`PYARROW_REQUIREMENT` and
 `PROTOBUF_REQUIREMENT`, `dependencies.bzl`), carries the generated plan
