@@ -271,6 +271,34 @@ test("an error that is no engine refusal, and an answer that cannot be written, 
   assert.deepEqual(report.changes, []);
 });
 
+test("an engine error of a status other than -3 is a run failure, never a refusal to list", async () => {
+  const report = newReport();
+  const s = session({ q: new KomiraError("execute: the call failed", { status: -2, step: "execute" }) });
+  await runCorpus(s, corpusOf({ a: "q" }), NONE, report);
+  assert.deepEqual(report.problems, ["c/a: the run failed: execute: the call failed"]);
+  assert.deepEqual(report.changes, []);
+});
+
+test("a table that cannot be registered is one problem for its corpus, and none of its cases runs", async () => {
+  const report = newReport();
+  const ran: string[] = [];
+  const s: SqlSession = {
+    registerParquet: async (name) => {
+      if (name === "U") {
+        throw new KomiraError("bind: no such file", { status: -3 });
+      }
+    },
+    sql: async (q) => {
+      ran.push(q);
+      return { toArrow: async () => answer([1]) };
+    },
+  };
+  await runCorpus(s, corpusOf({ a: "q" }), NONE, report);
+  assert.deepEqual(report.problems, ["c: the table U cannot be registered, so no case of the corpus ran: bind: no such file"]);
+  assert.deepEqual(ran, []);
+  assert.deepEqual(report.changes, []);
+});
+
 test("a thrown value that is not an Error is a run failure, by its text", async () => {
   const report = newReport();
   const s: SqlSession = {

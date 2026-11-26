@@ -186,6 +186,11 @@ test("a timestamp is its date and clock, the fraction without trailing zeros, +0
   assert.equal(timestampText(-63549316800n, TimeUnit.SECOND, true), "0045-03-15 (BC) 12:00:00+00");
   const us = makeData({ type: new Timestamp(TimeUnit.MICROSECOND, "UTC"), length: 1, data: new BigInt64Array([0n]) });
   assert.deepEqual(cells(column("t", makeVector(us))), ["1970-01-01 00:00:00+00"]);
+  // No zone, whether null, left out or empty: a TIMESTAMP, with no +00.
+  for (const type of [new Timestamp(TimeUnit.MICROSECOND, null), new Timestamp(TimeUnit.MICROSECOND), new Timestamp(TimeUnit.MICROSECOND, "")]) {
+    const plain = makeData({ type, length: 1, data: new BigInt64Array([0n]) });
+    assert.deepEqual(cells(column("t", makeVector(plain))), ["1970-01-01 00:00:00"]);
+  }
 });
 
 test("a time of day is HH:MM:SS with its fraction, at 32 and at 64 bits", () => {

@@ -137,7 +137,8 @@ export function floatDigits(abs: number): Digits {
  * after a point, and `e` with a sign and at least two digits.
  */
 function layout(digits: string, exp: number): string {
-  const trimmed = digits.replace(/0+$/, "") || "0";
+  // Not zero, so its digits hold one that is not 0.
+  const trimmed = digits.replace(/0+$/, "");
   if (exp < POSITIONAL_MIN || exp > POSITIONAL_MAX) {
     const rest = trimmed.slice(1);
     const sign = exp < 0 ? "-" : "+";
@@ -377,7 +378,8 @@ function cellOf(column: string, type: DataType, data: Data, i: number): Cell {
     return dateText(type.unit === DateUnit.DAY ? BigInt(v) : floorDiv(BigInt(v), 86400000n));
   }
   if (DataType.isTimestamp(type)) {
-    return timestampText((data.values as BigInt64Array)[i]!, type.unit, type.timezone !== null);
+    // A zone left out is null or undefined, and the empty zone is none (the C Data Interface's `tsu:`).
+    return timestampText((data.values as BigInt64Array)[i]!, type.unit, Boolean(type.timezone));
   }
   if (DataType.isTime(type)) {
     return timeText(BigInt((data.values as Int32Array | BigInt64Array)[i]!), type.unit);

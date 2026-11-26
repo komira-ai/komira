@@ -258,14 +258,17 @@ function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** The status of an engine refusal, KOMIRA_ERR_ENGINE. */
+const ENGINE_REFUSAL = -3;
+
 /**
- * Whether `e` is komira refusing a query: an error carrying a numeric status,
- * as every KomiraError the engine's refusal becomes does (status -3). A
- * TypeError, an error of the package's own state (status null) and anything
- * else is the run failing, never a refusal.
+ * Whether `e` is the engine refusing a query: an error carrying status -3,
+ * as every KomiraError the engine's refusal becomes does. Another status (a
+ * call that failed otherwise), a TypeError, an error of the package's own
+ * state (status null) and anything else is the run failing, never a refusal.
  */
 function isRefusal(e: unknown): e is Error {
-  return e instanceof Error && typeof (e as { status?: unknown }).status === "number";
+  return e instanceof Error && (e as { status?: unknown }).status === ENGINE_REFUSAL;
 }
 
 /** What a case did: the line a list holds for it (none when it answers as DuckDB), and how to say so. */
@@ -314,11 +317,18 @@ function judge(report: Report, key: string, outcome: Outcome, lists: Lists): voi
  * holds each to DuckDB's answer or to its line in `lists`, into `report`.
  * A list line of this corpus that names none of its cases is a problem too.
  * An error that is no refusal (`isRefusal`), and an answer the renderer cannot
- * write, are problems that change no list.
+ * write, are problems that change no list; so is a table that cannot be
+ * registered, after which none of the corpus's cases runs.
  */
 export async function runCorpus(session: SqlSession, corpus: Corpus, lists: Lists, report: Report): Promise<void> {
   for (const t of corpus.tables) {
-    await session.registerParquet(t.name, t.file);
+    try {
+      await session.registerParquet(t.name, t.file);
+    } catch (e) {
+      // No case of the corpus can run as its corpus says; the other corpora still run.
+      report.problems.push(`${corpus.name}: the table ${t.name} cannot be registered, so no case of the corpus ran: ${messageOf(e)}`);
+      return;
+    }
   }
   const names = new Set(corpus.cases.map((c) => `${corpus.name}/${c.name}`));
   for (const [file, list] of [
