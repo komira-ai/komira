@@ -179,6 +179,7 @@ TARGETS = [
     "komira//src/textproto:ci",
     "komira//src/textproto:coverage_floor",
     "komira//src/textproto:table",
+    "komira//third_party/node:node_darwin_arm64",
     "komira//third_party/rust:crates_gen",
     "komira//tools/build/examples/aws_lc:opt_levels",
     "komira//tools/build/examples/python_binding:hello",

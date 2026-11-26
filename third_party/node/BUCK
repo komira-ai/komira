@@ -89,7 +89,11 @@ node_dist(
     foreign = "macho-arm64",
     top = NODE_DARWIN_ARM64["top"],
     version = NODE_DARWIN_ARM64["version"],
-    visibility = _TEST_ONLY + _NEGATIVE,
+    # komira//ci: the pull request check builds it as a root of its own (on
+    # Linux nothing reaches it but :node_runtime's darwin branch); building it
+    # unpacks the archive and checks its Mach-O node and header on the linux
+    # execution platform, running nothing.
+    visibility = _TEST_ONLY + _NEGATIVE + ["komira//ci:"],
 )
 
 # The node a target platform bundles: the darwin-arm64 dist for a macOS
