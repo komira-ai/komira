@@ -94,7 +94,7 @@ them, then copy them over the committed ones and review the diff:
 ## The corpora
 
 Counts are of the case files (`ls cases/<corpus>/*.sql`, less
-`tables.sql`); 6391 in all, 2283 of them `order: query`.
+`tables.sql`); 6393 in all, 2283 of them `order: query`.
 
 | corpus | cases | what it probes |
 |---|---|---|
@@ -108,7 +108,7 @@ Counts are of the case files (`ls cases/<corpus>/*.sql`, less
 | `null_pattern_n<rows>`, `null_adversarial_n<rows>` | 882, 2100 | filters, aggregates and sorts over a table of `<rows>` rows (5 to 257, either side of 8, 16, 32, 64, 128, 192 and 256) whose text column mixes NULLs and empty strings |
 | `aggregate_modifiers`, `aggregate_names`, `agg_exact_floats` | 55, 31, 17 | DISTINCT and FILTER on aggregates, grouping forms; median, quantiles and the other aggregate names with their output names; float aggregates over 50000 rows of dyadic rationals, whose sums are exact in any order |
 | `agg_float_ungrouped` | 22 | SUM, AVG, MIN, MAX, COUNT and COUNT(*) of a DOUBLE and a FLOAT column with no GROUP BY: 4096 rows of non-dyadic values with NULLs, and small sets holding NaN (first, among values, only), +inf, -inf, both infinities, a sum past the double range, only NULLs, no row, and -0.0 |
-| `scalar_fn`, `string_domain` | 411, 52 | the scalar functions (math, string, date part) over a row each of edge inputs; string functions over Unicode, combining marks, NUL and empty strings |
+| `scalar_fn`, `string_domain` | 413, 52 | the scalar functions (math, string, date part) over a row each of edge inputs; string functions over Unicode, combining marks, NUL and empty strings |
 | `numeric_domain`, `numeric_envelope` | 103, 42 | arithmetic over every integer width signed and unsigned, FLOAT and DOUBLE, at their extremes (the rows that overflow are left out); comparisons and promotion across types |
 | `cast_boundaries`, `temporal_domain` | 108, 96 | CAST between types at their boundaries; date and timestamp parts, truncation and arithmetic, at the ends of months, leap years and before year 1 |
 | `fn_positions`, `fn_postagg_positions` | 136, 57 | the same function in each place a query can hold it: SELECT, WHERE, GROUP BY, HAVING, ORDER BY, over an aggregate, in a CTE |
