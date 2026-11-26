@@ -15,10 +15,11 @@
 //!     range and `pip check` holds the range; names compared as PEP 503 normalises them), no `mojo-compiler`
 //!     and no other distribution, and no `modular` package is importable (the wheel carries the Mojo
 //!     runtime itself).
-//!  3. The example and its data files are copied (by base name) into `<work>/run` and the example is run there
-//!     by `<work>/venv/bin/python -I`. It must exit 0 and print exactly the text of the expected file, in which
-//!     `<version>` is the published version and `<abi_version>` is the engine's C ABI version, taken from the
-//!     first line of the ABI table (`version<TAB><major>.<minor>` is major * 1000 + minor).
+//!  3. The example alone is copied (by base name) into `<work>/run` and run there by `<work>/venv/bin/python -I`.
+//!     It must exit 0 and print exactly the text of the expected file, in which `<version>` is the published
+//!     version, `<abi_version>` is the engine's C ABI version, taken from the first line of the ABI table
+//!     (`version<TAB><major>.<minor>` is major * 1000 + minor), and `<cwd>` is the real path (symlinks resolved)
+//!     of `<work>/run`, made before the example runs.
 //! A step that fails is named with its command, its exit status and the last lines of its stderr; a program
 //! that prints another text is shown beside the expected one, in full.
 //!
@@ -87,7 +88,6 @@ pub const Options = struct {
     python: []const u8,
     example: []const u8,
     expect: []const u8,
-    data: []const []const u8,
     abi_table: []const u8,
     work: []const u8,
     attempts: u32,
@@ -114,11 +114,12 @@ pub fn abiVersion(a: Allocator, why: *[]const u8, path: []const u8, table_text: 
     return refuse(a, why, "the first line of {s} is '{s}', not `version<TAB><major>.<minor>`", .{ path, first });
 }
 
-/// The expected text with `<version>` and `<abi_version>` replaced.
-pub fn expectedText(a: Allocator, text: []const u8, version: []const u8, abi: u32) Error![]u8 {
+/// The expected text with `<version>`, `<abi_version>` and `<cwd>` replaced.
+pub fn expectedText(a: Allocator, text: []const u8, version: []const u8, abi: u32, cwd: []const u8) Error![]u8 {
     const with_version = try std.mem.replaceOwned(u8, a, text, "<version>", version);
     const abi_text = try std.fmt.allocPrint(a, "{d}", .{abi});
-    return std.mem.replaceOwned(u8, a, with_version, "<abi_version>", abi_text);
+    const with_abi = try std.mem.replaceOwned(u8, a, with_version, "<abi_version>", abi_text);
+    return std.mem.replaceOwned(u8, a, with_abi, "<cwd>", cwd);
 }
 
 fn join(a: Allocator, base: []const []const u8, more: []const []const u8) Error![]const []const u8 {
@@ -141,21 +142,12 @@ fn step(a: Allocator, why: *[]const u8, runner: Runner, name: []const u8, argv: 
     return ran;
 }
 
-/// Copies the example and its data files into `run_dir`, each under its base name.
+/// Copies the example into `run_dir` under its base name.
 fn stageRun(a: Allocator, why: *[]const u8, opts: Options, run_dir: []const u8) Error!void {
     std.fs.cwd().makePath(run_dir) catch |e| return refuse(a, why, "cannot make {s}: {s}", .{ run_dir, @errorName(e) });
-    var seen = std.ArrayList([]const u8).empty;
-    const sources = try join(a, &.{opts.example}, opts.data);
-    for (sources) |src| {
-        const base = std.fs.path.basename(src);
-        for (seen.items) |s| {
-            if (std.mem.eql(u8, s, base)) return refuse(a, why, "two files to copy are named {s}", .{base});
-        }
-        try seen.append(a, base);
-        const dest = try std.fs.path.join(a, &.{ run_dir, base });
-        std.fs.cwd().copyFile(src, std.fs.cwd(), dest, .{}) catch |e|
-            return refuse(a, why, "cannot copy {s} to {s}: {s}", .{ src, dest, @errorName(e) });
-    }
+    const dest = try std.fs.path.join(a, &.{ run_dir, std.fs.path.basename(opts.example) });
+    std.fs.cwd().copyFile(opts.example, std.fs.cwd(), dest, .{}) catch |e|
+        return refuse(a, why, "cannot copy {s} to {s}: {s}", .{ opts.example, dest, @errorName(e) });
 }
 
 /// Prints `none`, or where a package named `modular` would be imported from.
@@ -209,9 +201,12 @@ pub fn run(a: Allocator, why: *[]const u8, runner: Runner, opts: Options, wheel:
     try common.requireFreeDir(a, why, "--work", opts.work);
     const abi_text = try meta.readFile(a, why, opts.abi_table, 1 << 20);
     const abi = try abiVersion(a, why, opts.abi_table, abi_text);
-    const expected = try expectedText(a, try meta.readFile(a, why, opts.expect, 1 << 20), wheel.version, abi);
+    const expect_text = try meta.readFile(a, why, opts.expect, 1 << 20);
     const run_dir = try std.fs.path.join(a, &.{ opts.work, "run" });
     try stageRun(a, why, opts, run_dir);
+    const real_run_dir = std.fs.cwd().realpathAlloc(a, run_dir) catch |e|
+        return refuse(a, why, "cannot resolve {s}: {s}", .{ run_dir, @errorName(e) });
+    const expected = try expectedText(a, expect_text, wheel.version, abi, real_run_dir);
 
     const venv = try std.fs.path.join(a, &.{ opts.work, "venv" });
     const venv_python = try std.fs.path.join(a, &.{ venv, "bin", "python" });

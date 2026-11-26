@@ -3,6 +3,22 @@
 # answers
 # =============================================================================
 #
+# Covers: run_sql over a Parquet table DuckDB wrote (the :window_oracle action
+# in BUCK) answers what the pinned DuckDB answers for each case of
+# tests/window/cases.sql: row_number, rank, dense_rank, percent_rank,
+# cume_dist, ntile, lag and lead (offsets, defaults, BIGINT, DOUBLE and
+# VARCHAR), running sums over the default RANGE frame and over a unique key,
+# running min, max, avg and count over tied keys, whole-partition sum, count,
+# avg, min and max, first_value, last_value and nth_value, with no, one or two
+# partition keys, several windows in one SELECT, a WHERE, an outer ORDER BY and
+# no row, a CTE holding a window read twice, a window over a CTE aggregation
+# read twice (and over a union of the reads) and a join with a window on its
+# left side beside a CTE read twice, with NULL keys, tied order keys and the
+# empty string, on one and three workers, each column of its documented type;
+# every case is run, sum, avg, min and max over an INTEGER among them; a DATE
+# partition key, a DECIMAL order key and a float default over a BIGINT lag are
+# LOWERING_WINDOW_UNSERVED refusals at step lower.
+#
 # The pinned DuckDB writes the table (tests/window/data.sql: 5000 rows in five
 # row groups; a BIGINT id with no tie, an INTEGER, a VARCHAR and a BOOLEAN
 # partition key, a BIGINT order key with many ties and NULLs, BIGINT, DOUBLE,

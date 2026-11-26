@@ -12,7 +12,9 @@
 # query and a plan of the same query take one route to their answer.
 #
 # Nothing here reads SQL text: this module imports no part of the SQL front
-# end (`sql.sql_token`, `sql.sql_parser`, `sql.sql_binder`, `sql.sql_frontend`).
+# end (`sql.sql_token`, `sql.sql_parser`, `sql.sql_binder`, `sql.sql_frontend`);
+# it imports `sql.sql_position`, which imports nothing, for the place a refusal
+# of `run_sql`'s parse step names.
 # A plan needs no registered table: a scan leaf carries its own source (its
 # paths, schema and orientation), and a Parquet scan of a file no table
 # names reads that file's footer for its lowering facts
@@ -36,6 +38,7 @@ from optimizer.plan_cse import plan_cse_eliminate
 from phase_timers.phase_timers import PH_LOWER, PH_OPTIMIZE, pt_now, pt_record
 from pipeline_exec.source_parquet import LocalOnlyScanFs
 from plan_ir.logical_plan import LogicalPlan
+from sql.sql_position import SqlPosition
 
 from .engine_context import EngineContext
 from .engine_execute import run_lowered_plan_with
@@ -58,10 +61,25 @@ struct SqlRefusal(Copyable, Movable):
     """One of the `STEP_*` names."""
     var reason: String
     """The step's own message, unchanged."""
+    var position: Optional[SqlPosition]
+    """Where the SQL text stopped parsing: set by `run_sql` for a refusal of
+    step `parse`, `None` for every other step and for every refusal of
+    `run_plan`."""
 
     def __init__(out self, var step: String, var reason: String):
         self.step = step^
         self.reason = reason^
+        self.position = None
+
+    def __init__(
+        out self,
+        var step: String,
+        var reason: String,
+        var position: Optional[SqlPosition],
+    ):
+        self.step = step^
+        self.reason = reason^
+        self.position = position^
 
 
 struct SqlOutcome(Movable):
@@ -78,6 +96,15 @@ struct SqlOutcome(Movable):
     def __init__(out self, var step: String, var reason: String):
         self.batches = List[RecordBatch]()
         self.refusal = Optional(SqlRefusal(step^, reason^))
+
+    def __init__(
+        out self,
+        var step: String,
+        var reason: String,
+        var position: Optional[SqlPosition],
+    ):
+        self.batches = List[RecordBatch]()
+        self.refusal = Optional(SqlRefusal(step^, reason^, position^))
 
     def ok(self) -> Bool:
         return not self.refusal

@@ -4,16 +4,21 @@
 #
 # What each test proves:
 #   * test_function_table_is_what_the_engine_measures: every `scalar_fn` case
-#     is run through run_sql over the corpus's table T and compared with the
+#     is run through run_sql over the corpus's tables T and E and compared with the
 #     answer the pinned DuckDB gave it, every refused or unrowed name is
 #     probed, and the resulting table (function_coverage.tsv, one line per
 #     name of sql_scalar_fn_spec and of the common-analysis list) is exactly
 #     the committed file. A function that starts or stops running, a row
 #     added or removed, and a case added to the corpus each change a line and
-#     fail it; the failure message holds the table to copy.
-#   * test_make_date_last_day_make_timestamp_equal_duckdb: in the measured
-#     table the lines of make_date, last_day and make_timestamp each read
-#     equal:n, n being the number of staged cases that call the name.
+#     fail it; the failure message holds each changed line (`- ` committed,
+#     `+ ` measured) to apply to the file.
+#   * test_a_changed_table_names_each_changed_line: a changed line is its
+#     committed and its measured text, an added line and a dropped line are
+#     each named, and an equal table names none.
+#   * test_make_date_last_day_make_timestamp_equal_duckdb: in the committed
+#     function_coverage.tsv the lines of make_date, last_day and
+#     make_timestamp each read equal:n, n being the number of staged cases
+#     that call the name.
 #   * test_the_ladder_reader_reads_each_row_shape: aliases share a line, a
 #     refusal row names its family, an inline reason is named, a name held in
 #     a constant is kept, and a source without the function, a row without a
@@ -23,11 +28,17 @@
 #   * test_the_comparison_is_not_vacuous: a case's own answer compares equal;
 #     one changed value, a missing row and an added row do not, in both row
 #     orders; a float one step away is equal within ulps and not exactly.
+#   * test_timestamp_and_list_answers_are_compared_by_value: a TIMESTAMP
+#     answer (date_trunc) and a list-of-strings answer (string_split) compare
+#     equal to DuckDB's text; a timestamp one microsecond or one day off, a
+#     list item changed, an item split in two, and the list of one empty
+#     string read as the empty list do not.
 #   * test_probe_names_the_step_that_refused: a name with no row stops at
 #     bind, a name that runs answers ok.
 #   * test_every_staged_case_is_run: each case has a SQL text and an answer,
 #     and the run covers all of them.
 
+from std.collections import Dict
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_sql_conformance.function_coverage import (
@@ -45,6 +56,49 @@ from runtime_paths import read_data
 from sdk_exec.engine_sql import run_sql
 
 
+def _key(line: String) -> String:
+    """A line's name (its text before the first tab; a comment line is its
+    own key)."""
+    var tab = line.find("\t")
+    if tab < 0 or line.startswith("#"):
+        return line
+    return String(line[byte=:tab])
+
+
+def _lines(text: String) -> List[String]:
+    var out = List[String]()
+    for piece in text.split("\n"):
+        if piece.byte_length() > 0:
+            out.append(String(piece))
+    return out^
+
+
+def changed_lines(committed: String, measured: String) raises -> String:
+    """The lines of `measured` that are not in `committed`, each as `+ line`,
+    and the lines of `committed` it drops or changes, each as `- line`, in
+    the measured order (a changed line is its `- ` line then its `+ ` line;
+    a dropped line comes last). The test runner prints only the end of a
+    failing test's output, so the message holds these, not the whole table."""
+    var old = Dict[String, String]()
+    var old_lines = _lines(committed)
+    for line in old_lines:
+        old[_key(line)] = line
+    var seen = Dict[String, Bool]()
+    var out = String()
+    for line in _lines(measured):
+        var k = _key(line)
+        seen[k] = True
+        if k in old:
+            if old[k] != line:
+                out += "- " + old[k] + "\n+ " + line + "\n"
+        else:
+            out += "+ " + line + "\n"
+    for line in old_lines:
+        if _key(line) not in seen:
+            out += "- " + line + "\n"
+    return out
+
+
 def test_function_table_is_what_the_engine_measures() raises:
     var measured = measure_table(read_data("sql_fn_table.mojo"))
     var committed = read_data("function_coverage.tsv")
@@ -52,8 +106,19 @@ def test_function_table_is_what_the_engine_measures() raises:
         assert_true(
             False,
             "function_coverage.tsv is not what the engine measures; the"
-            " measured table is\n<<<<\n" + measured + ">>>>",
+            " lines that change it are\n<<<<\n"
+            + changed_lines(committed, measured) + ">>>>",
         )
+
+
+def test_a_changed_table_names_each_changed_line() raises:
+    var committed = "# h\na\tFNK_X\tno_case\nb\tFNK_X\tequal:1\nc\tFNK_X\tequal:1\n"
+    var measured = "# h\na\tFNK_X\tequal:2\nb\tFNK_X\tequal:1\nd\tFNK_X\tdiffers:1\n"
+    assert_equal(
+        changed_lines(committed, measured),
+        "- a\tFNK_X\tno_case\n+ a\tFNK_X\tequal:2\n+ d\tFNK_X\tdiffers:1\n- c\tFNK_X\tequal:1\n",
+    )
+    assert_equal(changed_lines(committed, committed), "")
 
 
 def _table_line(table: String, name: String) -> String:
@@ -81,13 +146,13 @@ def _staged_cases_calling(name: String) raises -> Int:
 
 
 def test_make_date_last_day_make_timestamp_equal_duckdb() raises:
-    var measured = measure_table(read_data("sql_fn_table.mojo"))
+    var committed = read_data("function_coverage.tsv")
     var wanted = List[String]()
     wanted.append("make_date")
     wanted.append("last_day")
     wanted.append("make_timestamp")
     for i in range(len(wanted)):
-        var line = _table_line(measured, wanted[i])
+        var line = _table_line(committed, wanted[i])
         var n = _staged_cases_calling(wanted[i])
         assert_true(n > 0, wanted[i] + " has staged cases")
         var fields = line.split("\t")
@@ -95,8 +160,11 @@ def test_make_date_last_day_make_timestamp_equal_duckdb() raises:
         if outcome != "equal:" + String(n):
             assert_true(
                 False,
-                wanted[i] + " is not measured equal to DuckDB over its "
-                + String(n) + " staged cases; the measured line is: " + line,
+                wanted[i]
+                + " is not equal to DuckDB over its "
+                + String(n)
+                + " staged cases in function_coverage.tsv; its line is: "
+                + line,
             )
 
 
@@ -189,6 +257,32 @@ def test_the_comparison_is_not_vacuous() raises:
     assert_equal(
         compare_answer(sqrt.batches[0], "k\tsqrt(d)\n2\t10.000000000000002\n", False, 4), ""
     )
+
+
+def test_timestamp_and_list_answers_are_compared_by_value() raises:
+    var ctx = new_context()
+    var trunc = run_sql(ctx, "SELECT k, date_trunc('hour', t) FROM T")
+    assert_equal(len(trunc.batches), 1)
+    ref tb = trunc.batches[0]
+    var hour = read_data("duckdb/date_trunc_hour.tsv")
+    assert_equal(compare_answer(tb, hour, False, 0), "")
+    assert_true(
+        compare_answer(tb, hour.replace("0\t2015-09-04 12:00:00", "0\t2015-09-04 12:00:00.000001"), False, 0) != "",
+        "a timestamp one microsecond off",
+    )
+    assert_true(
+        compare_answer(tb, hour.replace("0\t2015-09-04 12:00:00", "0\t2015-09-05 12:00:00"), False, 0) != "",
+        "a timestamp one day off",
+    )
+    var split = run_sql(ctx, "SELECT k, string_split(s, ',') FROM T")
+    assert_equal(len(split.batches), 1)
+    ref sb = split.batches[0]
+    var lists = read_data("duckdb/string_split_comma.tsv")
+    assert_equal(compare_answer(sb, lists, False, 0), "")
+    assert_true(compare_answer(sb, lists.replace("[a, b]", "[a, c]"), False, 0) != "", "an item changed")
+    assert_true(compare_answer(sb, lists.replace("[a, b]", "['a, b']"), False, 0) != "", "two items read as one")
+    assert_true(compare_answer(sb, lists.replace("[abc]", "[ab, c]"), False, 0) != "", "one item read as two")
+    assert_true(compare_answer(sb, lists.replace("0\t['']", "0\t[]"), False, 0) != "", "[''] is not []")
 
 
 def test_probe_names_the_step_that_refused() raises:

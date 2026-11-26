@@ -8,7 +8,7 @@
 from arrow.schema import Schema
 from column_kernels.regexp_functions import regexp_escape_str
 from plan_expr.expr import (
-    EXPR_LITERAL, Expr, REGEXP_SPLIT_TO_ARRAY,
+    BIN_GT, BIN_LT, EXPR_LITERAL, Expr, REGEXP_SPLIT_TO_ARRAY, UN_IS_NULL, WhenCaseData,
 )
 from plan_expr.scalar_desugar import (
     FLOAT_CLASS_FINITE, FLOAT_CLASS_INFINITE, FLOAT_CLASS_NAN, YEAR_DERIVED_CENTURY,
@@ -38,15 +38,17 @@ from sql.sql_fn_table import (
 def _date_diff_days(sx: SqlExpr) raises -> Int64:
     """Constant-fold `date_diff('day', DATE d0, DATE d1)` to the integer day
     difference `days(d1) - days(d0)`. Raises for a unit other than `'day'` or
-    an operand that is not a DATE literal."""
+    an operand that is not a DATE literal (`_bind_date_diff` folds only
+    those; every other call is lowered by `plan_expr.temporal_delta`)."""
     ref args = sx._call.value().args
     if len(args) != 3:
         raise Error("SQL bind error: date_diff expects 3 arguments (unit, start, end)")
     ref unit = args[0]
     if unit.tag != SX_STRING or unit.text.lower() != "day":
         raise Error(
-            "SQL not supported: only date_diff('day', ...) is supported"
-            + " (got unit that is not the constant 'day')"
+            "SQL bind error: the bind-time fold of date_diff reads only the"
+            + " unit 'day'; date_diff over another unit is lowered by"
+            + " plan_expr.temporal_delta (`_bind_date_diff`)"
         )
     ref d0 = args[1]
     ref d1 = args[2]
@@ -97,6 +99,11 @@ def _bind_greatest_least(sx: SqlExpr, dsg: UInt8, schema: Schema, scope: BindSco
     Type unification is the CASE rule again (see `_bind_coalesce`): any float
     argument promotes the integer-literal ones, since every arm must share one
     dtype.
+
+    Over floats the tree is `_greatest_least_float`: DuckDB orders floats
+    totally (NaN above +inf, `-0.0 = 0.0`) and a tie keeps the first
+    argument, where this engine compares by IEEE. Over integers a tie is
+    one value either way, so `greatest_least_of`'s tree is the answer.
     """
     ref gargs = sx._call.value().args
     if len(gargs) != 2:
@@ -111,10 +118,49 @@ def _bind_greatest_least(sx: SqlExpr, dsg: UInt8, schema: Schema, scope: BindSco
     if _bound_expr_is_float(ga, schema) or _bound_expr_is_float(gb, schema):
         ga = _promote_int_literal_to_float(ga^)
         gb = _promote_int_literal_to_float(gb^)
-
+        var a_float = _bound_expr_is_float(ga, schema)
+        var b_float = _bound_expr_is_float(gb, schema)
+        return _greatest_least_float(dsg == DSG_GREATEST, ga^, gb^, a_float, b_float)
     # The tree is `scalar_desugar.greatest_least_of`, the builder the
     # dataframe `greatest` / `least` use too.
     return greatest_least_of(dsg == DSG_GREATEST, ga^, gb^)
+
+
+def _greatest_least_float(
+    greatest: Bool, var a: Expr, var b: Expr, a_float: Bool, b_float: Bool
+) -> Expr:
+    """`greatest(a, b)` / `least(a, b)` over floats, as DuckDB answers them:
+
+        CASE WHEN a IS NULL THEN b
+             WHEN b IS NULL THEN a
+             WHEN isnan(a)  THEN a          (least: b)
+             WHEN isnan(b)  THEN b          (least: a)
+             WHEN b > a     THEN b          (least: b < a)
+             ELSE a END
+
+    DuckDB's total order puts NaN above every other float, so a NaN is the
+    greatest and never the least of a NaN and a number; the NaN arms answer
+    that under the IEEE comparisons this engine runs, where every comparison
+    with a NaN is FALSE (`isnan` is `float_class_of`, right under both
+    orders). A tie keeps the first argument: DuckDB answers
+    `greatest(-0.0, 0.0)` and `least(-0.0, 0.0)` as `-0.0`, which `a > b
+    THEN a ELSE b` answers as `0.0`. An integer operand is never a NaN, so
+    its NaN arm is left out (`a_float`, `b_float`: the operand is a float
+    after the literal promotion)."""
+    var cmp_op = BIN_GT if greatest else BIN_LT
+    var cases = List[WhenCaseData]()
+    cases.append(WhenCaseData(Expr.unary(UN_IS_NULL, a.copy()), b.copy()))
+    cases.append(WhenCaseData(Expr.unary(UN_IS_NULL, b.copy()), a.copy()))
+    if a_float:
+        cases.append(WhenCaseData(
+            float_class_of(FLOAT_CLASS_NAN, a.copy()), a.copy() if greatest else b.copy()
+        ))
+    if b_float:
+        cases.append(WhenCaseData(
+            float_class_of(FLOAT_CLASS_NAN, b.copy()), b.copy() if greatest else a.copy()
+        ))
+    cases.append(WhenCaseData(Expr.binary(cmp_op, b.copy(), a.copy()), b.copy()))
+    return Expr.when(cases^, a^)
 
 
 def _bind_coalesce(sx: SqlExpr, dsg: UInt8, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:

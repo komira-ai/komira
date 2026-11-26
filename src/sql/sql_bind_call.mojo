@@ -326,9 +326,10 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
     # internal-error fallthrough below.
     var dsg_op = spec.op if spec.kind == FNK_DESUGAR else UInt8(255)
     if dsg_op == DSG_DATE_DIFF:
-        # Not part of the temporal family: its output is an INT64 day count,
-        # not an EXPR_EXTRACT. Two DATE literals fold to an INT64 at bind
-        # time; anything else lowers to a day subtraction over DATE32 columns.
+        # Not part of the temporal family: its output is an INT64 count of
+        # unit boundaries, not an EXPR_EXTRACT. Two DATE literals with the
+        # unit 'day' fold to an INT64 at bind time; anything else is lowered
+        # by plan_expr.temporal_delta over two DATEs or two TIMESTAMPs.
         return _bind_date_diff(sx, schema, scope, catalog, cte_scope, prebound)
     if dsg_op == DSG_COALESCE or dsg_op == DSG_IFNULL:
         return _bind_coalesce(sx, dsg_op, schema, scope, catalog, cte_scope, prebound)
@@ -380,11 +381,10 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
     if dsg_op == DSG_MAP_EXTRACT_VALUE:
         return _bind_map_get(sx, schema, scope, catalog, cte_scope, prebound)
     if dsg_op == DSG_DATE_SUB:
-        # ITS OWN FOLD AND ITS OWN UNIT CHECK, NOT `DSG_DATE_DIFF`'s. The two
-        # functions agree only for the 'day' unit this engine serves; sharing
-        # either would make a future widening of one silently widen the other.
-        # See `_date_sub_days`. (The 'day' COLUMN lowering IS shared, and
-        # `_date_delta_days_over_columns` states why that one is safe.)
+        # ITS OWN FOLD AND ITS OWN LOWERING, NOT `DSG_DATE_DIFF`'s: date_sub
+        # counts complete units and date_diff the boundaries crossed, so they
+        # differ once an operand carries a time of day or a unit is above the
+        # day (`plan_expr.temporal_delta`, `_date_sub_days`).
         return _bind_date_sub(sx, schema, scope, catalog, cte_scope, prebound)
     if dsg_op == DSG_FDIV or dsg_op == DSG_FMOD:
         return _bind_fdiv_fmod(sx, dsg_op, schema, scope, catalog, cte_scope, prebound)

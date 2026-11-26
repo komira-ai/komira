@@ -7,7 +7,7 @@
 //!   pypi_smoke present --index <testpypi|pypi> --name-file <path> --github-output <file>
 //!   pypi_smoke verify --index <testpypi|pypi> --dist <dir> [--attempts <n>] [--delay <seconds>]
 //!   pypi_smoke install --index <testpypi|pypi|dist> --dist <dir> --python <exe> --example <file> --expect <file>
-//!                      --data <file>... --abi-table <file> --work <dir> [--attempts <n>] [--delay <seconds>]
+//!                      --abi-table <file> --work <dir> [--attempts <n>] [--delay <seconds>]
 //!   pypi_smoke matrix --pythons <file> --platform <name> --github-output <file>
 //!   pypi_smoke storage --index <testpypi|pypi> --project <name> --limit-gib <1..1000> --over-percent <1..100>
 //!                      --summary <file> --github-output <file>
@@ -56,7 +56,7 @@ pub const usage =
     \\       pypi_smoke present --index <testpypi|pypi> --name-file <path> --github-output <file>
     \\       pypi_smoke verify --index <testpypi|pypi> --dist <dir> [--attempts <n>] [--delay <seconds>]
     \\       pypi_smoke install --index <testpypi|pypi|dist> --dist <dir> --python <exe> --example <file> --expect <file>
-    \\                          --data <file>... --abi-table <file> --work <dir> [--attempts <n>] [--delay <seconds>]
+    \\                          --abi-table <file> --work <dir> [--attempts <n>] [--delay <seconds>]
     \\       pypi_smoke matrix --pythons <file> --platform <name> --github-output <file>
     \\       pypi_smoke storage --index <testpypi|pypi> --project <name> --limit-gib <1..1000> --over-percent <1..100>
     \\                          --summary <file> --github-output <file>
@@ -66,19 +66,17 @@ pub const usage =
 
 const Parsed = struct {
     values: []?[]const u8,
-    repeated: []const []const u8,
 
     fn get(self: Parsed, k: usize) []const u8 {
         return self.values[k].?;
     }
 };
 
-/// The flags of one command: `names` (each given once; the first `required` must be there) and `repeated`, a
-/// flag that may be given many times. Null after the usage error was written to `err`.
-fn parseFlags(a: Allocator, args: []const []const u8, names: []const []const u8, required: usize, repeated: ?[]const u8, err: *std.Io.Writer) !?Parsed {
+/// The flags of one command: `names`, each given once; the first `required` must be there. Null after the usage
+/// error was written to `err`.
+fn parseFlags(a: Allocator, args: []const []const u8, names: []const []const u8, required: usize, err: *std.Io.Writer) !?Parsed {
     const values = try a.alloc(?[]const u8, names.len);
     @memset(values, null);
-    var many = std.ArrayList([]const u8).empty;
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         const flag = args[i];
@@ -86,21 +84,20 @@ fn parseFlags(a: Allocator, args: []const []const u8, names: []const []const u8,
         for (names, 0..) |n, k| {
             if (std.mem.eql(u8, flag, n)) slot = &values[k];
         }
-        const is_many = repeated != null and std.mem.eql(u8, flag, repeated.?);
-        if (slot == null and !is_many) {
+        if (slot == null) {
             try err.print("pypi_smoke: unknown argument {s}\n{s}", .{ flag, usage });
             try err.flush();
             return null;
         }
         i += 1;
-        if (i >= args.len or (slot != null and slot.?.* != null)) {
-            try err.print("pypi_smoke: {s} needs one value{s}\n", .{ flag, if (is_many) "" else ", given once" });
+        if (i >= args.len or (slot.?.* != null)) {
+            try err.print("pypi_smoke: {s} needs one value, given once\n", .{flag});
             try err.flush();
             return null;
         }
-        if (is_many) try many.append(a, args[i]) else slot.?.* = args[i];
+        slot.?.* = args[i];
     }
-    var complete = repeated == null or many.items.len != 0;
+    var complete = true;
     for (values[0..required]) |v| {
         if (v == null) complete = false;
     }
@@ -109,7 +106,7 @@ fn parseFlags(a: Allocator, args: []const []const u8, names: []const []const u8,
         try err.flush();
         return null;
     }
-    return .{ .values = values, .repeated = many.items };
+    return .{ .values = values };
 }
 
 fn parseNumber(s: []const u8, max: u64) ?u64 {
@@ -173,7 +170,7 @@ fn failedText(a: Allocator, out: *std.Io.Writer, err: *std.Io.Writer, comptime f
 
 fn cmdDist(a: Allocator, args: []const []const u8, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
     const names = [_][]const u8{ "--wheel", "--out", "--record", "--github-output" };
-    const p = (try parseFlags(a, args, &names, 4, null, err)) orelse return 2;
+    const p = (try parseFlags(a, args, &names, 4, err)) orelse return 2;
     var why: []const u8 = "";
     const wheel = meta.loadWheelFile(a, &why, p.get(0)) catch |e| return failed(a, out, err, e, why);
     meta.writeDist(a, &why, wheel, p.get(1)) catch |e| return failed(a, out, err, e, why);
@@ -190,7 +187,7 @@ fn cmdDist(a: Allocator, args: []const []const u8, out: *std.Io.Writer, err: *st
 
 fn cmdState(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
     const names = [_][]const u8{ "--index", "--dist", "--github-output" };
-    const p = (try parseFlags(a, args, &names, 3, null, err)) orelse return 2;
+    const p = (try parseFlags(a, args, &names, 3, err)) orelse return 2;
     const idx = (try indexOf(err, p.get(0))) orelse return 2;
     var why: []const u8 = "";
     const wheel = meta.loadDist(a, &why, p.get(1)) catch |e| return failed(a, out, err, e, why);
@@ -209,7 +206,7 @@ fn cmdState(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Wri
 
 fn cmdPresent(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
     const names = [_][]const u8{ "--index", "--name-file", "--github-output" };
-    const p = (try parseFlags(a, args, &names, 3, null, err)) orelse return 2;
+    const p = (try parseFlags(a, args, &names, 3, err)) orelse return 2;
     const idx = (try indexOf(err, p.get(0))) orelse return 2;
     const text = std.fs.cwd().readFileAlloc(a, p.get(1), 4096) catch |e|
         return failedText(a, out, err, "cannot read --name-file {s}: {s}", .{ p.get(1), @errorName(e) });
@@ -226,7 +223,7 @@ fn cmdPresent(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.W
 
 fn cmdVerify(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
     const names = [_][]const u8{ "--index", "--dist", "--attempts", "--delay" };
-    const p = (try parseFlags(a, args, &names, 2, null, err)) orelse return 2;
+    const p = (try parseFlags(a, args, &names, 2, err)) orelse return 2;
     const idx = (try indexOf(err, p.get(0))) orelse return 2;
     const pace = (try paceOf(err, p.values[2], p.values[3])) orelse return 2;
     var why: []const u8 = "";
@@ -239,7 +236,7 @@ fn cmdVerify(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Wr
 
 fn cmdInstall(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
     const names = [_][]const u8{ "--index", "--dist", "--python", "--example", "--expect", "--abi-table", "--work", "--attempts", "--delay" };
-    const p = (try parseFlags(a, args, &names, 7, "--data", err)) orelse return 2;
+    const p = (try parseFlags(a, args, &names, 7, err)) orelse return 2;
     const from_dist = std.mem.eql(u8, p.get(0), "dist");
     if (!from_dist and common.indexNamed(p.get(0)) == null) {
         try err.writeAll("pypi_smoke: --index is testpypi, pypi or dist\n");
@@ -264,7 +261,6 @@ fn cmdInstall(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.W
         .python = p.get(2),
         .example = p.get(3),
         .expect = p.get(4),
-        .data = p.repeated,
         .abi_table = p.get(5),
         .work = p.get(6),
         .attempts = pace.attempts,
@@ -282,7 +278,7 @@ fn cmdInstall(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.W
 
 fn cmdMatrix(a: Allocator, args: []const []const u8, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
     const names = [_][]const u8{ "--pythons", "--platform", "--github-output" };
-    const p = (try parseFlags(a, args, &names, 3, null, err)) orelse return 2;
+    const p = (try parseFlags(a, args, &names, 3, err)) orelse return 2;
     const platform = matrix.platformNamed(p.get(1)) orelse {
         try err.print("pypi_smoke: --platform is one of {s}\n", .{try matrix.platformNames(a)});
         try err.flush();
@@ -301,7 +297,7 @@ fn cmdMatrix(a: Allocator, args: []const []const u8, out: *std.Io.Writer, err: *
 
 fn cmdStorage(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
     const names = [_][]const u8{ "--index", "--project", "--limit-gib", "--over-percent", "--summary", "--github-output" };
-    const p = (try parseFlags(a, args, &names, 6, null, err)) orelse return 2;
+    const p = (try parseFlags(a, args, &names, 6, err)) orelse return 2;
     const idx = (try indexOf(err, p.get(0))) orelse return 2;
     const project_ok = p.get(1).len != 0 and for (p.get(1)) |c| {
         if (!std.ascii.isAlphanumeric(c) and std.mem.indexOfScalar(u8, "._-", c) == null) break false;
@@ -337,7 +333,7 @@ fn cmdStorage(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.W
 
 fn cmdPromote(a: Allocator, args: []const []const u8, deps: Deps, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
     const names = [_][]const u8{ "--record", "--out", "--github-output" };
-    const p = (try parseFlags(a, args, &names, 3, null, err)) orelse return 2;
+    const p = (try parseFlags(a, args, &names, 3, err)) orelse return 2;
     var why: []const u8 = "";
     const res = promote.check(a, &why, deps.fetcher, p.get(0), p.get(1), out) catch |e| return failed(a, out, err, e, why);
     const rec = res.record;

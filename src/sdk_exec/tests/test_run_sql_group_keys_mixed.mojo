@@ -3,6 +3,15 @@
 # DuckDB answers
 # =============================================================================
 #
+# Covers: run_sql over a Parquet table the pinned DuckDB writes (the
+# :group_keys_mixed_oracle action in BUCK; five row groups, NULLs in every
+# column, the empty string) answers what DuckDB answers for each query of
+# tests/group_keys_mixed/cases.sql, on one and on three workers: GROUP BY an
+# INTEGER, a VARCHAR and a DATE (in both orders, with count, sum, min and max),
+# a BIGINT and an INTEGER, a BOOLEAN, a DECIMAL and a VARCHAR; under a WHERE
+# and a HAVING; count(DISTINCT) per mixed key; SELECT DISTINCT over three
+# columns; an all-NULL key; no row; every case is run.
+#
 # The pinned DuckDB writes the table (tests/group_keys_mixed/data.sql: 10000
 # rows in five row groups, an INTEGER, a BIGINT, a VARCHAR, a DATE, a
 # DECIMAL(12, 2), a BOOLEAN and a BIGINT value column, each with NULLs at a

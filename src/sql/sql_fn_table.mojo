@@ -779,10 +779,10 @@ comptime _R_INTERVAL: String = (
     "or `INTERVAL + DATE` that folds to a DATE at bind time (`sql_bind_interval`), so there is "
     "no interval operand to hand a macro and no non-constant date+interval "
     "arm. ⚠ NOT the "
-    "same as `date_diff`/`date_sub`, whose output is an INT64 DAY COUNT and "
-    "which read no interval at all. ⚠ THOSE TWO DO MORE THAN "
-    "'constant-FOLD two DATE literals' — they fold two literals, and over "
-    "columns they lower to `CAST(b AS BIGINT) - CAST(a AS BIGINT)`. "
+    "same as `date_diff`/`date_sub`, whose output is an INT64 COUNT of "
+    "units and which read no interval at all: they fold two DATE literals, "
+    "and over columns they lower to integer arithmetic on the operands' "
+    "calendar fields (`plan_expr.temporal_delta`). "
     "Either way the OUTPUT is an integer, "
     "which is why neither of them unblocks this family."
 )
@@ -2907,11 +2907,10 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     # IS THE POINT. On v1.5.3, over 2027-01-31 -> 2027-03-01,
     # `date_diff('month', ...)` = **2** (boundaries CROSSED) and
     # `date_sub('month', ...)` = **1** (COMPLETE periods). They agree for
-    # 'day' — 63 and 63 over 2027-01-01 -> 2027-03-05 — which is the ONLY unit
-    # this engine serves, so aliasing them would be correct today and would
-    # become a silent wrong answer the DAY somebody widens the day-only fold.
-    # Two selectors, two folds, two messages: the widening then has to be done
-    # twice, deliberately, instead of once by accident.
+    # 'day' over two DATEs — 63 and 63 over 2027-01-01 -> 2027-03-05 — and
+    # nowhere else: over TIMESTAMPs and above the day they differ. Two
+    # selectors, two folds, two lowerings (`plan_expr.temporal_delta`'s
+    # `date_diff_of` and `date_sub_of`).
     if name == "date_sub" or name == "datesub": return SqlFnSpec(FNK_DESUGAR, DSG_DATE_SUB, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
 
     # -- EVEN ------------------------------------------------------------

@@ -1,7 +1,8 @@
 //! The install page, docs/install.md, shows the quickstart and what it prints: its ```python block is
 //! python/examples/quickstart.py byte for byte, and its ```text block is python/examples/quickstart.expected with
-//! `<version>` the newest release python/CHANGELOG.md lists and `<abi_version>` the version line of
-//! src/so/abi/komira.tsv, which is what the release smoke holds the installed package's output to. The five
+//! `<version>` the newest release python/CHANGELOG.md lists, `<abi_version>` the version line of
+//! src/so/abi/komira.tsv and `<cwd>` left as written (the page explains it); the release smoke holds the installed
+//! package's output to the same text with `<cwd>` the run directory's real path. The five
 //! files are the test's data, under KOMIRA_TEST_WORK. A change to one without the others fails here, with the
 //! first line that differs.
 const std = @import("std");
@@ -38,7 +39,7 @@ test "the install page's text block is what the quickstart prints at the newest 
         return fail(why, e);
     const abi = lib.install.abiVersion(a, &why, "src/so/abi/komira.tsv", try readData(a, "komira.tsv")) catch |e|
         return fail(why, e);
-    const want = try lib.install.expectedText(a, try readData(a, "quickstart.expected"), version, abi);
+    const want = try lib.install.expectedText(a, try readData(a, "quickstart.expected"), version, abi, "<cwd>");
     if (try lib.readme.docShowsBlock(a, lib.readme.install_page_output, try readData(a, "install.md"), want)) |w|
         return fail(w, error.InstallPageDiffersFromOutput);
 }

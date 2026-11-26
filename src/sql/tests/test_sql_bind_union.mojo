@@ -21,10 +21,11 @@
 #      float takes the float.
 #   6. Two zone-less timestamps take the finer unit; a zone on either side or a
 #      nanosecond side with another unit is refused.
-#   7. Pairs with no common type (string with number, string with large
-#      string, bool with number, date with timestamp, float16 with integer,
-#      decimal with string) are refused with the column number, name and both
-#      types.
+#   7. A 32- or 64-bit signed integer with a string takes the string, as in
+#      DuckDB, in either order. Pairs with no common type (a string with any
+#      other number, string with large string, bool with number, date with
+#      timestamp, float16 with integer, decimal with string) are refused with
+#      the column number, name and both types.
 #   8. The union is nullable when any branch is, on every kind of column; its
 #      names are the first branch's; each column folds on its own.
 #   9. A chain folds left to right into ONE union node with a child per
@@ -115,7 +116,7 @@ def _catalog() raises -> SqlCatalog:
     cat.add_parquet(String("t_pair_b"), String("t_pair_b.parquet"), pb.build())
     var pc = SchemaBuilder()
     pc.add_field(_x(ArrowType.INT64))
-    pc.add_field(Field(String("y"), ArrowType.INT32, False))
+    pc.add_field(Field(String("y"), ArrowType.BOOL, False))
     cat.add_parquet(String("t_pair_c"), String("t_pair_c.parquet"), pc.build())
     return cat^
 
@@ -343,8 +344,26 @@ def test_timestamps_with_a_zone_or_in_nanoseconds_are_refused() raises:
     )
 
 
+def test_a_32_or_64_bit_signed_integer_with_a_string_takes_the_string() raises:
+    _check("i32", "str", ArrowType.STRING)
+    _check("i64", "str", ArrowType.STRING)
+    _check("n_i32", "str", ArrowType.STRING)
+    var nullable = _schema(_pair_sql("i64", "n_str"))
+    assert_true(nullable.field_nullable(0))
+    # The integer branch is cast to the string, the string branch kept.
+    var plan = _plan(_pair_sql("i64", "str"))
+    ref kids = plan.union_data_ref().children
+    assert_true(kids[0][].output_schema.field_arrow_type(0) == ArrowType.STRING)
+    assert_true(kids[1][].output_schema.field_arrow_type(0) == ArrowType.STRING)
+
+
 def test_pairs_with_no_common_type_are_refused() raises:
-    _check_refused("str", "i32", "string", "int32", _NO_COMMON)
+    _check_refused("str", "i8", "string", "int8", _NO_COMMON)
+    _check_refused("str", "i16", "string", "int16", _NO_COMMON)
+    _check_refused("str", "u32", "string", "uint32", _NO_COMMON)
+    _check_refused("str", "f64", "string", "float64", _NO_COMMON)
+    _check_refused("str", "date", "string", "date32", _NO_COMMON)
+    _check_refused("lstr", "i64", "large_string", "int64", _NO_COMMON)
     _check_refused("str", "lstr", "string", "large_string", _NO_COMMON)
     _check_refused("bool", "i32", "bool", "int32", _NO_COMMON)
     _check_refused("bool", "f64", "bool", "float64", _NO_COMMON)
@@ -390,7 +409,7 @@ def test_names_come_from_the_head_and_each_column_folds_on_its_own() raises:
     assert_equal(
         _err("SELECT x, y FROM t_pair_a UNION ALL SELECT x, y FROM t_pair_c"),
         "SQL not supported: UNION ALL column 2 (y): branch 1 gives string and"
-        " branch 2 gives int32; no common type this engine casts to."
+        " branch 2 gives bool; no common type this engine casts to."
         " Cast the columns to one type.",
     )
 
@@ -414,10 +433,10 @@ def test_a_refusal_in_a_later_branch_names_the_branches_before_it() raises:
     assert_equal(
         _err(
             "SELECT x FROM t_i32 UNION ALL SELECT x FROM t_i64 UNION ALL"
-            " SELECT x FROM t_str"
+            " SELECT x FROM t_bool"
         ),
         "SQL not supported: UNION ALL column 1 (x): branches 1 to 2 give int64"
-        " and branch 3 gives string; no common type this engine casts to."
+        " and branch 3 gives bool; no common type this engine casts to."
         " Cast the columns to one type.",
     )
     assert_equal(

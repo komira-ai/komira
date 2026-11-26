@@ -2,6 +2,18 @@
 # run_sql_with over Parquet objects in GCS and Azure: the local file's answer
 # =============================================================================
 #
+# Covers: run_sql_with over catalog tables whose ParquetSource names a GCS
+# bucket or an Azure container (the scheme as source_url reads a gs:// or az://
+# URL), read through GcsScanFs over objectstore_gcs's in-memory fake and
+# through AzureScanFs over komira_test_fake_azure's fake Blob service
+# (objectstore_gcs, azure_blob, azure_core, source_url and
+# komira_test_fake_azure are test_deps for it): a filter and a projection, a
+# GROUP BY and a count, a table of two keys, and one key in two buckets (two
+# containers) under UNION ALL each answer what the same files answer locally
+# through run_sql; a missing and a refused object are the store's NOT_FOUND and
+# PERMISSION_DENIED at step execute; run_sql, and the opener of the other
+# store, refuse each with SCAN_FS_UNSERVED naming the store.
+#
 # Each test writes Parquet files under `test_tmpdir()` and puts the same bytes
 # in a fake store: GCS objects in objectstore_gcs's in-memory
 # `FakeGcsStorageBackend` (one per bucket, behind `_GcsBuckets` below) and
