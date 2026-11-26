@@ -7,7 +7,7 @@
 //!   komira_wheel check <flags> --wheel <wheel> --require-stamped true|false
 //!       [--twin <wheel>] --out <marker>
 //!   komira_wheel libs --wheel <wheel> --entry <member path>
-//!       --runtime-lib <name>=<file>... [--runtime-license <name>]...
+//!       [--opened <member path>]... --runtime-lib <name>=<file>... [--runtime-license <name>]...
 //!       [--runtime-dist <distribution>]...
 //!       [--expect-refusal <text>] --out <marker>
 //!   komira_wheel same --wheel <wheel> --like <wheel>
@@ -16,7 +16,8 @@
 //! cli.zig lists the flags of `write` and `check`. `write` refuses to write a
 //! wheel that native_policy's policy.zig refuses; `check` writes `ok` to
 //! --out only if check.zig refuses nothing. `libs` reads the wheel
-//! alone (libs.zig): --out gets the libraries the entry loads, in load order,
+//! alone (libs.zig): --out gets the libraries the entry and each --opened
+//! library load, in load order,
 //! one member path a line, only if libs.zig refuses nothing (with
 //! --expect-refusal, `refused: <text>` only if it refuses the wheel with
 //! exactly that text); each `--runtime-lib` file is the toolchain's copy of
