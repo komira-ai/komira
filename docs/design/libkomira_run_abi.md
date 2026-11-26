@@ -403,19 +403,25 @@ otherwise fail fast. The port keeps that answer and makes it explicit:
      variable-length payload aborts in its payload stage.
    - It adds a C driver case per reachable site, which asserts a status rather than
      a crash.
-   - The codec libraries are among those sites. `compression` (`_open_or_abort`)
-     and `zlib` open their system libraries in `_Global` initializers, which cannot
-     raise. Those run lazily, at the first use of a codec, so a missing library
-     aborts in the middle of a query (for example at the first compressed Parquet
-     page).
-   - **EXISTS:** every call that can reach a codec (the Parquet, CSV and JSON
-     register calls, the three describe calls, `komira_sql_stream`,
-     `komira_sql_stream_run` and `komira_plan_stream`; not
-     `komira_register_arrow_stream`, which reads no file) first opens libzstd, libz and liblz4 through a
-     raising probe (`probe_codec_libraries` in `compression.codec_libraries`),
-     so a missing library is -3 at that call. Today the engine is built by `komira_ctx_new`, and the probe runs
-     per call instead of there: a context on a host
-     without one of them still describes plans and defines credentials.
+   - The codec libraries were among those sites. `compression`, `zlib` and `lz4`
+     open their system libraries in `_Global` initializers, which cannot raise.
+     Those run lazily, at the first use of a codec, and a missing library
+     aborted in the middle of a query (for example at the first compressed
+     Parquet page).
+   - **EXISTS:** each initializer keeps the loader's refusal in its slot instead
+     of aborting (`_CodecLibrary` in `compression.codec_libraries`, and the same
+     in `zlib` and `lz4`), and each use of the handle raises it:
+     `<package>: cannot load <soname>: <the loader's error>` (a run's last error
+     is `execute: [Processor] <that text>`). A missing library is -3 at each
+     call whose run needs it (`komira_sql_stream`,
+     `komira_sql_stream_run` or `komira_plan_stream` over a zstd, gzip or lz4
+     page or file, a Parquet page CRC, or a `COPY ... TO` with that
+     compression), and every call that needs none of it works: macOS ships no
+     libzstd or liblz4, and a snappy or uncompressed Parquet file, a CSV file
+     and a JSON file still register, describe and answer there. No call opens
+     the libraries up front; an earlier version did (a probe of all three at
+     the start of every call that can read a file), which refused every such
+     call on a host that lacks one of them.
 4. **Fail-fast for the rest, and say so.** Whatever still aborts ends the host
    process. The `src/so` README and the Python package docs state this, along with
    the assert level the published library is built at.
@@ -447,13 +453,16 @@ call paths from the exports; nothing here was measured unless it says so.
 | `repeat` with a count such as 2^31 - 1 | not an abort: refused before the change too; kept as a case | the same refusal |
 
 **Refused, without a C driver case:** libzstd, libz or liblz4 missing on the
-host. `compression/codec_libraries.mojo` (`_open_or_abort`),
-`zlib/zlib_ffi.mojo` and `lz4/codec.mojo` open them in `_Global` initializers,
-which cannot raise, at the first zstd, gzip or lz4 page or file, at a Parquet
-page CRC (libz's `crc32`), or at a `COPY ... TO` with that compression. The
-probe above makes it -3 first. A C driver cannot hide a host library without
-an environment variable or a container, so the probe's refusal is a welded test
-of `compression` over a soname that does not exist.
+host. `compression/codec_libraries.mojo`, `zlib/zlib_ffi.mojo` and
+`lz4/codec.mojo` open them in `_Global` initializers at the first zstd, gzip or
+lz4 page or file, at a Parquet page CRC (libz's `crc32`), or at a `COPY ... TO`
+with that compression; the initializer keeps the refusal and the use raises it
+(-3 at that call). A C driver cannot hide a host library without an
+environment variable or a container, so the refusal is held by welded tests: of
+`compression`, `zlib` and `lz4` over a soname that does not exist, and of `so`
+(`tests/test_sources_without_libzstd.mojo`), whose process fills the libzstd
+slot with a refusal before anything opens it and then reads a snappy Parquet
+file, a CSV file and a JSON file and is refused, by name, at a zstd one.
 
 **Not reachable from an export** (each site stays as it is):
 
@@ -461,8 +470,11 @@ of `compression` over a soname that does not exist.
 |---|---|
 | `op_sort/sort_stage_string_key.mojo`, `op_sort/sort_stage_payloads.mojo` (19 `abort(`) | the typed sort stage (`SortBuffer`, `SortKeyColumn_String`, `PayloadCol_String`) has no caller outside `op_sort`'s and `op_window`'s tests; SQL sorts run in `pipeline_exec/sink_sort.mojo` through `op_sort.sort_multi` and `sort_topn_sink`, which hold no `abort(` |
 | `agg/aggregator.mojo` (2), `op_agg_state/dyn_accumulator.mojo` (2) | no file of `sdk_exec`, `pipeline_exec`, `lowering` or `so` imports `agg` or `op_agg_state`; SQL aggregates run in `pipeline_exec/sink_agg.mojo`, which raises on a type or tag it does not serve |
-| `compression/codec_libraries.mojo` for libbz2 and liblzma | only the Avro block codecs open them, and no export reads Avro |
 | `aws_core/aws_retry.mojo` (1) | the token bucket is built from two positive constants it never refuses |
+
+libbz2 and liblzma (`compression/codec_libraries.mojo`) are no abort site:
+their slots keep the refusal as libzstd's does, and only the Avro block codecs,
+which no export reaches, open them.
 
 The other matches of `abort` in the closure are comments, an unused import
 (`op_sort`), and a method named `abort` (`morsel/streaming_sink.mojo`). A raise

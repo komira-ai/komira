@@ -12,10 +12,14 @@
 # those members to the busybox copy byte for byte. The gzip trailer (RFC 1952
 # section 2.3.1) ends with ISIZE, the decoded length mod 2^32, little-endian,
 # which sizes the destination exactly.
+#
+# The handle slot: libz is held as its handle and calls answer through it; a
+# soname that does not exist is held as its refusal, raised at every use.
 # =============================================================================
 
+from std.ffi import OwnedDLHandle, _Global
 from std.pathlib import Path
-from std.testing import TestSuite, assert_equal, assert_true
+from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from zlib import (
     ZLIB_LEVEL_DEFAULT,
@@ -29,7 +33,14 @@ from zlib import (
     zlib_inflate_into,
     zlib_skip_stream,
 )
-from zlib.zlib_ffi import _zlib_deflate_into_sliced
+from zlib import LIBZ_SONAME
+from zlib.zlib_ffi import (
+    _ZlibLibrary,
+    _default_zlib_ffi_handle,
+    _load_zlib_library,
+    _zlib_deflate_into_sliced,
+    _zlib_library_handle,
+)
 
 comptime _TARBALL = "golden/zlib-1.3.1.tar.gz"
 comptime _MEMBER_DIR = "golden/zlib/"
@@ -474,6 +485,63 @@ def test_deflate_in_slices_is_the_same_stream() raises:
                 zlib_inflate_into(Span(out), Span(sliced)[0:b], wb), size
             )
             _assert_same(Span(out), Span(data))
+
+
+# The handle slot (zlib.zlib_ffi): a library that loads is held as its handle, and
+# a soname that does not exist as the refusal
+# `zlib: cannot load <soname>: <the loader's error>`, which the slot's
+# accessor raises, word for word, on every call (the slot is filled once; it
+# neither aborts nor opens the library again).
+comptime _ABSENT = "libz.so.komira-absent"
+
+
+def _loader_error(soname: String) -> String:
+    """What OwnedDLHandle raises for `soname`, or "" when it opens."""
+    try:
+        _ = OwnedDLHandle(soname)
+    except e:
+        return String(e)
+    return ""
+
+
+def _init_absent() -> _ZlibLibrary:
+    return _load_zlib_library(_ABSENT)
+
+
+comptime _ABSENT_GLOBAL = _Global["komira_zlib_test_absent", _init_absent]
+
+
+def _handle_message() -> String:
+    """What the accessor of the absent slot raises, or "" when it returns."""
+    try:
+        _ = _zlib_library_handle(_ABSENT_GLOBAL.get_or_create_ptr())
+    except e:
+        return String(e)
+    return ""
+
+
+def test_the_slot_over_the_library_holds_its_handle() raises:
+    var library = _load_zlib_library(LIBZ_SONAME)
+    assert_true(Bool(library.handle))
+    assert_equal(library.refusal, "")
+    var handle = _default_zlib_ffi_handle()
+    # The accessor hands out the slot's own open handle, and the Span
+    # entries answer through it: the CRC-32 of "a" is 0xE8B7BE43.
+    assert_true(Bool(handle[]))
+    var a = List[UInt8]()
+    a.append(UInt8(ord("a")))
+    assert_equal(zlib_crc32(Span(a)), UInt32(0xE8B7BE43))
+
+
+def test_a_slot_over_a_missing_library_keeps_the_refusal() raises:
+    var reason = _loader_error(_ABSENT)
+    assert_true(reason.byte_length() > 0, String(_ABSENT) + " opened")
+    var want = "zlib: cannot load " + String(_ABSENT) + ": " + reason
+    var library = _load_zlib_library(_ABSENT)
+    assert_false(Bool(library.handle))
+    assert_equal(library.refusal, want)
+    assert_equal(_handle_message(), want)
+    assert_equal(_handle_message(), want)
 
 
 def main() raises:

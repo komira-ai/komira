@@ -36,12 +36,12 @@ this package's API in follow-up changes.
 
 Every entry takes Spans: the destination's length is its capacity, and no
 signature holds a pointer. When libzstd, libbz2 or liblzma cannot be
-loaded, the process aborts at first use with the message
-`compression: cannot load <soname>: <the loader's error>`. libz and
-liblz4 are opened by `zlib` and `lz4`, which abort with their
-own messages (`libz dlopen failed (zlib FFI handle init)` and
-`liblz4 dlopen failed (lz4 raw-block handle init)`), naming neither
-the soname nor the loader's error.
+loaded, each use of its codec raises
+`compression: cannot load <soname>: <the loader's error>`, and the
+process goes on. libz and liblz4 are opened by `zlib` and `lz4`, which
+raise the same way with their own package name (`zlib: cannot load
+<soname>: ...`, `lz4: cannot load <soname>: ...`). A stream of another
+codec never opens the missing library.
 
 ## Examples
 
@@ -112,10 +112,13 @@ for d in range(len(decoded)):
         assert_equal(decoded[d][i], src[i])
 ```
 
-A library missing from the host ends the process at its first use, because
-the handle is opened in an initializer that cannot raise. A caller that must
-not die (libkomira) probes libzstd, libz and liblz4 first; a missing one is a
-raise naming it:
+A library missing from the host is a raise at each use of its codec:
+`compression: cannot load <soname>: <the loader's error>`. The handle is opened
+in an initializer that cannot raise, so the initializer keeps the refusal and
+the use raises it; a stream of another codec never opens the library. A
+caller that wants a missing library named before it starts probes libzstd,
+libz and liblz4 (libkomira does not: a host without libzstd still reads every
+file that has no zstd in it); a missing one is a raise naming it:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo

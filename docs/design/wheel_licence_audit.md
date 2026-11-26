@@ -53,8 +53,8 @@ there), Brotli `//third_party/brotli`, aws-lc `//third_party/aws-lc`, s2n-tls
   zlib and lz4 packages). They are not `DT_NEEDED`, not carried, and are
   the host's own files under their own licences; komira neither copies nor
   links them, so no notice of theirs is owed by the wheel.
-  If one is absent, the first call of that codec aborts with
-  `compression: cannot load <soname>`; other codecs and Parquet files that do
+  If one is absent, each call of that codec raises
+  `<package>: cannot load <soname>: <the loader's error>`; other codecs and Parquet files that do
   not use it are unaffected.
 - **The AWS, Google and Azure clients**: not in the wheel. The Mojo closure of
   the `so` package is `sdk_exec`'s (read from the `deps` of each `BUCK` file

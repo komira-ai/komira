@@ -16,21 +16,23 @@
 # linked and called in snappy_block.mojo. Other packages call the codec API of
 # this package and declare no codec FFI of their own.
 #
-# A handle accessor aborts the process when its library cannot be loaded: a
-# `_Global` init function cannot raise, and without the library no stream of
-# that codec can be read or written. `_open_codec_library` is the opener the
-# init functions call; it raises, so a test can call it with a soname that
-# does not exist and check the message the abort would carry.
+# A slot holds a `_CodecLibrary`: the library's handle, or, when the library
+# cannot be loaded, the refusal `_open_codec_library` raised
+# (`compression: cannot load <soname>: <the loader's error>`). A `_Global`
+# init function cannot raise, so the refusal is kept, and each handle accessor
+# raises it (`_library_handle`): a missing library is a raise at each use of
+# its codec, and a stream of any other codec, or a file that uses none, does
+# not open it. The slot is keyed by its name (`_ZSTD_SLOT_NAME` and the two
+# below), so a test can fill it first with a refusal of its own and stand for
+# a host that lacks the library.
 #
-# `probe_codec_libraries` opens libzstd, libz and liblz4 through that raising
-# opener and drops each handle: a caller that must not die on a missing
-# library (libkomira) calls it before the first codec use, so a missing
-# library is a raise with the opener's message and the `_Global` init, which
-# runs later, finds the library. bz2 and lzma are not probed.
+# `probe_codec_libraries` opens libzstd through its slot and libz and liblz4
+# by soname through the same raising opener, so a caller that wants a missing
+# library named before it starts (libkomira does not) gets the first refusal.
+# bz2 and lzma are not probed.
 # =============================================================================
 
 from std.ffi import OwnedDLHandle, _Global
-from std.os import abort
 from std.sys.info import CompilationTarget
 
 from lz4.codec import LIBLZ4_SONAME
@@ -80,57 +82,94 @@ def codec_probe_sonames() -> List[String]:
 
 def probe_codec_libraries() raises:
     """Open libzstd, libz and liblz4 (`codec_probe_sonames`), raising the
-    opener's error naming the first that cannot be loaded."""
-    probe_libraries(codec_probe_sonames())
+    opener's error naming the first that cannot be loaded. libzstd is opened
+    through its handle slot, so the refusal is the one its codec raises."""
+    _ = _zstd_handle()
+    var rest = List[String]()
+    rest.append(String(LIBZ_SONAME))
+    rest.append(String(LIBLZ4_SONAME))
+    probe_libraries(rest)
 
 
-def _open_or_abort(soname: String) -> OwnedDLHandle:
-    """`_open_codec_library(soname)`, aborting the process with its message
-    when the library cannot be loaded (a `_Global` init function cannot
-    raise)."""
+struct _CodecLibrary(Movable):
+    """What a handle slot holds: the library's handle, or the refusal raised
+    when it could not be loaded (then `handle` is empty)."""
+
+    var handle: Optional[OwnedDLHandle]
+    var refusal: String
+
+    def __init__(out self, var handle: OwnedDLHandle):
+        self.handle = Optional[OwnedDLHandle](handle^)
+        self.refusal = String()
+
+    def __init__(out self, *, var refusal: String):
+        self.handle = None
+        self.refusal = refusal^
+
+
+def _load_codec_library(soname: String) -> _CodecLibrary:
+    """`_open_codec_library(soname)` as a slot's value: the handle, or the
+    refusal it raised (a `_Global` init function cannot raise)."""
     try:
-        return _open_codec_library(soname)
+        return _CodecLibrary(_open_codec_library(soname))
     except e:
-        abort(String(e))
+        return _CodecLibrary(refusal=String(e))
 
 
-def _init_zstd_handle() -> OwnedDLHandle:
+def _init_zstd_handle() -> _CodecLibrary:
     """`_Global` init function: open libzstd once per process."""
-    return _open_or_abort(LIBZSTD_SONAME)
+    return _load_codec_library(LIBZSTD_SONAME)
 
 
-def _init_bz2_handle() -> OwnedDLHandle:
+def _init_bz2_handle() -> _CodecLibrary:
     """`_Global` init function: open libbz2 once per process."""
-    return _open_or_abort(LIBBZ2_SONAME)
+    return _load_codec_library(LIBBZ2_SONAME)
 
 
-def _init_lzma_handle() -> OwnedDLHandle:
+def _init_lzma_handle() -> _CodecLibrary:
     """`_Global` init function: open liblzma once per process."""
-    return _open_or_abort(LIBLZMA_SONAME)
+    return _load_codec_library(LIBLZMA_SONAME)
 
 
-comptime _ZSTD_GLOBAL = _Global[
-    "komira_compression_zstd_handle", _init_zstd_handle
-]
-comptime _BZ2_GLOBAL = _Global["komira_compression_bz2_handle", _init_bz2_handle]
-comptime _LZMA_GLOBAL = _Global[
-    "komira_compression_lzma_handle", _init_lzma_handle
-]
+# The slot names: one process-wide slot per name, in every module that spells it.
+comptime _ZSTD_SLOT_NAME = "komira_compression_zstd_handle"
+comptime _BZ2_SLOT_NAME = "komira_compression_bz2_handle"
+comptime _LZMA_SLOT_NAME = "komira_compression_lzma_handle"
+
+comptime _ZSTD_GLOBAL = _Global[_ZSTD_SLOT_NAME, _init_zstd_handle]
+comptime _BZ2_GLOBAL = _Global[_BZ2_SLOT_NAME, _init_bz2_handle]
+comptime _LZMA_GLOBAL = _Global[_LZMA_SLOT_NAME, _init_lzma_handle]
 
 
-# The accessors. SAFETY: `get_or_create_ptr` returns a pointer into
-# process-lifetime static storage the runtime manages; `MutUntrackedOrigin` is
-# the stdlib `_Global` API's own return type. The handles are never freed.
+@always_inline
+def _library_handle(
+    slot: UnsafePointer[_CodecLibrary, MutUntrackedOrigin]
+) raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
+    """The handle `slot` holds; raise its refusal when it holds none.
+
+    SAFETY: `slot` is a `_Global` slot's pointer, into process-lifetime static
+    storage the runtime manages and never frees; the handle in it is never
+    taken out or replaced, so the returned pointer stays valid for the
+    process."""
+    if not slot[].handle:
+        raise Error(slot[].refusal)
+    return UnsafePointer(to=slot[].handle.value())
+
+
+# The accessors: the handle of each slot, or a raise of its refusal.
+# SAFETY: `get_or_create_ptr` returns a pointer into process-lifetime static
+# storage the runtime manages; `MutUntrackedOrigin` is the stdlib `_Global`
+# API's own return type. The handles are never freed.
 @always_inline
 def _zstd_handle() raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
-    return _ZSTD_GLOBAL.get_or_create_ptr()
+    return _library_handle(_ZSTD_GLOBAL.get_or_create_ptr())
 
 
 @always_inline
 def _bz2_handle() raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
-    return _BZ2_GLOBAL.get_or_create_ptr()
+    return _library_handle(_BZ2_GLOBAL.get_or_create_ptr())
 
 
 @always_inline
 def _lzma_handle() raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
-    return _LZMA_GLOBAL.get_or_create_ptr()
+    return _library_handle(_LZMA_GLOBAL.get_or_create_ptr())

@@ -79,7 +79,6 @@
 
 from std.ffi import OwnedDLHandle, _Global
 from std.memory import alloc, unsafe_memset
-from std.os import abort
 from std.sys.info import CompilationTarget
 
 
@@ -137,35 +136,75 @@ comptime _Z_BUF_ERROR: Int32 = -5
 # -----------------------------------------------------------------------------
 
 
-def _init_zlib_ffi_handle() -> OwnedDLHandle:
-    """`_Global` init_fn: dlopen libz exactly once per process (KGEN-serialized).
+struct _ZlibLibrary(Movable):
+    """What the handle slot holds: the library's handle, or the refusal
+    `_load_zlib_library` made when it could not be loaded (then `handle` is
+    empty)."""
 
-    SAFETY: `_Global`'s init_fn must be non-raising. The OwnedDLHandle ctor
-    raises only when the pinned dylib is unresolvable (a fatal provisioning
-    error), so we `abort`: an unloadable libz cannot serve any later call.
-    """
+    var handle: Optional[OwnedDLHandle]
+    var refusal: String
+
+    def __init__(out self, var handle: OwnedDLHandle):
+        self.handle = Optional[OwnedDLHandle](handle^)
+        self.refusal = String()
+
+    def __init__(out self, *, var refusal: String):
+        self.handle = None
+        self.refusal = refusal^
+
+
+def _load_zlib_library(soname: String) -> _ZlibLibrary:
+    """dlopen `soname` as the slot's value: the handle, or the refusal
+    `zlib: cannot load <soname>: <the loader's error>`. A `_Global` init
+    function cannot raise, so the refusal is kept and the accessor raises it
+    at each use: a missing library is a raise at that call, never an abort."""
     try:
-        return OwnedDLHandle(LIBZ_SONAME)
+        return _ZlibLibrary(OwnedDLHandle(soname))
     except e:
-        abort("libz dlopen failed (zlib FFI handle init)")
+        return _ZlibLibrary(
+            refusal="zlib: cannot load " + soname + ": " + String(e)
+        )
 
 
-comptime _ZLIB_FFI_GLOBAL = _Global[
-    "komira_zlib_ffi_handle", _init_zlib_ffi_handle
-]
+def _init_zlib_ffi_handle() -> _ZlibLibrary:
+    """`_Global` init_fn: dlopen libz exactly once per process (KGEN-serialized)."""
+    return _load_zlib_library(LIBZ_SONAME)
+
+
+# The slot's name: one process-wide slot, in every module that spells it.
+comptime _ZLIB_SLOT_NAME = "komira_zlib_ffi_handle"
+
+comptime _ZLIB_FFI_GLOBAL = _Global[_ZLIB_SLOT_NAME, _init_zlib_ffi_handle]
+
+
+@always_inline
+def _zlib_library_handle(
+    slot: UnsafePointer[_ZlibLibrary, MutUntrackedOrigin]
+) raises -> UnsafePointer[OwnedDLHandle, MutUntrackedOrigin]:
+    """The handle `slot` holds; raise its refusal when it holds none.
+
+    SAFETY: FFI boundary. `slot` is a `_Global` slot's pointer, into
+    KGEN-runtime-managed static storage (process-lifetime, never freed); the
+    handle in it is never taken out or replaced, so the returned pointer stays
+    valid for the process.
+    """
+    if not slot[].handle:
+        raise Error(slot[].refusal)
+    return UnsafePointer(to=slot[].handle.value())
 
 
 @always_inline
 def _default_zlib_ffi_handle() raises -> UnsafePointer[
     OwnedDLHandle, MutUntrackedOrigin
 ]:
-    """Return the process-lifetime libz handle slot (init-once via `_Global`).
+    """Return the process-lifetime libz handle (init-once via `_Global`), or
+    raise the refusal of a library that could not be loaded.
 
-    SAFETY: FFI carve-out. Targets KGEN-runtime-managed static storage
+    SAFETY: FFI boundary. Targets KGEN-runtime-managed static storage
     (process-lifetime); `MutUntrackedOrigin` is the stdlib `_Global` API's own
     return type, confined to this FFI helper. No env var, no `unsafe_from_address`.
     """
-    return _ZLIB_FFI_GLOBAL.get_or_create_ptr()
+    return _zlib_library_handle(_ZLIB_FFI_GLOBAL.get_or_create_ptr())
 
 
 # -----------------------------------------------------------------------------

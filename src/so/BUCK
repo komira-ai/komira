@@ -47,6 +47,11 @@ NATIVE_OWNERS = [
 # plan rendered, sql_result, komira_sql_stream's answer on values (rows,
 # no rows with the schema, a result that outlives its session, and refusals as
 # `<step>: <reason>` with the step and the code recorded on the session);
+# test_sources_without_libzstd holds a host without libzstd (the libzstd
+# handle slot filled with a refusal before anything opens it): a snappy
+# Parquet file, a CSV file and a JSON file register, describe and answer, a
+# plan over the Parquet file runs, and a query over a zstd Parquet file is
+# refused naming libzstd, after which the session answers again;
 # test_register_text holds register_csv and
 # register_json: a CSV or JSON file registered by name and queried through
 # the session's engine, each CSV dialect argument equal to read_csv's (a
@@ -166,6 +171,7 @@ mojo_library(
         "tests/test_register_text.mojo",
         "tests/test_session.mojo",
         "tests/test_sources.mojo",
+        "tests/test_sources_without_libzstd.mojo",
         "tests/test_sql_cancel.mojo",
         "tests/test_status.mojo",
     ],
@@ -179,6 +185,9 @@ mojo_library(
         "tests/test_register_arrow.mojo": ["tests/fixtures/two_columns.parquet"],
         "tests/test_register_text.mojo": ["tests/fixtures/two_columns.parquet"],
         "tests/test_sources.mojo": ["tests/fixtures/two_columns.parquet"],
+        "tests/test_sources_without_libzstd.mojo": {
+            "parquet/pyarrow_page_crc_zstd_v2.parquet": "//src/parquet_codec:pyarrow_page_crc_zstd_v2.parquet",
+        },
     },
     visibility = ["PUBLIC"],
 )
