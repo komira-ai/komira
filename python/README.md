@@ -292,6 +292,12 @@ by `import komira`.
 
 - The module-level `komira.sql` and `komira.register_parquet` on a default
   session.
+- Surviving a crash inside the engine. An error the engine reports raises
+  `KomiraError`, but an abort, a fault, running out of stack, or running out
+  of memory that the session's `memory_limit` does not catch (a query over it
+  raises `MemoryLimitError`) ends the Python process. Inputs known to cause
+  one are refused with `KomiraError` first, for example a statement nested
+  more than 100 levels deep.
 - The DataFrame verbs not built yet, for both skins: what each capability
   has and lacks is recorded in
   [docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md).

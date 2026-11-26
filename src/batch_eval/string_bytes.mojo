@@ -500,7 +500,7 @@ def _utf8_char_starts(b: Span[UInt8, _]) -> List[Int]:
 
 
 def _pad_bytes(
-    s: String, count: Int, pad: String, on_left: Bool
+    s: String, count: Int, pad: String, on_left: Bool, max_bytes: Int
 ) raises -> List[UInt8]:
     """`lpad` / `rpad` — DuckDB v1.5.3 semantics, all four corners measured.
 
@@ -525,6 +525,12 @@ def _pad_bytes(
 
     The pad CYCLES from its own first character: `lpad('abc',6,'xy')` =
     `'xyxabc'` — x, y, x.
+
+    A result over `max_bytes` is REFUSED before anything is allocated, as
+    `_repeat_bytes` does: `count` is a BIGINT, so
+    `lpad('a', 9223372036854775807, 'x')` is a legal call. The byte count
+    checked is exact: the input, plus the whole pad cycles, plus the bytes of
+    the partial pad prefix. Exactly `max_bytes` is accepted.
     """
     var b = s.as_bytes()
     var starts = _utf8_char_starts(b)
@@ -551,6 +557,19 @@ def _pad_bytes(
     var pchars = len(pstarts) - 1
 
     var need = count - nchars
+    var prefix_bytes = pstarts[need % pchars]
+    # `full * len(pb) <= budget` is `full <= budget // len(pb)` (floor
+    # division, so a negative budget refuses too), and it cannot overflow.
+    var budget = max_bytes - len(b) - prefix_bytes
+    if need // pchars > budget // len(pb):
+        raise Error(
+            "PipelineCompiler: "
+            + (String("lpad") if on_left else String("rpad"))
+            + "() would produce more than "
+            + String(max_bytes)
+            + " bytes for one row, over the per-row ceiling"
+            + " (STRING_FN_N_REPEAT_MAX_BYTES)"
+        )
     var fill = List[UInt8]()
     for k in range(need):
         var c = k % pchars
@@ -574,8 +593,8 @@ def _pad_bytes(
 def _repeat_bytes(s: String, count: Int, max_bytes: Int) raises -> List[UInt8]:
     """`repeat(s, count)` — `count <= 0` gives `''` (measured at 0 and -1).
 
-    ⚠ THE ONE MEMBER WHOSE OUTPUT SIZE IS SET BY A DATA VALUE. DuckDB types
-    `count` as BIGINT, so `repeat('ab', 2147483647)` is a legal call asking for
+    ⚠ ITS OUTPUT SIZE IS SET BY A DATA VALUE, as `lpad`'s and `rpad`'s are.
+    DuckDB types `count` as BIGINT, so `repeat('ab', 2147483647)` is a legal call asking for
     4 GB, and this runs inside a morsel worker where an OOM takes the PROCESS
     and a raise takes one query. The ceiling is checked BEFORE any allocation
     and is a REFUSAL, not a clamp — a clamp returns a string that differs from
