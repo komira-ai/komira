@@ -2,7 +2,7 @@
 
 A wheel of the given files and metadata, byte for byte reproducible, which
 the rule refuses to write when it would be wrong for the platform it is
-tagged for (wheel/policy.zig). No shell, no Python: one Zig action writes the
+tagged for (native_policy/policy.zig). No shell, no Python: one Zig action writes the
 wheel, a second writes it again from inputs staged elsewhere, and a third
 reads it back.
 

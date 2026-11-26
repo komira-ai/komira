@@ -22,7 +22,7 @@
 //!            or under it, and stays inside the import package once `$ORIGIN`
 //!            is the library's own directory;
 //!   needed   every DT_NEEDED of a library the entry loads is a manylinux
-//!            system library (policy.zig's list), a library already loaded,
+//!            system library (native_policy's policy.zig list), a library already loaded,
 //!            or a member at `<run path entry>/<name>` for one of that
 //!            library's run path entries, tried in order; a name holding `/`
 //!            (opened as a path, not looked up) is refused;
@@ -40,7 +40,7 @@
 //! SONAME of every library komira ships is its file name) before the run path
 //! of the library that needs it. It is stricter than the loader in one way:
 //! the DT_RPATH of the libraries that loaded a library is not searched, only
-//! the library's own run path (DT_RUNPATH and DT_RPATH as elf.zig reads them).
+//! the library's own run path (DT_RUNPATH and DT_RPATH as native_policy's elf.zig reads them).
 //!
 //! The Mach-O walk (dyld(1)), for a Mach-O entry, holds the same `runpath`,
 //! `needed` and `stray` checks in Mach-O's terms:
@@ -62,10 +62,10 @@
 const std = @import("std");
 const check_mod = @import("check.zig");
 const cli = @import("cli.zig");
-const diag = @import("diag.zig");
-const elf = @import("elf.zig");
-const macho = @import("macho.zig");
-const policy = @import("policy.zig");
+const diag = @import("native_policy").diag;
+const elf = @import("native_policy").elf;
+const macho = @import("native_policy").macho;
+const policy = @import("native_policy").policy;
 const zip = @import("zip.zig");
 const Alloc = std.mem.Allocator;
 const Diag = diag.Diag;
@@ -330,7 +330,7 @@ fn walkMachO(alloc: Alloc, d: *Diag, entry_path: []const u8, package: []const u8
 }
 
 /// An operating system library: an absolute path under /usr/lib/ or
-/// /System/Library/, with no `..` step out of them (policy.zig's rule).
+/// /System/Library/, with no `..` step out of them (native_policy's policy.zig rule).
 fn systemLibrary(path: []const u8) bool {
     if (!std.mem.startsWith(u8, path, "/usr/lib/") and !std.mem.startsWith(u8, path, "/System/Library/")) return false;
     var parts = std.mem.splitScalar(u8, path, '/');

@@ -11,16 +11,17 @@
 // needs the library does. A refused library stays mapped (the Mojo runtime
 // cannot be unloaded), and the next call tries again.
 //
-// The addon's own error codes (KOMIRA_ARG, KOMIRA_LOAD_FAILED, ...) stay in
-// this module: `fromAddon` turns an error the addon threw, or a session call's
-// rejection, into a KomiraError. A session's calls run on a native thread of
+// The addon's own error codes (KOMIRA_ARG, KOMIRA_LOAD_FAILED, ...) and the
+// KOMIRA_ERR_* names of the statuses stay in this module: `fromAddon` turns
+// an error the addon threw, or a session call's rejection, into a KomiraError
+// of the class the engine's code picks. A session's calls run on a native thread of
 // its own (node/README.md, "The session thread") and return Promises.
 
 import { createRequire } from "node:module";
 import path from "node:path";
 
 import { isFile, libraryPath, type Host } from "./cpu.ts";
-import { KomiraError, LibraryLoadError } from "./errors.ts";
+import { KomiraError, LibraryLoadError, errorClass, stepOf } from "./errors.ts";
 import { ADDON, NATIVE, defaultHost, platformPackage, platformPackageDir } from "./platform.ts";
 
 /** A session of the addon: an external it made, opaque to JavaScript. */
@@ -30,7 +31,11 @@ export type Handle = object;
 export interface Addon {
   load(path: string): void;
   abiVersion(): number;
-  newSession(): Handle;
+  /**
+   * A context: `komira_ctx_new`, or `komira_ctx_new_with_options` when an
+   * option is given and not 0 (0 or undefined is the engine's own value).
+   */
+  newSession(threads?: number, memoryLimit?: number): Handle;
   /** Refuses later calls at once; the Promise settles once the context is freed, after the calls made before it. */
   freeSession(session: Handle): Promise<void>;
   /** Runs on the session's own thread; the Promise rejects with the call's status. */
@@ -123,24 +128,28 @@ export function loadFrom(addonFile: string, nativeDir: string, h: Host): Native 
 
 /**
  * The KomiraError for an error the addon threw. A failed C call carries its
- * status, its KOMIRA_ERR_* name and the context's last error, which becomes
- * the message unchanged (the addon's own message when the library gave no
- * text); a status the addon has no name for has no code. Anything else is the
- * addon refusing its own use, a defect of this package, and keeps its message
+ * status and the context's last error: its text becomes the message unchanged
+ * (the addon's own message when the library gave no text), its named code the
+ * error's `code` (null when empty) and its step number the error's `step`
+ * (null for none or a number this package does not know). The status and the
+ * code pick the class (`errorClass`). Anything else is the addon refusing its
+ * own use, or a session the library could not make, and keeps its message
  * with no status.
  */
 export function fromAddon(e: unknown): KomiraError {
   const fields = (typeof e === "object" && e !== null ? e : {}) as {
     status?: unknown;
-    code?: unknown;
     lastError?: unknown;
+    lastErrorCode?: unknown;
+    lastErrorStep?: unknown;
   };
   if (typeof fields.status !== "number") {
     return new KomiraError(messageOf(e));
   }
   const text = typeof fields.lastError === "string" && fields.lastError !== "" ? fields.lastError : messageOf(e);
-  const code = typeof fields.code === "string" && fields.code !== "KOMIRA_ERR_UNKNOWN" ? fields.code : null;
-  return new KomiraError(text, { status: fields.status, code });
+  const code = typeof fields.lastErrorCode === "string" && fields.lastErrorCode !== "" ? fields.lastErrorCode : null;
+  const cls = errorClass(fields.status, code);
+  return new cls(text, { status: fields.status, code, step: stepOf(fields.lastErrorStep) });
 }
 
 /** `f()`, with an error the addon throws turned into a KomiraError. */
