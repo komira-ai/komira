@@ -1046,6 +1046,28 @@ python_binding_test(
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# komira.pl's count types (test_pl_count_types.py), with no library: each
+# count polars answers as UInt32 is an Int64 in the schema komira.pl derives,
+# and the page of python/docs/pl/ that covers it names it in a paragraph that
+# says UInt32; on synthetic pages the finding is exactly the name missing. It
+# reads the three pages python/BUCK exports, on each minor, with the plan
+# modules, protobuf 7.36.2 and pyarrow (the pl/ family's inputs).
+[py_test(
+    name = "pl_count_types_test" + p["suffix"],
+    src = "test_pl_count_types.py",
+    args = [
+        "$(location //python:docs/pl/expressions.md)",
+        "$(location //python:docs/pl/group_by_join_unique.md)",
+        "$(location //python:docs/pl/windows.md)",
+    ],
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # The clean-environment install tests of the wheel (python/BUCK,
 # wheel_install_test): the driver that installs the wheels into an empty
 # prefix and runs a test there, the three tests the installed interpreter runs
