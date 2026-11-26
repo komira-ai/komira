@@ -17,8 +17,8 @@ the same columns; the right file has a duplicated key, keys the left lacks, a
 null key, and columns named like the left's. The programs cover:
 
 - group_by with one and two keys, a null key, the aggregates the engine's
-  grouped sinks serve (sums and means of integers, minimums and maximums of
-  numbers, counts), expressions over aggregates, polars' types of a sum over
+  grouped sinks serve (sums, means, minimums and maximums of integers,
+  counts), expressions over aggregates, polars' types of a sum over
   int32, uint16 and bool, len(), the per-column reductions, a key given as
   col(), and over the empty file;
 - join with each how (inner, left, right, full, semi, anti, cross), on one
@@ -36,7 +36,7 @@ null key, and columns named like the left's. The programs cover:
   the types of cum_sum over int32, float32 and bool.
 
 And the edges the oracle does not cover: unique(subset, keep="any") keeps one
-row of each value, any of them; a grouped sum or mean of a float column, which
+row of each value, any of them; a grouped sum, mean or maximum of a float column, which
 the engine's aggregation sinks do not serve yet, is refused by the engine; and
 collect() of a frame of all of these calls
 the plan entry and never the SQL one, whose explain() holds no SQL text.
@@ -143,7 +143,7 @@ GROUP_BY = [
         False,
     ),
     ("group_by_two_keys", lambda P, lf, rf: lf.group_by("g", "flag").agg(P.col("x").sum(), P.len()), False),
-    ("group_by_col_key", lambda P, lf, rf: lf.group_by(P.col("t")).agg(P.col("y").max()), False),
+    ("group_by_col_key", lambda P, lf, rf: lf.group_by(P.col("t")).agg(P.col("x").max()), False),
     ("group_by_len", lambda P, lf, rf: lf.group_by("g").len(), False),
     ("group_by_len_named", lambda P, lf, rf: lf.group_by("g").len(name="rows"), False),
     (
@@ -163,13 +163,13 @@ GROUP_BY = [
             P.col("flag").sum(),
             P.col("i32").min().alias("i32_min"),
             P.col("i32").mean().alias("i32_mean"),
-            P.col("f32").max().alias("f32_max"),
+            P.col("i32").max().alias("i32_max"),
         ),
         False,
     ),
     ("group_by_sum_of_columns", lambda P, lf, rf: lf.select("g", "x", "t", "i32").group_by("g").sum(), False),
     ("group_by_mean_of_columns", lambda P, lf, rf: lf.select("g", "x", "t").group_by("g").mean(), False),
-    ("group_by_min_of_columns", lambda P, lf, rf: lf.select("g", "x", "y").group_by("g").min(), False),
+    ("group_by_min_of_columns", lambda P, lf, rf: lf.select("g", "x", "t").group_by("g").min(), False),
     ("group_by_max_of_columns", lambda P, lf, rf: lf.select("g", "x", "t").group_by("g").max(), False),
     ("group_by_n_unique_of_columns", lambda P, lf, rf: lf.select("g", "t", "x").group_by("g").n_unique(), False),
     (
@@ -220,7 +220,7 @@ JOINS = [
     ("join_suffix", lambda P, lf, rf: lf.select("id", "g", "x").join(rf, on="g", suffix="_r"), False),
     (
         "join_then_group_by",
-        lambda P, lf, rf: lf.join(rf, on="g").group_by("g").agg(P.col("rid").sum(), P.col("w").max(), P.len()),
+        lambda P, lf, rf: lf.join(rf, on="g").group_by("g").agg(P.col("rid").sum(), P.col("rid").max().alias("rid_max"), P.len()),
         False,
     ),
 ]
@@ -411,14 +411,14 @@ def test_unique_keep_any_keeps_one_row_of_each_value(session, left):
 
 
 def test_a_grouped_float_sum_is_refused_by_the_engine(session, left):
-    """A grouped sum or mean of a float column builds the plan's own
-    aggregate; the engine's aggregation sinks sum floats only with no key, so
+    """A grouped sum, mean or maximum of a float column builds the plan's own
+    aggregate; the engine's aggregation sinks fold floats only with no key, so
     running it raises the engine's refusal, naming its step, and the session
     answers the next frame."""
     from komira import KomiraError
 
     lf = kpl.scan_parquet(left, session=session)
-    for expr in (kpl.col("y").sum(), kpl.col("y").mean()):
+    for expr in (kpl.col("y").sum(), kpl.col("y").mean(), kpl.col("y").max()):
         try:
             lf.group_by("g").agg(expr).collect().to_arrow()
         except KomiraError as e:

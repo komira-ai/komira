@@ -469,16 +469,8 @@ def test_join_on_keys_of_different_names_drops_the_right_key():
 def test_full_join_keeps_both_keys():
     lf = frame().join(right(), on="g", how="full")
     renamed = Project(R, (("rid", c("rid")), ("g_right", c("g")), ("w", c("w")), ("x_right", c("x"))))
-    assert lf._plan == Project(
-        Join(T, renamed, "full", ("g",), ("g_right",)),
-        ALL
-        + (
-            ("rid", c("rid")),
-            ("g_right", c("g_right")),
-            ("w", c("w")),
-            ("x_right", c("x_right")),
-        ),
-    )
+    # The join's own columns are polars' output: no projection over it.
+    assert lf._plan == Join(T, renamed, "full", ("g",), ("g_right",))
     assert lf.columns == [n for n, _ in TYPES] + ["rid", "g_right", "w", "x_right"]
 
 
@@ -528,26 +520,14 @@ def test_semi_and_anti_join_give_the_left_columns_with_no_projection():
 def test_cross_join_names_a_colliding_right_column_with_the_suffix():
     lf = frame().join(right(), how="cross")
     renamed = Project(R, (("rid", c("rid")), ("g_right", c("g")), ("w", c("w")), ("x_right", c("x"))))
-    assert lf._plan == Project(
-        Join(T, renamed, "cross"),
-        ALL
-        + (
-            ("rid", c("rid")),
-            ("g_right", c("g_right")),
-            ("w", c("w")),
-            ("x_right", c("x_right")),
-        ),
-    )
+    assert lf._plan == Join(T, renamed, "cross")
     assert lf._order is None
 
 
 def test_join_suffix_names_the_colliding_right_columns():
     lf = frame().join(right(), how="cross", suffix="_r")
     renamed = Project(R, (("rid", c("rid")), ("g_r", c("g")), ("w", c("w")), ("x_r", c("x"))))
-    assert lf._plan == Project(
-        Join(T, renamed, "cross"),
-        ALL + (("rid", c("rid")), ("g_r", c("g_r")), ("w", c("w")), ("x_r", c("x_r"))),
-    )
+    assert lf._plan == Join(T, renamed, "cross")
     assert lf.columns == [n for n, _ in TYPES] + ["rid", "g_r", "w", "x_r"]
 
 
