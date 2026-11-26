@@ -63,7 +63,7 @@ Every target of [`tests//negative/node`](../tests/negative/node/BUCK) must
 fail. The self-test scenario
 [`planted_red_builds_node`](../selftest/planted_red_builds_node.zig) requires
 each build to fail in an action on the farm, printing the text its row holds;
-the analysis refusals (the three rows that say so) are the scenario
+the analysis refusals (the rows that say so) are the scenario
 [`analysis_refusals_node`](../selftest/analysis_refusals_node.zig), which
 requires each one's exact message:
 
@@ -90,6 +90,7 @@ requires each one's exact message:
 | `not_node`, `no_bin_node`, `no_header`, `header_is_dir`, `node_not_executable` | `node_dist` refuses an archive that is no Node.js release, one with the Node-API header but no `bin/node`, one with `bin/node` but no header, one whose `node_api.h` is a directory, and one whose `bin/node` is not executable |
 | `node_does_not_run` | `node_dist` refuses a `bin/node` that exits non-zero (busybox under the name `node`) |
 | `warns` | `c_shared_lib` fails on a warning (`-Wall -Werror`) |
+| `target_os_with_triple`, `target_os_not_so` | analysis refuses `c_shared_lib`'s `target_os` with a `zig_triple`, and with an `out` that is not a `.so` name |
 | `binding_fails` | a failing test of a `node_binding_test` fails the target with node's status and its TAP output on stderr |
 | `binding_no_test`, `binding_skipped` | node exits 0 for a file that registers no test and for a skipped test; `node_binding_test` still fails, since nothing was checked |
 | `binding_addon_missing`, `binding_addon_wrong` | an addon test fails when the addon is not staged (not built), and when the addon is built and loads but returns another number |
