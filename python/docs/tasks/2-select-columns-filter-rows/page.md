@@ -62,5 +62,5 @@ Output:
 
 - How do I filter rows where a value is in a list? (rank 29, works; no page yet)
 - How do I select or drop columns? (rank 34, works; no page yet)
-- How do I filter rows where a text column contains a substring? (rank 41, works; no page yet)
+- [How do I filter rows where a text column contains a substring?](../41-filter-rows-text-column-contains-substring/page.md) (rank 41, works)
 - How do I filter rows by a date range? (rank 83, works; no page yet)
