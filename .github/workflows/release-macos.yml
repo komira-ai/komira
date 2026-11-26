@@ -60,7 +60,7 @@ jobs:
   release-macos:
     runs-on: ubuntu-24.04
     environment: build
-    timeout-minutes: 90
+    timeout-minutes: 1
     permissions:
       contents: read
       # for farm-connect only: the token Tailscale trusts
@@ -75,6 +75,8 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: temporary stall for a manual run
+        run: sleep 300
       - uses: ./.github/actions/farm-connect
         with:
           ts-client-id: ${{ vars.TS_CLIENT_ID }}
