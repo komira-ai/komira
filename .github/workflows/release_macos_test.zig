@@ -29,6 +29,9 @@
 //!  - it does not hold up the Linux path: it `needs` nothing (nothing in release.yml `needs` it, so the prod
 //!    publish never waits on this workflow; the publish waits on its own build of the macOS packages, in
 //!    mopm-stage), and it is bounded (`timeout-minutes` at most 120, the longest of the other jobs);
+//!  - a stalled step ends the run failed, not cancelled: the steps that wait on the farm (farm-connect, the
+//!    macOS set, the Python harness tests) each carry a `timeout-minutes` of their own, and the step bounds
+//!    add up to less than the job's (a step past its bound fails; a job past its bound is cancelled);
 //!  - a failed, skipped or stalled macOS build ends the run failed: the job is not `continue-on-error`, and a
 //!    last job `release-macos-result` (`needs: release-macos`, `if: ${{ !cancelled() }}`) fails with "the macOS
 //!    build did not run" when the build's result is skipped, and with "the macOS build was cancelled while the
@@ -115,6 +118,9 @@ const REPORT_PYTHON = "(steps.python.outcome == 'failure' && 'step `build the ma
 const REPORT_ECHO = "              echo \"::error title=release-macos::the macOS build did not pass: ${REPORT:-";
 const GUESS = "farm-connect refuses when a repository variable is empty";
 const MAX_MINUTES = 120;
+const STEP_BOUND = "        timeout-minutes: ";
+/// The steps that wait on the farm, by the line each starts with or holds just above its bound.
+const BOUNDED_STEPS = [_][]const u8{ FARM_CONNECT, "        id: build", "        id: python" };
 
 fn isComment(line: []const u8) bool {
     const trimmed = std.mem.trim(u8, line, " ");
@@ -289,6 +295,17 @@ fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     } else return "release-macos has no timeout-minutes (a stalled macOS build would hold the next release)");
     if (bound == 0 or bound > MAX_MINUTES) return "release-macos: timeout-minutes is not bounded at 120 or less";
     if (!has(job, BOUND)) return "release-macos: timeout-minutes is not the 90 the comment and docs/ci.md state";
+    // a stalled farm step fails (its own bound), before the job's bound cancels it and the run ends cancelled
+    for (BOUNDED_STEPS) |step| {
+        const at = lineAt(job, step) orelse continue;
+        if (at + 1 >= job.len or !std.mem.startsWith(u8, job[at + 1], STEP_BOUND))
+            return "release-macos: a step that waits on the farm has no timeout-minutes of its own (a stall would run into the job's bound, and the run would end cancelled, not failed)";
+    }
+    var step_minutes: u32 = 0;
+    for (job) |l| if (std.mem.startsWith(u8, l, STEP_BOUND)) {
+        step_minutes += std.fmt.parseInt(u32, std.mem.trim(u8, l[STEP_BOUND.len..], " "), 10) catch return "release-macos: a step's timeout-minutes is not a number";
+    };
+    if (step_minutes >= bound) return "release-macos: the steps' timeout-minutes add up to the job's or more (the job's bound would cancel a stalled step before the step's own bound fails it)";
     // the farm connection: batch priority, with the macOS set, tls as every caller passes it
     const connect_at = lineAt(job, FARM_CONNECT) orelse return "release-macos does not join the farm";
     if (!has(job, QOS)) return "release-macos does not pass farm-qos: batch";
@@ -933,6 +950,12 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     try expectRefused(ar, try replaced(ar, text, BOUND ++ "\n", "    timeout-minutes: 360\n"), "not bounded at 120");
     try expectRefused(ar, try replaced(ar, text, BOUND ++ "\n", "    timeout-minutes: 0\n"), "not bounded at 120");
     try expectRefused(ar, try replaced(ar, text, BOUND ++ "\n", "    timeout-minutes: 100\n"), "not the 90");
+    // each farm step carries its own bound, and the bounds fit inside the job's
+    try expectRefused(ar, try replaced(ar, text, FARM_CONNECT ++ "\n        timeout-minutes: 5\n", FARM_CONNECT ++ "\n"), "no timeout-minutes of its own");
+    try expectRefused(ar, try replaced(ar, text, "        id: build\n        timeout-minutes: 65\n", "        id: build\n"), "no timeout-minutes of its own");
+    try expectRefused(ar, try replaced(ar, text, "        id: python\n        timeout-minutes: 10\n", "        id: python\n"), "no timeout-minutes of its own");
+    try expectRefused(ar, try replaced(ar, text, "        id: build\n        timeout-minutes: 65\n", "        id: build\n        timeout-minutes: 75\n"), "add up to the job's or more");
+    try expectRefused(ar, try replaced(ar, text, "        id: build\n        timeout-minutes: 65\n", "        id: build\n        timeout-minutes: sixty\n"), "is not a number");
 
     // the farm connection and its priority
     try expectRefused(ar, try replaced(ar, text, DARWIN_PROPS ++ "\n", ""), "darwin-properties");
@@ -959,7 +982,7 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     try expectRefused(ar, try replaced(ar, text, BUILD_ARGS, "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_artifacts"), "exactly one buck2 step");
     try expectRefused(ar, try replaced(ar, text, BUILD_ARGS, BUILD_ARGS ++ " --no-remote-cache"), "does not build //release:mopm_darwin_libs for");
     try expectRefused(ar, try replaced(ar, text, BUILD_ARGS ++ "\n" ++ ASSERT ++ "\n      # The Python test harness on macOS arm64", BUILD_ARGS ++ "\n      # The Python test harness on macOS arm64"), "does not assert the build remote");
-    try expectRefused(ar, try replaced(ar, text, "      - name: build the macOS set\n        id: build\n        uses: ./.github/actions/buck2-farm\n", "      - name: build the macOS set\n        id: build\n        uses: ./.github/actions/other\n"), "outside the buck2-farm action");
+    try expectRefused(ar, try replaced(ar, text, "      - name: build the macOS set\n        id: build\n        timeout-minutes: 65\n        uses: ./.github/actions/buck2-farm\n", "      - name: build the macOS set\n        id: build\n        timeout-minutes: 65\n        uses: ./.github/actions/other\n"), "outside the buck2-farm action");
 
     // the run ends failed when the build did not run
     try expectRefused(ar, try replaced(ar, text, "\n  release-macos-result:\n", "\n  release-macos-final:\n"), "has no job release-macos-result");

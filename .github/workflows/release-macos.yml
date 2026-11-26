@@ -28,7 +28,10 @@
 # green. The macOS packages the release publishes are not taken from here: release.yml's `mopm-stage`
 # builds this set again, in the same configuration (so from this workflow's cache), as the osx-arm64
 # half of //release:mopm_release_artifacts, and a failure there stops the publish (docs/ci.md, "The
-# macOS build of the release"). Bounded: 90 minutes.
+# macOS build of the release"). Bounded: 90 minutes for the job, and less for each step that waits on
+# the farm (farm-connect 5, the macOS set 65, the Python harness tests 10): a step past its own bound
+# fails, and the run ends failed, where a job past its timeout-minutes is cancelled and its run ends
+# cancelled however the jobs after it end.
 # The last job, release-macos-result, makes a build that never ran (its job skipped) end the run
 # failed too, with "the macOS build did not run", and for a failed build says which step failed and,
 # when it was a buck2 step, what buck2 said (release/ci:buck2_failure reads the step's log). A build
@@ -79,6 +82,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/farm-connect
+        timeout-minutes: 5
         with:
           ts-client-id: ${{ vars.TS_CLIENT_ID }}
           ts-audience: ${{ vars.TS_AUDIENCE }}
@@ -112,6 +116,7 @@ jobs:
       # workers. `--keep-going`: one package's failure does not hide the others'.
       - name: build the macOS set
         id: build
+        timeout-minutes: 65
         uses: ./.github/actions/buck2-farm
         with:
           args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs //release/manual_fail:fails
@@ -124,6 +129,7 @@ jobs:
       # darwin-arm64 (//:release_macos_cases holds the two to one list).
       - name: build the macOS Python harness tests
         id: python
+        timeout-minutes: 10
         uses: ./.github/actions/buck2-farm
         with:
           args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going komira//tools/build/examples/python_binding:hello komira//tools/build/examples/python_binding:refuses_missing_lib komira//tools/build/examples/python_binding:refuses_wrong_add komira//tools/build/examples/python_binding:refuses_wrong_sum
@@ -151,8 +157,10 @@ jobs:
   # A cancelled build is one of two things, told apart by the job condition !cancelled() (false when
   # the run itself was cancelled): the run was cancelled, by a newer push (cancel-in-progress) or by
   # hand, and this job does not run (the run ends cancelled and the newer run builds); or the build
-  # job alone was cancelled while the run went on, which is its timeout-minutes running out (a stalled
-  # build), and that fails like any other build that did not pass.
+  # job alone was cancelled while the run went on, which is its timeout-minutes running out (a step
+  # without a bound of its own stalled), and that fails this job. The run still ends cancelled then
+  # (GitHub names a run with a cancelled job cancelled), which is why the steps that wait on the farm
+  # carry bounds of their own.
   release-macos-result:
     needs: release-macos
     if: ${{ !cancelled() }}

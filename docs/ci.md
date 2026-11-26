@@ -513,7 +513,11 @@ tests, which no pull request builds. The rest of this section is about `release-
   needs no ordering with the release (nothing waits on it), and `workflow_run` would
   start it only after the whole release finished, build the default branch's head
   instead of the pushed commit, and run for a pull request's `release.yml` run too if
-  that ever changed. `timeout-minutes: 90` still bounds a stalled build.
+  that ever changed. `timeout-minutes: 90` still bounds a stalled build, and the steps that
+  wait on the farm have bounds of their own inside it (farm-connect 5 minutes, the macOS set
+  65, the Python harness tests 10; the macOS set took at most 72 seconds over the last runs):
+  a step past its bound fails, so the run ends failed, where a job past its `timeout-minutes`
+  is cancelled and GitHub ends its run cancelled.
 - **Reported, not blocking (for now).** A red macOS build is a failed run of
   `release-macos.yml`, with a line in its summary, and the release run, the prod publish and
   `main_red.yml` do not see it: none of them `needs` it or reads its result. The job is not
@@ -523,7 +527,8 @@ tests, which no pull request builds. The rest of this section is about `release-
   run list, the commit status and the badge never read green for a Mac build that did not
   pass. A build job that ran out its `timeout-minutes` is cancelled by GitHub while the run
   goes on, so `release-macos-result` runs and fails with "the macOS build was cancelled while
-  the run went on". Only when the run itself was cancelled (a newer push, or by hand) does
+  the run went on" (the run itself still reads cancelled, which is why the farm steps carry
+  their own bounds). Only when the run itself was cancelled (a newer push, or by hand) does
   `release-macos-result` not run: the run ends cancelled and the newer run builds.
   Its message says what happened rather than guessing: when a buck2 step failed (the build
   of the set, or of the Python harness tests), `//release/ci:buck2_failure` (built before them)
