@@ -2,7 +2,7 @@
 // "Errors a user can act on"). Every one is a KomiraError, so `instanceof
 // KomiraError` catches komira's errors and nothing else. A wrong argument is
 // JavaScript's own TypeError or RangeError instead, raised before the library
-// is called. The private Arrow import (arrow_import.mts) raises
+// is called. The private Arrow import (arrow_import.ts) raises
 // UnsupportedOperation for a format it does not map.
 
 /** The step of a query an engine error came from. */
@@ -20,8 +20,10 @@ export interface KomiraErrorFields {
  *
  * `status` is the status number of the C call that failed (negative; -3 when
  * the engine refused), or null when no call returned one. `code` is the
- * engine's name for that status (`KOMIRA_ERR_ENGINE`), or null. `step` is the
- * step of the query that failed, or null. The message is the engine's text,
+ * engine's named code for the error (`SQL_SYNTAX_ERROR`, from
+ * `komira_last_error_code`), or null when it has none. `step` is the step of
+ * the query that refused it (from `komira_last_error_step`), or null. Both are
+ * null from a library older than ABI 1.7. The message is the engine's text,
  * unchanged, when the library gave one.
  */
 export class KomiraError extends Error {

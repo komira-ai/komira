@@ -37,6 +37,22 @@ c_shared_lib(
     out = "libkomira_fake_no_render.so",
 )
 
+# Libraries whose minor version promises a call they lack: ABI 1.3 without
+# komira_sql_stream, and ABI 1.7 with it but without komira_last_error_code.
+c_shared_lib(
+    name = "fake_v1_3_no_sql",
+    srcs = ["tests/fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=1003"],
+    out = "libkomira_fake_v1_3_no_sql.so",
+)
+
+c_shared_lib(
+    name = "fake_v1_7_no_code",
+    srcs = ["tests/fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=1007", "-DFAKE_SQL_STREAM"],
+    out = "libkomira_fake_v1_7_no_code.so",
+)
+
 # A stand-in whose parquet_schema and plan_render results hold the capacity the
 # addon passed and the length the call reported.
 c_shared_lib(
@@ -56,6 +72,8 @@ node_binding_test(
         "fake/libkomira_fake_v2.so": ":fake_v2",
         "fake/libkomira_fake_v0.so": ":fake_v0",
         "fake/libkomira_fake_no_render.so": ":fake_no_render",
+        "fake/libkomira_fake_v1_3_no_sql.so": ":fake_v1_3_no_sql",
+        "fake/libkomira_fake_v1_7_no_code.so": ":fake_v1_7_no_code",
         "fake/libkomira_fake_capacity.so": ":fake_capacity",
     },
 )
@@ -90,14 +108,20 @@ node_binding_test(
 _DEVTOOLS = "//node/devtools:modules"
 
 _SRCS = [
+    "src/arrow_import.ts",
     "src/cpu.ts",
     "src/errors.ts",
     "src/index.ts",
     "src/native.ts",
     "src/platform.ts",
+    "src/result.ts",
     "src/session.ts",
     "src/version.ts",
 ]
+
+# The Arrow import is measured by :arrow_test, whose stand-in producer makes
+# every format it maps; :package_test measures the rest.
+_ARROW_IMPORT = "src/arrow_import.ts"
 
 _TESTS = [
     "tests/cpu.test.ts",
@@ -109,6 +133,7 @@ _TESTS = [
     "tests/platform.test.ts",
     "tests/register_args.test.ts",
     "tests/session.test.ts",
+    "tests/sql.test.ts",
     "tests/unknown_status.test.ts",
     "tests/variants.test.ts",
 ]
@@ -119,11 +144,20 @@ _TEST_MODULES = [
     "tests/helpers.ts",
 ]
 
+# The peer dependency's declarations, which the sources import: the pinned
+# apache-arrow and the flatbuffers its declarations import, in a node_modules
+# at the cell root, where tsc finds them after the package's own (devtools).
+_ARROW_TYPES = {
+    "node_modules/apache-arrow": "//third_party/node:apache-arrow",
+    "node_modules/flatbuffers": "//third_party/node:flatbuffers",
+}
+
 # Every source and test, type-checked with strict on.
 tsc_check(
     name = "typecheck",
     modules = _DEVTOOLS,
     srcs = _SRCS + _TESTS + _TEST_MODULES + ["package.json", "tsconfig.json"],
+    data = _ARROW_TYPES,
 )
 
 # The JavaScript and .d.ts files the package ships, compiled from src/.
@@ -131,6 +165,7 @@ tsc_build(
     name = "dist",
     modules = _DEVTOOLS,
     srcs = _SRCS + ["package.json", "tsconfig.build.json", "tsconfig.json"],
+    data = _ARROW_TYPES,
 )
 
 # Stand-ins for the package's tests: a library of ABI 1.1 that loads, and two
@@ -158,6 +193,15 @@ c_shared_lib(
     out = "libkomira_fake_echo_register.so",
 )
 
+# A stand-in of ABI 1.9 whose komira_sql_stream answers fixed queries with
+# Arrow C streams, and refusals with the code and step the query names.
+c_shared_lib(
+    name = "fake_sql",
+    srcs = ["tests/fake_sql.c"],
+    headers = ["arrow_c.h"],
+    out = "libkomira_fake_sql.so",
+)
+
 c_shared_lib(
     name = "fake_unknown_status",
     srcs = ["tests/fake_libkomira.c"],
@@ -182,17 +226,19 @@ _ISA_FIXTURES = [
 _PLATFORM = "node_modules/@komira-ai/komira-linux-x64-gnu/"
 
 # The package's behaviour tests (tests/*.test.ts, run by the pinned node with
-# its types stripped), each file its own process. The sources are measured:
-# every one must be loaded, with at least 99% of its lines and branches
-# together covered.
+# its types stripped), each file its own process, with the pinned apache-arrow
+# as the peer dependency npm installs. The sources but the Arrow import are
+# measured: every one must be loaded, with at least 99% of its lines and
+# branches together covered.
 node_binding_test(
     name = "package_test",
     srcs = _TESTS,
-    covered_srcs = _SRCS,
+    covered_srcs = [s for s in _SRCS if s != _ARROW_IMPORT],
     data = {
         "dist": ":dist",
         "fake/echo_register/libkomira.so": ":fake_echo_register",
         "fake/engine_error/libkomira.so": ":fake_engine_error",
+        "fake/sql/libkomira.so": ":fake_sql",
         "fake/unknown_status/libkomira.so": ":fake_unknown_status",
         "fake/v1_1/libkomira.so": ":fake_v1_1",
         "fake/v2/libkomira.so": ":fake_v2",
@@ -210,7 +256,11 @@ node_binding_test(
     } | {
         m: m
         for m in _TEST_MODULES
+    } | {
+        # The Arrow import, which the sources load, unmeasured here.
+        _ARROW_IMPORT: _ARROW_IMPORT,
     },
+    deps = ["//third_party/node:apache-arrow"],
 )
 
 # The session thread's stand-in (tests/fake_latch.c): its own context per
@@ -253,16 +303,17 @@ node_addon(
 # The Arrow import: the addon's drain and descriptions (arrow_stream.test.mts)
 # and the apache-arrow Table the private module builds from them
 # (arrow_import.test.mts), over streams of the stand-in. The tests run the
-# pinned apache-arrow, the version package.json's peer range names.
+# pinned apache-arrow, the version package.json's peer range names. The
+# module is measured here: at least 99% of its lines and branches covered.
 node_binding_test(
     name = "arrow_test",
     srcs = ["arrow_stream.test.mts", "arrow_import.test.mts"],
+    covered_srcs = [_ARROW_IMPORT],
     data = {
         "arrow_stand_in.node": ":arrow_stand_in",
         "foreign_external.node": ":foreign_external",
         "komira_addon.node": ":komira_addon",
         "package.json": "package.json",
-        "src/arrow_import.mts": "src/arrow_import.mts",
         "src/errors.ts": "src/errors.ts",
         "tests/arrow_specs.mts": "tests/arrow_specs.mts",
     },

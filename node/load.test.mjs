@@ -16,12 +16,12 @@ test('the addon exposes exactly its calls', () => {
   assert.deepEqual(Object.keys(addon).sort(), [
     'abiVersion', 'arrowClose', 'arrowNextBatch', 'arrowSchema', 'freeSession',
     'importArrowStream', 'load', 'newSession', 'parquetSchema', 'planRender',
-    'registerParquet', 'sessionStats',
+    'registerParquet', 'sessionStats', 'sql',
   ]);
 });
 
 test('before load, every call that needs the library says it is not loaded', () => {
-  for (const call of [() => addon.abiVersion(), () => addon.newSession()]) {
+  for (const call of [() => addon.abiVersion(), () => addon.newSession(), () => addon.sql(null, 'SELECT 1')]) {
     assert.throws(call, { code: 'KOMIRA_NOT_LOADED', message: /not loaded/ });
   }
 });
@@ -57,6 +57,20 @@ test('a library without komira_plan_render names the missing symbol', () => {
   assert.throws(() => addon.load(fake('libkomira_fake_no_render.so')), {
     code: 'KOMIRA_MISSING_SYMBOL',
     message: /no symbol komira_plan_render/,
+  });
+});
+
+test('a library of ABI 1.3 without komira_sql_stream names it: its minor version promises it', () => {
+  assert.throws(() => addon.load(fake('libkomira_fake_v1_3_no_sql.so')), {
+    code: 'KOMIRA_MISSING_SYMBOL',
+    message: 'libkomira has no symbol komira_sql_stream',
+  });
+});
+
+test('a library of ABI 1.7 without komira_last_error_code names it: its minor version promises it', () => {
+  assert.throws(() => addon.load(fake('libkomira_fake_v1_7_no_code.so')), {
+    code: 'KOMIRA_MISSING_SYMBOL',
+    message: 'libkomira has no symbol komira_last_error_code',
   });
 });
 

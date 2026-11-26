@@ -2,8 +2,9 @@
 // "Public names" and "Behaviour"), and the default session of this
 // JavaScript environment.
 //
-// The calls that take a table are asynchronous, as the design fixes: they
-// return promises, and every error, an argument's included, is a rejection.
+// The calls that take a table or run a query are asynchronous, as the design
+// fixes: they return promises, and every error, an argument's included, is a
+// rejection.
 // Arguments are checked before the library is called: a wrong type is a
 // TypeError and a wrong value of the right type a RangeError. The addon runs
 // each session's library calls in order on a native thread of the session's
@@ -14,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { KomiraError, UnsupportedOperation } from "./errors.ts";
 import { call, callAsync, load, type Handle, type Native } from "./native.ts";
+import { resultOf, type Result } from "./result.ts";
 
 /**
  * The options of a session. Neither is settable yet: this package does not
@@ -124,6 +126,20 @@ function filePath(value: unknown): string {
     throw new RangeError("the path holds a lone surrogate, which UTF-8 cannot spell");
   }
   return path.resolve(p);
+}
+
+/** The SQL text of a query: a string without a NUL byte, that UTF-8 can spell. */
+function queryText(query: unknown): string {
+  if (typeof query !== "string") {
+    throw new TypeError("the query must be a string");
+  }
+  if (query.includes("\0")) {
+    throw new RangeError("the query holds a NUL byte");
+  }
+  if (!query.isWellFormed()) {
+    throw new RangeError("the query holds a lone surrogate, which UTF-8 cannot spell");
+  }
+  return query;
 }
 
 /** The refusal of a registration this package does not bind yet. */
@@ -240,6 +256,25 @@ export class Session {
     throw noRegistration("registerNdjson", "a newline-delimited JSON file");
   }
 
+  /**
+   * Runs the one SQL statement `query` over the session's tables
+   * (`komira_sql_stream`) and resolves with its answer, unread. The answer is
+   * computed before the promise settles, so it rejects on a syntax error, an
+   * unknown table or column, and every refusal at bind, optimize, lower or
+   * execute: with a KomiraError whose message is the engine's
+   * (`<step>: <reason>`), whose status is -3, and whose code and step are
+   * the engine's. A query that is not a string is a TypeError, and one
+   * holding a NUL byte or a lone surrogate a RangeError, before the library
+   * is called. The session takes its next call after a refusal.
+   */
+  async sql(query: string): Promise<Result> {
+    const text = queryText(query);
+    const handle = this.#open();
+    const native = this.#native;
+    const drained = await callAsync(() => native.addon.sql(handle, text));
+    return resultOf({ addon: native.addon, handle: drained });
+  }
+
   /** `close()`, for `using`. */
   [Symbol.dispose](): void {
     this.close();
@@ -268,4 +303,9 @@ export function defaultSessionOf(): Session {
 /** `registerParquet` on the default session. */
 export async function registerParquet(name: string, path: FilePath): Promise<void> {
   return defaultSessionOf().registerParquet(name, path);
+}
+
+/** `sql` on the default session. */
+export async function sql(query: string): Promise<Result> {
+  return defaultSessionOf().sql(query);
 }

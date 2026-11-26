@@ -1,6 +1,6 @@
 // The Arrow import end to end: a stand-in producer (tests/arrow_stand_in.c)
 // hands komira_addon an Arrow C stream, and readArrowStream
-// (src/arrow_import.mts) turns it into an apache-arrow Table of the pinned
+// (src/arrow_import.ts) turns it into an apache-arrow Table of the pinned
 // apache-arrow. Each column's bytes are written by hand (tests/arrow_specs.mts),
 // so every value read back is the value the bytes hold. A node --test file is
 // its own process, so the stand-in's release counts are this file's.
@@ -14,7 +14,7 @@ import vm from 'node:vm';
 
 import { Decimal, Union, UnionMode, type Table } from 'apache-arrow';
 
-import { readArrowStream, type ArrowAddon } from './src/arrow_import.mts';
+import { readArrowStream, type ArrowAddon } from './src/arrow_import.ts';
 import { KomiraError, UnsupportedOperation } from './src/errors.ts';
 import {
   NULLABLE,

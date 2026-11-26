@@ -8,7 +8,10 @@
 // text, read with the two-call protocol; without it the last error is empty.
 // With FAKE_ECHO_REGISTER komira_register_parquet fails with -3, and its last
 // error is `<name>\t<path>`, the two arguments as the call received them, so a
-// test reads back what reached the library.
+// test reads back what reached the library. With FAKE_SQL_STREAM it also
+// defines komira_sql_stream (refusing every query with -3), so a library of
+// ABI 1.7 built so reaches the next symbol its minor promises,
+// komira_last_error_code, which no build of this file defines.
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -67,6 +70,12 @@ EXPORT int32_t komira_parquet_schema(void *ctx, const char *path, uint8_t *b, ui
   (void)b; (void)cap; *n = 0; return 0;
 #endif
 }
+#ifdef FAKE_SQL_STREAM
+EXPORT int32_t komira_sql_stream(void *ctx, const char *sql, void *out) {
+  (void)ctx; (void)sql; (void)out;
+  return -3;
+}
+#endif
 #ifndef FAKE_OMIT_PLAN_RENDER
 EXPORT int32_t komira_plan_render(void *ctx, const uint8_t *p, uint64_t len, uint8_t *b, uint64_t cap, uint64_t *n) {
   (void)ctx; (void)p; (void)len;

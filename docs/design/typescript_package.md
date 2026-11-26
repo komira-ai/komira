@@ -47,17 +47,20 @@ Fixed before this design, and not reopened here:
 
 ### The addon
 
-- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (904 lines) is a Node-API addon in C, with
+- **EXISTS** [node/komira_addon.c](../../node/komira_addon.c) (1006 lines) is a Node-API addon in C, with
   its Arrow import in [node/arrow_import.c](../../node/arrow_import.c).
   - It defines `NAPI_VERSION 8` and uses `NAPI_MODULE_INIT`, so it is context-aware. Its function
     table is process-wide, and a worker thread shares it (the comment at the table). `:thread_test`
     loads it in worker threads.
-  - It exports twelve functions: `load`, `abiVersion`, `newSession`, `freeSession`,
-    `registerParquet`, `parquetSchema`, `planRender`, `sessionStats`, and the Arrow import's
+  - It exports thirteen functions: `load`, `abiVersion`, `newSession`, `freeSession`,
+    `registerParquet`, `parquetSchema`, `planRender`, `sql`, `sessionStats`, and the Arrow import's
     `importArrowStream`, `arrowSchema`, `arrowNextBatch` and `arrowClose` (below).
 - **How it binds libkomira.** `load(path)` opens the library with `dlopen(RTLD_NOW | RTLD_LOCAL)`
-  and requires `komira_abi_version()` major 1. It then resolves seven symbols by name, and a
-  missing one is named in a `KOMIRA_MISSING_SYMBOL` error.
+  and requires `komira_abi_version()` major 1. It then resolves seven symbols by name, and the
+  later ones the library's minor version promises (`komira_sql_stream` from 1.3,
+  `komira_last_error_code` and `komira_last_error_step` from 1.7), and a missing one is named in a
+  `KOMIRA_MISSING_SYMBOL` error. `sql` on a library older than 1.3 throws `KOMIRA_ABI_TOO_OLD`,
+  naming both versions.
   - The library is never `dlclose`d, because the Mojo runtime cannot be unloaded.
   - There is one library per process: loading the same path again does nothing, and loading
     another path is refused.
@@ -76,30 +79,37 @@ Fixed before this design, and not reopened here:
     A pending call holds its session, so the finalizer never runs under a call, and it joins the
     thread before it frees the context.
 - **Errors.** A non-zero status rejects with an `Error` that carries `status`, `code` (the
-  `KOMIRA_ERR_*` name) and `lastError` (read with the two-call protocol). Misuse of the addon
+  `KOMIRA_ERR_*` name) and `lastError` (read with the two-call protocol), and, from ABI 1.7,
+  `errorCode` and `errorStep` (`komira_last_error_code` and `komira_last_error_step`), which the
+  package's `KomiraError` carries as `code` and `step`. Misuse of the addon
   throws an error with a `code` and no `status`: `KOMIRA_ARG`, `KOMIRA_NOT_LOADED`,
   `KOMIRA_SESSION_FREED`, `KOMIRA_LOAD_FAILED`, `KOMIRA_ABI_MISMATCH`, `KOMIRA_MISSING_SYMBOL` and
   `KOMIRA_LOADED`.
+- **`sql`.** `sql(session, text)` runs `komira_sql_stream` on the session thread into a zeroed
+  stream and drains it there (step 1 of [Arrow: from the C stream to
+  JavaScript](#arrow-from-the-c-stream-to-javascript)). Its Promise resolves with the drained result
+  the Arrow import's calls read, which needs no context, so it reads after `freeSession`.
 - **Calls it does not bind.** `komira_csv_binding` and `komira_json_binding` have no function in
-  the addon. Nothing in it runs a query.
+  the addon, nor do `komira_sql_stream_run`'s run handle and `komira_plan_stream`.
 - **EXISTS** The Arrow import of [Arrow: from the C stream to
-  JavaScript](#arrow-from-the-c-stream-to-javascript), steps 1 to 3, over a stream handed to
+  JavaScript](#arrow-from-the-c-stream-to-javascript), steps 1 to 3, over the stream
+  `komira_sql_stream` fills (drained on the session thread) and over a stream handed to
   `importArrowStream` as a capsule (an N-API external tagged as an Arrow C stream,
-  [node/arrow_c.h](../../node/arrow_c.h)) rather than one `komira_sql_stream` fills. It drains on
-  the JavaScript thread. The private module is
-  [node/src/arrow_import.mts](../../node/src/arrow_import.mts) (`readArrowStream`), with
+  [node/arrow_c.h](../../node/arrow_c.h)), which it drains on the JavaScript thread. The private
+  module is [node/src/arrow_import.ts](../../node/src/arrow_import.ts) (`tableOf`, `openBatches`,
+  and `readArrowStream` for the tests), with
   `KomiraError` and `UnsupportedOperation` in [node/src/errors.ts](../../node/src/errors.ts), the package's one errors module.
   [node/package.json](../../node/package.json) is private and declares the `apache-arrow` peer
   dependency at `^21.2.0` (part 3 completes it).
 
 ### Tests and CI
 
-- **EXISTS** [node/BUCK](../../node/BUCK) has four `node_binding_test` targets.
+- **EXISTS** [node/BUCK](../../node/BUCK) has five `node_binding_test` targets.
   - `:load_test` runs [load.test.mjs](../../node/load.test.mjs) and
     [capacity.test.mjs](../../node/capacity.test.mjs). They cover the load refusals, using
     stand-ins built from [tests/fake_libkomira.c](../../node/tests/fake_libkomira.c): ABI 2.0,
-    ABI 0.999, a missing `komira_plan_render`, and a library that records the capacity it was
-    given.
+    ABI 0.999, a missing `komira_plan_render`, ABI 1.3 without `komira_sql_stream`, ABI 1.7
+    without `komira_last_error_code`, and a library that records the capacity it was given.
   - `:session_test` runs [session.test.mjs](../../node/session.test.mjs). It covers errors with
     their last error, the frozen schema bytes of `two_columns.parquet`, plan text, wrong-kind
     arguments, a foreign external, double free, and finalizers counted with `gc()` with no clock.
@@ -112,14 +122,21 @@ Fixed before this design, and not reopened here:
     [arrow_import.test.mts](../../node/arrow_import.test.mts) over streams of a stand-in producer
     ([tests/arrow_stand_in.c](../../node/tests/arrow_stand_in.c)) that counts each release: the
     round trip of every type of the exporter's set, with nulls, offsets and a dictionary, an empty
-    stream, failing callbacks, a misaligned buffer, malformed arrays and unmapped formats.
-- **EXISTS** The four tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
+    stream, failing callbacks, a misaligned buffer, malformed arrays and unmapped formats. It
+    measures `node/src/arrow_import.ts`: at least 99% of its lines and branches covered.
+  - `:package_test` runs the package's tests, `sql` and `Result` among them, over the real
+    library (a Parquet file of three rows the engine writes, a syntax error and an unknown table
+    with their codes and steps) and over a stand-in of ABI 1.9
+    ([tests/fake_sql.c](../../node/tests/fake_sql.c)) whose `komira_sql_stream` answers fixed
+    queries.
+- **EXISTS** The tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
   - `node_binding_test` runs `node --test` as a build action, under `env -i`, with no network.
   - It passes only if TAP reports tests, all passed, and none skipped
     ([tools/build/node/README.md](../../tools/build/node/README.md)).
-- **EXISTS** The TypeScript sources of `node/src/` are measured by their own test target:
-  `//node:package_test` names them as `covered_srcs`, and `node_binding_test` fails unless every one
-  is loaded and their lines and branches are each at least 99% covered (rule T1). The addon's C is
+- **EXISTS** The TypeScript sources of `node/src/` are measured by their own test targets:
+  `//node:package_test` names them, the Arrow import aside, as `covered_srcs`, and `:arrow_test`
+  names the Arrow import; `node_binding_test` fails unless every one is loaded and their lines and
+  branches are each at least 99% covered (rule T1). The addon's C is
   not measured. `.github/workflows/coverage.yml` and the covcheck README never name `node/`
   *(inferred from a search of both)*; covcheck does read lcov tracefiles
   ([tools/build/coverage/README.md](../../tools/build/coverage/README.md)).
@@ -152,11 +169,12 @@ Fixed before this design, and not reopened here:
 
 ### Release state
 
-- **Nothing is released.** **EXISTS** The package of part 3 (below, "Where the work lands"):
+- **Nothing is released.** **EXISTS** The package of parts 3 and 4 (below, "Where the work lands"):
   `node/package.json` (`"private": true`, named by D1's option A as a placeholder), the TypeScript
-  sources in `node/src/`, and the `.js` and `.d.ts` files `//node:dist` compiles from them. The
-  private Arrow import of part 2 (`node/src/arrow_import.mts`) is beside them, outside `dist/` until
-  `Result` uses it. No platform package is built and nothing is published. No workflow mentions npm
+  sources in `node/src/`, `Session.sql` and `Result` among them, and the `.js` and `.d.ts` files
+  `//node:dist` compiles from them. The private Arrow import of part 2
+  (`node/src/arrow_import.ts`) is one of those sources, read by `Result`. No platform package is
+  built and nothing is published. No workflow mentions npm
   publishing. The only use of npm in a workflow is the pin check in `kpin-update.yml`.
 
 ### The library under it
@@ -172,7 +190,7 @@ Fixed before this design, and not reopened here:
   - `komira_register_csv` and `komira_register_json` (1.5) bind a CSV or newline-delimited JSON
     file to the session as a table that SQL reads by name.
   - `komira_last_error_code` and `komira_last_error_step` (1.7) answer the last error's named code and
-    the step that refused it. The addon does not bind them yet.
+    the step that refused it. The addon reads both after every failed call.
   - `komira_register_arrow_stream` (1.9) drains a host's Arrow C stream into a table held in
     memory and registers it by name, replacing a table of that name; it releases the stream.
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners

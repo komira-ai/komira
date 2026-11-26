@@ -3,14 +3,15 @@
 //
 // This is the package's one entry. Its public names are exactly the ones
 // exported here; every other module is private. Importing it loads nothing:
-// the first Session, registerParquet or abiVersion loads libkomira from the
-// platform package npm installed beside it. No call runs a query yet.
+// the first Session, registerParquet, sql or abiVersion loads libkomira from
+// the platform package npm installed beside it.
 
 import { call, load } from "./native.ts";
 
 export { KomiraError, LibraryLoadError, UnsupportedCpuError, UnsupportedOperation } from "./errors.ts";
 export type { KomiraErrorFields, Step } from "./errors.ts";
-export { Session, registerParquet } from "./session.ts";
+export { Result } from "./result.ts";
+export { Session, registerParquet, sql } from "./session.ts";
 export type { CsvOptions, FilePath, SessionOptions } from "./session.ts";
 export { version } from "./version.ts";
 

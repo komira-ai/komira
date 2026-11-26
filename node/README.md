@@ -4,7 +4,8 @@ Two layers, the package over the addon:
 
 - **The TypeScript package** `@komira-ai/komira` ([below](#the-typescript-package)): the public names a
   user imports, the loader that finds libkomira in the platform package npm installs beside it, and
-  the errors. It is part 3 of [docs/design/typescript_package.md](../docs/design/typescript_package.md).
+  the errors. It is parts 3 (the package) and 4 (`sql` and `Result`) of
+  [docs/design/typescript_package.md](../docs/design/typescript_package.md).
 - **The addon**: a Node-API addon in C ([`komira_addon.c`](komira_addon.c)) that gives Node the calls of
   `libkomira`, komira's one shared library with a flat C ABI ([`src/so`](../src/so/README.md)). It is
   built by `node_addon` ([`tools/build/node`](../tools/build/node/README.md)) with the pinned zig
@@ -24,18 +25,20 @@ need no second build), with `apache-arrow ^21.2.0` as its peer dependency. The n
 | file | holds |
 |---|---|
 | [`package.json`](package.json) | the manifest npm reads: `exports` and `types` point at `dist/`, `engines`, the peer dependency, and the platform packages as optional dependencies at the package's own version. No `bin`, no scripts, no dependency of its own. Its `version` is a placeholder the package rule will stamp |
-| [`src/index.ts`](src/index.ts) | the one entry, and the public names: `Session`, `registerParquet`, `abiVersion`, `version`, `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError`, `UnsupportedOperation`, and the types `SessionOptions`, `CsvOptions`, `FilePath`, `KomiraErrorFields`, `Step` |
-| [`src/session.ts`](src/session.ts) | `Session`: `registerParquet(name, path)` (a path or a `file:` URL, a relative one resolved against the working directory when called), `registerCsv` and `registerNdjson` (their arguments checked, then refused with `UnsupportedOperation`: this package does not yet bind the call that registers those formats by name), `close()`, `closed`, `Symbol.dispose` and `Symbol.asyncDispose`; the options `threads` and `memoryLimit`, checked and refused by name until this package binds the call that sets them. The default session of the module-level `registerParquet`, one per JavaScript environment |
-| [`src/errors.ts`](src/errors.ts) | `KomiraError` (`status`, `code`, `step`, each `null` unless the engine gave one) and its subclasses |
+| [`src/index.ts`](src/index.ts) | the one entry, and the public names: `Session`, `Result`, `registerParquet`, `sql`, `abiVersion`, `version`, `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError`, `UnsupportedOperation`, and the types `SessionOptions`, `CsvOptions`, `FilePath`, `KomiraErrorFields`, `Step` |
+| [`src/session.ts`](src/session.ts) | `Session`: `registerParquet(name, path)` (a path or a `file:` URL, a relative one resolved against the working directory when called), `registerCsv` and `registerNdjson` (their arguments checked, then refused with `UnsupportedOperation`: this package does not yet bind the call that registers those formats by name), `sql(query)`, which runs one statement through `komira_sql_stream` and resolves with its `Result`, `close()`, `closed`, `Symbol.dispose` and `Symbol.asyncDispose`; the options `threads` and `memoryLimit`, checked and refused by name until this package binds the call that sets them. The default session of the module-level `registerParquet` and `sql`, one per JavaScript environment |
+| [`src/result.ts`](src/result.ts) | `Result`, the answer of one `sql` call, read once: `toArrow()`, a promise of one `apache-arrow` `Table`, or `for await`, its `RecordBatch`es in order; a second read rejects with `KomiraError("the result was already read")`. It reads after its session is closed |
+| [`src/arrow_import.ts`](src/arrow_import.ts) | the private Arrow import ([below](#the-arrow-import)): the addon's descriptions of a drained stream as `apache-arrow` data |
+| [`src/errors.ts`](src/errors.ts) | `KomiraError` (`status`, `code`, `step`, each `null` unless the engine gave one: `code` and `step` are `komira_last_error_code`'s and `komira_last_error_step`'s, from ABI 1.7) and its subclasses |
 | [`src/platform.ts`](src/platform.ts) | the platform package's name for the host, and its directory, found with `require.resolve` |
 | [`src/cpu.ts`](src/cpu.ts) | which libkomira file of the native directory this CPU opens: the `VARIANTS` selector, or the x86-64-v3 check of a single library |
 | [`src/native.ts`](src/native.ts) | the load, once per JavaScript environment, and the conversion of the addon's errors |
 | [`src/version.ts`](src/version.ts) | `version`, read from the package's own `package.json` |
-| [`tsconfig.json`](tsconfig.json), [`tsconfig.build.json`](tsconfig.build.json) | `strict` over the sources and tests (`:typecheck`); the build of `dist/`, a `.js` and a `.d.ts` per source (`:dist`) |
+| [`tsconfig.json`](tsconfig.json), [`tsconfig.build.json`](tsconfig.build.json) | `strict` over the sources and tests (`:typecheck`); the build of `dist/`, a `.js` and a `.d.ts` per source (`:dist`). Both read the pinned `apache-arrow`'s declarations, staged by the two targets, with `skipLibCheck`: those declarations name web stream types (`ByteLengthQueuingStrategy`) the pinned Node.js types do not declare as globals, so only the package's own files are checked |
 | [`devtools/`](devtools/README.md) | the pinned TypeScript compiler and Node.js types the two targets run |
 
-Every call that takes a table returns a promise, and every error, an argument's included, is its
-rejection. The addon runs each session's library calls in order on a native thread of the
+Every call that takes a table or runs a query returns a promise, and every error, an argument's
+included, is its rejection. The addon runs each session's library calls in order on a native thread of the
 session's own ([below](#the-session-thread)), so the event loop never waits on the engine. `close()`
 is synchronous: it refuses later calls at once, and the context is freed after the calls already
 made have run; `await using` (`Symbol.asyncDispose`) settles once it is freed. A wrong argument type
@@ -43,8 +46,8 @@ is a `TypeError` and a wrong value a `RangeError`, both before the library is ca
 
 ### How it finds libkomira
 
-Importing the package loads nothing. The first `Session`, `registerParquet` or `abiVersion` of a
-JavaScript environment:
+Importing the package loads nothing. The first `Session`, `registerParquet`, `sql` or `abiVersion` of
+a JavaScript environment:
 
 1. names the platform package from `process.platform`, `process.arch` and whether Node runs on glibc
    (`@komira-ai/komira-linux-x64-gnu`, `-linux-arm64-gnu`, `-darwin-arm64`), and finds it with
@@ -69,22 +72,24 @@ its own default session.
 
 | call | does |
 |---|---|
-| `load(path)` | opens `libkomira` from `path` with `dlopen`, requires `komira_abi_version()` to have major 1, and resolves the functions below. A second `load` of the same path does nothing; of another path is an error |
+| `load(path)` | opens `libkomira` from `path` with `dlopen`, requires `komira_abi_version()` to have major 1, and resolves the functions below: those of ABI 1.1, and the later ones the library's minor version promises (`komira_sql_stream` from 1.3, `komira_last_error_code` and `komira_last_error_step` from 1.7), each a `KOMIRA_MISSING_SYMBOL` when absent. A second `load` of the same path does nothing; of another path is an error |
 | `abiVersion()` | `komira_abi_version()`: `major * 1000 + minor`, 1009 for ABI 1.9 |
 | `newSession()` | `komira_ctx_new()`, as an N-API external (a handle that is not a number or an object) |
 | `freeSession(session)` | `komira_ctx_free()`, after the calls made before it (below). A Promise of `undefined`. Idempotent: a later call settles with the first |
 | `registerParquet(session, name, path)` | `komira_register_parquet`. A Promise of `undefined` |
 | `parquetSchema(session, path)` | `komira_parquet_schema`: a Promise of a `Buffer` of the file's schema as `komira.plan.v1` `WireSchema` bytes (a protobuf message, not an Arrow IPC stream), through the two-call protocol inside the addon |
 | `planRender(session, plan)` | `komira_plan_render`: a Promise of the text of a serialized plan (a `Uint8Array`, a `Buffer` included; its bytes are copied when the call is made), as a string. The plan is not run |
+| `sql(session, text)` | `komira_sql_stream` on the session's thread into a zeroed stream, which the thread then drains (below): a Promise of a result the Arrow calls read, which needs neither the context nor the session. On a library older than ABI 1.3 it throws `KOMIRA_ABI_TOO_OLD`, naming both versions |
 | `sessionStats()` | `{ created, freed }`: how many contexts the addon made and destroyed, for the tests of the session's lifetime |
 | `importArrowStream(capsule)` | a promise of a result: the Arrow C stream in `capsule` drained (below). It needs no library loaded |
-| `arrowSchema(result)` | the stream's schema, described |
+| `arrowSchema(result)` | the stream's schema, described (a result of `importArrowStream` or `sql`) |
 | `arrowNextBatch(result)` | the next batch, described, or `null` after the last |
 | `arrowClose(result)` | releases the schema and the batches not read yet. Idempotent |
 
-Everything else in the C ABI (`komira_last_error` is used by the addon itself;
-`komira_csv_binding` and `komira_json_binding` have no call yet) and every
-call that would run a query is outside this addon.
+Everything else in the C ABI (`komira_last_error`, `komira_last_error_code` and
+`komira_last_error_step` are used by the addon itself; `komira_csv_binding`,
+`komira_json_binding`, the run handle of `komira_sql_stream_run` and
+`komira_plan_stream` have no call yet) is outside this addon.
 
 ## The Arrow import
 
@@ -100,9 +105,9 @@ private TypeScript module ([`src/arrow_import.mts`](src/arrow_import.mts)) build
   it, calls `get_schema` once and `get_next` until the end, keeps every
   `ArrowArray`, and calls the stream's `release`. A non-zero callback status
   rejects with `get_last_error`'s text, after everything taken so far is
-  released. The run call that will hand the addon a stream of a query
-  (`komira_sql_stream`) is not bound yet; the tests make streams with a
-  stand-in producer.
+  released. `sql` drains the stream `komira_sql_stream` filled the same way,
+  on the session's thread, and a failed callback rejects `sql` with that
+  error. The tests of the import make streams with a stand-in producer.
 - **The descriptions.** A schema is `{ format, name, flags, metadata, children,
   dictionary }`, the metadata as `[key, value]` pairs or `null`. A batch is
   `{ length, nullCount, offset, buffers, children, dictionary }`. Each buffer is
@@ -128,10 +133,9 @@ private TypeScript module ([`src/arrow_import.mts`](src/arrow_import.mts)) build
 
 [`package.json`](package.json) is private and names `apache-arrow` as a peer
 dependency at `^21.2.0`, the range the tests run: they use the pinned 21.2.0
-([third_party/node](../third_party/node/README.md)). The Arrow import's files are
-`.mts` with only erasable syntax, so the pinned node runs them by stripping
-their types; `:typecheck` does not cover them yet, since they import
-`apache-arrow`, which `devtools/` does not hold.
+([third_party/node](../third_party/node/README.md)). The module is a source of
+the package like the others, compiled into `dist/` and type-checked by
+`:typecheck`; `:arrow_test` measures its coverage.
 
 ## Why `dlopen` at `load`, not a NEEDED dependency
 
@@ -169,18 +173,24 @@ destroyed before `freeSession` returns.
 
 A call whose status is not zero rejects with an `Error` with `status` (the number),
 `code` (`KOMIRA_ERR_ENGINE`, ...) and `lastError` (the session's last error text,
-read with the two-call protocol); the message is
-`<function> failed (status N): <lastError>`. Misuse of the addon itself throws,
+read with the two-call protocol), and, from a library of ABI 1.7, `errorCode`
+(`komira_last_error_code`'s text, the same protocol; empty when the error has
+none) and `errorStep` (`komira_last_error_step`'s number), all read on the
+session's thread right after the call; the message is
+`<function> failed (status N): <lastError>`. The package makes `errorCode` its
+`code` and the step's name its `step`. Misuse of the addon itself throws,
 synchronously and before anything is queued, with a `code` and no `status`: a `TypeError` `KOMIRA_ARG` for an argument of the
 wrong kind (a path with a NUL byte included), `KOMIRA_SESSION_FREED`,
 `KOMIRA_NOT_LOADED`, and from `load` `KOMIRA_LOAD_FAILED` (the loader's
 message), `KOMIRA_ABI_MISMATCH` (with the library's version),
-`KOMIRA_MISSING_SYMBOL` (with the name) and `KOMIRA_LOADED`.
+`KOMIRA_MISSING_SYMBOL` (with the name) and `KOMIRA_LOADED`, and from `sql` on a
+library older than ABI 1.3 `KOMIRA_ABI_TOO_OLD` (with both versions).
 
 The Arrow import rejects a failed stream callback with `code`
 `KOMIRA_ARROW_STREAM`, `status` (the callback's status, an errno value),
 `lastError` (`get_last_error`'s text, empty when there is none) and the message
-`get_schema failed (status N): <lastError>` (or `get_next`). A stream or an
+`get_schema failed (status N): <lastError>` (or `get_next`); so does `sql` when
+the stream `komira_sql_stream` filled fails as it is drained. A stream or an
 array that breaks the C Data Interface is `KOMIRA_ARROW_INVALID`, naming the
 column (`column "a.b": buffer 1 is NULL`, `the batch: ...` for the batch itself).
 A closed result is `KOMIRA_ARROW_CLOSED`. A value that is not a capsule or a
@@ -200,10 +210,12 @@ call to return, then destroys the context.
 ## Tests
 
 `:package_test` runs the package's behaviour tests, [`tests/*.test.ts`](tests/), with node stripping
-their types; each file is its own process. Its covered sources are `src/*.ts`: every one must be
-loaded and their lines and branches together must each be at least 99% covered, or the target fails.
-It stages the platform package as npm lays it out (`node_modules/@komira-ai/komira-linux-x64-gnu/`
-with the addon and `//src/so:libkomira[dist]` as `native/`), the compiled `dist/`, the stand-ins below,
+their types; each file is its own process. Its covered sources are `src/*.ts` but
+`src/arrow_import.ts`, which `:arrow_test` measures: every one must be loaded and their lines and
+branches together must each be at least 99% covered, or the target fails. It stages the platform
+package as npm lays it out (`node_modules/@komira-ai/komira-linux-x64-gnu/` with the addon and
+`//src/so:libkomira[dist]` as `native/`), the pinned `apache-arrow` as the peer dependency
+(`node_modules/apache-arrow/`), the compiled `dist/`, the stand-ins below,
 and the CPU-level fixtures and table of choices of the Python selector
 ([python/tests/fixtures/isa_variants](../python/tests/fixtures/isa_variants/README.md)). Every test
 that loads plants its host, so no real `/proc/cpuinfo` is read.
@@ -211,25 +223,26 @@ that loads plants its host, so no real `/proc/cpuinfo` is read.
 | file | what it proves |
 |---|---|
 | [`exports.test.ts`](tests/exports.test.ts) | the public names exactly, in the sources, in `dist/`, by the package's name through its `exports` map, and from CommonJS's `require`; importing opens no addon; `dist/` holds a `.js` and a `.d.ts` per source and imports `.js` siblings; `version` is the manifest's; the manifest's type, engines, peer, exports, files, optional platform packages at the package's version, and no bin, scripts or dependency |
-| [`errors.test.ts`](tests/errors.test.ts) | the class tree and names; `status`, `code` and `step` default to null; a failed C call keeps its status and code and takes the engine's text as its message (the addon's when there is none); an unknown status has no code; the addon refusing its own use, and a thrown non-Error, have no status |
+| [`errors.test.ts`](tests/errors.test.ts) | the class tree and names; `status`, `code` and `step` default to null; a failed C call keeps its status and takes the engine's text as its message (the addon's when there is none), with the engine's code and the name of each step number from ABI 1.7 and neither before it; an empty code and an unknown step number are null; an unknown status has no code; a failed Arrow stream callback keeps its message with no status; `KOMIRA_ABI_TOO_OLD` is a `LibraryLoadError`; a `KomiraError` is returned as it is; the addon refusing its own use, and a thrown non-Error, have no status |
 | [`platform.test.ts`](tests/platform.test.ts) | the package name of each release platform; a host with none (no glibc, riscv64, darwin x64, win32) refused by name; an installed package found, the staged one by default; one not installed, and one whose `exports` hides its `package.json`, refused with their messages; the default host |
 | [`cpu.test.ts`](tests/cpu.test.ts) | features are a whole word on the key's own lines that every processor lists; the x86-64-v3 check passes v3 and v4, refuses westmere and core2 and a second processor without `movbe` naming the missing flags in order, refuses an unreadable cpuinfo, and reads nothing off Linux x64; a directory without a manifest is its single library |
 | [`variants.test.ts`](tests/variants.test.ts) | the selector on the Python selector's table of choices, the fallbacks of one missing feature, one processor, `vmx flags` and a partial word, arm64's `Features`, the manifest read as written, a relative directory, no cpuinfo read for a manifest without features, and each refusal (unreadable cpuinfo, a host without a feature key, a missing, non-UTF-8, empty or malformed manifest, a path outside the directory, a missing or directory variant file with no lower level loaded, a `VARIANTS` that is a directory or a broken link) |
 | [`load.test.ts`](tests/load.test.ts) | a host with no package and a CPU below x86-64-v3 refused before any addon is opened; a missing addon, one that is not ELF, a directory without libkomira and a library of ABI 2.0 each refused with the loader's or the addon's words; the v3 file of a variants directory loaded rather than its floor (an ABI 2.0 stand-in); the same directory again is the same library with no CPU read, and another is refused |
-| [`session.test.ts`](tests/session.test.ts) | against a stand-in whose `komira_register_parquet` fails: the engine's status, code and text; every wrong argument and option a `TypeError` or `RangeError` before the library is called; the two options and the CSV and NDJSON registrations refused by name; close frees once and a closed session refuses each call; a call made before `close` still runs and settles while later calls are refused at once, and `await using` settles after its session's call and free; `using`, `await using` and both dispose symbols close |
+| [`session.test.ts`](tests/session.test.ts) | against a stand-in of ABI 1.1 whose `komira_register_parquet` fails: the engine's status and text, with no code or step; `sql` refused with a `LibraryLoadError` naming both versions, the session still working; a query that is not a string a `TypeError`, a NUL byte or a lone surrogate a `RangeError`; every wrong argument and option a `TypeError` or `RangeError` before the library is called; the two options and the CSV and NDJSON registrations refused by name; close frees once and a closed session refuses each call; a call made before `close` still runs and settles while later calls are refused at once, and `await using` settles after its session's call and free; `using`, `await using` and both dispose symbols close |
 | [`register_args.test.ts`](tests/register_args.test.ts) | against a stand-in whose refusal is the name and path `komira_register_parquet` received: each call passes its own table name unchanged; a string path as given, a `file:` URL as its decoded path, a relative path resolved against the working directory at the call (two directories, `..`, and `~` not expanded); the module-level call through the default session |
 | [`unknown_status.test.ts`](tests/unknown_status.test.ts) | a status libkomira does not define rejects with that number, no code and the addon's message |
-| [`package.test.ts`](tests/package.test.ts) | the real library loads from the staged platform package's `native/` with the planted host; the real engine opens the Parquet file by path, URL and relative path against the working directory at the call, and again under one name; a missing file is status -3 `KOMIRA_ERR_ENGINE` with the engine's text, and the session still works; the module-level call makes one default session and never closes it |
+| [`package.test.ts`](tests/package.test.ts) | the real library loads from the staged platform package's `native/` with the planted host; the real engine opens the Parquet file by path, URL and relative path against the working directory at the call, and again under one name; a missing file is status -3 at step `bind` with no code and the engine's text, and the session still works; the module-level call makes one default session and never closes it; a Parquet file of three rows the engine writes with `COPY` from a CSV file, registered and queried, answers its BIGINT values as an `apache-arrow` `Table` (and batch by batch), and `COPY` its `Count`; `SELEC 1` is status -3 `SQL_SYNTAX_ERROR` at `parse` and an unknown table `SQL_BIND_ERROR` at `bind` with the engine's exact text, the session answering the next query; an answer reads after its session is closed; the module-level `sql` runs on the default session |
+| [`sql.test.ts`](tests/sql.test.ts) | against a stand-in of ABI 1.9 ([`tests/fake_sql.c`](tests/fake_sql.c)) whose `komira_sql_stream` answers fixed queries: `toArrow` is one `Table` of the user's `apache-arrow`, with its schema and its two batches in order, and `for await` yields the same `RecordBatch`es; every second read, whichever way each reads, rejects with "the result was already read", and so does a read after a loop left early; an answer of no batch is an empty `Table` with its schema; an answer reads after its session is closed; a batch that breaks the C Data Interface rejects the read with a `KomiraError` naming the column, and an Arrow type the package does not read is an `UnsupportedOperation`, both ways of reading; a failing `get_next` rejects `sql` with the stream's text and no status, and the session answers the next query; refusals carry -3, the engine's text, and the code and step the library gives, each step by name, none for 0 or 9, and an unknown code as it is spelt; `registerParquet`'s refusal its step and no code; the module-level `sql` makes one default session and never closes it |
 | [`default_session.test.ts`](tests/default_session.test.ts) | a worker thread makes a default session of its own, once for two calls, and the main thread's is untouched |
 
 The addon's own tests:
 
 | target | what it proves | the defect it catches |
 |---|---|---|
-| `:load_test` ([`load.test.mjs`](load.test.mjs), [`capacity.test.mjs`](capacity.test.mjs)) | the addon exposes exactly the twelve calls; calls before `load` say not loaded; `load` refuses a non-string, a NUL byte, a missing file (with the loader's message), a library of ABI 2.0 and one of 0.999 (stand-ins built from [`tests/fake_libkomira.c`](tests/fake_libkomira.c)) and one without `komira_plan_render`, and each refusal leaves the addon unloaded; the real library loads, reports 1009, loads again as a no-op, and another path is then refused; with a stand-in that writes into each result the capacity it was given and the length it reported, `parquetSchema` and `planRender` pass exactly the reported length as the second call's capacity | an ABI check that is missing or accepts a higher major version, a missing symbol that is not named, a refused library that stays half-loaded, a second path ignored, a second call with more room than the reported length |
+| `:load_test` ([`load.test.mjs`](load.test.mjs), [`capacity.test.mjs`](capacity.test.mjs)) | the addon exposes exactly the thirteen calls; calls before `load` say not loaded; `load` refuses a non-string, a NUL byte, a missing file (with the loader's message), a library of ABI 2.0 and one of 0.999 (stand-ins built from [`tests/fake_libkomira.c`](tests/fake_libkomira.c)), one without `komira_plan_render`, one of ABI 1.3 without `komira_sql_stream` and one of ABI 1.7 without `komira_last_error_code`, and each refusal leaves the addon unloaded; the real library loads, reports 1009, loads again as a no-op, and another path is then refused; with a stand-in that writes into each result the capacity it was given and the length it reported, `parquetSchema` and `planRender` pass exactly the reported length as the second call's capacity | an ABI check that is missing or accepts a higher major version, a missing symbol that is not named, a symbol a minor version promises that is not required, a refused library that stays half-loaded, a second path ignored, a second call with more room than the reported length |
 | `:session_test` ([`session.test.mjs`](session.test.mjs)) | the version; a missing file rejects with an `Error` with status -3, code, `lastError` and the message ending in it; a good call on the same session after a refusal; `parquetSchema` of the fixture ([`src/so`](../src/so/tests/fixtures/two_columns.parquet)) is a `Buffer` equal to the bytes the C ABI returns (frozen as hex), twice; `planRender` of the scan plan the C gates render, from a `Buffer` and from a view with an offset; bytes that are not a plan (and an empty array) are status -3 with a last error; arguments of the wrong kind, another addon's external and a NUL byte are `TypeError`s without a status; `freeSession` twice calls `komira_ctx_free` once and a freed session is refused; five sessions never freed are each freed once by their finalizers, and five freed by `freeSession` are not freed again by theirs; a session whose calls ran on its thread and that is never freed is freed once by its finalizer | an error without its status or last error; a truncated or empty result; an offset ignored; a double free; no finalizer; a finalizer that frees again; a foreign external read as a session; a finalizer that never frees a session that made calls, or frees it twice |
 | `:thread_test` ([`thread.test.mjs`](thread.test.mjs)) | over a stand-in ([`tests/fake_latch.c`](tests/fake_latch.c)) that journals each call with its context and thread, holds a call at a gate until the test opens it (through the test addon [`tests/fake_control.c`](tests/fake_control.c)), and refuses a call on the JavaScript thread, two at once on one context and one from a second thread: four calls on one session run one at a time, in call order, on one thread that is not the JavaScript thread, and settle in that order, a failure among them included; a call after a failed one succeeds; a call on a second session settles while the first session's call is held, on another thread; `freeSession` while a call is held refuses later calls at once, frees nothing until the held call and the call queued behind it have run, settles after them (a second `freeSession` with it, a third at once) and frees once; `freeSession` of a session that made no call frees it on the JavaScript thread before it returns; a plan changed after its call was queued, and an empty plan, are rendered as they were when the call was made; a session dropped while its call is held is not finalized through 50 collections, and after the call settles is freed once, on the JavaScript thread; in a worker thread, a session runs on a thread of its own, its held call keeps the worker alive until its result is posted, and the worker then exits by itself with the session freed once; a worker terminated while its call is held exits and frees the context once | calls run on the JavaScript thread; two calls at once on one context; calls out of order; sessions that share a thread; a context freed under a running call or before a queued one; a second `freeSession` that settles before the free; a plan read after the caller changed it; a session finalized while its call is pending; a pending call that does not keep a worker alive; a session that keeps an idle worker alive or is not freed at the worker's exit |
-| `:arrow_test` ([`arrow_stream.test.mts`](arrow_stream.test.mts), [`arrow_import.test.mts`](arrow_import.test.mts)) | over streams of a stand-in producer ([`tests/arrow_stand_in.c`](tests/arrow_stand_in.c), an addon that builds a stream from a description and counts the releases of each stream's structs): the import releases the stream at once and holds the schema and batches; the schema and each batch are described exactly, every buffer at its exact length; a batch is released once, and not while its buffers are alive; a misaligned buffer is copied, and a batch of copies only is released when it is read; `get_schema` and `get_next` failures reject with the status and the last error (or the status alone), with everything released once; a released schema, a schema that is not a struct, eleven malformed arrays, a value that is not a capsule or a result, a capsule imported twice and a closed result are refused by name; a result never closed is released by its finalizer. Through `readArrowStream`: every integer and float width, bool, dates, times, timestamps, durations, intervals, decimal128 and decimal256, utf8 and binary and their large forms, a dictionary whose memory two batches share, list, struct, map and both unions round-trip equal, with nulls; offsets in every kind of column and in the batch; names, nullability and metadata; an empty stream and a batch of NULL buffers; eleven formats the mapping does not know are refused with `UnsupportedOperation` by their full message, everything released; the pinned `apache-arrow` satisfies the peer range | a buffer of the wrong length or slot; an offset ignored, or not carried into a struct's children; a batch released early, twice or never; a misaligned typed array; a callback error lost or without its text; a column read as another type; a dictionary id or union type id mixed up |
+| `:arrow_test` ([`arrow_stream.test.mts`](arrow_stream.test.mts), [`arrow_import.test.mts`](arrow_import.test.mts)) | over streams of a stand-in producer ([`tests/arrow_stand_in.c`](tests/arrow_stand_in.c), an addon that builds a stream from a description and counts the releases of each stream's structs): the import releases the stream at once and holds the schema and batches; the schema and each batch are described exactly, every buffer at its exact length; a batch is released once, and not while its buffers are alive; a misaligned buffer is copied, and a batch of copies only is released when it is read; `get_schema` and `get_next` failures reject with the status and the last error (or the status alone), with everything released once; a released schema, a schema that is not a struct, eleven malformed arrays, a value that is not a capsule or a result, a capsule imported twice and a closed result are refused by name; a result never closed is released by its finalizer. Through `readArrowStream` ([`src/arrow_import.ts`](src/arrow_import.ts), whose lines and branches must each be at least 99% covered): every integer and float width, bool, dates, times, timestamps, durations, intervals, decimal128 and decimal256, utf8 and binary and their large forms, a dictionary whose memory two batches share, list, struct, map and both unions round-trip equal, with nulls; offsets in every kind of column and in the batch; names, nullability and metadata; an empty stream and a batch of NULL buffers; eleven formats the mapping does not know are refused with `UnsupportedOperation` by their full message, everything released; the pinned `apache-arrow` satisfies the peer range | a buffer of the wrong length or slot; an offset ignored, or not carried into a struct's children; a batch released early, twice or never; a misaligned typed array; a callback error lost or without its text; a column read as another type; a dictionary id or union type id mixed up |
 
 The frozen schema bytes are what `libkomira` returned when the test was
 written, checked by reading them: a protobuf message of two fields, `i64` and
