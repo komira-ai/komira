@@ -339,7 +339,7 @@ ruling. Section 7's departures belong to this list as well.
 Each ruling is marked **carried** (the earlier SDK's answer) or **differs** (a ruling of section 12, by
 its number).
 
-1. **There is no index.** Carried, except the integer subscript (D9) and `value_counts` (D16).
+1. **There is no index.** Carried, except the integer subscript (D9).
    - `loc`, `iloc`, `at`, `iat`, `index`, `set_index`, `reset_index`, `sort_index`, `reindex`, and
      pandas' index `join` are refused (use `merge`).
    - A slice subscript `df[0:5]` raises `UnsupportedOperation`.
@@ -353,8 +353,9 @@ its number).
        gives a frame indexed by the output names.
      - `df.sum()` and the other frame reductions give a one-row frame, where pandas gives a `Series`
        indexed by column.
-     - `s.value_counts()` gives a frame with the value column and `count`, where pandas gives a
-       `Series` named `count` indexed by value.
+     - `s.value_counts()` is refused by name: pandas gives a `Series` indexed by value, and a komira
+       `Series` has no index to hold the values. Count the rows per value with
+       `df.groupby(column).size()`, and sort them with `sort_values("size", ascending=False)`.
      - `s.sum()` and the other `Series` reductions are lazy aggregates (section 2), where pandas gives
        a number.
 2. **pandas sorts its groups; polars does not.** Carried; the NULL placement of the sort differs (D4).

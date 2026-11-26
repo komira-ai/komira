@@ -114,7 +114,7 @@ These verbs have no capability of their own. Each one builds the plan of the row
 | frame rename | `rename(columns=)`, `add_prefix`, `add_suffix` | `rename(mapping)` | `project` |
 | drop rows with a missing value | `dropna(subset=None, how="any")` | `drop_nulls(subset=None)` | `filter` (`drop_nulls_predicate`) |
 | fill missing values | `fillna(v)` or `fillna({col: v})` | `fill_null(v)`, `fill_nan(v)` | `computed_column` |
-| count values per key | `s.value_counts()`: a frame of the value column and `count`, missing values dropped, sorted by `count` descending (rules section 8, ruling 1) | `lf.group_by(c).len()` | `group_by`, `sort` |
+| count values per key | `df.groupby(c).size().sort_values("size", ascending=False)`: `s.value_counts()` is refused by name, since pandas gives a `Series` indexed by value and a komira `Series` has no index (rules section 8, ruling 1) | `lf.group_by(c).len()` | `group_by`, `sort` |
 | distinct count | `nunique()` | `n_unique()` | `aggregate`, `group_by` |
 | median, standard deviation, variance | `median()`, `std()`, `var()` (`ddof=1`); other `ddof` refused | `median()`, `std()`, `var()` (`ddof=1`) | `aggregate`, `group_by` |
 | last rows of an ordered frame | `tail(n)` | `tail(n)` | `topn` (rules section 7) |
@@ -135,7 +135,8 @@ the same name:
 - `date32`
 
 The pandas-shaped skin also takes pandas' spellings of those: `"Int64"` and the other capitalised
-integer names, `"boolean"`, and `"str"`. `"object"` and `"category"` are refused by name, because neither
+integer and float names (`"UInt8"`, `"Float64"`, ...), `"boolean"`, and `"str"`, and Python's types `bool`, `int` (int64), `float` (float64) and
+`str` (string). `"object"` and `"category"` are refused by name, because neither
 names one Arrow type.
 
 ## The refusal tables
@@ -187,6 +188,7 @@ In the `read_*` message, `<format>` is the format of the name looked up (`parque
 | `collect` | `DataFrame` | `.collect() is the polars-shaped skin's word; this frame runs at .materialize()` |
 | `compute` | `DataFrame` | `.compute() is dask's word; this frame runs at .materialize()` |
 | `cat`, `sparse` | `Series` | `the .<name> accessor is not supported: komira has no categorical or sparse dtype` |
+| `value_counts` | `Series` | `.<name>() gives a Series indexed by the values in pandas, and a komira Series has no index: count the rows per value with df.groupby(column).size(), and sort them with sort_values("size", ascending=False)` |
 | `plot` | both | `.plot needs the rows: use materialize().to_pandas().plot` |
 
 ### `GroupBy`

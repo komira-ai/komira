@@ -28,8 +28,9 @@ stats = df[["value"]].median()            # one row, the column value
 - **Refused by name** with `UnsupportedOperation`: a Python function in
   `agg`, `first`, `last` and the other choices by row order, `ddof` other
   than 1, `skipna=False`, `nunique(dropna=False)` and `axis=1`. A missing
-  value is NULL: unlike pandas, a NaN in a float column is a value, not a
-  missing one.
+  value is NULL: unlike pandas, a NaN in a float column is a value in these
+  reductions, not a missing one ([`fillna` and `dropna`](missing_values.md) do
+  read it as missing).
 
 Which reductions the engine computes today is on
 [its own page](aggregates_engine.md); [drop_duplicates](drop_duplicates.md)
