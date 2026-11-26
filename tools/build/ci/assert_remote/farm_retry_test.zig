@@ -574,10 +574,10 @@ const FakeClock = struct {
     sleeps: usize = 0,
     /// Set by a sleep of 0 s or of more than `probe_seconds`, which no wait asks for.
     odd_sleep: bool = false,
-    fn now(c: *FakeClock) u64 {
+    pub fn now(c: *FakeClock) u64 {
         return c.now_s;
     }
-    fn sleep(c: *FakeClock, s: u64) void {
+    pub fn sleep(c: *FakeClock, s: u64) void {
         if (s == 0 or s > fw.probe_seconds) c.odd_sleep = true;
         c.now_s += s;
         c.sleeps += 1;
@@ -592,7 +592,7 @@ const FakeFarm = struct {
     answers_from: ?u64,
     cost: u64 = fw.probe_seconds,
     probes: usize = 0,
-    fn answers(f: *FakeFarm) bool {
+    pub fn answers(f: *FakeFarm) bool {
         f.probes += 1;
         if (f.answers_from) |from| if (f.clock.now_s >= from) return true;
         f.clock.now_s += f.cost;
