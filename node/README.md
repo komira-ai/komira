@@ -239,6 +239,13 @@ that loads plants its host, so no real `/proc/cpuinfo` is read.
 | [`sql.test.ts`](tests/sql.test.ts) | against a stand-in of ABI 1.9 ([`tests/fake_sql.c`](tests/fake_sql.c)) whose `komira_sql_stream` answers fixed queries: `toArrow` is one `Table` of the user's `apache-arrow`, with its schema and its two batches in order, and `for await` yields the same `RecordBatch`es; every second read, whichever way each reads, rejects with "the result was already read", and so does a read after a loop left early; an answer of no batch is an empty `Table` with its schema; an answer reads after its session is closed; a batch that breaks the C Data Interface rejects the read with a `KomiraError` naming the column, and an Arrow type the package does not read is an `UnsupportedOperation`, both ways of reading; a failing `get_next` rejects `sql` with the stream's text and no status, and the session answers the next query; refusals carry -3, the engine's text, the code and step the library gives and the class the code picks, each step by name, none for 0 or 9, and an unknown code as it is spelt; `registerParquet`'s refusal its step and no code; the module-level `sql` makes one default session and never closes it |
 | [`default_session.test.ts`](tests/default_session.test.ts) | a worker thread makes a default session of its own, once for two calls, and the main thread's is untouched |
 
+`:sql_conformance_test` runs every case of the SQL conformance corpus
+([`src/tests/conformance/komira_sql_conformance`](../src/tests/conformance/komira_sql_conformance/README.md))
+through `Session.sql` on the real engine and holds each answer to the one the pinned DuckDB
+committed, or to its line in the corpus's `refusals.tsv` or `differences.tsv`; with it, the runner's
+own tests and a fixture corpus with one wrong answer that must fail the run
+([`tests/conformance`](tests/conformance/README.md)).
+
 The addon's own tests:
 
 | target | what it proves | the defect it catches |
