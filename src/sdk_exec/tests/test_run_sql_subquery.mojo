@@ -3,6 +3,21 @@
 # what DuckDB answers
 # =============================================================================
 #
+# Covers: run_sql over Parquet tables DuckDB wrote (the :subquery_oracle action
+# in BUCK; several row groups, NULLs, duplicate and unmatched values in BIGINT,
+# INTEGER, DECIMAL, DATE and VARCHAR columns, an empty table) answers what the
+# pinned DuckDB answers for each query of tests/subquery/cases.sql, on one and
+# three workers: scalar subqueries in a WHERE (=, <, >, BIGINT, DOUBLE,
+# DECIMAL, DATE; the TPC-H Q15 shape over a CTE), over an empty table and as a
+# LIMIT body with no row (NULL), in a SELECT list, under CASE and coalesce, in
+# a grouped SELECT list, beside an aggregate, in a HAVING (the Q11 shape) and
+# nested; IN and NULL-aware NOT IN over one-table bodies and over DISTINCT,
+# GROUP BY / HAVING (the Q18 shape), join and expression bodies, with and
+# without NULL, over the empty table, and IN and NOT IN lists with NULL; a
+# scalar body of several rows and a VARCHAR LIMIT body are refused at optimize,
+# DECIMAL and DATE IN keys at lower, an expression left of IN at parse and IN
+# in a HAVING at bind; every case is run.
+#
 # The pinned DuckDB writes the tables (tests/subquery/data.sql: t and u in
 # small row groups, with NULL, duplicate and unmatched values in BIGINT,
 # INTEGER, DECIMAL(12,2), DATE and VARCHAR columns; nn, no NULL; e, the

@@ -26,8 +26,7 @@ by nothing and give one row. No SQL text is written.
 - A sum of nothing is 0, as in pandas' `min_count=0` (ruling 10): the sum is
   read through `CASE WHEN s IS NOT NULL THEN s ELSE 0 END` above the
   aggregate. `min_count=1` keeps the missing sum.
-- Missing values are NULL. A NaN is a value here: pandas' NaN-is-missing
-  (ruling 6) needs an `isnan` test the plan's vocabulary lacks.
+- Missing values are NULL. A NaN is a value in these reductions (ruling 6).
 - A Python function as an aggregate is an aggregate UDF, which no query runs
   yet: it is refused by name, as are the choices that need row order.
 """

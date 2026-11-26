@@ -1,6 +1,7 @@
 //! The cases of the README check (readme.zig): a README whose ```python block is the example byte for byte
 //! passes; a block that differs by one line is refused naming that line; a README with no such block, with
-//! CRLF line ends, with text added inside the block, or with a block that is cut short is refused.
+//! CRLF line ends, with text added inside the block, or with a block that is cut short is refused; the same for
+//! the README's ```text block, which is the expected output with `<cwd>` left as written.
 const std = @import("std");
 const lib = @import("pypi_smoke_lib");
 const t = std.testing;
@@ -142,7 +143,22 @@ test "an output block that shows another release's version or another ABI versio
     const a = ar.allocator();
     const expected = "<version>\n<abi_version>\nregistered readings\nTrue\n";
     const page = "```text\n0.1.1512\n1001\nregistered readings\nTrue\n```\n";
-    try t.expect((try lib.readme.docShowsBlock(a, lib.readme.install_page_output, page, try lib.install.expectedText(a, expected, "0.1.1512", 1001))) == null);
-    try t.expectEqualStrings(PAGE_HEAD ++ "line 1 of the closest block reads '0.1.1512', the expected output's reads '0.1.1600'", try pageRefusal(a, page, try lib.install.expectedText(a, expected, "0.1.1600", 1001)));
-    try t.expectEqualStrings(PAGE_HEAD ++ "line 2 of the closest block reads '1001', the expected output's reads '1002'", try pageRefusal(a, page, try lib.install.expectedText(a, expected, "0.1.1512", 1002)));
+    try t.expect((try lib.readme.docShowsBlock(a, lib.readme.install_page_output, page, try lib.install.expectedText(a, expected, "0.1.1512", 1001, "<cwd>"))) == null);
+    try t.expectEqualStrings(PAGE_HEAD ++ "line 1 of the closest block reads '0.1.1512', the expected output's reads '0.1.1600'", try pageRefusal(a, page, try lib.install.expectedText(a, expected, "0.1.1600", 1001, "<cwd>")));
+    try t.expectEqualStrings(PAGE_HEAD ++ "line 2 of the closest block reads '1001', the expected output's reads '1002'", try pageRefusal(a, page, try lib.install.expectedText(a, expected, "0.1.1512", 1002, "<cwd>")));
+}
+
+test "a README text block is the expected output with <cwd> left as written, and differing on that line is refused" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const expected = "<version>\nno such file: <cwd>/weather.parquet\n";
+    const want = try lib.install.expectedText(a, expected, "0.1.1512", 1001, "<cwd>");
+    const good = "# komira\n\n```text\n0.1.1512\nno such file: <cwd>/weather.parquet\n```\n";
+    try t.expect((try lib.readme.docShowsBlock(a, lib.readme.readme_output, good, want)) == null);
+    const bad = "```text\n0.1.1512\nno such file: /work/run/weather.parquet\n```\n";
+    try t.expectEqualStrings(
+        "python/README.md shows no ```text block equal to python/examples/quickstart.expected: line 2 of the closest block reads 'no such file: /work/run/weather.parquet', the expected output's reads 'no such file: <cwd>/weather.parquet'",
+        (try lib.readme.docShowsBlock(a, lib.readme.readme_output, bad, want)).?,
+    );
 }

@@ -9,7 +9,9 @@ System V archive of ELF objects or a BSD archive of Mach-O objects, with
 native_elf.zig and native_macho.zig); neither runs a shell.
 `checked_cxx_library` is the library as other targets use it: the providers
 of the prefixed `cxx_library`, with the checks as dependencies, so Buck2 runs
-them in every build whose graph holds the library.
+them in every build whose graph holds the library. When the library only
+re-exports another `cxx_library` (`archive`), its `[static-pic]` sub-target is
+that library's archive; every other provider is unchanged.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -100,12 +102,26 @@ _prefixed_archive_check = rule(
 prefixed_archive_check = declares_docs(_prefixed_archive_check)
 
 def _checked_impl(ctx):
-    return ctx.attrs.lib.providers
+    providers = ctx.attrs.lib.providers
+    if ctx.attrs.archive == None:
+        return providers
+    info = ctx.attrs.archive[DefaultInfo]
+    if "static-pic" not in info.sub_targets:
+        fail("{}: archive {} has no [static-pic] archive (not a cxx_library with sources?)".format(ctx.label, ctx.attrs.archive.label.raw_target()))
+    own = ctx.attrs.lib[DefaultInfo]
+    subs = {name: [sub[DefaultInfo]] for name, sub in own.sub_targets.items()}
+    subs["static-pic"] = [info.sub_targets["static-pic"][DefaultInfo]]
+    return [DefaultInfo(
+        default_outputs = own.default_outputs,
+        other_outputs = own.other_outputs,
+        sub_targets = subs,
+    )] + [p for p in providers if not isinstance(p, DefaultInfo)]
 
 _checked_cxx_library = rule(
     impl = _checked_impl,
-    doc = "The C/C++ library `lib`, every provider of it unchanged, gated by `checks`: targets returning a `ValidationInfo`, which Buck2 runs in every build whose graph holds this target.",
+    doc = "The C/C++ library `lib`, gated by `checks`; every provider of it is unchanged except, when `archive` is set, the `[static-pic]` sub-target of its DefaultInfo, which is `archive`'s. `checks` are targets returning a `ValidationInfo`, which Buck2 runs in every build whose graph holds this target.",
     attrs = {
+        "archive": attrs.option(attrs.dep(), default = None, doc = "The cxx_library whose `[static-pic]` archive is this library's, when `lib` only re-exports it (it has no sources of its own): the result's `[static-pic]` is that archive."),
         "checks": attrs.list(attrs.dep(providers = [ValidationInfo])),
         "lib": attrs.dep(),
     },

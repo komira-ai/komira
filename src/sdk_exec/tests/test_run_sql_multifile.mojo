@@ -2,6 +2,15 @@
 # run_sql over a table of several Parquet files: a directory, a glob, a Hive tree
 # =============================================================================
 #
+# Covers: run_sql over a table of several Parquet files: a directory (files at
+# any depth; a dot-name and a non-Parquet file skipped), a glob, a brace glob,
+# read_parquet('<glob>') and FROM '<glob>' in SQL text; a Hive tree whose int,
+# string and date keys are columns after the data columns in key order, filters
+# on a key (files pruned) and on a data column, a key alone, GROUP BY a key,
+# count(*), ORDER BY and LIMIT; hive_partitioning = false; a glob with no file,
+# a directory in SQL text and files of different schemas are named refusals at
+# their step; a replaced file is read again.
+#
 # Each test writes small INT64 / STRING Parquet files under `test_tmpdir()` (a
 # directory of its own per test), registers them or names them in SQL text, runs
 # SQL through `run_sql`, and compares the answer with an oracle computed HERE

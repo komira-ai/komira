@@ -1,16 +1,28 @@
 # =============================================================================
-# test_run_sql_set_ops: INTERSECT and EXCEPT through run_sql answer what DuckDB
-# answers
+# test_run_sql_set_ops: UNION, INTERSECT and EXCEPT through run_sql answer what
+# DuckDB answers
 # =============================================================================
 #
-# The pinned DuckDB writes the tables (tests/set_ops/data.sql: the four
-# two-column arms of the conformance corpus's set_operations cases, NULL keys
-# and an all-NULL and an empty arm among them, and two files of mixed column
-# types whose rows repeat and partly overlap) and answers each query of
-# tests/set_ops/cases.sql as a build action (`sql_oracle`). This test reads the
-# same cases.sql for the query text, runs it through `run_sql` (parse, bind
-# INTERSECT / EXCEPT onto a union, a grouped aggregation and a filter,
-# optimize, lower, run) over the same Parquet files, and compares the answer
+# Covers: UNION (bare and UNION DISTINCT), INTERSECT and EXCEPT through run_sql
+# answer what the pinned DuckDB answers (the :set_ops_oracle action in BUCK)
+# for each case of tests/set_ops/cases.sql, on one worker and on three: NULL
+# rows equal, an all-NULL and an empty input, repeated rows, several columns of
+# mixed types, one column of each key type, NaN, 0.0 with -0.0, inputs widened
+# to a common type (BIGINT with VARCHAR among them), the precedence of
+# INTERSECT over UNION, UNION ALL and EXCEPT and a UNION ALL kept apart from a
+# UNION beside it, a chain in a CTE and a derived table, a sort and an
+# aggregation over the result; every case is run; INTERSECT ALL and EXCEPT ALL
+# are refused at parse by name.
+#
+# The pinned DuckDB writes the tables (tests/set_ops/data.sql: the two-column
+# arms of the conformance corpus's set_operations cases, NULL keys, an all-NULL
+# and an empty arm and a VARCHAR-keyed arm among them, two one-column DOUBLE
+# files holding 0.0 and -0.0, and two files of mixed column types whose rows
+# repeat and partly overlap) and answers each query of tests/set_ops/cases.sql
+# as a build action (`sql_oracle`). This test reads the same cases.sql for the
+# query text, runs it through `run_sql` (parse, bind UNION onto a distinct over
+# a union and INTERSECT / EXCEPT onto a union, a grouped aggregation and a
+# filter, optimize, lower, run) over the same Parquet files, and compares the answer
 # with DuckDB's by value, rows as a multiset (komira_plan_harness), so a row
 # returned twice, a missing NULL row or an extra row each fail.
 #
@@ -38,15 +50,43 @@
 #                       ORDER BY after the last branch, count(*) and
 #                       GROUP BY over a derived INTERSECT / EXCEPT, a SELECT
 #                       DISTINCT input, FROM-less literal inputs.
+#   test_the_corpus_unions_equal_duckdb
+#                       the conformance corpus's bare-UNION cases: one and two
+#                       columns, three branches, an empty, an all-NULL and the
+#                       same arm, a UNION in a CTE and in a derived table under
+#                       count(*), a scan with a literal, a UNION before an
+#                       INTERSECT (the INTERSECT binds first), BIGINT with
+#                       VARCHAR (the key widened to VARCHAR, so 3 and '3' are
+#                       one row).
+#   test_union_forms_and_key_types_equal_duckdb
+#                       UNION DISTINCT; an empty left arm; four columns of
+#                       mixed types whose rows repeat across and within the
+#                       files; one VARCHAR key with the empty string; one
+#                       DOUBLE key with NaN (every NaN one row) and one with
+#                       0.0 in one input and -0.0 in the other; INTEGER with
+#                       BIGINT; VARCHAR with BIGINT; BIGINT with VARCHAR under
+#                       UNION ALL, INTERSECT and EXCEPT (the widening is every
+#                       set operation's); INTEGER with VARCHAR.
+#   test_union_precedence_equals_duckdb
+#                       a UNION ALL after a UNION keeps its duplicates; a
+#                       UNION after a UNION ALL dedups everything to its left;
+#                       UNION ALL, UNION, UNION ALL in one chain; UNION then
+#                       EXCEPT and EXCEPT then UNION fold left to right; an
+#                       INTERSECT before a UNION binds first; a chain in a CTE.
+#   test_what_surrounds_a_union_equals_duckdb
+#                       ORDER BY, LIMIT and OFFSET after the last branch;
+#                       GROUP BY over a derived UNION; FROM-less literal
+#                       branches.
 #   test_every_case_is_run
 #                       each case of cases.sql belongs to one of the tests
 #                       above.
 #   test_the_all_forms_are_refused_by_name
 #                       INTERSECT ALL and EXCEPT ALL are refused at parse with
-#                       their own names, not answered as the set forms.
+#                       their own names, not answered as the set forms, also
+#                       after a UNION.
 #
 # Every case runs on one worker and on three, so the workers' partial group
-# tables are merged.
+# and distinct tables are merged.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -61,7 +101,7 @@ from komira_plan_harness import (
 from runtime_paths import data_path, read_data
 from sdk_exec.engine_context import EngineContext
 from sdk_exec.engine_options import EngineOptions
-from sdk_exec.engine_sql import run_sql
+from sdk_exec.engine_sql import STEP_PARSE, run_sql
 
 
 struct _Case(Copyable, Movable):
@@ -92,7 +132,9 @@ def _cases() raises -> List[_Case]:
 
 def _with_paths(query: String) raises -> String:
     """`query` with each quoted Parquet file name replaced by its path."""
-    var files: List[String] = ["ta", "tb", "tn", "te", "ab", "l", "r"]
+    var files: List[String] = [
+        "ta", "tb", "tn", "te", "tv", "ab", "z0", "zn", "l", "r"
+    ]
     var text = query
     for i in range(len(files)):
         var name = files[i] + ".parquet"
@@ -188,6 +230,39 @@ def _surroundings() -> List[String]:
     ])
 
 
+def _corpus_unions() -> List[String]:
+    return List[String]([
+        "union_basic", "union_twocol", "union_three_arms", "union_empty_arm",
+        "union_allnull_arm", "union_self", "union_in_cte", "union_in_derived",
+        "union_scan_vs_literal", "union_then_intersect",
+        "union_widen_int_varchar",
+    ])
+
+
+def _union_forms() -> List[String]:
+    return List[String]([
+        "union_distinct_twocol", "union_empty_left", "union_mixed",
+        "union_varchar_key", "union_double_nan", "union_double_zero",
+        "union_widen_int_bigint", "union_varchar_then_bigint",
+        "union_all_widen_int_varchar", "union_widen_integer_varchar",
+        "intersect_widen_int_varchar", "except_widen_varchar_int",
+    ])
+
+
+def _union_precedence() -> List[String]:
+    return List[String]([
+        "union_then_union_all", "union_all_then_union",
+        "union_all_union_union_all", "union_then_except", "except_then_union",
+        "intersect_then_union", "intersect_in_cte",
+    ])
+
+
+def _union_surroundings() -> List[String]:
+    return List[String](
+        ["union_order_by_limit", "union_group_over_derived", "union_literals"]
+    )
+
+
 def test_the_corpus_arms_equal_duckdb() raises:
     _check_all(_arms())
 
@@ -212,6 +287,22 @@ def test_what_surrounds_a_set_operation_equals_duckdb() raises:
     _check_all(_surroundings())
 
 
+def test_the_corpus_unions_equal_duckdb() raises:
+    _check_all(_corpus_unions())
+
+
+def test_union_forms_and_key_types_equal_duckdb() raises:
+    _check_all(_union_forms())
+
+
+def test_union_precedence_equals_duckdb() raises:
+    _check_all(_union_precedence())
+
+
+def test_what_surrounds_a_union_equals_duckdb() raises:
+    _check_all(_union_surroundings())
+
+
 def test_every_case_is_run() raises:
     var known = _arms()
     known.extend(_mixed())
@@ -219,6 +310,10 @@ def test_every_case_is_run() raises:
     known.extend(_widened())
     known.extend(_precedence())
     known.extend(_surroundings())
+    known.extend(_corpus_unions())
+    known.extend(_union_forms())
+    known.extend(_union_precedence())
+    known.extend(_union_surroundings())
     var cases = _cases()
     assert_equal(len(cases), len(known), "cases in cases.sql")
     for i in range(len(cases)):
@@ -231,22 +326,30 @@ def test_every_case_is_run() raises:
 
 def test_the_all_forms_are_refused_by_name() raises:
     var words: List[String] = ["INTERSECT", "EXCEPT"]
-    for i in range(len(words)):
-        var ctx = EngineContext(EngineOptions(worker_count=1))
-        var out = run_sql(
-            ctx,
-            _with_paths(
-                "SELECT k FROM read_parquet('ta.parquet') " + words[i]
-                + " ALL SELECT k FROM read_parquet('tb.parquet')"
-            ),
-        )
-        assert_true(Bool(out.refusal), words[i] + " ALL answered")
-        assert_true(
-            out.refusal.value().reason.startswith(
-                "SQL not supported: " + words[i] + " ALL."
-            ),
-            out.refusal.value().reason,
-        )
+    # Each ALL form as the first operator and after a UNION.
+    var heads: List[String] = [
+        "SELECT k FROM read_parquet('ta.parquet') ",
+        "SELECT k FROM read_parquet('ta.parquet') UNION"
+        " SELECT k FROM read_parquet('tn.parquet') ",
+    ]
+    for h in range(len(heads)):
+        for i in range(len(words)):
+            var ctx = EngineContext(EngineOptions(worker_count=1))
+            var out = run_sql(
+                ctx,
+                _with_paths(
+                    heads[h] + words[i]
+                    + " ALL SELECT k FROM read_parquet('tb.parquet')"
+                ),
+            )
+            assert_true(Bool(out.refusal), words[i] + " ALL answered")
+            assert_equal(out.refusal.value().step, String(STEP_PARSE))
+            assert_true(
+                out.refusal.value().reason.startswith(
+                    "SQL not supported: " + words[i] + " ALL."
+                ),
+                out.refusal.value().reason,
+            )
 
 
 def main() raises:

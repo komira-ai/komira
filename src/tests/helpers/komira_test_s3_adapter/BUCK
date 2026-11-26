@@ -35,6 +35,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 mojo_library(
     name = "komira_test_s3_adapter",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # `SpawnedProcessRunner.start` needs setpriv and PR_SET_PDEATHSIG, which
+    # are Linux's, and refuses every start elsewhere; its welded test starts
+    # real children, so the library builds for Linux only. Its users are the
+    # Linux end-to-end tests of job_supervisor.
+    target_compatible_with = ["prelude//os/constraints:linux"],  # komira-limit:s3-adapter-runner-linux
     deps = [
         "//src/async_rt:async_rt",
         "//src/aws_core:aws_core",

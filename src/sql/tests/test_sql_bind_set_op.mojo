@@ -1,5 +1,5 @@
 # =============================================================================
-# INTERSECT and EXCEPT binding, and the precedence of a set-operation chain
+# UNION, INTERSECT and EXCEPT binding, and the precedence of a set-operation chain
 # (sql_parser, sql_binder, sql_bind_set_op)
 # =============================================================================
 #
@@ -24,6 +24,15 @@
 #      (a file's column can be), are refused by name.
 #   6. ORDER BY / LIMIT after the last branch sort and window the whole chain;
 #      a derived table holds a chain.
+#   7. UNION (bare or DISTINCT) binds to a PLAN_DISTINCT over every column
+#      (no column list) of the union of its inputs, named as the left input,
+#      with the common types; UNION ALL alone has no distinct.
+#   8. UNION folds left to right with UNION ALL and EXCEPT and below
+#      INTERSECT: a UNION ALL after a UNION stays outside its distinct, a
+#      UNION after a UNION ALL dedups the whole run to its left.
+#   9. A UNION's mismatch names UNION and the branches; two result columns of
+#      one name are refused for a UNION, not for a UNION ALL; a CTE body holds
+#      a chain.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -32,7 +41,7 @@ from arrow.schema import Field, Schema, SchemaBuilder
 from plan_expr.agg_expr import AGG_MAX, AGG_MIN
 from plan_ir.logical_plan import (
     LogicalPlan, PLAN_AGGREGATE, PLAN_FILTER, PLAN_LIMIT, PLAN_PROJECT,
-    PLAN_SCAN, PLAN_SORT, PLAN_UNION,
+    PLAN_DISTINCT, PLAN_SCAN, PLAN_SORT, PLAN_UNION,
 )
 
 from sql.sql_token import tokenize
@@ -57,6 +66,7 @@ def _catalog() raises -> SqlCatalog:
     _add(cat, "t_d", List[Field]([Field(String("x"), ArrowType.INT32, False)]))
     _add(cat, "t_i64", List[Field]([Field(String("x"), ArrowType.INT64, True)]))
     _add(cat, "t_str", List[Field]([Field(String("x"), ArrowType.STRING, False)]))
+    _add(cat, "t_bool", List[Field]([Field(String("x"), ArrowType.BOOL, False)]))
     _add(cat, "t_d10_2", List[Field]([Field.decimal128("x", 10, 2, False)]))
     _add(
         cat, "t_side",
@@ -119,6 +129,8 @@ def _shape(p: LogicalPlan) raises -> String:
         )
     if p.tag == PLAN_PROJECT:
         return _shape(p.project_data_ref().child[])
+    if p.tag == PLAN_DISTINCT:
+        return "DISTINCT(" + _shape(p.distinct_data_ref().child[]) + ")"
     if p.tag == PLAN_SORT:
         return "sort>" + _shape(p.sort_data_ref().child[])
     if p.tag == PLAN_LIMIT:
@@ -290,9 +302,9 @@ def test_the_inputs_take_the_common_type_and_either_ones_nullability() raises:
 
 def test_a_mismatch_names_the_operator_and_the_branches() raises:
     assert_equal(
-        _err("SELECT x FROM t_a INTERSECT SELECT x FROM t_str"),
+        _err("SELECT x FROM t_a INTERSECT SELECT x FROM t_bool"),
         "SQL not supported: INTERSECT column 1 (x): branch 1 gives int32 and"
-        " branch 2 gives string; no common type this engine casts to. Cast the"
+        " branch 2 gives bool; no common type this engine casts to. Cast the"
         " columns to one type.",
     )
     assert_equal(
@@ -305,10 +317,10 @@ def test_a_mismatch_names_the_operator_and_the_branches() raises:
     # own branch number.
     assert_equal(
         _err(
-            "SELECT x FROM t_a UNION ALL SELECT x FROM t_str INTERSECT"
+            "SELECT x FROM t_a UNION ALL SELECT x FROM t_bool INTERSECT"
             " SELECT x FROM t_b"
         ),
-        "SQL not supported: INTERSECT column 1 (x): branch 2 gives string and"
+        "SQL not supported: INTERSECT column 1 (x): branch 2 gives bool and"
         " branch 3 gives int32; no common type this engine casts to. Cast the"
         " columns to one type.",
     )
@@ -325,20 +337,20 @@ def test_a_mismatch_names_the_operator_and_the_branches() raises:
     assert_equal(
         _err(
             "SELECT x FROM t_a UNION ALL SELECT x FROM t_b EXCEPT"
-            " SELECT x FROM t_str"
+            " SELECT x FROM t_bool"
         ),
         "SQL not supported: EXCEPT column 1 (x): branches 1 to 2 give int32 and"
-        " branch 3 gives string; no common type this engine casts to. Cast the"
+        " branch 3 gives bool; no common type this engine casts to. Cast the"
         " columns to one type.",
     )
     # A UNION ALL after an EXCEPT folds the EXCEPT's result with the branch.
     assert_equal(
         _err(
             "SELECT x FROM t_a EXCEPT SELECT x FROM t_b UNION ALL"
-            " SELECT x FROM t_str"
+            " SELECT x FROM t_bool"
         ),
         "SQL not supported: UNION ALL column 1 (x): branches 1 to 2 give int32"
-        " and branch 3 gives string; no common type this engine casts to. Cast"
+        " and branch 3 gives bool; no common type this engine casts to. Cast"
         " the columns to one type.",
     )
 
@@ -376,6 +388,194 @@ def test_order_by_and_limit_apply_to_the_whole_chain() raises:
     assert_equal(Int(d.tag), Int(PLAN_PROJECT))
     assert_equal(Int(d.project_data_ref().child[].tag), Int(PLAN_FILTER))
     assert_true(_is_set_op(d.project_data_ref().child[].filter_data_ref().child[]))
+
+
+def test_union_binds_to_a_distinct_over_the_union() raises:
+    var p = _plan("SELECT k, s FROM t_pair UNION SELECT k, s FROM t_pair")
+    assert_equal(Int(p.tag), Int(PLAN_DISTINCT))
+    # Every column, as SELECT DISTINCT: no column list.
+    assert_false(Bool(p.distinct_data_ref().columns))
+    ref u = p.distinct_data_ref().child[]
+    assert_equal(Int(u.tag), Int(PLAN_UNION))
+    assert_equal(len(u.union_data_ref().children), 2)
+    assert_equal(p.output_schema.num_columns(), 2)
+    assert_equal(p.output_schema.field_name(0), "k")
+    assert_equal(p.output_schema.field_name(1), "s")
+    assert_true(p.output_schema.field_nullable(1))
+    # UNION DISTINCT is the same plan.
+    assert_equal(
+        _shape(_plan("SELECT x FROM t_a UNION DISTINCT SELECT x FROM t_b")),
+        "DISTINCT(union(t_a, t_b))",
+    )
+    # The result is named as the left input and takes the common type.
+    var w = _plan("SELECT x AS l FROM t_a UNION SELECT x AS r FROM t_i64")
+    assert_equal(w.output_schema.field_name(0), "l")
+    assert_true(w.output_schema.field_arrow_type(0) == ArrowType.INT64)
+    assert_true(w.output_schema.field_nullable(0))
+    ref kids = w.distinct_data_ref().child[].union_data_ref().children
+    assert_true(kids[0][].output_schema.field_arrow_type(0) == ArrowType.INT64)
+    assert_equal(kids[1][].output_schema.field_name(0), "l")
+    # An integer with a string: the string.
+    var vs = _plan("SELECT x FROM t_a UNION SELECT x FROM t_str")
+    assert_true(vs.output_schema.field_arrow_type(0) == ArrowType.STRING)
+    # A chain of UNION ALL alone has no distinct.
+    assert_equal(
+        _shape(_plan("SELECT x FROM t_a UNION ALL SELECT x FROM t_b")),
+        "union(t_a, t_b)",
+    )
+
+
+def test_union_folds_left_to_right_beside_union_all_and_except() raises:
+    assert_equal(
+        _shape(
+            _plan(
+                "SELECT x FROM t_a UNION SELECT x FROM t_b UNION ALL"
+                " SELECT x FROM t_c"
+            )
+        ),
+        "union(DISTINCT(union(t_a, t_b)), t_c)",
+    )
+    assert_equal(
+        _shape(
+            _plan(
+                "SELECT x FROM t_a UNION ALL SELECT x FROM t_b UNION"
+                " SELECT x FROM t_c"
+            )
+        ),
+        "DISTINCT(union(t_a, t_b, t_c))",
+    )
+    assert_equal(
+        _shape(
+            _plan(
+                "SELECT x FROM t_a UNION SELECT x FROM t_b UNION"
+                " SELECT x FROM t_c"
+            )
+        ),
+        "DISTINCT(union(DISTINCT(union(t_a, t_b)), t_c))",
+    )
+    assert_equal(
+        _shape(
+            _plan(
+                "SELECT x FROM t_a UNION ALL SELECT x FROM t_b UNION"
+                " SELECT x FROM t_c UNION ALL SELECT x FROM t_d"
+            )
+        ),
+        "union(DISTINCT(union(t_a, t_b, t_c)), t_d)",
+    )
+    assert_equal(
+        _shape(
+            _plan(
+                "SELECT x FROM t_a UNION SELECT x FROM t_b EXCEPT"
+                " SELECT x FROM t_c"
+            )
+        ),
+        "EXCEPT(DISTINCT(union(t_a, t_b)), t_c)",
+    )
+    assert_equal(
+        _shape(
+            _plan(
+                "SELECT x FROM t_a EXCEPT SELECT x FROM t_b UNION"
+                " SELECT x FROM t_c"
+            )
+        ),
+        "DISTINCT(union(EXCEPT(t_a, t_b), t_c))",
+    )
+
+
+def test_intersect_binds_before_union() raises:
+    assert_equal(
+        _shape(
+            _plan(
+                "SELECT x FROM t_a UNION SELECT x FROM t_b INTERSECT"
+                " SELECT x FROM t_c"
+            )
+        ),
+        "DISTINCT(union(t_a, INTERSECT(t_b, t_c)))",
+    )
+    assert_equal(
+        _shape(
+            _plan(
+                "SELECT x FROM t_a INTERSECT SELECT x FROM t_b UNION"
+                " SELECT x FROM t_c"
+            )
+        ),
+        "DISTINCT(union(INTERSECT(t_a, t_b), t_c))",
+    )
+
+
+def test_a_union_mismatch_names_union_and_the_branches() raises:
+    assert_equal(
+        _err("SELECT x FROM t_a UNION SELECT x FROM t_bool"),
+        "SQL not supported: UNION column 1 (x): branch 1 gives int32 and"
+        " branch 2 gives bool; no common type this engine casts to. Cast the"
+        " columns to one type.",
+    )
+    assert_equal(
+        _err("SELECT k, s FROM t_pair UNION SELECT x FROM t_a"),
+        "SQL bind error: UNION branch 2 produces 1 column(s) but the first"
+        " branch produces 2. Every branch of a UNION must produce the same"
+        " number of columns, in the same order.",
+    )
+    # Each branch is named by the operator that joins it.
+    assert_equal(
+        _err(
+            "SELECT x FROM t_a UNION ALL SELECT x FROM t_b UNION"
+            " SELECT x FROM t_bool"
+        ),
+        "SQL not supported: UNION column 1 (x): branches 1 to 2 give int32 and"
+        " branch 3 gives bool; no common type this engine casts to. Cast the"
+        " columns to one type.",
+    )
+    assert_equal(
+        _err(
+            "SELECT x FROM t_a UNION SELECT x FROM t_b UNION ALL"
+            " SELECT x FROM t_bool"
+        ),
+        "SQL not supported: UNION ALL column 1 (x): branches 1 to 2 give int32"
+        " and branch 3 gives bool; no common type this engine casts to. Cast"
+        " the columns to one type.",
+    )
+
+
+def test_a_union_over_two_result_columns_of_one_name_is_refused() raises:
+    assert_equal(
+        _err("SELECT x, x FROM t_a UNION SELECT x, x FROM t_b"),
+        "SQL not supported: UNION over two columns named `x`. Rows are"
+        " compared by column name, so the second would be read as the first."
+        " Give the two columns distinct aliases.",
+    )
+    # A UNION ALL compares no rows, so it keeps both columns.
+    var kept = _plan("SELECT x, x FROM t_a UNION ALL SELECT x, x FROM t_b")
+    assert_equal(kept.output_schema.num_columns(), 2)
+
+
+def test_a_union_sorts_and_lives_in_a_cte() raises:
+    assert_equal(
+        _shape(
+            _plan(
+                "SELECT x FROM t_a UNION SELECT x FROM t_b ORDER BY x LIMIT 2"
+            )
+        ),
+        "limit>sort>DISTINCT(union(t_a, t_b))",
+    )
+    assert_equal(
+        _shape(
+            _plan(
+                "WITH c AS (SELECT x FROM t_a UNION SELECT x FROM t_b)"
+                " SELECT x FROM c"
+            )
+        ),
+        "DISTINCT(union(t_a, t_b))",
+    )
+    assert_equal(
+        _shape(
+            _plan(
+                "WITH c AS (SELECT x FROM t_a INTERSECT SELECT x FROM t_b)"
+                " SELECT x FROM c"
+            )
+        ),
+        "INTERSECT(t_a, t_b)",
+    )
 
 
 def main() raises:

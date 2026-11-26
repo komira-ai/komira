@@ -12,7 +12,7 @@ from plan_ir.logical_plan import (
 from sql.sql_ast import (
     FROM_LESS_RELATION, JK_ANTI, JK_CROSS, JK_FULL, JK_LEFT, JK_RIGHT, JK_SEMI,
     STMT_COPY, STMT_CREATE_TABLE_AS, STMT_QUERY, SUBQ_DERIVED, SUBQ_NOT_IN, SUBQ_SCALAR,
-    SUBQ_EXCEPT, SUBQ_INTERSECT, SUBQ_UNION_ALL, SX_COLUMN, SelectStmt, SqlStatement,
+    SUBQ_EXCEPT, SUBQ_INTERSECT, SUBQ_UNION, SUBQ_UNION_ALL, SX_COLUMN, SelectStmt, SqlStatement,
     _UNION_RESULT_ALIAS,
 )
 from sql.sql_bind_aggregate import (
@@ -160,7 +160,11 @@ def _bind_query(
         ref cte = stmt.ctes[i]
         if cte_scope.has(cte.name):
             raise Error("SQL bind error: duplicate CTE name '" + cte.name + "'")
-        var body_plan = _bind_select(cte.body, catalog, cte_scope, prebound)
+        # A body that heads a set-operation chain binds the chain; its branch
+        # bodies live in this statement's subquery table.
+        var body_plan = _bind_select_with_union(
+            cte.body, stmt, catalog, cte_scope, prebound, False
+        )
         cte_scope.add(cte.name, body_plan^)
 
     # Pre-bind every subquery body in index order (inner-before-outer), each
@@ -211,10 +215,11 @@ def _bind_query(
             prebound.append(Expr.literal(ScalarValue.from_int64(0)))  # placeholder
         elif (
             sd.kind == SUBQ_UNION_ALL
+            or sd.kind == SUBQ_UNION
             or sd.kind == SUBQ_INTERSECT
             or sd.kind == SUBQ_EXCEPT
         ):
-            # A set-operation BRANCH (UNION ALL, INTERSECT, EXCEPT), not an
+            # A set-operation BRANCH (UNION ALL, UNION, INTERSECT, EXCEPT), not an
             # operand. It binds to a PLAN,
             # which no `prebound` slot can hold, so it pushes the same
             # unreferenced placeholder SUBQ_DERIVED does and is bound below —

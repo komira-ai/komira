@@ -14,6 +14,8 @@
 #   - inet_any_be() -> UInt32                            # 0.0.0.0 (INADDR_ANY) — bind all interfaces
 #   - set_so_sndbuf(fd, bytes) raises / so_sndbuf(fd) raises -> Int32
 #   - set_so_rcvbuf(fd, bytes) raises / so_rcvbuf(fd) raises -> Int32
+#   - wait_readable(fd_a, fd_b, timeout_ms) raises -> Bool  # poll(2) for POLLIN
+#   - socket_unsent_bytes(fd) raises -> Int               # send queue not yet taken by the peer
 #
 # Pointer discipline:
 #   - All public functions return typed scalars / Array.
@@ -507,3 +509,37 @@ def get_so_error(fd: Int32) raises -> Int32:
     if rc < Int32(0):
         raise Error("getsockopt(SO_ERROR) failed")
     return optval[0]
+
+
+def wait_readable(fd_a: Int32, fd_b: Int32, timeout_ms: Int) raises -> Bool:
+    """Wait up to `timeout_ms` (negative: without limit) until `fd_a` or
+    `fd_b` has data, an end of stream or an error to read; a negative fd is
+    not watched. True when a read of one would not block, False on timeout.
+    Raises when neither fd is watched, when a watched fd is not open, or when
+    poll(2) fails (a signal included: it is not retried)."""
+    # FFI-BOUNDARY: `komira_wait_readable` is the C shim of
+    # reactor/_posix_shim.c (komira_async_native); it takes three ints and
+    # returns an int. No pointer crosses: its pollfd array is a C local, and
+    # POLLIN / POLLNVAL come from <poll.h>. The fds stay owned by the caller.
+    var rc = external_call["komira_wait_readable", Int32](
+        fd_a, fd_b, Int32(timeout_ms)
+    )
+    if rc < Int32(0):
+        raise Error("wait_readable failed (errno " + String(-Int(rc)) + ")")
+    return rc > Int32(0)
+
+
+def socket_unsent_bytes(fd: Int32) raises -> Int:
+    """The bytes in socket `fd`'s send queue that the peer has not yet
+    acknowledged; on loopback, sent bytes not yet in the peer's receive
+    buffer. 0 means every byte sent has reached the peer's socket. Raises on
+    a bad fd or a socket that has no send queue to report."""
+    # FFI-BOUNDARY: `komira_socket_unsent` is the C shim of
+    # reactor/_posix_shim.c (komira_async_native); it takes an int and
+    # returns a long long. No pointer crosses: the platform's call (ioctl
+    # SIOCOUTQ on Linux, getsockopt SO_NWRITE on macOS) writes a C local. The
+    # fd stays owned by the caller.
+    var n = external_call["komira_socket_unsent", Int64](fd)
+    if n < Int64(0):
+        raise Error("socket_unsent_bytes: failed (errno " + String(-Int(n)) + ")")
+    return Int(n)

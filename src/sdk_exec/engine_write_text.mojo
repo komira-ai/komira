@@ -24,6 +24,16 @@
 #   DECIMAL    exact, with all of its scale (`12.50`, `-0.05`, `42`)
 #   DATE       `YYYY-MM-DD` (four digits at least), a year before 1 as
 #              `0044-03-15 (BC)`
+#   TIMESTAMP  the DATE text, a space, `HH:MM:SS`, then `.` and the fraction
+#              of a second with its trailing zeros removed when it is not
+#              zero (`2015-09-04 12:30:45.12`, `1970-01-01 00:00:00`,
+#              `0001-12-31 (BC) 00:00:00`), at the column's unit: up to 3
+#              digits for TIMESTAMP_MS, 6 for TIMESTAMP_US (and the legacy
+#              tag), 9 for TIMESTAMP_NS, none for TIMESTAMP_S; `+00` after
+#              it when the field carries a time zone (an instant, DuckDB's
+#              TIMESTAMPTZ, shown in UTC); the largest INT64 as `infinity`
+#              and its negation as `-infinity`, at every unit and with no
+#              `+00`
 # An empty result is the header row alone.
 #
 # JSON, one object per row, each followed by `\n` (DuckDB's `FORMAT json`,
@@ -40,7 +50,7 @@
 #   DECIMAL    as the DOUBLE nearest its value (`12.5`, `42.0`), as DuckDB;
 #              DECIMAL(38, 0), komira's type for the integer sum() that
 #              DuckDB types HUGEINT, as its exact digits (`42`)
-#   DATE       a string holding the CSV text
+#   DATE, TIMESTAMP  a string holding the CSV text
 # An empty result is an empty file.
 #
 # The NULL type is written as NULL in every row. A column of a type not
@@ -86,6 +96,7 @@ def text_writable(at: ArrowType) -> Bool:
         or at == ArrowType.DICTIONARY
         or at == ArrowType.DATE32
         or at == ArrowType.DECIMAL128
+        or at.is_timestamp()
     )
 
 
@@ -145,7 +156,13 @@ def _civil_from_days(days: Int) -> Tuple[Int, Int, Int]:
 def date_text(days: Int32) -> String:
     """A DATE as DuckDB renders it: `YYYY-MM-DD`, the year at least four
     digits, and a year before 1 as `<1 - year>-MM-DD (BC)`."""
-    var ymd = _civil_from_days(Int(days))
+    return _date_text(Int(days))
+
+
+def _date_text(days: Int) -> String:
+    """`date_text` of a day count past the INT32 range a DATE holds (a
+    timestamp's day)."""
+    var ymd = _civil_from_days(days)
     var year = ymd[0]
     var bc = year <= 0
     if bc:
@@ -153,6 +170,50 @@ def date_text(days: Int32) -> String:
     var s = _pad(year, 4) + "-" + _pad(ymd[1], 2) + "-" + _pad(ymd[2], 2)
     if bc:
         s += " (BC)"
+    return s^
+
+
+comptime _SECONDS_PER_DAY = 86_400
+
+
+def _timestamp_text(value: Int64, at: ArrowType, aware: Bool) -> String:
+    """A timestamp of the Arrow type `at` as DuckDB renders it (the module
+    header says how); `aware` for a field that carries a time zone."""
+    if value == Int64.MAX:
+        return "infinity"
+    if value == -Int64.MAX:
+        return "-infinity"
+    var per = 1_000_000
+    var digits = 6
+    if at == ArrowType.TIMESTAMP_S:
+        per = 1
+        digits = 0
+    elif at == ArrowType.TIMESTAMP_MS:
+        per = 1_000
+        digits = 3
+    elif at == ArrowType.TIMESTAMP_NS:
+        per = 1_000_000_000
+        digits = 9
+    var v = Int(value)
+    # Floor division and modulo: a time before 1970 is the day before at a
+    # positive time of day.
+    var secs = v // per
+    var frac = v % per
+    var days = secs // _SECONDS_PER_DAY
+    var sod = secs % _SECONDS_PER_DAY
+    var s = (
+        _date_text(days) + " " + _pad(sod // 3600, 2) + ":"
+        + _pad((sod // 60) % 60, 2) + ":" + _pad(sod % 60, 2)
+    )
+    if frac != 0:
+        var f = _pad(frac, digits)
+        var b = f.as_bytes()
+        var end = len(b)
+        while b[end - 1] == 0x30:
+            end -= 1
+        s += "." + String(f[byte = 0:end])
+    if aware:
+        s += "+00"
     return s^
 
 
@@ -463,6 +524,16 @@ def _column_cells(batch: RecordBatch, c: Int, json: Bool) raises -> _Cells:
                 cells.text("\"" + date_text(arr.get(r)) + "\"")
             else:
                 cells.text(date_text(arr.get(r)))
+    elif at.is_timestamp():
+        var arr = col.as_primitive[DType.int64]()
+        var aware = batch.schema.field_tz(c) != ""
+        for r in range(rows):
+            if arr.is_null(r):
+                cells.text(null)
+            elif json:
+                cells.text("\"" + _timestamp_text(arr.get(r), at, aware) + "\"")
+            else:
+                cells.text(_timestamp_text(arr.get(r), at, aware))
     elif at == ArrowType.DECIMAL128:
         var arr = col.as_decimal128()
         # 10^scale as the double nearest it (exact through 1e22), as

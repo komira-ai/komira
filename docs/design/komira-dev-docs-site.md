@@ -50,7 +50,7 @@ The rest of the site is laid out like this:
 | Section | Pages |
 |---|---|
 | Get started | Install (per language, with platforms and troubleshooting); your first query; reading results as Arrow, pandas and polars |
-| Guides | SQL (the dialect, files as tables, `COPY ... TO`, errors); pandas (the pandas-shaped `DataFrame`, its verbs, what it refuses and why); polars (the polars-shaped `komira.pl`, which is specified and not built) |
+| Guides | SQL (the dialect, files as tables, `COPY ... TO`, errors); pandas (the pandas-shaped `DataFrame`, its verbs, what it refuses and why); polars (the polars-shaped `komira.pl`: lazy frames, expressions, `scan_parquet`, `scan_csv`, `scan_ndjson`, `concat`, `when`, `collect`) |
 | Concepts | The engine (in-process, threads, memory budget, cancellation); plans (SQL and frames both build a plan; `explain`); Arrow (results as Arrow C streams, zero copy into pyarrow and apache-arrow); object stores (locations, named credentials that never enter a plan); Iceberg (tables in your own catalog) |
 | Recipes | Short tasks, one example each, listed in [section 3.6](#36-the-recipes) |
 | Reference | Python, TypeScript, Mojo: one page per module or class, generated ([section 4](#4-the-reference)) |
@@ -250,7 +250,7 @@ of prose, its parameters (name, type, description), what it returns, and what it
 
 | Language | Extractor | What it reads | What is public |
 |---|---|---|---|
-| Python | `//python:reference`, a program on the pinned CPython using only the standard library's `ast` | the package sources: docstrings, and the type annotations written inline. The package ships `py.typed` and no `.pyi` files, so the inline annotations are its type stubs. Should a `.pyi` file be added, its signature wins over the source's. The package is never imported. | the names in `komira.__all__` and their public members |
+| Python | `//python:reference`, a program on the pinned CPython using only the standard library's `ast` | the package sources: docstrings, and the type annotations written inline. The package ships `py.typed` and no `.pyi` files, so the inline annotations are its type stubs. Should a `.pyi` file be added, its signature wins over the source's. The package is never imported. | the names in `komira.__all__` and `komira.pl.__all__`, and their public members |
 | TypeScript | `//node:reference`, a program on the pinned Node that uses the TypeScript compiler API of the pinned `typescript` in [node/devtools](../../node/devtools/README.md) | the package's types, the same declarations `tsc` writes to `dist/*.d.ts`, and their doc comments | the exports of [node/src/index.ts](../../node/src/index.ts) |
 | Mojo | `//tools/build/site:mojo_reference`, a Zig program that converts the JSON of the existing [`mojo_doc_json`](../../tools/build/mojo/doc.md) rule | `mojo doc` output for each library: signatures, parameters and doc strings | every declaration `mojo doc` emits, which leaves out names starting with `_` |
 
@@ -265,7 +265,7 @@ page on the released site, because a reader cannot install it, and has one on `n
 
 ### 4.2 One docstring form in all three languages
 
-The docstrings today are plain prose. None of the 53 Python docstrings of the public surface has an
+The docstrings today are plain prose. None of the 64 Python docstrings of the public surface has an
 `Args:`, `Returns:` or `Raises:` section, and none of the 74 doc comments in `node/src` has a
 `@param`, `@returns` or `@throws` tag ([the audit](#132-python)). A generator can only copy such prose.
 It cannot fill in a parameter table.
@@ -287,7 +287,7 @@ follow them.
 
 - **Complete.** The extractor fails when a public symbol has no summary line, when a parameter of
   its signature has no description, or when a described parameter is not in its signature. It holds
-  at 100% for the Python and TypeScript packages, which are small (19 names in `komira.__all__`; 13
+  at 100% for the Python and TypeScript packages, which are small (20 names in `komira.__all__` and 11 in `komira.pl.__all__`; 13
   exported names in `node/src/index.ts`, values and types). For Mojo it holds for every library an
   example imports. For the other published libraries it is reported in the census of
   [readme_api_coverage.md](../readme_api_coverage.md) and does not fail. Its negative cases: a
@@ -530,8 +530,8 @@ Each count below names the command that gave it. Each problem names the file it 
 
 | What exists | What is wrong or missing |
 |---|---|
-| `komira.__all__`: 19 names (counted with `ast` over `python/komira/__init__.py`): `Session`, `Result`, `DataFrame`, `Series`, `GroupBy`, `read_parquet`, `read_csv`, `read_json`, `abi_version`, `__version__` and nine error classes | No reference exists, generated or written. `python/README.md` is the reference today, mixed with contributor tables. |
-| Docstrings: all 53 public classes, functions and methods have one. The count, made with `ast` over `python/komira/`, covers `Session`, `Result`, `DataFrame`, `Series`, `GroupBy`, `KomiraError`, `read_parquet`, `read_csv`, `read_json` and `abi_version`, and those classes' methods whose names do not start with `_` | Prose only: 0 `Args:`, 0 `Returns:`, 0 `Raises:`, 0 examples. Several cite `docs/design/` paths. |
+| `komira.__all__`: 20 names (counted with `ast` over `python/komira/__init__.py`): `Session`, `Result`, `DataFrame`, `Series`, `GroupBy`, `read_parquet`, `read_csv`, `read_json`, `concat`, `abi_version`, `__version__` and nine error classes. `komira.pl.__all__`: 11 names, the polars-shaped surface (`LazyFrame`, `Expr`, `col`, `lit`, `when`, `concat`, `len`, `scan_parquet`, `scan_csv`, `scan_ndjson`, `ExprStringNameSpace`) | No reference exists, generated or written. `python/README.md` is the reference today, mixed with contributor tables. |
+| Docstrings: all 64 public classes, functions and methods of `komira` have one. The count, made with `ast` over `python/komira/_*.py`, covers `Session`, `Result`, `DataFrame`, `Series`, `GroupBy`, `KomiraError`, `read_parquet`, `read_csv`, `read_json`, `concat` and `abi_version`, and those classes' methods whose names do not start with `_`. `komira.pl` was not counted | Prose only: 0 `Args:`, 0 `Returns:`, 0 `Raises:`, 0 examples. Several cite `docs/design/` paths. |
 | Inline type annotations on almost every function; `py.typed`; no `.pyi` (`find python -name '*.pyi'` finds none) | Nothing to fix for the reference: the inline annotations are the stubs. |
 | [python/examples/quickstart.py](../../python/examples/quickstart.py) and its expected output, held to the README and the install page by Zig tests; [analysis_job.py](../../python/examples/analysis_job.py), run by `//python:analysis_job_test` | This is the only tested-example pattern for Python, and it covers two programs. The README's other code blocks are not run by any check the audit found. |
 | [python/CHANGELOG.md](../../python/CHANGELOG.md) | One release recorded, `0.1.1512`, with no SQL. SQL, the frames, CSV and JSON, the memory limit and Python 3.11 and 3.12 are under "Unreleased". A site built from `main` would describe what `pip install` does not give, which is why the released site is built from the release's commit ([section 8](#8-versions)). |

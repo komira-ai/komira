@@ -1,6 +1,6 @@
 # The Python DataFrame surface: verbs, capabilities and refusals
 
-Status: design, not built. This is the verb half of [the DataFrame surface](dataframe_surface.md):
+Status: design, partly built; the pages under [python/docs/](../../python/docs/dataframe/overview.md) say what is built, one page per feature, and this document lists no built verb. This is the verb half of [the DataFrame surface](dataframe_surface.md):
 that document gives the rules. This one has three parts:
 
 - for each capability of the [surface capability matrix](../surface_capability_matrix.md), the verbs of
@@ -66,12 +66,12 @@ the surface has no spelling, and the cell stays empty by decision.
 | `join_asof` | `km.merge_asof(l, r, on=..., by=..., direction=...)`; `allow_exact_matches=False` refused | `lf.join_asof(o, on=..., by=..., strategy="backward"\|"forward"\|"nearest")` | ASOF_JOIN | refused at lower |
 | `aggregate` | `df.agg(total=("v", "sum"))`, `df.sum()` and the other frame reductions; a one-row frame (rules section 8, ruling 1) | `lf.select(kpl.col("v").sum())`, `lf.select(kpl.len())` | AGGREGATE with no keys | cut |
 | `group_by` | `df.groupby(keys).agg(...)`, `.size()`, `.count()`, `.sum()`, `.mean()`, `.min()`, `.max()` and the others (rules section 8, ruling 4) | `lf.group_by(keys).agg(...)`, `.len()`, `.sum()` and the others | AGGREGATE; pandas adds a SORT above it (`sort=True`) and a FILTER of missing keys below it (`dropna=True`) | cut, for the group key types the sinks serve |
-| `window` | `df.groupby(k)[c].transform("sum")`; on an ordered frame `.cumsum()`, `.rolling(n, min_periods=1).mean()`; `.rank(method="min"\|"dense")`; a `Series` aggregate used inside `assign` | `expr.over(keys)`; with an order (`order_by=` or an ordered frame) `cum_sum`, `cum_count`, `cum_min`, `cum_max`, `rolling_sum`, `rolling_mean`, `rolling_min`, `rolling_max`; `rank(method="min"\|"dense")`; an aggregate beside a row-wise value in `select` or `with_columns` (a broadcast) | PARTITION_BY (`select_broadcasting_aggregates` for a broadcast); rules section 7 for the order | refused at lower |
+| `window` | `df.groupby(k)[c].transform("sum")`; on an ordered frame `.cumsum()`, `.rolling(n, min_periods=1).mean()`; `.rank(method="min"\|"dense")`; a `Series` aggregate used inside `assign` | `expr.over(keys)`; with an order (`order_by=` or an ordered frame) `cum_sum`, `cum_count`, `cum_min`, `cum_max`, `rolling_sum`, `rolling_mean`, `rolling_min`, `rolling_max`; `rank(method="min"\|"max"\|"dense"\|"average")`; an aggregate beside a row-wise value in `select`, `with_columns` or `filter` (a broadcast) | PARTITION_BY (`select_broadcasting_aggregates` for a broadcast); rules section 7 for the order | refused at lower |
 | `sort` | `df.sort_values(by, ascending=True, na_position="last")` | `lf.sort(by, descending=False, nulls_last=False)` | SORT, every key with an explicit `nulls_first` (rules section 8, ruling 5) | cut |
 | `topn` | `df.nlargest(n, columns)`, `df.nsmallest(n, columns)` | `lf.top_k(k, by=...)`, `lf.bottom_k(k, by=...)` | TOPN; ties at the boundary as in rules section 7 | cut (SINK_TOPN) |
 | `topn_per_group` | `df.sort_values(o).groupby(k).head(n)` | `lf.sort(o).group_by(k).head(n)` | PARTITION_TOPN | refused at lower |
 | `limit` | `df.head(n)` | `lf.head(n)`, `lf.limit(n)`; `lf.slice(offset, n)` on an ordered frame | LIMIT, offset 0 unless `slice` | cut; a limit or an offset above a sort is cut as that range of the sort (SINK_TOPN), an offset over no sort is refused |
-| `distinct` | `df.drop_duplicates()`, `df.drop_duplicates(subset=...)` | `lf.unique()`, `lf.unique(subset=..., keep="any")` | DISTINCT, of whole rows or of `subset` | whole rows served by lowering for the key coverage of the grouped sinks; `subset` refused at lower |
+| `distinct` | `df.drop_duplicates()`, `df.drop_duplicates(subset=...)` | `lf.unique()`, `lf.unique(subset=..., keep="any"\|"none")` | DISTINCT, of whole rows or of `subset`; the polars skin builds a `subset` of fewer columns, and `keep="none"`, as a PARTITION_BY (`ROW_NUMBER` or `COUNT` per value) under a FILTER (dataframe_surface.md, rules section 7) | whole rows served by lowering for the key coverage of the grouped sinks; `subset` refused at lower |
 | `union` | `km.concat(frames)` | `kpl.concat(frames, how="vertical")` | UNION of one schema (`concat_schema_check`; rules section 8, ruling 15) | cut |
 | `subquery` | - | - | neither library has a subquery inside an expression; a broadcast aggregate is a window | - |
 | `view` | `km.add_sql_binding(name, df)`, then `km.sql(...)`; or `km.sql(..., name=df)` | `km.add_sql_binding(name, lf)`, then `km.sql(...)`; or `km.sql(..., name=lf)` | VIEW_REF | not wired |
@@ -114,7 +114,7 @@ These verbs have no capability of their own. Each one builds the plan of the row
 | frame rename | `rename(columns=)`, `add_prefix`, `add_suffix` | `rename(mapping)` | `project` |
 | drop rows with a missing value | `dropna(subset=None, how="any")` | `drop_nulls(subset=None)` | `filter` (`drop_nulls_predicate`) |
 | fill missing values | `fillna(v)` or `fillna({col: v})` | `fill_null(v)`, `fill_nan(v)` | `computed_column` |
-| count values per key | `s.value_counts()`: a frame of the value column and `count`, missing values dropped, sorted by `count` descending (rules section 8, ruling 1) | `lf.group_by(c).len()` | `group_by`, `sort` |
+| count values per key | `df.groupby(c).size().sort_values("size", ascending=False)`: `s.value_counts()` is refused by name, since pandas gives a `Series` indexed by value and a komira `Series` has no index (rules section 8, ruling 1) | `lf.group_by(c).len()` | `group_by`, `sort` |
 | distinct count | `nunique()` | `n_unique()` | `aggregate`, `group_by` |
 | median, standard deviation, variance | `median()`, `std()`, `var()` (`ddof=1`); other `ddof` refused | `median()`, `std()`, `var()` (`ddof=1`) | `aggregate`, `group_by` |
 | last rows of an ordered frame | `tail(n)` | `tail(n)` | `topn` (rules section 7) |
@@ -135,7 +135,8 @@ the same name:
 - `date32`
 
 The pandas-shaped skin also takes pandas' spellings of those: `"Int64"` and the other capitalised
-integer names, `"boolean"`, and `"str"`. `"object"` and `"category"` are refused by name, because neither
+integer and float names (`"UInt8"`, `"Float64"`, ...), `"boolean"`, and `"str"`, and Python's types `bool`, `int` (int64), `float` (float64) and
+`str` (string). `"object"` and `"category"` are refused by name, because neither
 names one Arrow type.
 
 ## The refusal tables
@@ -187,6 +188,7 @@ In the `read_*` message, `<format>` is the format of the name looked up (`parque
 | `collect` | `DataFrame` | `.collect() is the polars-shaped skin's word; this frame runs at .materialize()` |
 | `compute` | `DataFrame` | `.compute() is dask's word; this frame runs at .materialize()` |
 | `cat`, `sparse` | `Series` | `the .<name> accessor is not supported: komira has no categorical or sparse dtype` |
+| `value_counts` | `Series` | `.<name>() gives a Series indexed by the values in pandas, and a komira Series has no index: count the rows per value with df.groupby(column).size(), and sort them with sort_values("size", ascending=False)` |
 | `plot` | both | `.plot needs the rows: use materialize().to_pandas().plot` |
 
 ### `GroupBy`
@@ -206,7 +208,7 @@ In the `read_*` message, `<format>` is the format of the name looked up (`parque
 | `to_pandas`, `to_polars`, `to_arrow`, `fetch` | `LazyFrame` | `a LazyFrame is a plan: run it with .collect(), then convert the Result` |
 | `with_column` | `LazyFrame` | `with_column() is not a polars verb; use with_columns()` |
 | `unpivot`, `explode` | `LazyFrame` | `.<name>() is not supported yet: the plan has no node for it` |
-| `cache`, `profile`, `collect_async` | `LazyFrame` | `.<name>() is not supported: komira runs a plan only at .collect() and the sink verbs` |
+| `cache`, `profile`, `collect_async` | `LazyFrame` | `.<name>() is not supported: komira runs a plan only at .collect()` |
 | `apply` | `Expr` | `Expr.apply is not a polars verb; use map_elements(f, return_dtype=...)` |
 | `sort_by` | `Expr` | `Expr.sort_by() is not supported: the plan carries no order inside an expression; sort the frame instead` |
 | `first`, `last` | `Expr`, `LazyGroupBy` | `.<name>() is not supported yet; use .min() or .max() of an ordered key` |
