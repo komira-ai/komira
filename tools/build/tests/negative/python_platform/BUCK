@@ -5,9 +5,9 @@ load("//negative/python_oracle:stand_in.bzl", "stand_in_tzdata")
 # Fixtures of the python macros' platform default (tools/build/python/defs.bzl,
 # `_pinned_python`): a `python` given as a plain label is a linux x86_64
 # interpreter, so the target is configured for linux x86_64 only, unless the
-# label is `:cpython_macos`. komira//tools/build/ci/cases.bxl reads the
-# target_compatible_with each fixture gets and configures each for
-# darwin-arm64 and linux-x86_64. Nothing here is built or run: the package is
+# label is `:cpython_macos`. komira//tools/build/ci/cases.bxl configures each
+# fixture for darwin-arm64 and linux-x86_64 and compares which platforms take
+# it. Nothing here is built or run: the package is
 # outside the pull request check's query universe.
 #
 # The real interpreters are visible only to the test-only packages, so the
@@ -68,12 +68,12 @@ py_test(
     exec_compatible_with = LINUX_X86_64,
 )
 
-# A target_compatible_with given is kept: the default never replaces it.
+# A compatibility the target states is kept: the default never replaces it.
 py_test(
     name = "linux_label_given",
     src = "stand_in.txt",
     python = ":cpython_3_11",
     tzdata = ":tzdata",
     exec_compatible_with = LINUX_X86_64,
-    target_compatible_with = ["prelude//os/constraints:macos"],
+    target_compatible_with = ["prelude//os/constraints:macos"],  # komira-limit:python-platform-fixture
 )

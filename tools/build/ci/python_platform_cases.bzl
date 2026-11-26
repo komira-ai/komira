@@ -4,7 +4,7 @@ komira//tools/build/ci/cases.bxl.
 A `python` given as a plain label names one pinned interpreter, and each but `:cpython_macos` is
 a linux x86_64 build, so the macro configures the target for linux x86_64 only: a darwin-arm64
 build skips it instead of running a linux interpreter. A `select`, no `python`, or a
-`target_compatible_with` already given gets no default.
+compatibility the target already states gets no default.
 
 Each case configures a target for each platform and compares the answer (compatible or not) with
 the expected one. The fixtures (tests//negative/python_platform) run on linux x86_64, so no case
@@ -21,7 +21,7 @@ PYTHON_PLATFORM_CASES = [
     (_FIXTURE + "linux_label", "a linux interpreter's plain label is linux x86_64 only", False, True),
     (_FIXTURE + "macos_label", "`:cpython_macos` gets no linux default", True, True),
     (_FIXTURE + "select_label", "a `select` of interpreters gets no default", True, True),
-    (_FIXTURE + "linux_label_given", "a given target_compatible_with is kept, not replaced by the default", True, False),
+    (_FIXTURE + "linux_label_given", "a compatibility the target states is kept, not replaced by the default", True, False),
     ("komira//python/tests:load_test_py311", "a real test on the 3.11 interpreter is skipped on macOS", False, True),
     ("komira//python/tests:load_test", "a real test with no `python` builds on both", True, True),
 ]
