@@ -86,10 +86,10 @@ comptime _RAD_TO_DEG: Float64 = 180.0 / pi
 # "The same libm" holds where the oracle runs: the pinned DuckDB is built for
 # linux-x86_64 only, so its answers are glibc's. On macOS this file calls
 # Apple's libm, which rounds some inputs differently (glibc's `cbrt` is not
-# correctly rounded; Apple's is, on the two inputs checked), and DuckDB built for
-# macOS would answer Apple's bits too. The conformance suites compare a
-# transcendental's answer bit for bit on Linux and within a few ulp elsewhere
-# (src/tests/helpers/komira_plan_harness/libm_rule.mojo).
+# correctly rounded), and DuckDB built for macOS would answer Apple's bits too.
+# The conformance suites compare a transcendental's answer bit for bit on Linux
+# and within 4 ulp elsewhere; the measurement behind the bound is in
+# src/tests/helpers/komira_plan_harness/libm_rule.mojo.
 #
 # `ceil` / `floor` / `sqrt` stay on `std.math`: those are EXACT IEEE-754
 # operations with a single correctly-rounded answer, so there is no oracle to
