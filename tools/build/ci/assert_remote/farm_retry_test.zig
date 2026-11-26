@@ -16,8 +16,18 @@
 //! test_cut.log is a test run whose every test failed because the connection
 //! to the farm was cut before it ran: its progress lines cut to two, the
 //! action digests zeroed.
+//!
+//! The wait for the farm before a run again (farm_wait.zig) runs on a fake
+//! clock and a fake farm, so a case of twenty minutes takes none: a farm that
+//! answers at once, one back after three minutes, one that never answers (the
+//! bound, the last sleep cut to it, a line a minute), a bound of 0 and a probe
+//! slower than a minute. The farm config is read from the buckconfig
+//! farm-connect writes, and each way it can name no farm is refused by name.
+//! The real probe connects to loopback ports of the case's own (port 0), one
+//! listening and one bound but not listening.
 const std = @import("std");
 const fr = @import("farm_retry.zig");
+const fw = @import("farm_wait.zig");
 const t = std.testing;
 
 const build_cut = @embedFile("fixtures/build_cut.log");
@@ -450,24 +460,35 @@ test "only build, test and bxl run again" {
     for ([_][]const u8{ "run", "install", "uquery", "Build", "" }) |s| try t.expect(!fr.retriable(s));
 }
 
-test "the first log sits beside the log, as <name>.first.log" {
+test "a log run again is kept beside the log, as <name>.<ordinal>.log" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    try t.expectEqualStrings("/r/buck2-farm.first.log", try fr.firstLogPath(a, "/r/buck2-farm.log"));
-    try t.expectEqualStrings("/r/out.first", try fr.firstLogPath(a, "/r/out"));
+    try t.expectEqualStrings("/r/buck2-farm.first.log", try fr.keptLogPath(a, "/r/buck2-farm.log", "first"));
+    try t.expectEqualStrings("/r/buck2-farm.second.log", try fr.keptLogPath(a, "/r/buck2-farm.log", "second"));
+    try t.expectEqualStrings("/r/out.first", try fr.keptLogPath(a, "/r/out", "first"));
+}
+
+test "a step runs at most three times, and its runs are named first, second, third" {
+    try t.expectEqual(@as(usize, 3), fr.max_runs);
+    try t.expectEqualStrings("first", fr.ordinal(1));
+    try t.expectEqualStrings("second", fr.ordinal(2));
+    try t.expectEqualStrings("third", fr.ordinal(3));
+    try t.expectEqualStrings("next", fr.ordinal(4));
 }
 
 test "a wrong command line prints the usage and exits 2, running nothing" {
     var buf: [512]u8 = undefined;
     const cases = [_][]const [:0]const u8{
         &.{},
-        &.{ "--log", "l.log", "--summary", "s.md" }, // no command
-        &.{ "--log", "l.log", "--summary", "s.md", "--", "./buck2" }, // no subcommand
-        &.{ "--summary", "s.md", "--", "./buck2", "build" }, // no log
-        &.{ "--log", "l.log", "--", "./buck2", "build" }, // no summary
-        &.{ "--log", "", "--summary", "s.md", "--", "./buck2", "build" }, // an empty log path
-        &.{ "--log", "l.log", "--summary", "", "--", "./buck2", "build" }, // an empty summary (unset on the runner)
+        &.{ "--log", "l.log", "--summary", "s.md", "--farm-config", "f" }, // no command
+        &.{ "--log", "l.log", "--summary", "s.md", "--farm-config", "f", "--", "./buck2" }, // no subcommand
+        &.{ "--summary", "s.md", "--farm-config", "f", "--", "./buck2", "build" }, // no log
+        &.{ "--log", "l.log", "--farm-config", "f", "--", "./buck2", "build" }, // no summary
+        &.{ "--log", "l.log", "--summary", "s.md", "--", "./buck2", "build" }, // no farm config
+        &.{ "--log", "", "--summary", "s.md", "--farm-config", "f", "--", "./buck2", "build" }, // an empty log path
+        &.{ "--log", "l.log", "--summary", "", "--farm-config", "f", "--", "./buck2", "build" }, // an empty summary (unset on the runner)
+        &.{ "--log", "l.log", "--summary", "s.md", "--farm-config", "", "--", "./buck2", "build" }, // an empty farm config
         &.{ "--log", "l.log", "--other", "x", "--", "./buck2", "build" },
         &.{ "--log", "l.log", "--summary" },
     };
@@ -476,4 +497,235 @@ test "a wrong command line prints the usage and exits 2, running nothing" {
         try t.expectEqual(@as(u8, 2), try fr.main(t.allocator, args, 1 << 20, &w));
         try t.expectEqualStrings(fr.usage, w.buffered());
     }
+}
+
+// ---- the wait for the farm before a run again (farm_wait.zig) -----------------
+
+/// The machine buckconfig farm-connect writes with its default inputs.
+const farm_config =
+    \\[komira_ci]
+    \\  farm_wait_seconds = 1200
+    \\[buck2_re_client]
+    \\  engine_address = grpc://re.example.com:8980
+    \\  action_cache_address = grpc://re.example.com:8980
+    \\  cas_address = grpc://re.example.com:8980
+    \\  instance_name = main
+    \\  tls = false
+    \\[komira_re]
+    \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
+    \\
+;
+
+test "the farm config farm-connect writes gives the farm's host, port and longest wait" {
+    const f = try fw.parseConfig(farm_config);
+    try t.expectEqualStrings("re.example.com", f.host);
+    try t.expectEqual(@as(u16, 8980), f.port);
+    try t.expectEqual(@as(u32, 1200), f.wait_seconds);
+}
+
+test "an engine address is read as farm-connect reads FARM_ADDRESS: scheme, path and brackets dropped" {
+    const cases = [_]struct { address: []const u8, host: []const u8, port: u16 }{
+        .{ .address = "grpcs://re.example.com:443", .host = "re.example.com", .port = 443 },
+        .{ .address = "re.example.com:8980", .host = "re.example.com", .port = 8980 },
+        .{ .address = "grpc://re.example.com:8980/instance", .host = "re.example.com", .port = 8980 },
+        .{ .address = "grpc://[::1]:8980", .host = "::1", .port = 8980 },
+        .{ .address = "grpc://192.0.2.7:65535", .host = "192.0.2.7", .port = 65535 },
+    };
+    var buf: [256]u8 = undefined;
+    for (cases) |c| {
+        const text = try std.fmt.bufPrint(&buf, "[buck2_re_client]\nengine_address={s}\n[komira_ci]\nfarm_wait_seconds = 0\r\n", .{c.address});
+        const f = try fw.parseConfig(text);
+        try t.expectEqualStrings(c.host, f.host);
+        try t.expectEqual(c.port, f.port);
+        try t.expectEqual(@as(u32, 0), f.wait_seconds);
+    }
+}
+
+test "a farm config with no farm, or no longest wait, is refused by name" {
+    const wait = "[komira_ci]\n  farm_wait_seconds = 60\n";
+    try t.expectError(error.NoEngineAddress, fw.parseConfig(wait));
+    // the key in another section is not buck2's address
+    try t.expectError(error.NoEngineAddress, fw.parseConfig(wait ++ "[komira_re]\n  engine_address = grpc://re.example.com:8980\n"));
+    for ([_][]const u8{ "grpc://re.example.com", "re.example.com:", "re.example.com:80a", "grpc://:8980", "re.example.com:0", "re.example.com:70000", "[]:8980" }) |bad| {
+        var buf: [256]u8 = undefined;
+        const text = try std.fmt.bufPrint(&buf, "{s}[buck2_re_client]\n  engine_address = {s}\n", .{ wait, bad });
+        try t.expectError(error.BadEngineAddress, fw.parseConfig(text));
+    }
+    const address = "[buck2_re_client]\n  engine_address = grpc://re.example.com:8980\n";
+    try t.expectError(error.NoWaitSeconds, fw.parseConfig(address));
+    try t.expectError(error.NoWaitSeconds, fw.parseConfig(address ++ "[komira_re]\n  farm_wait_seconds = 60\n"));
+    for ([_][]const u8{ "", "20m", "-1", "1.5", "99999999999" }) |bad| {
+        var buf: [256]u8 = undefined;
+        const text = try std.fmt.bufPrint(&buf, "{s}[komira_ci]\n  farm_wait_seconds = {s}\n", .{ address, bad });
+        try t.expectError(error.BadWaitSeconds, fw.parseConfig(text));
+    }
+}
+
+test "each refused farm config says what is missing" {
+    try t.expectEqualStrings("it has no engine_address under [buck2_re_client]", fw.describeConfigError(error.NoEngineAddress));
+    try t.expectEqualStrings("its engine_address is not <host>:<port>", fw.describeConfigError(error.BadEngineAddress));
+    try t.expectEqualStrings("it has no farm_wait_seconds under [komira_ci]", fw.describeConfigError(error.NoWaitSeconds));
+    try t.expectEqualStrings("its farm_wait_seconds is not a whole number of seconds", fw.describeConfigError(error.BadWaitSeconds));
+}
+
+/// A clock that moves only when the wait sleeps or a probe takes its time.
+const FakeClock = struct {
+    now_s: u64 = 0,
+    sleeps: usize = 0,
+    /// Set by a sleep of 0 s or of more than `probe_seconds`, which no wait asks for.
+    odd_sleep: bool = false,
+    fn now(c: *FakeClock) u64 {
+        return c.now_s;
+    }
+    fn sleep(c: *FakeClock, s: u64) void {
+        if (s == 0 or s > fw.probe_seconds) c.odd_sleep = true;
+        c.now_s += s;
+        c.sleeps += 1;
+    }
+};
+
+/// A farm that answers once the clock reaches `answers_from` (never when
+/// null); a probe it does not answer takes `cost` seconds, as a connection
+/// left unanswered for its 5 s does.
+const FakeFarm = struct {
+    clock: *FakeClock,
+    answers_from: ?u64,
+    cost: u64 = fw.probe_seconds,
+    probes: usize = 0,
+    fn answers(f: *FakeFarm) bool {
+        f.probes += 1;
+        if (f.answers_from) |from| if (f.clock.now_s >= from) return true;
+        f.clock.now_s += f.cost;
+        return false;
+    }
+};
+
+test "a farm that answers the first probe: no wait, no sleep, nothing in the job log" {
+    var clock: FakeClock = .{};
+    var farm: FakeFarm = .{ .clock = &clock, .answers_from = 0 };
+    var buf: [1024]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try t.expectEqual(fw.Waited{ .answered = 0 }, try fw.waitForFarm(&clock, &farm, 1200, &w));
+    try t.expectEqual(@as(usize, 1), farm.probes);
+    try t.expectEqual(@as(usize, 0), clock.sleeps);
+    try t.expectEqualStrings("", w.buffered());
+}
+
+test "a farm back after three minutes: answered with the time waited, a line for each whole minute" {
+    var clock: FakeClock = .{};
+    var farm: FakeFarm = .{ .clock = &clock, .answers_from = 185 };
+    var buf: [1024]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    // probes start at 0, 10, 20, ...: each unanswered one takes 5 s, then 5 s of sleep
+    try t.expectEqual(fw.Waited{ .answered = 190 }, try fw.waitForFarm(&clock, &farm, 1200, &w));
+    try t.expectEqual(@as(usize, 20), farm.probes);
+    try t.expect(!clock.odd_sleep);
+    try t.expectEqualStrings(
+        "buck2-farm: the farm has not answered for 1 min 5 s; waiting up to 20 min 0 s\n" ++
+            "buck2-farm: the farm has not answered for 2 min 5 s; waiting up to 20 min 0 s\n" ++
+            "buck2-farm: the farm has not answered for 3 min 5 s; waiting up to 20 min 0 s\n",
+        w.buffered(),
+    );
+}
+
+test "a farm that never answers: the wait gives up once the bound has passed, its last sleep cut to the bound" {
+    var clock: FakeClock = .{};
+    var farm: FakeFarm = .{ .clock = &clock, .answers_from = null };
+    var buf: [4096]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    // the probe that starts at the bound (1200 s) is the last; it takes its 5 s
+    try t.expectEqual(fw.Waited{ .gave_up = 1205 }, try fw.waitForFarm(&clock, &farm, 1200, &w));
+    try t.expectEqual(@as(usize, 121), farm.probes);
+    try t.expectEqual(@as(usize, 120), clock.sleeps);
+    try t.expect(!clock.odd_sleep);
+    const out = w.buffered();
+    try t.expectEqual(@as(usize, 19), std.mem.count(u8, out, "\n"));
+    try t.expect(std.mem.startsWith(u8, out, "buck2-farm: the farm has not answered for 1 min 5 s; waiting up to 20 min 0 s\n"));
+    try t.expect(std.mem.endsWith(u8, out, "buck2-farm: the farm has not answered for 19 min 5 s; waiting up to 20 min 0 s\n"));
+}
+
+test "the bound does not fall between two probes: a sleep never passes it" {
+    var clock: FakeClock = .{};
+    // a refused connection takes no time
+    var farm: FakeFarm = .{ .clock = &clock, .answers_from = null, .cost = 0 };
+    var buf: [1024]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try t.expectEqual(fw.Waited{ .gave_up = 7 }, try fw.waitForFarm(&clock, &farm, 7, &w));
+    // probes at 0, 5 and 7: the second sleep is 2 s, the rest of the bound
+    try t.expectEqual(@as(usize, 3), farm.probes);
+    try t.expectEqual(@as(usize, 2), clock.sleeps);
+    try t.expect(!clock.odd_sleep);
+}
+
+test "a bound of 0: one probe, no sleep" {
+    var clock: FakeClock = .{};
+    var farm: FakeFarm = .{ .clock = &clock, .answers_from = null, .cost = 0 };
+    var buf: [1024]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try t.expectEqual(fw.Waited{ .gave_up = 0 }, try fw.waitForFarm(&clock, &farm, 0, &w));
+    try t.expectEqual(@as(usize, 1), farm.probes);
+    try t.expectEqual(@as(usize, 0), clock.sleeps);
+}
+
+test "a probe that takes past a minute gets one line with the time, not one per minute missed" {
+    var clock: FakeClock = .{};
+    var farm: FakeFarm = .{ .clock = &clock, .answers_from = null, .cost = 130 };
+    var buf: [1024]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try t.expectEqual(fw.Waited{ .gave_up = 265 }, try fw.waitForFarm(&clock, &farm, 200, &w));
+    try t.expectEqualStrings("buck2-farm: the farm has not answered for 2 min 10 s; waiting up to 3 min 20 s\n", w.buffered());
+}
+
+test "a wait is given in minutes and seconds" {
+    var buf: [64]u8 = undefined;
+    for ([_]struct { s: u64, want: []const u8 }{
+        .{ .s = 0, .want = "0 min 0 s" },
+        .{ .s = 59, .want = "0 min 59 s" },
+        .{ .s = 60, .want = "1 min 0 s" },
+        .{ .s = 3725, .want = "62 min 5 s" },
+    }) |c| {
+        var w = std.Io.Writer.fixed(&buf);
+        try fw.writeDuration(&w, c.s);
+        try t.expectEqualStrings(c.want, w.buffered());
+    }
+}
+
+test "the job summary line names the wait: at once, for how long, or past the longest wait" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings(
+        "buck2-farm: the first run of `build` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 4 failed block(s)); the farm answered at once; ran again (run 2 of at most 3); the first run's log is buck2-farm.first.log",
+        try fr.summaryLine(a, "build", 1, 4, .{ .answered = 0 }, "buck2-farm.first.log"),
+    );
+    try t.expectEqualStrings(
+        "buck2-farm: the second run of `test` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 1 failed block(s)); farm unreachable for 3 min 10 s; ran again (run 3 of at most 3); the second run's log is buck2-farm.second.log",
+        try fr.summaryLine(a, "test", 2, 1, .{ .answered = 190 }, "buck2-farm.second.log"),
+    );
+    try t.expectEqualStrings(
+        "buck2-farm: the first run of `bxl` was cut by a lost connection to the farm (buck2's `RE channel error` in each of 2 failed block(s)); farm unreachable for 20 min 5 s, the longest wait; not run again",
+        try fr.summaryLine(a, "bxl", 1, 2, .{ .gave_up = 1205 }, "unused"),
+    );
+}
+
+test "the real probe: a listening loopback port answers, a bound one that does not listen does not" {
+    const listen_at = try std.net.Address.parseIp("127.0.0.1", 0);
+    var server = try listen_at.listen(.{});
+    defer server.deinit();
+    try t.expect((fw.TcpProber{ .a = t.allocator, .host = "127.0.0.1", .port = server.listen_address.getPort() }).answers());
+
+    // a port bound and not listening refuses every connection, and no other socket can take it
+    const fd = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.STREAM | std.posix.SOCK.CLOEXEC, std.posix.IPPROTO.TCP);
+    defer std.posix.close(fd);
+    var addr = try std.net.Address.parseIp("127.0.0.1", 0);
+    try std.posix.bind(fd, &addr.any, addr.getOsSockLen());
+    var len = addr.getOsSockLen();
+    try std.posix.getsockname(fd, &addr.any, &len);
+    try t.expect(!(fw.TcpProber{ .a = t.allocator, .host = "127.0.0.1", .port = addr.getPort() }).answers());
+}
+
+test "the real clock reads at least the seconds slept" {
+    var clock = try fw.RealClock.init();
+    clock.slept = 42; // as after 42 s of sleep
+    try t.expect(clock.now() >= 42);
 }

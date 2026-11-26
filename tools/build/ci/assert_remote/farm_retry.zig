@@ -1,18 +1,31 @@
-//! The one retry of a buck2 step whose only failure is a cut connection to the
+//! The run again of a buck2 step whose only failure is a cut connection to the
 //! farm: `assert_remote run`, the first line of the buck2-farm action
 //! (.github/actions/buck2-farm/action.yml).
 //!
-//!     assert_remote run --log <file> --summary <file> -- <buck2> <subcommand> [args...]
+//!     assert_remote run --log <file> --summary <file> --farm-config <file> -- <buck2> <subcommand> [args...]
 //!
 //! It runs the command with its stdout and stderr merged, copied to this
 //! program's stdout (the job log) and to `--log` as they arrive, as
 //! `2>&1 | tee` would. A run that exits 0 ends here with 0. A failed run of
-//! `build`, `test` or `bxl` whose log `classify` calls a cut runs once more:
-//! the first log is kept beside `--log` as `<name>.first.log`, one line goes to
-//! `--summary` (the job summary) saying the step ran again after a cut
-//! connection, and the second run's log takes `--log`. There is never a third
-//! run. The exit code is buck2's own, of the last run; 2 for a wrong command
-//! line or a log that cannot be written or read.
+//! `build`, `test` or `bxl` whose log `classify` calls a cut is run again,
+//! after a wait for the farm (farm_wait.zig): `--farm-config` is the machine
+//! buckconfig farm-connect wrote, which names the farm's address and the
+//! longest wait (`farm_wait_seconds`). The tool probes the farm's port until
+//! it answers, at most that long, with a line in the job log each minute.
+//!   * When the farm answers, the failed run's log is kept beside `--log` as
+//!     `<name>.first.log` (the first run's) or `<name>.second.log` (the
+//!     second's), one line goes to `--summary` (the job summary) saying how
+//!     long the farm was unreachable and that the step ran again, and the next
+//!     run's log takes `--log`.
+//!   * When the bound passes first, one line goes to the job summary saying
+//!     how long the farm was unreachable and that the step was not run again;
+//!     `--log` keeps the failed run's log, and the step fails with its code.
+//! A step runs at most `max_runs` (3) times: a third run that is cut too is
+//! final. The farm config is read only when a run is to be run again, so a
+//! step that passes, or fails for good, never needs it. The exit code is
+//! buck2's own, of the last run; 2 for a wrong command line, a log that cannot
+//! be written or read, a farm config that cannot be read or names no farm, or
+//! a job summary that cannot be written.
 //!
 //! When the connection between the runner and the farm is cut, buck2 fails
 //! every action in flight at once, each with a block like this (recorded in
@@ -62,6 +75,7 @@
 
 const std = @import("std");
 const posix = std.posix;
+const farm_wait = @import("farm_wait.zig");
 
 /// What a failed run's log shows.
 pub const Verdict = union(enum) {
@@ -512,11 +526,11 @@ fn writeAllFd(fd: posix.fd_t, bytes: []const u8) void {
     }
 }
 
-/// `<dir>/<name>.first.log` for `<dir>/<name>.log` (`<log>.first` for a name
-/// without `.log`).
-pub fn firstLogPath(a: std.mem.Allocator, log: []const u8) ![]u8 {
-    if (std.mem.endsWith(u8, log, ".log")) return std.fmt.allocPrint(a, "{s}.first.log", .{log[0 .. log.len - 4]});
-    return std.fmt.allocPrint(a, "{s}.first", .{log});
+/// `<dir>/<name>.<ordinal>.log` for `<dir>/<name>.log` (`<log>.<ordinal>` for
+/// a name without `.log`): where the log of a run run again is kept.
+pub fn keptLogPath(a: std.mem.Allocator, log: []const u8, ordinal_name: []const u8) ![]u8 {
+    if (std.mem.endsWith(u8, log, ".log")) return std.fmt.allocPrint(a, "{s}.{s}.log", .{ log[0 .. log.len - 4], ordinal_name });
+    return std.fmt.allocPrint(a, "{s}.{s}", .{ log, ordinal_name });
 }
 
 /// Appends `line` and a newline to the file at `path`, creating it if needed.
@@ -531,12 +545,14 @@ fn appendLine(path: []const u8, line: []const u8) !void {
 const Args = struct {
     log: []const u8,
     summary: []const u8,
+    farm_config: []const u8,
     command: []const [:0]const u8,
 };
 
 fn parseArgs(args: []const [:0]const u8) ?Args {
     var log: ?[]const u8 = null;
     var summary: ?[]const u8 = null;
+    var farm_config: ?[]const u8 = null;
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
@@ -544,27 +560,58 @@ fn parseArgs(args: []const [:0]const u8) ?Args {
             const command = args[i + 1 ..];
             // The command is a program and its buck2 subcommand at least.
             if (command.len < 2) return null;
-            if (log == null or summary == null) return null;
-            if (log.?.len == 0 or summary.?.len == 0) return null;
-            return .{ .log = log.?, .summary = summary.?, .command = command };
+            const l = log orelse return null;
+            const s = summary orelse return null;
+            const f = farm_config orelse return null;
+            if (l.len == 0 or s.len == 0 or f.len == 0) return null;
+            return .{ .log = l, .summary = s, .farm_config = f, .command = command };
         }
         if (i + 1 >= args.len) return null;
         if (std.mem.eql(u8, arg, "--log")) {
             log = args[i + 1];
         } else if (std.mem.eql(u8, arg, "--summary")) {
             summary = args[i + 1];
+        } else if (std.mem.eql(u8, arg, "--farm-config")) {
+            farm_config = args[i + 1];
         } else return null;
         i += 1;
     }
     return null;
 }
 
-pub const usage = "usage: assert_remote run --log <file> --summary <file> -- <buck2> <subcommand> [args...]\n";
+pub const usage = "usage: assert_remote run --log <file> --summary <file> --farm-config <file> -- <buck2> <subcommand> [args...]\n";
+
+/// The most runs of one step: the first, and two more after a cut each.
+pub const max_runs = 3;
+
+/// The name of the n-th run (1-based), for the job log and the kept logs.
+pub fn ordinal(n: usize) []const u8 {
+    return switch (n) {
+        1 => "first",
+        2 => "second",
+        3 => "third",
+        else => "next",
+    };
+}
 
 /// Reads the log a run wrote, or null after the reason is on `w`.
 fn readLog(a: std.mem.Allocator, path: []const u8, cap: usize, w: *std.Io.Writer) !?[]u8 {
     return std.fs.cwd().readFileAlloc(a, path, cap) catch |e| {
         try w.print("buck2-farm: cannot read {s}: {s}\n", .{ path, @errorName(e) });
+        try w.flush();
+        return null;
+    };
+}
+
+/// Reads the farm from the machine buckconfig at `path`, or null after the reason is on `w`.
+fn readFarm(a: std.mem.Allocator, path: []const u8, w: *std.Io.Writer) !?farm_wait.Farm {
+    const text = std.fs.cwd().readFileAlloc(a, path, 1 << 20) catch |e| {
+        try w.print("buck2-farm: not run again: cannot read the farm config {s}: {s}\n", .{ path, @errorName(e) });
+        try w.flush();
+        return null;
+    };
+    return farm_wait.parseConfig(text) catch |e| {
+        try w.print("buck2-farm: not run again: the farm config {s} names no farm: {s}\n", .{ path, farm_wait.describeConfigError(e) });
         try w.flush();
         return null;
     };
@@ -578,6 +625,33 @@ fn exitCode(end: End) u8 {
     };
 }
 
+/// The job summary line for a step whose `run`-th run was cut (`blocks`
+/// failure blocks) and whose wait for the farm ended as `waited`. `kept` is
+/// the base name of the kept log when the step runs again.
+pub fn summaryLine(a: std.mem.Allocator, subcommand: []const u8, run: usize, blocks: usize, waited: farm_wait.Waited, kept: []const u8) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(a);
+    const w = &out.writer;
+    try w.print("buck2-farm: the {s} run of `{s}` was cut by a lost connection to the farm (buck2's `RE channel error` in each of {d} failed block(s)); ", .{ ordinal(run), subcommand, blocks });
+    switch (waited) {
+        .answered => |s| {
+            if (s == 0) {
+                try w.writeAll("the farm answered at once; ran again");
+            } else {
+                try w.writeAll("farm unreachable for ");
+                try farm_wait.writeDuration(w, s);
+                try w.writeAll("; ran again");
+            }
+            try w.print(" (run {d} of at most {d}); the {s} run's log is {s}", .{ run + 1, max_runs, ordinal(run), kept });
+        },
+        .gave_up => |s| {
+            try w.writeAll("farm unreachable for ");
+            try farm_wait.writeDuration(w, s);
+            try w.writeAll(", the longest wait; not run again");
+        },
+    }
+    return out.toOwnedSlice();
+}
+
 /// `assert_remote run <args>`: the header says what it does. `args` are the
 /// arguments after `run`; messages go to `w` (stderr); `cap` bounds a log read.
 pub fn main(a: std.mem.Allocator, args: []const [:0]const u8, cap: usize, w: *std.Io.Writer) !u8 {
@@ -586,78 +660,102 @@ pub fn main(a: std.mem.Allocator, args: []const [:0]const u8, cap: usize, w: *st
         try w.flush();
         return 2;
     };
-    const first = runTee(a, p.command, p.log) catch |e| {
+    var last = runTee(a, p.command, p.log) catch |e| {
         try w.print("buck2-farm: cannot run the command or write {s}: {s}\n", .{ p.log, @errorName(e) });
         try w.flush();
         return 2;
     };
-    switch (first) {
+    switch (last) {
         .exited => |c| if (c == 0) return 0,
         .signal => |s| {
             try w.print("buck2-farm: not run again: buck2 was ended by signal {d}\n", .{s});
             try w.flush();
-            return exitCode(first);
+            return exitCode(last);
         },
     }
     const subcommand = p.command[1];
     if (!retriable(subcommand)) {
         try w.print("buck2-farm: not run again: `{s}` is not build, test or bxl\n", .{subcommand});
         try w.flush();
-        return exitCode(first);
+        return exitCode(last);
     }
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
     const ar = arena.allocator();
-    const log1 = try readLog(ar, p.log, cap, w) orelse return 2;
-    const v1 = try classify(ar, log1);
-    if (v1 != .cut) {
-        try w.writeAll("buck2-farm: not run again: ");
-        try describe(v1, w);
-        try w.writeAll("\n");
-        try w.flush();
-        return exitCode(first);
-    }
-    const first_log = try firstLogPath(ar, p.log);
-    std.fs.cwd().rename(p.log, first_log) catch |e| {
-        try w.print("buck2-farm: cannot keep the first log as {s}: {s}\n", .{ first_log, @errorName(e) });
-        try w.flush();
-        return 2;
-    };
-    const note = try std.fmt.allocPrint(ar, "buck2-farm: `{s}` ran again after a cut connection to the farm (buck2's `RE channel error` in each of {d} failed block(s)); the first run's log is {s}", .{ subcommand, v1.cut, std.fs.path.basename(first_log) });
-    appendLine(p.summary, note) catch |e| {
-        try w.print("buck2-farm: cannot write the job summary {s}: {s}\n", .{ p.summary, @errorName(e) });
-        try w.flush();
-        return 2;
-    };
-    try w.print("{s}\n", .{note});
-    try w.flush();
 
-    const second = runTee(a, p.command, p.log) catch |e| {
-        try w.print("buck2-farm: cannot run the command again or write {s}: {s}\n", .{ p.log, @errorName(e) });
-        try w.flush();
-        return 2;
-    };
-    switch (second) {
-        .exited => |c| if (c == 0) {
-            try w.writeAll("buck2-farm: the second run passed\n");
+    var run: usize = 1;
+    while (true) {
+        // `last` is the `run`-th run, which exited non-zero.
+        const log = try readLog(ar, p.log, cap, w) orelse return 2;
+        const v = try classify(ar, log);
+        if (v != .cut) {
+            if (run == 1) {
+                try w.writeAll("buck2-farm: not run again: ");
+            } else {
+                try w.print("buck2-farm: FAILED: the {s} run failed: ", .{ordinal(run)});
+            }
+            try describe(v, w);
+            try w.writeAll("\n");
             try w.flush();
-            return 0;
-        },
-        .signal => |s| {
-            try w.print("buck2-farm: FAILED: the second run was ended by signal {d}\n", .{s});
+            return exitCode(last);
+        }
+        if (run == max_runs) {
+            try w.print("buck2-farm: FAILED: the {s} run was cut too: the connection to the farm was cut in each of {d} runs (buck2's `RE channel error`); not run again\n", .{ ordinal(run), run });
             try w.flush();
-            return exitCode(second);
-        },
-    }
-    const log2 = try readLog(ar, p.log, cap, w) orelse return 2;
-    const v2 = try classify(ar, log2);
-    if (v2 == .cut) {
-        try w.writeAll("buck2-farm: FAILED: the second run was cut too: the connection to the farm was cut again (buck2's `RE channel error`); not run a third time\n");
-    } else {
-        try w.writeAll("buck2-farm: FAILED: the second run failed: ");
-        try describe(v2, w);
+            return exitCode(last);
+        }
+        const farm = try readFarm(ar, p.farm_config, w) orelse return 2;
+        try w.print("buck2-farm: the {s} run was cut by a lost connection to the farm (buck2's `RE channel error` in each of {d} failed block(s)); waiting for the farm's port to answer, up to ", .{ ordinal(run), v.cut });
+        try farm_wait.writeDuration(w, farm.wait_seconds);
         try w.writeAll("\n");
+        try w.flush();
+        var clock = farm_wait.RealClock.init() catch |e| {
+            try w.print("buck2-farm: not run again: no monotonic clock: {s}\n", .{@errorName(e)});
+            try w.flush();
+            return 2;
+        };
+        const prober: farm_wait.TcpProber = .{ .a = ar, .host = farm.host, .port = farm.port };
+        const waited = try farm_wait.waitForFarm(&clock, prober, farm.wait_seconds, w);
+
+        const kept = try keptLogPath(ar, p.log, ordinal(run));
+        const note = try summaryLine(ar, subcommand, run, v.cut, waited, std.fs.path.basename(kept));
+        if (waited == .answered) {
+            std.fs.cwd().rename(p.log, kept) catch |e| {
+                try w.print("buck2-farm: cannot keep the {s} run's log as {s}: {s}\n", .{ ordinal(run), kept, @errorName(e) });
+                try w.flush();
+                return 2;
+            };
+        }
+        appendLine(p.summary, note) catch |e| {
+            try w.print("buck2-farm: cannot write the job summary {s}: {s}\n", .{ p.summary, @errorName(e) });
+            try w.flush();
+            return 2;
+        };
+        try w.print("{s}\n", .{note});
+        if (waited == .gave_up) {
+            try w.writeAll("buck2-farm: FAILED: the farm did not answer within the longest wait\n");
+            try w.flush();
+            return exitCode(last);
+        }
+        try w.flush();
+
+        run += 1;
+        last = runTee(a, p.command, p.log) catch |e| {
+            try w.print("buck2-farm: cannot run the command again or write {s}: {s}\n", .{ p.log, @errorName(e) });
+            try w.flush();
+            return 2;
+        };
+        switch (last) {
+            .exited => |c| if (c == 0) {
+                try w.print("buck2-farm: the {s} run passed\n", .{ordinal(run)});
+                try w.flush();
+                return 0;
+            },
+            .signal => |s| {
+                try w.print("buck2-farm: FAILED: the {s} run was ended by signal {d}\n", .{ ordinal(run), s });
+                try w.flush();
+                return exitCode(last);
+            },
+        }
     }
-    try w.flush();
-    return exitCode(second);
 }
