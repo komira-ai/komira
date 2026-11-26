@@ -310,20 +310,16 @@ fn releaseCheck(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Out
     return .{ .code = 0, .stdout = "" };
 }
 
-/// The file `name` of `d`, null when there is none; another failure to read it
-/// is returned.
-fn readOptional(alloc: Allocator, d: std.fs.Dir, name: []const u8) !?[]const u8 {
-    return d.readFileAlloc(alloc, name, std.math.maxInt(usize)) catch |e| switch (e) {
-        error.FileNotFound => null,
-        else => e,
-    };
-}
-
 fn lessThan(_: void, a: []const u8, b: []const u8) bool {
     return std.mem.lessThan(u8, a, b);
 }
 
-/// The task directories under `root`, in name order, each with what it holds.
+fn fileLess(_: void, a: tasks.File, b: tasks.File) bool {
+    return std.mem.lessThan(u8, a.name, b.name);
+}
+
+/// The task directories under `root`, in name order, each with its files
+/// in name order (a subdirectory with no bytes).
 fn readTasks(alloc: Allocator, dir: std.fs.Dir, root: []const u8) ![]const tasks.Task {
     var top = try dir.openDir(root, .{ .iterate = true });
     defer top.close();
@@ -337,20 +333,14 @@ fn readTasks(alloc: Allocator, dir: std.fs.Dir, root: []const u8) ![]const tasks
     for (names.items) |name| {
         var sub = try top.openDir(name, .{ .iterate = true });
         defer sub.close();
-        var files = std.ArrayList([]const u8).empty;
+        var files = std.ArrayList(tasks.File).empty;
         var fit = sub.iterate();
         while (try fit.next()) |e| {
-            const shown = if (e.kind == .directory) try std.mem.concat(alloc, u8, &.{ e.name, "/" }) else try alloc.dupe(u8, e.name);
-            try files.append(alloc, shown);
+            const data: ?[]const u8 = if (e.kind == .directory) null else try sub.readFileAlloc(alloc, e.name, std.math.maxInt(usize));
+            try files.append(alloc, .{ .name = try alloc.dupe(u8, e.name), .data = data });
         }
-        std.mem.sort([]const u8, files.items, {}, lessThan);
-        try out.append(alloc, .{
-            .name = name,
-            .files = files.items,
-            .example = try readOptional(alloc, sub, "example.py"),
-            .expected = try readOptional(alloc, sub, "expected_output.txt"),
-            .page = try readOptional(alloc, sub, "page.md"),
-        });
+        std.mem.sort(tasks.File, files.items, {}, fileLess);
+        try out.append(alloc, .{ .name = name, .files = files.items });
     }
     return out.items;
 }

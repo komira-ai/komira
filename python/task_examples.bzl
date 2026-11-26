@@ -5,12 +5,14 @@
 tools/build/readme_examples/tasks.zig) over the catalogue `catalogue`
 (docs/tasks/catalogue.json) and the task directories of `tree`, a directory
 whose subdirectories are the task directories: every directory is named after
-a catalogue entry that is not a gap and holds exactly example.py,
-expected_output.txt and page.md, the page's first fences being the two files
-byte for byte, and every gap names its issues. A refusal names the catalogue
+a catalogue entry that is not a gap and holds example.py, expected_output.txt,
+page.md and nothing but probe pairs, its page shows its files through include
+markers that equal them byte for byte (tools/build/readme_examples/task_page.zig),
+and every gap names its issues. A refusal names the catalogue
 `catalogue_display` and the task files under `display`, and fails the build.
 The output, `<name>.txt`, is the tool's report: `<directory> <status>` per task
-directory. What each example prints is held by its wheel test, not here.
+directory. What each example prints, or each probe fails with, is held by its wheel
+test, not here.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")

@@ -17,11 +17,22 @@ const CATALOGUE =
 
 const EXAMPLE = "import komira\nprint(1)\n";
 const EXPECTED = "1\n";
-const PAGE = "# How do I read a CSV file?\n\nAnswer.\n\n```python\nimport komira\nprint(1)\n```\n\n```text\n1\n```\n";
-const FILES = [_][]const u8{ "example.py", "expected_output.txt", "page.md" };
+const PAGE = "# How do I read a CSV file?\n\nAnswer.\n\n<!-- include example.py -->\n```python\nimport komira\nprint(1)\n```\n\n<!-- include expected_output.txt -->\n```text\n1\n```\n";
+const PAGE2 = "# How do I write a CSV file?\n\n<!-- include example.py -->\n```python\nimport komira\nprint(1)\n```\n\n<!-- include expected_output.txt -->\n```text\n1\n```\n";
+
+const FILES = [_]tasks.File{
+    .{ .name = "example.py", .data = EXAMPLE },
+    .{ .name = "expected_output.txt", .data = EXPECTED },
+    .{ .name = "page.md", .data = PAGE },
+};
 
 fn good(name: []const u8) tasks.Task {
-    return .{ .name = name, .files = &FILES, .example = EXAMPLE, .expected = EXPECTED, .page = PAGE };
+    return .{ .name = name, .files = &FILES };
+}
+
+/// A task directory `name` holding `files`.
+fn holding(name: []const u8, files: []const tasks.File) tasks.Task {
+    return .{ .name = name, .files = files };
 }
 
 /// The refusals of `catalogue` with `list`, under the display `d`.
@@ -58,9 +69,13 @@ fn expectFirstRefused(entry: []const u8, want: []const u8) !void {
 test "a catalogue and task directories that agree pass, and the report names each directory and its status" {
     var arena = Arena.init(t.allocator);
     defer arena.deinit();
-    const page2 = "# How do I write a CSV file?\n\n```python\nimport komira\nprint(1)\n```\n\n```text\n1\n```\n";
-    var two = good("2-write-csv");
-    two.page = page2;
+    const two = holding("2-write-csv", &.{
+        .{ .name = "example.py", .data = EXAMPLE },
+        .{ .name = "expected_output.txt", .data = EXPECTED },
+        .{ .name = "page.md", .data = PAGE2 },
+        .{ .name = "probe_native.error.txt", .data = "ParseError: no\n" },
+        .{ .name = "probe_native.py", .data = "raise SystemExit\n" },
+    });
     const r = try tasks.check(arena.allocator(), "d", "c.json", CATALOGUE, &.{ good("1-read-csv-file"), two });
     try t.expectEqual(@as(usize, 0), r.refusals.len);
     try t.expectEqualStrings("1-read-csv-file works\n2-write-csv partial\n", r.report);
@@ -230,95 +245,75 @@ test "a directory of a refused entry is named only by the catalogue's refusal" {
     try expectOnly(cat, &.{good("1-read-csv-file")}, "c.json: rank 1: status \"maybe\" is not works, partial or gap");
 }
 
-test "a file or subdirectory other than the three is refused" {
-    var task = good("1-read-csv-file");
-    task.files = &.{ "data.csv", "example.py", "expected_output.txt", "page.md" };
-    try expectOnly(CATALOGUE, &.{task}, "d/1-read-csv-file/data.csv: a task directory holds only example.py, expected_output.txt and page.md");
-    task.files = &.{ "example.py", "expected_output.txt", "out/", "page.md" };
-    try expectOnly(CATALOGUE, &.{task}, "d/1-read-csv-file/out/: a task directory holds only example.py, expected_output.txt and page.md");
+test "a file or subdirectory other than the three and probes is refused" {
+    try expectOnly(CATALOGUE, &.{holding("1-read-csv-file", &(FILES ++ [_]tasks.File{.{ .name = "data.csv", .data = "a\n" }}))}, "d/1-read-csv-file/data.csv: a task directory holds only example.py, expected_output.txt, page.md and probe_<name>.py with probe_<name>.error.txt");
+    try expectOnly(CATALOGUE, &.{holding("1-read-csv-file", &(FILES ++ [_]tasks.File{.{ .name = "out", .data = null }}))}, "d/1-read-csv-file/out/: a task directory holds no directory");
+    // A probe name with a capital or a hyphen is no probe.
+    try expectOnly(CATALOGUE, &.{holding("1-read-csv-file", &(FILES ++ [_]tasks.File{.{ .name = "probe_Native.py", .data = "x\n" }}))}, "d/1-read-csv-file/probe_Native.py: a task directory holds only example.py, expected_output.txt, page.md and probe_<name>.py with probe_<name>.error.txt");
+    try expectOnly(CATALOGUE, &.{holding("1-read-csv-file", &(FILES ++ [_]tasks.File{.{ .name = "probe_.py", .data = "x\n" }}))}, "d/1-read-csv-file/probe_.py: a task directory holds only example.py, expected_output.txt, page.md and probe_<name>.py with probe_<name>.error.txt");
 }
 
-test "each missing file is refused" {
-    var task = good("1-read-csv-file");
-    task.files = &.{ "expected_output.txt", "page.md" };
-    task.example = null;
-    try expectOnly(CATALOGUE, &.{task}, "d/1-read-csv-file: no example.py");
-    task = good("1-read-csv-file");
-    task.files = &.{ "example.py", "page.md" };
-    task.expected = null;
-    try expectOnly(CATALOGUE, &.{task}, "d/1-read-csv-file: no expected_output.txt");
-    task = good("1-read-csv-file");
-    task.files = &.{ "example.py", "expected_output.txt" };
-    task.page = null;
-    try expectOnly(CATALOGUE, &.{task}, "d/1-read-csv-file: no page.md");
-}
-
-test "a page whose first line is not the question is refused" {
-    var task = good("1-read-csv-file");
-    task.page = "# Reading CSV\n\n```python\nimport komira\nprint(1)\n```\n\n```text\n1\n```\n";
-    try expectOnly(CATALOGUE, &.{task}, "d/1-read-csv-file/page.md:1: the first line is not \"# How do I read a CSV file?\"");
-    task.page = "";
+/// That the refusals of `list` against CATALOGUE are exactly `want`, in order.
+fn expectAll(list: []const tasks.Task, want: []const []const u8) !void {
     var arena = Arena.init(t.allocator);
     defer arena.deinit();
-    const got = try refusals(arena.allocator(), CATALOGUE, &.{task});
-    try t.expectEqual(@as(usize, 3), got.len);
-    try t.expectEqualStrings("d/1-read-csv-file/page.md:1: the first line is not \"# How do I read a CSV file?\"", got[0]);
+    const got = try refusals(arena.allocator(), CATALOGUE, list);
+    try t.expectEqual(want.len, got.len);
+    for (want, got) |w, g| try t.expectEqualStrings(w, g);
 }
 
-test "a page whose python fence differs from example.py by one byte is refused at the fence's line" {
-    var task = good("1-read-csv-file");
-    task.example = "import komira\nprint(2)\n";
-    try expectOnly(CATALOGUE, &.{task}, "d/1-read-csv-file/page.md:5: the ```python fence is not example.py byte for byte");
-    // A missing final line ending is a difference too.
-    task.example = "import komira\nprint(1)";
-    try expectOnly(CATALOGUE, &.{task}, "d/1-read-csv-file/page.md:5: the ```python fence is not example.py byte for byte");
+test "each missing file is refused, and the page's include of it too" {
+    try expectAll(&.{holding("1-read-csv-file", &.{ FILES[1], FILES[2] })}, &.{
+        "d/1-read-csv-file: no example.py",
+        "d/1-read-csv-file/page.md:5: include example.py: the task directory has no such file",
+    });
+    try expectAll(&.{holding("1-read-csv-file", &.{ FILES[0], FILES[2] })}, &.{
+        "d/1-read-csv-file: no expected_output.txt",
+        "d/1-read-csv-file/page.md:11: include expected_output.txt: the task directory has no such file",
+    });
+    try expectOnly(CATALOGUE, &.{holding("1-read-csv-file", &.{ FILES[0], FILES[1] })}, "d/1-read-csv-file: no page.md");
 }
 
-test "a page whose text fence differs from expected_output.txt is refused at the fence's line" {
-    var task = good("1-read-csv-file");
-    task.expected = "2\n";
-    try expectOnly(CATALOGUE, &.{task}, "d/1-read-csv-file/page.md:10: the ```text fence is not expected_output.txt byte for byte");
-    task.expected = "";
-    try expectOnly(CATALOGUE, &.{task}, "d/1-read-csv-file/page.md:10: the ```text fence is not expected_output.txt byte for byte");
+const PARTIAL = [_]tasks.File{
+    .{ .name = "example.py", .data = EXAMPLE },
+    .{ .name = "expected_output.txt", .data = EXPECTED },
+    .{ .name = "page.md", .data = PAGE2 },
+};
+
+test "a probe without its error line, or an error line without its probe, is refused" {
+    try expectOnly(CATALOGUE, &.{holding("2-write-csv", &(PARTIAL ++ [_]tasks.File{.{ .name = "probe_native.py", .data = "x\n" }}))}, "d/2-write-csv/probe_native.py: no probe_native.error.txt, the line the probe must fail with");
+    try expectOnly(CATALOGUE, &.{holding("2-write-csv", &(PARTIAL ++ [_]tasks.File{.{ .name = "probe_native.error.txt", .data = "E: x\n" }}))}, "d/2-write-csv/probe_native.error.txt: no probe_native.py, the probe it is the failure of");
 }
 
-test "a page with no python or no text fence, or one left open, is refused" {
-    var task = good("1-read-csv-file");
-    task.page = "# How do I read a CSV file?\n\n```text\n1\n```\n";
-    try expectOnly(CATALOGUE, &.{task}, "d/1-read-csv-file/page.md: no closed ```python fence at the start of a line, which shows example.py");
-    task.page = "# How do I read a CSV file?\n\n```python\nimport komira\nprint(1)\n```\n\n```text\n1\n";
-    try expectOnly(CATALOGUE, &.{task}, "d/1-read-csv-file/page.md: no closed ```text fence at the start of a line, which shows expected_output.txt");
+test "an error line that is not one line ended by a line feed is refused" {
+    const bad = [_][]const u8{ "E: x", "E: x\ny\n", "\n", "", "E: x\r\n" };
+    inline for (bad) |d| {
+        try expectOnly(CATALOGUE, &.{holding("2-write-csv", &(PARTIAL ++ [_]tasks.File{
+            .{ .name = "probe_native.error.txt", .data = d },
+            .{ .name = "probe_native.py", .data = "x\n" },
+        }))}, "d/2-write-csv/probe_native.error.txt: not one line ended by a line feed");
+    }
 }
 
-test "the first fence at the start of a line is compared; later and indented fences are the page's own" {
-    var task = good("1-read-csv-file");
-    task.page = "# How do I read a CSV file?\n\n- a note:\n\n  ```python\n  other\n  ```\n\n```python\nimport komira\nprint(1)\n```\n\n```text\n1\n```\n\n```python\nmore\n```\n";
-    var arena = Arena.init(t.allocator);
-    defer arena.deinit();
-    const r = try tasks.check(arena.allocator(), "d", "c.json", CATALOGUE, &.{task});
-    try t.expectEqual(@as(usize, 0), r.refusals.len);
-    try t.expectEqualStrings("1-read-csv-file works\n", r.report);
+test "a probe on a task that works is refused" {
+    try expectOnly(CATALOGUE, &.{holding("1-read-csv-file", &(FILES ++ [_]tasks.File{
+        .{ .name = "probe_native.error.txt", .data = "E: x\n" },
+        .{ .name = "probe_native.py", .data = "x\n" },
+    }))}, "d/1-read-csv-file: rank 1 works, and a probe is for a gap or partial task (what komira cannot do yet)");
 }
 
-test "a page with CRLF line endings compares its fences line by line" {
-    var task = good("1-read-csv-file");
-    task.page = "# How do I read a CSV file?\r\n\r\n```python\r\nimport komira\r\nprint(1)\r\n```\r\n\r\n```text\r\n1\r\n```\r\n";
-    var arena = Arena.init(t.allocator);
-    defer arena.deinit();
-    const r = try tasks.check(arena.allocator(), "d", "c.json", CATALOGUE, &.{task});
-    try t.expectEqual(@as(usize, 0), r.refusals.len);
+test "the page's own refusals are reported, named by the page" {
+    const page = "# Reading CSV\n\n<!-- include example.py -->\n```python\nimport komira\nprint(1)\n```\n\n<!-- include expected_output.txt -->\n```text\n1\n```\n";
+    try expectOnly(CATALOGUE, &.{holding("1-read-csv-file", &.{ FILES[0], FILES[1], .{ .name = "page.md", .data = page } })}, "d/1-read-csv-file/page.md:1: the first line is not \"# How do I read a CSV file?\"");
 }
 
 test "every refusal is reported, and a refused check reports no directory" {
-    var task = good("1-read-csv-file");
-    task.example = "x\n";
-    task.expected = "y\n";
     var arena = Arena.init(t.allocator);
     defer arena.deinit();
-    const r = try tasks.check(arena.allocator(), "d", "c.json", CATALOGUE, &.{ task, good("3-read-excel") });
-    try t.expectEqual(@as(usize, 3), r.refusals.len);
-    try t.expectEqualStrings("d/1-read-csv-file/page.md:5: the ```python fence is not example.py byte for byte", r.refusals[0]);
-    try t.expectEqualStrings("d/1-read-csv-file/page.md:10: the ```text fence is not expected_output.txt byte for byte", r.refusals[1]);
-    try t.expectEqualStrings("d/3-read-excel: rank 3 is a gap, which has no example", r.refusals[2]);
+    const one = holding("1-read-csv-file", &.{ .{ .name = "example.py", .data = "x\n" }, FILES[1], FILES[2] });
+    const r = try tasks.check(arena.allocator(), "d", "c.json", CATALOGUE, &.{ one, good("3-read-excel") });
+    try t.expectEqual(@as(usize, 2), r.refusals.len);
+    try t.expectEqualStrings("d/1-read-csv-file/page.md:6: include example.py is stale (first difference at line 1 of example.py)", r.refusals[0]);
+    try t.expectEqualStrings("d/3-read-excel: rank 3 is a gap, which has no example", r.refusals[1]);
     try t.expectEqualStrings("", r.report);
 }

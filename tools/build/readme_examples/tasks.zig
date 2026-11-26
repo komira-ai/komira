@@ -17,34 +17,32 @@
 //!
 //! A task directory is named `<rank>-<slug>` after an entry that is not a
 //! gap: the slug finds the entry, and the rank must be the entry's. It
-//! holds exactly `example.py`, `expected_output.txt` and `page.md`. The page's first line is `# ` and the entry's question; its
-//! first `python` fence holds `example.py` byte for byte and its first
-//! `text` fence `expected_output.txt` (fences opened at the line's start;
-//! an indented one, inside a list, is the page's own). What the program
-//! prints is held to `expected_output.txt` by the wheel test of the
-//! directory (python/BUCK), not here.
+//! holds `example.py`, `expected_output.txt` and `page.md`, and nothing
+//! else but probes. A probe is the pair `probe_<name>.py` and
+//! `probe_<name>.error.txt` (`<name>` lowercase letters, digits and `_`):
+//! a program that must fail, and the one line it fails with. Only a gap or
+//! a partial task has probes. The page follows task_page.zig. What a
+//! program prints, or fails with, is held by the wheel test of the
+//! directory (python/docs/tasks/BUCK), not here.
 //!
 //! Every refusal is one line naming the file, and the line of the file
 //! where there is one. The fences are the shared Markdown reader's
 //! (`@import("markdown")`, tools/build/markdown).
 
 const std = @import("std");
-const md = @import("markdown");
+const page_rules = @import("task_page.zig");
 const Allocator = std.mem.Allocator;
 
 pub const Status = enum { works, partial, gap };
+
+pub const File = page_rules.File;
 
 /// One task directory as the check reads it.
 pub const Task = struct {
     /// The directory's name, `<rank>-<slug>`.
     name: []const u8,
-    /// The names of everything the directory holds, in any order; a
-    /// subdirectory is named with a trailing `/`.
-    files: []const []const u8,
-    /// The three files' contents, null when the directory lacks the file.
-    example: ?[]const u8 = null,
-    expected: ?[]const u8 = null,
-    page: ?[]const u8 = null,
+    /// Everything the directory holds, in any order.
+    files: []const File,
 };
 
 const Entry = struct {
@@ -62,6 +60,33 @@ pub const Result = struct {
 };
 
 const FILES = [_][]const u8{ "example.py", "expected_output.txt", "page.md" };
+
+const PROBE = "probe_";
+const PROBE_PY = ".py";
+const PROBE_ERROR = ".error.txt";
+
+fn probeNameOk(n: []const u8) bool {
+    if (n.len == 0) return false;
+    for (n) |ch| {
+        if (!((ch >= 'a' and ch <= 'z') or (ch >= '0' and ch <= '9') or ch == '_')) return false;
+    }
+    return true;
+}
+
+/// The `<name>` of `probe_<name><suffix>`, or null.
+fn probeOf(file: []const u8, suffix: []const u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, file, PROBE) or !std.mem.endsWith(u8, file, suffix)) return null;
+    if (file.len < PROBE.len + suffix.len) return null;
+    const n = file[PROBE.len .. file.len - suffix.len];
+    return if (probeNameOk(n)) n else null;
+}
+
+fn findFile(files: []const File, name: []const u8) ?File {
+    for (files) |f| {
+        if (std.mem.eql(u8, f.name, name)) return f;
+    }
+    return null;
+}
 
 const KEYS = [_][]const u8{ "rank", "slug", "category", "question", "status", "issues" };
 
@@ -221,48 +246,6 @@ fn splitName(name: []const u8) ?struct { rank: usize, slug: []const u8 } {
     return .{ .rank = rank, .slug = name[dash + 1 ..] };
 }
 
-/// The body of the first fence opened at the line's start whose info
-/// string is `info`, each line ended by "\n", and the page line (from 1)
-/// of its opening; or null when the page has none or the fence is not
-/// closed.
-fn fenceBody(alloc: Allocator, lines: []const []const u8, fences: []const md.Fence, info: []const u8) Allocator.Error!?struct { body: []const u8, line: usize } {
-    for (fences) |f| {
-        if (f.indent != 0 or !std.mem.eql(u8, f.info, info)) continue;
-        const close = f.close_line orelse return null;
-        var body = std.ArrayList(u8).empty;
-        for (lines[f.open_line + 1 .. close]) |l| {
-            try body.appendSlice(alloc, l);
-            try body.append(alloc, '\n');
-        }
-        return .{ .body = try body.toOwnedSlice(alloc), .line = f.open_line + 1 };
-    }
-    return null;
-}
-
-fn checkPage(c: *Check, task: Task, entry: Entry) Allocator.Error!void {
-    const page = task.page orelse return;
-    const lines = try md.splitLines(c.alloc, page);
-    const title = try std.mem.concat(c.alloc, u8, &.{ "# ", entry.question });
-    if (lines.len == 0 or !std.mem.eql(u8, lines[0], title)) {
-        try c.refuse("{s}/{s}/page.md:1: the first line is not \"{s}\"", .{ c.display, task.name, title });
-    }
-    const fences = try md.fences(c.alloc, lines);
-    const pairs = [_]struct { info: []const u8, file: []const u8, want: ?[]const u8 }{
-        .{ .info = "python", .file = "example.py", .want = task.example },
-        .{ .info = "text", .file = "expected_output.txt", .want = task.expected },
-    };
-    for (pairs) |p| {
-        const want = p.want orelse continue;
-        const got = try fenceBody(c.alloc, lines, fences, p.info) orelse {
-            try c.refuse("{s}/{s}/page.md: no closed ```{s} fence at the start of a line, which shows {s}", .{ c.display, task.name, p.info, p.file });
-            continue;
-        };
-        if (!std.mem.eql(u8, got.body, want)) {
-            try c.refuse("{s}/{s}/page.md:{d}: the ```{s} fence is not {s} byte for byte", .{ c.display, task.name, got.line, p.info, p.file });
-        }
-    }
-}
-
 fn checkTask(c: *Check, task: Task, cat: Catalogue) Allocator.Error!?Status {
     const split = splitName(task.name) orelse {
         try c.refuse("{s}/{s}: a task directory is named <rank>-<slug>", .{ c.display, task.name });
@@ -282,17 +265,45 @@ fn checkTask(c: *Check, task: Task, cat: Catalogue) Allocator.Error!?Status {
         try c.refuse("{s}/{s}: rank {d} is a gap, which has no example", .{ c.display, task.name, rank });
         return null;
     }
+    var probes: usize = 0;
     for (task.files) |f| {
+        const dir = try std.fmt.allocPrint(c.alloc, "{s}/{s}", .{ c.display, task.name });
+        if (f.data == null) {
+            try c.refuse("{s}/{s}/: a task directory holds no directory", .{ dir, f.name });
+            continue;
+        }
         const known = for (FILES) |want| {
-            if (std.mem.eql(u8, f, want)) break true;
+            if (std.mem.eql(u8, f.name, want)) break true;
         } else false;
-        if (!known) try c.refuse("{s}/{s}/{s}: a task directory holds only example.py, expected_output.txt and page.md", .{ c.display, task.name, f });
+        if (known) continue;
+        if (probeOf(f.name, PROBE_ERROR)) |n| {
+            const py = try std.mem.concat(c.alloc, u8, &.{ PROBE, n, PROBE_PY });
+            if (findFile(task.files, py) == null) try c.refuse("{s}/{s}: no {s}, the probe it is the failure of", .{ dir, f.name, py });
+            const d = f.data.?;
+            const one_line = d.len > 1 and d[d.len - 1] == '\n' and std.mem.indexOfScalar(u8, d[0 .. d.len - 1], '\n') == null and std.mem.indexOfScalar(u8, d, '\r') == null;
+            if (!one_line) try c.refuse("{s}/{s}: not one line ended by a line feed", .{ dir, f.name });
+            continue;
+        }
+        if (probeOf(f.name, PROBE_PY)) |n| {
+            probes += 1;
+            const err = try std.mem.concat(c.alloc, u8, &.{ PROBE, n, PROBE_ERROR });
+            if (findFile(task.files, err) == null) try c.refuse("{s}/{s}: no {s}, the line the probe must fail with", .{ dir, f.name, err });
+            continue;
+        }
+        try c.refuse("{s}/{s}: a task directory holds only example.py, expected_output.txt, page.md and probe_<name>.py with probe_<name>.error.txt", .{ dir, f.name });
     }
-    const have = [_]?[]const u8{ task.example, task.expected, task.page };
-    for (FILES, have) |f, h| {
-        if (h == null) try c.refuse("{s}/{s}: no {s}", .{ c.display, task.name, f });
+    if (probes > 0 and entry.status == .works) {
+        try c.refuse("{s}/{s}: rank {d} works, and a probe is for a gap or partial task (what komira cannot do yet)", .{ c.display, task.name, rank });
     }
-    try checkPage(c, task, entry);
+    for (FILES) |want| {
+        if (findFile(task.files, want) == null) try c.refuse("{s}/{s}: no {s}", .{ c.display, task.name, want });
+    }
+    if (findFile(task.files, "page.md")) |p| {
+        if (p.data) |text| {
+            const name = try std.fmt.allocPrint(c.alloc, "{s}/{s}/page.md", .{ c.display, task.name });
+            try page_rules.check(c.alloc, &c.refusals, name, entry.question, text, task.files);
+        }
+    }
     return entry.status;
 }
 

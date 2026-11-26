@@ -2,6 +2,7 @@
 
 Read the JSON Lines file with komira (`register_json` and SQL), take the rows as Arrow, and insert them with the database's own driver; `sqlite3` ships with Python.
 
+<!-- include example.py -->
 ```python
 import json
 import sqlite3
@@ -45,6 +46,7 @@ db.close()
 
 Output:
 
+<!-- include expected_output.txt -->
 ```text
 4 3
 (1, 'ana', 'click', 120)
@@ -60,19 +62,24 @@ Output:
 
 - komira reads newline-delimited JSON (one object per line) with flat values today. A file that is one array of records, or records with nested objects, is not read yet: komira-ai/komira#2338.
 - komira has no database connector yet, so the write goes through the driver: komira-ai/komira#2335 tracks writing to a database table from komira itself.
-- Postgres is the same shape with `psycopg` (`pip install psycopg`), not run by this page's test:
+- komira cannot yet write the rows itself: `probe_native_insert.py` beside this page tries `INSERT INTO ... SELECT` through komira and must fail with the line in `probe_native_insert.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
 
-  ```python
-  import psycopg
+### Postgres
 
-  with psycopg.connect("dbname=app") as conn:
-      with conn.cursor() as cur:
-          cur.execute("CREATE TABLE events (id bigint PRIMARY KEY, name text, kind text, ms bigint)")
-          cur.executemany(
-              "INSERT INTO events VALUES (%(id)s, %(name)s, %(kind)s, %(ms)s)",
-              rows.to_pylist(),
-          )
-  ```
+The same shape with `psycopg` (`pip install psycopg`) and a Postgres server; `rows` is the Arrow table of the program above.
+
+<!-- not-tested: needs a Postgres server, which the check does not have -->
+```python
+import psycopg
+
+with psycopg.connect("dbname=app") as conn:
+    with conn.cursor() as cur:
+        cur.execute("CREATE TABLE events (id bigint PRIMARY KEY, name text, kind text, ms bigint)")
+        cur.executemany(
+            "INSERT INTO events VALUES (%(id)s, %(name)s, %(kind)s, %(ms)s)",
+            rows.to_pylist(),
+        )
+```
 
 ## Related
 

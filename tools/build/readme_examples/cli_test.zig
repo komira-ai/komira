@@ -297,7 +297,7 @@ fn writeTask(dir: std.fs.Dir, a: std.mem.Allocator, name: []const u8, question: 
     defer sub.close();
     try sub.writeFile(.{ .sub_path = "example.py", .data = "print(1)\n" });
     try sub.writeFile(.{ .sub_path = "expected_output.txt", .data = "1\n" });
-    const page = try std.fmt.allocPrint(a, "# {s}\n\n```python\nprint(1)\n```\n\n```text\n1\n```\n", .{question});
+    const page = try std.fmt.allocPrint(a, "# {s}\n\n<!-- include example.py -->\n```python\nprint(1)\n```\n\n<!-- include expected_output.txt -->\n```text\n1\n```\n", .{question});
     try sub.writeFile(.{ .sub_path = "page.md", .data = page });
 }
 
@@ -339,8 +339,8 @@ test "tasks-check refused is exit 1, names each file under --display, and writes
     try writeTask(root, a, "3-c", "How do I c?");
     const o = cli.run(a, tmp.dir, &TASKS_ARGS);
     try t.expectEqual(@as(u8, 1), o.code);
-    try t.expectEqualStrings("python/docs/tasks/1-a/out/: a task directory holds only example.py, expected_output.txt and page.md\n" ++
-        "python/docs/tasks/1-a/page.md:7: the ```text fence is not expected_output.txt byte for byte\n" ++
+    try t.expectEqualStrings("python/docs/tasks/1-a/out/: a task directory holds no directory\n" ++
+        "python/docs/tasks/1-a/page.md:9: include expected_output.txt is stale (first difference at line 1 of expected_output.txt)\n" ++
         "python/docs/tasks/3-c: rank 3 is a gap, which has no example\n", o.stdout);
     try t.expectError(error.FileNotFound, tmp.dir.access("report.txt", .{}));
 }

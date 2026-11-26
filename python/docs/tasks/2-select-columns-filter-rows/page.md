@@ -2,6 +2,7 @@
 
 Name the columns in `SELECT` and the condition in `WHERE`, or index a pandas-shaped frame with a boolean Series and then a list of column names.
 
+<!-- include example.py -->
 ```python
 from pathlib import Path
 
@@ -43,6 +44,7 @@ print(west_big.materialize().to_arrow().to_pylist())
 
 Output:
 
+<!-- include expected_output.txt -->
 ```text
 [{'order_id': 1, 'customer': 'Ana', 'amount': 120}, {'order_id': 4, 'customer': 'Cy', 'amount': 200}, {'order_id': 5, 'customer': 'Bo', 'amount': 150}]
 [{'order_id': 1, 'region': 'east'}, {'order_id': 3, 'region': 'east'}, {'order_id': 4, 'region': 'north'}]

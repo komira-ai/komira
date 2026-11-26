@@ -14,6 +14,14 @@ _FILES = glob(["*/**"])
 
 _TASKS = sorted({f.split("/")[0]: True for f in _FILES}.keys())
 
+# The probes, `<task>/probe_<name>.py`: programs that show what komira cannot
+# do yet, each failing with the line of its `probe_<name>.error.txt`.
+_PROBES = sorted([
+    f.split("/")[0] + "/" + f.split("/")[1][len("probe_"):-len(".py")]
+    for f in _FILES
+    if f.count("/") == 1 and f.split("/")[1].startswith("probe_") and f.endswith(".py")
+])
+
 filegroup(
     name = "tree",
     srcs = _FILES,
@@ -54,6 +62,18 @@ _DRIVER = "komira//python/tests:run_task_example.py"
     files = {"--tasks-dir": ":tree"},
 ) for t in _TASKS]
 
+# Each probe, `<task>__probe_<name>`: it must raise exactly its recorded line.
+# A probe that runs to the end is red: the feature exists, and the page, its
+# catalogue status and the probe change with it.
+[wheel_install_test(
+    name = p.replace("/", "__probe_"),
+    python = "komira//third_party/python:cpython",
+    wheels = _WHEELS,
+    script = _DRIVER,
+    args = ["--probe", p],
+    files = {"--tasks-dir": ":tree"},
+) for p in _PROBES]
+
 # The same run on rank 1's example held to an expected output that differs in
 # its second line: it must fail, naming the task and that line.
 filegroup(
@@ -71,8 +91,8 @@ wheel_install_test(
     script = _DRIVER,
     args = ["--task", "1-read-csv-file"],
     files = {"--tasks-dir": ":tree_wrong_expected_output"},
-    expect_failure = "AssertionError: python/docs/tasks/1-read-csv-file printed other text than its expected_output.txt: line 2 is " +
-                     "\"{'id': 2, 'name': 'Bo', 'city': 'Lima', 'score': 7.0}\", expected \"{'id': 2, 'name': 'Bo', 'city': 'Lima', 'score': 7.5}\"",
+    expect_failure = "AssertionError: python/docs/tasks/1-read-csv-file/expected_output.txt:2: expected " +
+                     "\"{'id': 2, 'name': 'Bo', 'city': 'Lima', 'score': 7.5}\", printed \"{'id': 2, 'name': 'Bo', 'city': 'Lima', 'score': 7.0}\"",
 )
 
 # An example that raises: the run must fail naming the task and the error.
@@ -91,7 +111,42 @@ wheel_install_test(
     script = _DRIVER,
     args = ["--task", "1-read-csv-file"],
     files = {"--tasks-dir": ":tree_example_raises"},
-    expect_failure = "AssertionError: python/docs/tasks/1-read-csv-file raised ValueError: the input has no column amount",
+    expect_failure = "AssertionError: python/docs/tasks/1-read-csv-file/example.py:4: raised ValueError: the input has no column amount",
+)
+
+# A probe that runs to the end, and a probe that raises another line than its
+# recorded one: each run must fail, naming the probe's file.
+filegroup(
+    name = "tree_probes",
+    srcs = {
+        "22-read-json-file-write-records-database/probe_other.error.txt": "komira//python/tests:fixtures/task_probe_other_error.txt",
+        "22-read-json-file-write-records-database/probe_other.py": "komira//python/tests:fixtures/task_probe_raises.py",
+        "22-read-json-file-write-records-database/probe_runs.error.txt": "komira//python/tests:fixtures/task_probe_other_error.txt",
+        "22-read-json-file-write-records-database/probe_runs.py": "komira//python/tests:fixtures/task_probe_runs.py",
+    },
+)
+
+wheel_install_test(
+    name = "refuses_probe_that_runs",
+    python = "komira//third_party/python:cpython",
+    wheels = _WHEELS,
+    script = _DRIVER,
+    args = ["--probe", "22-read-json-file-write-records-database/runs"],
+    files = {"--tasks-dir": ":tree_probes"},
+    expect_failure = "AssertionError: python/docs/tasks/22-read-json-file-write-records-database/probe_runs.py: ran to the end, " +
+                     "but probe_runs.error.txt says it fails with 'ValueError: another refusal': " +
+                     "if komira does this now, update the page, its catalogue status and the probe",
+)
+
+wheel_install_test(
+    name = "refuses_probe_with_another_error",
+    python = "komira//third_party/python:cpython",
+    wheels = _WHEELS,
+    script = _DRIVER,
+    args = ["--probe", "22-read-json-file-write-records-database/other"],
+    files = {"--tasks-dir": ":tree_probes"},
+    expect_failure = "AssertionError: python/docs/tasks/22-read-json-file-write-records-database/probe_other.error.txt:1: " +
+                     "expected 'ValueError: another refusal', raised 'ValueError: komira cannot do this yet'",
 )
 
 # Every example on the macOS arm64 wheel, one run on the farm's macOS
@@ -108,7 +163,7 @@ wheel_install_test(
         "komira//python/tests:" + PROTOBUF_MACOS["file"],
     ],
     script = _DRIVER,
-    args = [a for t in _TASKS for a in ["--task", t]],
+    args = [a for t in _TASKS for a in ["--task", t]] + [a for p in _PROBES for a in ["--probe", p]],
     files = {"--tasks-dir": ":tree"},
     exec_compatible_with = DARWIN_ARM64,
     target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64

@@ -27,4 +27,5 @@ test {
     _ = @import("cli_test.zig");
     _ = @import("link_test.zig");
     _ = @import("tasks_test.zig");
+    _ = @import("task_page_test.zig");
 }

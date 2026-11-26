@@ -38,29 +38,63 @@ In the Python tree:
 - `example.py` is a complete program. It makes its own small input files in the directory it runs
   in, and uses no network.
 - `expected_output.txt` is exactly what `example.py` prints.
+- `probe_<name>.py` with `probe_<name>.error.txt` (optional, for a `gap` or `partial` task only) is
+  a probe: a program written the way the task would be done if komira could, and the one line it
+  fails with today, `<Type>: <message>`. A probe must fail with exactly that line. The day it runs
+  to the end, its target goes red, and the page, the catalogue status and the probe change together.
+  A page need not show a probe.
 - `page.md` is the task's page: its first line is `# ` and the question, then a one-line answer,
-  the program in the page's first `python` fence, its output in the first `text` fence, notes, and
-  the related tasks by rank.
+  the program, its output, notes, and the related tasks by rank.
+
+A page shows a file through an include marker, on the line directly before a fence, both at the
+start of their lines:
+
+````markdown
+<!-- include example.py -->
+```python
+...example.py, byte for byte...
+```
+````
+
+The fence's word is fixed by the file's extension (`.py` is `python`, `.txt` is `text`), and the
+marker names a file of the task directory by its file name. Every page includes `example.py` and
+`expected_output.txt`. A fence that shows no file says why on the line before it, as
+`<!-- not-tested: <reason> -->`, and the page should say so in its prose too. A `python` fence
+needs an include or that marker, and so does a `text` fence that directly follows code or an
+include with only blank lines between, so a page never shows output that no run printed. The
+marker words are spelled once, in `MARKERS` of `tools/build/readme_examples/task_page.zig`.
 
 ## What the pull request's check holds
 
-Two kinds of target in `python/docs/tasks/BUCK`, both in the pull request's check:
+These targets in `python/docs/tasks/BUCK` are all in the pull request's check:
 
-- `//python/docs/tasks:pages` holds the catalogue to the tree: every entry has the keys above with
-  their forms, every `gap` names its issues, every directory is named after an entry that is not a
-  `gap` (its slug finds the entry and its rank is the entry's), holds exactly the three files, and
-  its page's title is the question and its first `python` and `text` fences are `example.py` and
-  `expected_output.txt` byte for byte. It is `tasks-check` of the Zig tool
-  `//tools/build/readme_examples:tool`, which reads the page through the shared Markdown module.
-- `//python/docs/tasks:<rank>-<slug>`, one per directory, installs the built wheel into an empty
-  virtual environment of the hermetic CPython 3.13, with its pinned pyarrow and protobuf and nothing
-  else, no network and no library path, runs `example.py` there from a new empty directory, and
-  holds what it prints to `expected_output.txt` byte for byte. A difference fails the target with
-  the task and the first line that differs, and both texts in the log.
-  `//python/docs/tasks:refuses_wrong_expected_output` runs rank 1's example against an expected
-  output that differs in one line, and passes only when the run fails with that line;
-  `//python/docs/tasks:refuses_example_that_raises` runs an example that raises, and passes only
-  when the run fails naming the task and the error.
+- `//python/docs/tasks:pages` holds the catalogue to the tree:
+  - every entry has the keys above with their forms, and every `gap` names its issues;
+  - every directory is named after an entry that is not a `gap`: its slug finds the entry and its
+    rank is the entry's;
+  - every directory holds the three files and nothing but probe pairs, and a probe's error file is
+    one line;
+  - every page follows the marker rules above, each include equal to its file byte for byte.
+
+  It is `tasks-check` of the Zig tool `//tools/build/readme_examples:tool`, which reads the page
+  through the shared Markdown module. A stale include is named as `page.md:<line>`, with the first
+  line of the file that differs.
+- `//python/docs/tasks:<rank>-<slug>`, one per directory, runs `example.py`:
+  - it installs the built wheel into an empty virtual environment of the hermetic CPython 3.13,
+    with its pinned pyarrow and protobuf and nothing else, no network and no library path;
+  - it runs `example.py` there from a new empty directory;
+  - it holds what the program prints to `expected_output.txt` byte for byte. A difference is named
+    as `expected_output.txt:<line>`, and an exception as `example.py:<line>`, with both texts or the
+    traceback in the log.
+- `//python/docs/tasks:<rank>-<slug>__probe_<name>`, one per probe, runs the probe the same way. It
+  is red when the probe runs to the end, or raises another line than its `.error.txt`.
+- Four targets prove that these runs can fail. Each passes only when its run fails with the exact
+  line:
+  - `refuses_wrong_expected_output`: rank 1's example against an expected output that differs in
+    one line;
+  - `refuses_example_that_raises`: an example that raises;
+  - `refuses_probe_that_runs`: a probe that runs to the end;
+  - `refuses_probe_with_another_error`: a probe that raises another line.
 
 **Platforms.** The pull request's check runs every example on linux-x86_64. macOS arm64 is not in
 the pull request's check: a pull request builds no macOS wheel and runs no macOS test (rule B9; the

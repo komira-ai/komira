@@ -2,6 +2,7 @@
 
 Register the file with `Session.register_csv` and query it with SQL, or read it as a pandas-shaped frame with `komira.read_csv`.
 
+<!-- include example.py -->
 ```python
 from pathlib import Path
 
@@ -36,6 +37,7 @@ print(tsv.sort_values("id").materialize().to_arrow().to_pylist())
 
 Output:
 
+<!-- include expected_output.txt -->
 ```text
 {'id': 1, 'name': 'Ana', 'city': 'Oslo', 'score': 9.5}
 {'id': 2, 'name': 'Bo', 'city': 'Lima', 'score': 7.0}
