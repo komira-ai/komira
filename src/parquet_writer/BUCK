@@ -75,6 +75,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   codecs, DATE32 and DECIMAL128 types kept, row-group cutting with a page
 #   index, several batches with and without the concat-free path, nullability
 #   per field or per data, refusals.
+# - test_record_batch_logical_types: timestamps of every unit (and a zoned
+#   one) and the narrow and unsigned integers: the footer's LogicalType unit,
+#   UTC flag and ConvertedType for each, the values decoded with their types
+#   (seconds as microseconds), unsigned chunks with no min or max, and a
+#   TIMESTAMP_S value past the microsecond range refused.
 # - test_field_ids: Parquet field ids (SchemaElement field 9) through the
 #   Thrift writer and the footer parser, the `field_ids` argument of both
 #   record-batch entry points (no ids writes the old bytes; a wrong count is
@@ -122,6 +127,7 @@ mojo_library(
         "tests/test_multi_batch_stats_direct.mojo",
         "tests/test_no_env_reads.mojo",
         "tests/test_numeric_dict_preestimate.mojo",
+        "tests/test_record_batch_logical_types.mojo",
         "tests/test_record_batch_writer.mojo",
         "tests/test_page_size_limit_direct.mojo",
         "tests/test_stats_direct.mojo",

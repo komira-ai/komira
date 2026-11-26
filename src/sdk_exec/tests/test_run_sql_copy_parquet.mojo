@@ -7,11 +7,15 @@
 # table of BIGINT, DOUBLE, VARCHAR, BOOLEAN, DATE and DECIMAL columns with
 # NULLs, a query, an empty result, 130,000 rows in two row groups, a COPY over
 # the file it reads, a relative path), and its footer names the codec asked
-# for, for each of the six (every codec as the footer names it); an unknown
-# extension, a URL, CREATE TABLE AS and a TIMESTAMP column are named refusals
-# that touch no file; a missing directory, a directory at the path and a full
-# disk injected through the file system's test seam are named and leave no
-# temporary file and the old file whole.
+# for, for each of the six (every codec as the footer names it);
+# TIMESTAMP_US, _MS, _NS and _S columns, a zoned one, TINYINT and UBIGINT read
+# back with their types (seconds as microseconds), time zone and values, and
+# the footer carries each timestamp's unit and UTC flag; an unknown extension,
+# a URL, CREATE TABLE AS and a TIME column are named refusals that touch no
+# file, and a TIMESTAMP_S value past the microsecond range fails with the
+# writer's message naming the column, row and value; a missing directory, a
+# directory at the path and a full disk injected through the file system's
+# test seam are named and leave no temporary file and the old file whole.
 #
 # Each test writes into its own directory under test_tmpdir() and lists it
 # afterwards, so a temporary file left behind, or a file a refused COPY should
@@ -42,12 +46,26 @@
 #     holds only it.
 #   * test_a_relative_destination_is_the_working_directory: `TO 'rel.parquet'`
 #     is written where the process runs.
+#   * test_timestamps_and_narrow_integers_read_back: the table `times`
+#     (below) copied to Parquet and read back through run_sql: each column
+#     keeps its type (TIMESTAMP_US, _MS and _NS, TINYINT, UBIGINT; the zoned
+#     column keeps its time zone) and every value and NULL, including the
+#     epoch, a tick before it, year 1 BC, each unit's extremes and INT64's
+#     largest and its negation; a TIMESTAMP_S column reads back as
+#     TIMESTAMP_US holding each second times a million.
+#   * test_the_footer_carries_each_unit: the same file's footer gives each
+#     timestamp leaf its LogicalType unit (MICROS, MILLIS, NANOS, MICROS for
+#     seconds, MICROS), isAdjustedToUTC only on the zoned column, and the
+#     ConvertedType TIMESTAMP_MICROS or TIMESTAMP_MILLIS (none for
+#     nanoseconds); TINYINT is INT_8 and UBIGINT UINT_64. Catches a unit off
+#     by 1000, which no reader can tell from the values alone.
 #   * test_refused_copies_touch_no_file: `.txt` at `parse`
 #     (COPY_FORMAT_NOT_INFERRED), an `s3://` URL at `bind`
 #     (STORAGE_URL_REFUSED), CREATE TABLE AS at `bind`
-#     (STATEMENT_NOT_A_QUERY) and a TIMESTAMP column at `execute`
-#     (COPY_TYPE_UNSUPPORTED), each by exact message, and the directory stays
-#     empty.
+#     (STATEMENT_NOT_A_QUERY), a TIME column at `execute`
+#     (COPY_TYPE_UNSUPPORTED) and a TIMESTAMP_S value whose microseconds do
+#     not fit in an INT64 at `execute`, each by exact message, and the
+#     directory stays empty.
 #   * test_a_missing_directory_and_a_directory_at_the_path: STORAGE_NOT_FOUND
 #     and STORAGE_IO (rename, EISDIR) at `execute` by exact message; nothing is
 #     created and the directory at the path stays; the context runs on.
@@ -185,6 +203,70 @@ def _put(path: String, batch: RecordBatch, rows_per_group: Int) raises:
     var fh = open(path, "w")
     fh.write_bytes(Span(bytes))
     fh.close()
+
+
+# The table `times`, 5 rows, k BIGINT NOT NULL 0..4 and nullable columns,
+# all NULL in row 0: us TIMESTAMP_US, ms TIMESTAMP_MS, ns TIMESTAMP_NS,
+# s TIMESTAMP_S, utc TIMESTAMP_US with the time zone "UTC", i8 TINYINT and
+# u64 UBIGINT. Rows 1..4 hold the epoch, a tick before it, fractions, year 1
+# BC, each unit's extremes as DuckDB holds them, and INT64's largest and its
+# negation (DuckDB's infinity and -infinity).
+comptime _TIMES_ROWS = 5
+
+
+def _times_column(
+    mut sb: SchemaBuilder,
+    mut rb: RecordBatchBuilder,
+    name: String,
+    at: ArrowType,
+    tz: String,
+    values: List[Int64],
+) raises:
+    var arr = PrimitiveArray[DType.int64].allocate_nullable(_TIMES_ROWS)
+    arr._set_null(0)
+    for r in range(1, _TIMES_ROWS):
+        arr.set(r, values[r - 1])
+    sb.add_field(Field.timestamp(name, at, tz, True))
+    rb.add_column(Column.from_primitive_with_arrow_type[DType.int64](arr^, at))
+
+
+def _times() raises -> RecordBatch:
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    var k = PrimitiveArray[DType.int64].allocate(_TIMES_ROWS)
+    for x in range(_TIMES_ROWS):
+        k.set(x, Int64(x))
+    sb.add_field(Field("k", ArrowType.INT64, False))
+    rb.add_column(Column.from_primitive[DType.int64](k^))
+    _times_column(sb, rb, "us", ArrowType.TIMESTAMP_US, "", [
+        0, -62135683200000000, 9223372036854775806, -9223372022400000000,
+    ])
+    _times_column(sb, rb, "ms", ArrowType.TIMESTAMP_MS, "", [
+        -1, 1441369845120, Int64.MAX, -9223372022400000,
+    ])
+    _times_column(sb, rb, "ns", ArrowType.TIMESTAMP_NS, "", [
+        1441369845123456789, -1, -Int64.MAX, 9223286400000000000,
+    ])
+    _times_column(sb, rb, "s", ArrowType.TIMESTAMP_S, "", [
+        -1, 9223372036854, -9223372022400, 0,
+    ])
+    _times_column(sb, rb, "utc", ArrowType.TIMESTAMP_US, "UTC", [
+        1441369845123456, -1, Int64.MAX, -62135683200000000,
+    ])
+    var i8 = PrimitiveArray[DType.int8].allocate_nullable(_TIMES_ROWS)
+    var u64 = PrimitiveArray[DType.uint64].allocate_nullable(_TIMES_ROWS)
+    i8._set_null(0)
+    u64._set_null(0)
+    var i8s: List[Int8] = [-128, 127, 0, -1]
+    var u64s: List[UInt64] = [UInt64.MAX, 9223372036854775808, 0, 1]
+    for r in range(1, _TIMES_ROWS):
+        i8.set(r, i8s[r - 1])
+        u64.set(r, u64s[r - 1])
+    sb.add_field(Field("i8", ArrowType.INT8, True))
+    rb.add_column(Column.from_primitive[DType.int8](i8^))
+    sb.add_field(Field("u64", ArrowType.UINT64, True))
+    rb.add_column(Column.from_primitive[DType.uint64](u64^))
+    return rb.build(sb.build())
 
 
 def _context_with_t() raises -> EngineContext:
@@ -373,25 +455,108 @@ def test_refused_copies_touch_no_file() raises:
         + ": CREATE TABLE AS writes into a catalog table, and no catalog is"
         " bound; write COPY (<query>) TO '<file>.parquet' to write a file",
     )
-    var ts = PrimitiveArray[DType.int64].allocate(2)
-    ts.set(0, 0)
-    ts.set(1, 86_400_000_000)
+    var tm = PrimitiveArray[DType.int64].allocate(2)
+    tm.set(0, 0)
+    tm.set(1, 45_045_000_000)
     var sb = SchemaBuilder()
-    sb.add_field(Field("ts", ArrowType.TIMESTAMP_US, False))
+    sb.add_field(Field("tm", ArrowType.TIME64_US, False))
     var rb = RecordBatchBuilder()
     rb.add_column(
-        Column.from_primitive_with_arrow_type[DType.int64](ts^, ArrowType.TIMESTAMP_US)
+        Column.from_primitive_with_arrow_type[DType.int64](tm^, ArrowType.TIME64_US)
     )
-    ctx.catalog.add_in_memory("times", rb.build(sb.build()))
-    var tsp = d + "/ts.parquet"
+    ctx.catalog.add_in_memory("clock", rb.build(sb.build()))
+    var tmp = d + "/tm.parquet"
     _refusal(
-        ctx, "COPY times TO '" + tsp + "'", String(STEP_EXECUTE),
-        String(COPY_TYPE_UNSUPPORTED) + ": COPY ... TO '" + tsp
-        + "': column 'ts' has type " + String(ArrowType.TIMESTAMP_US)
+        ctx, "COPY clock TO '" + tmp + "'", String(STEP_EXECUTE),
+        String(COPY_TYPE_UNSUPPORTED) + ": COPY ... TO '" + tmp
+        + "': column 'tm' has type " + String(ArrowType.TIME64_US)
         + ", which is not written to Parquet yet",
+    )
+    var big = Int64.MAX // 1_000_000 + 1
+    var secs = PrimitiveArray[DType.int64].from_list([Int64(0), big])
+    var ssb = SchemaBuilder()
+    ssb.add_field(Field("at", ArrowType.TIMESTAMP_S, False))
+    var srb = RecordBatchBuilder()
+    srb.add_column(
+        Column.from_primitive_with_arrow_type[DType.int64](secs^, ArrowType.TIMESTAMP_S)
+    )
+    ctx.catalog.add_in_memory("far", srb.build(ssb.build()))
+    var farp = d + "/far.parquet"
+    _refusal(
+        ctx, "COPY far TO '" + farp + "'", String(STEP_EXECUTE),
+        String("parquet writer: column 'at' row 1 holds the TIMESTAMP_S value ")
+        + String(big) + ", whose microseconds do not fit in an INT64 (a Parquet"
+        " timestamp has no seconds unit, so seconds are written as"
+        " microseconds)",
     )
     _assert_only(d, List[String]())
     _copy(ctx, "COPY t TO '" + d + "/after.parquet'", _ROWS)
+
+
+def _times_file(mut ctx: EngineContext, name: String) raises -> String:
+    """COPY the table `times` to `<dir name>/times.parquet` and return the
+    file's path."""
+    ctx.catalog.add_in_memory("times", _times())
+    var d = _dir(name)
+    var f = d + "/times.parquet"
+    _copy(ctx, "COPY times TO '" + f + "'", _TIMES_ROWS)
+    _assert_only(d, ["times.parquet"])
+    return f^
+
+
+def test_timestamps_and_narrow_integers_read_back() raises:
+    var ctx = _new_context()
+    var f = _times_file(ctx, "times")
+    var back = _ok(ctx, "SELECT * FROM '" + f + "' ORDER BY k")
+    var want = _times()
+    assert_equal(back.num_rows(), _TIMES_ROWS)
+    assert_equal(back.num_columns(), want.num_columns())
+    var types: List[ArrowType] = [
+        ArrowType.INT64, ArrowType.TIMESTAMP_US, ArrowType.TIMESTAMP_MS,
+        ArrowType.TIMESTAMP_NS, ArrowType.TIMESTAMP_US, ArrowType.TIMESTAMP_US,
+        ArrowType.INT8, ArrowType.UINT64,
+    ]
+    for c in range(back.num_columns()):
+        var w = back.schema.field_name(c)
+        assert_equal(w, want.schema.field_name(c))
+        assert_true(back.schema.field_arrow_type(c) == types[c], w)
+        assert_equal(back.schema.field_tz(c), String("UTC") if w == "utc" else String(""), w)
+    for c in range(1, 6):
+        var w = back.schema.field_name(c)
+        var got = back.column_at(c).as_primitive[DType.int64]()
+        var put = want.column_at(c).as_primitive[DType.int64]()
+        assert_true(got.is_null(0), w)
+        for r in range(1, _TIMES_ROWS):
+            var scale = Int64(1_000_000) if w == "s" else Int64(1)
+            assert_equal(got.get(r), put.get(r) * scale, w + " row " + String(r))
+    var i8 = back.column_at(6).as_primitive[DType.int8]()
+    var u64 = back.column_at(7).as_primitive[DType.uint64]()
+    var i8_put = want.column_at(6).as_primitive[DType.int8]()
+    var u64_put = want.column_at(7).as_primitive[DType.uint64]()
+    assert_true(i8.is_null(0))
+    assert_true(u64.is_null(0))
+    for r in range(1, _TIMES_ROWS):
+        assert_equal(i8.get(r), i8_put.get(r), "i8 row " + String(r))
+        assert_equal(u64.get(r), u64_put.get(r), "u64 row " + String(r))
+
+
+def test_the_footer_carries_each_unit() raises:
+    var ctx = _new_context()
+    var meta = _footer(_times_file(ctx, "footer"))
+    # Leaf c + 1 is column c: k, us, ms, ns, s, utc, i8, u64.
+    var units: List[Int] = [2, 1, 3, 2, 2]
+    var converted: List[Int] = [10, 9, -1, 10, 10]
+    for c in range(1, 6):
+        ref leaf = meta.schema[c + 1]
+        assert_equal(leaf.logical_timestamp_unit.value(), units[c - 1], leaf.name)
+        assert_equal(leaf.logical_timestamp_is_utc.value(), leaf.name == "utc", leaf.name)
+        if converted[c - 1] < 0:
+            assert_true(not leaf.converted_type, leaf.name)
+        else:
+            assert_equal(leaf.converted_type.value(), converted[c - 1], leaf.name)
+    assert_true(not meta.schema[1].logical_timestamp_unit)
+    assert_equal(meta.schema[7].converted_type.value(), 15)
+    assert_equal(meta.schema[8].converted_type.value(), 14)
 
 
 def test_a_missing_directory_and_a_directory_at_the_path() raises:

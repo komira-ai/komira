@@ -66,11 +66,24 @@ _COPY_FILES = [
     "nulls_json.json",
     "grouped_json.json.gz",
     "typed_zstd_json.json.zst",
+    "times_default.parquet",
+    "times_csv.csv",
+    "times_json.json",
 ]
 
 _COPY_CASES = [f.split(".")[0] for f in _COPY_FILES]
 
+# The timestamp and integer cases read a Parquet file the pinned DuckDB
+# writes (tests/copy/times.sql says what it holds).
+sql_oracle(
+    name = "copy_times_input",
+    srcs = ["tests/copy/times.sql"],
+    outputs = ["times.parquet"],
+)
+
 _COPY_INPUTS = {f + ".csv": "tests/csv/" + f + ".csv" for f in ["typed", "nulls", "quoted"]}
+
+_COPY_INPUTS["times.parquet"] = ":copy_times_input[times.parquet]"
 
 # The program that runs each COPY line of a cases file through run_sql
 # (copy_runner/main.mojo says how).

@@ -108,21 +108,37 @@ DuckDB answers: one row, one BIGINT NOT NULL column `Count`, the rows written.
   - DATE annotated DATE;
   - DECIMAL as FIXED_LEN_BYTE_ARRAY(16) with its precision and scale;
   - strings UTF8;
+  - TINYINT, SMALLINT and the unsigned integers as INT32 (UBIGINT INT64) with
+    the ConvertedType INT_8, INT_16, UINT_8, UINT_16, UINT_32 or UINT_64, as
+    DuckDB writes them (an unsigned chunk carries no min or max, since its
+    signed order is not the values' order);
+  - a timestamp as INT64 with the LogicalType TIMESTAMP of its unit (MICROS,
+    MILLIS, NANOS; TIMESTAMP_S is written as microseconds, as DuckDB writes
+    it, and a seconds value whose microseconds do not fit in an INT64 is
+    refused) and the ConvertedType TIMESTAMP_MICROS or TIMESTAMP_MILLIS where
+    one exists;
   - no rows, only the schema, for an empty result.
-- A column of a type the Parquet writer cannot annotate (TIMESTAMP, TIME,
-  INTERVAL and the like, the unsigned and narrow integers, BLOB, nested) is
-  `COPY_TYPE_UNSUPPORTED` at `execute`, before any file is touched.
+- A timestamp is written isAdjustedToUTC (DuckDB reads it as TIMESTAMPTZ) only
+  when its field carries a time zone, as one read from such a file does;
+  komira's own timestamps carry none (a `TIMESTAMPTZ '...'` literal binds to
+  zone-less UTC microseconds), so they are written zone-less.
+- A column of a type the Parquet writer cannot annotate (TIME, INTERVAL,
+  DURATION, DATE64, BLOB, nested) is `COPY_TYPE_UNSUPPORTED` at `execute`,
+  before any file is touched.
 - A CSV or JSON file holds the bytes DuckDB's COPY writes for the same rows
   (`engine_write_text`'s header has each rule).
   - CSV: a header row, `,` between cells, `\n` after each line, NULL as an
     empty cell, a string quoted only when it is empty or holds `,`, `"` or a
-    line break, DATE as `YYYY-MM-DD`, DECIMAL exact, DOUBLE in its shortest
-    digits.
-  - JSON: one object per row in column order, NULL as `null`, DATE as a
-    string, DECIMAL as a number.
+    line break, DATE as `YYYY-MM-DD`, a timestamp as `YYYY-MM-DD HH:MM:SS`
+    with the fraction of a second, trailing zeros removed, when it is not
+    zero (`2015-09-04 12:30:45.12`), `+00` after a zoned one, and
+    `infinity` / `-infinity` for INT64's extremes, DECIMAL exact, DOUBLE in
+    its shortest digits.
+  - JSON: one object per row in column order, NULL as `null`, DATE and
+    timestamps as strings of the CSV text, DECIMAL as a number.
   - An empty result is the header row alone (CSV) or an empty file (JSON).
-- A timestamp, time, interval, BLOB or nested column in a CSV or JSON file is
-  `COPY_TYPE_UNSUPPORTED`, and two columns of one name (which DuckDB renames)
+- A time, interval, duration, DATE64, BLOB or nested column in a CSV or JSON
+  file is `COPY_TYPE_UNSUPPORTED`, and two columns of one name (which DuckDB renames)
   `COPY_DUPLICATE_COLUMN`, both at `execute` before any file is touched.
 - DELIMITER, QUOTE, HEADER false and the other CSV and JSON options are
   refused by name at `parse`.
@@ -148,6 +164,10 @@ var csv = run_sql(ctx, "COPY (SELECT 1 AS n, 'a,b' AS s) TO '" + dir + "/n.csv'"
 assert_equal(Int(csv.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 1)
 with open(dir + "/n.csv", "r") as f:
     assert_equal(f.read(), "n,s\n1,\"a,b\"\n")
+var ts = run_sql(ctx, "COPY (SELECT TIMESTAMP '2015-09-04 12:30:45.120' AS at) TO '" + dir + "/at.csv'")
+assert_equal(Int(ts.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 1)
+with open(dir + "/at.csv", "r") as f:
+    assert_equal(f.read(), "at\n2015-09-04 12:30:45.12\n")
 ```
 
 The encoders on their own:
@@ -184,7 +204,8 @@ assert_equal(String(unsafe_from_utf8=Span(encode_csv(batch))), "k\n1\n2\n")
 assert_equal(String(unsafe_from_utf8=Span(encode_ndjson(batch))), "{\"k\":1}\n{\"k\":2}\n")
 var gz = compress_text(encode_csv(batch), WCOMP_GZIP)
 assert_equal(Int(gz[0]), 0x1F)
-assert_equal(text_writable(ArrowType.TIMESTAMP_US), False)
+assert_equal(text_writable(ArrowType.TIMESTAMP_US), True)
+assert_equal(text_writable(ArrowType.TIME64_US), False)
 ```
 
 **The footer cache is pinned to a query.** `parquet_footers.FooterCache`

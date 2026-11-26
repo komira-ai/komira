@@ -7,7 +7,8 @@
 # VARCHAR, BOOLEAN, DATE and DECIMAL columns with NULLs (the empty string,
 # quoting) and for a filtered query; the format from .csv, .json, .ndjson,
 # .jsonl or FORMAT; gzip and zstd from the extension or COMPRESSION; an empty
-# result as DuckDB writes it; lz4, a TIMESTAMP column and two columns of one
+# result as DuckDB writes it; timestamps of every unit, a zoned one, TINYINT
+# and UBIGINT as DuckDB writes them; lz4, a TIME column and two columns of one
 # name are refused by name with no file made; a full disk and a missing
 # directory leave the old file and no temporary file.
 #
@@ -39,8 +40,18 @@
 #     plain text.
 #   * test_an_empty_result: `Count` 0; the CSV file is the header row and the
 #     JSON file is empty, as DuckDB writes them.
+#   * test_timestamps_and_narrow_integers_as_csv_and_json: the table `times`
+#     (below) to `.csv` and `.json` answers `Count` 5 and writes the bytes the
+#     pinned DuckDB writes for the same values: each unit's fraction with its
+#     trailing zeros removed and none when it is zero, a time before 1970 as
+#     the day before, `(BC)` after the date, seconds with no fraction, `+00`
+#     after a zoned timestamp, `infinity` and `-infinity` with no `+00`, the
+#     extremes of each unit, a JSON timestamp as a string, and TINYINT and
+#     UBIGINT at their minimum and maximum. Catches a fraction padded or cut,
+#     a unit read off by 1000, a negative time of day, and a zoned value
+#     written without its offset.
 #   * test_refused_text_copies_touch_no_file: COMPRESSION lz4 for CSV and for
-#     JSON at `bind` (COPY_COMPRESSION_UNSUPPORTED), a TIMESTAMP column to CSV
+#     JSON at `bind` (COPY_COMPRESSION_UNSUPPORTED), a TIME column to CSV
 #     and to JSON at `execute` (COPY_TYPE_UNSUPPORTED) and two columns of one
 #     name at `execute` (COPY_DUPLICATE_COLUMN), each by exact message; the
 #     directory stays empty and the next COPY writes.
@@ -96,6 +107,38 @@ comptime _JSON = (
 )
 
 comptime _ALL = "(SELECT * FROM t ORDER BY k)"
+
+# What the pinned DuckDB writes for the rows of `times`.
+comptime _TIMES_CSV = (
+    "k,us,ms,ns,s,utc,i8,u64\n"
+    "0,,,,,,,\n"
+    "1,1970-01-01 00:00:00,1969-12-31 23:59:59.999,"
+    "2015-09-04 12:30:45.123456789,1969-12-31 23:59:59,"
+    "2015-09-04 12:30:45.123456+00,-128,18446744073709551615\n"
+    "2,0001-12-31 (BC) 00:00:00,2015-09-04 12:30:45.12,"
+    "1969-12-31 23:59:59.999999999,294247-01-10 04:00:54,"
+    "1969-12-31 23:59:59.999999+00,127,9223372036854775808\n"
+    "3,294247-01-10 04:00:54.775806,infinity,-infinity,"
+    "290309-12-22 (BC) 00:00:00,infinity,0,0\n"
+    "4,290309-12-22 (BC) 00:00:00,290309-12-22 (BC) 00:00:00,"
+    "2262-04-11 00:00:00,1970-01-01 00:00:00,"
+    "0001-12-31 (BC) 00:00:00+00,-1,1\n"
+)
+
+comptime _TIMES_JSON = (
+    '{"k":0,"us":null,"ms":null,"ns":null,"s":null,"utc":null,"i8":null,"u64":null}\n'
+    '{"k":1,"us":"1970-01-01 00:00:00","ms":"1969-12-31 23:59:59.999",'
+    '"ns":"2015-09-04 12:30:45.123456789","s":"1969-12-31 23:59:59",'
+    '"utc":"2015-09-04 12:30:45.123456+00","i8":-128,"u64":18446744073709551615}\n'
+    '{"k":2,"us":"0001-12-31 (BC) 00:00:00","ms":"2015-09-04 12:30:45.12",'
+    '"ns":"1969-12-31 23:59:59.999999999","s":"294247-01-10 04:00:54",'
+    '"utc":"1969-12-31 23:59:59.999999+00","i8":127,"u64":9223372036854775808}\n'
+    '{"k":3,"us":"294247-01-10 04:00:54.775806","ms":"infinity","ns":"-infinity",'
+    '"s":"290309-12-22 (BC) 00:00:00","utc":"infinity","i8":0,"u64":0}\n'
+    '{"k":4,"us":"290309-12-22 (BC) 00:00:00","ms":"290309-12-22 (BC) 00:00:00",'
+    '"ns":"2262-04-11 00:00:00","s":"1970-01-01 00:00:00",'
+    '"utc":"0001-12-31 (BC) 00:00:00+00","i8":-1,"u64":1}\n'
+)
 
 
 def _dir(name: String) raises -> String:
@@ -191,6 +234,70 @@ def _table() raises -> RecordBatch:
     )
     sb.add_field(Field.decimal128("m", 12, 2, True))
     rb.add_column(Column.from_decimal128(m^))
+    return rb.build(sb.build())
+
+
+# The table `times`, 5 rows, k BIGINT NOT NULL 0..4 and nullable columns,
+# all NULL in row 0: us TIMESTAMP_US, ms TIMESTAMP_MS, ns TIMESTAMP_NS,
+# s TIMESTAMP_S, utc TIMESTAMP_US with the time zone "UTC", i8 TINYINT and
+# u64 UBIGINT. Rows 1..4 hold the epoch, a tick before it, fractions, year 1
+# BC, each unit's extremes as DuckDB holds them, and INT64's largest and its
+# negation (DuckDB's infinity and -infinity).
+comptime _TIMES_ROWS = 5
+
+
+def _times_column(
+    mut sb: SchemaBuilder,
+    mut rb: RecordBatchBuilder,
+    name: String,
+    at: ArrowType,
+    tz: String,
+    values: List[Int64],
+) raises:
+    var arr = PrimitiveArray[DType.int64].allocate_nullable(_TIMES_ROWS)
+    arr._set_null(0)
+    for r in range(1, _TIMES_ROWS):
+        arr.set(r, values[r - 1])
+    sb.add_field(Field.timestamp(name, at, tz, True))
+    rb.add_column(Column.from_primitive_with_arrow_type[DType.int64](arr^, at))
+
+
+def _times() raises -> RecordBatch:
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    var k = PrimitiveArray[DType.int64].allocate(_TIMES_ROWS)
+    for x in range(_TIMES_ROWS):
+        k.set(x, Int64(x))
+    sb.add_field(Field("k", ArrowType.INT64, False))
+    rb.add_column(Column.from_primitive[DType.int64](k^))
+    _times_column(sb, rb, "us", ArrowType.TIMESTAMP_US, "", [
+        0, -62135683200000000, 9223372036854775806, -9223372022400000000,
+    ])
+    _times_column(sb, rb, "ms", ArrowType.TIMESTAMP_MS, "", [
+        -1, 1441369845120, Int64.MAX, -9223372022400000,
+    ])
+    _times_column(sb, rb, "ns", ArrowType.TIMESTAMP_NS, "", [
+        1441369845123456789, -1, -Int64.MAX, 9223286400000000000,
+    ])
+    _times_column(sb, rb, "s", ArrowType.TIMESTAMP_S, "", [
+        -1, 9223372036854, -9223372022400, 0,
+    ])
+    _times_column(sb, rb, "utc", ArrowType.TIMESTAMP_US, "UTC", [
+        1441369845123456, -1, Int64.MAX, -62135683200000000,
+    ])
+    var i8 = PrimitiveArray[DType.int8].allocate_nullable(_TIMES_ROWS)
+    var u64 = PrimitiveArray[DType.uint64].allocate_nullable(_TIMES_ROWS)
+    i8._set_null(0)
+    u64._set_null(0)
+    var i8s: List[Int8] = [-128, 127, 0, -1]
+    var u64s: List[UInt64] = [UInt64.MAX, 9223372036854775808, 0, 1]
+    for r in range(1, _TIMES_ROWS):
+        i8.set(r, i8s[r - 1])
+        u64.set(r, u64s[r - 1])
+    sb.add_field(Field("i8", ArrowType.INT8, True))
+    rb.add_column(Column.from_primitive[DType.int8](i8^))
+    sb.add_field(Field("u64", ArrowType.UINT64, True))
+    rb.add_column(Column.from_primitive[DType.uint64](u64^))
     return rb.build(sb.build())
 
 
@@ -291,6 +398,17 @@ def test_an_empty_result() raises:
     _assert_only(d, ["e.csv", "e.json"])
 
 
+def test_timestamps_and_narrow_integers_as_csv_and_json() raises:
+    var ctx = EngineContext(EngineOptions(worker_count=2))
+    ctx.catalog.add_in_memory("times", _times())
+    var d = _dir("times")
+    _copy(ctx, "COPY (SELECT * FROM times ORDER BY k) TO '" + d + "/times.csv'", 5)
+    _copy(ctx, "COPY (SELECT * FROM times ORDER BY k) TO '" + d + "/times.json'", 5)
+    assert_equal(_text(d + "/times.csv"), String(_TIMES_CSV))
+    assert_equal(_text(d + "/times.json"), String(_TIMES_JSON))
+    _assert_only(d, ["times.csv", "times.json"])
+
+
 def test_refused_text_copies_touch_no_file() raises:
     var ctx = _context_with_t()
     var d = _dir("refused")
@@ -308,28 +426,28 @@ def test_refused_text_copies_touch_no_file() raises:
         + "' (FORMAT json, COMPRESSION lz4): CSV and JSON are written"
         " uncompressed, with gzip or with zstd",
     )
-    var ts = PrimitiveArray[DType.int64].allocate(2)
-    ts.set(0, 0)
-    ts.set(1, 86_400_000_000)
+    var tm = PrimitiveArray[DType.int64].allocate(2)
+    tm.set(0, 0)
+    tm.set(1, 45_045_000_000)
     var sb = SchemaBuilder()
-    sb.add_field(Field("ts", ArrowType.TIMESTAMP_US, False))
+    sb.add_field(Field("tm", ArrowType.TIME64_US, False))
     var rb = RecordBatchBuilder()
     rb.add_column(
-        Column.from_primitive_with_arrow_type[DType.int64](ts^, ArrowType.TIMESTAMP_US)
+        Column.from_primitive_with_arrow_type[DType.int64](tm^, ArrowType.TIME64_US)
     )
-    ctx.catalog.add_in_memory("times", rb.build(sb.build()))
-    var tc = d + "/ts.csv"
+    ctx.catalog.add_in_memory("clock", rb.build(sb.build()))
+    var tc = d + "/tm.csv"
     _refusal(
-        ctx, "COPY times TO '" + tc + "'", String(STEP_EXECUTE),
+        ctx, "COPY clock TO '" + tc + "'", String(STEP_EXECUTE),
         String(COPY_TYPE_UNSUPPORTED) + ": COPY ... TO '" + tc
-        + "': column 'ts' has type " + String(ArrowType.TIMESTAMP_US)
+        + "': column 'tm' has type " + String(ArrowType.TIME64_US)
         + ", which is not written to CSV yet",
     )
-    var tj = d + "/ts.json"
+    var tj = d + "/tm.json"
     _refusal(
-        ctx, "COPY times TO '" + tj + "'", String(STEP_EXECUTE),
+        ctx, "COPY clock TO '" + tj + "'", String(STEP_EXECUTE),
         String(COPY_TYPE_UNSUPPORTED) + ": COPY ... TO '" + tj
-        + "': column 'ts' has type " + String(ArrowType.TIMESTAMP_US)
+        + "': column 'tm' has type " + String(ArrowType.TIME64_US)
         + ", which is not written to JSON yet",
     )
     var dup = d + "/dup.json"
