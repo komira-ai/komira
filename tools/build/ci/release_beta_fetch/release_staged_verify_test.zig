@@ -1135,7 +1135,7 @@ test "add on the command line: exit 0 and the summary when the checks pass, 1 an
     var err = sink();
     defer err.deinit();
     try t.expectEqual(@as(u8, 0), try rsv.cliAdd(a, &args, "linux-64", fake.runner(), &out.writer, &err.writer));
-    try t.expect(std.mem.endsWith(u8, out.written(), "release_staged_verify: `mopm add` of 9 package(s) from https://conda.mopm.dev/ locked 10 package(s) of this release and installed the published bytes (sha256 and size)\n"));
+    try t.expect(std.mem.endsWith(u8, out.written(), "release_staged_verify: `mopm add` of 10 package(s) from https://conda.mopm.dev/ locked 11 package(s) of this release and installed the published bytes (sha256 and size)\n"));
     try t.expectEqualStrings("", err.written());
     try t.expectEqual(@as(usize, 11), fake.calls.items.len);
 
