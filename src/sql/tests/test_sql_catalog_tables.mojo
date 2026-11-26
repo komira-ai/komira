@@ -22,6 +22,11 @@
 #      a reserved word, a builtin that lowers; a refusal row is admitted.
 #      (catches: a class tested against the display name instead of the
 #      folded key, so `SUM` would be admitted)
+#   6. remove(name) drops the one table of that name, found without regard
+#      to case, whatever its kind, and keeps the others in order; a name that
+#      is not registered removes nothing and answers False, and the name is
+#      free for a new table afterwards. (catches: removing by the unfolded
+#      name, or dropping the table after the one asked for)
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -110,6 +115,26 @@ def test_single_batch_registration_and_table_of() raises:
     assert_equal(t.source.kind_name(), "in_memory")
     assert_equal(cat.schema_of(String("one")).num_columns(), 1)
     assert_false(cat.has(String("two")))
+
+
+def test_remove_drops_one_table_by_folded_name_and_frees_it() raises:
+    var cat = SqlCatalog()
+    cat.add_in_memory(String("first"), _batch(1))
+    cat.add_parquet(String("Second"), String("second.parquet"), _schema_k())
+    cat.add_in_memory(String("third"), _batch(3))
+    assert_true(cat.remove(String("SECOND")))
+    assert_false(cat.has(String("second")))
+    assert_equal(cat.table_of(String("first")).source.estimate_rows(), 1)
+    assert_equal(cat.table_of(String("third")).source.estimate_rows(), 3)
+    assert_false(cat.remove(String("second")))
+    assert_false(cat.remove(String("absent")))
+    cat.add_in_memory(String("second"), _batch(2))
+    assert_equal(cat.table_of(String("Second")).source.kind_name(), "in_memory")
+    assert_equal(cat.table_of(String("Second")).source.estimate_rows(), 2)
+    assert_true(cat.remove(String("first")))
+    assert_true(cat.remove(String("third")))
+    assert_true(cat.remove(String("second")))
+    assert_false(cat.has(String("second")))
 
 
 def test_from_less_relation_is_one_int64_row() raises:

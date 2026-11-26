@@ -40,7 +40,9 @@ load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 #                  then komira with --no-deps, --no-index and --find-links), each failing step named with its command, status
 #                  and stderr, only the komira install tried again, `pip check` and the installed version held, `pip freeze`
 #                  held to komira once plus only the wheel's requirements (names normalised, any version) and a `modular` package refused (also when the probe or freeze fails),
-#                  the example's output held to the expected file with the version and the ABI version put in,
+#                  only the example copied into the run directory (the data it needs it writes itself), the example's
+#                  output held to the expected file with the version, the ABI version and the run directory's real path
+#                  (`<cwd>`) put in (a name of another directory refused, both texts shown),
 #                  a malformed ABI table or a work directory that is not empty refused before any command;
 #   storage_unit   the storage step: an unknown project holds zero; the sum over every file of every release with
 #                  the exact bullet and outputs; a release that lists no file is not a version; exactly at the
@@ -58,14 +60,15 @@ load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 #                  each with nothing appended and nothing written to --out;
 #   cli_unit       the command line: exit 0, 1 and 2, the output file appended to (`present` appends one line,
 #                  and none when the name file or the index is refused), the failure line and the
-#                  one-line error annotation, and each flag refused by name (unknown, valueless, repeated, out
-#                  of range, --attempts or --delay with --index dist, an index or platform not known) without
+#                  one-line error annotation, and each flag refused by name (unknown, the removed `--data` among them,
+#                  valueless, repeated, out of range, --attempts or --delay with --index dist, an index or platform not known) without
 #                  reaching the index or a command; `install --index dist` with the directory's resolved path
 #                  and one attempt; `matrix` appending one line, and none when the list is refused;
 #   readme_unit    the README check: a python block equal to the example passes; one that differs by a line,
 #                  CRLF line ends, added or missing lines, no block, or a block that is not closed is refused
 #                  naming the line.
-#                  the same check holds the install page's ```text block to the expected output, and the
+#                  the same check holds the README's and the install page's ```text blocks to the expected output
+#                  (`<cwd>` left as written; a line that differs there refused), and the
 #                  changelog's newest release is its first `## <version>` heading after any `## Unreleased`,
 #                  a heading that is no version refused;
 #   matrix_unit    the list of supported Pythons as `matrix` reads it: a JSON list of exact versions gives the
@@ -73,7 +76,8 @@ load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 #                  strings, a version that is not `3.<minor>.<micro>`, a minor twice or out of order, and an empty
 #                  list refused, each naming the file and the entry.
 # readme_shows_quickstart runs that check on the real files: the "What works" block of python/README.md is
-# python/examples/quickstart.py byte for byte. install_page_shows_quickstart does the same for docs/install.md:
+# python/examples/quickstart.py byte for byte, and its text block is what the quickstart prints at the changelog's
+# newest release and the ABI version. install_page_shows_quickstart does the same for docs/install.md:
 # its python block is the quickstart, and its text block is what the quickstart prints at the changelog's newest
 # release and the ABI version of src/so/abi/komira.tsv. supported_pythons_lists reads the two lists of
 # //python:supported_pythons.
@@ -120,13 +124,18 @@ _SCENARIOS = ["meta", "index", "install", "cli", "readme", "matrix", "storage", 
     for scenario in _SCENARIOS
 ]
 
-# The README's block and the quickstart, read from the two files themselves (exported by python/BUCK).
+# The README's two blocks, read from the files themselves: the python block is the quickstart, and the text block is
+# the quickstart's expected output at the newest release of the changelog and the ABI version of the table, with
+# `<cwd>` left as written.
 zig_test(
     name = "readme_shows_quickstart",
     exec_compatible_with = LINUX_X86_64,
     src = "src/readme_shows_quickstart_test.zig",
     data = {
+        "CHANGELOG.md": "//python:CHANGELOG.md",
         "README.md": "//python:README.md",
+        "komira.tsv": "//src/so:abi/komira.tsv",
+        "quickstart.expected": "//python:examples/quickstart.expected",
         "quickstart.py": "//python:examples/quickstart.py",
     },
     deps = [":pypi_smoke_lib"],
@@ -136,7 +145,7 @@ zig_test(
 
 # The install page's two blocks, read from the files themselves: the python block is the quickstart, and the
 # text block is the quickstart's expected output at the newest release of the changelog and the ABI version of
-# the table (the same substitution the install step makes).
+# the table, with `<cwd>` left as written (the install step puts the run directory's real path in its place).
 zig_test(
     name = "install_page_shows_quickstart",
     exec_compatible_with = LINUX_X86_64,
@@ -186,9 +195,9 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
-# The same driver for the hosted macOS runner of pypi-macos-arm64.yml's smoke jobs (`verify` and `install`
+# The same driver for the hosted macOS runner of pypi.yml's smoke jobs (`verify` and `install`
 # run on the Apple silicon runner, where the macOS wheel can be installed), cross-built by the Linux zig.
-# pypi-macos-arm64.yml's build-macos-arm64 builds it with --target-platforms darwin-arm64; no pull request builds it
+# pypi.yml's job build-macos-arm64 builds it with --target-platforms darwin-arm64; no pull request builds it
 # (tools/build/ci/rules.bzl EXCLUDED).
 zig_exe(
     name = "pypi_smoke_macos_arm64",

@@ -1,8 +1,9 @@
-# Port: the libkomira calls that run a query (C ABI 1.3)
+# Port: the libkomira calls that run a query (C ABI 1.3 and 1.8)
 
 Status: port document. `komira_sql_stream` is built (ABI 1.3, with the `ArrowStream`
-golden type and the header's Arrow structs); `komira_plan_stream` and the abort
-containment are not. **EXISTS** names code on `main`; **PROPOSED** is new. Statements the author deduced rather than read are marked *(inferred)*.
+golden type and the header's Arrow structs), and so is `komira_plan_stream` (ABI 1.8,
+over `sdk_exec.engine_plan.run_plan`), and so is the abort containment of §8 for the paths it
+lists as refused. **EXISTS** names code on `main`; **PROPOSED** is new. Statements the author deduced rather than read are marked *(inferred)*.
 
 `libkomira` is komira's one shared library and its flat C ABI
 ([src/so](../../src/so/README.md)). ABI 1.1 registers and describes sources and
@@ -27,7 +28,7 @@ The callers are thin bindings over these calls: the Python package
 | item | port |
 |---|---|
 | run SQL | `komira_sql_stream(ctx, sql, out)`, from the earlier golden. ABI 1.3 |
-| run a plan | `komira_plan_stream(ctx, plan, plan_len, out)`, from the earlier golden. ABI 1.3. The bytes are an authored `WirePlanEnvelope`, the same input `komira_plan_render` takes. libkomira optimizes it in-process |
+| run a plan | `komira_plan_stream(ctx, plan, plan_len, out)`, from the earlier golden. ABI 1.8 (`komira_sql_stream` landed alone as 1.3, and 1.4 to 1.7 are other calls). The bytes are an authored `WirePlanEnvelope`, the same input `komira_plan_render` takes. libkomira optimizes it in-process |
 | result | an Arrow C stream (`struct ArrowArrayStream`), as in the earlier golden. The caller allocates it and libkomira fills it. The caller owns it after `KOMIRA_OK`. It does not depend on the context, which may be freed first |
 | status codes | the six of ABI 1.1. The port adds none. Every engine refusal is `KOMIRA_ERR_ENGINE` (-3), with the reason in the last error |
 | conventions | ABI 1.1's: the two-call `komira_last_error`, the 64 MiB input bound (-5), and `*out` untouched on any refusal |
@@ -35,12 +36,12 @@ The callers are thin bindings over these calls: the Python package
 | not carried | `komira_register_python_udf`, `komira_declare_sql_udf`, `komira_register_builtin_mojo_udf`, the seven `xl_*` calls, `komira_plan_bytes` and `komira_sql_render` (§9) |
 | new relative to the earlier ABI | session options, cancel, progress, a cancelled status code and credentials. Not decided here (§10) |
 
-The rows' `since` is 1.3 when they land together: 1.2 is the credential calls
-(`komira_credential_add`, `_set`, `_seal`; [credentials_and_writes.md](credentials_and_writes.md)
-decision 8), which landed first. Releases come from `main` automatically, so a row's `since` is
-the version of the first change that lands it on `main`. If `komira_sql_stream` lands alone,
-`komira_plan_stream` takes the next minor. The golden (`src/so/abi/komira.tsv`) holds whichever
-version is true.
+1.2 is the credential calls (`komira_credential_add`, `_set`, `_seal`;
+[credentials_and_writes.md](credentials_and_writes.md) decision 8), which landed first. Releases
+come from `main` automatically, so a row's `since` is the version of the first change that lands
+it on `main`: `komira_sql_stream` landed alone, as 1.3, and `komira_plan_stream` followed as 1.8, after the session options (1.4), the CSV and JSON
+registration calls (1.5), the run handle (1.6) and the error code and step calls (1.7).
+The golden (`src/so/abi/komira.tsv`) holds both.
 
 ## 2. What exists today
 
@@ -83,8 +84,10 @@ version is true.
   (`src/tests/helpers/komira_plan_harness/door.mojo`): a `const char *`
   `komira_last_error`, a `komira_plan_stream` like the one below, and
   `komira_plan_bytes`, which returns IPC bytes.
-- **EXISTS** No containment: an abort, a failed `debug_assert`, a fault, or an
-  out-of-memory kill inside libkomira ends the host process.
+- **EXISTS** An abort, a failed `debug_assert`, a fault, stack exhaustion or an
+  out-of-memory kill inside libkomira ends the host process. The inputs known
+  to reach one are refused before they do (§8, "The abort sites and the
+  inputs, by status").
 
 ## 3. The two run calls
 
@@ -96,13 +99,13 @@ komira_plan_stream	c_int32	c_void_p,POINTER(c_ubyte),c_uint64,POINTER(ArrowArray
 ```
 
 The same calls as libkomira golden rows (`symbol<TAB>return<TAB>arguments<TAB>since`).
-The rows of 1.1 and 1.2 stay byte for byte. Only these two rows are added, and no type or
-constant changes:
+The rows of 1.1 and 1.2 stay byte for byte. 1.3 added the first row and 1.8 the second, and
+neither changed a type or a constant:
 
 ```text
-version	1.3
+version	1.8
 komira_sql_stream	Int32	Handle,CStr,ArrowStream	1.3
-komira_plan_stream	Int32	Handle,ConstBytes,UInt64,ArrowStream	1.3
+komira_plan_stream	Int32	Handle,ConstBytes,UInt64,ArrowStream	1.8
 ```
 
 The C prototypes in `komira.h`:
@@ -167,9 +170,10 @@ to every later run on the context.
   design also lifts the refusal, into a bound catalog, for `CREATE TABLE ... AS` and `INSERT`, which
   answer what DuckDB returns: a one-row `Count` stream, or no rows for `CREATE TABLE` with a column
   list ([credentials_and_writes.md](credentials_and_writes.md#10-writes)).
-- **The error text.** **PROPOSED:** the last error text is `<step>: <reason>`,
+- **The error text.** **EXISTS:** the last error text is `<step>: <reason>`,
   where the step is the one that refused (parse, bind, optimize, lower or
-  execute). That text is for people, and bindings do not parse it (§6).
+  execute). A refusal of the parse step ends with ` at line <L>, column <C>`, where
+  the text stopped parsing. That text is for people, and bindings do not parse it (§6).
 
 ### What `komira_plan_stream` runs: the plan door
 
@@ -183,10 +187,20 @@ bytes `komira_plan_render` renders, and the format the SDKs' plan builders write
   by the UDFs' own. `plan_envelope_from_bytes` already decodes both, for the door
   that carries them later.
 - **The route.** It is `plan_from_bytes`, then `optimize`, `lower_for_context` and
-  `run_lowered_plan`: the tail of `run_sql` after bind. **PROPOSED:** `sdk_exec`
-  gets one `run_plan(mut ctx, var plan: LogicalPlan) -> SqlOutcome`, and `run_sql`
-  calls it after binding. SQL and plans then share one route from the optimizer
-  down.
+  `run_lowered_plan`: the tail of `run_sql` after bind. **EXISTS:** `sdk_exec`
+  has one `run_plan(mut ctx, var plan: LogicalPlan) -> SqlOutcome`
+  (`src/sdk_exec/engine_plan.mojo`), and `run_sql` runs its steps
+  (`run_plan_batch`) after binding. SQL and plans share one route from the
+  optimizer down. `run_plan` replaces the footer cache first, as `run_sql` does;
+  `run_sql` calls the steps without that, because its binder has already read
+  the footers lowering uses.
+- **The error text.** `<step>: <reason>`, where the step is `decode` (the bytes
+  are not a plan this build runs) or the step of `run_plan` that refused
+  (`optimize`, `lower` or `execute`).
+- **No SQL front end.** The door never makes SQL text and never calls the
+  tokenizer, parser or binder. `EngineContext.statements_parsed` counts the
+  statements `run_sql` parses on a context, and the door's tests hold it at 0
+  on the context that ran the plan.
 - **Tables.** A scan leaf carries its own binding (path, schema and fingerprint,
   from `komira_parquet_schema` or the binding calls), so a plan needs no
   registered table.
@@ -394,9 +408,14 @@ otherwise fail fast. The port keeps that answer and makes it explicit:
      raise. Those run lazily, at the first use of a codec, so a missing library
      aborts in the middle of a query (for example at the first compressed Parquet
      page).
-   - **PROPOSED:** the session opens the codec libraries through a raising probe
-     when it builds its engine, so a missing library is -3 at the first
-     registration or run.
+   - **EXISTS:** every call that can reach a codec (the Parquet, CSV and JSON
+     register calls, the three describe calls, `komira_sql_stream`,
+     `komira_sql_stream_run` and `komira_plan_stream`; not
+     `komira_register_arrow_stream`, which reads no file) first opens libzstd, libz and liblz4 through a
+     raising probe (`probe_codec_libraries` in `compression.codec_libraries`),
+     so a missing library is -3 at that call. Today the engine is built by `komira_ctx_new`, and the probe runs
+     per call instead of there: a context on a host
+     without one of them still describes plans and defines credentials.
 4. **Fail-fast for the rest, and say so.** Whatever still aborts ends the host
    process. The `src/so` README and the Python package docs state this, along with
    the assert level the published library is built at.
@@ -410,6 +429,75 @@ otherwise fail fast. The port keeps that answer and makes it explicit:
    libkomira installs no signal handler at all. The async runtime's SIGTERM
    handler (`async_rt` `install_sigterm_handler`) is for servers at boot, and
    libkomira never calls it.
+
+### The abort sites and the inputs, by status
+
+Every `abort(` in the closure of `src/so` (its `deps`), every input class the
+readers of the run path found that ends the process without one, and what
+happens to it. Read from the code, by grep of the closure and by following the
+call paths from the exports; nothing here was measured unless it says so.
+
+**Refused, with a C driver case** (`src/so/tests/c/abort_driver.c`, target
+`//src/so:abort_check`):
+
+| input | where it ended the process | now |
+|---|---|---|
+| a statement nested more than 100 levels (parentheses, prefix `NOT`, `-`, `+` or `@`, function calls, `CASE`, `IN` lists, scalar, `IN` and `EXISTS` subqueries, derived tables) | the parser recursed once per level on the caller's stack (`sql/sql_parser.mojo`), about 25 KB per parenthesis and 35 KB per subquery (measured on linux-x86_64 from the stack's high-water mark), so about 300 levels filled an 8 MiB stack in the parser alone | `parse: SQL syntax error: the statement nests deeper than 100 levels at line <L>, column <C>`; exactly 100 levels runs, except nested scalar subqueries, which the optimizer refuses by name (`OPTIMIZE_UNRESOLVED_SCALAR`). DuckDB allows 1000; smaller parser frames would let the limit rise |
+| `lpad` / `rpad` with a count such as 2^63 - 1 | `_pad_bytes` (`batch_eval/string_bytes.mojo`) appended the pad with no ceiling | refused over the 64 MiB per-row ceiling `repeat` already had (`STRING_FN_N_REPEAT_MAX_BYTES`) |
+| `repeat` with a count such as 2^31 - 1 | not an abort: refused before the change too; kept as a case | the same refusal |
+
+**Refused, without a C driver case:** libzstd, libz or liblz4 missing on the
+host. `compression/codec_libraries.mojo` (`_open_or_abort`),
+`zlib/zlib_ffi.mojo` and `lz4/codec.mojo` open them in `_Global` initializers,
+which cannot raise, at the first zstd, gzip or lz4 page or file, at a Parquet
+page CRC (libz's `crc32`), or at a `COPY ... TO` with that compression. The
+probe above makes it -3 first. A C driver cannot hide a host library without
+an environment variable or a container, so the probe's refusal is a welded test
+of `compression` over a soname that does not exist.
+
+**Not reachable from an export** (each site stays as it is):
+
+| site | why no input reaches it |
+|---|---|
+| `op_sort/sort_stage_string_key.mojo`, `op_sort/sort_stage_payloads.mojo` (19 `abort(`) | the typed sort stage (`SortBuffer`, `SortKeyColumn_String`, `PayloadCol_String`) has no caller outside `op_sort`'s and `op_window`'s tests; SQL sorts run in `pipeline_exec/sink_sort.mojo` through `op_sort.sort_multi` and `sort_topn_sink`, which hold no `abort(` |
+| `agg/aggregator.mojo` (2), `op_agg_state/dyn_accumulator.mojo` (2) | no file of `sdk_exec`, `pipeline_exec`, `lowering` or `so` imports `agg` or `op_agg_state`; SQL aggregates run in `pipeline_exec/sink_agg.mojo`, which raises on a type or tag it does not serve |
+| `compression/codec_libraries.mojo` for libbz2 and liblzma | only the Avro block codecs open them, and no export reads Avro |
+| `aws_core/aws_retry.mojo` (1) | the token bucket is built from two positive constants it never refuses |
+
+The other matches of `abort` in the closure are comments, an unused import
+(`op_sort`), and a method named `abort` (`morsel/streaming_sink.mojo`). A raise
+on an engine worker thread is not one of these: the segment task, the
+dispatcher and `fork_join` catch it, and `run_sql` returns it as a refusal.
+The Arrow stream callbacks hold no `abort(` and return an errno for a NULL
+argument or a released stream.
+
+**Still ending the process** (fail-fast, item 4; each is its own change):
+
+- **Flat chains.** `x IN (1, 2, ..., N)` is parsed into a left-deep `OR` chain
+  of N levels, and `1 + 1 + ...`, `a AND b AND ...` and `UNION` chains are
+  left-deep too. Later walkers recurse over that depth *(inferred: no depth at
+  which one fails was measured)*. A nesting limit would refuse long `IN` lists,
+  which DuckDB runs, so the fix is a flat `IN` list and n-ary `AND`/`OR`, then
+  a bound on the rest.
+- **Parquet footers that amplify.** A footer of millions of one-byte empty
+  schema elements or row groups is bounded only by its byte length, about
+  150-250 bytes of heap per byte of footer *(inferred)*; the fix is a column
+  and row-group count ceiling beside the reader's list-size check.
+- **Compressed CSV and JSON read whole.** `csv_binding` and `json_binding`
+  decompress a `.gz`, `.zst` or `.lz4` file whole before inferring from a
+  256 KiB prefix, so a decompression bomb can exhaust memory; the fix is an
+  output cap on that read.
+- **Corrupt Parquet data pages.** The data-page decoders were not audited here
+  for a length read from the page and used unchecked; that audit is its own
+  change.
+- **Plan decode stack.** `plan_wire` bounds the nesting to 64 messages, not
+  the stack they take; a host thread with a small stack is not covered.
+- **A file truncated while it is mapped.** Binding reads the prefix through a
+  mapping, so another process truncating the file at that moment raises
+  `SIGBUS`. It cannot be tested deterministically.
+- **Anything else** that aborts, faults or runs out of memory. The library is
+  built at the compiler's default assert level, `safe`: the `debug_assert`s
+  declared `assert_mode="safe"` are kept, and abort when they fail.
 
 ## 9. What replaces the earlier doors, and what is not carried
 
@@ -535,7 +623,8 @@ Each part below is its own change, and each adds its rows and its tests together
    `EngineContext` (§7).
 3. `komira_sql_stream` and `komira_plan_stream`, with the `ArrowStream` golden
    type, the gate drivers, the C driver and the 1.3 rows (§3).
-4. Abort containment (§8, items 3 and 4).
+4. Abort containment (§8, items 3 and 4): built for the paths §8 lists as
+   refused; the paths it lists as still ending the process follow.
 
 The items of §10 follow in their own changes.
 

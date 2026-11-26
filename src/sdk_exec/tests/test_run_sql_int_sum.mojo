@@ -2,6 +2,12 @@
 # run_sql: `sum()` over an integer column is DECIMAL(38, 0) and exact
 # =============================================================================
 #
+# Covers: run_sql over INT64 and INT32 Parquet columns in several row groups:
+# an integer sum() is declared DECIMAL(38, 0) and exact past the INT64 range
+# (MAX and MIN rows, partials that each pass INT64, {MAX, MAX, MIN, MIN} = -2,
+# per-group totals), an empty or all-NULL sum is NULL, and expressions, CASE
+# and HAVING over the sum run.
+#
 # DuckDB types the sum of an integer as HUGEINT, which cannot overflow; this
 # engine answers DECIMAL(38, 0), Arrow's one type that holds every HUGEINT
 # total. Each test writes a Parquet table of INT64 / INT32 columns (several row

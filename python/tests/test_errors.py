@@ -13,6 +13,8 @@
     step number is `step` None, and does not pick a class;
   - a status of -2 or -5 is a plain KomiraError whatever the code and step,
     which it still carries;
+  - the memory budget's refusal, MEMORY_BUDGET_EXCEEDED, is a MemoryLimitError
+    at the execute step, and the same code at another step is one too;
   - a credential refusal is a CredentialsError with its code and the bind step;
   - the last error's code and step read as None when there is no error;
 - on an ABI 1.3 stand-in, which has neither call: `code` and `step` are None,
@@ -59,6 +61,7 @@ TABLE = {
         "STORAGE_WRITE_UNSUPPORTED",
         "PLAN_URL_QUERY_REFUSED",
     ],
+    "MemoryLimitError": ["MEMORY_BUDGET_EXCEEDED"],
     "CredentialsError": [
         "CREDENTIAL_UNBOUND",
         "CREDENTIAL_NAME_CONFLICT",
@@ -136,6 +139,14 @@ def check_v1_7(native):
         assert (e.code, e.step) == ("SQL_NOT_SUPPORTED", STEP_NAMES[step])
     e = refusal(native, ctx, -3, LOWER, "SQL_SYNTAX_ERROR")
     assert type(e) is komira.ParseError and e.step == "lower", repr(e)
+
+    # The memory budget's code is its own class, at the step that raised it
+    # and at any other.
+    e = refusal(native, ctx, -3, EXECUTE, "MEMORY_BUDGET_EXCEEDED")
+    assert type(e) is komira.MemoryLimitError, repr(e)
+    assert (e.status, e.code, e.step) == (-3, "MEMORY_BUDGET_EXCEEDED", "execute"), (e.status, e.code, e.step)
+    e = refusal(native, ctx, -3, LOWER, "MEMORY_BUDGET_EXCEEDED")
+    assert type(e) is komira.MemoryLimitError and e.step == "lower", repr(e)
 
     # With no code, the step: parse and bind have a class, the rest do not.
     e = refusal(native, ctx, -3, PARSE)

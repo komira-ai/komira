@@ -15,6 +15,11 @@ ABI 1.3), which counts every stream, schema and batch it makes and releases:
   that fails (EIO) raises KomiraError from to_arrow and pyarrow's OSError from
   a reader, each with the stream's own error text, and the stream is still
   released once;
+- a notebook display reads the rows and leaves the result unread, to_arrow
+  then reads them all, and a result shown and never read releases its
+  stream when collected, each struct released once; a stream failing at its
+  second batch raises KomiraError with its own text from the display and
+  again from to_arrow, and is released once;
 - a query that is not a str, holds a NUL or is not UTF-8, and any call on a
   closed session, raise before the library is called;
 - importing komira imports no pyarrow; results and a capsule still unread at
@@ -78,6 +83,13 @@ def zero(**changes):
 
 
 ROWS_READ = zero(streams=1, streams_released=1, schemas=1, schemas_released=1, batches=2, batches_released=2)
+
+# The notebook display of the answer of "rows".
+ROWS_HTML = (
+    '<div class="komira"><table class="dataframe"><thead><tr><th>n</th></tr><tr><th>int32</th></tr></thead>'
+    "<tbody><tr><td>1</td></tr><tr><td>2</td></tr><tr><td>3</td></tr></tbody></table>"
+    "<p>3 rows, 1 column</p></div>"
+)
 
 # A result just returned: its stream made and its schema read.
 OPENED = zero(streams=1, schemas=1, schemas_released=1)
@@ -226,6 +238,39 @@ def main(args):
         e = raised(reader.read_next_batch)
         assert isinstance(e, OSError) and "execute: the stand-in fails at batch 2" in str(e), repr(e)
         del reader, e
+        gc.collect()
+        assert counts.since(before) == failed, counts.since(before)
+
+        # A notebook display reads the rows and leaves the result unread:
+        # to_arrow then reads them all, and every struct is released once.
+        before = counts()
+        r = s.sql("rows")
+        assert r._repr_html_() == ROWS_HTML, r._repr_html_()
+        assert r.to_arrow().to_pylist() == [{"n": 1}, {"n": 2}, {"n": 3}]
+        assert r._repr_html_() is None
+        del r
+        gc.collect()
+        assert counts.since(before) == ROWS_READ, counts.since(before)
+        # A result shown and never read releases its stream when collected.
+        before = counts()
+        r = s.sql("rows")
+        assert r._repr_html_() == ROWS_HTML
+        del r
+        gc.collect()
+        assert counts.since(before) == ROWS_READ, counts.since(before)
+
+        # A stream that fails at its second batch while the display reads it:
+        # KomiraError from the display with the stream's own text, the same
+        # from to_arrow after it, and the stream released once.
+        before = counts()
+        r = s.sql("next_fails")
+        e = raised(r._repr_html_)
+        assert type(e) is KomiraError and e.status is None, repr(e)
+        assert "execute: the stand-in fails at batch 2" in str(e), str(e)
+        assert isinstance(e.__cause__, OSError), repr(e.__cause__)
+        again = raised(r.to_arrow)
+        assert type(again) is KomiraError and str(again) == str(e), repr(again)
+        del r, e, again
         gc.collect()
         assert counts.since(before) == failed, counts.since(before)
 

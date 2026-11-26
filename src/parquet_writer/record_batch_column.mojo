@@ -9,6 +9,17 @@
 #       numeric dictionary when the column has at most
 #       NUMERIC_DICT_MAX_CARDINALITY distinct values, else
 #       DELTA_BINARY_PACKED;
+#   INT8 / INT16 / UINT8 / UINT16
+#       widened to INT32 (each value kept), then as INT32;
+#   UINT32 / UINT64
+#       their bits as INT32 / INT64, then as those, with the chunk's min and
+#       max dropped: the signed order of the bits is not the unsigned order
+#       of the values, and a reader that prunes by a wrong min or max skips
+#       rows it should read (the null count stays);
+#   TIMESTAMP_S
+#       scaled to microseconds, then as INT64 (DuckDB writes seconds as
+#       microseconds; parquet.thrift has no seconds unit); a value past the
+#       microsecond range of INT64 is refused;
 #   FLOAT32 / FLOAT64
 #       numeric dictionary, else BYTE_STREAM_SPLIT (which clusters the
 #       exponent and mantissa bytes into runs a codec compresses well);
@@ -32,6 +43,7 @@
 # =============================================================================
 
 from arrow.arrow_types import ArrowType
+from arrow.primitive_array import PrimitiveArray
 from arrow.record_batch import RecordBatch
 from parquet_api.metadata import SchemaElement
 from parquet_api.types import CompressionCodec, FieldRepetitionType
@@ -67,7 +79,24 @@ def _encode_int_page[
     nullable: Bool,
     codec: CompressionCodec,
 ) raises -> ColumnPage:
-    var arr = batch.column_at(col_idx).as_primitive[dtype]()
+    return _encode_int_array[dtype](
+        batch.column_at(col_idx).as_primitive[dtype](),
+        col_idx,
+        name,
+        nullable,
+        codec,
+    )
+
+
+def _encode_int_array[
+    dtype: DType
+](
+    arr: PrimitiveArray[dtype],
+    col_idx: Int,
+    name: String,
+    nullable: Bool,
+    codec: CompressionCodec,
+) raises -> ColumnPage:
     var d = encode_dict_numeric_column_page[dtype](
         col_idx, arr, name, nullable=nullable, codec=codec
     )
@@ -76,6 +105,88 @@ def _encode_int_page[
     return encode_dbp_column_page[dtype](
         col_idx, arr, name, nullable=nullable, codec=codec
     )
+
+
+def _cast_array[
+    src: DType, dst: DType
+](arr: PrimitiveArray[src]) raises -> PrimitiveArray[dst]:
+    """`arr` with each value cast to `dst` (a widening keeps the value, a
+    same-width cast keeps the bits) and the same nulls."""
+    var n = arr.length
+    var out = (
+        PrimitiveArray[dst].allocate_nullable(n)
+        if arr.null_count > 0
+        else PrimitiveArray[dst].allocate(n)
+    )
+    for i in range(n):
+        if arr.null_count > 0 and arr.is_null(i):
+            out._set_null(i)
+        else:
+            out.set(i, arr.get(i).cast[dst]())
+    return out^
+
+
+def _encode_cast_page[
+    src: DType, dst: DType
+](
+    batch: RecordBatch,
+    col_idx: Int,
+    name: String,
+    nullable: Bool,
+    codec: CompressionCodec,
+) raises -> ColumnPage:
+    """Column `col_idx`, read as `src`, encoded as the INT32 or INT64 `dst`
+    holding each value cast (`_cast_array`)."""
+    var wide = _cast_array[src, dst](
+        batch.column_at(col_idx).as_primitive[src]()
+    )
+    return _encode_int_array[dst](wide, col_idx, name, nullable, codec)
+
+
+def _without_min_max(var page: ColumnPage) -> ColumnPage:
+    """`page` with its statistics' min and max (both spellings) removed; the
+    null and distinct counts stay."""
+    if page.statistics:
+        page.statistics.value().min = None
+        page.statistics.value().max = None
+        page.statistics.value().min_value = None
+        page.statistics.value().max_value = None
+    return page^
+
+
+comptime _MICROS_PER_SECOND: Int64 = 1_000_000
+
+
+def _seconds_as_micros(
+    arr: PrimitiveArray[DType.int64], name: String
+) raises -> PrimitiveArray[DType.int64]:
+    """A TIMESTAMP_S column's seconds as microseconds, the same nulls.
+
+    Raises:
+        Error: a value whose microseconds do not fit in an INT64.
+    """
+    var limit = Int64.MAX // _MICROS_PER_SECOND
+    var n = arr.length
+    var out = (
+        PrimitiveArray[DType.int64].allocate_nullable(n)
+        if arr.null_count > 0
+        else PrimitiveArray[DType.int64].allocate(n)
+    )
+    for i in range(n):
+        if arr.null_count > 0 and arr.is_null(i):
+            out._set_null(i)
+            continue
+        var v = arr.get(i)
+        if v > limit or v < -limit:
+            raise Error(
+                "parquet writer: column '" + name + "' row " + String(i)
+                + " holds the TIMESTAMP_S value " + String(v)
+                + ", whose microseconds do not fit in an INT64 (a Parquet"
+                " timestamp has no seconds unit, so seconds are written as"
+                " microseconds)"
+            )
+        out.set(i, v * _MICROS_PER_SECOND)
+    return out^
 
 
 def _encode_float_page[
@@ -133,6 +244,41 @@ def _encode_column_to_page(
         # `as_primitive` reads the INT32-backed temporal types as INT32.
         return _encode_int_page[DType.int32](
             batch, col_idx, name, nullable, codec
+        )
+    if at == ArrowType.INT16:
+        return _encode_cast_page[DType.int16, DType.int32](
+            batch, col_idx, name, nullable, codec
+        )
+    if at == ArrowType.INT8:
+        return _encode_cast_page[DType.int8, DType.int32](
+            batch, col_idx, name, nullable, codec
+        )
+    if at == ArrowType.UINT16:
+        return _encode_cast_page[DType.uint16, DType.int32](
+            batch, col_idx, name, nullable, codec
+        )
+    if at == ArrowType.UINT8:
+        return _encode_cast_page[DType.uint8, DType.int32](
+            batch, col_idx, name, nullable, codec
+        )
+    if at == ArrowType.UINT32:
+        return _without_min_max(
+            _encode_cast_page[DType.uint32, DType.int32](
+                batch, col_idx, name, nullable, codec
+            )
+        )
+    if at == ArrowType.UINT64:
+        return _without_min_max(
+            _encode_cast_page[DType.uint64, DType.int64](
+                batch, col_idx, name, nullable, codec
+            )
+        )
+    if at == ArrowType.TIMESTAMP_S:
+        var micros = _seconds_as_micros(
+            batch.column_at(col_idx).as_primitive[DType.int64](), name
+        )
+        return _encode_int_array[DType.int64](
+            micros, col_idx, name, nullable, codec
         )
     if (
         at == ArrowType.INT64

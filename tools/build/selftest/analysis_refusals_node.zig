@@ -1,8 +1,9 @@
 //! analysis_refusals_node: the Node.js rules' analysis refusals
 //! (tools/build/node/defs.bzl), each with its exact message: an empty
 //! expect_error or exe, a source or bundle entry listed twice, a data
-//! destination that is a source or a package, conflicting pins, and a
-//! package in its own deps. Catches the staged-twice check deleted.
+//! destination that is a source or a package, conflicting pins, a
+//! package in its own deps, and a c_shared_lib's target_os with a
+//! zig_triple or with an `out` that is not a `.so` name. Catches the staged-twice check deleted.
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -51,6 +52,16 @@ const ROWS = [_]lib.Row{
         .name = "node_binding_no_srcs",
         .target = "tests//negative/node:binding_no_srcs",
         .text = "tests//negative/node:binding_no_srcs: srcs is empty: name the test files node --test runs",
+    },
+    .{
+        .name = "node_target_os_with_triple",
+        .target = "tests//negative/node:target_os_with_triple",
+        .text = "tests//negative/node:target_os_with_triple: target_os takes the triple from the target platform; leave zig_triple out",
+    },
+    .{
+        .name = "node_target_os_not_so",
+        .target = "tests//negative/node:target_os_not_so",
+        .text = "tests//negative/node:target_os_not_so: with target_os, out names the linux file and ends in .so; it is addon.node",
     },
 };
 

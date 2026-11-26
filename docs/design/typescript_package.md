@@ -31,10 +31,11 @@ Fixed before this design, and not reopened here:
   loads from any location with nothing installed beyond the host's system C and C++ libraries.
   The owner also ruled that komira may redistribute those libraries. Their licence files and
   notice are the wheel's (§3).
-  - The directory is one build output, the self-contained directory of the libkomira target. The
-    change that makes the wheel self-contained builds it, and the wheel is its first user.
-  - That change is not on `main` yet. The wheel on `main` still takes the runtime from Modular's
-    `mojo-compiler` (komira-ai/komira#2122).
+  - The directory is one build output, the self-contained directory of the libkomira target
+    (`//src/so:libkomira[dist]`). The wheel is its first user: `//python:komira_wheel` copies it whole
+    to `komira/_lib/`, with `libkomira.so` at the top and the native owners and the three Mojo runtime
+    libraries in `lib/`, and requires no distribution of Modular's ([python/BUCK](../../python/BUCK),
+    komira-ai/komira#2139, komira-ai/komira#2151).
   - The npm platform packages copy the same directory (§3).
 - **Release platforms.** linux-x86_64, linux-arm64 and macos-arm64 (rule B11).
 - **One UDF mode per language.** UDFs written in TypeScript run in Node worker processes (rule B21,
@@ -85,11 +86,11 @@ Fixed before this design, and not reopened here:
   JavaScript](#arrow-from-the-c-stream-to-javascript), steps 1 to 3, over a stream handed to
   `importArrowStream` as a capsule (an N-API external tagged as an Arrow C stream,
   [node/arrow_c.h](../../node/arrow_c.h)) rather than one `komira_sql_stream` fills. It drains on
-  the JavaScript thread: the session thread does not exist yet. The private module is
+  the JavaScript thread. The private module is
   [node/src/arrow_import.mts](../../node/src/arrow_import.mts) (`readArrowStream`), with
-  `KomiraError` and `UnsupportedOperation` in [node/src/errors.mts](../../node/src/errors.mts).
+  `KomiraError` and `UnsupportedOperation` in [node/src/errors.ts](../../node/src/errors.ts), the package's one errors module.
   [node/package.json](../../node/package.json) is private and declares the `apache-arrow` peer
-  dependency at `^21.2.0`.
+  dependency at `^21.2.0` (part 3 completes it).
 
 ### Tests and CI
 
@@ -116,9 +117,12 @@ Fixed before this design, and not reopened here:
   - `node_binding_test` runs `node --test` as a build action, under `env -i`, with no network.
   - It passes only if TAP reports tests, all passed, and none skipped
     ([tools/build/node/README.md](../../tools/build/node/README.md)).
-- **EXISTS** Nothing measures the coverage of `node/`. `.github/workflows/coverage.yml` and the
-  covcheck README never name it *(inferred from a search of both)*. covcheck does read lcov
-  tracefiles ([tools/build/coverage/README.md](../../tools/build/coverage/README.md)).
+- **EXISTS** The TypeScript sources of `node/src/` are measured by their own test target:
+  `//node:package_test` names them as `covered_srcs`, and `node_binding_test` fails unless every one
+  is loaded and their lines and branches are each at least 99% covered (rule T1). The addon's C is
+  not measured. `.github/workflows/coverage.yml` and the covcheck README never name `node/`
+  *(inferred from a search of both)*; covcheck does read lcov tracefiles
+  ([tools/build/coverage/README.md](../../tools/build/coverage/README.md)).
 
 ### Toolchain
 
@@ -137,8 +141,9 @@ Fixed before this design, and not reopened here:
   pinned lockfile), `tsc_check`, `tsc_build` and `jest_test` (`tools/build/node/modules.bzl`).
   - `npm_modules` is a Zig program and runs no npm. It reads a `package-lock.json` and the pins
     that `kpin lock` writes.
-  - These rules are used only by `src/tests/helpers` and their negative fixtures under
-    `tools/build/tests/negative`.
+  - These rules are used by `src/tests/helpers` and their negative fixtures under
+    `tools/build/tests/negative`, and by `//node:typecheck` and `//node:dist` over the package's
+    own pinned compiler (`node/devtools`).
 - **EXISTS** Pinned npm tarballs include `apache-arrow` 21.2.0. It is used by a test of an Arrow
   IPC round trip in `komira_test_node`.
 - **EXISTS** "Never shipped" ([third_party/node/README.md](../../third_party/node/README.md)): the
@@ -147,32 +152,36 @@ Fixed before this design, and not reopened here:
 
 ### Release state
 
-- **Nothing is released.** The SDK has no npm name, no `.d.ts` and no public TypeScript. Its
-  `package.json` is private, and its only TypeScript is the private Arrow import under
-  `node/src/` and the tests beside it. The other `.ts` files in the repository are test fixtures
-  under `src/tests/helpers` and `tools/build/tests/negative`. No workflow mentions npm publishing. The only use of npm in a workflow is the
-  pin check in `kpin-update.yml`.
+- **Nothing is released.** **EXISTS** The package of part 3 (below, "Where the work lands"):
+  `node/package.json` (`"private": true`, named by D1's option A as a placeholder), the TypeScript
+  sources in `node/src/`, and the `.js` and `.d.ts` files `//node:dist` compiles from them. The
+  private Arrow import of part 2 (`node/src/arrow_import.mts`) is beside them, outside `dist/` until
+  `Result` uses it. No platform package is built and nothing is published. No workflow mentions npm
+  publishing. The only use of npm in a workflow is the pin check in `kpin-update.yml`.
 
 ### The library under it
 
-- **EXISTS** `libkomira` is at ABI 1.7, with twenty-three exports
+- **EXISTS** `libkomira` is at ABI 1.9, with twenty-five exports
   ([src/so/abi/komira.tsv](../../src/so/abi/komira.tsv)).
   - `komira_sql_stream` (1.3) runs SQL text and answers an Arrow C stream.
     `komira_sql_stream_run` (1.6) runs it under a run handle that another thread cancels
-    (`komira_run_cancel`, status -6) and reads the progress of (`komira_run_progress`). The plan call,
-    `komira_plan_stream`, is designed but not built; it takes the next minor.
+    (`komira_run_cancel`, status -6) and reads the progress of (`komira_run_progress`).
+  - `komira_plan_stream` (1.8) runs a serialized logical plan and answers the same way.
   - `komira_ctx_new_with_options` (1.4) creates a context with the engine's worker count and
     memory budget as arguments (0 is the host's own value).
   - `komira_register_csv` and `komira_register_json` (1.5) bind a CSV or newline-delimited JSON
     file to the session as a table that SQL reads by name.
   - `komira_last_error_code` and `komira_last_error_step` (1.7) answer the last error's named code and
     the step that refused it. The addon does not bind them yet.
+  - `komira_register_arrow_stream` (1.9) drains a host's Arrow C stream into a table held in
+    memory and registers it by name, replacing a table of that name; it releases the stream.
   - On linux-x86_64 it is 3.8 MB, with run path `$ORIGIN/lib:$ORIGIN`, and its eleven native owners
     sit in `lib/` beside it ([src/so/README.md](../../src/so/README.md)).
   - It needs the three Mojo runtime libraries at load time: `libKGENCompilerRTShared`,
     `libAsyncRTRuntimeGlobals` and `libMSupportGlobals`
     ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)). The self-contained directory
-    puts them beside it, and that directory is not built on `main` yet.
+    (`//src/so:libkomira[dist]`) puts them in its `lib/`, which the library's run path finds, and the
+    wheel ships that directory.
 - **No TypeScript or Node SDK existed in the earlier code base.** Its one engine binding was the
   Python ctypes SDK ([python_package.md](python_package.md) decision 4).
 
@@ -463,11 +472,10 @@ is under [D2](#d2-where-the-mojo-runtime-comes-from). What follows from the ruli
   fails as any unloadable library does (§2, `LibraryLoadError`). The fix is to reinstall the
   package, never to install a Mojo runtime.
 - **The bytes a test ran.** Each platform package's runtime libraries are the bytes its install test
-  loaded (§5), because the package is the test's input. The open question of whether `libkomira`
-  built against the conda runtime loads against the PyPI runtime's libraries
-  ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md)) is the wheel change's to settle
-  when it picks the directory's runtime. The npm packages fetch no runtime, so whatever it picks is
-  what the npm install test loads.
+  loaded (§5), because the package is the test's input. The directory's runtime libraries
+  are taken from the pinned toolchain's Mojo package, the build that compiled `libkomira`
+  ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md), [NOTICE](../../NOTICE)). The npm
+  packages fetch no runtime, so the npm install test loads those same bytes.
 - **What the host provides.** On Linux the host provides `libstdc++.so.6` and `libgcc_s.so.1`,
   which the runtime needs, as for the wheel today
   ([mojo_runtime_pypi_vs_conda.md](mojo_runtime_pypi_vs_conda.md),
@@ -482,12 +490,14 @@ is under [D2](#d2-where-the-mojo-runtime-comes-from). What follows from the ruli
 - The platform packages carry the same native files as the wheel, the Mojo runtime libraries among
   them, so they carry the same licence files and the same notice as the wheel, and their
   `"license"` field follows the wheel's licence metadata. This design does not write that text. The
-  change that makes the wheel self-contained settles it, and the npm package rule copies the
-  wheel's licence files rather than keeping a second set.
-- Today's `NOTICE` reproduces the notices of snappy, Brotli and libc++, which are inside the native
-  owners ([wheel_licence_audit.md](wheel_licence_audit.md)). Its section on the Mojo runtime
-  ("a dependency, not distributed") describes the wheel as it is on `main`. Whatever the wheel's
-  change makes of it, the npm packages copy. No npm change edits `NOTICE`.
+  wheel carries the three runtime libraries with Modular's licence file and third-party notices,
+  and its License-Expression is `Apache-2.0 AND LicenseRef-Modular-Proprietary`
+  ([python/README.md](../../python/README.md)). The npm package rule copies the wheel's licence files
+  rather than keeping a second set.
+- `NOTICE` reproduces the notices of snappy, Brotli and libc++, which are inside the native owners
+  ([wheel_licence_audit.md](wheel_licence_audit.md)), and its last section is on the Mojo runtime
+  libraries the wheel carries. Whatever `NOTICE` holds, the npm packages copy. No npm change edits
+  `NOTICE`.
 
 ### macOS
 
@@ -502,9 +512,9 @@ is under [D2](#d2-where-the-mojo-runtime-comes-from). What follows from the ruli
 
 The release machine today publishes mopm packages from `release.yml` on every push to `main`:
 stage, test, commit, smoke ([docs/ci.md](../ci.md), [docs/releases.md](../releases.md)). The conda
-release set (`//release:release_set`) is built but not uploaded. The wheel is to be published by a
-top-level `pypi.yml` through the environments `testpypi` and `pypi`
-([python_package.md](python_package.md)). The npm packages follow the wheel's shape.
+release set (`//release:release_set`) is built but not uploaded. The Linux wheel is published by the
+top-level `pypi.yml` and the macOS arm64 wheel by `pypi-macos-arm64.yml`, each through the environments
+`testpypi` and `pypi` ([python_package.md](python_package.md)). The npm packages follow the wheel's shape.
 
 ### The build
 
@@ -514,12 +524,14 @@ top-level `pypi.yml` through the environments `testpypi` and `pypi`
     one fixed mtime, modes 0644 and 0755. A `[twin]` action writes it again from inputs staged
     elsewhere, and the check refuses it unless the bytes are equal.
   - It stamps `version` from `komira.package_stamp` and writes `package.json` from the rule's
-    attributes. There is no `package.json` in the repository that could drift.
-  - Its native input is the self-contained directory of the libkomira target, built by the change
-    that makes the wheel self-contained. The rule takes the directory as one input and copies it
+    attributes. **EXISTS** since part 3: `node/package.json`, the manifest the package's tests read
+    (`"private": true`, version `0.0.0`). The rule's change decides whether the rule stamps that file
+    or writes its own, and in the second case adds the check that the two agree.
+  - Its native input is the self-contained directory of the libkomira target, the one the wheel
+    copies. The rule takes the directory as one input and copies it
     whole; it never assembles the library, owners and runtime from separate targets.
-  - It reads the tarball back. The ELF policy of `wheel_file`, as the wheel's change sets it for the
-    self-contained directory, applies to the platform packages: the glibc floor; every run path at
+  - It reads the tarball back. The ELF policy of `wheel_file` for that directory
+    (`_NATIVE_NEEDS` in [python/BUCK](../../python/BUCK)) applies to the platform packages: the glibc floor; every run path at
     `$ORIGIN` or under it; every NEEDED a member or a system library, so the three runtime
     libraries are members; no other file of Modular's distribution; a size cap.
   - The rule refuses a package whose `repository.url` is not `https://github.com/komira-ai/komira`,
@@ -602,9 +614,8 @@ one publishes by hand otherwise.
 
 All tests are hermetic: no network, no clock, no fixed port (rule T12). The behaviour tests are
 written in TypeScript (rule T11) and run with the pinned Node, which strips types itself, so they
-need no build step. `node_binding_test` runs `.mts` files today (the Arrow import's tests), and
-`.mjs` and `.js`. `tsc_check` checks the tests' types, once `//node` has a lockfile with
-`typescript`.
+need no build step. `node_binding_test` takes `.mjs`, `.js`, `.ts` and `.mts` files (**EXISTS**).
+`tsc_check` checks the package's tests' types (`//node:typecheck`).
 
 ### The package's own tests
 
@@ -641,13 +652,14 @@ linux-x86_64.
   - An unread `Result` of a closed session reads.
   - Arguments of the wrong type or value throw before the library is called.
 - **Coverage.** Node's test runner writes lcov (`--experimental-test-coverage` with the lcov
-  reporter), and covcheck reads it, so `node/` is measured at line and branch level against 99%
-  (rule T1).
+  reporter), so `node/` is measured at line and branch level against 99% (rule T1).
+  - **EXISTS** for the TypeScript: `node_binding_test`'s `covered_srcs` are measured in the test's own
+    action, which fails under 99% or when a listed source was never loaded (node leaves an unloaded
+    file out of its totals). Showing the same numbers in the coverage job's table, through
+    covcheck, is a later step.
   - The addon's C has no measurement yet. covcheck reads lcov, so the addon can be compiled with
     coverage instrumentation and its counts written as lcov. Which instrumentation `zig cc` uses
     for this is that change's to show.
-  - The first change that touches `node/` wires both. Until it does, `node/` is a touched package
-    with no number.
 
 ### From the installed package, on each platform
 
@@ -826,13 +838,14 @@ that runs no query would be a release with nothing in it.
 
 ## What are the limits and open questions?
 
-- The npm platform packages wait for the self-contained directory, which does not exist on `main`
-  yet; its change also settles the licence files and notice the platform packages copy.
+- The npm platform packages wait for `npm_tarball` and the npm release set. The self-contained
+  directory they copy, and the licence files and notice the wheel carries with it, are on `main`.
 - Tests in `.ts` run with type stripping on the pinned 24, and on a Node 22 pin only from 22.18,
   so the Node 22 pin is 22.18 or later.
-- linux-arm64 waits for its build platform, and macos-arm64 for `libkomira`'s macOS build and
-  load. The Mach-O checks of komira-ai/komira#2116 are a step toward the macOS build. Both platforms
-  also need a Node pin of their own.
+- linux-arm64 waits for its build platform. macos-arm64 waits for the macOS build of the addon;
+  `libkomira` itself builds and loads on macOS, and the macOS arm64 wheel carries
+  `libkomira.dylib` and the three runtime libraries. Both platforms also need a Node pin of their
+  own (the one pin is linux-x64, [third_party/node/pins.bzl](../../third_party/node/pins.bzl)).
 - Whether ad-hoc signing is enough on macOS is inferred, not tested.
 - Whether a trusted publisher can be configured before its package exists is not stated by npm's
   documentation.
@@ -847,7 +860,7 @@ Each part is its own change, with its tests:
 4. `sql` and `Result`, once `komira_sql_stream` exists;
 5. errors, session options, and CSV and NDJSON registration, each after its library change;
 6. the package rule and the release set, consuming the self-contained directory of the libkomira
-   target, after the change that makes the wheel self-contained has landed;
+   target (`//src/so:libkomira[dist]`, which the wheel already uses);
 7. the macOS and linux-arm64 builds;
 8. the install tests;
 9. `npm.yml`;
@@ -863,6 +876,6 @@ The Excel SDK and the `ts_polars` builder follow, on a shared plan encoder.
 ## Where is the code?
 
 Today: [node/](../../node/README.md), [tools/build/node](../../tools/build/node/README.md),
-[third_party/node](../../third_party/node/README.md), [src/so](../../src/so/README.md). Later: `node/src/`
-for the TypeScript, `tools/build/package/` for `npm_tarball`, `release/` for the npm set, and
+[third_party/node](../../third_party/node/README.md), [src/so](../../src/so/README.md), and `node/src/`
+for the TypeScript. Later: `tools/build/package/` for `npm_tarball`, `release/` for the npm set, and
 `.github/workflows/npm.yml`.

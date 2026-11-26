@@ -2,6 +2,17 @@
 # run_sql: a GROUP BY over the memory budget spills to the spill directory
 # =============================================================================
 #
+# Covers: A GROUP BY of 60,001 groups (two rows each, a NULL key, NULL values)
+# on a context whose memory budget the group tables outgrow and which has a
+# spill directory answers an oracle computed in the test (count, exact sum,
+# min, max, NULL where a group has no value) on one and two workers, as the
+# same query with no budget does; the spill directory exists afterwards and is
+# empty; the same budget with no spill directory is refused at execute; an
+# ungrouped count and a GROUP BY of ten groups under the budget (a query that
+# fits) do not create the directory; an empty spill_directory is
+# ENGINE_OPTIONS_INVALID; a directory that cannot be created fails the spilling
+# query at execute and the context runs the next one.
+#
 # The table t(k BIGINT, v BIGINT) has ROWS rows; row i has k = i % GROUPS
 # (NULL where i % 997 == 3) and v = 3 * i - 50000 (NULL where i % 7 == 2), so
 # there are GROUPS groups of up to two rows (a row whose k is NULL leaves its
@@ -220,6 +231,12 @@ def test_the_same_budget_without_a_spill_directory_is_refused_at_execute() raise
         out.refusal.value().reason,
     )
     assert_true(out.refusal.value().reason.find("was denied") >= 0)
+    assert_true(
+        out.refusal.value().reason.startswith(
+            "[Processor] MEMORY_BUDGET_EXCEEDED: "
+        ),
+        out.refusal.value().reason,
+    )
 
 
 def test_a_query_that_fits_the_budget_writes_nothing() raises:

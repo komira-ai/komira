@@ -2,6 +2,18 @@
 # run_sql over an EngineContext: TPC-H Q6 from its SQL text
 # =============================================================================
 #
+# Covers: run_sql over an EngineContext. TPC-H Q6's text from bench_corpus over
+# a lineitem-shaped Parquet file gives the integer oracle's DECIMAL(38,4); a
+# self-join counts the key pairs of the oracle; a LEFT self-join counts the
+# matched pairs and the unmatched rows of the oracle and a scalar subquery
+# gives the oracle's count; a LEFT JOIN with a residual over both sides, a
+# syntax error, an unknown table, a missing file, CREATE TABLE AS and a
+# replaced file are named refusals, as are a tiny memory budget and an INT64
+# sum out of range; the context runs on after a refusal; the footer cache reads
+# each file once per query and shares it between bind and lower; a file
+# replaced between queries is read again; options are validated; contexts are
+# created and dropped repeatedly, the segment pool whole after each run.
+#
 # The query is the text of bench_corpus (`tpch/q6`), unedited. The table
 # is a lineitem-shaped Parquet file written here (DECIMAL(15,2) money and
 # quantity, DATE32 ship date, several row groups) from
@@ -47,7 +59,8 @@
 #     new answer (not the old one), and a replacement whose schema differs from
 #     the registered table is refused at step `lower`, naming the table.
 #   * test_a_tiny_memory_budget_is_refused_at_execute: a budget of 1 byte denies
-#     the sink its state ("was denied"), as a refusal at step `execute`.
+#     the sink its state ("was denied"), as a refusal at step `execute` that
+#     reads `[Processor] MEMORY_BUDGET_EXCEEDED: ...`.
 #   * test_a_sum_past_int64_is_answered_exactly_and_the_context_runs_on: SUM of
 #     three INT64 values of 2^62 is the DECIMAL(38, 0) 3 * 2^62, and Q6 then
 #     runs on the same context.
@@ -488,6 +501,12 @@ def test_a_tiny_memory_budget_is_refused_at_execute() raises:
     var out = run_sql(ctx, _q6())
     _expect_refusal(out, String(STEP_EXECUTE), "")
     assert_true(out.refusal.value().reason.find("was denied") >= 0)
+    assert_true(
+        out.refusal.value().reason.startswith(
+            "[Processor] MEMORY_BUDGET_EXCEEDED: "
+        ),
+        out.refusal.value().reason,
+    )
 
 
 def test_a_sum_past_int64_is_answered_exactly_and_the_context_runs_on() raises:

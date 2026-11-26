@@ -25,6 +25,7 @@ mojo_library(
         "tests/test_arrow_nested_compute_x1b.mojo",
         "tests/test_case_over_dictionary_column.mojo",
         "tests/test_case_zip_blend.mojo",
+        "tests/test_cast_bool_numeric.mojo",
         "tests/test_cast_int_to_decimal128.mojo",
         "tests/test_cast_small_int_widening.mojo",
         "tests/test_col_int_float_scalar_kerneldirect.mojo",

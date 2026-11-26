@@ -3,6 +3,19 @@
 # pinned DuckDB
 # =============================================================================
 #
+# Covers: run_sql over two Parquet tables DuckDB wrote (the
+# :window_frames_oracle action in BUCK) answers what the pinned DuckDB answers
+# for each case of tests/window_frames/cases.sql, on one and three workers:
+# ROWS frames (sliding, empty at a partition's edge, running and tail,
+# descending, offsets past the partition) with sum, count, avg, min, max,
+# first_value, last_value and nth_value, and RANGE frames with offsets over a
+# BIGINT key with ties and NULLs, an INTEGER key with an offset past 32 bits
+# and a DOUBLE key with NaN, infinities, -0.0 and NULL, with keys at the ends
+# of BIGINT and INTEGER range; no PARTITION BY, ranking and LAG ignoring their
+# frame, a WHERE and no row; every case is run; a RANGE bound that leaves the
+# key's type fails at step execute with DuckDB's overflow error, and a frame
+# DuckDB refuses fails at step bind with DuckDB's reason.
+#
 # DuckDB writes frames.parquet and edge.parquet (tests/window_frames/data.sql)
 # and answers each case of tests/window_frames/cases.sql; run_sql runs the
 # same text over the same files, on one worker and on three, and its batch

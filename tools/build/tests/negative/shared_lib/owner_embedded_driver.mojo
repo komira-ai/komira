@@ -1,7 +1,8 @@
 from std.ffi import OwnedDLHandle
+from std.sys import CompilationTarget
 
-comptime LIB = "./owner_embedded.so"
-comptime OWNER = "libkomira_libc_native.so.1"
+comptime LIB = "./owner_embedded.dylib" if CompilationTarget.is_macos() else "./owner_embedded.so"
+comptime OWNER = "libkomira_libc_native.1.dylib" if CompilationTarget.is_macos() else "libkomira_libc_native.so.1"
 
 
 def main() raises:

@@ -1,10 +1,20 @@
-load("@komira//python:dependencies.bzl", "DUCKDB_WHEEL", "PROTOBUF_REQUIREMENT", "PYARROW_MACOS", "PYARROW_WHEELS")
+load("@komira//python:dependencies.bzl", "DUCKDB_WHEEL", "PROTOBUF_MACOS", "PROTOBUF_REQUIREMENT", "PYARROW_MACOS", "PYARROW_WHEELS")
 load("@komira//python:pythons.bzl", "PYTHONS")
 load("@komira//third_party/python:pins.bzl", "PROTOBUF_EDGES", "WHEELS")
+load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/node:defs.bzl", "c_shared_lib")
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
-load("@komira//tools/build/python:defs.bzl", "py_test", "python_binding_test", "python_wheel")
+load("@komira//tools/build/python:defs.bzl", _py_test = "py_test", _python_binding_test = "python_binding_test", "python_wheel")
+load(":families.bzl", "register", "require_all_run", "test_target_name")
+
+# Every `py_test` and `python_binding_test` below is declared through these two,
+# which record its name and its file in `_SUITE` ({name: src}) before they
+# declare it: `:all` (the end of this file) depends on all of them, and a name
+# declared twice fails the load naming both files (families.bzl).
+_SUITE = {}
+py_test = register(_py_test, _SUITE)
+python_binding_test = register(_python_binding_test, _SUITE)
 
 # libkomira with the Mojo runtime and its native owners in lib/ beside it: the
 # directory the loader is given.
@@ -218,6 +228,13 @@ _ISA_FIXTURES = [
     "cpuinfo_x86_64_westmere.txt",
 ]
 
+# The Node package's selector test (node/BUCK, :package_test) reads the same
+# fixtures and table of choices, so the two loaders cannot disagree.
+[export_file(
+    name = "fixtures/" + f,
+    visibility = ["//node:"],
+) for f in ["cpuinfo_x86_64_v3.txt"] + ["isa_variants/" + x for x in _ISA_FIXTURES]]
+
 [python_binding_test(
     name = "variants_test" + p["suffix"],
     src = "test_variants.py",
@@ -342,7 +359,7 @@ pinned_file(
 )
 
 # Read only by the macOS wheel's install test, which runs from
-# pypi-macos-arm64.yml alone, never in a pull request.
+# the macOS jobs of pypi.yml alone, never in a pull request.
 pinned_file(
     name = PYARROW_MACOS["file"],
     url = PYARROW_MACOS["url"],
@@ -377,7 +394,9 @@ _PYARROW = {
 # make no stream; a failing get_schema raises KomiraError from sql and a
 # failing get_next from to_arrow (pyarrow's OSError from a reader); the
 # argument checks and a closed session make no call; results left unread at
-# interpreter exit are released without a crash.
+# interpreter exit are released without a crash; a notebook display reads the
+# rows, leaves the result unread and releases each struct once, also when the
+# stream fails while it reads.
 [python_binding_test(
     name = "sql_fake_test" + p["suffix"],
     src = "test_sql_fake.py",
@@ -423,9 +442,50 @@ c_shared_lib(
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# Ctrl-C and progress during Session.sql on the same stand-in built for ABI 1.6
+# (fake_threads.c with FAKE_RUN), whose komira_sql_stream_run holds the run at a
+# gate until the test opens it or the run is cancelled: Ctrl-C cancels the
+# run's handle and sql raises KeyboardInterrupt once the run returned, the
+# handle freed after the call; a second Ctrl-C while it stops is not raised; an
+# answer that stood after the cancel and a refusal during Ctrl-C are dropped; a
+# handler that does not raise leaves the query running; progress gets each
+# reading on the calling thread, never for a plan with no segment; the
+# callback's exception, and its call into the session, cancel the query and are
+# raised; a refusal and an unasked cancel raise their message; arguments are
+# checked first; an abandoned call makes no call; the log lines word for word.
+c_shared_lib(
+    name = "fake_run",
+    srcs = ["fake_threads.c"],
+    copts = ["-DFAKE_RUN"],
+    out = "libkomira_fake_run.so",
+)
+
+[python_binding_test(
+    name = "sql_cancel_test" + p["suffix"],
+    src = "test_sql_cancel.py",
+    data = {"fake_run/libkomira.so": ":fake_run"},
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Session.sql under a run handle on the real library: the progress readings of
+# a GROUP BY grow and end at done equal to total; a Ctrl-C and an exception
+# from the callback are raised from sql and the session answers after; a
+# refusal never calls the callback.
+[python_binding_test(
+    name = "sql_run_test" + p["suffix"],
+    src = "test_sql_run.py",
+    data = {
+        "labels.parquet": "komira//src/parquet_codec:pyarrow_multi_dict_page.parquet",
+        "libkomira": LIBKOMIRA,
+    },
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # Session.sql on the real library: SELECT 1 AS n, a GROUP BY over a checked-in
 # Parquet file (3000 rows, five labels, six row groups), an aggregate over the
-# quickstart's readings.parquet, an answer of no rows, each terminal, an engine
+# checked-in fixtures/readings.parquet, an answer of no rows, each terminal, an engine
 # refusal with its message and the session answering after it, and a result
 # read after its session was closed or collected (the stream needs neither),
 # or never read at all, without a crash.
@@ -435,9 +495,40 @@ c_shared_lib(
     data = {
         "labels.parquet": "komira//src/parquet_codec:pyarrow_multi_dict_page.parquet",
         "libkomira": LIBKOMIRA,
-        "readings.parquet": "komira//python:examples/readings.parquet",
+        "readings.parquet": "fixtures/readings.parquet",
     },
     deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Session(memory_limit=) on the real library, over labels.parquet: a limit of
+# one byte raises MemoryLimitError (status -3, code MEMORY_BUDGET_EXCEEDED, step
+# execute) from sql for an aggregate, a GROUP BY over an integer key and over a
+# string key, a COUNT(DISTINCT), a sort and a window function; the session
+# answers the next query, a syntax error is still a ParseError, and the same
+# queries on an unlimited session and on one of 1 GiB and two workers give the
+# same answers.
+[python_binding_test(
+    name = "memory_limit_test" + p["suffix"],
+    src = "test_memory_limit.py",
+    data = {
+        "labels.parquet": "komira//src/parquet_codec:pyarrow_multi_dict_page.parquet",
+        "libkomira": LIBKOMIRA,
+    },
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Session(threads=, memory_limit=) on the ABI 1.7 stand-in: the options reach
+# komira_ctx_new_with_options as given and absent ones as 0, no option calls
+# komira_ctx_new, a wrong type is a TypeError and a value outside 1 to 2**63 - 1
+# a ValueError before the library is called, the options are keyword-only, and
+# an option the library refuses is a KomiraError.
+[python_binding_test(
+    name = "session_options_test" + p["suffix"],
+    src = "test_session_options.py",
+    data = {"fake_v1_7/libkomira.so": ":fake_v1_7"},
+    deps = ["//python:komira"],
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
@@ -503,6 +594,9 @@ _FRAMES = {
 # is third_party/python's; for each other minor all three are installed here,
 # as `:protobuf-<version><suffix>` (`:protobuf-7.36.2_py311`). Each wheel is
 # `abi3`, one file for every minor.
+# The 7.36.2 file is also the one the wheel's install tests (python/BUCK)
+# install beside komira's wheel (`PROTOBUF_WHEEL`, python/dependencies.bzl),
+# and `PROTOBUF_MACOS` the one the macOS wheel's install test installs.
 _PROTOBUF_UPPER = [w for w in WHEELS if w["name"] == "protobuf"]
 
 [pinned_file(
@@ -510,7 +604,19 @@ _PROTOBUF_UPPER = [w for w in WHEELS if w["name"] == "protobuf"]
     url = w["url"],
     sha256 = w["sha256"],
     size_bytes = w["size"],
+    visibility = ["komira//python:"] if w in _PROTOBUF_UPPER else [],
 ) for w in PROTOBUF_EDGES + _PROTOBUF_UPPER]
+
+# Read only by the macOS wheel's install test, which runs from
+# the macOS jobs of pypi.yml alone, never in a pull request.
+pinned_file(
+    name = PROTOBUF_MACOS["file"],
+    url = PROTOBUF_MACOS["url"],
+    sha256 = PROTOBUF_MACOS["sha256"],
+    size_bytes = PROTOBUF_MACOS["size"],
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
+    visibility = ["komira//python:"],
+)
 
 [python_wheel(
     name = "protobuf-" + w["version"] + p["suffix"],
@@ -609,7 +715,8 @@ _CASES = [
 # - ops_verbs_test: the verbs the skins call, one per verb, including the
 #   cases that add no node.
 # - ops_no_sql_test: no node, verb or module of komira._ops renders SQL text,
-#   with cases that show each check fails when one does.
+#   and no module, class or source string of komira.pl names or holds it, with
+#   cases that show each check fails when one does.
 # - ops_udf_test: the user-function nodes (UdfSpec, UdfCall, MapBatches), their
 #   refusals, the walkers over a call and the map_batches verb.
 # - ops_dtype_test: the dtype spellings of a user function's return type, their
@@ -659,6 +766,16 @@ _CASES = [
     deps = [_PYARROW[p["suffix"]]],
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
+
+# The wheel tags the install driver (wheel_install_run.py) installs and
+# refuses, as pip does: exact tags on their own minor, the stable ABI
+# (`cp3<k>-abi3`, protobuf's wheels) on its minor and later ones, the machine,
+# the C library's version, and on macOS `universal2`.
+py_test(
+    name = "wheel_install_run_test",
+    src = "test_wheel_install_run.py",
+    srcs = ["wheel_install_run.py"],
+)
 
 # Capture of a user function (komira._capture), with no library: the `@udf`
 # decorator, return types, the read set (columns=, annotations and the
@@ -740,12 +857,202 @@ _PLAN_EXPR_RUNTIMES = [
     **_ON[p["suffix"]]
 ) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES for area in ["rel", "rel_goldens", "no_sql", "udf", "udf_goldens"]]
 
+# ---- the test families ----------------------------------------------------------
+#
+# A test of one of these shapes is a file `<dir>/test_<name>.py` and no stanza:
+# the globs below declare its targets, `<name>_test` with the suffix the family
+# gives (`_py311`, ..., `_protobuf_lower_edge`), so adding a test of the shape
+# is adding the file, and its docstring says what it covers. The name is the
+# file stem without `test_`, then `_test` (families.bzl, `test_target_name`):
+# two files that give one name fail the load, naming both. The directories
+# are in package python/tests (no BUCK file in them). What a family runs with
+# is its stanza here, the same for every test in it; a test that needs other
+# inputs gets a stanza of its own anywhere in this file, with its `src`. A
+# `test_*.py` that no stanza names and no family directory holds fails the
+# load (the end of this file).
+_FAMILIES = ["plan", "run", "duckdb", "pl", "pl_oracle"]
+
+_FAMILY_FILES = {d: glob([d + "/test_*.py"]) for d in _FAMILIES}
+
+# plan/: tests of the plan side with no library, on the plan tests'
+# runtimes (_PLAN_EXPR_RUNTIMES): the plan modules and a protobuf runtime, and
+# nothing else: each minor under 7.36.2, and CPython 3.13 under 5.29.1 too
+# (`<name>_test_protobuf_lower_edge`).
+[py_test(
+    name = test_target_name(f, suffix),
+    src = f,
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES for f in _FAMILY_FILES["plan"]]
+
+# run/: tests on the real libkomira (`libkomira`, and `fake_v1_7/libkomira.so`,
+# the ABI 1.7 stand-in that refuses the plan door), per minor, with the plan
+# modules, protobuf 7.36.2 and pyarrow.
+[python_binding_test(
+    name = test_target_name(f, p["suffix"]),
+    src = f,
+    data = {
+        "fake_v1_7/libkomira.so": ":fake_v1_7",
+        "libkomira": LIBKOMIRA,
+    },
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS for f in _FAMILY_FILES["run"]]
+
+# duckdb/: tests of the real libkomira against DuckDB, on CPython 3.13 alone
+# (the minor with a pinned DuckDB): the plan modules, duckdb, protobuf and
+# pyarrow.
+[python_binding_test(
+    name = test_target_name(f),
+    src = f,
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+) for f in _FAMILY_FILES["duckdb"]]
+
+# pl/: tests of komira.pl with no library, per minor: the plan modules,
+# protobuf 7.36.2 and pyarrow.
+[py_test(
+    name = test_target_name(f, p["suffix"]),
+    src = f,
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS for f in _FAMILY_FILES["pl"]]
+
+# pl_oracle/: tests of komira.pl against polars, on the real libkomira and
+# CPython 3.13 alone (the minor with a pinned polars): the plan modules,
+# protobuf, polars and pyarrow.
+[python_binding_test(
+    name = test_target_name(f),
+    src = f,
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:polars",
+        _PYARROW[""],
+    ],
+) for f in _FAMILY_FILES["pl_oracle"]]
+
+# Merges, semi and anti joins, and windows of the pandas-shaped frame against
+# DuckDB (test_frame_join_window_duckdb.py): the duckdb/ family's inputs, and
+# duckdb/test_frame_duckdb.py staged beside it, whose comparator, left file and
+# Case type it uses; each program equals DuckDB's answer to the SQL that means
+# the same over two Parquet files written in the test.
+python_binding_test(
+    name = "frame_join_window_duckdb_test",
+    src = "test_frame_join_window_duckdb.py",
+    srcs = ["duckdb/test_frame_duckdb.py"],
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+)
+
+# One pandas session over TPC-H scale factor 1 lineitem and orders
+# (test_pandas_session_tpch.py): a date cut, a two-key group by, the decimal sums,
+# means, least and greatest of TPC-H q1, a computed decimal column, a sorted first
+# ten rows, and a semi and an anti join; each answer of the pandas skin, of the
+# polars skin where it has the spelling, and of Session.sql over the same files
+# equals DuckDB's answer to the SQL that means the same. A pandas decimal sum
+# that fills a sum of nothing with 0 is refused by the engine, whose CASE has no
+# decimal output yet, and arithmetic with a Decimal literal is refused on the plan
+# route in both skins; each test fails when the engine answers its program. The staged
+# duckdb/test_frame_duckdb.py gives the comparator; the data is the staged
+# `tpch_sf1[data]` at <lib-dir>/tpch/tpch/sf1/<table>.parquet.
+# Derived from TPC-H; not comparable to published TPC-H results.
+python_binding_test(
+    name = "pandas_session_tpch_test",
+    src = "test_pandas_session_tpch.py",
+    srcs = ["duckdb/test_frame_duckdb.py"],
+    data = {
+        "libkomira": LIBKOMIRA,
+        "tpch": "komira//src/tpch_answers:tpch_sf1[data]",
+    },
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+)
+
+# The notebook display (komira/_display.py), with no library: a frame shows its
+# names over their types, equal to fixtures/display/frame.html, and calls
+# nothing on its session; a result shows its rows, equal to
+# fixtures/display/result.html, at most ten of them with the line saying there
+# are more, reading the stream only one batch past them, and still reads every
+# row once after; the row limit at its edges, long values cut and escaped, a
+# stream failing while the rows are read or past them, a KeyboardInterrupt
+# during the read, and a terminal on another thread waiting for a display.
+[py_test(
+    name = "display_test" + p["suffix"],
+    src = "test_display.py",
+    srcs = [
+        "fixtures/display/frame.html",
+        "fixtures/display/result.html",
+    ],
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# The polars-shaped skin's names (komira.pl, docs/design/dataframe_surface.md):
+# with no library and no plan modules, importing komira.pl loads nothing; its
+# public names; every entry of the module's, LazyFrame's and Expr's refusal
+# tables raises its AttributeError word for word, any other name Python's own;
+# no attribute is a column; no attribute can be set; no dunder runs a query; a
+# frame survives copy.
+[py_test(
+    name = "pl_names_test" + p["suffix"],
+    src = "test_pl_names.py",
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# The changelog's entries (python/CHANGELOG.md, python/changelog.d/), with no
+# library: every public name of komira and komira.pl (each module's `__all__`,
+# and each public class's own public attributes) is an identifier inside a
+# backticked code span of the changelog or of a fragment, the failure lists the
+# names without one, and on a synthetic changelog that leaves a name out the
+# finding is that name alone, in the failure's own words. It reads the files as
+# the tree of `//python:changelog[sources]`, the rule that assembles them.
+[py_test(
+    name = "changelog_names_test" + p["suffix"],
+    src = "test_changelog_names.py",
+    args = ["$(location //python:changelog[sources])"],
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # The clean-environment install tests of the wheel (python/BUCK,
 # wheel_install_test): the driver that installs the wheels into an empty
 # prefix and runs a test there, the three tests the installed interpreter runs
 # (the wheel alone, the wheel beside Modular's runtime, and the wheel after an
 # upgrade from the previous release), and the serialized plan the first renders
-# (the scan plan of src/so/tests/gate/gate_plan_render.mojo, as hex).
+# (the scan plan of src/so/tests/gate/gate_plan_render.mojo, as hex) and the
+# Parquet file whose aggregate it answers (fixtures/readings.parquet).
 [export_file(
     name = f,
     visibility = ["komira//python:"],
@@ -758,12 +1065,19 @@ _PLAN_EXPR_RUNTIMES = [
     "test_beside_modular.py",
     "test_upgrade.py",
     "fixtures/scan_plan.hex",
+    "fixtures/readings.parquet",
     "fixtures/previous_release_only.txt",
 ]]
 
 # The komira/python UDF runtime (src/udf_python) behind a ctypes host of its C
 # ABI (udf_host.py), on the two minors that have a pinned pyarrow: CPython 3.13
-# and 3.14. The library is staged as `libkomira_udf_python.so` in --lib-dir.
+# and 3.14. The library is staged in --lib-dir as `libkomira_udf_python.so`
+# (`libkomira_udf_python.dylib` on macOS, the name udf_host.LIB_FILE opens).
+_UDF_LIB = select({
+    "DEFAULT": {"libkomira_udf_python.so": "komira//src/udf_python:komira_udf_python"},
+    "prelude//os/constraints:macos": {"libkomira_udf_python.dylib": "komira//src/udf_python:komira_udf_python"},
+})
+
 _UDF_PYARROW = {
     "": "komira//third_party/python:pyarrow",
     "_py314": "komira//third_party/python:pyarrow-cp314",
@@ -773,7 +1087,7 @@ _UDF_PYARROW = {
     name = test[5:] + "_test" + p["suffix"],
     src = test + ".py",
     srcs = ["udf_host.py"],
-    data = {"libkomira_udf_python.so": "komira//src/udf_python:komira_udf_python"},
+    data = _UDF_LIB,
     deps = ["//python:komira", _UDF_PYARROW[p["suffix"]]],
     **_ON[p["suffix"]]
 ) for test in [
@@ -802,7 +1116,7 @@ _UDF_PYARROW = {
         "fixtures/udfs/__init__.py",
         "fixtures/udfs/runtime.py",
     ],
-    data = {"libkomira_udf_python.so": "komira//src/udf_python:komira_udf_python"},
+    data = _UDF_LIB,
     deps = [
         "//python:komira_with_plan_modules",
         _PROTOBUF[p["suffix"]]["7.36.2"],
@@ -810,3 +1124,26 @@ _UDF_PYARROW = {
     ],
     **_ON[p["suffix"]]
 ) for p in PYTHONS if p["suffix"] in _UDF_PYARROW]
+
+# ---- the suite --------------------------------------------------------------
+#
+# Every test file is run by a target: the `src` of one of the targets above (a
+# family's, found by its glob, or a stanza's) or an `export_file` of the wheel's
+# install tests (//python's BUCK file runs those); any other `test_*.py` fails the
+# load, naming the file. This part comes after every test is declared.
+_TEST_FILES = glob(["**/test_*.py"])
+
+require_all_run(
+    _TEST_FILES,
+    _SUITE.values(),
+    [f for f in _TEST_FILES if rule_exists(f)],
+    _FAMILIES,
+)
+
+# `:all` builds, and so runs, every test of the package, and is the one row of
+# this package in the check set (ci/targets.bzl): a test added as a file of a
+# family, or as a stanza, joins it without touching a generated list.
+ci_aggregate(
+    name = "all",
+    deps = [":" + name for name in sorted(_SUITE.keys())],
+)

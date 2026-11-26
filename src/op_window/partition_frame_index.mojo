@@ -21,8 +21,9 @@
 #     INT32 or FLOAT64 key, as DuckDB v1.5.6 answers it (measured):
 #       - a row whose key is NULL frames over the NULL peer group: each bound
 #         with an offset, and CURRENT ROW, is the group's edge; an UNBOUNDED
-#         bound stays the partition's edge. The window sorts NULLs last in
-#         both directions, so the NULL group ends the partition;
+#         bound stays the partition's edge. The NULL group is at one end of
+#         the partition: the end when the key's placement is NULLS LAST, the
+#         start when it is NULLS FIRST (the same rule, mirrored);
 #       - a row whose key is not NULL searches its offset bounds among the
 #         rows whose key is not NULL; UNBOUNDED FOLLOWING still reaches the
 #         partition's end, NULL keys included;
@@ -47,6 +48,7 @@ from arrow.column import Column
 from arrow.record_batch import RecordBatch
 from byte_buffer.heap_region import HeapRegion
 from op_sort.sort import sort_key_lt
+from plan_expr.null_order_policy import derived_nulls_first
 from plan_expr.partition_expr import (
     FRAME_BOUND_CURRENT_ROW,
     FRAME_BOUND_FOLLOWING,
@@ -297,12 +299,21 @@ def _before[wide: DType](kv: Scalar[wide], b: Scalar[wide], desc: Bool) -> Bool:
 
 
 def _non_null_end(key_col: Column[HeapRegion], seg_start: Int, seg_end: Int) -> Int:
-    """The first row of the partition's NULL-key group (NULLs sort last), or
-    `seg_end` when no key is NULL."""
+    """The first row of the partition's trailing NULL-key group (NULLs placed
+    last), or `seg_end` when no key is NULL."""
     var e = seg_end
     while e > seg_start and key_col.is_null_at(e - 1):
         e -= 1
     return e
+
+
+def _non_null_start(key_col: Column[HeapRegion], seg_start: Int, seg_end: Int) -> Int:
+    """The first row after the partition's leading NULL-key group (NULLs
+    placed first), or `seg_start` when no key is NULL."""
+    var s = seg_start
+    while s < seg_end and key_col.is_null_at(s):
+        s += 1
+    return s
 
 
 def _check_bounds[
@@ -313,6 +324,7 @@ def _check_bounds[
     bounds: List[Int],
     ends: List[Int],
     nullable: Bool,
+    nulls_first: Bool,
     tag: UInt8,
     offset: Int64,
     desc: Bool,
@@ -326,10 +338,14 @@ def _check_bounds[
     if tag != FRAME_BOUND_PRECEDING and tag != FRAME_BOUND_FOLLOWING:
         return
     for p in range(len(bounds)):
+        var nn_start = bounds[p]
         var nn_end = ends[p]
         if nullable:
-            nn_end = _non_null_end(key_col, bounds[p], ends[p])
-        for row in range(bounds[p], nn_end):
+            if nulls_first:
+                nn_start = _non_null_start(key_col, bounds[p], ends[p])
+            else:
+                nn_end = _non_null_end(key_col, bounds[p], ends[p])
+        for row in range(nn_start, nn_end):
             _ = _bound_value[dt, wide](
                 _key_at[dt, wide](key_col, row), tag, offset, desc, key
             )
@@ -345,6 +361,7 @@ def _range_value_fill[
     n: Int,
     frame: PartitionFrame,
     desc: Bool,
+    nulls_first: Bool,
 ) raises -> FrameIdx:
     """RANGE over one INT64, INT32 or FLOAT64 order key, every bound compared
     in `wide` (INT64 for an integer key, FLOAT64 for a float one): an INT64
@@ -354,11 +371,11 @@ def _range_value_fill[
     # A float bound cannot overflow: NaN and the infinities absorb an offset.
     comptime if not wide.is_floating_point():
         _check_bounds[dt, wide](
-            key_col, key, bounds, ends, nullable,
+            key_col, key, bounds, ends, nullable, nulls_first,
             frame.start_tag, frame.start_offset, desc,
         )
         _check_bounds[dt, wide](
-            key_col, key, bounds, ends, nullable,
+            key_col, key, bounds, ends, nullable, nulls_first,
             frame.end_tag, frame.end_offset, desc,
         )
     var lo = _zeros(n)
@@ -366,11 +383,19 @@ def _range_value_fill[
     for p in range(len(bounds)):
         var seg_start = bounds[p]
         var seg_end = ends[p]
+        # The non-NULL rows are [nn_start, nn_end); the NULL group is the rest
+        # of the partition, [seg_start, nn_start) or [nn_end, seg_end).
+        var nn_start = seg_start
         var nn_end = seg_end
         if nullable:
-            nn_end = _non_null_end(key_col, seg_start, seg_end)
-        var cur_lo = seg_start
-        var cur_hi = seg_start
+            if nulls_first:
+                nn_start = _non_null_start(key_col, seg_start, seg_end)
+            else:
+                nn_end = _non_null_end(key_col, seg_start, seg_end)
+        var null_lo = seg_start if nulls_first else nn_end
+        var null_hi = nn_start if nulls_first else seg_end
+        var cur_lo = nn_start
+        var cur_hi = nn_start
         for row in range(seg_start, seg_end):
             var new_lo: Int
             var new_hi: Int
@@ -378,8 +403,8 @@ def _range_value_fill[
                 new_lo = seg_start
             elif frame.start_tag == FRAME_BOUND_UNBOUNDED_FOLLOWING:
                 new_lo = seg_end
-            elif row >= nn_end:
-                new_lo = nn_end
+            elif row < nn_start or row >= nn_end:
+                new_lo = null_lo
             else:
                 var b = _bound_value[dt, wide](
                     _key_at[dt, wide](key_col, row),
@@ -395,8 +420,8 @@ def _range_value_fill[
                 new_hi = seg_end
             elif frame.end_tag == FRAME_BOUND_UNBOUNDED_PRECEDING:
                 new_hi = seg_start
-            elif row >= nn_end:
-                new_hi = seg_end
+            elif row < nn_start or row >= nn_end:
+                new_hi = null_hi
             else:
                 var b2 = _bound_value[dt, wide](
                     _key_at[dt, wide](key_col, row),
@@ -425,6 +450,7 @@ def _range_value_frame_index(
     order_keys: List[String],
     descending: List[Bool],
     frame: PartitionFrame,
+    nulls_first: List[Bool],
 ) raises -> FrameIdx:
     """RANGE with an offset bound, resolved against the order key's values."""
     if len(order_keys) == 0:
@@ -445,17 +471,20 @@ def _range_value_frame_index(
     var desc = False
     if len(descending) > 0:
         desc = descending[0]
+    var nf = derived_nulls_first(desc)
+    if len(nulls_first) > 0:
+        nf = nulls_first[0]
     if key_col.arrow_type == ArrowType.INT64:
         return _range_value_fill[DType.int64, DType.int64](
-            key_col, key, bounds, ends, n, frame, desc
+            key_col, key, bounds, ends, n, frame, desc, nf
         )
     elif key_col.arrow_type == ArrowType.INT32:
         return _range_value_fill[DType.int32, DType.int64](
-            key_col, key, bounds, ends, n, frame, desc
+            key_col, key, bounds, ends, n, frame, desc, nf
         )
     elif key_col.arrow_type == ArrowType.FLOAT64:
         return _range_value_fill[DType.float64, DType.float64](
-            key_col, key, bounds, ends, n, frame, desc
+            key_col, key, bounds, ends, n, frame, desc, nf
         )
     raise Error(
         "partition_frame_index: a RANGE frame with an offset needs an INT64,"
@@ -475,18 +504,21 @@ def frame_index(
     order_keys: List[String],
     descending: List[Bool],
     frame: PartitionFrame,
+    nulls_first: List[Bool] = List[Bool](),
 ) raises -> FrameIdx:
     """Every row's frame, the units decision made once for the operator.
 
     `batch` is sorted by (partition keys ++ order keys) and `bounds` holds
     the partition starts (`partition_keys._detect_partition_boundaries`).
+    `nulls_first` is the per-order-key NULL placement the batch was sorted
+    under; empty derives it from `descending`.
     """
     var n = batch.num_rows()
     var ends = _segment_ends(bounds, n)
     if frame.units == FRAME_UNITS_RANGE:
         if _is_offset_bound(frame.start_tag) or _is_offset_bound(frame.end_tag):
             return _range_value_frame_index(
-                batch, bounds, ends, order_keys, descending, frame
+                batch, bounds, ends, order_keys, descending, frame, nulls_first
             )
         return _range_peer_frame_index(batch, bounds, ends, order_keys, frame)
     if frame.units != FRAME_UNITS_ROWS:

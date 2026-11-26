@@ -21,6 +21,9 @@
 #      accepted and IGNORE NULLS refused, and the column-argument rules.
 #      (catches: a negative default not negated; `-9223372036854775808`
 #      refused as out of range)
+#   5. Window ORDER BY placement: each key records NULLS FIRST, NULLS LAST or
+#      unwritten on its own, after ASC or DESC and before a frame; a bare
+#      NULLS is refused.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -239,6 +242,34 @@ def test_quoted_names_in_a_window_keep_their_case() raises:
     _refuses('sum(v) OVER ("w")', "a named window reference `OVER (w ...)`")
     var rows = _win("sum(v) OVER (ROWS UNBOUNDED PRECEDING)")
     assert_true(rows.has_frame)
+
+
+def test_window_order_keys_record_nulls_placement_per_key() raises:
+    var w = _win("rank() OVER (ORDER BY a DESC NULLS FIRST, b NULLS LAST, c)")
+    assert_equal(len(w.nulls_first), 3)
+    assert_true(w.descending[0])
+    assert_true(w.nulls_first[0].value())
+    assert_false(w.nulls_first[1].value())
+    assert_false(Bool(w.nulls_first[2]))
+
+
+def test_window_nulls_placement_precedes_a_frame() raises:
+    var w = _win(
+        "sum(v) OVER (PARTITION BY g ORDER BY k ASC NULLS FIRST"
+        " ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)"
+    )
+    assert_true(w.nulls_first[0].value())
+    assert_false(w.descending[0])
+    _frame(w, SXFRAME_ROWS, SXFRAME_PRECEDING, 1, SXFRAME_CURRENT_ROW, 0)
+
+
+def test_window_without_order_by_has_no_nulls_placement() raises:
+    assert_equal(len(_win("count(*) OVER (PARTITION BY g)").nulls_first), 0)
+
+
+def test_window_nulls_alone_is_refused() raises:
+    _refuses("rank() OVER (ORDER BY k NULLS)", "ORDER BY ... NULLS expects FIRST or LAST")
+    _refuses("rank() OVER (ORDER BY k DESC NULLS, j)", "ORDER BY ... NULLS expects FIRST or LAST")
 
 
 def main() raises:

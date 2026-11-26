@@ -18,10 +18,20 @@
 //!
 //! The allowlist is a TSV file: `#` comment lines, blank lines, and rows of
 //! exactly two tab-separated fields: the file's path in the tree, and why it
-//! is still an interpreter file (not empty).
+//! is still an interpreter file (not empty). Rows are one per line, sorted by
+//! path in byte order.
+//!
+//! A path may be a glob row of exactly the form `<dir>/**/*.<ext>`: it covers
+//! every interpreter file under `<dir>/` at any depth whose extension is
+//! `<ext>` (an interpreter extension, compared ignoring ASCII case). Any
+//! other wildcard (`*?[]{}`) is refused. A file with another extension, or
+//! with only a `#!` line, is not covered and needs a row of its own.
 //!
 //! Findings, each one line of the report:
-//!   - a malformed row, or a second row for one path;
+//!   - a malformed row, a refused wildcard, or a second row for one path;
+//!   - a row that sorts before the row above it (both are named);
+//!   - a file row whose file a glob row covers too (the file row is removed);
+//!   - a glob row covering no interpreter file (stale);
 //!   - a row outside the scope;
 //!   - an interpreter file with no row (it is named, with why it counts);
 //!   - a row naming no interpreter file of the tree (the file was deleted or
@@ -159,11 +169,52 @@ pub fn collect(alloc: Alloc, dir: std.fs.Dir, scope: []const []const u8) ![]cons
     return found;
 }
 
+/// A glob row `<dir>/**/*.<ext>`: every interpreter file under `<dir>/` at
+/// any depth whose extension is `<ext>`.
+const Glob = struct {
+    dir: []const u8,
+    ext: []const u8,
+
+    fn covers(g: Glob, path: []const u8) bool {
+        if (path.len <= g.dir.len or path[g.dir.len] != '/' or !std.mem.startsWith(u8, path, g.dir)) return false;
+        const e = interpreterExtension(path) orelse return false;
+        return std.ascii.eqlIgnoreCase(e, g.ext);
+    }
+
+    /// Whether some file under the glob's dir can be in `scope`.
+    fn inScope(g: Glob, scope: []const []const u8, row_path: []const u8) bool {
+        const under = row_path[0 .. g.dir.len + 1];
+        if (scope.len == 0) return true;
+        for (scope) |p| {
+            if (std.mem.startsWith(u8, under, p) or std.mem.startsWith(u8, p, under)) return true;
+        }
+        return false;
+    }
+};
+
 const Row = struct {
     path: []const u8,
     line: usize,
+    glob: ?Glob = null,
     seen: bool = false,
 };
+
+const wildcards = "*?[]{}";
+
+/// The glob a row path `<dir>/**/*.<ext>` states, or null when `path` holds a
+/// wildcard in any other form (or an extension that is not an interpreter's).
+fn parseGlob(path: []const u8) ?Glob {
+    const tail = "/**/*.";
+    const at = std.mem.lastIndexOf(u8, path, tail) orelse return null;
+    const dir = path[0..at];
+    const ext = path[at + tail.len ..];
+    if (dir.len == 0 or std.mem.indexOfAny(u8, dir, wildcards) != null) return null;
+    if (ext.len == 0 or std.mem.indexOfAny(u8, ext, wildcards ++ "/.") != null) return null;
+    for (extensions) |e| {
+        if (std.ascii.eqlIgnoreCase(ext, e)) return .{ .dir = dir, .ext = ext };
+    }
+    return null;
+}
 
 /// Checks `found` (the interpreter files of the tree in `scope`) against
 /// `allowlist`, the text of the file named `name`, and writes one line per
@@ -175,6 +226,7 @@ pub fn check(alloc: Alloc, name: []const u8, allowlist: []const u8, scope: []con
     defer rows.deinit(alloc);
     var by_path = std.StringHashMap(usize).init(alloc);
     defer by_path.deinit();
+    var prev: ?Row = null;
 
     var lines = std.mem.splitScalar(u8, allowlist, '\n');
     var lineno: usize = 0;
@@ -199,12 +251,22 @@ pub fn check(alloc: Alloc, name: []const u8, allowlist: []const u8, scope: []con
             findings += 1;
             continue;
         }
+        var glob: ?Glob = null;
+        if (std.mem.indexOfAny(u8, path, wildcards) != null) {
+            glob = parseGlob(path);
+            if (glob == null) {
+                try w.print("{s}:{d}: {s}: a wildcard other than `<dir>/**/*.<ext>` (an interpreter extension) is not allowed\n", .{ name, lineno, path });
+                findings += 1;
+                continue;
+            }
+        }
         if (std.mem.trim(u8, fields[1], " ").len == 0) {
             try w.print("{s}:{d}: {s}: no reason\n", .{ name, lineno, path });
             findings += 1;
             continue;
         }
-        if (!inScope(scope, path)) {
+        const in_scope = if (glob) |g| g.inScope(scope, path) else inScope(scope, path);
+        if (!in_scope) {
             try w.print("{s}:{d}: {s}: outside the scope of the check: remove the row\n", .{ name, lineno, path });
             findings += 1;
             continue;
@@ -215,22 +277,45 @@ pub fn check(alloc: Alloc, name: []const u8, allowlist: []const u8, scope: []con
             findings += 1;
             continue;
         }
+        if (prev) |p| {
+            if (std.mem.lessThan(u8, path, p.path)) {
+                try w.print("{s}:{d}: {s}: out of order: it sorts before {s} (line {d}); rows are one per line, sorted by path in byte order\n", .{ name, lineno, path, p.path, p.line });
+                findings += 1;
+            }
+        }
         slot.value_ptr.* = rows.items.len;
-        try rows.append(alloc, .{ .path = path, .line = lineno });
+        try rows.append(alloc, .{ .path = path, .line = lineno, .glob = glob });
+        prev = rows.items[rows.items.len - 1];
     }
 
     for (found) |f| {
-        const i = by_path.get(f.path) orelse {
-            try w.print("{s}: an interpreter file ({s}) with no row in {s}: write it in Zig, or add a row review accepts\n", .{ f.path, f.why, name });
-            findings += 1;
+        var covered: ?usize = null;
+        for (rows.items, 0..) |*row, i| {
+            const g = row.glob orelse continue;
+            if (!g.covers(f.path)) continue;
+            row.seen = true;
+            if (covered == null) covered = i;
+        }
+        if (by_path.get(f.path)) |i| {
+            rows.items[i].seen = true;
+            if (covered) |c| {
+                try w.print("{s}:{d}: {s}: also covered by the glob row {s} (line {d}): remove the file row\n", .{ name, rows.items[i].line, f.path, rows.items[c].path, rows.items[c].line });
+                findings += 1;
+            }
             continue;
-        };
-        rows.items[i].seen = true;
+        }
+        if (covered != null) continue;
+        try w.print("{s}: an interpreter file ({s}) with no row in {s}: write it in Zig, or add a row review accepts\n", .{ f.path, f.why, name });
+        findings += 1;
     }
 
     for (rows.items) |row| {
         if (row.seen) continue;
-        try w.print("{s}:{d}: {s}: no interpreter file at this path: remove the row\n", .{ name, row.line, row.path });
+        if (row.glob) |g| {
+            try w.print("{s}:{d}: {s}: no `.{s}` interpreter file under `{s}/`: remove the row\n", .{ name, row.line, row.path, g.ext, g.dir });
+        } else {
+            try w.print("{s}:{d}: {s}: no interpreter file at this path: remove the row\n", .{ name, row.line, row.path });
+        }
         findings += 1;
     }
     return .{ .files = found.len, .findings = findings };

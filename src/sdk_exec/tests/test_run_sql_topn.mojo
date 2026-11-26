@@ -2,6 +2,16 @@
 # run_sql: ORDER BY with LIMIT and OFFSET equals DuckDB, ties and NULLs included
 # =============================================================================
 #
+# Covers: ORDER BY with LIMIT and OFFSET through run_sql over Parquet tables in
+# small row groups, on 1, 3 and 7 workers: each case of the order_by_limit
+# corpus with a LIMIT or an OFFSET (ties at the cut, NULLS FIRST and LAST in
+# both directions, NaN above inf, a 20000-row table, total orders carrying k)
+# answers the pinned DuckDB's rows in its order; the comparison reports a
+# reordered, changed, missing and added row; every staged case is run or listed
+# as refused (an OFFSET with no LIMIT is refused at bind by name, and the two
+# corpus cases that have one are listed, not skipped); a negative LIMIT is
+# refused at parse.
+#
 # The tables T (twelve rows: BIGINT with ties and NULLs, DOUBLE with NaN, inf
 # and NULLs, text, a low-cardinality text) and U (20000 rows: a BIGINT with
 # ties and a NULL for every k divisible by 37) are the rows of the `T` and `U`

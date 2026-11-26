@@ -3,6 +3,22 @@
 # answers
 # =============================================================================
 #
+# Covers: run_sql over a Parquet table DuckDB wrote (the :window_oracle action
+# in BUCK) answers what the pinned DuckDB answers for each case of
+# tests/window/cases.sql: row_number, rank, dense_rank, percent_rank,
+# cume_dist, ntile, lag and lead (offsets, defaults, BIGINT, DOUBLE and
+# VARCHAR), running sums over the default RANGE frame and over a unique key,
+# running min, max, avg and count over tied keys, whole-partition sum, count,
+# avg, min and max, first_value, last_value and nth_value, with no, one or two
+# partition keys, several windows in one SELECT, a WHERE, an outer ORDER BY and
+# no row, a CTE holding a window read twice, a window over a CTE aggregation
+# read twice (and over a union of the reads) and a join with a window on its
+# left side beside a CTE read twice, with NULL keys, tied order keys and the
+# empty string, on one and three workers, each column of its documented type;
+# every case is run, sum, avg, min and max over an INTEGER among them; a DATE
+# partition key, a DECIMAL order key and a float default over a BIGINT lag are
+# LOWERING_WINDOW_UNSERVED refusals at step lower.
+#
 # The pinned DuckDB writes the table (tests/window/data.sql: 5000 rows in five
 # row groups; a BIGINT id with no tie, an INTEGER, a VARCHAR and a BOOLEAN
 # partition key, a BIGINT order key with many ties and NULLs, BIGINT, DOUBLE,
@@ -36,7 +52,9 @@
 #                                            sum, count,
 #                                            count(*), avg, min and max over a
 #                                            whole partition, NULL partitions
-#                                            and NULL values included.
+#                                            and NULL values included; sum, min,
+#                                            max and avg of a nullable INTEGER
+#                                            over both frames.
 #   test_value_functions_equal_duckdb        first_value, last_value and
 #                                            nth_value per partition, and
 #                                            last_value over ROWS BETWEEN
@@ -59,10 +77,9 @@
 #   test_every_case_is_run                   each case of cases.sql belongs to
 #                                            one of the tests above.
 #   test_unserved_windows_are_named_refusals_at_lower
-#                                            a sum over an INTEGER, a DATE
-#                                            partition key, a DECIMAL order
-#                                            key and a float default over a
-#                                            BIGINT lag are refused at step
+#                                            a DATE partition key, a DECIMAL
+#                                            order key and a float default over
+#                                            a BIGINT lag are refused at step
 #                                            lower with a
 #                                            LOWERING_WINDOW_UNSERVED reason.
 #
@@ -128,18 +145,21 @@ def _column_type(name: String) -> ArrowType:
     if name == "b":
         return ArrowType.BOOL
     # row_number, rank, dense_rank, ntile, count, a sum or min or max of a
-    # BIGINT (komira's INT64; DuckDB's sum is a HUGEINT), lag, lead,
+    # BIGINT or an INTEGER (komira's INT64; DuckDB's sum is a HUGEINT), lag, lead,
     # first_value, last_value and nth_value of a BIGINT.
     if (
         name == "rn" or name == "rk" or name == "dr" or name == "q"
         or name == "cnt" or name == "cnv" or name == "sv" or name == "mnv"
-        or name == "mxv" or name == "lv1" or name == "ld2" or name == "lv0"
+        or name == "mxv" or name == "si" or name == "lv1" or name == "ld2" or name == "lv0"
         or name == "ld3" or name == "fv" or name == "lastv" or name == "nthv"
     ):
         return ArrowType.INT64
+    # min and max of an INTEGER stay INTEGER.
+    if name == "mni" or name == "mxi":
+        return ArrowType.INT32
     # percent_rank, cume_dist, avg, and a sum, min, max, lag of a DOUBLE.
     if (
-        name == "pr" or name == "cd" or name == "av" or name == "sf"
+        name == "pr" or name == "cd" or name == "av" or name == "ai" or name == "sf"
         or name == "mnf" or name == "mxf" or name == "lf"
     ):
         return ArrowType.FLOAT64
@@ -241,6 +261,8 @@ def _aggregates() -> List[String]:
     out.append("running_sum_f")
     out.append("whole_partition_aggs")
     out.append("whole_partition_f")
+    out.append("running_aggs_integer")
+    out.append("whole_partition_integer")
     return out^
 
 
@@ -337,11 +359,6 @@ struct _Refusal(Copyable, Movable):
 def _refusals() -> List[_Refusal]:
     var t = String("FROM read_parquet('win.parquet')")
     var out = List[_Refusal]()
-    out.append(_Refusal(
-        "a sum over an INTEGER",
-        "SELECT id, sum(i) OVER (PARTITION BY g) AS si " + t,
-        "SUM(i) has an argument of type int32, which the window sink does not compute over",
-    ))
     out.append(_Refusal(
         "a DATE partition key",
         "SELECT id, row_number() OVER (PARTITION BY d ORDER BY id) AS rn " + t,

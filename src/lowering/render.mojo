@@ -11,6 +11,7 @@ from lowering.lowered_plan import LoweredPlan
 from lowering.sink_capability import triple_name
 from physical_plan.iceberg_scan_spec import IcebergScanSpec
 from physical_plan.udf_call_spec import UdfCallSpec
+from plan_expr.null_order_policy import derived_nulls_first
 from plan_ir.udf_ref import udf_ref_kind_name
 from physical_plan.physical_plan import (
     SegmentDescPod,
@@ -367,6 +368,11 @@ def render_lowered_plan(plan: LoweredPlan) -> String:
                 out += ", "
             out += w.order_keys[k]
             out += " desc" if w.descending[k] else " asc"
+            # The placement is written only when it is not the derived one.
+            if k < len(w.nulls_first) and w.nulls_first[k] != derived_nulls_first(
+                w.descending[k]
+            ):
+                out += " nulls_first" if w.nulls_first[k] else " nulls_last"
         out += "] exprs=["
         for k in range(len(w.partition_exprs)):
             if k > 0:

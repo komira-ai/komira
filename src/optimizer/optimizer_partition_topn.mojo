@@ -48,6 +48,8 @@
 #   - PartitionBy has an empty ORDER BY (RANK without an order is
 #     meaningless; defensively bail out for ROW_NUMBER too — though the
 #     output ordering is already non-deterministic)
+#   - An ORDER BY key carries a NULL placement other than the derived one
+#     (`derived_nulls_first`); the top-N states are hard NULLS LAST
 #   - The filter predicate does not reference the rn/rk column
 #   - The filter op is not <= or <
 #   - K < 1 or K > 1_000_000 (negative K is a defensive bail-out, not crash)
@@ -76,6 +78,7 @@ from plan_expr.expr import (
     BIN_LE,
     BIN_LT,
 )
+from plan_expr.null_order_policy import derived_nulls_first
 from std.collections import Set
 
 from plan_expr.partition_expr import PartitionExpr, PF_ROW_NUMBER, PF_RANK
@@ -122,6 +125,18 @@ comptime _ENABLE_PF_RANK_FUSE: Bool = True
 # duplicates) would exceed this and require fallback — that decision
 # belongs to the engine.
 comptime _PF_RANK_TIE_EPSILON: Int = 16
+
+
+def _has_explicit_null_placement(
+    imm nulls_first: List[Bool], imm descending: List[Bool]
+) -> Bool:
+    """True iff some ORDER BY key's placement differs from the derived one."""
+    for i in range(len(nulls_first)):
+        if i >= len(descending) or nulls_first[i] != derived_nulls_first(
+            descending[i]
+        ):
+            return True
+    return False
 
 
 # =============================================================================
@@ -416,6 +431,10 @@ def fuse_partition_topn_inplace(mut plan: LogicalPlan, unsafe_cols: Set[String])
             #   4. PF_RANK only fires when `_ENABLE_PF_RANK_FUSE` is True
             #      (it is).
             if len(pb.partition_exprs) != 1:
+                return
+            # The top-N states are hard NULLS LAST: a window ordered with any
+            # other placement stays unfused.
+            if _has_explicit_null_placement(pb.nulls_first, pb.descending):
                 return
             var pf = pb.partition_exprs[0].func
             var is_row_number = pf == PF_ROW_NUMBER

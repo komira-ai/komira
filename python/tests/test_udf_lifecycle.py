@@ -3,11 +3,11 @@ context, an unload empties the zygote's registry entry, a closed instance leaves
 
     test_udf_lifecycle.py --lib-dir <dir>
 
-`<dir>/libkomira_udf_python.so` is `//src/udf_python:komira_udf_python`.
+`<dir>/libkomira_udf_python.so` (`libkomira_udf_python.dylib` on macOS) is
+`//src/udf_python:komira_udf_python`.
 """
 
 import os
-import select
 import sys
 
 import pyarrow as pa
@@ -35,18 +35,6 @@ def plus_two(x):
 """
 
 
-def wait_for_exit(pidfd):
-    """Block until the process behind `pidfd` has ended: a pidfd is readable once its
-    process terminates. Takes the descriptor, which must be opened before the process can
-    be reaped, and closes it."""
-    try:
-        poller = select.poll()
-        poller.register(pidfd, select.POLLIN)
-        poller.poll()
-    finally:
-        os.close(pidfd)
-
-
 def closing_a_context_ends_its_worker_and_leaves_the_other_context_usable(env):
     rt = env.runtime()
     who = rt.load_ok(env.bundle_spec({"who.py": WHO}, "who:who"))
@@ -58,11 +46,11 @@ def closing_a_context_ends_its_worker_and_leaves_the_other_context_usable(env):
     kept = second_who.call_ok([ints(0)]).to_pylist()[0]
     assert doomed != kept
     assert sorted(env.trace.pids("fork")) == sorted([doomed, kept])
-    pidfd = os.pidfd_open(doomed)
+    watch = h.ExitWatch(doomed)
     first_who.close()
     first_plus.close()
     first.close()
-    wait_for_exit(pidfd)
+    watch.wait()
     assert not h.process_gone(kept)
     assert second_plus.call_ok([ints(1, 2, 3)]).to_pylist() == [2, 3, 4]
     assert second_who.call_ok([ints(0)]).to_pylist() == [kept]
@@ -78,10 +66,10 @@ def closing_the_last_context_leaves_the_runtime_able_to_open_another(env):
     ctx = rt.open_context_ok()
     inst = ctx.open_instance_ok(who)
     worker = inst.call_ok([ints(0)]).to_pylist()[0]
-    pidfd = os.pidfd_open(worker)
+    watch = h.ExitWatch(worker)
     inst.close()
     ctx.close()
-    wait_for_exit(pidfd)
+    watch.wait()
     again = rt.open_context_ok()
     assert again.open_instance_ok(plus).call_ok([ints(4)]).to_pylist() == [5]
 

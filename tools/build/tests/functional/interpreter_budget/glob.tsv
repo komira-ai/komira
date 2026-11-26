@@ -1,0 +1,3 @@
+# The allowlist of the glob cases in BUCK.
+# path	reason
+tools/**/*.py	a glob row of the case

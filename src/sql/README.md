@@ -40,7 +40,7 @@ period tables; the function names and the specifier names are different sets.
 
 `sql.sql_parser` is a hand-written recursive-descent parser:
 `parse_sql(tokenize(sql))` returns a `SqlStatement`, a query (`WITH`,
-`SELECT`, `UNION ALL`, `INTERSECT`, `EXCEPT`), a `COPY ... TO` or a `CREATE TABLE ... AS`. Every
+`SELECT`, `UNION ALL`, `UNION`, `INTERSECT`, `EXCEPT`), a `COPY ... TO` or a `CREATE TABLE ... AS`. Every
 subquery body (scalar, `[NOT] EXISTS`, `[NOT] IN (SELECT ...)`, a derived
 table, a set-operation branch) is parked in the statement's flat `subqueries`
 table, and the expression node holds its index. Input the grammar has no
@@ -60,6 +60,16 @@ extension, as DuckDB does (`sql.sql_copy_format`): `.parquet`, `.csv`, and
 Any other extension is refused with `COPY_FORMAT_NOT_INFERRED` instead of
 being written as Parquet. With no `COMPRESSION`, Parquet is snappy and CSV and
 JSON take gzip from `.gz`, zstd from `.zst`, and none otherwise.
+
+The parser recurses once per nested construct on the caller's thread, so it
+refuses a statement nested deeper than `MAX_SQL_NESTING` (100) levels with
+`SQL syntax error: the statement nests deeper than 100 levels`
+(`sql.sql_nesting`) instead of exhausting the stack. DuckDB allows 1000; a
+level here takes about 25 to 35 KB of stack (measured on linux-x86_64), so 1000
+would not fit in the 8 MiB a host's query thread has. One level is one
+parenthesised expression, function call, CASE, prefix `NOT`, `+`, `-` or `@`,
+`IN ( ... )` list, subquery or derived table; chains a loop builds
+(`a + b + c`, `a AND b`, an IN list's items, a UNION chain) are not levels.
 
 `sql.sql_catalog` holds the tables and user functions a query may
 name. `SqlCatalog` registers an in-memory `Table` or `RecordBatch`
@@ -106,9 +116,10 @@ inside a larger expression into a hidden output, one accumulator per distinct
 aggregate; an aggregate inside an aggregate, or in a position that cannot hold
 one, is refused. `sql_bind_aggregate` plans a `GROUP BY` and `HAVING` (keys by
 ordinal, alias or expression) and the plain projection. `sql_bind_window_order`
-binds window functions with their `PARTITION BY` and `ORDER BY`, and the
-statement-level `ORDER BY` (column, ordinal, output alias or expression, with
-explicit `NULLS FIRST` / `NULLS LAST`).
+binds window functions with their `PARTITION BY` and `ORDER BY` (each window
+order key may carry `NULLS FIRST` / `NULLS LAST`; an unwritten one is the
+derived default), and the statement-level `ORDER BY` (column, ordinal, output
+alias or expression, with explicit `NULLS FIRST` / `NULLS LAST`).
 
 `sql.sql_binder` turns a parsed statement into a plan:
 `bind_statement(stmt, catalog, footers)` returns a `BoundStatement` whose
@@ -122,8 +133,8 @@ grouped query; a correlated scalar in a WHERE or the SELECT list of an
 ungrouped query, see below; `[NOT] EXISTS`; `[NOT] IN`, NULL-aware, its body
 either one table projecting one bare column or, uncorrelated, any query of
 one column),
-window functions, ORDER BY, LIMIT / OFFSET, DISTINCT, UNION ALL, INTERSECT
-and EXCEPT; and
+window functions, ORDER BY, LIMIT / OFFSET, DISTINCT, UNION ALL, UNION,
+INTERSECT and EXCEPT; and
 raises an `Error` starting `SQL bind error` or `SQL not supported`, naming
 the construct, for what it does not bind. The parquet facts a binding needs
 (the `ParquetSource` a `read_parquet('path')` relation scans, which may be
@@ -178,9 +189,11 @@ unsigned width (an unsigned 64-bit one with a signed integer is refused, since
 DuckDB's HUGEINT has no Arrow type); an integer or decimal with a float the
 float; two decimals the larger scale with the larger integer digits (refused
 above 38 digits); an integer with a decimal the decimal that holds the integer;
-two zone-less timestamps the finer unit. A pair with no such rule (a string with
-a number, a date with a timestamp, ...) raises `SQL not supported: UNION ALL
-column <i> (<name>)` naming both types. The union's names are the first
+two zone-less timestamps the finer unit; an INTEGER or BIGINT with a VARCHAR the
+VARCHAR (the integer cast to its plain decimal spelling, so 3 and `'3'` are one
+value). A pair with no such rule (a string with any other type, a date with a
+timestamp, ...) raises `SQL not supported: UNION ALL column <i> (<name>)`
+naming both types. The union's names are the first
 branch's, and a column is nullable when any branch's is. A branch whose names or
 types differ from the union's gets one projection that casts and renames its
 columns; a branch needing that projection with two columns of one name is
@@ -189,13 +202,27 @@ refused. Bare integer literals of every branch are INT32 when they fit, so
 `OFFSET` after the last branch apply to the whole union: the parser rewrites the
 query to `SELECT * FROM (<union>) ORDER BY ... LIMIT ...`, so the sort and the
 row window bind above the union node. On any other branch they are a
-`SQL syntax error` naming the clause and the operator after it.
+`SQL syntax error` naming the clause and the operator after it. A CTE body may
+hold a chain of any set operator; ORDER BY, LIMIT or OFFSET after its last
+branch is refused by name (`SQL not supported: <clause> after the last branch
+of a set operation in a WITH body`), because the rewrite's derived table would
+bind after the CTE.
+
+`UNION` and `UNION DISTINCT` (`sql.sql_bind_set_op`) are the deduplicating
+union: the union of the branches, with the same common column types and names
+as UNION ALL, under a `PLAN_DISTINCT` over every column, so whole rows compare
+with NULLs equal, every NaN is one value, and 0.0 and -0.0 are one value, as in
+SELECT DISTINCT. A UNION takes everything to its left as its left input:
+`a UNION ALL b UNION c` is one distinct over `union(a, b, c)`, while
+`a UNION b UNION ALL c` keeps `c`'s rows, duplicates included, outside the
+distinct of `a UNION b`. Errors name `UNION` and the branch numbers. Two result
+columns of one name are refused, since the distinct names its columns.
 
 `INTERSECT` and `EXCEPT` (`sql.sql_bind_set_op`) are the set forms: whole rows compared with NULLs equal, each result
 row once. `INTERSECT DISTINCT` and `EXCEPT DISTINCT` spell the same;
-`INTERSECT ALL`, `EXCEPT ALL` and bare `UNION` are refused by name. A chain
-takes DuckDB's precedence: INTERSECT binds tighter than UNION ALL and EXCEPT,
-and each level folds left to right, so `a UNION ALL b INTERSECT c EXCEPT d` is
+`INTERSECT ALL` and `EXCEPT ALL` are refused by name. A chain takes DuckDB's
+precedence: INTERSECT binds tighter than UNION, UNION ALL and EXCEPT, and each
+level folds left to right, so `a UNION ALL b INTERSECT c EXCEPT d` is
 `(a UNION ALL (b INTERSECT c)) EXCEPT d`; adjacent UNION ALL inputs stay one
 union node. The two inputs of an INTERSECT or EXCEPT take the common column
 types and the left input's names as UNION ALL's branches do (errors name the
@@ -207,6 +234,16 @@ max 1; EXCEPT: max 0) and a projection back to the columns. Two result columns
 of one name are refused, since the grouping names its columns, and so is a
 column named as one of the helper columns (`#set_side`, `#set_lo`, `#set_hi`),
 which only a file's column can be.
+
+`sql.sql_position` holds `SqlPosition`, a place in a text, and imports nothing,
+so `sdk_exec.engine_plan` carries one without the front end;
+`sql.sql_parse_text` says where a text stopped parsing. `tokenize(sql, starts)`
+also appends each token's start byte (the EOF token's being the text's byte
+length); `parse_sql_text(text, stopped_at)` is `parse_sql(tokenize(text))` that,
+before it raises the tokenizer's or parser's own `Error` unchanged, sets
+`stopped_at` (a `SqlPosition`, `line` and `column` from 1, the column counting
+characters) to the start of the token the tokenizer was lexing or the parser was
+looking at; `position_of(text, offset)` is that mapping from a byte offset.
 
 `sql.sql_frontend` is the text entry over the three steps.
 `statement_from_sql(sql, catalog, footers)` tokenizes, parses and binds in one
@@ -402,6 +439,28 @@ from sql.sql_copy_format import copy_codec_from_path, copy_format_from_path
 assert_equal(Int(copy_format_from_path("out/sales.parquet")), Int(WFMT_PARQUET))
 assert_equal(Int(copy_format_from_path("rows.csv.gz")), Int(WFMT_CSV))
 assert_equal(Int(copy_codec_from_path(WFMT_CSV, "rows.csv.gz")), Int(WCOMP_GZIP))
+```
+
+A statement nested one level past the limit is refused by the parser:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from sql.sql_nesting import MAX_SQL_NESTING
+from sql.sql_parser import parse_sql
+from sql.sql_token import tokenize
+
+var deep = String("SELECT ")
+for _ in range(MAX_SQL_NESTING + 1):
+    deep += "("
+deep += "1"
+for _ in range(MAX_SQL_NESTING + 1):
+    deep += ")"
+var refused = String("")
+try:
+    _ = parse_sql(tokenize(deep))
+except e:
+    refused = String(e)
+assert_equal(refused, "SQL syntax error: the statement nests deeper than 100 levels")
 ```
 
 A multi-file parquet relation, built in memory (no file is opened), registered in

@@ -32,7 +32,7 @@ comptime SX_LIKE: UInt8 = 8  # `child [NOT] LIKE 'pat'` (child in _agg; pat in t
 comptime SX_CALL: UInt8 = 9  # scalar fn call `name(args...)` (name in `text`; args in _call)
 comptime SX_SUBQUERY: UInt8 = 10  # subquery reference by index (int_val -> SelectStmt.subqueries): the GENERIC subquery-operand node. Scalar `(SELECT ...)` AND the predicate subqueries — `[NOT] EXISTS (...)`, `x [NOT] IN (...)` — all use this node. The referenced `SubqueryDef.kind` (scalar / exists / not-exists / in / not-in) drives how the query binder pre-binds it; the outer binder just looks up `prebound[idx]` regardless of kind (a scalar Expr for SCALAR, a boolean predicate Expr for EXISTS/IN).
 comptime SX_CASE: UInt8 = 11  # `CASE [operand] WHEN cond THEN res ... [ELSE default] END`. Children in `_case`: parallel WHEN-condition / THEN-result Slabs + a 0/1-entry ELSE Slab. A SIMPLE case (`CASE x WHEN v THEN ...`) is DESUGARED at parse time into a searched CASE (each condition becomes `x = v`), so the binder + AST only ever see the searched form. Binds to an `EXPR_WHEN` IR node (`_bind_case`); an omitted ELSE binds to a NULL literal (SQL default). The q8 market-share `sum(CASE WHEN ... THEN ... ELSE 0 END)` routes its CASE through the aggregate-argument binder (`_bind_agg_from_sx` -> `_bind_scalar`).
-comptime SX_WINDOW: UInt8 = 12  # `f(...) OVER (PARTITION BY ... ORDER BY ... [ROWS/RANGE frame])` window function. Metadata in `_window` (a `SqlWindowData`): the SXWIN_* function, the aggregate ARG column (empty for ranking fns), the partition/order column lists + descending flags, and the frame bounds. `SqlWindowData` holds NO nested `SqlExpr` (arg + partition/order are plain column NAMES, per the corpus), so the AST stays ACYCLIC through this node (no new recursion cycle / no AOT-wedge risk). Binds to a `LogicalPlan.partition_by` (PLAN_PARTITION_BY) node — the existing engine window operator, no new executor.
+comptime SX_WINDOW: UInt8 = 12  # `f(...) OVER (PARTITION BY ... ORDER BY ... [ROWS/RANGE frame])` window function. Metadata in `_window` (a `SqlWindowData`): the SXWIN_* function, the aggregate ARG column (empty for ranking fns), the partition/order column lists + descending flags + written NULLS placement, and the frame bounds. `SqlWindowData` holds NO nested `SqlExpr` (arg + partition/order are plain column NAMES, per the corpus), so the AST stays ACYCLIC through this node (no new recursion cycle / no AOT-wedge risk). Binds to a `LogicalPlan.partition_by` (PLAN_PARTITION_BY) node — the existing engine window operator, no new executor.
 comptime SX_UNARY: UInt8 = 13  # `NOT child` / `child IS [NOT] NULL` / `child IS [NOT] TRUE|FALSE` — a UNARY predicate. The SXUN_* code is in `op`; the child lives in the `_agg` slot, exactly as SX_LIKE's does. ⚠ THE `_agg` REUSE IS DELIBERATE, NOT A SHORTCUT: a new `Optional[SqlAggData]`-shaped FIELD would add another self-referential storage path for Mojo's AOT whole-program synthesis to walk, and this frontend has already paid for one of those (see SX_SUBQUERY's note on the `_bind_scalar <-> _bind_select` cycle that deadlocks the compiler). One-child nodes share one slot.
 comptime SX_BOOL: UInt8 = 14  # `TRUE` / `FALSE`, value in `int_val` (0/1). ⚠ NOT folded into SX_INT: `flag = 1` and `flag = true` are different queries, only the second type-checks against a BOOL column, and binding a bool literal as an integer would push the type error down into a comparison kernel instead of raising in the binder.
 
@@ -154,6 +154,10 @@ comptime SUBQ_UNION_ALL: UInt8 = 6
 # (`sql_bind_set_op._bind_set_chain`).
 comptime SUBQ_INTERSECT: UInt8 = 7
 comptime SUBQ_EXCEPT: UInt8 = 8
+
+# A branch joined by bare `UNION` / `UNION DISTINCT` (bound to a distinct over
+# the union of its inputs), a branch as the two above are.
+comptime SUBQ_UNION: UInt8 = 9
 
 # The qualifier the parser gives the derived table it wraps a whole UNION ALL in
 # when the last branch carries ORDER BY / LIMIT / OFFSET (the clauses belong to
@@ -822,6 +826,9 @@ struct SqlWindowData(Copyable, Movable):
         partition_by   — PARTITION BY column names (may be empty = global window).
         order_by       — ORDER BY column names (parallel to `descending`).
         descending     — per-order-key DESC flag (parallel to `order_by`).
+        nulls_first    — per-order-key written NULLS placement (parallel to
+                         `order_by`): True = NULLS FIRST, False = NULLS LAST,
+                         None = not written (the plan derives it).
         has_frame      — True iff an explicit `ROWS/RANGE ...` frame was written.
         frame_*        — the frame units + start/end bound tags & offsets (1:1 with
                          the IR `PartitionFrame`); only meaningful when `has_frame`.
@@ -864,6 +871,7 @@ struct SqlWindowData(Copyable, Movable):
     var arg_qual: String
     var partition_qual: List[String]  # parallel to `partition_by`
     var order_qual: List[String]  # parallel to `order_by`
+    var nulls_first: List[Optional[Bool]]  # parallel to `order_by`
 
     def __init__(
         out self,
@@ -882,6 +890,9 @@ struct SqlWindowData(Copyable, Movable):
         self.order_qual = List[String]()
         for _ in range(len(order_by)):
             self.order_qual.append(String(""))
+        self.nulls_first = List[Optional[Bool]]()
+        for _ in range(len(order_by)):
+            self.nulls_first.append(Optional[Bool](None))
         self.partition_by = partition_by^
         self.order_by = order_by^
         self.descending = descending^
@@ -1540,8 +1551,8 @@ struct SubqueryDef(Movable):
       - SUBQ_DERIVED     -> the body is bound to a subplan and registered in the
                             per-query CTE scope under `alias` (a named derived
                             relation); no `prebound` Expr is referenced for it.
-      - SUBQ_UNION_ALL / SUBQ_INTERSECT / SUBQ_EXCEPT -> a branch of a
-                            set-operation chain, bound by the chain's head
+      - SUBQ_UNION_ALL / SUBQ_UNION / SUBQ_INTERSECT / SUBQ_EXCEPT -> a branch
+                            of a set-operation chain, bound by the chain's head
                             (`sql_bind_set_op`); it pushes a placeholder.
 
     The `Slab[SubqueryDef]` storage on `SelectStmt` is byte-backed (its inner

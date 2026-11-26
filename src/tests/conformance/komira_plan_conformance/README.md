@@ -1,10 +1,11 @@
 # komira_plan_conformance
 
 The logical-plan conformance corpus. A case is a logical plan plus the answer
-it must give. Nothing in this repository executes a plan yet. Until something
-does, the welded test `test_corpus` checks every case through the plan wire
-and against its expectation's schema. Each shard becomes one executing test
-once a plan can run.
+it must give. No test of this corpus runs a plan yet: the welded test
+`test_corpus` checks every case through the plan wire and against its
+expectation's schema. A plan can run (`sdk_exec`'s `run_plan`, and
+`libkomira`'s `komira_plan_stream`); each shard becomes one executing test once
+it runs its cases through that door.
 
 ## Layout
 

@@ -7,7 +7,10 @@
  * pair, and the memfd of the cancel word. The FORK reply carries the
  * worker's pid and a pidfd the zygote opened on it before answering, so the
  * pidfd names that process and no other. The context keeps the other end of
- * the socket, the pidfd and its own mapping of the word. Every call on the
+ * the socket, the pidfd and its own mapping of the word. On macOS, which has
+ * neither memfd nor pidfd (design sections 5.2 and 5.3), the word is a file
+ * under the `scratch` option, unlinked at once, and the reply carries the
+ * pid alone. Every call on the
  * context's instances goes to that worker, which runs user code on its one
  * thread.
  *
@@ -17,7 +20,10 @@
  * call's id in the cancel word, once, which the worker reads between rows.
  * A worker that has not answered grace_ms (by host->now_ns) after the store
  * is stopped by force: the context records that it is sending the signal,
- * then sends SIGKILL through the pidfd.
+ * then sends SIGKILL through the pidfd. On macOS it sends kill(pid), and
+ * only while the worker's socket has not ended and no EXIT report names the
+ * worker; a pid freed and handed out again between that check and the kill
+ * is the race the design accepts.
  *
  * Ends: end of file on the worker's socket means the worker ended. Before a
  * status is returned the context waits, under rt->zy_mu, for the zygote's
@@ -42,6 +48,7 @@
  * shared.
  */
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -50,12 +57,49 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#ifndef __APPLE__
 #include <sys/syscall.h>
+#endif
 #include <unistd.h>
 
 #include "udfpy.h"
 
 #define TICK_MS 10
+
+#ifdef __APPLE__
+/* The cancel word's descriptor (design section 5.2): a file of its own under
+ * the `scratch` option (mkostemp, mode 0600, close-on-exec), unlinked at
+ * once, so only the descriptors name it, then sized to 8 bytes. Not
+ * shm_open, which a sandboxed process is refused. -1 with errno. */
+static int file_word(const char* scratch) {
+  char path[4200];
+  int n = snprintf(path, sizeof(path), "%s/cancel-XXXXXX", scratch);
+  if (n < 0 || (size_t)n >= sizeof(path)) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  int fd = mkostemp(path, O_CLOEXEC);
+  if (fd < 0) return -1;
+  unlink(path);
+  if (ftruncate(fd, 8) != 0) {
+    int e = errno;
+    close(fd);
+    errno = e;
+    return -1;
+  }
+  return fd;
+}
+
+/* recv with MSG_PEEK: 1 once the peer's end has closed and nothing is left to read. */
+static int sock_ended(int sock) {
+  char b;
+  ssize_t k;
+  do {
+    k = recv(sock, &b, 1, MSG_PEEK | MSG_DONTWAIT);
+  } while (k < 0 && errno == EINTR);
+  return k == 0;
+}
+#endif
 
 /* ---- opening and closing a context --------------------------------------------------- */
 
@@ -107,10 +151,16 @@ int32_t udfpy_open_context(udfpy_rt* rt, uint32_t slot, komira_udf_context_t** o
   int sv[2] = {-1, -1};
   int mfd = -1;
   int32_t rc = KOMIRA_UDF_OK;
-  if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) != 0) {
+  if (udfpy_socketpair(sv) != 0) {
     rc = udfpy_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "socketpair: %s", strerror(errno));
+#ifdef __APPLE__
+  } else if ((mfd = file_word(rt->opt.scratch)) < 0) {
+    rc = udfpy_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "the cancel word's file under '%s': %s", rt->opt.scratch,
+                    strerror(errno));
+#else
   } else if ((mfd = memfd_create("komira-udf-cancel", MFD_CLOEXEC)) < 0 || ftruncate(mfd, 8) != 0) {
     rc = udfpy_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "memfd_create: %s", strerror(errno));
+#endif
   } else {
     void* m = mmap(NULL, 8, PROT_READ | PROT_WRITE, MAP_SHARED, mfd, 0);
     if (m == MAP_FAILED)
@@ -126,11 +176,17 @@ int32_t udfpy_open_context(udfpy_rt* rt, uint32_t slot, komira_udf_context_t** o
     rc = udfpy_ctl_request(rt, g, UDFPY_OP_FORK, 0, id, (const uint8_t*)&slot, sizeof(slot), fds, 2, &r, err);
     if (rc == KOMIRA_UDF_OK) {
       rc = udfpy_reply_status(&r, err);
+#ifdef __APPLE__
+      if (rc == KOMIRA_UDF_OK && r.len >= 4 && r.nfds == 0) {
+        memcpy(&pid, r.payload, 4); /* no pidfd on macOS: the pid alone */
+      } else if (rc == KOMIRA_UDF_OK) {
+#else
       if (rc == KOMIRA_UDF_OK && r.len >= 4 && r.nfds == 1) {
         memcpy(&pid, r.payload, 4);
         c->pidfd = r.fds[0]; /* the context owns it now */
         r.nfds = 0;
       } else if (rc == KOMIRA_UDF_OK) {
+#endif
         rc = udfpy_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "the zygote's FORK reply is malformed");
       }
       udfpy_msg_free(&r);
@@ -206,7 +262,12 @@ static int32_t lost_error(komira_udf_context_t* c, komira_udf_error* err) {
 }
 
 static void send_kill(komira_udf_context_t* c) {
+#ifdef __APPLE__
+  if (c->pid > 0 && c->sock >= 0 && !__atomic_load_n(&c->exit_known, __ATOMIC_ACQUIRE) && !sock_ended(c->sock))
+    kill(c->pid, SIGKILL);
+#else
   if (c->pidfd >= 0) syscall(SYS_pidfd_send_signal, c->pidfd, SIGKILL, NULL, 0);
+#endif
 }
 
 /* How the context's worker ended, once it has: wait for its EXIT report (or

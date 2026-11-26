@@ -522,6 +522,7 @@ from plan_expr.expr import (
     EXPR_WINDOW_FN,
 )
 from plan_expr.partition_expr import PartitionExpr, PartitionFrame
+from plan_expr.null_order_policy import derived_nulls_first
 from plan_ir.logical_plan import (
     LogicalPlan,
     ExprArray,
@@ -3302,14 +3303,22 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         # Arm ordinal, not field number — `partition_by` is field 14, arm 11.
         arm = 11
         # ⚠ THE RENDER PRINTS A COUNT WHERE THE PAYLOAD IS. `plan_display`
-        # emits `PartitionBy(partition=[…], order=[…], <n> funcs)` — so LEG 1
-        # covers the two key lists and knows only HOW MANY partition
-        # expressions there are, never anything about one. `descending` is not
-        # in the render at any value either. LEG 2 is the strongest leg on this
+        # emits `PartitionBy(partition=[…], order=[…], funcs=[…])` with each
+        # order key's direction, and its NULL placement only where it differs
+        # from the derived one. LEG 2 is the strongest leg on this
         # arm for once: the node's output schema is the child's plus one column
         # per expr, derived by `partition_expr_output_field`, so a dropped
         # `alias_name` or a shifted `func` is a schema diff.
+        # `nulls_first` goes on the wire only when some key deviates from the
+        # placement derived from its `descending` flag; an all-derived plan
+        # leaves the field empty so its bytes equal those of a producer that
+        # predates the field.
         ref d = p.partition_by_data_ref()
+        var nulls_first_wire = List[Bool]()
+        for i in range(len(d.nulls_first)):
+            if i < len(d.descending) and d.nulls_first[i] != derived_nulls_first(d.descending[i]):
+                nulls_first_wire = d.nulls_first.copy()
+                break
         var pxs = List[WirePartitionExpr]()
         for i in range(len(d.partition_exprs)):
             pxs.append(_partition_expr_to_wire(d.partition_exprs[i]))
@@ -3319,6 +3328,7 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
             WirePartitionByNode(
                 d.partition_keys.copy(), d.order_keys.copy(),
                 d.descending.copy(), pxs^, kid^,
+                nulls_first_wire^,
             )
         )
     elif tag == PLAN_PARTITION_TOPN:
@@ -4042,10 +4052,17 @@ def _plan_from_wire(w: WirePlan, ctx: _DecodeCtx) raises -> LogicalPlan:
         var pxs = List[PartitionExpr]()
         for i in range(len(d.partition_exprs)):
             pxs.append(_partition_expr_from_wire(d.partition_exprs[i]))
+        # An empty `nulls_first` is a producer that never wrote the field: the
+        # placement is derived per order key. A non-empty list was checked
+        # against `order_keys` by the values gate.
+        var pb_nulls_first: Optional[List[Bool]] = None
+        if len(d.nulls_first) > 0:
+            pb_nulls_first = Optional(d.nulls_first.copy())
         out = LogicalPlan.partition_by(
             d.partition_keys.copy(), d.order_keys.copy(),
             d.descending.copy(), pxs^,
             _one_child(d.child, "WirePartitionByNode", ctx),
+            pb_nulls_first^,
         )
     elif tag == PLAN_PARTITION_TOPN:
         if not w.partition_topn:

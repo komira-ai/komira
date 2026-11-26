@@ -70,7 +70,7 @@ and no environment variable and touches no global, so equal arguments give a
 - `cut_shared`: shared subplans. A plan may hold a subtree once, its canonical
   occurrence, and every later occurrence as a `PLAN_CSE_REF` leaf carrying the
   canonical subtree's `structural_hash()` (`optimizer.plan_cse`, which the
-  producer runs: `sdk_exec.engine_sql.optimize_for_run` for `run_sql`). The
+  producer runs: `sdk_exec.engine_plan.optimize_for_run` for `run_sql` and `run_plan`). The
   canonical subtree is the first node of that hash the walk reaches (a node
   before its children, a union's branches in order, and in a plan that holds
   a reference a join's right child before its left, the producer's order; the
@@ -176,8 +176,8 @@ shape:
   not INT64, INT32, FLOAT64, BOOL or STRING; an `NTILE` bucket count or an
   `NTH_VALUE` n that is not above 0; a `LAG`, `LEAD`, `FIRST_VALUE`,
   `LAST_VALUE` or `NTH_VALUE` argument that is not an INT64, FLOAT64 or STRING
-  column; a `SUM`, `AVG`, `MIN` or `MAX` argument that is not an INT64 or
-  FLOAT64 column; an argument that is not a column of the child; a `LAG` or
+  column; a `SUM`, `AVG`, `MIN` or `MAX` argument that is not an INT8,
+  INT16, INT32, INT64 or FLOAT64 column; an argument that is not a column of the child; a `LAG` or
   `LEAD` default the column would change (a float over INT64, a string over a
   number, anything but a string over STRING); a function the sink does not
   compute; and, for a value function or aggregate, a frame SQL refuses (a

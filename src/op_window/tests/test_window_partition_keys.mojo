@@ -86,13 +86,17 @@ def _sink(
     okeys: List[String],
     desc: List[Bool],
     var exprs: List[PartitionExpr],
+    nulls_first: List[Bool] = List[Bool](),
 ) raises -> PartitionBySinkData:
     var sb = SchemaBuilder()
     for i in range(batch.schema.num_columns()):
         sb.add_field(batch.schema.field_at(i))
     for i in range(len(exprs)):
         sb.add_field(partition_expr_output_field(exprs[i], batch.schema, i))
-    return PartitionBySinkData(pkeys.copy(), okeys.copy(), desc.copy(), exprs^, sb.build())
+    return PartitionBySinkData(
+        pkeys.copy(), okeys.copy(), desc.copy(), exprs^, sb.build(),
+        nulls_first.copy(),
+    )
 
 
 def _run(
@@ -101,8 +105,9 @@ def _run(
     okeys: List[String],
     desc: List[Bool],
     var exprs: List[PartitionExpr],
+    nulls_first: List[Bool] = List[Bool](),
 ) raises -> RecordBatch:
-    var spec = _sink(batch, pkeys, okeys, desc, exprs^)
+    var spec = _sink(batch, pkeys, okeys, desc, exprs^, nulls_first)
     return _execute_partition_by_sink(batch^, spec)
 
 
@@ -235,6 +240,115 @@ def test_null_first_key_keeps_second_key_order() raises:
     assert_true(_null(out, 0, 2) and _null(out, 0, 3))
     assert_equal(_get_i64(out, 1, 2), 1)
     assert_equal(_get_i64(out, 1, 3), 2)
+
+
+# =============================================================================
+# NULLS FIRST: the NULL group leads, in either direction, stably
+# =============================================================================
+
+
+def _rank_with_ids(desc: Bool, nulls_first: Bool) raises -> RecordBatch:
+    # o: 3, NULL(slot 0), 1, NULL(slot 5); id follows the input row.
+    var ov: List[Int64] = [3, 0, 1, 5]
+    var ovalid: List[Bool] = [True, False, True, False]
+    var idv: List[Int64] = [10, 20, 30, 40]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_i64(ov, ovalid))
+    cols.append(_i64(idv, _all_valid(4)))
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.rank())
+    return _run(
+        _batch(_keys("o", "id"), cols^), List[String](), _keys("o"), [desc],
+        exprs^, [nulls_first],
+    )
+
+
+def test_nulls_first_ascending_puts_the_null_group_first_in_input_order() raises:
+    # ASC NULLS FIRST: NULL(id 20), NULL(id 40), 1, 3; the NULL peers share
+    # rank 1 and the first non-NULL key is rank 3.
+    var out = _rank_with_ids(False, True)
+    assert_true(_null(out, 0, 0) and _null(out, 0, 1))
+    assert_equal(_get_i64(out, 1, 0), 20)
+    assert_equal(_get_i64(out, 1, 1), 40)
+    assert_equal(_get_i64(out, 0, 2), 1)
+    assert_equal(_get_i64(out, 0, 3), 3)
+    var want_rank: List[Int64] = [1, 1, 3, 4]
+    for r in range(4):
+        assert_equal(_get_i64(out, 2, r), want_rank[r])
+
+
+def test_nulls_first_descending_puts_the_null_group_first_in_input_order() raises:
+    # DESC NULLS FIRST: NULL(id 20), NULL(id 40), 3, 1.
+    var out = _rank_with_ids(True, True)
+    assert_true(_null(out, 0, 0) and _null(out, 0, 1))
+    assert_equal(_get_i64(out, 1, 0), 20)
+    assert_equal(_get_i64(out, 1, 1), 40)
+    assert_equal(_get_i64(out, 0, 2), 3)
+    assert_equal(_get_i64(out, 0, 3), 1)
+    var want_rank: List[Int64] = [1, 1, 3, 4]
+    for r in range(4):
+        assert_equal(_get_i64(out, 2, r), want_rank[r])
+
+
+def test_nulls_last_stated_on_a_descending_key_keeps_the_nulls_at_the_end() raises:
+    var out = _rank_with_ids(True, False)
+    assert_equal(_get_i64(out, 0, 0), 3)
+    assert_equal(_get_i64(out, 0, 1), 1)
+    assert_true(_null(out, 0, 2) and _null(out, 0, 3))
+    assert_equal(_get_i64(out, 1, 2), 20)
+    assert_equal(_get_i64(out, 1, 3), 40)
+
+
+def test_nulls_placement_is_decided_per_order_key() raises:
+    # ORDER BY a NULLS FIRST, b DESC NULLS LAST.
+    #   a: 5, NULL, 5, NULL ; b: 1, 2, NULL, 3
+    #   -> (NULL,3) (NULL,2) (5,1) (5,NULL)
+    var av: List[Int64] = [5, 0, 5, 0]
+    var avalid: List[Bool] = [True, False, True, False]
+    var bv: List[Int64] = [1, 2, 0, 3]
+    var bvalid: List[Bool] = [True, True, False, True]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_i64(av, avalid))
+    cols.append(_i64(bv, bvalid))
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.row_number())
+    var out = _run(
+        _batch(_keys("a", "b"), cols^), List[String](), _keys("a", "b"),
+        [False, True], exprs^, [True, False],
+    )
+    assert_true(_null(out, 0, 0) and _null(out, 0, 1))
+    assert_equal(_get_i64(out, 1, 0), 3)
+    assert_equal(_get_i64(out, 1, 1), 2)
+    assert_equal(_get_i64(out, 0, 2), 5)
+    assert_equal(_get_i64(out, 0, 3), 5)
+    assert_equal(_get_i64(out, 1, 2), 1)
+    assert_true(_null(out, 1, 3))
+
+
+def test_nulls_first_does_not_move_a_null_partition_key() raises:
+    # PARTITION BY g ORDER BY o NULLS FIRST: the NULL partition g stays last.
+    #   g: 1, NULL, 1 ; o: 2, 7, NULL
+    #   -> g=1: (o NULL, 2); then the NULL partition: (7)
+    var gv: List[Int64] = [1, 0, 1]
+    var gvalid: List[Bool] = [True, False, True]
+    var ov: List[Int64] = [2, 7, 0]
+    var ovalid: List[Bool] = [True, True, False]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_i64(gv, gvalid))
+    cols.append(_i64(ov, ovalid))
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.row_number())
+    var out = _run(
+        _batch(_keys("g", "o"), cols^), _keys("g"), _keys("o"), [False],
+        exprs^, [True],
+    )
+    assert_true(_null(out, 1, 0))
+    assert_equal(_get_i64(out, 1, 1), 2)
+    assert_true(_null(out, 0, 2))
+    assert_equal(_get_i64(out, 1, 2), 7)
+    var want_rn: List[Int64] = [1, 2, 1]
+    for r in range(3):
+        assert_equal(_get_i64(out, 2, r), want_rn[r])
 
 
 # =============================================================================

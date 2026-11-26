@@ -1,13 +1,16 @@
 # udf_python
 
-`komira/python`: the UDF runtime library for Python functions. It is C11 with GNU extensions (`memfd_create`, `posix_spawn_file_actions_addclosefrom_np`), built as
-`libkomira_udf_python.so`, and implements the `komira_udf_runtime` table of
+`komira/python`: the UDF runtime library for Python functions. It is C11 with GNU extensions on linux (`memfd_create`, `posix_spawn_file_actions_addclosefrom_np`), built as
+`libkomira_udf_python.so` (ELF) on linux and `libkomira_udf_python.dylib` (Mach-O) on macOS
+([macOS](#macos)), and implements the `komira_udf_runtime` table of
 [`udf_abi`](../udf_abi/). It exports one symbol, `komira_udf_runtime_init_v1`. The design is
 [`docs/design/udf_python_worker.md`](../../docs/design/udf_python_worker.md); this build covers
 SCALAR (VALUES and ARROW) and MAP_BATCHES_COLUMN (ARROW) over the types of [Types](#types), with the
-code forms PACKAGE and BUNDLE. Linux only, with glibc 2.34 or later.
+code forms PACKAGE and BUNDLE. Linux with glibc 2.34 or later, and macOS arm64 (11.0 or later).
 
 ## What it does
+
+What follows is the linux build; [macOS](#macos) says what differs there.
 
 - `init` reads the runtime options from the host struct (`key=value` strings): `interpreter`, `zygote`,
   `abi` and `scratch` are required; `sys_path` (repeated), `grace_ms` and `trace` are optional. A refused
@@ -44,6 +47,30 @@ code forms PACKAGE and BUNDLE. Linux only, with glibc 2.34 or later.
 - Generations: a LOAD reply with the RETIRE flag (a module imported from another bundle, or threads started
   by an import) retires the generation; it is shut down when its last context closes, and a RETRY reply loads
   again in a new generation.
+
+## macOS
+
+The same sources, built for a macOS target as a Mach-O `libkomira_udf_python.dylib`
+(`c_shared_lib(target_os = True)`, the darwin-arm64 row's `aarch64-macos.11.0`). macOS has no memfd, no
+pidfd, no `SOCK_CLOEXEC`, `MSG_NOSIGNAL`, `MSG_CMSG_CLOEXEC`, closefrom spawn action or
+`sigabbrev_np`, so there (design sections 2.3, 5.2 to 5.4):
+
+- the library's sockets are made close-on-exec with `FD_CLOEXEC` and carry `SO_NOSIGPIPE`, and a descriptor
+  received is made close-on-exec as it is taken;
+- the zygote is spawned with `POSIX_SPAWN_CLOEXEC_DEFAULT`, keeping 1 and 2
+  (`posix_spawn_file_actions_addinherit_np`) and the 0 and 3 its actions make;
+- the cancel word is a file of its own under `scratch` (`cancel-XXXXXX`, `mkostemp`, mode 0600), unlinked
+  at once and sized to 8 bytes: only the library's and the worker's descriptors name it. `shm_open`, which
+  the design first named, is refused in a sandboxed process;
+- the FORK reply carries the worker's pid and no descriptor, and a forced stop is `kill(pid)` sent only while
+  the worker's socket has not ended and no `EXIT` report names the worker. A worker that exits, is reaped and
+  has its pid handed out again between that check and the `kill` is the race the design accepts;
+- a worker ends with its zygote through a thread that waits on a `kqueue` `EVFILT_PROC` `NOTE_EXIT` filter for
+  the zygote's pid (`python/komira/_udf/worker.py`), where linux uses `PR_SET_PDEATHSIG`;
+- the zygote's thread count leaves out the threads of its dispatch workqueue
+  (`proc_pidinfo(PROC_PIDWORKQUEUEINFO)`), which the kernel starts for libdispatch and a fork does not copy:
+  loading `libarrow`, as `import pyarrow` does, leaves one;
+- a signal is named from `sys_signame`, upper-cased (`signal 9 (SIGKILL)`).
 
 ## Files
 

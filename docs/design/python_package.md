@@ -60,9 +60,9 @@ range, or the DataFrame surface; each has its own design, named under
 Fixed before this design and not reopened here: the distribution (the name on PyPI, the name `pip install`
 takes) is `komira`, the same as the import package (`komira-ai` is the organisation's name only: the GitHub
 organisation, the PyPI organisation account and the mopm namespace; PyPI has one flat namespace); it is
-published by the top-level workflows
-`.github/workflows/pypi.yml` (the Linux wheel) and `.github/workflows/pypi-macos-arm64.yml` (the macOS arm64
-wheel) through the GitHub environments `testpypi` and `pypi`, by trusted
+published by the top-level workflow
+`.github/workflows/pypi.yml` (the Linux wheel's jobs and the macOS arm64 wheel's jobs, two independent chains of
+one file) through the GitHub environments `testpypi` and `pypi`, by trusted
 publishing with no token, and nothing is uploaded or registered by hand. The owner has given the go to release `komira` from that workflow
 before the DataFrame surfaces exist, so the name is registered on PyPI by the first release the workflow
 makes, and no one registers or uploads it any other way; the package lives in `python/` in this repository; it is published as a wheel first; the wheel
@@ -84,6 +84,9 @@ Python UDFs run in zygote worker processes ([udf_runtime_interface.md](udf_runti
 python/
   BUCK              the package's sources as one target, its tests' targets, later the wheel target
   README.md         what the package is, how it is built and tested (the package doc, like node/README.md)
+  CHANGELOG.md      the releases it keeps, newest first (decision 7, The changelog)
+  changelog.d/      one file `<slug>.md` of bullets for each change no kept release holds yet
+  changelog/        the Zig tool that assembles them and the wheel's description
   komira/           the import package
     __init__.py     the public names, and nothing else (decision 3)
     py.typed        the PEP 561 marker (decision 8)
@@ -113,8 +116,8 @@ python/
 - **Tests live in `python/tests/`**, run as `python_binding_test` targets against
   `//src/so:libkomira`, each script loading the library from the `--lib-dir` it is given. They are the
   only Python tests of the package (rule T11 allows Python tests for the Python SDK surface).
-- **The generated protobuf modules are not in the first release.** They come with the DataFrame plan
-  encoder (decision 4). When they come, they live where their proto package puts them, `komira/plan/v1/`
+- **The generated protobuf modules were not in the first release.** They came with the DataFrame
+  (decision 4), and live where their proto package puts them, `komira/plan/v1/`
   (`package komira.plan.v1;` in [src/plan_proto/plan.proto](../../src/plan_proto/plan.proto)): protoc
   writes `from komira.plan.v1 import ...` into the generated code, and the earlier SDK nested them there
   for that reason. `komira.plan` is then a package without public names: nothing in `__all__` comes from
@@ -196,9 +199,19 @@ Behaviour each later pull request implements, fixed here so they agree:
   registers an `os.register_at_fork` hook that marks every session of the parent closed in the child, so
   a call there raises `KomiraError` instead of running on a copied context. The package never forks;
   UDF workers are the engine's, not this package's.
-- **Ctrl-C during a query** is delivered when the query returns: `KeyboardInterrupt` is raised then, the
-  answer the query computed is freed, and the session stays usable. The first release has no cancel and
-  its docs say so.
+- **Ctrl-C during a query** cancels it. A ctypes call keeps its thread in the library, and Python runs a
+  signal's handler only on the main thread between bytecodes, so `Session.sql` makes
+  `komira_sql_stream_run` on a helper thread under a run handle of its own (src/so/README.md, "Cancel
+  and progress") and the calling thread waits for it, waking every 50 ms. Whatever is raised on the
+  calling thread while it waits (the `KeyboardInterrupt`, or the exception of a `progress` callback)
+  cancels the handle; the thread then waits for the call to return, drops a stream the call made,
+  frees the handle and raises the exception again, with the session's lock held throughout, so the
+  context never has two calls at once and the next call finds it free. A second Ctrl-C while the run
+  stops is dropped. On a library older than ABI 1.6 the query runs on the calling thread and Ctrl-C is
+  delivered when it returns, the answer freed.
+- **Progress** is polled, never called back from the library: the waiting thread reads the run handle's
+  segment counts and calls the `progress` callback, on the calling thread, when they change.
+- **Logging** goes to the standard logger `"komira"`, with a `NullHandler`; no query text.
 
 ### 4. What is carried from the earlier SDK, and what is not
 
@@ -261,7 +274,7 @@ visible from every thread, as a module-level name would be.
 
 The macOS arm64 wheel (`//python:komira_wheel_macos_arm64`, macOS 11 or later on Apple silicon, tagged
 `py3-none-macosx_11_0_arm64`) is built from its own `[dist]` directory and its own pinned compiler. It is built
-and tested only by pypi-macos-arm64.yml, never in a pull request (`//python:wheel_install_test_macos_arm64`, on
+and tested only by the macOS jobs of pypi.yml, never in a pull request (`//python:wheel_install_test_macos_arm64`, on
 the farm's macOS workers), and a run publishes it only from main.
 
 - An installed package loads `komira/_lib/libkomira.so`. The wheel carries
@@ -345,7 +358,7 @@ later designs fill marked:
 name = "komira"
 dynamic = ["version"]   # stamped by the wheel rule
 description = "SQL over local files, with libkomira, the komira query engine, in process"
-readme = "README.md"
+readme = "README.md"   # the wheel's description is this file followed by the assembled changelog (below)
 requires-python = ">=3.11"   # the oldest CPython the package's tests run (python/pythons.bzl)
 license = "Apache-2.0 AND LicenseRef-Modular-Proprietary"
 license-files = ["LICENSE", "NOTICE", "MODULAR_LICENSE", "MODULAR_THIRD_PARTY_NOTICES"]
@@ -368,6 +381,7 @@ classifiers = [
 dependencies = [
   # none for the Mojo runtime (decision 6)
   "pyarrow>=25.0.1",   # with Session.sql's Result; the lower bound is the pyarrow the tests run on
+  "protobuf>=5.29.1,<8",   # with the DataFrame: loads the generated plan modules (python/dependencies.bzl)
 ]
 
 [project.optional-dependencies]
@@ -381,6 +395,28 @@ Documentation = "https://github.com/komira-ai/komira/blob/main/docs/install.md"
 Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
 ```
 
+- **The changelog.** Every change to the package adds a file, `python/changelog.d/<slug>.md`, and never a
+  line of `python/CHANGELOG.md`: ten pull requests that each add a bullet at the head of one file conflict
+  with each other in the merge queue, and ten that each add a file do not. A file holds Markdown bullets
+  (`- **Title.** text`, a continuation indented two spaces, no heading). A release's version is `0.1.<N>`
+  from the stamp, which a pull request cannot know, so the release writes its section: the changelog tool
+  (`python/changelog`, Zig, with its own cases; the rule is `changelog_file`, target `//python:changelog`)
+  puts `## 0.1.<N>` before the first release heading of `CHANGELOG.md`, holding the bullets of every file in
+  file-name order, so a release lists every change merged since the newest section `CHANGELOG.md` keeps
+  (a section is kept by moving its files' bullets under their own heading in one change). The wheel's
+  description, `METADATA`'s body, is `README.md` followed by that changelog with each heading one level
+  down, so the page of version 0.1.`<N>` on PyPI shows its own section; both wheels read the one target,
+  so their `METADATA` is the same. The tool refuses, naming the file and the line, a file that is not a
+  slug and `.md`, an empty file, a line that is neither a bullet nor an indented continuation, a heading,
+  a `## Unreleased` heading in `CHANGELOG.md` and a `CHANGELOG.md` with no release heading; the wheel
+  depends on the target, so a pull request that builds the wheel builds the check. Nothing else fails when
+  an entry is missing, so `python/tests/test_changelog_names.py` holds every public name of `komira` and
+  `komira.pl` (each module's `__all__`, and the public attributes of each public class) to an entry: the
+  name is an identifier inside a backticked code span of `CHANGELOG.md` or of a file of `changelog.d/`.
+  It holds the names, not the change: a name whose last part is already in a span passes, and a change of
+  behaviour that adds no name needs a fragment by review.
+  A change that touches only `changelog.d/` is documentation-only to the release workflow (`**.md`), so it
+  starts no release; its entry reaches the page of the next release that changes code.
 - **PEP 639 licence metadata.** `license` is an SPDX expression with two terms: `Apache-2.0` for the
   repository's code and `LicenseRef-Modular-Proprietary` for the three Mojo runtime libraries the wheel
   carries. The pinned `mojo-compiler` conda package states `LicenseRef-Modular-Proprietary` in its
@@ -392,9 +428,11 @@ Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
   time). There is no `License ::` classifier: PEP 639 deprecates them alongside an expression. The wheel
   rule stages the files, so `python/` holds no copy that could drift. The wheel rule's read-back check
   refuses a wheel without them: an absent licence file must not build a wheel with no licence in it.
-- **One `Requires-Dist`, `pyarrow>=25.0.1`.** Release 1 listed none; the release with `Session.sql`
-  requires pyarrow, which a `Result` is read as (python/dependencies.bzl says why the range has no
-  upper bound). None is on `mojo-compiler`: the runtime libraries are in the wheel (decision 6).
+- **Two `Requires-Dist` lines, `pyarrow>=25.0.1` and `protobuf>=5.29.1,<8`.** Release 1 listed none;
+  the release with `Session.sql` requires pyarrow, which a `Result` is read as, and the release with
+  the DataFrame requires protobuf, which loads the generated plan modules a frame's plan is encoded
+  with (python/dependencies.bzl says why each range is what it is). None is on `mojo-compiler`: the
+  runtime libraries are in the wheel (decision 6).
 - **The tag is `py3-none-manylinux_2_35_x86_64`.** `libAsyncRTRuntimeGlobals.so` needs
   `GLIBC_2.35`, so a `manylinux_2_34` tag would promise a glibc the library does not run on; the highest
   C++ runtime versions the three need are `GLIBCXX_3.4.30` and `CXXABI_1.3.11`
@@ -405,7 +443,7 @@ Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
   repository; no internal host, no private repository, no address. The public-boundary lint reads
   `python/` like every file of the cell.
 - **Only what is true.** The `Operating System` classifiers name the release platforms, each of which
-  gets its wheel only after that wheel's install test passes on that platform (in pypi-macos-arm64.yml
+  gets its wheel only after that wheel's install test passes on that platform (in the macOS jobs of pypi.yml
   for macOS, never in a pull request's check). The CPython classifiers name the interpreters the
   package's tests run: 3.11, 3.12, 3.13 and 3.14, each pinned in
   [third_party/python](../../third_party/python/README.md) and listed once in
@@ -418,8 +456,9 @@ Changelog = "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md"
   table, so `pip install ./python` fails, as expected: the package is installed from its wheel. The
   wheel rule's attributes are the metadata, and `license-files` names files the rule stages from the
   repository root, which `python/` does not hold.
-- **protobuf is not a dependency of the first release.** Only the DataFrame plan encoder needs it; it is
-  added, with its range, when that lands.
+- **protobuf was not a dependency of the first release.** Only the DataFrame's plan encoder needs it;
+  it was added, with its range, with the DataFrame. `import komira` does not import it: the first
+  reader that makes a frame does.
 - **The version** is stamped by the wheel rule. Its scheme is in
   [packaging/conda/README.md](../../packaging/conda/README.md) ("Wheels: versioning") and is the wheel
   design's to confirm.
@@ -457,6 +496,13 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
     `LOWERING_WINDOW_UNSERVED`, `LOWERING_UDF_UNSERVED`, `SQL_STATEMENT_UNSUPPORTED`,
     `COPY_OPTION_UNSUPPORTED`, `COPY_FORMAT_NOT_INFERRED`, `STORAGE_URL_REFUSED`,
     `STORAGE_RANGE_NOT_SUPPORTED`, `STORAGE_WRITE_UNSUPPORTED`, `PLAN_URL_QUERY_REFUSED`.
+  - `MemoryLimitError`: `MEMORY_BUDGET_EXCEEDED`, the engine's refusal at step `execute` when the
+    memory budget (`Session(memory_limit=)`) denies an operator the bytes its state needs. The
+    code is the first word of the engine's message, set by `pipeline_exec` at every site that
+    reports a denied draw (the aggregation, grouped aggregation, window and sort sinks and
+    COUNT(DISTINCT)). A query the engine runs in less memory, as a fixed-width GROUP BY that
+    spills, does not raise it; the class and the code stay the same when a spill directory
+    becomes reachable through the ABI, and an operator that does not spill still raises it.
   - `CredentialsError`: `CREDENTIAL_UNBOUND`, `CREDENTIAL_NAME_CONFLICT`,
     `CREDENTIAL_KIND_MISMATCH`, `CREDENTIALS_NOT_FOUND`, `CREDENTIALS_INVALID`; also the default of
     the credential calls.
@@ -511,11 +557,16 @@ and `_py311`, `_py312` and `_py314` on the other supported minors), alone: the e
 ## What are the limits and open questions?
 
 - The interpreter list ([tools/build/lint/interpreter_allowlist.tsv](../../tools/build/lint/interpreter_allowlist.tsv))
-  needs a row for each `.py` file today, and `third_party/python`'s `_TEST_ONLY` and `src/so`'s visibility
-  each need a line for `python/`; the loader added them. Whether the interpreter list should
-  read `PYTHON_SURFACE` instead of a row per file is a question for that lint.
+  holds two glob rows for the package, `python/komira/**/*.py` and `python/tests/**/*.py`, so a new `.py` file
+  there needs no row; a file of another kind under `python/` (a shell script, or a file with only a `#!` line)
+  still needs its own. `third_party/python`'s `_TEST_ONLY` and `src/so`'s visibility each need a line for
+  `python/`; the loader added them.
 - Free-threaded CPython (3.14t): the package is not claimed for it in the first release. ctypes works
   there, but no test runs the package on it.
+- An abort inside libkomira ends the interpreter. A raise is a status and becomes a Python exception,
+  but an `abort()`, a fault, stack exhaustion or an out-of-memory kill cannot be caught in the process
+  ([libkomira_run_abi.md](libkomira_run_abi.md) §8 lists the inputs refused before they reach one, and
+  the ones that still do). The package README says so, under "What does not work yet".
 - `Result.to_polars` and `to_pandas` convert through Arrow, with pyarrow's `Table.to_pandas()` and
   `polars.from_arrow` and no options of their own; `python/tests/test_result_frames.py` holds the dtype
   each Arrow type the engine answers becomes.

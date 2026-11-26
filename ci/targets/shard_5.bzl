@@ -66,7 +66,7 @@ TARGETS = [
     "komira//third_party/wycheproof:LICENSE",
     "komira//tools/build/examples/abi_golden:abi_lib",
     "komira//tools/build/examples/abi_golden:header_driver",
-    "komira//tools/build/examples/shared_lib_native:spike_native",
+    "komira//tools/build/examples/shared_lib_native:spike_native_dist_load",
     "komira//tools/build/lint:actionlint_1.7.12_darwin_arm64.tar.gz",
     "komira//tools/build/lint:interpreter_budget",
     "komira//tools/build/lint:no_shell",

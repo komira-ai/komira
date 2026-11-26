@@ -2,7 +2,7 @@
 
 `load` opens the library from a directory, once per process, checks that its
 ABI major version is the one this package was written for, and binds the
-calls of `_FUNCTIONS` (the newest from ABI 1.7); every failure is a `LibraryLoadError` that says which
+calls of `_FUNCTIONS` (the newest from ABI 1.8); every failure is a `LibraryLoadError` that says which
 library and why. `Native` holds the bound calls and turns their status codes
 into `KomiraError`, with the context's last error, read with the two-call
 protocol, as the message, and, from ABI 1.7, its code and step as the error's
@@ -54,12 +54,17 @@ Python type yet and no stability promise. So are the three credential calls
 `CREDENTIALS_INVALID`) raises `CredentialsError`. `sql_stream` runs one SQL
 statement and returns its filled `_arrow.ArrowArrayStream`, which
 `Session.sql` hands to pyarrow (`_arrow.import_stream`) and wraps in a
-`Result`.
+`Result`; `plan_stream` does the same for a serialized plan, which a
+DataFrame's terminal sends (komira/_frame.py). The run handle calls of ABI 1.6 (`run_new`, `run_free`,
+`run_cancel`, `run_progress`) and `sql_stream_run`, which runs a statement
+under a handle that another thread cancels and reads the progress of, are what
+`_run.run_sql` makes; `has` says whether the library has a call.
 """
 
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import platform
 import sys
@@ -79,6 +84,8 @@ ABI_MAJOR = 1
 KOMIRA_OK = 0
 KOMIRA_ERR_ENGINE = -3
 KOMIRA_ERR_BUFFER_TOO_SMALL = -4
+# A run stopped by komira_run_cancel (ABI 1.6).
+KOMIRA_ERR_CANCELLED = -6
 
 # The scope a credential is sealed in: the session (src/so/abi/komira.tsv).
 KOMIRA_BIND_SESSION = 1
@@ -103,6 +110,7 @@ _Out = [_OutBuf, ctypes.c_uint64, _OutLen]
 # be there; a later one may be missing, and calling it then raises.
 _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
     "komira_ctx_new": (0, ctypes.c_void_p, []),
+    "komira_ctx_new_with_options": (4, ctypes.c_void_p, [ctypes.c_int64, ctypes.c_int64]),
     "komira_ctx_free": (0, None, [ctypes.c_void_p]),
     "komira_last_error": (0, ctypes.c_int32, [ctypes.c_void_p] + _Out),
     "komira_last_error_code": (7, ctypes.c_int32, [ctypes.c_void_p] + _Out),
@@ -138,7 +146,27 @@ _FUNCTIONS: dict[str, tuple[int, object, list[object]]] = {
         [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint8, ctypes.c_int32, ctypes.c_int32],
     ),
     "komira_register_json": (5, ctypes.c_int32, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]),
+    "komira_run_new": (6, ctypes.c_void_p, []),
+    "komira_run_free": (6, None, [ctypes.c_void_p]),
+    "komira_run_cancel": (6, ctypes.c_int32, [ctypes.c_void_p]),
+    "komira_run_progress": (
+        6,
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64)],
+    ),
+    "komira_sql_stream_run": (
+        6,
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(_arrow.ArrowArrayStream)],
+    ),
+    "komira_plan_stream": (
+        8,
+        ctypes.c_int32,
+        [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64, ctypes.POINTER(_arrow.ArrowArrayStream)],
+    ),
 }
+
+_log = logging.getLogger("komira")
 
 _lock = threading.Lock()
 _loaded: Native | None = None
@@ -440,6 +468,11 @@ class Native:
         self.abi_version = abi_version
         self._functions = functions
 
+    def has(self, name: str) -> bool:
+        """Whether this library has the call `name` (one of `_FUNCTIONS`):
+        its minor version is the call's or later."""
+        return self._functions[name] is not None
+
     def _fn(self, name: str) -> ctypes._CFuncPtr:
         """The bound call `name`, or a KomiraError when this library's minor
         version is older than the call's."""
@@ -456,6 +489,19 @@ class Native:
         ctx = self._fn("komira_ctx_new")()
         if not ctx:
             raise KomiraError("komira_ctx_new returned NULL")
+        return int(ctx)
+
+    def ctx_new_with_options(self, worker_count: int, memory_budget_bytes: int) -> int:
+        """A context whose engine runs `worker_count` workers within
+        `memory_budget_bytes`; 0 for either is the engine's own value. Needs
+        ABI 1.4. The engine refuses an option it cannot start with (NULL)."""
+        ctx = self._fn("komira_ctx_new_with_options")(worker_count, memory_budget_bytes)
+        if not ctx:
+            raise KomiraError(
+                "komira_ctx_new_with_options returned NULL for {} workers and a budget of {} bytes".format(
+                    worker_count, memory_budget_bytes
+                )
+            )
         return int(ctx)
 
     def ctx_free(self, ctx: int) -> None:
@@ -586,6 +632,63 @@ class Native:
         self._check(op, ctx, fn(ctx, text, ctypes.byref(stream)))
         return stream
 
+    def run_new(self) -> int:
+        """A new run handle (komira_run_new): not cancelled, at 0 of 0
+        segments. The caller frees it with run_free once no call given it is
+        running."""
+        run = self._fn("komira_run_new")()
+        if not run:
+            raise KomiraError("komira_run_new returned NULL")
+        return int(run)
+
+    def run_free(self, run: int) -> None:
+        self._fn("komira_run_free")(run)
+
+    def run_cancel(self, run: int) -> None:
+        """Cancels the run in flight under `run`, and every later one; any
+        thread may call it while the run runs."""
+        status = self._fn("komira_run_cancel")(run)
+        if status != KOMIRA_OK:
+            raise KomiraError("komira_run_cancel failed with status {}".format(status), status=status)
+
+    def run_progress(self, run: int) -> tuple[int, int]:
+        """(done, total): the plan segments the runs given `run` finished and
+        counted. Any thread may call it while the run runs."""
+        fn = self._fn("komira_run_progress")
+        done, total = ctypes.c_uint64(0), ctypes.c_uint64(0)
+        status = fn(run, ctypes.byref(done), ctypes.byref(total))
+        if status != KOMIRA_OK:
+            raise KomiraError("komira_run_progress failed with status {}".format(status), status=status)
+        return done.value, total.value
+
+    def sql_stream_run(self, ctx: int, query: str | bytes, run: int) -> _arrow.ArrowArrayStream:
+        """`sql_stream` under the run handle `run`: a cancel of `run` while
+        it runs raises KomiraError with status KOMIRA_ERR_CANCELLED and the
+        library's `QUERY_CANCELLED: ...` message, and makes no stream. `query`
+        may be the bytes `_c_string` made of it."""
+        op = "komira_sql_stream_run"
+        fn = self._fn(op)
+        text = query if isinstance(query, bytes) else _c_string("query", query)
+        stream = _arrow.ArrowArrayStream()
+        self._check(op, ctx, fn(ctx, text, run, ctypes.byref(stream)))
+        return stream
+
+    def plan_stream(self, ctx: int, plan: bytes) -> _arrow.ArrowArrayStream:
+        """Runs the serialized plan `plan` (a `WirePlanEnvelope`, which may
+        hold NUL bytes) on the context and returns its answer, the Arrow C
+        stream the library filled; the caller releases it. No SQL front end
+        is involved: the library decodes, optimizes, lowers and runs the
+        plan. A refusal raises KomiraError before any stream exists, as
+        `sql_stream`'s does."""
+        op = "komira_plan_stream"
+        fn = self._fn(op)
+        if not isinstance(plan, (bytes, bytearray, memoryview)):
+            raise TypeError("plan must be bytes, not {}".format(type(plan).__name__))
+        data = bytes(plan)
+        stream = _arrow.ArrowArrayStream()
+        self._check(op, ctx, fn(ctx, data, len(data), ctypes.byref(stream)))
+        return stream
+
     def _out(self, op: str, ctx: int, call: Callable[[ctypes._CFuncPtr, object, int, object], int]) -> bytes:
         """The bytes of the two-call `op`, or its KomiraError."""
         fn = self._fn(op)
@@ -699,4 +802,5 @@ def load(lib_dir: str | os.PathLike[str] | None = None) -> Native:
             raise LibraryLoadError("cannot load libkomira from {}: {}".format(path, e)) from None
         _loaded = _bind(lib, path)
         _loaded_dir = directory
+        _log.debug("loaded libkomira ABI %d.%d from %s", *divmod(_loaded.abi_version, 1000), path)
         return _loaded

@@ -25,11 +25,13 @@
 # `workflows:` of the trigger (a name in only one of them is never read, or
 # never started). A push-to-main workflow is added to both lists in the pull
 # request that introduces it, so no run of main goes unwatched in between.
-# It names two workflows: `release`, and `pypi`, whose push run builds the Python wheel
-# and installs it from the file and from TestPyPI (its scheduled and manual runs are not
-# push runs, so they are never read). The two macOS workflows, `release-macos` and
-# `pypi-macos-arm64`, are not named: a Mac build is reported, not blocking, so a red one is
-# a red run of its own workflow and opens no issue (docs/ci.md, "main_red.yml").
+# It names two workflows: `release`, and `pypi`, whose push run builds the Python wheels
+# (the Linux wheel's jobs and the macOS wheel's jobs, independent chains of one run) and
+# installs them from the file and from TestPyPI (its scheduled and manual runs are not
+# push runs, so they are never read). A red macOS chain makes the `pypi` run red, so it is
+# reported. The macOS workflow `release-macos` is not named: a Mac build is reported, not
+# blocking, so a red one is a red run of its own workflow and opens no issue (docs/ci.md,
+# "main_red.yml").
 #
 # WHY NO RED IS HIDDEN. The push runs of each watched workflow share a
 # concurrency group of their own with cancel-in-progress false: a running run is

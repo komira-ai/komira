@@ -6,11 +6,14 @@
 #   1. A trailing `;` is accepted and anything else after the query is
 #      "unexpected trailing tokens". (catches: _finalize accepting extra
 #      tokens, or refusing the `;`)
-#   2. `UNION ALL`, `INTERSECT` and `EXCEPT` chain each branch off the
-#      previous one in the subquery table, each entry's kind its operator;
-#      `INTERSECT DISTINCT` / `EXCEPT DISTINCT` are the set forms; bare UNION,
-#      INTERSECT ALL and EXCEPT ALL are refused by name; a clause before any
-#      operator is a syntax error naming that operator.
+#   2. `UNION ALL`, `UNION`, `INTERSECT` and `EXCEPT` chain each branch off
+#      the previous one in the subquery table, each entry's kind its operator;
+#      bare `UNION` and `UNION DISTINCT` are the deduplicating union
+#      (`SUBQ_UNION`), never `SUBQ_UNION_ALL`; `INTERSECT DISTINCT` /
+#      `EXCEPT DISTINCT` are the set forms; INTERSECT ALL and EXCEPT ALL are
+#      refused by name, also after a UNION; a clause before any operator is a
+#      syntax error naming that operator; a CTE body holds a chain, and a
+#      clause after its last branch is refused by name.
 #      (catches: every branch hung off the root; bare UNION bound as UNION ALL;
 #      an ALL form bound as the set form)
 #   3. COPY: a bare table (with or without a schema qualifier) becomes
@@ -71,6 +74,7 @@ from sql.sql_ast import (
     STMT_QUERY,
     STMT_COPY,
     STMT_CREATE_TABLE_AS,
+    SUBQ_UNION,
     SUBQ_UNION_ALL,
     SUBQ_INTERSECT,
     SUBQ_EXCEPT,
@@ -114,7 +118,7 @@ def test_trailing_semicolon_and_trailing_tokens() raises:
     _refuses("SELECT a FROM t; x", "unexpected trailing tokens after query")
 
 
-def test_union_all_chains_and_other_set_operators_refuse() raises:
+def test_union_all_chains_each_branch_off_the_previous_one() raises:
     var st = _parse(
         "SELECT a FROM t UNION ALL SELECT b FROM u UNION ALL SELECT c FROM v"
     )
@@ -125,7 +129,88 @@ def test_union_all_chains_and_other_set_operators_refuse() raises:
     assert_equal(st.query.subqueries[0].body.union_all_idx, 1)
     assert_equal(st.query.subqueries[1].body.from_tables[0].name, "v")
     assert_equal(st.query.subqueries[1].body.union_all_idx, -1)
-    _refuses("SELECT a FROM t UNION SELECT a FROM u", "bare UNION")
+
+
+def test_bare_union_and_union_distinct_are_the_deduplicating_union() raises:
+    var bare = _parse("SELECT a FROM t UNION SELECT b FROM u")
+    assert_equal(bare.query.union_all_idx, 0)
+    assert_equal(len(bare.query.subqueries), 1)
+    assert_equal(Int(bare.query.subqueries[0].kind), Int(SUBQ_UNION))
+    assert_equal(bare.query.subqueries[0].body.from_tables[0].name, "u")
+    # The operator's dedup is not the branch's own SELECT DISTINCT.
+    assert_false(bare.query.subqueries[0].body.distinct)
+    assert_false(bare.query.distinct)
+    # UNION DISTINCT spells the same; each operator keeps its own kind in a
+    # chain that mixes them, so a UNION ALL is not folded into a UNION.
+    var st = _parse(
+        "SELECT a FROM t UNION DISTINCT SELECT b FROM u UNION ALL SELECT c"
+        " FROM v union SELECT d FROM w EXCEPT SELECT e FROM x"
+    )
+    assert_equal(len(st.query.subqueries), 4)
+    assert_equal(Int(st.query.subqueries[0].kind), Int(SUBQ_UNION))
+    assert_false(st.query.subqueries[0].body.distinct)
+    assert_equal(st.query.subqueries[0].body.union_all_idx, 1)
+    assert_equal(Int(st.query.subqueries[1].kind), Int(SUBQ_UNION_ALL))
+    assert_equal(st.query.subqueries[1].body.from_tables[0].name, "v")
+    assert_equal(st.query.subqueries[1].body.union_all_idx, 2)
+    assert_equal(Int(st.query.subqueries[2].kind), Int(SUBQ_UNION))
+    assert_equal(st.query.subqueries[2].body.from_tables[0].name, "w")
+    assert_equal(st.query.subqueries[2].body.union_all_idx, 3)
+    assert_equal(Int(st.query.subqueries[3].kind), Int(SUBQ_EXCEPT))
+    assert_equal(st.query.subqueries[3].body.union_all_idx, -1)
+    # A trailing ORDER BY / LIMIT wraps the chain as it wraps a UNION ALL.
+    var wrapped = _parse("SELECT a FROM t UNION SELECT a FROM u ORDER BY 1 LIMIT 2")
+    assert_equal(Int(wrapped.query.subqueries[0].kind), Int(SUBQ_UNION))
+    assert_equal(len(wrapped.query.subqueries[0].body.order_by), 0)
+    assert_equal(wrapped.query.subqueries[1].derived_alias, "#union#1")
+    assert_equal(len(wrapped.query.order_by), 1)
+    assert_equal(wrapped.query.limit.value(), 2)
+    # A clause before a UNION names the operator as it is written.
+    assert_equal(
+        _err("SELECT a FROM t ORDER BY a UNION SELECT b FROM u"),
+        "SQL syntax error: ORDER BY before UNION. ORDER BY, LIMIT and OFFSET"
+        " apply to the whole UNION, so they must follow its last branch.",
+    )
+    _refuses(
+        "SELECT a FROM t UNION SELECT b FROM u LIMIT 1 UNION DISTINCT"
+        " SELECT c FROM v",
+        "SQL syntax error: LIMIT before UNION.",
+    )
+    # A branch must follow the operator.
+    _refuses("SELECT a FROM t UNION", "expected keyword 'select'")
+    _refuses("SELECT a FROM t UNION DISTINCT", "expected keyword 'select'")
+
+
+def test_a_cte_body_holds_a_set_operation_chain() raises:
+    var st = _parse(
+        "WITH c AS (SELECT a FROM t UNION SELECT a FROM u INTERSECT"
+        " SELECT a FROM v) SELECT a FROM c"
+    )
+    assert_equal(len(st.query.ctes), 1)
+    assert_equal(st.query.ctes[0].body.union_all_idx, 0)
+    assert_equal(len(st.query.subqueries), 2)
+    assert_equal(Int(st.query.subqueries[0].kind), Int(SUBQ_UNION))
+    assert_equal(st.query.subqueries[0].body.union_all_idx, 1)
+    assert_equal(Int(st.query.subqueries[1].kind), Int(SUBQ_INTERSECT))
+    assert_equal(st.query.union_all_idx, -1)
+    assert_equal(st.query.from_tables[0].name, "c")
+    # ORDER BY / LIMIT / OFFSET after the chain's last branch inside a CTE
+    # body are refused by name.
+    assert_equal(
+        _err(
+            "WITH c AS (SELECT a FROM t UNION ALL SELECT a FROM u ORDER BY 1)"
+            " SELECT a FROM c"
+        ),
+        "SQL not supported: ORDER BY after the last branch of a set operation"
+        " in a WITH body. The clause applies to the whole set operation; sort"
+        " or limit the query that reads the CTE instead.",
+    )
+    _refuses(
+        "WITH c AS (SELECT a FROM t EXCEPT SELECT a FROM u LIMIT 1) SELECT a"
+        " FROM c",
+        "SQL not supported: LIMIT after the last branch of a set operation in"
+        " a WITH body.",
+    )
 
 
 def test_intersect_and_except_chain_with_their_kind() raises:
@@ -178,9 +263,18 @@ def test_intersect_all_and_except_all_are_refused_by_name() raises:
         " returns distinct rows, is served.",
     )
     _refuses("SELECT a FROM t EXCEPT ALL SELECT a FROM u", "SQL not supported: EXCEPT ALL.")
-    # Also as a later branch of a chain.
+    # Also as a later branch of a chain, after a UNION ALL or a UNION.
     _refuses(
         "SELECT a FROM t UNION ALL SELECT a FROM u EXCEPT ALL SELECT a FROM v",
+        "SQL not supported: EXCEPT ALL.",
+    )
+    _refuses(
+        "SELECT a FROM t UNION SELECT a FROM u INTERSECT ALL SELECT a FROM v",
+        "SQL not supported: INTERSECT ALL.",
+    )
+    _refuses(
+        "SELECT a FROM t UNION DISTINCT SELECT a FROM u EXCEPT ALL"
+        " SELECT a FROM v",
         "SQL not supported: EXCEPT ALL.",
     )
 

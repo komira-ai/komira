@@ -203,9 +203,9 @@ def test_union_all_branches_must_agree() raises:
         " branch produces 1",
     )
     _err_starts(
-        "SELECT k FROM t UNION ALL SELECT s FROM t",
-        "SQL not supported: UNION ALL column 1 (k): branch 1 gives int64 and"
-        " branch 2 gives string; no common type this engine casts to",
+        "SELECT s FROM t UNION ALL SELECT v FROM t",
+        "SQL not supported: UNION ALL column 1 (s): branch 1 gives string and"
+        " branch 2 gives float64; no common type this engine casts to",
     )
 
 

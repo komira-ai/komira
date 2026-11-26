@@ -20,11 +20,10 @@
 #   COPY_COMPRESSION_UNSUPPORTED CSV or JSON with COMPRESSION lz4, which
 #                                DuckDB does not write either (step `bind`)
 #   COPY_TYPE_UNSUPPORTED        a column the writer has no annotated Parquet
-#                                type for (timestamps, times, durations,
-#                                DATE64, the unsigned and narrow integers,
-#                                binary, nested), or, for CSV and JSON, a
-#                                timestamp, time, duration, DATE64, binary or
-#                                nested column (step `execute`)
+#                                type for (times, durations, intervals,
+#                                DATE64, binary, nested), or, for CSV and
+#                                JSON, a time, duration, interval, DATE64,
+#                                binary or nested column (step `execute`)
 #   COPY_DUPLICATE_COLUMN        CSV or JSON of a result with two columns of
 #                                one name, which DuckDB would have renamed
 #                                (step `execute`)
@@ -37,8 +36,14 @@
 # What a Parquet file is: one row group per 122,880 rows (`DEFAULT_MAX_ROWS_PER_RG`);
 # column names and order are the result's; a nullable column is OPTIONAL and a
 # NOT NULL one REQUIRED; DECIMAL is FIXED_LEN_BYTE_ARRAY(16) with its precision
-# and scale; DATE is INT32 annotated DATE; strings are UTF8. An empty result is
-# a file with the schema and no rows. COMPRESSION is snappy (the default),
+# and scale; DATE is INT32 annotated DATE; strings are UTF8; TINYINT, SMALLINT
+# and the unsigned integers carry DuckDB's INT_8 .. UINT_64 annotations; a
+# timestamp is INT64 with the LogicalType TIMESTAMP of its unit (TIMESTAMP_S
+# as microseconds, as DuckDB writes it) and isAdjustedToUTC only when its field
+# carries a time zone; komira's own timestamps carry none (a TIMESTAMPTZ
+# literal binds to zone-less UTC microseconds), so they are written zone-less
+# (`parquet_writer.record_batch_schema` lists each annotation). An empty result
+# is a file with the schema and no rows. COMPRESSION is snappy (the default),
 # uncompressed, zstd (level 3), gzip (level 6) or lz4_raw, as the parser
 # admits them.
 
@@ -108,8 +113,15 @@ def _writable(at: ArrowType) -> Bool:
     """True for a type the writer gives its full Parquet annotation."""
     return (
         at == ArrowType.BOOL
+        or at == ArrowType.INT8
+        or at == ArrowType.INT16
         or at == ArrowType.INT32
         or at == ArrowType.INT64
+        or at == ArrowType.UINT8
+        or at == ArrowType.UINT16
+        or at == ArrowType.UINT32
+        or at == ArrowType.UINT64
+        or at.is_timestamp()
         or at == ArrowType.FLOAT32
         or at == ArrowType.FLOAT64
         or at == ArrowType.STRING

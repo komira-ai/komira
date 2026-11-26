@@ -1,55 +1,17 @@
 # Changelog
 
 What each release of the Python package `komira` added or changed, newest first. Installing it is
-on [the install page](../docs/install.md).
+on [the install page](https://github.com/komira-ai/komira/blob/main/docs/install.md).
 
-A release's version is `0.1.<n>`, given by the release workflow, so a pull request cannot know the
-version it will ship in. A pull request that changes what the package does, or what it needs, adds
-a line under `## Unreleased` (adding that heading above the newest release if it is not there), and
-the release that ships it moves those lines under its own `## <version>` heading.
-`//python/smoke:install_page_shows_quickstart` reads the newest version heading here: the output the
-install page shows names it.
-
-## Unreleased
-
-- **CSV and JSON files.** `Session.register_csv(name, path, *, delimiter=",", header=True,
-  all_varchar=False)` and `Session.register_json(name, path)` register a CSV file and a
-  newline-delimited JSON file as a table for `Session.sql`, with the column names and types the
-  engine infers when the call is made: the table `read_csv` or `read_json` makes of the same file.
-  A relative path is resolved against the working directory and `~` is expanded. A missing, empty or
-  unreadable file, or a name the session already has, raises `KomiraError` with the engine's message.
-  They need libkomira ABI 1.5.
-- **SQL.** `Session.sql(query)` runs one SQL statement over the session's registered tables and returns
-  a `Result`, read once as a pyarrow `Table` (`to_arrow()`), a `RecordBatchReader` (`to_reader()`) or
-  through the Arrow PyCapsule interface (`__arrow_c_stream__`, so `pyarrow.table(result)` reads it). A
-  syntax error, an unknown table or a refused construct raises `KomiraError` from `sql` itself, with the
-  engine's message. A result still reads after its session is closed. `komira.Result` is a new public name; a requested
-  schema on `__arrow_c_stream__` raises a `KomiraError`.
-- **pandas and polars.** `Result.to_pandas()` and `Result.to_polars()` read the answer as a pandas or
-  polars `DataFrame`, converted through Arrow by pyarrow's `Table.to_pandas()` and `polars.from_arrow`.
-  Neither library is a requirement of the wheel: when one is missing the call raises `ImportError`
-  naming it, and the result stays unread.
-- **Threads.** A `Session` may be used from several threads: its calls run one at a time, a call waiting
-  for the one running on the same session, and `close()` waits for a running call. Two sessions run at
-  once. A call from a signal handler or a finalizer made inside a running call of the same thread raises
-  `KomiraError`. Of two threads reading one `Result`, one reads it and the other gets `KomiraError`. Using
-  one session from two threads at once was not supported.
-- **Ctrl-C.** A query cannot be interrupted while it runs: Ctrl-C during `Session.sql` raises
-  `KeyboardInterrupt` once the engine has finished the query, and the session runs the next query. The
-  answer that query computed is freed; before, it was never freed when the interrupt was raised before
-  pyarrow took it.
-- **pyarrow.** The wheel requires `pyarrow>=25.0.1`, so `pip install komira` installs it; it had no
-  requirement.
-- **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its
-  `Requires-Python` is `>=3.11` (it was `>=3.13`), and its classifiers name the four. The package's
-  tests and the install of each release run on all four.
-- **UDF types.** A function captured for `komira/python` takes and returns `bool`, `int8` to `int64`, `float32`,
-  `float64`, `string`, `binary`, `date32`, `timestamp` (with or without a time zone), `decimal128`, `list` and
-  `struct`, with any number of arguments (it carried only `int32`, `int64` and `float64`). `decimal.Decimal` takes
-  `return_dtype=`; a list item or struct field is not a list, struct, decimal or zoned timestamp; a `timestamp[ns]`
-  argument is refused for a `VALUES` function. A dtype is the `str()` of the pyarrow type, except that the
-  floats are `float32` and `float64` (pyarrow's `float` and `double` are accepted and kept as those). A
-  `TypedDict` return hint with an optional key is refused: a struct's fields are all required.
+A change to the package never adds a line to this file. It adds one file, `python/changelog.d/<slug>.md`
+(the slug is lower-case letters, digits and hyphens), holding one or more bullets: `- **Title.** text`,
+a continuation line indented two spaces, no heading
+([how to write one](https://github.com/komira-ai/komira/blob/main/python/README.md#changelog-entries)).
+A release's version is `0.1.<n>`, given by the release workflow, so a pull request cannot know it: the
+release assembles the entries, and the section `## 0.1.<n>` it ships, before the sections kept below,
+lists the bullets of every file of `python/changelog.d/` in file-name order. So it lists every change
+merged since the newest section kept in this file. A section is kept here by moving those bullets under a
+`## <version>` heading of their own and deleting their files, in one change.
 
 ## 0.1.1512
 

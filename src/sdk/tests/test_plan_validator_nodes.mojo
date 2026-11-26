@@ -349,6 +349,15 @@ def test_partition_by_refusals() raises:
     _raises(p, "order_keys and descending have mismatched lengths")
 
 
+def test_partition_by_with_nulls_first_not_one_per_order_key_is_refused() raises:
+    var p = _pby(_keys("s"), _keys("a"), 1, "")
+    p._partition_by.value()[].nulls_first.append(True)
+    _raises(p, "order_keys and nulls_first have mismatched lengths")
+    var q = _pby(_keys("s"), _keys("a"), 1, "")
+    q._partition_by.value()[].nulls_first.clear()
+    _raises(q, "order_keys and nulls_first have mismatched lengths")
+
+
 def test_partition_topn_refusals() raises:
     validate_plan(LogicalPlan.partition_topn(_keys("s"), _keys("a"), _desc(1), 2, _scan()))
     _raises(

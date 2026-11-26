@@ -14,6 +14,8 @@ holds is what happens once the call returns:
 - with a handler that does not raise, sql returns the result, which reads in
   full, and the handler has run once;
 - with SIGINT ignored, sql returns the result as if no signal came;
+- a `progress` callback raises KomiraError naming ABI 1.6, which a run handle
+  needs, makes no stream and is never called, and the session answers after;
 - the session closes and the process exits 0 after main returns.
 
     test_sql_interrupt.py --lib-dir <dir> --runtime-dir <dir>
@@ -147,6 +149,20 @@ def main(args):
         assert counts.since(before) == ROWS_READ, counts.since(before)
 
         signal.signal(signal.SIGINT, signal.default_int_handler)
+        check_answers(s, counts)
+
+        # A 1.3 library has no run handle, so progress cannot be read.
+        assert not native.has("komira_sql_stream_run")
+        calls = []
+        before = counts()
+        try:
+            s.sql("rows", progress=lambda done, total: calls.append((done, total)))
+        except KomiraError as e:
+            want = "komira_run_new needs libkomira ABI version 1.6; the library at {} is 1.3".format(native.path)
+            assert str(e) == want and e.status is None, repr(e)
+        else:
+            raise AssertionError("progress on a 1.3 library raised nothing")
+        assert calls == [] and counts.since(before) == zero(), (calls, counts.since(before))
         check_answers(s, counts)
 
     assert s.closed
