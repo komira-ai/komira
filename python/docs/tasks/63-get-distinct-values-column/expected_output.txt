@@ -1,0 +1,6 @@
+[{'region': 'east'}, {'region': 'north'}, {'region': 'west'}]
+[{'regions': 3}]
+[{'region': 'east'}, {'region': 'north'}, {'region': 'west'}]
+[{'regions': 3}]
+[{'region': 'east'}, {'region': 'north'}, {'region': 'west'}]
+[{'regions': 3}]

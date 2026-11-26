@@ -83,5 +83,5 @@ Output:
 
 - How do I join two tables on a key? (rank 10, works; no page yet)
 - [How do I count rows per group?](../35-count-rows-per-group/page.md) (rank 35, works)
-- How do I find rows in A that are not in B (anti-join)? (rank 69, works; no page yet)
+- [How do I find rows in A that are not in B (anti-join)?](../69-anti-join-rows-in-a-not-in-b/page.md) (rank 69, works)
 - How do I join on multiple columns? (rank 73, works; no page yet)
