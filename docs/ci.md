@@ -1539,9 +1539,11 @@ different files and merge in either order. The ways weighed, with what each cost
 | one committed file per top-level package | a conflict still, for two in one package (`src/` holds most rows) | as before | as before |
 | the lists made in the check from the graph, none committed | no file to conflict | a query of the whole graph before the build (the guard asks it already) | nothing about a list: the list is the graph's by construction, and `./buck2 build //ci:pr` with no committed list is no longer one target a person or a step can name |
 
-A pull request opened before this layout conflicts once, on `main`'s deletion
-of `ci/targets.bzl` and `ci/targets/shard_<n>.bzl`. Merge `main`, take the
-deletion (`git rm ci/targets.bzl ci/targets/shard_*.bzl`), and write the roots
+A pull request opened before this layout conflicts once: each shard file it
+edited (`ci/targets/shard_<n>.bzl`) is a modify/delete conflict with `main`,
+which deleted them all (the files it did not edit are deleted with no conflict).
+Merge `main`, take the deletion of whatever is left
+(`git rm -qf --ignore-unmatch ci/targets.bzl 'ci/targets/shard_*.bzl'`), and write the roots
 from the graph (the command in the README), or add the one file the guard names
 for each root the pull request adds. From then on the pull request merges with
 the others with no second round.
