@@ -126,15 +126,17 @@ Fixed before this design, and not reopened here:
 
 ### Toolchain
 
-- **EXISTS** One Node pin: 24.21.0, linux-x64 only (`third_party/node/pins.bzl`).
+- **EXISTS** Node 24.21.0 pinned twice (`third_party/node/pins.bzl`): linux-x64, which every
+  node action runs, and darwin-arm64 (`NODE_DARWIN_ARM64`), which `//third_party/node:node_runtime`
+  stages beside a macOS test and no action runs.
   - The addon is compiled by `c_shared_lib` with
     `zig cc -target x86_64-linux-gnu.2.34 -shared -Wl,-z,undefs`, so the `napi_*` symbols resolve
     against `node` at load.
   - `node_dist` keeps only `bin/node`, `include/node` and `LICENSE` from the archive. npm, npx and
     corepack are left out, so the repository has no npm CLI.
   - The "Limits" section of [tools/build/node/README.md](../../tools/build/node/README.md) lists
-    what macOS needs: a `darwin-arm64` pin, the macOS execution platform, and
-    `-undefined dynamic_lookup`. None of it exists yet. linux-arm64 has neither a
+    what else macOS needs for the addon: the macOS execution platform for node actions and
+    `-undefined dynamic_lookup`. Neither exists yet. linux-arm64 has neither a
     Node pin nor a registered build platform (`tools/build/platforms/table.bzl`,
     `komira-limit:linux-arm64-unregistered`).
 - **EXISTS** The Node rules also hold `npm_modules` (an offline `npm ci --ignore-scripts` from a

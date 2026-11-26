@@ -1,9 +1,9 @@
 load("@komira//python:dependencies.bzl", "DUCKDB_WHEEL", "PROTOBUF_MACOS", "PROTOBUF_REQUIREMENT", "PYARROW_MACOS", "PYARROW_WHEELS")
 load("@komira//python:pythons.bzl", "PYTHONS")
-load("@komira//third_party/python:pins.bzl", "PROTOBUF_EDGES", "WHEELS")
+load("@komira//third_party/python:pins.bzl", "PROTOBUF_EDGES", "PROTOBUF_EDGES_MACOS", "WHEELS")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/node:defs.bzl", "c_shared_lib")
-load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 load("@komira//tools/build/python:defs.bzl", "py_test", "python_binding_test", "python_wheel")
 
 # libkomira with the Mojo runtime and its native owners in lib/ beside it: the
@@ -16,10 +16,15 @@ PARQUET = "komira//src/so:tests/fixtures/two_columns.parquet"
 # pinned interpreter: `<name>` on CPython 3.13 (the rules' default interpreter,
 # CPython 3.13 on macOS too), `<name>_py311`, `<name>_py312` and
 # `<name>_py314` on the others. `_ON[suffix]` is the `python` argument of a
-# minor's tests: none for 3.13.
+# minor's tests: none for 3.13. The other minors' interpreters are linux x86_64
+# builds, so the macros configure those tests (and the wheels they install) for
+# linux x86_64 only (tools/build/python/defs.bzl): a macOS build skips them.
 _ON = {p["suffix"]: ({"python": p["python"]} if p["suffix"] else {}) for p in PYTHONS}
 
-# Stand-ins for libkomira (fake_libkomira.c). The loader must refuse a library
+# Stand-ins for libkomira (fake_libkomira.c), each built for the target
+# platform's operating system (`target_os`): an ELF library on linux, a Mach-O
+# one on macOS, where python_binding_test stages the `libkomira.so` names below
+# as `libkomira.dylib`, the name the loader opens there. The loader must refuse a library
 # of ABI major 2, of major 0 (version 0.999), one reporting -1, one without
 # komira_abi_version and a 1.1 one without komira_register_parquet; it must
 # load a 1.0 one (without the calls 1.1 and 1.2 added), a 1.3 one and a 1.7 one
@@ -29,6 +34,7 @@ _ON = {p["suffix"]: ({"python": p["python"]} if p["suffix"] else {}) for p in PY
 # (version 1.2) records every credential call in its fake store.
 c_shared_lib(
     name = "fake_v2",
+    target_os = True,
     srcs = ["fake_libkomira.c"],
     copts = ["-DFAKE_VERSION=2000"],
     out = "libkomira_fake_v2.so",
@@ -36,6 +42,7 @@ c_shared_lib(
 
 c_shared_lib(
     name = "fake_v0",
+    target_os = True,
     srcs = ["fake_libkomira.c"],
     copts = ["-DFAKE_VERSION=999"],
     out = "libkomira_fake_v0.so",
@@ -43,6 +50,7 @@ c_shared_lib(
 
 c_shared_lib(
     name = "fake_negative",
+    target_os = True,
     srcs = ["fake_libkomira.c"],
     copts = ["-DFAKE_VERSION=-1"],
     out = "libkomira_fake_negative.so",
@@ -50,6 +58,7 @@ c_shared_lib(
 
 c_shared_lib(
     name = "fake_no_abi_version",
+    target_os = True,
     srcs = ["fake_libkomira.c"],
     copts = ["-DFAKE_OMIT_ABI_VERSION"],
     out = "libkomira_fake_no_abi_version.so",
@@ -57,6 +66,7 @@ c_shared_lib(
 
 c_shared_lib(
     name = "fake_no_register",
+    target_os = True,
     srcs = ["fake_libkomira.c"],
     copts = ["-DFAKE_OMIT_REGISTER"],
     out = "libkomira_fake_no_register.so",
@@ -64,6 +74,7 @@ c_shared_lib(
 
 c_shared_lib(
     name = "fake_v1_0",
+    target_os = True,
     srcs = ["fake_libkomira.c"],
     copts = [
         "-DFAKE_VERSION=1000",
@@ -74,6 +85,7 @@ c_shared_lib(
 
 c_shared_lib(
     name = "fake_v1_3",
+    target_os = True,
     srcs = ["fake_libkomira.c"],
     copts = ["-DFAKE_VERSION=1003"],
     out = "libkomira_fake_v1_3.so",
@@ -81,6 +93,7 @@ c_shared_lib(
 
 c_shared_lib(
     name = "fake_v1_7",
+    target_os = True,
     srcs = ["fake_libkomira.c"],
     copts = ["-DFAKE_VERSION=1007"],
     out = "libkomira_fake_v1_7.so",
@@ -88,12 +101,14 @@ c_shared_lib(
 
 c_shared_lib(
     name = "fake_modes",
+    target_os = True,
     srcs = ["fake_libkomira.c"],
     out = "libkomira_fake_modes.so",
 )
 
 c_shared_lib(
     name = "fake_store",
+    target_os = True,
     srcs = ["fake_libkomira.c"],
     copts = ["-DFAKE_VERSION=1002"],
     out = "libkomira_fake_store.so",
@@ -134,6 +149,8 @@ _FAKE_RUNTIME = [
 # file), a loaded copy that cannot be read back, and nothing checked off
 # Linux; and the build id reader on the stand-ins and on hand-written ELF
 # headers (no note, other notes, a cut program header table, not ELF64).
+# The check exists on Linux only and its stand-ins are ELF libraries, so the
+# test is built for Linux alone.
 [python_binding_test(
     name = "runtime_test" + p["suffix"],
     src = "test_runtime.py",
@@ -142,6 +159,7 @@ _FAKE_RUNTIME = [
         for case, where, _ in _FAKE_RUNTIME
     },
     deps = ["//python:komira"],
+    target_compatible_with = ["prelude//os/constraints:linux"],  # komira-limit:python-runtime-check-linux
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
@@ -205,6 +223,9 @@ _FAKE_RUNTIME = [
 # or a missing variant file with LibraryLoadError. The choices are the table
 # of fixtures/isa_variants, over the manifest the build writes from the
 # linux-x86_64 row and the manifests of rows not shipped yet.
+# Built for linux x86_64 only: the ISA levels are x86-64, and a native
+# directory holds the file `VARIANTS` beside the directory `variants/`, which a
+# case-insensitive file system (macOS) cannot hold side by side.
 _ISA_FIXTURES = [
     "README.md",
     "VARIANTS_aarch64",
@@ -235,6 +256,7 @@ _ISA_FIXTURES = [
         "isa_variants/VARIANTS_shipped": "komira//tools/build/package/libkomira:libkomira_variants_manifest",
     } | {"isa_variants/" + f: "fixtures/isa_variants/" + f for f in _ISA_FIXTURES},
     deps = ["//python:komira"],
+    target_compatible_with = LINUX_X86_64,  # komira-limit:isa-variants-linux-x86-64
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
@@ -418,6 +440,7 @@ _PYARROW = {
 # held, and of two threads reading one Result one reads it.
 c_shared_lib(
     name = "fake_threads",
+    target_os = True,
     srcs = ["fake_threads.c"],
     out = "libkomira_fake_threads.so",
 )
@@ -443,6 +466,7 @@ c_shared_lib(
 # checked first; an abandoned call makes no call; the log lines word for word.
 c_shared_lib(
     name = "fake_run",
+    target_os = True,
     srcs = ["fake_threads.c"],
     copts = ["-DFAKE_RUN"],
     out = "libkomira_fake_run.so",
@@ -584,7 +608,11 @@ _FRAMES = {
 # `abi3`, one file for every minor.
 # The 7.36.2 file is also the one the wheel's install tests (python/BUCK)
 # install beside komira's wheel (`PROTOBUF_WHEEL`, python/dependencies.bzl),
-# and `PROTOBUF_MACOS` the one the macOS wheel's install test installs.
+# and `PROTOBUF_MACOS` the one the macOS wheel's install test installs. The
+# 3.13 edges have a macOS file as well (`PROTOBUF_EDGES_MACOS`: `universal2`),
+# which `:protobuf-<version>` installs with CPython 3.13 on macOS, as
+# third_party/python's wheels do; the other minors' interpreters are linux
+# builds, so their targets are linux only.
 _PROTOBUF_UPPER = [w for w in WHEELS if w["name"] == "protobuf"]
 
 [pinned_file(
@@ -594,6 +622,17 @@ _PROTOBUF_UPPER = [w for w in WHEELS if w["name"] == "protobuf"]
     size_bytes = w["size"],
     visibility = ["komira//python:"] if w in _PROTOBUF_UPPER else [],
 ) for w in PROTOBUF_EDGES + _PROTOBUF_UPPER]
+
+_EDGE_MACOS_FILE = {v: m["url"].rsplit("/", 1)[1] for v, m in PROTOBUF_EDGES_MACOS.items()}
+
+# Read only by the 3.13 edge targets below, configured for macOS.
+[pinned_file(
+    name = _EDGE_MACOS_FILE[v],
+    url = m["url"],
+    sha256 = m["sha256"],
+    size_bytes = m["size"],
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
+) for v, m in PROTOBUF_EDGES_MACOS.items()]
 
 # Read only by the macOS wheel's install test, which runs from
 # the macOS jobs of pypi.yml alone, never in a pull request.
@@ -606,13 +645,30 @@ pinned_file(
     visibility = ["komira//python:"],
 )
 
+# CPython 3.13: the edges' macOS file and `:cpython_macos` for a macOS target
+# platform, the linux file and `:cpython` otherwise.
+[python_wheel(
+    name = "protobuf-" + w["version"],
+    distribution = w["name"],
+    version = w["version"],
+    wheel = select({
+        "prelude//os/constraints:macos": ":" + _EDGE_MACOS_FILE[w["version"]],
+        "DEFAULT": ":" + w["file"],
+    }),
+    python = select({
+        "prelude//os/constraints:macos": "komira//third_party/python:cpython_macos",
+        "DEFAULT": "komira//third_party/python:cpython",
+    }),
+) for w in PROTOBUF_EDGES]
+
+# The other minors: the linux file on their linux interpreter.
 [python_wheel(
     name = "protobuf-" + w["version"] + p["suffix"],
     distribution = w["name"],
     version = w["version"],
     wheel = ":" + w["file"],
     python = p["python"],
-) for p in PYTHONS for w in PROTOBUF_EDGES + (_PROTOBUF_UPPER if p["suffix"] else [])]
+) for p in PYTHONS if p["suffix"] for w in PROTOBUF_EDGES + _PROTOBUF_UPPER]
 
 # {suffix: {version: the target of that protobuf runtime for that minor}}
 _PROTOBUF = {
@@ -946,7 +1002,9 @@ python_binding_test(
 
 # The komira/python UDF runtime (src/udf_python) behind a ctypes host of its C
 # ABI (udf_host.py), on the two minors that have a pinned pyarrow: CPython 3.13
-# and 3.14. The library is staged as `libkomira_udf_python.so` in --lib-dir.
+# and 3.14. The library is staged as `libkomira_udf_python.so` in --lib-dir
+# (`.dylib` on a macOS target, which src/udf_python is not ported to yet: its
+# C is Linux code, so these tests do not pass there).
 _UDF_PYARROW = {
     "": "komira//third_party/python:pyarrow",
     "_py314": "komira//third_party/python:pyarrow-cp314",

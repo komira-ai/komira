@@ -108,8 +108,10 @@ def _shared_lib_impl(ctx):
     if force != None:
         if darwin:
             # ld has no bracketed whole-archive: -force_load names one
-            # archive, so each argument of the C libraries' link line is one.
-            link_extra = cmd_args(force, format = "-Wl,-force_load,{}")
+            # archive, so each path on the C libraries' link line gets one.
+            # A flag on that line (-lc++ from the C++ runtime's exported
+            # linker flags) starts with a dash and passes through unchanged.
+            link_extra = cmd_args(force, replace_regex = ("^([^-].*)$", "-Wl,-force_load,$1"))
         else:
             link_extra = cmd_args("-Wl,--whole-archive", force, "-Wl,--no-whole-archive")
     if ctx.attrs.exports_exact:
@@ -285,12 +287,15 @@ def _shared_lib_impl(ctx):
         # macOS arm64: the gated .dylib and, in lib/ (its run path,
         # `@loader_path/lib`), the three Mojo runtime libraries of the darwin
         # row. No owner libraries (refused above) and no C++ runtime: libc++
-        # and libSystem are the operating system's. The same directory a
-        # language package copies, as on Linux.
+        # and libSystem are the operating system's, so there is nothing to
+        # leave out of `[dist]` and `[runnable]` is the same directory. The
+        # directory a language package copies, as on Linux.
         dist = {so_file: public}
         for name in row("darwin-arm64")["runtime_libs"]:
             dist["lib/" + name] = tc.runtime.project(name)
-        sub_targets["dist"] = [DefaultInfo(default_output = ctx.actions.copied_dir(out_name + ".dist", dist))]
+        dist_dir = ctx.actions.copied_dir(out_name + ".dist", dist)
+        sub_targets["dist"] = [DefaultInfo(default_output = dist_dir)]
+        sub_targets["runnable"] = [DefaultInfo(default_output = dist_dir)]
     return [DefaultInfo(
         default_output = public,
         sub_targets = sub_targets | coverage_shared_lib(ctx, tc, _build_executable, srcs, main, _dep_closure(ctx), _c_link(ctx), link_extra, so_file),

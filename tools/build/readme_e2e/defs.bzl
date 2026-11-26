@@ -5,6 +5,9 @@
 `readme_e2e` installs one package from a staged set into a fresh project and runs
 its README examples against the installed copy, as one build action.
 `readme_e2e_scenario` is one scenario of the tool's own tests.
+
+`readme_e2e`, `readme_e2e_all` and `readme_e2e_complete` build only for linux x86_64
+(limit `readme-e2e-linux-x86-64`); for another target platform they are skipped as incompatible.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "DocTreeInfo", "declares_docs")
@@ -139,7 +142,13 @@ _readme_e2e = rule(
 )
 
 def readme_e2e(**kwargs):
-    _readme_e2e(exec_compatible_with = LINUX_X86_64, **kwargs)
+    # Linux-only by design (limit `readme-e2e-linux-x86-64`): a target whose dependency is
+    # incompatible is an error, not a skip, so the aggregate and the guard below mark themselves.
+    _readme_e2e(
+        exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:readme-e2e-linux-x86-64
+        **kwargs
+    )
 
 readme_e2e = declares_docs(readme_e2e)
 
@@ -196,7 +205,11 @@ _readme_e2e_all = rule(
 )
 
 def readme_e2e_all(**kwargs):
-    _readme_e2e_all(exec_compatible_with = LINUX_X86_64, **kwargs)
+    _readme_e2e_all(
+        exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:readme-e2e-linux-x86-64
+        **kwargs
+    )
 
 readme_e2e_all = declares_docs(readme_e2e_all)
 
@@ -226,7 +239,11 @@ _readme_e2e_complete = rule(
 )
 
 def readme_e2e_complete(**kwargs):
-    _readme_e2e_complete(exec_compatible_with = LINUX_X86_64, **kwargs)
+    _readme_e2e_complete(
+        exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:readme-e2e-linux-x86-64
+        **kwargs
+    )
 
 readme_e2e_complete = declares_docs(readme_e2e_complete)
 

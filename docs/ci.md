@@ -462,7 +462,10 @@ tests, which no pull request builds. The rest of this section is about `release-
   `tools/build/ci/rules.bzl`, so the pull-request selector never picks it, and each has
   `target_compatible_with = DARWIN_ARM64` (limit `pypi-wheel-macos-arm64` in
   `tools/build/platforms/limits.tsv`), so it builds only with `--target-platforms
-  komira//tools/build/platforms:darwin-arm64`, which only the macOS jobs of `pypi.yml` pass.
+  komira//tools/build/platforms:darwin-arm64`, which only the macOS jobs of `pypi.yml` pass. The Linux
+  wheel (`//python:komira_wheel`), the wheels derived from it and every test that installs or reads one
+  are the other half: compatible with linux-x86_64 only (limit `manylinux-wheel-linux-x86-64`), so a
+  darwin-arm64 build skips them.
 - **Analysed in every pull request.** What fails before anything is built
   (a target of the set's closure incompatible with darwin-arm64, a toolchain with no
   execution platform, a rule that fails at analysis) is found in the pull request that

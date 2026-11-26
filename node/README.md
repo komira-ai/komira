@@ -208,6 +208,11 @@ and the CPU-level fixtures and table of choices of the Python selector
 ([python/tests/fixtures/isa_variants](../python/tests/fixtures/isa_variants/README.md)). Every test
 that loads plants its host, so no real `/proc/cpuinfo` is read.
 
+Every node action runs the pinned linux-x64 node, so the tests that load the real library
+(`:load_test`, `:session_test`, `:package_test`) take it through `:libkomira_linux_x86_64`, an alias
+of `//src/so:libkomira` configured for linux-x86_64 whatever the platform of the target. On a macOS
+target platform they still stage the Linux library, which the Linux-executed node loads.
+
 | file | what it proves |
 |---|---|
 | [`exports.test.ts`](tests/exports.test.ts) | the public names exactly, in the sources, in `dist/`, by the package's name through its `exports` map, and from CommonJS's `require`; importing opens no addon; `dist/` holds a `.js` and a `.d.ts` per source and imports `.js` siblings; `version` is the manifest's; the manifest's type, engines, peer, exports, files, optional platform packages at the package's version, and no bin, scripts or dependency |

@@ -4,6 +4,9 @@
 `node_dist` unpacks a sha256-pinned Node.js release archive (linux-x64) into
 a directory holding `bin/node`, `include/node` (the Node-API headers) and the
 licence, and fails unless that `node` runs and reports the pinned version.
+With `foreign` (an archive for another platform, which no action here can run)
+it does not run `node`: it fails unless `bin/node` is an executable of that
+format and `include/node/node_version.h` states the pinned version.
 `npm_package` unpacks one sha256-pinned npm tarball after checking its
 registry integrity (`sha512-<base64>`) and the top-level `name` and `version`
 of its `package.json`, which the pinned `node` parses. `node_test` runs one script with the pinned `node` as a build
@@ -12,7 +15,9 @@ is running the test. `esbuild_bundle` bundles an entry module, its sibling
 sources and npm packages into one file with the pinned esbuild.
 `c_shared_lib` builds C sources into a shared library with the pinned zig:
 symbols it does not define (a Node-API addon's `napi_*`) stay undefined, and
-the program that loads it resolves them.
+the program that loads it resolves them. It is an ELF library for linux x86_64
+by default, and with `target_os = True` a Mach-O one when the target platform
+is macOS.
 
 `node` runs with `LD_LIBRARY_PATH` naming the dist's `native_libs` (the C++
 runtime it links, from the pinned conda-forge packages) and an environment of
@@ -40,7 +45,8 @@ NodeDistInfo = provider(
     fields = {
         "root": provider_field(Artifact),
         "version": provider_field(str),
-        # A directory whose `lib/` holds libstdc++.so.6 and libgcc_s.so.1.
+        # A directory whose `lib/` holds libstdc++.so.6 and libgcc_s.so.1; an
+        # empty directory for a dist of another platform (`foreign`).
         "native_libs": provider_field(Artifact),
     },
 )
@@ -73,27 +79,36 @@ def _closure(where, deps):
 # `node_act dist` keeps bin/node, include/node and LICENSE of the archive's top
 # directory (npm, npx, corepack and their lib/node_modules are left out: no
 # action installs with them), then runs that node, which must print v<version>.
+# With `foreign` it runs nothing: it reads bin/node's executable header and the
+# version include/node/node_version.h states.
 
 def _node_dist_impl(ctx):
+    where = str(ctx.label.raw_target())
+    foreign = ctx.attrs.foreign
+    if foreign and ctx.attrs.native_libs:
+        fail("{}: native_libs is for the node that runs here; a foreign dist is not run and has none".format(where))
+    if not foreign and not ctx.attrs.native_libs:
+        fail("{}: native_libs is empty: name the directory whose lib/ holds the libraries node links, or set foreign".format(where))
     out = ctx.actions.declare_output("node", dir = True)
-    libs = _out(ctx.attrs.native_libs)
-    ctx.actions.run(
-        cmd_args(
-            ctx.attrs._node_act[RunInfo],
-            "dist",
-            "--archive",
-            _out(ctx.attrs.archive),
-            "--out",
-            out.as_output(),
-            "--top",
-            ctx.attrs.top,
-            "--version",
-            ctx.attrs.version,
-            "--libs",
-            libs,
-        ),
-        category = "node_dist",
+    cmd = cmd_args(
+        ctx.attrs._node_act[RunInfo],
+        "dist",
+        "--archive",
+        _out(ctx.attrs.archive),
+        "--out",
+        out.as_output(),
+        "--top",
+        ctx.attrs.top,
+        "--version",
+        ctx.attrs.version,
     )
+    if foreign:
+        cmd.add("--foreign", foreign)
+        libs = ctx.actions.copied_dir("native_libs", {})
+    else:
+        libs = _out(ctx.attrs.native_libs)
+        cmd.add("--libs", libs)
+    ctx.actions.run(cmd, category = "node_dist")
     return [
         DefaultInfo(
             default_output = out,
@@ -104,12 +119,16 @@ def _node_dist_impl(ctx):
 
 _node_dist = rule(
     impl = _node_dist_impl,
-    doc = "A Node.js release archive (`.tar.gz`, linux-x64) reduced to `bin/node`, `include/node` and `LICENSE`; fails unless that `node` runs and prints `v<version>`. The sub-target `[include]` is the Node-API header directory.",
+    doc = "A Node.js release archive (`.tar.gz`, linux-x64) reduced to `bin/node`, `include/node` and `LICENSE`; fails unless that `node` runs and prints `v<version>`. With `foreign = \"macho-arm64\"` (a darwin-arm64 archive, which no action here runs) it takes no `native_libs`, runs nothing, and fails unless `bin/node` is a Mach-O 64-bit arm64 executable and `include/node/node_version.h` states `version`. The sub-target `[include]` is the Node-API header directory.",
     attrs = {
         # A pinned_file holding the `.tar.gz`.
         "archive": attrs.dep(),
-        # A directory whose lib/ holds the libraries node links beyond glibc.
-        "native_libs": attrs.dep(),
+        # The executable format of an archive built for another platform
+        # (`macho-arm64`); the dist is checked, not run.
+        "foreign": attrs.option(attrs.enum(["macho-arm64"]), default = None),
+        # A directory whose lib/ holds the libraries node links beyond glibc;
+        # required unless `foreign` is set.
+        "native_libs": attrs.option(attrs.dep(), default = None),
         # The archive's single top directory.
         "top": attrs.string(),
         "version": attrs.string(),
@@ -383,6 +402,11 @@ def _c_shared_lib_impl(ctx):
     args.extend(ctx.attrs.copts)
     for s in ctx.attrs.srcs:
         args.append(staged.project(s.short_path))
+
+    # `-z undefs` is an ELF linker flag: a Mach-O library (a triple of the
+    # `macos` OS, `aarch64-macos.11.0`) is linked without it, and a symbol it
+    # does not define and libSystem does not either is a link error.
+    undefs = [] if ctx.attrs.zig_triple.split(".")[0].endswith("-macos") else ["-Wl,-z,undefs"]
     # zig_launch (no shell) gives zig a scratch directory for its caches and
     # HOME, and the busybox applets as PATH.
     ctx.actions.run(
@@ -403,7 +427,7 @@ def _c_shared_lib_impl(ctx):
             "-fvisibility=hidden",
             "-Wall",
             "-Werror",
-            "-Wl,-z,undefs",
+            undefs,
             "-o",
             out.as_output(),
             args,
@@ -414,7 +438,7 @@ def _c_shared_lib_impl(ctx):
 
 _c_shared_lib = rule(
     impl = _c_shared_lib_impl,
-    doc = "C `srcs` compiled and linked by the pinned zig (`zig cc -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror`) for `zig_triple` into one shared library (`out`, default `lib<name>.so`). Symbols it does not define stay undefined (`-z undefs`) for the loading program to resolve; only symbols marked with default visibility are exported. `headers` are staged with the sources (`-I` their directory); each of `include_dirs` (a directory output) is an `-I`.",
+    doc = "C `srcs` compiled and linked by the pinned zig (`zig cc -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror`) for `zig_triple` into one shared library (`out`, default `lib<name>.so`). For an ELF triple, symbols it does not define stay undefined (`-z undefs`) for the loading program to resolve; for a macOS triple (`target_os`) the link has no such flag and leaves none undefined. Only symbols marked with default visibility are exported. `headers` are staged with the sources (`-I` their directory); each of `include_dirs` (a directory output) is an `-I`.",
     attrs = {
         "copts": attrs.list(attrs.string(), default = []),
         "headers": attrs.list(attrs.source(), default = []),
@@ -449,10 +473,21 @@ def _bundle_macro(**kwargs):
     _esbuild_bundle(**_linux(kwargs))
 
 def _shared_macro(**kwargs):
-    # The linux x86_64 row's triple: the glibc floor every link of that
-    # platform targets.
+    # By default the linux x86_64 row's triple: the glibc floor every link of
+    # that platform targets, in every configuration (a linux `node` loads the
+    # library whatever the target platform). With `target_os = True` the triple
+    # is that of the target platform's OS instead: the macOS row's for a
+    # darwin-arm64 target, so the library is a Mach-O file there. The action
+    # still runs on linux; zig links for macOS from it.
+    target_os = kwargs.pop("target_os", False)
     if "zig_triple" not in kwargs:
-        kwargs["zig_triple"] = row("linux-x86_64")["zig_triple"]
+        if target_os:
+            kwargs["zig_triple"] = select({
+                "prelude//os/constraints:macos": row("darwin-arm64")["zig_triple"],
+                "DEFAULT": row("linux-x86_64")["zig_triple"],
+            })
+        else:
+            kwargs["zig_triple"] = row("linux-x86_64")["zig_triple"]
     _c_shared_lib(**_linux(kwargs))
 
 def _addon_macro(**kwargs):

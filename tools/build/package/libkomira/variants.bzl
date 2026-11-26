@@ -17,7 +17,9 @@ the variants and the CPU features each needs are stated. The owners are the file
 `native_owners` and everything they need, compiled once at the floor CPU (the C toolchain's), and
 the runtime libraries are the toolchain's. The host's C++ runtime (libstdc++.so.6, libgcc_s.so.1)
 is not in it: a host provides it as it provides glibc. `omit` leaves the named paths out: a
-negative fixture of the check below, never a shipped directory.
+negative fixture of the check below, never a shipped directory. Linux x86_64 only, like
+the variants it links: another target platform skips it and the check (`libkomira_variants_manifest`
+is unmarked).
 
     libkomira_variants_load(name, dir, driver, variant, expect_failure = None)
 
@@ -135,10 +137,17 @@ _libkomira_variants_load = rule(
 )
 
 def _libkomira_variants_macro(**kwargs):
-    _libkomira_variants(**kwargs)
+    _libkomira_variants(
+        target_compatible_with = LINUX_X86_64,  # komira-limit:isa-variants-linux-x86-64
+        **kwargs
+    )
 
 def _libkomira_variants_load_macro(**kwargs):
-    _libkomira_variants_load(exec_compatible_with = LINUX_X86_64, **kwargs)
+    _libkomira_variants_load(
+        exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:isa-variants-linux-x86-64
+        **kwargs
+    )
 
 libkomira_variants = declares_docs(_libkomira_variants_macro)
 libkomira_variants_load = declares_docs(_libkomira_variants_load_macro)

@@ -40,6 +40,9 @@ the other, or a metapackage argument changed in one, is red.
 
 Nothing here runs buck2: the packages are dependencies, and the metapackage
 and the manifest are actions of the farm.
+
+The set is the linux-64 release (osx-arm64 packages come from `mopm stage`,
+docs/ci.md): another target platform skips it.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
@@ -201,5 +204,6 @@ def release_set(name, packages, **kwargs):
         run_id = run_id,
         attempt = attempt,
         exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:release-set-linux-64
         **kwargs
     )

@@ -34,7 +34,8 @@ RECORD's files deleted), and the script is given `--removed <path>` for each
 file the replaced release had that the new one lacks. Building the target is
 running the test. It runs on `exec_compatible_with`, Linux x86_64 unless given
 (python/BUCK passes the macOS arm64 platform for the macOS wheel's test, with
-the interpreter built for it).
+the interpreter built for it), and on Linux x86_64 it is compatible with that
+platform only, so a darwin-arm64 build skips it unless the call names its own.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -135,6 +136,10 @@ def _picked_files_macro(**kwargs):
     _picked_files(**kwargs)
 
 def _wheel_install_test_macro(exec_compatible_with = LINUX_X86_64, **kwargs):
+    if exec_compatible_with == LINUX_X86_64:
+        # The wheels it installs are Linux wheels, into the Linux interpreter:
+        # another target platform skips the test, as it skips the wheels.
+        kwargs.setdefault("target_compatible_with", LINUX_X86_64)  # komira-limit:manylinux-wheel-linux-x86-64
     _wheel_install_test(exec_compatible_with = exec_compatible_with, **kwargs)
 
 def _python_versions_macro(**kwargs):

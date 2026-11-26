@@ -139,6 +139,18 @@ worker, and a build for linux runs on linux as before:
   directory; macOS finds a library of the Mojo runtime through the first. A
   library file is `<out_name>.dylib` there, so a script picks the extension by
   `sys.platform` (`examples/python_binding/hello_test.py`).
+- A `python_binding_test`'s `data` destination named `*.so` is staged as `*.dylib`
+  for a macOS target, so a BUCK file names a stand-in library `libkomira.so`
+  and a macOS process finds `libkomira.dylib`, the name `komira._native` opens
+  there. A stand-in is a `c_shared_lib` with `target_os = True`, a Mach-O
+  library on macOS ([node](../node/README.md)).
+- A `python_wheel`, `py_test` or `python_binding_test` whose `python` is a plain
+  label names one pinned interpreter, and every one but `:cpython_macos` is a
+  linux x86_64 build (`:cpython310` to `:cpython314t`, and `:cpython`, the
+  Linux 3.13; any other plain label too): the macro configures
+  the target for linux x86_64 only (limit `python-linux-interpreters`), so a
+  macOS build skips it as incompatible. A `select` or no `python` is not
+  marked. The farm's macOS tests run CPython 3.13 alone.
 - The macOS CPython loads only the operating system's libraries, so
   `:cpython_macos` has no `native_libs` and nothing to `preload`.
 

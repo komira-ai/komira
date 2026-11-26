@@ -379,7 +379,10 @@ Adding a minor is a line in `pythons.bzl` and its interpreter's pin in
 minor. On macOS, `actions/setup-python` has no build of the newer patch
 releases of 3.11 and 3.12 (they are released as source alone), so the macOS
 jobs install 3.11.9 and 3.12.10. The farm's macOS tests run CPython 3.13
-alone.
+alone: the interpreters of the other minors are linux x86_64 builds, so the
+tests and wheels that name one (`_py311`, `_py312`, `_py314`) are configured for
+linux x86_64 only (limit `python-linux-interpreters`, set by the macros of
+`tools/build/python`) and a macOS build skips them.
 
 How the loader behaves:
 
@@ -461,7 +464,9 @@ How the loader behaves:
   `credential_seal` exist only on `_native.Native`. They have no public API and no stability
   promise.
 
-The tests below run on Linux x86_64 as build actions, with
+The tests below run on Linux x86_64 as build actions (all but `runtime_test` on
+the farm's macOS workers too, on CPython 3.13, where the
+stand-in libraries are Mach-O `libkomira.dylib` files), with
 `./buck2 build //python/tests:load_test` and the same for
 `//python/tests:session_test`, `//python/tests:minor0_test`,
 `//python/tests:minor3_test`, `//python/tests:two_call_test`,
@@ -493,7 +498,7 @@ The tests below run on Linux x86_64 as build actions, with
 | `credentials_test` | the credential objects, and what sealing each sends the library, on a stand-in's fake store that records every credential call |
 | `iceberg_test` | the Iceberg catalog, table and SigV4 values, with no library: each argument's checks and refusals with their full messages, which credential fits a catalog with and without SigV4, how a table name splits, repr, and no pickle or copy |
 | `credentials_lib_test` | sealing every kind of credential on the real library, and each of its refusals as a `CredentialsError` with its `CREDENTIALS_INVALID` message |
-| `runtime_test` | the runtime check on stand-in runtime libraries: not loaded, same build id, another build id, no build id, komira's copy unreadable, and the build id reader |
+| `runtime_test` | (Linux only) the runtime check on stand-in runtime libraries: not loaded, same build id, another build id, no build id, komira's copy unreadable, and the build id reader |
 | `cpu_test` | the CPU check on cpuinfo files written from `tests/fixtures/cpuinfo_x86_64_v3.txt`, and that a refused CPU never opens the library |
 | `frame_test` | the DataFrame with no library: each verb's node tree, where the row-order rules put each node, each output type, every refusal with its full message, the attribute rules of the frame, the Series and the module for every row of the refusal tables, no dunder running a query, and a terminal sending the encoded plan to the plan door and nothing else, with no SQL in the frame's modules |
 | `frame_groupby_test` | groupby, the reductions and drop_duplicates with no library: each one's node tree (the filter of missing keys below the aggregate, the key sort above it, the zero of an empty sum), its output types, the encoded aggregate, every refusal with its full message, and the GroupBy's attribute rules |

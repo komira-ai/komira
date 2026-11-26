@@ -15,7 +15,14 @@ compiles them against the bytes of the `.conda` file.
 ## What runs
 
 One build action per package, on the farm, hermetic and offline
-([`readme_e2e verify`](verify.zig); the rule is `readme_e2e`, [`defs.bzl`](defs.bzl)):
+([`readme_e2e verify`](verify.zig); the rule is `readme_e2e`, [`defs.bzl`](defs.bzl)).
+
+The targets are for linux x86_64 only (limit `readme-e2e-linux-x86-64`): the pinned mopm, the Mojo
+compiler and the gate run in a Linux action. For another target platform, such as darwin-arm64,
+`readme_e2e`, `readme_e2e_all` and `readme_e2e_complete` are skipped as incompatible; the macOS
+libraries are built, and their welded tests run, by `//release:mopm_darwin_libs`.
+
+The phases:
 
 | phase | what it does | what fails it |
 |---|---|---|

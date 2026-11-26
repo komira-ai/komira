@@ -101,7 +101,7 @@ def main(args):
     directory = os.path.join(lib_dir, "fake_v1_3")
     native = _native.load(directory)
     assert native.abi_version == 1003, native.abi_version
-    counts = Counts(ctypes.CDLL(os.path.join(directory, "libkomira.so")))
+    counts = Counts(ctypes.CDLL(os.path.join(directory, _native._LIB_NAME)))
 
     # Python's own handler, whatever the process was started with (a parent
     # that ignores SIGINT leaves it ignored in the child).

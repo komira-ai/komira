@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:isa_variants.bzl", "variant_label_name")
 load("@komira//tools/build/platforms:table.bzl", "row")
 load(":dist.bzl", "libkomira_dist_load", "picked_dir")
@@ -152,6 +153,8 @@ picked_dir(
         "libAsyncRTRuntimeGlobals.so",
         "libKGENCompilerRTShared.so",
     ]],
+    # The Linux [dist]'s ELF file names: the macOS [dist] holds .dylib files.
+    target_compatible_with = LINUX_X86_64,  # komira-limit:libkomira-elf-linux-x86-64
 )
 
 libkomira_dist_load(
@@ -214,6 +217,8 @@ cxx_binary(
     srcs = [":variants_load_files[variants_load.c]"],
     headers = {"komira.h": "//src/so:komira_abi"},
     header_namespace = "",
+    # glibc's link.h and dl_iterate_phdr: the driver loads the ELF variants.
+    target_compatible_with = LINUX_X86_64,  # komira-limit:isa-variants-linux-x86-64
 )
 
 # Each variant loaded from a copy of the directory with no library path, by the

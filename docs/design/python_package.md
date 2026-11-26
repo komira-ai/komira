@@ -272,16 +272,17 @@ visible from every thread, as a module-level name would be.
 The macOS arm64 wheel (`//python:komira_wheel_macos_arm64`, macOS 11 or later on Apple silicon, tagged
 `py3-none-macosx_11_0_arm64`) is built from its own `[dist]` directory and its own pinned compiler. It is built
 and tested only by the macOS jobs of pypi.yml, never in a pull request (`//python:wheel_install_test_macos_arm64`, on
-the farm's macOS workers), and a run publishes it only from main.
+the farm's macOS workers), and a run publishes it only from main. The manylinux wheel and the tests that install
+or read it are compatible with linux-x86_64 only, so a darwin-arm64 build skips them.
 
 - An installed package loads `komira/_lib/libkomira.so`. The wheel carries
   `//src/so:libkomira[dist]` whole at `komira/_lib/`: `libkomira.so`, and in `_lib/lib/` the native owners
   and the three Mojo runtime libraries. The runtime libraries are the ones of the toolchain's pinned
   `mojo-compiler` package that compiled libkomira, so runtime and compiler match by construction. `[dist]`
   is `[runnable]` without the C++ runtime (`libstdc++.so.6`, `libgcc_s.so.1`); `[runnable]` keeps it,
-  because build workers have none. On macOS arm64 `[dist]` is `libkomira.dylib` and, in `lib/`, the three
+  because Linux build workers have none. On macOS arm64 `[dist]` is `libkomira.dylib` and, in `lib/`, the three
   runtime `.dylib` files, with no owners (the C archives are linked into the dylib) and no C++ runtime; its
-  run path is `@loader_path/lib`.
+  run path is `@loader_path/lib`, and `[runnable]` is the same directory as `[dist]`.
 - The library's run path (`$ORIGIN/lib:$ORIGIN`,
   [tools/build/mojo/README.md](../../tools/build/mojo/README.md)) resolves the owners and the runtime in
   `_lib/lib/`, so the loader sets no search path and preloads nothing. It opens `<dir>/libkomira.so` with

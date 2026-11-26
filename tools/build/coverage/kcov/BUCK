@@ -176,10 +176,13 @@ kcov_tool(
 # The link directory every mojo_library's coverage build links through
 # (tools/build/mojo/coverage.bzl): cov_zig, debug_relocate and the toolchain's
 # zig. One target for all of them, so the paths of zig's C runtime sources in
-# the debug info do not depend on the library.
+# the debug info do not depend on the library. Linux x86_64 only, like coverage
+# itself: another target platform skips it (its toolchain is the Mojo toolchain,
+# which executes on the target platform).
 cov_link_dir(
     name = "cov_link",
     exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
     visibility = ["PUBLIC"],
 )
 

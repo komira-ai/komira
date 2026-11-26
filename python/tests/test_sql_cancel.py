@@ -565,7 +565,7 @@ def main(args):
     log.addHandler(records)
     log.setLevel(logging.DEBUG)
     native = _native.load(directory)
-    path = os.path.join(directory, "libkomira.so")
+    path = os.path.join(directory, _native._LIB_NAME)
     assert records.lines == [("DEBUG", "loaded libkomira ABI 1.6 from {}".format(path))], records.lines
     assert native.abi_version == 1006 and native.has("komira_sql_stream_run"), native.abi_version
     fake = Fake(path)

@@ -12,7 +12,7 @@ under kcov with them.
 | `:debug_relocate` | overwrites a directory path in a file (a test binary) with a placeholder of the same length |
 | `:cov_normalize` | rewrites one kcov Cobertura report to repository paths, in a canonical form |
 | `:cov_zig` | the `zig` of a coverage build's link directory: keeps a link's debug info and relocates the action's directories out of it |
-| `:cov_link` | that link directory (`cov_link_dir`): `cov_zig`, `debug_relocate` and the Mojo toolchain's zig, what a coverage build of a `mojo_library` links through ([Coverage builds](../../mojo/README.md#coverage-builds)) |
+| `:cov_link` | that link directory (`cov_link_dir`): `cov_zig`, `debug_relocate` and the Mojo toolchain's zig, what a coverage build of a `mojo_library` links through ([Coverage builds](../../mojo/README.md#coverage-builds)); linux x86_64 only, a darwin-arm64 build skips it |
 | `:cov_run` | the directory a coverage run runs from (`cov_run_dir`): [`cov_run`](#cov_run), kcov (`komira//tools/build/toolchains/kcov:kcov`), `cov_normalize` and `limit`, the seconds a run may take (450; only a fixture of the tests cell may set another `limit_s`) |
 
 ## Why: the sandbox path in the debug info

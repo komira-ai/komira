@@ -72,7 +72,9 @@ bundle; the shipped launcher has no override.
 
 A program built as `[shared]` is compiled from a generated file next to its
 main module, which imports `main` from it; the main module's file name must
-therefore be a Mojo identifier. Only linux x86_64 bundles are built today.
+therefore be a Mojo identifier. Only linux x86_64 bundles are built today: `mojo_bundle`,
+`bundle_tarball`, `oci_tree`, `oci_image` and `oci_image_check` are compatible with linux
+x86_64 only (limit `image-linux-x86-64-only`), so a darwin-arm64 build skips them.
 
 ## Package formats
 
@@ -469,8 +471,9 @@ walk is dyld's: each load command names an operating system library (under
 reaches with `@loader_path` its directory, or an `@loader_path/<path>` member;
 anything else (another absolute path such as Homebrew's or conda's, a home
 directory, `@executable_path`, a bare name) is refused. The runtime's copies
-come from the toolchain, or from a `mojo_runtime` directory named by `runtime`
-(the darwin toolchain executes on macOS, and the check on Linux). A refusal
+come from the toolchain (a check without `runtime` is linux x86_64 only, and a
+darwin-arm64 build skips it), or from a `mojo_runtime` directory named by
+`runtime` (the darwin toolchain executes on macOS, and the check on Linux). A refusal
 names its check:
 
 - `path`: every member is a relative path of plain components (no `/` first,
@@ -526,7 +529,8 @@ The tests: the Zig scenarios `:wheel_zip_unit`, `:wheel_elf_unit`,
 [`BUCK`](BUCK), on synthetic files and ELF libraries
 ([`wheel/testing.zig`](wheel/testing.zig)). The rule on fixtures: `:wheel_fixture`
 (a linux-x86_64 wheel holding the example Mojo shared library `plain`, with the
-Mojo runtime as `external_needed`), `:wheel_fixture_aarch64_tag` and
+Mojo runtime as `external_needed`; a darwin-arm64 build skips it and
+`:wheel_file_name_cases`), `:wheel_fixture_aarch64_tag` and
 `:wheel_fixture_macosx_tag` (the linux-arm64 and darwin-arm64 rows' tags; built on
 linux like every target). `:wheel_tag_cases` holds each release row's tag
 and the refusal of a member path holding a brace.

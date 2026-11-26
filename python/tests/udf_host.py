@@ -314,7 +314,9 @@ class Env:
 
     def __init__(self, lib_dir, check_leaks=True):
         self.check_leaks = check_leaks
-        self.lib = os.path.join(os.path.abspath(lib_dir), "libkomira_udf_python.so")
+        # python_binding_test stages the library as `.dylib` for a macOS target.
+        suffix = "dylib" if sys.platform == "darwin" else "so"
+        self.lib = os.path.join(os.path.abspath(lib_dir), "libkomira_udf_python." + suffix)
         self.dir = os.path.realpath(tempfile.mkdtemp(prefix="udf-"))
         self.code_root = self._mk("code")
         self.scratch = self._mk("rt")
