@@ -1,6 +1,6 @@
-# Temporary: an action that fails, built by a manual run of release-macos.yml in its macOS step.
+# Temporary: an action that hangs past its step bound, built by a manual run of release-macos.yml in its macOS step.
 genrule(
     name = "fails",
     out = "fails.txt",
-    cmd = "echo 'this action fails on purpose' >&2; exit 1",
+    cmd = "sleep 240; touch $OUT",
 )
