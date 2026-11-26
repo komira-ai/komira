@@ -31,8 +31,8 @@ error. Nothing here holds a pointer.
   `sql_result`'s is.
 
 Every operation but `plan_render_text` and `register_arrow` (which read no
-file) first calls `probe_codec_libraries` (libzstd, libz, liblz4), so a codec
-library missing from the host is a raise
+file) first calls `probe_codec_libraries` (libz; zstd and lz4 are linked in),
+so a codec library missing from the host is a raise
 `compression: cannot load <soname>: <loader error>` before anything is read,
 and not an abort of the process when a codec first opens it.
 """

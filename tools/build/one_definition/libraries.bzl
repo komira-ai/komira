@@ -52,10 +52,12 @@ SRC_C_LIBRARIES = [
 THIRD_PARTY_C_LIBRARIES = [
     "//third_party/aws-lc:crypto",
     "//third_party/brotli:brotlidec",
+    "//third_party/lz4:lz4",
     "//third_party/s2n-tls:s2n",
     "//third_party/sha1collisiondetection:sha1dc",
     "//third_party/snappy:snappy",
     "//third_party/sqlite:sqlite3",
+    "//third_party/zstd:zstd",
 ]
 
 def one_definition_listed(name):
@@ -86,8 +88,10 @@ def one_definition_listed(name):
 THIRD_PARTY_OWNERS = {
     "third_party/aws-lc": struct(owner = "//src/awslc:awslc", prefix = "komira_awslc_"),
     "third_party/brotli": struct(owner = "//src/parquet_codec:parquet_codec", prefix = "komira_brotli_"),
+    "third_party/lz4": struct(owner = "//src/lz4:lz4", prefix = "komira_lz4_"),
     "third_party/s2n-tls": struct(owner = "//src/http_core:http_core", prefix = "komira_s2n_"),
     "third_party/sha1collisiondetection": struct(owner = None, prefix = ""),
     "third_party/snappy": struct(owner = "//src/compression:compression", prefix = "komira_snappy_"),
     "third_party/sqlite": struct(owner = "//src/db_sqlite:db_sqlite", prefix = "komira_sqlite3_"),
+    "third_party/zstd": struct(owner = "//src/compression:compression", prefix = "komira_zstd_"),
 }

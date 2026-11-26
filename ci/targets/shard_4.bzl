@@ -46,8 +46,6 @@ TARGETS = [
     "komira//src/lowering_rules:lowering_rules_conda",
     "komira//src/lz4:ci",
     "komira//src/lz4:coverage_floor",
-    "komira//src/lz4:syslib_lz4-c.conda_linux_aarch64",
-    "komira//src/lz4:syslib_lz4-c.conda_osx_arm64",
     "komira//src/lz4:table",
     "komira//src/mail_address:ci",
     "komira//src/mail_address:coverage_floor",
