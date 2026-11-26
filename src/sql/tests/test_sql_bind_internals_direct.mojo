@@ -236,7 +236,7 @@ def test_date_folds_refuse_wrong_shapes() raises:
     except e:
         assert_true(
             String(e).startswith(
-                "SQL not supported: only date_sub('day', ...) is supported."
+                "SQL bind error: the bind-time fold of date_sub reads only the unit 'day'"
             ),
             String(e),
         )

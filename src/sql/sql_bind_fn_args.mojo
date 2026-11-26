@@ -38,15 +38,17 @@ from sql.sql_fn_table import (
 def _date_diff_days(sx: SqlExpr) raises -> Int64:
     """Constant-fold `date_diff('day', DATE d0, DATE d1)` to the integer day
     difference `days(d1) - days(d0)`. Raises for a unit other than `'day'` or
-    an operand that is not a DATE literal."""
+    an operand that is not a DATE literal (`_bind_date_diff` folds only
+    those; every other call is lowered by `plan_expr.temporal_delta`)."""
     ref args = sx._call.value().args
     if len(args) != 3:
         raise Error("SQL bind error: date_diff expects 3 arguments (unit, start, end)")
     ref unit = args[0]
     if unit.tag != SX_STRING or unit.text.lower() != "day":
         raise Error(
-            "SQL not supported: only date_diff('day', ...) is supported"
-            + " (got unit that is not the constant 'day')"
+            "SQL bind error: the bind-time fold of date_diff reads only the"
+            + " unit 'day'; date_diff over another unit is lowered by"
+            + " plan_expr.temporal_delta (`_bind_date_diff`)"
         )
     ref d0 = args[1]
     ref d1 = args[2]
