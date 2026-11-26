@@ -12,11 +12,11 @@ sources: they must open exactly the declared sonames
 (tools/build/package/pack/conda_dlopen.zig), and the package requires each
 row's requirement, byte for byte.
 
-Only the package reads it, and the closure's declarations (`MojoInfo.opens`,
-`dlopen_closure`): what a package carrying a native library built from the
-library must find on the host (tools/build/package/libkomira/opens.bzl). The
-library, its welded tests and its dependents build the same with or without a
-declaration.
+The package reads the declaration. The declarations of a whole closure
+(`MojoInfo.opens`, `dlopen_closure`) are read by
+tools/build/package/libkomira/opens.bzl, which holds them to what the hosts of
+each platform provide. The library, its welded tests and its dependents build
+the same with or without a declaration.
 """
 
 load("@komira//tools/build/package:system_libs.bzl", "SYSTEM_LIBS")

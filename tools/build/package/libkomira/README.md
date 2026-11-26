@@ -48,8 +48,9 @@ C API (`src/so`), and the check that installs it.
 
 - `dist_opens` holds what the native directory takes from the host
   ([`opens.bzl`](opens.bzl)). The wheel and the npm packages install no conda
-  requirement, so every library libkomira's Mojo closure opens at run time
-  (`mojo_library(dlopen = [...])`, collected up the closure as `MojoInfo.opens`)
+  requirement, so every library libkomira's Mojo closure declares it opens at
+  run time (`mojo_library(dlopen = [...])`, collected up the closure as
+  `MojoInfo.opens`; the conda packer holds a declaration to its sources)
   must be one the hosts of each platform of `DIST_NATIVE_NEEDS`
   ([`packaged.bzl`](packaged.bzl)) provide: the platform's row of `HOST_LIBS` in
   [`../system_libs.bzl`](../system_libs.bzl). On macOS that is libz, libbz2 and

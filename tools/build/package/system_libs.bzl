@@ -40,13 +40,16 @@ SYSTEM_LIBS = {
 # sonames are the Linux spellings `dlopen` declares; the code opens the same
 # library under the platform's own name (`libzstd.dylib` on macOS).
 #
-# linux-x86_64: every row. The wheel's audit (docs/design/wheel_licence_audit.md)
-# takes the codec libraries from the host.
+# linux-x86_64: every row, as the wheel's audit
+# (docs/design/wheel_licence_audit.md) takes every library it opens from the
+# host; a soname the closure no longer opens is judged nowhere.
 #
-# darwin-arm64: libz, libbz2 and liblzma, which macOS ships under /usr/lib (in
-# the dyld shared cache). macOS ships no libzstd and no liblz4: dyld's own
-# refusal of `libzstd.dylib` in the macOS wheel's install test says "not in
-# dyld cache" for /usr/lib/libzstd.dylib.
+# darwin-arm64: libz, libbz2 and liblzma, the macOS system libraries under
+# /usr/lib (libz.1.dylib, libbz2.1.0.dylib, liblzma.5.dylib, in the dyld shared
+# cache). No test here loads libbz2 or liblzma on a Mac, so for those two the
+# row records what macOS is known to ship, not something measured. macOS ships
+# no libzstd and no liblz4: dyld's refusal of `libzstd.dylib` in the macOS
+# wheel's install test says "not in dyld cache" for /usr/lib/libzstd.dylib.
 HOST_LIBS = {
     "darwin-arm64": [
         "libbz2.so.1.0",
