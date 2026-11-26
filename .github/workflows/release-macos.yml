@@ -116,10 +116,10 @@ jobs:
       # workers. `--keep-going`: one package's failure does not hide the others'.
       - name: build the macOS set
         id: build
-        timeout-minutes: 1
+        timeout-minutes: 65
         uses: ./.github/actions/buck2-farm
         with:
-          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs //release/manual_fail:fails
+          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs
           assert-remote: ${{ steps.assert.outputs.path }}
       # The Python test harness on macOS arm64: the macOS CPython and macOS wheels install on a macOS
       # worker and the hello binding test (pyarrow, and a Mojo shared library loaded by path) runs
