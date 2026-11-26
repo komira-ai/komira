@@ -7,7 +7,7 @@ Group by the columns that define a duplicate and keep groups with `count(*) > 1`
 from pathlib import Path
 
 import komira
-import komira.pl as pl
+from komira import pl
 
 Path("people.csv").write_text(
     "id,name,email\n"

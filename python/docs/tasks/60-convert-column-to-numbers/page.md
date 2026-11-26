@@ -7,7 +7,7 @@ On a polars-shaped frame, `pl.col(name).cast("int64", strict=False)` (or `"float
 from pathlib import Path
 
 import komira
-import komira.pl as pl
+from komira import pl
 
 Path("readings.csv").write_text(
     "sensor,count,level\n"
@@ -65,7 +65,6 @@ astype failed
 - Empty fields and text such as `oops` or `n/a` become null; the converted column aggregates like any number column, skipping the nulls.
 - Without `strict=False`, and in the pandas-shaped `astype`, a value that is not a number fails the query. `astype` has no `errors="coerce"` and there is no `komira.to_numeric`: `probe_to_numeric.py` beside this page tries `komira.to_numeric(..., errors="coerce")` and must fail with the line in `probe_to_numeric.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
 - SQL has no way to do this today: `TRY_CAST` is refused by name, and `CAST` from text to a number is refused too. Both are komira-ai/komira#2402.
-- `"int64"` reads only whole-number spellings, so `12.5` becomes null there; use `"float64"` for a column with fractions.
 
 ## Related
 

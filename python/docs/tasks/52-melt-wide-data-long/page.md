@@ -29,7 +29,7 @@ with komira.Session() as s:
 # pandas-shaped: one frame per column, stacked with concat.
 df = komira.read_csv("scores.csv")
 parts = [
-    df.assign(quarter=col, score=lambda d, col=col: d[col])[["name", "quarter", "score"]]
+    df.assign(quarter=col, score=df[col])[["name", "quarter", "score"]]
     for col in ["q1", "q2", "q3"]
 ]
 long = komira.concat(parts)

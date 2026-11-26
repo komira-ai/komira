@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import komira
-import komira.pl as pl
+from komira import pl
 
 Path("contacts.csv").write_text(
     "name,city,phone,score\n"

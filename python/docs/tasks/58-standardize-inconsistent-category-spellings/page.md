@@ -69,7 +69,7 @@ Output:
 
 - `trim()` removes spaces and `lower()` fixes case, so `Books`, `  books` and `BOOKS ` become `books` and group together.
 - A lookup table (`fixes.csv`, joined with `LEFT JOIN` and `coalesce`) turns known misspellings into the right value and leaves every other value as cleaned; a `CASE` does the same for a few fixes.
-- On the pandas-shaped frame `.str.strip()` is not supported yet (the engine trims spaces only, and pandas trims all whitespace), so the example strips with `.str.replace(r"^\s+|\s+$", "", regex=True)` and then `.str.lower()` (komira-ai/komira#2371). That frame has no `Series.map` or `replace`, so the misspelling `tys` stays a separate group in its output: map it in SQL.
+- On the pandas-shaped frame `.str.strip()` is not supported yet (the engine trims spaces only, and pandas trims all whitespace), so the example strips with `.str.replace(r"^\s+|\s+$", "", regex=True)` and then `.str.lower()` (komira-ai/komira#2371). That frame has no `Series.map` (komira-ai/komira#2370) or `replace` (komira-ai/komira#2401), so the misspelling `tys` stays a separate group in its output: map it in SQL.
 - The polars-shaped frame has `str.to_lowercase()` but no `strip_chars()` or `replace()` yet (komira-ai/komira#2371), so the example does not use it.
 
 ## Related
