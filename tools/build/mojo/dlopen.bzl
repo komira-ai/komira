@@ -12,11 +12,15 @@ sources: they must open exactly the declared sonames
 (tools/build/package/pack/conda_dlopen.zig), and the package requires each
 row's requirement, byte for byte.
 
-Only the package reads it. The library, its welded tests and its dependents
-build the same with or without a declaration.
+Only the package reads it, and the closure's declarations (`MojoInfo.opens`,
+`dlopen_closure`): what a package carrying a native library built from the
+library must find on the host (tools/build/package/libkomira/opens.bzl). The
+library, its welded tests and its dependents build the same with or without a
+declaration.
 """
 
 load("@komira//tools/build/package:system_libs.bzl", "SYSTEM_LIBS")
+load(":providers.bzl", "MojoInfo")
 
 DLOPEN_ATTRS = {
     # Sonames the library opens at run time (`OwnedDLHandle`); see above.
@@ -40,3 +44,22 @@ def dlopen_rows(ctx):
     """MojoInfo.dlopen: (soname, requirement) per declared soname that
     system_libs.bzl names, in soname order."""
     return [(s, SYSTEM_LIBS[s]) for s in sorted(ctx.attrs.dlopen) if s in SYSTEM_LIBS]
+
+def merge_opens(import_name, sonames, dep_opens):
+    """MojoInfo.opens of a library: {soname: sorted import names} for every
+    soname the library (`import_name`, declaring `sonames`) or a library of
+    its closure (`dep_opens`, the `opens` of each Mojo dependency) declares in
+    `dlopen`. A soname declared by several libraries names each of them."""
+    names = {}
+    for opens in dep_opens:
+        for s, owners in opens.items():
+            for o in owners:
+                names.setdefault(s, {})[o] = True
+    for s in sonames:
+        names.setdefault(s, {})[import_name] = True
+    return {s: sorted(names[s].keys()) for s in sorted(names.keys())}
+
+def dlopen_closure(ctx, import_name, deps):
+    """MojoInfo.opens (`merge_opens`) of the library `ctx` builds, from its
+    own `dlopen` and the `opens` of the Mojo packages among `deps`."""
+    return merge_opens(import_name, ctx.attrs.dlopen, [d[MojoInfo].opens for d in deps if MojoInfo in d])

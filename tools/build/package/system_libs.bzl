@@ -31,3 +31,27 @@ SYSTEM_LIBS = {
     "libz.so.1": "libzlib >=1.2.13,<2",
     "libzstd.so.1": "zstd >=1.5.2,<2",
 }
+
+# The sonames of SYSTEM_LIBS a host of each platform row provides, for a
+# package that carries libkomira's native directory (the Python wheel, the npm
+# platform packages) and so has no conda requirement to install them: a soname
+# libkomira's closure opens at run time that its platform's row lacks is a
+# refusal of the directory (tools/build/package/libkomira/opens.bzl). The
+# sonames are the Linux spellings `dlopen` declares; the code opens the same
+# library under the platform's own name (`libzstd.dylib` on macOS).
+#
+# linux-x86_64: every row. The wheel's audit (docs/design/wheel_licence_audit.md)
+# takes the codec libraries from the host.
+#
+# darwin-arm64: libz, libbz2 and liblzma, which macOS ships under /usr/lib (in
+# the dyld shared cache). macOS ships no libzstd and no liblz4: dyld's own
+# refusal of `libzstd.dylib` in the macOS wheel's install test says "not in
+# dyld cache" for /usr/lib/libzstd.dylib.
+HOST_LIBS = {
+    "darwin-arm64": [
+        "libbz2.so.1.0",
+        "liblzma.so.5",
+        "libz.so.1",
+    ],
+    "linux-x86_64": sorted(SYSTEM_LIBS.keys()),
+}

@@ -133,6 +133,7 @@ TARGETS = [
     "komira//tools/build/examples/shared_lib:spike_exact",
     "komira//tools/build/gen:command_agreement",
     "komira//tools/build/gen:transition_lint",
+    "komira//tools/build/package/libkomira:dist_opens",
     "komira//tools/build/package/libkomira:libkomira_dist_load",
     "komira//tools/build/package/libkomira:libkomira_dist_load_refuses_missing_runtime",
     "komira//tools/build/package/libkomira:libkomira_elf_report",

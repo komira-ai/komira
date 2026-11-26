@@ -57,6 +57,11 @@ extracted unmodified as that target's files.
   If one is absent, the first call of that codec aborts with
   `compression: cannot load <soname>`; other codecs and Parquet files that do
   not use it are unaffected.
+  Each must be a library the hosts of the wheel's platform provide:
+  `komira//tools/build/package/libkomira:dist_opens` refuses, in the pull
+  request's check, a closure that opens one a platform's row of `HOST_LIBS`
+  (`tools/build/package/system_libs.bzl`) lacks. macOS provides libz, libbz2
+  and liblzma, and no libzstd or liblz4.
 - **The AWS, Google and Azure clients**: not in the wheel. The Mojo closure of
   the `so` package is `sdk_exec`'s (read from the `deps` of each `BUCK` file
   from `so` down): it holds `http_client`, `http_core`, `net`, `objectstore`,

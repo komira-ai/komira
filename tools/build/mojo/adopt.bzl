@@ -115,7 +115,7 @@ load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo")
 load("@prelude//linking:link_info.bzl", "Archive", "ArchiveLinkable", "LibOutputStyle", "LinkInfo", "LinkInfos", "MergedLinkInfo", "create_merged_link_info", "create_merged_link_info_for_propagation")
 load("@prelude//linking:types.bzl", "Linkage")
 load(":defs.bzl", "adopt_link_tail", "adopt_readme_test")
-load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
+load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_closure", "dlopen_refusal", "dlopen_rows")
 load(":native_facts.bzl", "native_facts")
 load(":opt_level.bzl", "TEST_OPT_LEVEL")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo", "mojo_pkg_children", "welded_tests_info")
@@ -294,6 +294,7 @@ def _impl(ctx):
             conda_name = ctx.attrs.conda_name or import_name,
             conda_refusal = _conda_refusal(ctx, deps),
             dlopen = dlopen_rows(ctx),
+            opens = dlopen_closure(ctx, import_name, deps),
             direct = sorted([i.import_name for i in infos]),
             direct_conda = {i.import_name: struct(name = i.conda_name, refusal = i.conda_refusal) for i in infos},
             import_name = import_name,

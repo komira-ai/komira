@@ -36,7 +36,7 @@ load("@komira//tools/build/native:shared.bzl", "NativeSharedInfo")
 load(":native_facts.bzl", "NATIVE_ATTRS", "native_facts", "native_refusal")
 load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
 load(":opt_level.bzl", "MojoOptLevelInfo", "SHIPPED_OPT_LEVEL", "TEST_OPT_LEVEL", "opt_level_args")
-load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
+load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_closure", "dlopen_refusal", "dlopen_rows")
 load(":helpers.bzl", "HELPER_ATTRS", "helper_files")
 load(":readme.bzl", "readme_gate", "readme_kwargs")
 load(":run_check.bzl", "run_check_validation")
@@ -291,6 +291,7 @@ def _library_impl(ctx):
             conda_name = conda_name,
             conda_refusal = conda_refusal,
             dlopen = dlopen_rows(ctx),
+            opens = dlopen_closure(ctx, import_name, ctx.attrs.deps),
             direct = sorted([d[MojoInfo].import_name for d in ctx.attrs.deps if MojoInfo in d]),
             direct_conda = {
                 d[MojoInfo].import_name: struct(name = d[MojoInfo].conda_name, refusal = d[MojoInfo].conda_refusal)

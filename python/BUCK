@@ -133,7 +133,10 @@ changelog_file(
 # `--target-platforms komira//tools/build/platforms:darwin-arm64`. On macOS the
 # wheel rule refuses a Mach-O member that needs a newer macOS than the tag's,
 # and one whose code signature is missing or does not match it; "The macOS
-# wheel, read back" below holds the finished file.
+# wheel, read back" below holds the finished file. What its native directory
+# takes from the host, the libraries libkomira opens at run time, is held for
+# macOS on Linux, in the pull request
+# (//tools/build/package/libkomira:dist_opens).
 
 _PLATFORM = "linux-x86_64"
 

@@ -58,6 +58,7 @@ the action key.
 """
 
 load(":defs.bzl", "mojo_library", "mojo_precompile_cmd")
+load(":dlopen.bzl", "merge_opens")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoToolchainInfo")
 load(":system_libs.bzl", "dep_system_libs")
 load("@komira//tools/build/gen:defs.bzl", "committed_sources", "declare_fresh", "declare_uncommitted", "declare_unmigrated", "generated_state")
@@ -275,6 +276,8 @@ def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, name
         MojoInfo(
             direct = sorted([d[MojoInfo].import_name for d in ctx.attrs.deps]),
             import_name = import_name,
+            # Declares no `dlopen` of its own; its dependencies' are its closure's.
+            opens = merge_opens(import_name, [], [d[MojoInfo].opens for d in ctx.attrs.deps]),
             pkgs = ctx.actions.tset(MojoPkgTSet, value = pkg, children = deps),
             pkgs_def = MojoPkgTSet,
             system_libs = dep_system_libs(ctx.attrs.deps),

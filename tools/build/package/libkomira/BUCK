@@ -4,6 +4,8 @@ load("@komira//tools/build/platforms:isa_variants.bzl", "variant_label_name")
 load("@komira//tools/build/platforms:table.bzl", "row")
 load(":dist.bzl", "libkomira_dist_load", "picked_dir")
 load(":elf_report.bzl", "libkomira_elf_report")
+load(":opens.bzl", "dist_opens_cases", "dist_opens_check")
+load(":packaged.bzl", "DIST_NATIVE_NEEDS")
 load(":variants.bzl", "libkomira_variants", "libkomira_variants_load", "libkomira_variants_manifest")
 load("@komira//tools/build/package/install_check:install_check.bzl", "conda_install_check")
 
@@ -280,3 +282,22 @@ libkomira_variants_load(
     )
     for v in _ROW["isa_variants"]
 ]
+
+# ---- What the native directory takes from the host ---------------------------
+#
+# Fails loading this package if `opens_refusals` or `merge_opens` (opens.bzl,
+# tools/build/mojo/dlopen.bzl) gets any of its cases wrong.
+dist_opens_cases()
+
+# The libraries libkomira's Mojo closure opens at run time (`dlopen`), held to
+# what the hosts of each platform the native directory is packaged for provide
+# (DIST_NATIVE_NEEDS, packaged.bzl; HOST_LIBS, system_libs.bzl): the wheel and
+# the npm packages carry none of them. Fails at analysis naming the platform,
+# the soname and its libraries. It is a Linux target: the macOS row is judged
+# here too, so a change that would make the macOS wheel open a library macOS
+# does not ship is refused by the pull request's own check.
+dist_opens_check(
+    name = "dist_opens",
+    lib = "//src/so:so",
+    platforms = sorted(DIST_NATIVE_NEEDS.keys()),
+)
