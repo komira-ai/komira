@@ -23,7 +23,8 @@ need no second build), with `apache-arrow ^21.2.0` as its peer dependency. The n
 
 | file | holds |
 |---|---|
-| [`package.json`](package.json) | the manifest npm reads: `exports` and `types` point at `dist/`, `engines`, the peer dependency, and the platform packages as optional dependencies at the package's own version. No `bin`, no scripts, no dependency of its own. Its `version` is a placeholder the package rule will stamp |
+| [`package.json`](package.json) | the manifest npm reads: `exports` and `types` point at `dist/`, `engines`, the peer dependency, and the platform packages as optional dependencies at the package's own version. No `bin`, no scripts, no dependency of its own. Its `version` is `0.0.0` and it is `"private": true`: `:package` stamps it ([below](#the-npm-packages)) |
+| [`platforms/linux-x64-gnu/package.json`](platforms/linux-x64-gnu/package.json) | the manifest of the linux-x64 platform package, `@komira-ai/komira-linux-x64-gnu`: its `os`, `cpu` and `libc`, the wheel's licence expression, and the files it packs; stamped the same way by `:package_linux_x64` |
 | [`src/index.ts`](src/index.ts) | the one entry, and the public names: `Session`, `registerParquet`, `abiVersion`, `version`, `KomiraError`, `LibraryLoadError`, `UnsupportedCpuError`, `UnsupportedOperation`, and the types `SessionOptions`, `CsvOptions`, `FilePath`, `KomiraErrorFields`, `Step` |
 | [`src/session.ts`](src/session.ts) | `Session`: `registerParquet(name, path)` (a path or a `file:` URL, a relative one resolved against the working directory when called), `registerCsv` and `registerNdjson` (their arguments checked, then refused with `UnsupportedOperation`: this package does not yet bind the call that registers those formats by name), `close()`, `closed`, `Symbol.dispose` and `Symbol.asyncDispose`; the options `threads` and `memoryLimit` (positive integers, checked before the library is loaded), passed to `komira_ctx_new_with_options` when either is given. The default session of the module-level `registerParquet`, one per JavaScript environment |
 | [`src/errors.ts`](src/errors.ts) | `KomiraError` (`status`, `code`, `step`, each `null` unless the engine gave one: `code` is the engine's named code, `SQL_SYNTAX_ERROR`, ..., and `step` one of `parse`, `bind`, `optimize`, `lower`, `execute`) and its subclasses; the error table's rows that are an `UnsupportedOperation` (`errorClass`) and the step names (`stepOf`) |
@@ -202,6 +203,19 @@ context is destroyed once. When an environment is torn down (a worker that is
 terminated, the process at exit) while a call runs, the teardown waits for the
 call to return, then destroys the context.
 
+## The npm packages
+
+`:package` (`@komira-ai/komira`: `dist/`, `LICENSE` and `NOTICE`) and `:package_linux_x64`
+(`@komira-ai/komira-linux-x64-gnu`: the addon, `//src/so:libkomira[dist]` as it is at `native/`,
+and the wheel's licence files) are the tarballs `npm pack` would write, by `npm_tarball`
+([tools/build/package/README.md](../tools/build/package/README.md#the-npm-packages)): byte for byte
+reproducible, read back by their `[check]`, and refused when a file is not one the manifest's `files`
+names, when a native library needs what the platform does not give (a Mojo runtime library missing
+among them), or when the manifest's `repository.url` is not komira's. Each carries its manifest here
+stamped: unstamped, as in a pull request, it is `0.0.0` and stays private; the release stamp gives
+`0.1.<N>`, the wheel's version, on the package and on every optional dependency. Nothing publishes
+them yet.
+
 ## Tests
 
 `:package_test` runs the package's behaviour tests, [`tests/*.test.ts`](tests/), with node stripping
@@ -229,6 +243,7 @@ that loads plants its host, so no real `/proc/cpuinfo` is read.
 | [`unknown_status.test.ts`](tests/unknown_status.test.ts) | a status libkomira does not define rejects with that number, no code and the addon's message |
 | [`package.test.ts`](tests/package.test.ts) | the real library loads from the staged platform package's `native/` with the planted host; the real engine opens the Parquet file by path, URL and relative path against the working directory at the call, and again under one name; a session with `threads` and `memoryLimit` takes calls and is freed; a missing file is status -3 at the `bind` step, with the code and text the library's last-error calls give, and the session still works; the module-level call makes one default session and never closes it |
 | [`default_session.test.ts`](tests/default_session.test.ts) | a worker thread makes a default session of its own, once for two calls, and the main thread's is untouched |
+| [`missing_runtime.test.ts`](tests/missing_runtime.test.ts) | a native directory of the real library with `libMSupportGlobals.so`, one of the three Mojo runtime libraries, left out (`//tools/build/package/libkomira:dist_without_msupport`) is a `LibraryLoadError`, no other class, whose message names the library it tried and the missing file |
 
 The addon's own tests:
 

@@ -84,7 +84,8 @@ test("package.json: an ES module package for Node 22.12 and later, with apache-a
     "./package.json": "./package.json",
   });
   assert.equal(manifest["types"], "./dist/index.d.ts");
-  assert.deepEqual(manifest["files"], ["dist/**/*.js", "dist/**/*.d.ts"]);
+  // npm packs LICENSE and package.json whatever `files` says; NOTICE only when named.
+  assert.deepEqual(manifest["files"], ["dist/**/*.js", "dist/**/*.d.ts", "NOTICE"]);
 });
 
 test("package.json: every platform package is an optional dependency at the package's own version", () => {

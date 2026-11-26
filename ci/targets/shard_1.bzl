@@ -86,6 +86,8 @@ TARGETS = [
     "komira//tools/build/package:conda_ships_readme",
     "komira//tools/build/package:is_linux_x86_64",
     "komira//tools/build/package:level_test",
+    "komira//tools/build/package:npm_fixture",
+    "komira//tools/build/package:npm_platform_cases",
     "komira//tools/build/package:release_set_check",
     "komira//tools/build/package:shell_lint",
     "komira//tools/build/package:wheel_file_name_cases",

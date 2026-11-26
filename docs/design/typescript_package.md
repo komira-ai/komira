@@ -524,20 +524,25 @@ top-level `pypi.yml` and the macOS arm64 wheel by `pypi-macos-arm64.yml`, each t
 
 ### The build
 
-- **A package rule.** `npm_tarball`, in `tools/build/package/`, is a Starlark rule with a Zig tool,
-  the sibling of `wheel_file` (rule B7; no shell and no Python, rules B4 and B5).
+- **A package rule.** **EXISTS**: `npm_tarball`, in `tools/build/package/` (`npm.bzl`, the tool
+  `npm/`; [its README section](../../tools/build/package/README.md#the-npm-packages)), is a Starlark
+  rule with a Zig tool, the sibling of `wheel_file` (rule B7; no shell and no Python, rules B4 and
+  B5).
   - It writes the tarball `npm pack` would write: gzip over a tar of `package/...`, members sorted,
     one fixed mtime, modes 0644 and 0755. A `[twin]` action writes it again from inputs staged
     elsewhere, and the check refuses it unless the bytes are equal.
-  - It stamps `version` from `komira.package_stamp` and writes `package.json` from the rule's
-    attributes. **EXISTS** since part 3: `node/package.json`, the manifest the package's tests read
-    (`"private": true`, version `0.0.0`). The rule's change decides whether the rule stamps that file
-    or writes its own, and in the second case adds the check that the two agree.
+  - It stamps `version` from `komira.package_stamp`. **EXISTS** since part 3: `node/package.json`,
+    the manifest the package's tests read (`"private": true`, version `0.0.0`). The rule stamps that
+    file rather than writing its own, so the two cannot disagree: the version and every optional
+    dependency become the stamp's version, a stamped package drops `private`, and every other key is
+    kept. A platform package's manifest is `node/platforms/<npm platform>/package.json`, stamped the
+    same way. Every member must be one npm packs for the manifest's `files`, so the manifest names
+    `NOTICE`.
   - Its native input is the self-contained directory of the libkomira target, the one the wheel
     copies. The rule takes the directory as one input and copies it
     whole; it never assembles the library, owners and runtime from separate targets.
   - It reads the tarball back. The ELF policy of `wheel_file` for that directory
-    (`_NATIVE_NEEDS` in [python/BUCK](../../python/BUCK)) applies to the platform packages: the glibc floor; every run path at
+    (`DIST_NATIVE_NEEDS` in [packaged.bzl](../../tools/build/package/libkomira/packaged.bzl), which python/BUCK and node/BUCK load) applies to the platform packages: the glibc floor; every run path at
     `$ORIGIN` or under it; every NEEDED a member or a system library, so the three runtime
     libraries are members; no other file of Modular's distribution; a size cap.
   - The rule refuses a package whose `repository.url` is not `https://github.com/komira-ai/komira`,
@@ -548,7 +553,8 @@ top-level `pypi.yml` and the macOS arm64 wheel by `pypi-macos-arm64.yml`, each t
   - Its sub-targets are `[check]`, `[release]` and `[release_check]`, as for the wheel. The
     `[release]` target refuses an unstamped package.
 - **The targets.** `//node:package` (the main package) and
-  `//node:package_<platform>` for each platform row of `table.bzl`.
+  `//node:package_<platform>` for each platform row of `table.bzl`. **EXISTS**: `//node:package` and
+  `//node:package_linux_x64`, unstamped in a pull request.
 - **A release set of their own.** `//release:npm_packages` is one directory holding the tarballs
   and `npm_set.json`, which records each package's name, version, file, SHA-256 and the sha512
   `integrity` npm reports.
@@ -650,8 +656,8 @@ linux-x86_64.
   - A staged directory with one of the three runtime libraries removed rejects with
     `LibraryLoadError` and no other class, with a message that names the missing library's file.
     The loader's text varies by platform, so this test checks the class and the file name. The
-    other refusals assert the full message by equality (rule T13). This test needs the directory,
-    so it lands with the package rule (item 6 of the plan) or after it.
+    other refusals assert the full message by equality (rule T13). **EXISTS** with the package rule:
+    `node/tests/missing_runtime.test.ts`, on the directory without `libMSupportGlobals.so`.
   - `SELECT 1 AS n` and a `GROUP BY` over the checked-in Parquet fixture answer as DuckDB does.
   - An unknown table, a syntax error and an unsupported construct reject from `sql` with their
     class, `step` and `code`.
@@ -845,8 +851,9 @@ that runs no query would be a release with nothing in it.
 
 ## What are the limits and open questions?
 
-- The npm platform packages wait for `npm_tarball` and the npm release set. The self-contained
-  directory they copy, and the licence files and notice the wheel carries with it, are on `main`.
+- The npm packages wait for the npm release set. `npm_tarball` and the linux-x64 platform package
+  exist; the self-contained directory they copy, and the licence files and notice the wheel carries
+  with it, are on `main`.
 - Tests in `.ts` run with type stripping on the pinned 24, and on a Node 22 pin only from 22.18,
   so the Node 22 pin is 22.18 or later.
 - linux-arm64 waits for its build platform. macos-arm64 waits for the macOS build of the addon;
@@ -884,5 +891,5 @@ The Excel SDK and the `ts_polars` builder follow, on a shared plan encoder.
 
 Today: [node/](../../node/README.md), [tools/build/node](../../tools/build/node/README.md),
 [third_party/node](../../third_party/node/README.md), [src/so](../../src/so/README.md), and `node/src/`
-for the TypeScript. Later: `tools/build/package/` for `npm_tarball`, `release/` for the npm set, and
-`.github/workflows/npm.yml`.
+for the TypeScript, and `tools/build/package/` for `npm_tarball`. Later: `release/` for the npm set,
+and `.github/workflows/npm.yml`.

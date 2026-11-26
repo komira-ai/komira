@@ -534,3 +534,77 @@ Mojo runtime as `external_needed`), `:wheel_fixture_aarch64_tag` and
 `:wheel_fixture_macosx_tag` (the linux-arm64 and darwin-arm64 rows' tags; built on
 linux like every target). `:wheel_tag_cases` holds each release row's tag
 and the refusal of a member path holding a brace.
+
+## The npm packages
+
+`npm_tarball` ([`npm.bzl`](npm.bzl)) writes the tarball `npm pack` would write
+of the files it is given and the package's manifest, and refuses to write one
+that would be wrong for the platform it is for. `komira_npm`
+([`npm/main.zig`](npm/main.zig)) is the writer and its read-back check, a
+static executable run as build actions: no shell, no Python, no npm. It is
+generic: the packages' own targets are declared with the package
+([node/BUCK](../../../node/BUCK): `//node:package` and
+`//node:package_linux_x64`); the target here is a fixture.
+
+| attribute | what it does |
+|---|---|
+| `package` | the npm name; the manifest's `name` must be it, and the file name is npm pack's, `<name without @, / as ->-<version>.tgz` |
+| `manifest` | the source package.json checked in with the package: `"version": "0.0.0"`, `"private": true`, and every optional dependency at `0.0.0` |
+| `license` | the manifest's `license` must be it |
+| `files` | `{path in the package: file or directory}` (a directory adds every file under it); a native library (ELF or Mach-O) is written 0755, every other file 0644 |
+| `platform` | the row of [tools/build/platforms/table.bzl](../platforms/table.bzl) the package is for; unset, the package holds no native library |
+| `os_floor`, `max_glibcxx`, `max_cxxabi` | the bounds of the native policy, as the wheel's |
+
+- **The manifest is stamped, not written.** The tarball's package.json is the
+  source manifest with the stamp's version on the package and on every
+  optional dependency, and, when stamped, without `private`; every other key
+  keeps its value and place, written as `JSON.stringify(v, null, 2)` writes
+  it. So the manifest the package's tests read is the one npm reads, and they
+  cannot disagree. Unstamped, the package is `0.0.0` and keeps
+  `"private": true`, which npm refuses to publish.
+- **The version** is the wheel's stamp (`0.1.<N>`, [wheel/stamp.zig](wheel/stamp.zig),
+  the module `:package_stamp`), with the same refusal of a half stamp.
+- **Reproducible bytes**: a gzip stream (no name, no time, OS 255; the packer's
+  `deflate.zig`) over a ustar archive of `package/package.json` and every file at
+  `package/<path>`, sorted bytewise; regular files only, owner and group 0
+  with no names, one mtime (1985-10-26 08:15:00 UTC, the date `npm pack`
+  writes), modes 0644 and 0755, two zero blocks at the end. A second action
+  writes the tarball again from the same inputs staged at another path
+  (`[twin]`), and the check refuses it unless the two are the same bytes.
+
+Before anything is written, and again on the tarball read back
+([`npm/npm.zig`](npm/npm.zig), [`npm/manifest.zig`](npm/manifest.zig)), a
+refusal names its check:
+
+- `manifest`: the manifest's `name` and `license` are the rule's, the source
+  is the development manifest above, and it is a JSON object of integer
+  numbers;
+- `repository`: `repository.url` is `https://github.com/komira-ai/komira`,
+  which npm's trusted publishing requires;
+- `platform`: `os`, `cpu` and `libc` are exactly the platform's as npm spells
+  them (linux-x86_64: `linux`, `x64`, `glibc`), and absent for a package with
+  no platform, which holds no native library;
+- `files`: every member is one npm packs for the manifest's `files` list
+  (paths, directories and globs with `*` and `**`) or one it always packs
+  (package.json, a README or licence file at the top), so a stray file the
+  manifest leaves out is refused rather than shipped;
+- `scripts`: no `preinstall`, `install` or `postinstall` script;
+- `path`: relative, printable ASCII, no empty, `.` or `..` part, given once;
+  package.json is the rule's own;
+- `size`: no member over 90 MB;
+- for a platform package, the library checks of
+  [`native_policy/policy.zig`](native_policy/policy.zig), as for a wheel:
+  `glibc`, `glibcxx`, `cxxabi`, `runpath`, `needed` (so a native directory
+  missing one of the Mojo runtime libraries its libraries need is refused,
+  naming it), `external`, `arch`, and on macOS `minos`, `installname` and
+  `signature`. The refusals say "package" where a wheel's say "wheel".
+
+Sub-targets: `[default]` is the tarball, copied only after `[check]` passed;
+`[check]` reads it back ([`npm/check.zig`](npm/check.zig)): the gzip and tar
+exactly as this writer writes them, the members exactly (names, order, bytes
+and modes), the package.json read back held to the rule again, every member
+packed by its `files`, the library checks again, and the twin. `[release]` is
+the tarball copied only after `[release_check]` passed: the same check,
+refusing an unstamped package. A publisher reads `[release]` and nothing else.
+`npm_tarball_test_stamped` gives conda.bzl's test stamp (and its default output
+waits for `[release]` too).
