@@ -158,7 +158,7 @@ Columns: `name`; `row`, the lowering kind of the name's row (`FNK_*`),
 | `differs:n` | n cases ran and an answer differs from DuckDB's |
 | `refused_<step>:n` | n cases ended at that `run_sql` step (parse, bind, optimize, lower, execute) with a refusal: at bind the name does not bind, at a later step it bound and could not run |
 | `batches_n` | the case ran but answered n result batches, not one |
-| `unreadable:n` | n cases ran and answered one batch, and the comparison raised (any raise lands here; today it is an answer type the answer parser does not read, such as a list or a timestamp): the function executes, its values are not yet compared |
+| `unreadable:n` | n cases ran and answered one batch, and the comparison raised (any raise lands here; today it is an answer type the answer parser does not read, such as a list): the function executes, its values are not yet compared |
 | `no_case` | the row lowers, and no case calls the name: bound by the table, never run by this measurement |
 | `probe:refused_bind` | a refusal row or a name with no row: the call `SELECT name(k) FROM T` (one BIGINT argument) is refused at bind; for a refusal row this is the row's refusal, for a name with no row it only says that this call does not bind (a wrong arity or type would be refused too) |
 | `probe:ok` | the same probe ran: a name the table refuses, or has no row for, that nevertheless executes |
@@ -177,24 +177,24 @@ Counts of the names in `function_coverage.tsv` (731 names), each from
 
 | names | what was measured |
 |---|---|
-| 120 | lowering rows whose cases all ran and equal DuckDB's answers |
+| 125 | lowering rows whose cases all ran and equal DuckDB's answers |
 | 4 | lowering rows that run and differ from DuckDB only in floats, within 4 ulps (`cos`, `exp`, `log`, `log10`) |
-| 10 | lowering rows that run but whose answer the comparison cannot read yet: `date_trunc` and `datetrunc` (timestamp results), `string_split`, `str_split`, `split`, `string_to_array` and the four `regexp` / `string_split_regex` spellings (list results) |
+| 8 | lowering rows that run but whose answer the comparison cannot read yet: `string_split`, `str_split`, `split`, `string_to_array` and the four `regexp` / `string_split_regex` spellings (list results) |
 | 4 | lowering rows refused at bind by every case that calls them: `date_diff`, `datediff`, `date_sub`, `datesub` (the table binds the row; the cases' calls do not bind; the reason is not recorded in this table) |
-| 50 | lowering rows no `scalar_fn` case calls, so only the binder has seen them: among the common ones `abs`, `round`, `sign`, `trunc`, `floor`, `ceil`, `sqrt`, `pow`, `power`, `year`, `month`, `day`, `week`, `second`, `coalesce`, `nullif`, `ifnull`, `greatest`, `least`, `isnan`, `json_extract`, `json_extract_string`, `make_timestamp` (cases for some of them exist in other corpora, such as `fn_positions`, and are not run here) |
+| 49 | lowering rows no `scalar_fn` case calls, so only the binder has seen them: among the common ones `abs`, `round`, `sign`, `trunc`, `floor`, `ceil`, `sqrt`, `pow`, `power`, `year`, `month`, `day`, `week`, `second`, `coalesce`, `nullif`, `ifnull`, `greatest`, `least`, `isnan`, `json_extract`, `json_extract_string` (cases for some of them exist in other corpora, such as `fn_positions`, and are not run here) |
 | 3 | rows keyed by a constant (`internal`) |
-| 538 | refusal rows; every one is refused at bind by `SELECT name(k) FROM T` |
+| 536 | refusal rows; every one is refused at bind by `SELECT name(k) FROM T` |
 | 2 | common names with no row at all (`initcap`, `current_timestamp`), refused at bind |
 
-So the rows that execute and are checked against DuckDB are 124 of the 188
-lowering-row names (the first two lines); 14 execute or bind without a
-verified answer; 50 are unmeasured. The gap list of common analysis
+So the rows that execute and are checked against DuckDB are 129 of the 190
+lowering-row names (the first two lines); 12 execute or bind without a
+verified answer; 49 are unmeasured. The gap list of common analysis
 functions is the `common = yes` lines whose `row` is `FNK_REFUSED` or
 `NO_ROW`: for example `split_part`, `strftime`, `strptime`, `epoch`, `age`,
-`current_date`, `now`, `dayname`, `monthname`, `make_date`, `to_timestamp`,
+`current_date`, `now`, `dayname`, `monthname`, `to_timestamp`,
 `random`, `gcd`, `lcm`, `list_*` and `array_length`, `date_add`, `typeof`,
 `position`, `format` and `printf`, `chr`, `initcap`, `current_timestamp`;
-each carries its reason family in `detail`. The 50 unmeasured names are the
+each carries its reason family in `detail`. The 49 unmeasured names are the
 next measurement: a `scalar_fn` case each, with DuckDB's committed answer.
 
 ### Layout of the function coverage files

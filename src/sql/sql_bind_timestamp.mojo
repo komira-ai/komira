@@ -1,6 +1,7 @@
 # =============================================================================
 # sql/sql_bind_timestamp.mojo
-#   CAST target types, make_timestamp and TIMESTAMP literals.
+#   CAST target types, make_timestamp and TIMESTAMP literals (the
+#   six-argument make_timestamp is built in sql_bind_civil).
 # =============================================================================
 
 from arrow.arrow_types import ArrowType
@@ -11,6 +12,7 @@ from plan_expr.expr_walk import (
 )
 from plan_expr.scalar_value import ScalarValue
 from sql.sql_ast import SqlExpr
+from sql.sql_bind_civil import bind_make_timestamp_parts
 from sql.sql_bind_expr import _bind_scalar
 from sql.sql_bind_scope import (
     CteScope, _date_to_days, BindScope,
@@ -129,37 +131,27 @@ def _bind_make_timestamp_epoch(
     var n = len(cargs)
     var fname = String(sx.text)
 
-    # ---- The component overload, refused by arity ---------------------------
+    # ---- The component overload ---------------------------------------------
     # The row is `FN_ARITY_OWN` because `make_timestamp` is both an epoch
-    # constructor (arity 1) and a calendar constructor (arity 6) in DuckDB
-    # v1.5.5, and the two need different primitives: relabelling the calendar
-    # form would read its YEAR as microseconds.
+    # constructor (arity 1) and a calendar constructor (arity 6) in DuckDB,
+    # and the two need different lowerings: relabelling the calendar form
+    # would read its YEAR as microseconds. The calendar form computes the
+    # instant from its parts (`sql_bind_civil`).
     if n == 6 and fname == "make_timestamp":
-        raise Error(
-            "SQL not supported: the SIX-ARGUMENT `make_timestamp(year, month,"
-            " day, hour, minute, seconds)` MINTS A TEMPORAL VALUE from CALENDAR"
-            " COMPONENTS, and THE MISSING PRIMITIVE IS CIVIL-CALENDAR-TO-DAYS"
-            " — month lengths and the Gregorian leap rule — which no `EXPR_*`"
-            " tag or binder desugar in this engine computes. THE ONE-ARGUMENT"
-            " OVERLOAD OF THE SAME NAME IS SERVED, and the difference is not"
-            " arity for its own sake: `make_timestamp(<n>)` is a MICROSECOND"
-            " COUNT SINCE 1970-01-01 (measured DuckDB v1.5.5:"
-            " `make_timestamp(1)` is `1970-01-01 00:00:00.000001`), i.e. a"
-            " temporal quantity that only has to be LABELLED, while the"
-            " six-argument form has to be COMPUTED. DO NOT 'FIX' THIS BY"
-            " LOWERING IT TO THE SAME RELABEL: that reinterprets the YEAR as a"
-            " microsecond count and answers a wrong instant with a success"
-            " code. Spell the instant as a microsecond count, or use a"
-            " TIMESTAMP literal."
+        return bind_make_timestamp_parts(
+            sx, schema, scope, catalog, cte_scope, prebound
         )
     if n != 1:
+        var also = String("")
+        if fname == "make_timestamp":
+            also = (
+                " (or six: make_timestamp(year, month, day, hour, minute,"
+                " seconds))"
+            )
         raise Error(
-            "SQL bind error: `" + fname + "` takes exactly ONE argument here —"
-            " an INTEGER tick count since 1970-01-01 — but got "
-            + String(n) + ". (DuckDB v1.5.5 also gives `make_timestamp` a"
-            " six-argument calendar overload; this engine refuses that one by"
-            " name, because it needs civil-calendar arithmetic this engine does"
-            " not have.)"
+            "SQL bind error: `" + fname + "` takes exactly ONE argument —"
+            " an INTEGER tick count since 1970-01-01" + also + " — but got "
+            + String(n) + "."
         )
 
     var child = _bind_scalar(cargs[0], schema, scope, catalog, cte_scope, prebound)

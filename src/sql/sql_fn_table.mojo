@@ -414,10 +414,17 @@ selector carrying "the timestamp unit" would have made `make_timestamp_ms`
 answer 1000x small, and 1000x small is a plausible instant rather than a
 visible failure.
 
-⛔ THESE ARE THE EPOCH OVERLOADS ONLY. The CALENDAR-COMPONENT forms (the 6-ary
-`make_timestamp`, `make_date(y, m, d)`, `make_time`) still refuse through
-`_R_TSMINT`, whose missing primitive — civil-calendar-to-days — is REAL and is
-untouched by this. See `_bind_make_timestamp_epoch`."""
+⛔ THESE ARE THE EPOCH OVERLOADS ONLY. The CALENDAR-COMPONENT forms are
+computed, not relabelled: the 6-ary `make_timestamp` (an arity branch of
+`_bind_make_timestamp_epoch`) and `make_date(y, m, d)` (`DSG_MAKE_DATE` below)
+by `sql_bind_civil`; `make_time` still refuses through `_R_TSMINT`."""
+
+comptime DSG_MAKE_DATE: UInt8 = 36
+comptime DSG_LAST_DAY: UInt8 = 37
+"""The calendar-parts selectors: `make_date(y, m, d)` and `last_day(x)`, built
+from a day count of their parts by `sql_bind_civil` (the six-argument
+`make_timestamp` is the same arithmetic, reached through `DSG_MAKE_TS_US`'s
+arity-6 branch)."""
 
 
 # -----------------------------------------------------------------------------
@@ -1182,8 +1189,9 @@ comptime _R_TSFORMAT: String = (
     "own temporal type through unchanged, so there is no temporal-to-string "
     "route at all. (2) PARSE: a string-to-timestamp conversion needs a "
     "CALENDAR-FIELDS-TO-INSTANT step — the parsed year/month/day have to "
-    "become a tick count — which is the SAME civil-calendar-to-days primitive "
-    "`_R_TSMINT` measures absent for `make_date(y, m, d)`. ⚠ THE EPOCH-COUNT "
+    "become a tick count. The civil-calendar-to-days arithmetic that step needs "
+    "exists (`sql_bind_civil`, serving `make_date(y, m, d)`), but the parse "
+    "before it does not. ⚠ THE EPOCH-COUNT "
     "`make_timestamp` OVERLOADS DO NOT SERVE THIS: `make_timestamp(<n>)` labels a "
     "tick count that is ALREADY an instant, and a format directive never "
     "produces one — it produces fields. ⚠ `try_strptime` DIFFERS FROM "
@@ -1193,35 +1201,20 @@ comptime _R_TSFORMAT: String = (
 )
 
 comptime _R_TSMINT: String = (
-    "SQL not supported: this name MINTS A TEMPORAL VALUE from non-temporal "
-    "parts by CALENDAR ARITHMETIC or in a ZONE-AWARE type — `make_date(y, m, "
-    "d)`, `make_time(h, m, s)`, the SIX-ARY `make_timestamp(y, m, d, h, mi, "
-    "s)`, `make_timestamptz` and `to_timestamp(<epoch DOUBLE>)` on DuckDB "
-    "v1.5.5. TWO MISSING PRIMITIVES, one per half. (1) CIVIL-CALENDAR-TO-DAYS "
-    "— `make_date(y, m, d)` needs month lengths and leap years, and no "
-    "`EXPR_*` tag or binder desugar computes it. (2) A ZONE-AWARE TEMPORAL "
-    "VALUE — `make_timestamptz` and `to_timestamp` both return TIMESTAMP WITH "
-    "TIME ZONE, and no `sql_bind_*` module produces a value that carries a "
-    "zone: a `TIMESTAMPTZ '...'` literal binds to zone-less UTC microseconds "
+    "SQL not supported: this name MINTS A TEMPORAL VALUE this engine has no "
+    "type for — `make_time(h, m, s)` returns TIME, and `make_timestamptz` and "
+    "`to_timestamp(<epoch DOUBLE>)` return TIMESTAMP WITH TIME ZONE on DuckDB "
+    "v1.5.6. TWO MISSING PRIMITIVES. (1) A TIME VALUE: no `sql_bind_*` module "
+    "produces a time-of-day column. (2) A ZONE-AWARE TEMPORAL VALUE: no "
+    "`sql_bind_*` module produces a value that carries a zone: a "
+    "`TIMESTAMPTZ '...'` literal binds to zone-less UTC microseconds "
     "(`ScalarValue` has no tz field) (the same wall `_R_TZFN` measures). "
-    "⛔ THE RELABEL IS NOT A SERVING ROUTE FOR EITHER HALF, AND THAT IS WHY "
-    "THEY STAY REFUSED WHILE THEIR EPOCH SIBLINGS ARE SERVED: `CAST(<an "
-    "integer> AS DATE)` reinterprets whatever the integer is as a day count, "
-    "which for `make_date(2026, 10, 4)` would answer a wrong date rather "
-    "than raising. "
-    "⭐ THIS ROW IS NARROW BY OVERLOAD, NOT BY NAME. It does not refuse "
-    "`make_timestamp`/`make_timestamp_ms`/`make_timestamp_ns` on this "
-    "calendar-arithmetic ground, because their ARITY-1 overloads carry NO "
-    "calendar arithmetic at all. MEASURED "
-    "v1.5.5: `make_timestamp(1)` is `1970-01-01 00:00:00.000001`, i.e. the "
-    "argument is MICROSECONDS SINCE EPOCH and not a year (the catalog names "
-    "that parameter `year`, which is a red herring). A tick count relabelled "
-    "as the unit it is already in is exactly `EXPR_CAST`'s `INT64 -> "
-    "TIMESTAMP_*` arm. Refusing them by NAME would decline three overloads "
-    "for a missing primitive those overloads never need (ClickBench Q18 and "
-    "Q42 call them). Those three lower through "
-    "`DSG_MAKE_TS_US`/`_MS`/`_NS`; what is refused here is the half the "
-    "measurement supports."
+    "⭐ THE CALENDAR ARITHMETIC IS NOT THE GAP: `make_date(y, m, d)` and the "
+    "six-argument `make_timestamp(y, m, d, h, mi, s)` compute a day count "
+    "from their parts (`sql_bind_civil`), and the one-argument "
+    "`make_timestamp`/`make_timestamp_ms`/`make_timestamp_ns` relabel a "
+    "tick count (`DSG_MAKE_TS_US`/`_MS`/`_NS`); what is refused here is the "
+    "output type."
 )
 
 comptime _R_EPOCHCONV: String = (
@@ -1322,15 +1315,12 @@ comptime _R_INTERVALCTOR: String = (
 )
 
 comptime _R_DATEMINT: String = (
-    "SQL not supported: `last_day` and `julian` return a CALENDAR "
-    "ARITHMETIC RESULT that is not a field of the input — `last_day(DATE) -> "
-    "DATE` (the month's final day, needing month-length and leap-year "
-    "arithmetic) and `julian(TIMESTAMP) -> DOUBLE` (a fractional Julian day "
-    "number) on DuckDB v1.5.3. TWO DIFFERENT MISSING PRIMITIVES under one "
-    "family because both are temporal arithmetic with no `EXTRACT_*` unit: "
-    "`last_day` needs the temporal-MINTING route `_R_TSMINT` measures "
-    "absent, and `julian` needs the whole-instant-as-a-number route "
-    "`_R_EPOCHCONV` measures absent. ⚠ `julian` IS ALSO A `date_trunc` "
+    "SQL not supported: `julian` returns a CALENDAR ARITHMETIC RESULT that "
+    "is not a field of the input — `julian(TIMESTAMP) -> DOUBLE` (a "
+    "fractional Julian day number) on DuckDB v1.5.3. It needs the "
+    "whole-instant-as-a-number route `_R_EPOCHCONV` measures absent. "
+    "(`last_day`, the other calendar-arithmetic result, is served: "
+    "`sql_bind_civil`.) ⚠ `julian` IS ALSO A `date_trunc` "
     "PERIOD IN THIS FILE — `sql_date_trunc_unit` maps it to "
     "EXTRACT_TRUNC_DAY — and that is a DIFFERENT NAMESPACE with a different "
     "meaning; the FUNCTION `julian(x)` has no row until this one."
@@ -2762,10 +2752,10 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     # PLAIN truncating `year / 10`. Three functions, two different rules, and
     # applying either rule to all three is wrong for a third of all years.
     #
-    # ⚠ THE `-1` MAKES THESE CORRECT ONLY FOR AD YEARS, WHICH IS EVERY YEAR
-    # THIS ENGINE CAN REPRESENT. `BIN_DIV` over I64 truncates toward zero, so
-    # a BC year (year <= 0, unrepresentable in this engine's DATE) would round
-    # the wrong way; DuckDB's own answers there are a separate measurement.
+    # ⚠ THE `-1` MAKES THESE CORRECT ONLY FOR AD YEARS. `BIN_DIV` over I64
+    # truncates toward zero, so a BC year (year <= 0: `make_date` of such a
+    # year, or a TIMESTAMP from raw microseconds) would round the wrong way,
+    # and `scalar_desugar.year_derived_of` gives it its own arm.
     #
     # ⛔ `nanosecond` FOLDS THE SECONDS IN, exactly as `millisecond` and
     # `microsecond` do. MEASURED on `12:30:45.123456`: `second` = 45,
@@ -3935,23 +3925,23 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     if name == "strptime": return SqlFnSpec(FNK_REFUSED, _R_TSFORMAT)
     if name == "try_strptime": return SqlFnSpec(FNK_REFUSED, _R_TSFORMAT)
     #
-    # ---- TEMPORAL CONSTRUCTORS — 7 names, SPLIT 3 SERVED / 4 REFUSED
+    # ---- TEMPORAL CONSTRUCTORS — 7 names, SPLIT 4 SERVED / 3 REFUSED
     #
-    # ⭐ THE SPLIT IS BY OVERLOAD SHAPE, NOT BY NAME, AND IT IS THE WHOLE POINT
-    # OF THIS BLOCK. An EPOCH-COUNT constructor takes a tick count that is
-    # ALREADY a temporal quantity and only has to be labelled with its unit; a
-    # CALENDAR-COMPONENT constructor has to do civil-calendar arithmetic this
-    # engine cannot do. Refusing all seven on the second ground would be false
-    # of the first three — see `_R_TSMINT`'s own text.
+    # ⭐ THE SPLIT IS BY OUTPUT TYPE. An EPOCH-COUNT constructor takes a tick
+    # count that is ALREADY a temporal quantity and only has to be labelled
+    # with its unit; a CALENDAR-COMPONENT constructor computes a day count
+    # from its parts (`sql_bind_civil`). Both answer DATE or TIMESTAMP. The
+    # three refused names answer TIME or TIMESTAMP WITH TIME ZONE, which this
+    # engine has no value for — see `_R_TSMINT`'s own text.
     #
-    # ⚠ `make_timestamp` IS IN BOTH CATEGORIES AT ONCE: v1.5.5 gives it an
+    # ⚠ `make_timestamp` IS IN BOTH CATEGORIES AT ONCE: DuckDB gives it an
     # arity-1 epoch overload AND an arity-6 component overload. The row cannot
     # decide that, so it is `FN_ARITY_OWN` and `_bind_make_timestamp_epoch`
-    # refuses the 6-ary spelling with the calendar reason.
+    # branches on the arity.
     if name == "make_timestamp": return SqlFnSpec(FNK_DESUGAR, DSG_MAKE_TS_US, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     if name == "make_timestamp_ms": return SqlFnSpec(FNK_DESUGAR, DSG_MAKE_TS_MS, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     if name == "make_timestamp_ns": return SqlFnSpec(FNK_DESUGAR, DSG_MAKE_TS_NS, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
-    if name == "make_date": return SqlFnSpec(FNK_REFUSED, _R_TSMINT)
+    if name == "make_date": return SqlFnSpec(FNK_DESUGAR, DSG_MAKE_DATE, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     if name == "make_time": return SqlFnSpec(FNK_REFUSED, _R_TSMINT)
     if name == "make_timestamptz": return SqlFnSpec(FNK_REFUSED, _R_TSMINT)
     if name == "to_timestamp": return SqlFnSpec(FNK_REFUSED, _R_TSMINT)
@@ -3989,9 +3979,9 @@ def sql_scalar_fn_spec(name: String) -> SqlFnSpec:
     if name == "to_weeks": return SqlFnSpec(FNK_REFUSED, _R_INTERVALCTOR)
     if name == "to_years": return SqlFnSpec(FNK_REFUSED, _R_INTERVALCTOR)
     #
-    # ---- CALENDAR ARITHMETIC results — 2 names
+    # ---- CALENDAR ARITHMETIC results — 2 names, `last_day` served
     if name == "julian": return SqlFnSpec(FNK_REFUSED, _R_DATEMINT)
-    if name == "last_day": return SqlFnSpec(FNK_REFUSED, _R_DATEMINT)
+    if name == "last_day": return SqlFnSpec(FNK_DESUGAR, DSG_LAST_DAY, FN_ARITY_OWN, FN_ARITY_UNBOUNDED)
     #
     # ---- BIT type and integer-bitwise ops — 6 names
     if name == "bit_position": return SqlFnSpec(FNK_REFUSED, _R_BITFN)

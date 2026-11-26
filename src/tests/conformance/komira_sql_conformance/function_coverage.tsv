@@ -130,11 +130,11 @@ date_add	FNK_REFUSED	_R_INTERVAL	yes	0	probe:refused_bind
 date_diff	FNK_DESUGAR	-	yes	7	refused_bind:7
 date_part	FNK_DESUGAR	-	yes	56	equal:56
 date_sub	FNK_DESUGAR	-	-	3	refused_bind:3
-date_trunc	FNK_DESUGAR	-	yes	57	unreadable:57
+date_trunc	FNK_DESUGAR	-	yes	57	equal:57
 datediff	FNK_DESUGAR	-	-	3	refused_bind:3
 datepart	FNK_DESUGAR	-	-	4	equal:4
 datesub	FNK_DESUGAR	-	-	3	refused_bind:3
-datetrunc	FNK_DESUGAR	-	-	4	unreadable:4
+datetrunc	FNK_DESUGAR	-	-	4	equal:4
 day	FNK_EXTRACT_FIELD	-	yes	0	no_case
 dayname	FNK_REFUSED	_R_DATENAME	yes	0	probe:refused_bind
 dayofmonth	FNK_EXTRACT_FIELD	-	-	1	equal:1
@@ -401,7 +401,7 @@ json_valid	FNK_REFUSED	_R_JSONDOC	-	0	probe:refused_bind
 json_value	FNK_REFUSED	_R_JSONLEAFMODE	-	0	probe:refused_bind
 julian	FNK_REFUSED	_R_DATEMINT	-	0	probe:refused_bind
 lag	FNK_REFUSED	_R_AGGWINVALUE	-	0	probe:refused_bind
-last_day	FNK_REFUSED	_R_DATEMINT	yes	0	probe:refused_bind
+last_day	FNK_DESUGAR	-	yes	4	equal:4
 last_value	FNK_REFUSED	_R_AGGWINVALUE	-	0	probe:refused_bind
 lcase	FNK_STRING_FN	-	-	1	equal:1
 lcm	FNK_REFUSED	_R_INTPAIR	yes	0	probe:refused_bind
@@ -494,9 +494,9 @@ lower	FNK_STRING_FN	-	yes	1	equal:1
 lpad	FNK_STRING_FN_N	-	yes	2	equal:2
 ltrim	FNK_STRING_FN	-	yes	1	equal:1
 mad	FNK_REFUSED	_R_AGGRETAIN	-	0	probe:refused_bind
-make_date	FNK_REFUSED	_R_TSMINT	yes	0	probe:refused_bind
+make_date	FNK_DESUGAR	-	yes	7	equal:7
 make_time	FNK_REFUSED	_R_TSMINT	-	0	probe:refused_bind
-make_timestamp	FNK_DESUGAR	-	yes	0	no_case
+make_timestamp	FNK_DESUGAR	-	yes	4	equal:4
 make_timestamp_ms	FNK_DESUGAR	-	-	0	no_case
 make_timestamp_ns	FNK_DESUGAR	-	-	0	no_case
 make_timestamptz	FNK_REFUSED	_R_TSMINT	-	0	probe:refused_bind

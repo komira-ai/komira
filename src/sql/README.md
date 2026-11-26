@@ -80,15 +80,38 @@ returns a lazy row-oriented scan whose source carries the dialect and the
 file's mtime, so two dialects of one file are two different sources.
 
 The expression binder (`sql_bind_expr`, `sql_bind_call`, `sql_bind_cast`,
-`sql_bind_fn_args`, `sql_bind_fn_nested`, `sql_bind_timestamp`) lowers one
-`SqlExpr` to a plan `Expr` against a schema and a `BindScope`. `sql_bind_expr`
-binds literals, columns, operators, `CASE` and a scalar subquery by index into
-the bodies the caller bound first; `sql_bind_call` resolves a function call
-through `sql_fn_table` (a declared UDF fills in for a name no row lowers) and
-enforces the arity of each row that does not check its own; the other four hold the desugars: `CAST` and
+`sql_bind_fn_args`, `sql_bind_fn_nested`, `sql_bind_timestamp`,
+`sql_bind_civil`) lowers one `SqlExpr` to a plan `Expr` against a schema and a
+`BindScope`. `sql_bind_expr` binds literals, columns, operators, `CASE` and a
+scalar subquery by index into the bodies the caller bound first;
+`sql_bind_call` resolves a function call through `sql_fn_table` (a declared
+UDF fills in for a name no row lowers) and enforces the arity of each row that
+does not check its own; the other five hold the desugars: `CAST` and
 `DECIMAL` literals, the argument-shape functions (`greatest`, `coalesce`,
 `date_part`, `left`, `substring` and the like), the nested-value and
-date-arithmetic functions, and `TIMESTAMP` literals and `make_timestamp`. A
+date-arithmetic functions, `TIMESTAMP` literals and `make_timestamp`, and the
+calendar-parts functions.
+
+`sql_bind_civil` serves `make_date(y, m, d)`, `last_day(x)` and the
+six-argument `make_timestamp(y, m, d, h, mi, s)` as DuckDB answers them,
+from a day count of the parts (Hinnant's days-from-civil on INT64, with the
+year shifted so every division is a floor) and DuckDB's own validity rules.
+When every argument is a number literal the call folds at bind to a DATE or
+TIMESTAMP literal, and an invalid one is refused at bind with DuckDB's message
+(`Conversion Error: Date out of range: 2024-13-1`). Over columns, a row whose
+arguments are invalid fails the query at execution with
+`i64_from_str: no digits in 'make_date: Date out of range'` (or the
+`last_day` / `make_timestamp` equivalent: `Date out of range`, `Time out of
+range`, `Date and time not in timestamp range`): the error names the function
+and what was out of range but not the values, where DuckDB's message carries
+the values. A row with a NULL argument is NULL and never fails. `last_day` of
+DuckDB's infinite DATE or TIMESTAMP is NULL, as in DuckDB. Refused by name:
+`make_date`'s one-argument overloads, a DOUBLE or DECIMAL `make_date` argument
+(DuckDB refuses those too), a VARCHAR argument (DuckDB casts a string
+literal), and `last_day` of a TIMESTAMP WITH TIME ZONE. A call over columns is
+a tree of `CASE` nodes, and a `WHERE` filter refuses a predicate that holds
+one, by name, at execution (`batch_eval/predicate_null_scope.mojo`); a call of
+constants is a literal and filters. A
 shape the engine cannot answer exactly raises an `Error` that names it:
 `SQL not supported` for an unsupported shape, `SQL bind error` for malformed
 input (an arity mismatch, a DECIMAL that does not fit), `SQL internal` for a

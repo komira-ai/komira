@@ -340,8 +340,9 @@ def year_derived_of(which: UInt8, var child: Expr) -> Expr:
     #     y  > 0 :  (y - 1) / S + 1     19xx -> 20, 2000 -> 20, 2001 -> 21
     #     y <= 0 :   y      / S - 1     0 -> -1, -44 -> -1, -100 -> -2
     #
-    # ⚠ THE BC ARM IS REACHABLE. The engine's DATE32 cannot represent a BC
-    # date — but a TIMESTAMP built from raw int64 microseconds CAN, and every
+    # ⚠ THE BC ARM IS REACHABLE. A DATE from `make_date` with a year <= 0
+    # holds a BC date, a TIMESTAMP built from raw int64 microseconds holds a
+    # BC instant, and every
     # derived name here reads `EXTRACT_YEAR`, which decodes that instant
     # correctly. The AD form ALONE answers **1** for 44 BC (DuckDB: -1) and
     # **0** for 1000 BC's millennium (DuckDB: -2) — zero being a value the
@@ -428,9 +429,9 @@ def _dim_divisible(y: Expr, n: Int64) -> Expr:
     `days_in_month` at years -400 / -100 / -44 / -45 / -1 / 0 is
     29 / 28 / 29 / 28 / 28 / 29, which is this chain's answer at every row.
 
-    ⛔ SO DO NOT "SCOPE THIS TO NON-NEGATIVE YEARS" on the grounds that DATE32
-    cannot represent a BC year: a TIMESTAMP built from raw int64 microseconds
-    carries a BC instant and `EXTRACT_YEAR` decodes it (see `century` above).
+    ⛔ SO DO NOT "SCOPE THIS TO NON-NEGATIVE YEARS": `make_date` of a year
+    <= 0 is a BC DATE, a TIMESTAMP built from raw int64 microseconds carries a
+    BC instant, and `EXTRACT_YEAR` decodes both (see `century` above).
 
     ⚠ AND DO NOT MAKE IT FLOOR-BASED "FOR SAFETY" — `y - floor(y/n)*n` is also
     zero exactly when `n | y`, so the change would buy nothing and would cost
@@ -464,8 +465,18 @@ def days_in_month_of(var child: Expr) -> Expr:
     outer ELSE is NULL, not 31 — `days_in_month(NULL)` is NULL. Measured table
     and the reconstruction note: `sql_binder._bind_days_in_month`.
     """
-    var dyear = Expr.extract(EXTRACT_YEAR, child.copy())
-    var dmonth = Expr.extract(EXTRACT_MONTH, child^)
+    return days_in_month_of_parts(
+        Expr.extract(EXTRACT_YEAR, child.copy()),
+        Expr.extract(EXTRACT_MONTH, child^),
+    )
+
+
+def days_in_month_of_parts(var dyear: Expr, var dmonth: Expr) -> Expr:
+    """The length of month `dmonth` of year `dyear`, both INT64 expressions:
+    the CASE `days_in_month_of` builds, over a year and a month that need not
+    come from a date (`make_date(y, m, d)` checks `d` against it). A month
+    outside 1..12, or a NULL part, answers NULL.
+    """
     var fcases = List[WhenCaseData]()
     fcases.append(
         WhenCaseData(
