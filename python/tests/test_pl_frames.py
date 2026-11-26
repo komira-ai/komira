@@ -565,6 +565,21 @@ def test_join_refuses_what_it_cannot_run_or_what_polars_refuses():
     )
 
 
+def test_join_refuses_a_suffix_or_coalesce_of_the_wrong_kind():
+    for suffix in ("", 1, None):
+        refused(
+            lambda: frame().join(right(), on="g", suffix=suffix),
+            TypeError,
+            "join: suffix must be a non-empty str",
+        )
+    for coalesce in ("yes", 1, 0.0):
+        refused(
+            lambda: frame().join(right(), on="g", coalesce=coalesce),
+            TypeError,
+            "join: coalesce must be None or a bool",
+        )
+
+
 def test_join_refuses_keys_of_two_types():
     bad = kpl.scan_parquet(PATH_BAD, session=SESSION)
     refused(

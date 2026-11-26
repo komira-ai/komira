@@ -81,7 +81,7 @@ def join(left, other, on, how, left_on, right_on, suffix, validate, nulls_equal,
         )
     if not isinstance(suffix, str) or not suffix:
         raise TypeError("join: suffix must be a non-empty str")
-    if coalesce not in (None, True, False):
+    if coalesce is not None and not isinstance(coalesce, bool):
         raise TypeError("join: coalesce must be None or a bool")
     if how == "cross":
         if on is not None or left_on is not None or right_on is not None:

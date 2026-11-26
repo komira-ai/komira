@@ -253,7 +253,7 @@ WINDOWS = [
     ("broadcast_in_filter", lambda P, lf, rf: lf.filter(P.col("x") > P.col("x").mean()), False),
     (
         "over_partition",
-        lambda P, lf, rf: lf.select("id", "g", "x").with_columns(
+        lambda P, lf, rf: lf.select("id", "g", "x", "flag").with_columns(
             P.col("x").sum().over("g").alias("gs"),
             P.col("x").mean().over("g").alias("gm"),
             P.col("x").min().over("g").alias("gmin"),
