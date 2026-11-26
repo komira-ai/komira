@@ -29,9 +29,12 @@
 //!  - it does not hold up the Linux path: it `needs` nothing (nothing in release.yml `needs` it, so the prod
 //!    publish never waits on this workflow; the publish waits on its own build of the macOS packages, in
 //!    mopm-stage), and it is bounded (`timeout-minutes` at most 120, the longest of the other jobs);
-//!  - a failed or skipped macOS build ends the run failed: the job is not `continue-on-error`, and a last job
-//!    `release-macos-result` (`needs: release-macos`, `if: always()`) fails with "the macOS build did not run"
-//!    when the build's result is skipped, so a run whose build never ran is not green;
+//!  - a failed, skipped or stalled macOS build ends the run failed: the job is not `continue-on-error`, and a
+//!    last job `release-macos-result` (`needs: release-macos`, `if: ${{ !cancelled() }}`) fails with "the macOS
+//!    build did not run" when the build's result is skipped, and with "the macOS build was cancelled while the
+//!    run went on" when the build job alone was cancelled (its timeout-minutes ran out), so a run whose build
+//!    never ran or stalled is not green or merely cancelled; only a run cancelled as a whole (a newer push)
+//!    skips the job;
 //!  - it is not triggered on a pull request: neither macOS-naming workflow's `on:` names one, and no
 //!    workflow that runs on a pull request (pr.yml, coverage.yml) has a non-comment line naming darwin,
 //!    macOS, osx or `--target-platforms`, with two exceptions, both in pr.yml and exactly as written: the
@@ -96,6 +99,13 @@ const BOUND = "    timeout-minutes: 90";
 const CONTINUE_ON_ERROR = "    continue-on-error: true";
 const RESULT_JOB = "release-macos-result";
 const RESULT_REASON = "the macOS build did not run";
+/// The condition of release-macos-result: it runs whatever the build's result, except in a run cancelled as a
+/// whole (a newer push), where the newer run builds.
+const RESULT_IF = "    if: ${{ !cancelled() }}";
+/// The arm for a build job cancelled while the run went on (its timeout-minutes ran out): an error, and a failure.
+const CANCELLED_ARM = "            cancelled)";
+const CANCELLED_REASON = "the macOS build was cancelled while the run went on";
+const CANCELLED_EXIT = "              exit 1 ;;";
 const SAID_RUN = "        run: '\"$RUNNER_TEMP/buck2_failure\" --log \"$RUNNER_TEMP/buck2-farm.log\" --step \"$FAILED_STEP\" --github-output \"$GITHUB_OUTPUT\" --summary-file \"$GITHUB_STEP_SUMMARY\"'";
 const SAID_IF = "        if: failure() && steps.reader.outcome == 'success' && (steps.build.outcome == 'failure' || steps.python.outcome == 'failure')";
 const REPORT_OUTPUT = "      report: ${{ steps.said.outputs.message || ";
@@ -309,7 +319,7 @@ fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     const res = (try jobLines(ar, text, RESULT_JOB, &rn)) orelse return "release-macos.yml has no job release-macos-result (a skipped macOS build would end the run green)";
     if (rn != 1) return "release-macos-result is defined more than once";
     if (!has(res, "    needs: release-macos")) return "release-macos-result does not need exactly release-macos";
-    if (!has(res, "    if: always()")) return "release-macos-result is not if: always() (a skipped build would skip it too, and the run would end green)";
+    if (!has(res, RESULT_IF)) return "release-macos-result is not if: ${{ !cancelled() }} (with no condition or failure() a skipped build skips it and the run ends green; always() fails a run a newer push cancelled)";
     if (!has(res, "    runs-on: ubuntu-24.04")) return "release-macos-result does not run on ubuntu-24.04";
     if (mentions(res, "continue-on-error")) return "release-macos-result is continue-on-error: its failure would read as success";
     if (!mentions(res, "needs.release-macos.result")) return "release-macos-result does not read the result of release-macos";
@@ -317,6 +327,10 @@ fn checkMacos(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (!mentions(res, RESULT_REASON)) return "release-macos-result does not say \"the macOS build did not run\"";
     if (!mentions(res, "exit 1")) return "release-macos-result never fails";
     if (!mentions(res, "::error")) return "release-macos-result writes no ::error annotation";
+    // a build job cancelled while the run went on ran out its timeout-minutes: a stalled build fails the run
+    const arm = lineAt(res, CANCELLED_ARM) orelse return "release-macos-result does not handle a cancelled build (a stalled build that ran out its timeout-minutes)";
+    if (arm + 2 >= res.len or std.mem.indexOf(u8, res[arm + 1], "::error") == null or std.mem.indexOf(u8, res[arm + 1], CANCELLED_REASON) == null or !std.mem.eql(u8, res[arm + 2], CANCELLED_EXIT))
+        return "release-macos-result does not fail a cancelled build with \"the macOS build was cancelled while the run went on\" (a stalled build would end the run cancelled, not failed)";
     if (mentions(res, "uses:")) return "release-macos-result uses an action: it only reads a result";
     // a failed build is reported with what the failed step said, never with a guess at the cause
     if (!has(job, SAID_RUN)) return "release-macos does not read the build's log with buck2_failure (what buck2 said would be lost)";
@@ -950,12 +964,23 @@ test "each edit of the real release-macos.yml that breaks the macOS build's cont
     // the run ends failed when the build did not run
     try expectRefused(ar, try replaced(ar, text, "\n  release-macos-result:\n", "\n  release-macos-final:\n"), "has no job release-macos-result");
     try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n", "    needs: [release-macos, other]\n"), "does not need exactly release-macos");
-    try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n"), "not if: always()");
-    try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n    if: failure()\n"), "not if: always()");
+    const res_if = "    needs: release-macos\n" ++ RESULT_IF ++ "\n";
+    try expectRefused(ar, try replaced(ar, text, res_if, "    needs: release-macos\n"), "not if: ${{ !cancelled() }}");
+    try expectRefused(ar, try replaced(ar, text, res_if, "    needs: release-macos\n    if: failure()\n"), "not if: ${{ !cancelled() }}");
+    try expectRefused(ar, try replaced(ar, text, res_if, "    needs: release-macos\n    if: always()\n"), "not if: ${{ !cancelled() }}");
     try expectRefused(ar, try replaced(ar, text, "needs.release-macos.result", "needs.release-macos.outcome"), "does not read the result");
     try expectRefused(ar, try replaced(ar, text, RESULT_REASON, "the macOS build ended"), "does not say");
     try expectRefused(ar, try replaced(ar, text, "exit 1 ;;", "exit 0 ;;"), "never fails");
-    try expectRefused(ar, try replaced(ar, text, "    needs: release-macos\n    if: always()\n", "    needs: release-macos\n    if: always()\n    continue-on-error: true\n"), "its failure would read as success");
+    try expectRefused(ar, try replaced(ar, text, res_if, res_if ++ "    continue-on-error: true\n"), "its failure would read as success");
+
+    // a build job cancelled while the run went on (its timeout-minutes ran out) fails the run
+    const arm = CANCELLED_ARM ++ "\n              echo \"::error title=release-macos::" ++ CANCELLED_REASON;
+    try expectRefused(ar, try replaced(ar, text, arm, "            canceled)\n              echo \"::error title=release-macos::" ++ CANCELLED_REASON), "does not handle a cancelled build");
+    try expectRefused(ar, try replaced(ar, text, arm, CANCELLED_ARM ++ "\n              echo \"::warning title=release-macos::" ++ CANCELLED_REASON), "does not fail a cancelled build");
+    try expectRefused(ar, try replaced(ar, text, arm, CANCELLED_ARM ++ "\n              echo \"::error title=release-macos::the macOS build was cancelled"), "does not fail a cancelled build");
+    try expectRefused(ar, try replaced(ar, text, "(a stalled build), or its runner was stopped\"\n" ++ CANCELLED_EXIT ++ "\n", "(a stalled build), or its runner was stopped\" ;;\n"), "does not fail a cancelled build");
+    // the arm as it was: a warning that blamed a newer push, and no failure
+    try expectRefused(ar, try replaced(ar, text, "              echo \"::error title=release-macos::" ++ CANCELLED_REASON ++ ": it ran past its timeout-minutes (a stalled build), or its runner was stopped\"\n" ++ CANCELLED_EXIT ++ "\n", "              echo \"::warning title=release-macos::the macOS build was cancelled (a newer push replaces a running build)\" ;;\n"), "does not fail a cancelled build");
 
     // nothing publishes from it
     try expectRefused(ar, try replaced(ar, text, "      - name: the macOS build failed\n", "      - run: mopm publish --staged x --registry prod --oidc\n      - name: the macOS build failed\n"), "publishes");

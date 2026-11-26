@@ -518,10 +518,13 @@ tests, which no pull request builds. The rest of this section is about `release-
   `release-macos.yml`, with a line in its summary, and the release run, the prod publish and
   `main_red.yml` do not see it: none of them `needs` it or reads its result. The job is not
   `continue-on-error`, which would end a failed build green. The last job,
-  `release-macos-result` (`needs: release-macos`, `if: always()`), fails with "the macOS build
+  `release-macos-result` (`needs: release-macos`, `if: ${{ !cancelled() }}`), fails with "the macOS build
   did not run" when the build job was skipped, and with "did not pass" when it failed, so the
   run list, the commit status and the badge never read green for a Mac build that did not
-  pass. Its message says what happened rather than guessing: when a buck2 step failed (the build
+  pass. A build job that ran out its `timeout-minutes` is cancelled by GitHub while the run
+  goes on, so `release-macos-result` runs and fails with "the macOS build was cancelled while
+  the run went on". Only when the run itself was cancelled (a newer push, or by hand) does
+  `release-macos-result` not run: the run ends cancelled and the newer run builds. Its message says what happened rather than guessing: when a buck2 step failed (the build
   of the set, or of the Python harness tests), `//release/ci:buck2_failure` (built before them)
   reads that step's buck2 output and the message is buck2's own lines after `BUILD FAILED`
   (also written to the run's summary);

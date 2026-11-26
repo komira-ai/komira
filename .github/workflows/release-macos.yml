@@ -31,7 +31,10 @@
 # macOS build of the release"). Bounded: 90 minutes.
 # The last job, release-macos-result, makes a build that never ran (its job skipped) end the run
 # failed too, with "the macOS build did not run", and for a failed build says which step failed and,
-# when it was a buck2 step, what buck2 said (release/ci:buck2_failure reads the step's log).
+# when it was a buck2 step, what buck2 said (release/ci:buck2_failure reads the step's log). A build
+# that ran out its 90 minutes is cancelled by GitHub while the run goes on: that fails the run too,
+# with "the macOS build was cancelled while the run went on"; only a cancelled run (a newer push)
+# skips that job and ends cancelled.
 #
 # It needs the repository variables FARM_DARWIN_ARM64_PROPERTIES and FARM_DARWIN_MACOS_HOSTS (and may
 # take FARM_MACOS_LIBRARY_DIRS), docs/ci.md; without them the step after the connection fails the job
@@ -147,9 +150,14 @@ jobs:
   # A skipped build job is not a failed one, and a run whose jobs were all skipped ends green. This job
   # runs whatever happened to the build and fails unless it succeeded, so the run list, the commit
   # status and the badge say that the macOS build did not pass. Nothing in release.yml needs it.
+  # A cancelled build is one of two things, told apart by the job condition !cancelled() (false when
+  # the run itself was cancelled): the run was cancelled, by a newer push (cancel-in-progress) or by
+  # hand, and this job does not run (the run ends cancelled and the newer run builds); or the build
+  # job alone was cancelled while the run went on, which is its timeout-minutes running out (a stalled
+  # build), and that fails like any other build that did not pass.
   release-macos-result:
     needs: release-macos
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
@@ -165,7 +173,8 @@ jobs:
               echo "::error title=release-macos::the macOS build did not run: its job was skipped (a condition of the job was false, or an earlier job it waits on did not succeed)"
               exit 1 ;;
             cancelled)
-              echo "::warning title=release-macos::the macOS build was cancelled (a newer push replaces a running build)" ;;
+              echo "::error title=release-macos::the macOS build was cancelled while the run went on: it ran past its timeout-minutes (a stalled build), or its runner was stopped"
+              exit 1 ;;
             *)
               echo "::error title=release-macos::the macOS build did not pass: ${REPORT:-its job ended $BUILD_RESULT before the buckconfig check (the checkout or farm-connect failed; the log of the job says why)}"
               exit 1 ;;
