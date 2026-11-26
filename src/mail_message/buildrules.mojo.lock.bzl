@@ -5,16 +5,16 @@ MOPM = {"version": "0.0.138", "origin": "builtin", "workspace_root": True}
 MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
-    "../byte_buffer/mopm.toml": "269f3f9a12df23cdf8cdfe25a4002e39ce664bda21f50122999f9e3de2c7eda0",
-    "../datetime/mopm.toml": "e6f1de668b2838cb2fd2c6bf0b6ca84fbce036b8ea8db30633c64939e8c1def1",
-    "../encoding/mopm.toml": "d9564875ec708dbd9ca97c063141eb88cb3e382ce7b1dfd1bc64a2a0917f8e35",
-    "../host_probe/mopm.toml": "420afc534dca76710fb278af369b7829eeea599e7959ad95c8d07316f3c9f33a",
-    "../libc/mopm.toml": "7536db87cec8e40e3c514afe4830af8035f7052481feb535737a8778a52cf84c",
-    "../mail_address/mopm.toml": "17cd23617317d858e3002f9089b149e8242db8aa339273c37ca0cdbfbb7e97be",
-    "../simd_ops/mopm.toml": "247b0195039f9478b16cf99fc3e4c13adeebd7c6a468301a2e0c372d63a6420d",
+    "../byte_buffer/mopm.toml": "d6f1cc8e19924e1590cf7bee3d7250c6a2861efd066980c84f0a4b5ece4683f2",
+    "../datetime/mopm.toml": "3da3613147142936b1bf670ff80d82deb67228ec8c35f3159f7480be6f4abad1",
+    "../encoding/mopm.toml": "e1017d28d8a80d545ba93da6e0f168cff20366cdb93ff54181a80a3521e539d4",
+    "../host_probe/mopm.toml": "ef1629d9ccfe8224d18549692939560ccc6811a7457d06a7a1ae939a72bc0a05",
+    "../libc/mopm.toml": "b6b808cc29f7d69536de8df770fd3ebb3dd5b2497cb6eeeedc6dbf3dcc314178",
+    "../mail_address/mopm.toml": "0af4da0ff87eaa58aebc8947be7a25abf25745cd95e3b0487e2c364da0651cfd",
+    "../simd_ops/mopm.toml": "0a154e884085a079d19a26ff1e91a6c697cc9a5d455b06288d6db571b5a9f90d",
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "4ab268a03875cba5303da0ebad2bc8cad7f06ec7198989ffe533c23eb9b2bde7",
-    "mopm.toml": "7f68cf54b98909d295225a167ff1b03a898d5dff6816b636f98f98d38989ffba",
+    "mopm.lock": "e43fc976dce60244570e8cf920726f124bc0d683ba5399c7bbcb94217c86cd58",
+    "mopm.toml": "90e5dc56e45f73a1dad0b0216c6153604262d63489505d938811aa42d45613aa",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -904,4 +904,891 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/mail_message@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/byte_buffer/src/byte_buffer",
+      "deps": ["komira-ai/host_probe@0.1.0#mojo1.2.0/lib", "komira-ai/libc@0.1.0#mojo1.2.0/lib", "komira-ai/simd_ops@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["byte_buffer.mojoc"]
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/datetime/src/datetime",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["datetime.mojoc"]
+    },
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/host_probe@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/host_probe",
+      "import": "host_probe",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/host_probe/src/host_probe",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["host_probe.mojoc"]
+    },
+    {
+      "id": "komira-ai/libc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/libc/src/libc",
+      "deps": [],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["libc.mojoc"]
+    },
+    {
+      "id": "komira-ai/mail_address@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/mail_address",
+      "import": "mail_address",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/mail_address/src/mail_address",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["mail_address.mojoc"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/mail_message/src/mail_message",
+      "srcs": [
+        {"path": "src/mail_message/src/mail_message/__init__.mojo", "sha256": "7a1b59a0462954bcc5a20f12d94ab4ffcc40e768bd83065fdd176d06ebe70e69"},
+        {"path": "src/mail_message/src/mail_message/build.mojo", "sha256": "49b11ece3987555ace7e6b1cdd4adbaf5b3ba58351438fbb32de3a842c78251a"},
+        {"path": "src/mail_message/src/mail_message/chars.mojo", "sha256": "f54fe5397374b7d82c9ea1888db3e0db9f55f1cc63feb82c1274566974002a2a"},
+        {"path": "src/mail_message/src/mail_message/date.mojo", "sha256": "c551cd2b91ed9f2be93f37039ab5a6c02ba83c753f0ddc1d657cf88d2d6d4e89"},
+        {"path": "src/mail_message/src/mail_message/date_parse.mojo", "sha256": "fa86efc985845b8e8456bc68a4fd67c0dc00e0b9edf58e0ddae2a6c51c3445d8"},
+        {"path": "src/mail_message/src/mail_message/encoded_word.mojo", "sha256": "b20ea0a9e667df6909a99f6d1dc3900f54cefaa9be8b549e3ef25c80d7d5c393"},
+        {"path": "src/mail_message/src/mail_message/errors.mojo", "sha256": "e177585bb870f413f1089a366e30252590aa20abda2c336c2e346d171d9c1b8a"},
+        {"path": "src/mail_message/src/mail_message/fold.mojo", "sha256": "29d5cdd3dffc153141fe1ff7e6752f26ce342b3145b50c4f9d0c33a5c6711368"},
+        {"path": "src/mail_message/src/mail_message/header.mojo", "sha256": "f6e830c2c93cf5488474944ca2dbaa3171f97912a827a5155a72ce13c2029f45"},
+        {"path": "src/mail_message/src/mail_message/params.mojo", "sha256": "767ea193bc5f770f4b3f4142003e6d9687299b2d226c0c8753ec9d0282cbf0cd"},
+        {"path": "src/mail_message/src/mail_message/parse.mojo", "sha256": "ee59883e908b67466d024ae434e119cc358102f8b99990244b149c5813425150"},
+        {"path": "src/mail_message/src/mail_message/quoted_printable.mojo", "sha256": "6bc2f0652e9496ce5667a1d0a0d4068c4bd823aa81bbae29dbb0e699c9dbd034"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib", "komira-ai/datetime@0.1.0#mojo1.2.0/lib", "komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/mail_address@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["mail_message.mojoc"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_build_golden.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_build_golden.mojo", "sha256": "88ceaf9c6e4ded68f65d387e0202d251e24ecbc79c7d7cdd07ba8ce9e7d1b8a4"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_build_golden.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_build_paths.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_build_paths.mojo", "sha256": "6926918a4ba3184243ad7a24503e545bbb7d95869c576f68b79d061a2a7a7024"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_build_paths.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_date_parse.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_date_parse.mojo", "sha256": "bf571dbedd58168b5c59969b0d9604a98ae3c92e5144c85516c78297b9c53f9f"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_date_parse.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_folding.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_folding.mojo", "sha256": "10dfbe98479bac40a5db625dc391e8d6bd192bec1cde7fa1c049ea735f157f2c"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_folding.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_imap_gaps.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_imap_gaps.mojo", "sha256": "a14a7696588f4dc143802f5bdd5b10be0475636b7108b30ad918750afe40e8c9"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_imap_gaps.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_mime_values.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_mime_values.mojo", "sha256": "442df61419d0253ef933c23b5e20d21e74f2529e38db8d4e59afa64a406c8f8f"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mime_values.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_parse_corpus.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_parse_corpus.mojo", "sha256": "c9a00692cf4dd2f5e00194bfeb60e015035214b03284f5cef8d1971d34753599"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_parse_corpus.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_refusals.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_refusals.mojo", "sha256": "4b07fd4b4b6e9213939d99492222c23f34bea0fea40e29944c85a95745a6554e"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_refusals.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_rfc2047.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_rfc2047.mojo", "sha256": "d6494b0b56556dee1cf6615c274d8986d604f038fa2246a81ab7391e450e7530"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rfc2047.pass"]
+    },
+    {
+      "id": "komira-ai/simd_ops@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/simd_ops",
+      "import": "simd_ops",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/simd_ops/src/simd_ops",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["simd_ops.mojoc"]
+    },
+    {
+      "id": "native:komira-ai/libc/komira_libc_posix",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_libc_posix.a",
+      "srcs": [
+        {"path": "src/libc/native/komira_libc_posix.c", "sha256": "e622c2f2dd393e3c8bde188b95fd931dd516f11cab67af25cad6c47b841c3a6d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_libc_posix.a"],
+      "key": "cf999f64bdecac4774d0205cbd5a8f5de3538479d0e0d9e3e10792926ea0027c"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/mail_message@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/byte_buffer/src/byte_buffer",
+      "deps": ["komira-ai/host_probe@0.1.0#mojo1.2.0/lib", "komira-ai/libc@0.1.0#mojo1.2.0/lib", "komira-ai/simd_ops@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["byte_buffer.mojoc"]
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/datetime/src/datetime",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["datetime.mojoc"]
+    },
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/host_probe@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/host_probe",
+      "import": "host_probe",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/host_probe/src/host_probe",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["host_probe.mojoc"]
+    },
+    {
+      "id": "komira-ai/libc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/libc/src/libc",
+      "deps": [],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["libc.mojoc"]
+    },
+    {
+      "id": "komira-ai/mail_address@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/mail_address",
+      "import": "mail_address",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/mail_address/src/mail_address",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["mail_address.mojoc"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/mail_message/src/mail_message",
+      "srcs": [
+        {"path": "src/mail_message/src/mail_message/__init__.mojo", "sha256": "7a1b59a0462954bcc5a20f12d94ab4ffcc40e768bd83065fdd176d06ebe70e69"},
+        {"path": "src/mail_message/src/mail_message/build.mojo", "sha256": "49b11ece3987555ace7e6b1cdd4adbaf5b3ba58351438fbb32de3a842c78251a"},
+        {"path": "src/mail_message/src/mail_message/chars.mojo", "sha256": "f54fe5397374b7d82c9ea1888db3e0db9f55f1cc63feb82c1274566974002a2a"},
+        {"path": "src/mail_message/src/mail_message/date.mojo", "sha256": "c551cd2b91ed9f2be93f37039ab5a6c02ba83c753f0ddc1d657cf88d2d6d4e89"},
+        {"path": "src/mail_message/src/mail_message/date_parse.mojo", "sha256": "fa86efc985845b8e8456bc68a4fd67c0dc00e0b9edf58e0ddae2a6c51c3445d8"},
+        {"path": "src/mail_message/src/mail_message/encoded_word.mojo", "sha256": "b20ea0a9e667df6909a99f6d1dc3900f54cefaa9be8b549e3ef25c80d7d5c393"},
+        {"path": "src/mail_message/src/mail_message/errors.mojo", "sha256": "e177585bb870f413f1089a366e30252590aa20abda2c336c2e346d171d9c1b8a"},
+        {"path": "src/mail_message/src/mail_message/fold.mojo", "sha256": "29d5cdd3dffc153141fe1ff7e6752f26ce342b3145b50c4f9d0c33a5c6711368"},
+        {"path": "src/mail_message/src/mail_message/header.mojo", "sha256": "f6e830c2c93cf5488474944ca2dbaa3171f97912a827a5155a72ce13c2029f45"},
+        {"path": "src/mail_message/src/mail_message/params.mojo", "sha256": "767ea193bc5f770f4b3f4142003e6d9687299b2d226c0c8753ec9d0282cbf0cd"},
+        {"path": "src/mail_message/src/mail_message/parse.mojo", "sha256": "ee59883e908b67466d024ae434e119cc358102f8b99990244b149c5813425150"},
+        {"path": "src/mail_message/src/mail_message/quoted_printable.mojo", "sha256": "6bc2f0652e9496ce5667a1d0a0d4068c4bd823aa81bbae29dbb0e699c9dbd034"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib", "komira-ai/datetime@0.1.0#mojo1.2.0/lib", "komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/mail_address@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["mail_message.mojoc"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_build_golden.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_build_golden.mojo", "sha256": "88ceaf9c6e4ded68f65d387e0202d251e24ecbc79c7d7cdd07ba8ce9e7d1b8a4"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_build_golden.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_build_paths.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_build_paths.mojo", "sha256": "6926918a4ba3184243ad7a24503e545bbb7d95869c576f68b79d061a2a7a7024"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_build_paths.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_date_parse.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_date_parse.mojo", "sha256": "bf571dbedd58168b5c59969b0d9604a98ae3c92e5144c85516c78297b9c53f9f"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_date_parse.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_folding.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_folding.mojo", "sha256": "10dfbe98479bac40a5db625dc391e8d6bd192bec1cde7fa1c049ea735f157f2c"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_folding.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_imap_gaps.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_imap_gaps.mojo", "sha256": "a14a7696588f4dc143802f5bdd5b10be0475636b7108b30ad918750afe40e8c9"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_imap_gaps.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_mime_values.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_mime_values.mojo", "sha256": "442df61419d0253ef933c23b5e20d21e74f2529e38db8d4e59afa64a406c8f8f"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mime_values.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_parse_corpus.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_parse_corpus.mojo", "sha256": "c9a00692cf4dd2f5e00194bfeb60e015035214b03284f5cef8d1971d34753599"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_parse_corpus.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_refusals.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_refusals.mojo", "sha256": "4b07fd4b4b6e9213939d99492222c23f34bea0fea40e29944c85a95745a6554e"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_refusals.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_rfc2047.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_rfc2047.mojo", "sha256": "d6494b0b56556dee1cf6615c274d8986d604f038fa2246a81ab7391e450e7530"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rfc2047.pass"]
+    },
+    {
+      "id": "komira-ai/simd_ops@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/simd_ops",
+      "import": "simd_ops",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/simd_ops/src/simd_ops",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["simd_ops.mojoc"]
+    },
+    {
+      "id": "native:komira-ai/libc/komira_libc_posix",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_libc_posix.a",
+      "srcs": [
+        {"path": "src/libc/native/komira_libc_posix.c", "sha256": "e622c2f2dd393e3c8bde188b95fd931dd516f11cab67af25cad6c47b841c3a6d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_libc_posix.a"],
+      "key": "3c3134af6ad936c5c8018446a7757e784527494753d8df774a52f54829b6d194"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/mail_message@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/byte_buffer/src/byte_buffer",
+      "deps": ["komira-ai/host_probe@0.1.0#mojo1.2.0/lib", "komira-ai/libc@0.1.0#mojo1.2.0/lib", "komira-ai/simd_ops@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["byte_buffer.mojoc"]
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/datetime/src/datetime",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["datetime.mojoc"]
+    },
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/host_probe@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/host_probe",
+      "import": "host_probe",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/host_probe/src/host_probe",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["host_probe.mojoc"]
+    },
+    {
+      "id": "komira-ai/libc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/libc/src/libc",
+      "deps": [],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["libc.mojoc"]
+    },
+    {
+      "id": "komira-ai/mail_address@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/mail_address",
+      "import": "mail_address",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/mail_address/src/mail_address",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["mail_address.mojoc"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/mail_message/src/mail_message",
+      "srcs": [
+        {"path": "src/mail_message/src/mail_message/__init__.mojo", "sha256": "7a1b59a0462954bcc5a20f12d94ab4ffcc40e768bd83065fdd176d06ebe70e69"},
+        {"path": "src/mail_message/src/mail_message/build.mojo", "sha256": "49b11ece3987555ace7e6b1cdd4adbaf5b3ba58351438fbb32de3a842c78251a"},
+        {"path": "src/mail_message/src/mail_message/chars.mojo", "sha256": "f54fe5397374b7d82c9ea1888db3e0db9f55f1cc63feb82c1274566974002a2a"},
+        {"path": "src/mail_message/src/mail_message/date.mojo", "sha256": "c551cd2b91ed9f2be93f37039ab5a6c02ba83c753f0ddc1d657cf88d2d6d4e89"},
+        {"path": "src/mail_message/src/mail_message/date_parse.mojo", "sha256": "fa86efc985845b8e8456bc68a4fd67c0dc00e0b9edf58e0ddae2a6c51c3445d8"},
+        {"path": "src/mail_message/src/mail_message/encoded_word.mojo", "sha256": "b20ea0a9e667df6909a99f6d1dc3900f54cefaa9be8b549e3ef25c80d7d5c393"},
+        {"path": "src/mail_message/src/mail_message/errors.mojo", "sha256": "e177585bb870f413f1089a366e30252590aa20abda2c336c2e346d171d9c1b8a"},
+        {"path": "src/mail_message/src/mail_message/fold.mojo", "sha256": "29d5cdd3dffc153141fe1ff7e6752f26ce342b3145b50c4f9d0c33a5c6711368"},
+        {"path": "src/mail_message/src/mail_message/header.mojo", "sha256": "f6e830c2c93cf5488474944ca2dbaa3171f97912a827a5155a72ce13c2029f45"},
+        {"path": "src/mail_message/src/mail_message/params.mojo", "sha256": "767ea193bc5f770f4b3f4142003e6d9687299b2d226c0c8753ec9d0282cbf0cd"},
+        {"path": "src/mail_message/src/mail_message/parse.mojo", "sha256": "ee59883e908b67466d024ae434e119cc358102f8b99990244b149c5813425150"},
+        {"path": "src/mail_message/src/mail_message/quoted_printable.mojo", "sha256": "6bc2f0652e9496ce5667a1d0a0d4068c4bd823aa81bbae29dbb0e699c9dbd034"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib", "komira-ai/datetime@0.1.0#mojo1.2.0/lib", "komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/mail_address@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["mail_message.mojoc"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_build_golden.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_build_golden.mojo", "sha256": "88ceaf9c6e4ded68f65d387e0202d251e24ecbc79c7d7cdd07ba8ce9e7d1b8a4"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_build_golden.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_build_paths.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_build_paths.mojo", "sha256": "6926918a4ba3184243ad7a24503e545bbb7d95869c576f68b79d061a2a7a7024"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_build_paths.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_date_parse.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_date_parse.mojo", "sha256": "bf571dbedd58168b5c59969b0d9604a98ae3c92e5144c85516c78297b9c53f9f"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_date_parse.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_folding.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_folding.mojo", "sha256": "10dfbe98479bac40a5db625dc391e8d6bd192bec1cde7fa1c049ea735f157f2c"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_folding.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_imap_gaps.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_imap_gaps.mojo", "sha256": "a14a7696588f4dc143802f5bdd5b10be0475636b7108b30ad918750afe40e8c9"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_imap_gaps.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_mime_values.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_mime_values.mojo", "sha256": "442df61419d0253ef933c23b5e20d21e74f2529e38db8d4e59afa64a406c8f8f"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mime_values.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_parse_corpus.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_parse_corpus.mojo", "sha256": "c9a00692cf4dd2f5e00194bfeb60e015035214b03284f5cef8d1971d34753599"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_parse_corpus.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_refusals.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_refusals.mojo", "sha256": "4b07fd4b4b6e9213939d99492222c23f34bea0fea40e29944c85a95745a6554e"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_refusals.pass"]
+    },
+    {
+      "id": "komira-ai/mail_message@0.1.0#mojo1.2.0/test:src/mail_message/tests/test_rfc2047.mojo",
+      "package": "komira-ai/mail_message",
+      "import": "mail_message",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mail_message/tests/test_rfc2047.mojo", "sha256": "d6494b0b56556dee1cf6615c274d8986d604f038fa2246a81ab7391e450e7530"}
+      ],
+      "deps": ["komira-ai/mail_message@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rfc2047.pass"]
+    },
+    {
+      "id": "komira-ai/simd_ops@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/simd_ops",
+      "import": "simd_ops",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/simd_ops/src/simd_ops",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["simd_ops.mojoc"]
+    },
+    {
+      "id": "native:komira-ai/libc/komira_libc_posix",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_libc_posix.a",
+      "srcs": [
+        {"path": "src/libc/native/komira_libc_posix.c", "sha256": "e622c2f2dd393e3c8bde188b95fd931dd516f11cab67af25cad6c47b841c3a6d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_libc_posix.a"],
+      "key": "222f2a6e74d4b0380ea980b2cf9d2af60b98432f7be764be68bc30ae58c2d783"
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

@@ -2235,7 +2235,7 @@ struct _Parser(Movable):
             self._advance()
             otherwise.append(self._parse_expr())
         self._expect_kw("end")
-        return SqlExpr.case(conds^, results^, otherwise^)
+        return SqlExpr.case_when(conds^, results^, otherwise^)
 
     def _parse_op(mut self) raises -> SqlExpr:
         """`||` and `^@` — DuckDB's "any other operator" precedence level

@@ -39,14 +39,14 @@
 
 from atomic_alias import AtomicI64
 from std.ffi import _Global
-from std.io import FileDescriptor
+from std.sys import stderr
 from std.memory import OwnedPointer, alloc
 
 from async_rt.runtime.sched_trace import sched_trace_enabled
 
 # fd 2. A query's stdout is its RESULT STREAM: a diagnostic written there is
 # not a log line, it is a corrupted answer.
-comptime _JL_STDERR: FileDescriptor = FileDescriptor(2)
+comptime _JL_STDERR = stderr
 
 
 def _init_jl_counter() -> OwnedPointer[AtomicI64]:

@@ -20,9 +20,8 @@
 # =============================================================================
 
 from std.atomic import Ordering
-from std.io import FileDescriptor
 from std.memory import alloc, unsafe_memset, OwnedPointer, UnsafePointer
-from std.sys import num_physical_cores, size_of
+from std.sys import num_physical_cores, size_of, stderr
 
 from arrow.primitive_array import PrimitiveArray
 from atomic_alias import AtomicI64
@@ -70,7 +69,7 @@ comptime _MK_BUILD_PARALLEL_THRESHOLD: Int = JOIN_BUILD_PARALLEL_THRESHOLD
 as the single-key build's)."""
 
 # fd 2: a query's stdout is its result stream.
-comptime _MKB_STDERR: FileDescriptor = FileDescriptor(2)
+comptime _MKB_STDERR = stderr
 
 comptime _MK_CHUNKS_PER_CORE: Int = 4
 

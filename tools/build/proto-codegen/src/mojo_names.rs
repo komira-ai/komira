@@ -13,7 +13,7 @@ pub const KEYWORDS: &[&str] = &[
     "lambda", "mut", "None", "nonlocal", "not", "or", "out", "owned", "pass",
     "raise", "raises", "read", "ref", "return", "self", "struct", "trait",
     "True", "try", "var", "while", "with", "yield",
-    "imm", "deinit",
+    "imm", "deinit", "match", "case",
 ];
 
 /// Names a generated identifier is escaped away from: the keywords, and
@@ -128,6 +128,17 @@ mod tests {
         assert_eq!(flatten(&["fn".into()]), "fn_");
         assert_eq!(escape_member("return"), "return_");
         assert_eq!(escape_member("job_id"), "job_id");
+    }
+
+    #[test]
+    fn mojo_1_2_keywords_match_and_case_are_escaped() {
+        for n in ["match", "case"] {
+            assert_eq!(flatten(&[n.into()]), format!("{n}_"), "flatten({n})");
+            assert_eq!(escape_member(n), format!("{n}_"), "escape_member({n})");
+        }
+        assert_eq!(rpc_method_name("Match"), "match_");
+        assert_eq!(escape_member("matches"), "matches");
+        assert_eq!(escape_member("case_id"), "case_id");
     }
 
     #[test]

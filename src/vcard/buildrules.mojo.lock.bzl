@@ -5,10 +5,10 @@ MOPM = {"version": "0.0.138", "origin": "builtin", "workspace_root": True}
 MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
-    "../content_line/mopm.toml": "20be6acb9dd4b0373fecc7eee68085d23b54f44c626bd3ad42a3599f289a97ec",
+    "../content_line/mopm.toml": "3906153cb3a53b0566a86bf94e638239ded65cedf679b9b53f9fc0ece80b19f6",
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "d37ed760014afb17f61061071ae01c1db1351b824c13b18ae2173c5de42aec0a",
-    "mopm.toml": "339ce09356187be1d3cdba79daae8f6866ce4b4cca8f583f579da376787d747a",
+    "mopm.lock": "1496168fb73339e546163e41f7c05f26920e2bbffafb58f1d14c6a493affa54c",
+    "mopm.toml": "7765f3c89b193dedaa33d4f3c629bc3f7286fc86ff6c88785a2b0f68ca62e94e",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -292,4 +292,285 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/vcard@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/content_line@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/content_line",
+      "import": "content_line",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/content_line/src/content_line",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["content_line.mojoc"]
+    },
+    {
+      "id": "komira-ai/vcard@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/vcard",
+      "import": "vcard",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/vcard/src/vcard",
+      "srcs": [
+        {"path": "src/vcard/src/vcard/__init__.mojo", "sha256": "60e0ae884981b6d22473776f2fed1c7aa7e8160463703496abf378473e3f43e3"},
+        {"path": "src/vcard/src/vcard/card.mojo", "sha256": "9db968d10de86b86793379e58b0e2e1d25794b5feac30c9b71b97226560226f1"},
+        {"path": "src/vcard/src/vcard/contact.mojo", "sha256": "ed95f17752f82626c419a87124921c717fcac4d89a1dadca5ee347263f6cad3a"},
+        {"path": "src/vcard/src/vcard/read.mojo", "sha256": "ab5f7107cd9d24d0afb637e8d672ea89672393d10700625c2a7442b323bfcfa6"},
+        {"path": "src/vcard/src/vcard/write.mojo", "sha256": "e324bd34ca032865ba064ab0056ff8ba2068484d389481b9a88137647c42dd42"}
+      ],
+      "deps": ["komira-ai/content_line@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["vcard.mojoc"]
+    },
+    {
+      "id": "komira-ai/vcard@0.1.0#mojo1.2.0/test:src/vcard/tests/test_cards.mojo",
+      "package": "komira-ai/vcard",
+      "import": "vcard",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/vcard/tests/test_cards.mojo", "sha256": "45b58c9e780fe5c13cfe55d393b537c40a113abdbf61c85dbe281cb659db893f"}
+      ],
+      "deps": ["komira-ai/vcard@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cards.pass"]
+    },
+    {
+      "id": "komira-ai/vcard@0.1.0#mojo1.2.0/test:src/vcard/tests/test_contacts.mojo",
+      "package": "komira-ai/vcard",
+      "import": "vcard",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/vcard/tests/test_contacts.mojo", "sha256": "82ae628057bec5f2d25e1f439f7a7ed5fa6c21be9171ace0dba75b25f9cdc00e"}
+      ],
+      "deps": ["komira-ai/vcard@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_contacts.pass"]
+    },
+    {
+      "id": "komira-ai/vcard@0.1.0#mojo1.2.0/test:src/vcard/tests/test_round_trip.mojo",
+      "package": "komira-ai/vcard",
+      "import": "vcard",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/vcard/tests/test_round_trip.mojo", "sha256": "44234a4e785e681588f14e4139ab8d20052f7e6aa8d50523c1278239040db178"}
+      ],
+      "deps": ["komira-ai/vcard@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_round_trip.pass"]
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/vcard@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/content_line@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/content_line",
+      "import": "content_line",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/content_line/src/content_line",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["content_line.mojoc"]
+    },
+    {
+      "id": "komira-ai/vcard@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/vcard",
+      "import": "vcard",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/vcard/src/vcard",
+      "srcs": [
+        {"path": "src/vcard/src/vcard/__init__.mojo", "sha256": "60e0ae884981b6d22473776f2fed1c7aa7e8160463703496abf378473e3f43e3"},
+        {"path": "src/vcard/src/vcard/card.mojo", "sha256": "9db968d10de86b86793379e58b0e2e1d25794b5feac30c9b71b97226560226f1"},
+        {"path": "src/vcard/src/vcard/contact.mojo", "sha256": "ed95f17752f82626c419a87124921c717fcac4d89a1dadca5ee347263f6cad3a"},
+        {"path": "src/vcard/src/vcard/read.mojo", "sha256": "ab5f7107cd9d24d0afb637e8d672ea89672393d10700625c2a7442b323bfcfa6"},
+        {"path": "src/vcard/src/vcard/write.mojo", "sha256": "e324bd34ca032865ba064ab0056ff8ba2068484d389481b9a88137647c42dd42"}
+      ],
+      "deps": ["komira-ai/content_line@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["vcard.mojoc"]
+    },
+    {
+      "id": "komira-ai/vcard@0.1.0#mojo1.2.0/test:src/vcard/tests/test_cards.mojo",
+      "package": "komira-ai/vcard",
+      "import": "vcard",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/vcard/tests/test_cards.mojo", "sha256": "45b58c9e780fe5c13cfe55d393b537c40a113abdbf61c85dbe281cb659db893f"}
+      ],
+      "deps": ["komira-ai/vcard@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cards.pass"]
+    },
+    {
+      "id": "komira-ai/vcard@0.1.0#mojo1.2.0/test:src/vcard/tests/test_contacts.mojo",
+      "package": "komira-ai/vcard",
+      "import": "vcard",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/vcard/tests/test_contacts.mojo", "sha256": "82ae628057bec5f2d25e1f439f7a7ed5fa6c21be9171ace0dba75b25f9cdc00e"}
+      ],
+      "deps": ["komira-ai/vcard@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_contacts.pass"]
+    },
+    {
+      "id": "komira-ai/vcard@0.1.0#mojo1.2.0/test:src/vcard/tests/test_round_trip.mojo",
+      "package": "komira-ai/vcard",
+      "import": "vcard",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/vcard/tests/test_round_trip.mojo", "sha256": "44234a4e785e681588f14e4139ab8d20052f7e6aa8d50523c1278239040db178"}
+      ],
+      "deps": ["komira-ai/vcard@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_round_trip.pass"]
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/vcard@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/content_line@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/content_line",
+      "import": "content_line",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/content_line/src/content_line",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["content_line.mojoc"]
+    },
+    {
+      "id": "komira-ai/vcard@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/vcard",
+      "import": "vcard",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/vcard/src/vcard",
+      "srcs": [
+        {"path": "src/vcard/src/vcard/__init__.mojo", "sha256": "60e0ae884981b6d22473776f2fed1c7aa7e8160463703496abf378473e3f43e3"},
+        {"path": "src/vcard/src/vcard/card.mojo", "sha256": "9db968d10de86b86793379e58b0e2e1d25794b5feac30c9b71b97226560226f1"},
+        {"path": "src/vcard/src/vcard/contact.mojo", "sha256": "ed95f17752f82626c419a87124921c717fcac4d89a1dadca5ee347263f6cad3a"},
+        {"path": "src/vcard/src/vcard/read.mojo", "sha256": "ab5f7107cd9d24d0afb637e8d672ea89672393d10700625c2a7442b323bfcfa6"},
+        {"path": "src/vcard/src/vcard/write.mojo", "sha256": "e324bd34ca032865ba064ab0056ff8ba2068484d389481b9a88137647c42dd42"}
+      ],
+      "deps": ["komira-ai/content_line@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["vcard.mojoc"]
+    },
+    {
+      "id": "komira-ai/vcard@0.1.0#mojo1.2.0/test:src/vcard/tests/test_cards.mojo",
+      "package": "komira-ai/vcard",
+      "import": "vcard",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/vcard/tests/test_cards.mojo", "sha256": "45b58c9e780fe5c13cfe55d393b537c40a113abdbf61c85dbe281cb659db893f"}
+      ],
+      "deps": ["komira-ai/vcard@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cards.pass"]
+    },
+    {
+      "id": "komira-ai/vcard@0.1.0#mojo1.2.0/test:src/vcard/tests/test_contacts.mojo",
+      "package": "komira-ai/vcard",
+      "import": "vcard",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/vcard/tests/test_contacts.mojo", "sha256": "82ae628057bec5f2d25e1f439f7a7ed5fa6c21be9171ace0dba75b25f9cdc00e"}
+      ],
+      "deps": ["komira-ai/vcard@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_contacts.pass"]
+    },
+    {
+      "id": "komira-ai/vcard@0.1.0#mojo1.2.0/test:src/vcard/tests/test_round_trip.mojo",
+      "package": "komira-ai/vcard",
+      "import": "vcard",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/vcard/tests/test_round_trip.mojo", "sha256": "44234a4e785e681588f14e4139ab8d20052f7e6aa8d50523c1278239040db178"}
+      ],
+      "deps": ["komira-ai/vcard@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_round_trip.pass"]
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

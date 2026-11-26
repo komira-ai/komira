@@ -5,7 +5,7 @@ description = "An XML 1.0 codec in Mojo, with no dependencies: a strict namespac
 license = "Apache-2.0"
 repository = "https://github.com/komira-ai/komira"
 readme = "README.md"
-mojo = ["1.1.0"]
+mojo = ["1.1.0", "1.2.0"]
 
 [targets]
 lib = { path = "src/xml" }

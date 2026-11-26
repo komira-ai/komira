@@ -23,6 +23,11 @@
 //!    before the version rewrite (which edits the manifests the build reads), with the macOS keys in the
 //!    buckconfig farm-connect writes (`darwin-config-file`) and that this build alone names, so no other
 //!    step of the job configures a macOS platform;
+//!  - one build of every package per Mojo (1.1.0 and 1.2.0) at the one version of the run: `mopm-stage` builds
+//!    the packages once for each (the second on the platform `linux-x86_64-mojo-1.2.0`, into its own
+//!    directory), stages with `--artifacts 1.1.0=<dir> --artifacts 1.2.0=<dir>` and no `--compiler`, runs the
+//!    README e2e for each Mojo (as does `prod-test`), and `prod-add` runs `release_staged_verify add --mojo`
+//!    once for each, so a release that drops a Mojo from any of them is red;
 //!  - no secret: no line outside a comment names `MOPM_TOKEN` or `secrets`;
 //!  - the workflow's top-level `permissions` is `{}` (a job holds only what it names);
 //!  - the prod publish, six jobs under one gate (`prod-stage`, `prod-test`,
@@ -80,13 +85,20 @@ const PROD_BUILD_VERIFY = "          args: build //tools/build/ci:release_staged
 const PROD_VERIFY_RUN = "        run: '\"$RUNNER_TEMP/prod-test/release_staged_verify\" verify --staged \"$RUNNER_TEMP/prod-test/staged\" --out release/staged_set'";
 const PROD_E2E_RUN = "          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all";
 const STAGE_E2E_RUN = PROD_E2E_RUN;
+// The same e2e with Mojo 1.2.0: the platform names every Mojo rule's compiler, and the staged set holds both builds.
+const NEXT_PLATFORM = "--target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0";
+const PROD_E2E_NEXT = "          args: build " ++ NEXT_PLATFORM ++ " -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all";
+const STAGE_E2E_NEXT = PROD_E2E_NEXT;
 const PROD_REWRITE_NAME = "      - name: every member gets the version of this run";
-const PROD_MOPM_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.1.0 --out release/staged_set --registry prod'";
+const PROD_MOPM_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"1.1.0=$RUNNER_TEMP/mopm-publish/artifacts-1.1.0\" --artifacts \"1.2.0=$RUNNER_TEMP/mopm-publish/artifacts-1.2.0\" --out release/staged_set --registry prod'";
 const PROD_SMOKE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" smoke --staged \"$RUNNER_TEMP/prod-smoke/committed\" --config-url https://api.mopm.dev/index/config.json --attempts 5 --delay 30'";
-const PROD_ADD_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" add --staged \"$RUNNER_TEMP/prod-add/committed\" --mopm \"$RUNNER_TEMP/mopm-publish/mopm\" --work \"$RUNNER_TEMP/prod-add/work\"'";
+const PROD_ADD_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" add --staged \"$RUNNER_TEMP/prod-add/committed\" --mopm \"$RUNNER_TEMP/mopm-publish/mopm\" --work \"$RUNNER_TEMP/prod-add/work-1.1.0\" --mojo 1.1.0'";
+const PROD_ADD_NEXT_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" add --staged \"$RUNNER_TEMP/prod-add/committed\" --mopm \"$RUNNER_TEMP/mopm-publish/mopm\" --work \"$RUNNER_TEMP/prod-add/work-1.2.0\" --mojo 1.2.0'";
 // The packages of both platforms in the one directory `mopm stage --artifacts` reads; the only step that names the
 // buckconfig of the macOS keys (MAC_CONFIG_INPUT writes it), so no other step of mopm-stage configures a macOS platform.
-const PACKAGES_BUILD = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts";
+const PACKAGES_BUILD = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts-1.1.0";
+// The same build with Mojo 1.2.0, into the directory of that compiler (`mopm stage --artifacts 1.2.0=<directory>`).
+const PACKAGES_BUILD_NEXT = "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true " ++ NEXT_PLATFORM ++ " //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts-1.2.0";
 const MAC_CONFIG_INPUT = "          darwin-config-file: ${{ runner.temp }}/darwin.buckconfig";
 const MAC_CONFIG_FILE = "darwin.buckconfig";
 const STAGE_BUILD_VERIFY = "          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/mopm-publish/release_staged_verify";
@@ -216,17 +228,23 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     // the packages of both platforms, built once, before the rewrite edits the manifests the build reads, with the
     // macOS keys in a file of their own that only this step names
     var package_builds: usize = 0;
+    var next_builds: usize = 0;
     var config_lines: usize = 0;
     for (prod_stage) |l| {
         if (std.mem.eql(u8, l, PACKAGES_BUILD)) package_builds += 1;
+        if (std.mem.eql(u8, l, PACKAGES_BUILD_NEXT)) next_builds += 1;
         if (std.mem.indexOf(u8, l, MAC_CONFIG_FILE) != null) config_lines += 1;
     }
     if (package_builds != 1) return "mopm-stage does not build the packages of both platforms (//release:mopm_release_artifacts, with the macOS keys' buckconfig) exactly once";
+    if (next_builds != 1) return "mopm-stage does not build the packages of both platforms for the second Mojo (--target-platforms ...mojo-1.2.0, into artifacts-1.2.0) exactly once";
     if (lineAt(prod_stage, PACKAGES_BUILD).? > prod_rewrite_at) return "mopm-stage builds the packages after it rewrites their versions: the build would read the rewritten manifests";
+    if (lineAt(prod_stage, PACKAGES_BUILD_NEXT).? > prod_rewrite_at) return "mopm-stage builds the packages for the second Mojo after it rewrites their versions: the build would read the rewritten manifests";
     if (lineAt(prod_stage, MAC_CONFIG_INPUT) == null) return "mopm-stage's farm connection writes the macOS keys into the machine buckconfig (no darwin-config-file): every step of the job would configure a macOS platform";
-    if (config_lines != 2) return "a step of mopm-stage other than `build the packages` names the macOS keys' buckconfig: only that build configures a macOS platform";
+    if (config_lines != 3) return "a step of mopm-stage other than the two builds of the packages names the macOS keys' buckconfig: only those builds configure a macOS platform";
     const stage_e2e_at = lineAt(prod_stage, STAGE_E2E_RUN) orelse return "mopm-stage does not run the e2e on the staged set at this run's version (staged=stage, beta_version=0.1.<run number>)";
     if (stage_e2e_at < prod_stage_at) return "mopm-stage runs the e2e before it stages";
+    const stage_e2e_next_at = lineAt(prod_stage, STAGE_E2E_NEXT) orelse return "mopm-stage does not run the e2e on the staged set for the second Mojo (--target-platforms ...mojo-1.2.0, staged=stage, beta_version=0.1.<run number>)";
+    if (stage_e2e_next_at < prod_stage_at) return "mopm-stage runs the e2e for the second Mojo before it stages";
 
     if (try checkProd(ar, text, prod_stage)) |why| return why;
     if (try checkStagedRetention(ar, text)) |why| return why;
@@ -386,6 +404,8 @@ fn checkProd(ar: std.mem.Allocator, text: []const u8, stage_job: []const []const
     if (!(connect_at < tool_at and tool_at < verify_at)) return "prod-test verifies before the farm is joined and the tool built";
     if (!(download_at < verify_at)) return "prod-test verifies before it has the files";
     if (!(verify_at < e2e_at)) return "prod-test runs the e2e before the verification";
+    const e2e_next_at = lineAt(tst, PROD_E2E_NEXT) orelse return "prod-test does not run the e2e on the verified set for the second Mojo (--target-platforms ...mojo-1.2.0, staged=stage at this run's version)";
+    if (!(verify_at < e2e_next_at)) return "prod-test runs the e2e for the second Mojo before the verification";
     // nothing else may write the directory the e2e reads
     var writers: usize = 0;
     for (tst) |l| if (std.mem.indexOf(u8, l, "staged_set") != null) {
@@ -401,7 +421,7 @@ fn checkProd(ar: std.mem.Allocator, text: []const u8, stage_job: []const []const
     for (tst) |l| if (std.mem.eql(u8, l, E2E_ASSERT)) {
         asserted += 1;
     };
-    if (asserted != 2) return "prod-test has a farm step that is not asserted remote";
+    if (asserted != 3) return "prod-test has a farm step that is not asserted remote";
 
     const commit = (try jobLines(ar, text, "prod-commit", &scratch)).?;
     if (mentions(commit, "farm") or mentions(commit, "buck2")) return "prod-commit joins the farm or runs buck2";
@@ -446,13 +466,14 @@ fn checkProd(ar: std.mem.Allocator, text: []const u8, stage_job: []const []const
     }
     if (mentions(add, "farm") or mentions(add, "buck2")) return "prod-add joins the farm or runs buck2";
     const add_at = lineAt(add, PROD_ADD_RUN) orelse return "prod-add does not run release_staged_verify add with the mopm of mopm-stage on the committed directory";
+    const add_next_at = lineAt(add, PROD_ADD_NEXT_RUN) orelse return "prod-add does not run release_staged_verify add for the second Mojo (--mojo 1.2.0) on the committed directory";
     const add_dl = lineAt(add, "          name: mopm-prod-committed-${{ github.sha }}") orelse return "prod-add does not download the committed directory";
-    if (!(add_dl < add_at)) return "prod-add adds before it has the committed directory";
+    if (!(add_dl < add_at and add_dl < add_next_at)) return "prod-add adds before it has the committed directory";
     var add_runs: usize = 0;
     for (add) |l| if (std.mem.indexOf(u8, l, "release_staged_verify\" add ") != null) {
         add_runs += 1;
     };
-    if (add_runs != 1) return "prod-add runs release_staged_verify more than once";
+    if (add_runs != 2) return "prod-add runs release_staged_verify other than once for each Mojo (1.1.0 and 1.2.0)";
     return null;
 }
 
@@ -594,9 +615,18 @@ test "each defect written into the real release.yml (beta, switch, triggers, ver
     try expectRefused(ar, try replaced(ar, try replaced(ar, text, prod_rewrite_step, ""), "      - name: build the version tool\n", prod_rewrite_step ++ "      - name: build the version tool\n"), "before it builds it");
     try expectRefused(ar, try replaced(ar, text, BUILD_TOOL_LINE ++ "\n", ""), "does not build release_beta_version once");
     // the e2e of mopm-stage is at that version
-    const stage_e2e_tail = "\n          assert-remote: ${{ steps.assert.outputs.path }}\n      # Reads plan.json";
+    const stage_e2e_tail = "\n          assert-remote: ${{ steps.assert.outputs.path }}\n      - name: the README e2e against the staged set for Mojo 1.2.0";
     try expectRefused(ar, try replaced(ar, text, STAGE_E2E_RUN ++ stage_e2e_tail, "          args: build -c komira_release.staged=stage //release/readme_e2e/verify:all" ++ stage_e2e_tail), "mopm-stage does not run the e2e on the staged set at this run's version");
     try expectRefused(ar, try replaced(ar, text, STAGE_E2E_RUN ++ stage_e2e_tail, "          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_attempt }} //release/readme_e2e/verify:all" ++ stage_e2e_tail), "mopm-stage does not run the e2e on the staged set at this run's version");
+    // and the e2e with Mojo 1.2.0 is there too, at that version, on the platform of that Mojo, after the stage
+    const stage_e2e_next_tail = "\n          assert-remote: ${{ steps.assert.outputs.path }}\n      # Reads plan.json";
+    try expectRefused(ar, try replaced(ar, text, STAGE_E2E_NEXT ++ stage_e2e_next_tail, "          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all" ++ stage_e2e_next_tail), "mopm-stage does not run the e2e on the staged set for the second Mojo");
+    try expectRefused(ar, try replaced(ar, text, STAGE_E2E_NEXT ++ stage_e2e_next_tail, "          args: build " ++ NEXT_PLATFORM ++ " -c komira_release.staged=stage //release/readme_e2e/verify:all" ++ stage_e2e_next_tail), "mopm-stage does not run the e2e on the staged set for the second Mojo");
+    try expectRefused(ar, try replaced(ar, text, STAGE_E2E_NEXT ++ stage_e2e_next_tail, "          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} " ++ NEXT_PLATFORM ++ " //release/readme_e2e/verify:all" ++ stage_e2e_next_tail), "mopm-stage does not run the e2e on the staged set for the second Mojo");
+    // the stage packs a build for each Mojo: `--artifacts 1.1.0=<dir> --artifacts 1.2.0=<dir>`, no `--compiler`
+    try expectRefused(ar, try replaced(ar, text, PROD_MOPM_STAGE_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts-1.1.0\" --compiler 1.1.0 --out release/staged_set --registry prod'"), "does not stage against prod");
+    try expectRefused(ar, try replaced(ar, text, PROD_MOPM_STAGE_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"1.1.0=$RUNNER_TEMP/mopm-publish/artifacts-1.1.0\" --out release/staged_set --registry prod'"), "does not stage against prod");
+    try expectRefused(ar, try replaced(ar, text, PROD_MOPM_STAGE_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"1.1.0=$RUNNER_TEMP/mopm-publish/artifacts-1.1.0\" --artifacts \"1.2.0=$RUNNER_TEMP/mopm-publish/artifacts-1.1.0\" --out release/staged_set --registry prod'"), "does not stage against prod");
     // mopm-stage runs on every push and on a manual run: it takes no condition
     try expectRefused(ar, try replaced(ar, text, "  mopm-stage:\n    runs-on: ubuntu-24.04\n", "  mopm-stage:\n    if: github.event_name == 'push'\n    runs-on: ubuntu-24.04\n"), "mopm-stage has a condition");
 
@@ -758,6 +788,12 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     // prod-test's e2e is at the version of the run, the one the set was staged at
     try expectRefused(ar, try replaced(ar, text, e2e_step, try replaced(ar, e2e_step, e2e_args, "-c komira_release.staged=stage //release/readme_e2e/verify:all\n")), "does not run the e2e on the verified set");
     try expectRefused(ar, try replaced(ar, text, e2e_step, try replaced(ar, e2e_step, e2e_args, "-c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_attempt }} //release/readme_e2e/verify:all\n")), "does not run the e2e on the verified set");
+    // prod-test runs the e2e for the second Mojo too, on the same verified set at the version of the run
+    const e2e_next_step = "      - name: the README e2e against the staged files for Mojo 1.2.0\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ PROD_E2E_NEXT ++ nl ++ E2E_ASSERT ++ nl;
+    try expectRefused(ar, try replaced(ar, text, e2e_next_step, ""), "does not run the e2e on the verified set for the second Mojo");
+    try expectRefused(ar, try replaced(ar, text, PROD_E2E_NEXT, "          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all"), "for the second Mojo");
+    try expectRefused(ar, try replaced(ar, text, verify_step ++ e2e_step ++ e2e_next_step, e2e_next_step ++ verify_step ++ e2e_step), "runs the e2e for the second Mojo before the verification");
+    try expectRefused(ar, try replaced(ar, text, e2e_next_step, e2e_next_step ++ "        continue-on-error: true\n"), "prod-test ignores a failure");
     try expectRefused(ar, try replaced(ar, text, verify_step, verify_step ++ "      - run: cp x release/staged_set/y\n"), "other than in the one verify step");
     try expectRefused(ar, try replaced(ar, text, verify_step, verify_step ++ verify_step), "other than in the one verify step");
     try expectRefused(ar, try replaced(ar, text, PROD_E2E_RUN ++ nl ++ E2E_ASSERT ++ nl, PROD_E2E_RUN ++ nl), "not asserted remote");
@@ -800,18 +836,31 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD, linux_only), "does not build the packages of both platforms");
     try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD, "          args: build //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts"), "does not build the packages of both platforms");
     try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD, PACKAGES_BUILD ++ nl ++ PACKAGES_BUILD), "does not build the packages of both platforms");
+    // the second Mojo's build: once, on the platform of that Mojo, into the directory `mopm stage` reads for it, before the rewrite
+    try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD_NEXT, PACKAGES_BUILD_NEXT ++ nl ++ PACKAGES_BUILD_NEXT), "for the second Mojo");
+    try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD_NEXT, try replaced(ar, PACKAGES_BUILD_NEXT, " " ++ NEXT_PLATFORM, "")), "for the second Mojo");
+    try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD_NEXT, try replaced(ar, PACKAGES_BUILD_NEXT, "artifacts-1.2.0", "artifacts-1.1.0")), "for the second Mojo");
+    try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD_NEXT, try replaced(ar, PACKAGES_BUILD_NEXT, " -c komira_release.mac_tree=true", "")), "for the second Mojo");
+    try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD_NEXT ++ nl, ""), "for the second Mojo");
     // without the gate the target is incompatible, and the build would build nothing of either platform
     try expectRefused(ar, try replaced(ar, text, PACKAGES_BUILD, "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts"), "does not build the packages of both platforms");
     try expectRefused(ar, try replaced(ar, text, MAC_CONFIG_INPUT ++ nl, ""), "no darwin-config-file");
     try expectRefused(ar, try replaced(ar, text, STAGE_E2E_RUN, "          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all"), "names the macOS keys' buckconfig");
     const rewrite_step = PROD_REWRITE_NAME ++ "\n        env:\n" ++ REWRITE_ENV ++ "\n" ++ PROD_REWRITE_RUN ++ "\n";
     try expectRefused(ar, try replaced(ar, try replaced(ar, text, rewrite_step, ""), "      - name: build the packages\n", rewrite_step ++ "      - name: build the packages\n"), "the packages after it rewrites");
+    try expectRefused(ar, try replaced(ar, try replaced(ar, text, rewrite_step, ""), "      - name: build the packages for Mojo 1.2.0\n", rewrite_step ++ "      - name: build the packages for Mojo 1.2.0\n"), "for the second Mojo after it rewrites");
     try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ " || true"), "prod-add ignores a failure");
     try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ "\n        continue-on-error: true"), "prod-add ignores a failure");
     try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ "\n      - run: ./mopm publish --staged x --registry prod --oidc"), "it only adds and installs");
     try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ "\n      - run: mopm login"), "it only adds and installs");
     try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ "\n      - uses: ./.github/actions/farm-connect"), "prod-add joins the farm");
-    try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ nl ++ PROD_ADD_RUN), "more than once");
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_RUN, PROD_ADD_RUN ++ nl ++ PROD_ADD_RUN), "other than once for each Mojo");
+    // one add for each Mojo of the release: the second one cannot be dropped, repeated for the first Mojo, or be for another
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_NEXT_RUN ++ nl, ""), "does not run release_staged_verify add for the second Mojo");
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_NEXT_RUN, PROD_ADD_RUN), "does not run release_staged_verify add for the second Mojo");
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_NEXT_RUN, try replaced(ar, PROD_ADD_NEXT_RUN, "--mojo 1.2.0", "--mojo 1.1.0")), "does not run release_staged_verify add for the second Mojo");
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_NEXT_RUN, PROD_ADD_NEXT_RUN ++ " || true"), "prod-add ignores a failure");
+    try expectRefused(ar, try replaced(ar, text, PROD_ADD_NEXT_RUN, PROD_ADD_NEXT_RUN ++ nl ++ PROD_ADD_NEXT_RUN), "other than once for each Mojo");
     const add_dl = "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n          name: mopm-prod-committed-${{ github.sha }}\n          path: ${{ runner.temp }}/prod-add/committed\n";
     try expectRefused(ar, try replaced(ar, text, add_dl, "      - name: early\n" ++ PROD_ADD_RUN ++ nl ++ add_dl), "adds before it has the committed directory");
     try expectRefused(ar, try replaced(ar, text, "          name: mopm-prod-committed-${{ github.sha }}\n          path: ${{ runner.temp }}/prod-add/committed\n", "          name: mopm-prod-staged-${{ github.sha }}\n          path: ${{ runner.temp }}/prod-add/committed\n"), "prod-add does not download the committed directory");

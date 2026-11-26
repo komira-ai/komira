@@ -82,6 +82,30 @@ disagrees with the labels fails the step.
 | labels that hold no such `:lib` (another target of a set package, a package outside the set, the tests cell) | nothing: the build step is skipped |
 | a line that is not a target label | fails: `BROKEN` |
 
+## The Mojo 1.2.0 targets: `mojo_next.bxl`
+
+```sh
+./buck2 bxl komira//tools/build/ci/mojo_next.bxl:select @tools/build/ci/mojo_next_affected.args @targets.txt
+```
+
+`targets.txt` is what `affected.bxl` printed. It prints the targets of `pr.yml`'s Mojo 1.2.0 part
+([docs/ci.md](../../../docs/ci.md#pryml-the-pull-requests-check)), which builds them, and tests the ones that are not of the tests cell, with
+`--target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0`: the labels go to stdout, one per
+line, and one line `mojo_next: <KIND>: <reason>` goes to the log. A line of `targets.txt` that is not a target
+label fails the command with `mojo_next: BROKEN: ...`. [`mojo_next.bzl`](mojo_next.bzl) is the rule and
+`mojo_next_cases.bzl` its cases (run by `cases.bxl:run`): `mojo_next_answer` is everything the command prints and
+its failure.
+
+| The selector's answer | The kind and what is printed |
+|---|---|
+| a list that holds `komira//ci:pr` or `komira//ci:pr_default` | `WHOLE`: the twin aggregate, `komira//ci:pr_mojo_next` or `komira//ci:pr_default_mojo_next` |
+| labels, some of them not coverage roots (a package's `:coverage` or `:coverage_floor`, the coverage tools' fixtures) | `SOME`: every label but the coverage roots, in the list's order, once each |
+| labels that are all coverage roots, or no label | `NONE`: nothing, and the build step is skipped |
+| a line that is not a target label | fails: `BROKEN` |
+
+The twins are declared in `ci/BUCK`: `//ci:pr_mojo_next` and `//ci:pr_default_mojo_next` are `//ci:pr` and
+`//ci:pr_default` without the coverage roots, which are measured with the default compiler only.
+
 ## The aggregate: `//ci:pr`
 
 `ci/BUCK` declares one target that builds every check:

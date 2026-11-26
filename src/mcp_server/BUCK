@@ -2,6 +2,7 @@ load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
 load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":buildrules.mojo.bzl", "mojo_package")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 # A Model Context Protocol (MCP) server library: JSON-RPC 2.0 framing, the
 # session lifecycle (initialize, version negotiation, the initialized
@@ -50,7 +51,7 @@ mojo_conda(
         "../encoding": "//src/encoding:mopm.toml",
         "../json": "//src/json:mopm.toml",
     },
-    mojo = "1.1.0",
+    mojo = mojo_version(),
     mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/mcp_server",
     version = "0.1.0",

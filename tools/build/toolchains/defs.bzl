@@ -21,6 +21,7 @@ load("@komira//tools/build/mojo:cxx.bzl", "no_python_bootstrap_toolchain", "zig_
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_toolchain")
 load("@komira//tools/build/mojo:toolchain.bzl", "mojo_toolchain")
 load("@komira//tools/build/rust:defs.bzl", "rust_toolchain")
+load(":mojo_versions.bzl", "by_mojo")
 
 _TOOLCHAINS = "komira//tools/build/toolchains:"
 _TOOLCHAINS_RUST = "komira//tools/build/toolchains/rust:"
@@ -28,8 +29,12 @@ _TOOLCHAINS_RUST = "komira//tools/build/toolchains/rust:"
 MOJO_TOOLCHAIN_ATTRS = dict(
     busybox = _TOOLCHAINS + "busybox",
     cc_target = row("linux-x86_64")["zig_triple"],
-    compiler = _TOOLCHAINS + "mojo_compiler",
-    runtime = _TOOLCHAINS + "mojo_runtime",
+    # The compiler the target platform chooses (mojo_versions.bzl): the default, or the second
+    # one on a platform carrying its buildrules constraint. The select is here, on the toolchain,
+    # because the compiler is an exec dependency: inside it, a select would see the execution
+    # platform, which carries no Mojo version.
+    compiler = by_mojo(_TOOLCHAINS + "mojo_compiler", _TOOLCHAINS + "mojo_compiler_next"),
+    runtime = by_mojo(_TOOLCHAINS + "mojo_runtime", _TOOLCHAINS + "mojo_runtime_next"),
     # Every compile targets this CPU, whatever worker runs it. x86-64-v3
     # (AVX2, BMI2, FMA): built binaries and gated tests need a worker, and a
     # deployment host, that implements it.

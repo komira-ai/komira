@@ -6,8 +6,8 @@ MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "ed0c1b0b3572d1403e257ac008e80cc3cc8cc9dfb3ce20600dc720d2bc943ede",
-    "mopm.toml": "ab6282fc6026150dce0c53009eb0cd25d7e2d59b8192a99fc4c225ce464a5046",
+    "mopm.lock": "070cf6e0421b391006b44de87c9af46fd75bb78944aa38770e9a7f4794c853b9",
+    "mopm.toml": "11bdb385f611c700898c11e671d892bc63751d83fa6d5436857c0a55b2a9fd64",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -828,4 +828,822 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/kafka_server@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/kafka_server/src/kafka_server",
+      "srcs": [
+        {"path": "src/kafka_server/src/kafka_server/__init__.mojo", "sha256": "adb6e077153296fec9bb5360633bfc416bea93aac1f09c4e88bdb1ca1c88a7c5"},
+        {"path": "src/kafka_server/src/kafka_server/produce_error.mojo", "sha256": "bb424b0f179fcd8abbaf4b4f31824366b39551c9cbfc6b5262c8352329925c1e"},
+        {"path": "src/kafka_server/src/kafka_server/wire/__init__.mojo", "sha256": "dc109aefd0990a0b1b8ccac7f5cb993fa195e13f05da1a01975bb6c11dfec986"},
+        {"path": "src/kafka_server/src/kafka_server/wire/consumer_group.mojo", "sha256": "a79c868390c810adcd76a04d87108ddeb381907347fb3e528b9aceec63294deb"},
+        {"path": "src/kafka_server/src/kafka_server/wire/crc32c.mojo", "sha256": "2ce7458c307b0a06ecbb513d5e661eab3def3430e36ee63f2c2055863e812ab5"},
+        {"path": "src/kafka_server/src/kafka_server/wire/create_topics.mojo", "sha256": "9f3036ba5dd0bd498063d033e7c3d0105c384759d6356e9c8c82fcf8cf7134be"},
+        {"path": "src/kafka_server/src/kafka_server/wire/init_producer_id.mojo", "sha256": "525c73d067b042b6c33921520b2c823be9c8f3bfa0df8c892d91180a2b73ac8f"},
+        {"path": "src/kafka_server/src/kafka_server/wire/messages.mojo", "sha256": "6f066765014defbede6081b48a88090c4a9357d51aad34e8f6e3d09918ef8f45"},
+        {"path": "src/kafka_server/src/kafka_server/wire/produce_fetch.mojo", "sha256": "a9f0729c76ae4decc6f846ad656b47fa30cfce24bb408e04c3167d6789321e6e"},
+        {"path": "src/kafka_server/src/kafka_server/wire/record_batch_v2.mojo", "sha256": "3542bfd195be42729edce473636489ba8a8e171df6b8976b9b50186c3bf50a4f"},
+        {"path": "src/kafka_server/src/kafka_server/wire/transaction.mojo", "sha256": "04e4abc8b451beb043c1ae97ab93122c05e3f6ff5b814b301b3e6a51fc610a3d"},
+        {"path": "src/kafka_server/src/kafka_server/wire/wire.mojo", "sha256": "57cc3bd4ee29f7e062c69491fc503109ba24eb1e0f5c97e8a1d7a2393b36835d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["kafka_server.mojoc"],
+      "key": "b9886c8a912588a5c6af233044947d9d0447fcb83720cf31f393d9831ffe3f97"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_crc32c_portable.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_crc32c_portable.mojo", "sha256": "bb658155f2f1a763dadbe0c58d2d864f749228ba398d2df9df67bc7c534fbfc8"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_crc32c_portable.pass"],
+      "key": "05894d29e1085d5ae3db4d84defd926c187c7694abf492212f067a12cb41db6b"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_consumer_protocol.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_consumer_protocol.mojo", "sha256": "c028ed7369f986288d2ddc3ea2e59244eb6cc7821c2c220e591b84c6feed112d"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_consumer_protocol.pass"],
+      "key": "6708edff4dfcbbd10101dff6b390cd775b4b7b8e855dc9b7bcabca9a25268d32"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_create_topics.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_create_topics.mojo", "sha256": "0490a8969a5fa480e75d3ba6fb86bb75e9bd8155c8f2eff81c6e6cefa54ae22c"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_create_topics.pass"],
+      "key": "6ba1849c8f2e6f120d75644bdad3658bf869aa765889ea8ef70fd0ec0820f09f"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_data_path.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_data_path.mojo", "sha256": "fb580f32687e7984668cbd769a0a2d5012c60b7c09c183e9e20c6c93b9b1ec71"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_data_path.pass"],
+      "key": "c1a804b86bf1716e22fc48439a887a1a29b440e814c1fa3b5708c8914768a3aa"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_group_apis.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_group_apis.mojo", "sha256": "afa0b6540914474b4eb8884a71b6a5f8a6856f953931f8e727bc922cc61a6414"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_group_apis.pass"],
+      "key": "8daff40cec492dda75f51afa600eeec308792d81e78a33410208f697aeb432d5"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_init_producer_id.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_init_producer_id.mojo", "sha256": "42456b2dbb43f33f7b1aad5d7ede88440720b43db89cf4f1f95e68ff7b7919e6"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_init_producer_id.pass"],
+      "key": "b05e8dcb6027c1726fa0b724fe356336de620f2e1ce4b98ada1232fbfae56c50"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_metadata.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_metadata.mojo", "sha256": "6764b3a77f005984cbeb37ffea3989f93d824b76d88b2de9fbacbe7969388d7b"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_metadata.pass"],
+      "key": "ea1e9702e602c5e7b3cab571f35aacafe89b1aef8201eb5ac6fa7c60fd3a0c55"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_offset_apis.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_offset_apis.mojo", "sha256": "81b099b12fcca89ed741845ba748c0e1cb40b797d9463ac3b9bbfb55ce728555"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_offset_apis.pass"],
+      "key": "f149d45a91dff648930c8447784a511ad91c708e8605e24ecc3b21e25ec899e5"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_transaction.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_transaction.mojo", "sha256": "032a8d0a5046126bba066a24eace215b1976b1a2ae1444a82cb0e9c8cc4428f0"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_transaction.pass"],
+      "key": "d3413a62b82325a08421a8109f330231e610750f5059db655114c96a8af0f6d4"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_record_batch_edges.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_record_batch_edges.mojo", "sha256": "f083e9c279321dbe2fb170910f4861d0074fa7dcdcccd5c85eeefff8f2385b2f"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_record_batch_edges.pass"],
+      "key": "0669bd7a7739cc7e17f2108488df03a3313fb2579edf0bb19c05273f512fc258"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_record_batch_hostile.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_record_batch_hostile.mojo", "sha256": "e87e4c1c3066d616c8c26586f792600449a329be908947b565f67a24be8fce3e"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_record_batch_hostile.pass"],
+      "key": "8a7a0eab9f3c9ebe60f794e1ecd801d230bcac09c3a7b09a7eee7fe59bf34a6e"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_record_batch_v2.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_record_batch_v2.mojo", "sha256": "5e925013b836eec6e5039028a8e845de96d6fdf3312fe824321c9ab443f226c7"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_record_batch_v2.pass"],
+      "key": "81b5c2009b0ab116544d083fc3bf0f9e5e58927a821ef79ce27c4badc25124fe"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_wire_codec.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_wire_codec.mojo", "sha256": "7c10bc9aa5b7e8e4c7438f8f552bcb9a548ba0383e3146de6516098e507bc062"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_wire_codec.pass"],
+      "key": "f4106b51a833f74e93e7dd0c4dabbf5c077dbf15649087b2036280701e52d124"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_wire_primitive_edges.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_wire_primitive_edges.mojo", "sha256": "22de9fb5cdccb2d4647ad2f119641f53ed3898a280a0c7ca1a1585815d4c83e0"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_wire_primitive_edges.pass"],
+      "key": "4c86d8bf75215ffebd42a34a6dd90238c12c8d2078460633d4e06570c09292c4"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_produce_error_for.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_produce_error_for.mojo", "sha256": "d17bf11d62906b646977e556149611352f76ab5e9e54d34a954ee8ef02a8e6ba"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_produce_error_for.pass"],
+      "key": "ff3a130e8fbf4cd05ae9dc5aae655284cfdbd0808c18d010cd11d6e33da591a7"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/kafka_server@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/kafka_server/src/kafka_server",
+      "srcs": [
+        {"path": "src/kafka_server/src/kafka_server/__init__.mojo", "sha256": "adb6e077153296fec9bb5360633bfc416bea93aac1f09c4e88bdb1ca1c88a7c5"},
+        {"path": "src/kafka_server/src/kafka_server/produce_error.mojo", "sha256": "bb424b0f179fcd8abbaf4b4f31824366b39551c9cbfc6b5262c8352329925c1e"},
+        {"path": "src/kafka_server/src/kafka_server/wire/__init__.mojo", "sha256": "dc109aefd0990a0b1b8ccac7f5cb993fa195e13f05da1a01975bb6c11dfec986"},
+        {"path": "src/kafka_server/src/kafka_server/wire/consumer_group.mojo", "sha256": "a79c868390c810adcd76a04d87108ddeb381907347fb3e528b9aceec63294deb"},
+        {"path": "src/kafka_server/src/kafka_server/wire/crc32c.mojo", "sha256": "2ce7458c307b0a06ecbb513d5e661eab3def3430e36ee63f2c2055863e812ab5"},
+        {"path": "src/kafka_server/src/kafka_server/wire/create_topics.mojo", "sha256": "9f3036ba5dd0bd498063d033e7c3d0105c384759d6356e9c8c82fcf8cf7134be"},
+        {"path": "src/kafka_server/src/kafka_server/wire/init_producer_id.mojo", "sha256": "525c73d067b042b6c33921520b2c823be9c8f3bfa0df8c892d91180a2b73ac8f"},
+        {"path": "src/kafka_server/src/kafka_server/wire/messages.mojo", "sha256": "6f066765014defbede6081b48a88090c4a9357d51aad34e8f6e3d09918ef8f45"},
+        {"path": "src/kafka_server/src/kafka_server/wire/produce_fetch.mojo", "sha256": "a9f0729c76ae4decc6f846ad656b47fa30cfce24bb408e04c3167d6789321e6e"},
+        {"path": "src/kafka_server/src/kafka_server/wire/record_batch_v2.mojo", "sha256": "3542bfd195be42729edce473636489ba8a8e171df6b8976b9b50186c3bf50a4f"},
+        {"path": "src/kafka_server/src/kafka_server/wire/transaction.mojo", "sha256": "04e4abc8b451beb043c1ae97ab93122c05e3f6ff5b814b301b3e6a51fc610a3d"},
+        {"path": "src/kafka_server/src/kafka_server/wire/wire.mojo", "sha256": "57cc3bd4ee29f7e062c69491fc503109ba24eb1e0f5c97e8a1d7a2393b36835d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["kafka_server.mojoc"],
+      "key": "ef917f5dd9bc0aea8dca8d5ae3e872ba22a86b41bb65d102a7e7bbf82f699db9"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_crc32c_portable.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_crc32c_portable.mojo", "sha256": "bb658155f2f1a763dadbe0c58d2d864f749228ba398d2df9df67bc7c534fbfc8"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_crc32c_portable.pass"],
+      "key": "4c4d2c411c19e09f27ef4f5d5f49d143c28de6e30a3b39e78db59f6fc3d43b18"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_consumer_protocol.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_consumer_protocol.mojo", "sha256": "c028ed7369f986288d2ddc3ea2e59244eb6cc7821c2c220e591b84c6feed112d"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_consumer_protocol.pass"],
+      "key": "4cfa497afffa3cd566653ae13b5666b18dcc34c30931a16946137ef927df25a6"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_create_topics.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_create_topics.mojo", "sha256": "0490a8969a5fa480e75d3ba6fb86bb75e9bd8155c8f2eff81c6e6cefa54ae22c"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_create_topics.pass"],
+      "key": "9dbd35601732d872aced056c75688fe258d4a0f4bda6b4b2fcce362b7282621d"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_data_path.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_data_path.mojo", "sha256": "fb580f32687e7984668cbd769a0a2d5012c60b7c09c183e9e20c6c93b9b1ec71"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_data_path.pass"],
+      "key": "ef1afd18276d40df41ed97c7a0d651703842867d5c1043011f79f6f197fb62e2"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_group_apis.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_group_apis.mojo", "sha256": "afa0b6540914474b4eb8884a71b6a5f8a6856f953931f8e727bc922cc61a6414"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_group_apis.pass"],
+      "key": "aa1646cbf7663a18bd917af74f7a591c4d53ae3a06bf3d7a83784a77d8285a05"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_init_producer_id.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_init_producer_id.mojo", "sha256": "42456b2dbb43f33f7b1aad5d7ede88440720b43db89cf4f1f95e68ff7b7919e6"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_init_producer_id.pass"],
+      "key": "b923051b996789fb86160be9161258a29e9f586500ebcee2a062e8f3d3659f8f"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_metadata.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_metadata.mojo", "sha256": "6764b3a77f005984cbeb37ffea3989f93d824b76d88b2de9fbacbe7969388d7b"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_metadata.pass"],
+      "key": "aa6f751c46785de124ea38b18a2a275f2e9899e03ecb82fb425aedd57688acd3"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_offset_apis.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_offset_apis.mojo", "sha256": "81b099b12fcca89ed741845ba748c0e1cb40b797d9463ac3b9bbfb55ce728555"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_offset_apis.pass"],
+      "key": "942b9abd9aa9ee0e6b78cd617345fc51b9e49ff25062bda43bc88da6260a4327"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_transaction.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_transaction.mojo", "sha256": "032a8d0a5046126bba066a24eace215b1976b1a2ae1444a82cb0e9c8cc4428f0"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_transaction.pass"],
+      "key": "d178cd44b365dff72cc0186c1ad4aeaeedcfff7590b8db4313a552d8de025f1c"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_record_batch_edges.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_record_batch_edges.mojo", "sha256": "f083e9c279321dbe2fb170910f4861d0074fa7dcdcccd5c85eeefff8f2385b2f"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_record_batch_edges.pass"],
+      "key": "eee716c2d10f23467b4516732e40dc9f70d5c472ad15b14dfe5a3f4d87aa7fdc"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_record_batch_hostile.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_record_batch_hostile.mojo", "sha256": "e87e4c1c3066d616c8c26586f792600449a329be908947b565f67a24be8fce3e"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_record_batch_hostile.pass"],
+      "key": "e4a7dd4858e0c7d84a204a352544cf01968f57f4e00a98fea2e28dd263924277"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_record_batch_v2.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_record_batch_v2.mojo", "sha256": "5e925013b836eec6e5039028a8e845de96d6fdf3312fe824321c9ab443f226c7"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_record_batch_v2.pass"],
+      "key": "b0a85a9473f07f74f4987565f343e5c7e29d727fab7d61059f0afc6d0ac10cc4"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_wire_codec.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_wire_codec.mojo", "sha256": "7c10bc9aa5b7e8e4c7438f8f552bcb9a548ba0383e3146de6516098e507bc062"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_wire_codec.pass"],
+      "key": "d9449635450766f420a812a946bad96690d166930335ff09331e0d82de7dd137"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_wire_primitive_edges.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_wire_primitive_edges.mojo", "sha256": "22de9fb5cdccb2d4647ad2f119641f53ed3898a280a0c7ca1a1585815d4c83e0"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_wire_primitive_edges.pass"],
+      "key": "71be8cb9cc19e806132db1febc68579cc960083fac37be2f9848723dedf67503"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_produce_error_for.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_produce_error_for.mojo", "sha256": "d17bf11d62906b646977e556149611352f76ab5e9e54d34a954ee8ef02a8e6ba"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_produce_error_for.pass"],
+      "key": "7ba1af4cb5be0c37c7c9680e479e3305afc9cebb72b80ab41e0022f10b0ec752"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/kafka_server@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/kafka_server/src/kafka_server",
+      "srcs": [
+        {"path": "src/kafka_server/src/kafka_server/__init__.mojo", "sha256": "adb6e077153296fec9bb5360633bfc416bea93aac1f09c4e88bdb1ca1c88a7c5"},
+        {"path": "src/kafka_server/src/kafka_server/produce_error.mojo", "sha256": "bb424b0f179fcd8abbaf4b4f31824366b39551c9cbfc6b5262c8352329925c1e"},
+        {"path": "src/kafka_server/src/kafka_server/wire/__init__.mojo", "sha256": "dc109aefd0990a0b1b8ccac7f5cb993fa195e13f05da1a01975bb6c11dfec986"},
+        {"path": "src/kafka_server/src/kafka_server/wire/consumer_group.mojo", "sha256": "a79c868390c810adcd76a04d87108ddeb381907347fb3e528b9aceec63294deb"},
+        {"path": "src/kafka_server/src/kafka_server/wire/crc32c.mojo", "sha256": "2ce7458c307b0a06ecbb513d5e661eab3def3430e36ee63f2c2055863e812ab5"},
+        {"path": "src/kafka_server/src/kafka_server/wire/create_topics.mojo", "sha256": "9f3036ba5dd0bd498063d033e7c3d0105c384759d6356e9c8c82fcf8cf7134be"},
+        {"path": "src/kafka_server/src/kafka_server/wire/init_producer_id.mojo", "sha256": "525c73d067b042b6c33921520b2c823be9c8f3bfa0df8c892d91180a2b73ac8f"},
+        {"path": "src/kafka_server/src/kafka_server/wire/messages.mojo", "sha256": "6f066765014defbede6081b48a88090c4a9357d51aad34e8f6e3d09918ef8f45"},
+        {"path": "src/kafka_server/src/kafka_server/wire/produce_fetch.mojo", "sha256": "a9f0729c76ae4decc6f846ad656b47fa30cfce24bb408e04c3167d6789321e6e"},
+        {"path": "src/kafka_server/src/kafka_server/wire/record_batch_v2.mojo", "sha256": "3542bfd195be42729edce473636489ba8a8e171df6b8976b9b50186c3bf50a4f"},
+        {"path": "src/kafka_server/src/kafka_server/wire/transaction.mojo", "sha256": "04e4abc8b451beb043c1ae97ab93122c05e3f6ff5b814b301b3e6a51fc610a3d"},
+        {"path": "src/kafka_server/src/kafka_server/wire/wire.mojo", "sha256": "57cc3bd4ee29f7e062c69491fc503109ba24eb1e0f5c97e8a1d7a2393b36835d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["kafka_server.mojoc"],
+      "key": "11af8b157aeffed9cef910080959f531731db20817b426edb7cdb63acf9ea35a"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_crc32c_portable.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_crc32c_portable.mojo", "sha256": "bb658155f2f1a763dadbe0c58d2d864f749228ba398d2df9df67bc7c534fbfc8"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_crc32c_portable.pass"],
+      "key": "78514e6b7aa84f0dc5ce0a08fddae0ad4edb4b72af386b54b6c7b6ad8ec61dae"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_consumer_protocol.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_consumer_protocol.mojo", "sha256": "c028ed7369f986288d2ddc3ea2e59244eb6cc7821c2c220e591b84c6feed112d"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_consumer_protocol.pass"],
+      "key": "114486a278d14a5c22c3e218ec35fbdb0b1a9f228c95818116163cbada6978cf"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_create_topics.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_create_topics.mojo", "sha256": "0490a8969a5fa480e75d3ba6fb86bb75e9bd8155c8f2eff81c6e6cefa54ae22c"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_create_topics.pass"],
+      "key": "34d0e4ec78353b8b83addf73a22d2ce469cdde422c773ddc0220ecb4b6ac7beb"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_data_path.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_data_path.mojo", "sha256": "fb580f32687e7984668cbd769a0a2d5012c60b7c09c183e9e20c6c93b9b1ec71"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_data_path.pass"],
+      "key": "287383bdbee081e8a5594505fdc88241a734dcdf5e165ddd6c02258cae3cba50"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_group_apis.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_group_apis.mojo", "sha256": "afa0b6540914474b4eb8884a71b6a5f8a6856f953931f8e727bc922cc61a6414"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_group_apis.pass"],
+      "key": "ecd8d2f4a4a24edbf6c7cd3d5cf40c83b2c2f2b4a5b4b5e7bd11e7e52f1e7d12"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_init_producer_id.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_init_producer_id.mojo", "sha256": "42456b2dbb43f33f7b1aad5d7ede88440720b43db89cf4f1f95e68ff7b7919e6"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_init_producer_id.pass"],
+      "key": "b06905e9df5c24b8636466a644b8bcbfe5483c6434db0472a3291316e5e834cc"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_metadata.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_metadata.mojo", "sha256": "6764b3a77f005984cbeb37ffea3989f93d824b76d88b2de9fbacbe7969388d7b"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_metadata.pass"],
+      "key": "2bfc868375795c460910918b2955f8775df0202e85e977c9b2c01c545ad0b75e"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_offset_apis.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_offset_apis.mojo", "sha256": "81b099b12fcca89ed741845ba748c0e1cb40b797d9463ac3b9bbfb55ce728555"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_offset_apis.pass"],
+      "key": "1967808ab44fa5daeb68657b164572a62102bb257c8818ebe0a7c950ae1912ec"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_golden_transaction.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_golden_transaction.mojo", "sha256": "032a8d0a5046126bba066a24eace215b1976b1a2ae1444a82cb0e9c8cc4428f0"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_golden_transaction.pass"],
+      "key": "e7fb89429cc0ee8eebb3e3fcfa8332a2a6eccf609b9d785c7b24ed1ae5cdc553"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_record_batch_edges.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_record_batch_edges.mojo", "sha256": "f083e9c279321dbe2fb170910f4861d0074fa7dcdcccd5c85eeefff8f2385b2f"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_record_batch_edges.pass"],
+      "key": "9d6b09c24d2310db22781170f68ed18d550bd9f09796e71bfd73bea2e2eb3f68"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_record_batch_hostile.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_record_batch_hostile.mojo", "sha256": "e87e4c1c3066d616c8c26586f792600449a329be908947b565f67a24be8fce3e"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_record_batch_hostile.pass"],
+      "key": "db012465562530a4c18d13c4b6b62f938f31f92da363499e8243555ccb41b91c"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_record_batch_v2.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_record_batch_v2.mojo", "sha256": "5e925013b836eec6e5039028a8e845de96d6fdf3312fe824321c9ab443f226c7"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_record_batch_v2.pass"],
+      "key": "ce3397727556f5251dd5dbcb5eb58bf32a0bba1fc898f0e5edd3977a47db1bc7"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_wire_codec.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_wire_codec.mojo", "sha256": "7c10bc9aa5b7e8e4c7438f8f552bcb9a548ba0383e3146de6516098e507bc062"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_wire_codec.pass"],
+      "key": "2d2908789de0eac7649a2529f6e65e6bea9bf072612ad073338107c6dda4b73a"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_kafka_wire_primitive_edges.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_kafka_wire_primitive_edges.mojo", "sha256": "22de9fb5cdccb2d4647ad2f119641f53ed3898a280a0c7ca1a1585815d4c83e0"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_wire_primitive_edges.pass"],
+      "key": "7d56886947be65966bf772fd6be13208bb3987e20e9040eda0d70322e5893800"
+    },
+    {
+      "id": "komira-ai/kafka_server@0.1.0#mojo1.2.0/test:src/kafka_server/tests/test_produce_error_for.mojo",
+      "package": "komira-ai/kafka_server",
+      "import": "kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/kafka_server/tests/test_produce_error_for.mojo", "sha256": "d17bf11d62906b646977e556149611352f76ab5e9e54d34a954ee8ef02a8e6ba"}
+      ],
+      "deps": ["komira-ai/kafka_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_produce_error_for.pass"],
+      "key": "a8d6868946702864aadabe4bd2ff08916271ee3294d12d9270f938871f22f9f9"
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

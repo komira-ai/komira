@@ -20,7 +20,7 @@
 # correct + clear and SIMD widening is deliberately deferred.
 # =============================================================================
 
-from std.math import sqrt, sin, cos, asin, atan2, pi, ceil, floor
+from std.math import sqrt, sin, cos, asin, pi, ceil, floor
 from std.ffi import external_call
 
 from arrow.bitmap import Bitmap
@@ -83,6 +83,10 @@ comptime _RAD_TO_DEG: Float64 = 180.0 / pi
 # differ) and that no amount of kernel work can close, because the difference
 # is in the rounding of an intermediate that DuckDB never computes.
 #
+# `atan2` is the same case: `std.math.atan2` called libm up to Mojo 1.1.0 and
+# is a Mojo implementation from 1.2.0 that may differ from libm in the last ulp,
+# so it goes through `libm_atan2` below and both compilers give the same bits.
+#
 # `ceil` / `floor` / `sqrt` stay on `std.math`: those are EXACT IEEE-754
 # operations with a single correctly-rounded answer, so there is no oracle to
 # diverge from. `cot` and `degrees` are one exact arithmetic step on top of a
@@ -144,6 +148,15 @@ comptime _RAD_TO_DEG: Float64 = 180.0 / pi
 def libm_pow(base: Float64, exponent: Float64) -> Float64:
     """`base ** exponent` through libm's correctly-rounded `pow`."""
     return external_call["pow", Float64](base, exponent)
+
+
+@always_inline
+def libm_atan2(y: Float64, x: Float64) -> Float64:
+    """`atan2(y, x)` through libm, the same call DuckDB makes. `std.math.atan2`
+    is not used: from Mojo 1.2.0 it is not libm and can differ in the last ulp.
+    One named function so the column walker and the two row walkers in
+    `eval/expression_executor.mojo` cannot drift from this one."""
+    return external_call["atan2", Float64](y, x)
 
 
 
@@ -398,7 +411,7 @@ def _apply_binary(op: UInt8, y: Float64, x: Float64) -> Float64:
         # reason. `y` is the base, `x` the exponent.
         return libm_pow(y, x)
     # KMATH2_ATAN2.
-    return atan2(y, x)
+    return libm_atan2(y, x)
 
 
 def eval_math_binary(

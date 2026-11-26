@@ -96,7 +96,7 @@ _RUNTIME = _WORKER | {
     "node_worker.so": ":node_worker",
     "node_worker/code/fahrenheit.mjs": ":fahrenheit_bundle",
     "node_worker/code/fixtures.mjs": ":fixtures_bundle",
-    "node_worker/lib": "//tools/build/toolchains:mojo_runtime",
+    "node_worker/lib": "//tools/build/toolchains:mojo_runtime_selected",
     "node_worker/node": "//third_party/node:node",
     "node_worker/node_modules/apache-arrow": "//third_party/node:apache-arrow",
     "node_worker/node_modules/flatbuffers": "//third_party/node:flatbuffers",

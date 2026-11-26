@@ -5,13 +5,13 @@
 use std::fmt;
 
 /// Mojo's keywords, as mopm's client refuses them for a package name (`src/core/manifest.zig`,
-/// `keywords`).
+/// `keywords`), and `match` and `case`, which Mojo 1.2.0 reserves.
 pub const KEYWORDS: &[&str] = &[
     "alias", "and", "as", "assert", "async", "await", "borrowed", "break", "class", "comptime",
     "continue", "def", "deinit", "del", "elif", "else", "except", "finally", "fn", "for", "from",
     "global", "if", "import", "in", "inout", "is", "lambda", "let", "mut", "nonlocal", "not", "or",
     "out", "owned", "pass", "raise", "raises", "read", "ref", "return", "self", "struct", "trait",
-    "try", "var", "while", "with", "yield",
+    "try", "var", "while", "with", "yield", "match", "case",
 ];
 
 /// The Mojo builtins a package of that name would shadow (mopm's `src/core/manifest.zig`,
@@ -358,6 +358,8 @@ mod tests {
     fn each_list_names_its_own_problem_and_a_free_name_has_none() {
         assert_eq!(name_problem("Json"), Some(NameProblem::Grammar));
         assert_eq!(name_problem("async"), Some(NameProblem::Keyword));
+        assert_eq!(name_problem("match"), Some(NameProblem::Keyword));
+        assert_eq!(name_problem("case"), Some(NameProblem::Keyword));
         assert_eq!(name_problem("hash"), Some(NameProblem::Builtin));
         assert_eq!(name_problem("mopm"), Some(NameProblem::Reserved));
         assert_eq!(name_problem("collections"), Some(NameProblem::StdName));

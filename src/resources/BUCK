@@ -3,6 +3,7 @@ load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":buildrules.mojo.bzl", "mojo_package")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 # Files a program reads at run time, found under its own share/ directory;
 # see src/resources/resources.mojo. The test declares its fixtures as
@@ -74,7 +75,7 @@ mojo_conda(
     lib = ":lib",
     manifest = "mopm.toml",
     members = {"../runtime_paths": "//src/runtime_paths:mopm.toml"},
-    mojo = "1.1.0",
+    mojo = mojo_version(),
     mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/resources",
     version = "0.1.0",

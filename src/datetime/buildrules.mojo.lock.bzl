@@ -6,8 +6,8 @@ MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "ed0c1b0b3572d1403e257ac008e80cc3cc8cc9dfb3ce20600dc720d2bc943ede",
-    "mopm.toml": "e6f1de668b2838cb2fd2c6bf0b6ca84fbce036b8ea8db30633c64939e8c1def1",
+    "mopm.lock": "070cf6e0421b391006b44de87c9af46fd75bb78944aa38770e9a7f4794c853b9",
+    "mopm.toml": "3da3613147142936b1bf670ff80d82deb67228ec8c35f3159f7480be6f4abad1",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -504,4 +504,498 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/datetime@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/datetime/src/datetime",
+      "srcs": [
+        {"path": "src/datetime/src/datetime/__init__.mojo", "sha256": "d2acecd18fa1fc8490c2ba09e5ddba3cdc9088a2e1050eadf0dad3f329f5aa89"},
+        {"path": "src/datetime/src/datetime/civil.mojo", "sha256": "278135ceccf3bc27a21b592649b51901d5a85ace5fe495649cfb0b55af325b71"},
+        {"path": "src/datetime/src/datetime/http_date.mojo", "sha256": "82a1dd2a900fc9e0a3faa0d0bed2cae1be6404f74732b80769450cebc63c19e8"},
+        {"path": "src/datetime/src/datetime/posix_tz.mojo", "sha256": "8a3ce828a8618f95828547ec3528e129fca5250de2a5d99433ee7971de8cd840"},
+        {"path": "src/datetime/src/datetime/timestamp.mojo", "sha256": "d00c11b4ebb6eb595f23bb414584932c1b7426564db2f3b2a13683df07975631"},
+        {"path": "src/datetime/src/datetime/tzif.mojo", "sha256": "1c5ece2ecd8c50f74bb4f6e6611574405bf9091725fc28d8c0b8352aa1394250"},
+        {"path": "src/datetime/src/datetime/zone.mojo", "sha256": "0d2050c6115569eb934d98b56335792e712e1d7a6ab29e90229f1a2338d42197"},
+        {"path": "src/datetime/src/datetime/zone_offset.mojo", "sha256": "fbd7f38fc148da416e47b388a04069e8f30c597e3eaa91fe2778b8d631e13371"},
+        {"path": "src/datetime/src/datetime/zoneinfo.mojo", "sha256": "5f59141c1f75a5fc56e72820da97b4f5dd06e73a80574e255c64adb539dd6fc8"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["datetime.mojoc"],
+      "key": "f081b5c9a61ddd248914c65cc6a918407ac8ed50508d6cfa1f6b237686fc6b0d"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_civil.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_civil.mojo", "sha256": "4d0ab2b9063dbd12626d2c79e935d0b150604b486c500aa3c3b6da49300d4fbf"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_civil.pass"],
+      "key": "e688f6b02f530e57b2827f79cb2fb6c0b4659cbd1fc7539de0e4bc341cba4dbc"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_http_date.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_http_date.mojo", "sha256": "7464a100def35c8ab84abb5290f2d2e006d80943ec01368f98e6fed628287b7d"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_http_date.pass"],
+      "key": "27fd94a4bdda8185c8be98b8c6198bf235f53c5c2e80992e6fb4b10a235a1695"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_posix_tz.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_posix_tz.mojo", "sha256": "1be7f8b3c26b7c8a5ff96eb73c1fcad88d9d9a0c5bc95761cb122a24ea75c6ab"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_posix_tz.pass"],
+      "key": "6fb79b8655107f422fc835227bbd2c8d007836c09e655e6de7629b479a4e6a52"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_resolve.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_resolve.mojo", "sha256": "ee1825b7b43b7134c9a805959e37d43a127304d7d7890156142f52be220f9c95"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_resolve.pass"],
+      "key": "573242980889f4213faeb40ec9b57d4bb75ba6c4241a239106d410d76dead826"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_timestamp.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_timestamp.mojo", "sha256": "23141ebc1954d79611b38b8b9cc71e7abb437ab0a3266cbf705ebe621a024b87"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_timestamp.pass"],
+      "key": "4548fd6c09ccc933d2c4438d083bfedb9e7c6d65f5a20afb4e3743fda109b31a"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_tzif.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_tzif.mojo", "sha256": "f31f0f84b503794151ae12cb0bc97fbaff8d1204c8828b00c40121243f06887c"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_tzif.pass"],
+      "key": "c91d1cfe40dd9e1e9fba4f7bf71909e3764ced2f6ef60701cfe91c0d45deec9f"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_zone_name.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_zone_name.mojo", "sha256": "a313e678c506dc86f4fcc40f67503a66a8b4d37b0767e0888dcd63f255c5baff"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_zone_name.pass"],
+      "key": "5a4264c1517455ca50f92fb0fc884951df4b933597ff89e6b813f612c162a056"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_zone_values_and_loading.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_zone_values_and_loading.mojo", "sha256": "fd9145d695f6f6d0459fc1c3265397f29f107111865fc090f63372515d7cf3d9"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_zone_values_and_loading.pass"],
+      "key": "a36f51cb6b20ad61eb72d1b058d07fea63dc8e6bcef09f14cfb4fc036744f092"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/datetime@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/datetime/src/datetime",
+      "srcs": [
+        {"path": "src/datetime/src/datetime/__init__.mojo", "sha256": "d2acecd18fa1fc8490c2ba09e5ddba3cdc9088a2e1050eadf0dad3f329f5aa89"},
+        {"path": "src/datetime/src/datetime/civil.mojo", "sha256": "278135ceccf3bc27a21b592649b51901d5a85ace5fe495649cfb0b55af325b71"},
+        {"path": "src/datetime/src/datetime/http_date.mojo", "sha256": "82a1dd2a900fc9e0a3faa0d0bed2cae1be6404f74732b80769450cebc63c19e8"},
+        {"path": "src/datetime/src/datetime/posix_tz.mojo", "sha256": "8a3ce828a8618f95828547ec3528e129fca5250de2a5d99433ee7971de8cd840"},
+        {"path": "src/datetime/src/datetime/timestamp.mojo", "sha256": "d00c11b4ebb6eb595f23bb414584932c1b7426564db2f3b2a13683df07975631"},
+        {"path": "src/datetime/src/datetime/tzif.mojo", "sha256": "1c5ece2ecd8c50f74bb4f6e6611574405bf9091725fc28d8c0b8352aa1394250"},
+        {"path": "src/datetime/src/datetime/zone.mojo", "sha256": "0d2050c6115569eb934d98b56335792e712e1d7a6ab29e90229f1a2338d42197"},
+        {"path": "src/datetime/src/datetime/zone_offset.mojo", "sha256": "fbd7f38fc148da416e47b388a04069e8f30c597e3eaa91fe2778b8d631e13371"},
+        {"path": "src/datetime/src/datetime/zoneinfo.mojo", "sha256": "5f59141c1f75a5fc56e72820da97b4f5dd06e73a80574e255c64adb539dd6fc8"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["datetime.mojoc"],
+      "key": "f64ce8621b7582aa9140194555c6c8170acb4392e26fabb796f149ce69e01c02"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_civil.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_civil.mojo", "sha256": "4d0ab2b9063dbd12626d2c79e935d0b150604b486c500aa3c3b6da49300d4fbf"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_civil.pass"],
+      "key": "1897df56e3c2d82f9fb3e3d49c6867d861e0c3d067c02f2c521b0189051571eb"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_http_date.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_http_date.mojo", "sha256": "7464a100def35c8ab84abb5290f2d2e006d80943ec01368f98e6fed628287b7d"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_http_date.pass"],
+      "key": "3819c2e36dd1c4ba8f014c63c0670d2cac921e54df32f2bd331b62e73735144c"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_posix_tz.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_posix_tz.mojo", "sha256": "1be7f8b3c26b7c8a5ff96eb73c1fcad88d9d9a0c5bc95761cb122a24ea75c6ab"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_posix_tz.pass"],
+      "key": "ddfc5b7c877df516adab8a4f0a054823c861f633d48e97989205817a196b27ca"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_resolve.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_resolve.mojo", "sha256": "ee1825b7b43b7134c9a805959e37d43a127304d7d7890156142f52be220f9c95"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_resolve.pass"],
+      "key": "4625832847c4af3aa863e0a902be1b8b893282c1d3baf8dbb68bc0951685889b"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_timestamp.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_timestamp.mojo", "sha256": "23141ebc1954d79611b38b8b9cc71e7abb437ab0a3266cbf705ebe621a024b87"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_timestamp.pass"],
+      "key": "10ac8d1593c77faef5f2e434f495ec3dcc01a384f1c4fba2bbdf70238199c148"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_tzif.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_tzif.mojo", "sha256": "f31f0f84b503794151ae12cb0bc97fbaff8d1204c8828b00c40121243f06887c"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_tzif.pass"],
+      "key": "7ccd21f25be5515249f61f9b51a0467af9f86b2a8237102d89b38499abe30a1a"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_zone_name.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_zone_name.mojo", "sha256": "a313e678c506dc86f4fcc40f67503a66a8b4d37b0767e0888dcd63f255c5baff"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_zone_name.pass"],
+      "key": "c6594b957f022125ef433cf4eaf6553f6fc78416fbbf8494b1320563e7c0d51b"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_zone_values_and_loading.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_zone_values_and_loading.mojo", "sha256": "fd9145d695f6f6d0459fc1c3265397f29f107111865fc090f63372515d7cf3d9"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_zone_values_and_loading.pass"],
+      "key": "90ecc05d5e2f7be573d3c1a55e75c7cafac1b952ec2d29649d3f03e8eea33638"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/datetime@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/datetime/src/datetime",
+      "srcs": [
+        {"path": "src/datetime/src/datetime/__init__.mojo", "sha256": "d2acecd18fa1fc8490c2ba09e5ddba3cdc9088a2e1050eadf0dad3f329f5aa89"},
+        {"path": "src/datetime/src/datetime/civil.mojo", "sha256": "278135ceccf3bc27a21b592649b51901d5a85ace5fe495649cfb0b55af325b71"},
+        {"path": "src/datetime/src/datetime/http_date.mojo", "sha256": "82a1dd2a900fc9e0a3faa0d0bed2cae1be6404f74732b80769450cebc63c19e8"},
+        {"path": "src/datetime/src/datetime/posix_tz.mojo", "sha256": "8a3ce828a8618f95828547ec3528e129fca5250de2a5d99433ee7971de8cd840"},
+        {"path": "src/datetime/src/datetime/timestamp.mojo", "sha256": "d00c11b4ebb6eb595f23bb414584932c1b7426564db2f3b2a13683df07975631"},
+        {"path": "src/datetime/src/datetime/tzif.mojo", "sha256": "1c5ece2ecd8c50f74bb4f6e6611574405bf9091725fc28d8c0b8352aa1394250"},
+        {"path": "src/datetime/src/datetime/zone.mojo", "sha256": "0d2050c6115569eb934d98b56335792e712e1d7a6ab29e90229f1a2338d42197"},
+        {"path": "src/datetime/src/datetime/zone_offset.mojo", "sha256": "fbd7f38fc148da416e47b388a04069e8f30c597e3eaa91fe2778b8d631e13371"},
+        {"path": "src/datetime/src/datetime/zoneinfo.mojo", "sha256": "5f59141c1f75a5fc56e72820da97b4f5dd06e73a80574e255c64adb539dd6fc8"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["datetime.mojoc"],
+      "key": "8adc7dfb534c0965b1e8ae827908513b8180567580a326e205201d47f86e45fc"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_civil.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_civil.mojo", "sha256": "4d0ab2b9063dbd12626d2c79e935d0b150604b486c500aa3c3b6da49300d4fbf"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_civil.pass"],
+      "key": "c45dbe1c19917eb1ff92eae7a64e5397c352e1eb950b6453712c652dfb3657cb"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_http_date.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_http_date.mojo", "sha256": "7464a100def35c8ab84abb5290f2d2e006d80943ec01368f98e6fed628287b7d"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_http_date.pass"],
+      "key": "fe0e3fb8b9c89aee10dc660cc2561db92d6e3124a489f948627ab967987a43e4"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_posix_tz.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_posix_tz.mojo", "sha256": "1be7f8b3c26b7c8a5ff96eb73c1fcad88d9d9a0c5bc95761cb122a24ea75c6ab"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_posix_tz.pass"],
+      "key": "44c1136932b6322e13735b1e29daed0bf712ba94eced591363cf1f918d38f891"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_resolve.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_resolve.mojo", "sha256": "ee1825b7b43b7134c9a805959e37d43a127304d7d7890156142f52be220f9c95"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_resolve.pass"],
+      "key": "0cc3f3eb54ec6de4f2dc9a109b9e61503ebc8d38f1399af5bf91d71b2cd8be93"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_timestamp.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_timestamp.mojo", "sha256": "23141ebc1954d79611b38b8b9cc71e7abb437ab0a3266cbf705ebe621a024b87"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_timestamp.pass"],
+      "key": "bd91d4dea1d6e0a58dbd71dd4522694ff1b478c740f8fe0d6026171172bdafaf"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_tzif.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_tzif.mojo", "sha256": "f31f0f84b503794151ae12cb0bc97fbaff8d1204c8828b00c40121243f06887c"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_tzif.pass"],
+      "key": "a3551a8ff2a38b8bec20e5984c015b9ec7234d200be48e5a333aa4d3f3fec701"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_zone_name.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_zone_name.mojo", "sha256": "a313e678c506dc86f4fcc40f67503a66a8b4d37b0767e0888dcd63f255c5baff"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_zone_name.pass"],
+      "key": "326244b80926c916202893000afef331858a56256f35019269adbaccc1339b8b"
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/test:src/datetime/tests/test_zone_values_and_loading.mojo",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/datetime/tests/test_zone_values_and_loading.mojo", "sha256": "fd9145d695f6f6d0459fc1c3265397f29f107111865fc090f63372515d7cf3d9"}
+      ],
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_zone_values_and_loading.pass"],
+      "key": "74e7641db0a038f8394e11cc125ada6fe4e4417615d8cbe831c3b84785284ee2"
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

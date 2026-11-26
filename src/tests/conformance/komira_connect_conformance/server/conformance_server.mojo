@@ -24,7 +24,7 @@
 # response alone.
 # =============================================================================
 
-from std.io import FileDescriptor
+from std.sys import stderr, stdout
 
 from connect import ConnectService
 from http_core.tls import TlsConfig, tls_init
@@ -34,7 +34,7 @@ from http_server.server import HttpServer, HttpServerConfig
 from service import conformance_service
 from wire import decode_compat_request, encode_compat_response
 
-comptime _STDERR: FileDescriptor = FileDescriptor(2)
+comptime _STDERR = stderr
 comptime _SERVE_POLL_TIMEOUT_US: Int32 = 100_000
 
 
@@ -62,8 +62,8 @@ def _write_delimited_stdout(message: List[UInt8]) raises:
     out.append(UInt8((n >> 8) & 0xFF))
     out.append(UInt8(n & 0xFF))
     out.extend(Span(message))
-    var stdout = FileDescriptor(1)
-    stdout.write_bytes(Span(out))
+    var out_fd = stdout
+    out_fd.write_bytes(Span(out))
 
 
 def _tls_config(cert_pem: String, key_pem: String) raises -> TlsConfig:

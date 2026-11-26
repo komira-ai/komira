@@ -5,11 +5,11 @@ MOPM = {"version": "0.0.138", "origin": "builtin", "workspace_root": True}
 MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
-    "../encoding/mopm.toml": "d9564875ec708dbd9ca97c063141eb88cb3e382ce7b1dfd1bc64a2a0917f8e35",
-    "../json/mopm.toml": "7cca5a2e36734233b459f459c5834d170f268d72fabafdc92b3b0f346f95b782",
+    "../encoding/mopm.toml": "e1017d28d8a80d545ba93da6e0f168cff20366cdb93ff54181a80a3521e539d4",
+    "../json/mopm.toml": "22b36527f34106b572af5ad45d7bd211a9c765072d81152373a50e21a0b3cb92",
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "4d0ed2db8ce17aaeccbd9ea2025e5c15396f675516c2563d867e9f8cd52d64b3",
-    "mopm.toml": "1a5fcf2f0328e9cc9766b3c9b012e556b4226412e5742a382c2cf2e10a293106",
+    "mopm.lock": "0f3e2c94c131d57e41a3e636deb9a4beb742dca4fcfa8e154e97c62a9e1972f9",
+    "mopm.toml": "18f26eebfd4ca66a80f49c45d41c1da0559f4da9f90a4e7ee8338f7aa346bf12",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -329,4 +329,321 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/mcp_server@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/json@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/json",
+      "import": "json",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/json/src/json",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["json.mojoc"]
+    },
+    {
+      "id": "komira-ai/mcp_server@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/mcp_server",
+      "import": "mcp_server",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/mcp_server/src/mcp_server",
+      "srcs": [
+        {"path": "src/mcp_server/src/mcp_server/__init__.mojo", "sha256": "d673a4c9a66c8cc8a3e46bba0aa26c932f8dc31018be364860509fee2872d58b"},
+        {"path": "src/mcp_server/src/mcp_server/jsonrpc.mojo", "sha256": "5cc26228edee7dfd98f1cc1315f4d24f1b31e15958bd1c7c8b9082eb7b4c2036"},
+        {"path": "src/mcp_server/src/mcp_server/protocol.mojo", "sha256": "47d1fe8d0beda4f9ad748e7d55ef343ad932178828e731b06ecc53f1486a086f"},
+        {"path": "src/mcp_server/src/mcp_server/provider.mojo", "sha256": "51c74fb86f11f1235bf2cecada40138aac0e68b24262068af5f94c8046b68b6a"},
+        {"path": "src/mcp_server/src/mcp_server/server.mojo", "sha256": "0558ba723d6e39fdd963aff7d9a2783e59d0862e7b6f6f6f2fffb17d3eb339a9"}
+      ],
+      "deps": ["komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/json@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["mcp_server.mojoc"]
+    },
+    {
+      "id": "komira-ai/mcp_server@0.1.0#mojo1.2.0/test:src/mcp_server/tests/test_jsonrpc_spec_examples.mojo",
+      "package": "komira-ai/mcp_server",
+      "import": "mcp_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mcp_server/tests/test_jsonrpc_spec_examples.mojo", "sha256": "5a9f44a3705380ca94ef70accfe08f8e127b2140b21572fec3fe32c2130b338c"}
+      ],
+      "deps": ["komira-ai/mcp_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_jsonrpc_spec_examples.pass"]
+    },
+    {
+      "id": "komira-ai/mcp_server@0.1.0#mojo1.2.0/test:src/mcp_server/tests/test_mcp_lifecycle.mojo",
+      "package": "komira-ai/mcp_server",
+      "import": "mcp_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mcp_server/tests/test_mcp_lifecycle.mojo", "sha256": "7783fbf0cf85b1264aa50e3a07b1a5e01cba408e39c88ad573dde4fcba393106"}
+      ],
+      "deps": ["komira-ai/mcp_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mcp_lifecycle.pass"]
+    },
+    {
+      "id": "komira-ai/mcp_server@0.1.0#mojo1.2.0/test:src/mcp_server/tests/test_mcp_spec_examples.mojo",
+      "package": "komira-ai/mcp_server",
+      "import": "mcp_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mcp_server/tests/test_mcp_spec_examples.mojo", "sha256": "586ff9d086bcce0b3dd5e3a481d8e7094bf01de404eb82550954a8cfebe3d363"}
+      ],
+      "deps": ["komira-ai/mcp_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mcp_spec_examples.pass"]
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/mcp_server@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/json@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/json",
+      "import": "json",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/json/src/json",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["json.mojoc"]
+    },
+    {
+      "id": "komira-ai/mcp_server@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/mcp_server",
+      "import": "mcp_server",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/mcp_server/src/mcp_server",
+      "srcs": [
+        {"path": "src/mcp_server/src/mcp_server/__init__.mojo", "sha256": "d673a4c9a66c8cc8a3e46bba0aa26c932f8dc31018be364860509fee2872d58b"},
+        {"path": "src/mcp_server/src/mcp_server/jsonrpc.mojo", "sha256": "5cc26228edee7dfd98f1cc1315f4d24f1b31e15958bd1c7c8b9082eb7b4c2036"},
+        {"path": "src/mcp_server/src/mcp_server/protocol.mojo", "sha256": "47d1fe8d0beda4f9ad748e7d55ef343ad932178828e731b06ecc53f1486a086f"},
+        {"path": "src/mcp_server/src/mcp_server/provider.mojo", "sha256": "51c74fb86f11f1235bf2cecada40138aac0e68b24262068af5f94c8046b68b6a"},
+        {"path": "src/mcp_server/src/mcp_server/server.mojo", "sha256": "0558ba723d6e39fdd963aff7d9a2783e59d0862e7b6f6f6f2fffb17d3eb339a9"}
+      ],
+      "deps": ["komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/json@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["mcp_server.mojoc"]
+    },
+    {
+      "id": "komira-ai/mcp_server@0.1.0#mojo1.2.0/test:src/mcp_server/tests/test_jsonrpc_spec_examples.mojo",
+      "package": "komira-ai/mcp_server",
+      "import": "mcp_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mcp_server/tests/test_jsonrpc_spec_examples.mojo", "sha256": "5a9f44a3705380ca94ef70accfe08f8e127b2140b21572fec3fe32c2130b338c"}
+      ],
+      "deps": ["komira-ai/mcp_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_jsonrpc_spec_examples.pass"]
+    },
+    {
+      "id": "komira-ai/mcp_server@0.1.0#mojo1.2.0/test:src/mcp_server/tests/test_mcp_lifecycle.mojo",
+      "package": "komira-ai/mcp_server",
+      "import": "mcp_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mcp_server/tests/test_mcp_lifecycle.mojo", "sha256": "7783fbf0cf85b1264aa50e3a07b1a5e01cba408e39c88ad573dde4fcba393106"}
+      ],
+      "deps": ["komira-ai/mcp_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mcp_lifecycle.pass"]
+    },
+    {
+      "id": "komira-ai/mcp_server@0.1.0#mojo1.2.0/test:src/mcp_server/tests/test_mcp_spec_examples.mojo",
+      "package": "komira-ai/mcp_server",
+      "import": "mcp_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mcp_server/tests/test_mcp_spec_examples.mojo", "sha256": "586ff9d086bcce0b3dd5e3a481d8e7094bf01de404eb82550954a8cfebe3d363"}
+      ],
+      "deps": ["komira-ai/mcp_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mcp_spec_examples.pass"]
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/mcp_server@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/json@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/json",
+      "import": "json",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/json/src/json",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["json.mojoc"]
+    },
+    {
+      "id": "komira-ai/mcp_server@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/mcp_server",
+      "import": "mcp_server",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/mcp_server/src/mcp_server",
+      "srcs": [
+        {"path": "src/mcp_server/src/mcp_server/__init__.mojo", "sha256": "d673a4c9a66c8cc8a3e46bba0aa26c932f8dc31018be364860509fee2872d58b"},
+        {"path": "src/mcp_server/src/mcp_server/jsonrpc.mojo", "sha256": "5cc26228edee7dfd98f1cc1315f4d24f1b31e15958bd1c7c8b9082eb7b4c2036"},
+        {"path": "src/mcp_server/src/mcp_server/protocol.mojo", "sha256": "47d1fe8d0beda4f9ad748e7d55ef343ad932178828e731b06ecc53f1486a086f"},
+        {"path": "src/mcp_server/src/mcp_server/provider.mojo", "sha256": "51c74fb86f11f1235bf2cecada40138aac0e68b24262068af5f94c8046b68b6a"},
+        {"path": "src/mcp_server/src/mcp_server/server.mojo", "sha256": "0558ba723d6e39fdd963aff7d9a2783e59d0862e7b6f6f6f2fffb17d3eb339a9"}
+      ],
+      "deps": ["komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/json@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["mcp_server.mojoc"]
+    },
+    {
+      "id": "komira-ai/mcp_server@0.1.0#mojo1.2.0/test:src/mcp_server/tests/test_jsonrpc_spec_examples.mojo",
+      "package": "komira-ai/mcp_server",
+      "import": "mcp_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mcp_server/tests/test_jsonrpc_spec_examples.mojo", "sha256": "5a9f44a3705380ca94ef70accfe08f8e127b2140b21572fec3fe32c2130b338c"}
+      ],
+      "deps": ["komira-ai/mcp_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_jsonrpc_spec_examples.pass"]
+    },
+    {
+      "id": "komira-ai/mcp_server@0.1.0#mojo1.2.0/test:src/mcp_server/tests/test_mcp_lifecycle.mojo",
+      "package": "komira-ai/mcp_server",
+      "import": "mcp_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mcp_server/tests/test_mcp_lifecycle.mojo", "sha256": "7783fbf0cf85b1264aa50e3a07b1a5e01cba408e39c88ad573dde4fcba393106"}
+      ],
+      "deps": ["komira-ai/mcp_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mcp_lifecycle.pass"]
+    },
+    {
+      "id": "komira-ai/mcp_server@0.1.0#mojo1.2.0/test:src/mcp_server/tests/test_mcp_spec_examples.mojo",
+      "package": "komira-ai/mcp_server",
+      "import": "mcp_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/mcp_server/tests/test_mcp_spec_examples.mojo", "sha256": "586ff9d086bcce0b3dd5e3a481d8e7094bf01de404eb82550954a8cfebe3d363"}
+      ],
+      "deps": ["komira-ai/mcp_server@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mcp_spec_examples.pass"]
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

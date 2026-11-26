@@ -13,7 +13,7 @@
 # =============================================================================
 
 from std.atomic import Atomic
-from std.io import FileDescriptor
+from std.sys import stderr
 from std.memory import alloc, UnsafePointer, OwnedPointer
 from std.sys.intrinsics import prefetch, PrefetchOptions
 
@@ -62,7 +62,7 @@ comptime _MARK_PARALLEL_THRESHOLD: Int = 100_000
 comptime _MARK_PF_DIST: Int = 8
 
 # fd 2: a query's stdout is its result stream.
-comptime _RM_STDERR: FileDescriptor = FileDescriptor(2)
+comptime _RM_STDERR = stderr
 
 
 struct _ResidualMarkCtx(Movable):

@@ -438,7 +438,10 @@ def _copy_string_to_c_int8(s: String) -> UnsafePointer[Int8, MutUntrackedOrigin]
     var n = s.byte_length()
     var buf = alloc[Int8](n + 1).unsafe_origin_cast[MutUntrackedOrigin]()
     var s_ref = s
-    var src = s_ref.as_c_string_slice().unsafe_ptr()
+    # SAFETY: `s_ref` outlives `src` (a local copy read only by the memcpy below); the
+    # bitcast to Int8 (same width, one byte) matches the destination: Mojo 1.2 types the
+    # pointer `c_char` (`Scalar[_c_char_dtype()]`), which does not unify with Int8.
+    var src = s_ref.as_c_string_slice().unsafe_ptr().unsafe_bitcast[Int8]()
     if n > 0:
         unsafe_memcpy(dest=buf, src=src, count=n)
     (buf + n).unsafe_write(Int8(0))

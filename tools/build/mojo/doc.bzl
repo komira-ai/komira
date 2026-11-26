@@ -12,7 +12,11 @@ library's welded tests. A source that does not compile fails the action
 With `golden` or `symbols`, a second action checks the JSON, and the target's
 output is the checked copy:
 
-- `golden`: the JSON must equal this file byte for byte.
+- `golden`: the JSON must equal this file byte for byte, except that each
+  `@MOJO_VERSION@` in it stands for the version of the compiler the target
+  platform builds with (`compiler_version`, by default mojo_version() of
+  tools/build/toolchains/mojo_versions.bzl): `mojo doc` writes that version
+  as the JSON's top-level `version`, so one golden holds for both compilers.
 - `symbols`: each entry, a dotted path inside the package
   (`<module>.<name>`, `<module>.<struct>.<method>`, a subpackage's name
   first), must name a declaration of the JSON. The JSON is read by
@@ -28,6 +32,7 @@ load(":defs.bzl", "mojo_compile_cmd")
 load(":providers.bzl", "MojoInfo", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/bench_salt:bench_salt.bzl", "salted")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 def _impl(ctx):
     tc = ctx.attrs.toolchain[MojoToolchainInfo]
@@ -64,6 +69,7 @@ def _impl(ctx):
     ctx.actions.run(
         cmd_args(
             ctx.attrs._doc_check[RunInfo],
+            ["--compiler-version", ctx.attrs.compiler_version] if ctx.attrs.compiler_version else [],
             raw,
             ctx.attrs.golden or "-",
             inspect,
@@ -80,6 +86,7 @@ mojo_doc_json_rule = rule(
     impl = _impl,
     doc = "The `mojo doc` JSON of the mojo_library `lib`, as `<name>.json`; with `golden` it must equal that file byte for byte, and with `symbols` it must declare each dotted path. See doc.bzl.",
     attrs = {
+        "compiler_version": attrs.string(default = "", doc = "The version `@MOJO_VERSION@` in `golden` stands for; empty: the golden is compared as written."),
         "golden": attrs.option(attrs.source(), default = None),
         "lib": attrs.dep(providers = [MojoInfo]),
         "symbols": attrs.list(attrs.string(), default = []),
@@ -89,4 +96,10 @@ mojo_doc_json_rule = rule(
     },
 )
 
-mojo_doc_json = declares_docs(mojo_doc_json_rule)
+_mojo_doc_json = declares_docs(mojo_doc_json_rule)
+
+def mojo_doc_json(**kwargs):
+    """mojo_doc_json_rule, with `compiler_version` the compiler the target platform builds with unless given."""
+    if "compiler_version" not in kwargs:
+        kwargs["compiler_version"] = mojo_version()
+    _mojo_doc_json(**kwargs)

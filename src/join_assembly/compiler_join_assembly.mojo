@@ -23,8 +23,7 @@
 from std.memory import unsafe_memcpy, unsafe_memset, alloc
 from std.sys.intrinsics import prefetch, PrefetchOptions
 from std.collections import Set
-from std.sys import size_of
-from std.io import FileDescriptor
+from std.sys import size_of, stderr
 
 # -----------------------------------------------------------------------------
 # _STDERR — DIAGNOSTICS DO NOT GO ON THE DATA CHANNEL.
@@ -38,7 +37,7 @@ from std.io import FileDescriptor
 # ROUTED, NOT DELETED -- the `ArrowOffsetPromotion` banner below announces a
 # change to the DECLARED TYPE of a user-visible column and must never be silent.
 # Only its destination moves (same spelling as `compiler_helpers.mojo:_STDERR`).
-comptime _STDERR: FileDescriptor = FileDescriptor(2)
+comptime _STDERR = stderr
 
 from arrow.schema import RecordBatch, RecordBatchBuilder, Schema, SchemaBuilder, Field
 from arrow.column import Column

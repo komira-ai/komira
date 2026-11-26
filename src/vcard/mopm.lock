@@ -1,13 +1,19 @@
 {
   "lock_version": 3,
   "mojo": [
-    "1.1.0"
+    "1.1.0",
+    "1.2.0"
   ],
   "toolchain": {
     "1.1.0": {
       "linux-64": "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6",
       "linux-aarch64": "9178cc89625b91870bf333edfd63d3c363e1c1504abb62e69c9a4bcf71f7263a",
       "osx-arm64": "be2708aa44a3f2af7a3baac8b5c0aa9b71c35c54d41c198327af54095a09871c"
+    },
+    "1.2.0": {
+      "linux-64": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+      "linux-aarch64": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+      "osx-arm64": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89"
     }
   },
   "channels": [

@@ -35,7 +35,7 @@
 
 from atomic_alias import AtomicI64
 from std.atomic import Ordering
-from std.io import FileDescriptor
+from std.sys import stderr
 from std.memory import unsafe_memset, UnsafePointer
 from std.sys.intrinsics import prefetch, PrefetchOptions
 
@@ -85,7 +85,7 @@ from .join_parallel_build_counter import (
 comptime _PF_DIST: Int = 8
 
 # fd 2: a query's stdout is its result stream.
-comptime _HCB_STDERR: FileDescriptor = FileDescriptor(2)
+comptime _HCB_STDERR = stderr
 
 
 # THE FILL FLOOR IS ON BYTES, NOT ROWS. The gain is `cap * 8 / bandwidth`

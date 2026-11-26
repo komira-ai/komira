@@ -313,6 +313,7 @@ mod tests {
             ("Json", "is not a package name (^[a-z][a-z0-9_]{1,63}$)"),
             ("", "is not a package name (^[a-z][a-z0-9_]{1,63}$)"),
             ("async", "is a Mojo keyword"),
+            ("match", "is a Mojo keyword"),
             ("hash", "is a Mojo builtin"),
             ("std", "is reserved by mopm"),
             ("collections", "is a name in the Mojo standard library"),

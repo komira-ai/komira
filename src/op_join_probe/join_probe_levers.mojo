@@ -15,7 +15,7 @@
 
 from std.atomic import Atomic
 from std.ffi import _Global
-from std.io import FileDescriptor
+from std.sys import stderr
 from std.memory import OwnedPointer, UnsafePointer, alloc
 
 from async_rt.runtime.sched_trace import sched_trace_enabled
@@ -44,7 +44,7 @@ comptime _JPB_FRESH = _Global["komira_join_probe_buf_fresh", _init_jpl_i64]
 
 
 # fd 2: a query's stdout is its result stream.
-comptime _JPL_STDERR: FileDescriptor = FileDescriptor(2)
+comptime _JPL_STDERR = stderr
 
 
 def join_probe_buf_reuse_configure(on: Bool) raises:

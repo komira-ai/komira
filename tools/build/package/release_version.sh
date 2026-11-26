@@ -54,8 +54,9 @@ closure=$(git log -1 --first-parent --format=%H "$commit" -- . ':(exclude)docs' 
 [ -n "$closure" ] || { echo "release_version.sh: no commit touches the published closure" >&2; exit 1; }
 table=$(git show "$closure:tools/build/platforms/table.bzl") ||
     { echo "release_version.sh: $closure has no tools/build/platforms/table.bzl" >&2; exit 1; }
-by_name=$(printf '%s\n' "$table" | sed -n 's/.*"mojo_compiler_\(.*\)_linux-64\.conda".*/\1/p')
-by_url=$(printf '%s\n' "$table" | sed -n 's#.*/linux-64/mojo-compiler-\(.*\)-release\.conda".*#\1#p')
+# The default compiler: the `mojo_compiler` pin (the table's `mojo_compiler_next` is the second one).
+by_name=$(printf '%s\n' "$table" | sed -n '/"mojo_compiler": pin(/,/),/s/.*"mojo_compiler_\(.*\)_linux-64\.conda".*/\1/p')
+by_url=$(printf '%s\n' "$table" | sed -n '/"mojo_compiler": pin(/,/),/s#.*/linux-64/mojo-compiler-\(.*\)-release\.conda".*#\1#p')
 case "$by_name" in
     [0-9]*) ;;
     *) echo "release_version.sh: cannot read the pinned compiler version from the linux-64 row of table.bzl at $closure" >&2; exit 1 ;;

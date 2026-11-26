@@ -76,3 +76,26 @@ test "differences: an added or removed tail, and at most max lines" {
     try t.expectEqualStrings("-1\n-2\n", try D.differences(a, "1\n2\n3\n4\n", "x\ny\n", 2));
     try t.expectEqualStrings("", try D.differences(a, "same\n", "same\n", 40));
 }
+
+test "goldenAsCompared: each placeholder is the compiler's version, and nothing else changes" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const raw = "{\n  \"x\": \"@MOJO_VERSION@ and @MOJO_VERSION@\",\n  \"version\": \"@MOJO_VERSION@\"\n}\n";
+    try t.expectEqualStrings("{\n  \"x\": \"1.2.0 and 1.2.0\",\n  \"version\": \"1.2.0\"\n}\n", try D.goldenAsCompared(a, raw, "1.2.0"));
+    try t.expectEqualStrings("{\n  \"x\": \"1.1.0 and 1.1.0\",\n  \"version\": \"1.1.0\"\n}\n", try D.goldenAsCompared(a, raw, "1.1.0"));
+}
+
+test "goldenAsCompared: with no version the golden is compared as written, the placeholder included" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const raw = "{\"version\": \"@MOJO_VERSION@\"}";
+    try t.expectEqualStrings(raw, try D.goldenAsCompared(arena.allocator(), raw, null));
+}
+
+test "goldenAsCompared: a golden that names a version literally is not rewritten, so it still fails on another compiler" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const raw = "{\"version\": \"1.1.0\"}";
+    try t.expectEqualStrings(raw, try D.goldenAsCompared(arena.allocator(), raw, "1.2.0"));
+}

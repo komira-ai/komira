@@ -4,6 +4,7 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":buildrules.mojo.bzl", "mojo_package")
 load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixture_case", "proto_fixture_check")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 # The plan IR on the wire: `komira.plan.v1`.
 #
@@ -178,7 +179,7 @@ mojo_conda(
         "../proto_codec": "//src/proto_codec:mopm.toml",
         "../protobuf": "//src/protobuf:mopm.toml",
     },
-    mojo = "1.1.0",
+    mojo = mojo_version(),
     mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/plan_proto",
     version = "0.1.0",

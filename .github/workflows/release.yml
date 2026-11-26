@@ -12,8 +12,9 @@
 # THE MOPM JOBS. The libraries moved to mopm (every src/<name> that has a
 # mopm.toml) are published to the mopm registry as one group, apart from the
 # release set, each built for linux-64 and osx-arm64 (//release:mopm_release_artifacts:
-# //release:mopm_artifacts and the macOS set, built on the farm's macOS workers), the two
-# files of a package in the same group at the same version. The publish is CONTINUOUS:
+# //release:mopm_artifacts and the macOS set, built on the farm's macOS workers) and for
+# Mojo 1.1.0 and Mojo 1.2.0, the files of a package (one per platform and Mojo) in the same group
+# at the same version. The publish is CONTINUOUS:
 # EVERY push to main runs it, to the registry `prod`, in seven jobs: build and
 # stage, stage in prod, test the staged bytes, commit, smoke, add from prod, and
 # (when one of them failed or the run was cancelled) abort. This workflow publishes to no other
@@ -57,8 +58,9 @@
 #                   the plan; on a difference it prints the command a human runs
 #                   to yank the group. It yanks nothing.
 #     prod-add      (needs prod-commit and prod-smoke; no environment, no identity)
-#                   what a user gets: in a fresh project set to the Mojo this
-#                   release was built for, the pinned mopm runs
+#                   what a user gets, once for each Mojo the release publishes (1.1.0
+#                   and 1.2.0, two steps): in a fresh project set to that Mojo, the
+#                   pinned mopm runs
 #                   `mopm add komira-ai/<name> --registry prod` for json, uuid
 #                   and libc, then `mopm sync`; the lock must record full names
 #                   under https://conda.mopm.dev/komira-ai/ at this run's version,
@@ -90,12 +92,12 @@
 #      release.json: a package whose bytes, name, platform or metadata are not
 #      what its manifest says, or that is not stamped, is a red build.
 #
-# macOS HERE: ONE BUILD. The macOS arm64 set is also built, reported and not blocking, by its own
+# macOS HERE: ONE BUILD PER MOJO. The macOS arm64 set is also built, reported and not blocking, by its own
 # workflow, release-macos.yml. The only lines of this file that name macOS are mopm-stage's: the macOS
-# keys its farm connection writes to a buckconfig of their own, and the step `build the packages`, the
-# one that names that file, whose //release:mopm_release_artifacts builds the osx-arm64 half of the
-# packages this workflow publishes on the farm's macOS workers (//:release_macos_cases holds exactly
-# those lines). That build is in this workflow's group, so a stalled Mac build holds the next run and
+# keys its farm connection writes to a buckconfig of their own, and the two steps `build the packages` and
+# `build the packages for Mojo 1.2.0`, the ones that name that file, whose //release:mopm_release_artifacts build the
+# osx-arm64 half of the packages this workflow publishes on the farm's macOS workers (//:release_macos_cases
+# holds exactly those lines). Those builds are in this workflow's group, so a stalled Mac build holds the next run and
 # the prod publish of both platforms, bounded by mopm-stage's timeout-minutes.
 #
 # Triggers: a push to main (not one that touches only documentation:
@@ -304,13 +306,24 @@ jobs:
       # stage --artifacts` reads (//release:mopm_release_artifacts): the linux-64 tree, and
       # the osx-arm64 tree built for darwin-arm64 on the farm's macOS workers. Each `.mojoc`
       # exists only once its library's welded tests passed on that platform, so a red macOS
-      # build stops the release before anything is staged. The last build before the version
-      # rewrite below (which edits the manifests the build reads), and the only step that
-      # names the file of the macOS keys.
+      # build stops the release before anything is staged. One directory per Mojo the release
+      # publishes: this one is built with Mojo 1.1.0, the default compiler of the tree, and the
+      # next step builds the same set with Mojo 1.2.0. These are the last builds before the version
+      # rewrite below (which edits the manifests the builds read), and the only steps that
+      # name the file of the macOS keys.
       - name: build the packages
         uses: ./.github/actions/buck2-farm
         with:
-          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts
+          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts-1.1.0
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The same packages built with Mojo 1.2.0: the target platform carries the constraint that
+      # every Mojo rule of the tree (and the osx-arm64 half, through its transition) selects its
+      # compiler on (tools/build/toolchains/mojo_versions.bzl). The same version of every package
+      # is then published with a build for each Mojo.
+      - name: build the packages for Mojo 1.2.0
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --config-file ${{ runner.temp }}/darwin.buckconfig -c komira_release.mac_tree=true --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 //release:mopm_release_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts-1.2.0
           assert-remote: ${{ steps.assert.outputs.path }}
       # THE VERSION OF THIS RUN. A (name, version) pair can be created once on a registry, and a
       # mopm version is exactly MAJOR.MINOR.PATCH, so every release carries new versions: every
@@ -323,21 +336,29 @@ jobs:
         env:
           RUN_NUMBER: ${{ github.run_number }}
         run: '"$RUNNER_TEMP/mopm-publish/release_beta_version" --workspace-root src --version "0.1.$RUN_NUMBER"'
-      # STAGE. Packs each member of src/ from its built `.mojoc` (compiler: MOJO
-      # of packages.bzl), asks the registry, without a token, which versions it
+      # STAGE. Packs each member of src/ from its built `.mojoc` for each compiler (`--artifacts
+      # <mojo version>=<directory>`, once per compiler: the two builds above, so every member has
+      # a build for Mojo 1.1.0 and one for Mojo 1.2.0 at the one version), asks the registry, without a token, which versions it
       # holds, and writes the staged set: plan.json, each `.conda`, each README.
       # It stays out of the build because it makes requests; the directory is a
       # gitignored input of //release/staged_set. A version the registry holds
       # with other bytes, or has yanked, makes the step fail.
       - name: mopm stage
-        run: '"$RUNNER_TEMP/mopm-publish/mopm" stage --workspace-root src --artifacts "$RUNNER_TEMP/mopm-publish/artifacts" --compiler 1.1.0 --out release/staged_set --registry prod'
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" stage --workspace-root src --artifacts "1.1.0=$RUNNER_TEMP/mopm-publish/artifacts-1.1.0" --artifacts "1.2.0=$RUNNER_TEMP/mopm-publish/artifacts-1.2.0" --out release/staged_set --registry prod'
       # TRY. Every package's README examples, compiled and run on the farm as a
       # user would, against the `.conda` files of the set that was just staged
-      # (the e2e installs offline from it, so the closure must be in it).
+      # (the e2e installs offline from it, so the closure must be in it), once with
+      # Mojo 1.1.0 and once with Mojo 1.2.0: the compiler, the project's Mojo and the
+      # build of each package the e2e installs follow the target platform.
       - name: the README e2e against the staged set
         uses: ./.github/actions/buck2-farm
         with:
           args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the README e2e against the staged set for Mojo 1.2.0
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
           assert-remote: ${{ steps.assert.outputs.path }}
       # Reads plan.json and hashes every file; sends nothing and reads no token.
       - name: mopm publish --staged --dry-run
@@ -460,6 +481,11 @@ jobs:
         uses: ./.github/actions/buck2-farm
         with:
           args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the README e2e against the staged files for Mojo 1.2.0
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --target-platforms komira//tools/build/platforms:linux-x86_64-mojo-1.2.0 -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: Stop buck2
         if: always()
@@ -598,5 +624,7 @@ jobs:
           path: ${{ runner.temp }}/prod-add/committed
       - name: mopm and the verify tool are executable
         run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm" "$RUNNER_TEMP/mopm-publish/release_staged_verify"
-      - name: mopm add from prod installs the published files
-        run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" add --staged "$RUNNER_TEMP/prod-add/committed" --mopm "$RUNNER_TEMP/mopm-publish/mopm" --work "$RUNNER_TEMP/prod-add/work"'
+      - name: mopm add from prod installs the published files, Mojo 1.1.0
+        run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" add --staged "$RUNNER_TEMP/prod-add/committed" --mopm "$RUNNER_TEMP/mopm-publish/mopm" --work "$RUNNER_TEMP/prod-add/work-1.1.0" --mojo 1.1.0'
+      - name: mopm add from prod installs the published files, Mojo 1.2.0
+        run: '"$RUNNER_TEMP/mopm-publish/release_staged_verify" add --staged "$RUNNER_TEMP/prod-add/committed" --mopm "$RUNNER_TEMP/mopm-publish/mopm" --work "$RUNNER_TEMP/prod-add/work-1.2.0" --mojo 1.2.0'

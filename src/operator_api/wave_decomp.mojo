@@ -88,7 +88,7 @@
 
 from counters.global_counter import GlobalCounter
 
-from std.io import FileDescriptor
+from std.sys import stderr
 
 
 # ---- WORKER BODY brackets (ns) ----------------------------------------------
@@ -340,4 +340,4 @@ def stream_wtrace_emit(
         )
     # stderr, never stdout: `//src/cmd/plan_exec` streams Arrow IPC on fd 1
     # (`scripts/lint_plan_exec_stdout.py`).
-    print(out, end="", file=FileDescriptor(2))
+    print(out, end="", file=stderr)

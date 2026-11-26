@@ -5,18 +5,18 @@ MOPM = {"version": "0.0.138", "origin": "builtin", "workspace_root": True}
 MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
-    "../calendar/mopm.toml": "5f7480c92bab56cb2590171fe94cbf538a6364f93c34fd56f048308a11a526cd",
-    "../calendar_proto/mopm.toml": "974c73904d5130c9d8652f245dbf545d2160bc20ddea53bbb05bc70eaa64280e",
-    "../content_line/mopm.toml": "20be6acb9dd4b0373fecc7eee68085d23b54f44c626bd3ad42a3599f289a97ec",
-    "../datetime/mopm.toml": "e6f1de668b2838cb2fd2c6bf0b6ca84fbce036b8ea8db30633c64939e8c1def1",
-    "../encoding/mopm.toml": "d9564875ec708dbd9ca97c063141eb88cb3e382ce7b1dfd1bc64a2a0917f8e35",
-    "../json/mopm.toml": "7cca5a2e36734233b459f459c5834d170f268d72fabafdc92b3b0f346f95b782",
-    "../proto_codec/mopm.toml": "9d56540c1e449147ed357c8aa714104e44bd722518f2de54dede11cec3670db2",
-    "../protobuf/mopm.toml": "5c1a88816f25acb6410d0d6f3bea7107813cbf510b876b10d196954d439b9dbe",
-    "../wkt/mopm.toml": "838c056439be3c137b5e078f7f7f7d55f631891b3d0eb6403a9afeb566f8b887",
+    "../calendar/mopm.toml": "e12da28f89462da14a4c3263ba4294743c460f9f88fa64e82da6c4404371ff09",
+    "../calendar_proto/mopm.toml": "ee48f8ee2d4ec014a12ba1996666cff3092b2702f847115548bde8a46dbe45ac",
+    "../content_line/mopm.toml": "3906153cb3a53b0566a86bf94e638239ded65cedf679b9b53f9fc0ece80b19f6",
+    "../datetime/mopm.toml": "3da3613147142936b1bf670ff80d82deb67228ec8c35f3159f7480be6f4abad1",
+    "../encoding/mopm.toml": "e1017d28d8a80d545ba93da6e0f168cff20366cdb93ff54181a80a3521e539d4",
+    "../json/mopm.toml": "22b36527f34106b572af5ad45d7bd211a9c765072d81152373a50e21a0b3cb92",
+    "../proto_codec/mopm.toml": "8eb3c529a55c1c0ed5ea246a6bd5ef1bb614570deb32f7f6a20473feab70e801",
+    "../protobuf/mopm.toml": "4ef57e63c2ae7ae9dcfdcf4e10c6e9f43e4e670a42ca1fb2883b0ab4ed30b190",
+    "../wkt/mopm.toml": "48e986fda6d0e82c970b5d2213a0e890820797aa401042112f46091777ae6437",
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "b3c9edb75defed6e2d452dc653e01a3b0950d704926ede9d570f57a877c7836d",
-    "mopm.toml": "d42f394833f6c8bcb30dc1024a786800ad784931a96d4a9e7f6a09953fc6dbb6",
+    "mopm.lock": "ace76b79cf8cabf9222a32182200f21b74b28c0ed096b535a444c5a3c3d9edd7",
+    "mopm.toml": "574a707c18b92c7bfebc3b3ea1d4d10b1554f77e7939bb38fce5fa47e0e1598c",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -774,4 +774,759 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/calendar_ics@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/calendar@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/calendar",
+      "import": "calendar",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/calendar/src/calendar",
+      "deps": ["komira-ai/calendar_proto@0.1.0#mojo1.2.0/lib", "komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["calendar.mojoc"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/calendar_ics/src/calendar_ics",
+      "srcs": [
+        {"path": "src/calendar_ics/src/calendar_ics/__init__.mojo", "sha256": "ecacef237e9bfd43db5b934b93abe19fb044c16b6b2d12e71cbf2aecb8bc3c9f"},
+        {"path": "src/calendar_ics/src/calendar_ics/props.mojo", "sha256": "3fdae050d9b2c200a2f77ba36a32edfa3a909d7fe7c04c17618130834904c89a"},
+        {"path": "src/calendar_ics/src/calendar_ics/read.mojo", "sha256": "7d5e9cb53f64cec289d16db5f7195131991425805928c0ac8b17fb27b06693c1"},
+        {"path": "src/calendar_ics/src/calendar_ics/read_event.mojo", "sha256": "a46201e76abb99bcedb661181a58663ce9d0c5a71ec0b799490c3b49adda5883"},
+        {"path": "src/calendar_ics/src/calendar_ics/report.mojo", "sha256": "835deeff3ab86cf280510e4f261f52e888dff1ffafb43e862c054651bf942256"},
+        {"path": "src/calendar_ics/src/calendar_ics/rrule.mojo", "sha256": "12fe7214592424d490b269c85919dd7506858c458a3ccdc9ab01973d3c8463ae"},
+        {"path": "src/calendar_ics/src/calendar_ics/tree.mojo", "sha256": "caf6b199c8aa57017802fc11edf76639e075f42569eeab75f13939fcc8157c57"},
+        {"path": "src/calendar_ics/src/calendar_ics/values.mojo", "sha256": "d941a72bf069c44113b0491f597dec71ef100aaf1df8a81233cca5450bc3a381"},
+        {"path": "src/calendar_ics/src/calendar_ics/vtimezone.mojo", "sha256": "97713b6a969b4e7140844021fd56c0cafc0e967e5406952aaa7761830c3de3be"},
+        {"path": "src/calendar_ics/src/calendar_ics/write.mojo", "sha256": "284d92cf18b9a34dbd350b9ff6b57a00d69d87458ff512b53a9cabc49c603459"},
+        {"path": "src/calendar_ics/src/calendar_ics/zones.mojo", "sha256": "ca3f3f60432b8eaf5ceca16dedfe8c0a6f3e822f45abd88f636ac7d31cd6fde1"}
+      ],
+      "deps": ["komira-ai/calendar@0.1.0#mojo1.2.0/lib", "komira-ai/calendar_proto@0.1.0#mojo1.2.0/lib", "komira-ai/content_line@0.1.0#mojo1.2.0/lib", "komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["calendar_ics.mojoc"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_read.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_read.mojo", "sha256": "da1780c0e95e636e7f09ef43276168f4135e586a72c0323dfa9e49eaf7843498"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_read.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_read_cases.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_read_cases.mojo", "sha256": "f025b027bf6522423edfd308398cf508df41c6494ed9b9dba486231bb5b88507"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_read_cases.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_read_edges.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_read_edges.mojo", "sha256": "ba8f6619c02627cefd60910e78929d0ebc72964623c4094676c3d5b9c74ec4b6"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_read_edges.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_round_trip_edges.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_round_trip_edges.mojo", "sha256": "456cbe50342d51743cf22934c2db13dad294500772dfb591b45fc6fa14405977"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_round_trip_edges.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_rrule.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_rrule.mojo", "sha256": "a0e4e737c4f2424aacf09263e9403cf3ad42f44f75fafc99b3c188c59b481218"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rrule.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_values.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_values.mojo", "sha256": "ff6852e21e3b8f3130718f80eec9fc51a130aa5eb2ea5edfeac6b9b90030ec76"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_values.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_write.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_write.mojo", "sha256": "ca35b45d0d7dcfc4dcd810673e4135b7eadc6b30ae6799db334b61faa737d50e"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_write.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_proto@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/calendar_proto",
+      "import": "calendar_proto",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/calendar_proto/generated/calendar_proto",
+      "deps": ["komira-ai/proto_codec@0.1.0#mojo1.2.0/lib", "komira-ai/wkt@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["calendar_proto.mojoc"]
+    },
+    {
+      "id": "komira-ai/content_line@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/content_line",
+      "import": "content_line",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/content_line/src/content_line",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["content_line.mojoc"]
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/datetime/src/datetime",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["datetime.mojoc"]
+    },
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/json@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/json",
+      "import": "json",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/json/src/json",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["json.mojoc"]
+    },
+    {
+      "id": "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/proto_codec",
+      "import": "proto_codec",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/proto_codec/src/proto_codec",
+      "deps": ["komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/json@0.1.0#mojo1.2.0/lib", "komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["proto_codec.mojoc"]
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/protobuf/src/protobuf",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["protobuf.mojoc"]
+    },
+    {
+      "id": "komira-ai/wkt@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/wkt",
+      "import": "wkt",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/wkt/src/wkt",
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib", "komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/json@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["wkt.mojoc"]
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/calendar_ics@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/calendar@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/calendar",
+      "import": "calendar",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/calendar/src/calendar",
+      "deps": ["komira-ai/calendar_proto@0.1.0#mojo1.2.0/lib", "komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["calendar.mojoc"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/calendar_ics/src/calendar_ics",
+      "srcs": [
+        {"path": "src/calendar_ics/src/calendar_ics/__init__.mojo", "sha256": "ecacef237e9bfd43db5b934b93abe19fb044c16b6b2d12e71cbf2aecb8bc3c9f"},
+        {"path": "src/calendar_ics/src/calendar_ics/props.mojo", "sha256": "3fdae050d9b2c200a2f77ba36a32edfa3a909d7fe7c04c17618130834904c89a"},
+        {"path": "src/calendar_ics/src/calendar_ics/read.mojo", "sha256": "7d5e9cb53f64cec289d16db5f7195131991425805928c0ac8b17fb27b06693c1"},
+        {"path": "src/calendar_ics/src/calendar_ics/read_event.mojo", "sha256": "a46201e76abb99bcedb661181a58663ce9d0c5a71ec0b799490c3b49adda5883"},
+        {"path": "src/calendar_ics/src/calendar_ics/report.mojo", "sha256": "835deeff3ab86cf280510e4f261f52e888dff1ffafb43e862c054651bf942256"},
+        {"path": "src/calendar_ics/src/calendar_ics/rrule.mojo", "sha256": "12fe7214592424d490b269c85919dd7506858c458a3ccdc9ab01973d3c8463ae"},
+        {"path": "src/calendar_ics/src/calendar_ics/tree.mojo", "sha256": "caf6b199c8aa57017802fc11edf76639e075f42569eeab75f13939fcc8157c57"},
+        {"path": "src/calendar_ics/src/calendar_ics/values.mojo", "sha256": "d941a72bf069c44113b0491f597dec71ef100aaf1df8a81233cca5450bc3a381"},
+        {"path": "src/calendar_ics/src/calendar_ics/vtimezone.mojo", "sha256": "97713b6a969b4e7140844021fd56c0cafc0e967e5406952aaa7761830c3de3be"},
+        {"path": "src/calendar_ics/src/calendar_ics/write.mojo", "sha256": "284d92cf18b9a34dbd350b9ff6b57a00d69d87458ff512b53a9cabc49c603459"},
+        {"path": "src/calendar_ics/src/calendar_ics/zones.mojo", "sha256": "ca3f3f60432b8eaf5ceca16dedfe8c0a6f3e822f45abd88f636ac7d31cd6fde1"}
+      ],
+      "deps": ["komira-ai/calendar@0.1.0#mojo1.2.0/lib", "komira-ai/calendar_proto@0.1.0#mojo1.2.0/lib", "komira-ai/content_line@0.1.0#mojo1.2.0/lib", "komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["calendar_ics.mojoc"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_read.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_read.mojo", "sha256": "da1780c0e95e636e7f09ef43276168f4135e586a72c0323dfa9e49eaf7843498"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_read.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_read_cases.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_read_cases.mojo", "sha256": "f025b027bf6522423edfd308398cf508df41c6494ed9b9dba486231bb5b88507"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_read_cases.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_read_edges.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_read_edges.mojo", "sha256": "ba8f6619c02627cefd60910e78929d0ebc72964623c4094676c3d5b9c74ec4b6"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_read_edges.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_round_trip_edges.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_round_trip_edges.mojo", "sha256": "456cbe50342d51743cf22934c2db13dad294500772dfb591b45fc6fa14405977"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_round_trip_edges.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_rrule.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_rrule.mojo", "sha256": "a0e4e737c4f2424aacf09263e9403cf3ad42f44f75fafc99b3c188c59b481218"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rrule.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_values.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_values.mojo", "sha256": "ff6852e21e3b8f3130718f80eec9fc51a130aa5eb2ea5edfeac6b9b90030ec76"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_values.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_write.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_write.mojo", "sha256": "ca35b45d0d7dcfc4dcd810673e4135b7eadc6b30ae6799db334b61faa737d50e"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_write.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_proto@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/calendar_proto",
+      "import": "calendar_proto",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/calendar_proto/generated/calendar_proto",
+      "deps": ["komira-ai/proto_codec@0.1.0#mojo1.2.0/lib", "komira-ai/wkt@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["calendar_proto.mojoc"]
+    },
+    {
+      "id": "komira-ai/content_line@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/content_line",
+      "import": "content_line",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/content_line/src/content_line",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["content_line.mojoc"]
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/datetime/src/datetime",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["datetime.mojoc"]
+    },
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/json@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/json",
+      "import": "json",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/json/src/json",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["json.mojoc"]
+    },
+    {
+      "id": "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/proto_codec",
+      "import": "proto_codec",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/proto_codec/src/proto_codec",
+      "deps": ["komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/json@0.1.0#mojo1.2.0/lib", "komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["proto_codec.mojoc"]
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/protobuf/src/protobuf",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["protobuf.mojoc"]
+    },
+    {
+      "id": "komira-ai/wkt@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/wkt",
+      "import": "wkt",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/wkt/src/wkt",
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib", "komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/json@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["wkt.mojoc"]
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/calendar_ics@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/calendar@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/calendar",
+      "import": "calendar",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/calendar/src/calendar",
+      "deps": ["komira-ai/calendar_proto@0.1.0#mojo1.2.0/lib", "komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["calendar.mojoc"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/calendar_ics/src/calendar_ics",
+      "srcs": [
+        {"path": "src/calendar_ics/src/calendar_ics/__init__.mojo", "sha256": "ecacef237e9bfd43db5b934b93abe19fb044c16b6b2d12e71cbf2aecb8bc3c9f"},
+        {"path": "src/calendar_ics/src/calendar_ics/props.mojo", "sha256": "3fdae050d9b2c200a2f77ba36a32edfa3a909d7fe7c04c17618130834904c89a"},
+        {"path": "src/calendar_ics/src/calendar_ics/read.mojo", "sha256": "7d5e9cb53f64cec289d16db5f7195131991425805928c0ac8b17fb27b06693c1"},
+        {"path": "src/calendar_ics/src/calendar_ics/read_event.mojo", "sha256": "a46201e76abb99bcedb661181a58663ce9d0c5a71ec0b799490c3b49adda5883"},
+        {"path": "src/calendar_ics/src/calendar_ics/report.mojo", "sha256": "835deeff3ab86cf280510e4f261f52e888dff1ffafb43e862c054651bf942256"},
+        {"path": "src/calendar_ics/src/calendar_ics/rrule.mojo", "sha256": "12fe7214592424d490b269c85919dd7506858c458a3ccdc9ab01973d3c8463ae"},
+        {"path": "src/calendar_ics/src/calendar_ics/tree.mojo", "sha256": "caf6b199c8aa57017802fc11edf76639e075f42569eeab75f13939fcc8157c57"},
+        {"path": "src/calendar_ics/src/calendar_ics/values.mojo", "sha256": "d941a72bf069c44113b0491f597dec71ef100aaf1df8a81233cca5450bc3a381"},
+        {"path": "src/calendar_ics/src/calendar_ics/vtimezone.mojo", "sha256": "97713b6a969b4e7140844021fd56c0cafc0e967e5406952aaa7761830c3de3be"},
+        {"path": "src/calendar_ics/src/calendar_ics/write.mojo", "sha256": "284d92cf18b9a34dbd350b9ff6b57a00d69d87458ff512b53a9cabc49c603459"},
+        {"path": "src/calendar_ics/src/calendar_ics/zones.mojo", "sha256": "ca3f3f60432b8eaf5ceca16dedfe8c0a6f3e822f45abd88f636ac7d31cd6fde1"}
+      ],
+      "deps": ["komira-ai/calendar@0.1.0#mojo1.2.0/lib", "komira-ai/calendar_proto@0.1.0#mojo1.2.0/lib", "komira-ai/content_line@0.1.0#mojo1.2.0/lib", "komira-ai/datetime@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["calendar_ics.mojoc"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_read.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_read.mojo", "sha256": "da1780c0e95e636e7f09ef43276168f4135e586a72c0323dfa9e49eaf7843498"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_read.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_read_cases.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_read_cases.mojo", "sha256": "f025b027bf6522423edfd308398cf508df41c6494ed9b9dba486231bb5b88507"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_read_cases.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_read_edges.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_read_edges.mojo", "sha256": "ba8f6619c02627cefd60910e78929d0ebc72964623c4094676c3d5b9c74ec4b6"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_read_edges.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_round_trip_edges.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_round_trip_edges.mojo", "sha256": "456cbe50342d51743cf22934c2db13dad294500772dfb591b45fc6fa14405977"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_round_trip_edges.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_rrule.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_rrule.mojo", "sha256": "a0e4e737c4f2424aacf09263e9403cf3ad42f44f75fafc99b3c188c59b481218"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rrule.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_values.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_values.mojo", "sha256": "ff6852e21e3b8f3130718f80eec9fc51a130aa5eb2ea5edfeac6b9b90030ec76"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_values.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_ics@0.1.0#mojo1.2.0/test:src/calendar_ics/tests/test_write.mojo",
+      "package": "komira-ai/calendar_ics",
+      "import": "calendar_ics",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/calendar_ics/tests/test_write.mojo", "sha256": "ca35b45d0d7dcfc4dcd810673e4135b7eadc6b30ae6799db334b61faa737d50e"}
+      ],
+      "deps": ["komira-ai/calendar_ics@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_write.pass"]
+    },
+    {
+      "id": "komira-ai/calendar_proto@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/calendar_proto",
+      "import": "calendar_proto",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/calendar_proto/generated/calendar_proto",
+      "deps": ["komira-ai/proto_codec@0.1.0#mojo1.2.0/lib", "komira-ai/wkt@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["calendar_proto.mojoc"]
+    },
+    {
+      "id": "komira-ai/content_line@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/content_line",
+      "import": "content_line",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/content_line/src/content_line",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["content_line.mojoc"]
+    },
+    {
+      "id": "komira-ai/datetime@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/datetime",
+      "import": "datetime",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/datetime/src/datetime",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["datetime.mojoc"]
+    },
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/json@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/json",
+      "import": "json",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/json/src/json",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["json.mojoc"]
+    },
+    {
+      "id": "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/proto_codec",
+      "import": "proto_codec",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/proto_codec/src/proto_codec",
+      "deps": ["komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/json@0.1.0#mojo1.2.0/lib", "komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["proto_codec.mojoc"]
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/protobuf/src/protobuf",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["protobuf.mojoc"]
+    },
+    {
+      "id": "komira-ai/wkt@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/wkt",
+      "import": "wkt",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/wkt/src/wkt",
+      "deps": ["komira-ai/datetime@0.1.0#mojo1.2.0/lib", "komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/json@0.1.0#mojo1.2.0/lib", "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["wkt.mojoc"]
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

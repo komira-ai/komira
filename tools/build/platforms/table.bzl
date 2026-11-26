@@ -71,6 +71,7 @@ ASSET_ROLES = [
     "llvm_branch_tools",
     "llvm_branch_zstd",
     "mojo_compiler",
+    "mojo_compiler_next",
     "pixi",
     "protoc",
     "rust_std",
@@ -269,6 +270,14 @@ PLATFORMS = {
                 "1ff52b39a0d2a1bedb8c4705aadc460205ca62fc19f63426bc545e4b60a31aa0",
                 size = 69781261,
             ),
+            # The second compiler, 1.2.0: what a target platform carrying
+            # `buildrules//platforms:mojo_1_2_0` compiles with (toolchains/defs.bzl).
+            "mojo_compiler_next": pin(
+                "mojo_compiler_1.2.0_linux-64.conda",
+                "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda",
+                "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b",
+                size = 71258238,
+            ),
             # pixi, the raw static (musl) executable of the release: no archive,
             # nothing to unpack. Release validations install into an environment
             # this pixi defines (//tools/build/toolchains:pixi).
@@ -455,6 +464,14 @@ PLATFORMS = {
                 "6b0bac64c58040eed477c77a998ee685168b52f34256397867e85e1024d7f0a9",
                 size = 62368467,
             ),
+            # The second compiler, 1.2.0: what a target platform carrying
+            # `buildrules//platforms:mojo_1_2_0` compiles with (toolchains/defs.bzl).
+            "mojo_compiler_next": pin(
+                "mojo_compiler_1.2.0_osx-arm64.conda",
+                "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda",
+                "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de",
+                size = 63449264,
+            ),
             # pixi, the raw executable of the same release as linux-x86_64's.
             "pixi": pin(
                 "pixi-0.67.2-aarch64-apple-darwin",
@@ -601,6 +618,14 @@ PLATFORMS = {
                 "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.1.0-release.conda",
                 "6d764a80411401b0e04ef4c8e779d7b09564cb0011d382986aefe189378451d1",
                 size = 67816551,
+            ),
+            # The second compiler, 1.2.0: what a target platform carrying
+            # `buildrules//platforms:mojo_1_2_0` compiles with (toolchains/defs.bzl).
+            "mojo_compiler_next": pin(
+                "mojo_compiler_1.2.0_linux-aarch64.conda",
+                "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda",
+                "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23",
+                size = 69162897,
             ),
             # pixi, the raw static (musl) executable of the same release as the
             # other rows'.

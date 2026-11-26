@@ -83,14 +83,14 @@
 
 from atomic_alias import AtomicI64
 from std.ffi import _Global
-from std.io import FileDescriptor
+from std.sys import stderr
 from std.memory import alloc, OwnedPointer
 
 from async_rt.runtime.sched_trace import sched_trace_enabled
 
 
 # fd 2: a query's stdout is its result stream.
-comptime _BL1_STDERR: FileDescriptor = FileDescriptor(2)
+comptime _BL1_STDERR = stderr
 
 
 # =============================================================================

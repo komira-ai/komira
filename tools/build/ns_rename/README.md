@@ -34,7 +34,7 @@ The tool refuses a mapping, naming the line, when:
 - a line does not have exactly two tab-separated fields;
 - an old name is not `komira_` followed by a package name, or is not after the previous line's old
   name as bytes (unsorted or repeated);
-- a new name is not `^[a-z][a-z0-9_]{1,63}$`, is a Mojo keyword or builtin (mopm's
+- a new name is not `^[a-z][a-z0-9_]{1,63}$`, is a Mojo keyword (mopm's list plus `match` and `case`, reserved from Mojo 1.2.0) or builtin (mopm's
   `src/core/manifest.zig` lists), one of mopm's reserved names (`mopm`, `mojo`, `max`, `modular`,
   `std`, `stdlib`), or any directory or file name of the Mojo 1.0.0 standard library (the 173 names
   under `mojo/stdlib/std/`, at any depth: `src/names.rs`);

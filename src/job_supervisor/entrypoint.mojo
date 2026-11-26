@@ -57,6 +57,8 @@
 # No pointer type crosses this file's surface.
 # =============================================================================
 
+from std.sys import stderr
+
 from gcp_core import (
     AdcFetcher,
     AdcOptions,
@@ -398,5 +400,5 @@ def run_entrypoint(args: List[String]) -> Int:
     try:
         return exit_status_of(start_and_run(args))
     except e:
-        print(String(e), file=FileDescriptor(2))
+        print(String(e), file=stderr)
         return EXIT_REFUSED

@@ -1,9 +1,10 @@
 //! `release_staged_verify add`: what a user gets from prod when they add a package of this release.
 //!
-//!   release_staged_verify add --staged <dir> --mopm <file> --work <dir>
+//!   release_staged_verify add --staged <dir> --mopm <file> --work <dir> --mojo <version>
 //!
-//! `prod-add` of release.yml runs it after `prod-commit` and `prod-smoke`, when the group is visible.
-//! `--staged` is the committed set (`plan.json` is what this release published), `--mopm` the pinned mopm
+//! `prod-add` of release.yml runs it after `prod-commit` and `prod-smoke`, when the group is visible, once for
+//! each Mojo the release published (a plan holds a build of every package for each of them). `--mojo` is the
+//! Mojo this run checks. `--staged` is the committed set (`plan.json` is what this release published), `--mopm` the pinned mopm
 //! binary the stage job built (the one that staged and committed the set), and `--work` a directory that
 //! must not exist: it is made here, so nothing of an earlier run is read, and the toolchain cache is in it.
 //! Both are absolute paths (mopm runs in `<work>/project`, where a relative one would mean something else).
@@ -12,20 +13,21 @@
 //! the command and the first line mopm wrote to stderr:
 //!
 //!   mopm init --name release-check/prod_add
-//!   (set `[toolchain] mojo` of the mopm.toml init wrote to the Mojo this release was built for)
+//!   (set `[toolchain] mojo` of the mopm.toml init wrote to `--mojo`)
 //!   mopm add komira-ai/<name> --registry prod      (once for each name of `add_set`)
 //!   mopm sync --registry prod --cache <work>/cache
 //!
 //! `mopm init` writes the Mojo of its own default (`mojo = "1.0.0"` for mopm 0.0.138), and `mopm add` resolves the
 //! newest version built for the project's Mojo, so a project left at that default gets the last release built for
-//! it, not this one. A user who builds for this release's Mojo edits that line, and so does `add`: the version is
-//! the `<mojo>` of the build string `mojo<mojo>_<n>` of every file of `add_set` in the plan (`releaseMojo`), which
-//! must name one Mojo; the mopm.toml must hold exactly one `mojo =` line in `[toolchain]` (`setMojo`). Either
-//! failing is refused before `mopm add` runs.
+//! it, not this one. A user who builds for one of this release's Mojo versions edits that line, and so does `add`, to
+//! `--mojo`: every file of `add_set` in the plan must be named `...-mojo<mojo>_<n>.conda`, and each name must have a
+//! file built for `--mojo` (`checkMojo`; files built for the other Mojo versions of the release are fine, the
+//! release holds one build per Mojo); the mopm.toml must hold exactly one `mojo =` line in `[toolchain]`
+//! (`setMojo`). Either failing is refused before `mopm add` runs.
 //!
 //! Then it reads the `mopm.lock` they wrote and refuses, reporting every difference at once:
 //!  - a `lock_version` other than 3, a `channels` other than exactly [`prod_channel`], or a `mojo` other than
-//!    exactly [the release's Mojo];
+//!    exactly [`--mojo`];
 //!  - an entry whose name is not a full name (`<namespace>/<name>`), whose `channel` is not
 //!    `prod_channel` followed by its namespace and `/` (the namespace's own channel), whose name is not a
 //!    member of the plan, whose version is not the plan's (the version of this run), or an artifact whose
@@ -182,31 +184,33 @@ const Lock = struct {
     packages: []const LockEntry = &.{},
 };
 
-/// The Mojo version this release built `names` for (header). Every file of each name is
-/// `mojo-<namespace>.<name>-<version>-mojo<mojo>_<n>.conda`; a file named otherwise, files that name two Mojo
-/// versions (one compiler builds a release), or names with no file at all are refused.
-pub fn releaseMojo(a: Allocator, why: *[]const u8, plan: rbf.Plan, names: []const []const u8) ![]const u8 {
-    var found: ?[]const u8 = null;
-    var from: []const u8 = "";
+/// Refuses a plan that has no build of a name of `names` for `mojo` (header). Every file of each name must be
+/// `mojo-<namespace>.<name>-<version>-mojo<mojo>_<n>.conda`; a file named otherwise is refused. Files built for
+/// another Mojo are allowed: a release holds a build of each package for every Mojo it supports, and one run
+/// checks one of them.
+pub fn checkMojo(a: Allocator, why: *[]const u8, plan: rbf.Plan, names: []const []const u8, mojo: []const u8) !void {
     for (names) |n| {
         const m = memberOf(plan, n) orelse return refuse(a, why, "{s} is not a member of plan.json", .{n});
         const conda = try std.mem.replaceOwned(u8, a, m.name, "/", ".");
         const prefix = try std.fmt.allocPrint(a, "mojo-{s}-{s}-mojo", .{ conda, m.version });
+        var built = false;
         for (m.files) |f| {
             const ok = std.mem.startsWith(u8, f.filename, prefix) and std.mem.endsWith(u8, f.filename, ".conda");
             const build = if (ok) f.filename[prefix.len .. f.filename.len - ".conda".len] else "";
             const us = std.mem.lastIndexOfScalar(u8, build, '_') orelse 0;
             if (us == 0 or us + 1 == build.len) return refuse(a, why, "{s}: {s} is not named {s}<mojo>_<n>.conda, so it names no Mojo version", .{ n, f.filename, prefix });
-            const mojo = build[0..us];
-            if (found) |seen| {
-                if (!std.mem.eql(u8, seen, mojo)) return refuse(a, why, "plan.json names two Mojo versions for the packages add installs: {s} ({s}) and {s} ({s}); a project is set to one", .{ seen, from, mojo, f.filename });
-            } else {
-                found = mojo;
-                from = f.filename;
-            }
+            built = built or std.mem.eql(u8, build[0..us], mojo);
         }
+        if (!built) return refuse(a, why, "plan.json lists no file of {s} built for Mojo {s}", .{ n, mojo });
     }
-    return found orelse return refuse(a, why, "plan.json lists no file for {s}, so it names no Mojo version", .{try std.mem.join(a, ", ", names)});
+}
+
+/// Whether `mojo` is a Mojo version as the build strings and mopm.toml write it: digits and dots, starting and
+/// ending with a digit (it is written into mopm.toml and compared with file names).
+pub fn isMojoVersion(mojo: []const u8) bool {
+    if (mojo.len == 0 or !std.ascii.isDigit(mojo[0]) or !std.ascii.isDigit(mojo[mojo.len - 1])) return false;
+    for (mojo) |c| if (!(std.ascii.isDigit(c) or c == '.')) return false;
+    return true;
 }
 
 /// `toml` with the one `mojo = ...` line of its `[toolchain]` table replaced by `mojo = "<mojo>"` (header). A table
@@ -228,7 +232,7 @@ pub fn setMojo(a: Allocator, why: *[]const u8, toml: []const u8, mojo: []const u
             try out.writer.print("mojo = \"{s}\"{s}", .{ mojo, if (std.mem.endsWith(u8, line, "\r")) "\r" else "" });
         } else try out.writer.writeAll(line);
     }
-    if (count != 1) return refuse(a, why, "the mopm.toml `mopm init` wrote has {d} `mojo =` line(s) in [toolchain]; add sets exactly one to this release's Mojo {s}", .{ count, mojo });
+    if (count != 1) return refuse(a, why, "the mopm.toml `mopm init` wrote has {d} `mojo =` line(s) in [toolchain]; add sets exactly one to the Mojo this run checks, {s}", .{ count, mojo });
     return out.written();
 }
 
@@ -246,7 +250,7 @@ fn checkLock(a: Allocator, lock: Lock, plan: rbf.Plan, names: []const []const u8
     }
     if (lock.mojo.len != 1 or !std.mem.eql(u8, lock.mojo[0], release_mojo)) {
         const listed = try std.mem.join(a, ", ", lock.mojo);
-        try bad.append(a, try std.fmt.allocPrint(a, "mopm.lock is locked for mojo [{s}]; this release was built for mojo {s}", .{ listed, release_mojo }));
+        try bad.append(a, try std.fmt.allocPrint(a, "mopm.lock is locked for mojo [{s}]; this run checks mojo {s}", .{ listed, release_mojo }));
     }
     const mojo: ?[]const u8 = if (lock.mojo.len > 0) lock.mojo[0] else null;
     var pinned = std.ArrayList(Pinned).empty;
@@ -343,19 +347,20 @@ fn setProjectMojo(a: Allocator, why: *[]const u8, project: []const u8, mojo: []c
         return refuse(a, why, "the mopm.toml `mopm init` wrote in {s}: {s}", .{ project, @errorName(e) });
     dir.writeFile(.{ .sub_path = "mopm.toml", .data = try setMojo(a, why, text, mojo) }) catch |e|
         return refuse(a, why, "cannot write mopm.toml in {s}: {s}", .{ project, @errorName(e) });
-    try log.print("set [toolchain] mojo = \"{s}\" in mopm.toml: the Mojo this release was built for\n", .{mojo});
+    try log.print("set [toolchain] mojo = \"{s}\" in mopm.toml: the Mojo this run checks\n", .{mojo});
 }
 
-/// `add` (header). `names` is `add_set` on the command line; `subdir` the host's (`subdirOf`). `log` gets every
+/// `add` (header). `names` is `add_set` on the command line; `subdir` the host's (`subdirOf`); `mojo` is `--mojo`. `log` gets every
 /// command, what mopm printed, and one `installed` line per file that matched.
-pub fn add(a: Allocator, why: *[]const u8, staged: []const u8, mopm: []const u8, work: []const u8, names: []const []const u8, subdir: []const u8, runner: Runner, log: *std.Io.Writer) !Report {
+pub fn add(a: Allocator, why: *[]const u8, staged: []const u8, mopm: []const u8, work: []const u8, names: []const []const u8, subdir: []const u8, mojo: []const u8, runner: Runner, log: *std.Io.Writer) !Report {
     const plan = try rbf.parsePlan(a, why, try rbf.readFileIn(a, why, staged, "plan.json", rbf.max_plan_bytes));
     // the child runs in <work>/project, so a relative path would be read from there, not from here
     if (!std.fs.path.isAbsolute(mopm)) return refuse(a, why, "--mopm {s} is not an absolute path", .{mopm});
     if (!std.fs.path.isAbsolute(work)) return refuse(a, why, "--work {s} is not an absolute path", .{work});
     for (names) |n| if (memberOf(plan, n) == null)
         return refuse(a, why, "{s} is not a member of plan.json: this release did not publish it, so it cannot be added from prod", .{n});
-    const mojo = try releaseMojo(a, why, plan, names);
+    if (!isMojoVersion(mojo)) return refuse(a, why, "--mojo {s} is not a Mojo version (digits and dots, as in 1.1.0)", .{mojo});
+    try checkMojo(a, why, plan, names, mojo);
     if (std.fs.path.dirname(work)) |parent| std.fs.cwd().makePath(parent) catch |e|
         return refuse(a, why, "cannot make {s}: {s}", .{ parent, @errorName(e) });
     std.fs.cwd().makeDir(work) catch |e| {

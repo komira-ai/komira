@@ -5,7 +5,7 @@ description = "Cryptographic primitives: SHA-1 and SHA-2, BLAKE2b-256, HMAC, HKD
 license = "Apache-2.0"
 repository = "https://github.com/komira-ai/komira"
 readme = "README.md"
-mojo = ["1.1.0"]
+mojo = ["1.1.0", "1.2.0"]
 
 [dependencies]
 "komira-ai/awslc" = { path = "../awslc", version = "0.1" }

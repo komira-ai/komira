@@ -34,6 +34,7 @@ mojo_library(
         "tests/test_g4_bool_union_take_silent_overread.mojo",
         "tests/test_gather_string_copy_lengths.mojo",
         "tests/test_gather_width_counter.mojo",
+        "tests/test_libm_atan2_bit_exact.mojo",
         "tests/test_parallel_sort_gather.mojo",
         "tests/test_regexp_anchor_seed_and_reuse.mojo",
         "tests/test_regexp_bitstate_differential.mojo",

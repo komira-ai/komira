@@ -6,8 +6,8 @@ MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "ed0c1b0b3572d1403e257ac008e80cc3cc8cc9dfb3ce20600dc720d2bc943ede",
-    "mopm.toml": "9507ef5dfbd4b70ba1c290d57460b506c4b72d6fe337427e848577bf3f8c5d61",
+    "mopm.lock": "070cf6e0421b391006b44de87c9af46fd75bb78944aa38770e9a7f4794c853b9",
+    "mopm.toml": "e51a99d3f44f9138e0470e5d3028a234a3df318bdcb2da042b6da129be77e78d",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -399,4 +399,393 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/parquet_api@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/parquet_api/src/parquet_api",
+      "srcs": [
+        {"path": "src/parquet_api/src/parquet_api/__init__.mojo", "sha256": "73a55f1df1e288475c0a25a9897766142b9fe6f784093b78c980a068da43ca04"},
+        {"path": "src/parquet_api/src/parquet_api/hll_footer.mojo", "sha256": "3793d06929bb2ec723891f99352c828726b7c14c767e1fc7a37eecbfb92b7dce"},
+        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "80e8ddde87264ade71147a0827cfc6b182292c5a455664d48e3968ab7c9f6a8b"},
+        {"path": "src/parquet_api/src/parquet_api/types.mojo", "sha256": "5c961b33b41c0b6328f47aa6c31e1eb5f1917d4af6fe028c561e796257a67391"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["parquet_api.mojoc"],
+      "key": "4e8449c1a33b3660e6e44e9a253923527a5076b9fa94610f81c6afaabb1beb24"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_enum_ne_operator.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_enum_ne_operator.mojo", "sha256": "eadbed4e9001384d6bb747c37c95f9df69ff53717f803aa36046a61f31f5a31f"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_enum_ne_operator.pass"],
+      "key": "45bfa273d00116e2a63447999b1c10ef336a5c34f9c393587970f52dcbc640d6"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_enum_unknown_values.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_enum_unknown_values.mojo", "sha256": "d0d39d2bfe9f9cfe7d6df1e8fb36cb89dd88ad0ddc596a71354f160d35287330"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_enum_unknown_values.pass"],
+      "key": "b9740eecb04e7a408924edca2b7a07bde4a0bc67de1bf1ed6376e1f9ce1b0221"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_hll_footer.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_hll_footer.mojo", "sha256": "7d8ea6b684cf6df4b28d986e49c2f117e21ac4859237b69307e7db20899ac42e"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hll_footer.pass"],
+      "key": "3e1e85bfeed7a741f58e8ffcb912906f45e94c89542fa48a744de938d82b5603"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_no_env_reads.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_no_env_reads.mojo", "sha256": "5b62d05e0aa4c65ebb02804deae0944c5b1d4ed39b0663ab1030508a1b3a67e3"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_no_env_reads.pass"],
+      "key": "c257ab3d43d987eb3103b77fbd811df415dc1127027f2eaea53a2a712130b41a"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_parquet_types.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "0ad438c8c0cd7480d9f117a9881f8343927a800de3795196ad9ff4dc96f07e02"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_parquet_types.pass"],
+      "key": "d1cf63a764815f40659e1b3965f0c49278504555488ed9e73c63873660c5fab0"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_values_match_parquet_thrift.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_values_match_parquet_thrift.mojo", "sha256": "7118a8fc4c45448940ad7f8b65b38a6a1294d25520279150331626f09b828481"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_values_match_parquet_thrift.pass"],
+      "key": "21e85fe9d6f1fc3b2aac094de0f016832b71076b0aa9434cdf84447ee3de740c"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/parquet_api@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/parquet_api/src/parquet_api",
+      "srcs": [
+        {"path": "src/parquet_api/src/parquet_api/__init__.mojo", "sha256": "73a55f1df1e288475c0a25a9897766142b9fe6f784093b78c980a068da43ca04"},
+        {"path": "src/parquet_api/src/parquet_api/hll_footer.mojo", "sha256": "3793d06929bb2ec723891f99352c828726b7c14c767e1fc7a37eecbfb92b7dce"},
+        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "80e8ddde87264ade71147a0827cfc6b182292c5a455664d48e3968ab7c9f6a8b"},
+        {"path": "src/parquet_api/src/parquet_api/types.mojo", "sha256": "5c961b33b41c0b6328f47aa6c31e1eb5f1917d4af6fe028c561e796257a67391"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["parquet_api.mojoc"],
+      "key": "bfe9b55d29e00f3f2ea401fff390f90c6e8624f7f494e9cb38edd165c0529a19"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_enum_ne_operator.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_enum_ne_operator.mojo", "sha256": "eadbed4e9001384d6bb747c37c95f9df69ff53717f803aa36046a61f31f5a31f"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_enum_ne_operator.pass"],
+      "key": "4652f7efb2ff2cd2453e9e20c2ad4de71d3cd03638ff6ea6e7169506a452e11d"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_enum_unknown_values.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_enum_unknown_values.mojo", "sha256": "d0d39d2bfe9f9cfe7d6df1e8fb36cb89dd88ad0ddc596a71354f160d35287330"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_enum_unknown_values.pass"],
+      "key": "8cab75ed9a74414e6fa5aa89241d84d23a8139beaa7acfac202fbea862948b8c"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_hll_footer.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_hll_footer.mojo", "sha256": "7d8ea6b684cf6df4b28d986e49c2f117e21ac4859237b69307e7db20899ac42e"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hll_footer.pass"],
+      "key": "22adc69b47ca8f01aff5521f13653e9bf0882f2c2bc63e93b34b8bb3fa37b6d3"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_no_env_reads.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_no_env_reads.mojo", "sha256": "5b62d05e0aa4c65ebb02804deae0944c5b1d4ed39b0663ab1030508a1b3a67e3"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_no_env_reads.pass"],
+      "key": "d28a4c293e016324f0e9b9954469c8048839f4f8afb3999c545c2df0c8126c94"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_parquet_types.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "0ad438c8c0cd7480d9f117a9881f8343927a800de3795196ad9ff4dc96f07e02"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_parquet_types.pass"],
+      "key": "2c22a4a1eb2f63fbf2a9fc9cd0ab2d36eab43b9e091efeea9cf2e9fb2ac5ee4a"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_values_match_parquet_thrift.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_values_match_parquet_thrift.mojo", "sha256": "7118a8fc4c45448940ad7f8b65b38a6a1294d25520279150331626f09b828481"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_values_match_parquet_thrift.pass"],
+      "key": "65c4e520fd286322882b8f1c9285d725ba610dcd9f12f4669e15fa1d604032e7"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/parquet_api@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/parquet_api/src/parquet_api",
+      "srcs": [
+        {"path": "src/parquet_api/src/parquet_api/__init__.mojo", "sha256": "73a55f1df1e288475c0a25a9897766142b9fe6f784093b78c980a068da43ca04"},
+        {"path": "src/parquet_api/src/parquet_api/hll_footer.mojo", "sha256": "3793d06929bb2ec723891f99352c828726b7c14c767e1fc7a37eecbfb92b7dce"},
+        {"path": "src/parquet_api/src/parquet_api/metadata.mojo", "sha256": "80e8ddde87264ade71147a0827cfc6b182292c5a455664d48e3968ab7c9f6a8b"},
+        {"path": "src/parquet_api/src/parquet_api/types.mojo", "sha256": "5c961b33b41c0b6328f47aa6c31e1eb5f1917d4af6fe028c561e796257a67391"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["parquet_api.mojoc"],
+      "key": "f586ff41c5f0c68a182438baf9b8395fda3d942a97596bcf92d110f37721b84f"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_enum_ne_operator.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_enum_ne_operator.mojo", "sha256": "eadbed4e9001384d6bb747c37c95f9df69ff53717f803aa36046a61f31f5a31f"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_enum_ne_operator.pass"],
+      "key": "55c4b3b8e42d6f20c21d9d51549e2b3322d7a808f2c6fe6beeadc3352f0f152d"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_enum_unknown_values.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_enum_unknown_values.mojo", "sha256": "d0d39d2bfe9f9cfe7d6df1e8fb36cb89dd88ad0ddc596a71354f160d35287330"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_enum_unknown_values.pass"],
+      "key": "02ab01629a2691df168de63eeae9e1cf7feae60b51046c580e45e4e20eece693"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_hll_footer.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_hll_footer.mojo", "sha256": "7d8ea6b684cf6df4b28d986e49c2f117e21ac4859237b69307e7db20899ac42e"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hll_footer.pass"],
+      "key": "e1127d02ccc99a48a93ec05cf75267c315c4fe81507d0a0abfd5526812910474"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_no_env_reads.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_no_env_reads.mojo", "sha256": "5b62d05e0aa4c65ebb02804deae0944c5b1d4ed39b0663ab1030508a1b3a67e3"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_no_env_reads.pass"],
+      "key": "cbf4ea1b2142a33884ae0fd9fc28d69ce3a35b025c7488636e5fd8db8d87a6d7"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_parquet_types.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_parquet_types.mojo", "sha256": "0ad438c8c0cd7480d9f117a9881f8343927a800de3795196ad9ff4dc96f07e02"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_parquet_types.pass"],
+      "key": "e6ed74edc4fb706db16a063a1c7f75eb51feb244c46bf89da7412b37c42ae4b9"
+    },
+    {
+      "id": "komira-ai/parquet_api@0.1.0#mojo1.2.0/test:src/parquet_api/tests/test_values_match_parquet_thrift.mojo",
+      "package": "komira-ai/parquet_api",
+      "import": "parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/parquet_api/tests/test_values_match_parquet_thrift.mojo", "sha256": "7118a8fc4c45448940ad7f8b65b38a6a1294d25520279150331626f09b828481"}
+      ],
+      "deps": ["komira-ai/parquet_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_values_match_parquet_thrift.pass"],
+      "key": "6a35737236448777b3e0f0661c4c767deb65da8f73c550e5152e218d5a6a34f5"
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

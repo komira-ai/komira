@@ -6,8 +6,8 @@ MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "ed0c1b0b3572d1403e257ac008e80cc3cc8cc9dfb3ce20600dc720d2bc943ede",
-    "mopm.toml": "9da42a790fa7c23f07220ff9eb8237874fca7c82273f3ada9f18f9a2b7a68eb5",
+    "mopm.lock": "070cf6e0421b391006b44de87c9af46fd75bb78944aa38770e9a7f4794c853b9",
+    "mopm.toml": "ff704d50c7300cbb9c8958e878bb475f196543f1e8354f330c4f1c42fdc8f17e",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -222,4 +222,216 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/awslc@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/awslc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/awslc/src/awslc",
+      "srcs": [
+        {"path": "src/awslc/src/awslc/__init__.mojo", "sha256": "44b49ee62f53e96ce642011aabdd240df04309736a80bfd82e54861ca77e838e"}
+      ],
+      "deps": [],
+      "natives": [
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["awslc.mojoc"],
+      "key": "ab30045932e6cb8f582ae4db1749201d569782e3893385fcf6954845bb56ed7f"
+    },
+    {
+      "id": "komira-ai/awslc@0.1.0#mojo1.2.0/test:src/awslc/tests/test_aws_lc.mojo",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/awslc/tests/test_aws_lc.mojo", "sha256": "4681471635c3330b8b5641bb3fc1b17a124fd3ee25de7e2ddda8418dc5c4eb9d"}
+      ],
+      "deps": ["komira-ai/awslc@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_aws_lc.pass"],
+      "key": "b4c8ce0ca5fd2c40550b50dea3ff4ca520cf433d74004ba7357ac13884a63568"
+    },
+    {
+      "id": "native:komira-ai/awslc/awslc",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libawslc.a",
+      "srcs": [
+        {"path": "src/awslc/native/awslc_provided.c", "sha256": "2ad7801dbb74d7ad84fa29637700da7cbf37bc12ac383d81bd7fde2a4e461a25"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libawslc.a"],
+      "key": "b2b5eb464ae0ece97e773ed5e4c460c0d7e7670056ebe4eb81bc7eee248f0ff7"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/awslc@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/awslc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/awslc/src/awslc",
+      "srcs": [
+        {"path": "src/awslc/src/awslc/__init__.mojo", "sha256": "44b49ee62f53e96ce642011aabdd240df04309736a80bfd82e54861ca77e838e"}
+      ],
+      "deps": [],
+      "natives": [
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["awslc.mojoc"],
+      "key": "b96e8fd8aef73f08e290589d0b0410374804bd517feb2c3e322047b68f561ec2"
+    },
+    {
+      "id": "komira-ai/awslc@0.1.0#mojo1.2.0/test:src/awslc/tests/test_aws_lc.mojo",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/awslc/tests/test_aws_lc.mojo", "sha256": "4681471635c3330b8b5641bb3fc1b17a124fd3ee25de7e2ddda8418dc5c4eb9d"}
+      ],
+      "deps": ["komira-ai/awslc@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_aws_lc.pass"],
+      "key": "ffc364e1dd812ac47fa54db652451f16c2b9343768675b8d1589bf8f23d4f868"
+    },
+    {
+      "id": "native:komira-ai/awslc/awslc",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libawslc.a",
+      "srcs": [
+        {"path": "src/awslc/native/awslc_provided.c", "sha256": "2ad7801dbb74d7ad84fa29637700da7cbf37bc12ac383d81bd7fde2a4e461a25"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libawslc.a"],
+      "key": "5f5f0018d18082c0bd6754f168ec1cb6f726404f014b4dd8edd7bf6a8a8f1fb8"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/awslc@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/awslc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/awslc/src/awslc",
+      "srcs": [
+        {"path": "src/awslc/src/awslc/__init__.mojo", "sha256": "44b49ee62f53e96ce642011aabdd240df04309736a80bfd82e54861ca77e838e"}
+      ],
+      "deps": [],
+      "natives": [
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["awslc.mojoc"],
+      "key": "d2603a0c7d1b40664a5ff441fcfa28cc0e0340a05573d7ac4a77262bec072ee5"
+    },
+    {
+      "id": "komira-ai/awslc@0.1.0#mojo1.2.0/test:src/awslc/tests/test_aws_lc.mojo",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/awslc/tests/test_aws_lc.mojo", "sha256": "4681471635c3330b8b5641bb3fc1b17a124fd3ee25de7e2ddda8418dc5c4eb9d"}
+      ],
+      "deps": ["komira-ai/awslc@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_aws_lc.pass"],
+      "key": "0719e0876f47b2c12349d9c627e7ffac1c35aa08b35fb805849336b5cc0be8be"
+    },
+    {
+      "id": "native:komira-ai/awslc/awslc",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libawslc.a",
+      "srcs": [
+        {"path": "src/awslc/native/awslc_provided.c", "sha256": "2ad7801dbb74d7ad84fa29637700da7cbf37bc12ac383d81bd7fde2a4e461a25"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libawslc.a"],
+      "key": "36ee5e34055e3d8ffcdda6b871e198744cb8109ea502d6dfb35f0215a43c42b4"
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

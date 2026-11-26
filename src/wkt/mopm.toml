@@ -5,7 +5,7 @@ description = "The protobuf well-known types (Timestamp, Duration, Empty, the sc
 license = "Apache-2.0"
 repository = "https://github.com/komira-ai/komira"
 readme = "README.md"
-mojo = ["1.1.0"]
+mojo = ["1.1.0", "1.2.0"]
 
 [dependencies]
 "komira-ai/datetime" = { path = "../datetime", version = "0.1" }

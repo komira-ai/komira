@@ -12,10 +12,9 @@
 # =============================================================================
 
 from std.memory import UnsafePointer, alloc, unsafe_memcpy, unsafe_memset
-from std.sys import size_of, simd_width_of, num_physical_cores
+from std.sys import size_of, simd_width_of, num_physical_cores, stderr
 from std.sys.intrinsics import prefetch, PrefetchOptions
 from std.ffi import external_call
-from std.io import FileDescriptor
 
 # -----------------------------------------------------------------------------
 # _STDERR — DIAGNOSTICS DO NOT GO ON THE DATA CHANNEL.
@@ -36,7 +35,7 @@ from std.io import FileDescriptor
 # Not a logging package's stderr sink: that would add a package dependency for
 # a two-call diagnostic, and `print(file=...)` needs no FFI declaration of its
 # own.
-comptime _STDERR: FileDescriptor = FileDescriptor(2)
+comptime _STDERR = stderr
 
 # The variable-width gather's per-string copy goes through `fast_copy_bytes`,
 # NOT stdlib `memcpy`. Reason, from the object code: stdlib `memcpy`

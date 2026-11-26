@@ -337,7 +337,10 @@ def _copy_string_to_c(s: String) -> UnsafePointer[Int8, MutUntrackedOrigin]:
     var buf = alloc[Int8](n + 1)
     # memcpy from the String's underlying storage instead of byte-by-byte loop
     var s_ref = s
-    var src = s_ref.as_c_string_slice().unsafe_ptr()
+    # SAFETY: `s_ref` outlives `src` (a local copy read only by the memcpy below); the
+    # bitcast to Int8 (same width, one byte) matches the destination: Mojo 1.2 types the
+    # pointer `c_char` (`Scalar[_c_char_dtype()]`), which does not unify with Int8.
+    var src = s_ref.as_c_string_slice().unsafe_ptr().unsafe_bitcast[Int8]()
     if n > 0:
         unsafe_memcpy(dest=buf, src=src, count=n)
     (buf + n).unsafe_write(Int8(0))
@@ -691,14 +694,20 @@ def encode_metadata(
         cursor = cursor + 4
         if klen > 0:
             var k_ref = k
-            var k_src = k_ref.as_c_string_slice().unsafe_ptr()
+            # SAFETY: `k_ref` outlives `k_src` (a local copy read only by the memcpy below); the
+            # bitcast to Int8 (same width, one byte) matches the destination: Mojo 1.2 types the
+            # pointer `c_char` (`Scalar[_c_char_dtype()]`), which does not unify with Int8.
+            var k_src = k_ref.as_c_string_slice().unsafe_ptr().unsafe_bitcast[Int8]()
             unsafe_memcpy(dest=cursor, src=k_src, count=klen)
             cursor = cursor + klen
         _i32_to_bytes(Int32(vlen), cursor)
         cursor = cursor + 4
         if vlen > 0:
             var v_ref = v
-            var v_src = v_ref.as_c_string_slice().unsafe_ptr()
+            # SAFETY: `v_ref` outlives `v_src` (a local copy read only by the memcpy below); the
+            # bitcast to Int8 (same width, one byte) matches the destination: Mojo 1.2 types the
+            # pointer `c_char` (`Scalar[_c_char_dtype()]`), which does not unify with Int8.
+            var v_src = v_ref.as_c_string_slice().unsafe_ptr().unsafe_bitcast[Int8]()
             unsafe_memcpy(dest=cursor, src=v_src, count=vlen)
             cursor = cursor + vlen
     return buf

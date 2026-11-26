@@ -54,6 +54,7 @@ load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:test_runtime.bzl", "data_map")
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "by_mojo")
 
 PythonDistInfo = provider(
     doc = "An unpacked CPython: its root directory and the interpreter's path in it.",
@@ -536,7 +537,12 @@ def _py_test_macro(**kwargs):
 
 def _binding_test_macro(**kwargs):
     if "runtime" not in kwargs:
-        kwargs["runtime"] = _by_os("komira//tools/build/toolchains:mojo_runtime", "komira//tools/build/toolchains/darwin:mojo_runtime")
+        # The runtime of the compiler the target platform chooses: selected here, on the attribute,
+        # because `runtime` is an exec dependency (toolchains/mojo_versions.bzl).
+        kwargs["runtime"] = by_mojo(
+            _by_os("komira//tools/build/toolchains:mojo_runtime", "komira//tools/build/toolchains/darwin:mojo_runtime"),
+            _by_os("komira//tools/build/toolchains:mojo_runtime_next", "komira//tools/build/toolchains/darwin:mojo_runtime_next"),
+        )
     _python_binding_test(**_interpreter(_platform(kwargs)))
 
 def _oracle_macro(**kwargs):

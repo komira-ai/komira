@@ -40,7 +40,7 @@
 
 from atomic_alias import AtomicI64
 from std.builtin.swap import swap
-from std.io import FileDescriptor
+from std.sys import stderr
 from std.memory import Pointer, UnsafePointer
 
 from arrow.arrow_types import ArrowType
@@ -68,7 +68,7 @@ from .subrg_columns import build_int32_codes_col, build_one_scan_col
 from .subrg_cursor_feed import open_subrg_cursor
 
 
-comptime _STDERR: FileDescriptor = FileDescriptor(2)
+comptime _STDERR = stderr
 
 comptime SCAN_CHUNK_ROWS: Int = 30_000
 comptime SCAN_SUBRG_SLOTS: Int = SCAN_CHUNK_ROWS + SUBRG_MAX_RUN

@@ -5,12 +5,12 @@ MOPM = {"version": "0.0.138", "origin": "builtin", "workspace_root": True}
 MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
-    "../host_probe/mopm.toml": "420afc534dca76710fb278af369b7829eeea599e7959ad95c8d07316f3c9f33a",
-    "../libc/mopm.toml": "7536db87cec8e40e3c514afe4830af8035f7052481feb535737a8778a52cf84c",
-    "../simd_ops/mopm.toml": "247b0195039f9478b16cf99fc3e4c13adeebd7c6a468301a2e0c372d63a6420d",
+    "../host_probe/mopm.toml": "ef1629d9ccfe8224d18549692939560ccc6811a7457d06a7a1ae939a72bc0a05",
+    "../libc/mopm.toml": "b6b808cc29f7d69536de8df770fd3ebb3dd5b2497cb6eeeedc6dbf3dcc314178",
+    "../simd_ops/mopm.toml": "0a154e884085a079d19a26ff1e91a6c697cc9a5d455b06288d6db571b5a9f90d",
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "ee612af0de457a2e7f9396c76a1d2c307f113a423f602a582a23721d6382c564",
-    "mopm.toml": "269f3f9a12df23cdf8cdfe25a4002e39ce664bda21f50122999f9e3de2c7eda0",
+    "mopm.lock": "d04206a196042b6df569ff9c3dcb784356bd8fa2ae9d179ed6e05aed8263f78b",
+    "mopm.toml": "d6f1cc8e19924e1590cf7bee3d7250c6a2861efd066980c84f0a4b5ece4683f2",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -1233,4 +1233,1224 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/byte_buffer@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/byte_buffer/src/byte_buffer",
+      "srcs": [
+        {"path": "src/byte_buffer/src/byte_buffer/__init__.mojo", "sha256": "35c55f33a29251eec6a655ce11ce08ff8ce703f3a3ac157044fc25526ad79425"},
+        {"path": "src/byte_buffer/src/byte_buffer/aligned_buffer_trait.mojo", "sha256": "709acf259cc237705dd53ac92b8196a459347e35f439e99824cc9d325f989a1c"},
+        {"path": "src/byte_buffer/src/byte_buffer/byte_buffer.mojo", "sha256": "58358b40100539d7f5eb3dc903959d01944db56278d98fc76cc60e66648149c7"},
+        {"path": "src/byte_buffer/src/byte_buffer/byte_view.mojo", "sha256": "09db93d23dcefd776d8c6d0a44a0eba62e93c0a2363205d9ebbf662aa4f54637"},
+        {"path": "src/byte_buffer/src/byte_buffer/constants.mojo", "sha256": "a4b8a5f50e7b2269599c73b82215a295777bc65730677b8279efd32f0b54e56e"},
+        {"path": "src/byte_buffer/src/byte_buffer/copyable_shared_aligned_buffer.mojo", "sha256": "f5a8ec5519f8b661a151e032ced74c6effa27a1c990d866715558a5777ee034c"},
+        {"path": "src/byte_buffer/src/byte_buffer/file_identity.mojo", "sha256": "3d3d7a52795382afa7fff7a07f8e48497fe7202b29809b2f7a8295baf19e7120"},
+        {"path": "src/byte_buffer/src/byte_buffer/heap_region.mojo", "sha256": "226e2a54f7db5640bfbe2f4d1aaadd713614d5a26402ab3890d3730c5f33bb2a"},
+        {"path": "src/byte_buffer/src/byte_buffer/hugepage_span.mojo", "sha256": "7bf7599e03c848ad9f53eee5c922f5d11bfea6667f7605a8c4667df23b0ca69e"},
+        {"path": "src/byte_buffer/src/byte_buffer/memory_region.mojo", "sha256": "735c733f9068d28107efe6f9bf606d4b443f55943fbf9eb31b0dfe45981d1e45"},
+        {"path": "src/byte_buffer/src/byte_buffer/mmap_region.mojo", "sha256": "4b2993a38c53dd19f7e86c6db48a5d7285d7b6884c87f6056df95837e3496ca6"},
+        {"path": "src/byte_buffer/src/byte_buffer/owned_aligned_buffer.mojo", "sha256": "8bd935a2046c6fd4806c23b372d6eb4975b213b8cf8af1d65d25244423ff117c"},
+        {"path": "src/byte_buffer/src/byte_buffer/shared_aligned_buffer.mojo", "sha256": "d80da0598e48c6eda94a53387c065b5fdf0a64341ddbc585f85fef4f2ae4546f"}
+      ],
+      "deps": ["komira-ai/host_probe@0.1.0#mojo1.2.0/lib", "komira-ai/libc@0.1.0#mojo1.2.0/lib", "komira-ai/simd_ops@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["byte_buffer.mojoc"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_byte_buffer.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_byte_buffer.mojo", "sha256": "6c5bae6473a6b4209da53bf7aae48bca0cd572d3738fb02a2b95eb2c41059bfe"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_byte_buffer.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_byte_view.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_byte_view.mojo", "sha256": "b8a16fcc854c85aae1d19579bc66cc1e6a16ba7f122921b64216edd1514daf28"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_byte_view.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_constants.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_constants.mojo", "sha256": "39cf1d364d5c4a7881716c4dd23d76e272527297e5c1feeef6bb766e3b703b97"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_constants.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_copyable_sab_mmap_keepalive_copy.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_copyable_sab_mmap_keepalive_copy.mojo", "sha256": "34ce54498f722195b14b6f54f16ca8942c62870f5558d85eb263df43646486de"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_copyable_sab_mmap_keepalive_copy.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_fast_copy_call_sites_enabled.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_fast_copy_call_sites_enabled.mojo", "sha256": "c8be9e80c825cac17e90cea1172a4d571af11fd6e2ec9e46b7b1805246b592bd"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_fast_copy_call_sites_enabled.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_file_identity.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_file_identity.mojo", "sha256": "6fed7fc9e88698500914609a2f47dabd1113bfe0d1c6d00236f45d49682b104c"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_file_identity.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_heap_region.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_heap_region.mojo", "sha256": "cc704862bec621721fb7d48cbdb03188de53012cb401771d365ad357cadef8c6"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_heap_region.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_hugepage_hint.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_hugepage_hint.mojo", "sha256": "a8b56cf61e0ffe97ec9b26b3637a0fda3a51da2b90b293af56f69e73b90080d7"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hugepage_hint.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_mmap_region_open_errors.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_mmap_region_open_errors.mojo", "sha256": "0cb38e5e5327c40fff478d4fa7b29c3c8e7c09c1196a52edf6d66dd6bb0cb792"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mmap_region_open_errors.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_mmap_region_open_readonly.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_mmap_region_open_readonly.mojo", "sha256": "dc3c9250ae93a84a6a856f70356608cccce62eb8c98619d1b6f57e297372ab80"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mmap_region_open_readonly.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_mmap_region_willneed.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_mmap_region_willneed.mojo", "sha256": "d6fc83f3fb66406f8b1c591640c4001425cf2b6460e43ac5f7ff6d447f90a144"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mmap_region_willneed.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_owned_aligned_buffer_edges.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_owned_aligned_buffer_edges.mojo", "sha256": "e10a038bdc30f11cc7e8e614947fbd052563d1b1162a244130763e5af3c57ce1"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_owned_aligned_buffer_edges.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_owned_aligned_buffer_reserve_regrow.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_owned_aligned_buffer_reserve_regrow.mojo", "sha256": "8ac2820186518aa7eb3e540777d29813e1f418874889f8dc27174d22e4f7dd94"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_owned_aligned_buffer_reserve_regrow.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_owned_aligned_buffer_with_capacity.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_owned_aligned_buffer_with_capacity.mojo", "sha256": "556d7100be0c05f7eee13a0758c9b7b86eeb837abf342fc231fb98af4320b7e4"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_owned_aligned_buffer_with_capacity.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_sab_api.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_sab_api.mojo", "sha256": "d8b13a14743030e792b0a4c329d578c174645908f73ff765cd23b182a7dff660"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_api.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_sab_borrow_mmap_range_check.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_sab_borrow_mmap_range_check.mojo", "sha256": "4b10968aa9d96e9bc1d83ebf2c486671acbc9403e410275de9fce774e6222fd1"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_borrow_mmap_range_check.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_sab_borrowed_view_mmap_keepalive.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_sab_borrowed_view_mmap_keepalive.mojo", "sha256": "7101db61347f2b19094c18b0c13b16bb10a670c9c7f43e3bbb1cd41ef4680405"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_borrowed_view_mmap_keepalive.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_sab_share_range_window.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_sab_share_range_window.mojo", "sha256": "a32b09dcf8d0a722557f05c8473102516a92cdb84236e7235c509d337440ddb3"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_share_range_window.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_write_uleb128.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_write_uleb128.mojo", "sha256": "e1e9f3e0421565d6f7fde2294e601da73c48c4a44964a652152d906d6540e893"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_write_uleb128.pass"]
+    },
+    {
+      "id": "komira-ai/host_probe@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/host_probe",
+      "import": "host_probe",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/host_probe/src/host_probe",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["host_probe.mojoc"]
+    },
+    {
+      "id": "komira-ai/libc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/libc/src/libc",
+      "deps": [],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["libc.mojoc"]
+    },
+    {
+      "id": "komira-ai/simd_ops@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/simd_ops",
+      "import": "simd_ops",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/simd_ops/src/simd_ops",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["simd_ops.mojoc"]
+    },
+    {
+      "id": "native:komira-ai/libc/komira_libc_posix",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_libc_posix.a",
+      "srcs": [
+        {"path": "src/libc/native/komira_libc_posix.c", "sha256": "e622c2f2dd393e3c8bde188b95fd931dd516f11cab67af25cad6c47b841c3a6d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_libc_posix.a"],
+      "key": "cf999f64bdecac4774d0205cbd5a8f5de3538479d0e0d9e3e10792926ea0027c"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/byte_buffer@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/byte_buffer/src/byte_buffer",
+      "srcs": [
+        {"path": "src/byte_buffer/src/byte_buffer/__init__.mojo", "sha256": "35c55f33a29251eec6a655ce11ce08ff8ce703f3a3ac157044fc25526ad79425"},
+        {"path": "src/byte_buffer/src/byte_buffer/aligned_buffer_trait.mojo", "sha256": "709acf259cc237705dd53ac92b8196a459347e35f439e99824cc9d325f989a1c"},
+        {"path": "src/byte_buffer/src/byte_buffer/byte_buffer.mojo", "sha256": "58358b40100539d7f5eb3dc903959d01944db56278d98fc76cc60e66648149c7"},
+        {"path": "src/byte_buffer/src/byte_buffer/byte_view.mojo", "sha256": "09db93d23dcefd776d8c6d0a44a0eba62e93c0a2363205d9ebbf662aa4f54637"},
+        {"path": "src/byte_buffer/src/byte_buffer/constants.mojo", "sha256": "a4b8a5f50e7b2269599c73b82215a295777bc65730677b8279efd32f0b54e56e"},
+        {"path": "src/byte_buffer/src/byte_buffer/copyable_shared_aligned_buffer.mojo", "sha256": "f5a8ec5519f8b661a151e032ced74c6effa27a1c990d866715558a5777ee034c"},
+        {"path": "src/byte_buffer/src/byte_buffer/file_identity.mojo", "sha256": "3d3d7a52795382afa7fff7a07f8e48497fe7202b29809b2f7a8295baf19e7120"},
+        {"path": "src/byte_buffer/src/byte_buffer/heap_region.mojo", "sha256": "226e2a54f7db5640bfbe2f4d1aaadd713614d5a26402ab3890d3730c5f33bb2a"},
+        {"path": "src/byte_buffer/src/byte_buffer/hugepage_span.mojo", "sha256": "7bf7599e03c848ad9f53eee5c922f5d11bfea6667f7605a8c4667df23b0ca69e"},
+        {"path": "src/byte_buffer/src/byte_buffer/memory_region.mojo", "sha256": "735c733f9068d28107efe6f9bf606d4b443f55943fbf9eb31b0dfe45981d1e45"},
+        {"path": "src/byte_buffer/src/byte_buffer/mmap_region.mojo", "sha256": "4b2993a38c53dd19f7e86c6db48a5d7285d7b6884c87f6056df95837e3496ca6"},
+        {"path": "src/byte_buffer/src/byte_buffer/owned_aligned_buffer.mojo", "sha256": "8bd935a2046c6fd4806c23b372d6eb4975b213b8cf8af1d65d25244423ff117c"},
+        {"path": "src/byte_buffer/src/byte_buffer/shared_aligned_buffer.mojo", "sha256": "d80da0598e48c6eda94a53387c065b5fdf0a64341ddbc585f85fef4f2ae4546f"}
+      ],
+      "deps": ["komira-ai/host_probe@0.1.0#mojo1.2.0/lib", "komira-ai/libc@0.1.0#mojo1.2.0/lib", "komira-ai/simd_ops@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["byte_buffer.mojoc"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_byte_buffer.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_byte_buffer.mojo", "sha256": "6c5bae6473a6b4209da53bf7aae48bca0cd572d3738fb02a2b95eb2c41059bfe"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_byte_buffer.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_byte_view.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_byte_view.mojo", "sha256": "b8a16fcc854c85aae1d19579bc66cc1e6a16ba7f122921b64216edd1514daf28"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_byte_view.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_constants.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_constants.mojo", "sha256": "39cf1d364d5c4a7881716c4dd23d76e272527297e5c1feeef6bb766e3b703b97"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_constants.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_copyable_sab_mmap_keepalive_copy.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_copyable_sab_mmap_keepalive_copy.mojo", "sha256": "34ce54498f722195b14b6f54f16ca8942c62870f5558d85eb263df43646486de"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_copyable_sab_mmap_keepalive_copy.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_fast_copy_call_sites_enabled.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_fast_copy_call_sites_enabled.mojo", "sha256": "c8be9e80c825cac17e90cea1172a4d571af11fd6e2ec9e46b7b1805246b592bd"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_fast_copy_call_sites_enabled.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_file_identity.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_file_identity.mojo", "sha256": "6fed7fc9e88698500914609a2f47dabd1113bfe0d1c6d00236f45d49682b104c"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_file_identity.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_heap_region.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_heap_region.mojo", "sha256": "cc704862bec621721fb7d48cbdb03188de53012cb401771d365ad357cadef8c6"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_heap_region.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_hugepage_hint.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_hugepage_hint.mojo", "sha256": "a8b56cf61e0ffe97ec9b26b3637a0fda3a51da2b90b293af56f69e73b90080d7"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hugepage_hint.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_mmap_region_open_errors.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_mmap_region_open_errors.mojo", "sha256": "0cb38e5e5327c40fff478d4fa7b29c3c8e7c09c1196a52edf6d66dd6bb0cb792"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mmap_region_open_errors.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_mmap_region_open_readonly.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_mmap_region_open_readonly.mojo", "sha256": "dc3c9250ae93a84a6a856f70356608cccce62eb8c98619d1b6f57e297372ab80"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mmap_region_open_readonly.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_mmap_region_willneed.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_mmap_region_willneed.mojo", "sha256": "d6fc83f3fb66406f8b1c591640c4001425cf2b6460e43ac5f7ff6d447f90a144"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mmap_region_willneed.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_owned_aligned_buffer_edges.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_owned_aligned_buffer_edges.mojo", "sha256": "e10a038bdc30f11cc7e8e614947fbd052563d1b1162a244130763e5af3c57ce1"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_owned_aligned_buffer_edges.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_owned_aligned_buffer_reserve_regrow.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_owned_aligned_buffer_reserve_regrow.mojo", "sha256": "8ac2820186518aa7eb3e540777d29813e1f418874889f8dc27174d22e4f7dd94"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_owned_aligned_buffer_reserve_regrow.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_owned_aligned_buffer_with_capacity.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_owned_aligned_buffer_with_capacity.mojo", "sha256": "556d7100be0c05f7eee13a0758c9b7b86eeb837abf342fc231fb98af4320b7e4"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_owned_aligned_buffer_with_capacity.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_sab_api.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_sab_api.mojo", "sha256": "d8b13a14743030e792b0a4c329d578c174645908f73ff765cd23b182a7dff660"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_api.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_sab_borrow_mmap_range_check.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_sab_borrow_mmap_range_check.mojo", "sha256": "4b10968aa9d96e9bc1d83ebf2c486671acbc9403e410275de9fce774e6222fd1"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_borrow_mmap_range_check.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_sab_borrowed_view_mmap_keepalive.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_sab_borrowed_view_mmap_keepalive.mojo", "sha256": "7101db61347f2b19094c18b0c13b16bb10a670c9c7f43e3bbb1cd41ef4680405"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_borrowed_view_mmap_keepalive.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_sab_share_range_window.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_sab_share_range_window.mojo", "sha256": "a32b09dcf8d0a722557f05c8473102516a92cdb84236e7235c509d337440ddb3"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_share_range_window.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_write_uleb128.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_write_uleb128.mojo", "sha256": "e1e9f3e0421565d6f7fde2294e601da73c48c4a44964a652152d906d6540e893"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_write_uleb128.pass"]
+    },
+    {
+      "id": "komira-ai/host_probe@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/host_probe",
+      "import": "host_probe",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/host_probe/src/host_probe",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["host_probe.mojoc"]
+    },
+    {
+      "id": "komira-ai/libc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/libc/src/libc",
+      "deps": [],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["libc.mojoc"]
+    },
+    {
+      "id": "komira-ai/simd_ops@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/simd_ops",
+      "import": "simd_ops",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/simd_ops/src/simd_ops",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["simd_ops.mojoc"]
+    },
+    {
+      "id": "native:komira-ai/libc/komira_libc_posix",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_libc_posix.a",
+      "srcs": [
+        {"path": "src/libc/native/komira_libc_posix.c", "sha256": "e622c2f2dd393e3c8bde188b95fd931dd516f11cab67af25cad6c47b841c3a6d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_libc_posix.a"],
+      "key": "3c3134af6ad936c5c8018446a7757e784527494753d8df774a52f54829b6d194"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/byte_buffer@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/byte_buffer/src/byte_buffer",
+      "srcs": [
+        {"path": "src/byte_buffer/src/byte_buffer/__init__.mojo", "sha256": "35c55f33a29251eec6a655ce11ce08ff8ce703f3a3ac157044fc25526ad79425"},
+        {"path": "src/byte_buffer/src/byte_buffer/aligned_buffer_trait.mojo", "sha256": "709acf259cc237705dd53ac92b8196a459347e35f439e99824cc9d325f989a1c"},
+        {"path": "src/byte_buffer/src/byte_buffer/byte_buffer.mojo", "sha256": "58358b40100539d7f5eb3dc903959d01944db56278d98fc76cc60e66648149c7"},
+        {"path": "src/byte_buffer/src/byte_buffer/byte_view.mojo", "sha256": "09db93d23dcefd776d8c6d0a44a0eba62e93c0a2363205d9ebbf662aa4f54637"},
+        {"path": "src/byte_buffer/src/byte_buffer/constants.mojo", "sha256": "a4b8a5f50e7b2269599c73b82215a295777bc65730677b8279efd32f0b54e56e"},
+        {"path": "src/byte_buffer/src/byte_buffer/copyable_shared_aligned_buffer.mojo", "sha256": "f5a8ec5519f8b661a151e032ced74c6effa27a1c990d866715558a5777ee034c"},
+        {"path": "src/byte_buffer/src/byte_buffer/file_identity.mojo", "sha256": "3d3d7a52795382afa7fff7a07f8e48497fe7202b29809b2f7a8295baf19e7120"},
+        {"path": "src/byte_buffer/src/byte_buffer/heap_region.mojo", "sha256": "226e2a54f7db5640bfbe2f4d1aaadd713614d5a26402ab3890d3730c5f33bb2a"},
+        {"path": "src/byte_buffer/src/byte_buffer/hugepage_span.mojo", "sha256": "7bf7599e03c848ad9f53eee5c922f5d11bfea6667f7605a8c4667df23b0ca69e"},
+        {"path": "src/byte_buffer/src/byte_buffer/memory_region.mojo", "sha256": "735c733f9068d28107efe6f9bf606d4b443f55943fbf9eb31b0dfe45981d1e45"},
+        {"path": "src/byte_buffer/src/byte_buffer/mmap_region.mojo", "sha256": "4b2993a38c53dd19f7e86c6db48a5d7285d7b6884c87f6056df95837e3496ca6"},
+        {"path": "src/byte_buffer/src/byte_buffer/owned_aligned_buffer.mojo", "sha256": "8bd935a2046c6fd4806c23b372d6eb4975b213b8cf8af1d65d25244423ff117c"},
+        {"path": "src/byte_buffer/src/byte_buffer/shared_aligned_buffer.mojo", "sha256": "d80da0598e48c6eda94a53387c065b5fdf0a64341ddbc585f85fef4f2ae4546f"}
+      ],
+      "deps": ["komira-ai/host_probe@0.1.0#mojo1.2.0/lib", "komira-ai/libc@0.1.0#mojo1.2.0/lib", "komira-ai/simd_ops@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["byte_buffer.mojoc"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_byte_buffer.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_byte_buffer.mojo", "sha256": "6c5bae6473a6b4209da53bf7aae48bca0cd572d3738fb02a2b95eb2c41059bfe"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_byte_buffer.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_byte_view.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_byte_view.mojo", "sha256": "b8a16fcc854c85aae1d19579bc66cc1e6a16ba7f122921b64216edd1514daf28"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_byte_view.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_constants.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_constants.mojo", "sha256": "39cf1d364d5c4a7881716c4dd23d76e272527297e5c1feeef6bb766e3b703b97"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_constants.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_copyable_sab_mmap_keepalive_copy.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_copyable_sab_mmap_keepalive_copy.mojo", "sha256": "34ce54498f722195b14b6f54f16ca8942c62870f5558d85eb263df43646486de"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_copyable_sab_mmap_keepalive_copy.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_fast_copy_call_sites_enabled.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_fast_copy_call_sites_enabled.mojo", "sha256": "c8be9e80c825cac17e90cea1172a4d571af11fd6e2ec9e46b7b1805246b592bd"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_fast_copy_call_sites_enabled.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_file_identity.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_file_identity.mojo", "sha256": "6fed7fc9e88698500914609a2f47dabd1113bfe0d1c6d00236f45d49682b104c"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_file_identity.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_heap_region.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_heap_region.mojo", "sha256": "cc704862bec621721fb7d48cbdb03188de53012cb401771d365ad357cadef8c6"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_heap_region.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_hugepage_hint.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_hugepage_hint.mojo", "sha256": "a8b56cf61e0ffe97ec9b26b3637a0fda3a51da2b90b293af56f69e73b90080d7"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hugepage_hint.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_mmap_region_open_errors.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_mmap_region_open_errors.mojo", "sha256": "0cb38e5e5327c40fff478d4fa7b29c3c8e7c09c1196a52edf6d66dd6bb0cb792"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mmap_region_open_errors.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_mmap_region_open_readonly.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_mmap_region_open_readonly.mojo", "sha256": "dc3c9250ae93a84a6a856f70356608cccce62eb8c98619d1b6f57e297372ab80"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mmap_region_open_readonly.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_mmap_region_willneed.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_mmap_region_willneed.mojo", "sha256": "d6fc83f3fb66406f8b1c591640c4001425cf2b6460e43ac5f7ff6d447f90a144"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_mmap_region_willneed.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_owned_aligned_buffer_edges.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_owned_aligned_buffer_edges.mojo", "sha256": "e10a038bdc30f11cc7e8e614947fbd052563d1b1162a244130763e5af3c57ce1"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_owned_aligned_buffer_edges.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_owned_aligned_buffer_reserve_regrow.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_owned_aligned_buffer_reserve_regrow.mojo", "sha256": "8ac2820186518aa7eb3e540777d29813e1f418874889f8dc27174d22e4f7dd94"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_owned_aligned_buffer_reserve_regrow.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_owned_aligned_buffer_with_capacity.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_owned_aligned_buffer_with_capacity.mojo", "sha256": "556d7100be0c05f7eee13a0758c9b7b86eeb837abf342fc231fb98af4320b7e4"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_owned_aligned_buffer_with_capacity.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_sab_api.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_sab_api.mojo", "sha256": "d8b13a14743030e792b0a4c329d578c174645908f73ff765cd23b182a7dff660"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_api.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_sab_borrow_mmap_range_check.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_sab_borrow_mmap_range_check.mojo", "sha256": "4b10968aa9d96e9bc1d83ebf2c486671acbc9403e410275de9fce774e6222fd1"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_borrow_mmap_range_check.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_sab_borrowed_view_mmap_keepalive.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_sab_borrowed_view_mmap_keepalive.mojo", "sha256": "7101db61347f2b19094c18b0c13b16bb10a670c9c7f43e3bbb1cd41ef4680405"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_borrowed_view_mmap_keepalive.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_sab_share_range_window.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_sab_share_range_window.mojo", "sha256": "a32b09dcf8d0a722557f05c8473102516a92cdb84236e7235c509d337440ddb3"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sab_share_range_window.pass"]
+    },
+    {
+      "id": "komira-ai/byte_buffer@0.1.0#mojo1.2.0/test:src/byte_buffer/tests/test_write_uleb128.mojo",
+      "package": "komira-ai/byte_buffer",
+      "import": "byte_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/byte_buffer/tests/test_write_uleb128.mojo", "sha256": "e1e9f3e0421565d6f7fde2294e601da73c48c4a44964a652152d906d6540e893"}
+      ],
+      "deps": ["komira-ai/byte_buffer@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_write_uleb128.pass"]
+    },
+    {
+      "id": "komira-ai/host_probe@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/host_probe",
+      "import": "host_probe",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/host_probe/src/host_probe",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["host_probe.mojoc"]
+    },
+    {
+      "id": "komira-ai/libc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/libc/src/libc",
+      "deps": [],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira-ai/libc", "kind": "static", "built": "native:komira-ai/libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["libc.mojoc"]
+    },
+    {
+      "id": "komira-ai/simd_ops@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/simd_ops",
+      "import": "simd_ops",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/simd_ops/src/simd_ops",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["simd_ops.mojoc"]
+    },
+    {
+      "id": "native:komira-ai/libc/komira_libc_posix",
+      "package": "komira-ai/libc",
+      "import": "libc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_libc_posix.a",
+      "srcs": [
+        {"path": "src/libc/native/komira_libc_posix.c", "sha256": "e622c2f2dd393e3c8bde188b95fd931dd516f11cab67af25cad6c47b841c3a6d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_libc_posix.a"],
+      "key": "222f2a6e74d4b0380ea980b2cf9d2af60b98432f7be764be68bc30ae58c2d783"
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

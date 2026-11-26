@@ -5,14 +5,14 @@ MOPM = {"version": "0.0.138", "origin": "builtin", "workspace_root": True}
 MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
-    "../atomic_alias/mopm.toml": "397daeb6e28dc079575eeb7efc7155ab0afc5eecf3a9c888e95201b1fe5e3f7c",
-    "../awslc/mopm.toml": "9da42a790fa7c23f07220ff9eb8237874fca7c82273f3ada9f18f9a2b7a68eb5",
-    "../clock/mopm.toml": "80f57ee22ddfd46df4346b42887971d129650c1ae49f24203010f6a445287177",
-    "../encoding/mopm.toml": "d9564875ec708dbd9ca97c063141eb88cb3e382ce7b1dfd1bc64a2a0917f8e35",
-    "../uuid/mopm.toml": "7ed7e8550c4f17eeae8789fa67313a0eaa750a6c342138ee2a352c6266630d1b",
+    "../atomic_alias/mopm.toml": "9238845410fd79d05a66396487bd5c884ecbf9f465bd99540c46444214d5058c",
+    "../awslc/mopm.toml": "ff704d50c7300cbb9c8958e878bb475f196543f1e8354f330c4f1c42fdc8f17e",
+    "../clock/mopm.toml": "751ae8aadcec9ed1e4f7c608fd039523e3ec8e8262bec1f5ed6e5a4ce3556d08",
+    "../encoding/mopm.toml": "e1017d28d8a80d545ba93da6e0f168cff20366cdb93ff54181a80a3521e539d4",
+    "../uuid/mopm.toml": "f9ebb329c7acfb5fd7448731c2fabff74caec1adc00200ad9ef2a2550c4c42c1",
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "c2a51a8a489cba4aca0bec55647948e91e36d5cc4fd4de0d63a930dfe2d562e6",
-    "mopm.toml": "6bc48d52cb37bf9f1f2dc6298a3ca8e768dd6123615713d438e1082f32ed46c1",
+    "mopm.lock": "54115a6015e72bc770e31517db14e824bea1c8ecfe32b2578a2a7e6d3dc04f5d",
+    "mopm.toml": "17a94a0f6ff1719419c7793f20187f46bfaf1ab2ead61aa60003f90be7c80cf9",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -4325,4 +4325,4314 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/crypto@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/atomic_alias",
+      "import": "atomic_alias",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/atomic_alias/src/atomic_alias",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["atomic_alias.mojoc"]
+    },
+    {
+      "id": "komira-ai/awslc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/awslc/src/awslc",
+      "deps": [],
+      "natives": [
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["awslc.mojoc"]
+    },
+    {
+      "id": "komira-ai/clock@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/clock",
+      "import": "clock",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/clock/src/clock",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["clock.mojoc"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/crypto/src/crypto",
+      "srcs": [
+        {"path": "src/crypto/src/crypto/__init__.mojo", "sha256": "d5a14f6c5ab62dc23d7263cee1fcc8bdb197155888782e965b052e595404b7dc"},
+        {"path": "src/crypto/src/crypto/aead.mojo", "sha256": "0d1939f57349af254e6632fc4a01542855971a17ac0d433596e44a338f2522d2"},
+        {"path": "src/crypto/src/crypto/aes_gcm.mojo", "sha256": "d8e200994c4c49d0daa407004170d267cf5b6845d9348bbdb9ca23d55d858360"},
+        {"path": "src/crypto/src/crypto/cert/__init__.mojo", "sha256": "5305cf56fa6975cd7c7129ffa319dc69d1f43f9d3055dac26bf0802448232164"},
+        {"path": "src/crypto/src/crypto/cert/asn1.mojo", "sha256": "4340e5faad20c6fa6dbaf602e3776f009415f6400d12eebd59094eec84255793"},
+        {"path": "src/crypto/src/crypto/cert/chain.mojo", "sha256": "4d35d08454ab8de9df1930f06b06c8b0c8f311ddb2766ea2dfe9920433d2b430"},
+        {"path": "src/crypto/src/crypto/cert/name_matcher.mojo", "sha256": "46750117026dbeca63fb8e0601080ba20aa1d2b44aea158f4216de5d7fa359a3"},
+        {"path": "src/crypto/src/crypto/cert/root_store.mojo", "sha256": "8179f811ad424446e257c54d22ac0f5484d9210da173a6ccec4dde8bb00b232a"},
+        {"path": "src/crypto/src/crypto/cert/root_store_data.mojo", "sha256": "f338e258e81111987f084a74c37c3a0f0c55b30864e8742e07bf76a261398275"},
+        {"path": "src/crypto/src/crypto/cert/x509.mojo", "sha256": "0e07938959ce82cda92b6a4c83c67afa68e6842acb4a0d3cf49a0c444202f333"},
+        {"path": "src/crypto/src/crypto/chacha20_poly1305.mojo", "sha256": "8f6ce0ea9adbbc4979d655547f3498cbacac112a2aca5f41a8fafb13870ce722"},
+        {"path": "src/crypto/src/crypto/ecdh_p256.mojo", "sha256": "91bf5f0a574ef0427a165347e57fe2b650bfc30171aa49a485bb06e52857d5ad"},
+        {"path": "src/crypto/src/crypto/ecdsa_p256.mojo", "sha256": "058cb4c1ad2bdec4dfdeba1748ee6ee4ca3f3acadbf231a5b2f4510c1b1ac343"},
+        {"path": "src/crypto/src/crypto/ecdsa_p384.mojo", "sha256": "a85dbf618ab9945c21e35539e0627f987868e240a76bccc0546de19f6b36992c"},
+        {"path": "src/crypto/src/crypto/ed25519.mojo", "sha256": "e2cec95c2ead75eb673ea9f2aff64b39d7efff1c58cfb685af557cc21657af36"},
+        {"path": "src/crypto/src/crypto/hash.mojo", "sha256": "b3c396fb4e7a30ee1042e9c50ea6e8d005e4ed31f451e2856cd55be3f98c5559"},
+        {"path": "src/crypto/src/crypto/hex.mojo", "sha256": "640bb00c7e8cfea9f685086ec4c97a586ff08b65073573c1249f1e0e90674ae3"},
+        {"path": "src/crypto/src/crypto/hkdf.mojo", "sha256": "6ccd473702a897ac51a076627d9a0ccb3472cabf399e03d59e5b07c075331fef"},
+        {"path": "src/crypto/src/crypto/hmac.mojo", "sha256": "cdb9074f8570c62b74afd5370d2df91206667908c5c822c95b3d33b5d7f1f558"},
+        {"path": "src/crypto/src/crypto/hmac_streaming.mojo", "sha256": "b750a8072923c2151362c5559fb145dc27aeedf0122c600ca3e4c7e65b9ab821"},
+        {"path": "src/crypto/src/crypto/internal/__init__.mojo", "sha256": "1951dac15c825d2df747c0ef9b34a82e3d5b9d44b489474cac3386b537e3c783"},
+        {"path": "src/crypto/src/crypto/internal/asm/__init__.mojo", "sha256": "338523a0dcdf3ea174cbe022996d6373a346482912ca8d530d64b7db45e35149"},
+        {"path": "src/crypto/src/crypto/internal/asm/aes_gcm_ffi.mojo", "sha256": "e4a44c07fa6e63b7f9004e39c0ec6c5648e150169d0507612d8d7872e9aed8e1"},
+        {"path": "src/crypto/src/crypto/internal/asm/chacha20_poly1305_ffi.mojo", "sha256": "76ee565b96eaf8e17ecd4d856f2b8ce9b1176d2ba34b43675a2b648db0fcbd38"},
+        {"path": "src/crypto/src/crypto/internal/asm/ed25519_ffi.mojo", "sha256": "4455db7fcc0588e3910dc9b7a457ffe525baa4833c1230730313a004a30c7645"},
+        {"path": "src/crypto/src/crypto/internal/asm/hkdf_ffi.mojo", "sha256": "f6b0a771d831a9e4a9397d05a83fc654817a3c76f4ca9abfe6614a810f33b6a0"},
+        {"path": "src/crypto/src/crypto/internal/asm/hmac_ffi.mojo", "sha256": "0e82d5d02673226ba26db70ff65d211f826fca5f591b12d7ff148632c401ce22"},
+        {"path": "src/crypto/src/crypto/internal/asm/p256_ecdh_ffi.mojo", "sha256": "d3ae50cbad65721ab3fa213f4e40c9b313ef73dfddf46b19c3e9eaf97ad75905"},
+        {"path": "src/crypto/src/crypto/internal/asm/p256_ffi.mojo", "sha256": "ac886ac90a0a4075f34cbd439f604db1d6b33f26864ec6f746ec3f4bba79c98d"},
+        {"path": "src/crypto/src/crypto/internal/asm/p384_ffi.mojo", "sha256": "d2f1ed0d92c54edce67f424890e5333d2414c36707e4e3f3e9cdbee1ca64c041"},
+        {"path": "src/crypto/src/crypto/internal/asm/rng_ffi.mojo", "sha256": "c692d6d66dbe3fad60579959bf4e31ef068a065a27ceb1e579d9a64db99b732f"},
+        {"path": "src/crypto/src/crypto/internal/asm/rsa_ffi.mojo", "sha256": "79797ba098727ecce1d0000db913701f564e1cfa19f6a18c847ae29f1e994443"},
+        {"path": "src/crypto/src/crypto/internal/asm/rsa_sign_ffi.mojo", "sha256": "6d8dda68dbc8723c2c3ef49ca3ea422a3ae17c658a63fc7a015c5d2ab9cb5374"},
+        {"path": "src/crypto/src/crypto/internal/asm/sha256_compress.mojo", "sha256": "05278ba39be61bc6370f6ccc58f0a434c09dd29f07cca328d428394eef319fe7"},
+        {"path": "src/crypto/src/crypto/internal/asm/sha256_ffi.mojo", "sha256": "0bd3ec3c07efc50f261e7f802797c0be82bff7fc87f3d4abca06297a2c120836"},
+        {"path": "src/crypto/src/crypto/internal/asm/x25519_ffi.mojo", "sha256": "22d98a45f5559baf98ae1cc7f42333b11da688ccd76b97a3366db6fd76a2818e"},
+        {"path": "src/crypto/src/crypto/pbkdf2.mojo", "sha256": "49b35edea0f894abf5a9c8d6ac93a138fa08527160fcecc87f0dc32e6a54b0b0"},
+        {"path": "src/crypto/src/crypto/rng.mojo", "sha256": "e62f6c4d4aa27eee28a5815d77a209befb65cad3afaaed87f6689a0320c33244"},
+        {"path": "src/crypto/src/crypto/rsa.mojo", "sha256": "052b6f15ae52d90680cd1b4ac5249c4893595afa011607f98566bffd2ee14eaa"},
+        {"path": "src/crypto/src/crypto/rsa_pem_key.mojo", "sha256": "31f2b7801a2f2ea8c3701e9be94c754e51d4d818f4c889edab9e7efd76b08c7f"},
+        {"path": "src/crypto/src/crypto/rsa_pss.mojo", "sha256": "15f53688719763f642793a831febbbefa7f8be5f0f7728dbd02683cfd23b7f2c"},
+        {"path": "src/crypto/src/crypto/sha256.mojo", "sha256": "4771cad0b8925c4ae9e8e7fc53fa2ac7ef9864dd18f3be60ccebf5099fa199e3"},
+        {"path": "src/crypto/src/crypto/traits.mojo", "sha256": "1f2d2f3f2c2331c34292969a82a0ce334fc41ab829d1daf04ecb41e6bd60b492"},
+        {"path": "src/crypto/src/crypto/x25519.mojo", "sha256": "bf2a43ba2ddaf4a2f2f06d1013d4197273775290d1202162d53356825bf94cd5"},
+        {"path": "src/crypto/src/crypto/x25519_simd.mojo", "sha256": "f7984dff0328a122393ec019d6a507e7a5cc0d825ea0e79e779c1178ae285991"},
+        {"path": "src/crypto/src/crypto/zeroize.mojo", "sha256": "ed518e2ae03b824d7c1cc0392c527363efc62ca225cc715684bc8a02563320ae"}
+      ],
+      "deps": ["komira-ai/awslc@0.1.0#mojo1.2.0/lib", "komira-ai/encoding@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["crypto.mojoc"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_aes_gcm_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_aes_gcm_kat.mojo", "sha256": "3f04166c0950d3431809157bf62a87e0e8b290a10cba1adca4e5895982891e12"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_aes_gcm_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_aes_gcm_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_aes_gcm_smoke.mojo", "sha256": "29aa15ccfe64080ddce638b3b0d48e23bb2dde50cf24158b21c36692448ac083"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_aes_gcm_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_asn1_constructed.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_asn1_constructed.mojo", "sha256": "c59931fe9ed07440369ad50d9dd1cde8fa3f109695835d939e29cea56ae88a91"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_asn1_constructed.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_asn1_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_asn1_edges.mojo", "sha256": "a744c7a3a0c27e39c424ffdec420099c6614be014bf9fa26df5839326e110f2b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_asn1_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_asn1_primitives.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_asn1_primitives.mojo", "sha256": "10d02c6a4b9cc3b28a575845783a86004a588c97de15d96994bf51f56ba13cf8"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_asn1_primitives.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_awslc_one_copy.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_awslc_one_copy.mojo", "sha256": "f72a76d183cf8e3c590930fcb676c7f2a4ab150513a7c4a5da8a0b582a904aa5"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_awslc_one_copy.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_bettertls_synthetic.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_bettertls_synthetic.mojo", "sha256": "45890d0f00b8248ca252272b9eeb9325e68f9e3f0fc319d44c66fe883a585328"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_bettertls_synthetic.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_blake2b_256_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_blake2b_256_kat.mojo", "sha256": "64b2cd7c3a741993914394386cd39bb58ef8ec6d98726e0cecb6496f00964779"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_blake2b_256_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha256_long.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha256_long.mojo", "sha256": "394bcc3a43b35db046891864296d591cb3221bb9198a02b6242bf75a2fbac7ee"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha256_long.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha256_monte.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha256_monte.mojo", "sha256": "31bbd10b732fc687ca759ecb6e63a6f01fe24b51ea08e5b61cb7e1fb752603ae"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha256_monte.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha256_short.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha256_short.mojo", "sha256": "9d45f722f7b6420c224521ca11d82353a8f0d8e08727b49c4963cd3703017176"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha256_short.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha384_long.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha384_long.mojo", "sha256": "97ae02b9162f52876d21cdf90d79b2fd2da2215a0fbd6e9804ac076da69a7401"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha384_long.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha384_monte.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha384_monte.mojo", "sha256": "6dd93a8646ff92f8f503c9adf5c1472ea806836dac33127c4cbc383363418aee"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha384_monte.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha384_short.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha384_short.mojo", "sha256": "1d5d10e069aa0281ffd3405243637afe17162d7a039fe5edc1e172a435644ca6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha384_short.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha512_long.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha512_long.mojo", "sha256": "9dc65b75e809ef60ea4b70429a05955052d0187631a159fcab127008eddfcc62"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha512_long.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha512_monte.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha512_monte.mojo", "sha256": "3e8ad63cfdda26c58e26af96b59fa54786edc48c0711113b523b6dd397043917"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha512_monte.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha512_short.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha512_short.mojo", "sha256": "89d3bf8c3ca6a338605e6c9eda9e5a655013477ee45e49467eff77fa0bb728d1"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha512_short.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chacha20_poly1305_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chacha20_poly1305_kat.mojo", "sha256": "46fd6819f3d6484ec93807795f25a20b01631af4ea59f7a8910543908d9b4be9"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chacha20_poly1305_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_policy.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_policy.mojo", "sha256": "8331a421464b91bf77102cbc599c7ae7c2edf34534e38fb52c1049eba6b473ea"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_policy.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_rsa_pss.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_rsa_pss.mojo", "sha256": "471094922bdabe12a32f71eb967a42411bbb097c8d1de2034e5343bf61961ab7"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_rsa_pss.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_signatures.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_signatures.mojo", "sha256": "bd2c04b5bd250ce387117b9a2068847e95189acf33963fe01eb33a9aa52e946b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_signatures.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_validator.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_validator.mojo", "sha256": "10efc6403b907f92700ba3faaca17092119e630fa2d7ca3c709fd949fb9855dc"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_validator.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_validator_ed25519.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_validator_ed25519.mojo", "sha256": "686fc1a610fc4f1cfb73e0022357e8fd76cc002072cdd3b6bd631a58f3356bc7"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_validator_ed25519.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_validator_p384.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_validator_p384.mojo", "sha256": "9f22b1b86a51dfc4f7bcb36d8e0936584b038c101944334ad9930cc0c2055405"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_validator_p384.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_crypto_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_crypto_kat.mojo", "sha256": "15221da0d36bdda3ca722503a1345c5a8e33a293e68ffd4aabf9dd9ef1fbe48a"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_crypto_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_derive_secret.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_derive_secret.mojo", "sha256": "1b7886728ae0ec7bfdc4c529f74d2e59b85502f166a7c615c0b13ee19bbc88ee"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_derive_secret.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p256_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p256_edges.mojo", "sha256": "bafd9b1bce02e1fd5b29cdcc9d94f913aec7a5d0dc4a8dd29c9b9ff7512657fe"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p256_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p256_rfc6979.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p256_rfc6979.mojo", "sha256": "e8df99c2972388309f42e3029f2dacbfdc3b37d2f4534e6e4fb0cfa611a744a6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p256_rfc6979.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p256_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p256_smoke.mojo", "sha256": "d8d9b43b8e0682e80933278d5cd1d312a234180d0ec5f86e655435f41ab4b040"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p256_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p384_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p384_edges.mojo", "sha256": "b4bfc77b6ee288f39d7798751c449469d778319398ac1b6ecb122a81c9bf779d"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p384_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p384_rfc6979.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p384_rfc6979.mojo", "sha256": "838d6fa3a4ba4e58d964525ea42010ce54be3970f821369beff5a7004b66a994"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p384_rfc6979.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p384_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p384_smoke.mojo", "sha256": "e777313d9b0be78df61a4032648a12d877b843bea33b7e4ac4bb922cf96ff5a6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p384_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_sign_failure_raises.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_sign_failure_raises.mojo", "sha256": "b50ad7092fb281274ad3c852fbb4ee3a283d234b4b07af2c550ab7000980b0c6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_sign_failure_raises.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ed25519_length_guard.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ed25519_length_guard.mojo", "sha256": "89d3eaae184cd83692f2c12b51ff5e86650f0ca9eac01d038d66a1ae8a86b28f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ed25519_length_guard.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ed25519_rfc8032.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ed25519_rfc8032.mojo", "sha256": "e5b0fa2a118c8c7343fe04cb2d3a99a050b5f801bad4e0a5dd28d77b57c8405b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ed25519_rfc8032.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_encoding_byte_identity.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_encoding_byte_identity.mojo", "sha256": "9e6bb5325280f921363089429e6dfc86e87b39575fea10bce9c47eb92105f972"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_encoding_byte_identity.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hkdf_expand_label.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hkdf_expand_label.mojo", "sha256": "85ea8d35c18cc1790d17006a2e68e2c886b68f8b83b440537b7bf96d9563bc13"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hkdf_expand_label.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hkdf_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hkdf_kat.mojo", "sha256": "255b9b102cd0fa0e7b0b359d7129e616fa650014efc49438dc57040588080dbe"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hkdf_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hkdf_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hkdf_smoke.mojo", "sha256": "6f7fa3bdfe97d1dd5daf9e0747d7ce434005a1158ae318b996bb8b5553bb837e"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hkdf_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hmac_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hmac_kat.mojo", "sha256": "7017022948108e4abfdbeb3973958ae6e241a6911368acdad93e87ce88174b72"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hmac_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hmac_streaming_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hmac_streaming_smoke.mojo", "sha256": "81dc0a1c2dfc8e267498afe6a7fc6023bcc28217a153ef6305640a3a08bb926d"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hmac_streaming_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_name_matcher.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_name_matcher.mojo", "sha256": "b7decd1ce72ba04cf125754721870f1a373b5d68bd3ba059977cd1b90441fef2"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_name_matcher.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_name_matcher_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_name_matcher_edges.mojo", "sha256": "f73b241d57f71ab12fada7daf1198a753af418add286b59f80986f6bb7dcbfe6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_name_matcher_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_p256_ecdh_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_p256_ecdh_kat.mojo", "sha256": "f66ef7875a4c516a5cc6cfde029cb41edca54e1944603e15d62d7a190cad2de2"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_p256_ecdh_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_p256_ecdh_refusals.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_p256_ecdh_refusals.mojo", "sha256": "07d554b4f1f69666d4e3faebc5cf6adf66f82d30fc2552d14cfb105fb545275c"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_p256_ecdh_refusals.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_pbkdf2_ct_eq.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_pbkdf2_ct_eq.mojo", "sha256": "d4d11a96b1ae9ae1caba399fa9d9a256975ff6160965aeaa24a030153a2c70f3"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_pbkdf2_ct_eq.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rng_chacha20_drbg_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rng_chacha20_drbg_smoke.mojo", "sha256": "af118cf4bea79d1891d0fa9a29dc1b3f9d4a926eb3ceec2b880e9f8129687e11"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rng_chacha20_drbg_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rng_system_entropy_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rng_system_entropy_smoke.mojo", "sha256": "6fa61770c7c5e7bbaaeb1fd08879d31d4ce3a46e85e48fb9dc1a6ce1e88cc23f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rng_system_entropy_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_root_store.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_root_store.mojo", "sha256": "f79de6760bc0cddc8bea0a414c22cf7881869c36cf9dd2cec2bc5b4510b91c26"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_root_store.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_root_store_data_bytes.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_root_store_data_bytes.mojo", "sha256": "165a484adf5dcd3fdd3194fe3195a87e05ea9dd2dae5d703ed43daecf2ce2b34"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_root_store_data_bytes.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rsa_pem_key.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rsa_pem_key.mojo", "sha256": "523e98ab78ee50ac828c2a2011968974d53c1c6e49d57dab1bf0731d91e870de"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rsa_pem_key.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rsa_pkcs1_verify.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rsa_pkcs1_verify.mojo", "sha256": "04d81d0cd745f9633b51debe4da0618740b014fad01864af85ac83a26cde837f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rsa_pkcs1_verify.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rsa_pss_verify.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rsa_pss_verify.mojo", "sha256": "21dce973ec5e06094e8e0ef6bc9eae155b9279c1acf5c72ed172f66b1b2348f2"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rsa_pss_verify.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rsa_sign_verify_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rsa_sign_verify_edges.mojo", "sha256": "4434c7fd4cdd0c175c8ffd6cef0661c68f687450cc8fdd39b881e5953dff3755"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rsa_sign_verify_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha1_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha1_kat.mojo", "sha256": "f62d5423861f0c1226dd3c692d2e6f39f306de816d4f939b7aedea83e543305f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha1_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha256_compress.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha256_compress.mojo", "sha256": "69d405c784620e3c135b9fd552ca7488b6b4eb25ca9c797e308e07340bd52662"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha256_compress.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha256_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha256_kat.mojo", "sha256": "a5cf1efd845fc1f24f641110fd5bb850c9a779bb374edbf7ac4865f3f1cc0965"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha256_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha256_streaming_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha256_streaming_smoke.mojo", "sha256": "d32ffbb0f36d3d03985e7437b891f042a91909ce4355bdf6d104568dbf6fb66d"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha256_streaming_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha384_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha384_kat.mojo", "sha256": "6b665a8ad3786a2b49eda0aade1a3767a11ab052afdf2bfad646c1acbadb205d"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha384_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha384_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha384_smoke.mojo", "sha256": "83f0c54c0cc26b7a74983381c8689e6177d920eccab628d6fac8f663d10a8457"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha384_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha512_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha512_kat.mojo", "sha256": "360b766aa578a257140aa83b2ee6bde5a0916005d6dc8ab49f2f711ac4e3aaf2"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha512_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha512_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha512_smoke.mojo", "sha256": "2d5684efe1014ff6d059bbf1b68c7c1cf5dd24ee642513a4f64be7047e1bcd99"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha512_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_small_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_small_edges.mojo", "sha256": "3423ac121d1a97f4c1750e396529f7f97269e0328cb1253b799d7e324e4ad6be"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_small_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_wycheproof_hkdf_sha256.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_wycheproof_hkdf_sha256.mojo", "sha256": "c446b2db9783ca0dfb702c14c550b1dfdd7ac09f16439cca443b471f3468ceec"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_wycheproof_hkdf_sha256.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_wycheproof_hkdf_sha384.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_wycheproof_hkdf_sha384.mojo", "sha256": "3187bdb7e88e269a455b4793fbfe6c2a767c8975209f3b4d48683873aba932bf"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_wycheproof_hkdf_sha384.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_wycheproof_hkdf_sha512.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_wycheproof_hkdf_sha512.mojo", "sha256": "8076ff5d52fa2ed3df78828bced4ab3d292a0e4b14ec74f67e5c3bcd23b2926f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_wycheproof_hkdf_sha512.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x25519_4way_oracle.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x25519_4way_oracle.mojo", "sha256": "aa5d64420501df6827ef63b5b1f8431278503731019dfb5cfd1d865f7f546126"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x25519_4way_oracle.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x25519_iterated.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x25519_iterated.mojo", "sha256": "566213ecb0d049af3c3193b6cbc99cd4c090a4a8903c4ca5148bc673f9df2b07"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x25519_iterated.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x25519_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x25519_kat.mojo", "sha256": "c68fc663e0be9ce3399a10a6796656167ccdca3e825dcadf69e15ee92d64b876"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x25519_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x25519_small_order.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x25519_small_order.mojo", "sha256": "ba45037b310f6185ecbacb93966567f3c0a4d64488d78c38d55112ff1654373a"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x25519_small_order.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x509_letsencrypt_r3.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x509_letsencrypt_r3.mojo", "sha256": "32e5aa9735ae5b6ae5bc1448f48a976b4f144161f603cb2b8f17c4492134de9a"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x509_letsencrypt_r3.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x509_malformed.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x509_malformed.mojo", "sha256": "a32c85919a6beba0bea8cf08633327a092015aacf1c362ccadd6d0134cdd6b1b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x509_malformed.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x509_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x509_smoke.mojo", "sha256": "44108f471e7d9c2132ad067ae141dd612e725999a018b5766863322d50cefde3"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x509_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_zeroize_on_drop.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_zeroize_on_drop.mojo", "sha256": "18fd85543d5fb601ebf52f3e0d236e0b3823f19f5f6a84a7c0fac8f516c4432b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_zeroize_on_drop.pass"]
+    },
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/uuid@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/uuid",
+      "import": "uuid",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/uuid/src/uuid",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/awslc@0.1.0#mojo1.2.0/lib", "komira-ai/clock@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["uuid.mojoc"]
+    },
+    {
+      "id": "native:komira-ai/awslc/awslc",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libawslc.a",
+      "srcs": [
+        {"path": "src/awslc/native/awslc_provided.c", "sha256": "2ad7801dbb74d7ad84fa29637700da7cbf37bc12ac383d81bd7fde2a4e461a25"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libawslc.a"],
+      "key": "b2b5eb464ae0ece97e773ed5e4c460c0d7e7670056ebe4eb81bc7eee248f0ff7"
+    },
+    {
+      "id": "native:komira-ai/crypto/komira_crypto_sha256_hw",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_crypto_sha256_hw.a",
+      "srcs": [
+        {"path": "src/crypto/native/komira_crypto_sha256_hw.c", "sha256": "81af9cffd8fe294883a44210f29d8e1ec2725d441194355b3e4776ae3bbaa848"}
+      ],
+      "needs": ["libawslc.a"],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_crypto_sha256_hw.a"],
+      "key": "2664e4265b8be8b189393acc7d223f32e86bb52d489fcf2cf4718c37d50a67fb"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/crypto@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/atomic_alias",
+      "import": "atomic_alias",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/atomic_alias/src/atomic_alias",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["atomic_alias.mojoc"]
+    },
+    {
+      "id": "komira-ai/awslc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/awslc/src/awslc",
+      "deps": [],
+      "natives": [
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["awslc.mojoc"]
+    },
+    {
+      "id": "komira-ai/clock@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/clock",
+      "import": "clock",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/clock/src/clock",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["clock.mojoc"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/crypto/src/crypto",
+      "srcs": [
+        {"path": "src/crypto/src/crypto/__init__.mojo", "sha256": "d5a14f6c5ab62dc23d7263cee1fcc8bdb197155888782e965b052e595404b7dc"},
+        {"path": "src/crypto/src/crypto/aead.mojo", "sha256": "0d1939f57349af254e6632fc4a01542855971a17ac0d433596e44a338f2522d2"},
+        {"path": "src/crypto/src/crypto/aes_gcm.mojo", "sha256": "d8e200994c4c49d0daa407004170d267cf5b6845d9348bbdb9ca23d55d858360"},
+        {"path": "src/crypto/src/crypto/cert/__init__.mojo", "sha256": "5305cf56fa6975cd7c7129ffa319dc69d1f43f9d3055dac26bf0802448232164"},
+        {"path": "src/crypto/src/crypto/cert/asn1.mojo", "sha256": "4340e5faad20c6fa6dbaf602e3776f009415f6400d12eebd59094eec84255793"},
+        {"path": "src/crypto/src/crypto/cert/chain.mojo", "sha256": "4d35d08454ab8de9df1930f06b06c8b0c8f311ddb2766ea2dfe9920433d2b430"},
+        {"path": "src/crypto/src/crypto/cert/name_matcher.mojo", "sha256": "46750117026dbeca63fb8e0601080ba20aa1d2b44aea158f4216de5d7fa359a3"},
+        {"path": "src/crypto/src/crypto/cert/root_store.mojo", "sha256": "8179f811ad424446e257c54d22ac0f5484d9210da173a6ccec4dde8bb00b232a"},
+        {"path": "src/crypto/src/crypto/cert/root_store_data.mojo", "sha256": "f338e258e81111987f084a74c37c3a0f0c55b30864e8742e07bf76a261398275"},
+        {"path": "src/crypto/src/crypto/cert/x509.mojo", "sha256": "0e07938959ce82cda92b6a4c83c67afa68e6842acb4a0d3cf49a0c444202f333"},
+        {"path": "src/crypto/src/crypto/chacha20_poly1305.mojo", "sha256": "8f6ce0ea9adbbc4979d655547f3498cbacac112a2aca5f41a8fafb13870ce722"},
+        {"path": "src/crypto/src/crypto/ecdh_p256.mojo", "sha256": "91bf5f0a574ef0427a165347e57fe2b650bfc30171aa49a485bb06e52857d5ad"},
+        {"path": "src/crypto/src/crypto/ecdsa_p256.mojo", "sha256": "058cb4c1ad2bdec4dfdeba1748ee6ee4ca3f3acadbf231a5b2f4510c1b1ac343"},
+        {"path": "src/crypto/src/crypto/ecdsa_p384.mojo", "sha256": "a85dbf618ab9945c21e35539e0627f987868e240a76bccc0546de19f6b36992c"},
+        {"path": "src/crypto/src/crypto/ed25519.mojo", "sha256": "e2cec95c2ead75eb673ea9f2aff64b39d7efff1c58cfb685af557cc21657af36"},
+        {"path": "src/crypto/src/crypto/hash.mojo", "sha256": "b3c396fb4e7a30ee1042e9c50ea6e8d005e4ed31f451e2856cd55be3f98c5559"},
+        {"path": "src/crypto/src/crypto/hex.mojo", "sha256": "640bb00c7e8cfea9f685086ec4c97a586ff08b65073573c1249f1e0e90674ae3"},
+        {"path": "src/crypto/src/crypto/hkdf.mojo", "sha256": "6ccd473702a897ac51a076627d9a0ccb3472cabf399e03d59e5b07c075331fef"},
+        {"path": "src/crypto/src/crypto/hmac.mojo", "sha256": "cdb9074f8570c62b74afd5370d2df91206667908c5c822c95b3d33b5d7f1f558"},
+        {"path": "src/crypto/src/crypto/hmac_streaming.mojo", "sha256": "b750a8072923c2151362c5559fb145dc27aeedf0122c600ca3e4c7e65b9ab821"},
+        {"path": "src/crypto/src/crypto/internal/__init__.mojo", "sha256": "1951dac15c825d2df747c0ef9b34a82e3d5b9d44b489474cac3386b537e3c783"},
+        {"path": "src/crypto/src/crypto/internal/asm/__init__.mojo", "sha256": "338523a0dcdf3ea174cbe022996d6373a346482912ca8d530d64b7db45e35149"},
+        {"path": "src/crypto/src/crypto/internal/asm/aes_gcm_ffi.mojo", "sha256": "e4a44c07fa6e63b7f9004e39c0ec6c5648e150169d0507612d8d7872e9aed8e1"},
+        {"path": "src/crypto/src/crypto/internal/asm/chacha20_poly1305_ffi.mojo", "sha256": "76ee565b96eaf8e17ecd4d856f2b8ce9b1176d2ba34b43675a2b648db0fcbd38"},
+        {"path": "src/crypto/src/crypto/internal/asm/ed25519_ffi.mojo", "sha256": "4455db7fcc0588e3910dc9b7a457ffe525baa4833c1230730313a004a30c7645"},
+        {"path": "src/crypto/src/crypto/internal/asm/hkdf_ffi.mojo", "sha256": "f6b0a771d831a9e4a9397d05a83fc654817a3c76f4ca9abfe6614a810f33b6a0"},
+        {"path": "src/crypto/src/crypto/internal/asm/hmac_ffi.mojo", "sha256": "0e82d5d02673226ba26db70ff65d211f826fca5f591b12d7ff148632c401ce22"},
+        {"path": "src/crypto/src/crypto/internal/asm/p256_ecdh_ffi.mojo", "sha256": "d3ae50cbad65721ab3fa213f4e40c9b313ef73dfddf46b19c3e9eaf97ad75905"},
+        {"path": "src/crypto/src/crypto/internal/asm/p256_ffi.mojo", "sha256": "ac886ac90a0a4075f34cbd439f604db1d6b33f26864ec6f746ec3f4bba79c98d"},
+        {"path": "src/crypto/src/crypto/internal/asm/p384_ffi.mojo", "sha256": "d2f1ed0d92c54edce67f424890e5333d2414c36707e4e3f3e9cdbee1ca64c041"},
+        {"path": "src/crypto/src/crypto/internal/asm/rng_ffi.mojo", "sha256": "c692d6d66dbe3fad60579959bf4e31ef068a065a27ceb1e579d9a64db99b732f"},
+        {"path": "src/crypto/src/crypto/internal/asm/rsa_ffi.mojo", "sha256": "79797ba098727ecce1d0000db913701f564e1cfa19f6a18c847ae29f1e994443"},
+        {"path": "src/crypto/src/crypto/internal/asm/rsa_sign_ffi.mojo", "sha256": "6d8dda68dbc8723c2c3ef49ca3ea422a3ae17c658a63fc7a015c5d2ab9cb5374"},
+        {"path": "src/crypto/src/crypto/internal/asm/sha256_compress.mojo", "sha256": "05278ba39be61bc6370f6ccc58f0a434c09dd29f07cca328d428394eef319fe7"},
+        {"path": "src/crypto/src/crypto/internal/asm/sha256_ffi.mojo", "sha256": "0bd3ec3c07efc50f261e7f802797c0be82bff7fc87f3d4abca06297a2c120836"},
+        {"path": "src/crypto/src/crypto/internal/asm/x25519_ffi.mojo", "sha256": "22d98a45f5559baf98ae1cc7f42333b11da688ccd76b97a3366db6fd76a2818e"},
+        {"path": "src/crypto/src/crypto/pbkdf2.mojo", "sha256": "49b35edea0f894abf5a9c8d6ac93a138fa08527160fcecc87f0dc32e6a54b0b0"},
+        {"path": "src/crypto/src/crypto/rng.mojo", "sha256": "e62f6c4d4aa27eee28a5815d77a209befb65cad3afaaed87f6689a0320c33244"},
+        {"path": "src/crypto/src/crypto/rsa.mojo", "sha256": "052b6f15ae52d90680cd1b4ac5249c4893595afa011607f98566bffd2ee14eaa"},
+        {"path": "src/crypto/src/crypto/rsa_pem_key.mojo", "sha256": "31f2b7801a2f2ea8c3701e9be94c754e51d4d818f4c889edab9e7efd76b08c7f"},
+        {"path": "src/crypto/src/crypto/rsa_pss.mojo", "sha256": "15f53688719763f642793a831febbbefa7f8be5f0f7728dbd02683cfd23b7f2c"},
+        {"path": "src/crypto/src/crypto/sha256.mojo", "sha256": "4771cad0b8925c4ae9e8e7fc53fa2ac7ef9864dd18f3be60ccebf5099fa199e3"},
+        {"path": "src/crypto/src/crypto/traits.mojo", "sha256": "1f2d2f3f2c2331c34292969a82a0ce334fc41ab829d1daf04ecb41e6bd60b492"},
+        {"path": "src/crypto/src/crypto/x25519.mojo", "sha256": "bf2a43ba2ddaf4a2f2f06d1013d4197273775290d1202162d53356825bf94cd5"},
+        {"path": "src/crypto/src/crypto/x25519_simd.mojo", "sha256": "f7984dff0328a122393ec019d6a507e7a5cc0d825ea0e79e779c1178ae285991"},
+        {"path": "src/crypto/src/crypto/zeroize.mojo", "sha256": "ed518e2ae03b824d7c1cc0392c527363efc62ca225cc715684bc8a02563320ae"}
+      ],
+      "deps": ["komira-ai/awslc@0.1.0#mojo1.2.0/lib", "komira-ai/encoding@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["crypto.mojoc"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_aes_gcm_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_aes_gcm_kat.mojo", "sha256": "3f04166c0950d3431809157bf62a87e0e8b290a10cba1adca4e5895982891e12"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_aes_gcm_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_aes_gcm_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_aes_gcm_smoke.mojo", "sha256": "29aa15ccfe64080ddce638b3b0d48e23bb2dde50cf24158b21c36692448ac083"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_aes_gcm_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_asn1_constructed.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_asn1_constructed.mojo", "sha256": "c59931fe9ed07440369ad50d9dd1cde8fa3f109695835d939e29cea56ae88a91"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_asn1_constructed.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_asn1_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_asn1_edges.mojo", "sha256": "a744c7a3a0c27e39c424ffdec420099c6614be014bf9fa26df5839326e110f2b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_asn1_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_asn1_primitives.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_asn1_primitives.mojo", "sha256": "10d02c6a4b9cc3b28a575845783a86004a588c97de15d96994bf51f56ba13cf8"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_asn1_primitives.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_awslc_one_copy.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_awslc_one_copy.mojo", "sha256": "f72a76d183cf8e3c590930fcb676c7f2a4ab150513a7c4a5da8a0b582a904aa5"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_awslc_one_copy.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_bettertls_synthetic.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_bettertls_synthetic.mojo", "sha256": "45890d0f00b8248ca252272b9eeb9325e68f9e3f0fc319d44c66fe883a585328"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_bettertls_synthetic.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_blake2b_256_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_blake2b_256_kat.mojo", "sha256": "64b2cd7c3a741993914394386cd39bb58ef8ec6d98726e0cecb6496f00964779"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_blake2b_256_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha256_long.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha256_long.mojo", "sha256": "394bcc3a43b35db046891864296d591cb3221bb9198a02b6242bf75a2fbac7ee"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha256_long.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha256_monte.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha256_monte.mojo", "sha256": "31bbd10b732fc687ca759ecb6e63a6f01fe24b51ea08e5b61cb7e1fb752603ae"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha256_monte.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha256_short.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha256_short.mojo", "sha256": "9d45f722f7b6420c224521ca11d82353a8f0d8e08727b49c4963cd3703017176"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha256_short.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha384_long.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha384_long.mojo", "sha256": "97ae02b9162f52876d21cdf90d79b2fd2da2215a0fbd6e9804ac076da69a7401"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha384_long.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha384_monte.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha384_monte.mojo", "sha256": "6dd93a8646ff92f8f503c9adf5c1472ea806836dac33127c4cbc383363418aee"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha384_monte.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha384_short.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha384_short.mojo", "sha256": "1d5d10e069aa0281ffd3405243637afe17162d7a039fe5edc1e172a435644ca6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha384_short.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha512_long.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha512_long.mojo", "sha256": "9dc65b75e809ef60ea4b70429a05955052d0187631a159fcab127008eddfcc62"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha512_long.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha512_monte.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha512_monte.mojo", "sha256": "3e8ad63cfdda26c58e26af96b59fa54786edc48c0711113b523b6dd397043917"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha512_monte.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha512_short.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha512_short.mojo", "sha256": "89d3bf8c3ca6a338605e6c9eda9e5a655013477ee45e49467eff77fa0bb728d1"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha512_short.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chacha20_poly1305_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chacha20_poly1305_kat.mojo", "sha256": "46fd6819f3d6484ec93807795f25a20b01631af4ea59f7a8910543908d9b4be9"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chacha20_poly1305_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_policy.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_policy.mojo", "sha256": "8331a421464b91bf77102cbc599c7ae7c2edf34534e38fb52c1049eba6b473ea"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_policy.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_rsa_pss.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_rsa_pss.mojo", "sha256": "471094922bdabe12a32f71eb967a42411bbb097c8d1de2034e5343bf61961ab7"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_rsa_pss.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_signatures.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_signatures.mojo", "sha256": "bd2c04b5bd250ce387117b9a2068847e95189acf33963fe01eb33a9aa52e946b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_signatures.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_validator.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_validator.mojo", "sha256": "10efc6403b907f92700ba3faaca17092119e630fa2d7ca3c709fd949fb9855dc"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_validator.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_validator_ed25519.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_validator_ed25519.mojo", "sha256": "686fc1a610fc4f1cfb73e0022357e8fd76cc002072cdd3b6bd631a58f3356bc7"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_validator_ed25519.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_validator_p384.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_validator_p384.mojo", "sha256": "9f22b1b86a51dfc4f7bcb36d8e0936584b038c101944334ad9930cc0c2055405"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_validator_p384.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_crypto_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_crypto_kat.mojo", "sha256": "15221da0d36bdda3ca722503a1345c5a8e33a293e68ffd4aabf9dd9ef1fbe48a"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_crypto_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_derive_secret.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_derive_secret.mojo", "sha256": "1b7886728ae0ec7bfdc4c529f74d2e59b85502f166a7c615c0b13ee19bbc88ee"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_derive_secret.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p256_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p256_edges.mojo", "sha256": "bafd9b1bce02e1fd5b29cdcc9d94f913aec7a5d0dc4a8dd29c9b9ff7512657fe"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p256_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p256_rfc6979.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p256_rfc6979.mojo", "sha256": "e8df99c2972388309f42e3029f2dacbfdc3b37d2f4534e6e4fb0cfa611a744a6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p256_rfc6979.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p256_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p256_smoke.mojo", "sha256": "d8d9b43b8e0682e80933278d5cd1d312a234180d0ec5f86e655435f41ab4b040"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p256_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p384_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p384_edges.mojo", "sha256": "b4bfc77b6ee288f39d7798751c449469d778319398ac1b6ecb122a81c9bf779d"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p384_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p384_rfc6979.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p384_rfc6979.mojo", "sha256": "838d6fa3a4ba4e58d964525ea42010ce54be3970f821369beff5a7004b66a994"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p384_rfc6979.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p384_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p384_smoke.mojo", "sha256": "e777313d9b0be78df61a4032648a12d877b843bea33b7e4ac4bb922cf96ff5a6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p384_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_sign_failure_raises.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_sign_failure_raises.mojo", "sha256": "b50ad7092fb281274ad3c852fbb4ee3a283d234b4b07af2c550ab7000980b0c6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_sign_failure_raises.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ed25519_length_guard.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ed25519_length_guard.mojo", "sha256": "89d3eaae184cd83692f2c12b51ff5e86650f0ca9eac01d038d66a1ae8a86b28f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ed25519_length_guard.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ed25519_rfc8032.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ed25519_rfc8032.mojo", "sha256": "e5b0fa2a118c8c7343fe04cb2d3a99a050b5f801bad4e0a5dd28d77b57c8405b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ed25519_rfc8032.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_encoding_byte_identity.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_encoding_byte_identity.mojo", "sha256": "9e6bb5325280f921363089429e6dfc86e87b39575fea10bce9c47eb92105f972"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_encoding_byte_identity.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hkdf_expand_label.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hkdf_expand_label.mojo", "sha256": "85ea8d35c18cc1790d17006a2e68e2c886b68f8b83b440537b7bf96d9563bc13"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hkdf_expand_label.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hkdf_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hkdf_kat.mojo", "sha256": "255b9b102cd0fa0e7b0b359d7129e616fa650014efc49438dc57040588080dbe"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hkdf_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hkdf_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hkdf_smoke.mojo", "sha256": "6f7fa3bdfe97d1dd5daf9e0747d7ce434005a1158ae318b996bb8b5553bb837e"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hkdf_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hmac_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hmac_kat.mojo", "sha256": "7017022948108e4abfdbeb3973958ae6e241a6911368acdad93e87ce88174b72"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hmac_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hmac_streaming_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hmac_streaming_smoke.mojo", "sha256": "81dc0a1c2dfc8e267498afe6a7fc6023bcc28217a153ef6305640a3a08bb926d"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hmac_streaming_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_name_matcher.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_name_matcher.mojo", "sha256": "b7decd1ce72ba04cf125754721870f1a373b5d68bd3ba059977cd1b90441fef2"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_name_matcher.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_name_matcher_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_name_matcher_edges.mojo", "sha256": "f73b241d57f71ab12fada7daf1198a753af418add286b59f80986f6bb7dcbfe6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_name_matcher_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_p256_ecdh_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_p256_ecdh_kat.mojo", "sha256": "f66ef7875a4c516a5cc6cfde029cb41edca54e1944603e15d62d7a190cad2de2"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_p256_ecdh_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_p256_ecdh_refusals.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_p256_ecdh_refusals.mojo", "sha256": "07d554b4f1f69666d4e3faebc5cf6adf66f82d30fc2552d14cfb105fb545275c"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_p256_ecdh_refusals.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_pbkdf2_ct_eq.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_pbkdf2_ct_eq.mojo", "sha256": "d4d11a96b1ae9ae1caba399fa9d9a256975ff6160965aeaa24a030153a2c70f3"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_pbkdf2_ct_eq.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rng_chacha20_drbg_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rng_chacha20_drbg_smoke.mojo", "sha256": "af118cf4bea79d1891d0fa9a29dc1b3f9d4a926eb3ceec2b880e9f8129687e11"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rng_chacha20_drbg_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rng_system_entropy_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rng_system_entropy_smoke.mojo", "sha256": "6fa61770c7c5e7bbaaeb1fd08879d31d4ce3a46e85e48fb9dc1a6ce1e88cc23f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rng_system_entropy_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_root_store.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_root_store.mojo", "sha256": "f79de6760bc0cddc8bea0a414c22cf7881869c36cf9dd2cec2bc5b4510b91c26"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_root_store.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_root_store_data_bytes.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_root_store_data_bytes.mojo", "sha256": "165a484adf5dcd3fdd3194fe3195a87e05ea9dd2dae5d703ed43daecf2ce2b34"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_root_store_data_bytes.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rsa_pem_key.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rsa_pem_key.mojo", "sha256": "523e98ab78ee50ac828c2a2011968974d53c1c6e49d57dab1bf0731d91e870de"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rsa_pem_key.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rsa_pkcs1_verify.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rsa_pkcs1_verify.mojo", "sha256": "04d81d0cd745f9633b51debe4da0618740b014fad01864af85ac83a26cde837f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rsa_pkcs1_verify.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rsa_pss_verify.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rsa_pss_verify.mojo", "sha256": "21dce973ec5e06094e8e0ef6bc9eae155b9279c1acf5c72ed172f66b1b2348f2"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rsa_pss_verify.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rsa_sign_verify_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rsa_sign_verify_edges.mojo", "sha256": "4434c7fd4cdd0c175c8ffd6cef0661c68f687450cc8fdd39b881e5953dff3755"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rsa_sign_verify_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha1_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha1_kat.mojo", "sha256": "f62d5423861f0c1226dd3c692d2e6f39f306de816d4f939b7aedea83e543305f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha1_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha256_compress.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha256_compress.mojo", "sha256": "69d405c784620e3c135b9fd552ca7488b6b4eb25ca9c797e308e07340bd52662"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha256_compress.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha256_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha256_kat.mojo", "sha256": "a5cf1efd845fc1f24f641110fd5bb850c9a779bb374edbf7ac4865f3f1cc0965"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha256_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha256_streaming_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha256_streaming_smoke.mojo", "sha256": "d32ffbb0f36d3d03985e7437b891f042a91909ce4355bdf6d104568dbf6fb66d"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha256_streaming_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha384_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha384_kat.mojo", "sha256": "6b665a8ad3786a2b49eda0aade1a3767a11ab052afdf2bfad646c1acbadb205d"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha384_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha384_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha384_smoke.mojo", "sha256": "83f0c54c0cc26b7a74983381c8689e6177d920eccab628d6fac8f663d10a8457"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha384_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha512_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha512_kat.mojo", "sha256": "360b766aa578a257140aa83b2ee6bde5a0916005d6dc8ab49f2f711ac4e3aaf2"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha512_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha512_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha512_smoke.mojo", "sha256": "2d5684efe1014ff6d059bbf1b68c7c1cf5dd24ee642513a4f64be7047e1bcd99"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha512_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_small_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_small_edges.mojo", "sha256": "3423ac121d1a97f4c1750e396529f7f97269e0328cb1253b799d7e324e4ad6be"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_small_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_wycheproof_hkdf_sha256.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_wycheproof_hkdf_sha256.mojo", "sha256": "c446b2db9783ca0dfb702c14c550b1dfdd7ac09f16439cca443b471f3468ceec"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_wycheproof_hkdf_sha256.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_wycheproof_hkdf_sha384.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_wycheproof_hkdf_sha384.mojo", "sha256": "3187bdb7e88e269a455b4793fbfe6c2a767c8975209f3b4d48683873aba932bf"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_wycheproof_hkdf_sha384.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_wycheproof_hkdf_sha512.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_wycheproof_hkdf_sha512.mojo", "sha256": "8076ff5d52fa2ed3df78828bced4ab3d292a0e4b14ec74f67e5c3bcd23b2926f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_wycheproof_hkdf_sha512.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x25519_4way_oracle.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x25519_4way_oracle.mojo", "sha256": "aa5d64420501df6827ef63b5b1f8431278503731019dfb5cfd1d865f7f546126"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x25519_4way_oracle.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x25519_iterated.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x25519_iterated.mojo", "sha256": "566213ecb0d049af3c3193b6cbc99cd4c090a4a8903c4ca5148bc673f9df2b07"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x25519_iterated.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x25519_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x25519_kat.mojo", "sha256": "c68fc663e0be9ce3399a10a6796656167ccdca3e825dcadf69e15ee92d64b876"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x25519_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x25519_small_order.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x25519_small_order.mojo", "sha256": "ba45037b310f6185ecbacb93966567f3c0a4d64488d78c38d55112ff1654373a"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x25519_small_order.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x509_letsencrypt_r3.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x509_letsencrypt_r3.mojo", "sha256": "32e5aa9735ae5b6ae5bc1448f48a976b4f144161f603cb2b8f17c4492134de9a"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x509_letsencrypt_r3.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x509_malformed.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x509_malformed.mojo", "sha256": "a32c85919a6beba0bea8cf08633327a092015aacf1c362ccadd6d0134cdd6b1b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x509_malformed.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x509_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x509_smoke.mojo", "sha256": "44108f471e7d9c2132ad067ae141dd612e725999a018b5766863322d50cefde3"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x509_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_zeroize_on_drop.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_zeroize_on_drop.mojo", "sha256": "18fd85543d5fb601ebf52f3e0d236e0b3823f19f5f6a84a7c0fac8f516c4432b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_zeroize_on_drop.pass"]
+    },
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/uuid@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/uuid",
+      "import": "uuid",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/uuid/src/uuid",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/awslc@0.1.0#mojo1.2.0/lib", "komira-ai/clock@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["uuid.mojoc"]
+    },
+    {
+      "id": "native:komira-ai/awslc/awslc",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libawslc.a",
+      "srcs": [
+        {"path": "src/awslc/native/awslc_provided.c", "sha256": "2ad7801dbb74d7ad84fa29637700da7cbf37bc12ac383d81bd7fde2a4e461a25"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libawslc.a"],
+      "key": "5f5f0018d18082c0bd6754f168ec1cb6f726404f014b4dd8edd7bf6a8a8f1fb8"
+    },
+    {
+      "id": "native:komira-ai/crypto/komira_crypto_sha256_hw",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_crypto_sha256_hw.a",
+      "srcs": [
+        {"path": "src/crypto/native/komira_crypto_sha256_hw.c", "sha256": "81af9cffd8fe294883a44210f29d8e1ec2725d441194355b3e4776ae3bbaa848"}
+      ],
+      "needs": ["libawslc.a"],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_crypto_sha256_hw.a"],
+      "key": "21c6a3b9097d92eb62620b96005e3614984bc7549ba6a3f755699b14d896a97e"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/crypto@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/atomic_alias",
+      "import": "atomic_alias",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/atomic_alias/src/atomic_alias",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["atomic_alias.mojoc"]
+    },
+    {
+      "id": "komira-ai/awslc@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/awslc/src/awslc",
+      "deps": [],
+      "natives": [
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["awslc.mojoc"]
+    },
+    {
+      "id": "komira-ai/clock@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/clock",
+      "import": "clock",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/clock/src/clock",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["clock.mojoc"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/crypto/src/crypto",
+      "srcs": [
+        {"path": "src/crypto/src/crypto/__init__.mojo", "sha256": "d5a14f6c5ab62dc23d7263cee1fcc8bdb197155888782e965b052e595404b7dc"},
+        {"path": "src/crypto/src/crypto/aead.mojo", "sha256": "0d1939f57349af254e6632fc4a01542855971a17ac0d433596e44a338f2522d2"},
+        {"path": "src/crypto/src/crypto/aes_gcm.mojo", "sha256": "d8e200994c4c49d0daa407004170d267cf5b6845d9348bbdb9ca23d55d858360"},
+        {"path": "src/crypto/src/crypto/cert/__init__.mojo", "sha256": "5305cf56fa6975cd7c7129ffa319dc69d1f43f9d3055dac26bf0802448232164"},
+        {"path": "src/crypto/src/crypto/cert/asn1.mojo", "sha256": "4340e5faad20c6fa6dbaf602e3776f009415f6400d12eebd59094eec84255793"},
+        {"path": "src/crypto/src/crypto/cert/chain.mojo", "sha256": "4d35d08454ab8de9df1930f06b06c8b0c8f311ddb2766ea2dfe9920433d2b430"},
+        {"path": "src/crypto/src/crypto/cert/name_matcher.mojo", "sha256": "46750117026dbeca63fb8e0601080ba20aa1d2b44aea158f4216de5d7fa359a3"},
+        {"path": "src/crypto/src/crypto/cert/root_store.mojo", "sha256": "8179f811ad424446e257c54d22ac0f5484d9210da173a6ccec4dde8bb00b232a"},
+        {"path": "src/crypto/src/crypto/cert/root_store_data.mojo", "sha256": "f338e258e81111987f084a74c37c3a0f0c55b30864e8742e07bf76a261398275"},
+        {"path": "src/crypto/src/crypto/cert/x509.mojo", "sha256": "0e07938959ce82cda92b6a4c83c67afa68e6842acb4a0d3cf49a0c444202f333"},
+        {"path": "src/crypto/src/crypto/chacha20_poly1305.mojo", "sha256": "8f6ce0ea9adbbc4979d655547f3498cbacac112a2aca5f41a8fafb13870ce722"},
+        {"path": "src/crypto/src/crypto/ecdh_p256.mojo", "sha256": "91bf5f0a574ef0427a165347e57fe2b650bfc30171aa49a485bb06e52857d5ad"},
+        {"path": "src/crypto/src/crypto/ecdsa_p256.mojo", "sha256": "058cb4c1ad2bdec4dfdeba1748ee6ee4ca3f3acadbf231a5b2f4510c1b1ac343"},
+        {"path": "src/crypto/src/crypto/ecdsa_p384.mojo", "sha256": "a85dbf618ab9945c21e35539e0627f987868e240a76bccc0546de19f6b36992c"},
+        {"path": "src/crypto/src/crypto/ed25519.mojo", "sha256": "e2cec95c2ead75eb673ea9f2aff64b39d7efff1c58cfb685af557cc21657af36"},
+        {"path": "src/crypto/src/crypto/hash.mojo", "sha256": "b3c396fb4e7a30ee1042e9c50ea6e8d005e4ed31f451e2856cd55be3f98c5559"},
+        {"path": "src/crypto/src/crypto/hex.mojo", "sha256": "640bb00c7e8cfea9f685086ec4c97a586ff08b65073573c1249f1e0e90674ae3"},
+        {"path": "src/crypto/src/crypto/hkdf.mojo", "sha256": "6ccd473702a897ac51a076627d9a0ccb3472cabf399e03d59e5b07c075331fef"},
+        {"path": "src/crypto/src/crypto/hmac.mojo", "sha256": "cdb9074f8570c62b74afd5370d2df91206667908c5c822c95b3d33b5d7f1f558"},
+        {"path": "src/crypto/src/crypto/hmac_streaming.mojo", "sha256": "b750a8072923c2151362c5559fb145dc27aeedf0122c600ca3e4c7e65b9ab821"},
+        {"path": "src/crypto/src/crypto/internal/__init__.mojo", "sha256": "1951dac15c825d2df747c0ef9b34a82e3d5b9d44b489474cac3386b537e3c783"},
+        {"path": "src/crypto/src/crypto/internal/asm/__init__.mojo", "sha256": "338523a0dcdf3ea174cbe022996d6373a346482912ca8d530d64b7db45e35149"},
+        {"path": "src/crypto/src/crypto/internal/asm/aes_gcm_ffi.mojo", "sha256": "e4a44c07fa6e63b7f9004e39c0ec6c5648e150169d0507612d8d7872e9aed8e1"},
+        {"path": "src/crypto/src/crypto/internal/asm/chacha20_poly1305_ffi.mojo", "sha256": "76ee565b96eaf8e17ecd4d856f2b8ce9b1176d2ba34b43675a2b648db0fcbd38"},
+        {"path": "src/crypto/src/crypto/internal/asm/ed25519_ffi.mojo", "sha256": "4455db7fcc0588e3910dc9b7a457ffe525baa4833c1230730313a004a30c7645"},
+        {"path": "src/crypto/src/crypto/internal/asm/hkdf_ffi.mojo", "sha256": "f6b0a771d831a9e4a9397d05a83fc654817a3c76f4ca9abfe6614a810f33b6a0"},
+        {"path": "src/crypto/src/crypto/internal/asm/hmac_ffi.mojo", "sha256": "0e82d5d02673226ba26db70ff65d211f826fca5f591b12d7ff148632c401ce22"},
+        {"path": "src/crypto/src/crypto/internal/asm/p256_ecdh_ffi.mojo", "sha256": "d3ae50cbad65721ab3fa213f4e40c9b313ef73dfddf46b19c3e9eaf97ad75905"},
+        {"path": "src/crypto/src/crypto/internal/asm/p256_ffi.mojo", "sha256": "ac886ac90a0a4075f34cbd439f604db1d6b33f26864ec6f746ec3f4bba79c98d"},
+        {"path": "src/crypto/src/crypto/internal/asm/p384_ffi.mojo", "sha256": "d2f1ed0d92c54edce67f424890e5333d2414c36707e4e3f3e9cdbee1ca64c041"},
+        {"path": "src/crypto/src/crypto/internal/asm/rng_ffi.mojo", "sha256": "c692d6d66dbe3fad60579959bf4e31ef068a065a27ceb1e579d9a64db99b732f"},
+        {"path": "src/crypto/src/crypto/internal/asm/rsa_ffi.mojo", "sha256": "79797ba098727ecce1d0000db913701f564e1cfa19f6a18c847ae29f1e994443"},
+        {"path": "src/crypto/src/crypto/internal/asm/rsa_sign_ffi.mojo", "sha256": "6d8dda68dbc8723c2c3ef49ca3ea422a3ae17c658a63fc7a015c5d2ab9cb5374"},
+        {"path": "src/crypto/src/crypto/internal/asm/sha256_compress.mojo", "sha256": "05278ba39be61bc6370f6ccc58f0a434c09dd29f07cca328d428394eef319fe7"},
+        {"path": "src/crypto/src/crypto/internal/asm/sha256_ffi.mojo", "sha256": "0bd3ec3c07efc50f261e7f802797c0be82bff7fc87f3d4abca06297a2c120836"},
+        {"path": "src/crypto/src/crypto/internal/asm/x25519_ffi.mojo", "sha256": "22d98a45f5559baf98ae1cc7f42333b11da688ccd76b97a3366db6fd76a2818e"},
+        {"path": "src/crypto/src/crypto/pbkdf2.mojo", "sha256": "49b35edea0f894abf5a9c8d6ac93a138fa08527160fcecc87f0dc32e6a54b0b0"},
+        {"path": "src/crypto/src/crypto/rng.mojo", "sha256": "e62f6c4d4aa27eee28a5815d77a209befb65cad3afaaed87f6689a0320c33244"},
+        {"path": "src/crypto/src/crypto/rsa.mojo", "sha256": "052b6f15ae52d90680cd1b4ac5249c4893595afa011607f98566bffd2ee14eaa"},
+        {"path": "src/crypto/src/crypto/rsa_pem_key.mojo", "sha256": "31f2b7801a2f2ea8c3701e9be94c754e51d4d818f4c889edab9e7efd76b08c7f"},
+        {"path": "src/crypto/src/crypto/rsa_pss.mojo", "sha256": "15f53688719763f642793a831febbbefa7f8be5f0f7728dbd02683cfd23b7f2c"},
+        {"path": "src/crypto/src/crypto/sha256.mojo", "sha256": "4771cad0b8925c4ae9e8e7fc53fa2ac7ef9864dd18f3be60ccebf5099fa199e3"},
+        {"path": "src/crypto/src/crypto/traits.mojo", "sha256": "1f2d2f3f2c2331c34292969a82a0ce334fc41ab829d1daf04ecb41e6bd60b492"},
+        {"path": "src/crypto/src/crypto/x25519.mojo", "sha256": "bf2a43ba2ddaf4a2f2f06d1013d4197273775290d1202162d53356825bf94cd5"},
+        {"path": "src/crypto/src/crypto/x25519_simd.mojo", "sha256": "f7984dff0328a122393ec019d6a507e7a5cc0d825ea0e79e779c1178ae285991"},
+        {"path": "src/crypto/src/crypto/zeroize.mojo", "sha256": "ed518e2ae03b824d7c1cc0392c527363efc62ca225cc715684bc8a02563320ae"}
+      ],
+      "deps": ["komira-ai/awslc@0.1.0#mojo1.2.0/lib", "komira-ai/encoding@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["crypto.mojoc"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_aes_gcm_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_aes_gcm_kat.mojo", "sha256": "3f04166c0950d3431809157bf62a87e0e8b290a10cba1adca4e5895982891e12"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_aes_gcm_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_aes_gcm_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_aes_gcm_smoke.mojo", "sha256": "29aa15ccfe64080ddce638b3b0d48e23bb2dde50cf24158b21c36692448ac083"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_aes_gcm_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_asn1_constructed.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_asn1_constructed.mojo", "sha256": "c59931fe9ed07440369ad50d9dd1cde8fa3f109695835d939e29cea56ae88a91"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_asn1_constructed.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_asn1_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_asn1_edges.mojo", "sha256": "a744c7a3a0c27e39c424ffdec420099c6614be014bf9fa26df5839326e110f2b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_asn1_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_asn1_primitives.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_asn1_primitives.mojo", "sha256": "10d02c6a4b9cc3b28a575845783a86004a588c97de15d96994bf51f56ba13cf8"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_asn1_primitives.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_awslc_one_copy.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_awslc_one_copy.mojo", "sha256": "f72a76d183cf8e3c590930fcb676c7f2a4ab150513a7c4a5da8a0b582a904aa5"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_awslc_one_copy.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_bettertls_synthetic.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_bettertls_synthetic.mojo", "sha256": "45890d0f00b8248ca252272b9eeb9325e68f9e3f0fc319d44c66fe883a585328"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_bettertls_synthetic.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_blake2b_256_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_blake2b_256_kat.mojo", "sha256": "64b2cd7c3a741993914394386cd39bb58ef8ec6d98726e0cecb6496f00964779"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_blake2b_256_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha256_long.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha256_long.mojo", "sha256": "394bcc3a43b35db046891864296d591cb3221bb9198a02b6242bf75a2fbac7ee"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha256_long.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha256_monte.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha256_monte.mojo", "sha256": "31bbd10b732fc687ca759ecb6e63a6f01fe24b51ea08e5b61cb7e1fb752603ae"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha256_monte.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha256_short.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha256_short.mojo", "sha256": "9d45f722f7b6420c224521ca11d82353a8f0d8e08727b49c4963cd3703017176"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha256_short.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha384_long.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha384_long.mojo", "sha256": "97ae02b9162f52876d21cdf90d79b2fd2da2215a0fbd6e9804ac076da69a7401"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha384_long.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha384_monte.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha384_monte.mojo", "sha256": "6dd93a8646ff92f8f503c9adf5c1472ea806836dac33127c4cbc383363418aee"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha384_monte.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha384_short.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha384_short.mojo", "sha256": "1d5d10e069aa0281ffd3405243637afe17162d7a039fe5edc1e172a435644ca6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha384_short.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha512_long.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha512_long.mojo", "sha256": "9dc65b75e809ef60ea4b70429a05955052d0187631a159fcab127008eddfcc62"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha512_long.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha512_monte.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha512_monte.mojo", "sha256": "3e8ad63cfdda26c58e26af96b59fa54786edc48c0711113b523b6dd397043917"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha512_monte.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_cavp_sha512_short.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_cavp_sha512_short.mojo", "sha256": "89d3bf8c3ca6a338605e6c9eda9e5a655013477ee45e49467eff77fa0bb728d1"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_cavp_sha512_short.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chacha20_poly1305_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chacha20_poly1305_kat.mojo", "sha256": "46fd6819f3d6484ec93807795f25a20b01631af4ea59f7a8910543908d9b4be9"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chacha20_poly1305_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_policy.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_policy.mojo", "sha256": "8331a421464b91bf77102cbc599c7ae7c2edf34534e38fb52c1049eba6b473ea"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_policy.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_rsa_pss.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_rsa_pss.mojo", "sha256": "471094922bdabe12a32f71eb967a42411bbb097c8d1de2034e5343bf61961ab7"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_rsa_pss.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_signatures.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_signatures.mojo", "sha256": "bd2c04b5bd250ce387117b9a2068847e95189acf33963fe01eb33a9aa52e946b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_signatures.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_validator.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_validator.mojo", "sha256": "10efc6403b907f92700ba3faaca17092119e630fa2d7ca3c709fd949fb9855dc"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_validator.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_validator_ed25519.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_validator_ed25519.mojo", "sha256": "686fc1a610fc4f1cfb73e0022357e8fd76cc002072cdd3b6bd631a58f3356bc7"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_validator_ed25519.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_chain_validator_p384.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_chain_validator_p384.mojo", "sha256": "9f22b1b86a51dfc4f7bcb36d8e0936584b038c101944334ad9930cc0c2055405"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_chain_validator_p384.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_crypto_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_crypto_kat.mojo", "sha256": "15221da0d36bdda3ca722503a1345c5a8e33a293e68ffd4aabf9dd9ef1fbe48a"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_crypto_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_derive_secret.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_derive_secret.mojo", "sha256": "1b7886728ae0ec7bfdc4c529f74d2e59b85502f166a7c615c0b13ee19bbc88ee"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_derive_secret.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p256_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p256_edges.mojo", "sha256": "bafd9b1bce02e1fd5b29cdcc9d94f913aec7a5d0dc4a8dd29c9b9ff7512657fe"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p256_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p256_rfc6979.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p256_rfc6979.mojo", "sha256": "e8df99c2972388309f42e3029f2dacbfdc3b37d2f4534e6e4fb0cfa611a744a6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p256_rfc6979.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p256_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p256_smoke.mojo", "sha256": "d8d9b43b8e0682e80933278d5cd1d312a234180d0ec5f86e655435f41ab4b040"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p256_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p384_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p384_edges.mojo", "sha256": "b4bfc77b6ee288f39d7798751c449469d778319398ac1b6ecb122a81c9bf779d"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p384_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p384_rfc6979.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p384_rfc6979.mojo", "sha256": "838d6fa3a4ba4e58d964525ea42010ce54be3970f821369beff5a7004b66a994"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p384_rfc6979.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_p384_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_p384_smoke.mojo", "sha256": "e777313d9b0be78df61a4032648a12d877b843bea33b7e4ac4bb922cf96ff5a6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_p384_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ecdsa_sign_failure_raises.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ecdsa_sign_failure_raises.mojo", "sha256": "b50ad7092fb281274ad3c852fbb4ee3a283d234b4b07af2c550ab7000980b0c6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ecdsa_sign_failure_raises.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ed25519_length_guard.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ed25519_length_guard.mojo", "sha256": "89d3eaae184cd83692f2c12b51ff5e86650f0ca9eac01d038d66a1ae8a86b28f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ed25519_length_guard.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_ed25519_rfc8032.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_ed25519_rfc8032.mojo", "sha256": "e5b0fa2a118c8c7343fe04cb2d3a99a050b5f801bad4e0a5dd28d77b57c8405b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_ed25519_rfc8032.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_encoding_byte_identity.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_encoding_byte_identity.mojo", "sha256": "9e6bb5325280f921363089429e6dfc86e87b39575fea10bce9c47eb92105f972"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_encoding_byte_identity.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hkdf_expand_label.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hkdf_expand_label.mojo", "sha256": "85ea8d35c18cc1790d17006a2e68e2c886b68f8b83b440537b7bf96d9563bc13"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hkdf_expand_label.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hkdf_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hkdf_kat.mojo", "sha256": "255b9b102cd0fa0e7b0b359d7129e616fa650014efc49438dc57040588080dbe"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hkdf_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hkdf_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hkdf_smoke.mojo", "sha256": "6f7fa3bdfe97d1dd5daf9e0747d7ce434005a1158ae318b996bb8b5553bb837e"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hkdf_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hmac_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hmac_kat.mojo", "sha256": "7017022948108e4abfdbeb3973958ae6e241a6911368acdad93e87ce88174b72"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hmac_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_hmac_streaming_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_hmac_streaming_smoke.mojo", "sha256": "81dc0a1c2dfc8e267498afe6a7fc6023bcc28217a153ef6305640a3a08bb926d"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_hmac_streaming_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_name_matcher.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_name_matcher.mojo", "sha256": "b7decd1ce72ba04cf125754721870f1a373b5d68bd3ba059977cd1b90441fef2"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_name_matcher.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_name_matcher_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_name_matcher_edges.mojo", "sha256": "f73b241d57f71ab12fada7daf1198a753af418add286b59f80986f6bb7dcbfe6"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_name_matcher_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_p256_ecdh_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_p256_ecdh_kat.mojo", "sha256": "f66ef7875a4c516a5cc6cfde029cb41edca54e1944603e15d62d7a190cad2de2"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_p256_ecdh_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_p256_ecdh_refusals.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_p256_ecdh_refusals.mojo", "sha256": "07d554b4f1f69666d4e3faebc5cf6adf66f82d30fc2552d14cfb105fb545275c"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_p256_ecdh_refusals.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_pbkdf2_ct_eq.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_pbkdf2_ct_eq.mojo", "sha256": "d4d11a96b1ae9ae1caba399fa9d9a256975ff6160965aeaa24a030153a2c70f3"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_pbkdf2_ct_eq.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rng_chacha20_drbg_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rng_chacha20_drbg_smoke.mojo", "sha256": "af118cf4bea79d1891d0fa9a29dc1b3f9d4a926eb3ceec2b880e9f8129687e11"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rng_chacha20_drbg_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rng_system_entropy_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rng_system_entropy_smoke.mojo", "sha256": "6fa61770c7c5e7bbaaeb1fd08879d31d4ce3a46e85e48fb9dc1a6ce1e88cc23f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rng_system_entropy_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_root_store.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_root_store.mojo", "sha256": "f79de6760bc0cddc8bea0a414c22cf7881869c36cf9dd2cec2bc5b4510b91c26"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_root_store.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_root_store_data_bytes.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_root_store_data_bytes.mojo", "sha256": "165a484adf5dcd3fdd3194fe3195a87e05ea9dd2dae5d703ed43daecf2ce2b34"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_root_store_data_bytes.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rsa_pem_key.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rsa_pem_key.mojo", "sha256": "523e98ab78ee50ac828c2a2011968974d53c1c6e49d57dab1bf0731d91e870de"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rsa_pem_key.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rsa_pkcs1_verify.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rsa_pkcs1_verify.mojo", "sha256": "04d81d0cd745f9633b51debe4da0618740b014fad01864af85ac83a26cde837f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rsa_pkcs1_verify.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rsa_pss_verify.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rsa_pss_verify.mojo", "sha256": "21dce973ec5e06094e8e0ef6bc9eae155b9279c1acf5c72ed172f66b1b2348f2"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rsa_pss_verify.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_rsa_sign_verify_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_rsa_sign_verify_edges.mojo", "sha256": "4434c7fd4cdd0c175c8ffd6cef0661c68f687450cc8fdd39b881e5953dff3755"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_rsa_sign_verify_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha1_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha1_kat.mojo", "sha256": "f62d5423861f0c1226dd3c692d2e6f39f306de816d4f939b7aedea83e543305f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha1_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha256_compress.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha256_compress.mojo", "sha256": "69d405c784620e3c135b9fd552ca7488b6b4eb25ca9c797e308e07340bd52662"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha256_compress.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha256_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha256_kat.mojo", "sha256": "a5cf1efd845fc1f24f641110fd5bb850c9a779bb374edbf7ac4865f3f1cc0965"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha256_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha256_streaming_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha256_streaming_smoke.mojo", "sha256": "d32ffbb0f36d3d03985e7437b891f042a91909ce4355bdf6d104568dbf6fb66d"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha256_streaming_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha384_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha384_kat.mojo", "sha256": "6b665a8ad3786a2b49eda0aade1a3767a11ab052afdf2bfad646c1acbadb205d"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha384_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha384_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha384_smoke.mojo", "sha256": "83f0c54c0cc26b7a74983381c8689e6177d920eccab628d6fac8f663d10a8457"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha384_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha512_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha512_kat.mojo", "sha256": "360b766aa578a257140aa83b2ee6bde5a0916005d6dc8ab49f2f711ac4e3aaf2"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha512_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_sha512_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_sha512_smoke.mojo", "sha256": "2d5684efe1014ff6d059bbf1b68c7c1cf5dd24ee642513a4f64be7047e1bcd99"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_sha512_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_small_edges.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_small_edges.mojo", "sha256": "3423ac121d1a97f4c1750e396529f7f97269e0328cb1253b799d7e324e4ad6be"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_small_edges.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_wycheproof_hkdf_sha256.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_wycheproof_hkdf_sha256.mojo", "sha256": "c446b2db9783ca0dfb702c14c550b1dfdd7ac09f16439cca443b471f3468ceec"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_wycheproof_hkdf_sha256.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_wycheproof_hkdf_sha384.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_wycheproof_hkdf_sha384.mojo", "sha256": "3187bdb7e88e269a455b4793fbfe6c2a767c8975209f3b4d48683873aba932bf"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_wycheproof_hkdf_sha384.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_wycheproof_hkdf_sha512.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_wycheproof_hkdf_sha512.mojo", "sha256": "8076ff5d52fa2ed3df78828bced4ab3d292a0e4b14ec74f67e5c3bcd23b2926f"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_wycheproof_hkdf_sha512.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x25519_4way_oracle.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x25519_4way_oracle.mojo", "sha256": "aa5d64420501df6827ef63b5b1f8431278503731019dfb5cfd1d865f7f546126"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x25519_4way_oracle.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x25519_iterated.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x25519_iterated.mojo", "sha256": "566213ecb0d049af3c3193b6cbc99cd4c090a4a8903c4ca5148bc673f9df2b07"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x25519_iterated.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x25519_kat.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x25519_kat.mojo", "sha256": "c68fc663e0be9ce3399a10a6796656167ccdca3e825dcadf69e15ee92d64b876"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x25519_kat.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x25519_small_order.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x25519_small_order.mojo", "sha256": "ba45037b310f6185ecbacb93966567f3c0a4d64488d78c38d55112ff1654373a"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x25519_small_order.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x509_letsencrypt_r3.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x509_letsencrypt_r3.mojo", "sha256": "32e5aa9735ae5b6ae5bc1448f48a976b4f144161f603cb2b8f17c4492134de9a"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x509_letsencrypt_r3.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x509_malformed.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x509_malformed.mojo", "sha256": "a32c85919a6beba0bea8cf08633327a092015aacf1c362ccadd6d0134cdd6b1b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x509_malformed.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_x509_smoke.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_x509_smoke.mojo", "sha256": "44108f471e7d9c2132ad067ae141dd612e725999a018b5766863322d50cefde3"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_x509_smoke.pass"]
+    },
+    {
+      "id": "komira-ai/crypto@0.1.0#mojo1.2.0/test:src/crypto/tests/test_zeroize_on_drop.mojo",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/crypto/tests/test_zeroize_on_drop.mojo", "sha256": "18fd85543d5fb601ebf52f3e0d236e0b3823f19f5f6a84a7c0fac8f516c4432b"}
+      ],
+      "deps": ["komira-ai/crypto@0.1.0#mojo1.2.0/lib", "komira-ai/uuid@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "komira_crypto_sha256_hw", "soname": "libkomira_crypto_sha256_hw.a", "package": "komira-ai/crypto", "kind": "static", "needs": ["libawslc.a"], "built": "native:komira-ai/crypto/komira_crypto_sha256_hw"},
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_zeroize_on_drop.pass"]
+    },
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/uuid@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/uuid",
+      "import": "uuid",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/uuid/src/uuid",
+      "deps": ["komira-ai/atomic_alias@0.1.0#mojo1.2.0/lib", "komira-ai/awslc@0.1.0#mojo1.2.0/lib", "komira-ai/clock@0.1.0#mojo1.2.0/lib"],
+      "natives": [
+        {"id": "awslc", "soname": "libawslc.a", "package": "komira-ai/awslc", "kind": "static", "built": "native:komira-ai/awslc/awslc"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["uuid.mojoc"]
+    },
+    {
+      "id": "native:komira-ai/awslc/awslc",
+      "package": "komira-ai/awslc",
+      "import": "awslc",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libawslc.a",
+      "srcs": [
+        {"path": "src/awslc/native/awslc_provided.c", "sha256": "2ad7801dbb74d7ad84fa29637700da7cbf37bc12ac383d81bd7fde2a4e461a25"}
+      ],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libawslc.a"],
+      "key": "36ee5e34055e3d8ffcdda6b871e198744cb8109ea502d6dfb35f0215a43c42b4"
+    },
+    {
+      "id": "native:komira-ai/crypto/komira_crypto_sha256_hw",
+      "package": "komira-ai/crypto",
+      "import": "crypto",
+      "version": "0.1.0",
+      "kind": "native",
+      "soname": "libkomira_crypto_sha256_hw.a",
+      "srcs": [
+        {"path": "src/crypto/native/komira_crypto_sha256_hw.c", "sha256": "81af9cffd8fe294883a44210f29d8e1ec2725d441194355b3e4776ae3bbaa848"}
+      ],
+      "needs": ["libawslc.a"],
+      "deps": [],
+      "natives": [],
+      "outputs": ["libkomira_crypto_sha256_hw.a"],
+      "key": "e27017206b893c943e85a9d2d8636579d1b8f313f8119797f639ee16fe24b3c4"
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

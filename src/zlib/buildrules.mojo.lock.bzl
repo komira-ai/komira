@@ -6,8 +6,8 @@ MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "44879a6e433708f41540df762329a9e210c67cf432f4e12d08231825faf70c2f",
-    "mopm.toml": "a338fc1e70e8358cc44ca242020d77926c3d46ab02a5f0b47c36c7d7f46c96ea",
+    "mopm.lock": "1a979d853631610f4bd03aabfc78a9525e3a7b81df980a69a4d19e51afc6db49",
+    "mopm.toml": "7f2de5ae81be8733cf25d1236228c8ea20634c6a95c4121a333b88b9e6298ead",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -180,4 +180,174 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/zlib@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "system_libs": [
+    {"name": "libzlib", "version": "1.3.2", "build": "h25fd6f3_3", "url": "https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda", "sha256": "eb8a0db0aa570124f7d2a93d7c7f596e3390df5e047818d873baad32985fc736", "size": 63713}
+  ],
+  "units": [
+    {
+      "id": "komira-ai/zlib@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/zlib",
+      "import": "zlib",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/zlib/src/zlib",
+      "srcs": [
+        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "d16afac82d5c8ca46ec620dd671830a2bbaf654ecb3e465f6b2ff299a160584f"},
+        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "e51ec456ca1df8df4f608883c118665a6f1cede91d55fa4dfdfd3301e90df148"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["zlib.mojoc"],
+      "key": "b9f45f370b42bdbfd49250010fd2b7c0db9d10de149dfb6e7880eb9928bd0799"
+    },
+    {
+      "id": "komira-ai/zlib@0.1.0#mojo1.2.0/test:src/zlib/tests/test_zlib_into.mojo",
+      "package": "komira-ai/zlib",
+      "import": "zlib",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/zlib/tests/test_zlib_into.mojo", "sha256": "71fa37f53bb02cb88759cb5a683762960d760fea2ebeba835d61261339f24420"}
+      ],
+      "deps": ["komira-ai/zlib@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "loads": ["libzlib"],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_zlib_into.pass"],
+      "key": "dedc31833edc9bff6b5444eb372adeb038a99e7af585689444cdcd802071f257"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/zlib@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "system_libs": [
+    {"name": "libzlib", "version": "1.3.2", "build": "hdc9db2a_3", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libzlib-1.3.2-hdc9db2a_3.conda", "sha256": "76efa6cc9d7e6f5ee3bbca0939f64054af2bdfb3c3632531f8e633cf6c2ea41e", "size": 70108}
+  ],
+  "units": [
+    {
+      "id": "komira-ai/zlib@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/zlib",
+      "import": "zlib",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/zlib/src/zlib",
+      "srcs": [
+        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "d16afac82d5c8ca46ec620dd671830a2bbaf654ecb3e465f6b2ff299a160584f"},
+        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "e51ec456ca1df8df4f608883c118665a6f1cede91d55fa4dfdfd3301e90df148"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["zlib.mojoc"],
+      "key": "0885a1d4044fefa0cb9b625b450769fe379ef5c8f1747c6e5552b05b7dce5646"
+    },
+    {
+      "id": "komira-ai/zlib@0.1.0#mojo1.2.0/test:src/zlib/tests/test_zlib_into.mojo",
+      "package": "komira-ai/zlib",
+      "import": "zlib",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/zlib/tests/test_zlib_into.mojo", "sha256": "71fa37f53bb02cb88759cb5a683762960d760fea2ebeba835d61261339f24420"}
+      ],
+      "deps": ["komira-ai/zlib@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "loads": ["libzlib"],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_zlib_into.pass"],
+      "key": "4e939896b53e69573ea6123547c8327b19ef517a67be5e84d9c19ffd8962e1bf"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/zlib@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "system_libs": [
+    {"name": "libzlib", "version": "1.3.2", "build": "h8088a28_3", "url": "https://conda.anaconda.org/conda-forge/osx-arm64/libzlib-1.3.2-h8088a28_3.conda", "sha256": "a18fa5d5bac452401459f966cf0d872224e8080c4ff93c77e168d43ab42ef9d7", "size": 47822}
+  ],
+  "units": [
+    {
+      "id": "komira-ai/zlib@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/zlib",
+      "import": "zlib",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/zlib/src/zlib",
+      "srcs": [
+        {"path": "src/zlib/src/zlib/__init__.mojo", "sha256": "d16afac82d5c8ca46ec620dd671830a2bbaf654ecb3e465f6b2ff299a160584f"},
+        {"path": "src/zlib/src/zlib/zlib_ffi.mojo", "sha256": "e51ec456ca1df8df4f608883c118665a6f1cede91d55fa4dfdfd3301e90df148"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["zlib.mojoc"],
+      "key": "e403cad3cfcd827bbfae4f5580e614eb0f303b1cd8d82ebb219a6296f99839b2"
+    },
+    {
+      "id": "komira-ai/zlib@0.1.0#mojo1.2.0/test:src/zlib/tests/test_zlib_into.mojo",
+      "package": "komira-ai/zlib",
+      "import": "zlib",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/zlib/tests/test_zlib_into.mojo", "sha256": "71fa37f53bb02cb88759cb5a683762960d760fea2ebeba835d61261339f24420"}
+      ],
+      "deps": ["komira-ai/zlib@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "loads": ["libzlib"],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_zlib_into.pass"],
+      "key": "a46becea96ed5c562b7fc76265d127dc39ce96c43f097815061a4ee0c1f9e577"
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

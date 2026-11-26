@@ -2,7 +2,7 @@
 //!
 //!   release_staged_verify verify --staged <dir> --out <dir>
 //!   release_staged_verify smoke  --staged <dir> --config-url <https url> [--attempts <n>] [--delay <seconds>]
-//!   release_staged_verify add    --staged <dir> --mopm <file> --work <dir>
+//!   release_staged_verify add    --staged <dir> --mopm <file> --work <dir> --mojo <version>
 //!
 //! It shares the plan reader and the client of release_beta_fetch.zig (the file beside this one) and
 //! holds no credential.
@@ -31,8 +31,8 @@
 //! for the group `state.json` names, for a human to run: it never sends one.
 //!
 //! `add` is what `prod-add` runs after `prod-smoke`: a user's `mopm add komira-ai/<name>` and `mopm sync` against
-//! prod, in a directory it makes, with the pinned mopm; it checks the lock they write and the files they install
-//! against the plan. prod_add.zig (beside this file) says what it runs and refuses.
+//! prod, in a directory it makes, with the pinned mopm, in a project set to `--mojo` (one run per Mojo the
+//! release publishes); it checks the lock they write and the files they install against the plan. prod_add.zig (beside this file) says what it runs and refuses.
 const std = @import("std");
 const builtin = @import("builtin");
 const rbf = @import("release_beta_fetch.zig");
@@ -162,7 +162,7 @@ pub fn yankCommand(a: Allocator, state_text: []const u8, stage: []const u8) !?[]
 const usage =
     \\usage: release_staged_verify verify --staged <dir> --out <dir>
     \\       release_staged_verify smoke --staged <dir> --config-url <https url> [--attempts <n>] [--delay <seconds>]
-    \\       release_staged_verify add --staged <dir> --mopm <file> --work <dir>
+    \\       release_staged_verify add --staged <dir> --mopm <file> --work <dir> --mojo <version>
     \\
 ;
 
@@ -171,17 +171,18 @@ fn parseNumber(s: []const u8, max: u64) ?u64 {
     return if (v <= max) v else null;
 }
 
-/// `add` on the command line, after the verb: its three flags, each given once, then prod_add.add with `subdir`
+/// `add` on the command line, after the verb: its four flags, each given once, then prod_add.add with `subdir`
 /// (the host's; null where mopm installs no toolchain) and `runner`. Returns the exit status: 0 when every check
 /// passed, 1 with `ADD FAILED: <why>` on `err` when one did not, 2 on a usage error.
 pub fn cliAdd(a: Allocator, args: []const []const u8, subdir: ?[]const u8, runner: prod_add.Runner, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
     var staged: ?[]const u8 = null;
     var mopm: ?[]const u8 = null;
     var work: ?[]const u8 = null;
+    var mojo: ?[]const u8 = null;
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         const flag = args[i];
-        const slot: *?[]const u8 = if (std.mem.eql(u8, flag, "--staged")) &staged else if (std.mem.eql(u8, flag, "--mopm")) &mopm else if (std.mem.eql(u8, flag, "--work")) &work else {
+        const slot: *?[]const u8 = if (std.mem.eql(u8, flag, "--staged")) &staged else if (std.mem.eql(u8, flag, "--mopm")) &mopm else if (std.mem.eql(u8, flag, "--work")) &work else if (std.mem.eql(u8, flag, "--mojo")) &mojo else {
             try err.print("release_staged_verify: unknown argument {s}\n{s}", .{ flag, usage });
             try err.flush();
             return 2;
@@ -194,7 +195,7 @@ pub fn cliAdd(a: Allocator, args: []const []const u8, subdir: ?[]const u8, runne
         }
         slot.* = args[i];
     }
-    if (staged == null or mopm == null or work == null) {
+    if (staged == null or mopm == null or work == null or mojo == null) {
         try err.writeAll(usage);
         try err.flush();
         return 2;
@@ -205,14 +206,14 @@ pub fn cliAdd(a: Allocator, args: []const []const u8, subdir: ?[]const u8, runne
         return 2;
     };
     var why: []const u8 = "";
-    const rep = prod_add.add(a, &why, staged.?, mopm.?, work.?, &prod_add.add_set, host, runner, out) catch |e| {
+    const rep = prod_add.add(a, &why, staged.?, mopm.?, work.?, &prod_add.add_set, host, mojo.?, runner, out) catch |e| {
         const msg = if (e == error.Refused) why else @errorName(e);
         try out.flush();
         try err.print("release_staged_verify: ADD FAILED: {s}\n", .{msg});
         try err.flush();
         return 1;
     };
-    try out.print("release_staged_verify: `mopm add` of {d} package(s) from {s} locked {d} package(s) of this release and installed the published bytes (sha256 and size)\n", .{ rep.members, prod_channel, rep.entries });
+    try out.print("release_staged_verify: `mopm add` of {d} package(s) from {s} locked {d} package(s) of this release for Mojo {s} and installed the published bytes (sha256 and size)\n", .{ rep.members, prod_channel, rep.entries, mojo.? });
     try out.flush();
     return 0;
 }

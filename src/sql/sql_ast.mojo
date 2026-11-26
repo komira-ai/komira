@@ -1115,7 +1115,7 @@ struct SqlExpr(Movable):
         return SqlExpr(SX_NULL)
 
     @staticmethod
-    def case(var conds: Slab[SqlExpr], var results: Slab[SqlExpr], var otherwise: Slab[SqlExpr]) -> SqlExpr:
+    def case_when(var conds: Slab[SqlExpr], var results: Slab[SqlExpr], var otherwise: Slab[SqlExpr]) -> SqlExpr:
         """`CASE WHEN c0 THEN r0 [WHEN c1 THEN r1 ...] [ELSE d] END`. `conds`
         and `results` are parallel (one WHEN/THEN pair per branch); `otherwise`
         carries the ELSE default in a 0-or-1-entry Slab (empty => the binder

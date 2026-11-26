@@ -10,8 +10,10 @@ built says another.
 # and its file is `mojo-komira-ai.<name>-<version>-<build>.conda`. Its import name is `<name>`.
 NAMESPACE = "komira-ai"
 
-# The compiler the packages are built for (`mojo` of each package's `mojo_conda`).
-MOJO = "1.1.0"
+# The compiler the packages are built for is not here: it is the target platform's (`mojo_version()` of
+# tools/build/toolchains/mojo_versions.bzl, what each package's `mojo_conda` packs for). The default platform
+# builds the e2e for the default compiler, and `--target-platforms komira//tools/build/platforms:linux-x86_64-mojo-<version>`
+# for the other one.
 
 # The pinned mopm the e2e installs with. It must have `mopm add --overlay`; one that lacks it fails every
 # target of //release/readme_e2e/verify at its install step, naming the option. It is the mopm every package

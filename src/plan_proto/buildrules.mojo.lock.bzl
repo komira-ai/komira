@@ -5,13 +5,13 @@ MOPM = {"version": "0.0.138", "origin": "builtin", "workspace_root": True}
 MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
-    "../encoding/mopm.toml": "d9564875ec708dbd9ca97c063141eb88cb3e382ce7b1dfd1bc64a2a0917f8e35",
-    "../json/mopm.toml": "7cca5a2e36734233b459f459c5834d170f268d72fabafdc92b3b0f346f95b782",
-    "../proto_codec/mopm.toml": "9d56540c1e449147ed357c8aa714104e44bd722518f2de54dede11cec3670db2",
-    "../protobuf/mopm.toml": "5c1a88816f25acb6410d0d6f3bea7107813cbf510b876b10d196954d439b9dbe",
+    "../encoding/mopm.toml": "e1017d28d8a80d545ba93da6e0f168cff20366cdb93ff54181a80a3521e539d4",
+    "../json/mopm.toml": "22b36527f34106b572af5ad45d7bd211a9c765072d81152373a50e21a0b3cb92",
+    "../proto_codec/mopm.toml": "8eb3c529a55c1c0ed5ea246a6bd5ef1bb614570deb32f7f6a20473feab70e801",
+    "../protobuf/mopm.toml": "4ef57e63c2ae7ae9dcfdcf4e10c6e9f43e4e670a42ca1fb2883b0ab4ed30b190",
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "8762ef9fc6f29fa465c2997bd7bdbb92bffee16611fe641ddecdeedf4412bce5",
-    "mopm.toml": "a4373c7f5e9e72a1c0a3cf2688855a00f057dbb890155c1a1d2eaa832966dd7f",
+    "mopm.lock": "dd4837db56dea65954684a4218ebac3991a4c8d196caedf66f62bd662fe94122",
+    "mopm.toml": "42d204948a704ad4312d90f9da2113d2aaacf436e47871e652a059876cf322c5",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -736,4 +736,726 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/plan_proto@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/json@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/json",
+      "import": "json",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/json/src/json",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["json.mojoc"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/plan_proto/generated/plan_proto",
+      "srcs": [
+        {"path": "src/plan_proto/generated/plan_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p01.mojo", "sha256": "c12126861ca1debe6ea8d12ccf5c915518f96ddc069b5eea314d1f534f76cea6"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p02.mojo", "sha256": "651c77271685fea42eb006473761e3a8481519fba00ab662fb3f43e969a4b00a"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p03.mojo", "sha256": "c69814eb951cbe5ed7ef86df75feb1e846eff79ca9c95401aa1bedc2916155de"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p04.mojo", "sha256": "7a3f89586b4d816328b98a54187b6df2256665c06a9a3cded37d2fac48bc463f"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p05.mojo", "sha256": "4001672673e6699b823fd967c84388fdc25c3dce25fdcd83d63ee17814d87608"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p06.mojo", "sha256": "28921f47f60a61d2c95579cb1b7ccfc49882e435d06ed794bd91fd05cdd6b799"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p07.mojo", "sha256": "74705ccc8be59ed67157158f352a08582f5e4da8e4ac95b0c8075295647bb28f"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p01.mojo", "sha256": "4c93ef67eee24dab2669fc018816a68c08de0e456457258d62b9532fafe0aecb"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p02.mojo", "sha256": "12595200ce8e8277a553d2664611c0f34d317df06ddd02109e338c3ad4b532af"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p03.mojo", "sha256": "7e3fb3f84c08689b56e578bb2394b4baef0fcee6bb3013e0864e984afff820e4"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p04.mojo", "sha256": "128b374fbb22fbd2ede61faccb7947caca71c5e6ffca9479e5b88580d34af0cb"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p05.mojo", "sha256": "40f5178c5b63e068a6a35592862be59eb7a26afae3b6ef3c991b717fd7b4d395"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p06.mojo", "sha256": "9ceb44a46371bdd43ce4bfb623bbb959054f6c0e411128add7ab6213fffd12b2"},
+        {"path": "src/plan_proto/generated/plan_proto/optimized_plan.mojo", "sha256": "20695c1698c377ac9f44ba5caed5b5f7a1038ba3382ac520cf3608cc9c235b01"},
+        {"path": "src/plan_proto/generated/plan_proto/plan.mojo", "sha256": "2188219a8a0de67fe668e3cd656cf3b6659725517a7167aafa6f6f000097d348"},
+        {"path": "src/plan_proto/generated/plan_proto/plan_vocabulary.mojo", "sha256": "7c4eb04af4817226e138d187ad36237a165f5262daf2e98a7d3350c8fcc4ed4c"}
+      ],
+      "deps": ["komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["plan_proto.mojoc"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_optimized_plan_field_numbers.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "5294336f21b35c39570eda3d793a518379f3d6e04307bc1e73e0f7474a0b94f2"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_optimized_plan_field_numbers.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_optimized_plan_goldens.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "7dece02999b5af0f9642c3e1b8a56e66ea06bc3f883e55f995bed531c8651e8d"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_optimized_plan_goldens.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_census_complete.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "c64310777f4ea45d9a7e19b7f2f2f4abbb01cf5edf802e2d50f2d89f5bf08588"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_census_complete.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_enum_numbers_functions.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_functions.mojo", "sha256": "c8b866e643e3911f46a3b68440fa1690c71da0f495266aca6a0aad7abb106c21"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_enum_numbers_functions.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "0c3a4c1c2b1a7924d093e1fb89e84e8c5dcfe2ada16c3958c77be09387fa74ab"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_enum_numbers_nodes.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_field_numbers_expr.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_expr.mojo", "sha256": "21bd20c1ae1db76084b9484bf22a79f4af9e71bf1e9f6fb1b3cacce48ae6d12b"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_field_numbers_expr.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_field_numbers_plan.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_plan.mojo", "sha256": "4c461542626310472f8e71b22e1c3fb6e29fa6995eb72fa0241d45501b3e692f"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_field_numbers_plan.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_field_numbers_scan.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_scan.mojo", "sha256": "ace98eddb4d5d8d2a6b5301ca9048e855de13db4728a91ba4681a6cea4673edf"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_field_numbers_scan.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_field_numbers_udf.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_udf.mojo", "sha256": "2e2230d2947374dac8f6078fc430913d8a21c8af2fa1eef40e9c8b783671f013"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_field_numbers_udf.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_reservations.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_reservations.mojo", "sha256": "d8cfc84928760fd9832251c0938cade0a2ff6501f70f17df8b8bd072268b1ef7"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_reservations.pass"]
+    },
+    {
+      "id": "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/proto_codec",
+      "import": "proto_codec",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/proto_codec/src/proto_codec",
+      "deps": ["komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/json@0.1.0#mojo1.2.0/lib", "komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["proto_codec.mojoc"]
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/protobuf/src/protobuf",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["protobuf.mojoc"]
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/plan_proto@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/json@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/json",
+      "import": "json",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/json/src/json",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["json.mojoc"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/plan_proto/generated/plan_proto",
+      "srcs": [
+        {"path": "src/plan_proto/generated/plan_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p01.mojo", "sha256": "c12126861ca1debe6ea8d12ccf5c915518f96ddc069b5eea314d1f534f76cea6"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p02.mojo", "sha256": "651c77271685fea42eb006473761e3a8481519fba00ab662fb3f43e969a4b00a"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p03.mojo", "sha256": "c69814eb951cbe5ed7ef86df75feb1e846eff79ca9c95401aa1bedc2916155de"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p04.mojo", "sha256": "7a3f89586b4d816328b98a54187b6df2256665c06a9a3cded37d2fac48bc463f"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p05.mojo", "sha256": "4001672673e6699b823fd967c84388fdc25c3dce25fdcd83d63ee17814d87608"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p06.mojo", "sha256": "28921f47f60a61d2c95579cb1b7ccfc49882e435d06ed794bd91fd05cdd6b799"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p07.mojo", "sha256": "74705ccc8be59ed67157158f352a08582f5e4da8e4ac95b0c8075295647bb28f"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p01.mojo", "sha256": "4c93ef67eee24dab2669fc018816a68c08de0e456457258d62b9532fafe0aecb"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p02.mojo", "sha256": "12595200ce8e8277a553d2664611c0f34d317df06ddd02109e338c3ad4b532af"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p03.mojo", "sha256": "7e3fb3f84c08689b56e578bb2394b4baef0fcee6bb3013e0864e984afff820e4"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p04.mojo", "sha256": "128b374fbb22fbd2ede61faccb7947caca71c5e6ffca9479e5b88580d34af0cb"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p05.mojo", "sha256": "40f5178c5b63e068a6a35592862be59eb7a26afae3b6ef3c991b717fd7b4d395"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p06.mojo", "sha256": "9ceb44a46371bdd43ce4bfb623bbb959054f6c0e411128add7ab6213fffd12b2"},
+        {"path": "src/plan_proto/generated/plan_proto/optimized_plan.mojo", "sha256": "20695c1698c377ac9f44ba5caed5b5f7a1038ba3382ac520cf3608cc9c235b01"},
+        {"path": "src/plan_proto/generated/plan_proto/plan.mojo", "sha256": "2188219a8a0de67fe668e3cd656cf3b6659725517a7167aafa6f6f000097d348"},
+        {"path": "src/plan_proto/generated/plan_proto/plan_vocabulary.mojo", "sha256": "7c4eb04af4817226e138d187ad36237a165f5262daf2e98a7d3350c8fcc4ed4c"}
+      ],
+      "deps": ["komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["plan_proto.mojoc"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_optimized_plan_field_numbers.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "5294336f21b35c39570eda3d793a518379f3d6e04307bc1e73e0f7474a0b94f2"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_optimized_plan_field_numbers.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_optimized_plan_goldens.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "7dece02999b5af0f9642c3e1b8a56e66ea06bc3f883e55f995bed531c8651e8d"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_optimized_plan_goldens.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_census_complete.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "c64310777f4ea45d9a7e19b7f2f2f4abbb01cf5edf802e2d50f2d89f5bf08588"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_census_complete.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_enum_numbers_functions.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_functions.mojo", "sha256": "c8b866e643e3911f46a3b68440fa1690c71da0f495266aca6a0aad7abb106c21"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_enum_numbers_functions.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "0c3a4c1c2b1a7924d093e1fb89e84e8c5dcfe2ada16c3958c77be09387fa74ab"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_enum_numbers_nodes.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_field_numbers_expr.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_expr.mojo", "sha256": "21bd20c1ae1db76084b9484bf22a79f4af9e71bf1e9f6fb1b3cacce48ae6d12b"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_field_numbers_expr.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_field_numbers_plan.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_plan.mojo", "sha256": "4c461542626310472f8e71b22e1c3fb6e29fa6995eb72fa0241d45501b3e692f"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_field_numbers_plan.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_field_numbers_scan.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_scan.mojo", "sha256": "ace98eddb4d5d8d2a6b5301ca9048e855de13db4728a91ba4681a6cea4673edf"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_field_numbers_scan.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_field_numbers_udf.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_udf.mojo", "sha256": "2e2230d2947374dac8f6078fc430913d8a21c8af2fa1eef40e9c8b783671f013"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_field_numbers_udf.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_reservations.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_reservations.mojo", "sha256": "d8cfc84928760fd9832251c0938cade0a2ff6501f70f17df8b8bd072268b1ef7"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_reservations.pass"]
+    },
+    {
+      "id": "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/proto_codec",
+      "import": "proto_codec",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/proto_codec/src/proto_codec",
+      "deps": ["komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/json@0.1.0#mojo1.2.0/lib", "komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["proto_codec.mojoc"]
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/protobuf/src/protobuf",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["protobuf.mojoc"]
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/plan_proto@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/encoding@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/encoding",
+      "import": "encoding",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/encoding/src/encoding",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["encoding.mojoc"]
+    },
+    {
+      "id": "komira-ai/json@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/json",
+      "import": "json",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/json/src/json",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["json.mojoc"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/plan_proto/generated/plan_proto",
+      "srcs": [
+        {"path": "src/plan_proto/generated/plan_proto/__init__.mojo", "sha256": "dc2a80fdbf615bfea0d42c8478a647e8b14b94bce3f47f6cd28a02e1d3ff9d20"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/__init__.mojo", "sha256": "7712116c68b53f810b80a05a7b8e411633e45db849ac9d7d7df53fb250cb901c"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p01.mojo", "sha256": "c12126861ca1debe6ea8d12ccf5c915518f96ddc069b5eea314d1f534f76cea6"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p02.mojo", "sha256": "651c77271685fea42eb006473761e3a8481519fba00ab662fb3f43e969a4b00a"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p03.mojo", "sha256": "c69814eb951cbe5ed7ef86df75feb1e846eff79ca9c95401aa1bedc2916155de"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p04.mojo", "sha256": "7a3f89586b4d816328b98a54187b6df2256665c06a9a3cded37d2fac48bc463f"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p05.mojo", "sha256": "4001672673e6699b823fd967c84388fdc25c3dce25fdcd83d63ee17814d87608"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p06.mojo", "sha256": "28921f47f60a61d2c95579cb1b7ccfc49882e435d06ed794bd91fd05cdd6b799"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_p07.mojo", "sha256": "74705ccc8be59ed67157158f352a08582f5e4da8e4ac95b0c8075295647bb28f"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p01.mojo", "sha256": "4c93ef67eee24dab2669fc018816a68c08de0e456457258d62b9532fafe0aecb"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p02.mojo", "sha256": "12595200ce8e8277a553d2664611c0f34d317df06ddd02109e338c3ad4b532af"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p03.mojo", "sha256": "7e3fb3f84c08689b56e578bb2394b4baef0fcee6bb3013e0864e984afff820e4"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p04.mojo", "sha256": "128b374fbb22fbd2ede61faccb7947caca71c5e6ffca9479e5b88580d34af0cb"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p05.mojo", "sha256": "40f5178c5b63e068a6a35592862be59eb7a26afae3b6ef3c991b717fd7b4d395"},
+        {"path": "src/plan_proto/generated/plan_proto/_parts/plan_vocabulary_p06.mojo", "sha256": "9ceb44a46371bdd43ce4bfb623bbb959054f6c0e411128add7ab6213fffd12b2"},
+        {"path": "src/plan_proto/generated/plan_proto/optimized_plan.mojo", "sha256": "20695c1698c377ac9f44ba5caed5b5f7a1038ba3382ac520cf3608cc9c235b01"},
+        {"path": "src/plan_proto/generated/plan_proto/plan.mojo", "sha256": "2188219a8a0de67fe668e3cd656cf3b6659725517a7167aafa6f6f000097d348"},
+        {"path": "src/plan_proto/generated/plan_proto/plan_vocabulary.mojo", "sha256": "7c4eb04af4817226e138d187ad36237a165f5262daf2e98a7d3350c8fcc4ed4c"}
+      ],
+      "deps": ["komira-ai/proto_codec@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["plan_proto.mojoc"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_optimized_plan_field_numbers.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_optimized_plan_field_numbers.mojo", "sha256": "5294336f21b35c39570eda3d793a518379f3d6e04307bc1e73e0f7474a0b94f2"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_optimized_plan_field_numbers.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_optimized_plan_goldens.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_optimized_plan_goldens.mojo", "sha256": "7dece02999b5af0f9642c3e1b8a56e66ea06bc3f883e55f995bed531c8651e8d"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_optimized_plan_goldens.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_census_complete.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_census_complete.mojo", "sha256": "c64310777f4ea45d9a7e19b7f2f2f4abbb01cf5edf802e2d50f2d89f5bf08588"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_census_complete.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_enum_numbers_functions.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_functions.mojo", "sha256": "c8b866e643e3911f46a3b68440fa1690c71da0f495266aca6a0aad7abb106c21"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_enum_numbers_functions.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_enum_numbers_nodes.mojo", "sha256": "0c3a4c1c2b1a7924d093e1fb89e84e8c5dcfe2ada16c3958c77be09387fa74ab"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_enum_numbers_nodes.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_field_numbers_expr.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_expr.mojo", "sha256": "21bd20c1ae1db76084b9484bf22a79f4af9e71bf1e9f6fb1b3cacce48ae6d12b"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_field_numbers_expr.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_field_numbers_plan.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_plan.mojo", "sha256": "4c461542626310472f8e71b22e1c3fb6e29fa6995eb72fa0241d45501b3e692f"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_field_numbers_plan.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_field_numbers_scan.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_scan.mojo", "sha256": "ace98eddb4d5d8d2a6b5301ca9048e855de13db4728a91ba4681a6cea4673edf"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_field_numbers_scan.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_field_numbers_udf.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_field_numbers_udf.mojo", "sha256": "2e2230d2947374dac8f6078fc430913d8a21c8af2fa1eef40e9c8b783671f013"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_field_numbers_udf.pass"]
+    },
+    {
+      "id": "komira-ai/plan_proto@0.1.0#mojo1.2.0/test:src/plan_proto/tests/test_plan_reservations.mojo",
+      "package": "komira-ai/plan_proto",
+      "import": "plan_proto",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/plan_proto/tests/test_plan_reservations.mojo", "sha256": "d8cfc84928760fd9832251c0938cade0a2ff6501f70f17df8b8bd072268b1ef7"}
+      ],
+      "deps": ["komira-ai/plan_proto@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_plan_reservations.pass"]
+    },
+    {
+      "id": "komira-ai/proto_codec@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/proto_codec",
+      "import": "proto_codec",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/proto_codec/src/proto_codec",
+      "deps": ["komira-ai/encoding@0.1.0#mojo1.2.0/lib", "komira-ai/json@0.1.0#mojo1.2.0/lib", "komira-ai/protobuf@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["proto_codec.mojoc"]
+    },
+    {
+      "id": "komira-ai/protobuf@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/protobuf",
+      "import": "protobuf",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/protobuf/src/protobuf",
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["protobuf.mojoc"]
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }

@@ -13,6 +13,7 @@ load(":guard.bzl", _guard_findings = "findings", _mopm_findings = "mopm_findings
 load("@komira//tools/build/mojo:opt_level.bzl", "TEST_OPT_LEVEL", "opt_level_args")
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 _TOOL = "komira//tools/build/readme_e2e:readme_e2e"
 _README_TOOL = "komira//tools/build/readme_examples:tool"
@@ -36,12 +37,15 @@ _readme_e2e_staged = rule(
     doc = "The staged set of a release (mopm's spec/staged-set.md): `plan.json`, each member's `.conda` under its subdir, each README at `<name>/README.md`. `members` is {name: (version, the package's `.conda` target, its README target)}, written in dependency order with the sha256 and size of each file. A member whose package does not hold the name, version and file name given, or that needs a package the set lacks, fails the build. This is the hermetic stand-in for `mopm stage`, which asks the registry and so cannot be a build action: the pull request check uses it, and the release workflow tries the set `mopm stage` wrote (README.md, \"The staged set\"). Any target whose output is a directory in that layout is a `staged` of `readme_e2e`.",
     attrs = {
         "members": attrs.dict(attrs.string(), attrs.tuple(attrs.string(), attrs.dep(), attrs.dep())),
-        "mojo": attrs.string(default = "1.1.0"),
+        "mojo": attrs.string(doc = "The compiler version the packages are built for (the macro: the target platform's, mojo_version())."),
         "_tool": attrs.exec_dep(providers = [RunInfo], default = _TOOL),
     },
 )
 
 def readme_e2e_staged(**kwargs):
+    # The compiler the packages are built for: the one the target platform builds with, unless given.
+    if "mojo" not in kwargs:
+        kwargs["mojo"] = mojo_version()
     _readme_e2e_staged(exec_compatible_with = LINUX_X86_64, **kwargs)
 
 readme_e2e_staged = declares_docs(readme_e2e_staged)
@@ -127,7 +131,7 @@ _readme_e2e = rule(
     impl = _e2e_impl,
     doc = "One package of a staged set, tried as a user of it: a fresh project runs `mopm add <package>@=<version> --overlay <staged set>`, the locked closure is unpacked into a prefix, and the README the set holds is compiled and run example by example against that prefix, with nothing of the source tree on the path. The target exists (its marker) only when every example passed. See README.md.",
     attrs = {
-        "mojo": attrs.string(default = "1.1.0", doc = "The compiler version the packages are built for."),
+        "mojo": attrs.string(doc = "The compiler version the packages are built for (the macro: the target platform's, mojo_version())."),
         "mopm": attrs.exec_dep(providers = [RunInfo], doc = "The mopm that installs. It must have `--overlay`: one that lacks it fails the target, naming the option."),
         "package": attrs.string(),
         "readme_tool": attrs.exec_dep(providers = [RunInfo], default = _README_TOOL),
@@ -139,6 +143,9 @@ _readme_e2e = rule(
 )
 
 def readme_e2e(**kwargs):
+    # The compiler the packages are built for: the one the target platform builds with, unless given.
+    if "mojo" not in kwargs:
+        kwargs["mojo"] = mojo_version()
     _readme_e2e(exec_compatible_with = LINUX_X86_64, **kwargs)
 
 readme_e2e = declares_docs(readme_e2e)

@@ -10,7 +10,7 @@ manifest of the run declares a program and no `--program-targets` is given;
 never a finding).
 """
 
-from std.io import FileDescriptor
+from std.sys import stderr
 from std.os import listdir, makedirs
 
 from covcheck.analyze import FORMAT_BRANCH_LCOV, FORMAT_COBERTURA, FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
@@ -378,7 +378,7 @@ def run_program_query(a: Args) raises -> Int:
 def run(args: List[String]) -> Int:
     """Runs the command line `args` (without the program name); errors go
     to stderr. Returns the exit code."""
-    var err = FileDescriptor(2)
+    var err = stderr
     try:
         var parsed = parse_args(args)
         try:

@@ -2,6 +2,7 @@ load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
 load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_test")
 load(":buildrules.mojo.bzl", "mojo_package")
+load("@komira//tools/build/toolchains:mojo_versions.bzl", "mojo_version")
 
 # The benchmarks of komira libraries as programs, and the harness they share (the RESULT line and the
 # command line: src/bench/harness.mojo). The package is published as source; a user builds a
@@ -57,7 +58,7 @@ mojo_conda(
         "../containers": "//src/containers:mopm.toml",
         "../spsc_ring": "//src/spsc_ring:mopm.toml",
     },
-    mojo = "1.1.0",
+    mojo = mojo_version(),
     mopm = "toolchains//:mopm_0_0_138",
     package = "komira-ai/bench",
     version = "0.1.0",

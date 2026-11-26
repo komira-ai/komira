@@ -6,8 +6,8 @@ MOJO = "1.1.0"
 CLOSURE_SHA256 = "c5ce2a54915da765db89f9efd0feef92ffc2e883d183fd2088b59afe8f7913c6"
 MANIFEST_SHA256 = {
     "mopm-toolchain.toml": "6ce400c706ab5b64376ca561ee1f1eaf1edcea19279cce60fe7510fc218d7249",
-    "mopm.lock": "ed0c1b0b3572d1403e257ac008e80cc3cc8cc9dfb3ce20600dc720d2bc943ede",
-    "mopm.toml": "8324ddeb0f27c51a35a62cae2e998ccd21bfbdd50407f7142a5b373df79a2566",
+    "mopm.lock": "070cf6e0421b391006b44de87c9af46fd75bb78944aa38770e9a7f4794c853b9",
+    "mopm.toml": "a9110aeed99bac9994c7f9abe18f272c15e0a88d815cf8fe60b5f38e27bc9040",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 6,
@@ -213,4 +213,207 @@ GRAPHS = {
     "linux-64": GRAPH,
     "linux-aarch64": json.decode(GRAPH_JSON_LINUX_AARCH64),
     "osx-arm64": json.decode(GRAPH_JSON_OSX_ARM64),
+}
+GRAPH_JSON_MOJO_1_2_0 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/codeworks_api@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-64",
+    "cc_target": "x86_64-linux-gnu.2.34",
+    "closure_sha256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz", "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "size": 45480516},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_7.conda", "sha256": "e031634c3a928f9594eba868bc46ef5230d6571a364a0c63215b06c4563bfcea", "size": 1058444},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda", "sha256": "fa7018298629fc429971fffd6ecba3d27a7b02e4e890d6a93ea01ffebe8cb745", "size": 6615436},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-64/mojo-compiler-1.2.0-release.conda", "sha256": "a746d7db173a9882e7073ae6d905acfe383a754faecb4a53710b7b90db377e6b", "size": 71258238}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/codeworks_api@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/codeworks_api",
+      "import": "codeworks_api",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/codeworks_api/src/codeworks_api",
+      "srcs": [
+        {"path": "src/codeworks_api/src/codeworks_api/__init__.mojo", "sha256": "d04db0310716a7b248b46f91746d255815aceaf09c940223dad5fef0da001ef7"},
+        {"path": "src/codeworks_api/src/codeworks_api/surface.mojo", "sha256": "63e68f3f46d8b46244917a985e84b6cbfe839ddf74df1c2d8cc44c568bbd3a2d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["codeworks_api.mojoc"],
+      "key": "740f9e02e8286fa54a40dc65b72fbb4970264d3fad93225713718e5e17bc0aa5"
+    },
+    {
+      "id": "komira-ai/codeworks_api@0.1.0#mojo1.2.0/test:src/codeworks_api/tests/test_repo_name_and_constants.mojo",
+      "package": "komira-ai/codeworks_api",
+      "import": "codeworks_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/codeworks_api/tests/test_repo_name_and_constants.mojo", "sha256": "1ec1ee304fd199bcf2af6ed5ba4cca6b7395460d528829df8c00c7e1c3ad3e0d"}
+      ],
+      "deps": ["komira-ai/codeworks_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_repo_name_and_constants.pass"],
+      "key": "50d7bf62c77cb3657242c390227c3083596a67b0e48ae1af802ba5b12d8526ea"
+    },
+    {
+      "id": "komira-ai/codeworks_api@0.1.0#mojo1.2.0/test:src/codeworks_api/tests/test_surface.mojo",
+      "package": "komira-ai/codeworks_api",
+      "import": "codeworks_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/codeworks_api/tests/test_surface.mojo", "sha256": "836790b77c5c9021134c190f6447fd0528840561fa3f6246749fedb140b23507"}
+      ],
+      "deps": ["komira-ai/codeworks_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_surface.pass"],
+      "key": "3dcd7ccd608e6d2816e4267dba88a8c466ac6d00da0170be5f521a6a03ce1c7e"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/codeworks_api@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "linux-aarch64",
+    "cc_target": "aarch64-linux-gnu.2.34",
+    "closure_sha256": "b895737110c2a8703e386e9b2131f45722c6a1ca4fbc833db34c1356072afed6",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz", "sha256": "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63", "size": 41849060},
+    "components": [
+      {"name": "libgcc", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_7.conda", "sha256": "eae7a3449d5a3b5351c5427137c076cc3fc826645c7bfc42dc10772b783826f1", "size": 627793},
+      {"name": "libstdcxx", "version": "16.2.0", "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_7.conda", "sha256": "b241a3acfa9cdb1359112864a1241225533c92642de3000d52ae65ef5d3a9786", "size": 6236630},
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.2.0-release.conda", "sha256": "a10c210e81877d47369f53b918a2b82da635908d44088ef52ffeb7035b297f23", "size": 69162897}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/codeworks_api@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/codeworks_api",
+      "import": "codeworks_api",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/codeworks_api/src/codeworks_api",
+      "srcs": [
+        {"path": "src/codeworks_api/src/codeworks_api/__init__.mojo", "sha256": "d04db0310716a7b248b46f91746d255815aceaf09c940223dad5fef0da001ef7"},
+        {"path": "src/codeworks_api/src/codeworks_api/surface.mojo", "sha256": "63e68f3f46d8b46244917a985e84b6cbfe839ddf74df1c2d8cc44c568bbd3a2d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["codeworks_api.mojoc"],
+      "key": "d231bc38d240943af0ed166a6a7a3e4dc950b1eee12febf527e3af8a96162c47"
+    },
+    {
+      "id": "komira-ai/codeworks_api@0.1.0#mojo1.2.0/test:src/codeworks_api/tests/test_repo_name_and_constants.mojo",
+      "package": "komira-ai/codeworks_api",
+      "import": "codeworks_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/codeworks_api/tests/test_repo_name_and_constants.mojo", "sha256": "1ec1ee304fd199bcf2af6ed5ba4cca6b7395460d528829df8c00c7e1c3ad3e0d"}
+      ],
+      "deps": ["komira-ai/codeworks_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_repo_name_and_constants.pass"],
+      "key": "b92f8e7c7158ae8a1fe1f6a48d87acdb2ea3b7aef35345ab1fb61b5c6315bdbe"
+    },
+    {
+      "id": "komira-ai/codeworks_api@0.1.0#mojo1.2.0/test:src/codeworks_api/tests/test_surface.mojo",
+      "package": "komira-ai/codeworks_api",
+      "import": "codeworks_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/codeworks_api/tests/test_surface.mojo", "sha256": "836790b77c5c9021134c190f6447fd0528840561fa3f6246749fedb140b23507"}
+      ],
+      "deps": ["komira-ai/codeworks_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_surface.pass"],
+      "key": "01a5a86a2db7af77d4b6853c388f4134b7ab47626281af770ee7696a02b94170"
+    }
+  ]
+}
+'''
+GRAPH_JSON_MOJO_1_2_0_OSX_ARM64 = r'''{
+  "unit_graph": 6,
+  "package": "komira-ai/codeworks_api@0.1.0",
+  "mojo": "1.2.0",
+  "toolchain": {
+    "mojo": "1.2.0",
+    "subdir": "osx-arm64",
+    "cc_target": "aarch64-macos.11.0",
+    "closure_sha256": "310d34abf4021e1f8e9381ebf8aba1920a8c2acaaec2c0a0c50c1db26bd42d89",
+    "zig": {"version": "0.12.0", "url": "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz", "sha256": "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f", "size": 43447724},
+    "components": [
+      {"name": "mojo-compiler", "version": "1.2.0", "url": "https://conda.modular.com/max/osx-arm64/mojo-compiler-1.2.0-release.conda", "sha256": "1f5811bc7ff86dc8a684ddab6d9612a966529935fa184e204990323e573228de", "size": 63449264}
+    ]
+  },
+  "units": [
+    {
+      "id": "komira-ai/codeworks_api@0.1.0#mojo1.2.0/lib",
+      "package": "komira-ai/codeworks_api",
+      "import": "codeworks_api",
+      "version": "0.1.0",
+      "kind": "lib",
+      "root": "src/codeworks_api/src/codeworks_api",
+      "srcs": [
+        {"path": "src/codeworks_api/src/codeworks_api/__init__.mojo", "sha256": "d04db0310716a7b248b46f91746d255815aceaf09c940223dad5fef0da001ef7"},
+        {"path": "src/codeworks_api/src/codeworks_api/surface.mojo", "sha256": "63e68f3f46d8b46244917a985e84b6cbfe839ddf74df1c2d8cc44c568bbd3a2d"}
+      ],
+      "deps": [],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["codeworks_api.mojoc"],
+      "key": "8d919f3f8b4be55ed65e5be0fc6d5b8de0cf903e7a42155d041032a0fddf6997"
+    },
+    {
+      "id": "komira-ai/codeworks_api@0.1.0#mojo1.2.0/test:src/codeworks_api/tests/test_repo_name_and_constants.mojo",
+      "package": "komira-ai/codeworks_api",
+      "import": "codeworks_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/codeworks_api/tests/test_repo_name_and_constants.mojo", "sha256": "1ec1ee304fd199bcf2af6ed5ba4cca6b7395460d528829df8c00c7e1c3ad3e0d"}
+      ],
+      "deps": ["komira-ai/codeworks_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_repo_name_and_constants.pass"],
+      "key": "94e0640abf4b5b7a1456788d906b0af9dffa578c4f191fefe6fe799d83ef26c5"
+    },
+    {
+      "id": "komira-ai/codeworks_api@0.1.0#mojo1.2.0/test:src/codeworks_api/tests/test_surface.mojo",
+      "package": "komira-ai/codeworks_api",
+      "import": "codeworks_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/codeworks_api/tests/test_surface.mojo", "sha256": "836790b77c5c9021134c190f6447fd0528840561fa3f6246749fedb140b23507"}
+      ],
+      "deps": ["komira-ai/codeworks_api@0.1.0#mojo1.2.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_surface.pass"],
+      "key": "81aadeb7942bdc8d155c4cda5ae5388a42d2579812d095bea5bdb2564bbb2ef4"
+    }
+  ]
+}
+'''
+MOJOS = {
+    "1.1.0": {"CLOSURE_SHA256": CLOSURE_SHA256, "GRAPHS": GRAPHS},
+    "1.2.0": {"CLOSURE_SHA256": "67e41f2db7895607f242b096a49154945287105d70edb7ace34e92e334ab8e58", "GRAPHS": {"linux-64": json.decode(GRAPH_JSON_MOJO_1_2_0), "linux-aarch64": json.decode(GRAPH_JSON_MOJO_1_2_0_LINUX_AARCH64), "osx-arm64": json.decode(GRAPH_JSON_MOJO_1_2_0_OSX_ARM64)}},
 }
