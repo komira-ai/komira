@@ -793,8 +793,10 @@ would be handed two files for one name.
    the actor's place among its open groups back at once; otherwise the registry expires the group after
    twelve hours. It `needs` all three jobs that can fail because `failure()` looks only at the jobs a job
    depends on: a test that failed would not reach an abort that needed `prod-stage` alone. A directory
-   without `state.json` means the stage failed before it asked for a group, and the step says there is
-   nothing to end. A group that was already committed is not ended: mopm refuses and says to yank it.
+   without `state.json` means the stage failed before it asked for a group, and a step says there is
+   nothing to end. Which of the two steps runs is each step's `if: hashFiles('mopm-prod/staged/state.json')`
+   (`!= ''` or `== ''`), so the job downloads the directory into the workspace, the only place `hashFiles`
+   reads, and no step holds shell logic; `beta-abort` is the same with `mopm-beta`. A group that was already committed is not ended: mopm refuses and says to yank it.
 5. **`prod-smoke`** runs once the group is visible. `release_staged_verify smoke` reads the prod index
    (`https://api.mopm.dev/index/config.json`, whose `stage` must be `prod` and whose `channel_url` must be
    exactly `https://conda.mopm.dev/`), downloads `<channel_url><namespace>/<subdir>/<filename>` (each

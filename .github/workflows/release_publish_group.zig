@@ -118,10 +118,21 @@ pub fn checkGroup(ar: std.mem.Allocator, text: []const u8, g: Group) !?[]const u
 
     const abort = (try wf.jobLines(ar, text, try say(ar, "{[r]s}-abort", r), &scratch)) orelse return try say(ar, "no job {[r]s}-abort", r);
     if (wf.mentions(abort, "farm") or wf.mentions(abort, "buck2")) return try say(ar, "{[r]s}-abort joins the farm or runs buck2", r);
+    // each step is one command: whether there is a group to end is the step's if:, never shell logic
+    if (wf.mentions(abort, "run: |")) return try say(ar, "{[r]s}-abort runs shell logic in a run: block: each step is one command, and the step's if: says whether there is a group to end", r);
     if (!wf.has(abort, g.abort_cmd)) return try say(ar, "{[r]s}-abort does not run publish --staged --registry {[r]s} --oidc --abort", r);
     if (wf.mentions(abort, "--no-commit") or wf.mentions(abort, "--dry-run") or wf.mentions(abort, "yank")) return try say(ar, "{[r]s}-abort stages, dry-runs or yanks", r);
-    if (wf.lineAt(abort, g.staged_artifact) == null) return try say(ar, "{[r]s}-abort does not download the directory {[r]s}-stage kept (the state.json names the group)", r);
+    const abort_dl = wf.lineAt(abort, g.staged_artifact) orelse return try say(ar, "{[r]s}-abort does not download the directory {[r]s}-stage kept (the state.json names the group)", r);
+    // hashFiles reads the workspace only, so the directory whose state.json it asks about is there
+    if (abort_dl + 1 >= abort.len or !std.mem.eql(u8, abort[abort_dl + 1], try say(ar, "          path: ${{{{ github.workspace }}}}/mopm-{[r]s}/staged", r)))
+        return try say(ar, "{[r]s}-abort does not download the directory to ${{{{ github.workspace }}}}/mopm-{[r]s}/staged: hashFiles in a step's if: reads the workspace only", r);
     if (count(abort, "mopm\" publish") != 1) return try say(ar, "{[r]s}-abort runs mopm publish more than once", r);
+    // the abort runs exactly when there is a state.json (a group to end); without one, a step says so
+    const cmd_at = wf.lineAt(abort, g.abort_cmd).?;
+    if (cmd_at == 0 or !std.mem.eql(u8, abort[cmd_at - 1], try say(ar, "        if: hashFiles('mopm-{[r]s}/staged/state.json') != ''", r)))
+        return try say(ar, "{[r]s}-abort does not end the group only when state.json is there (its step's if: hashFiles('mopm-{[r]s}/staged/state.json') != '')", r);
+    if (!wf.has(abort, try say(ar, "        if: hashFiles('mopm-{[r]s}/staged/state.json') == ''", r)))
+        return try say(ar, "{[r]s}-abort has no step for a directory without state.json (if: hashFiles('mopm-{[r]s}/staged/state.json') == '')", r);
     return null;
 }
 
@@ -130,7 +141,7 @@ const BETA_STAGED_ARTIFACT = "          name: mopm-beta-staged-${{ github.sha }}
 const BETA_BUILD_VERIFY = "          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/beta-test/release_staged_verify";
 const BETA_VERIFY_RUN = "        run: '\"$RUNNER_TEMP/beta-test/release_staged_verify\" verify --staged \"$RUNNER_TEMP/beta-test/staged\" --out release/staged_set'";
 const BETA_COMMIT_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-beta/staged\" --registry beta --oidc'";
-const BETA_ABORT_CMD = "            \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-beta/staged\" --registry beta --oidc --abort";
+const BETA_ABORT_CMD = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$GITHUB_WORKSPACE/mopm-beta/staged\" --registry beta --oidc --abort'";
 const BETA_ABORT_IF = "    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.beta-stage.result != 'skipped'";
 
 const BETA_GROUP = Group{
@@ -285,7 +296,7 @@ test "a beta job on the wrong registry, environment or artifact, and a prod job 
     try wf.expectRefused(ar, try wf.replaced(ar, text, BETA_STAGE_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-publish/staged\" --registry beta2 --oidc --no-commit'"), "beta-stage names a registry other than beta: " ++ beta_wrong);
     try wf.expectRefused(ar, try wf.replaced(ar, text, BETA_STAGE_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-publish/staged\" --registry beta-old --oidc --no-commit'"), "beta-stage names a registry other than beta: " ++ beta_wrong);
     try wf.expectRefused(ar, try wf.replaced(ar, text, BETA_COMMIT_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-beta/staged\" --registry prod --oidc'"), "beta-commit names a registry other than beta: " ++ beta_wrong);
-    try wf.expectRefused(ar, try wf.replaced(ar, text, BETA_ABORT_CMD, "            \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-beta/staged\" --registry prod --oidc --abort"), "beta-abort names a registry other than beta: " ++ beta_wrong);
+    try wf.expectRefused(ar, try wf.replaced(ar, text, BETA_ABORT_CMD, "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$GITHUB_WORKSPACE/mopm-beta/staged\" --registry prod --oidc --abort'"), "beta-abort names a registry other than beta: " ++ beta_wrong);
     // a second registry on a line that also names beta
     try wf.expectRefused(ar, try wf.replaced(ar, text, BETA_COMMIT_RUN, BETA_COMMIT_RUN[0 .. BETA_COMMIT_RUN.len - 1] ++ " --registry prod'"), "beta-commit names a registry other than beta: " ++ beta_wrong);
     // a line of the beta test that reads prod
@@ -350,10 +361,33 @@ test "each edit of a beta command that breaks the contract is refused with its m
     try wf.expectRefused(ar, try wf.replaced(ar, text, "          name: mopm-beta-staged-${{ github.sha }}\n          path: ${{ runner.temp }}/mopm-beta/staged\n      - name: mopm is executable\n        run: chmod +x \"$RUNNER_TEMP/mopm-publish/mopm\"\n      - name: mopm publish --staged --registry beta --oidc\n", "          name: mopm-beta-nothing-${{ github.sha }}\n          path: ${{ runner.temp }}/mopm-beta/staged\n      - name: mopm is executable\n        run: chmod +x \"$RUNNER_TEMP/mopm-publish/mopm\"\n      - name: mopm publish --staged --registry beta --oidc\n"), "beta-commit does not download the directory beta-stage kept (with its state.json)");
 
     // the abort: --abort, on the directory with the state, once, and nothing else
-    try wf.expectRefused(ar, try wf.replaced(ar, text, BETA_ABORT_CMD, BETA_ABORT_CMD[0 .. BETA_ABORT_CMD.len - " --abort".len]), "beta-abort does not run publish --staged --registry beta --oidc --abort");
+    try wf.expectRefused(ar, try wf.replaced(ar, text, BETA_ABORT_CMD, BETA_ABORT_CMD[0 .. BETA_ABORT_CMD.len - " --abort'".len] ++ "'"), "beta-abort does not run publish --staged --registry beta --oidc --abort");
     try wf.expectRefused(ar, try wf.replaced(ar, text, BETA_ABORT_CMD, BETA_ABORT_CMD ++ "\n            mopm yank --group g --registry beta --reason x"), "beta-abort stages, dry-runs or yanks");
-    try wf.expectRefused(ar, try wf.replaced(ar, text, BETA_ABORT_CMD, BETA_ABORT_CMD ++ "\n            \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged x --registry beta --oidc --abort"), "beta-abort runs mopm publish more than once");
+    try wf.expectRefused(ar, try wf.replaced(ar, text, BETA_ABORT_CMD, BETA_ABORT_CMD ++ "\n      - run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged x --registry beta --oidc --abort'"), "beta-abort runs mopm publish more than once");
     try wf.expectRefused(ar, try wf.replaced(ar, text, BETA_ABORT_CMD, BETA_ABORT_CMD ++ " || true"), "beta-abort ignores a failure");
+}
+
+test "an abort that runs shell logic, ends a group without state.json, or keeps its directory outside the workspace is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try wf.readWorkflow(ar);
+    inline for (.{ .{ "beta", BETA_ABORT_CMD }, .{ "prod", wf.PROD_ABORT_CMD } }) |c| {
+        const r = c[0];
+        const cmd = c[1] ++ "\n";
+        const if_state = "        if: hashFiles('mopm-" ++ r ++ "/staged/state.json') != ''\n";
+        const if_none = "        if: hashFiles('mopm-" ++ r ++ "/staged/state.json') == ''\n";
+        // the check in shell, as the abort steps were written before
+        const shell = "        run: |\n          if [ -f \"$GITHUB_WORKSPACE/mopm-" ++ r ++ "/staged/state.json\" ]; then\n    " ++ cmd ++ "          fi\n";
+        try wf.expectRefused(ar, try wf.replaced(ar, text, if_state ++ cmd, shell), r ++ "-abort runs shell logic in a run: block");
+        // the abort with no condition, or asking about another file
+        try wf.expectRefused(ar, try wf.replaced(ar, text, if_state ++ cmd, cmd), r ++ "-abort does not end the group only when state.json is there");
+        try wf.expectRefused(ar, try wf.replaced(ar, text, if_state ++ cmd, "        if: hashFiles('mopm-" ++ r ++ "/staged/plan.json') != ''\n" ++ cmd), r ++ "-abort does not end the group only when state.json is there");
+        // no step says that there was nothing to end
+        try wf.expectRefused(ar, try wf.replaced(ar, text, if_none, ""), r ++ "-abort has no step for a directory without state.json");
+        // the directory where hashFiles cannot see it
+        try wf.expectRefused(ar, try wf.replaced(ar, text, "          path: ${{ github.workspace }}/mopm-" ++ r ++ "/staged\n", "          path: ${{ runner.temp }}/mopm-" ++ r ++ "/staged\n"), r ++ "-abort does not download the directory to ${{ github.workspace }}/mopm-" ++ r ++ "/staged");
+    }
 }
 
 test "a registry name is a whole word after --registry" {

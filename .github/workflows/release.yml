@@ -559,16 +559,17 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mopm-beta-staged-${{ github.sha }}
-          path: ${{ runner.temp }}/mopm-beta/staged
+          path: ${{ github.workspace }}/mopm-beta/staged
       - name: mopm is executable
         run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
+      # The directory is in the workspace, so a step's `if:` can ask whether `state.json` is there
+      # (hashFiles reads the workspace only): each step is one command, with no shell logic.
       - name: mopm publish --staged --registry beta --oidc --abort
-        run: |
-          if [ -f "$RUNNER_TEMP/mopm-beta/staged/state.json" ]; then
-            "$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-beta/staged" --registry beta --oidc --abort
-          else
-            echo "no state.json: the beta stage failed before it asked the registry for a group; nothing to end"
-          fi
+        if: hashFiles('mopm-beta/staged/state.json') != ''
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$GITHUB_WORKSPACE/mopm-beta/staged" --registry beta --oidc --abort'
+      - name: no group to end
+        if: hashFiles('mopm-beta/staged/state.json') == ''
+        run: 'echo "no state.json: the beta stage failed before it asked the registry for a group; nothing to end"'
 
   # THE PROD PUBLISH, in six jobs (see the header). Every one runs only on a
   # push to main (a manual run never reaches the environment `prod`), and
@@ -743,16 +744,17 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: mopm-prod-staged-${{ github.sha }}
-          path: ${{ runner.temp }}/mopm-prod/staged
+          path: ${{ github.workspace }}/mopm-prod/staged
       - name: mopm is executable
         run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
+      # The directory is in the workspace, so a step's `if:` can ask whether `state.json` is there
+      # (hashFiles reads the workspace only): each step is one command, with no shell logic.
       - name: mopm publish --staged --oidc --abort
-        run: |
-          if [ -f "$RUNNER_TEMP/mopm-prod/staged/state.json" ]; then
-            "$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-prod/staged" --registry prod --oidc --abort
-          else
-            echo "no state.json: the stage failed before it asked the registry for a group; nothing to end"
-          fi
+        if: hashFiles('mopm-prod/staged/state.json') != ''
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$GITHUB_WORKSPACE/mopm-prod/staged" --registry prod --oidc --abort'
+      - name: no group to end
+        if: hashFiles('mopm-prod/staged/state.json') == ''
+        run: 'echo "no state.json: the stage failed before it asked the registry for a group; nothing to end"'
 
   # SMOKE. The group is visible. `release_staged_verify smoke` reads the prod index and
   # downloads every file of the plan from the channel it names, the way an install fetches

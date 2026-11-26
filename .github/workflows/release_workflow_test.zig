@@ -77,7 +77,7 @@ const PROD_STAGE_NEEDS = "    needs: [release, mopm-stage, beta-commit]";
 const ABORT_IF = "    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'";
 pub const PROD_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-publish/staged\" --registry prod --oidc --no-commit'";
 pub const PROD_COMMIT_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod --oidc'";
-pub const PROD_ABORT_CMD = "            \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod --oidc --abort";
+pub const PROD_ABORT_CMD = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$GITHUB_WORKSPACE/mopm-prod/staged\" --registry prod --oidc --abort'";
 pub const PROD_STAGED_ARTIFACT = "          name: mopm-prod-staged-${{ github.sha }}";
 pub const PROD_BUILD_VERIFY = "          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/prod-test/release_staged_verify";
 pub const PROD_VERIFY_RUN = "        run: '\"$RUNNER_TEMP/prod-test/release_staged_verify\" verify --staged \"$RUNNER_TEMP/prod-test/staged\" --out release/staged_set'";
@@ -732,8 +732,8 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     try expectRefused(ar, try replaced(ar, text, PROD_COMMIT_RUN, PROD_COMMIT_RUN ++ nl ++ "      - run: ./buck2 build //x"), "prod-commit joins the farm");
 
     // the abort: --abort, on the directory with the state, once
-    try expectRefused(ar, try replaced(ar, text, PROD_ABORT_CMD, "            \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod --oidc"), "prod-abort does not run");
-    try expectRefused(ar, try replaced(ar, text, PROD_ABORT_CMD, "            \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod --oidc --abort --no-commit"), "prod-abort does not run");
+    try expectRefused(ar, try replaced(ar, text, PROD_ABORT_CMD, "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$GITHUB_WORKSPACE/mopm-prod/staged\" --registry prod --oidc'"), "prod-abort does not run");
+    try expectRefused(ar, try replaced(ar, text, PROD_ABORT_CMD, "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$GITHUB_WORKSPACE/mopm-prod/staged\" --registry prod --oidc --abort --no-commit'"), "prod-abort does not run");
     try expectRefused(ar, try replaced(ar, text, PROD_ABORT_CMD, PROD_ABORT_CMD ++ "\n            mopm yank --group g --registry prod --reason x"), "stages, dry-runs or yanks");
 
     // the smoke: reads the committed directory and the prod index, and only reads
