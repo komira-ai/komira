@@ -101,6 +101,7 @@ def main(args):
         "UnsupportedOperation",
         "__version__",
         "abi_version",
+        "concat",
         "read_csv",
         "read_json",
         "read_parquet",
