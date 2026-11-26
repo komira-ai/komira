@@ -13,5 +13,5 @@ COPY (SELECT k, 1 AS one, count(*) AS n FROM read_parquet('expr.parquet') GROUP 
 COPY (SELECT coalesce(s, 'none') AS st, count(*) AS n FROM read_parquet('expr.parquet') GROUP BY s) TO 'coalesce_of_key.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT upper(s) AS us, count(*) AS n FROM read_parquet('expr.parquet') GROUP BY s) TO 'upper_of_key.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT k + 1 AS k1, k * 2, count(*) AS n, sum(v) AS total FROM read_parquet('expr.parquet') GROUP BY k) TO 'arith_of_key.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
-COPY (SELECT k, s, CASE WHEN s IS NULL THEN k ELSE k + 10 END AS ks, count(*) AS n FROM read_parquet('expr.parquet') GROUP BY k, s) TO 'expr_of_two_keys.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
+COPY (SELECT k, s, CASE WHEN k > 0 THEN s ELSE 'neg' END AS ks, count(*) AS n FROM read_parquet('expr.parquet') GROUP BY k, s) TO 'expr_of_two_keys.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);
 COPY (SELECT coalesce(s, 'none') AS st, count(*) AS n FROM read_parquet('expr.parquet') WHERE v > 0 GROUP BY s HAVING count(*) > 300) TO 'item_under_where_having.tsv' (FORMAT csv, DELIMITER E'\t', HEADER true);

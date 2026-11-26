@@ -35,8 +35,9 @@
 #   test_an_expression_of_the_keys_beside_an_aggregate_equals_duckdb
 #       coalesce(s, 'none') and upper(s) over GROUP BY s (the NULL group and
 #       the empty-string group apart); k + 1 and the unaliased k * 2, named
-#       `(k * 2)` as DuckDB names it, over GROUP BY k; a CASE over two keys;
-#       coalesce(s, 'none') under a WHERE and a HAVING.
+#       `(k * 2)` as DuckDB names it, over GROUP BY k; a CASE over two keys
+#       yielding a VARCHAR, its NULL k taking the ELSE; coalesce(s, 'none')
+#       under a WHERE and a HAVING.
 #   test_every_case_is_run
 #       each case of cases.sql belongs to one of the tests above.
 # =============================================================================
