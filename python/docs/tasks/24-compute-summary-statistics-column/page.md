@@ -69,5 +69,5 @@ Output:
 
 - [How do I compute several aggregates at once with named outputs?](../25-compute-aggregates-once-named-outputs/page.md) (rank 25, works)
 - How do I group by a column and sum another column? (rank 4, works; no page yet)
-- How do I count the rows of a table? (rank 62, works; no page yet)
-- How do I get the distinct values of a column? (rank 63, works; no page yet)
+- [How do I count the rows of a table?](../62-count-rows-table/page.md) (rank 62, works)
+- [How do I get the distinct values of a column?](../63-get-distinct-values-column/page.md) (rank 63, works)
