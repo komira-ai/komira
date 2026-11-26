@@ -77,7 +77,9 @@ python_versions(
 # naming the file and the line, so a malformed entry fails the build that
 # reaches the wheel. `[description]` is README.md followed by that changelog,
 # its headings one level down: the wheel's description, so the page of version
-# 0.1.<N> on PyPI shows its own section. `[sources]` is the tree of
+# 0.1.<N> on PyPI shows its own section; a stamped build gives it the commit
+# too (`-c komira.package_commit=<sha>`), and every link of it to the
+# repository's main opens that commit instead. `[sources]` is the tree of
 # CHANGELOG.md and changelog.d/ as the tool reads it, for
 # tests/test_changelog_names.py, which holds every public name of the package
 # to an entry.
@@ -221,6 +223,12 @@ _LICENSE_FILES = {
 # the Modular Community License Terms in MODULAR_LICENSE).
 _LICENSE_EXPRESSION = "Apache-2.0 AND LicenseRef-Modular-Proprietary"
 
+# The commit a stamped build is stamped with (`-c komira.package_commit`), ""
+# for an unstamped one: the `Documentation` URL is the install page at that
+# commit, which describes that wheel, and at main for an unstamped build. The
+# `Changelog` URL stays at main, whose CHANGELOG.md keeps every release.
+_COMMIT = read_config("komira", "package_commit", "")
+
 # Every field of the wheel on every platform; each platform adds its row of
 # _NATIVE_NEEDS.
 _SHARED_METADATA = {
@@ -230,7 +238,7 @@ _SHARED_METADATA = {
     "license_files": _LICENSE_FILES,
     "project_urls": {
         "Changelog": "https://github.com/komira-ai/komira/blob/main/python/CHANGELOG.md",
-        "Documentation": "https://github.com/komira-ai/komira/blob/main/docs/install.md",
+        "Documentation": "https://github.com/komira-ai/komira/blob/{}/docs/install.md".format(_COMMIT or "main"),
         "Issues": "https://github.com/komira-ai/komira/issues",
         "Source": "https://github.com/komira-ai/komira",
     },
