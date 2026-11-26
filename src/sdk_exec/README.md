@@ -94,19 +94,35 @@ DuckDB answers: one row, one BIGINT NOT NULL column `Count`, the rows written.
 - A Parquet file: the result's column names in order; a nullable column OPTIONAL and
   a NOT NULL one REQUIRED; one row group per 122,880 rows; DATE annotated
   DATE, DECIMAL as FIXED_LEN_BYTE_ARRAY(16) with its precision and scale,
-  strings UTF8. An empty result writes the schema with no rows. A column of a
-  type the writer cannot annotate (TIMESTAMP, TIME, INTERVAL and the like, the
-  unsigned and narrow integers, BLOB, nested) is `COPY_TYPE_UNSUPPORTED` at
-  `execute`, before any file is touched.
+  strings UTF8. The annotations DuckDB writes for the rest: TINYINT,
+  SMALLINT and the unsigned integers as INT32 (UBIGINT INT64) with the
+  ConvertedType INT_8, INT_16, UINT_8, UINT_16, UINT_32 or UINT_64 (an
+  unsigned chunk carries no min or max, since its signed order is not the
+  values' order); a timestamp as INT64 with the LogicalType TIMESTAMP of its
+  unit (MICROS, MILLIS, NANOS; TIMESTAMP_S is written as microseconds, as
+  DuckDB writes it, and a seconds value whose microseconds do not fit in an
+  INT64 is refused) and the ConvertedType TIMESTAMP_MICROS or
+  TIMESTAMP_MILLIS where one exists. A timestamp is written isAdjustedToUTC
+  (DuckDB reads it as TIMESTAMPTZ) only when its field carries a time zone,
+  as one read from such a file does; komira's own timestamps carry none (a
+  `TIMESTAMPTZ '...'` literal binds to zone-less UTC microseconds), so they
+  are written zone-less. An empty result writes the schema with no rows. A
+  column of a type the writer cannot annotate (TIME, INTERVAL, DURATION,
+  DATE64, BLOB, nested) is `COPY_TYPE_UNSUPPORTED` at `execute`, before any
+  file is touched.
 - A CSV or JSON file holds the bytes DuckDB's COPY writes for the same rows
   (`engine_write_text`'s header has each rule). CSV: a header row, `,`
   between cells, `\n` after each line, NULL as an empty cell, a string
   quoted only when it is empty or holds `,`, `"` or a line break, DATE as
-  `YYYY-MM-DD`, DECIMAL exact, DOUBLE in its shortest digits. JSON: one
-  object per row in column order, NULL as `null`, DATE as a string, DECIMAL
-  as a number. An empty result is the header row alone (CSV) or an empty
-  file (JSON). A timestamp, time, interval, BLOB or nested column is
-  `COPY_TYPE_UNSUPPORTED`, and two columns of one name (which DuckDB renames)
+  `YYYY-MM-DD`, a timestamp as `YYYY-MM-DD HH:MM:SS` with the fraction of a
+  second, trailing zeros removed, when it is not zero
+  (`2015-09-04 12:30:45.12`), `+00` after a zoned one, and `infinity` /
+  `-infinity` for INT64's extremes, DECIMAL exact, DOUBLE in its shortest
+  digits. JSON: one object per row in column order, NULL as `null`, DATE and
+  timestamps as strings of the CSV text, DECIMAL as a number. An empty result
+  is the header row alone (CSV) or an empty file (JSON). A time, interval,
+  duration, DATE64, BLOB or nested column is `COPY_TYPE_UNSUPPORTED`, and
+  two columns of one name (which DuckDB renames)
   `COPY_DUPLICATE_COLUMN`, both at `execute` before any file is touched.
   DELIMITER, QUOTE, HEADER false and the other CSV and JSON options are
   refused by name at `parse`.
@@ -132,6 +148,10 @@ var csv = run_sql(ctx, "COPY (SELECT 1 AS n, 'a,b' AS s) TO '" + dir + "/n.csv'"
 assert_equal(Int(csv.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 1)
 with open(dir + "/n.csv", "r") as f:
     assert_equal(f.read(), "n,s\n1,\"a,b\"\n")
+var ts = run_sql(ctx, "COPY (SELECT TIMESTAMP '2015-09-04 12:30:45.120' AS at) TO '" + dir + "/at.csv'")
+assert_equal(Int(ts.batches[0].column_at(0).as_primitive[DType.int64]().get(0)), 1)
+with open(dir + "/at.csv", "r") as f:
+    assert_equal(f.read(), "at\n2015-09-04 12:30:45.12\n")
 ```
 
 The encoders on their own:
@@ -168,7 +188,8 @@ assert_equal(String(unsafe_from_utf8=Span(encode_csv(batch))), "k\n1\n2\n")
 assert_equal(String(unsafe_from_utf8=Span(encode_ndjson(batch))), "{\"k\":1}\n{\"k\":2}\n")
 var gz = compress_text(encode_csv(batch), WCOMP_GZIP)
 assert_equal(Int(gz[0]), 0x1F)
-assert_equal(text_writable(ArrowType.TIMESTAMP_US), False)
+assert_equal(text_writable(ArrowType.TIMESTAMP_US), True)
+assert_equal(text_writable(ArrowType.TIME64_US), False)
 ```
 
 **The footer cache is pinned to a query.** `parquet_footers.FooterCache`
@@ -311,8 +332,12 @@ The tests run when the package is built.
   it (a table of BIGINT, DOUBLE, VARCHAR, BOOLEAN, DATE and DECIMAL columns with
   NULLs, a query, an empty result, 130,000 rows in two row groups, a COPY over
   the file it reads, a relative path), and its footer names the codec asked
-  for, for each of the six; an unknown extension, a URL, CREATE TABLE AS and
-  a TIMESTAMP column are named refusals that create no file; a missing
+  for, for each of the six; TIMESTAMP_US, _MS, _NS and _S columns, a zoned
+  one, TINYINT and UBIGINT read back with their types (seconds as
+  microseconds), time zone and values, and the footer carries each
+  timestamp's unit and UTC flag; an unknown extension, a URL, CREATE TABLE
+  AS, a TIME column and a TIMESTAMP_S value past the microsecond range are
+  named refusals that create no file; a missing
   directory, a directory at the path and a full disk injected through the
   file system's test seam are named and leave no temporary file and the old
   file whole.
@@ -320,12 +345,15 @@ The tests run when the package is built.
   bytes DuckDB writes for a table of BIGINT, DOUBLE, VARCHAR, BOOLEAN, DATE
   and DECIMAL columns with NULLs and for a filtered query; the format from
   `.csv`, `.json`, `.ndjson`, `.jsonl` or FORMAT; gzip and zstd from the
-  extension or COMPRESSION; an empty result; lz4, a TIMESTAMP column and two
-  columns of one name refused by name with no file made; a full disk and a
+  extension or COMPRESSION; an empty result; timestamps of every unit, a
+  zoned one, TINYINT and UBIGINT as DuckDB writes them; lz4, a TIME column
+  and two columns of one name refused by name with no file made; a full disk
+  and a
   missing directory leave the old file and no temporary file.
 - `test_copy_text_encoding`: the CSV and JSON encoders give DuckDB's text
   for every type they write and NULL, doubles in fixed and exponent
   notation, NaN and the infinities, FLOATs, BC dates and years past 9999,
+  timestamps of each unit (fractions, BC, extremes, `infinity`, `+00`),
   exact decimals, quoting and escaping; gzip and zstd decompress to their
   input.
 
