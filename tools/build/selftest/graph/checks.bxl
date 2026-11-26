@@ -25,8 +25,9 @@
 #                     (graph_checks.zig).
 #   readme_coverage   the targets of the check's patterns that are
 #                     mojo_adopted_library, mojo_library or readme_e2e
-#                     targets (unconfigured: each one's rule kind and its
-#                     `readme`, or its `package`); the paths of the tree's
+#                     targets (unconfigured: each one's rule kind, and
+#                     `README.md` when buck2 matches its `readme` as its own
+#                     package's README.md, or its `package`); the paths of the tree's
 #                     files under src/ that are a README.md or a mopm.toml;
 #                     and the check's ledger. The READMEs and the ledger are
 #                     staged for the checker to read; it refuses a ledger that
@@ -88,16 +89,25 @@ def _python_closure(ctx, info, actions):
 # and the README e2e's (readme_coverage.zig names the first two too).
 _README_KINDS = "(^|:)(_adopted|mojo_library_rule|_readme_e2e)$"
 
+# A `readme` that is the target's own package's README.md, however buck2
+# spells the source (`README.md`, `<cell>//<package>:README.md`, or
+# `<cell>//src/<name>/README.md`, quoted or not), and not a README.md of a
+# directory below the package. buck2 matches it (`attrregexfilter`), so the
+# check never parses a printed attribute value.
+_OWN_README = '((^|[:"])|src/[^/:]+/)README\\.md"?$'
+
 def _readme_coverage(ctx, info, actions):
     universe = " + ".join(["(" + p + ")" for p in info.targets])
     facts = []
-    for t in ctx.uquery().eval("kind('{}', {})".format(_README_KINDS, universe)):
+    nodes = "kind('{}', {})".format(_README_KINDS, universe)
+    gates = "kind('(^|:)(_adopted|mojo_library_rule)$', {})".format(universe)
+    own = {str(t.label): True for t in ctx.uquery().eval("attrregexfilter(readme, '{}', {})".format(_OWN_README, gates))}
+    for t in ctx.uquery().eval(nodes):
         kind = t.rule_type
         if kind.split(":")[-1] == "_readme_e2e":
             facts.append("e2e\t{}\t{}".format(t.label, t.get_attr("package")))
         else:
-            readme = t.get_attr("readme")
-            facts.append("gate\t{}\t{}\t{}".format(t.label, kind, "" if readme == None else readme))
+            facts.append("gate\t{}\t{}\t{}".format(t.label, kind, "README.md" if str(t.label) in own else ""))
     scan = {}
     for prefix, tree in info.trees.items():
         for p, a in ctx.analysis(ctx.configured_targets(tree)).providers()[DocTreeInfo].files.items():

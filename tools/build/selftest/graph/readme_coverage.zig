@@ -12,8 +12,10 @@
 //!                                      `src/.../README.md` or `src/.../mopm.toml`
 //!   gate <label> <rule kind> <readme>  a mojo_adopted_library (`_adopted`)
 //!                                      or mojo_library (`mojo_library_rule`)
-//!                                      target, and its `readme` attribute
-//!                                      ("" when it has none)
+//!                                      target, and `README.md` when its
+//!                                      `readme` is its own package's
+//!                                      README.md (buck2 matches the
+//!                                      attribute, checks.bxl), "" otherwise
 //!   e2e <label> <package>              a `readme_e2e` target and its `package`
 //!   ledger <path>                      the ledger the graph_check names
 //!   scan <path>                        a file whose text is in --scan
@@ -72,8 +74,9 @@ pub const Outcome = struct {
     facts: usize,
     /// READMEs found: rows of the ledger.
     readmes: usize,
-    /// `gate` and `e2e` facts read: none of either means the kind query
-    /// matched nothing, so every row would read `none` and `no`.
+    /// `gate` facts that name a README and `e2e` facts read: none of either
+    /// means a query of checks.bxl matched nothing, so every row would read
+    /// `none` or `no`.
     gates: usize,
     e2es: usize,
     /// Every refusal, one message each.
@@ -205,7 +208,9 @@ pub fn collect(a: Allocator, facts: []const u8, texts: *const std.StringHashMap(
         }
     }
     // The gate of each package: an adopted one before a mojo_library one.
+    var gates_read: usize = 0;
     for (gate_facts.items) |g| {
+        if (g[2].len > 0) gates_read += 1;
         const pkg = packageOf(g[0]);
         const name = srcFile(try std.fmt.allocPrint(a, "{s}/README.md", .{pkg}), "README.md") orelse continue;
         if (g[2].len == 0) continue;
@@ -243,7 +248,7 @@ pub fn collect(a: Allocator, facts: []const u8, texts: *const std.StringHashMap(
         if (!seen.contains(nameOf(l))) try findings.append(a, try std.fmt.allocPrint(a, "{s} is the README e2e of `{s}`, and there is no src/{s}/README.md", .{ l, nameOf(l), nameOf(l) }));
     }
     std.mem.sort(Row, rows.items, {}, rowLess);
-    return .{ .facts = n, .gates = gate_facts.items.len, .e2es = e2es, .rows = try rows.toOwnedSlice(a), .ledger = ledger, .findings = findings };
+    return .{ .facts = n, .gates = gates_read, .e2es = e2es, .rows = try rows.toOwnedSlice(a), .ledger = ledger, .findings = findings };
 }
 
 fn yesNo(b: bool) []const u8 {
@@ -693,6 +698,9 @@ test "the gate and e2e facts are counted, so a query that matched no kind is tol
     const o = try check(a, FACTS, &m);
     try t.expectEqual(@as(usize, 3), o.gates);
     try t.expectEqual(@as(usize, 1), o.e2es);
+    // Gate facts whose readme names no README (the attribute query matched none) count as none read.
+    const unnamed = "gate\tkomira//src/notes:notes\tkomira//tools/build/mojo/defs.bzl:mojo_library_rule\t\n";
+    try t.expectEqual(@as(usize, 0), (try check(a, unnamed, &m)).gates);
     const files_only = "file\tsrc/notes/README.md\nscan\tsrc/notes/README.md\n";
     const p = try check(a, files_only, &m);
     try t.expectEqual(@as(usize, 1), p.readmes);

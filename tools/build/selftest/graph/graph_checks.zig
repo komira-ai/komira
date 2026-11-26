@@ -102,7 +102,7 @@ fn readmeCoverageMain(a: std.mem.Allocator, label: []const u8, facts: []const u8
     const texts = try scanned(a, label, "readme_coverage", facts, scan_dir);
     const o = try readme_coverage.check(a, facts, &texts);
     if (o.readmes == 0) fail("{s}: readme_coverage read no src/<name>/README.md: the tree held none, so it checked nothing", .{label});
-    if (o.gates == 0 or o.e2es == 0) fail("{s}: readme_coverage read {d} gate and {d} e2e fact(s): the kind query of checks.bxl matched no README gate or no readme_e2e target, so every row would say none", .{ label, o.gates, o.e2es });
+    if (o.gates == 0 or o.e2es == 0) fail("{s}: readme_coverage read {d} gate fact(s) naming a README and {d} e2e fact(s): a query of checks.bxl (the rule kinds, or the `readme` match) matched nothing, so every row would say none", .{ label, o.gates, o.e2es });
     if (o.findings.len > 0) {
         const w = std.fs.File.stderr().deprecatedWriter();
         for (o.findings) |f| try w.print("{s}: readme_coverage: {s}\n", .{ label, f });
