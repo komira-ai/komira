@@ -15,7 +15,7 @@ configuration).
           request that does not touch what a row owns leaves them out (below).
   UNIVERSE the target patterns of the check set: the graph the selector
           answers over, and the targets the aggregate `//ci:pr` holds
-          (ci/targets.bzl). The tests cell is its `functional` tree only:
+          (one file per root, ci/roots/: roots.bzl). The tests cell is its `functional` tree only:
           the rest of that cell fails by design.
 
 A pattern is a path, `dir/**` (everything under dir), `text*` (a path
@@ -75,7 +75,7 @@ DEFAULT = "komira//ci:pr_default"
 #   own     the paths whose change keeps it: a change with a file matching one of these
 #           (patterns as in WIDEN) builds it and everything above it; a change with none
 #           leaves out the target and every check that depends on it, WIDENED or not.
-#   roots   the roots of the check set (ci/targets.bzl) that reach the target: DEFAULT is
+#   roots   the roots of the check set (ci/roots/, roots.bzl) that reach the target: DEFAULT is
 #           the check set without them, and `default_guard.bxl:check` fails when DEFAULT
 #           still reaches the target or a root here reaches nothing heavy.
 #   reason  why it is left off.

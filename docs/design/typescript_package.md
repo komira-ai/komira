@@ -132,7 +132,7 @@ Fixed before this design, and not reopened here:
     with their codes and steps) and over a stand-in of ABI 1.9
     ([tests/fake_sql.c](../../node/tests/fake_sql.c)) whose `komira_sql_stream` answers fixed
     queries.
-- **EXISTS** The tests are in the pull request's check set (`ci/targets/shard_7.bzl`).
+- **EXISTS** The tests are in the pull request's check set (`ci/roots/komira/node:*`).
   - `node_binding_test` runs `node --test` as a build action, under `env -i`, with no network.
   - It passes only if TAP reports tests, all passed, and none skipped
     ([tools/build/node/README.md](../../tools/build/node/README.md)).
