@@ -15,8 +15,9 @@
 #   2. `_fn_arity_msg` has a message per lowering family and an internal one
 #      for a kind with none.
 #   3. The date folds refuse a wrong argument count, a unit other than
-#      `day` and a non-DATE operand; the DATE32 / float / string predicates
-#      see through an alias and answer False for other shapes.
+#      `day` and a non-DATE operand; the DATE32 / TIMESTAMP / float / string
+#      predicates see through an alias and answer False for other shapes
+#      (for TIMESTAMP: a TIMESTAMPTZ, a DATE, a missing name, an expression).
 #   4. `_bind_scalar` refuses `*`, a CASE with no WHEN and an unknown node
 #      tag; the CAST desugar refuses a wrong argument shape; a DECIMAL type
 #      name with no closing parenthesis is refused.
@@ -74,6 +75,7 @@ from sql.sql_bind_ops import _map_aggfunc, _map_binop, _map_unop
 from sql.sql_bind_fn_args import _date_diff_days, _fn_arity_msg
 from sql.sql_bind_fn_nested import (
     _bound_expr_is_date32,
+    _bound_expr_is_timestamp_us,
     _col_arrow_type_by_name,
     _date_sub_days,
 )
@@ -293,6 +295,24 @@ def test_type_predicates_see_through_an_alias() raises:
         _bound_expr_is_string(Expr.unary(UInt8(0), Expr.col_ref("s")), sch)
     )
     assert_false(_bound_expr_is_string(Expr.col_ref("zz"), sch))
+    # The TIMESTAMP predicate of date_diff / date_sub: a naive TIMESTAMP
+    # column, also under an alias, is one; a TIMESTAMPTZ, a DATE, a name the
+    # schema does not hold and an expression over a TIMESTAMP are not.
+    var sb = SchemaBuilder()
+    sb.add_field(Field.timestamp(String("ts"), ArrowType.TIMESTAMP_US, String(""), True))
+    sb.add_field(Field.timestamp(String("tz"), ArrowType.TIMESTAMP_US, String("UTC"), True))
+    sb.add_field(Field(String("d"), ArrowType.DATE32, True))
+    var tsch = sb.build()
+    assert_true(_bound_expr_is_timestamp_us(Expr.col_ref("TS"), tsch))
+    assert_true(_bound_expr_is_timestamp_us(Expr.alias(Expr.col_ref("ts"), "x"), tsch))
+    assert_false(_bound_expr_is_timestamp_us(Expr.alias(Expr.col_ref("tz"), "x"), tsch))
+    assert_false(_bound_expr_is_timestamp_us(Expr.col_ref("d"), tsch))
+    assert_false(_bound_expr_is_timestamp_us(Expr.col_ref("zz"), tsch))
+    assert_false(
+        _bound_expr_is_timestamp_us(
+            Expr.binary(UInt8(0), Expr.col_ref("ts"), Expr.col_ref("ts")), tsch
+        )
+    )
 
 
 def _scope_over_t(cat: SqlCatalog, cte: CteScope) raises -> BindScope:

@@ -287,12 +287,12 @@ def _bound_expr_is_date32(e: Expr, schema: Schema) -> Bool:
     return False
 
 
-def _bound_expr_is_timestamp_us(e: Expr, schema: Schema) -> Bool:
+def _bound_expr_is_timestamp_us(e: Expr, schema: Schema) raises -> Bool:
     """True iff the already-bound value Expr `e` produces a TIMESTAMP in
     microseconds with no time zone over `schema`: a timestamp literal, such a
     column, or an alias over either. A TIMESTAMPTZ is not one: its calendar
     fields are those of the session's time zone, which this lowering does not
-    read."""
+    read. Raises only if the schema cannot rebuild a field it lists."""
     if e.tag == EXPR_LITERAL:
         return e.literal_value().is_timestamp()
     if e.tag == EXPR_COL_REF:
@@ -302,10 +302,7 @@ def _bound_expr_is_timestamp_us(e: Expr, schema: Schema) -> Bool:
                 var at = schema.field_arrow_type(i)
                 if at != ArrowType.TIMESTAMP and at != ArrowType.TIMESTAMP_US:
                     return False
-                try:
-                    return schema.field_at(i).timezone().byte_length() == 0
-                except:
-                    return False
+                return schema.field_at(i).timezone().byte_length() == 0
         return False
     if e.tag == EXPR_ALIAS:
         return _bound_expr_is_timestamp_us(e.alias_child_ref(), schema)
