@@ -10,8 +10,8 @@ and the file utilities every action uses are pinned downloads.
 > Until then, on a Mac you can install and run `./buck2` and read the code.
 
 **To use komira from Python:** `pip install komira` (Linux x86_64, or macOS 11+
-on Apple silicon; CPython 3.11 to 3.14). It registers Parquet files and runs SQL over them, with the
-answers read as pyarrow. See [installing komira for Python](docs/install.md) and the
+on Apple silicon; CPython 3.11 to 3.14). It registers Parquet files and runs
+SQL over them, with the answers read as pyarrow. See [installing komira for Python](docs/install.md) and the
 [changelog](python/CHANGELOG.md).
 
 The build tooling (Mojo rules, a hermetic toolchain, execution platforms,
