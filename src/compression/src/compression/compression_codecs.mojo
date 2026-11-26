@@ -346,7 +346,7 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
             _span_ptr(input),
             n,
         )
-        var is_err = external_call["komira_zstd_isError", Int](result)
+        var is_err = external_call["komira_zstd_isError", UInt32](result)
         if is_err != 0:
             raise Error(
                 "Zstd.decompress: ZSTD_decompress failed (result="
@@ -449,7 +449,7 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
             _span_ptr(src),
             n,
         )
-        var is_err = external_call["komira_zstd_isError", Int](result)
+        var is_err = external_call["komira_zstd_isError", UInt32](result)
         if is_err != 0:
             raise Error(
                 "Zstd.decompress_into_with_dctx: ZSTD_decompressDCtx"
@@ -488,7 +488,7 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
             _span_ptr(src),
             n,
         )
-        var is_err = external_call["komira_zstd_isError", Int](result)
+        var is_err = external_call["komira_zstd_isError", UInt32](result)
         if is_err != 0:
             raise Error(
                 "Zstd.decompress_into: ZSTD_decompress failed (result="
@@ -534,7 +534,7 @@ struct Zstd[level: Int = 3](ArrowIpcCompression):
             n,
             Int32(Self.level),
         )
-        var is_err = external_call["komira_zstd_isError", Int](result)
+        var is_err = external_call["komira_zstd_isError", UInt32](result)
         if is_err != 0:
             raise Error(
                 "Zstd.compress_into: ZSTD_compress failed (result="

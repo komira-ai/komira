@@ -572,8 +572,8 @@ test "add: prod serves the set; init, an add per package, then sync, and the loc
     defer log.deinit();
     var why: []const u8 = "";
     const rep = try runAdd(a, &tmp, &fake, &why, &log.writer);
-    try t.expectEqual(@as(usize, 9), rep.members);
-    try t.expectEqual(@as(usize, 10), rep.entries);
+    try t.expectEqual(@as(usize, 10), rep.members);
+    try t.expectEqual(@as(usize, 11), rep.entries);
     const cache = try path(a, &tmp, "work/cache");
     const want = [_][]const u8{
         "init --name release-check/prod_add",
@@ -689,7 +689,7 @@ test "add: prod also holds the release before, built for the Mojo init writes; t
     defer log.deinit();
     var why: []const u8 = "";
     const rep = try runAdd(a, &tmp, &fake, &why, &log.writer);
-    try t.expectEqual(@as(usize, 10), rep.entries);
+    try t.expectEqual(@as(usize, 11), rep.entries);
     // init's mopm.toml with only the [toolchain] mojo line changed
     const want = try std.mem.replaceOwned(u8, a, INIT_TOML, "mojo = \"" ++ INIT_MOJO ++ "\"", "mojo = \"" ++ RELEASE_MOJO ++ "\"");
     try t.expectEqualStrings(want, try tmp.dir.readFileAlloc(a, "work/project/mopm.toml", 1 << 20));
