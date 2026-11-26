@@ -776,6 +776,7 @@ def test_a_membership_is_refused_by_assign_setitem_and_the_verbs_of_a_series():
     for call in (
         lambda: m.isin([1, 2]),
         lambda: m.isin(env.o["b"]),
+        lambda: m.astype("int64"),
         lambda: m.cumsum(),
         lambda: m.cummin(),
         lambda: m.cummax(),

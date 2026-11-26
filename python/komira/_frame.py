@@ -13,7 +13,7 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
   default session without one.
 - The verbs are `df["x"]` (a `Series`), `df[["a", "b"]]` (a projection),
   `df[cond]` (a filter), `assign` and `df["x"] = ...` (computed columns),
-  `sort_values` and `head`. Each derives the output schema now, as the engine
+  `sort_values`, `head` and `tail`. Each derives the output schema now, as the engine
   will, so `columns`, `dtypes`, `repr` and the notebook display
   (`_repr_html_`, the names and types) run nothing, and an unknown column is
   a `KeyError` at the verb that names it.
@@ -26,13 +26,22 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
 - A Series may read windows (`cumsum`, `rank`, `rolling`, a group's
   `transform`, komira/_windows.py): `assign`, `df["x"] = ...` and `df[cond]`
   compute them in a projection of their own first.
+- `fillna`, `dropna`, `rename`, `add_prefix`, `add_suffix` and `astype` each
+  build one projection or filter. A value is missing when it is NULL, or NaN
+  in a float column (komira/_missing.py): `fillna` replaces it with a literal
+  of the column's type, and `dropna` filters on it. `astype` casts through
+  komira/_cast.py. `tail` takes the last rows of a sorted frame as a TOPN by
+  the reversed keys, sorted back. `komira.concat` is a union of frames of one
+  schema, checked in komira/_verbs.py before it is built.
 - Row order (section 7): a sort makes a frame ordered; a filter, a projection
-  that keeps the sort keys, an `assign` that replaces none of them and `head`
+  that keeps the sort keys, an `assign`, `fillna`, `astype` or `rename` that
+  changes none of them, a `dropna` and `head`
   keep it ordered, the builder placing filters and projections under the sort
   and a limit above it, and a sort above a limit when a verb comes after one.
-  A reduction, `drop_duplicates` and `merge` give an unordered frame, except
-  that `groupby(sort=True)` and `merge(sort=True)` sort by their keys; a semi
-  or anti join keeps the order, as a filter does.
+  `tail` of a sorted frame is sorted. A reduction, `drop_duplicates`,
+  `concat` and `merge` give an unordered frame, except that
+  `groupby(sort=True)` and `merge(sort=True)` sort by their keys; a semi or
+  anti join keeps the order, as a filter does.
 - No dunder runs a query, no attribute is a column, and a name the class does
   not define raises `AttributeError` (komira/_refusals.py).
 
@@ -45,11 +54,12 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from types import ModuleType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from . import _display, _groupby, _merge, _ops, _refusals, _windows
+from . import _display, _groupby, _merge, _ops, _refusals, _verbs, _windows
 from ._errors import UnsupportedOperation
 from ._groupby import GroupBy
+from ._missing import present
 from ._series import Series, _Membership, operand
 from ._session import Result, Session, _local_path, default_session
 from ._windows import Windows, merged
@@ -57,9 +67,13 @@ from ._windows import Windows, merged
 if TYPE_CHECKING:
     from .plan.v1 import plan_pb2
 
-__all__ = ["DataFrame", "read_csv", "read_json", "read_parquet"]
+__all__ = ["DataFrame", "concat", "read_csv", "read_json", "read_parquet"]
 
 _TERMINAL = "run it with .materialize() and read the Result"
+
+
+# The default of an argument pandas tells apart from None.
+_UNSET: Any = object()
 
 
 def _encoder() -> ModuleType:
@@ -351,6 +365,300 @@ class DataFrame:
             return self._derive(_ops.limit(plan.child, min(plan.n, n)))
         return self._derive(_ops.limit(plan, n))
 
+    def tail(self, n: int = 5) -> DataFrame:
+        """The last `n` rows of a sorted frame, in the frame's order: the
+        first `n` rows by the sort's keys reversed, sorted back by its keys.
+        Of rows that tie at the cut, any are taken. An unsorted frame has no
+        last rows, and a frame cut by `head` has the row count to find them
+        by: both are refused."""
+        if isinstance(n, bool) or not isinstance(n, int):
+            raise TypeError(f"tail(n) takes an int, not {type(n).__name__}")
+        if n < 0:
+            raise UnsupportedOperation(
+                f"tail({n}) keeps all rows but the first {-n}, which needs the row count: "
+                "sort with sort_values(...) and take the rows you want with tail(k)"
+            )
+        plan = self._plan
+        if isinstance(plan, (_ops.Limit, _ops.TopN)):
+            raise UnsupportedOperation(
+                f"tail({n}) of a frame cut by head() takes the last of the first rows, which needs the row "
+                "count: take the tail before the head"
+            )
+        if not isinstance(plan, _ops.Sort):
+            raise UnsupportedOperation(
+                f"tail({n}) takes the last rows by order, and an unsorted frame has none: "
+                "sort with sort_values(...) first"
+            )
+        reversed_keys = tuple(
+            _ops.SortKey(k.column, descending=not k.descending, nulls_first=not k.nulls_first) for k in plan.keys
+        )
+        return self._derive(_ops.Sort(_ops.TopN(plan.child, reversed_keys, n), plan.keys))
+
+    # ---- missing values, names and types ----------------------------------
+
+    def fillna(
+        self,
+        value: object = None,
+        *,
+        axis: int | str | None = None,
+        inplace: bool = False,
+        limit: int | None = None,
+        method: str | None = None,
+        downcast: object = None,
+    ) -> DataFrame:
+        """A frame with each missing value (NULL, and NaN in a float column)
+        replaced: by `value` in every column, or by `{column: value}` in those
+        columns only. The value is a literal of the column's type: an int for
+        an int32 or int64 column, an int or a float for a float32 or float64
+        one, a bool, a str. Builds one projection; an empty dict changes
+        nothing."""
+        if inplace is not False:
+            raise UnsupportedOperation(
+                "fillna(inplace=True) changes the frame in place, and komira frames do not change: "
+                "use the frame fillna returns"
+            )
+        if axis is not None and (isinstance(axis, bool) or axis not in (0, "index")):
+            raise UnsupportedOperation(f"fillna(axis={axis!r}) fills along each row, and a plan fills columns: use axis=0")
+        if limit is not None:
+            raise UnsupportedOperation(
+                f"fillna(limit={limit!r}) fills only the first values of a run, which needs row order: "
+                "leave limit out"
+            )
+        if method is not None:
+            raise UnsupportedOperation(
+                f"fillna(method={method!r}) fills from the row before or after, which needs row order: "
+                "fill with a value, as fillna(0)"
+            )
+        if downcast is not None:
+            raise UnsupportedOperation(
+                f"fillna(downcast={downcast!r}) changes the columns' types after filling: "
+                "cast the columns afterwards with astype()"
+            )
+        if value is None:
+            raise ValueError("Must specify a fill 'value' or 'method'.")
+        columns = self._plan.columns
+        dtypes = self.dtypes
+        scalar = not isinstance(value, dict)
+        if scalar:
+            fills = {name: value for name in columns}
+            _verbs.no_series_fill(value)
+        else:
+            for name, each in value.items():
+                if not isinstance(name, str):
+                    raise TypeError(f"fillna value names columns with str, not a {type(name).__name__}")
+                _verbs.no_series_fill(each)
+            _ops.require_columns(tuple(value), columns)
+            fills = value
+        items = tuple(
+            (
+                name,
+                _verbs.fill_column(name, dtypes[name], fills[name], scalar),
+            )
+            for name in columns
+            if name in fills
+        )
+        filled = {name for name, _ in items}
+        plan = _ops.with_columns(self._plan, items)
+        return self._ordered(plan, lambda keys: not any(k.column in filled for k in keys))
+
+    def dropna(
+        self,
+        *,
+        axis: int | str = 0,
+        how: str = _UNSET,
+        thresh: int = _UNSET,
+        subset: str | list[str] | tuple[str, ...] | None = None,
+        inplace: bool = False,
+        ignore_index: bool = False,
+    ) -> DataFrame:
+        """The rows where every one of the `subset` columns (all columns when
+        None) holds a value, `how="any"`, the default; or where at least one
+        does, `how="all"`. A value is not NULL, and in a float column not NaN.
+        Builds one filter. An empty subset keeps every row under
+        `how="any"`, with no node, and no row under `how="all"`, as pandas
+        does. `ignore_index` is accepted and does nothing, since a frame has
+        no index."""
+        if inplace is not False:
+            raise UnsupportedOperation(
+                "dropna(inplace=True) changes the frame in place, and komira frames do not change: "
+                "use the frame dropna returns"
+            )
+        _groupby._check_bool(ignore_index, "ignore_index", "dropna")
+        if isinstance(axis, bool) or axis not in (0, 1, "index", "columns"):
+            raise ValueError(f"No axis named {axis} for object type DataFrame")
+        if axis in (1, "columns"):
+            raise UnsupportedOperation(
+                f"dropna(axis={axis!r}) drops the columns that hold a missing value, and a plan's columns "
+                "cannot depend on its rows: choose the columns by name with df[[...]]"
+            )
+        if how is not _UNSET and thresh is not _UNSET:
+            raise TypeError("You cannot set both the how and thresh arguments at the same time.")
+        if thresh is not _UNSET and thresh is not None:
+            raise UnsupportedOperation(
+                f"dropna(thresh={thresh!r}) counts the values each row holds, which this release does not build: "
+                'use how="any" or how="all", or name the columns with subset='
+            )
+        if how is _UNSET:
+            how = "any"
+        if how not in ("any", "all"):
+            raise ValueError(f"invalid how option: {how}")
+        columns = self._plan.columns
+        if subset is None:
+            names = columns
+        else:
+            names = (subset,) if isinstance(subset, str) else subset
+            if not isinstance(names, (list, tuple)):
+                raise TypeError(f"dropna subset takes column names, not a {type(subset).__name__}")
+            for name in names:
+                if not isinstance(name, str):
+                    raise TypeError(f"dropna subset takes column names, which are str, not {type(name).__name__}")
+            _ops.require_columns(tuple(names), columns)
+        names = tuple(dict.fromkeys(names))
+        if not names:
+            if how == "any":
+                return self._derive(self._plan)
+            # pandas keeps a row when any of no columns is present: no row.
+            return self._ordered(_ops.filter_(self._plan, _ops.Lit(False)), lambda keys: True)
+        dtypes = self.dtypes
+        tests = tuple(present(_ops.ColRef(name), dtypes[name]) for name in names)
+        predicate = _ops.and_all(tests) if how == "any" else _ops.or_all(tests)
+        return self._ordered(_ops.filter_(self._plan, predicate), lambda keys: True)
+
+    def rename(
+        self,
+        mapper: object = None,
+        *,
+        index: object = None,
+        columns: object = None,
+        axis: int | str | None = None,
+        copy: bool | None = None,
+        inplace: bool = False,
+        level: object = None,
+        errors: str = "ignore",
+    ) -> DataFrame:
+        """A frame with columns renamed: `columns` is a dict of old name to
+        new name, or a function called with each column name; `mapper` with
+        `axis=1` is the same. A name the frame lacks is skipped with
+        `errors="ignore"`, pandas' default, and is a `KeyError` with
+        `errors="raise"`. Two columns given one name are refused. A frame has
+        no index to rename. Builds one projection, none when no name changes."""
+        if inplace is not False:
+            raise UnsupportedOperation(
+                "rename(inplace=True) changes the frame in place, and komira frames do not change: "
+                "use the frame rename returns"
+            )
+        if copy is not None:
+            _groupby._check_bool(copy, "copy", "rename")
+        if errors not in ("ignore", "raise"):
+            raise ValueError(f"rename errors must be 'ignore' or 'raise', not {errors!r}")
+        if level is not None:
+            raise UnsupportedOperation(
+                f"rename(level={level!r}) picks a level of a multi-level index, and komira frames have no "
+                "index: rename columns with rename(columns={...})"
+            )
+        if mapper is not None and (index is not None or columns is not None):
+            raise TypeError("Cannot specify both 'mapper' and any of 'index' or 'columns'")
+        if index is not None:
+            raise UnsupportedOperation(
+                "rename(index=...) renames row labels, and komira frames have no index: "
+                "rename columns with rename(columns={...})"
+            )
+        if mapper is not None:
+            if isinstance(axis, bool) or (axis is not None and axis not in (0, 1, "index", "columns")):
+                raise ValueError(f"No axis named {axis} for object type DataFrame")
+            if axis not in (1, "columns"):
+                where = "by default" if axis is None else f"with axis={axis!r}"
+                raise UnsupportedOperation(
+                    f"rename(mapper) renames row labels {where}, and komira frames have no index: "
+                    "rename columns with rename(columns={...})"
+                )
+            columns = mapper
+        if columns is None:
+            raise TypeError("rename() needs the new names: pass columns={'old': 'new'}, or a function of the name")
+        existing = self._plan.columns
+        if isinstance(columns, dict):
+            for old, new in columns.items():
+                if not isinstance(old, str) or not isinstance(new, str):
+                    raise TypeError("rename columns maps column names to new names, and both are str")
+            if errors == "raise":
+                _ops.require_columns(tuple(columns), existing)
+            wanted = {old: new for old, new in columns.items() if old in existing}
+        elif callable(columns):
+            wanted = {}
+            for old in existing:
+                new = columns(old)
+                if not isinstance(new, str):
+                    raise TypeError(
+                        f"rename columns function returned a value of type {type(new).__name__} for the column {old!r}, "
+                        "and column names are str"
+                    )
+                wanted[old] = new
+        else:
+            raise TypeError(f"rename columns takes a dict or a function, not a {type(columns).__name__}")
+        return self._renamed(wanted)
+
+    def _renamed(self, wanted: dict[str, str]) -> DataFrame:
+        """The frame with the columns in `wanted` (old name to new) renamed,
+        one projection, none when no name changes."""
+        mapping = {old: new for old, new in wanted.items() if old != new}
+        if not mapping:
+            return self._derive(self._plan)
+        seen: set[str] = set()
+        for old in self._plan.columns:
+            new = mapping.get(old, old)
+            if new in seen:
+                raise ValueError(
+                    f"rename would give two columns the name {new!r}: rename the other column too, "
+                    "or pick another name"
+                )
+            seen.add(new)
+        plan = _ops.rename(self._plan, mapping)
+        return self._ordered(plan, lambda keys: all(mapping.get(k.column, k.column) == k.column for k in keys))
+
+    def add_prefix(self, prefix: str, axis: int | str | None = None) -> DataFrame:
+        """A frame with `prefix` put before every column name."""
+        _verbs.check_label_axis(axis, "add_prefix")
+        if not isinstance(prefix, str):
+            raise TypeError(f"add_prefix prefix must be a str, not {type(prefix).__name__}")
+        return self._renamed({name: prefix + name for name in self._plan.columns})
+
+    def add_suffix(self, suffix: str, axis: int | str | None = None) -> DataFrame:
+        """A frame with `suffix` put after every column name."""
+        _verbs.check_label_axis(axis, "add_suffix")
+        if not isinstance(suffix, str):
+            raise TypeError(f"add_suffix suffix must be a str, not {type(suffix).__name__}")
+        return self._renamed({name: name + suffix for name in self._plan.columns})
+
+    def astype(self, dtype: object, copy: bool | None = None, errors: str = "raise") -> DataFrame:
+        """A frame with every column cast to `dtype`, or the columns of
+        `{column: dtype}` cast to theirs. A dtype is named as `Series.astype`
+        takes it (komira/_cast.py); a column that already has it is left as it
+        is. Builds one projection. `errors="ignore"` is refused: a plan cannot
+        decide before it runs which values fail to cast."""
+        from . import _cast
+
+        _cast.check_astype_args(copy, errors, "astype")
+        columns = self._plan.columns
+        if isinstance(dtype, dict):
+            for name in dtype:
+                if not isinstance(name, str):
+                    raise TypeError(f"astype dtype names columns with str, not a {type(name).__name__}")
+            _ops.require_columns(tuple(dtype), columns)
+            targets = dtype
+        else:
+            targets = {name: dtype for name in columns}
+        current = self.dtypes
+        items = []
+        for name in columns:
+            if name not in targets:
+                continue
+            node = _cast.cast_node(_ops.ColRef(name), current[name], targets[name], "astype")
+            if node is not None:
+                items.append((name, node))
+        cast = {name for name, _ in items}
+        plan = _ops.with_columns(self._plan, tuple(items))
+        return self._ordered(plan, lambda keys: not any(k.column in cast for k in keys))
+
     # ---- group-by and reductions (komira/_groupby.py) ---------------------
 
     def groupby(
@@ -556,6 +864,45 @@ class DataFrame:
             name=name,
             obj=self,
         )
+
+
+# ---- concat ---------------------------------------------------------------
+
+
+def concat(
+    objs: list[DataFrame] | tuple[DataFrame, ...],
+    *,
+    axis: int | str = 0,
+    join: str = "outer",
+    ignore_index: bool = False,
+    keys: object = None,
+    levels: object = None,
+    names: object = None,
+    verify_integrity: bool = False,
+    sort: bool = False,
+    copy: bool | None = None,
+) -> DataFrame:
+    """The rows of the frames one after another: a union of inputs of one
+    schema. The frames are on one session (their readers may differ, and the
+    answer reads the sources of all); their columns are the same set (a frame
+    with them in another order is reordered to the first frame's by a
+    projection), of one type each, and allow missing values alike. pandas
+    would fill missing columns with NaN and upcast types, and this refuses
+    both. The answer has no row order. `ignore_index` and `copy` are accepted
+    and do nothing, since a frame has no index and a plan holds no rows; with
+    equal column sets `join` "outer" and "inner" mean the same."""
+    return _verbs.concat_frames(
+        objs,
+        axis=axis,
+        join=join,
+        ignore_index=ignore_index,
+        keys=keys,
+        levels=levels,
+        names=names,
+        verify_integrity=verify_integrity,
+        sort=sort,
+        copy=copy,
+    )
 
 
 # ---- readers -------------------------------------------------------------

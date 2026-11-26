@@ -152,10 +152,23 @@ as FIXED_LEN_BYTE_ARRAY(16), DATE32 annotated DATE) and cut row groups at
 `max_rows_per_rg` rows (default 122,880), with a page index. Several batches
 that fit one row group are encoded PLAIN without a concat when every column is
 INT32, INT64, FLOAT32, FLOAT64, STRING or LARGE_STRING; any other mix is
-concatenated first. A column of an Arrow type with no writer (unsigned and
-narrow integers, BINARY, nested types) is refused. TIMESTAMP, DATE64, TIME and
-DURATION are written as INT64 or INT32 with no logical-type annotation: the
-values are right and a reader sees integers.
+concatenated first. A column of an Arrow type with no writer (BINARY, nested
+types, ...) is refused.
+
+The narrow and unsigned integers and the timestamps carry the annotations
+DuckDB writes for them. INT8, INT16, UINT8, UINT16 and UINT32 are INT32
+(widened, or their bits for UINT32) and UINT64 is INT64 (its bits), with the
+ConvertedType INT_8, INT_16, UINT_8, UINT_16, UINT_32 or UINT_64; a UINT32 or
+UINT64 chunk carries no min or max (the signed order of its bits is not the
+values' order), only its null count. A timestamp is INT64 with SchemaElement
+field 10, the LogicalType TIMESTAMP: unit MICROS (the legacy TIMESTAMP tag
+and TIMESTAMP_US), MILLIS (TIMESTAMP_MS) or NANOS (TIMESTAMP_NS), and
+isAdjustedToUTC when the Arrow field carries a time zone; the ConvertedType
+TIMESTAMP_MICROS or TIMESTAMP_MILLIS beside it (nanoseconds have none).
+TIMESTAMP_S is written as microseconds, since Parquet has no seconds unit, and
+a value whose microseconds do not fit in an INT64 is refused naming the
+column, the row and the value. DATE64, TIME and DURATION are written as INT64
+or INT32 with no annotation: the values are right and a reader sees integers.
 
 `field_ids` (a trailing keyword of both functions) gives leaf `i` the Parquet
 field id `field_ids[i]` (SchemaElement field 9), which table formats such as

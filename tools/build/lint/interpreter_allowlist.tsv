@@ -12,6 +12,7 @@ buck2	a thin wrapper: runs the pinned buck2 release
 python/examples/analysis_job.py	the Python package's analysis job example: run from the installed wheel and compared with DuckDB (python/examples/README.md)
 python/examples/quickstart.py	the Python package's quickstart: the example the README shows and the release smoke runs (python/examples/README.md)
 python/komira/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_accessors.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_arrow.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_errors.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_display.py	the Python package: its sources are Python (docs/design/python_package.md)
@@ -31,9 +32,11 @@ python/komira/_capture/_code.py	the Python package: its sources are Python (docs
 python/komira/_capture/_decorator.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_capture/_readset.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_capture/_types.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_cast.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_credentials.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_iceberg.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_merge.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_missing.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_plan/__init__.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_plan/_agg.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_plan/_expr.py	the Python package: its sources are Python (docs/design/python_package.md)
@@ -48,6 +51,7 @@ python/komira/_refusals.py	the Python package: its sources are Python (docs/desi
 python/komira/_runtime.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_run.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_series.py	the Python package: its sources are Python (docs/design/python_package.md)
+python/komira/_verbs.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_session.py	the Python package: its sources are Python (docs/design/python_package.md)
 python/komira/_udf/__init__.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
 python/komira/_udf/wire.py	the Python UDF runtime: the zygote and its workers run user Python in the user's own interpreter (docs/design/udf_python_worker.md)
@@ -109,12 +113,16 @@ python/tests/test_tpch_installed.py	the Python package's tests: the installed wh
 python/tests/tpch_compare.py	the Python package's tests: the answer check of the wheel's TPC-H run, read by the installed wheel's test and by its own, in Python
 python/tests/test_display.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_frame.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_frame_concat.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_frame_duckdb.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_frame_groupby.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_frame_join_window_duckdb.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_frame_merge.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_frame_run.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_frame_window.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_frame_verbs.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_frame_verbs_duckdb.py	the Python package's tests: the SDK surface is tested in Python
+python/tests/test_series_accessors.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql_cancel.py	the Python package's tests: the SDK surface is tested in Python
 python/tests/test_sql_fake.py	the Python package's tests: the SDK surface is tested in Python

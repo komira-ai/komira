@@ -16,6 +16,10 @@ nothing. It is used inside its own frame's verbs: `df[s]` filters by it and
   `-`, and `& | ~` over boolean Series. `isin` takes a list of values, or a
   Series of a frame of the same session (a semi join, which only `df[...]`
   takes).
+- `astype(dtype)` casts to one Arrow type (komira/_cast.py). `s.str` gives the
+  string methods of a string Series and `s.dt` the date and time methods of a
+  timestamp or date32 Series (komira/_accessors.py); on a Series of another
+  type each raises `AttributeError`, so `hasattr(s, "str")` is False.
 - The window verbs (`cumsum`, `cummin`, `cummax`, `rank`, `rolling`) give a
   Series that reads windows (komira/_windows.py); operators combine it with
   others as any Series, carrying the windows along.
@@ -37,7 +41,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import _ops, _refusals, _windows
+from . import _accessors, _cast, _ops, _refusals, _windows
 from ._errors import UnsupportedOperation
 from ._windows import Windows, merged
 
@@ -213,6 +217,35 @@ class Series:
         `string`, `bool`, ...), as the engine derives it; runs nothing."""
         self._check_current()
         return self._type
+
+    def astype(self, dtype: object, copy: bool | None = None, errors: str = "raise") -> Series:
+        """The Series cast to `dtype` (komira/_cast.py): a name, a pandas
+        spelling, a builtin or a pyarrow type of one of the Arrow types it
+        lists. A value that does not convert is the engine's error when the
+        frame runs. A Series that has the type already is returned as an
+        equal one. `copy` changes nothing, and `errors="ignore"` is refused."""
+        self._check_current()
+        _cast.check_astype_args(copy, errors, "astype")
+        node = _cast.cast_node(self._node, self._type, dtype, "astype")
+        return self._derive(self._node if node is None else node)
+
+    @property
+    def str(self) -> _accessors.StringMethods:
+        """The string methods of a string Series (komira/_accessors.py);
+        `AttributeError` for a Series of another type."""
+        self._check_current()
+        if not _accessors.is_string(self._type):
+            raise AttributeError(_accessors.accessor_message("str", self._type), name="str", obj=self)
+        return _accessors.StringMethods._of(self)
+
+    @property
+    def dt(self) -> _accessors.DatetimeMethods:
+        """The date and time methods of a timestamp or date32 Series
+        (komira/_accessors.py); `AttributeError` for a Series of another type."""
+        self._check_current()
+        if not _accessors.is_datetimelike(self._type):
+            raise AttributeError(_accessors.accessor_message("dt", self._type), name="dt", obj=self)
+        return _accessors.DatetimeMethods._of(self)
 
     def isin(self, values: object) -> Series:
         """Whether each value equals one of `values`, a list or tuple of at
@@ -474,6 +507,10 @@ class Series:
     # ---- attributes never fall through ----------------------------------
 
     def __getattr__(self, name: str) -> object:
+        # Python calls this after the `str` or `dt` property raised its
+        # AttributeError: the message is the accessor's, not "no attribute".
+        if name in ("str", "dt"):
+            raise AttributeError(_accessors.accessor_message(name, self._type), name=name, obj=self)
         message = None if name.startswith("_") else _refusals.refused(_refusals.SERIES, name)
         if message is None:
             message = f"'Series' object has no attribute '{name}'"
@@ -590,4 +627,4 @@ class _Membership(Series):
         raise UnsupportedOperation(_MEMBERSHIP)
 
     _bound = _predicate = _compare = _arith = _refuse
-    __neg__ = isin = cumsum = cummin = cummax = rank = rolling = _refuse
+    __neg__ = isin = astype = cumsum = cummin = cummax = rank = rolling = _refuse

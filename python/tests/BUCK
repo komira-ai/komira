@@ -891,6 +891,18 @@ _PLAN_EXPR_RUNTIMES = [
 #   files written here, semi and anti joins, and windows, each answered by
 #   komira through the plan door and by DuckDB from the SQL that means the
 #   same, equal row for row (frame_duckdb_test's comparator).
+# - frame_verbs_test, frame_concat_test and series_accessors_test,
+#   with no library, on the same runtimes: the node trees of fillna, dropna
+#   (a float column's not-NaN test), rename, add_prefix, add_suffix, astype,
+#   tail (a reversed-key top-n under the frame's sort), concat (the union and
+#   the projection that reorders a later frame), the refusal of value_counts
+#   by name, Series.astype and the .str and .dt methods, their
+#   output types, where the order is kept, every refusal with its full
+#   message, and the accessors' attribute rules.
+# - frame_verbs_duckdb_test, on CPython 3.13: those verbs over a Parquet file
+#   with NaN, float32, timestamp and date columns, each equal to DuckDB's
+#   answer to the SQL that means pandas' answer, and the casts and regular
+#   expressions the engine does not run refused at the terminal with its step.
 [py_test(
     name = "frame_test{}".format(suffix),
     src = "test_frame.py",
@@ -942,7 +954,27 @@ _PLAN_EXPR_RUNTIMES = [
         _PROTOBUF[p["suffix"]][runtime],
     ],
     **_ON[p["suffix"]]
-) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES for area in ["merge", "window"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES for area in ["merge", "window", "verbs"]]
+
+[py_test(
+    name = "frame_concat_test{}".format(suffix),
+    src = "test_frame_concat.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
+
+[py_test(
+    name = "series_accessors_test{}".format(suffix),
+    src = "test_series_accessors.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]][runtime],
+    ],
+    **_ON[p["suffix"]]
+) for suffix, p, runtime in _PLAN_EXPR_RUNTIMES]
 
 [python_binding_test(
     name = "frame_run_test" + p["suffix"],
@@ -975,6 +1007,18 @@ python_binding_test(
     name = "frame_join_window_duckdb_test",
     src = "test_frame_join_window_duckdb.py",
     srcs = ["test_frame_duckdb.py"],
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:duckdb",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+    ],
+)
+
+python_binding_test(
+    name = "frame_verbs_duckdb_test",
+    src = "test_frame_verbs_duckdb.py",
     data = {"libkomira": LIBKOMIRA},
     deps = [
         "//python:komira_with_plan_modules",
