@@ -55,7 +55,9 @@ build action unless
   cannot pass).
 
 The target users name, `//third_party/<lib>:<lib>`, is a `checked_cxx_library`:
-the prefixed library's providers, with the check as a dependency. Its result
+the prefixed library's providers, with the check as a dependency (on macOS,
+where `:crypto` re-exports //src/awslc's archive, its `[static-pic]` is that
+archive, `archive` of the rule, so a native shared library can link it). Its result
 is a `ValidationInfo`, and Buck2 runs the validations of every target in the
 graph it builds, so no build that links the library succeeds while the
 check is red.

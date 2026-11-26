@@ -265,6 +265,10 @@ again. The install test runs this program on the installed wheel.
   `sort_values(inplace=True)`, a stable sort, `head(-n)` and `df[0:5]` raise
   `UnsupportedOperation`.
 - `explain()` returns the engine's text of the plan and runs nothing.
+- **In a notebook.** A frame shows as a table of its column names over their
+  types, and runs nothing. A `Result` (`df.materialize()`, or `s.sql(...)`)
+  shows its first ten rows at most, saying when there are more, and is still
+  unread afterwards: `to_arrow()` and the other terminals read every row.
 
 #### Group-by and aggregates
 
@@ -371,7 +375,9 @@ by `import komira`.
   session.
 - The rest of the pandas-shaped DataFrame (`merge_asof`, `shift` and the other
   windows by row offset, `Series` reductions, missing-value verbs, writing
-  files, `//`, `%` and `**`, `isna`), and the polars-shaped one.
+  files, `//`, `%` and `**`, `isna`), and the rest of the polars-shaped
+  `komira.pl` (group-by, joins, windows, `unique`, the sinks, `from_arrow`,
+  regular expressions and `.dt`).
 - Iceberg tables: reading one, and writing to one by its name in a catalog.
 
 Those DataFrame verbs come in a later release of this same package.
@@ -387,6 +393,7 @@ The package's layout and API are designed in
 |---|---|
 | `komira/__init__.py` | the public names, exactly `__all__`, and the module's `__getattr__`, which refuses the pandas names of `_refusals.MODULE` with their message |
 | `komira/_frame.py` | the pandas-shaped `DataFrame` and its readers `read_parquet`, `read_csv` and `read_json`: a plan of `komira/_ops` nodes, the sources its scans read and the session it runs on; the verbs build nodes with `_ops`'s builder (with a sort put back above a limit where a verb keeps the order), derive the output schema with the encoder, and `materialize()` sends the encoded plan to the session's plan door. It writes no SQL text, and imports `_plan`, so protobuf, only when the first frame is made |
+| `komira/_display.py` | the HTML of the notebook display (`_repr_html_`): a frame's column names over their types, and the first ten rows a result read; values as Arrow's string cast (Python's `str` for a column the cast refuses), cut at 100 characters and HTML-escaped. It reads no stream and calls no library |
 | `komira/_series.py` | `Series`: an expression node over its frame's columns and the field the engine derives for it, bound to the frame and its generation; its operators, `isin` and `dtype` |
 | `komira/_merge.py` | `DataFrame.merge` and the semi and anti joins of `isin` with another frame's column: one `Join` node, a projection under it that renames the right frame's shared names and one over it that gives pandas' names; it writes no SQL text |
 | `komira/_windows.py` | the window verbs (`transform`, `cumsum`, `cummin`, `cummax`, `rank`, `rolling`): each a `WindowExpr` a Series reads by a placeholder, and the window projection `assign` and a filter build under their own; it writes no SQL text |
@@ -400,13 +407,14 @@ The package's layout and API are designed in
 | `komira/_native.py` | the `ctypes` loader: `load(lib_dir=None)` and the `Native` it returns, with the calls up to ABI 1.8 (`sql_stream`, `register_csv`, `register_json`, the run handle calls `run_new`, `run_cancel`, `run_progress` and `sql_stream_run` of 1.6, the last error's code and step, and `plan_stream`, the plan door of 1.8, among them) |
 | `komira/_run.py` | `run_sql`, which `Session.sql` runs a query with on ABI 1.6: the call `komira_sql_stream_run` on a helper thread under a run handle of its own, while the calling thread waits, reads the handle's progress for the `progress` callback, and cancels the handle when anything is raised on it (a Ctrl-C's `KeyboardInterrupt`, the callback's exception) |
 | `komira/_plan/` | the plan encoder: `encode_plan`, a plan of `komira/_ops` as the `komira.plan.v1` `WirePlanEnvelope` the plan door takes, every node with the output schema the engine derives for it and every scan reading a source libkomira described (`parquet_source`, `binding_source`); calls of user functions (`UdfCall`, `MapBatches`) as `WireUdfApply` and `WireMapBatchesNode` over the envelope's `UdfRef` list, one per distinct function, each with the komira/python descriptor; `encode_expr`, an expression node as a `WireExpr`; and `expr_field`, the output field the engine derives for it. It writes no SQL text. It imports the generated plan modules, which the wheel ships at `komira/plan/v1/`; `import komira` does not import it |
+| `komira/pl/` | `komira.pl`, the polars-shaped DataFrame surface ([docs/design/dataframe_surface.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface.md)): `LazyFrame` with `select`, `with_columns`, `filter`, `sort`, `head`, `limit`, `slice`, `tail`, `top_k`, `bottom_k`, `drop`, `rename`, `drop_nulls`, `columns`, `schema`, `explain` and `collect`; `Expr` with the operators, `alias`, `cast`, the null tests, `fill_null`, `is_in`, `is_between`, `abs`, the aggregates and `.str`; `col`, `lit`, `when`, `len`, `concat`; and the readers `scan_parquet`, `scan_ndjson` and `scan_csv`. A frame is a plan of `komira/_ops`; `collect()` encodes it with `komira/_plan` and runs it through `komira_plan_stream`. It writes no SQL text and imports no polars. A name it does not define raises `AttributeError`, with the refusal tables' message for theirs |
 | `komira/_runtime.py` | `check_loaded_runtime`, called before libkomira is opened: it compares the Mojo runtime libraries already loaded in the process with komira's copies by build id, and the GNU build id reader it uses |
-| `komira/_session.py` | `Session` with `register_parquet`, `register_csv`, `register_json` and `sql`, `Result`, and the session's private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal`; the private calls a frame makes (`_parquet_schema`, `_csv_binding`, `_json_binding`, `_plan_stream`, `_plan_render`), each under the session's lock; and `default_session()`, the process's default session |
+| `komira/_session.py` | `Session` with `register_parquet`, `register_csv`, `register_json` and `sql`, `Result` (whose notebook display reads its stream at most one batch past the tenth row and puts back a reader that replays those batches before the rest, so the result stays unread), and the session's private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal`; the private calls a frame makes (`_parquet_schema`, `_csv_binding`, `_json_binding`, `_plan_stream`, `_plan_render`), each under the session's lock; and `default_session()`, the process's default session |
 | `komira/py.typed` | the PEP 561 marker |
 | `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the tests that encode or run a plan; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |
 | `pythons.bzl` | the supported Pythons, the one list of them (Supported Pythons, below) |
-| `tests/` | the tests (`python_binding_test`, and `py_test` for the plan encoder and the frame with no library: `test_plan_expr.py`, `test_plan_expr_goldens.py`, `test_plan_rel.py`, `test_plan_rel_goldens.py`, `test_plan_udf.py`, `test_plan_udf_goldens.py`, `test_plan_no_sql.py`, `test_frame.py`, `test_frame_groupby.py`, `test_frame_merge.py` and `test_frame_window.py`), `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, `test_tpch_installed.py` and `tpch_compare.py`, TPC-H q1 to q22 at scale factor 1 through the installed wheel against DuckDB's recorded answers (`:tpch_via_wheel_test`; its answer check is held by `test_tpch_compare.py`), `test_analysis_job.py`, which runs `examples/analysis_job.py` from the installed wheel and compares its answers with DuckDB's (`:analysis_job_test`), and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
+| `tests/` | the tests (`python_binding_test`, and `py_test` for the plan encoder and the frame with no library: `test_plan_expr.py`, `test_plan_expr_goldens.py`, `test_plan_rel.py`, `test_plan_rel_goldens.py`, `test_plan_udf.py`, `test_plan_udf_goldens.py`, `test_plan_no_sql.py`, `test_frame.py`, `test_frame_groupby.py`, `test_frame_merge.py`, `test_frame_window.py`, and for `komira.pl` `test_pl_names.py` and `test_pl_verbs.py`), `test_pl_oracle.py`, `komira.pl` against polars on the real library, `fake_libkomira.c` and `fake_runtime_lib.c`, the stand-in libraries they load, `test_installed.py` and `wheel_install_run.py`, the install test and its driver, `test_tpch_installed.py` and `tpch_compare.py`, TPC-H q1 to q22 at scale factor 1 through the installed wheel against DuckDB's recorded answers (`:tpch_via_wheel_test`; its answer check is held by `test_tpch_compare.py`), `test_analysis_job.py`, which runs `examples/analysis_job.py` from the installed wheel and compares its answers with DuckDB's (`:analysis_job_test`), and `test_beside_modular.py`, the tests of komira loaded beside Modular's runtime |
 
 ### Supported Pythons
 
@@ -527,7 +535,8 @@ The tests below run on Linux x86_64 as build actions, with
 `//python/tests:runtime_test`, `//python/tests:cpu_test`,
 `//python/tests:frame_test`, `//python/tests:frame_groupby_test`,
 `//python/tests:frame_merge_test`, `//python/tests:frame_window_test`,
-`//python/tests:frame_run_test`, `//python/tests:frame_duckdb_test` and
+`//python/tests:frame_run_test`, `//python/tests:display_test`,
+`//python/tests:frame_duckdb_test` and
 `//python/tests:frame_join_window_duckdb_test`:
 
 | test | what it covers |
@@ -555,6 +564,7 @@ The tests below run on Linux x86_64 as build actions, with
 | `frame_run_test` | the DataFrame on the real library: the readers over Parquet, CSV and JSON files written by the test, each verb's rows through `komira_plan_stream`, `explain()`, a frame run twice, a missing file and a closed session refused at the reader, the engine's refusal at the terminal, the default session, and an ABI 1.7 stand-in refusing the plan door by the version it needs |
 | `frame_merge_test` | merge and the semi and anti joins of `isin` with no library: each `how`'s node tree (the renaming projection under the join, the naming one over it, the keys pandas' way, `sort=True`), the output types, the join's wire arm, every refusal with its full message, and the refusal of an `isin` of another frame anywhere but as the whole condition of `df[...]` |
 | `frame_window_test` | the window verbs with no library: the node tree of `transform`, `cumsum`, `cummin`, `cummax`, `rank` and `rolling` (the window projection, the masks of missing values and keys), of a Series that reads windows in `assign` and in a filter, under the sort of a sorted frame, the output types, the partition-by arms on the wire, and every refusal with its full message |
+| `display_test` | the notebook display with no library: a frame's names and types and a result's rows, each equal to its file in `tests/fixtures/display/`; at most ten rows, the stream read one batch past them; the row limit at its edges, long values cut and escaped, a stream failing while the rows are read, a Ctrl-C during the read, and a terminal on another thread waiting for a display; and each terminal reading every row after a display |
 | `frame_duckdb_test` | frame programs over one Parquet file with NULLs, negative numbers, floats and strings, each equal to DuckDB's answer to the SQL that means the same over the same file, in order where the frame is sorted: the verbs above, groupby and the reductions the engine runs against GROUP BY, the frame's reductions, drop_duplicates against DISTINCT, and the reductions the engine does not run yet refused at the terminal; CPython 3.13 (the minor with a pinned DuckDB) |
 | `frame_join_window_duckdb_test` | merges of that file and a second one written here (each `how`, the keys and suffixes, missing keys matching nothing), semi and anti joins, and the window verbs, each equal to DuckDB's answer to the SQL that means the same (`JOIN`, `EXISTS`, `OVER`), with `frame_duckdb_test`'s comparator; CPython 3.13 |
 

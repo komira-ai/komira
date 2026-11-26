@@ -472,8 +472,8 @@ _SUBQUERY_TEST_DATA.update({t + ".parquet": ":subquery_oracle[" + t + ".parquet]
 _SUBQUERY_TEST_DATA.update({c + ".tsv": ":subquery_oracle[" + c + ".tsv]" for c in _SUBQUERY_CASES})
 # DuckDB's tables and answers for test_run_sql_set_ops: tests/set_ops/data.sql
 # writes the Parquet files, and each line of tests/set_ops/cases.sql runs one
-# INTERSECT or EXCEPT query over them and writes its answer.
-_SET_OPS_FILES = ["ta", "tb", "tn", "te", "ab", "l", "r"]
+# UNION, INTERSECT or EXCEPT query over them and writes its answer.
+_SET_OPS_FILES = ["ta", "tb", "tn", "te", "tv", "ab", "z0", "zn", "l", "r"]
 
 _SET_OPS_CASES = [
     "arms_intersect",
@@ -511,6 +511,39 @@ _SET_OPS_CASES = [
     "group_over_derived",
     "distinct_inputs",
     "literals",
+    "union_basic",
+    "union_twocol",
+    "union_three_arms",
+    "union_empty_arm",
+    "union_allnull_arm",
+    "union_self",
+    "union_in_cte",
+    "union_in_derived",
+    "union_scan_vs_literal",
+    "union_then_intersect",
+    "union_widen_int_varchar",
+    "union_distinct_twocol",
+    "union_empty_left",
+    "union_mixed",
+    "union_varchar_key",
+    "union_double_nan",
+    "union_double_zero",
+    "union_widen_int_bigint",
+    "union_varchar_then_bigint",
+    "union_then_union_all",
+    "union_all_then_union",
+    "union_all_union_union_all",
+    "union_then_except",
+    "except_then_union",
+    "intersect_then_union",
+    "union_order_by_limit",
+    "union_group_over_derived",
+    "union_literals",
+    "intersect_in_cte",
+    "union_all_widen_int_varchar",
+    "union_widen_integer_varchar",
+    "intersect_widen_int_varchar",
+    "except_widen_varchar_int",
 ]
 
 sql_oracle(
@@ -855,14 +888,16 @@ _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".ts
 #   INTEGER keys at the ends of their range; every case is run; a RANGE bound
 #   that leaves the key's type fails at step execute with DuckDB's overflow
 #   error, and a frame DuckDB refuses fails at step bind with its reason.
-# - test_run_sql_set_ops: INTERSECT and EXCEPT through run_sql answer what the
-#   pinned DuckDB answers (the :set_ops_oracle action above) for each case of
-#   tests/set_ops/cases.sql, on one worker and on three: NULL rows equal, an
-#   all-NULL and an empty input, repeated rows, several columns of mixed types,
-#   one column of each key type, NaN, inputs widened to a common type, the
-#   precedence of INTERSECT over UNION ALL and EXCEPT, a sort and an
-#   aggregation over the result; every case is run; INTERSECT ALL and EXCEPT
-#   ALL are refused at parse by name.
+# - test_run_sql_set_ops: UNION (bare and UNION DISTINCT), INTERSECT and
+#   EXCEPT through run_sql answer what the pinned DuckDB answers (the
+#   :set_ops_oracle action above) for each case of tests/set_ops/cases.sql, on
+#   one worker and on three: NULL rows equal, an all-NULL and an empty input,
+#   repeated rows, several columns of mixed types, one column of each key type,
+#   NaN, 0.0 with -0.0, inputs widened to a common type (BIGINT with VARCHAR
+#   among them), the precedence of INTERSECT over UNION, UNION ALL and EXCEPT
+#   and a UNION ALL kept apart from a UNION beside it, a chain in a CTE and a
+#   derived table, a sort and an aggregation over the result; every case is
+#   run; INTERSECT ALL and EXCEPT ALL are refused at parse by name.
 # - test_run_sql_timers_off: Q6 through run_sql on four workers in the default
 #   build gives the oracle's answer and leaves every phase timer
 #   (phase_timers) unregistered and at zero.

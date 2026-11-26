@@ -46,6 +46,12 @@
 #   count; a matched pair is taken without a count; a second end is refused
 #   again. Catches an end that subtracts a stale start (the case of a failed
 #   begin sample) or one that is dropped without a trace.
+# - test_a_usage_bracket_on_a_target_without_usage_counts_no_drop: on a thread
+#   that has a lane, a `pt_ru_begin` / `pt_ru_end` pair leaves the overflow
+#   count 0 and every usage counter 0 on a target that reads no thread usage
+#   (macOS); where usage works the pair is a normal sample and the count is
+#   still 0. Catches an unavailable usage read booked as a dropped record, which
+#   made the probe report dropped timer records on every run.
 # - test_more_threads_than_lanes_are_counted_not_silent: with more thread ids
 #   than lanes, the lanes fill to PT_LANES, each dropped record adds one to
 #   `pt_overflow_count`, a thread that has a lane still records, and a calling
@@ -244,6 +250,27 @@ def test_an_end_without_its_begin_records_nothing_and_is_counted() raises:
     pt_reset()
 
 
+def test_a_usage_bracket_on_a_target_without_usage_counts_no_drop() raises:
+    comptime if CompilationTarget.is_linux():
+        # A sandbox that refuses getrusage makes the sample fail, which is a
+        # counted drop by design (the test above).
+        if not pt_ru_available():
+            print(
+                "SKIP test_a_usage_bracket_on_a_target_without_usage_counts_no_drop:"
+                " getrusage(RUSAGE_THREAD) is refused here, so the end is a counted drop"
+            )
+            return
+    pt_reset()
+    pt_record_ns[PH_FILTER](1)
+    pt_ru_begin[PH_FILTER]()
+    pt_ru_end[PH_FILTER]()
+    assert_equal(pt_overflow_count(), 0)
+    comptime if not CompilationTarget.is_linux():
+        for field in range(FIELD_RU_VOL, FIELD_RU_END):
+            assert_equal(pt_get(0, PH_FILTER, field), 0)
+    pt_reset()
+
+
 def test_more_threads_than_lanes_are_counted_not_silent() raises:
     # Synthetic thread ids stand in for threads (pt_record_ns_as). This test
     # fills the lane table for good, so it runs last in the process.
@@ -303,5 +330,6 @@ def main() raises:
     suite.test[test_forgetting_threads_frees_every_lane]()
     suite.test[test_thread_usage_counts_this_threads_switches_and_faults]()
     suite.test[test_an_end_without_its_begin_records_nothing_and_is_counted]()
+    suite.test[test_a_usage_bracket_on_a_target_without_usage_counts_no_drop]()
     suite.test[test_more_threads_than_lanes_are_counted_not_silent]()
     suite^.run()

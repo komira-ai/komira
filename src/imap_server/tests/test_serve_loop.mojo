@@ -37,6 +37,7 @@ from async_rt.reactor.socket_setup import (
     inet_loopback_be,
     set_so_rcvbuf,
     set_so_sndbuf,
+    wait_readable,
 )
 from http_core.tls import TlsConfig
 from mail_auth import TestAuthVerifier
@@ -156,6 +157,32 @@ def _run(mut rig: _Rig, mut peer: Peer, line: String, done: String) raises -> St
 def _noop(mut rig: _Rig, mut peer: Peer) raises:
     """One NOOP round trip: proof the connection is alive and served."""
     _ = _run(rig, peer, String("n1 NOOP"), String("n1 OK NOOP completed\r\n"))
+
+
+def _server_has_input(mut rig: _Rig) raises -> Bool:
+    """True when any accepted socket has bytes (or an end) waiting to be read:
+    async_rt's `wait_readable` with a zero timeout, over each one."""
+    var ids = rig.reg.all_conn_ids()
+    for i in range(len(ids)):
+        if wait_readable(rig.reg.fd_of(ids[i]), Int32(-1), 0):
+            return True
+    return False
+
+
+def _noop_at(mut rig: _Rig, mut peer: Peer, now_ms: Int) raises:
+    """One NOOP round trip served at `now_ms`. The clock moves only once the
+    NOOP has reached the server's socket, so the step that reads it sees the
+    connection as active at `now_ms` whether or not the kernel delivers
+    loopback bytes synchronously (macOS may not)."""
+    peer.send(String("n1 NOOP\r\n"))
+    while not _server_has_input(rig):
+        _ = peer.poll()
+        if peer.eof:
+            raise Error("the server closed the connection before the NOOP reached it")
+        yield_cpu()
+    rig.now_ms = now_ms
+    _wait_for(rig, peer, String("n1 OK NOOP completed\r\n"))
+    _ = peer.take_through(String("n1 OK NOOP completed\r\n"))
 
 
 def _upgrade(mut rig: _Rig, mut peer: Peer) raises:
@@ -420,8 +447,7 @@ def test_expiry_is_decided_by_now_ms_and_exact() raises:
     assert_equal(rig.reg.conn_count(), 2)
     # One millisecond more: `idle` is told and closed. `busy` speaks in the same
     # step's time, so it is not idle.
-    rig.now_ms = 2001
-    _noop(rig, busy)
+    _noop_at(rig, busy, 2001)
     assert_equal(rig.expired, 1)
     _wait_for(rig, idle, String("\r\n"))
     _wait_eof(rig, idle)
@@ -430,17 +456,12 @@ def test_expiry_is_decided_by_now_ms_and_exact() raises:
     )
     assert_equal(rig.reg.conn_count(), 1)
     # `busy` keeps speaking, so it is never idle ...
-    rig.now_ms = 3000
-    _noop(rig, busy)
-    rig.now_ms = 4000
-    _noop(rig, busy)
-    rig.now_ms = 5000
-    _noop(rig, busy)
-    rig.now_ms = 5900
-    _noop(rig, busy)
+    _noop_at(rig, busy, 3000)
+    _noop_at(rig, busy, 4000)
+    _noop_at(rig, busy, 5000)
+    _noop_at(rig, busy, 5900)
     # ... and exactly max_session_ms old (accepted at 1000) is not too old.
-    rig.now_ms = 6000
-    _noop(rig, busy)
+    _noop_at(rig, busy, 6000)
     assert_equal(rig.expired, 1)
     assert_equal(rig.reg.conn_count(), 1)
     # One millisecond more is.
@@ -464,19 +485,16 @@ def test_a_connection_that_does_not_log_in_is_closed() raises:
     _greeting(rig, user)
     _ = _run(rig, user, String("l1 LOGIN bob@example.com s3cret"), String("l1 OK"))
     # Both connected at 1000; lazy keeps talking but never logs in.
-    rig.now_ms = 2500
-    _noop(rig, lazy)
-    rig.now_ms = 4000  # exactly max_unauth_ms after the connect: alive
-    _noop(rig, lazy)
+    _noop_at(rig, lazy, 2500)
+    # 4000 is exactly max_unauth_ms after the connect: alive
+    _noop_at(rig, lazy, 4000)
     assert_equal(rig.expired, 0)
-    rig.now_ms = 4001
-    _noop(rig, user)
+    _noop_at(rig, user, 4001)
     assert_equal(rig.expired, 1)
     _wait_for(rig, lazy, String("* BYE Autologout"))
     _wait_eof(rig, lazy)
     # The user who logged in is not subject to that limit.
-    rig.now_ms = 50000
-    _noop(rig, user)
+    _noop_at(rig, user, 50000)
     assert_equal(rig.expired, 1)
     assert_equal(rig.reg.conn_count(), 1)
     lazy.close()
