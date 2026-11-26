@@ -70,3 +70,59 @@ def main() raises:
     assert_equal(p.structural_hash(), plan(3).structural_hash())
     assert_true(p.structural_hash() != plan(4).structural_hash())
 ```
+
+Build a window (`PartitionBy`) whose order keys state their NULL placement,
+`ROW_NUMBER() OVER (PARTITION BY a ORDER BY b ASC NULLS FIRST, a DESC)`. The
+optional last argument holds one `nulls_first` flag per order key. Without it,
+each key takes the derived placement, which is NULLs last in both directions.
+The render names a placement only where it differs from that default, so a
+window that states the default renders, and hashes, like one that states
+nothing:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo module
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, Schema, SchemaBuilder
+from plan_expr.partition_expr import PartitionExpr
+from plan_ir.logical_plan import LogicalPlan, SOURCE_PARQUET
+
+
+def schema() -> Schema:
+    var sb = SchemaBuilder()
+    sb.add_field(Field("a", ArrowType.INT64, nullable=False))
+    sb.add_field(Field("b", ArrowType.INT64, nullable=True))
+    return sb.build()
+
+
+def window(var nulls_first: Optional[List[Bool]]) raises -> LogicalPlan:
+    var scan = LogicalPlan.scan(String("t.parquet"), SOURCE_PARQUET, schema())
+    var fns = List[PartitionExpr]()
+    fns.append(PartitionExpr.row_number())
+    var partition: List[String] = ["a"]
+    var order: List[String] = ["b", "a"]
+    var descending: List[Bool] = [False, True]
+    return LogicalPlan.partition_by(
+        partition^, order^, descending^, fns^, scan^, nulls_first^
+    )
+
+
+def main() raises:
+    var first: List[Bool] = [True, False]
+    var p = window(Optional(first^))
+    var fn_text = String(PartitionExpr.row_number())
+    assert_equal(
+        String(p),
+        String("PartitionBy(partition=[a], order=[b ASC NULLS FIRST, a DESC], funcs=[")
+        + fn_text
+        + "])\n"
+        + '  Scan(path="t.parquet", type=PARQUET, source_kind=COLUMNAR)\n',
+    )
+
+    # Stating the default is the same plan as stating nothing.
+    var last: List[Bool] = [False, False]
+    assert_equal(
+        window(Optional(last^)).structural_hash(),
+        window(None).structural_hash(),
+    )
+    assert_true(p.structural_hash() != window(None).structural_hash())
+```

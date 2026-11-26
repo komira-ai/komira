@@ -6,16 +6,21 @@
 # claimed there makes `prod-stage` refuse and turns main red. The pull request check cannot
 # write to the live registry, so it holds the members to this file instead
 # (//release:prod_claimed_names_cases): a maintainer adds a name here only AFTER claiming it
-# on the prod registry, in the pull request that adds the member.
+# on the prod registry, in the pull request that adds the member or ahead of it. A name claimed
+# for a library that is not published yet (its row in release/UNPUBLISHED.md) is listed too, and
+# the check accepts a name no member has.
 #
 # A line stays when its package leaves the release: the 16 kci_* names (kci is retired and its
 # libraries are deleted) stay claimed so nobody else can take them. The check refuses a dropped
 # line of that set, and a member whose name is not claimed.
 anomaly
+arrow
+arrow_ipc
 async_api
 atomic_alias
 awslc
 bench
+bench_corpus
 bench_report
 broker_proto
 bump_arena
@@ -26,6 +31,8 @@ calendar_proto
 chat_proto
 clock
 codeworks_api
+column_format
+column_kernels
 compression
 contacts_proto
 containers
@@ -37,10 +44,13 @@ datetime
 dynamic_filter
 encoding
 fork_join
+git
 hashing
 host_probe
 job_report_proto
+jose
 json
+jwks
 kafka_server
 kci_api
 kci_artifact
@@ -58,19 +68,26 @@ kci_resource_proto
 kci_validator_report
 kci_validator_rows
 kci_workflow_check
+kg_code
 kg_mode
 kg_spec
 libc
 log
 lz4
 mail_address
+mail_auth
 mail_message
 managed_mail_proto
 mcp_server
 metrics
 name_registry
+oauth
+op_agg_row_api
+optimized_plan_header
 parquet_api
+plan_expr
 plan_proto
+plan_stats
 proto_codec
 protobuf
 resources
@@ -78,8 +95,12 @@ retry
 rowcell
 runtime_paths
 scalar_arithmetic
+secret_env
+secret_registry
+secret_store
 simd_ops
 snapshotter
+source_url
 spsc_ring
 supervisor_proto
 sync
@@ -90,6 +111,8 @@ trace
 uuid
 validation_run
 vcard
+viewport
+webpush
 wkt
 xml
 zlib

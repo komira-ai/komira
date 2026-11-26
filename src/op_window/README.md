@@ -10,7 +10,8 @@ input columns followed by the new columns.
 Results follow DuckDB (docs/design/query_semantics.md §4 and §9):
 
 - Rows come out ordered by partition keys ascending and order keys in their
-  own direction, NULLs last in both directions, floats with NaN above +inf.
+  own direction, each order key's NULLs where `nulls_first` places them (last
+  in both directions when it is empty), floats with NaN above +inf.
   A float ORDER BY key column comes back with each -0.0 written as 0.0.
 - NULL partition keys form one partition; NULL order keys are peers of each
   other; NaN equals NaN and -0.0 equals +0.0 as keys.
@@ -43,6 +44,10 @@ Modules:
   summed from its own values alone (subtracting a value that leaves would
   take with it what it absorbed, or leave NaN behind an infinity); MIN / MAX
   by rescan; every aggregate over the whole partition.
+- `partition_narrow_int`: SUM / AVG / MIN / MAX over an INT8, INT16 or INT32
+  column: the sink widens the argument once (INT64, or FLOAT64 for the AVG of
+  an INT8 or INT16, which DuckDB divides in double), runs the kernels above
+  and narrows a MIN / MAX result back to the input type.
 - `partition_value_fns`: LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE over
   INT64, FLOAT64 and STRING columns.
 - `partition_scan_sink_parallel`: `_execute_partition_by_sink_parallel`, the
