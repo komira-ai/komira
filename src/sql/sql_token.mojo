@@ -250,6 +250,20 @@ def tokenize(sql: String) raises -> List[Token]:
     case-insensitive dialect); keywords and aggregate names are ordinary
     identifiers the parser classifies by (lower-cased) text.
     """
+    var scratch = List[Int]()
+    return tokenize(sql, scratch)
+
+
+def tokenize(sql: String, mut starts: List[Int]) raises -> List[Token]:
+    """Tokenize `sql` like `tokenize(sql)`, and append to `starts` the byte
+    offset in `sql` where each token starts, the closing TK_EOF's being the
+    byte length of `sql`.
+
+    The offset is appended before the token is lexed, so when the tokenizer
+    raises, the last entry of `starts` is where the token it was lexing starts
+    (an unterminated string literal's opening quote, the unexpected character).
+    On success `len(starts) == len(tokens)`.
+    """
     var src = sql.as_bytes()
     var n = len(src)
     var i = 0
@@ -264,6 +278,9 @@ def tokenize(sql: String) raises -> List[Token]:
             while i < n and src[i] != UInt8(ord("\n")):
                 i += 1
             continue
+        # Every path below emits exactly one token (or raises), so this keeps
+        # `starts` aligned with `out`.
+        starts.append(i)
         # numeric literal: INT or FLOAT. A FLOAT is `digits '.' digits`,
         # `digits '.'` (`5.`), `'.' digits` (`.5`), or one of those followed by
         # an exponent (`1e-2`, `2.5E1`, `1.e2`); DuckDB reads the first three as
@@ -516,6 +533,7 @@ def tokenize(sql: String) raises -> List[Token]:
                 " `x::BIGINT`"
             )
         raise Error("SQL syntax error: unexpected character '" + chr(Int(c)) + "'")
+    starts.append(n)
     out.append(Token(TK_EOF, String(""), Int64(0), Float64(0.0)))
     return out^
 

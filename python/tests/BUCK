@@ -499,7 +499,7 @@ c_shared_lib(
 
 # Session.sql on the real library: SELECT 1 AS n, a GROUP BY over a checked-in
 # Parquet file (3000 rows, five labels, six row groups), an aggregate over the
-# quickstart's readings.parquet, an answer of no rows, each terminal, an engine
+# checked-in fixtures/readings.parquet, an answer of no rows, each terminal, an engine
 # refusal with its message and the session answering after it, and a result
 # read after its session was closed or collected (the stream needs neither),
 # or never read at all, without a crash.
@@ -509,7 +509,7 @@ c_shared_lib(
     data = {
         "labels.parquet": "komira//src/parquet_codec:pyarrow_multi_dict_page.parquet",
         "libkomira": LIBKOMIRA,
-        "readings.parquet": "komira//python:examples/readings.parquet",
+        "readings.parquet": "fixtures/readings.parquet",
     },
     deps = ["//python:komira", _PYARROW[p["suffix"]]],
     **_ON[p["suffix"]]
@@ -1089,6 +1089,22 @@ python_binding_test(
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# - pl_frames_test: as pl_verbs_test, for group_by, join, unique and the
+#   windows (over, rank, cum_*, rolling_*, an aggregate broadcast beside
+#   row-wise values): each plan equals a hand-written tree, polars' output
+#   names and types, every refusal with its full message, and the plan bytes
+#   collect() hands the session hold no SQL text.
+[py_test(
+    name = "pl_frames_test" + p["suffix"],
+    src = "test_pl_frames.py",
+    deps = [
+        "//python:komira_with_plan_modules",
+        _PROTOBUF[p["suffix"]]["7.36.2"],
+        _PYARROW[p["suffix"]],
+    ],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # komira.pl against polars itself (test_pl_oracle.py), on the real library and
 # CPython 3.13, the one minor with a pinned polars: each program, written once
 # for both modules, gives the same frame through komira.pl's plan and the plan
@@ -1110,12 +1126,30 @@ python_binding_test(
     ],
 )
 
+# group_by, join, unique and the windows of komira.pl against polars itself
+# (test_pl_oracle_frames.py), as pl_oracle_test: each program, written once
+# for both modules, gives the same frame through komira.pl's plan as through
+# polars 1.44.2, values and dtypes, and the schema komira.pl derives is the
+# answer's; and the plan entry is called, never the SQL one.
+python_binding_test(
+    name = "pl_oracle_frames_test",
+    src = "test_pl_oracle_frames.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:polars",
+        _PYARROW[""],
+    ],
+)
+
 # The clean-environment install tests of the wheel (python/BUCK,
 # wheel_install_test): the driver that installs the wheels into an empty
 # prefix and runs a test there, the three tests the installed interpreter runs
 # (the wheel alone, the wheel beside Modular's runtime, and the wheel after an
 # upgrade from the previous release), and the serialized plan the first renders
-# (the scan plan of src/so/tests/gate/gate_plan_render.mojo, as hex).
+# (the scan plan of src/so/tests/gate/gate_plan_render.mojo, as hex) and the
+# Parquet file whose aggregate it answers (fixtures/readings.parquet).
 [export_file(
     name = f,
     visibility = ["komira//python:"],
@@ -1128,6 +1162,7 @@ python_binding_test(
     "test_beside_modular.py",
     "test_upgrade.py",
     "fixtures/scan_plan.hex",
+    "fixtures/readings.parquet",
     "fixtures/previous_release_only.txt",
 ]]
 

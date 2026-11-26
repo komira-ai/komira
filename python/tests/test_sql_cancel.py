@@ -6,8 +6,11 @@ on a context and on a run handle, and counts the streams it made and released:
 - Ctrl-C while a query runs cancels its run handle, sql raises
   KeyboardInterrupt once the run returned, the handle is freed after the call
   left, and the session answers the next query, under a new handle;
-- a second Ctrl-C while the query stops is not raised: the first one is, and
-  the run is cancelled once;
+- a second Ctrl-C while the query stops is not raised: the first one is.
+  Landing once stop has cancelled, it cancels nothing more; landing between
+  komira_run_cancel's return and stop noting it, it makes stop cancel again,
+  which the ABI allows (a second cancel does nothing): exactly two cancels,
+  both before the handle is freed;
 - a query that answers although it was cancelled (the cancel came after its
   last check) raises KeyboardInterrupt, and its stream is released;
 - a refusal during which Ctrl-C came raises KeyboardInterrupt and makes no
@@ -217,33 +220,160 @@ def ctrl_c_cancels_a_running_query(fake, s, c):
     assert streams.since() == (1, 1), streams.since()
 
 
+class StopWatch:
+    """While in use, the `_Call` that sql makes sets `waiting` when its stop
+    waits for the call with the cancel already noted: a Ctrl-C from then on
+    lands after the cancel and its flag."""
+
+    def __init__(self):
+        self.waiting = threading.Event()
+        watch = self
+
+        class Done(threading.Event):
+            def __init__(self, call):
+                super().__init__()
+                self._call = call
+
+            def wait(self, timeout=None):
+                if self._call._cancelled:
+                    watch.waiting.set()
+                return super().wait(timeout)
+
+        class Call(_run._Call):
+            def __init__(self, *args):
+                super().__init__(*args)
+                self.done = Done(self)
+
+        self._call = Call
+
+    def __enter__(self):
+        self._real = _run._Call
+        _run._Call = self._call
+        return self
+
+    def __exit__(self, *exc):
+        _run._Call = self._real
+
+
 def a_second_ctrl_c_while_the_query_stops_is_not_raised(fake, s):
+    """The second Ctrl-C lands once stop has cancelled and noted it, while it
+    waits for the call: it is not raised, and the run is cancelled once."""
     handler = Handler()
     signal.signal(signal.SIGINT, handler)
     journal = Journal(fake)
 
-    def interrupt_twice():
-        fake.wait_entered(1)
-        ctrl_c()
-        # The run was cancelled and now holds at gate 2 before it returns.
-        fake.wait_entered(2)
-        ctrl_c()
-        handler.called[1].wait()
-        fake.open(2)
+    with StopWatch() as watch:
 
-    waiter = on_thread(interrupt_twice)
-    e = raised(lambda: s.sql("slowcancel:1:2"))
-    waiter.join()
-    signal.signal(signal.SIGINT, signal.default_int_handler)
+        def interrupt_twice():
+            fake.wait_entered(1)
+            ctrl_c()
+            # The run was cancelled and now holds at gate 2 before it returns.
+            fake.wait_entered(2)
+            watch.waiting.wait()
+            ctrl_c()
+            handler.called[1].wait()
+            fake.open(2)
+
+        waiter = on_thread(interrupt_twice)
+        try:
+            e = raised(lambda: s.sql("slowcancel:1:2"))
+        finally:
+            waiter.join()
+            signal.signal(signal.SIGINT, signal.default_int_handler)
     assert type(e) is KeyboardInterrupt and str(e) == "0", repr(e)
     assert handler.count == 2, handler.count
     lines = journal.lines()
-    assert [line for line in lines if line.endswith(" cancel")] == ["r{} cancel".format(run_number(lines))], lines
+    r, c = run_number(lines), s_ctx_number(fake)
+    assert lines == [
+        "r{} new".format(r),
+        "c{} sql_run slowcancel:1:2 enter".format(c),
+        "r{} cancel".format(r),
+        "c{} sql_run slowcancel:1:2 leave".format(c),
+        "c{} last_error - enter".format(c),
+        "c{} last_error - leave".format(c),
+        "c{} last_error - enter".format(c),
+        "c{} last_error - leave".format(c),
+        "r{} free".format(r),
+    ], lines
     answers(s)
 
 
-def a_query_answering_after_its_cancel_is_dropped(fake, s, cancels):
+class CancelThenCtrlC:
+    """Stands in for `Native.run_cancel`: the first call cancels through the
+    stand-in, then a second Ctrl-C lands before it returns, so stop has not
+    noted the cancel; every later call only cancels."""
+
+    def __init__(self, native, handler):
+        self._cancel = native.run_cancel
+        self._handler = handler
+        self.calls = 0
+
+    def __call__(self, run):
+        self.calls += 1
+        self._cancel(run)
+        if self.calls == 1:
+            ctrl_c()
+            # The signal is pending on this thread: its handler runs and
+            # raises at the next point Python checks for one, when ctrl_c
+            # returns or at the latest inside this wait, which never returns
+            # since only the handler sets the event.
+            self._handler.called[1].wait()
+
+
+def a_second_ctrl_c_between_the_cancel_and_its_flag_cancels_again(fake, s):
+    """The second Ctrl-C lands after komira_run_cancel took but before stop
+    noted it: stop cancels again, which the ABI allows (a second cancel does
+    nothing). Exactly two cancels on the one handle, both before the free; the
+    first Ctrl-C is raised and the session answers after."""
+    native = _native.load()
+    handler = Handler()
+    signal.signal(signal.SIGINT, handler)
+    journal = Journal(fake)
+    before = cancel_count(fake)
+    cancel = CancelThenCtrlC(native, handler)
+    native.run_cancel = cancel
+
+    def interrupt_then_open():
+        fake.wait_entered(19)
+        ctrl_c()
+        fake.wait_entered(20)
+        fake.wait_cancels(before + 2)
+        fake.open(20)
+
+    waiter = on_thread(interrupt_then_open)
+    try:
+        e = raised(lambda: s.sql("slowcancel:19:20"))
+    finally:
+        del native.run_cancel
+        waiter.join()
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+    assert type(e) is KeyboardInterrupt and str(e) == "0", repr(e)
+    assert handler.count == 2 and cancel.calls == 2, (handler.count, cancel.calls)
+    lines = journal.lines()
+    r, c = run_number(lines), s_ctx_number(fake)
+    assert lines == [
+        "r{} new".format(r),
+        "c{} sql_run slowcancel:19:20 enter".format(c),
+        "r{} cancel".format(r),
+        "r{} cancel".format(r),
+        "c{} sql_run slowcancel:19:20 leave".format(c),
+        "c{} last_error - enter".format(c),
+        "c{} last_error - leave".format(c),
+        "c{} last_error - enter".format(c),
+        "c{} last_error - leave".format(c),
+        "r{} free".format(r),
+    ], lines
+    answers(s)
+
+
+def cancel_count(fake):
+    """The cancels the stand-in has journaled, on every handle."""
+    return sum(1 for line in fake.journal() if line.endswith(" cancel"))
+
+
+def a_query_answering_after_its_cancel_is_dropped(fake, s):
     journal, streams = Journal(fake), Streams(fake)
+    cancels = cancel_count(fake)
 
     def interrupt_then_answer():
         fake.wait_entered(3)
@@ -578,7 +708,8 @@ def main(args):
 
     ctrl_c_cancels_a_running_query(fake, s, c)
     a_second_ctrl_c_while_the_query_stops_is_not_raised(fake, s)
-    a_query_answering_after_its_cancel_is_dropped(fake, s, cancels=2)
+    a_second_ctrl_c_between_the_cancel_and_its_flag_cancels_again(fake, s)
+    a_query_answering_after_its_cancel_is_dropped(fake, s)
     a_refusal_during_ctrl_c_raises_the_interrupt(fake, s)
     a_handler_that_does_not_raise_leaves_the_query_running(fake, s)
     progress_is_given_each_reading(fake, s)
