@@ -542,8 +542,9 @@ top-level `pypi.yml` and the macOS arm64 wheel by `pypi-macos-arm64.yml`, each t
     libraries are members; no other file of Modular's distribution; a size cap.
   - The rule refuses a package whose `repository.url` is not `https://github.com/komira-ai/komira`,
     because trusted publishing requires that it match.
-  - The policy code moves into a module both tools import, in a refactor of its own before the npm
-    rule (rule P7).
+  - The policy code is a module both tools import: **EXISTS** as the zig_module
+    `//tools/build/package:native_policy` (`tools/build/package/native_policy/`), moved out of the
+    wheel tool in a refactor of its own before the npm rule (rule P7).
   - Its sub-targets are `[check]`, `[release]` and `[release_check]`, as for the wheel. The
     `[release]` target refuses an unstamped package.
 - **The targets.** `//node:package` (the main package) and

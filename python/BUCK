@@ -707,7 +707,8 @@ wheel_file(
 # minimum macOS above the tag's, an install name that is not @rpath/<file>, a
 # run path that is not @loader_path-relative, a load that is neither a member,
 # nor under /usr/lib or /System/Library, and a code signature that is missing
-# or does not match the file's pages (wheel/policy.zig, wheel/codesign.zig).
+# or does not match the file's pages (tools/build/package/native_policy/:
+# policy.zig, codesign.zig).
 #
 # `:wheel_libs_macos_arm64`: from komira/_lib/libkomira.dylib, the library
 # _native.load opens on macOS, every load command resolves to a member through

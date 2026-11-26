@@ -1,4 +1,4 @@
-//! komira_wheel: what a macOS library asks of the system that loads it, read
+//! native_policy: what a macOS library asks of the system that loads it, read
 //! from its Mach-O bytes: its CPU type and file type, its install name
 //! (LC_ID_DYLIB), the libraries it loads (LC_LOAD_DYLIB and its weak,
 //! re-export, lazy and upward forms, in command order), its run path entries
