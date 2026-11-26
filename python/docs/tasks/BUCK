@@ -1,0 +1,96 @@
+load("@komira//python:dependencies.bzl", "PROTOBUF_MACOS", "PROTOBUF_WHEEL", "PYARROW_MACOS", "PYARROW_WHEELS")
+load("@komira//python:install_test.bzl", "wheel_install_test")
+load("@komira//python:task_examples.bzl", "task_pages_check")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
+
+# The Python examples of the common tasks (docs/tasks/README.md): one
+# directory per task, `<rank>-<slug>/`, after an entry of
+# docs/tasks/catalogue.json, each holding example.py, expected_output.txt
+# and page.md.
+
+# Every file of every task directory, at its path below this package: the
+# directory the checks below read.
+_FILES = glob(["*/**"])
+
+_TASKS = sorted({f.split("/")[0]: True for f in _FILES}.keys())
+
+filegroup(
+    name = "tree",
+    srcs = _FILES,
+)
+
+# The catalogue against the directories (python/task_examples.bzl): each
+# directory is a task that is not a gap, holds exactly its three files, and
+# its page shows example.py and expected_output.txt byte for byte; every gap
+# names its issues.
+task_pages_check(
+    name = "pages",
+    catalogue = "komira//docs/tasks:catalogue.json",
+    catalogue_display = "docs/tasks/catalogue.json",
+    tree = ":tree",
+    display = "python/docs/tasks",
+)
+
+_WHEELS = [
+    "komira//python:komira_wheel",
+    "komira//python/tests:" + PYARROW_WHEELS[""]["file"],
+    "komira//python/tests:" + PROTOBUF_WHEEL["file"],
+]
+
+_DRIVER = "komira//python/tests:run_task_example.py"
+
+# Each task's example, one target per directory, named as the directory:
+# the wheel installed into an empty environment of the hermetic CPython 3.13
+# with its pyarrow and protobuf and nothing else, no network, and example.py
+# run there from a new empty directory, what it prints held to
+# expected_output.txt byte for byte (python/tests/run_task_example.py). On
+# linux-x86_64, in the pull request's check.
+[wheel_install_test(
+    name = t,
+    python = "komira//third_party/python:cpython",
+    wheels = _WHEELS,
+    script = _DRIVER,
+    args = ["--task", t],
+    files = {"--tasks-dir": ":tree"},
+) for t in _TASKS]
+
+# The same run on rank 1's example held to an expected output that differs in
+# its second line: it must fail, naming the task and that line.
+filegroup(
+    name = "tree_wrong_expected_output",
+    srcs = {
+        "1-read-csv-file/example.py": "1-read-csv-file/example.py",
+        "1-read-csv-file/expected_output.txt": "komira//python/tests:fixtures/task_wrong_expected_output.txt",
+    },
+)
+
+wheel_install_test(
+    name = "refuses_wrong_expected_output",
+    python = "komira//third_party/python:cpython",
+    wheels = _WHEELS,
+    script = _DRIVER,
+    args = ["--task", "1-read-csv-file"],
+    files = {"--tasks-dir": ":tree_wrong_expected_output"},
+    expect_failure = "AssertionError: python/docs/tasks/1-read-csv-file printed other text than its expected_output.txt: line 2 is " +
+                     "\"{'id': 2, 'name': 'Bo', 'city': 'Lima', 'score': 7.0}\", expected \"{'id': 2, 'name': 'Bo', 'city': 'Lima', 'score': 7.5}\"",
+)
+
+# Every example on the macOS arm64 wheel, one run on the farm's macOS
+# workers: built by release-macos.yml's step `build the macOS Python harness
+# tests` (DARWIN_PYTHON_HARNESS, release/darwin_libs.bzl), never by a pull
+# request (tools/build/ci/rules.bzl, EXCLUDED). CPython 3.13 is the one macOS
+# interpreter pinned.
+wheel_install_test(
+    name = "examples_macos_arm64",
+    python = "komira//third_party/python:cpython_macos",
+    wheels = [
+        "komira//python:komira_wheel_macos_arm64",
+        "komira//python/tests:" + PYARROW_MACOS["file"],
+        "komira//python/tests:" + PROTOBUF_MACOS["file"],
+    ],
+    script = _DRIVER,
+    args = [a for t in _TASKS for a in ["--task", t]],
+    files = {"--tasks-dir": ":tree"},
+    exec_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:pypi-wheel-macos-arm64
+)

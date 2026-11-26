@@ -338,6 +338,8 @@ The package's layout and API are designed in
 | `komira/py.typed` | the PEP 561 marker |
 | `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the tests that encode or run a plan; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |
+| `task_examples.bzl` | `task_pages_check`, the check of the common-task pages against the catalogue (`docs/tasks/catalogue.json`) |
+| `docs/tasks/` | the Python examples of the common data-analysis tasks, one directory `<rank>-<slug>/` per task with `example.py`, `expected_output.txt` and `page.md`, and `BUCK`, which runs each example against the installed wheel ([docs/tasks/README.md](https://github.com/komira-ai/komira/blob/main/docs/tasks/README.md)) |
 | `pythons.bzl` | the supported Pythons, the one list of them (Supported Pythons, below) |
 | `CHANGELOG.md` | what the releases it keeps added or changed, newest first, and how a change gets an entry (Changelog entries, below) |
 | `changelog.d/` | the entries no kept release holds yet, one file `<slug>.md` for each change |

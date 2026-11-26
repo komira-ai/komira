@@ -115,15 +115,15 @@ jobs:
           assert-remote: ${{ steps.assert.outputs.path }}
       # The Python test harness on macOS arm64: the macOS CPython and macOS wheels install on a macOS
       # worker and the hello binding test (pyarrow, and a Mojo shared library loaded by path) runs
-      # there, with its three twins that must fail the way they name. Release only: no pull request
-      # runs a macOS action.
+      # there, with its three twins that must fail the way they name; and every common-task example
+      # (python/docs/tasks) on the macOS arm64 wheel. Release only: no pull request runs a macOS action.
       # The targets are DARWIN_PYTHON_HARNESS of release/darwin_libs.bzl, which pr.yml analyses for
       # darwin-arm64 (//:release_macos_cases holds the two to one list).
       - name: build the macOS Python harness tests
         id: python
         uses: ./.github/actions/buck2-farm
         with:
-          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going komira//tools/build/examples/python_binding:hello komira//tools/build/examples/python_binding:refuses_missing_lib komira//tools/build/examples/python_binding:refuses_wrong_add komira//tools/build/examples/python_binding:refuses_wrong_sum
+          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going komira//tools/build/examples/python_binding:hello komira//tools/build/examples/python_binding:refuses_missing_lib komira//tools/build/examples/python_binding:refuses_wrong_add komira//tools/build/examples/python_binding:refuses_wrong_sum komira//python/docs/tasks:examples_macos_arm64
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: the macOS build failed
         if: failure()

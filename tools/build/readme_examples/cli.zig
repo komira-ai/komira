@@ -34,6 +34,17 @@
 //!         check), exit 0 and write the refusal to --out only when the
 //!         members are refused and the refusal contains <text>; otherwise
 //!         exit 1. --out is required, and at least one member.
+//!     tool tasks-check --catalogue <catalogue.json> --catalogue-display <name>
+//!                      --root <dir> --display <dir> --out <file>
+//!         The check of the common-task pages (tasks.zig): the catalogue,
+//!         and each subdirectory of --root as a task directory (files at the
+//!         top of --root are not read). Refusals name the catalogue
+//!         --catalogue-display and the task files under --display. Passing,
+//!         writes to --out `<directory> <status>` per task directory, in
+//!         name order (exit 0); refused, prints each refusal on its own line
+//!         and writes nothing (exit 1). The build runs it on
+//!         docs/tasks/catalogue.json and python/docs/tasks
+//!         (python/docs/tasks/BUCK, `:pages`).
 //!
 //! A flag is `--name value` or `--name=value`. Everything goes to stdout.
 //! Exit status: 0; 1 when the README is refused (each reason on its own line,
@@ -44,6 +55,7 @@ const std = @import("std");
 const examples = @import("examples.zig");
 const program = @import("program.zig");
 const link = @import("link.zig");
+const tasks = @import("tasks.zig");
 const Allocator = std.mem.Allocator;
 
 /// What the process does: its exit status and the bytes it prints (main.zig
@@ -54,7 +66,8 @@ const USAGE = "usage: tool generate --readme F --display NAME --package NAME --l
     "       tool map --package NAME --display NAME --report F\n" ++
     "       tool link --readme F --display NAME --out F\n" ++
     "       tool link-check --readme F --display NAME --expect F --out F\n" ++
-    "       tool release-check --out F [--expect-refusal TEXT] (--member NAME DISPLAY F | --no-readme NAME DISPLAY)...\n";
+    "       tool release-check --out F [--expect-refusal TEXT] (--member NAME DISPLAY F | --no-readme NAME DISPLAY)...\n" ++
+    "       tool tasks-check --catalogue F --catalogue-display NAME --root D --display D --out F\n";
 
 fn usage(alloc: Allocator, why: []const u8) Outcome {
     const text = std.mem.concat(alloc, u8, &.{ "readme-examples: ", why, "\n", USAGE }) catch oom();
@@ -297,6 +310,73 @@ fn releaseCheck(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Out
     return .{ .code = 0, .stdout = "" };
 }
 
+/// The file `name` of `d`, null when there is none; another failure to read it
+/// is returned.
+fn readOptional(alloc: Allocator, d: std.fs.Dir, name: []const u8) !?[]const u8 {
+    return d.readFileAlloc(alloc, name, std.math.maxInt(usize)) catch |e| switch (e) {
+        error.FileNotFound => null,
+        else => e,
+    };
+}
+
+fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.lessThan(u8, a, b);
+}
+
+/// The task directories under `root`, in name order, each with what it holds.
+fn readTasks(alloc: Allocator, dir: std.fs.Dir, root: []const u8) ![]const tasks.Task {
+    var top = try dir.openDir(root, .{ .iterate = true });
+    defer top.close();
+    var names = std.ArrayList([]const u8).empty;
+    var it = top.iterate();
+    while (try it.next()) |e| {
+        if (e.kind == .directory) try names.append(alloc, try alloc.dupe(u8, e.name));
+    }
+    std.mem.sort([]const u8, names.items, {}, lessThan);
+    var out = std.ArrayList(tasks.Task).empty;
+    for (names.items) |name| {
+        var sub = try top.openDir(name, .{ .iterate = true });
+        defer sub.close();
+        var files = std.ArrayList([]const u8).empty;
+        var fit = sub.iterate();
+        while (try fit.next()) |e| {
+            const shown = if (e.kind == .directory) try std.mem.concat(alloc, u8, &.{ e.name, "/" }) else try alloc.dupe(u8, e.name);
+            try files.append(alloc, shown);
+        }
+        std.mem.sort([]const u8, files.items, {}, lessThan);
+        try out.append(alloc, .{
+            .name = name,
+            .files = files.items,
+            .example = try readOptional(alloc, sub, "example.py"),
+            .expected = try readOptional(alloc, sub, "expected_output.txt"),
+            .page = try readOptional(alloc, sub, "page.md"),
+        });
+    }
+    return out.items;
+}
+
+fn tasksCheck(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcome {
+    const v = switch (flags(alloc, argv, &.{ "catalogue", "catalogue-display", "root", "display", "out" })) {
+        .values => |v| v,
+        .refused => |o| return o,
+    };
+    const catalogue = dir.readFileAlloc(alloc, v[0], std.math.maxInt(usize)) catch |e| {
+        return .{ .code = 2, .stdout = fmt(alloc, "readme-examples: cannot read {s}: {s}\n", .{ v[0], @errorName(e) }) };
+    };
+    const found = readTasks(alloc, dir, v[2]) catch |e| {
+        return .{ .code = 2, .stdout = fmt(alloc, "readme-examples: cannot read the task directories of {s}: {s}\n", .{ v[2], @errorName(e) }) };
+    };
+    const result = tasks.check(alloc, v[3], v[1], catalogue, found) catch oom();
+    if (result.refusals.len > 0) {
+        const text = std.mem.join(alloc, "\n", result.refusals) catch oom();
+        return .{ .code = 1, .stdout = fmt(alloc, "{s}\n", .{text}) };
+    }
+    writeFile(dir, v[4], result.report) catch |e| {
+        return .{ .code = 2, .stdout = fmt(alloc, "readme-examples: cannot write {s}: {s}\n", .{ v[4], @errorName(e) }) };
+    };
+    return .{ .code = 0, .stdout = "" };
+}
+
 /// What the tool does with `argv`, paths read relative to `dir`.
 pub fn run(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcome {
     if (argv.len < 2) return usage(alloc, "no subcommand");
@@ -305,5 +385,6 @@ pub fn run(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcome 
     if (std.mem.eql(u8, argv[1], "link")) return linkCmd(alloc, dir, argv);
     if (std.mem.eql(u8, argv[1], "link-check")) return linkCheck(alloc, dir, argv);
     if (std.mem.eql(u8, argv[1], "release-check")) return releaseCheck(alloc, dir, argv);
+    if (std.mem.eql(u8, argv[1], "tasks-check")) return tasksCheck(alloc, dir, argv);
     return usage(alloc, fmt(alloc, "unknown subcommand {s}", .{argv[1]}));
 }

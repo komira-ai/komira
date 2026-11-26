@@ -280,3 +280,95 @@ test "release-check usage: --out once and required, a member needed, each member
         try t.expect(std.mem.startsWith(u8, o.stdout, c.first));
     }
 }
+
+// ---- tasks-check ------------------------------------------------------------
+
+const TASKS_CATALOGUE =
+    \\[
+    \\  {"rank": 1, "slug": "a", "category": "Read", "question": "How do I a?", "status": "works"},
+    \\  {"rank": 2, "slug": "b", "category": "Read", "question": "How do I b?", "status": "partial"},
+    \\  {"rank": 3, "slug": "c", "category": "Read", "question": "How do I c?", "status": "gap", "issues": ["komira-ai/komira#1"]}
+    \\]
+;
+
+fn writeTask(dir: std.fs.Dir, a: std.mem.Allocator, name: []const u8, question: []const u8) !void {
+    try dir.makePath(name);
+    var sub = try dir.openDir(name, .{});
+    defer sub.close();
+    try sub.writeFile(.{ .sub_path = "example.py", .data = "print(1)\n" });
+    try sub.writeFile(.{ .sub_path = "expected_output.txt", .data = "1\n" });
+    const page = try std.fmt.allocPrint(a, "# {s}\n\n```python\nprint(1)\n```\n\n```text\n1\n```\n", .{question});
+    try sub.writeFile(.{ .sub_path = "page.md", .data = page });
+}
+
+const TASKS_ARGS = [_][]const u8{ "tool", "tasks-check", "--catalogue", "tasks/catalogue.json", "--catalogue-display", "docs/tasks/catalogue.json", "--root", "tasks", "--display", "python/docs/tasks", "--out", "report.txt" };
+
+test "tasks-check reads every subdirectory of the root, in name order, and writes the report" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "tasks_pass");
+    defer tmp.done();
+    try tmp.dir.makePath("tasks");
+    try tmp.dir.writeFile(.{ .sub_path = "tasks/catalogue.json", .data = TASKS_CATALOGUE });
+    // Files at the top of the root are not task directories.
+    try tmp.dir.writeFile(.{ .sub_path = "tasks/README.md", .data = "# Tasks\n" });
+    var root = try tmp.dir.openDir("tasks", .{});
+    defer root.close();
+    try writeTask(root, a, "2-b", "How do I b?");
+    try writeTask(root, a, "1-a", "How do I a?");
+    const o = cli.run(a, tmp.dir, &TASKS_ARGS);
+    try t.expectEqualStrings("", o.stdout);
+    try t.expectEqual(@as(u8, 0), o.code);
+    try t.expectEqualStrings("1-a works\n2-b partial\n", try tmp.dir.readFileAlloc(a, "report.txt", 1 << 20));
+}
+
+test "tasks-check refused is exit 1, names each file under --display, and writes no report" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "tasks_refused");
+    defer tmp.done();
+    try tmp.dir.makePath("tasks");
+    try tmp.dir.writeFile(.{ .sub_path = "tasks/catalogue.json", .data = TASKS_CATALOGUE });
+    var root = try tmp.dir.openDir("tasks", .{});
+    defer root.close();
+    try writeTask(root, a, "1-a", "How do I a?");
+    try root.writeFile(.{ .sub_path = "1-a/expected_output.txt", .data = "2\n" });
+    try root.makePath("1-a/out");
+    try writeTask(root, a, "3-c", "How do I c?");
+    const o = cli.run(a, tmp.dir, &TASKS_ARGS);
+    try t.expectEqual(@as(u8, 1), o.code);
+    try t.expectEqualStrings("python/docs/tasks/1-a/out/: a task directory holds only example.py, expected_output.txt and page.md\n" ++
+        "python/docs/tasks/1-a/page.md:7: the ```text fence is not expected_output.txt byte for byte\n" ++
+        "python/docs/tasks/3-c: rank 3 is a gap, which has no example\n", o.stdout);
+    try t.expectError(error.FileNotFound, tmp.dir.access("report.txt", .{}));
+}
+
+test "tasks-check with no catalogue or no root is exit 2, naming the path" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "tasks_io");
+    defer tmp.done();
+    var o = cli.run(a, tmp.dir, &TASKS_ARGS);
+    try t.expectEqual(@as(u8, 2), o.code);
+    try t.expectEqualStrings("readme-examples: cannot read tasks/catalogue.json: FileNotFound\n", o.stdout);
+    try tmp.dir.writeFile(.{ .sub_path = "catalogue.json", .data = TASKS_CATALOGUE });
+    const args = [_][]const u8{ "tool", "tasks-check", "--catalogue", "catalogue.json", "--catalogue-display", "c.json", "--root", "tasks", "--display", "d", "--out", "report.txt" };
+    o = cli.run(a, tmp.dir, &args);
+    try t.expectEqual(@as(u8, 2), o.code);
+    try t.expectEqualStrings("readme-examples: cannot read the task directories of tasks: FileNotFound\n", o.stdout);
+}
+
+test "tasks-check without a flag is the usage, exit 2" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "tasks_usage");
+    defer tmp.done();
+    const args = [_][]const u8{ "tool", "tasks-check", "--catalogue", "c.json", "--catalogue-display", "c.json", "--root", "r", "--display", "d" };
+    const o = cli.run(a, tmp.dir, &args);
+    try t.expectEqual(@as(u8, 2), o.code);
+    try t.expect(std.mem.startsWith(u8, o.stdout, "readme-examples: --out is required\n"));
+}
