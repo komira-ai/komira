@@ -1,7 +1,13 @@
 """The interpreter list: no interpreter file appears without a row, and no row outlives its file.
 
 Every interpreter file of the repository has a row in the allowlist (path,
-reason), and every row names such a file. An interpreter file is a shell,
+reason), and every row names such a file. A row is a file's path, or a glob row
+of exactly the form `<dir>/**/*.<ext>`, which covers every interpreter file
+under `<dir>/` at any depth whose extension is `<ext>` (a file of another
+extension, or with only a `#!` line, needs its own row; any other wildcard, a
+glob row covering no file, and a file row under a glob row that covers it are
+findings). Rows are one per line, sorted by path in byte order, with no
+duplicate: a row out of order is a finding naming both rows. An interpreter file is a shell,
 Python, Perl, awk, sed or Ruby file: by its extension (`.sh`, `.bash`,
 `.zsh`, `.ksh`, `.py`, `.pyw`, `.pl`, `.pm`, `.awk`, `.sed`, `.rb`) or by a
 first `#!` line naming one of them, directly, through `env` or through
@@ -33,6 +39,8 @@ declared only in komira's checkout: it names the `tests` cell.
 Not checked here, and held by review: a new row needs a reason review
 accepts. A row whose file is deleted (or is no longer an interpreter file) is
 a finding, so the row is removed in the same change and the list only shrinks.
+A glob row exists so that a package whose sources are all in one interpreter
+language adds a file, not a row.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
@@ -67,7 +75,7 @@ def _interpreter_budget_impl(ctx):
 
 interpreter_budget_rule = rule(
     impl = _interpreter_budget_impl,
-    doc = "Every interpreter file (shell, Python, Perl, awk, sed, Ruby; by extension or `#!` line) of `tree` (a doc_tree target: the root one holds every file of the cell), of the doc_tree targets in `dotfiles` (paths in the cell), of `cells` (another cell's doc_tree, at its path) and of `files` (path: source), under a prefix of `scope` (empty: everywhere), has a row in `allowlist` (its path in that tree; a TSV of path, reason), and every row names one. Existence only: no size is checked. The verdict is a validation; with `expect`, it passes only when the findings hold each expected text.",
+    doc = "Every interpreter file (shell, Python, Perl, awk, sed, Ruby; by extension or `#!` line) of `tree` (a doc_tree target: the root one holds every file of the cell), of the doc_tree targets in `dotfiles` (paths in the cell), of `cells` (another cell's doc_tree, at its path) and of `files` (path: source), under a prefix of `scope` (empty: everywhere), has a row in `allowlist` (its path in that tree, or a glob row `<dir>/**/*.<ext>`; a TSV of path, reason, one row per line sorted by path in byte order), and every row names one. Existence only: no size is checked. The verdict is a validation; with `expect`, it passes only when the findings hold each expected text.",
     attrs = {
         "allowlist": attrs.string(),
         "cells": attrs.dict(attrs.string(), attrs.dep(providers = [DocTreeInfo]), default = {}),

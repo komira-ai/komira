@@ -9,7 +9,7 @@ on Linux x86_64 and, for the macOS wheel, on macOS arm64).
         --modular-license <LICENSE> --modular-notices <Third-Party-Notices>
         --aws-lc-license <LICENSE> --s2n-tls-license <LICENSE>
         --parquet <file.parquet> --plan-hex <file.hex>
-        --readings <readings.parquet> --readme <README.md>
+        --readings <readings.parquet> --readme <description.md>
         --quickstart <quickstart.py> --quickstart-expected <quickstart.expected>
         --requires-dist <requirement>...
 
@@ -38,7 +38,8 @@ Then, in order:
   pinned aws-lc and s2n-tls archives' LICENSE files, and `MODULAR_LICENSE`
   and `MODULAR_THIRD_PARTY_NOTICES`, byte for byte the pinned compiler
   package's, and no other; its description (the body of METADATA, what PyPI shows)
-  is `--readme`, README.md, byte for byte;
+  is `--readme` byte for byte: the wheel's description, README.md followed by
+  the assembled changelog (//python:changelog[description]);
 - `komira.abi_version()` is the `version` line of the ABI golden;
 - `Session().register_parquet` registers the Parquet fixture, and a missing
   file raises `KomiraError` with the engine's status;
@@ -234,7 +235,7 @@ def check_metadata(dist, opts):
         readme = f.read()
     if body != readme:
         at = next((i for i, (a, b) in enumerate(zip(body, readme)) if a != b), min(len(body), len(readme)))
-        raise AssertionError("the wheel's description is not README.md byte for byte: it differs at offset {} (description {} characters, README.md {})".format(at, len(body), len(readme)))
+        raise AssertionError("the wheel's description is not --readme byte for byte: it differs at offset {} (description {} characters, --readme {})".format(at, len(body), len(readme)))
 
 
 def run_quickstart(opts, abi):

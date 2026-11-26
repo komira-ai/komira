@@ -2,6 +2,14 @@
 # run_plan: a logical plan run with no SQL front end
 # =============================================================================
 #
+# Covers: run_plan (engine_plan) of a plan bound from SQL on one context, run
+# on a fresh context with no table registered: a filter with a sort and an
+# aggregate answer what run_sql answers, directly and through plan_to_bytes and
+# plan_from_bytes, and parse no statement on that context (statements_parsed
+# stays 0, while run_sql counts one per statement, a refused one included); a
+# plan over a file removed after binding is refused at lower naming the file,
+# and the context runs on.
+#
 # Each plan is bound from SQL on one context (`plan_from_sql`, which is not the
 # SQL door and counts nothing) and run by `run_plan` on a second, fresh
 # context with no table registered; `run_sql` runs the same text on the first.
