@@ -13,8 +13,9 @@ frame's own reductions (`agg`, `sum`, `mean`, `median`, `std`, `var`, `min`, `ma
 `.dt` accessors (`_frame.py`, `_verbs.py`, `_missing.py`, `_cast.py`, `_accessors.py`). NaN as missing
 (ruling 6) is built in `fillna` and `dropna`, not yet in the aggregates; `isna`, `notna`
 and the `Series` reductions are not built yet. The core of the polars-shaped skin, `komira.pl`, is built (the readers of Parquet, NDJSON and CSV, the
-row-wise verbs, sort and its order rules, aggregates without keys, and `concat`), and its `collect()` runs
-the plan the same way. The other verbs are not built. The verbs, the plan each one builds and
+row-wise verbs, sort and its order rules, aggregates, `concat`, `group_by`, `join`, `unique` and the
+windows), and its `collect()` runs the plan the same way. The other verbs (`shift`, `join_asof`, the
+sinks, `from_arrow`) are not built. The verbs, the plan each one builds and
 its matrix row are in [dataframe_surface_verbs.md](dataframe_surface_verbs.md). This document gives
 the rules those verbs follow.
 
@@ -312,7 +313,10 @@ The rules that follow from this:
   `cummin`/`cum_min`, `cummax`/`cum_max`, `rolling`, and `rolling_*`.
 - `rank` orders by the ranked values. `method="min"` and `method="dense"` are supported. `method="first"`
   (pandas) and `method="ordinal"` (polars) break ties by row order, so they are refused. pandas'
-  default `method="average"` and `method="max"` have no plan function yet, so they are refused too.
+  default `method="average"` and `method="max"` have no plan function yet, so the pandas skin refuses
+  them. The polars skin builds both from plan functions: `"max"` is the count of the values less the
+  descending `RANK`, plus 1, and `"average"` is the mean of the `"min"` and `"max"` ranks. A null
+  ranks null in the polars skin, as in polars.
 - **Ties picked by row order.** pandas `drop_duplicates(subset=...)` and `nlargest`/`nsmallest`, and
   polars `unique(subset=...)` and `top_k`/`bottom_k`, choose which of several tied rows to return.
   - The library's default choice is accepted, and the skin returns any one of the tied rows. This is a
@@ -321,6 +325,10 @@ The rules that follow from this:
   - An explicit choice that needs row order is refused: `keep="first"` and `keep="last"` in polars, and
     `keep="last"` in pandas. So are the choices that need a window first: `keep=False` in
     `drop_duplicates`, and `keep="all"` in `nlargest`.
+  - The polars skin builds `unique(subset=...)` over fewer than every column with a window: the rows
+    numbered 1 by `ROW_NUMBER` over each value of the subset (`keep="any"`). Its `keep="none"` keeps
+    the rows whose count over their value is 1, a window too. A null is a value of its own, as in
+    polars.
   - Over whole rows (no `subset`, or one that names every column) no choice is made, since equal rows
     are the same row. So pandas `drop_duplicates()` answers `keep="first"` and `keep="last"` alike
     with a DISTINCT, and `keep=False` with an AGGREGATE by every column whose `count(*)` is 1. The
@@ -459,9 +467,10 @@ its number).
       fixed table in the verbs document. komira adds no dtype classes of its own.
     - pyarrow and protobuf are the package's required dependencies, and pandas and polars are optional.
     - Results arrive as Arrow and convert through the `Result` terminals.
-    - **Count types** (a departure). polars answers a count, `len()`, `str.len_chars()` and the sum
-      of a boolean or a UInt32 column as UInt32. The engine casts to no UInt32 yet, so the polars
-      skin answers these as Int64, the plan's own count type; the values are polars'.
+    - **Count types** (a departure). polars answers a count, `len()`, `str.len_chars()`, a rank
+      other than `"average"`, `cum_count()` and the sum of a boolean or a UInt32 column as UInt32.
+      The engine casts to no UInt32 yet, so the polars skin answers these as Int64, the plan's own
+      count type; the values are polars'.
     - The engine computes a CASE only as INT64, FLOAT64 or STRING. So the polars skin computes a
       `when`, a `fill_null` and the floor correction of ruling 9 in one of those and casts the result
       once to polars' type (Int32 or Float32), and refuses branches of another type by name.
