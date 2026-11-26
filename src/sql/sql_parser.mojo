@@ -50,7 +50,7 @@ from .sql_ast import (
     SXUN_NOT, SXUN_IS_NULL, SXUN_IS_NOT_NULL, SXUN_NEGATE, SXUN_ABS, SXLIKE_LIKE, SXLIKE_ILIKE,
     JK_CROSS, JK_LEFT, JK_RIGHT, JK_FULL, JK_SEMI, JK_ANTI,
     SUBQ_SCALAR, SUBQ_EXISTS, SUBQ_NOT_EXISTS, SUBQ_IN, SUBQ_NOT_IN, SUBQ_DERIVED,
-    SUBQ_UNION_ALL, SUBQ_INTERSECT, SUBQ_EXCEPT, _UNION_RESULT_ALIAS,
+    SUBQ_UNION_ALL, SUBQ_INTERSECT, SUBQ_EXCEPT, SUBQ_UNION, _UNION_RESULT_ALIAS,
     STMT_QUERY, STMT_COPY, STMT_CREATE_TABLE_AS,
     SXOP_EQ, SXOP_NE, SXOP_LT, SXOP_LE, SXOP_GT, SXOP_GE,
     SXOP_AND, SXOP_OR, SXOP_ADD, SXOP_SUB, SXOP_MUL, SXOP_DIV, SXOP_IDIV, SXOP_MOD,
@@ -200,8 +200,11 @@ struct _Parser(Movable):
         stmt.ctes = ctes^
         return stmt^
 
-    def _parse_set_operator_tail(mut self, mut lhs: SelectStmt) raises:
-        """★ Set operators. `<select> UNION ALL | INTERSECT | EXCEPT <select>`.
+    def _parse_set_operator_tail(
+        mut self, mut lhs: SelectStmt, in_with_body: Bool = False
+    ) raises:
+        """★ Set operators. `<select> UNION [ALL | DISTINCT] | INTERSECT |
+        EXCEPT <select>`.
 
         Without a set-operator production `_parse_select_stmt` would return
         after the first SELECT and `_finalize` would report the `UNION` keyword
@@ -210,22 +213,17 @@ struct _Parser(Movable):
 
         Each branch after the head is a subquery-table entry whose kind is the
         operator joining it to the branches before it (`SUBQ_UNION_ALL`,
-        `SUBQ_INTERSECT`, `SUBQ_EXCEPT`). The chain is flat here; the binder
-        (`sql_bind_set_op`) applies DuckDB's precedence, INTERSECT before
-        UNION ALL and EXCEPT. `INTERSECT DISTINCT` / `EXCEPT DISTINCT` are the
-        set forms spelled out.
-
-        ⛔ BARE `UNION` IS REFUSED BY NAME AND MUST STAY REFUSED UNTIL IT IS
-        BOUND TO A DEDUPLICATING PLAN. `UNION` without `ALL` DEDUPLICATES, and
-        `PLAN_UNION` does not: binding it to the same node would silently return
-        duplicate rows. The refusal names the rewrite
-        (`SELECT DISTINCT * FROM (a UNION ALL b)`) rather than the node.
+        `SUBQ_UNION`, `SUBQ_INTERSECT`, `SUBQ_EXCEPT`). The chain is flat here;
+        the binder (`sql_bind_set_op`) applies DuckDB's precedence, INTERSECT
+        before UNION, UNION ALL and EXCEPT. Bare `UNION` and `UNION DISTINCT`
+        are the deduplicating union; `INTERSECT DISTINCT` / `EXCEPT DISTINCT`
+        are the set forms spelled out.
 
         ⛔ `INTERSECT ALL` / `EXCEPT ALL` ARE REFUSED BY NAME. Their bag
         results keep a row min(m, n) or max(m - n, 0) times, which needs the
         rows numbered or repeated; no plan node here does either.
 
-        ⚠ IT LOOPS, so `A UNION ALL B UNION ALL C` is three branches rather
+        ⚠ IT LOOPS, so `A UNION ALL B UNION C` is three branches rather
         than a syntax error at the second `UNION`. Each branch is parsed by
         `_parse_select_stmt` — the SAME helper the first branch used — so a
         branch gets the whole SELECT grammar and cannot drift from it.
@@ -235,7 +233,10 @@ struct _Parser(Movable):
         error naming the clause. On the last branch they are moved off it by
         `_wrap_union_in_star_select`, which rewrites the query to
         `SELECT * FROM (<union>) <wrapper> ORDER BY ... LIMIT ...`, so the sort
-        and the row window bind above the union node.
+        and the row window bind above the union node. In a WITH body
+        (`in_with_body`) they are refused by name instead: the wrapper is a
+        derived table, and a CTE body binds before the query's derived tables
+        are registered.
         """
         var last = -1
         while (
@@ -243,8 +244,8 @@ struct _Parser(Movable):
         ):
             var word = String(self.tokens[self.pos].text).upper()
             var op_name = word
-            if word == "UNION":
-                op_name = "UNION ALL"
+            if word == "UNION" and self.tokens[self.pos + 1].text == "all":
+                op_name = "UNION ALL"  # the tokens end in TK_EOF
             # ORDER BY / LIMIT / OFFSET apply to the whole set operation, so
             # they may follow only the last branch. DuckDB refuses the same
             # text with `Parser Error: syntax error at or near "<operator>"`.
@@ -279,26 +280,28 @@ struct _Parser(Movable):
                 last = len(self.subqueries) - 1
                 continue
             self._advance()  # 'union'
-            if not self._is_kw("all"):
-                raise Error(
-                    "SQL not supported: bare UNION. UNION without ALL"
-                    " DEDUPLICATES its result and this engine's PLAN_UNION node"
-                    " CONCATENATES — binding the two to one node would return"
-                    " duplicate rows out of the one query written to exclude"
-                    " them, with no diagnostic. Write UNION ALL, or"
-                    " `SELECT DISTINCT * FROM (<a> UNION ALL <b>) u` for the"
-                    " deduplicating form."
-                )
-            self._advance()  # 'all'
+            if self._is_kw("all"):
+                self._advance()  # 'all'
+            else:  # bare UNION and UNION DISTINCT: the deduplicating union
+                if self._is_kw("distinct"):
+                    self._advance()
+                kind = SUBQ_UNION
             self._append_set_branch(lhs, last, kind)
             last = len(self.subqueries) - 1
-        if last >= 0 and _tail_clause_name(self.subqueries[last].body) != "":
+        var tail = _tail_clause_name(self.subqueries[last].body) if last >= 0 else String("")
+        if tail != "" and in_with_body:
+            raise Error(
+                "SQL not supported: " + tail + " after the last branch of a set"
+                " operation in a WITH body. The clause applies to the whole set"
+                " operation; sort or limit the query that reads the CTE instead."
+            )
+        if tail != "":
             self._wrap_union_in_star_select(lhs, last)
 
     def _append_set_branch(mut self, mut lhs: SelectStmt, last: Int, kind: UInt8) raises:
         """Parse the next branch of a set-operation chain and append it to the
         subquery table with `kind`, the operator that joins it to the branches
-        before it (`SUBQ_UNION_ALL`, `SUBQ_INTERSECT` or `SUBQ_EXCEPT`). `last`
+        before it (a `SUBQ_*` set-operator kind). `last`
         is the table index of the chain's previous branch, or -1 when `lhs`, the
         head, is the only one so far."""
         var rhs = self._parse_select_stmt()
@@ -596,7 +599,8 @@ struct _Parser(Movable):
         """Parse `WITH name AS (<select>) [, name2 AS (<select>)]*` — the leading
         WITH is at the current position. Each body is a full nested SELECT parsed
         by `_parse_select_stmt` (reused, so CTE bodies get the entire grammar:
-        joins, GROUP BY, HAVING, ORDER BY, LIMIT). `WITH RECURSIVE` is not
+        joins, GROUP BY, HAVING, ORDER BY, LIMIT) and may head a set-operation
+        chain (`_parse_set_operator_tail`). `WITH RECURSIVE` is not
         supported (raises cleanly — no recursive-CTE corpus query)."""
         self._expect_kw("with")
         if self._is_kw("recursive"):
@@ -610,6 +614,7 @@ struct _Parser(Movable):
             self._expect_kw("as")
             self._expect(TK_LPAREN, "'(' after CTE name")
             var body = self._parse_select_stmt()
+            self._parse_set_operator_tail(body, in_with_body=True)
             self._expect(TK_RPAREN, "')' to close the CTE body")
             ctes.append(CteDef(cname, body^))
             if self._kind() == TK_COMMA:
@@ -3232,8 +3237,8 @@ struct _Parser(Movable):
         return w^
 
     def _parse_over_clause(mut self, func: UInt8, arg_col: String) raises -> SqlWindowData:
-        """Parse `OVER ( [PARTITION BY col, ...] [ORDER BY col [ASC|DESC], ...]
-        [ROWS|RANGE <frame>] )` — the `over` keyword is at the current position.
+        """Parse `OVER ( [PARTITION BY col, ...]
+        [ORDER BY col [ASC|DESC] [NULLS FIRST|LAST], ...] [ROWS|RANGE <frame>] )` — the `over` keyword is at the current position.
         Returns the fully-populated `SqlWindowData` (function + arg + keys + frame).
         Partition / order operands are column names only (the corpus never orders a
         window by an expression)."""
@@ -3264,6 +3269,7 @@ struct _Parser(Movable):
         var desc = List[Bool]()
         var pqual = List[String]()
         var oqual = List[String]()
+        var nfirst = List[Optional[Bool]]()
         if self._is_kw("partition"):
             self._advance()
             self._expect_kw("by")
@@ -3288,6 +3294,21 @@ struct _Parser(Movable):
                 elif self._is_kw("desc"):
                     self._advance()
                     d = True
+                var nf = Optional[Bool](None)
+                if self._is_kw("nulls"):
+                    self._advance()
+                    if self._is_kw("first"):
+                        self._advance()
+                        nf = Optional[Bool](True)
+                    elif self._is_kw("last"):
+                        self._advance()
+                        nf = Optional[Bool](False)
+                    else:
+                        raise Error(
+                            "SQL syntax error: ORDER BY ... NULLS expects FIRST"
+                            " or LAST"
+                        )
+                nfirst.append(nf^)
                 oby.append(c)
                 desc.append(d)
                 if self._kind() == TK_COMMA:
@@ -3297,6 +3318,7 @@ struct _Parser(Movable):
         var w = SqlWindowData(func, arg_col, pby^, oby^, desc^)
         w.partition_qual = pqual^
         w.order_qual = oqual^
+        w.nulls_first = nfirst^
         if self._is_kw("rows") or self._is_kw("range"):
             self._parse_frame(w)
         self._expect(TK_RPAREN, "')' to close the OVER clause")

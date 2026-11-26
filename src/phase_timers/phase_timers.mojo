@@ -39,6 +39,8 @@
 # not to be trusted. Every path that takes a lane counts the same way: the
 # interval records, and the two ends of a resource-usage interval (each end
 # that finds no lane adds 1, and so does an end whose begin sample is missing).
+# A target with no per-thread usage (not Linux) takes no sample, so there a
+# usage interval that has a lane records nothing and adds nothing.
 # The probe also refuses a thread list that cannot fit.
 #
 # One query at a time: the slab is process-global because the sites sit in
@@ -309,6 +311,10 @@ def _count_drop() raises:
 def _ru_fold(phase: Int, begin: Bool) raises:
     var lane = _find_lane(_my_thread())
     if lane < 0:
+        return
+    # A target without per-thread usage has nothing to sample: that is not a
+    # failed sample, so it records nothing and counts no drop.
+    comptime if not CompilationTarget.is_linux():
         return
     var sampled = _ru_sample(lane)
     # The word `_RU_ARMED` of the phase says that the begin sample was taken

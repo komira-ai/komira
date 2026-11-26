@@ -13,40 +13,78 @@
 #   * OPTIONAL or REQUIRED per column (the page encoders write definition
 #     levels exactly for OPTIONAL columns);
 #   * DECIMAL128 as FIXED_LEN_BYTE_ARRAY(16) with its DECIMAL annotation, and
-#     DATE32 with ConvertedType DATE.
+#     DATE32 with ConvertedType DATE;
+#   * the annotations DuckDB writes for the same columns:
+#       TINYINT, SMALLINT     INT32, ConvertedType INT_8 / INT_16
+#       UTINYINT .. UINTEGER  INT32, ConvertedType UINT_8 / UINT_16 / UINT_32
+#       UBIGINT               INT64, ConvertedType UINT_64
+#       TIMESTAMP (the legacy tag, _US, and _S, whose pages carry
+#       microseconds)         INT64, LogicalType TIMESTAMP(MICROS) and
+#                             ConvertedType TIMESTAMP_MICROS
+#       TIMESTAMP_MS          INT64, TIMESTAMP(MILLIS), TIMESTAMP_MILLIS
+#       TIMESTAMP_NS          INT64, TIMESTAMP(NANOS), no ConvertedType (it
+#                             has no nanosecond member)
+#     A timestamp is isAdjustedToUTC when its field carries a time zone (an
+#     instant, DuckDB's TIMESTAMPTZ) and not otherwise (a wall-clock time).
+#     The LogicalType rides `logical_timestamp_unit` and
+#     `logical_timestamp_is_utc`, which `thrift_writer` writes as
+#     SchemaElement field 10.
 #
 # What is not written is refused here, before any page is encoded: a type with
-# no encoder (BINARY, nested types, small or unsigned integers, ...) raises
-# instead of being declared as INT64 and failing, or worse succeeding, later.
-# TIMESTAMP, DATE64, TIME and DURATION columns are written as their INT64
-# or INT32 storage with NO logical-type annotation (the footer carries no unit
-# or time zone for them): the values are right and a reader sees integers.
+# no encoder (BINARY, nested types, ...) raises instead of being declared as
+# INT64 and failing, or worse succeeding, later. DATE64, TIME and DURATION
+# columns are written as their INT64 or INT32 storage with NO annotation (the
+# footer carries no unit for them): the values are right and a reader sees
+# integers.
 # =============================================================================
 
 from arrow.arrow_types import ArrowType
 from arrow.schema import Schema
 from parquet_api.metadata import SchemaElement
-from parquet_api.types import CONVERTED_TYPE_DATE, ParquetType
+from parquet_api.types import (
+    CONVERTED_TYPE_DATE,
+    CONVERTED_TYPE_INT_8,
+    CONVERTED_TYPE_INT_16,
+    CONVERTED_TYPE_UINT_8,
+    CONVERTED_TYPE_UINT_16,
+    CONVERTED_TYPE_UINT_32,
+    CONVERTED_TYPE_UINT_64,
+    ParquetType,
+)
 
 from .decimal_encode import patch_decimal_schema_elements
 from .writer_helpers import make_schema_elements_nullable
+
+# parquet.thrift's ConvertedType values for the two timestamp units it has.
+comptime _CONVERTED_TIMESTAMP_MILLIS = 9
+comptime _CONVERTED_TIMESTAMP_MICROS = 10
+
+# parquet.thrift's TimeUnit union members, as `logical_timestamp_unit` holds
+# them.
+comptime _UNIT_MILLIS = 1
+comptime _UNIT_MICROS = 2
+comptime _UNIT_NANOS = 3
 
 
 def arrow_type_to_parquet_type(at: ArrowType) raises -> ParquetType:
     """The Parquet physical type a column of Arrow type `at` is written as.
 
-    INT32 and the INT32-backed temporal types (DATE32, TIME32_*) are INT32;
-    INT64 and the INT64-backed ones (DATE64, TIME64_*, TIMESTAMP*,
-    DURATION_*) are INT64; FLOAT32 FLOAT; FLOAT64 DOUBLE; STRING,
-    LARGE_STRING and DICTIONARY (of strings) BYTE_ARRAY; BOOL BOOLEAN;
-    DECIMAL128 FIXED_LEN_BYTE_ARRAY.
+    INT32, the narrower integers, UINT32 and the INT32-backed temporal
+    types (DATE32, TIME32_*) are INT32; INT64, UINT64 and the INT64-backed
+    ones (DATE64, TIME64_*, TIMESTAMP*, DURATION_*) are INT64; FLOAT32
+    FLOAT; FLOAT64 DOUBLE; STRING, LARGE_STRING and DICTIONARY (of strings)
+    BYTE_ARRAY; BOOL BOOLEAN; DECIMAL128 FIXED_LEN_BYTE_ARRAY.
 
     Raises:
-        Error: `at` has no writer (unsigned and narrow integers, BINARY,
-            nested types, ...).
+        Error: `at` has no writer (BINARY, nested types, ...).
     """
     if (
         at == ArrowType.INT32
+        or at == ArrowType.INT16
+        or at == ArrowType.INT8
+        or at == ArrowType.UINT32
+        or at == ArrowType.UINT16
+        or at == ArrowType.UINT8
         or at == ArrowType.DATE32
         or at == ArrowType.TIME32_S
         or at == ArrowType.TIME32_MS
@@ -54,6 +92,7 @@ def arrow_type_to_parquet_type(at: ArrowType) raises -> ParquetType:
         return ParquetType.INT32
     if (
         at == ArrowType.INT64
+        or at == ArrowType.UINT64
         or at == ArrowType.DATE64
         or at == ArrowType.TIME64_US
         or at == ArrowType.TIME64_NS
@@ -87,10 +126,8 @@ def patch_date32_schema_elements(
 
     Without it a date column reads back as a bare INT32: the day counts
     survive and the type does not. `elements` is `[root, leaf_0, ...]`, so
-    leaf `c` is `elements[c + 1]`. Only DATE32: a TIMESTAMP needs the modern
-    LogicalType union (unit and UTC flag), which `converted_type` cannot
-    express and this writer does not emit, and guessing a unit would write
-    timestamps wrong by a factor of 1000.
+    leaf `c` is `elements[c + 1]`. Only DATE32: the integer and timestamp
+    annotations are `schema_elements_for`'s.
     """
     for c in range(schema.num_columns()):
         if schema.field_arrow_type(c) != ArrowType.DATE32:
@@ -104,6 +141,60 @@ def patch_date32_schema_elements(
                 + " column(s)"
             )
         elements[c + 1].converted_type = Int(CONVERTED_TYPE_DATE)
+
+
+def _integer_converted_type(at: ArrowType) -> Optional[Int]:
+    """The ConvertedType DuckDB stamps on an integer column narrower than,
+    or unsigned unlike, the physical type it rides; None for INT32, INT64
+    and every other type."""
+    if at == ArrowType.INT8:
+        return CONVERTED_TYPE_INT_8
+    if at == ArrowType.INT16:
+        return CONVERTED_TYPE_INT_16
+    if at == ArrowType.UINT8:
+        return CONVERTED_TYPE_UINT_8
+    if at == ArrowType.UINT16:
+        return CONVERTED_TYPE_UINT_16
+    if at == ArrowType.UINT32:
+        return CONVERTED_TYPE_UINT_32
+    if at == ArrowType.UINT64:
+        return CONVERTED_TYPE_UINT_64
+    return None
+
+
+def _timestamp_unit(at: ArrowType) -> Int:
+    """The TimeUnit a timestamp column of Arrow type `at` is written in: a
+    TIMESTAMP_S column's pages carry microseconds, as DuckDB writes it."""
+    if at == ArrowType.TIMESTAMP_MS:
+        return _UNIT_MILLIS
+    if at == ArrowType.TIMESTAMP_NS:
+        return _UNIT_NANOS
+    return _UNIT_MICROS
+
+
+def _patch_integer_and_timestamp_elements(
+    mut elements: List[SchemaElement], schema: Schema
+):
+    """Stamp each narrow or unsigned integer leaf with its ConvertedType and
+    each timestamp leaf with its LogicalType TIMESTAMP (unit, and
+    isAdjustedToUTC when the field carries a time zone) and the matching
+    ConvertedType where parquet.thrift has one. `elements` is
+    `[root, leaf_0, ...]`, as `make_schema_elements_nullable` built it."""
+    for c in range(schema.num_columns()):
+        var at = schema.field_arrow_type(c)
+        ref leaf = elements[c + 1]
+        var converted = _integer_converted_type(at)
+        if converted:
+            leaf.converted_type = converted.value()
+        if not at.is_timestamp():
+            continue
+        var unit = _timestamp_unit(at)
+        leaf.logical_timestamp_unit = unit
+        leaf.logical_timestamp_is_utc = schema.field_tz(c) != ""
+        if unit == _UNIT_MILLIS:
+            leaf.converted_type = _CONVERTED_TIMESTAMP_MILLIS
+        elif unit == _UNIT_MICROS:
+            leaf.converted_type = _CONVERTED_TIMESTAMP_MICROS
 
 
 def schema_elements_for(
@@ -126,4 +217,5 @@ def schema_elements_for(
     )
     patch_decimal_schema_elements(elements, schema)
     patch_date32_schema_elements(elements, schema)
+    _patch_integer_and_timestamp_elements(elements, schema)
     return elements^

@@ -1,0 +1,14 @@
+k	json_extract_path(j, '$.b')
+0	"""x"""
+1	null
+10	"""Ünïcodé"""
+11	
+12	""""""
+2	true
+3	
+4	
+5	
+6	
+7	"""tab\there"""
+8	
+9	

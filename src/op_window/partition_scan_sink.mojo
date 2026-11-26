@@ -6,7 +6,8 @@
 # (`physical_plan`) over one accumulated batch:
 #
 #   1. sort the batch by (partition keys ++ order keys)
-#      (`partition_keys.sort_partition_batch`: NULLs last, floats by
+#      (`partition_keys.sort_partition_batch`: NULLs placed per order key, last
+#      unless `nulls_first` says otherwise, floats by
 #      `sort_key_lt`, dictionaries by value);
 #   2. find the partition starts (`_detect_partition_boundaries`);
 #   3. evaluate each `PartitionExpr` into one new column;
@@ -17,6 +18,9 @@
 # (`exec_types.partition_by_output_contract`). A float ORDER BY key
 # column is emitted with each -0.0 written as 0.0, as DuckDB returns a sorted
 # float key (docs/design/query_semantics.md §4.9).
+#
+# A SUM / AVG / MIN / MAX over an INT8, INT16 or INT32 column runs over a
+# widened copy of it (`partition_narrow_int`).
 #
 # The kernels per function: ranking and running aggregates in
 # `partition_scan_kernels`, value functions in `partition_value_fns`, every
@@ -72,6 +76,12 @@ from .partition_scan_kernels import (
     _eval_running_min_i64,
     _eval_running_sum_f64,
     _eval_running_sum_i64,
+)
+from .partition_narrow_int import (
+    narrow_from_i64,
+    narrow_int_arg_type,
+    widened_batch,
+    widened_expr,
 )
 from .partition_sliding_frame import eval_sliding_agg
 from .partition_value_fns import eval_value_fn
@@ -231,6 +241,7 @@ def _eval_partition_expr(
     bounds: List[Int],
     order_keys: List[String],
     descending: List[Bool],
+    nulls_first: List[Bool],
     expr: PartitionExpr,
 ) raises -> Column[HeapRegion]:
     """Evaluate one PartitionExpr against a sorted batch."""
@@ -253,7 +264,9 @@ def _eval_partition_expr(
         or expr.func == PF_LAST_VALUE
         or expr.func == PF_NTH_VALUE
     ):
-        return eval_value_fn(batch, bounds, order_keys, descending, expr)
+        return eval_value_fn(
+            batch, bounds, order_keys, descending, nulls_first, expr
+        )
     elif (
         expr.func == PF_SUM
         or expr.func == PF_COUNT
@@ -261,12 +274,30 @@ def _eval_partition_expr(
         or expr.func == PF_MIN
         or expr.func == PF_MAX
     ):
+        # A narrow integer argument is evaluated over its widened copy (the
+        # kernels read INT64 and FLOAT64); a MIN / MAX result is narrowed
+        # back after the RANGE peer closure, which handles INT64 only.
+        var narrow_type = narrow_int_arg_type(batch, expr)
+        if narrow_type != ArrowType.NULL:
+            var wide = _eval_partition_expr(
+                widened_batch(batch, expr, narrow_type),
+                bounds,
+                order_keys,
+                descending,
+                nulls_first,
+                widened_expr(expr),
+            )
+            if expr.func == PF_MIN or expr.func == PF_MAX:
+                return narrow_from_i64(wide, narrow_type)
+            return wide^
         # Only the running frame takes the per-row incremental kernels; every
         # other frame (bounded, and the whole partition) is the frame
         # evaluator's. The gate is `is_running()`, not `not is_sliding()`:
         # the whole partition is neither running nor sliding.
         if not expr.frame.is_running():
-            return eval_sliding_agg(batch, bounds, order_keys, descending, expr)
+            return eval_sliding_agg(
+                batch, bounds, order_keys, descending, nulls_first, expr
+            )
         var running = _eval_running_agg(batch, bounds, expr)
         # `is_running()` does not look at the units. Under RANGE (SQL's
         # default frame for an ordered window) CURRENT ROW is the last peer,
@@ -298,6 +329,7 @@ def _copy_sink_data(sink_data: PartitionBySinkData) raises -> PartitionBySinkDat
         sink_data.descending.copy(),
         exprs_copy^,
         sb.build(),
+        sink_data.nulls_first.copy(),
     )
 
 
@@ -339,7 +371,7 @@ def _eval_sorted(
     for i in range(len(sink_data.partition_exprs)):
         var new_col = _eval_partition_expr(
             sorted_batch, bounds, sink_data.order_keys, sink_data.descending,
-            sink_data.partition_exprs[i],
+            sink_data.nulls_first, sink_data.partition_exprs[i],
         )
         builder.add_column(new_col^)
 
@@ -362,6 +394,10 @@ def _execute_partition_by_sink(
     if batch.num_rows() == 0:
         return _empty_output(sink_data)
     var sorted_batch = sort_partition_batch(
-        batch^, sink_data.partition_keys, sink_data.order_keys, sink_data.descending
+        batch^,
+        sink_data.partition_keys,
+        sink_data.order_keys,
+        sink_data.descending,
+        sink_data.nulls_first,
     )
     return _eval_sorted(sorted_batch, sink_data)

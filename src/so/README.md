@@ -349,14 +349,17 @@ returns.
   past them is read (a text of exactly 64 MiB is run); a text that is not UTF-8,
   and every engine refusal, is -3. The last error of an engine refusal is
   `<step>: <reason>`, the step that refused (`parse`, `bind`, `optimize`,
-  `lower` or `execute`) and its own message; a result column the stream cannot
+  `lower` or `execute`) and its own message; for `parse` the message is
+  followed by ` at line <L>, column <C>` (both from 1; the column counts
+  characters), where the text stopped parsing, as in
+  `parse: SQL syntax error: expected keyword 'by' at line 1, column 42`; a result column the stream cannot
   carry is refused by name before `*out` is written. The context answers the
   next call after any refusal. The refusal's step and code are read with
 `komira_last_error_step` and `komira_last_error_code`.
 
 `sql_result` is the call on values: SQL text in, the answer's batches and
 schema out (an `sdk_exec` `ArrowResult`, every batch checked to cross the
-stream), or a raise with the `<step>: <reason>` text.
+stream), or a raise with the `<step>: <reason>` text (with its position for `parse`).
 
 ```mojo
 from so import Session, sql_result
@@ -902,7 +905,8 @@ reach one, so that it comes back as a status:
 - A statement nested more than 100 levels deep (parentheses, prefix operators,
   function calls, `CASE`, subqueries, derived tables; `src/sql/README.md` lists
   what counts as a level) is `parse: SQL syntax error: the statement nests
-  deeper than 100 levels`. The parser recursed once per level on the
+  deeper than 100 levels at line <L>, column <C>`, where the text stopped
+  parsing. The parser recursed once per level on the
   caller's stack, so a deep enough text exhausted it.
 - `lpad`, `rpad` and `repeat` whose value for one row would be over 64 MiB
   (`STRING_FN_N_REPEAT_MAX_BYTES`) are refused by name before anything is

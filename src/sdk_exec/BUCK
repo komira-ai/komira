@@ -66,11 +66,24 @@ _COPY_FILES = [
     "nulls_json.json",
     "grouped_json.json.gz",
     "typed_zstd_json.json.zst",
+    "times_default.parquet",
+    "times_csv.csv",
+    "times_json.json",
 ]
 
 _COPY_CASES = [f.split(".")[0] for f in _COPY_FILES]
 
+# The timestamp and integer cases read a Parquet file the pinned DuckDB
+# writes (tests/copy/times.sql says what it holds).
+sql_oracle(
+    name = "copy_times_input",
+    srcs = ["tests/copy/times.sql"],
+    outputs = ["times.parquet"],
+)
+
 _COPY_INPUTS = {f + ".csv": "tests/csv/" + f + ".csv" for f in ["typed", "nulls", "quoted"]}
+
+_COPY_INPUTS["times.parquet"] = ":copy_times_input[times.parquet]"
 
 # The program that runs each COPY line of a cases file through run_sql
 # (copy_runner/main.mojo says how).
@@ -472,8 +485,8 @@ _SUBQUERY_TEST_DATA.update({t + ".parquet": ":subquery_oracle[" + t + ".parquet]
 _SUBQUERY_TEST_DATA.update({c + ".tsv": ":subquery_oracle[" + c + ".tsv]" for c in _SUBQUERY_CASES})
 # DuckDB's tables and answers for test_run_sql_set_ops: tests/set_ops/data.sql
 # writes the Parquet files, and each line of tests/set_ops/cases.sql runs one
-# INTERSECT or EXCEPT query over them and writes its answer.
-_SET_OPS_FILES = ["ta", "tb", "tn", "te", "ab", "l", "r"]
+# UNION, INTERSECT or EXCEPT query over them and writes its answer.
+_SET_OPS_FILES = ["ta", "tb", "tn", "te", "tv", "ab", "z0", "zn", "l", "r"]
 
 _SET_OPS_CASES = [
     "arms_intersect",
@@ -511,6 +524,39 @@ _SET_OPS_CASES = [
     "group_over_derived",
     "distinct_inputs",
     "literals",
+    "union_basic",
+    "union_twocol",
+    "union_three_arms",
+    "union_empty_arm",
+    "union_allnull_arm",
+    "union_self",
+    "union_in_cte",
+    "union_in_derived",
+    "union_scan_vs_literal",
+    "union_then_intersect",
+    "union_widen_int_varchar",
+    "union_distinct_twocol",
+    "union_empty_left",
+    "union_mixed",
+    "union_varchar_key",
+    "union_double_nan",
+    "union_double_zero",
+    "union_widen_int_bigint",
+    "union_varchar_then_bigint",
+    "union_then_union_all",
+    "union_all_then_union",
+    "union_all_union_union_all",
+    "union_then_except",
+    "except_then_union",
+    "intersect_then_union",
+    "union_order_by_limit",
+    "union_group_over_derived",
+    "union_literals",
+    "intersect_in_cte",
+    "union_all_widen_int_varchar",
+    "union_widen_integer_varchar",
+    "intersect_widen_int_varchar",
+    "except_widen_varchar_int",
 ]
 
 sql_oracle(
@@ -546,6 +592,8 @@ _WINDOW_CASES = [
     "running_sum_f",
     "whole_partition_aggs",
     "whole_partition_f",
+    "running_aggs_integer",
+    "whole_partition_integer",
     "value_functions",
     "last_value_whole_frame",
     "no_partition",
@@ -786,21 +834,26 @@ _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".ts
 #   run_sql answers one BIGINT row `Count`; the file read back equals the query
 #   (a table, a query, an empty result, 130,000 rows in two row groups, every
 #   codec as the footer names it, a COPY over the file it reads, a relative
-#   path); an unknown extension, a URL, CREATE TABLE AS and a TIMESTAMP
-#   column are named refusals that touch no file; a missing
-#   directory, a directory at the path and an injected full disk leave no
-#   temporary file and the old file whole.
+#   path; timestamps of every unit, a zoned one, TINYINT and UBIGINT keep
+#   their types and values, and the footer carries each timestamp's unit);
+#   an unknown extension, a URL, CREATE TABLE AS and a TIME column are named
+#   refusals that touch no file, and a TIMESTAMP_S value past the microsecond
+#   range fails with the writer's message naming the column, row and value;
+#   a missing directory, a directory at the path and an injected full disk
+#   leave no temporary file and the old file whole.
 # - test_run_sql_copy_text: COPY ... TO a local CSV or newline-delimited JSON
 #   file through run_sql writes the bytes DuckDB writes for the same rows
 #   (NULLs, quoting, the empty string, dates, decimals, doubles), with the
 #   format from the extension or FORMAT, gzip and zstd from the extension or
-#   COMPRESSION, an empty result as DuckDB writes it; lz4, a TIMESTAMP column
-#   and two columns of one name are named refusals that touch no file; a
+#   COMPRESSION, an empty result as DuckDB writes it, timestamps of every unit
+#   and narrow and unsigned integers; lz4, a TIME column and two columns of
+#   one name are named refusals that touch no file; a
 #   full disk leaves the old file and no temporary file.
 # - test_copy_text_encoding: the CSV and JSON encoders on batches of every
 #   type they write give DuckDB's bytes: each type and NULL, doubles across
 #   fixed and exponent notation, NaN and the infinities, FLOATs, dates
-#   before year 1 and after 9999, exact decimals, quoting and escaping;
+#   before year 1 and after 9999, timestamps of each unit, exact decimals,
+#   quoting and escaping;
 #   gzip and zstd decompress to their input; the writable types.
 # - test_run_sql_csv: read_csv through run_sql answers what the pinned DuckDB
 #   answers (the :csv_oracle action below) for each case of tests/csv/cases.sql:
@@ -837,9 +890,10 @@ _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".ts
 #   union of the reads) and a join with a window on its left side beside a CTE
 #   read twice, with NULL
 #   keys, tied order keys and the empty string, on one and three workers, each
-#   column of the right type; every case is run; a sum over an INTEGER, a DATE
-#   partition key, a DECIMAL order key and a float default over a BIGINT lag
-#   are LOWERING_WINDOW_UNSERVED refusals at step lower.
+#   column of the right type; every case is run, sum, avg, min and max over an
+#   INTEGER among them; a DATE partition key, a DECIMAL order key and a float
+#   default over a BIGINT lag are LOWERING_WINDOW_UNSERVED refusals at step
+#   lower.
 # - test_run_sql_window_frames: run_sql over two Parquet tables DuckDB wrote
 #   (the :window_frames_oracle action above) answers what the pinned DuckDB
 #   answers for each case of tests/window_frames/cases.sql, on one and three
@@ -852,14 +906,16 @@ _WINDOW_FRAMES_TEST_DATA.update({c + ".tsv": ":window_frames_oracle[" + c + ".ts
 #   INTEGER keys at the ends of their range; every case is run; a RANGE bound
 #   that leaves the key's type fails at step execute with DuckDB's overflow
 #   error, and a frame DuckDB refuses fails at step bind with its reason.
-# - test_run_sql_set_ops: INTERSECT and EXCEPT through run_sql answer what the
-#   pinned DuckDB answers (the :set_ops_oracle action above) for each case of
-#   tests/set_ops/cases.sql, on one worker and on three: NULL rows equal, an
-#   all-NULL and an empty input, repeated rows, several columns of mixed types,
-#   one column of each key type, NaN, inputs widened to a common type, the
-#   precedence of INTERSECT over UNION ALL and EXCEPT, a sort and an
-#   aggregation over the result; every case is run; INTERSECT ALL and EXCEPT
-#   ALL are refused at parse by name.
+# - test_run_sql_set_ops: UNION (bare and UNION DISTINCT), INTERSECT and
+#   EXCEPT through run_sql answer what the pinned DuckDB answers (the
+#   :set_ops_oracle action above) for each case of tests/set_ops/cases.sql, on
+#   one worker and on three: NULL rows equal, an all-NULL and an empty input,
+#   repeated rows, several columns of mixed types, one column of each key type,
+#   NaN, 0.0 with -0.0, inputs widened to a common type (BIGINT with VARCHAR
+#   among them), the precedence of INTERSECT over UNION, UNION ALL and EXCEPT
+#   and a UNION ALL kept apart from a UNION beside it, a chain in a CTE and a
+#   derived table, a sort and an aggregation over the result; every case is
+#   run; INTERSECT ALL and EXCEPT ALL are refused at parse by name.
 # - test_run_sql_timers_off: Q6 through run_sql on four workers in the default
 #   build gives the oracle's answer and leaves every phase timer
 #   (phase_timers) unregistered and at zero.
@@ -985,6 +1041,7 @@ mojo_library(
         "tests/test_run_sql_multifile.mojo",
         "tests/test_run_sql_s3.mojo",
         "tests/test_run_sql_no_from.mojo",
+        "tests/test_run_sql_refusal_position.mojo",
         "tests/test_run_sql_q6.mojo",
         "tests/test_run_sql_set_ops.mojo",
         "tests/test_run_sql_spill.mojo",

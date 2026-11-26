@@ -4,11 +4,13 @@
 //! byte, then a line that is exactly "```". A document with CRLF line ends, a trailing space or another line in
 //! the block is not equal.
 //!
-//! Three are checked on the real files (readme_shows_quickstart_test.zig, install_page_shows_quickstart_test.zig):
-//! the README's "What works" block is python/examples/quickstart.py (`readmeShowsExample`), and the install page,
-//! docs/install.md, shows the same program (`install_page_example`) and what it prints (`install_page_output`):
-//! python/examples/quickstart.expected with `<version>` the newest release of python/CHANGELOG.md
-//! (`newestRelease`) and `<abi_version>` the engine's C ABI version.
+//! Four are checked on the real files (readme_shows_quickstart_test.zig, install_page_shows_quickstart_test.zig):
+//! the README's "What works" block is python/examples/quickstart.py (`readmeShowsExample`) and the README shows
+//! what it prints (`readme_output`), and the install page, docs/install.md, shows the same program
+//! (`install_page_example`) and what it prints (`install_page_output`): python/examples/quickstart.expected with
+//! `<version>` the newest release of python/CHANGELOG.md (`newestRelease`) and `<abi_version>` the engine's C ABI
+//! version. The docs leave `<cwd>` as written (they explain it), so the files are compared with the literal
+//! `<cwd>` put in for the directory.
 const std = @import("std");
 const common = @import("common.zig");
 
@@ -34,6 +36,14 @@ pub const readme_example: Shown = .{
     .fence = "python",
     .source = "python/examples/quickstart.py",
     .source_noun = "the example",
+};
+
+pub const readme_output: Shown = .{
+    .doc = "python/README.md",
+    .doc_noun = "the README",
+    .fence = "text",
+    .source = "python/examples/quickstart.expected",
+    .source_noun = "the expected output",
 };
 
 pub const install_page_example: Shown = .{

@@ -6,7 +6,8 @@
  * abort does to the host"): statements nested deeper than the parser's limit,
  * and lpad and rpad asked for a value of about 2^63 bytes. repeat, refused by
  * the same ceiling already, is checked beside them. Each must come back as
- * KOMIRA_ERR_ENGINE with the reason as the last error, *out as the driver
+ * KOMIRA_ERR_ENGINE with the reason as the last error (a parse refusal
+ * followed by the line and column it stopped at), *out as the driver
  * wrote it, and the context still answering the next query. The statements
  * nested to exactly the limit must still run, except nested scalar
  * subqueries, which the optimizer refuses by name (a status as well).
@@ -132,6 +133,34 @@ static void expect_refused(komira_handle ctx, const char *what, const char *sql,
     expect_usable(ctx, what);
 }
 
+/* `sql` is refused by the parser with KOMIRA_ERR_ENGINE: *out untouched, the
+   last error is exactly `error` followed by ` at line 1, column <C>`, where C
+   is a decimal from 1 to one past the text's length (the place the parser
+   stopped; every statement here is one line), and the next query on the
+   context answers. */
+static void expect_parse_refused(komira_handle ctx, const char *what, const char *sql, const char *error) {
+    struct ArrowArrayStream out, before;
+    memset(&out, 0xAB, sizeof out);
+    memcpy(&before, &out, sizeof out);
+    char text[512];
+    int32_t rc = sql == NULL ? KOMIRA_ERR_NULL_ARG : p_komira_sql_stream(ctx, sql, &out);
+    if (rc != KOMIRA_ERR_ENGINE) fprintf(stderr, "FAIL: %s returned %d, want %d\n", what, rc, KOMIRA_ERR_ENGINE);
+    CHECK(rc == KOMIRA_ERR_ENGINE);
+    CHECK(memcmp(&out, &before, sizeof out) == 0);
+    const char *got = last_error_text(ctx, text, sizeof text);
+    char head[256];
+    snprintf(head, sizeof head, "%s at line 1, column ", error);
+    size_t head_len = strlen(head);
+    int ok = strncmp(got, head, head_len) == 0;
+    const char *digits = got + (ok ? head_len : 0);
+    char *end = NULL;
+    unsigned long column = ok ? strtoul(digits, &end, 10) : 0;
+    ok = ok && end != digits && digits[0] != '0' && *end == '\0' && column >= 1 && column <= strlen(sql) + 1;
+    if (!ok) fprintf(stderr, "FAIL: %s: last error '%s', want '%s<column>'\n", what, got, head);
+    CHECK(ok);
+    expect_usable(ctx, what);
+}
+
 /* `sql` is refused with KOMIRA_ERR_ENGINE for a reason of its own, one that
    starts with `prefix`: *out untouched, and the next query on the context
    answers. */
@@ -154,8 +183,8 @@ static void expect_engine_refusal(komira_handle ctx, const char *what, const cha
 /* One nested form: `open` repeated `n` times and `middle` nests `n + extra`
    levels. At the limit it runs (or, when `at_limit_refusal` is not NULL, the
    engine refuses it for that reason, which is not the nesting limit), one
-   level more is refused by the parser, and a hundred times the limit is
-   refused the same way. */
+   level more is refused by the parser (its reason, then where it stopped),
+   and a hundred times the limit is refused the same way. */
 static void nesting_case(komira_handle ctx, const char *what, const char *head, const char *open, const char *middle,
                          const char *close, int extra, const char *at_limit_refusal) {
     char deep[128];
@@ -169,10 +198,10 @@ static void nesting_case(komira_handle ctx, const char *what, const char *head, 
     }
     free(sql);
     sql = nest(head, open, at_limit + 1, middle, close);
-    expect_refused(ctx, what, sql, deep);
+    expect_parse_refused(ctx, what, sql, deep);
     free(sql);
     sql = nest(head, open, 100 * NESTING_LIMIT, middle, close);
-    expect_refused(ctx, what, sql, deep);
+    expect_parse_refused(ctx, what, sql, deep);
     free(sql);
 }
 

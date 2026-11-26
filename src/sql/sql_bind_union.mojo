@@ -4,7 +4,7 @@
 #   projection that conforms a branch to them.
 # =============================================================================
 #
-# A set operation (`sql_bind_set_op`: UNION ALL, INTERSECT, EXCEPT) folds one
+# A set operation (`sql_bind_set_op`: UNION ALL, UNION, INTERSECT, EXCEPT) folds one
 # common type per column over its inputs left to right (`_union_merge_schema`)
 # and puts one projection on every input whose names or types differ from the
 # result's (`_union_conform_branch`), so every child of a `PLAN_UNION` node
@@ -13,13 +13,17 @@
 # position, when the branch ends in one. A pair of types this
 # engine cannot cast between is refused by name.
 #
+# An INTEGER or BIGINT with a VARCHAR takes VARCHAR, as in DuckDB: the integer
+# input is cast to its plain decimal spelling (the cast `CAST(x AS VARCHAR)`
+# binds to), so 3 and '3' are one value of the result.
+#
 # Where DuckDB answers and this binder refuses, by name: UBIGINT with a signed
 # integer (DuckDB's HUGEINT; Arrow has no 128-bit integer); a common decimal
 # wider than 38 digits (DuckDB narrows the scale or keeps a type the values
 # can overflow); BOOLEAN with a number, DATE with a timestamp, a string with
-# any other type, STRING with LARGE_STRING, and a timestamp with a zone or in
-# nanoseconds against another unit (the projection's casts do not serve these
-# pairs exactly). A column is nullable when any branch is; nullability alone
+# any type but INTEGER and BIGINT, STRING with LARGE_STRING, and a timestamp
+# with a zone or in nanoseconds against another unit (the projection's casts
+# do not serve these pairs exactly). A column is nullable when any branch is; nullability alone
 # never adds a projection, because the concatenation merges validity.
 
 from arrow.arrow_types import ArrowType
@@ -174,6 +178,8 @@ def _common_type(
 ) -> _Common:
     """The common type DuckDB gives a UNION ALL column whose branches have the
     types `a` and `b` (see the module header for what is refused)."""
+    if _int_to_string(a, b) or _int_to_string(b, a):
+        return _Common(ArrowType.STRING)
     if a.is_timestamp() or b.is_timestamp():
         return _common_timestamp(a, a_tz, b, b_tz)
     var a_dec = a == ArrowType.DECIMAL128
@@ -204,6 +210,12 @@ def _common_type(
     if b_float and a.is_integer():
         return _Common(b)
     return _Common(ArrowType.NULL, why=String(_NO_COMMON_TYPE))
+
+
+def _int_to_string(a: ArrowType, b: ArrowType) -> Bool:
+    """`a` is INT32 or INT64 and `b` STRING: the integer pair whose cast to a
+    string the engine serves."""
+    return (a == ArrowType.INT32 or a == ArrowType.INT64) and b == ArrowType.STRING
 
 
 def _union_type_name(schema: Schema, i: Int) -> String:

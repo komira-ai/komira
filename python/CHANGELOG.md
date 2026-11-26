@@ -12,6 +12,42 @@ install page shows names it.
 
 ## Unreleased
 
+- **komira.pl: group-by, joins, unique and windows.** `lf.group_by(keys).agg(...)` (and `len`,
+  `sum`, `mean`, `median`, `min`, `max`, `n_unique`) gives one row per group, the null key a group
+  of its own. `lf.join(other, on=..., how=...)` takes every `how` polars has (`inner`, `left`,
+  `right`, `full`, `semi`, `anti`, `cross`), `left_on`/`right_on`, `suffix` and `coalesce`, and
+  gives polars' output columns. `lf.unique(subset=None, keep="any"|"none")` keeps one row per
+  value, or only the rows no other row shares. `expr.over(keys, order_by=...)` computes an
+  expression per partition; an aggregate beside row-wise values in `select`, `with_columns` or
+  `filter` is broadcast over the rows, as in polars. `rank` (`"average"`, `"min"`, `"max"`,
+  `"dense"`), `cum_sum`, `cum_count`, `cum_min`, `cum_max` and `rolling_sum`, `rolling_mean`,
+  `rolling_min`, `rolling_max` (with `min_samples`) read the frame's sort or `over(order_by=...)`.
+  Each builds plan nodes (an aggregate, a join, a distinct, a window) run with no SQL. Refused by
+  name: anything that needs row order the plan does not have (`maintain_order=True`,
+  `keep="first"`/`"last"`, `rank("ordinal")`, a running or rolling window of an unsorted frame
+  without `order_by`), `nulls_equal=True`, and a key that is an expression. A rank, `len()` and
+  `cum_count()` are Int64 where polars gives UInt32. The engine refuses when the query runs what it
+  does not compute yet, such as a grouped sum or mean of a float column.
+- **More verbs of the pandas-shaped DataFrame.** `df.fillna(value or {col: value})` and
+  `df.dropna(how="any"|"all", subset=None)`, where a NaN in a float column is missing as NULL is;
+  `df.rename(columns=dict or function, errors="ignore"|"raise")`, `df.add_prefix` and
+  `df.add_suffix`; `df.astype(dtype or {col: dtype})` and `s.astype(dtype)`, a dtype being a pyarrow
+  type, a name of the design's table, a pandas spelling (`"Int64"`, `"boolean"`, `"str"`) or `int`,
+  `float`, `bool` and `str`; `df.tail(n)` of a sorted frame; `komira.concat(frames)` of frames with
+  the same columns and types; `s.value_counts()` is refused by name, since a komira Series has no index to
+  hold the values (count them with `df.groupby(column).size()`); and the `s.str`
+  (`lower`, `upper`, `len`, `startswith`, `endswith`, `contains`, `match`, `fullmatch`, `replace`,
+  `slice`, `pad`, `extract`) and `s.dt` (`year`, `quarter`, `month`, `day`, `hour`, `minute`,
+  `second`, `microsecond`, `dayofweek`, `dayofyear`, `floor`) accessors. Each builds plan nodes and
+  runs with no SQL. The engine refuses at `materialize()` a cast it does not run (to `bool`, or a
+  timestamp or a date to a string) and a regular expression over a computed Series. Arguments that
+  need an index or row positions (`axis=1`, `inplace=True`, `thresh=`, ...) raise
+  `UnsupportedOperation` naming what to write instead; `str.strip` and the other pandas methods not
+  built raise `AttributeError` saying why.
+- **Notebook display.** In Jupyter and IPython a `komira.DataFrame` shows as a table of its column
+  names over their types, and runs nothing; a `Result` shows its first ten rows at most, with a line
+  giving the row and column counts or saying there are more. The result is still unread after it is
+  shown: `to_arrow()`, `to_pandas()` and the other terminals read every row, once.
 - **Group-by and aggregates in the pandas-shaped DataFrame.** `df.groupby(by, *, sort=True,
   dropna=True)` gives a `komira.GroupBy` whose `agg(...)`, `sum`, `mean`, `median`, `std`, `var`,
   `min`, `max`, `count`, `size` and `nunique` return a frame of the keys and one column per output,
@@ -41,6 +77,16 @@ install page shows names it.
   `UnsupportedOperation` naming `materialize()`. They need libkomira ABI 1.8.
 - **protobuf.** The wheel requires `protobuf>=5.29.1,<8`, so `pip install komira` installs it, and
   ships the generated plan modules a DataFrame encodes its plan with. `import komira` imports neither.
+- **komira.pl, the polars-shaped frames (core).** `import komira.pl as kpl`: `kpl.scan_parquet`,
+  `scan_ndjson` and `scan_csv` make a lazy `LazyFrame` (reading the file's schema, nothing else), and
+  `select`, `with_columns`, `filter`, `sort`, `head`, `limit`, `slice`, `tail`, `top_k`, `bottom_k`,
+  `drop`, `rename`, `drop_nulls` and `kpl.concat` build its plan, with `kpl.col`, `kpl.lit`,
+  `kpl.when`, `kpl.len` and the expression operators, null tests, `cast`, `is_in`, `is_between`,
+  aggregates and `.str` functions. `collect()` runs the plan through the engine's plan entry, not
+  through SQL, and returns a `Result`; `schema` and `explain()` run nothing. Output names and types
+  follow polars 1.44.2, except that a count, `len()`, `str.len_chars()` and the sum of a boolean or a UInt32
+  column are Int64 where polars gives UInt32; what the engine cannot run is refused by name (today `median()`, `std()`, `var()` and `min()` or `max()` of a string column build their
+  plans and the engine refuses them when the frame is collected).
 - **CSV and JSON files.** `Session.register_csv(name, path, *, delimiter=",", header=True,
   all_varchar=False)` and `Session.register_json(name, path)` register a CSV file and a
   newline-delimited JSON file as a table for `Session.sql`, with the column names and types the
@@ -76,6 +122,14 @@ install page shows names it.
 - **Logging.** komira logs to the `logging` logger `"komira"`, which has a `NullHandler`: at `DEBUG`
   the library it loaded and each answered query's plan segments, at `INFO` a query stopped by an
   exception. It logs no query text.
+- **Where a syntax error is.** A statement the engine cannot parse raises `ParseError` from `sql`
+  with a message that ends with where it stopped parsing, `at line <L>, column <C>`:
+  `parse: SQL syntax error: expected keyword 'by' at line 1, column 42`.
+- **The quickstart.** The README and the install page show a new first program that needs no file
+  beside it: it writes a small Parquet file with pyarrow, runs an aggregate and a GROUP BY, reads the
+  answers as rows, as a pyarrow Table, with `to_reader()` and with `pyarrow.table(result)`, and shows
+  the message of a missing file and of a syntax error. Both pages show what it prints. The
+  `readings.parquet` the earlier program downloaded is no longer needed.
 - **pyarrow.** The wheel requires `pyarrow>=25.0.1`, so `pip install komira` installs it; it had no
   requirement.
 - **Python 3.11 and 3.12.** The wheel installs on CPython 3.11, 3.12, 3.13 and 3.14: its

@@ -172,7 +172,8 @@ to every later run on the context.
   list ([credentials_and_writes.md](credentials_and_writes.md#10-writes)).
 - **The error text.** **EXISTS:** the last error text is `<step>: <reason>`,
   where the step is the one that refused (parse, bind, optimize, lower or
-  execute). That text is for people, and bindings do not parse it (§6).
+  execute). A refusal of the parse step ends with ` at line <L>, column <C>`, where
+  the text stopped parsing. That text is for people, and bindings do not parse it (§6).
 
 ### What `komira_plan_stream` runs: the plan door
 
@@ -441,7 +442,7 @@ call paths from the exports; nothing here was measured unless it says so.
 
 | input | where it ended the process | now |
 |---|---|---|
-| a statement nested more than 100 levels (parentheses, prefix `NOT`, `-`, `+` or `@`, function calls, `CASE`, `IN` lists, scalar, `IN` and `EXISTS` subqueries, derived tables) | the parser recursed once per level on the caller's stack (`sql/sql_parser.mojo`), about 25 KB per parenthesis and 35 KB per subquery (measured on linux-x86_64 from the stack's high-water mark), so about 300 levels filled an 8 MiB stack in the parser alone | `parse: SQL syntax error: the statement nests deeper than 100 levels`; exactly 100 levels runs, except nested scalar subqueries, which the optimizer refuses by name (`OPTIMIZE_UNRESOLVED_SCALAR`). DuckDB allows 1000; smaller parser frames would let the limit rise |
+| a statement nested more than 100 levels (parentheses, prefix `NOT`, `-`, `+` or `@`, function calls, `CASE`, `IN` lists, scalar, `IN` and `EXISTS` subqueries, derived tables) | the parser recursed once per level on the caller's stack (`sql/sql_parser.mojo`), about 25 KB per parenthesis and 35 KB per subquery (measured on linux-x86_64 from the stack's high-water mark), so about 300 levels filled an 8 MiB stack in the parser alone | `parse: SQL syntax error: the statement nests deeper than 100 levels at line <L>, column <C>`; exactly 100 levels runs, except nested scalar subqueries, which the optimizer refuses by name (`OPTIMIZE_UNRESOLVED_SCALAR`). DuckDB allows 1000; smaller parser frames would let the limit rise |
 | `lpad` / `rpad` with a count such as 2^63 - 1 | `_pad_bytes` (`batch_eval/string_bytes.mojo`) appended the pad with no ceiling | refused over the 64 MiB per-row ceiling `repeat` already had (`STRING_FN_N_REPEAT_MAX_BYTES`) |
 | `repeat` with a count such as 2^31 - 1 | not an abort: refused before the change too; kept as a case | the same refusal |
 

@@ -458,7 +458,8 @@ tests, which no pull request builds. The rest of this section is about `release-
   `pypi.yml` (the macOS wheel's jobs are in it) to not running on a pull request or a merge group. The five targets of the macOS wheel
   (`//python:komira_wheel_macos_arm64`, `//python:wheel_install_test_macos_arm64`,
   `//python:wheel_libs_macos_arm64`, `//python:wheel_same_macos_arm64`,
-  `//python/smoke:pypi_smoke_macos_arm64`) stay out of the check twice: each has an `EXCLUDED` row in
+  `//python/smoke:pypi_smoke_macos_arm64`) and the pinned macOS pyarrow wheel its install test reads
+  (`//python/tests:pyarrow-25.0.1-cp313-cp313-macosx_12_0_arm64.whl`) stay out of the check twice: each has an `EXCLUDED` row in
   `tools/build/ci/rules.bzl`, so the pull-request selector never picks it, and each has
   `target_compatible_with = DARWIN_ARM64` (limit `pypi-wheel-macos-arm64` in
   `tools/build/platforms/limits.tsv`), so it builds only with `--target-platforms
@@ -540,47 +541,32 @@ tests, which no pull request builds. The rest of this section is about `release-
 Not built yet. `//release:mopm_darwin_libs` covers the mopm packages only. Most of `//src` is
 not a mopm package, so a change that breaks one of those libraries on macOS is seen by nobody.
 Measured: a `uquery` of `kind(...)` for the library rules (`mojo_library`, gated, shared,
-system, native and `cxx_library`) over the `src` directory lists 422 targets. One
-`build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going
---skip-incompatible-targets` of that list on the farm (`Commands: 15971 (cached: 12379, remote:
-3592, local: 0)`) built 288, skipped 4 as incompatible (the connect, git pack, git protocol and
-HTTP conformance suites) and stopped on 130. With the `bench_data` and `phase_timers` fixes
-below, the same build built 291, skipped the same 4 and stopped on 127. Every target that
-stops has an open issue, one per cause. A target is counted under the first failing action
-its build report names:
+system, native and `cxx_library`) over the `src` directory lists 425 targets. One `build --target-platforms komira//tools/build/platforms:darwin-arm64
+--keep-going --skip-incompatible-targets` of that list on the farm, on main after the `http_core`
+macOS test fixes and the Mach-O native shared library (`Commands: 18849 (cached: 16445, remote:
+2404, local: 0)`), built 405, skipped 4 as incompatible (the connect, git pack, git protocol and
+HTTP conformance suites) and stopped on 16. With the fixes below the same build builds 415, skips
+7 and stops on 3. A target is counted under the first failing action its build report names:
 
-| Cause | Targets | Issue |
-| --- | --- | --- |
-| `http_core`'s s2n shim test expects `ECONNRESET` where macOS reads end of stream | 107 (`http_core` and what depends on it) | komira-ai/komira#2206 |
-| `http_core`'s partial-send test never sees a partial send on macOS (hidden behind the test above in the same package) | the same 107 | komira-ai/komira#2207 |
-| a library's native shared library was ELF only; fixed: `native_shared_library` links a Mach-O `.dylib` for darwin-arm64 (tools/build/native/README.md, "On macOS (Mach-O)"), and a farm build of the nine `_native` targets for darwin-arm64 built all nine with checks 1 to 7 green (measured: `build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going --skip-incompatible-targets` of the nine, `Commands: 477 (cached: 0, remote: 477, local: 0)`); the other 4 of the 13 counted here were dependents of those nine (inferred, not rebuilt for this row) | 13 | komira-ai/komira#2197 |
-| the UDF spike helpers' C used Linux-only APIs; since it was ported (below), their welded tests stop instead: the native runtime has no macOS rule for loading a verified library, and the node worker's tests need a darwin-arm64 `node` and read `/proc` | 7 in the sweep; 2 since the port (`komira_udf_spike_native`, `komira_udf_spike_node_worker`) | komira-ai/komira#2199 |
+| Cause | Targets on main | After the fixes | Issue |
+| --- | --- | --- | --- |
+| the mail servers' serve-loop tests moved the clock before the peer's bytes had reached the server, and stepped a fixed number of times; macOS loopback can deliver after the send returns. Fixed: they wait, with `poll`, for the bytes to arrive | 3 (`smtp_server`, `imap_server`, `smtp_client`) | 0 | |
+| `db_postgres`'s TLS handshake test alternated 256 busy rounds over TCP loopback. Fixed: a side blocked on read waits in `poll` | 2 (`db_postgres`, `komira_db_conformance`) | 0 | |
+| `job_supervisor`'s tests started `/bin/true`, which macOS keeps in `/usr/bin`. Fixed: they start `/bin/sh -c "exit 0"` | 2 (`job_supervisor`, `komira_job_supervisor_loopback`) | 0 | |
+| on macOS `//third_party/aws-lc:crypto` re-exports `//src/awslc`'s archive and had no `[static-pic]` for `native_shared_library`, and `komira_crypto_native` listed ELF-only weak names. Fixed: `checked_cxx_library` takes that archive (`archive`) and the weak list is per OS | 2 (`komira_crypto_native`, `komira_http_core_native`) | 0 | |
+| the per-CPU-level links of `libkomira` failed analysis instead of being skipped. Fixed: they are linux-x86_64 only (`komira-limit:isa-variants-linux-x86-64`) | 2 | 0 (skipped) | |
+| `phase_timers` counted a usage sample that macOS cannot take (no per-thread `getrusage`) as a dropped record | 1 (`bench_q6_phases`) | 0 | |
+| `komira_test_s3_adapter`'s runner starts MinIO through setpriv and `PR_SET_PDEATHSIG` and refuses every start elsewhere. It is Linux only, with its two end-to-end binaries (`komira-limit:s3-adapter-runner-linux`) | 1 | 0 (skipped) | |
+| `cbrt` answers one ulp from the expected ones, which come from the Linux DuckDB (`decimal_compare` conformance) | 1 | 1 | komira-ai/komira#2233 |
+| the UDF spike helpers' welded tests: the native runtime has no macOS rule for loading a verified library, and the node worker's tests need a darwin-arm64 `node` | 2 (`komira_udf_spike_native`, `komira_udf_spike_node_worker`) | 2 | komira-ai/komira#2199 |
 
-Since that sweep, `http_core`'s welded tests pass on macOS: the s2n shim test makes its reset
-happen there too (a TCP loopback connection closed with `SO_LINGER` zero, komira-ai/komira#2206),
-and the partial-send test passes on macOS. The targets of its two rows now build, or stop on a
-cause of their own that the next sweep counts.
-
-`bench_runner` stopped on `bench_data` before and now stops on `http_core`, which it also
-depends on. No target stopped on aws-lc and s2n-tls (komira-ai/komira#2196), on `so_exports`
-(komira-ai/komira#2198) or on a read of `/proc/self/status` (komira-ai/komira#2201). The UDF
-spike helpers' C (`probe.c`, `channel.c`, `engine_loop.c`) has a macOS branch for each Linux-only
-API it used (`dl_iterate_phdr` and `mallinfo2`, `SOCK_CLOEXEC` and `memfd_create`,
-`sched_getaffinity` and `pthread_barrier_t`). Measured: a `build --target-platforms
-komira//tools/build/platforms:darwin-arm64 --keep-going` on the farm of the two helper libraries,
-their C libraries and their runtime shared libraries (`native`, `native_c`, `node_worker`,
-`node_worker_corrupt`): every C library and shared library built, the welded tests `test_probe`,
-`test_channel`, `test_engine_barrier` and `test_no_node` passed on a farm Mac, and the other 13
-welded tests stopped on the two gaps in that row (`test_native_io` also on its 4095-byte path,
-longer than macOS allows): `Commands: 1244 (cached: 1204, remote: 40, local: 0)`, and the 13 are
-the `mojo_gated_test` actions its build report lists as failed. Nine
-causes were ours and are fixed: tests that assumed Linux's `PATH_MAX`, a `SIGPIPE` that macOS
-raises for the whole process, BSD `yes`, the epoll backend, the `libc.so.6` name, a
-temporary-file name that two threads could draw alike on macOS's coarser clock, an NFD file
-name that APFS treats as the same file as its NFC form, `bench_data`'s Snappy digests pinned
-once for both cpus where Snappy's bytes differ by cpu (komira-ai/komira#2208), and
-`phase_timers`' fork stamp, which macOS's clock could read equal to a task's end stamp
-(komira-ai/komira#2200).
+Fixed by the sweeps before this one: tests that assumed Linux's `PATH_MAX`, a `SIGPIPE` that macOS
+raises for the whole process, BSD `yes`, the epoll backend, the `libc.so.6` name, a temporary-file
+name that two threads could draw alike on macOS's coarser clock, an NFD file name that APFS treats
+as the same file as its NFC form, `bench_data`'s Snappy digests (komira-ai/komira#2208),
+`phase_timers`' fork stamp (komira-ai/komira#2200), `http_core`'s s2n shim reset and partial-send
+tests (komira-ai/komira#2206, komira-ai/komira#2207), the ELF-only native shared library
+(komira-ai/komira#2197) and the UDF spike helpers' C (`probe.c`, `channel.c`, `engine_loop.c`).
 
 The proposal keeps this set built, in the same way as the mopm set:
 
@@ -752,8 +738,9 @@ refuses a pull request in which a member (every `src/<name>` with a `mopm.toml`,
 `release/readme_e2e/packages.bzl`) is missing from it: "<name> is a member of the release and is not in
 release/prod_claimed_names.txt: claim it on the prod registry first, then add it to release/prod_claimed_names.txt".
 A maintainer adds a name to the file only after claiming it on the prod registry, in the pull request that adds the
-member. The file keeps the names of deleted packages (the `kci_*` libraries), whose names stay claimed, and refuses the
-dropping of one of them, an unsorted or repeated line, and an empty file. It is a
+member or ahead of it: names claimed for libraries not published yet (each with its row in `release/UNPUBLISHED.md`)
+are listed too, and the check accepts a name no member has. The file keeps the names of deleted packages (the
+`kci_*` libraries), whose names stay claimed, and refuses the dropping of one of them, an unsorted or repeated line, and an empty file. It is a
 committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
 last word.
 
@@ -983,7 +970,7 @@ workflow.
 
 | job | half | environment | permissions | what it does |
 |---|---|---|---|---|
-| `build` | push | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds the wheel and its install test (`//python:komira_wheel[release]` and `//python:wheel_install_test`) with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`), `//python/smoke:pypi_smoke` and `//python:supported_pythons[linux-x86_64]` (the exact versions of [python/pythons.bzl](../python/pythons.bzl) as a JSON list, `pythons.json`); runs `pypi_smoke dist`, which makes the dist directory and writes `built.txt`, the record of the wheel's file name, sha256 and size; copies the quickstart, its expected output, its data and the ABI table beside the driver; runs `pypi_smoke matrix` (its output `matrix`, one entry per Python). Keeps `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver, those four files, `pythons.json` and `built.txt`) for 14 days. No upload step. |
+| `build` | push | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp (`release_json stamp`); builds the wheel and its install test (`//python:komira_wheel[release]` and `//python:wheel_install_test`) with the three stamp flags (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`), `//python/smoke:pypi_smoke` and `//python:supported_pythons[linux-x86_64]` (the exact versions of [python/pythons.bzl](../python/pythons.bzl) as a JSON list, `pythons.json`); runs `pypi_smoke dist`, which makes the dist directory and writes `built.txt`, the record of the wheel's file name, sha256 and size; copies the quickstart, its expected output and the ABI table beside the driver; runs `pypi_smoke matrix` (its output `matrix`, one entry per Python). Keeps `pypi-<version>-dist` (the wheel) and `pypi-<version>-smoke` (the driver, those three files, `pythons.json` and `built.txt`) for 14 days. No upload step. |
 | `wheel-user-test` | push | none | none | [the user test of the wheel file](#the-user-test-of-the-wheel-file): one job per Python of the list, on a fresh runner with no checkout, `pypi_smoke install --index dist`. |
 | `testpypi` | push | `testpypi` | `id-token: write` | after `wheel-user-test`; no farm, no checkout, no buck2. Downloads the two artifacts, prints the size of the project on TestPyPI and on PyPI ([storage](#storage-on-the-indexes)), runs `pypi_smoke state --index testpypi`, and uploads the wheel to TestPyPI only when the state is `absent`. |
 | `testpypi-smoke` | push | none | none | one job per entry of `build`'s `matrix` (`fail-fast: false`, so every Python reports): `pypi_smoke verify --index testpypi`, then `pypi_smoke install --index testpypi` with the quickstart files of the smoke artifact, on a runner with that exact version from `actions/setup-python`. Skipped when the state is `differs`. |
@@ -1069,8 +1056,9 @@ and nothing else; no `modular` package is importable; and
 the quickstart, the program the README and the install page show (held byte for byte by
 `//python/smoke:readme_shows_quickstart` and `//python/smoke:install_page_shows_quickstart`), runs and must
 print exactly what `python/examples/quickstart.expected` says. Today that is import, the version, the
-engine's ABI version, and `SELECT 1 AS n` and an aggregate over a registered Parquet file, each printed as
-rows through pyarrow. When the quickstart grows (a pandas result, say),
+engine's ABI version, a Parquet file the program writes itself, an aggregate and a GROUP BY with an ORDER BY
+over it read as rows, a pyarrow Table, a reader and the PyCapsule interface, and the two `KomiraError` messages
+of a missing file and a SQL syntax error. When the quickstart grows (a pandas result, say),
 this job and the index smokes run the new program with no change here. A local directory does not lag, so
 the install is tried once (`--attempts` and `--delay` are refused with `--index dist`).
 
@@ -1237,7 +1225,7 @@ exit status is 0 for success, 1 for a refusal or a failure (the last line printe
 | `state` | `--index <testpypi\|pypi> --dist <dir> --github-output <file>` | `--dist` holds exactly one wheel and nothing else. One request for the version's JSON on the index, no retry. Appends `state=absent`, `same` or `differs` (below). Any other answer than a 404 or a 200 with the expected shape fails. |
 | `present` | `--index <testpypi\|pypi> --name-file <file> --github-output <file>` | reads the one-line file name (`komira-<version>-<tag>.whl`) from `--name-file`, asks the index's JSON for that release (as `state` does) and appends `present=true` (the release lists a file of exactly that name) or `present=false`. It needs no wheel, so it runs before anything is built. An index error is a refusal and appends nothing. |
 | `verify` | `--index <testpypi\|pypi> --dist <dir> [--attempts <1..20>] [--delay <0..300>]` | asks the index for the file it serves and compares it with the built one (below). A refused attempt is tried again up to `--attempts` times (default 5), `--delay` seconds apart (default 30), because an index can lag an upload. |
-| `install` | `--index <testpypi\|pypi\|dist> --dist <dir> --python <exe> --example <quickstart.py> --expect <quickstart.expected> --data <file>... --abi-table <komira.tsv> --work <dir> [--attempts <n>] [--delay <s>]` | installs the published wheel into an empty environment and runs the example (below); with `--index dist`, the wheel of `--dist` itself ([the user test](#the-user-test-of-the-wheel-file)). `--attempts` and `--delay` as for `verify`, for the install of `komira` only; refused with `--index dist`, which installs once. |
+| `install` | `--index <testpypi\|pypi\|dist> --dist <dir> --python <exe> --example <quickstart.py> --expect <quickstart.expected> --abi-table <komira.tsv> --work <dir> [--attempts <n>] [--delay <s>]` | installs the published wheel into an empty environment and runs the example (below); with `--index dist`, the wheel of `--dist` itself ([the user test](#the-user-test-of-the-wheel-file)). `--attempts` and `--delay` as for `verify`, for the install of `komira` only; refused with `--index dist`, which installs once. |
 | `matrix` | `--pythons <list> --platform <name> --github-output <file>` | reads the list of supported Pythons ([above](#the-user-test-of-the-wheel-file)) and appends `matrix=<JSON>`, the `include` list of a job matrix with the platform, the Python and the hosted runner of every entry. A malformed list is a refusal and appends nothing. |
 | `storage` | `--index <testpypi\|pypi> --project <name> --limit-gib <1..1000> --over-percent <1..100> --summary <file> --github-output <file>` | one request for the project's JSON; sums the size of every file of every release; appends the summary line and `over=true\|false` and `bytes=<total>` ([above](#storage-on-the-indexes)). Over the threshold is an `::error` line, not a failure. A 404 is 0 bytes; any other answer that is not a project's JSON with sizes is a refusal and appends nothing. |
 | `promote` | `--record <file> --out <dir> --github-output <file>` | [the promotion](#the-promotion)'s choice and download: the record's file from TestPyPI, held to the record; newer TestPyPI versions of the same tag named as skipped; refused when PyPI's newest is newer. Any refusal appends nothing and writes nothing into `--out`. |
@@ -1277,10 +1265,11 @@ and make no network request; the live indexes are reached only by a run of this 
    `pip freeze` must list `komira==<version>` once and otherwise only the distributions the wheel's
    `Requires-Dist` names, at any version (pyarrow and protobuf; the wheel carries the Mojo runtime, so no `mojo-compiler`
    and no other distribution is installed), no package named `modular` may be importable, and
-   the quickstart runs with `python -I` in a directory holding only the example and its data file: it
-   must exit 0 and print what `python/examples/quickstart.expected` says, compared exactly, with `<version>`
-   replaced by the version and `<abi_version>` by the ABI version of the `--abi-table` file
-   (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.8` is 1008). A failed step names the command, its exit
+   the quickstart runs with `python -I` in a directory holding only the example (it writes its own Parquet
+   file there, so no data file is passed): it must exit 0 and print what `python/examples/quickstart.expected`
+   says, compared exactly, with `<version>` replaced by the version, `<abi_version>` by the ABI version of the
+   `--abi-table` file (`src/so/abi/komira.tsv`: `major * 1000 + minor`, so `1.9` is 1009) and `<cwd>` by the real
+   path (symlinks resolved) of that directory, which the missing-file message names. A failed step names the command, its exit
    status and the last lines of its stderr.
 
 The user test of the wheel file is the first gate: `testpypi` `needs` `wheel-user-test`, so a wheel that does
@@ -1288,10 +1277,15 @@ not install and run from its own file is uploaded nowhere. The TestPyPI smoke is
 version whose TestPyPI smoke passed on every Python gets a record, and only a record is promoted to PyPI.
 
 The quickstart is [`python/examples/quickstart.py`](../python/examples/README.md). Today it asserts the
-version, the engine's C ABI version, and the rows of `SELECT 1 AS n` and of an aggregate over
-`readings.parquet` (its row count and the sum of `value`), read through pyarrow, and that the session
-closes. The README's block under "What works"
-is the same text, held byte for byte by `//python/smoke:readme_shows_quickstart`. The install page,
+version and the engine's C ABI version; that it writes a small Parquet file with pyarrow, registers it and runs an
+aggregate and a GROUP BY with an aggregate and an ORDER BY; that the answers read as rows, as a pyarrow Table with
+its schema, with `to_reader()` and through the Arrow PyCapsule interface; that a missing file and a SQL syntax
+error raise `KomiraError` with messages naming the file's absolute path and the line and column; and that the
+session closes. The README's block under "What works"
+is the same text, and the README's output block is `quickstart.expected`, both held byte for byte by
+`//python/smoke:readme_shows_quickstart`. The pull request check runs the same quickstart against the installed
+wheel on the farm, `//python:wheel_install_test` (`python/tests/test_installed.py`), which compares its stdout with
+`quickstart.expected` and uploads nothing. The install page,
 [docs/install.md](install.md), shows the same program and what it prints, `quickstart.expected` with the
 newest release of [python/CHANGELOG.md](../python/CHANGELOG.md) and the ABI version put in, held by
 `//python/smoke:install_page_shows_quickstart`.
@@ -1300,7 +1294,8 @@ newest release of [python/CHANGELOG.md](../python/CHANGELOG.md) and the ABI vers
 GitHub-hosted runner `macos-15` (Apple silicon, free for public repositories), once per supported CPython from
 `actions/setup-python` (3.11.9 and 3.12.10 for 3.11 and 3.12: their newer patch releases have no macOS build there), the macOS driver (`//python/smoke:pypi_smoke_macos_arm64`, cross-compiled on the farm for
 `aarch64-macos`) checks that the index serves the bytes that were built and that `pip install komira==<version>` into an
-empty environment gives a package that imports, reports the version and the ABI version, and runs the quickstart.
+empty environment gives a package that imports, reports the version and the ABI version, and runs the quickstart (the same program and expected output, with `<cwd>`
+substituted, and no data file).
 The wheel is self-contained: `komira/_lib/libkomira.dylib` and, in `komira/_lib/lib/`, the three Mojo runtime
 libraries (`libAsyncRTRuntimeGlobals.dylib`, `libKGENCompilerRTShared.dylib`, `libMSupportGlobals.dylib`); it depends on
 no package of Modular's.
