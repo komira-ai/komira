@@ -6,6 +6,7 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/node:defs.bzl", "c_shared_lib")
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 load("@komira//tools/build/python:defs.bzl", _py_test = "py_test", _python_binding_test = "python_binding_test", "python_wheel")
+load("@komira//src/tests/conformance/komira_iceberg_scan_conformance:orders_files.bzl", "CASES", "ORDERS_INPUTS")
 load(":families.bzl", "register", "require_all_run", "test_target_name")
 
 # Every `py_test` and `python_binding_test` below is declared through these two,
@@ -535,6 +536,31 @@ c_shared_lib(
     deps = ["//python:komira", _PYARROW[p["suffix"]]],
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
+
+# iceberg_scan through Session.sql on the real library, over the table `orders`
+# of src/tests/conformance/komira_iceberg_scan_conformance (six snapshots, a
+# position and an equality delete, an overwrite, partitioned by region): each
+# case of its oracle/cases.sql gives the pinned DuckDB's column names and rows
+# (`:answers`), the metadata file reads as the directory does, an older
+# snapshot reads its rows, and each refusal (an unknown snapshot, a directory
+# with no version hint, a missing path, a non-file scheme, a file: URI with a
+# host, a moved table without allow_moved_paths, a snapshot id that is not an
+# integer) is its named error and leaves the session answering. On CPython 3.13 alone: the test reaches no code of the
+# package that differs by minor.
+_ICEBERG = "komira//src/tests/conformance/komira_iceberg_scan_conformance"
+
+_ICEBERG_DATA = {"cases.sql": _ICEBERG + ":oracle/cases.sql", "libkomira": LIBKOMIRA}
+
+_ICEBERG_DATA.update({dest: _ICEBERG + src for dest, src in ORDERS_INPUTS.items()})
+
+_ICEBERG_DATA.update({c + ".tsv": _ICEBERG + ":answers[" + c + ".tsv]" for c in CASES})
+
+python_binding_test(
+    name = "iceberg_scan_test",
+    src = "test_iceberg_scan.py",
+    data = _ICEBERG_DATA,
+    deps = ["//python:komira", _PYARROW[""]],
+)
 
 # Session.sql on the real library: SELECT 1 AS n, a GROUP BY over a checked-in
 # Parquet file (3000 rows, five labels, six row groups), an aggregate over the

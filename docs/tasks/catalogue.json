@@ -817,9 +817,10 @@
     "slug": "query-iceberg-table",
     "category": "Cloud storage",
     "question": "How do I query an Iceberg table?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
-      "komira-ai/komira#2363"
+      "komira-ai/komira#2363",
+      "komira-ai/komira#2481"
     ]
   },
   {

@@ -25,8 +25,13 @@ load(":orders_files.bzl", "CASES", "ORDERS_INPUTS", "ORDERS_OUTPUTS")
 #                             older snapshots; a metadata file as the path;
 #                             an unknown snapshot and an unmoved table refused
 #
+#   //python/tests:iceberg_scan_test  the same cases through Session.sql
+#                                     from Python, over the same staged table
+#
 # The checks are in the test (the library has no code of its own), so the
-# test is its own action. Nothing depends on this package.
+# test is its own action. No library depends on this package; the Python
+# test //python/tests:iceberg_scan_test stages `:orders_table`, `:answers` and
+# oracle/cases.sql.
 mojo_binary(
     name = "orders_writer",
     srcs = ["runner/main.mojo"],
@@ -38,6 +43,7 @@ iceberg_table(
     name = "orders_table",
     outputs = ORDERS_OUTPUTS,
     writer = ":orders_writer",
+    visibility = ["komira//python/tests:"],
 )
 
 sql_oracle(
@@ -49,6 +55,14 @@ sql_oracle(
     ],
     inputs = ORDERS_INPUTS,
     outputs = [c + ".tsv" for c in CASES],
+    visibility = ["komira//python/tests:"],
+)
+
+# The cases, for python/tests (test_iceberg_scan.py), which runs each through
+# Session.sql and compares the rows with `:answers`.
+export_file(
+    name = "oracle/cases.sql",
+    visibility = ["komira//python/tests:"],
 )
 
 _PARITY_DATA = {"cases.sql": "oracle/cases.sql"}
