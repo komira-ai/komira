@@ -53,7 +53,7 @@ _DRIVER = "komira//python/tests:run_task_example.py"
 # catalogue status and the probe change with it.
 #
 # `:examples` is the aggregate of all of them (python/task_examples.bzl): the
-# one row of the check set's generated list (ci/targets.bzl) for them, so a
+# one root of the check set (its file, ci/roots/komira/python/docs/tasks:examples) for them, so a
 # task directory added or removed changes no file outside its own. Building
 # it, on linux-x86_64 in the pull request's check, builds every example and
 # probe, and one that fails is named by its own label.

@@ -234,7 +234,7 @@ zig_test(
             "packages.bzl": "//release/readme_e2e:packages.bzl",
             "darwin_libs.bzl": "//release:darwin_libs.bzl",
             "release.BUCK": "//release:release_buck",
-            "ci_targets": "//ci:target_shards",
+            "ci_roots": "//ci:root_files",
         },
         **{"workflows/" + w.removeprefix(".github/workflows/"): w for w in WORKFLOWS}
     ),

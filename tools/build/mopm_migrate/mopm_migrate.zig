@@ -65,7 +65,7 @@ pub fn load(a: Allocator, repo: std.fs.Dir, package: []const u8) !std.ArrayList(
             try addFile(a, repo, &files, path);
         }
     }
-    for ([_][]const u8{ "release/readme_e2e/packages.bzl", "release/mopm_native_ids.bzl", "ci/targets/shard_0.bzl", "release/BUCK", "release/artifacts.textproto" }) |p| {
+    for ([_][]const u8{ "release/readme_e2e/packages.bzl", "release/mopm_native_ids.bzl", "tools/build/ci/roots.bzl", "release/BUCK", "release/artifacts.textproto" }) |p| {
         repo.access(p, .{}) catch continue;
         try addFile(a, repo, &files, p);
     }

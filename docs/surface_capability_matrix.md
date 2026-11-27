@@ -206,8 +206,8 @@ read, naming the attribute.
    own: one target filling two cells of a surface is a finding.
 4. Raise `floor` in `//:surface_capability_matrix` to the new number of
    filled cells (review holds this), and refresh the census below.
-5. Regenerate the check set's lists (`ci/targets.bzl`, the command in its
-   first line): the edge from the lint to a test it names is not counted
+5. Write the check set's roots again (`ci/roots/`, the command in
+   [tools/build/ci/README.md](../tools/build/ci/README.md#the-aggregate-cipr)): the edge from the lint to a test it names is not counted
    (`tools/build/ci/ci_graph.bzl`, `roots`), so the test stays a root of
    `//ci:pr`, built by it and run by `buck2 test`.
 
