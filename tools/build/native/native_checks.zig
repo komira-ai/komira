@@ -8,6 +8,9 @@
 //! commands and two-level binding instead of the dynamic section and symbol
 //! versions.
 //!
+//! `checkLoader` is `c_shared_lib`'s check (tools/build/node/defs.bzl) of
+//! the undefined symbols a library leaves to the program that loads it.
+//!
 //! A check adds one line per finding to a `Red`; the caller fails the build
 //! action when any line was added, and otherwise writes the green message
 //! the check returns.
@@ -641,6 +644,56 @@ pub fn check7MachO(alloc: Alloc, so: Shared, weak: []const []const u8, red: *Red
     try red.names("weak undefined symbols not on the recorded weak list", try minus(alloc, have.items, ws));
     try red.names("recorded weak names the library no longer references (update the list)", try minus(alloc, ws, have.items));
     return std.fmt.allocPrint(alloc, "{d} strong undefined symbols, all system or komira_; weak undefined exactly the {d} recorded", .{ strong_n, ws.len });
+}
+
+// ---- what a c_shared_lib leaves to the program that loads it -----------------
+
+/// Whether the undefined symbol `s` is bound to a library `so` loads. ELF:
+/// it needs a version of a NEEDED file (glibc's `GLIBC_2.x`; glibc is the
+/// one library a c_shared_lib links). Mach-O: its two-level ordinal names a
+/// loaded dylib. Anything else is left to the program that loads `so`: an
+/// unversioned ELF symbol, or a Mach-O one bound to flat lookup (a
+/// `-undefined dynamic_lookup` link), to the main executable or to the
+/// library itself.
+fn boundToLoaded(so: Shared, s: Sym) bool {
+    if (so.format == .elf) return s.version != null;
+    const l = s.lib orelse return false;
+    return !(std.mem.eql(u8, l, macho.lib_flat) or std.mem.eql(u8, l, macho.lib_self) or std.mem.eql(u8, l, macho.lib_executable));
+}
+
+fn startsWithAny(name: []const u8, prefixes: []const []const u8) bool {
+    for (prefixes) |p| if (std.mem.startsWith(u8, name, p)) return true;
+    return false;
+}
+
+/// The `loader` check of `c_shared_lib` (tools/build/node/defs.bzl): every
+/// strong undefined symbol of `so` is bound to a library it loads, or starts
+/// with one of `leave`, the names the loading program defines (a Node-API
+/// addon's `napi_` and `node_api_`, which `node` exports); and `so` exports
+/// each of `exports`. With `leave` empty no symbol may be left to the loading
+/// program. A weak undefined symbol is not held: when nothing defines it, it
+/// is null and the load does not fail.
+pub fn checkLoader(alloc: Alloc, so: Shared, leave: []const []const u8, exports: []const []const u8, red: *Red) ![]const u8 {
+    var stray = std.ArrayList([]const u8).empty;
+    var bound_n: usize = 0;
+    var left_n: usize = 0;
+    for (try undefinedOf(alloc, so, false)) |s| {
+        if (boundToLoaded(so, s)) {
+            bound_n += 1;
+        } else if (startsWithAny(s.name, leave)) {
+            left_n += 1;
+        } else try stray.append(alloc, s.name);
+    }
+    var allowed = std.ArrayList(u8).empty;
+    for (leave, 0..) |p, i| try allowed.writer(alloc).print("{s}{s}*", .{ if (i == 0) "" else " or ", p });
+    const what = if (leave.len == 0)
+        "strong undefined symbols left to the loading program, which may define none of them"
+    else
+        try std.fmt.allocPrint(alloc, "strong undefined symbols left to the loading program that are not {s}", .{allowed.items});
+    try red.names(what, try sorted(alloc, stray.items));
+    try red.names("names the library must export and does not", try minus(alloc, exports, try exportsOf(alloc, so)));
+    if (leave.len == 0) return std.fmt.allocPrint(alloc, "{d} strong undefined symbols, all bound to the libraries it loads; none left to the loading program; exports the {d} required", .{ bound_n, exports.len });
+    return std.fmt.allocPrint(alloc, "{d} strong undefined symbols bound to the libraries it loads and {d} left to the loading program, all {s}; exports the {d} required", .{ bound_n, left_n, allowed.items, exports.len });
 }
 
 // ---- the README program calls the library's C (slice 10) ---------------------

@@ -19,7 +19,9 @@ and runs `node --test` there, once per pinned Node.js line. `esbuild_bundle` bun
 sources and npm packages into one file with the pinned esbuild.
 `c_shared_lib` builds C sources into a shared library with the pinned zig:
 symbols it does not define (a Node-API addon's `napi_*`) stay undefined, and
-the program that loads it resolves them. It links for the linux x86_64 row,
+the program that loads it resolves them; its loader check fails the build
+when a symbol other than a Node-API addon's `napi_*` and `node_api_*` is
+left so. It links for the linux x86_64 row,
 or with `target_os = True` for the target platform's OS (Mach-O on macOS; a
 Node addon's `.node` keeps its name there).
 
@@ -34,7 +36,7 @@ Every action runs on the linux x86_64 execution platform (the macros set
 `npm_install_test`, which name the darwin-arm64 one and the macOS build of
 `node_act` (`act`), since they run the macOS `node`; none runs a shell: the actions are `node_act`
 (tools/build/node_tools) and, for `c_shared_lib`, the pinned zig through
-`zig_launch`. Sources an action reads are
+`zig_launch` and `native_so` (tools/build/native). Sources an action reads are
 copied under buck-out first: a source file's path differs between a standalone
 checkout and a repository mounting komira as a cell, and so would the action's
 digest.
@@ -499,10 +501,19 @@ _esbuild_bundle = rule(
 _MACOS = "prelude//os/constraints:macos"
 
 def _macho(zig_triple):
-    return zig_triple.split("-")[1] == "macos"
+    """Whether `zig_triple` links Mach-O: its OS part, before any `.<os floor>` (`aarch64-macos.11.0`), is `macos`."""
+    return zig_triple.split("-")[1].split(".")[0] == "macos"
 
 def _undefs(zig_triple, basename):
-    """The link flags that leave a symbol the sources do not define for the loading program: `-z undefs` for ELF; for Mach-O, `-undefined dynamic_lookup`, and an install name that holds no build path."""
+    """The link flags that leave a symbol the sources do not define for the loading program: `-z undefs` for ELF; for Mach-O, `-undefined dynamic_lookup`, and an install name that holds no build path.
+
+    Mach-O allows no undefined symbol unless the link says so, and the pinned
+    zig (0.12.0) has one way to say it: `-undefined dynamic_lookup`, which
+    binds every symbol no loaded dylib defines to flat lookup. It takes no
+    per-symbol `-U` and no `-bundle_loader`, and ignores `-z undefs` for
+    Mach-O. node-gyp (addon.gypi) and cmake-js (lib/toolset.js) link a macOS
+    addon with the same flag. Which names may be left so is held after the
+    link by the loader check (`_loader_check`)."""
     if _macho(zig_triple):
         return ["-Wl,-undefined,dynamic_lookup", "-Wl,-install_name,@rpath/" + basename]
     return ["-Wl,-z,undefs"]
@@ -525,6 +536,37 @@ def _triple_and_out(ctx):
     if ctx.attrs._on_macos:
         return row("darwin-arm64")["zig_triple"], (out[:-len(".so")] + ".dylib" if out.endswith(".so") else out)
     return row("linux-x86_64")["zig_triple"], out
+
+# The names a Node-API addon leaves to `node`, which loads it and defines
+# them (Node-API's functions are all `napi_*` or `node_api_*`), and the one it
+# exports for `node` to call (NAPI_MODULE_INIT defines it).
+_NODE_API_LEFT = ["napi_", "node_api_"]
+_NODE_API_EXPORTS = ["napi_register_module_v1"]
+
+def _loader_check(ctx, lib):
+    """The loader check of `lib` (native_so loader, tools/build/native): every
+    strong undefined symbol is bound to a library it loads (glibc's versioned
+    names; on Mach-O a loaded dylib's ordinal), or, for a Node-API addon,
+    starts with `napi_` or `node_api_`; and an addon exports
+    `napi_register_module_v1`. Its result is a validation, so building the
+    library fails when the check is red."""
+    result = ctx.actions.declare_output(ctx.label.name + ".loader.json")
+    leave = _NODE_API_LEFT if ctx.attrs.node_api else []
+    exports = _NODE_API_EXPORTS if ctx.attrs.node_api else []
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs._native_so[RunInfo],
+            "loader",
+            "--result",
+            result.as_output(),
+            "--so",
+            lib,
+            [["--leave", p] for p in leave],
+            [["--export", e] for e in exports],
+        ),
+        category = "c_shared_lib_loader",
+    )
+    return result
 
 def _c_shared_lib_impl(ctx):
     staged = ctx.actions.copied_dir(ctx.label.name + ".srcs", {s.short_path: s for s in ctx.attrs.srcs + ctx.attrs.headers})
@@ -564,21 +606,27 @@ def _c_shared_lib_impl(ctx):
         ),
         category = "c_shared_lib",
     )
-    return [DefaultInfo(default_output = out)]
+    loader = _loader_check(ctx, out)
+    return [
+        DefaultInfo(default_output = out, sub_targets = {"loader": [DefaultInfo(default_output = loader)]}),
+        ValidationInfo(validations = [ValidationSpec(name = "loader", validation_result = loader)]),
+    ]
 
 _c_shared_lib = rule(
     impl = _c_shared_lib_impl,
-    doc = "C `srcs` compiled and linked by the pinned zig (`zig cc -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror`) for `zig_triple` (default the linux x86_64 row's) into one shared library (`out`, default `lib<name>.so`). With `target_os`, for the target platform's OS instead: on a macOS target the darwin-arm64 row's triple and `out` with `.dylib` for its `.so` (a Node addon's `.node` keeps its name); analysis refuses `target_os` with a `zig_triple`, or with an `out` that is neither a `.so` nor a `.node` name. Symbols it does not define stay undefined (`-z undefs`; for a macOS triple `-undefined dynamic_lookup`, with the install name `@rpath/<out>`) for the loading program to resolve; only symbols marked with default visibility are exported. `headers` are staged with the sources (`-I` their directory); each of `include_dirs` (a directory output) is an `-I`.",
+    doc = "C `srcs` compiled and linked by the pinned zig (`zig cc -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror`) for `zig_triple` (default the linux x86_64 row's) into one shared library (`out`, default `lib<name>.so`). With `target_os`, for the target platform's OS instead: on a macOS target the darwin-arm64 row's triple and `out` with `.dylib` for its `.so` (a Node addon's `.node` keeps its name); analysis refuses `target_os` with a `zig_triple`, or with an `out` that is neither a `.so` nor a `.node` name. Symbols it does not define stay undefined (`-z undefs`; for a macOS triple `-undefined dynamic_lookup`, with the install name `@rpath/<out>`) for the loading program to resolve; only symbols marked with default visibility are exported. The loader check (`native_so loader`, a validation, `[loader]`) fails the build when a strong undefined symbol is bound to no library the library loads, unless `node_api` is set (node_addon sets it) and the name starts with `napi_` or `node_api_`; with `node_api` the library must also export `napi_register_module_v1`. `headers` are staged with the sources (`-I` their directory); each of `include_dirs` (a directory output) is an `-I`.",
     attrs = {
         "copts": attrs.list(attrs.string(), default = []),
         "headers": attrs.list(attrs.source(), default = []),
         "include_dirs": attrs.list(attrs.dep(), default = []),
+        "node_api": attrs.bool(default = False),
         "out": attrs.option(attrs.string(), default = None),
         "srcs": attrs.list(attrs.source()),
         "target_os": attrs.bool(default = False),
         "zig_triple": attrs.option(attrs.string(), default = None),
         "_on_macos": attrs.bool(default = select({_MACOS: True, "DEFAULT": False})),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_native_so": attrs.exec_dep(default = "komira//tools/build/native:native_so", providers = [RunInfo]),
         "_zig": attrs.exec_dep(default = "komira//tools/build/toolchains:zig"),
         "_zig_launch": attrs.exec_dep(default = "komira//tools/build/mojo:zig_launch", providers = [RunInfo]),
     },
@@ -621,6 +669,7 @@ def _addon_macro(**kwargs):
     if "include_dirs" in kwargs:
         fail("{}: node_addon takes node_include, not include_dirs".format(kwargs["name"]))
     kwargs["include_dirs"] = [include]
+    kwargs["node_api"] = True
     if "out" not in kwargs:
         kwargs["out"] = kwargs["name"] + ".node"
     _shared_macro(**kwargs)
