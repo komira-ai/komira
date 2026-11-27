@@ -2,9 +2,10 @@
 `esbuild_bundle`, `c_shared_lib`, `node_binding_test`, `npm_install_test` and
 `node_addon` (README.md).
 
-`node_dist` unpacks a sha256-pinned Node.js release archive (linux-x64) into
-a directory holding `bin/node`, `include/node` (the Node-API headers) and the
-licence, and fails unless that `node` runs and reports the pinned version.
+`node_dist` unpacks a sha256-pinned Node.js release archive (linux-x64, or
+darwin-arm64 run by the macOS `act`) into a directory holding `bin/node`,
+`include/node` (the Node-API headers) and the licence, and fails unless that
+`node` runs and reports the pinned version.
 `npm_package` unpacks one sha256-pinned npm tarball after checking its
 registry integrity (`sha512-<base64>`) and the top-level `name` and `version`
 of its `package.json`, which the pinned `node` parses. `node_test` runs one script with the pinned `node` as a build
@@ -16,7 +17,8 @@ sources and npm packages into one file with the pinned esbuild.
 `c_shared_lib` builds C sources into a shared library with the pinned zig:
 symbols it does not define (a Node-API addon's `napi_*`) stay undefined, and
 the program that loads it resolves them. It links for the linux x86_64 row,
-or with `target_os = True` for the target platform's OS (Mach-O on macOS).
+or with `target_os = True` for the target platform's OS (Mach-O on macOS; a
+Node addon's `.node` keeps its name there).
 
 `node` runs with `LD_LIBRARY_PATH` naming the dist's `native_libs` (the C++
 runtime it links, from the pinned conda-forge packages) and an environment of
@@ -25,7 +27,9 @@ and nothing else (`env -i`): no `NODE_OPTIONS`, no `NODE_PATH`. esbuild runs
 with an empty environment.
 
 Every action runs on the linux x86_64 execution platform (the macros set
-`exec_compatible_with`), and none runs a shell: the actions are `node_act`
+`exec_compatible_with`) but a macOS `node_dist` and a macOS
+`npm_install_test`, which name the darwin-arm64 one and the macOS build of
+`node_act` (`act`), since they run the macOS `node`; none runs a shell: the actions are `node_act`
 (tools/build/node_tools) and, for `c_shared_lib`, the pinned zig through
 `zig_launch`. Sources an action reads are
 copied under buck-out first: a source file's path differs between a standalone
@@ -44,7 +48,8 @@ NodeDistInfo = provider(
     fields = {
         "root": provider_field(Artifact),
         "version": provider_field(str),
-        # A directory whose `lib/` holds libstdc++.so.6 and libgcc_s.so.1.
+        # A directory whose `lib/` holds libstdc++.so.6 and libgcc_s.so.1 (none
+        # for a macOS node, which links only the system's libraries).
         "native_libs": provider_field(Artifact),
     },
 )
@@ -80,10 +85,16 @@ def _closure(where, deps):
 
 def _node_dist_impl(ctx):
     out = ctx.actions.declare_output("node", dir = True)
-    libs = _out(ctx.attrs.native_libs)
+    if ctx.attrs.native_libs != None:
+        libs = _out(ctx.attrs.native_libs)
+    else:
+        # The actions name a library directory all the same: one whose lib/
+        # holds no library.
+        none = ctx.actions.write("no_native_libs.txt", "this node links only the system's libraries\n")
+        libs = ctx.actions.copied_dir("no_native_libs", {"lib/README": none})
     ctx.actions.run(
         cmd_args(
-            ctx.attrs._node_act[RunInfo],
+            ctx.attrs.act[RunInfo],
             "dist",
             "--archive",
             _out(ctx.attrs.archive),
@@ -108,16 +119,18 @@ def _node_dist_impl(ctx):
 
 _node_dist = rule(
     impl = _node_dist_impl,
-    doc = "A Node.js release archive (`.tar.gz`, linux-x64) reduced to `bin/node`, `include/node` and `LICENSE`; fails unless that `node` runs and prints `v<version>`. The sub-target `[include]` is the Node-API header directory.",
+    doc = "A Node.js release archive (`.tar.gz`, linux-x64 or darwin-arm64) reduced to `bin/node`, `include/node` and `LICENSE`; fails unless that `node` runs and prints `v<version>`. The sub-target `[include]` is the Node-API header directory. A macOS archive names the darwin-arm64 execution platform and `act` the macOS build of node_act, and has no `native_libs`.",
     attrs = {
+        # node_act built for the execution platform: the macOS build for a macOS archive.
+        "act": attrs.exec_dep(default = "komira//tools/build/node_tools:node_act", providers = [RunInfo]),
         # A pinned_file holding the `.tar.gz`.
         "archive": attrs.dep(),
-        # A directory whose lib/ holds the libraries node links beyond glibc.
-        "native_libs": attrs.dep(),
+        # A directory whose lib/ holds the libraries node links beyond glibc;
+        # none for a node that links only the system's (macOS).
+        "native_libs": attrs.option(attrs.dep(), default = None),
         # The archive's single top directory.
         "top": attrs.string(),
         "version": attrs.string(),
-        "_node_act": attrs.exec_dep(default = "komira//tools/build/node_tools:node_act", providers = [RunInfo]),
     },
 )
 
@@ -363,7 +376,7 @@ def _npm_install_test_impl(ctx):
         out = ctx.actions.declare_output("{}.{}.pass".format(ctx.label.name, line))
         ctx.actions.run(
             cmd_args(
-                ctx.attrs._node_act[RunInfo],
+                ctx.attrs.act[RunInfo],
                 "install-test",
                 "--node",
                 dist.root,
@@ -397,15 +410,16 @@ def _npm_install_test_impl(ctx):
 
 _npm_install_test = rule(
     impl = _npm_install_test_impl,
-    doc = "Installs the npm tarball `install` with the pinned npm (`npm install --offline --ignore-scripts --engine-strict`) into an empty project that depends on it alone, with `tarballs` as the packages npm resolves the names their package.json give to (every other dependency, a platform package or a peer, comes from them, so nothing reaches a registry), then runs the test files `test_files` (destinations of `data`, staged in the project with the fixtures, `.mjs`, `.cjs`, `.js`, `.ts`, `.cts` or `.mts`) with `node --test` from the project, so they import the package by its name. One build action per Node.js of `nodes`, each with its output `<name>.node_<major>.pass` (the sub-target `[node_<major>]`), which exists only if the npm install exited 0, no installed package has an install script (as npm's package-lock.json says, `hasInstallScript`; --ignore-scripts kept it from running), and the TAP summary reports tests that all passed with none skipped or todo.",
+    doc = "Installs the npm tarball `install` with the pinned npm (`npm install --offline --ignore-scripts --engine-strict`) into an empty project that depends on it alone, with `tarballs` as the packages npm resolves the names their package.json give to (every other dependency, a platform package or a peer, comes from them, so nothing reaches a registry), then runs the test files `test_files` (destinations of `data`, staged in the project with the fixtures, `.mjs`, `.cjs`, `.js`, `.ts`, `.cts` or `.mts`) with `node --test` from the project, so they import the package by its name. One build action per Node.js of `nodes`, each with its output `<name>.node_<major>.pass` (the sub-target `[node_<major>]`), which exists only if the npm install exited 0, no installed package has an install script (as npm's package-lock.json says, `hasInstallScript`; --ignore-scripts kept it from running), and the TAP summary reports tests that all passed with none skipped or todo. On macOS the test names the darwin-arm64 execution platform, macOS `nodes` and the macOS build of node_act as `act`.",
     attrs = {
+        # node_act built for the execution platform: the macOS build on macOS.
+        "act": attrs.exec_dep(default = "komira//tools/build/node_tools:node_act", providers = [RunInfo]),
         "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "install": attrs.source(),
         "nodes": attrs.list(attrs.exec_dep(providers = [NodeDistInfo])),
         "npm": attrs.exec_dep(providers = [NpmPackageInfo], default = "komira//third_party/node:npm"),
         "tarballs": attrs.list(attrs.source(), default = []),
         "test_files": attrs.list(attrs.string()),
-        "_node_act": attrs.exec_dep(default = "komira//tools/build/node_tools:node_act", providers = [RunInfo]),
     } | RERUN_ATTRS,
 )
 
@@ -478,18 +492,18 @@ def _triple_and_out(ctx):
     triple (the glibc floor every link of that platform targets) and `out`.
     With `target_os`, for the target platform's OS: on a macOS target the
     darwin-arm64 row's triple (Mach-O, its macOS floor) and `out` with
-    `.dylib` for its `.so`; `out` must then be a `.so` name and `zig_triple`
-    is not given."""
+    `.dylib` for its `.so`; `out` must then be a `.so` name, or a Node addon's
+    `.node`, which is its name on every OS, and `zig_triple` is not given."""
     where = ctx.label.raw_target()
     out = ctx.attrs.out or "lib{}.so".format(ctx.label.name)
     if not ctx.attrs.target_os:
         return ctx.attrs.zig_triple or row("linux-x86_64")["zig_triple"], out
     if ctx.attrs.zig_triple != None:
         fail("{}: target_os takes the triple from the target platform; leave zig_triple out".format(where))
-    if not out.endswith(".so"):
-        fail("{}: with target_os, out names the linux file and ends in .so; it is {}".format(where, out))
+    if not out.endswith(".so") and not out.endswith(".node"):
+        fail("{}: with target_os, out names the linux file and ends in .so, or is a Node addon's .node; it is {}".format(where, out))
     if ctx.attrs._on_macos:
-        return row("darwin-arm64")["zig_triple"], out[:-len(".so")] + ".dylib"
+        return row("darwin-arm64")["zig_triple"], (out[:-len(".so")] + ".dylib" if out.endswith(".so") else out)
     return row("linux-x86_64")["zig_triple"], out
 
 def _c_shared_lib_impl(ctx):
@@ -533,7 +547,7 @@ def _c_shared_lib_impl(ctx):
 
 _c_shared_lib = rule(
     impl = _c_shared_lib_impl,
-    doc = "C `srcs` compiled and linked by the pinned zig (`zig cc -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror`) for `zig_triple` (default the linux x86_64 row's) into one shared library (`out`, default `lib<name>.so`). With `target_os`, for the target platform's OS instead: on a macOS target the darwin-arm64 row's triple and `out` with `.dylib` for its `.so`; analysis refuses `target_os` with a `zig_triple`, or with an `out` that is not a `.so` name. Symbols it does not define stay undefined (`-z undefs`; for a macOS triple `-undefined dynamic_lookup`, with the install name `@rpath/<out>`) for the loading program to resolve; only symbols marked with default visibility are exported. `headers` are staged with the sources (`-I` their directory); each of `include_dirs` (a directory output) is an `-I`.",
+    doc = "C `srcs` compiled and linked by the pinned zig (`zig cc -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror`) for `zig_triple` (default the linux x86_64 row's) into one shared library (`out`, default `lib<name>.so`). With `target_os`, for the target platform's OS instead: on a macOS target the darwin-arm64 row's triple and `out` with `.dylib` for its `.so` (a Node addon's `.node` keeps its name); analysis refuses `target_os` with a `zig_triple`, or with an `out` that is neither a `.so` nor a `.node` name. Symbols it does not define stay undefined (`-z undefs`; for a macOS triple `-undefined dynamic_lookup`, with the install name `@rpath/<out>`) for the loading program to resolve; only symbols marked with default visibility are exported. `headers` are staged with the sources (`-I` their directory); each of `include_dirs` (a directory output) is an `-I`.",
     attrs = {
         "copts": attrs.list(attrs.string(), default = []),
         "headers": attrs.list(attrs.source(), default = []),

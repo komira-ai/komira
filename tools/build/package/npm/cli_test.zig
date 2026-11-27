@@ -2,9 +2,9 @@
 //! valueless or repeated one refused; `<name>=<value>` split at the first
 //! `=`; a file or a directory staged at its path, a symbolic link or a
 //! missing file refused; a whole input read from flags and files with the
-//! stamp's version, for a package with no platform and for a linux one; a
-//! platform given by halves refused; and the commands, another one refused
-//! with the usage line.
+//! stamp's version, for a package with no platform, for a linux one and
+//! with optional dependencies; a platform given by halves refused; and the
+//! commands, another one refused with the usage line.
 
 const std = @import("std");
 const diag = @import("native_policy").diag;
@@ -93,7 +93,7 @@ test "a file or a directory staged at its path; a link or a missing file refused
     try t.expectEqualStrings(try std.fmt.allocPrint(a, "cannot read {s}: FileNotFound", .{gone}), d.msg);
 }
 
-test "a whole input read from flags and files, with the stamp's version, with no platform and for linux" {
+test "a whole input read from flags and files, with the stamp's version, with no platform, for linux and with optional dependencies" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -127,6 +127,14 @@ test "a whole input read from flags and files, with the stamp's version, with no
     try t.expectEqualStrings("2.35", l.glibc.?);
     try t.expectEqualStrings("3.4.30", l.max_glibcxx.?);
     try t.expect(l.max_cxxabi == null);
+    try t.expectEqual(@as(usize, 0), l.optional.len);
+
+    // The optional dependencies the package names, in the order given.
+    const with_optional = base ++ [_][]const u8{ "--optional-dependency", "@komira-ai/komira-linux-x64-gnu", "--optional-dependency", "@komira-ai/komira-darwin-arm64" };
+    const m = try cli.input(a, &d, try cli.parse(a, &d, &with_optional, &.{}));
+    try t.expectEqual(@as(usize, 2), m.optional.len);
+    try t.expectEqualStrings("@komira-ai/komira-linux-x64-gnu", m.optional[0]);
+    try t.expectEqualStrings("@komira-ai/komira-darwin-arm64", m.optional[1]);
 
     const dev = [_][]const u8{
         "--name",         "@komira-ai/komira",

@@ -214,12 +214,13 @@ zig_test(
 )
 
 # The cases of npm.yml, the publish of the npm packages (.github/workflows/npm_workflow_test.zig says what
-# each catches): a push to main of code alone, top-level permissions {}, the four jobs build, test, publish
-# and smoke on the hosted runner, each job's exact condition, needs, environment and permissions (the
-# environment npm and its id-token for the publish alone, the farm's for build and test, nothing for the
-# smoke), the publish and the smoke gated on the build job's output of release/npm_publish.txt, the publish
-# command in the publish job alone, no checkout or farm in the publish or the smoke, and no token or
-# secret. A build action.
+# each catches): a push to main of code alone, top-level permissions {}, the five jobs build, test,
+# build-macos-arm64, publish and smoke on the hosted runner, each job's exact condition, needs, environment
+# and permissions (the environment npm and its id-token for the publish alone, the farm's for build, test and
+# the macOS job, nothing for the smoke), the publish and the smoke gated on the build job's output of
+# release/npm_publish.txt, the set with the macOS package taken exactly when the macOS job succeeded and
+# kept by that job alone after its install test, the publish command in the publish job alone, no checkout
+# or farm in the publish or the smoke, and no token or secret. A build action.
 zig_test(
     name = "npm_workflow_cases",
     exec_compatible_with = LINUX_X86_64,

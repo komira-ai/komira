@@ -64,6 +64,18 @@ DARWIN_PYTHON_HARNESS = [
     "komira//python/docs/tasks:examples_macos_arm64",
 ]
 
+# The macOS npm targets: .github/workflows/npm.yml's macOS job (build-macos-arm64) builds the platform
+# package and runs its install test, for darwin-arm64, then builds the npm set with the macOS package
+# (DARWIN_NPM_SET, for Linux: its transition configures the macOS package inside it), and pr.yml's
+# analysis of the macOS set analyses them too (release/darwin_analysis.bxl), so a target of their closure that cannot run on a macOS worker fails in
+# its pull request.
+DARWIN_NPM = [
+    "komira//node:package_macos_arm64",
+    "komira//node:install_test_macos_arm64",
+]
+
+DARWIN_NPM_SET = "komira//release:npm_packages_macos_arm64"
+
 def _impl(ctx):
     tree = {}
     for name, lib in zip(ctx.attrs.names, ctx.attrs.libs):

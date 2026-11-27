@@ -78,6 +78,7 @@ pub fn mainInput(alloc: Alloc) !npm.Input {
         .stamped = true,
         .license = "Apache-2.0",
         .files = files,
+        .optional = &.{"@komira-ai/komira-linux-x64-gnu"},
     };
 }
 

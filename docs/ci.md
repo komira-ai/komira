@@ -12,7 +12,7 @@ Nothing is compiled on the runner.
 
 | event | runs |
 |---|---|
-| push to `main` | [`release.yml`](#releaseyml-the-release): builds the release set and publishes the mopm packages to the prod registry, on every push (no schedule, no switch); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert). And, when the push changes more than documentation, the TestPyPI half of [`pypi.yml`](#pypiyml-publishing-the-python-package): builds the `komira` wheel on the farm, installs the wheel file on a fresh runner per supported Python, uploads it to TestPyPI, installs it from there per supported Python and runs the quickstart, and records the version when all of that passed. And, on the same pushes, [the macOS arm64 wheel in `pypi.yml`](#the-macos-arm64-wheel-in-pypiyml): the same for the macOS arm64 wheel of the same version, in jobs of the same run. And, on the same pushes, [`npm.yml`](#npmyml-publishing-the-npm-packages): builds the npm packages on the farm and runs their install test on each pinned Node.js; it publishes them only once `release/npm_publish.txt` says `publish: on`, which it does not yet |
+| push to `main` | [`release.yml`](#releaseyml-the-release): builds the release set and publishes the mopm packages to the prod registry, on every push (no schedule, no switch); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert). And, when the push changes more than documentation, the TestPyPI half of [`pypi.yml`](#pypiyml-publishing-the-python-package): builds the `komira` wheel on the farm, installs the wheel file on a fresh runner per supported Python, uploads it to TestPyPI, installs it from there per supported Python and runs the quickstart, and records the version when all of that passed. And, on the same pushes, [the macOS arm64 wheel in `pypi.yml`](#the-macos-arm64-wheel-in-pypiyml): the same for the macOS arm64 wheel of the same version, in jobs of the same run. And, on the same pushes, [`npm.yml`](#npmyml-publishing-the-npm-packages): builds the npm packages on the farm and runs their install test on each pinned Node.js, the macOS arm64 package's on the farm's macOS workers ([the macOS package in `npm.yml`](#the-macos-package-in-npmyml)); it publishes them only once `release/npm_publish.txt` says `publish: on`, which it does not yet |
 | pull request from a branch of this repository | `pr / check`, whose [macOS part](#the-macos-part-of-the-check) builds the libraries of the macOS set the change reaches on the farm's Macs; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | merge group of the [merge queue](#the-merge-queue) (`merge_group`) | `pr / check` on the group's head commit, which is what `main` becomes; `coverage` does not run |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
@@ -177,7 +177,7 @@ repository variables (Settings > Secrets and variables > Actions > Variables):
 | `FARM_ADDRESS` | the remote-execution service as a URL with its port |
 | `FARM_INSTANCE` | its instance name |
 | `FARM_LINUX_X86_64_PROPERTIES` | the worker property set of the linux x86_64 actions |
-| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml`, by the job `build-macos-arm64` of `pypi.yml` and by the job `check` of `pr.yml` (which also passes `darwin-config-file`, so that only its step `build for macOS` sees them: [The macOS part of the check](#the-macos-part-of-the-check)), and by the job `mopm-stage` of `release.yml` (which also passes `darwin-config-file`, so that only its step `build the packages`, the build of `//release:mopm_release_artifacts`, sees them: [the mopm jobs](#the-mopm-jobs)), and by no other job |
+| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml`, by the job `build-macos-arm64` of `pypi.yml`, by the job `build-macos-arm64` of `npm.yml` and by the job `check` of `pr.yml` (which also passes `darwin-config-file`, so that only its step `build for macOS` sees them: [The macOS part of the check](#the-macos-part-of-the-check)), and by the job `mopm-stage` of `release.yml` (which also passes `darwin-config-file`, so that only its step `build the packages`, the build of `//release:mopm_release_artifacts`, sees them: [the mopm jobs](#the-mopm-jobs)), and by no other job |
 | `FARM_TLS` | `true` when the service serves REAPI over TLS; unset or empty means `false`. Each workflow passes it as farm-connect's `tls`, so the address and its transport change together |
 
 Variables are not masked, and a job's logs are public. The action masks the
@@ -195,7 +195,7 @@ the network.
 **Priority.** A farm that queues by priority class runs a `ci` action before a
 `batch` one. The action takes an optional `farm-qos` (`ci` or `batch`) and, when
 it is set, writes the request header `x-kbf-qos` as buck2's `http_headers`.
-Every job of `release.yml` passes `batch`, and so do the job `build` of `pypi.yml`, the job `build-macos-arm64` of `pypi.yml`, the jobs `build` and `test` of `npm.yml` and the job `release-macos` of `release-macos.yml`, so the release work that a push to
+Every job of `release.yml` passes `batch`, and so do the job `build` of `pypi.yml`, the job `build-macos-arm64` of `pypi.yml`, the jobs `build`, `test` and `build-macos-arm64` of `npm.yml` and the job `release-macos` of `release-macos.yml`, so the release work that a push to
 `main` starts waits behind the pull-request checks when the farm is full; no
 other workflow passes it, so they stay at `ci`. The class is not a platform
 property: it is not part of an action's digest, so a release build and a pull
@@ -538,7 +538,9 @@ tests, which no pull request builds. The rest of this section is about `release-
   `bxl --config-file release/darwin_analysis.buckconfig komira//release/darwin_analysis.bxl:check`,
   which configures `//release:mopm_darwin_libs` and the macOS Python harness tests
   (`DARWIN_PYTHON_HARNESS` of `release/darwin_libs.bzl`, the targets of the workflow's second build
-  step) for darwin-arm64 and analyses them, with their whole closure, as the release's build would.
+  step) for darwin-arm64 and analyses them, with their whole closure, as the release's build would,
+  and so the macOS npm targets of `npm.yml`'s macOS job (`DARWIN_NPM`, the macOS package and its install
+  test, and `//release:npm_packages_macos_arm64`, for Linux, whose transition configures the macOS package).
   It also refuses a Zig tool that an action of the closure runs and that is built for another
   platform than the one the action runs on (`release/exec_tools.bzl`): a Linux tool configured for
   the macOS execution platform analyses fine and fails only on the worker, with "cannot execute
@@ -679,7 +681,7 @@ conda packages that `release/artifacts.textproto` declares, as one release set,
 with Buck2 targets on the farm. It is written by hand. It holds no job of the Python wheel: `pypi.yml`
 builds and installs that on every push that changes code
 ([below](#pypiyml-publishing-the-python-package)). Nor of the npm packages: `npm.yml` builds and tests
-them ([below](#npmyml-publishing-the-npm-packages)).
+them, the macOS one on the farm's macOS workers ([below](#npmyml-publishing-the-npm-packages)).
 **The release set itself publishes to no channel**: the job `release` builds the
 set, so a push to `main` still proves the release builds, keeps what it built as
 a workflow artifact, and holds no publishing credential and no channel. The
@@ -1681,7 +1683,8 @@ of the macOS wheel's jobs into `pypi.yml`.
 
 [`.github/workflows/npm.yml`](../.github/workflows/npm.yml) builds, tests and publishes the npm packages of
 [`node/`](../node/README.md) ([the design, section 4](design/typescript_package.md#4-release)): the main
-package `@komira-ai/komira` and its platform package `@komira-ai/komira-linux-x64-gnu`. It is written by
+package `@komira-ai/komira` and its platform packages `@komira-ai/komira-linux-x64-gnu` and, built on the
+farm's macOS workers, `@komira-ai/komira-darwin-arm64` ([below](#the-macos-package-in-npmyml)). It is written by
 hand. **It publishes nothing yet**: the publish waits for the owner's go (the design's D4), and the go is a
 change of one committed file ([the gate](#the-publish-gate)). Until then every run builds the packages and
 runs their install test, and the publish and the smoke are skipped.
@@ -1697,8 +1700,9 @@ kept, so two runs never publish at once.
 |---|---|---|---|
 | `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp, builds `//release/ci:npm_smoke` and the pinned `//third_party/node:node` and `//third_party/node:npm` (npm 11.20.0), reads the gate (`npm_smoke gate`, its output `publish`), builds `//release:npm_packages` with the three stamp flags and release.yml's three release values ([why](#stamped-builds-of-releasebuck)) and holds the directory to its record (`npm_smoke verify`, its output `version`). Keeps `npm-set-<sha>` (the tarballs and `npm_set.json`) and `npm-tools-<sha>` (`npm_smoke`, Node.js, npm) for 14 days. No publish step. |
 | `test` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm: downloads the two artifacts, builds `//release:npm_packages[npm_set.json]` again with the build job's stamp and the release values, and runs `npm_smoke verify --built`: the kept directory is its record, and the record is the one this stamp builds, so the tarballs the install test installs (built from the same stamp, reproducible) are the kept ones. Then builds `//node:install_test` with the same stamp: npm installs the tarballs into an empty project and the package's tests import it by its name, on Node.js 22, 24 and 26. No npm identity. |
-| `publish` | `npm` | `contents: read`, `id-token: write` (trusted publishing) | only when `build`'s output `publish` is `true`, after `test`; no checkout, no farm, no build, no token. Downloads the two artifacts and runs `npm_smoke publish`: holds the directory to `npm_set.json` again, then, for each platform package and last the main package (which names them in its `optionalDependencies`), asks the registry for that version and runs `npm publish <file> --access public` when it is absent. |
-| `smoke` | none | none | only when `publish` ran and succeeded; no checkout, no identity. Runs `npm_smoke smoke`: installs `@komira-ai/komira` at exactly the set's version from the registry into an empty project (`npm install --ignore-scripts --engine-strict`, tried up to five times, 30 seconds apart, while the registry catches up), holds the `integrity` npm recorded in `package-lock.json` for each package to `npm_set.json`, and, with no step between, runs `SELECT 1 AS n` through the installed package, which must print the set's version, `n` and `1`. The one job whose test reaches the network, and it reaches only the npm registry. |
+| `build-macos-arm64` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm with its macOS workers, beside `test`, with the build job's stamp ([below](#the-macos-package-in-npmyml)): builds `//node:install_test_macos_arm64` for darwin-arm64, then `//release:npm_packages_macos_arm64` (with the release values as well), holds the directory to its record (`npm_smoke verify`), and keeps it as `npm-set-macos-arm64-<sha>` for 14 days. No npm identity. |
+| `publish` | `npm` | `contents: read`, `id-token: write` (trusted publishing) | only when `build`'s output `publish` is `true`, after `build` and `test` passed and `build-macos-arm64` ended, whatever its result (a cancelled run publishes nothing); no checkout, no farm, no build, no token. Downloads the set with the macOS package (`npm-set-macos-arm64-<sha>`) when `build-macos-arm64` succeeded and the set without it (`npm-set-<sha>`) otherwise, and the tools, and runs `npm_smoke publish`: holds the directory to `npm_set.json` again, then, for each platform package and last the main package (which names them in its `optionalDependencies`), asks the registry for that version and runs `npm publish <file> --access public` when it is absent. |
+| `smoke` | none | none | only when `publish` ran and succeeded, with the set `publish` took (its output `set`); no checkout, no identity. Runs `npm_smoke smoke`: installs `@komira-ai/komira` at exactly the set's version from the registry into an empty project (`npm install --ignore-scripts --engine-strict`, tried up to five times, 30 seconds apart, while the registry catches up), holds the `integrity` npm recorded in `package-lock.json` for each package to `npm_set.json`, and, with no step between, runs `SELECT 1 AS n` through the installed package, which must print the set's version, `n` and `1`. The one job whose test reaches the network, and it reaches only the npm registry. |
 
 **The set and its record.** `//release:npm_packages` ([release/npm_packages.bzl](../release/npm_packages.bzl))
 is one directory: each package's tarball, under the name `npm pack` gives it, and `npm_set.json`, which
@@ -1706,9 +1710,15 @@ is one directory: each package's tarball, under the name `npm pack` gives it, an
 package's name, version, file, SHA-256 and the sha512 `integrity` npm reports, the platform packages first
 and the main package last, the order they are published in. Stamped, it takes each package's `[release]`
 tarball and refuses an unstamped one; a pull request builds it unstamped (`0.0.0`), which checks all but
-the stamp. It is not a member of the conda `//release:release_set` and not an entry of
-`release/artifacts.textproto`. [`release/npm_names.txt`](../release/npm_names.txt) lists the set's names, and
-`//release:npm_names_cases` holds the list equal to the set.
+the stamp. The main package names exactly the set's platform packages in its `optionalDependencies`:
+`npm_smoke set` refuses the set otherwise (`--main-optional`, the names the main package's rule gives it),
+so a main package never names a platform package that is not published with it. It is not a member of the
+conda `//release:release_set` and not an entry of `release/artifacts.textproto`.
+`//release:npm_packages_macos_arm64` is the same set with the macOS package and the main package that names
+it ([below](#the-macos-package-in-npmyml)). [`release/npm_names.txt`](../release/npm_names.txt) lists the
+two sets' names, and `//release:npm_names_cases` holds the list equal to them (the macOS set's names read
+from the list `release/BUCK` declares it with, `//release:npm_macos_arm64_names`, since a pull request does
+not build it).
 
 **The tool.** [`//release/ci:npm_smoke`](../release/ci/npm_smoke/cli.zig) is one Zig program for every
 step (`set`, `gate`, `verify`, `publish`, `smoke`), built behind its cases
@@ -1723,8 +1733,9 @@ publishing needs npm 11.5.1 or later under Node.js 22.14 or later; the pins are 
 `release/BUCK` holds `//release:npm_packages` and also calls the macro `release_set`
 ([release_set.bzl](../release/release_set.bzl)), which fails the evaluation of the whole file, and so the
 build of every target in it, when the build is stamped (`komira.package_stamp` set to anything but `0`) and
-does not also pass `komira.release_revision`, `komira.release_run_id` and `komira.release_attempt`. So both
-stamped builds of the set in `npm.yml` pass the three values exactly as `release.yml`'s build of
+does not also pass `komira.release_revision`, `komira.release_run_id` and `komira.release_attempt`. So the
+three stamped builds of `release/BUCK` in `npm.yml` (the set twice, and the macOS job's
+`//release:npm_packages_macos_arm64`) pass the three values exactly as `release.yml`'s build of
 `//release:release_set` does (`${{ github.sha }}`, `gh-${{ github.run_id }}`, `${{ github.run_attempt }}`);
 the set reads none of them. A pull request builds everything unstamped, so its check never evaluates
 `release/BUCK` this way. `//:release_stamp_cases`
@@ -1750,13 +1761,48 @@ leave a gate the build job would fail on, or read as on. To stop publishing agai
 npm's trusted publishing binds a package's publisher to the workflow file name and an environment, so
 publishing has a file of its own, as PyPI's has, and only the job `publish` runs in the environment `npm`.
 npm exchanges that job's OIDC token for the publish and generates the provenance itself: no `NPM_TOKEN`
-exists, and no secret is read. `build` and `test` hold `id-token: write` for the farm connection alone, in
-the environment `build`, which npm does not trust. `smoke` holds no permission. `//:npm_workflow_cases`
-([npm_workflow_test.zig](../.github/workflows/npm_workflow_test.zig) says what it holds) pins the trigger,
-the top-level `permissions: {}`, the four jobs and each one's condition, runner, `needs`, environment and
-permissions, the gate, that only `publish` runs the publish command and that neither `publish` nor `smoke`
-has a checkout, the farm or buck2, and that no line names a token or a secret; each defect written into the
-real file is refused.
+exists, and no secret is read. `build`, `test` and `build-macos-arm64` hold `id-token: write` for the farm
+connection alone, in the environment `build`, which npm does not trust. `smoke` holds no permission.
+`//:npm_workflow_cases` ([npm_workflow_test.zig](../.github/workflows/npm_workflow_test.zig) says what it
+holds) pins the trigger, the top-level `permissions: {}`, the five jobs and each one's condition, runner,
+`needs`, environment and permissions, the gate, the set `publish` and `smoke` take, the macOS job's install
+test, set and artifact in that order with no step it may skip or pass over, that only `publish` runs the
+publish command and that neither `publish` nor `smoke` has a checkout, the farm or buck2, and that no line
+names a token or a secret; each defect written into the real file is refused.
+
+### The macOS package in npm.yml
+
+`@komira-ai/komira-darwin-arm64` (`//node:package_macos_arm64`: the Mach-O addon and libkomira's macOS
+directory, `libkomira.dylib` and the three Mojo runtime libraries, as the macOS arm64 wheel carries them) is
+built for darwin-arm64 by the job `build-macos-arm64`, on the farm's macOS workers, never by a pull request
+(rule B9). The job runs beside `test`, after `build`, whose stamp it takes, so both sets carry one version.
+farm-connect passes it the macOS worker set and hosts (`FARM_DARWIN_ARM64_PROPERTIES`,
+`FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS`), as it does `pypi.yml`'s macOS job.
+
+1. `//node:install_test_macos_arm64`, with `--target-platforms komira//tools/build/platforms:darwin-arm64`:
+   on a macOS worker, the pinned npm installs `//node:package_with_macos_arm64` (the main package naming both
+   platform packages) into an empty project, offline and with no install script, npm resolves its platform
+   package to the macOS one by `os` and `cpu`, and `node/install/`'s tests import it by its name on the
+   macOS Node.js 22, 24 and 26 (`//third_party/node:node_22_macos_arm64` and the others, unpacked by the
+   macOS build of `node_act`). The tests load the addon and `libkomira.dylib`, ad-hoc signed by the linker
+   and nothing else, from the files npm wrote; the loader refuses a library it will not run (an invalid
+   signature, or a quarantine Gatekeeper rejects), so the load is the test of those files.
+2. `//release:npm_packages_macos_arm64` from the same stamp: the macOS package configured for darwin-arm64 by
+   the set's transition, as step 1 configured it, so its tarball is the one step 1 installed; the linux-x64
+   package and the main package are built on the Linux workers. `npm_smoke verify` holds the directory to
+   its record, and the job keeps it as `npm-set-macos-arm64-<sha>`.
+
+`publish` takes that set when the job succeeded, and `npm-set-<sha>` (`//release:npm_packages`, whose main
+package names the linux-x64 package alone) otherwise: when the install test failed, the build failed, or the
+job ran out of its 120 minutes, nothing was kept, and the main package of the release does not name the
+macOS package. The Linux packages are published whatever the Macs did; `publish` waits for the job to end. A
+failed macOS job turns the run red. `publish` hands its choice on as its output `set`, which `smoke` reads,
+so a re-run of failed jobs that re-runs the macOS job but not `publish` cannot point the smoke at another set
+than the one published; a re-run of `publish` itself after the macOS job's result changed stops at the main
+package (the registry holds that version with other bytes), and the next code commit publishes again. Both steps build with `-c komira_release.mac_tree=true`, the gate of the
+targets that need the macOS execution platform; pr.yml's last step configures and analyses the macOS package,
+its install test and the set with it (`release/darwin_analysis.bxl`), running no action, so a change that
+leaves them unanalysable fails its pull request.
 
 ### A failed run
 
@@ -1770,7 +1816,8 @@ watches `npm`); whether to `npm deprecate` that version is the owner's call. No 
 ### Owner steps before the first publish
 
 - Confirm that the `komira-ai` scope on npm is the company's.
-- Create each package of `release/npm_names.txt` on npm with its trusted publisher: the repository
+- Create each package of `release/npm_names.txt` (`@komira-ai/komira-darwin-arm64` among them) on npm with
+  its trusted publisher: the repository
   `komira-ai/komira`, the workflow `npm.yml`, the environment `npm`. Whether npm lets a trusted publisher be
   configured before the package exists, and so how the first version of each is created, is the owner's to
   settle.
