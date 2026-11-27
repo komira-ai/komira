@@ -103,15 +103,15 @@ Output:
 <!-- include expected_output.txt -->
 ```text
 AwsKeys('sales-reader', key_id=<set>, secret=<set>)
-[{'orders': 2, 'total': 165}]
-{'region': 'east', 'total': 165}
-{'region': 'west', 'total': 230}
+[{'orders': 2, 'total': Decimal('165')}]
+{'region': 'east', 'total': Decimal('165')}
+{'region': 'west', 'total': Decimal('230')}
 UnsupportedOperation STORAGE_URL_REFUSED
 ```
 
 ## Notes
 
-- `komira.files` takes one object (`s3://sales/2026/east.parquet`) or a glob of objects (`*`, `?`, `[...]`, `{a,b}`, one `**`), which is listed when the source is bound. `s3a://` is the same scheme. The footers are read when the source is bound, so a missing object or a refused credential raises at `add_sql_binding`, not at the query.
+- `komira.files` takes one object (`s3://sales/2026/east.parquet`) or a glob of objects (`*`, `?`, `[...]`, one `**`; not `{a,b}`), which is listed when the source is bound. `s3a://` is the same scheme. The footers are read when the source is bound, so a missing object or a refused credential raises at `add_sql_binding`, not at the query.
 - The credential is a value with a name you choose: `komira.AwsKeys(name, key_id=..., secret=..., session_token=None)`. Binding seals its value on the session under that name, and the engine is given only the name, so no secret is in a log record, an error message or a `repr` (`print(keys)` shows `<set>`). Binding another source with a credential of the same name replaces the value for every table bound under it. Read the values from where you keep secrets, never from the program text.
 - `region=` is required for `s3://`: a source without one is refused with `STORAGE_REGION_UNKNOWN`. `endpoint=` reaches a store that is not AWS's own (an emulator, as here, or another S3-compatible store; `http://` is plaintext), and is addressed by path; `url_style="vhost"` or `"path"` chooses, as DuckDB's `URL_STYLE` does.
 - The program above runs a stand-in for S3 on this machine so that it needs no account; against real S3, leave the stand-in and `endpoint=` out.

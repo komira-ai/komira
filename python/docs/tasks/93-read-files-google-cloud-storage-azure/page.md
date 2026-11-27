@@ -101,14 +101,14 @@ Output:
 <!-- include expected_output.txt -->
 ```text
 AzureSas('reports-reader', account='salesacct', sas=<set>)
-{'product': 'cake', 'units': 21}
-{'product': 'tea', 'units': 71}
+{'product': 'cake', 'units': Decimal('21')}
+{'product': 'tea', 'units': Decimal('71')}
 UnsupportedOperation STORAGE_URL_REFUSED
 ```
 
 ## Notes
 
-- `az://container/blob` names the container and the blob; `abfs://` and `abfss://` locations are read too. The account is the credential's: `komira.AzureSas(name, account=..., sas=...)` with a shared access signature, or `komira.AzureKey(name, account=..., key=...)` with the account's Shared Key. The blob may be a glob (`*`, `?`, `[...]`, `{a,b}`, one `**`), listed when the source is bound, and every footer is read then, so a missing blob or a refused credential raises at `add_sql_binding`.
+- `az://container/blob` names the container and the blob; `abfs://` and `abfss://` locations are read too. The account is the credential's: `komira.AzureSas(name, account=..., sas=...)` with a shared access signature, or `komira.AzureKey(name, account=..., key=...)` with the account's Shared Key. The blob may be a glob (`*`, `?`, `[...]`, one `**`; not `{a,b}`), listed when the source is bound, and every footer is read then, so a missing blob or a refused credential raises at `add_sql_binding`.
 - The credential's name is yours to choose. Binding seals its value on the session under that name and gives the engine the name only, so no secret is in a log record, an error message or a `repr` (`print(sas)` shows `<set>`). Read the values from where you keep secrets, never from the program text.
 - `endpoint=` reaches a service that is not Azure's own, addressed by path as here; `http://` is plaintext. An `az://` source takes no `region=`.
 - The program above runs a stand-in for Azure Blob on this machine so that it needs no account; against Azure, leave the stand-in and `endpoint=` out.

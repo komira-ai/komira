@@ -551,8 +551,9 @@ How the loader behaves:
   older than 1.7 answers only with `CREDENTIALS_INVALID`). The package never
   parses the message to choose the class.
 - **Private calls.** `parquet_schema`, `csv_binding`, `json_binding`,
-  `plan_render`, `plan_stream`, `credential_add`, `credential_set`,
-  `credential_seal` and `add_sql_binding` exist only on `_native.Native`. They have no public API and no stability
+  `plan_render`, `plan_stream`, `credential_add`, `credential_set` and
+  `credential_seal` exist only on `_native.Native`, and so does
+  `Native.add_sql_binding`, which the public `Session.add_sql_binding` makes. They have no public API and no stability
   promise.
 
 The tests run on Linux x86_64 as build actions, so building a test's target

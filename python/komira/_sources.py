@@ -173,8 +173,9 @@ def files(
 
     `location` is a local path or glob, or a URL of an object store:
     `s3://bucket/key` (`s3a://` too), or `az://container/blob` (`abfs://`,
-    `abfss://`). The key may be a glob (`*`, `?`, `[...]`, `{a,b}`, one
-    `**`), listed when the source is bound. `credential` reads it:
+    `abfss://`). The key may be a glob (`*`, `?`, `[...]`, one `**`; a
+    brace list is not expanded), listed when the source is bound.
+    `credential` reads it:
     `AwsKeys` (or `AwsProfile`) for `s3://`, `GcpServiceAccount` or `GcpToken`
     for `gs://`, `AzureKey` or `AzureSas` for Azure, `ANONYMOUS` for an
     unsigned read, and `AMBIENT`, the default, for the process's own
