@@ -47,12 +47,16 @@ mojo_package(path = ".")
 
 # `:anomaly`, the target the packages that depend on this library name, is `:lib` as komira's
 # Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once the
-# tests have passed. It carries the README gate too (`[tests][readme]`): the examples run against
-# `:lib`; the tests are not run again.
+# tests have passed. It carries the README gate too (`[tests][readme]`), source-first
+# (docs/design/documentation_tests.md): each file of examples/ is its own welded test, compiled and
+# run against `:lib`, and the freshness check holds every fence of README.md equal to the file its
+# include marker names (`[tests][readme][fill]` is the patch when it is not); the tests are not run
+# again.
 mojo_adopted_library(
     name = "anomaly",
     lib = ":lib",
     readme = "README.md",
+    readme_examples = glob(["examples/*.mojo"]),
     srcs = glob(["src/anomaly/**/*.mojo"]),
     test_srcs = glob(["tests/test_*.mojo"]),
     test_runs = ":test",

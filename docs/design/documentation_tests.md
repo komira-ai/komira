@@ -3,7 +3,7 @@
 Status: accepted; the six decisions at the end were taken on 2026-11-27, each as recommended.
 Built where a line says "exists": the task pages, and the first tier's tooling for package READMEs
 (the include marker, `fill`, the freshness check, one welded test per example file, `migrate` and
-`migrate --verify`), proven on fixtures, with no package README migrated yet. How every code block
+`migrate --verify`), proven on fixtures, and one package README migrated (`src/anomaly`). How every code block
 in our documentation is run or accounted for. Counts are from main of this repository; *(not checked
 here)* marks one from our other repositories, and *[est]* marks an estimate.
 
@@ -65,7 +65,7 @@ Three mechanisms exist in this repository.
 - **The Python quickstart pair**: `python/smoke/src/readme.zig` holds the quickstart blocks of
   [python/README.md](../../python/README.md) and [docs/install.md](../install.md) equal to
   `python/examples/quickstart.{py,expected}`.
-- **Source-first package READMEs** (exists as tooling; no package README uses it yet). A library
+- **Source-first package READMEs** (exists; `src/anomaly` is the one package README on it). A library
   that lists `readme_examples = glob(["examples/*.mojo"])` runs each file as its own welded test
   and holds its README to the files with the tool's `check`; `fill` is the patch that mends a stale
   README; `migrate` and `migrate --verify` turn an inline README into files and includes, and prove
