@@ -27,9 +27,11 @@ imports polars.
   `drop_nulls`, `unpivot`, `columns`, `schema`, `explain` and `collect`;
   [`group_by`, `join` and `unique`](group_by_join_unique.md) (newer than
   0.1.1623).
+- **Writing.** [`sink_csv`, `sink_parquet` and `sink_ndjson`](writing_files.md)
+  (newer than 0.1.1623).
 - **Module functions.** `col`, `lit`, `when`, `len`, `concat`.
 - **Names it does not define** raise `AttributeError`, with the refusal
   tables' message for the names they hold.
 
-The expressions are on [their own page](expressions.md). Not built yet: the
-sinks, `from_arrow`, `shift`, `join_asof`, regular expressions and `.dt`.
+The expressions are on [their own page](expressions.md). Not built yet:
+`from_arrow`, `shift`, `join_asof`, regular expressions and `.dt`.
