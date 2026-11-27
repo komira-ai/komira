@@ -23,6 +23,9 @@
 #   * test_pivot_aggregates_keep_their_types: avg is DOUBLE, max of a DOUBLE
 #     DOUBLE, count a BIGINT that is never NULL, count(x) over a string
 #     served, count(DISTINCT x) over a BIGINT served.
+#   * test_a_literal_pivot_value_is_typed_like_a_column: sum(1) and
+#     max(2.5) are served (a literal names no column, so every other column
+#     groups); max('x') is refused as a VARCHAR value.
 #   * test_pivot_relation_answers_to_its_alias: an aliased PIVOT is qualified
 #     by its alias, an unaliased one by `__unnamed_pivot`, and it joins.
 #   * test_pivot_cells_are_conditional_aggregates: the plan is one aggregate
@@ -30,6 +33,8 @@
 #   * test_unpivot_keeps_other_columns_then_name_then_value: the columns not
 #     listed in the relation's order, then the name column (VARCHAR), then the
 #     value column of the listed columns' type; `AS` labels serve.
+#   * test_unpivot_writes_the_relations_spelling_of_a_column: an IN entry
+#     with no AS writes the relation's spelling (`Q1`), one with AS its label.
 #   * test_unpivot_leaves_out_nulls_unless_include_nulls: one branch per
 #     listed column, each filtered on its column IS NOT NULL, none with
 #     INCLUDE NULLS, as with the default EXCLUDE NULLS.
@@ -75,7 +80,8 @@ def _catalog() raises -> SqlCatalog:
     wide(region, product VARCHAR, price DOUBLE, qty INTEGER,
     cost DECIMAL(12,2), note VARCHAR, amount BIGINT);
     qs(y INTEGER, q BIGINT, v BIGINT);
-    scores(name VARCHAR, q1, q2, q3 BIGINT, note VARCHAR, f DOUBLE)."""
+    scores(name VARCHAR, q1, q2, q3 BIGINT, note VARCHAR, f DOUBLE);
+    mixed(Name VARCHAR, Q1 BIGINT, q2 BIGINT), spelled in mixed case."""
     var cat = SqlCatalog()
     _add(cat, "sales", [
         Field(String("region"), ArrowType.STRING, True),
@@ -103,6 +109,11 @@ def _catalog() raises -> SqlCatalog:
         Field(String("q3"), ArrowType.INT64, True),
         Field(String("note"), ArrowType.STRING, True),
         Field(String("f"), ArrowType.FLOAT64, True),
+    ])
+    _add(cat, "mixed", [
+        Field(String("Name"), ArrowType.STRING, True),
+        Field(String("Q1"), ArrowType.INT64, True),
+        Field(String("q2"), ArrowType.INT64, True),
     ])
     return cat^
 
@@ -279,6 +290,22 @@ def test_pivot_aggregates_keep_their_types() raises:
     )
 
 
+def test_a_literal_pivot_value_is_typed_like_a_column() raises:
+    # A literal names no column, so `amount` groups too.
+    assert_equal(
+        _schema_of("SELECT * FROM sales PIVOT (sum(1) FOR product IN ('pen'))"),
+        "region:string?, amount:int64?, pen" + _SUM,
+    )
+    assert_equal(
+        _schema_of("SELECT * FROM sales PIVOT (max(2.5) FOR product IN ('pen'))"),
+        "region:string?, amount:int64?, pen:float64?",
+    )
+    _refused(
+        "SELECT * FROM sales PIVOT (max('x') FOR product IN ('pen'))",
+        "SQL not supported: PIVOT over a value that is neither BIGINT nor DOUBLE",
+    )
+
+
 def test_pivot_relation_answers_to_its_alias() raises:
     assert_equal(
         _schema_of(
@@ -337,6 +364,21 @@ def test_unpivot_keeps_other_columns_then_name_then_value() raises:
     assert_equal(
         _schema_of("SELECT * FROM scores UNPIVOT (txt FOR k IN (name, note))"),
         "q1:int64?, q2:int64?, q3:int64?, f:float64?, k:string, txt:string?",
+    )
+
+
+def test_unpivot_writes_the_relations_spelling_of_a_column() raises:
+    # `q1` in the IN list names the column spelled `Q1`; the name column
+    # holds `Q1`, as DuckDB's does. An AS label is written as given.
+    var text = _plan_text(
+        "SELECT * FROM mixed UNPIVOT (v FOR n IN (q1, q2 AS 'Second'))"
+    )
+    assert_true('ScalarValue(utf8, "Q1")' in text, text)
+    assert_true('ScalarValue(utf8, "Second")' in text, text)
+    assert_true('ScalarValue(utf8, "q1")' not in text, text)
+    assert_equal(
+        _schema_of("SELECT * FROM mixed UNPIVOT (v FOR n IN (q1, q2))"),
+        "Name:string?, n:string, v:int64?",
     )
 
 

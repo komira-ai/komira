@@ -1681,6 +1681,9 @@ struct _Parser(Movable):
             var label = self._parse_in_label()
             if label:
                 spec.labels.append(label.value())
+            elif unpivot:
+                # The binder writes the relation's own spelling of the column.
+                spec.labels.append(String(""))
             else:
                 spec.labels.append(spec.values[len(spec.values) - 1])
             if self._kind() == TK_COMMA:

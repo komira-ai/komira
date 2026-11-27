@@ -354,9 +354,12 @@ def _bind_unpivot(
             stmt.select_items.append(
                 SelectItem(SqlExpr.column(kept[i]), Optional[String](), False)
             )
+        # No AS label: the relation's spelling of the column (`Q1` for a
+        # column spelled so, whatever case the IN list wrote).
+        var label = spec.labels[c] if spec.labels[c] != "" else cols[c]
         stmt.select_items.append(
             SelectItem(
-                SqlExpr.string_lit(spec.labels[c]),
+                SqlExpr.string_lit(label),
                 Optional[String](spec.name_col),
                 False,
             )

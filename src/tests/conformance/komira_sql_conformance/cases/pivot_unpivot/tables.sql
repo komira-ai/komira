@@ -3,7 +3,8 @@
 -- lists (pad), a NULL amount, a NULL product and a NULL region. P holds a
 -- DOUBLE price per region and product. Q keys BIGINT values by an INTEGER
 -- group and a BIGINT quarter number. W is wide data: three BIGINT quarters
--- with NULLs (one row all NULL) and a VARCHAR note. EMPTY holds no row.
+-- with NULLs (one row all NULL) and a VARCHAR note. M spells two of its
+-- columns in mixed case. EMPTY holds no row.
 -- A DOUBLE is a quoted literal cast to its type.
 CREATE TABLE SALES (region VARCHAR, product VARCHAR, amount BIGINT);
 INSERT INTO SALES VALUES
@@ -36,3 +37,7 @@ INSERT INTO W VALUES
     ('Cy', NULL, NULL, NULL, 'c'),
     ('Di', -1, 0, 9000000000, '');
 CREATE TABLE EMPTY (region VARCHAR, product VARCHAR, amount BIGINT);
+CREATE TABLE M ("Name" VARCHAR, "Q1" BIGINT, q2 BIGINT);
+INSERT INTO M VALUES
+    ('Ana', 1, 2),
+    ('Bo', NULL, 3);

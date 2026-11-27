@@ -31,8 +31,9 @@ struct PivotSpec(Copyable, Movable):
     UNPIVOT [INCLUDE NULLS] (v FOR n IN (c1 [AS l1], c2, ...)):
       - `value_col` is `v` and `name_col` is `n`, the two columns it adds;
       - `values` holds the listed column names;
-      - `labels` holds what each one writes into `n`: its `AS` label, else its
-        column name;
+      - `labels` holds what each one writes into `n`: its `AS` label, or ""
+        when it has none, and then the binder writes the relation's own
+        spelling of the column, as DuckDB does;
       - `include_nulls` keeps the rows whose value is NULL.
     """
 

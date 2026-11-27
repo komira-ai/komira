@@ -136,14 +136,14 @@ them, then copy them over the committed ones and review the diff:
 ## The corpora
 
 Counts are of the case files (`ls cases/<corpus>/*.sql`, less
-`tables.sql`); 6420 in all, 2283 of them `order: query`.
+`tables.sql`); 6421 in all, 2283 of them `order: query`.
 
 | corpus | cases | what it probes |
 |---|---|---|
 | `join_shapes` | 57 | INNER, LEFT, RIGHT, FULL, CROSS and NATURAL joins, ON and USING: keys with orphans, duplicates and a NULL on both sides, an empty side, DOUBLE keys with NaN and -0.0, string keys, a two-column key, a repeated column name |
 | `set_operations` | 45 | UNION, INTERSECT, EXCEPT, each with and without ALL, over duplicates and NULLs, widened key types |
 | `union_all` | 28 | UNION ALL: the common type of two or three branches (integers of each width signed and unsigned, FLOAT, DOUBLE, DECIMAL, timestamp units), recorded with `typeof`; NULLs in one branch, an empty branch, a second branch with other column names, ORDER BY and LIMIT after the last branch, aggregates under and over a union, integer literals |
-| `pivot_unpivot` | 27 | PIVOT with sum, count (of rows, of a value, DISTINCT, of a VARCHAR), min, avg and max over BIGINT and DOUBLE values: a missing pair, a value no row has, a value the list leaves out, value and aggregate aliases, integer values, a whole-relation pivot, no rows; UNPIVOT leaving out and keeping NULLs, AS labels, VARCHAR columns, one column; an alias in WHERE; an UNPIVOT of a PIVOT; a VARCHAR pivot value, which komira refuses |
+| `pivot_unpivot` | 28 | PIVOT with sum, count (of rows, of a value, DISTINCT, of a VARCHAR), min, avg and max over BIGINT and DOUBLE values: a missing pair, a value no row has, a value the list leaves out, value and aggregate aliases, integer values, a whole-relation pivot, no rows; UNPIVOT leaving out and keeping NULLs, AS labels, VARCHAR columns, one column, a column spelled in mixed case; an alias in WHERE; an UNPIVOT of a PIVOT; a VARCHAR pivot value, which komira refuses |
 | `subquery_cte` | 45 | scalar, IN, EXISTS and correlated subqueries, CTEs (with and without reuse) |
 | `window_frames`, `range_frames` | 91, 119 | window aggregates over ROWS frames, and RANGE frames by offset over integers, floats, NULL and tied keys, both directions |
 | `order_by_limit` | 75 | ORDER BY direction and NULL placement, several keys, LIMIT and OFFSET (zero, past the end), ties in a group; `topn_*`: LIMIT with and without OFFSET over BIGINT, DOUBLE (NaN, inf) and text keys with ties at the cut and NULLS FIRST or LAST in both directions, total orders carrying `k`, and a 20000-row table `U` |
