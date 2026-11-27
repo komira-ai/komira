@@ -1,6 +1,6 @@
 # How do I write a table to Parquet?
 
-Run `COPY (SELECT ...) TO 'file.parquet' (FORMAT parquet)` through `Session.sql`; it writes one Parquet file and returns the row count. The frame has no `to_parquet` yet.
+Run `COPY (SELECT ...) TO 'file.parquet' (FORMAT parquet)` through `Session.sql`; it writes one Parquet file and returns the row count. The pandas-shaped frame writes its own rows with `df.to_parquet(path)`.
 
 <!-- include example.py -->
 ```python
@@ -47,7 +47,8 @@ rows written: 3
 
 - `COPY` writes the rows of any query, so it also writes a whole table (`COPY (SELECT * FROM orders) TO ...`). Put an `ORDER BY` in the query when the file's row order matters.
 - The write returns a one-row result holding the number of rows written.
-- The frame and `komira.pl` have no writer of their own yet: `df.to_parquet(path)` and `lf.sink_parquet(path)` raise `AttributeError` (komira-ai/komira#2368). `probe_frame_to_parquet.py` and `probe_lazy_sink_parquet.py` beside this page try them and must fail with the lines in their `.error.txt` files. The day one of them runs, this page's check goes red, and the page and the catalogue status change with it.
+- `df.to_parquet(path, compression="snappy")` runs the frame once and writes its rows to one Parquet file, the bytes `COPY` writes for the same rows, and returns `None`; `compression` is snappy (the default), gzip, zstd, lz4 or None.
+- `komira.pl` has no writer of its own yet: `lf.sink_parquet(path)` raises `AttributeError` (komira-ai/komira#2368). `probe_lazy_sink_parquet.py` beside this page tries it and must fail with the line in its `.error.txt` file. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
 - One file per `COPY`: writing a directory of files partitioned by a column is not supported yet: komira-ai/komira#2346.
 
 ## Related

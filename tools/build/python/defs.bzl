@@ -48,6 +48,15 @@ for a target configured for macOS, and `python` (and, for `python_binding_test`,
 `runtime`) default to the interpreter and Mojo runtime of that platform. The
 macOS interpreter is unpacked, and its version checked, by a macOS build of
 `python_act` that a macOS worker runs.
+
+A `python_wheel`, `py_test` or `python_binding_test` that names its `python` by
+a plain label runs that one pinned interpreter, and every one but
+`komira//third_party/python:cpython_macos` (CPython 3.10, 3.11, 3.12, the Linux
+3.13, 3.14 and free-threaded 3.14) is a linux x86_64 build: the macros configure that target
+for linux x86_64 only (the limit `python-linux-interpreters`), so a macOS build
+skips it as incompatible. A `python` that is a `select` on the operating system
+(`third_party/python`'s wheels, the protobuf edge wheels of python/tests) is
+not marked. The farm's macOS tests run CPython 3.13 alone.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -285,7 +294,10 @@ _py_test = rule(
 # script that opens a runtime library by path); `ctypes.CDLL(os.path.join(libdir, "<out_name>.so"))` loads a
 # library by path. `data` ({dest: source}) is staged in the same directory at
 # `dest`: a library's runnable directory (`libkomira[runnable]`, the library
-# with its lib/ beside it) or a stand-in library under a path of its own.
+# with its lib/ beside it) or a stand-in library under a path of its own. For a
+# macOS target platform a destination named `*.so` is staged as `*.dylib`, the
+# name a macOS process opens, so a test names a library as `libkomira.so` in
+# its BUCK file and finds `libkomira.dylib` (`komira._native._LIB_NAME`).
 
 def _python_binding_test_impl(ctx):
     libs = data_map(ctx, str(ctx.label.raw_target()), ctx.attrs.data)
@@ -311,7 +323,7 @@ def _python_binding_test_impl(ctx):
 
 _python_binding_test = rule(
     impl = _python_binding_test_impl,
-    doc = "A `py_test` that loads shared libraries: `libs` (`mojo_shared_lib` targets) are staged by file name in one directory, and `data` ({dest: source}, a build output allowed) at `dest` in it; the directory is passed to the script as `--lib-dir <dir>` and the runtime directory as `--runtime-dir <dir>`; the action's LD_LIBRARY_PATH and DYLD_LIBRARY_PATH are that directory and the Mojo runtime libraries (`runtime`), and nothing else.",
+    doc = "A `py_test` that loads shared libraries: `libs` (`mojo_shared_lib` targets) are staged by file name in one directory, and `data` ({dest: source}, a build output allowed) at `dest` in it (a destination named `*.so` is staged as `*.dylib` when the target platform is macOS); the directory is passed to the script as `--lib-dir <dir>` and the runtime directory as `--runtime-dir <dir>`; the action's LD_LIBRARY_PATH and DYLD_LIBRARY_PATH are that directory and the Mojo runtime libraries (`runtime`), and nothing else.",
     attrs = _PY_TEST_ATTRS | {
         "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "libs": attrs.list(attrs.dep(), default = []),
@@ -526,14 +538,30 @@ def _dist_macro(**kwargs):
         kwargs["exec_compatible_with"] = LINUX_X86_64
     _python_dist(**kwargs)
 
+def _pinned_python(kwargs):
+    """A `python` given as a plain label names one pinned interpreter, and every one but `:cpython_macos` is a linux x86_64 build (third_party/python): the target is configured for linux x86_64 only, so another platform skips it, and its wheels. No `python`, or a `select`, takes the platform's own."""
+    python = kwargs.get("python")
+    if type(python) == "string" and not python.endswith(":cpython_macos"):
+        kwargs.setdefault("target_compatible_with", LINUX_X86_64)  # komira-limit:python-linux-interpreters
+    return kwargs
+
 def _wheel_macro(**kwargs):
-    _python_wheel(**_platform(kwargs))
+    _python_wheel(**_platform(_pinned_python(kwargs)))
 
 def _source_package_macro(**kwargs):
     _python_source_package(**kwargs)
 
 def _py_test_macro(**kwargs):
-    _py_test(**_interpreter(_platform(kwargs)))
+    _py_test(**_interpreter(_platform(_pinned_python(kwargs))))
+
+def _dylib_data(data):
+    """`data` for a macOS target: each destination named `*.so` is staged as `*.dylib`, the name the loader of a macOS process opens (python/komira/_native.py)."""
+    if type(data) != "dict":
+        return data
+    return select({
+        _MACOS: {(k[:-len(".so")] + ".dylib" if k.endswith(".so") else k): v for k, v in data.items()},
+        "DEFAULT": data,
+    })
 
 def _binding_test_macro(**kwargs):
     if "runtime" not in kwargs:
@@ -543,7 +571,9 @@ def _binding_test_macro(**kwargs):
             _by_os("komira//tools/build/toolchains:mojo_runtime", "komira//tools/build/toolchains/darwin:mojo_runtime"),
             _by_os("komira//tools/build/toolchains:mojo_runtime_next", "komira//tools/build/toolchains/darwin:mojo_runtime_next"),
         )
-    _python_binding_test(**_interpreter(_platform(kwargs)))
+    if "data" in kwargs:
+        kwargs["data"] = _dylib_data(kwargs["data"])
+    _python_binding_test(**_interpreter(_platform(_pinned_python(kwargs))))
 
 def _oracle_macro(**kwargs):
     # An oracle computes its answer on linux whatever the target platform.

@@ -400,6 +400,8 @@ _TESTS_LINTS = [
         "tests//negative/coverage:greens",
         "tests//src/tests/coverage:greens",
     ],
+    # The coverage fixtures exist on linux x86_64 only (limit `coverage-linux-x86-64`).
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
 ) for _ in _TESTS_LINTS[:1]]
 
 # The repository's documentation: every relative link and #anchor in every

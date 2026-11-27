@@ -5,7 +5,10 @@
 `node_dist` unpacks a sha256-pinned Node.js release archive (linux-x64, or
 darwin-arm64 run by the macOS `act`) into a directory holding `bin/node`,
 `include/node` (the Node-API headers) and the licence, and fails unless that
-`node` runs and reports the pinned version.
+`node` runs and reports the pinned version. With `foreign` (an archive for
+another platform, which no action here can run) it does not run `node`: it
+fails unless `bin/node` is an executable of that format and
+`include/node/node_version.h` states the pinned version.
 `npm_package` unpacks one sha256-pinned npm tarball after checking its
 registry integrity (`sha512-<base64>`) and the top-level `name` and `version`
 of its `package.json`, which the pinned `node` parses. `node_test` runs one script with the pinned `node` as a build
@@ -49,7 +52,8 @@ NodeDistInfo = provider(
         "root": provider_field(Artifact),
         "version": provider_field(str),
         # A directory whose `lib/` holds libstdc++.so.6 and libgcc_s.so.1 (none
-        # for a macOS node, which links only the system's libraries).
+        # for a macOS node, which links only the system's libraries); an empty
+        # directory for a dist of another platform (`foreign`).
         "native_libs": provider_field(Artifact),
     },
 )
@@ -82,33 +86,45 @@ def _closure(where, deps):
 # `node_act dist` keeps bin/node, include/node and LICENSE of the archive's top
 # directory (npm, npx, corepack and their lib/node_modules are left out: no
 # action installs with them), then runs that node, which must print v<version>.
+# With `foreign` it runs nothing: it reads bin/node's executable header and the
+# version include/node/node_version.h states.
+
+# The default `act`: the linux node_act, whose dist needs `native_libs`.
+_LINUX_ACT = "komira//tools/build/node_tools:node_act"
 
 def _node_dist_impl(ctx):
+    where = str(ctx.label.raw_target())
+    foreign = ctx.attrs.foreign
+    if foreign and ctx.attrs.native_libs:
+        fail("{}: native_libs is for the node that runs here; a foreign dist is not run and has none".format(where))
+    if not foreign and not ctx.attrs.native_libs and str(ctx.attrs.act.label.raw_target()) == _LINUX_ACT:
+        fail("{}: native_libs is empty: name the directory whose lib/ holds the libraries node links, or set foreign".format(where))
     out = ctx.actions.declare_output("node", dir = True)
-    if ctx.attrs.native_libs != None:
-        libs = _out(ctx.attrs.native_libs)
-    else:
-        # The actions name a library directory all the same: one whose lib/
-        # holds no library.
-        none = ctx.actions.write("no_native_libs.txt", "this node links only the system's libraries\n")
-        libs = ctx.actions.copied_dir("no_native_libs", {"lib/README": none})
-    ctx.actions.run(
-        cmd_args(
-            ctx.attrs.act[RunInfo],
-            "dist",
-            "--archive",
-            _out(ctx.attrs.archive),
-            "--out",
-            out.as_output(),
-            "--top",
-            ctx.attrs.top,
-            "--version",
-            ctx.attrs.version,
-            "--libs",
-            libs,
-        ),
-        category = "node_dist",
+    cmd = cmd_args(
+        ctx.attrs.act[RunInfo],
+        "dist",
+        "--archive",
+        _out(ctx.attrs.archive),
+        "--out",
+        out.as_output(),
+        "--top",
+        ctx.attrs.top,
+        "--version",
+        ctx.attrs.version,
     )
+    if foreign:
+        cmd.add("--foreign", foreign)
+        libs = ctx.actions.copied_dir("native_libs", {})
+    else:
+        if ctx.attrs.native_libs != None:
+            libs = _out(ctx.attrs.native_libs)
+        else:
+            # A macOS node run by the macOS act: the action names a library
+            # directory all the same, one whose lib/ holds no library.
+            none = ctx.actions.write("no_native_libs.txt", "this node links only the system's libraries\n")
+            libs = ctx.actions.copied_dir("no_native_libs", {"lib/README": none})
+        cmd.add("--libs", libs)
+    ctx.actions.run(cmd, category = "node_dist")
     return [
         DefaultInfo(
             default_output = out,
@@ -119,14 +135,18 @@ def _node_dist_impl(ctx):
 
 _node_dist = rule(
     impl = _node_dist_impl,
-    doc = "A Node.js release archive (`.tar.gz`, linux-x64 or darwin-arm64) reduced to `bin/node`, `include/node` and `LICENSE`; fails unless that `node` runs and prints `v<version>`. The sub-target `[include]` is the Node-API header directory. A macOS archive names the darwin-arm64 execution platform and `act` the macOS build of node_act, and has no `native_libs`.",
+    doc = "A Node.js release archive (`.tar.gz`, linux-x64 or darwin-arm64) reduced to `bin/node`, `include/node` and `LICENSE`; fails unless that `node` runs and prints `v<version>`. The sub-target `[include]` is the Node-API header directory. A macOS archive run on macOS names the darwin-arm64 execution platform and `act` the macOS build of node_act, and has no `native_libs`. With `foreign = \"macho-arm64\"` (a darwin-arm64 archive unpacked on linux, where no action runs it) it takes no `native_libs`, runs nothing, and fails unless `bin/node` is a Mach-O 64-bit arm64 executable and `include/node/node_version.h` states `version`.",
     attrs = {
         # node_act built for the execution platform: the macOS build for a macOS archive.
         "act": attrs.exec_dep(default = "komira//tools/build/node_tools:node_act", providers = [RunInfo]),
         # A pinned_file holding the `.tar.gz`.
         "archive": attrs.dep(),
+        # The executable format of an archive built for another platform
+        # (`macho-arm64`); the dist is checked, not run.
+        "foreign": attrs.option(attrs.enum(["macho-arm64"]), default = None),
         # A directory whose lib/ holds the libraries node links beyond glibc;
-        # none for a node that links only the system's (macOS).
+        # required unless `foreign` is set or `act` is not the linux node_act
+        # (a macOS node links only the system's).
         "native_libs": attrs.option(attrs.dep(), default = None),
         # The archive's single top directory.
         "top": attrs.string(),
@@ -516,6 +536,7 @@ def _c_shared_lib_impl(ctx):
     args.extend(ctx.attrs.copts)
     for s in ctx.attrs.srcs:
         args.append(staged.project(s.short_path))
+
     # zig_launch (no shell) gives zig a scratch directory for its caches and
     # HOME, and the busybox applets as PATH.
     ctx.actions.run(

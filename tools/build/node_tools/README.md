@@ -32,12 +32,18 @@ worker, since they run the macOS `node`.
 
 ```
 node_act dist --archive <tgz> --out <dir> --top <dir> --version <v> --libs <dir>
+node_act dist --archive <tgz> --out <dir> --top <dir> --version <v> --foreign macho-arm64
 node_act npm-package --tarball <tgz> --out <dir> --name <n> --version <v> --integrity <sha512-b64> --exe <path|-> --node <dir> --libs <dir> --js <program>
 node_act node-test --node <dir> --libs <dir> --out <file> --dir <dir> --script <path> --expect <pass|fail> --error <text> -- <args>...
 node_act binding-test --node <dir> --libs <dir> --out <file> --dir <dir> [--cover <path>]... -- <test file>...
 node_act install-test --node <dir> --libs <dir> --npm <dir> --out <file> --dir <dir> --install <tgz> [--tarball <tgz>]... -- <test file>...
 node_act esbuild-bundle --esbuild <exe> --dir <dir> --entry <path> --out <file> --format <cjs|esm>
 ```
+
+`dist --foreign macho-arm64` is for an archive built for macOS arm64, which this platform cannot run: it takes no
+`--libs` and does not run `bin/node`. It refuses an archive whose `bin/node` does not start with the Mach-O 64-bit
+arm64 header (an ELF file, another cputype, a shorter file are named) or whose `include/node/node_version.h` does not
+state `<v>` (`NODE_MAJOR_VERSION`, `NODE_MINOR_VERSION` and `NODE_PATCH_VERSION`, each defined as a number).
 
 | file | what it holds | its tests |
 |---|---|---|

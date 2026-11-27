@@ -1,6 +1,6 @@
 # How do I write a table to a CSV file?
 
-Run `COPY (query) TO 'out.csv' (FORMAT csv, HEADER true)` through a `komira.Session`, or run a frame and write its Arrow table with `pyarrow.csv.write_csv`.
+Run `COPY (query) TO 'out.csv' (FORMAT csv, HEADER true)` through a `komira.Session`, call `df.to_csv(path)` on the pandas-shaped frame, or run a frame and write its Arrow table with `pyarrow.csv.write_csv`.
 
 <!-- include example.py -->
 ```python
@@ -47,7 +47,8 @@ id,region,amount
 
 - `COPY ... TO` writes the bytes DuckDB's `COPY` writes for the same rows: a header row, `,` between cells, NULL as an empty cell, a string quoted only when it needs it. It answers one row, `Count`, the rows written. The write is all or nothing and replaces an existing file.
 - The destination is a local path. A path ending in `.csv` needs no `FORMAT`; a name with no known extension is refused by name. A `.gz` or `.zst` name, or `COMPRESSION gzip` or `zstd`, writes a compressed file.
-- komira's frames have no writer of their own: `df.to_csv(...)` on the pandas-shaped frame and `lf.sink_csv(...)` on the polars-shaped one are not there yet (komira-ai/komira#2372). `probe_frame_to_csv.py` and `probe_lazyframe_sink_csv.py` beside this page try them and must fail with the lines in their `.error.txt` files. The day one runs, this page's check goes red, and the page and the catalogue status change with it.
+- `df.to_csv(path)` on the pandas-shaped frame runs it once, writes the bytes `COPY ... TO` writes for the same rows, and returns `None`. A `.gz` or `.zst` name writes a compressed file (`compression="infer"`); `index` is accepted and changes nothing.
+- The polars-shaped frame has no writer of its own yet: `lf.sink_csv(...)` is not there (komira-ai/komira#2372). `probe_lazyframe_sink_csv.py` beside this page tries it and must fail with the line in its `.error.txt` file. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
 - The CSV options of `COPY` are only `FORMAT`, `COMPRESSION`, `COMPRESSION_LEVEL` and `HEADER`: a delimiter, quote character or NULL text option is refused by name (komira-ai/komira#2374). `HEADER` written bare, without `true`, is a syntax error today: komira-ai/komira#2322.
 - pyarrow's `write_csv` quotes the header and every string cell, as the second file shows; `COPY` quotes a string only when it needs it.
 - `HEADER false` is refused, since the writer always writes the header row.

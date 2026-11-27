@@ -26,9 +26,19 @@ node_addon(
     target_os = True,
 )
 
+# libkomira configured for linux-x86_64 whatever the platform of the target that
+# reads it: every node rule runs the pinned linux-x64 node, which loads an ELF
+# library, so the tests below stage the Linux build on a macOS target platform
+# too (the same alias as //python:komira_wheel_linux_x86_64).
+configured_alias(
+    name = "libkomira_linux_x86_64",
+    actual = "komira//src/so:libkomira",
+    platform = "komira//tools/build/platforms:linux-x86_64",
+)
+
 # libkomira with the Mojo runtime and its native owners in lib/ beside it: the
 # directory the tests hand to load().
-LIBKOMIRA = "komira//src/so:libkomira[runnable]"
+LIBKOMIRA = ":libkomira_linux_x86_64[runnable]"
 
 # Stand-ins for libkomira that the addon must refuse: a library of ABI major 2,
 # one of major 0 (version 0.999), and one without komira_plan_render.
@@ -462,7 +472,7 @@ node_binding_test(
         "fixtures/two_columns.parquet": "komira//src/so:tests/fixtures/two_columns.parquet",
         "package.json": "package.json",
         _PLATFORM + "komira_addon.node": ":komira_addon",
-        _PLATFORM + "native": "komira//src/so:libkomira[dist]",
+        _PLATFORM + "native": ":libkomira_linux_x86_64[dist]",
         _PLATFORM + "package.json": "tests/fixtures/platform_package.json",
     } | {
         "fixtures/isa_variants/" + f: "komira//python/tests:fixtures/isa_variants/" + f

@@ -54,14 +54,14 @@ def _gen_impl(ctx):
 
 _third_party_srcs_gen = rule(
     impl = _gen_impl,
-    doc = "Runs :gen over a .tar.gz release archive. The three strings only fill in the generated file's header.",
+    doc = "Runs :gen over a .tar.gz release archive. :gen is an exec dep, so it is built for the platform of the action that runs it (Linux x86-64), whatever the target platform. The three strings only fill in the generated file's header.",
     attrs = {
         "archive": attrs.source(),
         "committed_path": attrs.string(),
         "drift_label": attrs.string(),
         "gen_label": attrs.string(),
         "library": attrs.enum(["aws-lc", "s2n-tls", "aws-lc-files", "s2n-tls-files"]),
-        "_gen": attrs.dep(default = "komira//tools/build/third_party_srcs:gen", providers = [MojoRunnableInfo]),
+        "_gen": attrs.exec_dep(default = "komira//tools/build/third_party_srcs:gen", providers = [MojoRunnableInfo]),
         "_tool": attrs.exec_dep(default = "komira//tools/build/third_party_srcs:third_party_act", providers = [RunInfo]),
     },
 )

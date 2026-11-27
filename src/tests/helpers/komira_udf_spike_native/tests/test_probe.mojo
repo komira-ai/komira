@@ -16,9 +16,12 @@
 #     (a count of the wrong directory, or of entries that are not
 #     descriptors).
 #   - descriptor 0: closed, the probe reads it closed; restored, open; and
-#     a descriptor 0 that is not the runtime's library memory file is never
-#     read as one. That it reads the memory file itself as one is
-#     test_stdin_closed's case, on Linux, where the runtime makes that file.
+#     a descriptor 0 that is not the runtime's private copy of a library
+#     is never read as one. That it reads the copy itself as one is
+#     test_stdin_closed's case, on both systems.
+#   - private copies and the path bound: the count of copies the runtimes
+#     hold reads (0 or more, never the unreadable -1), and PATH_MAX is at
+#     least 1024, the smallest system value.
 
 from std.ffi import OwnedDLHandle, external_call
 from std.testing import assert_equal, assert_false, assert_true
@@ -28,7 +31,9 @@ from komira_udf_spike_native.code import (
     heap_in_use,
     loaded_objects,
     open_fds,
-    stdin_is_library_memfd,
+    path_max,
+    private_copies,
+    stdin_is_library_copy,
     stdin_open,
 )
 
@@ -69,7 +74,7 @@ def _open_fds() raises:
 
 def _stdin() raises:
     assert_true(stdin_open(), "descriptor 0 is closed before the test")
-    assert_false(stdin_is_library_memfd(), "descriptor 0 read as the library memory file")
+    assert_false(stdin_is_library_copy(), "descriptor 0 read as the library's private copy")
     var saved = external_call["dup", Int32](Int32(0))
     assert_true(saved >= 0, "dup of descriptor 0")
     assert_true(close_stdin(), "close of descriptor 0")
@@ -77,7 +82,15 @@ def _stdin() raises:
     assert_equal(external_call["dup2", Int32](saved, Int32(0)), 0, "descriptor 0 restored")
     assert_equal(external_call["close", Int32](saved), 0, "close of the saved descriptor")
     assert_true(stdin_open(), "descriptor 0 read as closed after it was restored")
-    assert_false(stdin_is_library_memfd(), "descriptor 0 read as the library memory file")
+    assert_false(stdin_is_library_copy(), "descriptor 0 read as the library's private copy")
+
+
+def _private_copies() raises:
+    assert_true(private_copies() >= 0, "the scratch directory was not readable")
+
+
+def _path_max() raises:
+    assert_true(path_max() >= 1024, "PATH_MAX: " + String(path_max()))
 
 
 def main() raises:
@@ -85,4 +98,6 @@ def main() raises:
     _heap_in_use()
     _open_fds()
     _stdin()
+    _private_copies()
+    _path_max()
     print("test_probe: ok")

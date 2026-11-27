@@ -352,6 +352,7 @@ by `import komira`.
   a URL written in the SQL text (`FROM 's3://...'`), the DataFrame readers
   on a URL, `COPY ... TO` a URL, the process's own identity (`AMBIENT`), and
   `ANONYMOUS` or `AwsProfile` on `s3://` (komira-ai/komira#2337).
+- Python user functions: no verb takes one and no query runs one yet.
 
 The DataFrame verbs not built yet come in later releases of this same package.
 
@@ -366,7 +367,7 @@ The package's layout and API are designed in
 | path | what it is |
 |---|---|
 | `komira/__init__.py` | the public names, exactly `__all__`, and the module's `__getattr__`, which refuses the pandas names of `_refusals.MODULE` with their message |
-| `komira/_frame.py` | the pandas-shaped `DataFrame` and its readers: a plan of `komira/_ops` nodes, the sources its scans read and the session it runs on; the verbs build nodes with `_ops`'s builder, derive the output schema with the encoder, and `materialize()` sends the encoded plan to the session's plan door. It writes no SQL text, and imports `_plan`, so protobuf, only when the first frame is made. The verbs are described, one page each, in `python/docs/dataframe/` |
+| `komira/_frame.py` | the pandas-shaped `DataFrame` and its readers: a plan of `komira/_ops` nodes, the sources its scans read and the session it runs on; the verbs build nodes with `_ops`'s builder, derive the output schema with the encoder, and `materialize()` sends the encoded plan to the session's plan door, and `to_parquet`, `to_csv` and `to_json` send a plan with a write target there. It writes no SQL text, and imports `_plan`, so protobuf, only when the first frame is made. The verbs are described, one page each, in `python/docs/dataframe/` |
 | `komira/_display.py` | the HTML of the notebook display (`_repr_html_`): a frame's column names over their types, and the first ten rows a result read (`python/docs/dataframe/display.md`). It reads no stream and calls no library |
 | `komira/_series.py` | `Series`: an expression node over its frame's columns and the field the engine derives for it, bound to the frame and its generation |
 | `komira/_groupby.py` | `GroupBy` and the frame's reductions: each builds one `Aggregate` node, and `drop_duplicates` a `Distinct` or an `Aggregate`; it writes no SQL text |
@@ -374,6 +375,7 @@ The package's layout and API are designed in
 | `komira/_missing.py` | pandas' "missing" as plan nodes: `IS NOT NULL`, and for a float column also not NaN, built from comparisons with infinity since the plan has no NaN test |
 | `komira/_cast.py` | the dtype names `astype` takes (the design's table, pandas' spellings, Python's types and pyarrow types) and the `Cast` node of each |
 | `komira/_accessors.py` | `s.str` and `s.dt`: each method one expression node (`StringFn`, `StringOp`, `StringFnN`, `Substring`, `Regexp`, `Extract`) over the Series' node |
+| `komira/_write.py` | the write terminals' shared path: the destination (`None` refused, a URL passed on for the engine to refuse by name, any other path made absolute at the call with `~` expanded), each verb's `compression` to the engine's codec (`'infer'` from the extension), and `write`, which encodes the frame's plan under a `WriteTarget` and runs it through the session's `_plan_write` |
 | `komira/_refusals.py` | the refusal tables of the frame, the GroupBy, the Series, the `.str` and `.dt` accessors and the module ([docs/design/dataframe_surface_verbs.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface_verbs.md)) |
 | `komira/_capture/` | the capture of Python user functions (private; no query runs them yet): `udf`, the decorator that records a function's call shape (`scalar`, `map_batches_column`, `row`, `map_batches_frame`), its return type (`return_dtype=`, `schema=` or the type hints) and, for `row` and `map_batches_frame`, its read set (`columns=`, a `TypedDict` or dataclass annotation, or for `row` a scan of the function's bytecode, refused with `UDF_READ_SET_REQUIRED` when the reads are not bounded); `Udf.spec()`, the `UdfSpec` the plan encodes, with the function's code as a bundle named by its sha256 or as a reference into an installed distribution; and `write_code`, which writes each code object under its digest. Calling a decorated function calls the function, which is how the komira/python worker runs it. It imports no `ctypes` |
 | `komira/_credentials.py` | the credential objects, which `komira.files` takes (public: those a file source takes; `BearerToken` and `OAuth2ClientCredentials`, for a catalog, stay private): `AwsKeys`, `AwsProfile`, `GcpServiceAccount`, `GcpToken`, `AzureKey`, `AzureSas`, `BearerToken` and `OAuth2ClientCredentials`, each a name and its fields, checked when built (the name's grammar and reserved names; each value a non-empty `str` of at most 4096 bytes of UTF-8), with every secret shown as `<set>` by `repr` and no pickle or copy; and the built-in `AMBIENT` and `ANONYMOUS` ([docs/design/credentials_and_writes.md](https://github.com/komira-ai/komira/blob/main/docs/design/credentials_and_writes.md), decision 1) |
@@ -386,7 +388,7 @@ The package's layout and API are designed in
 | `komira/pl/` | `komira.pl`, the polars-shaped DataFrame surface ([docs/design/dataframe_surface.md](https://github.com/komira-ai/komira/blob/main/docs/design/dataframe_surface.md)): lazy frames and expressions over a plan of `komira/_ops`; `collect()` encodes it with `komira/_plan` and runs it through `komira_plan_stream`. It writes no SQL text and imports no polars. A name it does not define raises `AttributeError`, with the refusal tables' message for theirs. Its verbs are described, one page each, in `python/docs/pl/` |
 | `komira/_runtime.py` | `check_loaded_runtime`, called before libkomira is opened: it compares the Mojo runtime libraries already loaded in the process with komira's copies by build id, and the GNU build id reader it uses |
 | `komira/_sources.py` | `files(location, *, credential=AMBIENT, endpoint=None, region=None, url_style=None)`, a file source: checked when built (types; a credential that fits the location's store; no setting on a local path, which is made absolute), its credential's secrets shown as `<set>`, no pickle or copy, and `_wire()`, its `WireBoundSource` bytes (src/plan_proto/bound_source.proto), which carry the credential's name and never a value |
-| `komira/_session.py` | `Session` with `register_parquet`, `register_csv`, `register_json`, `add_sql_binding` (which seals the source's credential, then calls `komira_add_sql_binding`, under one hold of the lock) and `sql`, `Result` (whose notebook display reads its stream at most one batch past the tenth row and puts back a reader that replays those batches before the rest, so the result stays unread), and the session's private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal`; the private calls a frame makes (`_parquet_schema`, `_csv_binding`, `_json_binding`, `_plan_stream`, `_plan_render`), each under the session's lock; and `default_session()`, the process's default session |
+| `komira/_session.py` | `Session` with `register_parquet`, `register_csv`, `register_json`, `add_sql_binding` (which seals the source's credential, then calls `komira_add_sql_binding`, under one hold of the lock) and `sql`, `Result` (whose notebook display reads its stream at most one batch past the tenth row and puts back a reader that replays those batches before the rest, so the result stays unread), and the session's private `_seal_credential`, which defines a credential on the session through `komira_credential_add`, `_set` and `_seal`; the private calls a frame makes (`_parquet_schema`, `_csv_binding`, `_json_binding`, `_plan_stream`, `_plan_write`, `_plan_render`), each under the session's lock; and `default_session()`, the process's default session |
 | `komira/py.typed` | the PEP 561 marker |
 | `BUCK` | `:komira`, the package's files as the directory its tests import from; `:komira_with_plan_modules`, the same with the generated plan modules at `komira/plan/v1/`, for the tests that encode or run a plan; `:komira_wheel`, the wheel; `:komira_wheel_macos_arm64`, the macOS wheel; `:wheel_install_test` and `:wheel_install_test_macos_arm64`, each installed into an empty environment; and the `refuses_*` and `beside_*` targets |
 | `install_test.bzl` | the rules of the wheel's files and of the install test, and `python_versions`, the supported Pythons as JSON for the workflows |
@@ -473,7 +475,10 @@ Adding a minor is a line in `pythons.bzl` and its interpreter's pin in
 minor. On macOS, `actions/setup-python` has no build of the newer patch
 releases of 3.11 and 3.12 (they are released as source alone), so the macOS
 jobs install 3.11.9 and 3.12.10. The farm's macOS tests run CPython 3.13
-alone.
+alone: the interpreters of the other minors are linux x86_64 builds, so the
+tests and wheels that name one (`_py311`, `_py312`, `_py314`) are configured for
+linux x86_64 only (limit `python-linux-interpreters`, set by the macros of
+`tools/build/python`) and a macOS build skips them.
 
 How the loader behaves:
 
@@ -560,7 +565,10 @@ The tests run on Linux x86_64 as build actions, so building a test's target
 runs it. `./buck2 build //python/tests:all` builds and runs every test of the
 package, and each test is `//python/tests:<name>` (`load_test`, `sql_test`,
 `frame_test`, ...) with `<name>_py311`, `<name>_py312` and `<name>_py314` for
-the other Pythons (Supported Pythons, below). What a test covers is in its
+the other Pythons (Supported Pythons, below). The farm's macOS workers run
+them too, on CPython 3.13 only (the other pinned interpreters are Linux
+builds), with Mach-O stand-in libraries (`libkomira.dylib`); `runtime_test`
+and the tests of the Linux wheel are Linux only. What a test covers is in its
 file's docstring, which also says what the test is given.
 
 A test is declared in one of two ways (`tests/BUCK`):

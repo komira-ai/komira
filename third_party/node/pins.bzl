@@ -1,4 +1,4 @@
-"""The hermetic Node.js of the tests: the runtime and the npm packages, each pinned twice.
+"""The hermetic Node.js of the tests: the runtime (linux-x64, and darwin-arm64 for a macOS target) and the npm packages, each pinned twice.
 
 Read by this package's BUCK, which declares the downloads and the unpacked
 targets, and by the tests that hold the runtime to its pin
@@ -101,6 +101,14 @@ NODE_MACOS = [
         "license": "MIT",
     },
 ]
+
+# The darwin-arm64 archive of `NODE`'s release, for the node of a macOS target
+# platform (BUCK, `node_runtime`): the `NODE_MACOS` entry of the same version,
+# so the archive is one pin and one target. It is never run by an action (the
+# execution platform is linux): `node_dist` with `foreign` checks its
+# `bin/node` is a Mach-O arm64 executable and that
+# `include/node/node_version.h` states `version`.
+NODE_DARWIN_ARM64 = dict([n for n in NODE_MACOS if n["version"] == NODE["version"]][0], name = "node_darwin_arm64")
 
 def _npm(name, version, url, sha256, size, integrity, license, deps = [], exe = None):
     return {

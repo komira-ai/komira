@@ -60,9 +60,12 @@ NATIVE_OWNERS = [
 # test_plan_result holds plan_result, komira_plan_stream's
 # answer on values: a plan built from SQL on one session, serialized and run
 # on a fresh session with no table, equals the SQL answer and parses no SQL
-# statement, and every refusal is `<step>: <reason>` (`decode` for bytes that
-# are not a plan, SQL text among them, and for an envelope with a write target
-# or UDFs; `lower` and `execute` from run_plan); test_credentials holds the three steps of a definition, each
+# statement, an envelope with a write target writes its file (Parquet, CSV
+# and JSON lines, byte-equal to the SQL door's COPY) and answers the rows
+# written as `Count`, and every refusal is `<step>: <reason>` (`decode` for
+# bytes that are not a plan, SQL text among them, and for an envelope with
+# UDFs; `bind` for a destination URL or CSV/JSON with lz4; `lower` and
+# `execute` from run_plan and the write); test_credentials holds the three steps of a definition, each
 # kind's fields and every named refusal, word for word, and the generations of
 # a name; test_credentials_reveal reads sealed values through sdk_exec's
 # SecretCapability and reads an object of a fake S3 with them, where a wrong

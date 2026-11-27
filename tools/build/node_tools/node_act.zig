@@ -7,6 +7,11 @@
 //!   node_act dist --archive <tgz> --out <dir> --top <dir> --version <v> --libs <dir>
 //!       Keeps bin/node, include/node and LICENSE of the archive's top
 //!       directory, and runs that node, which must print v<version>.
+//!   node_act dist --archive <tgz> --out <dir> --top <dir> --version <v> --foreign macho-arm64
+//!       The same for an archive built for macOS arm64, which this platform
+//!       cannot run: no --libs, and node is not run. bin/node must start with
+//!       the Mach-O 64-bit arm64 header, and include/node/node_version.h must
+//!       state <v>.
 //!   node_act npm-package --tarball <tgz> --out <dir> --name <n> --version <v>
 //!       --integrity <sha512-b64> --exe <path|-> --node <dir> --libs <dir> --js <program>
 //!       Checks the tarball's sha512, unpacks its package/ directory, has the
@@ -69,15 +74,82 @@ pub fn libsEnv(a: std.mem.Allocator, libs_abs: []const u8) !std.process.EnvMap {
     return env;
 }
 
+/// The first bytes of a Mach-O 64-bit arm64 executable: the magic `0xfeedfacf`
+/// and the cputype `CPU_TYPE_ARM64` (`0x0100000c`), little-endian.
+pub const macho_arm64_header = [8]u8{ 0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01 };
+
+/// Why `head` (the first bytes of a file) is not a Mach-O 64-bit arm64
+/// executable, or null when it is. An ELF file is named, as the likeliest
+/// mistake: the linux archive given for a macOS dist.
+pub fn machoArm64Refusal(head: []const u8) ?[]const u8 {
+    if (head.len < macho_arm64_header.len) return "it is shorter than a Mach-O header";
+    if (std.mem.startsWith(u8, head, "\x7fELF")) return "it is an ELF file";
+    if (!std.mem.eql(u8, head[0..4], macho_arm64_header[0..4])) return "it does not start with the Mach-O 64-bit magic";
+    if (!std.mem.eql(u8, head[4..8], macho_arm64_header[4..8])) return "its Mach-O cputype is not arm64";
+    return null;
+}
+
+/// The number `<name>` is defined as in node_version.h (`#define NODE_MAJOR_VERSION 24`), or null.
+fn defineNumber(text: []const u8, name: []const u8) ?u32 {
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        var toks = std.mem.tokenizeAny(u8, line, " \t\r");
+        const d = toks.next() orelse continue;
+        if (!std.mem.eql(u8, d, "#define")) continue;
+        const n = toks.next() orelse continue;
+        if (!std.mem.eql(u8, n, name)) continue;
+        const v = toks.next() orelse continue;
+        return std.fmt.parseInt(u32, v, 10) catch continue;
+    }
+    return null;
+}
+
+/// The `<major>.<minor>.<patch>` node_version.h states. When a define is
+/// absent or not a number, `error.NoDefine` and `missing` names it.
+pub fn headerVersion(a: std.mem.Allocator, text: []const u8, missing: *[]const u8) error{ NoDefine, OutOfMemory }![]u8 {
+    const names = [_][]const u8{ "NODE_MAJOR_VERSION", "NODE_MINOR_VERSION", "NODE_PATCH_VERSION" };
+    var n: [3]u32 = undefined;
+    for (names, 0..) |name, i| {
+        n[i] = defineNumber(text, name) orelse {
+            missing.* = name;
+            return error.NoDefine;
+        };
+    }
+    return std.fmt.allocPrint(a, "{d}.{d}.{d}", .{ n[0], n[1], n[2] });
+}
+
+/// Why a dist built for macOS arm64 is not the pinned release, or null: its
+/// `bin/node` (first bytes `head`) is no Mach-O arm64 executable, or its
+/// node_version.h (`header`) states a version other than `want`. Nothing is run.
+pub fn foreignRefusal(a: std.mem.Allocator, archive: []const u8, head: []const u8, header: []const u8, want: []const u8) !?[]const u8 {
+    if (machoArm64Refusal(head)) |why| {
+        return try std.fmt.allocPrint(a, "node_dist: the bin/node in {s} is not a Mach-O 64-bit arm64 executable: {s}\n", .{ archive, why });
+    }
+    var missing: []const u8 = "";
+    const got = headerVersion(a, header, &missing) catch |e| switch (e) {
+        error.NoDefine => return try std.fmt.allocPrint(a, "node_dist: include/node/node_version.h in {s} does not define {s} as a number\n", .{ archive, missing }),
+        error.OutOfMemory => return e,
+    };
+    if (!std.mem.eql(u8, got, want)) {
+        return try std.fmt.allocPrint(a, "node_dist: include/node/node_version.h in {s} states v{s}, the pin says v{s}\n", .{ archive, got, want });
+    }
+    return null;
+}
+
 fn cmdDist(a: std.mem.Allocator, args: []const []const u8) u8 {
-    const spec = [_]U.Spec{ .{ .name = "archive" }, .{ .name = "out" }, .{ .name = "top" }, .{ .name = "version" }, .{ .name = "libs" } };
+    const spec = [_]U.Spec{ .{ .name = "archive" }, .{ .name = "out" }, .{ .name = "top" }, .{ .name = "version" }, .{ .name = "libs" }, .{ .name = "foreign" } };
     var bad: []const u8 = "";
     const f = U.parseFlags(a, args, &spec, &bad) catch |e| return usage("dist: {s}: {s}", .{ @errorName(e), bad });
     const archive = f.need("archive") catch return usage("dist needs --archive", .{});
     const out = f.need("out") catch return usage("dist needs --out", .{});
     const top = f.need("top") catch return usage("dist needs --top", .{});
     const want = f.need("version") catch return usage("dist needs --version", .{});
-    const libs = f.need("libs") catch return usage("dist needs --libs", .{});
+    const foreign = f.one("foreign");
+    if (foreign) |fmt| {
+        if (!std.mem.eql(u8, fmt, "macho-arm64")) return usage("dist: --foreign is macho-arm64, not {s}", .{fmt});
+        if (f.one("libs") != null) return usage("dist: --foreign takes no --libs", .{});
+    }
+    const libs = if (foreign != null) "" else f.need("libs") catch return usage("dist needs --libs", .{});
 
     const cwd = std.fs.cwd().realpathAlloc(a, ".") catch return usage("cannot resolve the working directory", .{});
     const bytes = std.fs.cwd().readFileAlloc(a, archive, 1 << 30) catch |e| return usage("cannot read {s}: {s}", .{ archive, @errorName(e) });
@@ -94,6 +166,21 @@ fn cmdDist(a: std.mem.Allocator, args: []const []const u8) u8 {
     if (!isFile(dest, "LICENSE", false)) {
         std.debug.print("node_dist: {s} holds no {s}/LICENSE\n", .{ archive, top });
         return 2;
+    }
+    if (foreign != null) {
+        // Not run: its format is this platform's no more than its libraries are.
+        var head: [macho_arm64_header.len]u8 = undefined;
+        const got = dest.readFile("bin/node", &head) catch |e| return usage("cannot read {s}/bin/node: {s}", .{ out, @errorName(e) });
+        const header = dest.readFileAlloc(a, "include/node/node_version.h", 1 << 20) catch |e| switch (e) {
+            error.FileNotFound => "",
+            else => return usage("cannot read {s}/include/node/node_version.h: {s}", .{ out, @errorName(e) }),
+        };
+        const refusal = foreignRefusal(a, archive, got, header, want) catch return 2;
+        if (refusal) |why| {
+            std.debug.print("{s}", .{why});
+            return 2;
+        }
+        return 0;
     }
     const libs_abs = U.abs(a, cwd, libs) catch return 2;
     const env = libsEnv(a, libs_abs) catch return 2;

@@ -15,7 +15,8 @@ load(":defs.bzl", "udf_bench")
 #                 channel and the worker's life (channel.c), Arrow IPC
 #                 encode and validated decode (ipc.c), and the inits with
 #                 the `node` launcher (node_launcher.c); and the probe of the
-#                 channel that test_channel reads (channel_probe.c)
+#                 channel that test_channel reads and the process counts
+#                 that test_proxy_edges reads (channel_probe.c)
 #   refrt/        each runtime library's one export, forwarded to its C init
 #   worker/       the worker, in JavaScript: komira-test/node, one context
 #                 per process, apache-arrow from node_modules
@@ -91,13 +92,16 @@ _WORKER = {"node_worker/worker/" + f: "worker/" + f for f in [
 
 # The layout node_worker.so reads beside itself (proxy/node_launcher.c). The
 # C++ runtime node links (libstdc++, libgcc_s) is the Mojo runtime's copy:
-# the same conda-forge files node's own native_libs unpacks.
+# the same conda-forge files node's own native_libs unpacks. `node` is the
+# runtime of the target platform: the linux archive's, or on macOS arm64 the
+# darwin-arm64 archive's (third_party/node:node_runtime), which links system
+# libraries only.
 _RUNTIME = _WORKER | {
     "node_worker.so": ":node_worker",
     "node_worker/code/fahrenheit.mjs": ":fahrenheit_bundle",
     "node_worker/code/fixtures.mjs": ":fixtures_bundle",
     "node_worker/lib": "//tools/build/toolchains:mojo_runtime_selected",
-    "node_worker/node": "//third_party/node:node",
+    "node_worker/node": "//third_party/node:node_runtime",
     "node_worker/node_modules/apache-arrow": "//third_party/node:apache-arrow",
     "node_worker/node_modules/flatbuffers": "//third_party/node:flatbuffers",
     "node_worker/node_modules/json-with-bigint": "//third_party/node:json-with-bigint",
@@ -184,7 +188,7 @@ cxx_library(
 )
 
 # The probe of the channel a worker is given (proxy/channel_probe.c), for
-# the welded test test_channel. No runtime library links it.
+# the welded tests test_channel and test_proxy_edges. No runtime library links it.
 cxx_library(
     name = "komira_udf_node_worker_channel_probe",
     srcs = [":c_files[proxy/channel_probe.c]"],

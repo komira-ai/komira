@@ -181,15 +181,21 @@ to every later run on the context.
 
 The input is an authored `komira.plan.v1.WirePlanEnvelope`. These are the same
 bytes `komira_plan_render` renders, and the format the SDKs' plan builders write.
-- **Envelopes it refuses.** `plan_from_bytes` refuses an envelope that carries a
-  write target (`PLAN_WIRE_WRITE_TARGET_DROPPED`) or a UDF list
-  (`PLAN_WIRE_UDFS_DROPPED`). The door keeps those refusals (-3) until each lands.
-  The write target is lifted by the write design
-  ([credentials_and_writes.md](credentials_and_writes.md#10-writes)), the UDF list
-  by the UDFs' own. `plan_envelope_from_bytes` already decodes both, for the door
-  that carries them later.
-- **The route.** It is `plan_from_bytes`, then `optimize`, `lower_for_context` and
-  `run_lowered_plan`: the tail of `run_sql` after bind. **EXISTS:** `sdk_exec`
+- **Envelopes it refuses.** The door decodes with `plan_envelope_from_bytes` and
+  refuses an envelope that carries a UDF list (`PLAN_WIRE_UDFS_DROPPED`, at
+  `decode`, -3) until the UDFs' own design lands.
+- **Envelopes it writes.** An envelope with a write target (format version 5)
+  is run by `run_plan_write` instead of `run_plan`, as
+  [credentials_and_writes.md](credentials_and_writes.md#10-writes) decides: the
+  plan's rows go to a local Parquet, CSV or newline-delimited JSON file, and the
+  stream answers the one-row BIGINT `Count` that `COPY ... TO` answers. The
+  destination is checked at `bind` before the plan runs (a URL is
+  `STORAGE_URL_REFUSED`, CSV or JSON with lz4 `COPY_COMPRESSION_UNSUPPORTED`),
+  and the file is written all or nothing at `execute`. The signature of
+  `komira_plan_stream` and the ABI version do not change.
+- **The route.** It is `plan_envelope_from_bytes`, then `optimize`, `lower_for_context` and
+  `run_lowered_plan`: the tail of `run_sql` after bind (a write goes on to
+  `write_copy_result`, as `COPY` does). **EXISTS:** `sdk_exec`
   has one `run_plan(mut ctx, var plan: LogicalPlan) -> SqlOutcome`
   (`src/sdk_exec/engine_plan.mojo`), and `run_sql` runs its steps
   (`run_plan_batch`) after binding. SQL and plans share one route from the
@@ -197,8 +203,8 @@ bytes `komira_plan_render` renders, and the format the SDKs' plan builders write
   `run_sql` calls the steps without that, because its binder has already read
   the footers lowering uses.
 - **The error text.** `<step>: <reason>`, where the step is `decode` (the bytes
-  are not a plan this build runs) or the step of `run_plan` that refused
-  (`optimize`, `lower` or `execute`).
+  are not a plan this build runs), `bind` (a write's destination) or the step
+  of `run_plan` that refused (`optimize`, `lower` or `execute`).
 - **No SQL front end.** The door never makes SQL text and never calls the
   tokenizer, parser or binder. `EngineContext.statements_parsed` counts the
   statements `run_sql` parses on a context, and the door's tests hold it at 0
@@ -337,7 +343,7 @@ The port adds no code. The six codes of ABI 1.1 cover the two run calls:
 | 0 `KOMIRA_OK` | `*out` holds a stream |
 | -1 `KOMIRA_ERR_NULL_CTX` | NULL `ctx` |
 | -2 `KOMIRA_ERR_NULL_ARG` | NULL `sql`, `plan` or `out` |
-| -3 `KOMIRA_ERR_ENGINE` | invalid UTF-8; a parse, bind, optimize, lower or execute refusal; an unsupported feature refused by name (rule B21); a result type the stream cannot carry; a plan the decoder refuses, including an envelope with a write target or UDFs; an engine that fails to build |
+| -3 `KOMIRA_ERR_ENGINE` | invalid UTF-8; a parse, bind, optimize, lower or execute refusal; an unsupported feature refused by name (rule B21); a result type the stream cannot carry; a plan the decoder refuses, including an envelope with UDFs; a write destination the engine refuses; an engine that fails to build |
 | -4 `KOMIRA_ERR_BUFFER_TOO_SMALL` | not returned by the run calls (no byte output) |
 | -5 `KOMIRA_ERR_TOO_LARGE` | `plan_len`, or SQL text, above 64 MiB |
 

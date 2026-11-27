@@ -146,10 +146,12 @@ Fixed before this design, and not reopened here:
 
 ### Toolchain
 
-- **EXISTS** One Node pin for every node rule: 24.21.0 on linux-x64 (`third_party/node/pins.bzl`).
+- **EXISTS** Node 24.21.0 pinned for every node rule on linux-x64 (`third_party/node/pins.bzl`).
   The install test of §5 also has 22.23.5 and 26.13.1 (`:node_22`, `:node_26`), and npm 11.20.0
   (`:npm`), visible to `//node` alone; the macOS install test has the same three lines' darwin-arm64
   archives (`NODE_MACOS`: `:node_22_macos_arm64`, `:node_macos_arm64`, `:node_26_macos_arm64`).
+  The 24.21.0 one is also `NODE_DARWIN_ARM64`, which `//third_party/node:node_runtime` stages beside
+  a macOS test, checked on linux and run by no action.
   - The addon is compiled by `c_shared_lib` with
     `zig cc -target x86_64-linux-gnu.2.34 -shared -Wl,-z,undefs`, so the `napi_*` symbols resolve
     against `node` at load.

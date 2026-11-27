@@ -11,6 +11,12 @@ The execution platform and the target platform are the same os and cpu
 compiled once, as a shared library for this platform, and loaded by rustc
 when a dependent crate is compiled.
 
+For that reason rust_library, rust_binary, rust_test and rust_weld_check
+build only for linux x86_64 (limit `rust-toolchain-x86-64`): for any other
+target platform they are skipped as incompatible, since `toolchains//:rust`
+has no other platform, and a target whose dependency is incompatible is an
+error and not a skip, so each of these marks itself.
+
 Output layout of a crate `C` compiled by target `T`:
 
     T/C/libC.rlib          library (or T/C/libC.so for a proc-macro)
@@ -705,7 +711,15 @@ def _welded(rule_fn):
     def call(tests = [], **kwargs):
         if "welded_tests" in kwargs:
             fail("{}: pass `tests = [...]`, not `welded_tests`".format(kwargs.get("name", "")))
+        kwargs.setdefault("target_compatible_with", LINUX_X86_64)  # komira-limit:rust-toolchain-x86-64
         return rule_fn(tests = tests, welded_tests = tests, **kwargs)
+    return call
+
+def _linux_only(rule_fn):
+    """`rule_fn`, built for linux x86_64 only: the rust toolchain has no other platform."""
+    def call(**kwargs):
+        kwargs.setdefault("target_compatible_with", LINUX_X86_64)  # komira-limit:rust-toolchain-x86-64
+        return rule_fn(**kwargs)
     return call
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
@@ -714,5 +728,5 @@ crates_io_library = declares_docs(crates_io_library)
 rust_binary = declares_docs(_welded(rust_binary_rule))
 rust_library = declares_docs(_welded(rust_library_rule))
 rust_sysroot = declares_docs(rust_sysroot_rule)
-rust_test = declares_docs(rust_test_rule)
-rust_weld_check = declares_docs(rust_weld_check_rule)
+rust_test = declares_docs(_linux_only(rust_test_rule))
+rust_weld_check = declares_docs(_linux_only(rust_weld_check_rule))

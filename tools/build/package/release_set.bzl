@@ -77,6 +77,9 @@ of `-c komira.package_*` (these packages are given the test stamp); that a
 member's requirement on another member is at the set's version and build string
 (komira_pack writes it so; the order check reads only requirements that are);
 and agreement across members beyond the stamp.
+
+The set is the linux-64 release (osx-arm64 packages come from `mopm stage`,
+docs/ci.md): another target platform skips this target.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -293,6 +296,7 @@ def _release_set_check(name, metapackage, libs, release_set, native = {}, **kwar
         packages = packages,
         release_set = release_set,
         exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:release-set-linux-64
         **kwargs
     )
 

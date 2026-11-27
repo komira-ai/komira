@@ -158,6 +158,8 @@ prefix_header(
     min_symbols = 1000,
     prefix = "komira_awslc",
     style = "boringssl",
+    # The symbols of the x86_64 ELF archive; the macOS libcrypto is //src/awslc's.
+    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:aws-lc-x86-64-linux
     visibility = ["//third_party/s2n-tls:"],
 )
 
@@ -185,6 +187,7 @@ prefixed_archive_check(
     min_defined = 1000,
     original_names = [":prefix_symbols[symbols]"],
     prefix = THIRD_PARTY_OWNERS["third_party/aws-lc"].prefix,
+    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:aws-lc-x86-64-linux
 )
 
 # libcrypto on macOS arm64: //src/awslc's build of the same archive (its

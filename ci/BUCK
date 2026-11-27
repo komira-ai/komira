@@ -17,6 +17,7 @@ load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
 load("@komira//tools/build/ci:mojo_next.bzl", "default_only")
 load("@komira//tools/build/ci:roots.bzl", "ROOTS_DIR", "TEST_ROOTS_DIR", "labels_of")
 load("@komira//tools/build/ci:rules.bzl", "HEAVY")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 _TESTS = labels_of(glob([TEST_ROOTS_DIR + "/**"]), TEST_ROOTS_DIR)
 
@@ -32,9 +33,13 @@ filegroup(
     visibility = ["//:"],
 )
 
+# `pr` and `pr_default` are the Linux part of the pull request check: they hold checks that exist
+# on Linux only, so they are skipped as incompatible for another target platform; the macOS step
+# of `pr / check` builds //release:mopm_darwin_libs instead (tools/build/ci/darwin.bzl).
 ci_aggregate(
     name = "pr",
     deps = TARGETS,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:pr-check-linux-x86-64
     tests = TESTS,
 )
 
@@ -43,6 +48,7 @@ _HEAVY_ROOTS = [root for row in HEAVY for root in row[2]]
 ci_aggregate(
     name = "pr_default",
     deps = [t for t in TARGETS if t not in _HEAVY_ROOTS],
+    target_compatible_with = LINUX_X86_64,  # komira-limit:pr-check-linux-x86-64
     tests = [t for t in TESTS if t not in _HEAVY_ROOTS],
 )
 

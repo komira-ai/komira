@@ -1,4 +1,4 @@
-load("@komira//third_party/node:pins.bzl", "NODE", "NPM")
+load("@komira//third_party/node:pins.bzl", "NODE", "NODE_DARWIN_ARM64", "NPM")
 load("@komira//node:install_test.bzl", "INSTALL_DATA", "INSTALL_REGISTRY", "INSTALL_TESTS")
 load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "esbuild_bundle", "node_addon", "node_binding_test", "node_dist", "node_test", "npm_install_test", "npm_package")
 load(":stand_in.bzl", "npm_repack", "stand_in_archive", "stand_in_npm")
@@ -486,6 +486,48 @@ node_dist(
     archive = ":archive_node_does_not_run",
     native_libs = _PKG + "native_libs",
     top = "node-x",
+    version = NODE["version"],
+)
+
+# A dist built for another platform is checked, not run (`foreign`).
+
+# RED "is not a Mach-O 64-bit arm64 executable: it is an ELF file": the
+# linux archive given as a macOS arm64 one.
+node_dist(
+    name = "foreign_given_elf",
+    archive = _PKG + NODE["archive"],
+    foreign = "macho-arm64",
+    top = NODE["top"],
+    version = NODE["version"],
+)
+
+# RED "states v24.21.0, the pin says v24.20.0": the darwin archive, a Mach-O
+# arm64 node, under another version.
+node_dist(
+    name = "foreign_version_differs",
+    archive = _PKG + NODE_DARWIN_ARM64["archive"],
+    foreign = "macho-arm64",
+    top = NODE_DARWIN_ARM64["top"],
+    version = "24.20.0",
+)
+
+# RED "native_libs is for the node that runs here": a foreign dist is not
+# run, so it has no libraries.
+node_dist(
+    name = "foreign_with_libs",
+    archive = _PKG + NODE_DARWIN_ARM64["archive"],
+    foreign = "macho-arm64",
+    native_libs = _PKG + "native_libs",
+    top = NODE_DARWIN_ARM64["top"],
+    version = NODE_DARWIN_ARM64["version"],
+)
+
+# RED "native_libs is empty": a dist that is run needs the libraries its node
+# links.
+node_dist(
+    name = "libs_missing",
+    archive = _PKG + NODE["archive"],
+    top = NODE["top"],
     version = NODE["version"],
 )
 

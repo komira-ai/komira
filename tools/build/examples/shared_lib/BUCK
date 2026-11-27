@@ -44,8 +44,7 @@ mojo_shared_lib(
     deps = ["//tools/build/examples/cshim:add"],
 )
 
-# The same shape with no C dependency, which is what builds on macOS arm64
-# today (the C/C++ toolchain is Linux only): two exports and one @export,
+# The same shape with no C dependency: two exports and one @export,
 # `plain_hidden`, that `exports` does not name.
 mojo_shared_lib(
     name = "plain",

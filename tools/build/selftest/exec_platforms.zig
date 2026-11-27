@@ -22,10 +22,17 @@
 //!    `-c komira_selftest.inner=true` (every inner command passes it),
 //!    `//tools/build/examples:hello` is configured for linux-x86_64 with the
 //!    hash the platform table pins (`golden_config_hash`).
+//! 5. third_party_srcs' generator runs where its action runs: under a
+//!    darwin-arm64 target platform, the `:gen` that `aws_lc_mini_gen` takes is
+//!    configured for linux-x86_64, the platform of the action that executes
+//!    it, and not for darwin-arm64. Catches the generator taken as a plain
+//!    dependency, so a Mach-O binary is handed to a Linux worker.
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
 const LINUX = "komira//tools/build/platforms:linux-x86_64";
+const DARWIN = "komira//tools/build/platforms:darwin-arm64";
+const GEN = "komira//tools/build/third_party_srcs:gen";
 
 /// target -> the execution platform it must resolve to.
 const RESOLUTION = [_][2][]const u8{
@@ -161,8 +168,34 @@ fn innerKeyHash(c: *lib.Ctx) !void {
     }
 }
 
+/// Under a darwin-arm64 target platform, the line of `:gen` in the first-level
+/// dependencies of `aws_lc_mini_gen` is configured for linux-x86_64. The
+/// line is matched on its own: the generator's runner, `third_party_act`, is
+/// a linux-x86_64 line whatever `:gen` is, so the whole output would not tell.
+fn genExecConfig(c: *lib.Ctx) !void {
+    const res = try c.run(&.{ "cquery", "deps(komira//tools/build/third_party_srcs:aws_lc_mini_gen, 1)" }, .{ .target_platforms = DARWIN });
+    if (!res.ok()) {
+        c.fail("third_party_srcs: the cquery of aws_lc_mini_gen's dependencies under {s} failed (see {s})", .{ DARWIN, res.log });
+        return;
+    }
+    const prefix = GEN ++ " (";
+    var seen: usize = 0;
+    var wrong: usize = 0;
+    for (try lib.text.lines(c.a, res.stdout)) |line| {
+        if (!std.mem.startsWith(u8, line, prefix)) continue;
+        seen += 1;
+        if (!lib.parse.configuredFor(line, LINUX) or lib.parse.configuredFor(line, DARWIN)) wrong += 1;
+    }
+    if (seen == 1 and wrong == 0) {
+        c.pass("third_party_srcs: under {s}, :gen is configured for {s}, where the action that runs it executes", .{ DARWIN, LINUX });
+    } else {
+        c.fail("third_party_srcs: under {s}, {d} line(s) of :gen, {d} not configured for {s} alone (see {s})", .{ DARWIN, seen, wrong, LINUX, res.log });
+    }
+}
+
 fn body(c: *lib.Ctx) !void {
     try resolution(c);
+    try genExecConfig(c);
     try innerKeyHash(c);
     try keyLeg(c, "execution: with only [komira_re] linux_x86_64_properties set, the one execution platform is remote", &HOST_ONLY, 1, 0);
     try keyLeg(c, "execution: with only [komira_re] darwin_arm64_properties set (another platform's key), the one execution platform is local and nothing fails", &OTHER_ONLY, 0, 1);

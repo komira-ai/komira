@@ -12,7 +12,9 @@
 //!     differs (to the last byte), no package.json, a name or version that
 //!     differs or is a prefix, nested or absent, a version that is a number,
 //!     an exe that does not run or prints another version;
-//!   - node_dist's archive and version checks;
+//!   - node_dist's archive and version checks, and for an archive of another
+//!     platform (`foreign`) its executable format and the version its
+//!     node_version.h states, with no node run;
 //!   - c_shared_lib compiles with `-Wall -Werror`;
 //!   - node_binding_test: a failing test, a file that registers no test and a
 //!     skipped test fail though node may exit 0, an addon that is not staged
@@ -203,6 +205,16 @@ const ROWS = [_]lib.Row{
         .name = "node_dist_does_not_run",
         .target = "tests//negative/node:node_does_not_run",
         .text = "/bin/node does not run",
+    },
+    .{
+        .name = "node_dist_foreign_given_elf",
+        .target = "tests//negative/node:foreign_given_elf",
+        .text = "is not a Mach-O 64-bit arm64 executable: it is an ELF file",
+    },
+    .{
+        .name = "node_dist_foreign_version_differs",
+        .target = "tests//negative/node:foreign_version_differs",
+        .text = "states v24.21.0, the pin says v24.20.0",
     },
     .{
         .name = "node_binding_fails",
