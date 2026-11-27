@@ -10,11 +10,12 @@
 #
 # A worker's state is a `ValueSlot`: per aggregate, the worker group index and
 # the value of every non-NULL row it folded, in two lists side by side. A
-# value is kept as a double: a FLOAT32 widened (exact), a signed integer
-# converted, which is the double DuckDB interpolates (it sorts the integers
-# and converts the two it picks; the conversion keeps their order, so the two
-# picked are the same values). A DECIMAL128 or any other type is refused by
-# `agg_fold.bind_column`, by name. The cell of the aggregate (`agg_fold`)
+# value is kept as a double: a FLOAT64 as it is, a signed integer converted,
+# which is the double DuckDB interpolates (it sorts the integers and converts
+# the two it picks; the conversion keeps their order, so the two picked are
+# the same values). A DECIMAL128 or a FLOAT32 (DuckDB's answer keeps the
+# input's type there, not the DOUBLE the plan declares) and any other type
+# are refused by `agg_fold.bind_column`, by name. The cell of the aggregate (`agg_fold`)
 # still takes the column's type and counts the values, so a group with none is
 # NULL as for any other aggregate.
 #
@@ -240,14 +241,12 @@ def keep_column_values(
 ) raises:
     """Charge and keep the non-NULL values of column `col_idx` (`rows` rows)
     under group `group`. The column was bound by `agg_fold.fold_column`, which
-    refused any type but a signed integer, FLOAT32 and FLOAT64."""
+    refused any type but a signed integer and FLOAT64."""
     ref col = batch.column_at(col_idx)
     reserve_values(reservation, rows - col.null_count(), where_, pool)
     var at = col.arrow_type
     if at == ArrowType.FLOAT64:
         keep_column[DType.float64](slot, agg, group, batch, col_idx, rows)
-    elif at == ArrowType.FLOAT32:
-        keep_column[DType.float32](slot, agg, group, batch, col_idx, rows)
     elif at == ArrowType.INT64:
         keep_column[DType.int64](slot, agg, group, batch, col_idx, rows)
     elif at == ArrowType.INT8:

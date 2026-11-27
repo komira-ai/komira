@@ -321,7 +321,9 @@ class Series:
             raise UnsupportedOperation(
                 f"quantile() needs a numeric or boolean Series, and this one is {dtype}"
             )
-        node = _ops.Cast(self._node, "float64") if dtype == "bool" else self._node
+        # A boolean counts as 0 and 1; a float32 is widened, exactly, since the
+        # engine's quantile reads doubles and refuses a FLOAT32 column.
+        node = _ops.Cast(self._node, "float64") if dtype in ("bool", "float32") else self._node
         plan = _ops.aggregate(
             self._frame._plan, (), (("q", _ops.Agg("quantile_cont", (node, _ops.Lit(float(q))))),)
         )

@@ -20,9 +20,9 @@
 #   * The answers over 10, 20, .., 60 are DuckDB's bit for bit on one worker,
 #     and equal (the quantiles exactly, the variances to 1e-12) on two and
 #     three workers, dealt in order and in reverse, and folding by position.
-#   * INT64, INT32, FLOAT64 and FLOAT32 columns of the same values give the
-#     same answers; a DECIMAL128 column folds its variance from DuckDB's
-#     DOUBLE of each value.
+#   * INT64, INT32 and FLOAT64 columns of the same values give the same
+#     answers; a DECIMAL128 column folds its variance from DuckDB's DOUBLE of
+#     each value.
 #   * A large mean and a small spread (10^9 + 1 .. 10^9 + 4) keep their
 #     variance (1.6666666666666667, where sum(x*x)/n - mean^2 gives 0).
 #   * QUANTILE_CONT interpolates between neighbours and holds its ends (0 is
@@ -30,7 +30,8 @@
 #   * NaN sorts above every value and is counted; at the ends of the double
 #     range the quantiles are DuckDB's (-DBL_MAX and DBL_MAX give 0.0, two
 #     -inf give -inf); a variance that is not finite is refused by name.
-#   * Refused by name: MEDIAN over DECIMAL128 and STDDEV over DATE32; a
+#   * Refused by name: MEDIAN over DECIMAL128 and FLOAT32 (DuckDB keeps the
+#     input's type there) and STDDEV over DATE32; a
 #     QUANTILE_CONT whose fraction is out of [0, 1], not a constant, not a
 #     FLOAT64, or missing; a MEDIAN with two arguments; a MEDIAN declared
 #     INT64; an aggregate the sinks do not serve, naming those they do; kept
@@ -365,7 +366,6 @@ def test_integer_and_float_columns_give_the_same_answers() raises:
     var vals = _tens()
     _check(_run(vals, ArrowType.INT32), _six_tens(), "INT32")
     _check(_run(vals, ArrowType.FLOAT64), _six_tens(), "FLOAT64")
-    _check(_run(vals, ArrowType.FLOAT32), _six_tens(), "FLOAT32")
 
 
 def _decimal_batch() raises -> RecordBatch:
@@ -585,15 +585,23 @@ def test_a_column_type_the_aggregate_does_not_take_is_refused_by_name() raises:
     var tail = String(
         "): SUM, AVG, STDDEV_SAMP, STDDEV_POP, VAR_SAMP and VAR_POP take"
         " signed integers, DECIMAL128, FLOAT32 and FLOAT64; MIN and MAX also"
-        " DATE32; MEDIAN and QUANTILE_CONT signed integers, FLOAT32 and"
-        " FLOAT64 (over a DECIMAL128 DuckDB's answer is a DECIMAL, not the"
-        " DOUBLE the plan declares)"
+        " DATE32; MEDIAN and QUANTILE_CONT signed integers and FLOAT64 (over a"
+        " DECIMAL128 or a FLOAT32 DuckDB's answer keeps the input's type, not"
+        " the DOUBLE the plan declares)"
     )
     assert_equal(
         _refused_over(AGG_MEDIAN, _decimal_batch()),
         "pipeline_exec: MEDIAN (output column 0) is not served over this"
         " column type ("
         + String(ArrowType.DECIMAL128)
+        + tail,
+    )
+    var f32 = _some(1.0, 2.0)
+    assert_equal(
+        _refused_over(AGG_MEDIAN, _column(f32, 0, 2, ArrowType.FLOAT32)),
+        "pipeline_exec: MEDIAN (output column 0) is not served over this"
+        " column type ("
+        + String(ArrowType.FLOAT32)
         + tail,
     )
     assert_equal(

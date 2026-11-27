@@ -147,6 +147,11 @@ def _agg_node(dtypes: dict[str, str], item: _Item, where: str, hint: str) -> _op
             ref = _ops.When(((_ops.Compare("eq", ref, _ops.Lit(True)), _ops.Lit(1)),), _ops.Lit(0))
         elif dtype == "bool":
             ref = _ops.Cast(ref, "int64" if item.how == "sum" else "float64")
+        elif dtype == "float32" and item.how == "median":
+            # The engine's median keeps the values as doubles and refuses a
+            # FLOAT32 column (DuckDB's answer there is a FLOAT): the frame's
+            # median is a float64, so the column is widened, exactly, first.
+            ref = _ops.Cast(ref, "float64")
     func = _POPULATION[item.how] if item.ddof == 0 and item.how in _POPULATION else _FUNCS[item.how]
     return _ops.Agg(func, (ref,))
 

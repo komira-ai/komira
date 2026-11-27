@@ -260,6 +260,34 @@ def test_the_frame_reductions_are_one_row_aggregates_with_no_key_filter_or_sort(
     assert df[["x"]].agg("var")._plan == df[["x"]].var()._plan
 
 
+def test_the_median_of_a_float32_column_widens_it_to_float64_first():
+    # The engine reads a median's values as doubles and refuses a FLOAT32
+    # column by name; the frame's median is a float64, so the column is cast.
+    env = Env((("a", "int64"), ("f", "float32")))
+    got = env.df.groupby("a").median()
+    found = [a for a in _walk_aggs(got._plan)]
+    assert found == [Agg("median", (Cast(ColRef("f"), "float64"),))], found
+    # std and var fold FLOAT32 values themselves: no cast.
+    assert [a for a in _walk_aggs(env.df.groupby("a").std()._plan)] == [Agg("stddev_samp", (ColRef("f"),))]
+
+
+def _walk_aggs(node):
+    """Every Agg in a plan tree, in the order the tree lists them."""
+    out = []
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        if isinstance(n, Agg):
+            out.append(n)
+            continue
+        if isinstance(n, tuple):
+            stack.extend(reversed(n))
+            continue
+        for name in getattr(n, "__dataclass_fields__", {}):
+            stack.append(getattr(n, name))
+    return out
+
+
 def test_ddof_1_builds_the_sample_aggregates_and_ddof_0_the_population_ones():
     env = Env()
     df, g = env.df, env.df.groupby("a")

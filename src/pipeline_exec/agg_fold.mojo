@@ -65,9 +65,9 @@
 #     the largest; the verdict can differ between groupings only when a partial
 #     sum leaves 128 bits while the total does not, and a total that left them
 #     is refused whatever the grouping;
-#   * SUM, AVG or a variance over DATE32, MEDIAN or QUANTILE_CONT over DATE32
-#     or DECIMAL128 (DuckDB's answer there is a DECIMAL, not the DOUBLE the
-#     plan declares), and every aggregate over a type that is not a signed
+#   * SUM, AVG or a variance over DATE32, MEDIAN or QUANTILE_CONT over DATE32,
+#     DECIMAL128 or FLOAT32 (DuckDB's answer there keeps the input's type, not
+#     the DOUBLE the plan declares), and every aggregate over a type that is not a signed
 #     integer, DECIMAL128, FLOAT32, FLOAT64 or DATE32 (COUNT takes any),
 #     naming the type, in the ungrouped and the grouped sinks alike;
 #   * a column whose type or decimal scale differs from the one the cell saw.
@@ -394,7 +394,10 @@ def bind_column(
     if (
         kind == IN_NONE
         or (kind == IN_DATE and numeric)
-        or (kind == IN_DECIMAL and values)
+        or (
+            values
+            and (kind == IN_DECIMAL or col.arrow_type == ArrowType.FLOAT32)
+        )
     ):
         raise Error(
             "pipeline_exec: "
@@ -403,9 +406,9 @@ def bind_column(
             + String(col.arrow_type)
             + "): SUM, AVG, STDDEV_SAMP, STDDEV_POP, VAR_SAMP and VAR_POP"
             " take signed integers, DECIMAL128, FLOAT32 and FLOAT64; MIN and"
-            " MAX also DATE32; MEDIAN and QUANTILE_CONT signed integers,"
-            " FLOAT32 and FLOAT64 (over a DECIMAL128 DuckDB's answer is a"
-            " DECIMAL, not the DOUBLE the plan declares)"
+            " MAX also DATE32; MEDIAN and QUANTILE_CONT signed integers and"
+            " FLOAT64 (over a DECIMAL128 or a FLOAT32 DuckDB's answer keeps"
+            " the input's type, not the DOUBLE the plan declares)"
         )
     out.kind = kind
     if kind == IN_DECIMAL:

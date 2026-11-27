@@ -247,8 +247,9 @@ Import each module by name; the package root exports nothing.
   not spill. `AnyAggSink` is the
   one slot of the sink variant that holds the grouped or the ungrouped sink.
 - `agg_values`: the values MEDIAN and QUANTILE_CONT keep. Every non-NULL
-  value of such an aggregate (a signed integer or a float, as a double; a
-  DECIMAL128 is refused by name, DuckDB's answer there being a DECIMAL) is
+  value of such an aggregate (a signed integer or a FLOAT64, as a double; a
+  DECIMAL128 or a FLOAT32 is refused by name, DuckDB's answer there keeping
+  the input's type) is
   kept beside the cells with its worker group, charged to the worker's
   reservation; `combine` moves each worker's values under the merged group,
   then sorts each group's values and interpolates DuckDB's way: the values at
