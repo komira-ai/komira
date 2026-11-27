@@ -36,6 +36,9 @@ from std.testing import TestSuite, assert_equal, assert_true
 from arrow.arrow_types import ArrowType
 from arrow.schema import Field, SchemaBuilder
 
+from plan_expr.expr import EXPR_CORRELATED_SUBQUERY
+from plan_ir.corr_subquery import corr_subq_inner_plan_ref
+from plan_ir.logical_plan import LogicalPlan, PLAN_FILTER, PLAN_PROJECT
 from sql.sql_bind_parquet import NoParquetFooters
 from sql.sql_catalog import SqlCatalog
 from sql.sql_frontend import plan_from_sql
@@ -476,6 +479,22 @@ def test_subquery_bodies() raises:
     )
 
 
+def _in_body_plan(sql: String) raises -> String:
+    """The rendered inner plan of `sql`'s `WHERE x IN (...)` subquery: the
+    root Project's Filter predicate is the subquery expression."""
+    var cat = _catalog()
+    var plan = plan_from_sql(sql, cat, NoParquetFooters())
+    if plan.tag != PLAN_PROJECT:
+        raise Error("test: the plan's root is not a Project:\n" + String(plan))
+    ref filt = plan.project_data_ref().child[]
+    if filt.tag != PLAN_FILTER:
+        raise Error("test: no Filter under the root Project:\n" + String(plan))
+    ref pred = filt.filter_data_ref().predicate
+    if pred.tag != EXPR_CORRELATED_SUBQUERY:
+        raise Error("test: the Filter holds no subquery:\n" + String(plan))
+    return String(corr_subq_inner_plan_ref(pred))
+
+
 def test_distinct_on_and_qualify_in_an_in_body_bind() raises:
     # The body is bound whole, so its plan keeps the row-number partition and
     # its filter.
@@ -483,10 +502,10 @@ def test_distinct_on_and_qualify_in_an_in_body_bind() raises:
         "PartitionBy(partition=[k], order=[], funcs=[ROW_NUMBER(, offset=0,"
         " frame=ROWS[0:0..4:0]) AS __distinct_on_rn])"
     )
-    var got = _got("SELECT id FROM t WHERE k IN (SELECT DISTINCT ON (k) k FROM u)")
+    var got = _in_body_plan("SELECT id FROM t WHERE k IN (SELECT DISTINCT ON (k) k FROM u)")
     assert_true(keep in got, got)
     assert_true(String(_KEEP1).rstrip("\n") in got, got)
-    got = _got(
+    got = _in_body_plan(
         "SELECT id FROM t WHERE k IN (SELECT k FROM u QUALIFY row_number() OVER (PARTITION BY k ORDER BY id) = 1)"
     )
     assert_true(
