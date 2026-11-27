@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import komira
+from komira import pl
 
 Path("scores.csv").write_text(
     "name,q1,q2,q3\n"
@@ -20,11 +21,15 @@ with komira.Session() as s:
     )
     print(long.to_arrow().to_pylist())
 
-# pandas-shaped: one frame per column, stacked with concat.
+# pandas-shaped: melt, every column not in id_vars becoming rows.
 df = komira.read_csv("scores.csv")
-parts = [
-    df.assign(quarter=col, score=df[col])[["name", "quarter", "score"]]
-    for col in ["q1", "q2", "q3"]
-]
-long = komira.concat(parts)
-print(long.dropna(subset=["score"]).sort_values(["name", "quarter"]).materialize().to_arrow().to_pylist())
+long = df.melt(id_vars=["name"], var_name="quarter", value_name="score")
+print(long.sort_values(["name", "quarter"]).materialize().to_arrow().to_pylist())
+
+# polars-shaped: unpivot, the same with polars' names.
+lf = pl.scan_csv("scores.csv")
+long = lf.unpivot(["q1", "q2", "q3"], index="name", variable_name="quarter", value_name="score")
+print(long.sort("name", "quarter").collect().to_arrow().to_pylist())
+
+# Without the missing scores: drop the rows whose score is missing.
+print(long.drop_nulls("score").sort("name", "quarter").collect().to_arrow().to_pylist())

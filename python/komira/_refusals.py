@@ -59,7 +59,7 @@ FRAME = _BOTH | _rows(
         ".{name}() is pandas' own: run with materialize(), then call to_pandas().{name}()",
     ),
     (
-        ("pivot", "pivot_table", "melt", "stack", "unstack", "explode", "transpose", "T"),
+        ("pivot", "pivot_table", "stack", "unstack", "explode", "transpose", "T"),
         ".{name}() is not supported yet: the plan has no node for it",
     ),
     (
@@ -99,7 +99,7 @@ GROUPBY = _rows(
 MODULE = _rows(
     (("Index", "MultiIndex", "RangeIndex"), "komira frames have no index"),
     (
-        ("pivot_table", "melt", "crosstab", "get_dummies"),
+        ("pivot_table", "crosstab", "get_dummies"),
         "komira.{name}() is not supported yet: the plan has no node for it",
     ),
     (

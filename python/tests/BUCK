@@ -1052,6 +1052,24 @@ python_binding_test(
     ],
 )
 
+# The pandas-shaped frame's melt and komira.melt against pandas' own melt
+# (test_frame_melt_pandas.py): on the real library, a Parquet file written in
+# the test with missing values in every kind of column and one column written
+# as never missing, read by pandas into Arrow dtypes; each call's column
+# names, Arrow types and rows (a multiset, in order for a sorted melt) equal
+# pandas'. CPython 3.13 alone, the minor with pinned pandas and polars.
+python_binding_test(
+    name = "frame_melt_pandas_test",
+    src = "test_frame_melt_pandas.py",
+    data = {"libkomira": LIBKOMIRA},
+    deps = [
+        "//python:komira_with_plan_modules",
+        "komira//third_party/python:protobuf",
+        "komira//third_party/python:pyarrow",
+        "komira//third_party/python:pandas",
+    ],
+)
+
 # One pandas session over TPC-H scale factor 1 lineitem and orders
 # (test_pandas_session_tpch.py): a date cut, a two-key group by, the decimal sums,
 # means, least and greatest of TPC-H q1, a computed decimal column, a sorted first

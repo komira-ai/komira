@@ -1,6 +1,7 @@
 # The form komira does not have yet: DuckDB's UNPIVOT, which melts the
-# columns in one clause (komira-ai/komira#2399). pandas' df.melt is the
-# same missing operation. It must fail with the line of probe_unpivot.error.txt.
+# columns in one clause (komira-ai/komira#2399); the frames have it as
+# df.melt and komira.pl's unpivot. It must fail with the line of
+# probe_unpivot.error.txt.
 from pathlib import Path
 
 import komira

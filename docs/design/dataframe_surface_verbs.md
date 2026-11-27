@@ -75,7 +75,7 @@ marked **not built** is designed, but the skin does not define it yet: calling i
 | `topn_per_group` | `df.sort_values(o).groupby(k).head(n)`, not built | `lf.sort(o).group_by(k).head(n)`, not built | PARTITION_TOPN | refused at lower |
 | `limit` | `df.head(n)` | `lf.head(n)`, `lf.limit(n)`; `lf.slice(offset, n)` on an ordered frame | LIMIT, offset 0 unless `slice` | cut; a limit or an offset above a sort is cut as that range of the sort (SINK_TOPN), an offset over no sort is refused |
 | `distinct` | `df.drop_duplicates()`; `subset=` of fewer than every column not built (raises `UnsupportedOperation`) | `lf.unique()`, `lf.unique(subset=..., keep="any"\|"none")` | DISTINCT of whole rows; the polars skin builds a `subset` of fewer columns, and `keep="none"`, as a PARTITION_BY (`ROW_NUMBER` or `COUNT` per value) under a FILTER (dataframe_surface.md, rules section 7) | whole rows served by lowering for the key coverage of the grouped sinks; the polars `subset` and `keep="none"` are cut as a window (`LOWERING_WINDOW_UNSERVED` for a type the window sink does not serve) |
-| `union` | `km.concat(frames)` | `kpl.concat(frames, how="vertical")` | UNION of one schema (`concat_schema_check`; rules section 8, ruling 15) | cut |
+| `union` | `km.concat(frames)`; `df.melt(id_vars, value_vars, var_name, value_name)` and `km.melt(df, ...)` | `kpl.concat(frames, how="vertical")`; `lf.unpivot(on, index=, variable_name=, value_name=)` | UNION of one schema (`concat_schema_check`; rules section 8, ruling 15); a melt or unpivot is a UNION of one PROJECT per value column (the id columns, the column's name as a string literal, the column), its value columns of one type | cut |
 | `subquery` | - | - | neither library has a subquery inside an expression; a broadcast aggregate is a window | - |
 | `view` | `km.add_sql_binding(name, df)`, then `km.sql(...)`; or `km.sql(..., name=df)`; not built (`Session.add_sql_binding` binds `komira.files` sources, not frames, and `Session.sql` takes SQL text only) | `km.add_sql_binding(name, lf)`, then `km.sql(...)`; or `km.sql(..., name=lf)`; not built | VIEW_REF | not wired |
 | `udf_map` | `s.map(f)`, `s.apply(f)`, `df.apply(f, axis=1)`; not built | `expr.map_elements(f, return_dtype=...)`, `expr.map_batches(f, return_dtype=...)`; not built | a `UdfRef` called by `WireUdfApply` | not wired: libkomira's plan entry refuses an envelope that carries `UdfRef` entries at step `decode` (`PLAN_WIRE_UDFS_DROPPED`). Lowering, for a Mojo caller of `plan_envelope_from_bytes`, cuts a call that is a whole projection column (`OP_UDF_APPLY`) and refuses one inside a larger expression (`LOWERING_UDF_UNSERVED`) |
@@ -156,7 +156,7 @@ A verb that does exist but refuses some arguments, or an unordered frame, is not
 | name | message |
 |---|---|
 | `Index`, `MultiIndex`, `RangeIndex` | `komira frames have no index` |
-| `pivot_table`, `melt`, `crosstab`, `get_dummies` | `komira.<name>() is not supported yet: the plan has no node for it` |
+| `pivot_table`, `crosstab`, `get_dummies` | `komira.<name>() is not supported yet: the plan has no node for it` |
 | `merge_ordered` | `merge_ordered() fills by row order, which a frame does not have; use merge() then sort_values()` |
 | `to_datetime`, `to_numeric` | `komira.<name>() is not supported; cast a column with s.astype(...)` |
 | `NamedAgg` | `use a tuple: agg(out=("column", "func"))` |
@@ -185,7 +185,7 @@ In the `read_*` message, `<format>` is the format of the name looked up (`parque
 | `iterrows`, `itertuples`, `items`, `values`, `to_numpy`, `to_list`, `tolist`, `item` | both | `.<name> needs the rows: run the frame with materialize(), then convert the Result with to_pandas()` |
 | `shape`, `size`, `empty` | `DataFrame` | `.<name> needs a query to run: count rows with df.agg(n=(column, "size")).materialize()` |
 | `to_dict`, `to_records`, `to_excel`, `to_sql`, `to_string`, `to_markdown` | `DataFrame` | `.<name>() is pandas' own: run with materialize(), then call to_pandas().<name>()` |
-| `pivot`, `pivot_table`, `melt`, `stack`, `unstack`, `explode`, `transpose`, `T` | `DataFrame` | `.<name>() is not supported yet: the plan has no node for it` |
+| `pivot`, `pivot_table`, `stack`, `unstack`, `explode`, `transpose`, `T` | `DataFrame` | `.<name>() is not supported yet: the plan has no node for it` |
 | `describe`, `info`, `memory_usage` | `DataFrame` | `.<name>() reports on a pandas object; run with materialize(), then call to_pandas().<name>()` |
 | `query`, `eval` | `DataFrame` | `.<name>() takes an expression as text, which komira does not parse; write df[df["a"] > 1]` |
 | `collect` | `DataFrame` | `.collect() is the polars-shaped skin's word; this frame runs at .materialize()` |
@@ -210,7 +210,7 @@ In the `read_*` message, `<format>` is the format of the name looked up (`parque
 | `materialize` | `LazyFrame` | `.materialize() is the pandas-shaped skin's word; this frame runs at .collect()` |
 | `to_pandas`, `to_polars`, `to_arrow`, `fetch` | `LazyFrame` | `a LazyFrame is a plan: run it with .collect(), then convert the Result` |
 | `with_column` | `LazyFrame` | `with_column() is not a polars verb; use with_columns()` |
-| `unpivot`, `explode` | `LazyFrame` | `.<name>() is not supported yet: the plan has no node for it` |
+| `explode` | `LazyFrame` | `.<name>() is not supported yet: the plan has no node for it` |
 | `cache`, `profile`, `collect_async` | `LazyFrame` | `.<name>() is not supported: komira runs a plan only at .collect()` |
 | `apply` | `Expr` | `Expr.apply is not a polars verb; use map_elements(f, return_dtype=...)` |
 | `sort_by` | `Expr` | `Expr.sort_by() is not supported: the plan carries no order inside an expression; sort the frame instead` |
