@@ -75,3 +75,41 @@ It depends on `arrow`, `async_rt`, `batch_eval`, `fs`,
 operator package. Import from the defining module, for example
 `from engine_runtime.host_detect import ...`; the package has
 no facade.
+
+## Examples
+
+A reservation with a budget grants grows until the budget is reached, then
+denies them and counts the denial. Releasing bytes makes room again.
+
+```mojo
+from std.testing import assert_equal, assert_false, assert_true
+from engine_runtime.memory.reservation import MemoryReservation
+
+var r = MemoryReservation.with_budget(1024)
+assert_true(r.has_budget())
+assert_equal(r.budget_bytes(), 1024)
+assert_true(r.try_grow(1000))
+assert_false(r.try_grow(100))
+assert_equal(r.try_grow_denied_count(), 1)
+assert_equal(r.held_bytes(), 1000)
+r.release(800)
+assert_true(r.try_grow(100))
+assert_equal(r.held_bytes(), 300)
+```
+
+The FNV-1a 64-bit hash of a byte list, as a list and as a span, gives the
+published value for the input "a".
+
+```mojo
+from std.testing import assert_equal
+from engine_runtime.spill.fnv1a import (
+    FNV1A_64_OFFSET_BASIS,
+    fnv1a_64_over,
+    fnv1a_64_over_span,
+)
+
+var a: List[UInt8] = [97]
+assert_equal(fnv1a_64_over(List[UInt8]()), FNV1A_64_OFFSET_BASIS)
+assert_equal(fnv1a_64_over(a), UInt64(0xAF63DC4C8601EC8C))
+assert_equal(fnv1a_64_over_span(Span(a)), fnv1a_64_over(a))
+```

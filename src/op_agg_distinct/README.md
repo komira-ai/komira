@@ -24,3 +24,49 @@ The COUNT(DISTINCT) kernels of grouped aggregation. It holds the grouped COUNT(D
 - `median_parallel_drain`: `parallel_group_finalize_column`, which finalizes each occupied group of an aggregate (the stage MEDIAN drain) and appends the output column, fanning the groups out over the dispatcher's workers from 256 groups up; the column is the same either way.
 
 The numbering of the string encode is the driver's output group order, so every body must number identically; the tests hold each parallel body to the serial one. The `cd_*_count` / `reset_*` functions are process-wide counters that let a test see which route ran. The encode entry points take the raw value and offset buffers of a column and are package-private.
+
+## Examples
+
+A per-worker distinct-pair set admits each (aggregate slot, group, value) pair once, and allocates nothing until the first insert.
+
+```mojo
+from op_agg_distinct.agg_cd_distinct_set import CdDistinctSet, cd_pair_tag
+from std.testing import assert_equal, assert_false, assert_true
+
+var s = CdDistinctSet()
+s.reserve_hint(100)
+assert_equal(s.capacity(), 0)
+
+var group7 = cd_pair_tag(0, 7)
+assert_true(s.admit(group7, Int64(42)))
+assert_false(s.admit(group7, Int64(42)))
+assert_true(s.admit(group7, Int64(43)))
+assert_true(s.admit(cd_pair_tag(0, 8), Int64(42)))
+assert_true(s.admit(cd_pair_tag(1, 7), Int64(42)))
+assert_equal(s.count(), 4)
+```
+
+The global group directory maps each worker's group ids onto one numbering in first-seen order, with the NULL key as its own group.
+
+```mojo
+from op_agg_distinct.cd_global_dir import CdGlobalDir
+from std.testing import assert_equal
+
+var d = CdGlobalDir()
+var keys0: List[Int] = [5, 7]
+var nulls0: List[Bool] = [False, False]
+var keys1: List[Int] = [7, 9, 0]
+var nulls1: List[Bool] = [False, False, True]
+
+var map0 = d.map_worker(keys0, nulls0)
+var map1 = d.map_worker(keys1, nulls1)
+
+assert_equal(map0[0], 0)
+assert_equal(map0[1], 1)
+assert_equal(map1[0], 1)
+assert_equal(map1[1], 2)
+assert_equal(map1[2], 3)
+assert_equal(d.null_gid, 3)
+assert_equal(len(d.keys), 4)
+assert_equal(d.runs[1], 2)
+```
