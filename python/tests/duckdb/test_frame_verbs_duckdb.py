@@ -16,6 +16,14 @@ below is a copy of its own, since a test file cannot import another.
   where NaN is filled as NULL is, float32, string, bool), a scalar over several
   numeric types, a dict, an empty dict, fillna keeping a sort and one that fills
   the sort key, a filter on a filled column;
+- replace: a list of strings, a scalar over int64, float64, float32, int32
+  and string columns, an int and a float that is not whole, a dict of
+  columns, a nested dict, a column that holds none of the values (its type
+  kept), ints in an int32 column, a float32 value, a replaced value not looked
+  for again, the mean and the count skipping the replaced cells, NaN to None
+  and NaN with a value to a number (NULL and NaN alike), None in a list over an
+  int64 column, Series.replace assigned and over an expression, a filter on a
+  replaced column, replace keeping a sort;
 - dropna: how="any" over the whole frame and over a subset, how="all" over two
   float columns (NaN counts as missing), a subset given as one name, dropna on a
   sorted frame, dropna then fillna;
@@ -44,8 +52,9 @@ below is a copy of its own, since a test file cannot import another.
 - Series.dt: year, quarter, month, day, hour, minute, second, microsecond,
   dayofweek and aliases, dayofyear, floor("D"), floor("h") on the timestamp;
   year, month, day and dayofweek on the date; a filter on a field;
-- casts and string functions the engine does not run build their plan and are
-  refused at materialize() with the engine's step (ENGINE_REFUSED);
+- casts and string functions the engine does not run, and a filter whose
+  condition holds a Series.replace, build their plan and are refused at
+  materialize() with the engine's step (ENGINE_REFUSED);
 - columns are equal by name and order; ints, strings, bools, dates and
   timestamps exactly; floats to a relative 1e-12 and NaN equal to NaN; NULL
   equals NULL; Arrow type names equal for every column;
@@ -1035,6 +1044,113 @@ DTS = [
     ),
 ]
 
+# ---- replace -----------------------------------------------------------------
+# pandas' replace: each listed value becomes the replacement, a NULL for None,
+# in the column's own type. The file's timestamp and date columns could hold a
+# str (pandas parses it), so a frame-wide replace of text is over a projection
+# without them.
+
+NUMBERS_AND_TEXT = ["k", "v", "w", "n", "s"]
+
+REPLACES = [
+    Case(
+        "replace of a list of strings with None makes each a NULL",
+        lambda d: d[["n", "s"]].replace(["banana", "x", ""], None),
+        "SELECT n, CASE WHEN s IN ('banana', 'x', '') THEN NULL ELSE s END AS s FROM t",
+    ),
+    Case(
+        "replace of a scalar with None over int64, float64, float32, int32 and a string column",
+        lambda d: d[NUMBERS_AND_TEXT].replace(-1, None),
+        "SELECT CASE WHEN k = -1 THEN NULL ELSE k END AS k, CASE WHEN v = -1 THEN NULL ELSE v END AS v, "
+        "CASE WHEN w = -1 THEN NULL ELSE w END AS w, CASE WHEN n = -1 THEN NULL ELSE n END AS n, s FROM t",
+    ),
+    Case(
+        "replace of a list with an int and a float that is not whole meets only the float column with the float",
+        lambda d: d[["k", "v"]].replace([-4, -2.25], None),
+        "SELECT CASE WHEN k = -4 THEN NULL ELSE k END AS k, "
+        "CASE WHEN v IN (-4.0, -2.25) THEN NULL ELSE v END AS v FROM t",
+    ),
+    Case(
+        "replace with a dict of columns replaces each column's own values and leaves the others",
+        lambda d: d.replace({"s": "banana", "k": [0, 1], "w": -1.0}, None),
+        "SELECT * REPLACE (CASE WHEN k IN (0, 1) THEN NULL ELSE k END AS k, "
+        "CASE WHEN w = -1.0 THEN NULL ELSE w END AS w, CASE WHEN s = 'banana' THEN NULL ELSE s END AS s) FROM t",
+    ),
+    Case(
+        "replace with a nested dict maps old to new per column",
+        lambda d: d.replace({"s": {"banana": None, "x": "y"}, "n": {1: 100}}),
+        "SELECT * REPLACE (CASE WHEN n = 1 THEN 100 ELSE n END AS n, "
+        "CASE WHEN s = 'banana' THEN NULL WHEN s = 'x' THEN 'y' ELSE s END AS s) FROM t",
+    ),
+    Case(
+        "a column that holds none of the values is unchanged and keeps its type",
+        lambda d: d[["n", "s", "w"]].replace(1000, None),
+        "SELECT n, s, w FROM t",
+    ),
+    Case(
+        "replace of ints with ints in an int32 column keeps it int32",
+        lambda d: d[["n"]].replace([1, 8], [100, 800]),
+        "SELECT CASE WHEN n = 1 THEN 100 WHEN n = 8 THEN 800 ELSE n END AS n FROM t",
+    ),
+    Case(
+        "replace of a float32 value keeps the column float32",
+        lambda d: d[["w"]].replace(-1.0, 0.5),
+        "SELECT CAST(CASE WHEN w = -1.0 THEN 0.5 ELSE w END AS FLOAT) AS w FROM t",
+    ),
+    Case(
+        "a replaced value is not looked for again: 0 becomes 1 and 1 becomes 2",
+        lambda d: d[["k"]].replace([0, 1], [1, 2]),
+        "SELECT CASE WHEN k = 0 THEN 1 WHEN k = 1 THEN 2 ELSE k END AS k FROM t",
+    ),
+    Case(
+        "the mean skips the cells replace made NULL",
+        lambda d: d[["k"]].replace([-4, 6], None).mean(),
+        "SELECT avg(CASE WHEN k IN (-4, 6) THEN NULL ELSE k END) AS k FROM t",
+    ),
+    Case(
+        "count skips the cells replace made NULL",
+        lambda d: d[["s"]].replace(["banana", "x"], None).count(),
+        "SELECT count(CASE WHEN s IN ('banana', 'x') THEN NULL ELSE s END) AS s FROM t",
+    ),
+    Case(
+        "replace of NaN with None makes a float column's NaN a NULL",
+        lambda d: d[["v"]].replace(math.nan, None),
+        "SELECT CASE WHEN v IS NULL OR isnan(v) THEN NULL ELSE v END AS v FROM t",
+    ),
+    Case(
+        "replace of NaN and a value with a number fills NULL and NaN and the value",
+        lambda d: d[["v"]].replace([math.nan, -2.25], 0),
+        "SELECT CASE WHEN v IS NULL OR isnan(v) OR v = -2.25 THEN 0.0 ELSE v END AS v FROM t",
+    ),
+    Case(
+        "replace of None in a list fills NULL in an int64 column",
+        lambda d: d[["k"]].replace([None], 0),
+        "SELECT COALESCE(k, 0) AS k FROM t",
+    ),
+    Case(
+        "Series.replace assigned as a column",
+        lambda d: d.assign(s=d["s"].replace("banana", None)),
+        "SELECT * REPLACE (CASE WHEN s = 'banana' THEN NULL ELSE s END AS s) FROM t",
+    ),
+    Case(
+        "Series.replace of an expression",
+        lambda d: on(d[["k"]], lambda f: f.assign(k1=(f["k"] + 1).replace(0, None))),
+        "SELECT k, CASE WHEN k + 1 = 0 THEN NULL ELSE k + 1 END AS k1 FROM t",
+    ),
+    Case(
+        "a filter on a replaced column: the replaced rows compare as NULL and drop out",
+        lambda d: on(d.replace({"k": -4}, None), lambda f: f[f["k"] < 0]),
+        "SELECT * REPLACE (CASE WHEN k = -4 THEN NULL ELSE k END AS k) FROM t "
+        "WHERE (CASE WHEN k = -4 THEN NULL ELSE k END) < 0",
+    ),
+    Case(
+        "replace keeps the order of a sort it does not replace",
+        lambda d: d.sort_values("n").replace({"s": "banana"}, None),
+        "SELECT * REPLACE (CASE WHEN s = 'banana' THEN NULL ELSE s END AS s) FROM t ORDER BY n",
+        ("n",),
+    ),
+]
+
 TYPES = [
     Case("a plain read has every column type", lambda d: d, "SELECT * FROM t"),
     Case(
@@ -1051,7 +1167,10 @@ TYPES = [
 #     string, from a timestamp to a date, from a string to a date: the engine's
 #     cast has no arm for those pairs;
 #   - a regex over a computed string (the lowered Series): the engine's regex
-#     operations take a column as their input, not an expression.
+#     operations take a column as their input, not an expression;
+#   - a filter whose condition holds a CASE (a Series.replace compared in
+#     the filter itself): the filter's NULL-collapse walk has no arm for a
+#     CASE. A filter on a column replace made works (REPLACES).
 ENGINE_REFUSED = [
     ("a cast of a bool to a string", lambda d: d.astype({"flag": "string"})),
     ("a cast of a timestamp to a string", lambda d: d.astype({"t": "string"})),
@@ -1066,6 +1185,7 @@ ENGINE_REFUSED = [
         "a regex match over a lowered string",
         lambda d: on(d[["n", "s"]], lambda f: f.assign(r=f["s"].str.lower().str.contains("an+a"))),
     ),
+    ("a filter on a Series.replace in the condition", lambda d: d[d["k"].replace(-4, None) < 0]),
 ]
 
 
@@ -1082,6 +1202,10 @@ def test_fillna_equals_duckdb_coalesce(path):
 
 def test_dropna_equals_duckdb_where_not_null_and_not_nan(path):
     run_cases(path, DROPS)
+
+
+def test_replace_equals_duckdb_case_when(path):
+    run_cases(path, REPLACES)
 
 
 def test_rename_and_affixes_equal_duckdb_aliases(path):
@@ -1124,7 +1248,7 @@ def test_concat_of_frames_from_two_readers_equals_duckdb_union_all(path):
     assert found is None, "frames of two readers: {}".format(found)
 
 
-def test_casts_and_regexes_the_engine_does_not_run_are_refused_at_the_terminal(path):
+def test_programs_the_engine_does_not_run_are_refused_at_the_terminal(path):
     with komira.Session() as session:
         base = komira.read_parquet(path, session=session)
         for name, program in ENGINE_REFUSED:
@@ -1265,6 +1389,7 @@ WITH_FILE = [
     test_the_file_has_nulls_nan_and_the_strings_and_times_the_cases_need,
     test_the_types_of_the_file_read_back_as_duckdb_reads_them,
     test_fillna_equals_duckdb_coalesce,
+    test_replace_equals_duckdb_case_when,
     test_dropna_equals_duckdb_where_not_null_and_not_nan,
     test_rename_and_affixes_equal_duckdb_aliases,
     test_astype_equals_duckdb_cast,
@@ -1274,7 +1399,7 @@ WITH_FILE = [
     test_groupby_size_sorted_descending_equals_duckdb_group_by_count,
     test_str_methods_equal_duckdb_string_functions,
     test_dt_fields_equal_duckdb_date_parts,
-    test_casts_and_regexes_the_engine_does_not_run_are_refused_at_the_terminal,
+    test_programs_the_engine_does_not_run_are_refused_at_the_terminal,
 ]
 
 PURE = [
@@ -1302,7 +1427,7 @@ def main(args):
         for test in WITH_FILE:
             test(path)
     assert not FAILED, "{} cases failed:\n".format(len(FAILED)) + "\n".join(FAILED)
-    lists = (TYPES, FILLS, DROPS, RENAMES, CASTS, TAILS, CONCATS, COUNTS_BY_GROUP, STRS, DTS)
+    lists = (TYPES, FILLS, REPLACES, DROPS, RENAMES, CASTS, TAILS, CONCATS, COUNTS_BY_GROUP, STRS, DTS)
     print("frame verbs duckdb: {} cases".format(sum(len(c) for c in lists)))
 
 

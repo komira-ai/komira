@@ -16,6 +16,8 @@ nothing. It is used inside its own frame's verbs: `df[s]` filters by it and
   `-`, and `& | ~` over boolean Series. `isin` takes a list of values, or a
   Series of a frame of the same session (a semi join, which only `df[...]`
   takes).
+- `replace(to_replace, value)` puts a value of the Series' type, or a NULL,
+  where a listed value is (komira/_replace.py).
 - `astype(dtype)` casts to one Arrow type (komira/_cast.py). `s.str` gives the
   string methods of a string Series and `s.dt` the date and time methods of a
   timestamp or date32 Series (komira/_accessors.py); on a Series of another
@@ -39,7 +41,7 @@ nothing. It is used inside its own frame's verbs: `df[s]` filters by it and
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import _accessors, _cast, _ops, _refusals, _windows
 from ._errors import UnsupportedOperation
@@ -49,6 +51,10 @@ if TYPE_CHECKING:
     from ._frame import DataFrame
 
 __all__ = ["Series", "operand"]
+
+# The default of `replace`'s `value`, which pandas tells apart from None
+# (komira/_replace.py uses the same object).
+_UNSET: Any = object()
 
 # The Arrow types of the integer columns (komira/_ops/_vocab.py names), each
 # with its rank: 1 for 8 bits up to 4 for 64.
@@ -273,6 +279,27 @@ class Series:
             _ops.Compare("eq", *self._widened(self._node, _literal(v, "isin()"), self._windows)) for v in values
         )
         return self._derive(_ops.or_all(tests) if tests else _ops.Lit(False))
+
+    def replace(
+        self,
+        to_replace: object = None,
+        value: object = _UNSET,
+        *,
+        inplace: bool = False,
+        regex: object = False,
+    ) -> Series:
+        """The Series with the values `to_replace` names replaced, read as
+        pandas reads them (komira/_replace.py): a value or a list with a
+        value or a list of the same length, or `{old: new}` with no value.
+        `value=None` is a NULL of the Series' type. Matching is exact, by the
+        type; a Series no value can be in is returned as an equal one."""
+        from . import _replace
+
+        self._check_current()
+        _replace.check_args("Series", inplace, regex)
+        pairs = _replace.series_pairs(to_replace, value)
+        node = _replace.replaced(self._node, self._type, pairs, None, False)
+        return self._derive(self._node if node is None else node)
 
     # ---- windows (komira/_windows.py) -----------------------------------
 

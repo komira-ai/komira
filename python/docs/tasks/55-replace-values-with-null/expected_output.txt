@@ -1,3 +1,6 @@
 [{'name': 'Ana', 'city': 'Oslo', 'phone': '555-0101', 'score': 8}, {'name': 'Bo', 'city': None, 'phone': None, 'score': -1}, {'name': 'Cy', 'city': 'Lima', 'phone': '555-0103', 'score': 6}, {'name': 'Di', 'city': None, 'phone': None, 'score': -1}]
+[{'name': 'Ana', 'city': 'Oslo', 'phone': '555-0101', 'score': 8}, {'name': 'Bo', 'city': None, 'phone': None, 'score': None}, {'name': 'Cy', 'city': 'Lima', 'phone': '555-0103', 'score': 6}, {'name': 'Di', 'city': None, 'phone': None, 'score': None}]
+[{'score': 7.0}]
+[{'name': 'Ana', 'city': 'Oslo'}, {'name': 'Bo', 'city': None}, {'name': 'Cy', 'city': 'Lima'}, {'name': 'Di', 'city': None}]
 [{'name': 'Ana', 'score': 8}, {'name': 'Bo', 'score': None}, {'name': 'Cy', 'score': 6}, {'name': 'Di', 'score': None}]
 [{'mean': 7.0}]
