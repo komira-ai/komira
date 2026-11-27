@@ -451,8 +451,15 @@ the human check is the review of the diff.
 - No view or tab engine and no status words in the core; no committed run results or host names.
 
 Not checked: whether uv, poetry, pdm, pixi and conda can be pointed at a loopback index; a
-network-off platform on the farm; per-example Mojo compile time on the farm, which sets the cost of
-one test per file over about 660 files; whether buildrules can pin a Zig tool for our other repos.
+network-off platform on the farm; whether buildrules can pin a Zig tool for our other repos.
+
+Measured: one example file as its own test (`mojo_build_test` then `mojo_gated_test` of
+`tests//functional/readme_examples/source_first`, against `komira//src/anomaly:anomaly`) takes about
+35 to 60 seconds on the farm, the compile most of it, read from the pull request check's progress
+lines, which name the oldest running action every 7 seconds (a bound, not a per-action timer).
+Four files and the failing fixture ran in parallel in about 90 seconds of wall time. About 660 files
+cold would be about 6 to 11 farm-hours of action time *[est]*, cached after the first build. That
+is today's cost, not an added one: the inline gate already compiles one program per example.
 
 ## Decisions taken
 
