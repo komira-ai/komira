@@ -652,9 +652,9 @@ def _out_fault(p: Void, rows: Int, want: Field) -> String:
     var a = p.bitcast[CArrowArray]()
     if a[].is_released():
         return String("call_batch returned OK with no output array")
-    var dev_type = (p + 88).bitcast[Int32]()[]
-    var dev_id = (p + 80).bitcast[Int64]()[]
-    var sync = (p + 96).bitcast[Void]()[]
+    var dev_type = (p.bitcast[UInt8]() + 88).bitcast[Int32]()[]
+    var dev_id = (p.bitcast[UInt8]() + 80).bitcast[Int64]()[]
+    var sync = (p.bitcast[UInt8]() + 96).bitcast[Void]()[]
     if dev_type != ARROW_DEVICE_CPU or dev_id != -1 or Int(sync) != 0:
         return "the output is on device " + String(dev_type) + "/" + String(dev_id) + ", not the CPU"
     if a[].length != Int64(rows):
@@ -682,8 +682,8 @@ def call_batch(
     # SAFETY: a zeroed device-array block; the exported ArrowArray (80 bytes)
     # is moved into its first words, so the block, not `arr`, holds it.
     d_args.bitcast[CArrowArray]().unsafe_write(arr^)
-    (d_args + 80).bitcast[Int64]()[] = -1
-    (d_args + 88).bitcast[Int32]()[] = ARROW_DEVICE_CPU
+    (d_args.bitcast[UInt8]() + 80).bitcast[Int64]()[] = -1
+    (d_args.bitcast[UInt8]() + 88).bitcast[Int32]()[] = ARROW_DEVICE_CPU
     var d_out = _zeroed(_DEVICE_ARRAY_BYTES)
     var cp = _zeroed(size_of[CUdfCall]())
     # SAFETY: a zeroed block of the call struct's size; `cancel` stays NULL

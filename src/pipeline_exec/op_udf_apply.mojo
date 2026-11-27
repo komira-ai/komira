@@ -110,7 +110,7 @@ struct UdfApplyShared(Movable):
     def output_field(self) -> Field:
         return self._field.copy()
 
-    def make(self, worker_id: Int) -> UdfApplyOp:
+    def make(self, worker_id: Int) raises -> UdfApplyOp:
         """The operator of worker `worker_id`."""
         return UdfApplyOp(
             ArcPointer(copy=self._pool), self._ids.copy(), self._udf_index, self._field.copy(),
@@ -139,7 +139,7 @@ struct UdfApplyOp(MorselOperatorImpl):
         var field: Field,
         binding: ArcPointer[UdfBinding],
         worker: Int,
-    ):
+    ) raises:
         self._pool = pool^
         self._ids = ids^
         self._udf_index = udf_index
