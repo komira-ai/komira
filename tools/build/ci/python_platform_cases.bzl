@@ -14,10 +14,12 @@ the 3.11 interpreter's label from python/pythons.bzl, and `load_test` names no `
 A real test has exec dependencies (the interpreter's tzdata), and configuring it for darwin-arm64
 resolves them on a darwin-arm64 execution platform. The check registers that platform only in its
 macOS build step (pr.yml's `darwin-config-file`), so `cases.bxl:run` runs without it. There a real
-case's darwin answer is the compatibility the macro wrote on the target, the answer configuring
-gives: compatible exactly when every constraint of its `target_compatible_with` is one of
-darwin-arm64's. With the platform registered (a machine whose buckconfig names the macOS workers),
-the real case is configured for darwin-arm64 like a fixture.
+case's darwin answer is the compatibility the macro wrote on the target itself: compatible when
+every constraint of its `target_compatible_with` is one of darwin-arm64's. That is what the macro
+default decides; unlike configuring, it does not look at the target's dependencies or at
+`compatible_with`, and a `select` there fails the case by name. With the platform registered (a
+machine whose buckconfig names the macOS workers), the real case is configured for darwin-arm64
+like a fixture.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
@@ -69,7 +71,11 @@ def python_platform_cases(ctx):
     for target, proves, darwin, linux in PYTHON_PLATFORM_CASES:
         for platform, want in [(_DARWIN, darwin), (_LINUX, linux)]:
             if platform == _DARWIN and not darwin_exec and not target.startswith(_FIXTURE):
-                got = stated_compatible(ctx.unconfigured_targets(target).get_attr("target_compatible_with"), DARWIN_ARM64)
+                stated = ctx.unconfigured_targets(target).get_attr("target_compatible_with")
+                if type(stated) != "list":
+                    out.append("python platform: {} states target_compatible_with as a {}, not a list, so its darwin-arm64 answer cannot be read without a darwin-arm64 execution platform ({})".format(target, type(stated), proves))
+                    continue
+                got = stated_compatible(stated, DARWIN_ARM64)
             else:
                 got = ctx.configured_targets(target, target_platform = platform) != None
             if got != want:
