@@ -68,8 +68,12 @@ macOS floor or the one above it that the tag names. The pure-Python wheels
 installs the macOS file with `:cpython_macos`, otherwise the linux file with
 `:cpython`, so a `py_test`'s `deps` do not change. The macOS interpreter loads
 only the operating system's libraries, so there is no `native_libs` for it.
-Only the 3.13 closure has a macOS build: the 3.14 closures and the protobuf
-edges stay linux-only. Nothing here is built in a pull request; the macOS
+Only the 3.13 closure has a macOS build: the 3.14 closures, and the other
+interpreters (3.10, 3.11, 3.12, 3.14 and free-threaded 3.14), are linux-only, and
+the `py_test`s, wheels and tests that name one are configured for linux x86_64
+only (limit `python-linux-interpreters`), so a macOS build skips them. The
+protobuf edges for 3.13 have a macOS file too (`PROTOBUF_EDGES_MACOS`, see
+[protobuf](#protobuf)). Nothing here is built in a pull request; the macOS
 harness is built by the release workflow
 ([tools/build/python](../../tools/build/python/README.md#macos-arm64)).
 
@@ -91,7 +95,11 @@ and [python/tests](../../python/tests/BUCK) loads them under each edge:
 | 5.28.3 | `PROTOBUF_EDGES` | `komira//python/tests:protobuf-5.28.3` | the release below the range, which must refuse the gencode |
 
 `PROTOBUF_EDGES` holds the binary wheels (`cp38-abi3`, manylinux x86_64) of
-the two older releases, BSD-3-Clause like 7.36.2. python/tests/BUCK declares
+the two older releases, BSD-3-Clause like 7.36.2, and `PROTOBUF_EDGES_MACOS`
+their `universal2` wheels (`cp38-abi3`) for CPython 3.13 on macOS: the 3.13
+targets `protobuf-5.29.1` and `protobuf-5.28.3` install the macOS file with
+`:cpython_macos` for a macOS target platform, the linux one otherwise, as
+`:protobuf` does. python/tests/BUCK declares
 their downloads and installed targets, so that they are inside the Python
 surface, and only its tests depend on them. It also installs all three for
 each other minor the package supports (3.11, 3.12 and 3.14), as

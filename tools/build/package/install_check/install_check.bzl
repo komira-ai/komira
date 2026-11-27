@@ -33,6 +33,8 @@ the text, and nothing is loaded. `depend_pin` then names a pin the package
 does not hold (the check's own `--require-depend` is what must refuse it).
 
 The output is the probe's marker (what it loaded). `[prefix]` is the install.
+Linux x86_64 only (conda packages are linux-64 only so far, and the probe reads
+/proc/self/maps): another target platform skips the check.
 It checks a package on the farm; beta's `beta_validate` installs the published
 files with a package manager and runs the same load again (docs/design/native_packaging.md,
 "Built once, promoted unchanged", install check 4).
@@ -124,6 +126,10 @@ _conda_install_check = rule(
 )
 
 def conda_install_check(**kwargs):
-    _conda_install_check(exec_compatible_with = LINUX_X86_64, **kwargs)
+    _conda_install_check(
+        exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:libkomira-elf-linux-x86-64
+        **kwargs
+    )
 
 conda_install_check = declares_docs(conda_install_check)

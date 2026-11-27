@@ -1,0 +1,6 @@
+{'region': 'east', 'orders': 2, 'biggest': 120, 'mean': 82.5}
+{'region': 'north', 'orders': 1, 'biggest': 200, 'mean': 200.0}
+{'region': 'west', 'orders': 2, 'biggest': 150, 'mean': 115.0}
+[{'region': 'east', 'target': 100}, {'region': 'north', 'target': 150}, {'region': 'west', 'target': 100}]
+[{'id': 1, 'region': 'east', 'amount': 120, 'target': 100}, {'id': 4, 'region': 'north', 'amount': 200, 'target': 150}, {'id': 5, 'region': 'west', 'amount': 150, 'target': 100}]
+[{'id': 1, 'amount': 120}, {'id': 4, 'amount': 200}, {'id': 5, 'amount': 150}]

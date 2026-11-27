@@ -337,7 +337,8 @@ npm_platform_cases(
 
 # The rule on fixtures (wheel/fixtures/): a linux-x86_64 wheel holding a real
 # Mojo shared library (the example `plain`, which needs the Mojo runtime:
-# external_needed) at the test stamp, so building it runs [check] and
+# external_needed; an ELF library, so a darwin-arm64 build skips it and
+# `wheel_file_name_cases`) at the test stamp, so building it runs [check] and
 # [release_check], the twin's byte equality among them; and wheels of plain
 # files for the linux-arm64 and darwin-arm64 (macOS) rows, whose tags are
 # derived the same way.
@@ -361,6 +362,7 @@ wheel_file_test_stamped(
         "libKGENCompilerRTShared.so",
         "libMSupportGlobals.so",
     ],
+    target_compatible_with = LINUX_X86_64,  # komira-limit:manylinux-wheel-linux-x86-64
 )
 
 # Named by the tag they test: each is built on linux like every other
@@ -397,6 +399,7 @@ zig_test(
     },
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
+    target_compatible_with = LINUX_X86_64,  # komira-limit:manylinux-wheel-linux-x86-64
 )
 
 # The tag of each release platform's row, written out: the glibc floor and

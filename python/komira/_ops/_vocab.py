@@ -322,6 +322,9 @@ LEFT_ONLY_HOWS = frozenset({"semi", "anti"})
 
 SOURCE_FORMATS = frozenset({"parquet", "csv", "ndjson", "json", "orc", "avro", "arrow"})
 WRITE_FORMATS = frozenset({"parquet", "csv", "jsonl"})
+# The compressions a write target names; the formats that write each are in
+# komira/_ops/_rel.py (`WriteTarget`).
+WRITE_CODECS = frozenset({"snappy", "uncompressed", "zstd", "gzip", "lz4"})
 
 RIGHT_SUFFIX = "_right"
 IN_LIST_MAX = 64

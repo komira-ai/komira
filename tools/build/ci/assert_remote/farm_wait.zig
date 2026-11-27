@@ -6,7 +6,10 @@
 //! `engine_address` under `[buck2_re_client]`, the address buck2 itself uses,
 //! and `farm_wait_seconds` under `[komira_ci]`, farm-connect's
 //! `farm-wait-minutes` input in seconds. So the wait here and farm-connect's
-//! own wait before the first build have one bound, set in one place.
+//! own wait before the first build have one bound, set in one place. The
+//! same section may hold `dead_connection_seconds`, the watchdog's bound on a
+//! connection to the farm that hears nothing (farm_watchdog.zig); farm-connect
+//! does not write it, so the watchdog's default holds.
 //!
 //! The probe is the one farm-connect makes: a TCP connection to the farm's
 //! port, given 5 s, every 5 s until it answers or the bound has passed, with a
@@ -23,7 +26,15 @@ pub const Farm = struct {
     port: u16,
     /// The longest wait for the farm to answer, in seconds.
     wait_seconds: u32,
+    /// How long a connection to the farm may hear nothing before the watchdog
+    /// calls it dead, in seconds (farm_watchdog.zig).
+    dead_seconds: u32 = default_dead_seconds,
 };
+
+/// The watchdog's bound when the farm config sets none: twice the 150 s after
+/// which the farm closes a connection that moved nothing (farm_watchdog.zig
+/// says why).
+pub const default_dead_seconds: u32 = 300;
 
 pub const ConfigError = error{
     /// No `engine_address` under `[buck2_re_client]`.
@@ -34,6 +45,8 @@ pub const ConfigError = error{
     NoWaitSeconds,
     /// A `farm_wait_seconds` that is not a whole number of seconds.
     BadWaitSeconds,
+    /// A `dead_connection_seconds` that is not a whole number of seconds from 1.
+    BadDeadSeconds,
 };
 
 /// The farm of a buckconfig's text: the sections and keys the header names,
@@ -43,6 +56,7 @@ pub fn parseConfig(text: []const u8) ConfigError!Farm {
     var section: []const u8 = "";
     var address: ?[]const u8 = null;
     var wait: ?[]const u8 = null;
+    var dead: ?[]const u8 = null;
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |raw| {
         const l = std.mem.trim(u8, raw, " \t\r");
@@ -55,11 +69,17 @@ pub fn parseConfig(text: []const u8) ConfigError!Farm {
         const value = std.mem.trim(u8, l[eq + 1 ..], " \t");
         if (std.mem.eql(u8, section, "buck2_re_client") and std.mem.eql(u8, key, "engine_address")) address = value;
         if (std.mem.eql(u8, section, "komira_ci") and std.mem.eql(u8, key, "farm_wait_seconds")) wait = value;
+        if (std.mem.eql(u8, section, "komira_ci") and std.mem.eql(u8, key, "dead_connection_seconds")) dead = value;
     }
     const hp = try hostPort(address orelse return error.NoEngineAddress);
     const w = wait orelse return error.NoWaitSeconds;
     const seconds = std.fmt.parseInt(u32, w, 10) catch return error.BadWaitSeconds;
-    return .{ .host = hp.host, .port = hp.port, .wait_seconds = seconds };
+    var dead_seconds = default_dead_seconds;
+    if (dead) |d| {
+        dead_seconds = std.fmt.parseInt(u32, d, 10) catch return error.BadDeadSeconds;
+        if (dead_seconds == 0) return error.BadDeadSeconds;
+    }
+    return .{ .host = hp.host, .port = hp.port, .wait_seconds = seconds, .dead_seconds = dead_seconds };
 }
 
 const HostPort = struct { host: []const u8, port: u16 };
@@ -89,6 +109,7 @@ pub fn describeConfigError(e: ConfigError) []const u8 {
         error.BadEngineAddress => "its engine_address is not <host>:<port>",
         error.NoWaitSeconds => "it has no farm_wait_seconds under [komira_ci]",
         error.BadWaitSeconds => "its farm_wait_seconds is not a whole number of seconds",
+        error.BadDeadSeconds => "its dead_connection_seconds is not a whole number of seconds from 1",
     };
 }
 

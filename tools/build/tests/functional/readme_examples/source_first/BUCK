@@ -1,0 +1,36 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:readme.bzl", "mojo_readme_example_failure")
+
+# The README of src/anomaly migrated to source-first (test 38;
+# docs/design/documentation_tests.md): inline.md is that README as it was (the
+# inline model), README.md and examples/ what `migrate` makes of it. The
+# library's `[tests][readme]` is the freshness check of README.md against
+# examples/ and one welded test per file, each compiled against
+# komira//src/anomaly:anomaly and run. The target must build.
+mojo_library(
+    name = "source_first",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    deps = ["komira//src/anomaly:anomaly"],
+    readme_examples = glob(["examples/*.mojo"]),
+)
+
+# examples/example_1.mojo with one assert changed (line 9 expects the
+# unordered verdict of a good series): compiled and run as a README example's
+# welded test is, it must fail naming that file and line. The target builds
+# only when it does.
+mojo_readme_example_failure(
+    name = "changed_assert",
+    example = "changed_assert/example_1.mojo",
+    deps = ["komira//src/anomaly:anomaly"],
+    expect = "functional/readme_examples/source_first/changed_assert/example_1.mojo:9:",
+)
+
+# The README examples tool's unit tests read these (tools/build/readme_examples:
+# migrate of inline.md is README.md and examples/, byte for byte, and
+# `migrate --verify` proves it).
+filegroup(
+    name = "fixture",
+    srcs = ["README.md", "inline.md"] + glob(["examples/*.mojo"]),
+    visibility = ["komira//tools/build/readme_examples:"],
+)

@@ -154,3 +154,73 @@ Where it does not follow the spec, or does less:
   whose status is DELETED (this package never writes one).
 - The Avro row form is required-only: a null cell encodes as its type's zero
   value.
+
+## Example
+
+A schema gets field ids in column order, and adding a column keeps the old ids
+and bumps the schema id.
+
+```mojo
+from std.testing import assert_equal, assert_true
+from iceberg import (
+    ICE_T_LONG,
+    ICE_T_STRING,
+    IcebergSchema,
+    evolve_add_column,
+    iceberg_type_name,
+)
+
+var schema = IcebergSchema(0)
+schema.add(String("id"), ICE_T_LONG, required=True)
+schema.add(String("region"), ICE_T_STRING, required=True)
+assert_equal(schema.last_column_id(), 2)
+
+var evolved = evolve_add_column(schema, String("email"), ICE_T_STRING)
+assert_equal(evolved.schema_id, 1)
+assert_equal(evolved.num_fields(), 3)
+assert_equal(evolved.fields[2].field_id, 3)
+assert_true(not evolved.fields[2].required)
+assert_equal(iceberg_type_name(ICE_T_LONG), String("long"))
+```
+
+A partition spec turns a row into its partition values, with the spec's
+murmur3 bucket hash, and bounds serialize to the spec's little-endian bytes.
+
+```mojo
+from std.testing import assert_equal
+from iceberg import (
+    ICE_T_LONG,
+    ICE_T_STRING,
+    IcebergSchema,
+    PartitionSpec,
+    RowCell,
+    make_long_cell,
+    make_string_cell,
+    iceberg_bucket_of,
+    partition_value_of,
+    serialize_int32,
+)
+
+var schema = IcebergSchema(0)
+schema.add(String("id"), ICE_T_LONG, required=True)
+schema.add(String("region"), ICE_T_STRING, required=True)
+
+var spec = PartitionSpec(0)
+spec.add_bucket(1, 4, String("id_bucket"))
+spec.add_identity(2, String("region"))
+
+var row = List[RowCell]()
+row.append(make_long_cell(Int64(42)))
+row.append(make_string_cell(String("us-east")))
+var pv = partition_value_of(spec, schema, row)
+assert_equal(len(pv), 2)
+assert_equal(
+    Int(pv[0].as_long()),
+    iceberg_bucket_of(make_long_cell(Int64(42)), ICE_T_LONG, 4),
+)
+assert_equal(pv[1].as_string(), String("us-east"))
+
+var key_bytes = serialize_int32(Int32(34))
+assert_equal(len(key_bytes), 4)
+assert_equal(Int(key_bytes[0]), 0x22)
+```

@@ -160,7 +160,7 @@ def komira_main(
     return __wrap_and_execute_raising_main[_komira_program_main](argc, argv)
 """
 
-def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = [], levels = None, emit_object = False, link_head = None):
+def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = [], levels = None, emit_object = False, link_head = None, src_prefix = ""):
     """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
 
     Reads only `ctx.actions` and `ctx.label`, so a dynamic action passes
@@ -191,10 +191,14 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
     With `emit_object`, emits the program's object file instead (`--emit
     object`), linked to nothing: every `external_call` the program reaches
     is an undefined symbol of it (the README check, shared.bzl).
+
+    `src_prefix` goes before each source's path in the staged tree, so the
+    compiler names the file by it (a README example, staged at its path from
+    the cell root: readme.bzl's readme_file_test).
     """
     opt_args = opt_level_args(ctx.label, opt_level, category, levels)
-    mapping = {s.short_path: s for s in srcs}
-    entry = main.short_path
+    mapping = {src_prefix + s.short_path: s for s in srcs}
+    entry = src_prefix + main.short_path
     if shared and abi_lib:
         fail("{}: shared and abi_lib are exclusive".format(ctx.label))
     if shared:

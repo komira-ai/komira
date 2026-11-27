@@ -2,8 +2,9 @@
 docs/design/udf_runtime_interface.md (section 1.2), test-only spike code.
 
 - native/native_runtime.c: the runtime, a loader with no interpreter that
-  verifies a native UDF library's sha256, dlopens the verified bytes, checks
-  the library's describe and forwards the C ABI to its table. Its shared
+  verifies a native UDF library's sha256, dlopens a private copy of the
+  verified bytes (a memory file on Linux, a file in a private directory on
+  macOS), checks the library's describe and forwards the C ABI to its table. Its shared
   library is :native.
 - code: native libraries staged as code objects (named by hex sha256 under a
   code root) and the code sets a spec names them by; the count of objects the

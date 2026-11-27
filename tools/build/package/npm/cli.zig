@@ -8,6 +8,7 @@
 //!   [--os O --cpu C [--libc L]] (the manifest's platform fields)
 //!   [--glibc V --arch A | --macos V] [--max-glibcxx V] [--max-cxxabi V]
 //!   --stamp N --commit C --timestamp-ms MS
+//!   [--optional-dependency N]... (the optional dependencies it names)
 //! `write` adds `--out <tarball>`; `check` adds `--tarball <tarball>`,
 //! `--require-stamped true|false`, `[--twin <tarball>]` and `--out <marker>`.
 //! A `--file` naming a directory adds each file under it, at
@@ -62,6 +63,7 @@ pub const common_flags = [_][]const u8{
     "--stamp",
     "--commit",
     "--timestamp-ms",
+    "--optional-dependency",
 };
 
 /// The commands of `komira_npm`, by their first argument.
@@ -168,5 +170,6 @@ pub fn input(alloc: Alloc, d: *Diag, a: Args) Refused!npm.Input {
         .arch = arch orelse "x86_64",
         .max_glibcxx = try a.opt(alloc, d, "--max-glibcxx"),
         .max_cxxabi = try a.opt(alloc, d, "--max-cxxabi"),
+        .optional = try a.all(alloc, "--optional-dependency"),
     };
 }

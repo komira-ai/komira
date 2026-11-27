@@ -23,6 +23,7 @@
 //!        tests_act cov-link-line <out> <busybox> <wrapper> <compiler dir> <zig dir> <cc target> <cpu> <test.mojo> <bitcode> <link dir> [-I<dir>...]
 //!        tests_act cov-plant <sed expression> <source> <out>
 //!        tests_act stand-in-archive <busybox> <out.tar.gz> <top> (file:<path>|program:<path>)...
+//!        tests_act npm-repack <in.tgz> <out.tgz> (--drop <path>|--add <path>=<file>|--script <name>=<command>)...
 //!
 //! Each exits 0 when its check holds, 1 when it does not (saying what, on stderr),
 //! and 2 for a usage error or a failure of its own. The shell snippets they
@@ -49,6 +50,8 @@
 //! expression of a small subset (minised.zig). Called under the name `zig`, the
 //! program is the recorder of cov-link-line.
 //! stand-in-archive: a `.tar.gz` of the named files and programs (archives.zig).
+//! npm-repack: an npm tarball written again with files left out (--drop) or
+//! added (--add), or with scripts in its package.json (archives.zig).
 
 const std = @import("std");
 const A = std.mem.Allocator;
@@ -275,6 +278,7 @@ pub fn main() !void {
     if (std.mem.eql(u8, cmd, "re-probe")) return probes.reProbe(a, rest) catch |e| fail("tests_act: re-probe: {s}", .{@errorName(e)});
     if (std.mem.eql(u8, cmd, "loader-trace")) std.process.exit(probes.loaderTrace(a, rest) catch |e| fail("tests_act: loader-trace: {s}", .{@errorName(e)}));
     if (std.mem.eql(u8, cmd, "stand-in-archive")) return archives.standInArchive(a, rest) catch |e| fail("tests_act: stand-in-archive: {s}", .{@errorName(e)});
+    if (std.mem.eql(u8, cmd, "npm-repack")) return archives.npmRepack(a, rest) catch |e| fail("tests_act: npm-repack: {s}", .{@errorName(e)});
     if (std.mem.eql(u8, cmd, "proto-gen")) return proto_checks.protoGen(a, rest) catch |e| fail("tests_act: proto-gen: {s}", .{@errorName(e)});
     if (std.mem.eql(u8, cmd, "proto-check")) return proto_checks.protoCheck(a, rest) catch |e| fail("tests_act: proto-check: {s}", .{@errorName(e)});
     if (std.mem.eql(u8, cmd, "rest-extract")) return proto_checks.restExtract(a, rest) catch |e| fail("tests_act: rest-extract: {s}", .{@errorName(e)});

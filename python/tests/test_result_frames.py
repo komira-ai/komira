@@ -254,7 +254,7 @@ def fake(args):
     lib_dir, with_polars = args[0], args[1] == "polars"
     directory = os.path.join(lib_dir, "fake_v1_3")
     assert _native.load(directory).abi_version == 1003
-    counts = Counts(ctypes.CDLL(os.path.join(directory, "libkomira.so")))
+    counts = Counts(ctypes.CDLL(os.path.join(directory, _native._LIB_NAME)))
     read = zero(streams=1, streams_released=1, schemas=1, schemas_released=1, batches=2, batches_released=2)
     failed = zero(streams=1, streams_released=1, schemas=1, schemas_released=1, batches=1, batches_released=1)
     opened = zero(streams=1, schemas=1, schemas_released=1)

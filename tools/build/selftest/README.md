@@ -38,7 +38,7 @@ given `--nested`, which the guard refuses.
 
 | scenario | what it checks | a planted defect it catches |
 |---|---|---|
-| [`exec_platforms`](exec_platforms.zig) | Mojo, toolchain, third_party_srcs and C/C++ targets resolve to `linux-x86_64`; the host platform's own `[komira_re]` key decides remote execution; under the inner key `hello` keeps the pinned configuration hash | a second platform registered first; any key selecting remote |
+| [`exec_platforms`](exec_platforms.zig) | Mojo, toolchain, third_party_srcs and C/C++ targets resolve to `linux-x86_64`; the host platform's own `[komira_re]` key decides remote execution; under the inner key `hello` keeps the pinned configuration hash; under a darwin-arm64 target platform third_party_srcs' `:gen` is configured for `linux-x86_64` | a second platform registered first; any key selecting remote; the generator taken as a plain dependency |
 | [`uquery_select_branches`](uquery_select_branches.zig) | `uquery deps(cshim:cadd_user)` reaches `toolchains//:cxx_no_default_deps` | the alias deleted |
 | [`analysis_refusals_platform_table`](analysis_refusals_platform_table.zig) | the table's load-time cases hold; the platforms declared; `host`; the reserved row's key refused | a pending pin accepted in a registered row |
 | [`analysis_refusals_mojo`](analysis_refusals_mojo.zig) | the gate bypass, empty `exports`, test_data, env, test_deps, assert level, defines and memory cap refusals, a dep of the wrong kind, an optimization level `mojo build` does not accept, a package named in `closure_excludes` reached through `deps` (the four the host profile refuses, and the three more `lowering` refuses) | each `fail()` deleted, `[ungated]` returning MojoInfo, `closure_excludes` compared by prefix |
@@ -62,7 +62,7 @@ given `--nested`, which the guard refuses.
 | [`analysis_refusals_rust`](analysis_refusals_rust.zig) | rust_library's test_srcs refusals; the refusals of the Cargo attributes (`env`, `patch`, `proc_macro_extern`) | the `.rs` check deleted; the reserved-name check deleted |
 | [`analysis_refusals_coverage`](analysis_refusals_coverage.zig) | the coverage rules' analysis refusals | the import-name, no-args and LLVM_PROFILE_FILE checks deleted |
 | [`config_refusals`](config_refusals.zig) | `komira.coverage`, `komira.mutation`, `komira.test_timeout_s` values refused at load | any value but true read as false; the margin's `<=` made `<` |
-| [`rerun`](rerun.zig) | `-c komira.rerun` naming one target re-runs only its test actions, on the farm; naming one target of each of the 20 rules that run tests re-runs an action of each; the `buck2 test` commands of a mojo_test and a rust_test carry it; its value and label refusals | `rerun_env` ignoring the label (every target salted); a rule not calling it |
+| [`rerun`](rerun.zig) | `-c komira.rerun` naming one target re-runs only its test actions, on the farm; naming one target of each of the 21 rules that run tests re-runs an action of each; the `buck2 test` commands of a mojo_test and a rust_test carry it; its value and label refusals | `rerun_env` ignoring the label (every target salted); a rule not calling it |
 | [`bench_salt`](bench_salt.zig) | `-c komira.bench_salt` empty or unset leaves every action digest as it is; a value gives every action of one target of each rule family (mojo_library, mojo_binary, mojo_shared_lib, rust_library, rust_binary, native_shared_library, komira_pack_tar, a conda package) a new digest, executed on the farm, while the Zig and toolchain tool actions keep theirs; the same value again is all cache hits; the environment `salted` gives (`tests//functional/bench_salt:env`) is the one given for an unset, empty or blank value and has `KOMIRA_BENCH_SALT` for a value; a value with a space or a slash is refused | a rule not passing its env through `salted`; the variable set for an empty value (the fixture's dump sees it, and the digests of unset and empty would agree); the salt reaching a tool action |
 | [`graph_check_refusals`](graph_check_refusals.zig) | python_closure over planted graphs (`tests//negative/python_closure`): a Python rule reached only through an exec dependency, and a stale ceiling entry, refused; the same graph with its findings in the ceiling passes | the closure narrowed to target dependencies; the ceiling read as a cap |
 | [`darwin_select`](darwin_select.zig) | `bxl komira//tools/build/ci/darwin.bxl:select @tools/build/ci/darwin_affected.args @<list>`, the macOS part's selection as pr.yml runs it, over five lists: the aggregate prints the whole macOS set alone; set `:lib`s print once each in `DARWIN_PACKAGES`' order; a list reaching no set library, and an empty list, print nothing; a line that is not a label fails the command, naming it; each row checks the exit status, stdout exactly and the verdict line | the argument file and the command's flag disagreeing (every list read as empty); the verdict or the labels on the wrong stream; a refusal that no longer fails |
@@ -92,6 +92,11 @@ dependency, holds a Python rule, a target under `third_party/python/` or
 `tools/build/python/` or a `.py` source; a `.py` file; a release textproto or a
 workflow that runs Python. Its allowlist, `tests/python_closure_allowlist.bzl`,
 only shrinks ([`graph/python_closure.zig`](graph/python_closure.zig)).
+`readme_coverage` (declared in the release package, `//release:readme_coverage`)
+fails when `release/README_COVERAGE.md` is not the text the build graph and the
+READMEs make: every `src/<name>/README.md`, whether its package has a
+`mopm.toml` and a README e2e target, which README gate runs its examples and
+whether it holds one ([`graph/readme_coverage.zig`](graph/readme_coverage.zig)).
 
 ## In the pull-request check
 

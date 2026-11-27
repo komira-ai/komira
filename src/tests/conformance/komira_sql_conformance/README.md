@@ -194,6 +194,16 @@ the file after a change (the test runner prints only the last 200 lines of a
 failing test, fewer than the table has). Its rows come from the source text
 of `sql_scalar_fn_spec`, so a row added to the table is a line here.
 
+The committed table is measured on linux-x86_64, where the pinned DuckDB runs
+on the same libm (glibc) as the engine, and there the test holds it byte for
+byte. On another host (macOS, with Apple's libm) a transcendental function's
+answer is held to DuckDB's within 4 ulp, not bit for bit
+(`komira_plan_harness.libm_rule`). So before comparing, the test folds both
+tables on each line whose every case calls a transcendental function: its
+`equal` and `equal_within_4_ulps` counts are summed into one `equal`.
+`differs` is not folded. A line also credited by a case that calls none is not
+folded either. A table measured off the oracle host is never the one to commit.
+
 Columns: `name`; `row`, the lowering kind of the name's row (`FNK_*`),
 `NO_ROW` when the table has none; `detail`, a refusal's reason family;
 `common`, `yes` for a name on the common-analysis list; `cases`, how many

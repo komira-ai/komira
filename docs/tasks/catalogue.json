@@ -77,7 +77,12 @@
     "slug": "write-table-csv-file",
     "category": "Write",
     "question": "How do I write a table to a CSV file?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2372",
+      "komira-ai/komira#2374",
+      "komira-ai/komira#2322"
+    ]
   },
   {
     "rank": 12,
@@ -91,7 +96,11 @@
     "slug": "remove-duplicate-rows",
     "category": "Clean",
     "question": "How do I remove duplicate rows?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2378",
+      "komira-ai/komira#2380"
+    ]
   },
   {
     "rank": 14,
@@ -122,7 +131,12 @@
     "slug": "apply-function-value-column",
     "category": "Transform",
     "question": "How do I apply a function to every value in a column?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2332",
+      "komira-ai/komira#2384",
+      "komira-ai/komira#2330"
+    ]
   },
   {
     "rank": 18,
@@ -136,7 +150,11 @@
     "slug": "read-many-files-matching-pattern-table",
     "category": "Read",
     "question": "How do I read many files matching a pattern into one table?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2385",
+      "komira-ai/komira#2386"
+    ]
   },
   {
     "rank": 20,
@@ -245,7 +263,7 @@
     "slug": "read-parquet-csv-files-s3",
     "category": "Cloud storage",
     "question": "How do I read Parquet or CSV files from S3?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
       "komira-ai/komira#2337"
     ]
@@ -272,7 +290,10 @@
     "slug": "select-drop-columns",
     "category": "Transform",
     "question": "How do I select or drop columns?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2390"
+    ]
   },
   {
     "rank": 35,
@@ -293,21 +314,30 @@
     "slug": "run-sql-csv-parquet-file",
     "category": "Performance",
     "question": "How do I run SQL on a CSV or Parquet file (or a DataFrame)?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2391"
+    ]
   },
   {
     "rank": 38,
     "slug": "resample-time-series-daily-weekly-monthly",
     "category": "Time",
     "question": "How do I resample a time series to daily, weekly or monthly?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2392"
+    ]
   },
   {
     "rank": 39,
     "slug": "extract-year-month-weekday-date-column",
     "category": "Time",
     "question": "How do I extract year, month and weekday from a date column?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2393"
+    ]
   },
   {
     "rank": 40,
@@ -328,21 +358,30 @@
     "slug": "lowercase-trim-replace-text-column",
     "category": "Strings",
     "question": "How do I lowercase, trim and replace text in a column?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2371"
+    ]
   },
   {
     "rank": 43,
     "slug": "concatenate-string-columns",
     "category": "Strings",
     "question": "How do I concatenate string columns?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2373"
+    ]
   },
   {
     "rank": 44,
     "slug": "split-string-column-columns",
     "category": "Strings",
     "question": "How do I split a string column into several columns?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2375"
+    ]
   },
   {
     "rank": 45,
@@ -369,7 +408,10 @@
     "slug": "get-top-n-rows-per-group",
     "category": "Aggregate",
     "question": "How do I get the top N rows per group?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2377"
+    ]
   },
   {
     "rank": 48,
@@ -390,7 +432,11 @@
     "slug": "percent-of-group-total",
     "category": "Aggregate",
     "question": "How do I compute each row's percent of its group total?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2379",
+      "komira-ai/komira#2381"
+    ]
   },
   {
     "rank": 51,
@@ -765,7 +811,7 @@
     "slug": "read-files-google-cloud-storage-azure",
     "category": "Cloud storage",
     "question": "How do I read files from Google Cloud Storage or Azure Blob?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
       "komira-ai/komira#2337"
     ]
@@ -775,7 +821,10 @@
     "slug": "query-iceberg-table",
     "category": "Cloud storage",
     "question": "How do I query an Iceberg table?",
-    "status": "partial"
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2363"
+    ]
   },
   {
     "rank": 95,
@@ -826,6 +875,10 @@
     "slug": "read-csv-odd-delimiter-no-header",
     "category": "Read",
     "question": "How do I read a CSV with an odd delimiter, no header or extra lines?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2364",
+      "komira-ai/komira#2365"
+    ]
   }
 ]

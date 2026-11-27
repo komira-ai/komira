@@ -1,21 +1,44 @@
-load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "node_addon", "node_binding_test")
+load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "node_addon", "node_binding_test", "npm_install_test")
 load("@komira//tools/build/node:modules.bzl", "tsc_build", "tsc_check")
 load("@komira//src/tests/conformance/komira_sql_conformance:tables.bzl", "CORPUS_TABLES", "corpus_tables")
 load("@komira//tools/build/package:npm.bzl", "npm_tarball")
 load("@komira//tools/build/package/libkomira:packaged.bzl", "DIST_LICENSE_EXPRESSION", "DIST_LICENSE_FILES", "DIST_NATIVE_NEEDS")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64")
+load(":install_test.bzl", "INSTALL_DATA", "INSTALL_FILES", "INSTALL_NODES", "INSTALL_NODES_MACOS", "INSTALL_REGISTRY", "INSTALL_TESTS")
+
+# The failing cases of :install_test (tools/build/tests/negative/node), which
+# install the packages below and the test's files. That package is in the
+# `tests` cell, which only komira's own checkout has; a label naming it
+# would fail to load in a repository that uses komira as a cell, so it is
+# named only when the cell exists.
+_NEGATIVE = ["tests//negative/node:"] if read_root_config("cells", "tests") else []
 
 # The Node-API addon over libkomira, built with the pinned zig against the
 # headers of the pinned node. README.md says what it exposes and why it opens
 # the library with dlopen; arrow_import.c is its import of an Arrow C stream.
+# For the target platform's OS (`target_os`): ELF on Linux, and on macOS (the
+# macOS platform package) a Mach-O for the darwin-arm64 row, named
+# komira_addon.node on both.
 node_addon(
     name = "komira_addon",
     srcs = ["komira_addon.c", "arrow_import.c"],
     headers = ["arrow_c.h", "arrow_import.h"],
+    target_os = True,
+)
+
+# libkomira configured for linux-x86_64 whatever the platform of the target that
+# reads it: every node rule runs the pinned linux-x64 node, which loads an ELF
+# library, so the tests below stage the Linux build on a macOS target platform
+# too (the same alias as //python:komira_wheel_linux_x86_64).
+configured_alias(
+    name = "libkomira_linux_x86_64",
+    actual = "komira//src/so:libkomira",
+    platform = "komira//tools/build/platforms:linux-x86_64",
 )
 
 # libkomira with the Mojo runtime and its native owners in lib/ beside it: the
 # directory the tests hand to load().
-LIBKOMIRA = "komira//src/so:libkomira[runnable]"
+LIBKOMIRA = ":libkomira_linux_x86_64[runnable]"
 
 # Stand-ins for libkomira that the addon must refuse: a library of ABI major 2,
 # one of major 0 (version 0.999), and one without komira_plan_render.
@@ -213,20 +236,49 @@ tsc_build(
 # is its manifest here stamped: package.json for the main package, and
 # platforms/<npm platform>/package.json for a platform package. Unstamped (a
 # pull request) they are 0.0.0 and stay `"private": true`; the release stamp
-# gives 0.1.<N>, the wheel's version. Nothing here publishes them.
+# gives 0.1.<N>, the wheel's version. Nothing here publishes them: the
+# release sets //release:npm_packages and //release:npm_packages_macos_arm64
+# take them, and .github/workflows/npm.yml publishes one of the two.
 
-# @komira-ai/komira: the compiled JavaScript and declarations, LICENSE and
-# NOTICE.
+# The main package's files: the compiled JavaScript and declarations, LICENSE
+# and NOTICE.
+_MAIN_FILES = {
+    "LICENSE": "komira//:LICENSE",
+    "NOTICE": "komira//:NOTICE",
+    "dist": ":dist",
+}
+
+_LINUX_X64 = "@komira-ai/komira-linux-x64-gnu"
+
+_DARWIN_ARM64 = "@komira-ai/komira-darwin-arm64"
+
+# @komira-ai/komira naming the linux-x64 package alone, the main package of
+# //release:npm_packages: the release when the macOS package's install test
+# did not pass. package.json lists every platform package; the stamp keeps the
+# ones `optional_dependencies` names (tools/build/package/npm.bzl), so the
+# published main package never names one that was not published with it.
 npm_tarball(
     name = "package",
     package = "@komira-ai/komira",
     manifest = "package.json",
     license = "Apache-2.0",
-    files = {
-        "LICENSE": "komira//:LICENSE",
-        "NOTICE": "komira//:NOTICE",
-        "dist": ":dist",
-    },
+    files = _MAIN_FILES,
+    optional_dependencies = [_LINUX_X64],
+    visibility = ["komira//ci:", "komira//release:"] + _NEGATIVE,
+)
+
+# @komira-ai/komira naming the linux-x64 and the darwin-arm64 packages, the
+# main package of //release:npm_packages_macos_arm64 and the one
+# :install_test_macos_arm64 installs: the release when that test passed. The
+# same files as :package; only package.json differs.
+npm_tarball(
+    name = "package_with_macos_arm64",
+    package = "@komira-ai/komira",
+    manifest = "package.json",
+    license = "Apache-2.0",
+    files = _MAIN_FILES,
+    optional_dependencies = [_DARWIN_ARM64, _LINUX_X64],
+    visibility = ["komira//ci:", "komira//release:"],
 )
 
 # @komira-ai/komira-linux-x64-gnu: the addon, libkomira's self-contained native
@@ -235,7 +287,7 @@ npm_tarball(
 # expression and native bounds (tools/build/package/libkomira/packaged.bzl).
 npm_tarball(
     name = "package_linux_x64",
-    package = "@komira-ai/komira-linux-x64-gnu",
+    package = _LINUX_X64,
     manifest = "platforms/linux-x64-gnu/package.json",
     license = DIST_LICENSE_EXPRESSION,
     platform = "linux-x86_64",
@@ -243,7 +295,79 @@ npm_tarball(
         "komira_addon.node": ":komira_addon",
         "native": "komira//src/so:libkomira[dist]",
     } | DIST_LICENSE_FILES,
+    visibility = ["komira//ci:", "komira//release:"] + _NEGATIVE,
     **DIST_NATIVE_NEEDS["linux-x86_64"]
+)
+
+# @komira-ai/komira-darwin-arm64: the same for macOS arm64, configured for
+# darwin-arm64 (`--target-platforms komira//tools/build/platforms:darwin-arm64`,
+# or the transition of //release:npm_packages_macos_arm64): the Mach-O addon
+# and libkomira's macOS directory (libkomira.dylib and the three Mojo runtime
+# libraries in lib/, the macOS wheel's), held to the native policy's Mach-O
+# checks (arm64, the row's macOS 11.0 floor, the signature the linker gives,
+# install names and load commands of members or the system). Built by npm.yml's
+# macOS job on the farm's macOS workers, never by a pull request.
+npm_tarball(
+    name = "package_macos_arm64",
+    package = _DARWIN_ARM64,
+    manifest = "platforms/darwin-arm64/package.json",
+    license = DIST_LICENSE_EXPRESSION,
+    platform = "darwin-arm64",
+    files = {
+        "komira_addon.node": ":komira_addon",
+        "native": "komira//src/so:libkomira[dist]",
+    } | DIST_LICENSE_FILES,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:npm-macos-arm64
+    visibility = ["komira//ci:", "komira//release:"],
+    **DIST_NATIVE_NEEDS["darwin-arm64"]
+)
+
+# ---- From the installed package (docs/design/typescript_package.md, section 5)
+#
+# The tarballs above as a user installs them: the pinned npm (third_party/
+# node, :npm) installs :package into an empty project, offline and with
+# --ignore-scripts, and npm resolves its platform package to
+# :package_linux_x64 and its peer, apache-arrow, to the pinned tarballs. Then
+# install/install.test.ts and install/commonjs.test.cjs import the package by
+# its name from that project: what npm installed, the public names, the load
+# of libkomira from the platform package alone, SELECT 1, a GROUP BY over the
+# Parquet, CSV and NDJSON fixtures, apache-arrow's classes, and require() from
+# CommonJS. Once per pinned Node.js line, 22, 24 and 26 (`[node_22]`,
+# `[node_24]`, `[node_26]`), each its own action; a package npm marks as
+# having an install script fails it (tools/build/node/README.md).
+[export_file(
+    name = "install/" + f,
+    src = "install/" + f,
+    visibility = _NEGATIVE,
+) for f in INSTALL_FILES]
+
+npm_install_test(
+    name = "install_test",
+    install = ":package",
+    tarballs = [":package_linux_x64"] + INSTALL_REGISTRY,
+    data = INSTALL_DATA,
+    test_files = INSTALL_TESTS,
+    nodes = INSTALL_NODES,
+)
+
+# The same on macOS arm64, on a macOS worker: npm installs :package_with_macos_arm64,
+# which names both platform packages, resolves its platform package to
+# :package_macos_arm64 (the only one whose os and cpu match), and the same
+# tests run on the macOS Node.js of each line (22, 24 and 26), which load the
+# ad-hoc-signed addon and libkomira from what npm wrote. Built by npm.yml's
+# macOS job (`--target-platforms komira//tools/build/platforms:darwin-arm64`),
+# never by a pull request (rule B9); the main package names the macOS package
+# only in the set published after this test passed.
+npm_install_test(
+    name = "install_test_macos_arm64",
+    act = "komira//tools/build/node_tools:node_act_darwin",
+    install = ":package_with_macos_arm64",
+    tarballs = [":package_macos_arm64"] + INSTALL_REGISTRY,
+    data = INSTALL_DATA,
+    test_files = INSTALL_TESTS,
+    nodes = INSTALL_NODES_MACOS,
+    exec_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:npm-macos-arm64
 )
 
 # Stand-ins for the package's tests: a library of ABI 1.1 that loads, and two
@@ -348,7 +472,7 @@ node_binding_test(
         "fixtures/two_columns.parquet": "komira//src/so:tests/fixtures/two_columns.parquet",
         "package.json": "package.json",
         _PLATFORM + "komira_addon.node": ":komira_addon",
-        _PLATFORM + "native": "komira//src/so:libkomira[dist]",
+        _PLATFORM + "native": ":libkomira_linux_x86_64[dist]",
         _PLATFORM + "package.json": "tests/fixtures/platform_package.json",
     } | {
         "fixtures/isa_variants/" + f: "komira//python/tests:fixtures/isa_variants/" + f

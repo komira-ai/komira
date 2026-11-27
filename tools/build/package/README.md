@@ -72,7 +72,9 @@ bundle; the shipped launcher has no override.
 
 A program built as `[shared]` is compiled from a generated file next to its
 main module, which imports `main` from it; the main module's file name must
-therefore be a Mojo identifier. Only linux x86_64 bundles are built today.
+therefore be a Mojo identifier. Only linux x86_64 bundles are built today: `mojo_bundle`,
+`bundle_tarball`, `oci_tree`, `oci_image` and `oci_image_check` are compatible with linux
+x86_64 only (limit `image-linux-x86-64-only`), so a darwin-arm64 build skips them.
 
 ## Package formats
 
@@ -470,8 +472,9 @@ walk is dyld's: each load command names an operating system library (under
 reaches with `@loader_path` its directory, or an `@loader_path/<path>` member;
 anything else (another absolute path such as Homebrew's or conda's, a home
 directory, `@executable_path`, a bare name) is refused. The runtime's copies
-come from the toolchain, or from a `mojo_runtime` directory named by `runtime`
-(the darwin toolchain executes on macOS, and the check on Linux). A refusal
+come from the toolchain (a check without `runtime` is linux x86_64 only, and a
+darwin-arm64 build skips it), or from a `mojo_runtime` directory named by
+`runtime` (the darwin toolchain executes on macOS, and the check on Linux). A refusal
 names its check:
 
 - `path`: every member is a relative path of plain components (no `/` first,
@@ -535,7 +538,8 @@ Mach-O and code signature readers, in
 synthetic ELF and Mach-O libraries
 ([`native_policy/testing.zig`](native_policy/testing.zig)). The rule on fixtures: `:wheel_fixture`
 (a linux-x86_64 wheel holding the example Mojo shared library `plain`, with the
-Mojo runtime as `external_needed`), `:wheel_fixture_aarch64_tag` and
+Mojo runtime as `external_needed`; a darwin-arm64 build skips it and
+`:wheel_file_name_cases`), `:wheel_fixture_aarch64_tag` and
 `:wheel_fixture_macosx_tag` (the linux-arm64 and darwin-arm64 rows' tags; built on
 linux like every target). `:wheel_tag_cases` holds each release row's tag
 and the refusal of a member path holding a brace.
@@ -548,8 +552,9 @@ that would be wrong for the platform it is for. `komira_npm`
 ([`npm/main.zig`](npm/main.zig)) is the writer and its read-back check, a
 static executable run as build actions: no shell, no Python, no npm. It is
 generic: the packages' own targets are declared with the package
-([node/BUCK](../../../node/BUCK): `//node:package` and
-`//node:package_linux_x64`); the target here is a fixture.
+([node/BUCK](../../../node/BUCK): `//node:package`,
+`//node:package_with_macos_arm64`, `//node:package_linux_x64` and
+`//node:package_macos_arm64`); the target here is a fixture.
 
 | attribute | what it does |
 |---|---|
@@ -559,10 +564,14 @@ generic: the packages' own targets are declared with the package
 | `files` | `{path in the package: file or directory}` (a directory adds every file under it); a native library (ELF or Mach-O) is written 0755, every other file 0644 |
 | `platform` | the row of [tools/build/platforms/table.bzl](../platforms/table.bzl) the package is for; unset, the package holds no native library |
 | `os_floor`, `max_glibcxx`, `max_cxxabi` | the bounds of the native policy, as the wheel's |
+| `optional_dependencies` | the manifest's optional dependencies the package names (default none): each must be one the manifest lists, and the others are dropped (the key too, when none is named); the provider `NpmTarballInfo` carries them for the npm release set |
 
 - **The manifest is stamped, not written.** The tarball's package.json is the
   source manifest with the stamp's version on the package and on every
-  optional dependency, and, when stamped, without `private`; every other key
+  optional dependency, and, when stamped, without `private`; of its optional
+  dependencies it keeps exactly those `optional_dependencies` names, in the
+  manifest's order (so `node/package.json` lists every platform package, and
+  a main package names only those released with it); every other key
   keeps its value and place, written as `JSON.stringify(v, null, 2)` writes
   it. So the manifest the package's tests read is the one npm reads, and they
   cannot disagree. Unstamped, the package is `0.0.0` and keeps
@@ -593,6 +602,9 @@ refusal names its check:
   (paths, directories and globs with `*` and `**`) or one it always packs
   (package.json, a README or licence file at the top), so a stray file the
   manifest leaves out is refused rather than shipped;
+- `optional`: `optional_dependencies` names no package twice and none the
+  source manifest does not list; read back, the package.json names exactly
+  those;
 - `scripts`: no `preinstall`, `install` or `postinstall` script;
 - `path`: relative, printable ASCII, no empty, `.` or `..` part, given once;
   package.json is the rule's own;

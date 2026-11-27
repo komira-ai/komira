@@ -191,13 +191,14 @@ def main(args):
         # Session() and abi_version() load the same way and are refused the same.
         assert cpu_error(komira.abi_version) == refusal(no_avx2, ["avx2"])
 
-        # With the cpuinfo of the x86-64-v3 CPU the same load goes on: the
-        # runtime check asks for each Mojo runtime library by name with
-        # RTLD_NOLOAD (none is loaded, and that opens nothing), then the
-        # library is opened by its path.
+        # With the cpuinfo of the x86-64-v3 CPU the same load goes on: on Linux
+        # the runtime check asks for each Mojo runtime library by name with
+        # RTLD_NOLOAD (none is loaded, and that opens nothing; it does nothing
+        # on another system), then the library is opened by its path.
         _native._check_cpu = lambda: check(real, system="linux", machine="x86_64")
         native = _native.load(fake)
-        assert opened == list(_runtime.RUNTIME_LIBRARIES) + [os.path.join(fake, "libkomira.so")], opened
+        asked = list(_runtime.RUNTIME_LIBRARIES) if sys.platform == "linux" else []
+        assert opened == asked + [os.path.join(fake, _native._LIB_NAME)], opened
         assert native.abi_version == 1003 and _native._loaded is native
     finally:
         ctypes.CDLL = cdll

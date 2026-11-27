@@ -12,7 +12,8 @@ and the Mojo runtime libraries of the platform row's `runtime_libs`, taken from
 the toolchain. The output is a markdown file: size, SONAME, RUNPATH, DT_NEEDED
 and the highest GLIBC, GLIBCXX and CXXABI version of each file, which owners
 the library reaches, and the wheel tag its glibc floor allows. The report is a
-record; the gates of `lib` and `libkomira_install` hold the behaviour.
+record; the gates of `lib` and `libkomira_install` hold the behaviour. Linux
+x86_64 only (ELF files, glibc versions): another target platform skips it.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -58,6 +59,10 @@ _libkomira_elf_report = rule(
 )
 
 def libkomira_elf_report(**kwargs):
-    _libkomira_elf_report(exec_compatible_with = LINUX_X86_64, **kwargs)
+    _libkomira_elf_report(
+        exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = LINUX_X86_64,  # komira-limit:libkomira-elf-linux-x86-64
+        **kwargs
+    )
 
 libkomira_elf_report = declares_docs(libkomira_elf_report)

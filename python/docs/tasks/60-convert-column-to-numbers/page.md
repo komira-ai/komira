@@ -68,7 +68,7 @@ astype failed
 
 ## Related
 
-- How do I change a column's data type? (rank 12, works; no page yet)
+- [How do I change a column's data type?](../12-change-column-data-type/page.md) (rank 12, works)
 - [How do I replace specific values such as 'N/A' with null?](../55-replace-values-with-null/page.md) (rank 55, partial)
 - How do I find and fill missing values? (rank 6, works; no page yet)
 - [How do I validate data: nulls, uniqueness, ranges?](../59-validate-data-nulls-uniqueness-ranges/page.md) (rank 59, works)
