@@ -163,9 +163,7 @@ shape:
   aggregation; an aggregation with a group top-k; a distinct over an explicit
   column list, over no column or over two columns of one name; a source other
   than Parquet, in memory, CSV, JSON or an Iceberg table; a JSON scan whose
-  projection names a column its schema does not hold; a CSV scan with `header=false` (the reader
-  would name its columns `col_0`, `col_1`, ..., where DuckDB names them
-  `column0`, `column1`, ...); a union with no branch, or with a branch whose
+  projection names a column its schema does not hold; a union with no branch, or with a branch whose
   schema is not the union's (column count, and per column the name, Arrow
   type, decimal precision and scale and timezone; the concatenation reads
   every branch by position in the union's layout, so the producer casts and

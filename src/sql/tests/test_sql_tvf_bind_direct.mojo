@@ -12,8 +12,9 @@
 #   2. The same file with all_varchar gives the same 2 names, both STRING, with
 #      the inferred nullability.
 #      (mutant: the `all_varchar` branch skipped -> `k` stays int64)
-#   3. has_header False reads the header row as data: the names are `col_0`,
-#      `col_1`, never `k`, and column 0 is STRING because it holds `k`.
+#   3. has_header False reads the header row as data: the names are
+#      `column0`, `column1` (DuckDB's), never `k`, and column 0 is STRING
+#      because it holds `k`.
 #      (mutant: `has_header` not threaded -> the names are `k`, `name`)
 #   4. A CSV file holding only blank lines raises `inferred ZERO columns`.
 #      (A 0-byte file never reaches the guard: mapping it raises first.)
@@ -217,8 +218,8 @@ def test_csv_has_header_false_reads_header_row_as_data() raises:
     o.has_header = False
     var s = csv_tvf_schema(path, o)
     assert_equal(s.num_columns(), 2)
-    assert_equal(s.field_at_unchecked(0).name, "col_0")
-    assert_equal(s.field_at_unchecked(1).name, "col_1")
+    assert_equal(s.field_at_unchecked(0).name, "column0")
+    assert_equal(s.field_at_unchecked(1).name, "column1")
     assert_true(
         s.field_at_unchecked(0).arrow_type == ArrowType.STRING,
         "column 0 holds the text `k`, so it is string",

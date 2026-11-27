@@ -29,7 +29,7 @@ write: RecordBatch ─► CsvSink | write_avro_file | write_orc_file
 
 1. Skips a UTF-8 byte-order mark when `strip_utf8_bom` is set, as it is by default.
 2. Scans the bytes into a `ScannedCells` buffer: flat lists of cell starts, cell ends, cell flags and row starts (`scanned_cells.mojo`). `_dispatch_scan` (`reader.mojo`) selects one of three scanners, `scan_csv_phase1_into_cells`, `scan_csv_phase2_movemask_into_cells` and `scan_csv_phase3_pclmulqdq_into_cells`, all of which live in `csv_scanner_phase1.mojo` and are chosen by `SCANNER_VARIANT_PHASE_2` or `SCANNER_VARIANT_PHASE_3`; the default, `DEFAULT_SCANNER_VARIANT = 2`, is `scan_csv_phase2_movemask_into_cells`.
-3. Takes column names from the header row, or names them `col_0`, `col_1` and so on when `has_header` is false.
+3. Takes column names from the header row, or, when `has_header` is false, names them as DuckDB does (`header_free_column_name`, `column_names.mojo`): `column0`, `column1` and so on, the index padded with leading zeros to the digit count of the last index (`column00` to `column10` for eleven columns).
 4. Uses `declared_column_types` when set, after `check_declared_column_types` has confirmed there is one entry per column. Otherwise it infers with `infer_column_types`, whose lattice is Int64, Float64, Date32, Bool, then String (`type_inference.mojo`), or with `infer_column_types_wide` when `infer_temporal_types` is set, which adds the temporal types.
 5. Builds each column with `_build_column`: Int64, Float64, Date32, Bool and String have builders in `reader.mojo`, and every other type goes to `dispatch_typed_builder` (`typed_column_builders.mojo`). A short row gives a null, and so does a cell that does not parse as the column's type.
 

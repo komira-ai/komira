@@ -9,9 +9,11 @@ back with Session.sql as pyarrow:
   `read_json` over the same file;
 - each dialect argument is the one the file is read with: `delimiter="|"`
   reads people_pipe.csv as the same rows, `all_varchar=True` makes every
-  column a string, and a table registered with `header=False` is refused when
-  a query reads it, naming `header=false`: an UnsupportedOperation at step
-  "lower" with code LOWERING_UNCUTTABLE_NODE;
+  column a string, and `header=False` reads every line as a row under the
+  names DuckDB gives, column0, column1, column2: people_no_header.csv as the
+  same rows and types as people.csv, the same as SQL's `read_csv(...,
+  header = false)`, with `all_varchar=True` as strings, and people.csv with
+  its header line as the first row of three string columns;
 - a `pathlib.Path`, a relative path and a path under `~` are resolved when
   the call is made, so the table still answers after the working directory
   and HOME change back;
@@ -27,7 +29,7 @@ back with Session.sql as pyarrow:
     test_register_text.py --lib-dir <dir> --runtime-dir <dir>
 
 `<dir>/libkomira/` is `//src/so:libkomira[runnable]`; `<dir>/people.csv`,
-`<dir>/people_pipe.csv`, `<dir>/events.jsonl` and `<dir>/empty.txt` are the
+`<dir>/people_pipe.csv`, `<dir>/people_no_header.csv`, `<dir>/events.jsonl` and `<dir>/empty.txt` are the
 fixtures of python/tests/fixtures, and `<dir>/two_columns.parquet` a Parquet
 file.
 """
@@ -48,6 +50,10 @@ PEOPLE = [
     {"id": 2, "name": None, "score": 20.0},
     {"id": 3, "name": "cy", "score": None},
 ]
+
+# people_no_header.csv, read with header=False: the rows of people.csv under
+# DuckDB's names for a file with no header line.
+NO_HEADER = [{"column0": r["id"], "column1": r["name"], "column2": r["score"]} for r in PEOPLE]
 
 # events.jsonl, in the order of `id`: the same rows.
 EVENTS = PEOPLE
@@ -100,6 +106,7 @@ def main(args):
     assert komira.abi_version() >= 1005, komira.abi_version()
     people = os.path.join(lib_dir, "people.csv")
     pipe = os.path.join(lib_dir, "people_pipe.csv")
+    no_header = os.path.join(lib_dir, "people_no_header.csv")
     events = os.path.join(lib_dir, "events.jsonl")
     empty = os.path.join(lib_dir, "empty.txt")
     parquet = os.path.join(lib_dir, "two_columns.parquet")
@@ -140,11 +147,39 @@ def main(args):
         t = s.sql("SELECT * FROM strings").to_arrow()
         assert t.schema.names == ["id", "name", "score"], t.schema
         assert all(is_text(f.type) for f in t.schema), t.schema
-        assert s.register_csv("headless", people, header=False) is None
-        e = raised(lambda: s.sql("SELECT * FROM headless"))
-        assert type(e) is komira.UnsupportedOperation and e.status == -3, repr(e)
-        assert (e.step, e.code) == ("lower", "LOWERING_UNCUTTABLE_NODE"), (e.step, e.code)
-        assert str(e).startswith("lower: ") and "header=false" in str(e), str(e)
+        # No header line: the columns are column0, column1, ... as DuckDB
+        # names them, and every line is a row.
+        assert s.register_csv("headless", no_header, header=False) is None
+        t = s.sql("SELECT * FROM headless ORDER BY column0").to_arrow()
+        assert t.schema.names == ["column0", "column1", "column2"], t.schema
+        assert t.schema.field("column0").type == pa.int64(), t.schema
+        assert is_text(t.schema.field("column1").type), t.schema
+        assert t.schema.field("column2").type == pa.float64(), t.schema
+        assert t.to_pylist() == NO_HEADER, t.to_pylist()
+        want = s.sql("SELECT * FROM read_csv('{}', header = false) ORDER BY column0".format(no_header)).to_arrow()
+        assert fields(want.schema) == fields(t.schema), (want.schema, t.schema)
+        assert want.to_pylist() == NO_HEADER, want.to_pylist()
+        assert s.register_csv("headless_strings", no_header, header=False, all_varchar=True) is None
+        t = s.sql("SELECT * FROM headless_strings ORDER BY column0").to_arrow()
+        assert t.schema.names == ["column0", "column1", "column2"], t.schema
+        assert all(is_text(f.type) for f in t.schema), t.schema
+        assert t.to_pylist() == [
+            {"column0": "1", "column1": "ann", "column2": "10.5"},
+            {"column0": "2", "column1": None, "column2": "20"},
+            {"column0": "3", "column1": "cy", "column2": None},
+        ], t.to_pylist()
+        # A header line read with header=False is a row like the others, so
+        # every column holds text.
+        assert s.register_csv("header_as_row", people, header=False) is None
+        t = s.sql("SELECT * FROM header_as_row ORDER BY column0").to_arrow()
+        assert t.schema.names == ["column0", "column1", "column2"], t.schema
+        assert all(is_text(f.type) for f in t.schema), t.schema
+        assert t.to_pylist() == [
+            {"column0": "1", "column1": "ann", "column2": "10.5"},
+            {"column0": "2", "column1": None, "column2": "20"},
+            {"column0": "3", "column1": "cy", "column2": None},
+            {"column0": "id", "column1": "name", "column2": "score"},
+        ], t.to_pylist()
 
         # A pathlib.Path, a relative path and a path under `~`, resolved
         # when the call is made: each table still answers once the working

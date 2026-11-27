@@ -33,6 +33,7 @@ mojo_library(
         "tests/test_csv_dtype_completion.mojo",
         "tests/test_csv_header_non_ascii.mojo",
         "tests/test_csv_header_only.mojo",
+        "tests/test_csv_no_header_column_names.mojo",
         "tests/test_csv_parallel_reader_default_workers.mojo",
         "tests/test_csv_parallel_reader_dispatcher_arm.mojo",
         "tests/test_csv_parallel_reader_header.mojo",

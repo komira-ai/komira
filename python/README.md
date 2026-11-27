@@ -173,9 +173,9 @@ package, and each compares what it prints with that file, every line.
     every later query reads the file with them. An empty CSV field and a JSON
     `null` or missing key read as NULL.
   - `delimiter` is the one ASCII character between fields, and
-    `all_varchar=True` makes every column a string. A table registered with
-    `header=False` raises `KomiraError` when a query reads it: the engine
-    does not name the columns of a file with no header yet.
+    `all_varchar=True` makes every column a string. With `header=False`
+    every line is a row and the columns are named `column0`, `column1`, ...
+    as DuckDB names them.
   - Paths are taken as `register_parquet` takes them.
   - A missing, empty or unreadable file raises `komira.KomiraError` with the
     engine's message, which names the file. So does a name the session

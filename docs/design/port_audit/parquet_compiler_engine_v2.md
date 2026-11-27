@@ -49,7 +49,7 @@ Part of the [port audit](../port_audit.md). Each row is one non-test source file
 
 ### CSV and NDJSON sources in the SQL and DataFrame path
 - Earlier files: komira_parquet/csv_reader.mojo
-- Done for one local CSV file with a header row: read_csv lowers to a SOURCE_CSV segment and src/pipeline_exec/source_csv.mojo decodes it at the bound types (plain or .gz, .zst, .lz4); src/sdk_exec/tests/test_run_sql_csv.mojo holds it to DuckDB. Missing: NDJSON, a CSV glob or several files, header=false (refused by name), and a CSV registered as a table (src/sdk_exec only has register_parquet). Closest code: src/scan_source/csv_source.mojo, json_source.mojo and src/pipeline_exec/source_batch.mojo.
+- Done for one local CSV file, with or without a header row (without one the columns are column0, column1, ... as DuckDB names them): read_csv lowers to a SOURCE_CSV segment and src/pipeline_exec/source_csv.mojo decodes it at the bound types (plain or .gz, .zst, .lz4); src/sdk_exec/tests/test_run_sql_csv.mojo holds it to DuckDB. Missing: NDJSON, a CSV glob or several files, and a CSV registered as a table (src/sdk_exec only has register_parquet). Closest code: src/scan_source/csv_source.mojo, json_source.mojo and src/pipeline_exec/source_batch.mojo.
 - Why: the SDK must run SQL over CSV and NDJSON files, not only Parquet.
 - Task: pysdk-engine-csv-source
 

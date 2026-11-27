@@ -54,7 +54,7 @@ NATIVE_OWNERS = [
 # test_register_text holds register_csv and
 # register_json: a CSV or JSON file registered by name and queried through
 # the session's engine, each CSV dialect argument equal to read_csv's (a
-# header-less table refused at lower as read_csv's is) and the JSON table
+# header-less table named column0, column1 as read_csv's is) and the JSON table
 # equal to read_json's, an unreadable file, an empty name and a
 # taken name refused with nothing registered;
 # test_plan_result holds plan_result, komira_plan_stream's
@@ -464,8 +464,8 @@ cxx_binary(
 # (-1, INT64_MIN) is NULL. And it registers files it writes into
 # $TEST_TMPDIR with komira_register_csv (a `|` file, one with all_varchar)
 # and komira_register_json and queries each by name: the rows are the files'
-# own, and a file registered with no header is refused at lower when
-# queried; a taken name, an empty one and a missing file are refused with
+# own, and a file registered with no header answers under the names
+# column0, column1; a taken name, an empty one and a missing file are refused with
 # the named last error, and the first table keeps answering.
 # And it is a producer of struct ArrowArrayStream written in C, whose
 # callbacks count the library's releases: komira_register_arrow_stream drains

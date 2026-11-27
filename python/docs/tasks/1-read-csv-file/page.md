@@ -53,7 +53,7 @@ int64 float64
 - The engine infers the column names and types from the start of the file when you register or read it; the rows are read when a query runs.
 - An empty field reads as NULL (`None` in Python).
 - `sep` (pandas-shaped) and `delimiter` (`register_csv`) take one ASCII character.
-- A file without a header line is refused today: `header=None` and `header=False` raise an error naming `header=false`.
+- A file without a header line reads with `header=None` (`read_csv`) or `header=False` (`register_csv`): every line is a row and the columns are named `column0`, `column1`, ... as DuckDB names them.
 - Gzip, zstd and lz4 compressed CSV files read the same way.
 
 ## Related

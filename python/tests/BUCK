@@ -600,6 +600,7 @@ c_shared_lib(
         "events.jsonl": "fixtures/events.jsonl",
         "libkomira": LIBKOMIRA,
         "people.csv": "fixtures/people.csv",
+        "people_no_header.csv": "fixtures/people_no_header.csv",
         "people_pipe.csv": "fixtures/people_pipe.csv",
         "two_columns.parquet": PARQUET,
     },

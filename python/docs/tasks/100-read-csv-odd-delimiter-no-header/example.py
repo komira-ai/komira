@@ -14,3 +14,14 @@ with komira.Session() as s:
 # pandas-shaped: sep= is the delimiter, as in pandas.
 eu = komira.read_csv("orders_eu.csv", sep=";")
 print(eu.sort_values("id").materialize().to_arrow().to_pylist())
+
+# No header line: every line is a row, and the columns are named column0,
+# column1, ... as DuckDB names them.
+Path("scores.csv").write_text('1,Ana,3\n2,"Bo, Jr.",5\n')
+
+with komira.Session() as s:
+    s.register_csv("scores", "scores.csv", header=False)
+    print(s.sql("SELECT * FROM scores ORDER BY column0").to_arrow().to_pylist())
+
+bare = komira.read_csv("scores.csv", header=None)
+print(bare.sort_values("column0").materialize().to_arrow().to_pylist())

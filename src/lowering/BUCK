@@ -10,7 +10,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                        render line, its filter and projection as operators
 #                        over the full schema, the positional factory's
 #                        default dialect, a string key served COLUMNAR, a
-#                        scan with header=false refused by name.
+#                        scan with header=false cut with a spec that reads
+#                        the first line as data.
 # test_lower_distinct    SELECT DISTINCT cut to a SINK_AGG grouped by every
 #                        column with no aggregate: the sink row by column
 #                        type and dictionary footer, the group keys in column

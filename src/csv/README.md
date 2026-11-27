@@ -14,7 +14,9 @@ CSV writer for the engine's sinks.
   declared types, per-column date formats, decimals and projection are
   options on `CsvReadOptions`.
 - **Defaults** follow pandas: comma delimiter, a header row (without one the
-  columns are `col_0`, `col_1`, ...), the cells `""`, `NULL`, `NA`, `NaN`,
+  columns are named as DuckDB names them, `column0`, `column1`, ..., the
+  index padded to the digits of the last one: `column00` .. `column10` for
+  eleven columns), the cells `""`, `NULL`, `NA`, `NaN`,
   `null` read as null, and `true`, `TRUE`, `T`, `1`, `yes`, `Y` (and `false`,
   `FALSE`, `F`, `0`, `no`, `N`) as booleans. Blank lines are skipped
   (in a one-column file a blank line is a null record).
@@ -59,12 +61,12 @@ assert_equal(notes.as_string().get(0), "red, large")
 assert_equal(notes.as_string().get(1), "say \"hi\"")
 ```
 
-Null tokens become Arrow nulls, and a file without a header gets generated
-column names:
+Null tokens become Arrow nulls, and a file without a header gets the column
+names DuckDB gives it, `column0`, `column1`, ... (`header_free_column_name`):
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
-from csv import CsvReadOptions, Rfc4180, read_csv_bytes_to_batch
+from csv import CsvReadOptions, Rfc4180, header_free_column_name, read_csv_bytes_to_batch
 
 var nulls = String("id,name\n1,pen\n,NULL\n3,NA\n")
 var batch = read_csv_bytes_to_batch[Rfc4180](nulls.as_bytes(), CsvReadOptions())
@@ -79,7 +81,9 @@ var options = CsvReadOptions()
 options.has_header = False
 var bare = read_csv_bytes_to_batch[Rfc4180](String("1,2,3\n4,5,6\n").as_bytes(), options)
 assert_equal(bare.num_rows(), 2)
-assert_equal(String(bare.schema.field_at(2).name), "col_2")
+assert_equal(String(bare.schema.field_at(2).name), "column2")
+assert_equal(header_free_column_name(2, 3), "column2")
+assert_equal(header_free_column_name(2, 11), "column02")
 ```
 
 Projection keeps only the named columns, and the cell classifiers follow the

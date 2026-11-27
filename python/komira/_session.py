@@ -127,10 +127,8 @@ class Session:
         the file, and every later query reads the file with them. `delimiter`
         is the one ASCII character between fields; `header` says whether the
         first line holds the column names; `all_varchar=True` makes every
-        column a string. A query on a table registered with `header=False`
-        raises `KomiraError` naming `header=false`, as `read_csv(...,
-        header=false)` does: the engine does not yet name the columns of a
-        file without a header.
+        column a string. With `header=False` every line is a row and the
+        columns are named `column0`, `column1`, ... as DuckDB names them.
 
         A missing, empty or unreadable file, or a `name` the session already
         has a table under (of any kind, in any case), raises `KomiraError`
