@@ -341,6 +341,12 @@ export_file(
     visibility = ["//:"],
 )
 
+# The macro whose stamped evaluation needs the release's values, read by //:release_stamp_cases.
+export_file(
+    name = "release_set.bzl",
+    visibility = ["//:"],
+)
+
 export_file(
     name = "release_buck",
     src = "BUCK",

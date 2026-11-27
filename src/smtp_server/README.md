@@ -24,6 +24,68 @@ message says `Authentication-Results: <host>; none`. It is not a relay (a
 recipient outside `LocalDomains` is refused 550 5.1.1 at RCPT) and it does no
 spam or abuse filtering beyond the limits below.
 
+## Examples
+
+`SmtpTestSession` is one connection of a `SmtpRegistry` with a recording
+delivery and no socket, so a whole message goes through the command state
+machine in memory. The delivery sees the envelope and the dot-unstuffed text:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from smtp_server import SMTP_STATE_RCPT, SMTP_STATE_READY, SmtpServerConfig, SmtpTestSession
+
+var s = SmtpTestSession(SmtpServerConfig(String("mx.test")))
+assert_equal(s.greeting, "220 mx.test ESMTP ready\r\n")
+assert_true(s.send(String("EHLO c.test\r\n")).startswith("250-mx.test greets you\r\n"))
+assert_equal(s.send(String("MAIL FROM:<sender@x.test>\r\n")), "250 2.1.0 Ok\r\n")
+assert_equal(s.send(String("RCPT TO:<rcpt@y.test>\r\n")), "250 2.1.5 Ok\r\n")
+assert_equal(s.reg.state_of(s.conn_id), SMTP_STATE_RCPT)
+assert_true(s.send(String("DATA\r\n")).endswith("354 End data with <CR><LF>.<CR><LF>\r\n"))
+assert_equal(
+    s.send(String("Subject: hi\r\n\r\nhello\r\n.\r\n")),
+    "250 2.0.0 Ok: queued as q1\r\n",
+)
+assert_equal(s.reg.state_of(s.conn_id), SMTP_STATE_READY)
+assert_equal(s.delivery.delivery_count, 1)
+assert_equal(s.delivery.message_from[0], "sender@x.test")
+assert_equal(s.delivery.message_recipients[0][0], "rcpt@y.test")
+assert_equal(s.delivery.message_text(0), "Subject: hi\r\n\r\nhello\r\n")
+assert_equal(s.reg.messages_accepted_of(s.conn_id), 1)
+assert_equal(
+    s.send(String("QUIT\r\n")), "221 2.0.0 mx.test closing connection\r\n"
+)
+assert_true(s.outcome.closing)
+```
+
+The delivery decides each recipient and the message. A refused recipient is not
+in the transaction, the recipient cap answers 452 without asking the delivery,
+and a 451 from `deliver` leaves a clean connection:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from smtp_server import SMTP_STATE_MAIL, SMTP_STATE_READY, SmtpLimits, SmtpServerConfig, SmtpTestSession
+
+var limits = SmtpLimits()
+limits.max_recipients = 2
+var s = SmtpTestSession(SmtpServerConfig(String("mx.test"), limits=limits))
+s.delivery.refuse_rcpt(String("nobody@y.test"), 550, String("5.1.1 No such user"))
+_ = s.send(String("EHLO c.test\r\nMAIL FROM:<a@x.test>\r\n"))
+assert_equal(s.send(String("RCPT TO:<nobody@y.test>\r\n")), "550 5.1.1 No such user\r\n")
+assert_equal(s.reg.state_of(s.conn_id), SMTP_STATE_MAIL)
+assert_equal(s.send(String("RCPT TO:<b@y.test>\r\n")), "250 2.1.5 Ok\r\n")
+assert_equal(s.send(String("RCPT TO:<c@y.test>\r\n")), "250 2.1.5 Ok\r\n")
+assert_equal(s.send(String("RCPT TO:<d@y.test>\r\n")), "452 4.5.3 Too many recipients\r\n")
+assert_equal(len(s.delivery.calls), 3)
+assert_equal(s.reg.recipient_count(s.conn_id), 2)
+
+s.delivery.result_code = 451
+s.delivery.result_text = String("4.3.0 Try later")
+assert_true(s.send(String("DATA\r\nx\r\n.\r\n")).endswith("451 4.3.0 Try later\r\n"))
+assert_equal(s.reg.state_of(s.conn_id), SMTP_STATE_READY)
+assert_equal(s.reg.messages_accepted_of(s.conn_id), 0)
+assert_equal(s.reg.recipient_count(s.conn_id), 0)
+```
+
 ## Serving
 
 ```text

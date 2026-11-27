@@ -67,7 +67,7 @@ const SET_OUTPUT = "      set: " ++ CHOICE;
 const SMOKE_SET = "          name: ${{ needs.publish.outputs.set }}";
 /// The macOS job's install test, the set it then builds, and the artifact it keeps, in that order.
 const MAC_INSTALL_TEST = "          args: build --target-platforms komira//tools/build/platforms:darwin-arm64 -c komira_release.mac_tree=true -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} //node:install_test_macos_arm64";
-const MAC_SET_BUILD = "          args: build -c komira_release.mac_tree=true -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} //release:npm_packages_macos_arm64 --out ${{ runner.temp }}/npm/macos-set";
+const MAC_SET_BUILD = "          args: build -c komira_release.mac_tree=true -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} -c komira.release_revision=${{ github.sha }} -c komira.release_run_id=gh-${{ github.run_id }} -c komira.release_attempt=${{ github.run_attempt }} //release:npm_packages_macos_arm64 --out ${{ runner.temp }}/npm/macos-set";
 const MAC_KEEP = "          name: npm-set-macos-arm64-${{ github.sha }}";
 const MAC_SET_WORD = "npm-set-macos-arm64-";
 const STOP_STEP = "      - name: Stop buck2";
@@ -453,7 +453,7 @@ test "the macOS job keeps its set only after its install test passed on the farm
     // built for the Linux platform: the install test would not run on a Mac
     try expectRefused(ar, try editJob(ar, text, MACOS_JOB, "args: build --target-platforms komira//tools/build/platforms:darwin-arm64 -c", "args: build -c"), "npm.yml: build-macos-arm64 does not run the macOS install test (//node:install_test_macos_arm64) on the farm's macOS workers");
     // the set from another stamp, and no set kept
-    try expectRefused(ar, try editJob(ar, text, MACOS_JOB, "-c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} //release:npm_packages_macos_arm64", "//release:npm_packages_macos_arm64"), "npm.yml: build-macos-arm64 does not build //release:npm_packages_macos_arm64 from the build job's stamp");
+    try expectRefused(ar, try editJob(ar, text, MACOS_JOB, "-c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} -c komira.release_revision", "-c komira.release_revision"), "npm.yml: build-macos-arm64 does not build //release:npm_packages_macos_arm64 from the build job's stamp");
     try expectRefused(ar, try editJob(ar, text, MACOS_JOB, MAC_KEEP ++ "\n", "          name: npm-macos-${{ github.sha }}\n"), "npm.yml: build-macos-arm64 does not keep the set with the macOS package");
     // the set built and kept before the install test ran
     const job = try jobText(text, MACOS_JOB);

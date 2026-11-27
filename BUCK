@@ -77,6 +77,11 @@ coverage_ci_cases(
 # `./buck2 build //...`.
 WORKFLOWS = glob([".github/workflows/*.yml"])
 
+# The local actions the workflows call (.github/actions/<name>/action.yml): not
+# workflows, so actionlint does not read them, but the pins, the endpoint
+# lints and //:release_stamp_cases do.
+ACTIONS = glob([".github/actions/*/action.yml"])
+
 zig_test(
     name = "farm_connect_cases",
     exec_compatible_with = LINUX_X86_64,
@@ -225,6 +230,30 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# The cases of the stamped builds that evaluate release/BUCK (.github/workflows/release_stamp_test.zig says
+# what each catches): release/BUCK calls release_set, which fails a stamped evaluation of the file without
+# the release's revision, run id and attempt, so every command of a workflow or a local action that builds
+# a target of release, or of a package holding a target that depends on one, with komira.package_stamp passes
+# the three values the way
+# release.yml does; a new workflow is read too. A build action.
+zig_test(
+    name = "release_stamp_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/release_stamp_test.zig",
+    data = dict(
+        {
+            "release_set.bzl": "//release:release_set.bzl",
+            "release.BUCK": "//release:release_buck",
+        },
+        **dict(
+            {"workflows/" + w.removeprefix(".github/workflows/"): w for w in WORKFLOWS},
+            **{"actions/" + a.removeprefix(".github/actions/").replace("/action.yml", ".yml"): a for a in ACTIONS}
+        )
+    ),
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # The cases of the macOS builds of the release workflows (.github/workflows/release_macos_test.zig
 # says what each catches): the workflow release-macos.yml builds the macOS set on the farm, in a
 # concurrency group of its own, and release.yml holds no macOS job; pypi.yml's macOS jobs build only when
@@ -276,11 +305,6 @@ zig_test(
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
 )
-
-# The local actions the workflows call (.github/actions/<name>/action.yml): not
-# workflows, so actionlint does not read them, but the pins and the endpoint
-# lints do.
-ACTIONS = glob([".github/actions/*/action.yml"])
 
 workflow_lint(
     name = "workflow_lint",

@@ -1686,9 +1686,9 @@ kept, so two runs never publish at once.
 
 | job | environment | permissions | what it does |
 |---|---|---|---|
-| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp, builds `//release/ci:npm_smoke` and the pinned `//third_party/node:node` and `//third_party/node:npm` (npm 11.20.0), reads the gate (`npm_smoke gate`, its output `publish`), builds `//release:npm_packages` with the three stamp flags and holds the directory to its record (`npm_smoke verify`, its output `version`). Keeps `npm-set-<sha>` (the tarballs and `npm_set.json`) and `npm-tools-<sha>` (`npm_smoke`, Node.js, npm) for 14 days. No publish step. |
-| `test` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm: downloads the two artifacts, builds `//release:npm_packages[npm_set.json]` again with the build job's stamp, and runs `npm_smoke verify --built`: the kept directory is its record, and the record is the one this stamp builds, so the tarballs the install test installs (built from the same stamp, reproducible) are the kept ones. Then builds `//node:install_test` with the same stamp: npm installs the tarballs into an empty project and the package's tests import it by its name, on Node.js 22, 24 and 26. No npm identity. |
-| `build-macos-arm64` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm with its macOS workers, beside `test`, with the build job's stamp ([below](#the-macos-package-in-npmyml)): builds `//node:install_test_macos_arm64` for darwin-arm64, then `//release:npm_packages_macos_arm64`, holds the directory to its record (`npm_smoke verify`), and keeps it as `npm-set-macos-arm64-<sha>` for 14 days. No npm identity. |
+| `build` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm ([farm-connect](#how-it-reaches-the-farm), `farm-qos: batch`): builds `//release/ci:release_json` and takes the stamp, builds `//release/ci:npm_smoke` and the pinned `//third_party/node:node` and `//third_party/node:npm` (npm 11.20.0), reads the gate (`npm_smoke gate`, its output `publish`), builds `//release:npm_packages` with the three stamp flags and release.yml's three release values ([why](#stamped-builds-of-releasebuck)) and holds the directory to its record (`npm_smoke verify`, its output `version`). Keeps `npm-set-<sha>` (the tarballs and `npm_set.json`) and `npm-tools-<sha>` (`npm_smoke`, Node.js, npm) for 14 days. No publish step. |
+| `test` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm: downloads the two artifacts, builds `//release:npm_packages[npm_set.json]` again with the build job's stamp and the release values, and runs `npm_smoke verify --built`: the kept directory is its record, and the record is the one this stamp builds, so the tarballs the install test installs (built from the same stamp, reproducible) are the kept ones. Then builds `//node:install_test` with the same stamp: npm installs the tarballs into an empty project and the package's tests import it by its name, on Node.js 22, 24 and 26. No npm identity. |
+| `build-macos-arm64` | `build` | `contents: read`, `id-token: write` (the tailnet only) | on the farm with its macOS workers, beside `test`, with the build job's stamp ([below](#the-macos-package-in-npmyml)): builds `//node:install_test_macos_arm64` for darwin-arm64, then `//release:npm_packages_macos_arm64` (with the release values as well), holds the directory to its record (`npm_smoke verify`), and keeps it as `npm-set-macos-arm64-<sha>` for 14 days. No npm identity. |
 | `publish` | `npm` | `contents: read`, `id-token: write` (trusted publishing) | only when `build`'s output `publish` is `true`, after `build` and `test` passed and `build-macos-arm64` ended, whatever its result (a cancelled run publishes nothing); no checkout, no farm, no build, no token. Downloads the set with the macOS package (`npm-set-macos-arm64-<sha>`) when `build-macos-arm64` succeeded and the set without it (`npm-set-<sha>`) otherwise, and the tools, and runs `npm_smoke publish`: holds the directory to `npm_set.json` again, then, for each platform package and last the main package (which names them in its `optionalDependencies`), asks the registry for that version and runs `npm publish <file> --access public` when it is absent. |
 | `smoke` | none | none | only when `publish` ran and succeeded, with the set `publish` took (its output `set`); no checkout, no identity. Runs `npm_smoke smoke`: installs `@komira-ai/komira` at exactly the set's version from the registry into an empty project (`npm install --ignore-scripts --engine-strict`, tried up to five times, 30 seconds apart, while the registry catches up), holds the `integrity` npm recorded in `package-lock.json` for each package to `npm_set.json`, and, with no step between, runs `SELECT 1 AS n` through the installed package, which must print the set's version, `n` and `1`. The one job whose test reaches the network, and it reaches only the npm registry. |
 
@@ -1715,6 +1715,25 @@ command. It runs the pinned npm as `<node> <npm>/bin/npm-cli.js` with the public
 of its own work directory, written empty, and a cache of its own, so no npmrc of a runner is read. Trusted
 publishing needs npm 11.5.1 or later under Node.js 22.14 or later; the pins are npm 11.20.0 and Node.js
 24.21.0.
+
+### Stamped builds of release/BUCK
+
+`release/BUCK` holds `//release:npm_packages` and also calls the macro `release_set`
+([release_set.bzl](../release/release_set.bzl)), which fails the evaluation of the whole file, and so the
+build of every target in it, when the build is stamped (`komira.package_stamp` set to anything but `0`) and
+does not also pass `komira.release_revision`, `komira.release_run_id` and `komira.release_attempt`. So the
+three stamped builds of `release/BUCK` in `npm.yml` (the set twice, and the macOS job's
+`//release:npm_packages_macos_arm64`) pass the three values exactly as `release.yml`'s build of
+`//release:release_set` does (`${{ github.sha }}`, `gh-${{ github.run_id }}`, `${{ github.run_attempt }}`);
+the set reads none of them. A pull request builds everything unstamped, so its check never evaluates
+`release/BUCK` this way. `//:release_stamp_cases`
+([release_stamp_test.zig](../.github/workflows/release_stamp_test.zig) says what it holds), part of the pull
+request's check, reads every workflow and local action instead: each command that sets
+`komira.package_stamp` and names a target of `release` or of a package that holds a target depending on one
+of `release` (the root package, `ci` and `tools/build/ci`; any target of them counts, which is stricter than
+the failure), or a recursive pattern over one, must pass the three values, and a
+new workflow is read the same way. It also holds `release_set.bzl` to read exactly those keys, so a fourth
+value it starts to need turns the case red.
 
 ### The publish gate
 

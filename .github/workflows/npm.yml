@@ -9,7 +9,8 @@
 #   `build`    on the farm: takes the stamp (`release_json stamp`), reads the publish gate
 #              (release/npm_publish.txt, `npm_smoke gate`), builds //release:npm_packages stamped (each
 #              package at 0.1.<N>, the wheel's version, with npm_set.json: each package's name, version,
-#              file, SHA-256 and sha512 integrity), holds the directory to its set (`npm_smoke verify`), and
+#              file, SHA-256 and sha512 integrity; with release.yml's three release values, which the
+#              stamped evaluation of release/BUCK needs), holds the directory to its set (`npm_smoke verify`), and
 #              builds the tools the later jobs run with no checkout: //release/ci:npm_smoke and the pinned
 #              Node.js and npm CLI (//third_party/node:node and :npm, pinned by URL and SHA-256). Keeps the
 #              set and the tools as two artifacts. No publish step.
@@ -151,11 +152,14 @@ jobs:
       - name: the publish gate
         id: gate
         run: '"$RUNNER_TEMP/npm/tools/npm_smoke" gate --file release/npm_publish.txt --github-output "$GITHUB_OUTPUT"'
-      # The set, stamped: every package at 0.1.<build number>, and npm_set.json.
+      # The set, stamped: every package at 0.1.<build number>, and npm_set.json. release/BUCK, which holds the
+      # set, also calls release_set, and a stamped evaluation of the file fails without the release's
+      # revision, run id and attempt, so this build passes them as release.yml does (//:release_stamp_cases
+      # holds every stamped build of a target that loads release/BUCK to them); the set reads none of them.
       - name: build the npm packages
         uses: ./.github/actions/buck2-farm
         with:
-          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} //release:npm_packages --out ${{ runner.temp }}/npm/set
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} -c komira.release_revision=${{ github.sha }} -c komira.release_run_id=gh-${{ github.run_id }} -c komira.release_attempt=${{ github.run_attempt }} //release:npm_packages --out ${{ runner.temp }}/npm/set
           assert-remote: ${{ steps.assert.outputs.path }}
       # The directory is exactly the set's tarballs and npm_set.json, each with its sha256 and integrity; the
       # output `version` is the set's.
@@ -230,11 +234,12 @@ jobs:
         id: assert
         run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
       # The record of the set again, from the build job's stamp: the tarballs are reproducible, so it is the
-      # kept set's record exactly when the kept tarballs are the ones this stamp builds.
+      # kept set's record exactly when the kept tarballs are the ones this stamp builds. It is of release/BUCK
+      # too, so it passes the release's revision, run id and attempt as the build job's set does.
       - name: build the set's record from the same stamp
         uses: ./.github/actions/buck2-farm
         with:
-          args: build -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} //release:npm_packages[npm_set.json] --out ${{ runner.temp }}/npm/built/npm_set.json
+          args: build -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} -c komira.release_revision=${{ github.sha }} -c komira.release_run_id=gh-${{ github.run_id }} -c komira.release_attempt=${{ github.run_attempt }} //release:npm_packages[npm_set.json] --out ${{ runner.temp }}/npm/built/npm_set.json
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: the kept tarballs are the set and the set is the one this stamp builds
         run: '"$RUNNER_TEMP/npm/tools/npm_smoke" verify --set "$RUNNER_TEMP/npm/set/npm_set.json" --dir "$RUNNER_TEMP/npm/set" --built "$RUNNER_TEMP/npm/built/npm_set.json" --github-output "$GITHUB_OUTPUT"'
@@ -305,11 +310,12 @@ jobs:
           args: build --target-platforms komira//tools/build/platforms:darwin-arm64 -c komira_release.mac_tree=true -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} //node:install_test_macos_arm64
           assert-remote: ${{ steps.assert.outputs.path }}
       # The set with the macOS package, from the same stamp: its transition configures that package as the
-      # step above did, so its tarball is the one the install test installed.
+      # step above did, so its tarball is the one the install test installed. It is of release/BUCK, so it
+      # passes the release's revision, run id and attempt as the build job's set does.
       - name: build the npm packages with the macOS package
         uses: ./.github/actions/buck2-farm
         with:
-          args: build -c komira_release.mac_tree=true -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} //release:npm_packages_macos_arm64 --out ${{ runner.temp }}/npm/macos-set
+          args: build -c komira_release.mac_tree=true -c komira.package_stamp=${{ needs.build.outputs.build_number }} -c komira.package_commit=${{ needs.build.outputs.source_commit }} -c komira.package_timestamp_ms=${{ needs.build.outputs.timestamp_ms }} -c komira.release_revision=${{ github.sha }} -c komira.release_run_id=gh-${{ github.run_id }} -c komira.release_attempt=${{ github.run_attempt }} //release:npm_packages_macos_arm64 --out ${{ runner.temp }}/npm/macos-set
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: the directory holds the set with the macOS package, stamped
         run: '"$RUNNER_TEMP/npm/tools/npm_smoke" verify --set "$RUNNER_TEMP/npm/macos-set/npm_set.json" --dir "$RUNNER_TEMP/npm/macos-set" --github-output "$GITHUB_OUTPUT"'
