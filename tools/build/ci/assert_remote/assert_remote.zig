@@ -8,11 +8,12 @@
 //! Exit 0: the log shows no local execution. Exit 1: it does not (the reason
 //! is on stderr). Exit 2: the log cannot be read or the usage is wrong.
 //!
-//!     assert_remote run --log <file> --summary <file> -- <buck2> <subcommand> [args...]
+//!     assert_remote run --log <file> --summary <file> --farm-config <file> -- <buck2> <subcommand> [args...]
 //!
-//! runs the buck2 command that writes that log, and runs it once more when
-//! its only failure is a cut connection to the farm (farm_retry.zig, beside
-//! this file, says what it runs, reads and writes). One executable does both
+//! runs the buck2 command that writes that log and, when its only failure is
+//! a cut connection to the farm, waits (bounded) for the farm to answer and
+//! runs it again, at most three runs in all (farm_retry.zig and farm_wait.zig,
+//! beside this file, say what it runs, reads and writes). One executable does both
 //! because the buck2-farm action gets one built tool from its caller.
 //!
 //! What buck2 prints (recorded in fixtures/, measured on the farm):

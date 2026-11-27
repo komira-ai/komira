@@ -71,7 +71,8 @@ coverage_ci_cases(
 # The cases of the farm-connect action (.github/actions/farm-connect/action_test.zig
 # says what each catches): its input checks and the buckconfig it writes, run
 # from action.yml's own scripts with the busybox sh in a HOME of each case's
-# own; and every workflow step that uses the action, which must pass `tls`
+# own; its wait for the farm, run on a clock of each case's own
+# (probe_test.zig); and every workflow step that uses the action, which must pass `tls`
 # from the FARM_TLS variable. A build action, so a failing case fails
 # `./buck2 build //...`.
 WORKFLOWS = glob([".github/workflows/*.yml"])
@@ -80,6 +81,8 @@ zig_test(
     name = "farm_connect_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/actions/farm-connect/action_test.zig",
+    # The cases of the step that waits for the farm, imported by action_test.zig.
+    imports = [".github/actions/farm-connect/probe_test.zig"],
     data = dict(
         {"action.yml": ".github/actions/farm-connect/action.yml"},
         **{w.removeprefix(".github/"): w for w in WORKFLOWS}
@@ -232,7 +235,8 @@ zig_test(
 # The cases of the buck2-farm action (.github/actions/buck2-farm/action_test.zig
 # says what each catches): action.yml's shape, and its two run lines run
 # end to end over recorded buck2 output with the real //tools/build/ci:assert_remote,
-# a cut connection to the farm run once more and every other failure not.
+# a cut connection to the farm run again once a farm on a loopback port of the case's
+# own answers (at most three runs) and every other failure not.
 zig_test(
     name = "buck2_farm_cases",
     exec_compatible_with = LINUX_X86_64,

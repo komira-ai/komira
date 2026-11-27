@@ -10,8 +10,10 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # every action ran on the farm (assert_remote.zig says what buck2 prints and
 # what is accepted). The CI action `buck2-farm` runs it over the run's log.
 # `assert_remote run` is the action's first line: it runs the buck2 command,
-# and runs it once more when its only failure is a cut connection to the farm
-# (assert_remote/farm_retry.zig says what counts as one).
+# and when its only failure is a cut connection to the farm
+# (assert_remote/farm_retry.zig says what counts as one) waits for the farm's
+# port to answer, for a bounded time (assert_remote/farm_wait.zig), and runs it
+# again, at most three runs in all.
 # Its cases are recorded buck2 output (assert_remote/fixtures); welded: the
 # tool is built only when they pass.
 zig_test(
@@ -21,6 +23,7 @@ zig_test(
     imports = [
         "assert_remote/assert_remote.zig",
         "assert_remote/farm_retry.zig",
+        "assert_remote/farm_wait.zig",
         "assert_remote/fixtures/build_cached.log",
         "assert_remote/fixtures/build_failed_unknown_target.log",
         "assert_remote/fixtures/build_remote.log",
@@ -35,13 +38,15 @@ zig_test(
 
 # Which failed runs `assert_remote run` runs again (assert_remote/farm_retry_test.zig
 # says what each case holds): recorded failed runs on the farm, a cut and real
-# failures, and logs made from them with a line added or changed.
+# failures, and logs made from them with a line added or changed; and the wait
+# for the farm before a run again, on a clock of the case's own.
 zig_test(
     name = "farm_retry_unit",
     exec_compatible_with = LINUX_X86_64,
     src = "assert_remote/farm_retry_test.zig",
     imports = [
         "assert_remote/farm_retry.zig",
+        "assert_remote/farm_wait.zig",
         "assert_remote/fixtures/build_cut.log",
         "assert_remote/fixtures/build_cut_after_file_changes.log",
         "assert_remote/fixtures/build_cut_and_compile_error.log",
@@ -58,7 +63,7 @@ zig_exe(
     name = "assert_remote",
     exec_compatible_with = LINUX_X86_64,
     src = "assert_remote/assert_remote.zig",
-    imports = ["assert_remote/farm_retry.zig"],
+    imports = ["assert_remote/farm_retry.zig", "assert_remote/farm_wait.zig"],
     unit_tests = [":assert_remote_unit", ":farm_retry_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
