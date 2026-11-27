@@ -1,0 +1,5 @@
+AwsKeys('sales-reader', key_id=<set>, secret=<set>)
+[{'orders': 2, 'total': 165}]
+{'region': 'east', 'total': 165}
+{'region': 'west', 'total': 230}
+UnsupportedOperation STORAGE_URL_REFUSED

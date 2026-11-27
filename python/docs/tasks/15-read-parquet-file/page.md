@@ -63,7 +63,7 @@ int64 string float64
 - In SQL, `FROM read_parquet('file')` and `FROM 'file.parquet'` both work without registering; `parquet_scan(...)` is not supported.
 - `komira.read_parquet` takes a path and `session` only: there is no `columns=` argument, so select columns on the frame afterwards (`df[["id", "name"]]`) as the example does.
 - `komira.pl.scan_parquet` is lazy; there is no eager `komira.pl.read_parquet`, so call `.collect()`.
-- Only local files are read here; URLs are tracked by komira-ai/komira#2345 (https) and komira-ai/komira#2337 (s3, gs, az).
+- Only local files are read here. Parquet objects of `s3://` and Azure Blob are read through `Session.add_sql_binding` and `komira.files` (rank 31 and rank 93); `https://` is komira-ai/komira#2345, and `gs://` and a URL written in the SQL are komira-ai/komira#2337.
 
 ## Related
 

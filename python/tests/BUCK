@@ -419,6 +419,35 @@ _PYARROW = {
     **_ON[p["suffix"]]
 ) for p in PYTHONS]
 
+# Session.add_sql_binding and komira.files on the real library, against the
+# loopback stand-ins of S3 and Azure Blob (objectstore_fakes.py: HTTP servers
+# on 127.0.0.1, port 0, which verify each request's SigV4 or Shared Key
+# signature, or its SAS): an s3:// key and glob with AwsKeys, an az:// blob
+# with AzureKey and a glob with AzureSas answer SQL, and no request carries a
+# secret; rebinding replaces a table of any kind; local files bind by path; a
+# wrong secret is refused by the store and binds nothing; each named refusal
+# of the library, word for word, as the class its code picks, leaving the
+# name's table as it was; no secret in a DEBUG log record or a repr; and the
+# argument checks, the copy refusals and the exact WireBoundSource bytes.
+[python_binding_test(
+    name = "sql_binding_test" + p["suffix"],
+    src = "test_sql_binding.py",
+    srcs = ["objectstore_fakes.py"],
+    data = {"libkomira": LIBKOMIRA},
+    deps = ["//python:komira", _PYARROW[p["suffix"]]],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
+# Session.add_sql_binding on the stand-in of ABI 1.2: KomiraError naming the
+# call and ABI 1.10, and no credential call reaches the library's fake store.
+[python_binding_test(
+    name = "sql_binding_minor_test" + p["suffix"],
+    src = "test_sql_binding_minor.py",
+    data = {"fake_store/libkomira.so": ":fake_store"},
+    deps = ["//python:komira"],
+    **_ON[p["suffix"]]
+) for p in PYTHONS]
+
 # A session used from several threads, on a stand-in (fake_threads.c, ABI 1.3)
 # that journals each call's entry and exit on its context, holds a call at a
 # gate until the test opens it, and counts calls that enter a context another

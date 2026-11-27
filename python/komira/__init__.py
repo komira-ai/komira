@@ -2,7 +2,9 @@
 
 This is an early release: a `Session` registers Parquet, CSV and
 newline-delimited JSON files and runs SQL over them, and each `Result` reads
-as Arrow (pyarrow). The pandas-shaped `DataFrame` reads the same files
+as Arrow (pyarrow). `Session.add_sql_binding` binds a SQL name to a
+`files` source: Parquet objects of `s3://` or Azure, read with a named
+credential (`AwsKeys`, `AzureKey`, `AzureSas`, ...). The pandas-shaped `DataFrame` reads the same files
 (`read_parquet`, `read_csv`, `read_json`), groups and reduces them
 (`groupby`, `agg`), stacks frames (`concat`), and builds a plan that runs, with no SQL, at
 `materialize()` (docs/design/dataframe_surface.md). The public names
@@ -23,6 +25,7 @@ import logging as _logging
 from importlib import metadata as _metadata
 
 from . import _native
+from ._credentials import AMBIENT, ANONYMOUS, AwsKeys, AwsProfile, AzureKey, AzureSas, GcpServiceAccount, GcpToken
 from ._errors import (
     BindError,
     CredentialsError,
@@ -40,6 +43,7 @@ from ._refusals import MODULE as _MODULE_REFUSALS
 from ._refusals import refused as _refused
 from ._series import Series
 from ._session import Result, Session
+from ._sources import files
 
 _logging.getLogger("komira").addHandler(_logging.NullHandler())
 
@@ -65,9 +69,17 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "AMBIENT",
+    "ANONYMOUS",
+    "AwsKeys",
+    "AwsProfile",
+    "AzureKey",
+    "AzureSas",
     "BindError",
     "CredentialsError",
     "DataFrame",
+    "GcpServiceAccount",
+    "GcpToken",
     "GroupBy",
     "KomiraError",
     "LibraryLoadError",
@@ -82,6 +94,7 @@ __all__ = [
     "__version__",
     "abi_version",
     "concat",
+    "files",
     "read_csv",
     "read_json",
     "read_parquet",
