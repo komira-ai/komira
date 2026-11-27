@@ -770,6 +770,23 @@ class DataFrame:
             raise TypeError(f"drop_duplicates ignore_index must be a bool, not {type(ignore_index).__name__}")
         return _groupby.drop_duplicates(self, subset, keep)
 
+    def explode(self, column: str, ignore_index: bool = False) -> DataFrame:
+        """The frame with the list column `column` replaced by one row per
+        element, the other columns repeated. A row whose list is empty or NULL
+        gives one row holding NULL, as pandas does. One column only, given by
+        its name; a column that is not a list is refused. `ignore_index` is
+        accepted and does nothing, since a frame has no index. The frame keeps
+        its row order unless it is sorted by the exploded column."""
+        if not isinstance(column, str):
+            raise UnsupportedOperation(
+                "explode: only one column, given by its name, is supported; "
+                "explode the columns one after another"
+            )
+        _groupby._check_bool(ignore_index, "ignore_index", "explode")
+        _ops.require_columns((column,), self._plan.columns)
+        plan = _ops.unnest(self._plan, column, True)
+        return self._ordered(plan, lambda keys: not any(k.column == column for k in keys))
+
     # ---- joins (komira/_merge.py) ------------------------------------------
 
     def merge(

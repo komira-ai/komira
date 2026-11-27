@@ -228,6 +228,7 @@ from plan_ir.logical_plan import (
     PLAN_EXCHANGE,
     PLAN_MAP_BATCHES,
     PLAN_STEP,
+    PLAN_UNNEST,
     plan_tag_name,
 )
 from plan_ir.corr_subquery import corr_data_inner_plan_ref
@@ -445,6 +446,13 @@ def bind_plan_inmem_payloads(
     if tag == PLAN_STEP:
         # A source with no child and literal arguments: nothing to bind.
         return 0
+    if tag == PLAN_UNNEST:
+        # The column is a name; no expression site.
+        if not plan._unnest:
+            return 0
+        return bind_plan_inmem_payloads(
+            registry, plan._unnest.value()[].child[]
+        )
 
     # ---- TWO-CHILD ---------------------------------------------------------
     # BOTH sides, always. A join whose RIGHT side is the in-memory one is the

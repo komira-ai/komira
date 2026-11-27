@@ -1606,6 +1606,18 @@ message WireStepNode {
   repeated WireScalar args = 2;
 }
 
+// `UnnestData` — `PLAN_UNNEST` (engine tag 21): one row per element of the
+// list column `column` of its child. The node's output schema is the child's
+// with `column` replaced in place, under the same name, by the list's element
+// type (nullable when the element is nullable or `keep_empty` is set). A row
+// whose list is empty or NULL gives no row (SQL `unnest`), or, when
+// `keep_empty` is set, one row whose element is NULL (DataFrame `explode`).
+message WireUnnestNode {
+  WirePlan child = 1;
+  string column = 2;
+  bool keep_empty = 3;
+}
+
 // ⚠ THE NODE KIND IS STATED ONCE: field 1 (`PlanTag tag`) is RESERVED. Read
 // the block above `WireExpr` for the full argument; it applies verbatim. The
 // plan-side armless tags are CONVERT_COLUMN_TO_ROW and CONVERT_ROW_TO_COLUMN,
@@ -1673,6 +1685,8 @@ message WirePlan {
     // The UDF arms: fields 21..22 (optimized_plan_udfs.md §10.4).
     WireMapBatchesNode map_batches = 21;
     WireStepNode step = 22;
+    // The unnest arm: field 23, ARM 19.
+    WireUnnestNode unnest = 23;
   }
 }
 

@@ -31,6 +31,7 @@ from plan_ir.logical_plan import (
     PLAN_EXCHANGE,
     PLAN_MAP_BATCHES,
     PLAN_STEP,
+    PLAN_UNNEST,
     ASOF_BACKWARD,
     ASOF_FORWARD,
     ASOF_NEAREST,
@@ -859,6 +860,16 @@ def _write_plan_node[
                 writer.write(", ")
             st.args[i].write_to(writer)
         writer.write("])\n")
+
+    elif plan.tag == PLAN_UNNEST:
+        # Both fields are emitted: this render is the structural hash, and
+        # `keep_empty` changes which rows the node returns.
+        ref un = plan._unnest.value()[]
+        writer.write(
+            "Unnest(column=", un.column, ", keep_empty=",
+            "true" if un.keep_empty else "false", ")\n",
+        )
+        _write_plan_node(writer, un.child[], indent + 1, placeholder_inmem_id)
 
     else:
         writer.write("Unknown(tag=", Int(plan.tag), ")\n")

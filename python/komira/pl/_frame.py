@@ -47,6 +47,7 @@ from komira._ops import (
     scan,
     select,
     sort,
+    unnest,
     with_columns,
 )
 from komira._session import Result, Session, _local_path, default_session
@@ -468,6 +469,28 @@ class LazyFrame:
         ref = windows.window(win)
         kept = filter_(_window.windowed(base, windows), Compare("eq", ref, Lit(1)))
         return self._with(Project(kept, tuple((c, ColRef(c)) for c in base.columns)), None)
+
+    def explode(self, columns, *more_columns) -> LazyFrame:
+        """The frame with the list column `columns` (a name) replaced by one
+        row per element, the other columns repeated. A row whose list is empty
+        or NULL gives one row holding NULL, as polars does. One column only;
+        a column that is not a list is refused. The frame keeps its row order
+        unless it is sorted by the exploded column."""
+        if more_columns or not isinstance(columns, str):
+            raise UnsupportedOperation(
+                "explode: only one column, given by its name, is supported; "
+                "explode the columns one after another"
+            )
+        require_columns((columns,), self._plan.columns)
+        plan = unnest(self._plan, columns, True)
+        order = self._order
+        if order is not None and any(k.column == columns for k in order):
+            order = None
+        elif order is not None:
+            plan = Sort(plan, order)
+        out = self._with(plan, order)
+        out._wire_fields()
+        return out
 
     def head(self, n: int = 5) -> LazyFrame:
         """The first `n` rows of an ordered frame; of an unordered one, some

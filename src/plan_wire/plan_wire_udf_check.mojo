@@ -112,6 +112,7 @@ from plan_ir.logical_plan import (
     PLAN_STEP,
     PLAN_TOPN,
     PLAN_UNION,
+    PLAN_UNNEST,
     PLAN_VIEW_REF,
     _infer_expr_field,
     plan_tag_name,
@@ -734,6 +735,8 @@ def _check_plan(plan: LogicalPlan, udfs: List[UdfRef]) raises:
         _check_frame(plan, udfs)
     elif tag == PLAN_STEP:
         _check_step(plan, udfs)
+    elif tag == PLAN_UNNEST:
+        _check_plan(plan.unnest_data_ref().child[], udfs)
     elif tag == PLAN_VIEW_REF or tag == PLAN_CSE_REF:
         # Leaves whose subtree lives elsewhere; nothing here calls a UdfRef.
         pass

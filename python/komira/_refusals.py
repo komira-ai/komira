@@ -59,7 +59,7 @@ FRAME = _BOTH | _rows(
         ".{name}() is pandas' own: run with materialize(), then call to_pandas().{name}()",
     ),
     (
-        ("pivot", "pivot_table", "melt", "stack", "unstack", "explode", "transpose", "T"),
+        ("pivot", "pivot_table", "melt", "stack", "unstack", "transpose", "T"),
         ".{name}() is not supported yet: the plan has no node for it",
     ),
     (

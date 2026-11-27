@@ -45,6 +45,7 @@ from plan_ir.logical_plan import (
     PLAN_EXCHANGE,
     PLAN_MAP_BATCHES,
     PLAN_STEP,
+    PLAN_UNNEST,
     JOIN_SEMI,
     JOIN_ANTI,
     JOIN_LEFT,
@@ -53,6 +54,7 @@ from plan_ir.logical_plan import (
 )
 from plan_expr.expr import Expr, EXPR_COL_REF, EXPR_ALIAS
 from plan_ir.logical_plan import ExprArray
+from plan_ir.logical_plan_unnest import unnest_output_schema
 # Underscore-prefixed symbols are not re-exported by `import *` in the shim;
 # import directly from the canonical module.
 from plan_ir.logical_plan import _infer_expr_field, _infer_agg_field
@@ -134,6 +136,14 @@ def infer_schema(plan: LogicalPlan) raises -> Schema:
         # construction by the caller that holds the `UdfRef` list; nothing
         # in the plan alone re-derives it.
         return _copy_schema(plan.output_schema)
+    elif plan.tag == PLAN_UNNEST:
+        # The child's schema with the list column replaced by its element
+        # type; refuses (by column name) when the child no longer has a list
+        # column of that name.
+        ref un = plan.unnest_data_ref()
+        return unnest_output_schema(
+            un.child[].output_schema, un.column, un.keep_empty
+        )
     else:
         raise Error("infer_schema: unknown plan tag " + String(Int(plan.tag)))
 

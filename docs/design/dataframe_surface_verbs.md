@@ -75,6 +75,7 @@ marked **not built** is designed, but the skin does not define it yet: calling i
 | `topn_per_group` | `df.sort_values(o).groupby(k).head(n)`, not built | `lf.sort(o).group_by(k).head(n)`, not built | PARTITION_TOPN | refused at lower |
 | `limit` | `df.head(n)` | `lf.head(n)`, `lf.limit(n)`; `lf.slice(offset, n)` on an ordered frame | LIMIT, offset 0 unless `slice` | cut; a limit or an offset above a sort is cut as that range of the sort (SINK_TOPN), an offset over no sort is refused |
 | `distinct` | `df.drop_duplicates()`; `subset=` of fewer than every column not built (raises `UnsupportedOperation`) | `lf.unique()`, `lf.unique(subset=..., keep="any"\|"none")` | DISTINCT of whole rows; the polars skin builds a `subset` of fewer columns, and `keep="none"`, as a PARTITION_BY (`ROW_NUMBER` or `COUNT` per value) under a FILTER (dataframe_surface.md, rules section 7) | whole rows served by lowering for the key coverage of the grouped sinks; the polars `subset` and `keep="none"` are cut as a window (`LOWERING_WINDOW_UNSERVED` for a type the window sink does not serve) |
+| `explode` | `df.explode(column)`; one column by name, `ignore_index` accepted and ignored (a list of columns raises `UnsupportedOperation`) | `lf.explode(column)`; one column by name | UNNEST of the list column with `keep_empty` true: an empty or NULL list gives one row holding NULL | cut as a fused morsel operator; a column that is not a list is refused by name when the plan is built |
 | `union` | `km.concat(frames)` | `kpl.concat(frames, how="vertical")` | UNION of one schema (`concat_schema_check`; rules section 8, ruling 15) | cut |
 | `subquery` | - | - | neither library has a subquery inside an expression; a broadcast aggregate is a window | - |
 | `view` | `km.add_sql_binding(name, df)`, then `km.sql(...)`; or `km.sql(..., name=df)`; not built (`Session.add_sql_binding` binds `komira.files` sources, not frames, and `Session.sql` takes SQL text only) | `km.add_sql_binding(name, lf)`, then `km.sql(...)`; or `km.sql(..., name=lf)`; not built | VIEW_REF | not wired |
@@ -185,7 +186,7 @@ In the `read_*` message, `<format>` is the format of the name looked up (`parque
 | `iterrows`, `itertuples`, `items`, `values`, `to_numpy`, `to_list`, `tolist`, `item` | both | `.<name> needs the rows: run the frame with materialize(), then convert the Result with to_pandas()` |
 | `shape`, `size`, `empty` | `DataFrame` | `.<name> needs a query to run: count rows with df.agg(n=(column, "size")).materialize()` |
 | `to_dict`, `to_records`, `to_excel`, `to_sql`, `to_string`, `to_markdown` | `DataFrame` | `.<name>() is pandas' own: run with materialize(), then call to_pandas().<name>()` |
-| `pivot`, `pivot_table`, `melt`, `stack`, `unstack`, `explode`, `transpose`, `T` | `DataFrame` | `.<name>() is not supported yet: the plan has no node for it` |
+| `pivot`, `pivot_table`, `melt`, `stack`, `unstack`, `transpose`, `T` | `DataFrame` | `.<name>() is not supported yet: the plan has no node for it` |
 | `describe`, `info`, `memory_usage` | `DataFrame` | `.<name>() reports on a pandas object; run with materialize(), then call to_pandas().<name>()` |
 | `query`, `eval` | `DataFrame` | `.<name>() takes an expression as text, which komira does not parse; write df[df["a"] > 1]` |
 | `collect` | `DataFrame` | `.collect() is the polars-shaped skin's word; this frame runs at .materialize()` |
@@ -210,7 +211,7 @@ In the `read_*` message, `<format>` is the format of the name looked up (`parque
 | `materialize` | `LazyFrame` | `.materialize() is the pandas-shaped skin's word; this frame runs at .collect()` |
 | `to_pandas`, `to_polars`, `to_arrow`, `fetch` | `LazyFrame` | `a LazyFrame is a plan: run it with .collect(), then convert the Result` |
 | `with_column` | `LazyFrame` | `with_column() is not a polars verb; use with_columns()` |
-| `unpivot`, `explode` | `LazyFrame` | `.<name>() is not supported yet: the plan has no node for it` |
+| `unpivot` | `LazyFrame` | `.<name>() is not supported yet: the plan has no node for it` |
 | `cache`, `profile`, `collect_async` | `LazyFrame` | `.<name>() is not supported: komira runs a plan only at .collect()` |
 | `apply` | `Expr` | `Expr.apply is not a polars verb; use map_elements(f, return_dtype=...)` |
 | `sort_by` | `Expr` | `Expr.sort_by() is not supported: the plan carries no order inside an expression; sort the frame instead` |

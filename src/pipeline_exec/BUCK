@@ -15,7 +15,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # an Iceberg snapshot, with their deletes applied, served as a resident batch)
 # and `source_jsonl` (a JSONL file read at the plan's schema, served as a batch
 # source), the operators `op_filter`, `op_project`,
-# `op_limit` and `op_hash_probe` (the INNER, LEFT, RIGHT, FULL, SEMI, ANTI and
+# `op_limit`, `op_unnest` (one row per element of a list column) and `op_hash_probe` (the INNER, LEFT, RIGHT, FULL, SEMI, ANTI and
 # CROSS join probe over an index of the build rows; RIGHT and FULL owe their
 # unmatched build rows as a tail that `run_segment` pushes after the workers),
 # the sinks `sink_collect`, `sink_agg` (the ungrouped aggregation, over
@@ -68,6 +68,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 projection under a mask; a limit across
 #                                 morsels, shared by workers, at zero, under a
 #                                 mask.
+# test_op_unnest                 OP_UNNEST: one row per list element, empty and NULL lists
+#                                 dropped or kept as a NULL row, other columns repeated,
+#                                 chunked output, refusals by name, and the real builder.
 # test_op_limit_concurrent       the limit's row budget drawn on by several threads at
 #                                 once: disjoint ranges, no lost count.
 # test_sink_collect               the output ordered by morsel position, masks
@@ -372,6 +375,7 @@ mojo_library(
         "tests/test_join_plan_concurrent.mojo",
         "tests/test_op_filter.mojo",
         "tests/test_op_limit_concurrent.mojo",
+        "tests/test_op_unnest.mojo",
         "tests/test_op_project_limit.mojo",
         "tests/test_real_concat.mojo",
         "tests/test_real_plan.mojo",

@@ -36,6 +36,7 @@
 #            OP_JOIN_PROBE        `HashProbeOp` (`op_hash_probe`), over the
 #                                 index made from the rows the build segment
 #                                 it names published
+#            OP_UNNEST            `UnnestOp`  (`op_unnest`)
 #   sink     SINK_COLLECT         `CollectSink` (`sink_collect`)
 #            SINK_AGG, key NONE   `AggSink` (`sink_agg`), from the `AggSinkData`
 #                                 the descriptor's `sink_param_id` names; it
@@ -148,6 +149,7 @@ from physical_plan.physical_plan import (
     OP_FILTER,
     OP_JOIN_PROBE,
     OP_LIMIT,
+    OP_UNNEST,
     OP_PROJECT,
     ORDER_ROW_RANGE,
     AggSinkData,
@@ -179,6 +181,7 @@ from .op_filter import FilterOp, FilterShared
 from .op_hash_probe import HashProbeOp, HashProbeShared
 from .op_limit import LimitOp, LimitShared
 from .op_project import ProjectShared
+from .op_unnest import UnnestOp, UnnestShared
 from .op_variant import OpVariant
 from .pipeline_sink import PipelineSink
 from .published_outputs import PublishedOutputs
@@ -243,6 +246,7 @@ struct _OpParts(Movable):
     var project: Optional[ProjectShared]
     var limit: Optional[LimitShared]
     var probe: Optional[HashProbeShared]
+    var unnest: Optional[UnnestShared]
 
     def __init__(out self, seg_id: Int, op_index: Int):
         self.seg_id = seg_id
@@ -251,6 +255,7 @@ struct _OpParts(Movable):
         self.project = None
         self.limit = None
         self.probe = None
+        self.unnest = None
 
 
 struct RealBuilder[
@@ -276,7 +281,7 @@ struct RealBuilder[
         BatchSource,
         SinkOutputSource,
     ]
-    comptime Op = OpVariant[FilterOp, MapOp, LimitOp, HashProbeOp]
+    comptime Op = OpVariant[FilterOp, MapOp, LimitOp, HashProbeOp, UnnestOp]
     comptime Sink = PipelineSink[
         CollectSink, AnyAggSink, SortSink, WindowSink
     ]
@@ -405,13 +410,15 @@ struct RealBuilder[
             parts.project = Optional(ProjectShared(spec))
         elif spec.tag == OP_LIMIT:
             parts.limit = Optional(LimitShared(spec))
+        elif spec.tag == OP_UNNEST:
+            parts.unnest = Optional(UnnestShared(spec))
         else:
             raise Error(
                 "pipeline_exec: operator tag "
                 + String(Int(spec.tag))
                 + " of segment "
                 + String(desc.seg_id)
-                + " is not served (OP_FILTER, OP_PROJECT and OP_LIMIT are,"
+                + " is not served (OP_FILTER, OP_PROJECT, OP_LIMIT and OP_UNNEST are,"
                 " and OP_JOIN_PROBE once its segment's source is built)"
             )
         self._parts.append(parts^)
@@ -588,6 +595,8 @@ struct RealBuilder[
             return Self.Op.second(parts.project.value().make())
         if parts.probe:
             return Self.Op.fourth(parts.probe.value().make())
+        if parts.unnest:
+            return Self.Op.fifth(parts.unnest.value().make())
         return Self.Op.third(parts.limit.value().make())
 
     def build_sink(
@@ -793,6 +802,10 @@ struct RealBuilder[
             if desc.ops[i].tag == OP_JOIN_PROBE:
                 var at = self._parts_index(desc, i)
                 schema = self._parts[at].probe.value().output_schema(schema)
+                continue
+            if desc.ops[i].tag == OP_UNNEST:
+                var at = self._parts_index(desc, i)
+                schema = self._parts[at].unnest.value().output_schema(schema)
                 continue
             if desc.ops[i].tag != OP_PROJECT:
                 continue

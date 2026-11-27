@@ -21,12 +21,15 @@ derived by the engine's own factory for the node (src/plan_ir/logical_plan.mojo)
                is nullable. The engine picks the algorithm (`JOIN_ALGO_AUTO`)
     Union      union_all: the first input's fields, which every input must
                have, the same names, types and nullability
+    Unnest     unnest: the child's fields, the list column replaced in place by
+               a field of its element type, nullable when the element is or
+               when the node keeps empty and NULL lists as a NULL row
     MapBatches map_batches: the `UdfRef` of its function (komira/_plan/_udf.py)
                by index; its fields are the children of the `UdfRef`'s return
                type
 
-Refused by name (`UnsupportedOperation`), because the engine has no node that
-means them: a `Distinct` over a subset of the columns, and a `Union` whose
+Refused by name (`UnsupportedOperation`): an `Unnest` of a column that is not a
+list; and, because the engine has no node that means them, a `Distinct` over a subset of the columns, and a `Union` whose
 inputs differ in a column's type or nullability.
 
 A `Write` is the root of a plan only. It is not a node: `encode_plan` encodes its
@@ -60,6 +63,7 @@ from komira._ops._rel import (
     SortKey,
     TopN,
     Union,
+    Unnest,
     Write,
 )
 from komira._ops._vocab import LEFT_ONLY_HOWS, RIGHT_SUFFIX
@@ -69,7 +73,7 @@ from ._expr import encode_expr, encode_residual
 from ._field import expr_field
 from ._source import encode_scan
 from ._udf import UdfTable, udf_ref
-from ._wire import member, pb, vocab
+from ._wire import arrow_id, arrow_name, field, member, pb, vocab
 from ._window import window_stack
 
 __all__ = ["encode_plan"]
@@ -185,6 +189,25 @@ def _map_batches(node: MapBatches, child: pb.WirePlan, udfs: UdfTable) -> pb.Wir
     return out
 
 
+def _unnest(node: Unnest, child: pb.WirePlan) -> pb.WirePlan:
+    out = pb.WirePlan()
+    for f in child.output_schema.fields:
+        if f.name != node.column:
+            out.output_schema.fields.append(f)
+            continue
+        if f.arrow_type_id != arrow_id("list") or len(f.child_type_ids) != 1 or len(f.child_nullables) != 1:
+            raise UnsupportedOperation(
+                f"explode: column '{node.column}' is {arrow_name(f.arrow_type_id)}, not a list"
+            )
+        out.output_schema.fields.append(
+            field(f.name, f.child_type_ids[0], f.child_nullables[0] or node.keep_empty)
+        )
+    out.unnest.child.CopyFrom(child)
+    out.unnest.column = node.column
+    out.unnest.keep_empty = node.keep_empty
+    return out
+
+
 def encode_node(
     plan, sources: Mapping[str, pb.WireScanSource], udfs: UdfTable
 ) -> pb.WirePlan:
@@ -210,6 +233,8 @@ def encode_node(
         return _project(plan, child, udfs)
     if isinstance(plan, Aggregate):
         return encode_aggregate(plan, child, udfs)
+    if isinstance(plan, Unnest):
+        return _unnest(plan, child)
     out = pb.WirePlan()
     _same_fields(out, child)
     if isinstance(plan, Filter):

@@ -1,5 +1,5 @@
 """The support types (Field, SortKey, Agg, Frame, WindowExpr) and the Scan,
-Filter, Project, Aggregate, Sort, TopN, Limit and Distinct nodes of
+Filter, Project, Aggregate, Sort, TopN, Limit, Distinct and Unnest nodes of
 komira._ops: the output columns each node derives, structural equality and
 hashing, and every refusal with its exact exception class and message. Join,
 Union and Write are in test_ops_rel_join.py.
@@ -25,7 +25,10 @@ from komira._ops import (
     SortKey,
     TopN,
     Unary,
+    Unnest,
     WindowExpr,
+    walk_plan,
+    unnest,
 )
 from komira._ops._vocab import AGG_FUNCS, WINDOW_FUNCS
 
@@ -789,6 +792,28 @@ def test_distinct_refuses_bad_subsets():
     refused(lambda: Distinct(people(), ("id", "nam")), KeyError, missing("nam", "name"))
     refused(lambda: Distinct(people(), (3,)), TypeError, "Distinct.subset must be a str, not int")
     refused(lambda: Distinct("people"), TypeError, "Distinct.child must be a plan node, not str")
+
+
+def test_unnest_keeps_the_childs_columns_and_walks_to_its_child():
+    base = people()
+    node = Unnest(base, "name", True)
+    assert node.columns == ("id", "name", "score"), node.columns
+    assert node.child is base and node.column == "name" and node.keep_empty is True
+    assert node == Unnest(people(), "name", True) and hash(node) == hash(Unnest(people(), "name", True))
+    assert node != Unnest(people(), "name", False)
+    assert node != Unnest(people(), "id", True)
+    assert unnest(base, "name", False) == Unnest(base, "name", False)
+    assert list(walk_plan(node)) == [node, base]
+
+
+def test_unnest_refuses_bad_arguments():
+    refused(lambda: Unnest(people(), "zzz", True), KeyError, missing("zzz"))
+    refused(lambda: Unnest(people(), "nam", True), KeyError, missing("nam", "name"))
+    refused(lambda: Unnest(people(), 3, True), TypeError, "Unnest.column must be a str, not int")
+    refused(lambda: Unnest(people(), "", True), ValueError, "Unnest.column must not be empty")
+    refused(lambda: Unnest(people(), "name", 1), TypeError, "Unnest.keep_empty must be a bool, not int")
+    refused(lambda: Unnest("people", "name", True), TypeError, "Unnest.child must be a plan node, not str")
+    refused(lambda: unnest("people", "name", True), TypeError, "unnest plan must be a plan node, not str")
 
 
 def main():

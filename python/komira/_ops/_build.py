@@ -33,6 +33,7 @@ from ._rel import (
     SortKey,
     TopN,
     Union,
+    Unnest,
     Write,
     WriteTarget,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "select",
     "sort",
     "top_n",
+    "unnest",
     "with_columns",
     "write",
 ]
@@ -279,3 +281,8 @@ def write(plan: Plan, path: str, format: str) -> Write:
 def map_batches(plan: Plan, udf: UdfSpec) -> MapBatches:
     """A `MapBatches` of the `map_batches_frame` function over the plan."""
     return MapBatches(_plan(plan, "map_batches plan"), udf)
+
+
+def unnest(plan: Plan, column: str, keep_empty: bool) -> Unnest:
+    """An `Unnest` of the plan's list column, one row per element."""
+    return Unnest(_plan(plan, "unnest plan"), column, keep_empty)

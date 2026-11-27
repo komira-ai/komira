@@ -248,7 +248,8 @@ comptime OP_JOIN_PROBE: UInt8 = 3      # Hash join probe (streaming)
 # MorselOp tag values 4-13 are retired and must not be reused.
 comptime OP_UDF_APPLY: UInt8 = 14      # A user-function call, one column appended
 comptime OP_UDF_FRAME: UInt8 = 15      # A frame user function per morsel
-# The next free tag id is 16.
+comptime OP_UNNEST: UInt8 = 16         # One output row per list element of a column
+# The next free tag id is 17.
 
 # Sink tags (`SegmentDescPod.sink_kind`)
 comptime SINK_AGG: UInt8 = 0           # Hash aggregation
@@ -293,6 +294,9 @@ struct MorselOp(Movable):
         OP_LIMIT: Enforce row count limit (with atomic counter for parallel).
         OP_JOIN_PROBE: Probe a hash table built by a completed build segment.
         OP_UDF_APPLY, OP_UDF_FRAME: A user-function call, `udf`.
+        OP_UNNEST: One output row per element of the LIST column
+            `unnest_column`; `unnest_keep_empty` also keeps an empty or NULL
+            list as one row with a NULL element.
 
     Late-materialization fields (OP_JOIN_PROBE only):
         probe_output_cols: Optional list of join-output column names to keep.
@@ -339,12 +343,22 @@ struct MorselOp(Movable):
     # so this field keeps the IR inert.
     var probe_residual: Optional[Expr]
     var udf: Optional[UdfCallSpec]  # OP_UDF_APPLY / OP_UDF_FRAME (`udf_call_spec`)
+    var unnest_column: String       # OP_UNNEST: the LIST column to unnest; "" when unused
+    var unnest_keep_empty: Bool     # OP_UNNEST: keep an empty / NULL list as one NULL row
 
     @staticmethod
     def udf_call(tag: UInt8, var spec: UdfCallSpec) -> MorselOp:
         """Create an OP_UDF_APPLY or OP_UDF_FRAME operator."""
         var op = MorselOp(tag=tag)
         op.udf = spec^
+        return op^
+
+    @staticmethod
+    def unnest(var column: String, keep_empty: Bool) -> MorselOp:
+        """Create an OP_UNNEST operator over the LIST column `column`."""
+        var op = MorselOp(tag=OP_UNNEST)
+        op.unnest_column = column^
+        op.unnest_keep_empty = keep_empty
         return op^
 
     @staticmethod
@@ -480,6 +494,8 @@ struct MorselOp(Movable):
         self.probe_output_cols = None
         self.probe_residual = None
         self.udf = None
+        self.unnest_column = String()
+        self.unnest_keep_empty = False
 
 # =============================================================================
 # The descriptor contract — SegmentDescPod + SourceSpecPod (inert POD)
