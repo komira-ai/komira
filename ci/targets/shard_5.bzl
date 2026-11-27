@@ -39,6 +39,7 @@ TARGETS = [
     "komira//src/op_agg_slab:op_agg_slab_conda",
     "komira//src/op_sort:op_sort_conda",
     "komira//src/operator_api:operator_api_conda",
+    "komira//src/optimized_plan:optimized_plan_conda",
     "komira//src/optimized_plan_header:optimized_plan_header_conda",
     "komira//src/optimizer:optimizer_conda",
     "komira//src/parquet_scan:parquet_scan_conda",

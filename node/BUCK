@@ -1,5 +1,6 @@
 load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "node_addon", "node_binding_test")
 load("@komira//tools/build/node:modules.bzl", "tsc_build", "tsc_check")
+load("@komira//src/tests/conformance/komira_sql_conformance:tables.bzl", "CORPUS_TABLES", "corpus_tables")
 load("@komira//tools/build/package:npm.bzl", "npm_tarball")
 load("@komira//tools/build/package/libkomira:packaged.bzl", "DIST_LICENSE_EXPRESSION", "DIST_LICENSE_FILES", "DIST_NATIVE_NEEDS")
 
@@ -169,11 +170,27 @@ _ARROW_TYPES = {
     "node_modules/flatbuffers": "//third_party/node:flatbuffers",
 }
 
+# The SQL conformance runner (tests/conformance/README.md): its modules, which
+# :sql_conformance_test measures, its tests, and the module they share.
+_CONFORMANCE_SRCS = [
+    "tests/conformance/corpus.ts",
+    "tests/conformance/render.ts",
+]
+
+_CONFORMANCE_TESTS = [
+    "tests/conformance/corpus.test.ts",
+    "tests/conformance/render.test.ts",
+    "tests/conformance/sql_conformance.test.ts",
+    "tests/conformance/wrong_answer.test.ts",
+]
+
+_CONFORMANCE_MODULES = ["tests/conformance/staged.ts"]
+
 # Every source and test, type-checked with strict on.
 tsc_check(
     name = "typecheck",
     modules = _DEVTOOLS,
-    srcs = _SRCS + _TESTS + _TEST_MODULES + ["package.json", "tsconfig.json"],
+    srcs = _SRCS + _TESTS + _TEST_MODULES + _CONFORMANCE_SRCS + _CONFORMANCE_TESTS + _CONFORMANCE_MODULES + ["package.json", "tsconfig.json"],
     data = _ARROW_TYPES,
 )
 
@@ -399,6 +416,59 @@ node_binding_test(
         "package.json": "package.json",
         "src/errors.ts": "src/errors.ts",
         "tests/arrow_specs.mts": "tests/arrow_specs.mts",
+    },
+    deps = ["//third_party/node:apache-arrow"],
+)
+
+# ---- SQL conformance, reused (docs/design/typescript_package.md, section 5) ----
+#
+# The cases of src/tests/conformance/komira_sql_conformance run through
+# Session.sql on the real engine (tests/conformance/README.md): each corpus's
+# tables as the Parquet the pinned DuckDB wrote from its tables.sql, each
+# answer written as the corpus writes DuckDB's and compared byte for byte,
+# and each case komira refuses or answers otherwise held to its line in the
+# corpus's refusals.tsv or differences.tsv. Nothing of the corpus is copied:
+# the cases, the tables and the lists are that package's targets.
+_CONFORMANCE = "komira//src/tests/conformance/komira_sql_conformance:"
+
+# The negative case: a fixture corpus whose wrong.tsv is wrong in one cell,
+# its table W written by the pinned DuckDB as the corpus's tables are.
+_WRONG_ANSWER = glob(["tests/conformance/fixtures/wrong_answer/*"])
+
+corpus_tables(
+    name = "conformance_wrong_answer_tables",
+    tables_sql = "tests/conformance/fixtures/wrong_answer/tables.sql",
+    tables = ["W"],
+)
+
+# The runner's tests (corpus.test.ts, render.test.ts), the fixture corpus
+# with one wrong answer (wrong_answer.test.ts), and every corpus case
+# (sql_conformance.test.ts). The runner's modules are measured: at least 99%
+# of their lines and branches together covered. The package's sources are
+# loaded unmeasured; :package_test measures them.
+node_binding_test(
+    name = "sql_conformance_test",
+    srcs = _CONFORMANCE_TESTS,
+    covered_srcs = _CONFORMANCE_SRCS,
+    data = {
+        "komira_addon.node": ":komira_addon",
+        "libkomira": LIBKOMIRA,
+        "package.json": "package.json",
+        "fixtures/cpuinfo_x86_64_v3.txt": "komira//python/tests:fixtures/cpuinfo_x86_64_v3.txt",
+        "conformance/cases": _CONFORMANCE + "cases_tree",
+        "conformance/differences.tsv": _CONFORMANCE + "differences.tsv",
+        "conformance/refusals.tsv": _CONFORMANCE + "refusals.tsv",
+        "conformance/wrong_answer_tables/W.parquet": ":conformance_wrong_answer_tables[W.parquet]",
+    } | {
+        "conformance/tables/{}/{}.parquet".format(corpus, t): "{}{}_tables[{}.parquet]".format(_CONFORMANCE, corpus, t)
+        for corpus, tables in CORPUS_TABLES.items()
+        for t in tables
+    } | {
+        "conformance/wrong_answer/" + f.split("/")[-1]: f
+        for f in _WRONG_ANSWER
+    } | {
+        m: m
+        for m in _SRCS + _CONFORMANCE_MODULES + ["tests/helpers.ts"]
     },
     deps = ["//third_party/node:apache-arrow"],
 )
