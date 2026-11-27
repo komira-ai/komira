@@ -20,6 +20,9 @@
 #                       from the partition top-n segment.
 #   test_a_rank_node_keeps_its_function_and_heap_capacity
 #                       RANK and over_fetch_k reach the sink data unchanged.
+#   test_two_sort_keys_render_each_direction
+#                       the param line lists every sort key with its
+#                       direction.
 #   test_a_limit_above_a_keyed_partition_top_n_is_refused_and_one_with_no_key_is_cut
 #                       the reader of a keyed node is a sorted stream, as a
 #                       keyed window's is.
@@ -303,6 +306,18 @@ def test_a_rank_node_keeps_its_function_and_heap_capacity() raises:
     assert_equal(d.over_fetch_k, 18)
     var text = render_lowered_plan(lp)
     assert_true("fn=RANK k=2\n" in text, text)
+
+
+def test_two_sort_keys_render_each_direction() raises:
+    var two = LogicalPlan.partition_topn(
+        _names("g"), _names("k", "v"), _flags(False, True, 2), 4, _scan()
+    )
+    var text = render_lowered_plan(_lowered(two, _inputs(500)))
+    assert_true(
+        "  partition_topn 0: partition=[g] order=[k asc, v desc]"
+        " fn=ROW_NUMBER k=4\n" in text,
+        text,
+    )
 
 
 def test_a_limit_above_a_keyed_partition_top_n_is_refused_and_one_with_no_key_is_cut() raises:

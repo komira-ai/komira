@@ -21,8 +21,9 @@
 #   * Refused by name: data the builder does not hold, a pool too small for
 #     the rows (the pool holds nothing afterwards), a direction list of
 #     another length and a function other than ROW_NUMBER or RANK when the
-#     sink is built, a worker id outside the sink's slots, and a read before
-#     the combine.
+#     sink is built, a worker id outside the sink's slots (above and below),
+#     a read before the combine, and each draw of the combine a pool too
+#     small for it denies (the concatenation, the kernel's sorted copy).
 
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
@@ -30,7 +31,9 @@ from arrow.arrow_types import ArrowType
 from arrow.schema import Field, RecordBatch, Schema, SchemaBuilder
 from async_api.token import CancellationToken
 from parquet.runtime_footer_cache import ParquetMetadataCache
+from column_kernels.compiler_helpers import batch_buffer_bytes
 from morsel.morsel import Morsel
+from morsel.pipeline_execution import PipelineExecution
 from physical_plan.physical_plan import (
     KEY_DTYPE_NONE,
     PartitionTopNSinkData,
@@ -353,9 +356,43 @@ def test_a_worker_outside_the_slots_and_a_read_before_combine_are_refused() rais
     ):
         sink.consume(4, Morsel(sample_batch(0, 3), 0, 0))
     with assert_raises(
+        contains="the partition top-n sink holds 1 worker slots, got worker -1"
+    ):
+        sink.consume(-1, Morsel(sample_batch(0, 3), 0, 0))
+    with assert_raises(
         contains="the partition top-n sink was read before it was combined"
     ):
         _ = sink.take_output()
+
+
+def _combined_under(budget: Int, seg_id: Int) raises:
+    """Consume 20 sample rows into a sink over a pool of `budget` bytes,
+    then combine it."""
+    var sink = PartitionTopNPipelineSink(
+        _data("s", "a", True, 2), SegmentPool(budget), seg_id
+    )
+    sink.resize_worker_state(1)
+    sink.consume(0, Morsel(sample_batch(0, 20), 0, 0))
+    var pipe = PipelineExecution(1, 0)
+    sink.combine(pipe)
+
+
+def test_each_draw_of_combine_is_refused_by_name() raises:
+    var kept = batch_buffer_bytes(sample_batch(0, 20))
+    # The rows fit, their concatenation does not.
+    with assert_raises(
+        contains="the partition top-n sink of segment 1 was denied "
+        + String(kept)
+        + " bytes for the concatenation"
+    ):
+        _combined_under(kept, 1)
+    # The concatenation fits, the kernel's sorted copy and state do not.
+    with assert_raises(
+        contains="the partition top-n sink of segment 2 was denied"
+    ):
+        _combined_under(2 * kept, 2)
+    with assert_raises(contains="for the sorted copy and the kernel's state"):
+        _combined_under(2 * kept, 2)
 
 
 def main() raises:
