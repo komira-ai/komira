@@ -963,7 +963,8 @@ registry identity and no secret, and runs, in order:
    with the first differing byte) is reported at once; a pass that found one is repeated up to five times
    30 seconds apart, as the smoke's is, because a cache can lag the commit. Only when everything matched
    does it write `release/staged_set` (beside its checked-in `BUCK`): `plan.json`, each README as served
-   and each file as downloaded. Its cases (`//tools/build/ci:served_unit`) run a registry in memory.
+   and each file as downloaded. Its cases (`//tools/build/ci:served_unit`) run a registry in memory, and
+   `//tools/build/ci:served_cli_cases` run the built tool with `served` on cases that fail before any request.
 2. `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all`
    on the farm: the README e2e of every package installs from that set and compiles and runs the
    examples of the README the registry served. A package the set lacks fails at the e2e's phase

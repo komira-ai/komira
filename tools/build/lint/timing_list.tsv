@@ -17,6 +17,7 @@ use	tools/build/bisect/probe.zig	Thread.sleep	1	production: the poll of the prob
 use	tools/build/ci/assert_remote/farm_wait.zig	Instant	3	production: the real clock of the bounded wait for the farm before a cut buck2 command runs again (the tests give the wait a clock of their own)
 use	tools/build/ci/assert_remote/farm_wait.zig	Thread.sleep	1	production: the pause between two probes of the farm's port in that wait (the tests give the wait a clock of their own)
 use	tools/build/ci/release_beta_fetch/release_staged_verify.zig	Thread.sleep	1	production: the pause between prod smoke passes while the channel catches up (tests pass a delay of 0)
+use	tools/build/ci/release_beta_fetch/served.zig	Thread.sleep	1	production: the pause between served passes while the registry's channel and API catch up with a commit (tests pass a delay of 0)
 use	tools/build/coverage/branch/bounded_run.zig	Thread.sleep	1	production: the default Clock's nap (a test gives the Clock its own)
 use	tools/build/mojo/tools/mojo_compile.zig	nanosleep	1	production: the watchdog's one-second tick (the ticked build takes its ticks from the process that runs it)
 use	tools/build/mojo/tools/mojo_compile_macos.zig	nanosleep	1	production: the watchdog's one-second tick, as on Linux

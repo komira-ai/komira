@@ -331,6 +331,19 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
+# The cases of release_staged_verify's executable run through its verbs (release_beta_fetch/
+# served_cli_test.zig says what each catches): the built tool (`RELEASE_STAGED_VERIFY`) is run with
+# `served`, as release.yml's served jobs run it, on cases that make no request, and its exit code,
+# stdout and stderr are checked by exact equality. A build action.
+zig_test(
+    name = "served_cli_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_fetch/served_cli_test.zig",
+    exec_tools = {"RELEASE_STAGED_VERIFY": ":release_staged_verify"},
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # lock_graphs: the action of lock_graphs.bxl, which holds the graphs a package's
 # buildrules.mojo.lock.bzl commits (one per platform subdir) to the subdirs its
 # mopm.lock records. Built behind its unit tests.

@@ -108,6 +108,7 @@ TARGETS = [
     "komira//tools/build/ci:lock_graphs",
     "komira//tools/build/ci:release_beta_version",
     "komira//tools/build/ci:release_staged_verify",
+    "komira//tools/build/ci:served_cli_cases",
     "komira//tools/build/lint/tool:lint_unit_doc_links",
     "komira//tools/build/one_definition:one_definition",
     "tests//functional/aws_client_mode:doc_tree",

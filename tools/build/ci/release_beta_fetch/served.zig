@@ -214,29 +214,27 @@ pub fn served(a: Allocator, backing: Allocator, why: *[]const u8, staged: []cons
         defer pass_arena.deinit();
         const p = pass_arena.allocator();
         var pass_why: []const u8 = "";
-        const pass = servedOnce(p, &pass_why, plan, readmes.items, fetcher, pins, log) catch |e| {
+        // A pass is refused (the index, before any file) or done; a done pass with a difference is a failure too.
+        const pass: ?Pass = servedOnce(p, &pass_why, plan, readmes.items, fetcher, pins, log) catch |e| blk: {
             if (e != error.Refused) return e;
             why.* = try a.dupe(u8, pass_why);
-            if (n >= attempts) return error.Refused;
-            try log.print("attempt {d} of {d} failed, trying again: {s}\n", .{ n, attempts, why.* });
-            try log.flush();
-            std.Thread.sleep(delay_ms * std.time.ns_per_ms);
-            continue;
+            break :blk null;
         };
-        if (pass.failed()) {
-            why.* = try failureText(a, pass, files, plan.members.len, pins.stage);
-            if (n >= attempts) return error.Refused;
-            try log.print("attempt {d} of {d} failed, trying again: {s}\n", .{ n, attempts, why.* });
-            try log.flush();
-            std.Thread.sleep(delay_ms * std.time.ns_per_ms);
-            continue;
+        if (pass) |done| {
+            if (!done.failed()) {
+                var entries = std.ArrayList(rbf.Entry).empty;
+                try entries.append(p, .{ .rel = "plan.json", .data = plan_text });
+                for (plan.members, readmes.items) |m, text| try entries.append(p, .{ .rel = m.readme.?, .data = text });
+                for (done.files.checked) |c| try entries.append(p, .{ .rel = try std.fmt.allocPrint(p, "{s}/{s}", .{ c.file.subdir, c.file.filename }), .data = c.bytes });
+                try rbf.writeSet(a, why, out, entries.items);
+                return .{ .members = plan.members.len, .files = files, .readmes = plan.members.len };
+            }
+            why.* = try failureText(a, done, files, plan.members.len, pins.stage);
         }
-        var entries = std.ArrayList(rbf.Entry).empty;
-        try entries.append(p, .{ .rel = "plan.json", .data = plan_text });
-        for (plan.members, readmes.items) |m, text| try entries.append(p, .{ .rel = m.readme.?, .data = text });
-        for (pass.files.checked) |c| try entries.append(p, .{ .rel = try std.fmt.allocPrint(p, "{s}/{s}", .{ c.file.subdir, c.file.filename }), .data = c.bytes });
-        try rbf.writeSet(a, why, out, entries.items);
-        return .{ .members = plan.members.len, .files = files, .readmes = plan.members.len };
+        if (n >= attempts) return error.Refused;
+        try log.print("attempt {d} of {d} failed, trying again: {s}\n", .{ n, attempts, why.* });
+        try log.flush();
+        std.Thread.sleep(delay_ms * std.time.ns_per_ms);
     }
 }
 
