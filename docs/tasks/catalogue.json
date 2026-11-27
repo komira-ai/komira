@@ -609,7 +609,10 @@
     "slug": "compare-row-previous-row",
     "category": "Time",
     "question": "How do I compare each row with the previous row (lag, lead, change)?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2387"
+    ]
   },
   {
     "rank": 78,
@@ -626,14 +629,20 @@
     "slug": "add-days-date-take-difference-dates",
     "category": "Time",
     "question": "How do I add days to a date or take the difference between dates?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2388"
+    ]
   },
   {
     "rank": 80,
     "slug": "group-month-week",
     "category": "Time",
     "question": "How do I group by month or week?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2408"
+    ]
   },
   {
     "rank": 81,

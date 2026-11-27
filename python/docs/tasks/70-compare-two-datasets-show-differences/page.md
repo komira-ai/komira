@@ -66,4 +66,4 @@ Output:
 - How do I find rows in A that are not in B (anti-join)? (rank 69, works)
 - [How do I join two tables on a key?](../10-join-two-tables-on-key/page.md) (rank 10, works)
 - How do I left join and keep unmatched rows? (rank 36, works; no page yet)
-- How do I join on multiple columns? (rank 73, works; no page yet)
+- How do I join on multiple columns? (rank 73, works)
