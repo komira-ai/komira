@@ -32,7 +32,8 @@ the document is written to it. A slice that depends on a question waits for the 
      connection" ([pandas.read_sql](https://pandas.pydata.org/docs/reference/api/pandas.read_sql.html)).
      `to_sql`'s page lists no `str` *(to confirm that pandas accepts one there)*.
    - polars' `read_database_uri` takes "A connectorx or ADBC connection URI string that starts with the
-     backend's driver name, for example: “postgresql://user:pass@server:port/database”"
+     backend's driver name", and its own example is a `postgresql://` URI with a user, a password, a
+     server, a port and a database
      ([polars.read_database_uri](https://docs.pola.rs/api/python/stable/reference/api/polars.read_database_uri.html)).
    - So `read_sql(con="postgresql://...")`, `read_database_uri(query, uri)`,
      `to_sql(name, "postgresql://...")` and `sqlite:///<path>` are served. The SDK parses the URI in
@@ -278,8 +279,8 @@ A database read and a database write take the same object.
   - A user who keeps a password in `PGPASSWORD` writes `password=os.environ["PGPASSWORD"]`. That is
     their code reading their environment, and the package still reads none.
 - **A URI string in Python is a spelling of the source object** (question 2). `to_sql(con=...)` and
-  the read design's readers take `postgresql://user:password@host:port/database`,
-  `mysql://user:password@host:port/database` and `sqlite:///<path>`.
+  the read design's readers take `postgresql://<user>:<password>@<host>:<port>/<database>`,
+  `mysql://<user>:<password>@<host>:<port>/<database>` and `sqlite:///<path>`.
   - The SDK parses the URI in Python, before the library is called. Each part is percent-decoded.
   - A `+<driver>` suffix (`postgresql+psycopg2://`) names a Python client that komira does not use,
     so it is accepted, and it changes nothing *(a decision: the database it reaches is the same)*.
@@ -691,7 +692,7 @@ The tests, by slice, with what each proves. Names are the planned test names.
 | `test_pg_upsert_temp_table_is_dropped_on_commit` | the fake records `CREATE TEMP TABLE ... ON COMMIT DROP`, and after a commit and after a rollback no temporary table is left. A role without `TEMP` gives `DATABASE_PRIVILEGE_DENIED` |
 | `test_pg_value_too_long_and_unknown_types` | a value longer than a `varchar(n)` gives `DATABASE_VALUE_UNREPRESENTABLE`, and an enum or domain column gives `DATABASE_TYPE_UNSUPPORTED` before any row is sent |
 | `test_location_refuses_connection_strings` | `komira.postgres("u:p@h", ...)` and `"host=h password=p"` raise before the library is called, the same bytes reaching the library are refused with `STORAGE_URL_REFUSED`, and a URI inside SQL text is refused the same way. No message quotes the string |
-| `test_uri_con_builds_the_source_objects_plan` (Python, `plan/` and `run/`) | `to_sql("t", "postgresql://etl:<pw>@db.example.com:5432/crm?sslmode=require")` builds plan bytes equal to those of `komira.postgres("db.example.com", "crm", sslmode="require", credential=komira.Password("uri-<hex>", user="etl", password=<pw>))`. The password goes through the credential calls (the fake library records them), and neither the plan bytes nor any message holds it. `sqlite:///shop.db` equals `komira.sqlite("shop.db")`, an unknown query parameter is refused naming it, and `postgresql+psycopg2://` builds the same plan |
+| `test_uri_con_builds_the_source_objects_plan` (Python, `plan/` and `run/`) | `to_sql("t", "postgresql://etl:pw@db.example.com:5432/crm?sslmode=require")` builds plan bytes equal to those of `komira.postgres("db.example.com", "crm", sslmode="require", credential=komira.Password("uri-<hex>", user="etl", password="pw"))`. The password goes through the credential calls (the fake library records them), and neither the plan bytes nor any message holds it. `sqlite:///shop.db` equals `komira.sqlite("shop.db")`, an unknown query parameter is refused naming it, and `postgresql+psycopg2://` builds the same plan |
 | `test_frame_to_sql_refuses_connection_objects` | a `sqlite3.Connection`, an SQLAlchemy engine and an ADBC connection each raise `UnsupportedOperation` with the exact message before any file is created |
 | `test_frame_to_sql_if_exists_modes` (Python, `run/`) | `fail`, `replace`, `append` and `delete_rows` against a SQLite file, read back with the standard library's `sqlite3`, give pandas' table, and the return is the row count |
 | `test_frame_to_sql_refuses_by_name` | each refused `con`, `dtype`, `index_label`, `method` callable and `schema` raises `UnsupportedOperation` with its exact message before any file is created |
