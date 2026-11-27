@@ -27,12 +27,14 @@
 //! `--http2-keepalive-interval-secs`, `--http2-keepalive-timeout-secs`). So a
 //! connection that has heard nothing for longer than 150 s is one the farm has
 //! already closed, whatever buck2 is doing on it. The watchdog's bound is
-//! twice that, 300 s, unless the machine buckconfig sets
+//! twice that, 300 s, counted from the run's start at the earliest (a
+//! connection the daemon kept idle from an earlier step is judged by what it
+//! hears in this run), unless the machine buckconfig sets
 //! `dead_connection_seconds` under `[komira_ci]` (farm_wait.zig).
 //!
 //! When a connection has been silent past the bound, the run is ended: buck2
 //! is sent SIGINT, as a Ctrl-C (it cancels its command and exits), and SIGKILL
-//! if it has not ended `grace_ms` later; then `<buck2> kill` stops its daemon,
+//! if it has not ended `Watchdog.grace_ms` later (the bound, at most 10 s); then `<buck2> kill` stops its daemon,
 //! which holds the dead connection and the lost action, so the next run starts
 //! clean. What farm_retry.zig does next (the one line in the job log and the
 //! summary, the wait for the farm, the run again within the bound of three) it
@@ -49,8 +51,13 @@ const native_endian = @import("builtin").cpu.arch.endian();
 /// How often the watchdog reads the runner's connections, in milliseconds.
 pub const check_ms: u64 = 1000;
 
-/// How long buck2 is given to end after SIGINT before SIGKILL, in milliseconds.
-pub const grace_ms: u64 = 10_000;
+/// The longest buck2 is given to end after SIGINT before SIGKILL, in
+/// milliseconds; a shorter bound gives it the bound (`Watchdog.grace_ms`).
+pub const max_grace_ms: u64 = 10_000;
+
+/// How long the tool still reads buck2's output after SIGKILL, in
+/// milliseconds, should something buck2 started hold the pipe open.
+pub const after_kill_ms: u64 = 5_000;
 
 /// One TCP connection of the runner's to the farm, as the kernel reported it.
 pub const Conn = struct {
@@ -63,12 +70,15 @@ pub const Conn = struct {
 
 /// The connection that makes a run dead: the one silent longest, when that
 /// is longer than `bound_ms`; null when every connection has heard from the
-/// farm within the bound, or there is none.
-pub fn dead(conns: []const Conn, bound_ms: u64) ?Conn {
+/// farm within the bound, or there is none. A silence counts from the run's
+/// start at the earliest (`run_ms` ago): a connection buck2's daemon kept idle
+/// from before the run is judged only by what it hears during the run.
+pub fn dead(conns: []const Conn, bound_ms: u64, run_ms: u64) ?Conn {
     var worst: ?Conn = null;
     for (conns) |c| {
-        if (c.silent_ms <= bound_ms) continue;
-        if (worst == null or c.silent_ms > worst.?.silent_ms) worst = c;
+        const silent = @min(c.silent_ms, run_ms);
+        if (silent <= bound_ms) continue;
+        if (worst == null or silent > worst.?.silent_ms) worst = .{ .local_port = c.local_port, .silent_ms = silent };
     }
     return worst;
 }
@@ -257,11 +267,16 @@ pub const Watchdog = struct {
         w.a.free(w.farm);
     }
 
-    /// Reads the connections once and judges them.
-    pub fn look(w: *Watchdog) Look {
+    /// Reads the connections once and judges them, `run_ms` into the run.
+    pub fn look(w: *Watchdog, run_ms: u64) Look {
         readConnections(w.a, w.farm, &w.conns) catch |e| return .{ .unreadable = e };
-        if (dead(w.conns.items, w.bound_ms)) |c| return .{ .dead = c };
+        if (dead(w.conns.items, w.bound_ms, run_ms)) |c| return .{ .dead = c };
         return .alive;
+    }
+
+    /// How long buck2 is given to end after SIGINT: the bound, at most `max_grace_ms`.
+    pub fn grace_ms(w: *const Watchdog) u64 {
+        return @min(w.bound_ms, max_grace_ms);
     }
 };
 

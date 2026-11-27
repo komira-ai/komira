@@ -489,8 +489,9 @@ pub const Cut = struct {
     code: u8,
 };
 
-/// Milliseconds since `start` on the monotonic clock; when the clock cannot
-/// be read again, `start` itself, so the watchdog never looks early.
+/// Milliseconds since `start` on the monotonic clock; 0 when the clock cannot
+/// be read again, so the watchdog never looks early (and, should the clock stay
+/// unreadable, does not look at all).
 fn msSince(start: std.time.Instant) u64 {
     const now = std.time.Instant.now() catch return 0;
     return now.since(start) / std.time.ns_per_ms;
@@ -529,8 +530,10 @@ fn stopDaemon(a: std.mem.Allocator, program: []const u8, w: *std.Io.Writer) !voi
 /// fd 1 and to a new file at `log` as it arrives, and waits for it. With a
 /// `watchdog`, it looks at the connections to the farm every
 /// `farm_watchdog.check_ms` while the run runs, and ends the run (SIGINT, then
-/// SIGKILL after `farm_watchdog.grace_ms`, then `<argv[0]> kill`) when one is
-/// dead; what it does goes to `w`.
+/// SIGKILL after the watchdog's grace, then `<argv[0]> kill`) when one is
+/// dead; what it does goes to `w`. A run that exits 0 all the same is a pass.
+/// After SIGKILL the output is read for `farm_watchdog.after_kill_ms` more at
+/// most, should something buck2 started hold the pipe open.
 fn runTee(a: std.mem.Allocator, argv: []const [:0]const u8, log: []const u8, watchdog: ?*farm_watchdog.Watchdog, w: *std.Io.Writer) !End {
     const argv_z = try a.allocSentinel(?[*:0]const u8, argv.len, null);
     defer a.free(argv_z);
@@ -568,10 +571,11 @@ fn runTee(a: std.mem.Allocator, argv: []const [:0]const u8, log: []const u8, wat
     const start = try std.time.Instant.now();
     var next_look: u64 = farm_watchdog.check_ms;
     var kill_at: u64 = 0;
+    var grace: u64 = 0;
     var fds = [_]posix.pollfd{.{ .fd = pipe[0], .events = posix.POLL.IN, .revents = 0 }};
     while (true) {
         const before = msSince(start);
-        const timeout: i32 = if (cut != null) (if (killed) -1 else msUntil(before, kill_at)) else if (watch != null) msUntil(before, next_look) else -1;
+        const timeout: i32 = if (cut != null) msUntil(before, kill_at) else if (watch != null) msUntil(before, next_look) else -1;
         if (try posix.poll(&fds, timeout) > 0) {
             const n = try posix.read(pipe[0], &chunk);
             if (n == 0) break;
@@ -583,16 +587,18 @@ fn runTee(a: std.mem.Allocator, argv: []const [:0]const u8, log: []const u8, wat
         }
         const now = msSince(start);
         if (cut != null) {
+            if (killed and now >= kill_at) break;
             if (!killed and now >= kill_at) {
-                try w.print("buck2-farm: buck2 has not ended {d} s after SIGINT; ending it with SIGKILL\n", .{farm_watchdog.grace_ms / std.time.ms_per_s});
+                try w.print("buck2-farm: buck2 has not ended {d} s after SIGINT; ending it with SIGKILL\n", .{grace / std.time.ms_per_s});
                 try w.flush();
                 posix.kill(pid, posix.SIG.KILL) catch {};
                 killed = true;
+                kill_at = now + farm_watchdog.after_kill_ms;
             }
         } else if (watch) |wd| {
             if (now >= next_look) {
                 next_look = now + farm_watchdog.check_ms;
-                switch (wd.look()) {
+                switch (wd.look(now)) {
                     .alive => {},
                     .dead => |c| {
                         try w.print("buck2-farm: watchdog: the connection to the farm from local port {d} has heard nothing from the farm for ", .{c.local_port});
@@ -603,7 +609,8 @@ fn runTee(a: std.mem.Allocator, argv: []const [:0]const u8, log: []const u8, wat
                         try w.flush();
                         posix.kill(pid, posix.SIG.INT) catch {};
                         cut = c;
-                        kill_at = now + farm_watchdog.grace_ms;
+                        grace = wd.grace_ms();
+                        kill_at = now + grace;
                     },
                     .unreadable => |e| {
                         try w.print("buck2-farm: watchdog stopped: cannot read the runner's connections to the farm: {s}; the run goes on without it\n", .{@errorName(e)});
@@ -615,11 +622,14 @@ fn runTee(a: std.mem.Allocator, argv: []const [:0]const u8, log: []const u8, wat
         }
     }
     const status = posix.waitpid(pid, 0).status;
-    if (write_error) |e| return e;
     const end: End = if (posix.W.IFEXITED(status)) .{ .exited = posix.W.EXITSTATUS(status) } else .{ .signal = posix.W.TERMSIG(status) };
+    if (cut != null) try stopDaemon(a, argv[0], w);
+    if (write_error) |e| return e;
     if (cut) |c| {
-        try stopDaemon(a, argv[0], w);
-        return .{ .cut = .{ .conn = c, .code = exitCode(end) } };
+        // a buck2 that finished as it was ended passed; an ended run is never a 0
+        if (end == .exited and end.exited == 0) return end;
+        const code = exitCode(end);
+        return .{ .cut = .{ .conn = c, .code = if (code == 0) 1 else code } };
     }
     return end;
 }

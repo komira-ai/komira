@@ -291,7 +291,9 @@ the runner's established TCP connections to the farm's address and port (the
 `engine_address` of the same machine buckconfig) and, for each, how long ago it
 last received anything from the farm: the shorter of `tcp_info`'s
 `last_data_recv` and `last_ack_recv`, the measure the kernel's own TCP
-keepalive uses. It never reads the log: a remote action that runs for an hour
+keepalive uses, counted from the run's start at the earliest, so a connection
+buck2's daemon kept idle from an earlier step is judged only by what it hears
+in this run. It never reads the log: a remote action that runs for an hour
 and prints nothing is normal.
 
 The bound comes from what a live farm does on every connection. The farm server
@@ -313,8 +315,8 @@ moment,
     buck2-farm: watchdog: the connection to the farm from local port 41022 has heard nothing from the farm for 5 min 1 s, past the bound of 5 min 0 s: the farm has closed it and buck2 would wait on it for ever; ending buck2 (SIGINT)
     buck2-farm: stopping buck2's daemon, which holds the dead connection (`./buck2 kill`)
 
-buck2 is sent SIGINT, as a Ctrl-C, and SIGKILL if it has not ended 10 s later
-(a line says so); then `./buck2 kill` stops its daemon, which holds the dead
+buck2 is sent SIGINT, as a Ctrl-C, and SIGKILL if it has not ended once the
+bound has passed again, at most 10 s later (a line says so); then `./buck2 kill` stops its daemon, which holds the dead
 connection and the lost action, so the next run starts with a new one. From
 there the run is treated as a cut: the same wait for the farm, its log kept as
 `buck2-farm.first.log`, one line in the job summary,

@@ -21,14 +21,14 @@ const native_endian = @import("builtin").cpu.arch.endian();
 // ---- the judgement ------------------------------------------------------------
 
 test "no connection, or every one heard from within the bound, is alive" {
-    try t.expectEqual(@as(?wd.Conn, null), wd.dead(&.{}, 300_000));
+    try t.expectEqual(@as(?wd.Conn, null), wd.dead(&.{}, 300_000, std.math.maxInt(u64)));
     const live = [_]wd.Conn{ .{ .local_port = 1, .silent_ms = 0 }, .{ .local_port = 2, .silent_ms = 30_000 }, .{ .local_port = 3, .silent_ms = 299_999 } };
-    try t.expectEqual(@as(?wd.Conn, null), wd.dead(&live, 300_000));
+    try t.expectEqual(@as(?wd.Conn, null), wd.dead(&live, 300_000, std.math.maxInt(u64)));
 }
 
 test "a connection silent exactly the bound is still alive; one millisecond more is dead" {
-    try t.expectEqual(@as(?wd.Conn, null), wd.dead(&.{.{ .local_port = 7, .silent_ms = 300_000 }}, 300_000));
-    try t.expectEqual(@as(?wd.Conn, .{ .local_port = 7, .silent_ms = 300_001 }), wd.dead(&.{.{ .local_port = 7, .silent_ms = 300_001 }}, 300_000));
+    try t.expectEqual(@as(?wd.Conn, null), wd.dead(&.{.{ .local_port = 7, .silent_ms = 300_000 }}, 300_000, std.math.maxInt(u64)));
+    try t.expectEqual(@as(?wd.Conn, .{ .local_port = 7, .silent_ms = 300_001 }), wd.dead(&.{.{ .local_port = 7, .silent_ms = 300_001 }}, 300_000, std.math.maxInt(u64)));
 }
 
 test "one dead connection among live ones makes the run dead, and the longest silent is named" {
@@ -38,7 +38,23 @@ test "one dead connection among live ones makes the run dead, and the longest si
         .{ .local_port = 3, .silent_ms = 13_200_000 }, // 3 h 40 min
         .{ .local_port = 4, .silent_ms = 20 },
     };
-    try t.expectEqual(@as(?wd.Conn, .{ .local_port = 3, .silent_ms = 13_200_000 }), wd.dead(&conns, 300_000));
+    try t.expectEqual(@as(?wd.Conn, .{ .local_port = 3, .silent_ms = 13_200_000 }), wd.dead(&conns, 300_000, std.math.maxInt(u64)));
+}
+
+test "a silence counts from the run's start: a connection idle from before the run is not dead early" {
+    const idle = [_]wd.Conn{.{ .local_port = 9, .silent_ms = 600_000 }};
+    // 1 s into the run: the ten minutes before it do not count
+    try t.expectEqual(@as(?wd.Conn, null), wd.dead(&idle, 300_000, 1_000));
+    try t.expectEqual(@as(?wd.Conn, null), wd.dead(&idle, 300_000, 300_000));
+    // silent for more than the bound within the run: dead, named with the run's share of it
+    try t.expectEqual(@as(?wd.Conn, .{ .local_port = 9, .silent_ms = 300_001 }), wd.dead(&idle, 300_000, 300_001));
+}
+
+test "buck2 is given the bound to end after SIGINT, at most 10 s" {
+    const w2: wd.Watchdog = .{ .a = t.allocator, .farm = &.{}, .bound_ms = 2_000 };
+    try t.expectEqual(@as(u64, 2_000), w2.grace_ms());
+    const w300: wd.Watchdog = .{ .a = t.allocator, .farm = &.{}, .bound_ms = 300_000 };
+    try t.expectEqual(@as(u64, 10_000), w300.grace_ms());
 }
 
 test "a silence is written in minutes and seconds, rounded down" {
@@ -81,7 +97,7 @@ fn mapped(ip: [4]u8) [16]u8 {
     return r;
 }
 
-/// A `struct tcp_info` of `len` bytes with its two receive times set.
+/// A `struct tcp_info` the size of `buf`, with its two receive times set where it holds them.
 fn tcpInfo(buf: []u8, data_ms: u32, ack_ms: u32) []u8 {
     @memset(buf, 0);
     if (buf.len >= 56) std.mem.writeInt(u32, buf[52..56], data_ms, native_endian);
@@ -311,7 +327,7 @@ test "the kernel reports a loopback connection to the farm's port, the runner's 
     var w = try wd.Watchdog.init(t.allocator, "127.0.0.1", port, 300);
     defer w.deinit();
     try t.expectEqual(@as(u64, 300_000), w.bound_ms);
-    try t.expect(w.look() == .alive);
+    try t.expect(w.look(std.math.maxInt(u64)) == .alive);
     // the client's socket, and not the server's end, whose remote is the client
     try t.expectEqual(@as(usize, 1), w.conns.items.len);
     try t.expectEqual(mine.getPort(), w.conns.items[0].local_port);

@@ -55,7 +55,7 @@
 //!    the socket open is the half-open case: the run is ended, buck2's daemon
 //!    stopped (`./buck2 kill`), the reason in the job log and the summary, and
 //!    the step run again and green; a buck2 that ignores SIGINT is ended with
-//!    SIGKILL; three such runs are red after three, never four; one then a
+//!    SIGKILL once the grace (the bound, 2 s) has passed; three such runs are red after three, never four; one then a
 //!    real failure is red naming it; a subcommand other than build, test or
 //!    bxl is ended and not run again. A farm that sends a byte every 25 ms is
 //!    slow but alive: a run that reads 200 of them, so lasts at least 5 s,
@@ -902,7 +902,7 @@ test "a hanging buck2 that ignores SIGINT is ended with SIGKILL, and the step ru
     try t.expectEqual(@as(u8, 0), c.code);
     try t.expectEqual(@as(usize, 2), c.runs);
     try t.expectEqual(@as(usize, 1), c.kills);
-    try t.expect(has(c.out1, "buck2-farm: buck2 has not ended 10 s after SIGINT; ending it with SIGKILL\n"));
+    try t.expect(has(c.out1, "buck2-farm: buck2 has not ended 2 s after SIGINT; ending it with SIGKILL\n"));
     try t.expect(has(c.out1, "buck2-farm: the second run passed\n"));
 }
 
