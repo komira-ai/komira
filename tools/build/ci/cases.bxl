@@ -14,10 +14,10 @@
 #                  that leaves a check out.
 #   shipped cases  rules.bzl as shipped and affected.bxl's configuration: the
 #                  paths that must widen, the log and failure text.
-#   the rest       the aggregate's generator, shards and guards, the
+#   the rest       the aggregate's committed roots and guards, the
 #                  toolchains per platform, the macOS selection, the checks of
 #                  the Python tests' suite (python/tests/families.bzl), and
-#                  the common-task examples' one row in the generated list
+#                  the common-task examples' one root of the check set
 #                  (tasks_cases.bzl, over python/docs/task_tree_fixture/).
 #
 # Each case names what it proves.
@@ -31,7 +31,8 @@ load(":heavy_cases.bzl", "heavy_cases")
 load(":tasks_cases.bzl", "task_tree_cases")
 load(":rules.bzl", "EXCLUDED", "INERT", "WIDEN")
 load(":affected.bxl", "CONFIG")
-load(":ci_graph.bzl", "check_nodes", "closure", "findings", "python_findings", "python_nodes", "render_all", "render_loader", "render_shard", "roots", "sdk_own_deps", "shard_findings", "shard_of", "SHARDS", "LINE_LIMIT")
+load(":ci_graph.bzl", "REGENERATE", "check_nodes", "closure", "findings", "python_findings", "python_nodes", "root_findings", "roots", "sdk_own_deps")
+load(":roots.bzl", "labels_of", "root_files", "root_label", "root_path")
 
 # ---- the table graph ---------------------------------------------------
 #
@@ -40,7 +41,7 @@ load(":ci_graph.bzl", "check_nodes", "closure", "findings", "python_findings", "
 #   src/lib.bzl   -> loaded by src/a/BUCK and src/b/BUCK
 #   docs/x.md     -> owned by docs:doc_tree
 #   .hidden       -> owned by nothing
-#   ci/BUCK, ci/targets.bzl, ci/targets/shard_3.bzl -> the aggregate's package (ci:pr)
+#   ci/BUCK, ci/roots/k/src/b:b -> the aggregate's package (ci:pr; a root's file is ci:root_files')
 
 _FILES = {
     "src/a/a.mojo": True,
@@ -53,26 +54,23 @@ _FILES = {
     "README.md": True,
     ".hidden": True,
     "ci/BUCK": True,
-    "ci/targets.bzl": True,
-    "ci/targets/shard_3.bzl": True,
+    "ci/roots/k/src/b:b": True,
     "orphan.bzl": True,
 }
 _OWNERS = {
     "src/a/a.mojo": ["k//src/a:a"],
     "src/b/b.mojo": ["k//src/b:b"],
     "docs/x.md": ["k//docs:doc_tree"],
-    "ci/targets.bzl": ["k//ci:pr"],
+    "ci/roots/k/src/b:b": ["k//ci:root_files"],
 }
 _PACKAGES = {
     "src/a": ["k//src/a:a", "k//src/a:a_test"],
     "src/b": ["k//src/b:b"],
     "docs": ["k//docs:doc_tree"],
-    "ci": ["k//ci:pr"],
+    "ci": ["k//ci:pr", "k//ci:root_files"],
 }
 _INCLUDING = {
     "src/lib.bzl": ["k//src/a:a", "k//src/a:a_test", "k//src/b:b"],
-    "ci/targets.bzl": ["k//ci:pr"],
-    "ci/targets/shard_3.bzl": ["k//ci:pr"],
 }
 
 # reverse edges: who depends on a target (the aggregate is not in the universe)
@@ -185,12 +183,10 @@ def _real_cases(ctx):
     if "{}:lonely".format(_F) not in text or "1 check target(s)" not in text or "targets.bxl:generate" not in text:
         out.append("real: guard over an aggregate that leaves `lonely` out did not name it and the regeneration: '{}'".format(text))
     # The printed command must not be the bare `cp ... "$(generator)"/.`: an empty generator output
-    # would make it copy `/` into ci/. It assigns the output, checks it is a directory other than /.
-    if 'out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL' not in text or '"$(./buck2' in text:
+    # would make it copy `/` into ci/. It assigns the output, checks it is a directory other than /,
+    # and deletes the committed files only after that.
+    if REGENERATE not in text or not REGENERATE.startswith('out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && git rm ') or '"$(./buck2' in text:
         out.append("real: the regeneration command in the guard message is not the fail-safe form: '{}'".format(text))
-    shard = render_shard(["a//:x"], ["a//:t"])
-    if shard[-8:] != ["TARGETS = [", '    "a//:x",', "]", "", "TESTS = [", '    "a//:t",', "]", ""]:
-        out.append("real: render of a shard: {}".format(shard[-8:]))
     return out
 
 # ---- roots and the execution-platform registration -------------------------
@@ -355,7 +351,7 @@ _ORDINARY = [
     "docs/ci.md",
     "release/artifacts.textproto",
     ".github/workflows/pr.yml",
-    "ci/targets.bzl",
+    "ci/roots/komira/src/containers:ci",
 ]
 
 def _shipped_rules_cases():
@@ -572,78 +568,218 @@ def _adopted_darwin_cases(ctx):
             ctx.configured_targets(t.label, target_platform = _DARWIN)
     return out
 
-# ---- the shards of ci/targets.bzl ------------------------------------------
+# ---- the committed roots (roots.bzl) -------------------------------------------
+#
+# One empty file per root. The cases hold the encoding (label <-> path, both ways, and
+# the paths that name no label), the trees (a test root under ci/test_roots/, any other
+# under ci/roots/), the merge of two branches that each add targets, and the guard's
+# refusals, each named by the path to add or delete.
 
-def _pkg_labels(n, per, prefix = "p"):
-    """`n` packages of `per` targets each, as labels."""
-    return ["k//src/{}{}:t{}".format(prefix, i, j) for i in range(n) for j in range(per)]
+def _changed(base, branch):
+    """path -> "add" or "delete": what `branch` changes in the tree `base` (both path -> "")."""
+    out = {p: "add" for p in branch if p not in base}
+    for p in base:
+        if p not in branch:
+            out[p] = "delete"
+    return out
 
-def _shard_cases():
+def _merge(base, a, b):
+    """(tree, conflicts): git's three-way merge of the file trees `a` and `b` of one `base`, at
+    the level of paths, which is all a tree of empty files has. A path one side changed takes
+    that change; a path both sides changed the same way (two adds of the same empty file, two
+    deletes) takes it; a path the two sides changed differently is a conflict, and so is a file
+    that stands where another file's directory does."""
+    ca, cb = _changed(base, a), _changed(base, b)
+    conflicts = sorted([p for p in ca if p in cb and ca[p] != cb[p]])
+    tree = dict(base)
+    for c in [ca, cb]:
+        for p, op in c.items():
+            if op == "add":
+                tree[p] = ""
+            elif p in tree:
+                tree.pop(p)
+    for p in tree:
+        for q in tree:
+            if q.startswith(p + "/"):
+                conflicts.append("{} is a file and a directory of {}".format(p, q))
+    return tree, conflicts
+
+def _graph(roots_of, tests_of, add = [], add_tests = [], depended = []):
+    """The (roots, tests) of a branch of the graph (`roots_of`, `tests_of`): it adds the
+    targets `add` and the tests `add_tests`, which nothing depends on, and its new targets
+    depend on the old roots `depended`, which are roots no more."""
+    rs = sorted([l for l in roots_of if l not in depended] + add + add_tests)
+    ts = sorted([l for l in tests_of if l not in depended] + add_tests)
+    return rs, ts
+
+_BASE_ROOTS = [
+    "komira//:top",
+    "komira//python/docs/tasks:1-read-csv-file",
+    "komira//src/p1:lib",
+    "komira//src/p1:test_p1",
+    "komira//src/p2:lib",
+    "tests//functional/f:case",
+]
+_BASE_TESTS = ["komira//src/p1:test_p1"]
+
+def _merge_case(name, a, b):
+    """The merge of the branches `a` and `b` (each a (roots, tests) of the graph) of the base:
+    each branch's files are the generator's for its graph, the merge has no conflict in either
+    order, the two orders give one tree, and the guard holds over the merged tree against the
+    graph of both changes (the base's roots, less those either side now depends on, plus both
+    sides' new ones)."""
     out = []
-    labels = _pkg_labels(40, 3) + ["k//:top", "k//tools/build/x:y"]
-    tests = [l for l in labels if l.endswith(":t0")]
-    files = render_all(labels, tests)
+    base = root_files(_BASE_ROOTS, _BASE_TESTS)
+    fa, fb = root_files(a[0], a[1]), root_files(b[0], b[1])
+    ab, conflicts = _merge(base, fa, fb)
+    ba, conflicts_ba = _merge(base, fb, fa)
+    if conflicts or conflicts_ba:
+        out.append("roots: merge, {}: conflicts {} {}".format(name, conflicts, conflicts_ba))
+    if sorted(ab.keys()) != sorted(ba.keys()):
+        out.append("roots: merge, {}: the two orders give different trees".format(name))
+    gone = {l: True for l in _BASE_ROOTS if l not in a[0] or l not in b[0]}
+    merged_roots = sorted({l: True for l in a[0] + b[0] if l not in gone}.keys())
+    merged_tests = sorted({l: True for l in a[1] + b[1] if l not in gone}.keys())
+    text = root_findings(root_files(merged_roots, merged_tests).keys(), ab.keys())
+    if text:
+        out.append("roots: merge, {}: the guard fails over the merged tree: {}".format(name, text))
+    return out
 
-    # placement: a package's rows share a shard, every shard index is in range, and
-    # the rows spread (a hash that sent every package to one shard would pass the rest)
-    for l in labels:
-        n = shard_of(l)
-        if n < 0 or n >= SHARDS:
-            out.append("shards: {} is placed in shard {}, outside 0..{}".format(l, n, SHARDS - 1))
-    if shard_of("k//src/p1:t0") != shard_of("k//src/p1:t2") or shard_of("k//src/p1:t0") != shard_of("other//src/p1:z"):
-        out.append("shards: the rows of one package must share a shard whatever their target or cell")
-    used = {shard_of(l): True for l in _pkg_labels(40, 1)}
-    if len(used) < SHARDS // 2:
-        out.append("shards: 40 packages reach only {} of {} shards".format(len(used), SHARDS))
+def _root_file_cases():
+    out = []
 
-    # the files: one loader and one file per shard; the union of the shards is the input
-    want_files = sorted(["ci/targets.bzl"] + ["ci/targets/shard_{}.bzl".format(n) for n in range(SHARDS)])
-    if sorted(files.keys()) != want_files:
-        out.append("shards: render_all wrote {}, wanted {}".format(sorted(files.keys()), want_files))
-    rows = []
-    trows = []
-    for n in range(SHARDS):
-        lines = files["ci/targets/shard_{}.bzl".format(n)]
-        i = lines.index("TARGETS = [")
-        j = lines.index("TESTS = [")
-        rows += [l.strip().strip(",").strip('"') for l in lines[i + 1:j - 2]]
-        trows += [l.strip().strip(",").strip('"') for l in lines[j + 1:-2]]
-        for l in lines[i + 1:j - 2]:
-            if shard_of(l.strip().strip(",").strip('"')) != n:
-                out.append("shards: shard {} holds {}, which belongs to shard {}".format(n, l.strip(), shard_of(l.strip().strip(",").strip('"'))))
-    if sorted(rows) != sorted(labels) or sorted(trows) != sorted(tests):
-        out.append("shards: the union of the shards ({} target rows, {} test rows) is not the input ({}, {})".format(len(rows), len(trows), len(labels), len(tests)))
+    # the encoding: a label's path is the label with `//` written `/`, and back
+    for label, path in [
+        ("komira//src/avro:avro_conda", "komira/src/avro:avro_conda"),
+        ("komira//:top", "komira/:top"),
+        ("tests//functional/a/b:c.d=e,f+g@h!i~j-k_l", "tests/functional/a/b:c.d=e,f+g@h!i~j-k_l"),
+        ("komira//python/docs/tasks:22-read-json-file-write-records-database__probe_native_insert", "komira/python/docs/tasks:22-read-json-file-write-records-database__probe_native_insert"),
+    ]:
+        if root_path(label) != path:
+            out.append("roots: the path of {} is {}, wanted {}".format(label, root_path(label), path))
+        if root_label(path) != label:
+            out.append("roots: the label of {} is '{}', wanted {}".format(path, root_label(path), label))
+    for path, why in [
+        ("komira", "no cell directory"),
+        ("/src/a:b", "an empty cell"),
+        ("komira/src/a", "no `:`"),
+        ("komira/src/a:b:c", "two `:`"),
+        ("komira/src/a:", "an empty target name"),
+        ("komira/src:x/y:z", "a `:` in a directory"),
+        ("komira/src/b_no_colon", "no `:` in the last part"),
+    ]:
+        if root_label(path) != "":
+            out.append("roots: '{}' ({}) names no label, got '{}'".format(path, why, root_label(path)))
 
-    # the loader loads every shard and exposes the two lists, sorted
-    loader = "\n".join(render_loader())
-    for n in range(SHARDS):
-        if 'load("//ci/targets:shard_{n}.bzl", _TARGETS_{n} = "TARGETS", _TESTS_{n} = "TESTS")'.format(n = n) not in loader:
-            out.append("shards: the loader does not load shard {}".format(n))
-    if "\nTARGETS = sorted(_TARGETS_0 + " not in loader or "\nTESTS = sorted(_TESTS_0 + " not in loader or "_TARGETS_{}".format(SHARDS) in loader:
-        out.append("shards: the loader must expose TARGETS and TESTS as the sorted union of exactly the {} shards".format(SHARDS))
+    # what ci/BUCK reads from its globs: the labels, sorted, and nothing for a path that names none
+    got = labels_of(["roots/komira/src/b:b", "roots/komira/src/a:a", "roots/komira/src/bad", "roots/tests/functional:x"], "roots")
+    if got != ["komira//src/a:a", "komira//src/b:b", "tests//functional:x"]:
+        out.append("roots: labels_of the glob: {}".format(got))
 
-    # the guard on the shards: current is green; stale either way, a test outside
-    # TARGETS, and a shard at the line limit are red, each naming its cause
-    if shard_findings(labels, labels, tests) != "":
-        out.append("shards: a current list failed the guard: " + shard_findings(labels, labels, tests))
-    if "no longer roots" not in shard_findings(labels, labels + ["k//src/gone:x"], tests) or "k//src/gone:x" not in shard_findings(labels, labels + ["k//src/gone:x"], tests):
-        out.append("shards: a row that is no longer a root must fail and be named")
-    if "in no shard" not in shard_findings(labels + ["k//src/new:x"], labels, tests) or "k//src/new:x" not in shard_findings(labels + ["k//src/new:x"], labels, tests):
-        out.append("shards: a root with no row must fail and be named")
-    if "not a row of TARGETS" not in shard_findings(labels, labels, tests + ["k//src/new:x"]):
-        out.append("shards: a TESTS row outside TARGETS must fail")
-    # one package's rows all land in one shard: LINE_LIMIT rows overflow it
-    big = ["k//src/one:t{}".format(i) for i in range(LINE_LIMIT)]
-    text = shard_findings(big, big, [])
-    if "limit" not in text or "shard_{}.bzl".format(shard_of(big[0])) not in text:
-        out.append("shards: a shard of {} rows must fail the line limit and name its file: '{}'".format(LINE_LIMIT, text))
-    just_under = ["k//src/one:t{}".format(i) for i in range(LINE_LIMIT - 11)]
-    if shard_findings(just_under, just_under, []) != "":
-        out.append("shards: a shard of {} lines (one under the limit) must pass".format(LINE_LIMIT - 1))
+    # the trees: a test root's file is under ci/test_roots/, every other root's under ci/roots/
+    got = root_files(["komira//src/a:a", "komira//src/a:test_a", "komira//:top"], ["komira//src/a:test_a"])
+    want = {"ci/roots/komira/:top": "", "ci/roots/komira/src/a:a": "", "ci/test_roots/komira/src/a:test_a": ""}
+    if got != want:
+        out.append("roots: root_files: {}, wanted {}".format(got, want))
+
+    # a file never stands where another's directory does: the target `b` of the package `src/a`
+    # and the targets of the package `src/a/b` (with the `:` dropped, `src/a/b` would be both)
+    paths = root_files(["k//src/a:b", "k//src/a/b:c", "k//src/a/b/c:d", "k//:src"], []).keys()
+    for p in paths:
+        for q in paths:
+            if q.startswith(p + "/"):
+                out.append("roots: the file {} is a directory of {}".format(p, q))
+    _, clash = _merge({}, {"k/src/a/b": ""}, {"k/src/a/b/c": ""})
+    if not clash:
+        out.append("roots: the merge model must refuse a file at the path of another's directory")
+    _, clash = _merge({"x": ""}, {"x": "", "y": ""}, {})
+    if clash:
+        out.append("roots: one side's add is no conflict: {}".format(clash))
+
+    # two branches merge with no conflict, in either order, and the guard holds after: targets
+    # added in two packages; in one package (the task examples, which every example batch adds
+    # to); a new package beside a new test; and two new targets that depend on the same old
+    # root, which both branches delete
+    out += _merge_case(
+        "targets added in two packages",
+        _graph(_BASE_ROOTS, _BASE_TESTS, add = ["komira//src/new_a:lib"]),
+        _graph(_BASE_ROOTS, _BASE_TESTS, add = ["komira//src/p2:extra"]),
+    )
+    out += _merge_case(
+        "targets added in one package",
+        _graph(_BASE_ROOTS, _BASE_TESTS, add = ["komira//python/docs/tasks:2-select-columns"]),
+        _graph(_BASE_ROOTS, _BASE_TESTS, add = ["komira//python/docs/tasks:3-sort-rows"]),
+    )
+    out += _merge_case(
+        "a new package and a new test",
+        _graph(_BASE_ROOTS, _BASE_TESTS, add = ["komira//src/new_b:lib", "komira//src/new_b:lib_conda"]),
+        _graph(_BASE_ROOTS, _BASE_TESTS, add_tests = ["komira//src/p2:test_p2"]),
+    )
+    out += _merge_case(
+        "two new dependents of one old root",
+        _graph(_BASE_ROOTS, _BASE_TESTS, add = ["komira//src/p1:bin"], depended = ["komira//src/p1:lib"]),
+        _graph(_BASE_ROOTS, _BASE_TESTS, add = ["komira//src/p3:bin"], depended = ["komira//src/p1:lib"]),
+    )
+
+    # the guard: the current tree passes; each defect fails, naming the file to add or delete
+    want = root_files(_BASE_ROOTS, _BASE_TESTS).keys()
+
+    def named(text):
+        """(the paths the failure says to add, those it says to delete)."""
+        adds, deletes = [], []
+        for part in text.split(". Add and delete those files")[0].split("; "):
+            if "): " not in part:
+                continue
+            paths = part.split("): ", 1)[1].split(" ")
+            if "have no file" in part:
+                adds += paths
+            elif "name no root" in part:
+                deletes += paths
+        return sorted(adds), sorted(deletes)
+
+    def refused(name, have, adds, deletes, want = want):
+        text = root_findings(want, have)
+        if not text:
+            out.append("roots: guard, {}: passed".format(name))
+            return
+        if named(text) != (sorted(adds), sorted(deletes)):
+            out.append("roots: guard, {}: names {} to add and {} to delete, wanted {} and {}: '{}'".format(name, named(text)[0], named(text)[1], adds, deletes, text))
+        if REGENERATE not in text:
+            out.append("roots: guard, {}: the failure does not name the command that writes every file".format(name))
+
+    if root_findings(want, want) != "":
+        out.append("roots: guard, a current tree failed: " + root_findings(want, want))
+    if root_findings(want, list(reversed(want))) != "":
+        out.append("roots: guard, the order of the listing must not matter")
+    refused("a root with no file", [p for p in want if p != "ci/roots/komira/src/p2:lib"], ["ci/roots/komira/src/p2:lib"], [])
+    refused("a file whose target is gone", want + ["ci/roots/komira/src/gone:x"], [], ["ci/roots/komira/src/gone:x"])
+    g = _graph(_BASE_ROOTS, _BASE_TESTS, add = ["komira//src/p1:bin"], depended = ["komira//src/p1:lib"])
+    nowdep = root_files(g[0], g[1]).keys()
+    refused("a file of a root that now has a dependent", nowdep + ["ci/roots/komira/src/p1:lib"], [], ["ci/roots/komira/src/p1:lib"], want = nowdep)
+    refused("a test filed as a plain root", [p for p in want if "test_p1" not in p] + ["ci/roots/komira/src/p1:test_p1"], ["ci/test_roots/komira/src/p1:test_p1"], ["ci/roots/komira/src/p1:test_p1"])
+    refused("a plain root filed as a test", [p for p in want if p != "ci/roots/komira/src/p2:lib"] + ["ci/test_roots/komira/src/p2:lib"], ["ci/roots/komira/src/p2:lib"], ["ci/test_roots/komira/src/p2:lib"])
+    refused("a root in both trees", want + ["ci/roots/komira/src/p1:test_p1"], [], ["ci/roots/komira/src/p1:test_p1"])
+    refused("a file that names no label", want + ["ci/roots/komira/src/p2_lib"], [], ["ci/roots/komira/src/p2_lib"])
+
+    # after a merge the guard still refuses a branch that left its new root without a file
+    base = root_files(_BASE_ROOTS, _BASE_TESTS)
+    tree, _ = _merge(base, root_files(_BASE_ROOTS + ["komira//src/new_a:lib"], _BASE_TESTS), base)
+    merged_want = root_files(_BASE_ROOTS + ["komira//src/new_a:lib", "komira//src/new_c:lib"], _BASE_TESTS).keys()
+    refused("a merged branch that left its root without a file", tree.keys(), ["ci/roots/komira/src/new_c:lib"], [], want = merged_want)
+
+    # the whole text, by exact equality: one of each, and the count past the first ten
+    text = root_findings(["ci/roots/k/src/a:a"], ["ci/roots/k/src/b:b"])
+    exact = "the committed roots of //ci:pr (ci/roots/, ci/test_roots/) are out of date: 1 root(s) of the check set have no file (first 1, add each as an empty file): ci/roots/k/src/a:a; 1 file(s) name no root of the check set (first 1, delete each): ci/roots/k/src/b:b. Add and delete those files, or write every one from the graph: " + REGENERATE
+    if text != exact:
+        out.append("roots: guard, the failure text: '{}', wanted '{}'".format(text, exact))
+    many = ["ci/roots/k/src/m:" + c for c in "abcdefghijkl".elems()]
+    text = root_findings(many, [])
+    if "12 root(s) of the check set have no file (first 10," not in text or named(text)[0] != many[:10]:
+        out.append("roots: guard, twelve missing files must be counted and the first ten named: '{}'".format(text))
     return out
 
 def _run(ctx):
-    table = _shard_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _shipped_config_cases() + heavy_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _proto_toolchain_cases(ctx) + _adopted_darwin_cases(ctx) + darwin_table_cases() + python_tests_cases()
+    table = _root_file_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _shipped_config_cases() + heavy_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _proto_toolchain_cases(ctx) + _adopted_darwin_cases(ctx) + darwin_table_cases() + python_tests_cases()
     real = _real_cases(ctx) + darwin_real_cases(ctx, DARWIN_PACKAGES, "komira//release:mopm_darwin_libs") + darwin_answer_cases(DARWIN_PACKAGES, "komira//release:mopm_darwin_libs") + task_tree_cases(ctx)
     failures = table + real
     if failures:
