@@ -62,6 +62,6 @@ year=2028/month=1/data_0.parquet
 
 ## Related
 
-- [How do I write a table to Parquet?](../27-write-table-parquet/page.md) (rank 27, partial)
+- [How do I write a table to Parquet?](../27-write-table-parquet/page.md) (rank 27, works)
 - [How do I read a partitioned dataset and skip partitions you do not need?](../98-read-partitioned-dataset-skip-partitions-need/page.md) (rank 98, works)
 - [How do I write a table to a CSV file?](../11-write-table-csv-file/page.md) (rank 11, partial)
