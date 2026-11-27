@@ -1,0 +1,4 @@
+{'t': 1, 'sales': 10, 'prev': None, 'nxt': 13, 'change': None}
+{'t': 2, 'sales': 13, 'prev': 10, 'nxt': 13, 'change': 3}
+{'t': 3, 'sales': 13, 'prev': 13, 'nxt': 9, 'change': 0}
+{'t': 4, 'sales': 9, 'prev': 13, 'nxt': None, 'change': -4}

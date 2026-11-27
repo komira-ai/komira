@@ -67,6 +67,6 @@ month [{'bucket': datetime.date(2026, 10, 1), 'total': 55.0, 'n': 6}, {'bucket':
 ## Related
 
 - [How do I extract year, month and weekday from a date column?](../39-extract-year-month-weekday-date-column/page.md) (rank 39, partial)
-- How do I group by month or week? (rank 80, works; no page yet)
+- [How do I group by month or week?](../80-group-month-week/page.md) (rank 80, partial)
 - How do I fill gaps in a time series so every date is present? (rank 81, gap; no page yet)
-- How do I parse strings into dates? (rank 23, partial; no page yet)
+- [How do I parse strings into dates?](../23-parse-strings-dates/page.md) (rank 23, partial)

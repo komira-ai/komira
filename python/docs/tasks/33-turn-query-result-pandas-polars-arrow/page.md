@@ -94,5 +94,5 @@ pldf = lf.collect().to_polars()  # from the polars-shaped frame
 
 - [How do I read a CSV file?](../1-read-csv-file/page.md) (rank 1, works)
 - [How do I select columns and filter rows?](../2-select-columns-filter-rows/page.md) (rank 2, works)
-- How do I write a table to Parquet? (rank 27, partial; no page yet)
+- [How do I write a table to Parquet?](../27-write-table-parquet/page.md) (rank 27, partial)
 - [How do I run SQL on a CSV or Parquet file (or a DataFrame)?](../37-run-sql-csv-parquet-file/page.md) (rank 37, partial)

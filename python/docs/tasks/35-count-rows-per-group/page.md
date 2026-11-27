@@ -63,5 +63,5 @@ Output:
 
 ## Related
 
-- How do I group by a column and sum another column? (rank 4, works; no page yet)
-- How do I count how many times each value appears? (rank 9, works; no page yet)
+- [How do I group by a column and sum another column?](../4-group-by-column-and-sum/page.md) (rank 4, works)
+- [How do I count how many times each value appears?](../9-count-each-value/page.md) (rank 9, works)

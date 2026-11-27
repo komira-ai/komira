@@ -12,7 +12,7 @@ A test of the Python package is one of three things:
 Every `py_test` and `python_binding_test` of the package is registered through
 `register` when BUCK declares it, by the name it is declared under, and
 `:all` (BUCK's last target) depends on every registered name, so the check set
-(ci/targets.bzl) holds the one row `:all` for this package and a new test
+(ci/roots/) holds the one root `:all` for this package and a new test
 changes no row.
 
 A name declared twice, and a `test_*.py` that no target runs, fail the load of
