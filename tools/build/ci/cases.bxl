@@ -16,7 +16,9 @@
 #                  paths that must widen, the log and failure text.
 #   the rest       the aggregate's generator, shards and guards, the
 #                  toolchains per platform, the macOS selection, the checks of
-#                  the Python tests' suite (python/tests/families.bzl).
+#                  the Python tests' suite (python/tests/families.bzl), and
+#                  the common-task examples' one row in the generated list
+#                  (tasks_cases.bzl, over python/docs/task_tree_fixture/).
 #
 # Each case names what it proves.
 
@@ -26,6 +28,7 @@ load("//python/tests:families_cases.bzl", "python_tests_cases")
 load("//release:darwin_libs.bzl", "DARWIN_PACKAGES")
 load(":darwin_cases.bzl", "darwin_answer_cases", "darwin_real_cases", "darwin_table_cases")
 load(":heavy_cases.bzl", "heavy_cases")
+load(":tasks_cases.bzl", "task_tree_cases")
 load(":rules.bzl", "EXCLUDED", "INERT", "WIDEN")
 load(":affected.bxl", "CONFIG")
 load(":ci_graph.bzl", "check_nodes", "closure", "findings", "python_findings", "python_nodes", "render_all", "render_loader", "render_shard", "roots", "sdk_own_deps", "shard_findings", "shard_of", "SHARDS", "LINE_LIMIT")
@@ -641,7 +644,7 @@ def _shard_cases():
 
 def _run(ctx):
     table = _shard_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _shipped_config_cases() + heavy_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _proto_toolchain_cases(ctx) + _adopted_darwin_cases(ctx) + darwin_table_cases() + python_tests_cases()
-    real = _real_cases(ctx) + darwin_real_cases(ctx, DARWIN_PACKAGES, "komira//release:mopm_darwin_libs") + darwin_answer_cases(DARWIN_PACKAGES, "komira//release:mopm_darwin_libs")
+    real = _real_cases(ctx) + darwin_real_cases(ctx, DARWIN_PACKAGES, "komira//release:mopm_darwin_libs") + darwin_answer_cases(DARWIN_PACKAGES, "komira//release:mopm_darwin_libs") + task_tree_cases(ctx)
     failures = table + real
     if failures:
         fail("{} case(s) failed:\n  ".format(len(failures)) + "\n  ".join(failures))

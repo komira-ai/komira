@@ -456,7 +456,15 @@ def _bind_select(
             )
         plan = _bind_window_projection(stmt, schema, scope, plan^, catalog, cte_scope, prebound)
     elif has_agg or group_present:
-        plan = _bind_aggregate(stmt, schema, scope, plan^, catalog, cte_scope, prebound, order_names, order_carry, order_expr_idx, order_expr_names)
+        # A bare integer literal beside an aggregate (`SELECT 1 AS one,
+        # count(*) FROM t`) is INT32 on the same terms as in a projection.
+        plan = _bind_aggregate(
+            stmt, schema, scope, plan^, catalog, cte_scope, prebound,
+            order_names, order_carry, order_expr_idx, order_expr_names,
+            result_int_literals=(
+                (result_names and stmt.union_all_idx < 0) or int32_result_literals
+            ),
+        )
     else:
         # The result's bare integer literals are INT32 as in DuckDB. Every
         # branch of a UNION ALL binds them INT32 too (`int32_result_literals`),
