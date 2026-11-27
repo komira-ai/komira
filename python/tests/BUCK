@@ -1190,8 +1190,8 @@ require_all_run(
 )
 
 # `:all` builds, and so runs, every test of the package, and is the one row of
-# this package in the check set (ci/targets.bzl): a test added as a file of a
-# family, or as a stanza, joins it without touching a generated list.
+# this package in the check set (its one file, ci/roots/komira/python/tests:all): a test added as a
+# file of a family, or as a stanza, joins it without adding a root.
 ci_aggregate(
     name = "all",
     deps = [":" + name for name in sorted(_SUITE.keys())],

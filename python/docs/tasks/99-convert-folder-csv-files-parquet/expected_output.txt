@@ -1,0 +1,6 @@
+feb.csv -> feb.parquet 3 rows
+jan.csv -> jan.parquet 2 rows
+mar.csv -> mar.parquet 1 rows
+{'order_id': 3, 'item': 'apple', 'qty': 2}
+{'order_id': 4, 'item': 'fig', 'qty': 7}
+{'order_id': 5, 'item': 'pear', 'qty': 1}

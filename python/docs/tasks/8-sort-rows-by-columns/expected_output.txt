@@ -1,0 +1,11 @@
+{'name': 'Di', 'team': 'blue', 'score': 9}
+{'name': 'Bo', 'team': 'blue', 'score': 7}
+{'name': 'Flo', 'team': 'blue', 'score': 5}
+{'name': 'Ana', 'team': 'red', 'score': 9}
+{'name': 'Ed', 'team': 'red', 'score': 7}
+{'name': 'Cy', 'team': 'red', 'score': None}
+['Cy', 'Ana', 'Di', 'Bo', 'Ed', 'Flo']
+['Di', 'Bo', 'Flo', 'Ana', 'Ed', 'Cy']
+['Cy', 'Ana', 'Di', 'Bo', 'Ed', 'Flo']
+['Di', 'Bo', 'Flo', 'Cy', 'Ana', 'Ed']
+['Di', 'Bo', 'Flo', 'Ana', 'Ed', 'Cy']

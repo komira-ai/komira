@@ -92,6 +92,11 @@ dependency, holds a Python rule, a target under `third_party/python/` or
 `tools/build/python/` or a `.py` source; a `.py` file; a release textproto or a
 workflow that runs Python. Its allowlist, `tests/python_closure_allowlist.bzl`,
 only shrinks ([`graph/python_closure.zig`](graph/python_closure.zig)).
+`readme_coverage` (declared in the release package, `//release:readme_coverage`)
+fails when `release/README_COVERAGE.md` is not the text the build graph and the
+READMEs make: every `src/<name>/README.md`, whether its package has a
+`mopm.toml` and a README e2e target, which README gate runs its examples and
+whether it holds one ([`graph/readme_coverage.zig`](graph/readme_coverage.zig)).
 
 ## In the pull-request check
 

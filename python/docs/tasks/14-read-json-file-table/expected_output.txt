@@ -1,0 +1,4 @@
+[{'id': 1, 'name': 'ana', 'score': 9.5}, {'id': 2, 'name': 'bo', 'score': 7.0}, {'id': 3, 'name': 'cy', 'score': None}]
+[{'id': 1, 'name': 'ana', 'score': 9.5}, {'id': 2, 'name': 'bo', 'score': 7.0}, {'id': 3, 'name': 'cy', 'score': None}]
+[{'n': 3, 'best': 9.5}]
+[{'id': 1, 'name': 'ana', 'score': 9.5}, {'id': 2, 'name': 'bo', 'score': 7.0}, {'id': 3, 'name': 'cy', 'score': None}]

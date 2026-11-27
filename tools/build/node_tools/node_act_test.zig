@@ -1,9 +1,10 @@
 //! Unit tests of node_act's pure parts.
-//! Its process behaviour (the four subcommands, their messages and exit
+//! Its process behaviour (the subcommands, their messages and exit
 //! statuses, the environment node is run in) is tests//functional/node_act;
 //! the node rules' targets run through it too.
 const std = @import("std");
 const A = @import("node_act.zig");
+const tartest = @import("node_tartest");
 const t = std.testing;
 
 test "keepDist and isFile" {
@@ -179,4 +180,154 @@ test "coverTable: one line per covered source, in the order given" {
             "binding_test: covered src/a.ts: lines 11/11 (100.00%), branches 5/5 (100.00%)\n",
         try A.coverTable(a, files, &.{ "src/b.ts", "src/a.ts", "src/none.ts" }),
     );
+}
+
+// ---- install-test ---------------------------------------------------------------
+
+test "isTopManifest: the package.json of the one top directory, whatever its name" {
+    try t.expect(A.isTopManifest("package/package.json"));
+    try t.expect(A.isTopManifest("node v25.9/package.json"));
+    try t.expect(A.isTopManifest("./package/package.json"));
+    try t.expect(!A.isTopManifest("package.json"));
+    try t.expect(!A.isTopManifest("/package.json"));
+    try t.expect(!A.isTopManifest("package/dist/package.json"));
+    try t.expect(!A.isTopManifest("package/package.json5"));
+    try t.expect(!A.isTopManifest("package/"));
+}
+
+test "manifestName: the top-level name, a string that is not empty" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings("@komira-ai/komira", try A.manifestName(a, "{\"version\":\"0.0.0\",\"name\":\"@komira-ai/komira\"}"));
+    try t.expectError(error.NoName, A.manifestName(a, "{\"version\":\"0.0.0\"}"));
+    try t.expectError(error.NoName, A.manifestName(a, "{\"name\":7}"));
+    try t.expectError(error.NoName, A.manifestName(a, "{\"name\":\"\"}"));
+    try t.expectError(error.NoName, A.manifestName(a, "{\"dist\":{\"name\":\"nested\"}}"));
+    try t.expectError(error.NoName, A.manifestName(a, "[\"name\"]"));
+    try t.expect(std.meta.isError(A.manifestName(a, "{\"name\":")));
+}
+
+test "tarballName: the name in the top package.json of a tarball, any top directory" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const plain = try tartest.tgz(a, "apache-arrow", "21.2.0", &.{.{ .name = "package/Arrow.js", .data = "export {};\n" }});
+    try t.expectEqualStrings("apache-arrow", try A.tarballName(a, plain));
+    const types = try tartest.gzip(a, try tartest.tar(a, &.{
+        .{ .name = "node v25.9/", .kind = '5', .mode = 0o755 },
+        .{ .name = "node v25.9/README.md", .data = "types\n" },
+        .{ .name = "node v25.9/package.json", .data = "{\"name\":\"@types/node\",\"version\":\"25.9.9\"}" },
+    }));
+    try t.expectEqualStrings("@types/node", try A.tarballName(a, types));
+    // A package.json deeper down is not the package's.
+    const nested = try tartest.gzip(a, try tartest.tar(a, &.{
+        .{ .name = "package/", .kind = '5', .mode = 0o755 },
+        .{ .name = "package/sub/package.json", .data = "{\"name\":\"inner\"}" },
+    }));
+    try t.expectError(error.NoManifest, A.tarballName(a, nested));
+    const nameless = try tartest.gzip(a, try tartest.tar(a, &.{
+        .{ .name = "package/package.json", .data = "{\"version\":\"1.0.0\"}" },
+    }));
+    try t.expectError(error.NoName, A.tarballName(a, nameless));
+    try t.expect(std.meta.isError(A.tarballName(a, "not gzip")));
+}
+
+test "projectManifest: one file: dependency, every other tarball an override, by absolute path" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const text = try A.projectManifest(
+        a,
+        "/s/project",
+        .{ .name = "@komira-ai/komira", .file = "tarballs/komira-ai-komira-0.0.0.tgz" },
+        &.{
+            .{ .name = "@komira-ai/komira-linux-x64-gnu", .file = "tarballs/komira-ai-komira-linux-x64-gnu-0.0.0.tgz" },
+            .{ .name = "apache-arrow", .file = "tarballs/npm-apache-arrow-21.2.0.tgz" },
+        },
+    );
+    try t.expect(std.mem.endsWith(u8, text, "}\n"));
+    const v = (try std.json.parseFromSlice(std.json.Value, a, text, .{})).value;
+    try t.expectEqual(@as(usize, 6), v.object.count());
+    try t.expectEqualStrings("komira-install-test", v.object.get("name").?.string);
+    try t.expectEqualStrings("0.0.0", v.object.get("version").?.string);
+    try t.expect(v.object.get("private").?.bool);
+    try t.expectEqualStrings("module", v.object.get("type").?.string);
+    const deps = v.object.get("dependencies").?.object;
+    try t.expectEqual(@as(usize, 1), deps.count());
+    try t.expectEqualStrings("file:/s/project/tarballs/komira-ai-komira-0.0.0.tgz", deps.get("@komira-ai/komira").?.string);
+    const over = v.object.get("overrides").?.object;
+    try t.expectEqual(@as(usize, 2), over.count());
+    try t.expectEqualStrings("file:/s/project/tarballs/komira-ai-komira-linux-x64-gnu-0.0.0.tgz", over.get("@komira-ai/komira-linux-x64-gnu").?.string);
+    try t.expectEqualStrings("file:/s/project/tarballs/npm-apache-arrow-21.2.0.tgz", over.get("apache-arrow").?.string);
+    // With no other tarball, overrides is an empty object.
+    const alone = (try std.json.parseFromSlice(std.json.Value, a, try A.projectManifest(a, "/p", .{ .name = "p", .file = "tarballs/p.tgz" }, &.{}), .{})).value;
+    try t.expectEqual(@as(usize, 0), alone.object.get("overrides").?.object.count());
+}
+
+test "clash: a package name or a file name given twice" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const have = [_]A.Tarball{.{ .name = "tslib", .file = "tarballs/tslib-2.8.1.tgz" }};
+    try t.expect(try A.clash(a, &have, .{ .name = "flatbuffers", .file = "tarballs/flatbuffers.tgz" }) == null);
+    try t.expect(try A.clash(a, &.{}, .{ .name = "tslib", .file = "tarballs/tslib-2.8.1.tgz" }) == null);
+    try t.expectEqualStrings(
+        "tarballs/tslib-2.8.1.tgz and tarballs/other.tgz are both the package tslib",
+        (try A.clash(a, &have, .{ .name = "tslib", .file = "tarballs/other.tgz" })).?,
+    );
+    try t.expectEqualStrings(
+        "two tarballs are named tarballs/tslib-2.8.1.tgz",
+        (try A.clash(a, &have, .{ .name = "other", .file = "tarballs/tslib-2.8.1.tgz" })).?,
+    );
+}
+
+test "npmInstallArgv: offline, no install script, engines enforced, nothing of the worker's" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const argv = try A.npmInstallArgv(a, "/n/bin/node", "/npm", "/s");
+    const want = [_][]const u8{
+        "/n/bin/node",
+        "/npm/bin/npm-cli.js",
+        "install",
+        "--offline",
+        "--ignore-scripts",
+        "--engine-strict",
+        "--no-audit",
+        "--no-fund",
+        "--no-update-notifier",
+        "--loglevel=warn",
+        "--cache=/s/npm-cache",
+        "--userconfig=/s/npmrc",
+        "--globalconfig=/s/npmrc-global",
+    };
+    try t.expectEqual(want.len, argv.len);
+    for (want, argv) |w, g| try t.expectEqualStrings(w, g);
+}
+
+test "installScripts: the packages npm marks hasInstallScript, sorted, and nothing else" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const lock =
+        \\{"name":"t","lockfileVersion":3,"packages":{
+        \\  "":{"name":"t","hasInstallScript":true},
+        \\  "node_modules/zz":{"version":"1.0.0","hasInstallScript":true},
+        \\  "node_modules/@komira-ai/komira":{"version":"0.0.0","hasInstallScript":true},
+        \\  "node_modules/tslib":{"version":"2.8.1"},
+        \\  "node_modules/off":{"version":"1.0.0","hasInstallScript":false},
+        \\  "node_modules/odd":{"version":"1.0.0","hasInstallScript":"yes"}
+        \\}}
+    ;
+    const got = try A.installScripts(a, lock);
+    try t.expectEqual(@as(usize, 3), got.len);
+    try t.expectEqualStrings("", got[0]);
+    try t.expectEqualStrings("node_modules/@komira-ai/komira", got[1]);
+    try t.expectEqualStrings("node_modules/zz", got[2]);
+    try t.expectEqual(@as(usize, 0), (try A.installScripts(a, "{\"packages\":{\"node_modules/a\":{\"version\":\"1.0.0\"}}}")).len);
+    try t.expectError(error.NotALock, A.installScripts(a, "{\"lockfileVersion\":3}"));
+    try t.expectError(error.NotALock, A.installScripts(a, "{\"packages\":[]}"));
+    try t.expectError(error.NotALock, A.installScripts(a, "[]"));
+    try t.expect(std.meta.isError(A.installScripts(a, "{\"packages\":")));
 }

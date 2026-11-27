@@ -20,8 +20,9 @@ incompatibility under the key fails instead of driving buck2.
 `graph_check` declares a BXL graph check (graph/checks.bxl): the check's name
 and the targets it queries, as strings, never as dependencies, and its Zig
 checker. .github/workflows/pr.yml runs the BXL for each graph_check; the checker runs over the facts the BXL collected as a build action.
-python_closure also reads files (`trees`, doc_tree targets as strings, and
-`srcs`) and takes its allowlist (`surface`, `ceiling`).
+python_closure and readme_coverage also read files (`trees`, doc_tree targets
+as strings, and `srcs`); python_closure takes its allowlist (`surface`,
+`ceiling`).
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -168,9 +169,10 @@ graph_check_rule = rule(
         "check": attrs.string(),
         "checker": attrs.exec_dep(providers = [RunInfo]),
         "targets": attrs.list(attrs.string()),
-        # python_closure: the doc_tree targets it reads the files of, as
-        # strings keyed by their cell's path in the repository, and the
-        # files of this package a doc_tree skips.
+        # python_closure and readme_coverage: the doc_tree targets they read
+        # the files of, as strings keyed by their cell's path in the
+        # repository, and more files of this package (python_closure: the
+        # dotfiles a doc_tree skips; readme_coverage: its ledger).
         "trees": attrs.dict(attrs.string(), attrs.string(), default = {}),
         "srcs": attrs.list(attrs.source(), default = []),
         # python_closure's allowlist (graph_checks.zig): package paths of

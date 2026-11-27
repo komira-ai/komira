@@ -1,0 +1,7 @@
+{'item': 'ink', 'stock': 3, 'total': 21.75, 'half': 1.5}
+{'item': 'pad', 'stock': 6, 'total': 24.0, 'half': 3.0}
+{'item': 'pen', 'stock': 6, 'total': 12.5, 'half': 3.0}
+['item', 'qty', 'spare', 'price', 'stock', 'total', 'half']
+int64 float64 float64
+[{'item': 'ink', 'stock': 3, 'total': 21.75, 'half': 1.5}, {'item': 'pad', 'stock': 6, 'total': 24.0, 'half': 3.0}, {'item': 'pen', 'stock': 6, 'total': 12.5, 'half': 3.0}]
+[{'item': 'ink', 'stock': 3, 'total': 21.75, 'half': 1.5}, {'item': 'pad', 'stock': 6, 'total': 24.0, 'half': 3.0}, {'item': 'pen', 'stock': 6, 'total': 12.5, 'half': 3.0}]

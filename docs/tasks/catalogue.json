@@ -39,7 +39,10 @@
     "slug": "find-fill-missing-values",
     "category": "Clean",
     "question": "How do I find and fill missing values?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2362"
+    ]
   },
   {
     "rank": 7,
@@ -74,7 +77,12 @@
     "slug": "write-table-csv-file",
     "category": "Write",
     "question": "How do I write a table to a CSV file?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2372",
+      "komira-ai/komira#2374",
+      "komira-ai/komira#2322"
+    ]
   },
   {
     "rank": 12,
@@ -88,7 +96,11 @@
     "slug": "remove-duplicate-rows",
     "category": "Clean",
     "question": "How do I remove duplicate rows?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2378",
+      "komira-ai/komira#2380"
+    ]
   },
   {
     "rank": 14,
@@ -119,7 +131,12 @@
     "slug": "apply-function-value-column",
     "category": "Transform",
     "question": "How do I apply a function to every value in a column?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2332",
+      "komira-ai/komira#2384",
+      "komira-ai/komira#2330"
+    ]
   },
   {
     "rank": 18,
@@ -133,7 +150,11 @@
     "slug": "read-many-files-matching-pattern-table",
     "category": "Read",
     "question": "How do I read many files matching a pattern into one table?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2385",
+      "komira-ai/komira#2386"
+    ]
   },
   {
     "rank": 20,
@@ -171,14 +192,20 @@
     "slug": "parse-strings-dates",
     "category": "Time",
     "question": "How do I parse strings into dates?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2366"
+    ]
   },
   {
     "rank": 24,
     "slug": "compute-summary-statistics-column",
     "category": "Aggregate",
     "question": "How do I compute summary statistics of a column?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2367"
+    ]
   },
   {
     "rank": 25,
@@ -202,14 +229,20 @@
     "slug": "write-table-parquet",
     "category": "Write",
     "question": "How do I write a table to Parquet?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2368"
+    ]
   },
   {
     "rank": 28,
     "slug": "process-csv-larger-than-memory",
     "category": "Read",
     "question": "How do I process a CSV that does not fit in memory?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2369"
+    ]
   },
   {
     "rank": 29,
@@ -313,21 +346,30 @@
     "slug": "lowercase-trim-replace-text-column",
     "category": "Strings",
     "question": "How do I lowercase, trim and replace text in a column?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2371"
+    ]
   },
   {
     "rank": 43,
     "slug": "concatenate-string-columns",
     "category": "Strings",
     "question": "How do I concatenate string columns?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2373"
+    ]
   },
   {
     "rank": 44,
     "slug": "split-string-column-columns",
     "category": "Strings",
     "question": "How do I split a string column into several columns?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2375"
+    ]
   },
   {
     "rank": 45,
@@ -354,7 +396,10 @@
     "slug": "get-top-n-rows-per-group",
     "category": "Aggregate",
     "question": "How do I get the top N rows per group?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2377"
+    ]
   },
   {
     "rank": 48,
@@ -375,49 +420,74 @@
     "slug": "percent-of-group-total",
     "category": "Aggregate",
     "question": "How do I compute each row's percent of its group total?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2379",
+      "komira-ai/komira#2381"
+    ]
   },
   {
     "rank": 51,
     "slug": "make-pivot-table",
     "category": "Aggregate",
     "question": "How do I make a pivot table?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2399",
+      "komira-ai/komira#2400"
+    ]
   },
   {
     "rank": 52,
     "slug": "melt-wide-data-long",
     "category": "Transform",
     "question": "How do I melt (unpivot) wide data to long?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2399",
+      "komira-ai/komira#2400"
+    ]
   },
   {
     "rank": 53,
     "slug": "reshape-long-data-wide",
     "category": "Transform",
     "question": "How do I reshape long data to wide?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2399",
+      "komira-ai/komira#2400"
+    ]
   },
   {
     "rank": 54,
     "slug": "cross-tabulate-two-columns",
     "category": "Transform",
     "question": "How do I cross-tabulate two columns?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2400"
+    ]
   },
   {
     "rank": 55,
     "slug": "replace-values-with-null",
     "category": "Clean",
     "question": "How do I replace specific values such as 'N/A' with null?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2401"
+    ]
   },
   {
     "rank": 56,
     "slug": "detect-outliers",
     "category": "Clean",
     "question": "How do I detect outliers?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2367"
+    ]
   },
   {
     "rank": 57,
@@ -445,7 +515,10 @@
     "slug": "convert-column-to-numbers",
     "category": "Clean",
     "question": "How do I convert a column to numbers, turning bad values into null?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2402"
+    ]
   },
   {
     "rank": 61,
@@ -570,7 +643,10 @@
     "slug": "compare-row-previous-row",
     "category": "Time",
     "question": "How do I compare each row with the previous row (lag, lead, change)?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2387"
+    ]
   },
   {
     "rank": 78,
@@ -587,14 +663,20 @@
     "slug": "add-days-date-take-difference-dates",
     "category": "Time",
     "question": "How do I add days to a date or take the difference between dates?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2388"
+    ]
   },
   {
     "rank": 80,
     "slug": "group-month-week",
     "category": "Time",
     "question": "How do I group by month or week?",
-    "status": "works"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2408"
+    ]
   },
   {
     "rank": 81,
@@ -611,7 +693,7 @@
     "slug": "convert-unix-timestamp-datetime-back",
     "category": "Time",
     "question": "How do I convert a Unix timestamp to a datetime and back?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
       "komira-ai/komira#2344"
     ]
@@ -676,7 +758,7 @@
     "slug": "bulk-load-large-file-database",
     "category": "Databases",
     "question": "How do I bulk-load a large file into a database?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
       "komira-ai/komira#2335"
     ]
@@ -686,8 +768,9 @@
     "slug": "keep-history-changing-rows",
     "category": "Databases",
     "question": "How do I keep history of changing rows (slowly changing dimension)?",
-    "status": "gap",
+    "status": "partial",
     "issues": [
+      "komira-ai/komira#2334",
       "komira-ai/komira#2335"
     ]
   },
@@ -726,7 +809,10 @@
     "slug": "query-iceberg-table",
     "category": "Cloud storage",
     "question": "How do I query an Iceberg table?",
-    "status": "partial"
+    "status": "gap",
+    "issues": [
+      "komira-ai/komira#2363"
+    ]
   },
   {
     "rank": 95,
@@ -777,6 +863,10 @@
     "slug": "read-csv-odd-delimiter-no-header",
     "category": "Read",
     "question": "How do I read a CSV with an odd delimiter, no header or extra lines?",
-    "status": "partial"
+    "status": "partial",
+    "issues": [
+      "komira-ai/komira#2364",
+      "komira-ai/komira#2365"
+    ]
   }
 ]

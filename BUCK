@@ -112,17 +112,19 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
-# The cases of the mopm jobs of release.yml: the continuous prod publish (each prod job's
-# gate, needs, environment and permissions, the commands), no beta job, no schedule, the
-# release-main concurrency group, no secret, the version of every run, and that the staged set
-# (mopm-staged-<sha>, mopm-prod-staged-<sha>) is kept 7 to 14 days for a rerun on a later day
-# (.github/workflows/release_workflow_test.zig says what each catches), and no wheel stage (no
-# wheel job, no setup-python, no wheel target, no smoke driver: pypi.yml tests the wheel). A build
-# action.
+# The cases of the mopm jobs of release.yml: the continuous publish to beta and then prod (each
+# beta and prod job's gate, needs, environment and permissions, the commands, each job's registry,
+# and prod-stage needing beta-commit), no schedule, the release-main concurrency group, no secret,
+# the version of every run, and that the staged set (mopm-staged-<sha>, mopm-beta-staged-<sha>,
+# mopm-prod-staged-<sha>) is kept 7 to 14 days for a rerun on a later day
+# (.github/workflows/release_workflow_test.zig and release_publish_group.zig say what each
+# catches), and no wheel stage (no wheel job, no setup-python, no wheel target, no smoke driver:
+# pypi.yml tests the wheel). A build action.
 zig_test(
     name = "release_workflow_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/workflows/release_workflow_test.zig",
+    imports = [".github/workflows/release_publish_group.zig"],
     data = {
         "workflows/release.yml": ".github/workflows/release.yml",
         "packages.bzl": "//release/readme_e2e:packages.bzl",
@@ -135,8 +137,8 @@ zig_test(
 # The whole-set check of release.yml (.github/workflows/release_plan_expect_test.zig says what each case
 # catches): `mopm-stage` builds //release:mopm_plan_expectation on the farm and, as the step right after
 # `mopm stage`, runs `release_staged_verify expect` on the staged plan with it, with no condition and no
-# ignored failure, and `prod-stage` needs `mopm-stage`, so a set that is not every package on every
-# platform stops before the registry is asked for a group. A build action.
+# ignored failure, and `beta-stage` and `prod-stage` need `mopm-stage`, so a set that is not every
+# package on every platform stops before either registry is asked for a group. A build action.
 zig_test(
     name = "release_plan_expect_cases",
     exec_compatible_with = LINUX_X86_64,
@@ -224,7 +226,7 @@ zig_test(
             "packages.bzl": "//release/readme_e2e:packages.bzl",
             "darwin_libs.bzl": "//release:darwin_libs.bzl",
             "release.BUCK": "//release:release_buck",
-            "ci_targets": "//ci:target_shards",
+            "ci_roots": "//ci:root_files",
         },
         **{"workflows/" + w.removeprefix(".github/workflows/"): w for w in WORKFLOWS}
     ),

@@ -51,16 +51,19 @@ commits nothing and never rewrites history. The plan:
    `mojo_library` is kept above `mojo_package`; the other comments are written by the tool.
 5. **`README.md`**: a `## Build files` section is appended.
 6. **Shared rows**, each inserted at its sorted place: `release/readme_e2e/packages.bzl` and
-   `release/mopm_native_ids.bzl` (the `load` and the row). It does not edit `ci/targets.bzl` or its
-   shards: those are generated (see below). It does not delete the library's row in
+   `release/mopm_native_ids.bzl` (the `load` and the row). It does not write the check set's root
+   files (`ci/roots/`): the generator does (see below). It does not delete the library's row in
    `release/UNPUBLISHED.md`: `//release:unpublished_cases` refuses the change until the author deletes it.
+   It does not edit the package's row in `release/README_COVERAGE.md` either: the graph check
+   `//release:readme_coverage` prints the row it must be (`mopm.toml`, e2e and the `mojo_adopted_library`
+   gate), and the author copies it.
 
 What it leaves to the farm, and prints: `buildrules.mojo.bzl` and `buildrules.mojo.lock.bzl`
 (`buildrules mojo sync`, the recipe's step 4), `coverage_floor.txt` (a measure), and the regeneration of the
-`ci/targets` rows (`:ci`, `:conda_holds`, `:coverage_floor`, `:table` of the package): the plan prints the
+check set's roots (`:ci`, `:conda_holds`, `:coverage_floor`, `:table` of the package): the plan prints the
 command for the layout it finds, `./buck2 bxl komira//tools/build/ci/targets.bxl:generate > ci/targets.bzl`
-for one file, `out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL --no-preserve=mode "$out"/. ci/`
-for the sharded layout (`ci/targets/shard_<n>.bzl`; the form refuses an empty or missing generator output, which a bare `"$(...)"/.` would turn into a copy of `/`), then `guard.bxl:check`. The tool builds and runs nothing.
+for one file, `out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && git rm -rqf --ignore-unmatch ci/roots ci/test_roots && git clean -fdq -- ci/roots ci/test_roots && cp -rL --no-preserve=mode "$out"/. ci/ && git add ci/roots ci/test_roots`
+for one file per root (`tools/build/ci/roots.bzl`; the form refuses an empty or missing generator output, which a bare `"$(...)"/.` would turn into a copy of `/`, and deletes the old files only after the generator succeeded), then `guard.bxl:check`. The tool builds and runs nothing.
 
 ## What it refuses
 
@@ -127,7 +130,7 @@ tool keeps the comment as written, so the author edits it.
   above `cxx_toolchain`; a native deep in the closure adds the attribute; none in the closure adds nothing; a package that
   owns C, a dependency with `[native-dependencies]` or a shared `[native.<id>]`, and a static native only the test-only
   dependencies reach, are refused; a native reached by both closures gives one attribute; two natives are named in the plural.
-- the plan writes no `ci/targets` row and names the generator for each layout.
+- the plan writes no root of the check set and names the generator for each layout.
 - the dry run prints the plan and the tree is byte for byte what it was.
 - a real run on a scratch tree, and a second run that refuses.
 - the BUCK reader and the import scanner on their own.
