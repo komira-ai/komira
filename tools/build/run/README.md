@@ -21,7 +21,7 @@ replaced, is `docs/design/zig_gate_runner.md`.
 ```
 gate mojo --busybox B --runtime-lib DIR --label L --test ROOT/bin/NAME --marker M
           [--mem-cap-mib N] [--deadline-s L --runner-timeout-s T] [--hang-limit-s N]
-          [--limit-s N --limit-report coverage]
+          [--limit-s N --limit-report coverage] [--stdout FILE]
           [--env NAME=VALUE | --lib-dir DIR]... [--arg VALUE]...
 ```
 
@@ -46,6 +46,16 @@ gate mojo --busybox B --runtime-lib DIR --label L --test ROOT/bin/NAME --marker 
   banner, `GATED TEST FAILED: <label> (exit <rc>)` with the last 200 lines of
   the test's output, and the test's own status (128+N for a death by signal
   N; 77 is red like any other status).
+- `--stdout FILE` (once, before the first `--env`, `--lib-dir` or `--arg`; the
+  path is relative to the action's directory, as `--marker` is): FILE is
+  created or truncated before the run and holds exactly the bytes the test
+  wrote to stdout (empty when it wrote none); the log, and so the banner's
+  output section, then holds its stderr alone. On a red test the banner is
+  followed by `------------------------------------------------------------------ stdout`,
+  the last 200 lines of FILE and a rule line; a coverage run past its limit
+  shows them under `... stdout (last 200 lines)`. A FILE that cannot be
+  created exits 2. Without it nothing changes: both streams go to the log and
+  no marker or banner byte differs.
 - `--mem-cap-mib`: every 0.1 s the resident memory of the test and every
   process below it is summed from the process table (`/proc`; on macOS,
   libproc); over the cap, all of them are

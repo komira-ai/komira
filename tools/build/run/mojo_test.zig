@@ -111,6 +111,9 @@ test "G1 usage: every bad command line exits 2 with its runner's message, and no
         .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "1800s" }), .msg = "hang_limit: REFUSING: the limit '1800s' is not a positive whole number of seconds" },
         .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "5", "--deadline-s", "30", "--runner-timeout-s", "90" }), .msg = "gate_runner: usage error: --hang-limit-s is a limit of its own" },
         .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "5", "--limit-s", "30", "--limit-report", "coverage" }), .msg = "gate_runner: usage error: --hang-limit-s is a limit of its own" },
+        .{ .argv = try e.args("exit", &.{ "--stdout", "o1", "--stdout", "o2" }), .msg = "gate_runner: --stdout given twice" },
+        .{ .argv = try e.args("exit", &.{"--stdout"}), .msg = "gate_runner: --stdout needs a value" },
+        .{ .argv = try e.args("exit", &.{ "--arg", "x", "--stdout", "o1" }), .msg = "gate_runner: --stdout after an --env, --lib-dir or --arg" },
         .{ .argv = &.{ "mojo", "--busybox", e.bb, "--runtime-lib", "l", "--label", label, "--test", "root/x", "--marker", "passed" }, .msg = "gate_runner: " },
     };
     for (cases) |c| {
@@ -342,6 +345,75 @@ test "G10 G11 banner: byte golden for exit 1 and 77 and deaths by SIGKILL and SI
     const out = output(r.err);
     try std.testing.expect(std.mem.startsWith(u8, out, "line 51\n"));
     try std.testing.expect(std.mem.endsWith(u8, out, "line 250\n"));
+}
+
+test "stdout file: a passing test's stdout lands in it exactly, its stderr does not, the marker is as without it" {
+    const e = try Env.init();
+    defer e.deinit();
+    const r = try e.run(try e.args("streams", &.{ "--stdout", "got.txt", "--arg", "0" }), .{});
+    try std.testing.expectEqual(@as(u8, 0), r.status);
+    try std.testing.expectEqualStrings("", r.out);
+    try std.testing.expectEqualStrings("", r.err);
+    try std.testing.expectEqualStrings("out 1\nout 2\n", try kit.readFile(e.a, try e.path("got.txt")));
+    try std.testing.expectEqualStrings("PASS //x:y\n", try kit.readFile(e.a, try e.path("passed")));
+}
+
+test "stdout file: a test that prints nothing leaves an empty file, and an old file is truncated" {
+    const e = try Env.init();
+    defer e.deinit();
+    try std.fs.cwd().writeFile(.{ .sub_path = try e.path("got.txt"), .data = "stale bytes from an earlier run\n" });
+    const r = try e.run(try e.args("exit", &.{ "--stdout", "got.txt", "--arg", "0" }), .{});
+    try std.testing.expectEqual(@as(u8, 0), r.status);
+    try std.testing.expect(kit.exists(try e.path("got.txt")));
+    try std.testing.expectEqualStrings("", try kit.readFile(e.a, try e.path("got.txt")));
+}
+
+test "stdout file: a red test shows the banner over its stderr, then its stdout under the stdout heading" {
+    const e = try Env.init();
+    defer e.deinit();
+    const r = try e.run(try e.args("streams", &.{ "--stdout", "got.txt", "--arg", "3" }), .{});
+    try std.testing.expectEqual(@as(u8, 3), r.status);
+    const want = "==================================================================\nGATED TEST FAILED: //x:y (exit 3)\nThe library's package is not produced until this test passes.\n" ++
+        "------------------------------------------------------------------ output\nerr 1\n" ++
+        "==================================================================\n" ++
+        "------------------------------------------------------------------ stdout\nout 1\nout 2\n" ++
+        "==================================================================\n";
+    try std.testing.expectEqualStrings(want, r.err);
+    try std.testing.expect(!kit.exists(try e.path("passed")));
+    // A death by signal shows the same two sections.
+    const sig = try e.run(try e.args("signal", &.{ "--stdout", "got.txt", "--arg", "9" }), .{});
+    try std.testing.expectEqual(@as(u8, 137), sig.status);
+    try std.testing.expectEqualStrings("==================================================================\nGATED TEST FAILED: //x:y (exit 137)\nThe library's package is not produced until this test passes.\n" ++
+        "------------------------------------------------------------------ output\n==================================================================\n" ++
+        "------------------------------------------------------------------ stdout\n==================================================================\n", sig.err);
+}
+
+test "stdout file: a red test's stdout section is the last 200 lines of the file" {
+    const e = try Env.init();
+    defer e.deinit();
+    const r = try e.run(try e.args("lines", &.{ "--stdout", "got.txt", "--arg", "250", "--arg", "1", "--arg", "1" }), .{});
+    try std.testing.expectEqual(@as(u8, 1), r.status);
+    const heading = "------------------------------------------------------------------ stdout\n";
+    const i = std.mem.indexOf(u8, r.err, heading).?;
+    const section = r.err[i + heading.len ..];
+    try std.testing.expect(std.mem.startsWith(u8, section, "line 51\n"));
+    try std.testing.expect(std.mem.endsWith(u8, section, "line 250\n" ++ util.rule ++ "\n"));
+    // The banner's own output section (the stderr log) is empty: only its rule line before the stdout heading.
+    const out_head = "------------------------------------------------------------------ output\n";
+    const k = std.mem.indexOf(u8, r.err, out_head).? + out_head.len;
+    try std.testing.expectEqualStrings(util.rule ++ "\n", r.err[k..i]);
+    // The file itself keeps all 250 lines.
+    const all = try kit.readFile(e.a, try e.path("got.txt"));
+    try std.testing.expect(std.mem.startsWith(u8, all, "line 1\n"));
+}
+
+test "stdout file: a path that cannot be created is refused with exit 2 and no marker" {
+    const e = try Env.init();
+    defer e.deinit();
+    const r = try e.run(try e.args("exit", &.{ "--stdout", "no/such/dir/got.txt", "--arg", "0" }), .{});
+    try std.testing.expectEqual(@as(u8, 2), r.status);
+    try std.testing.expect(std.mem.startsWith(u8, r.err, "gate_runner: cannot write the stdout file no/such/dir/got.txt: FileNotFound\n"));
+    try std.testing.expect(!kit.exists(try e.path("passed")));
 }
 
 // The production exec (execve, no fixture): busybox's printenv as the test,

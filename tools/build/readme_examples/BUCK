@@ -18,8 +18,10 @@ _ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 # release member that packages no README or one with no example
 # (tools/build/package/release_set.bzl); `tasks-check` holds the catalogue of
 # common tasks to a language's task pages (tasks.zig; python/docs/tasks/BUCK);
-# `check` and `fill` are a source-first README's freshness check and the patch
-# that mends it (include.zig), `migrate` turns an inline README into files and
+# `check` and `fill` are the freshness check and the patch that mends it of
+# every document that shows files, a package README or a task page alike, by
+# one rule table (include.zig); `compare-output` holds what a README example
+# printed to its expected-output file (output.zig); `migrate` turns an inline README into files and
 # includes and `migrate --verify` proves it the same programs (migrate.zig),
 # and `expect-failure` passes only when a command fails with a given text
 # (expect_failure.zig; tools/build/mojo/readme.bzl's failure fixture).
@@ -91,7 +93,7 @@ zig_module(
     name = "examples",
     src = "examples.zig",
     # The marker words (examples.zig reads an include marker).
-    imports = ["task_page.zig"],
+    imports = ["markers.zig"],
     deps = ["//tools/build/markdown:markdown"],
     unit_tests = [":readme_examples_unit"],
     visibility = ["//tools/build/selftest/graph:"],

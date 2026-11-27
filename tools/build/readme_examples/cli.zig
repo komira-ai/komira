@@ -14,22 +14,32 @@
 //!         mode (examples.zig); --includes refuse (the README of a library
 //!         still on the inline model) refuses include markers. Every flag
 //!         but --includes (allow when absent) is required.
-//!     tool check --readme <README.md> --display <name> [--example <path>=<file>]... --out <file>
-//!         The freshness check of a source-first README (include.zig):
-//!         each --example is a file the library lists, <path> as an include
-//!         names it (`examples/<name>.mojo`, relative to the README) and
-//!         <file> where it is read. Passing, writes one line to --out: how
-//!         many examples it shows, or `NO EXAMPLE` when it lists and shows
-//!         none (exit 0); refused, prints each refusal on its own line and
-//!         writes nothing (exit 1).
-//!     tool fill --readme <README.md> --display <name> [--example <path>=<file>]... --out <file>
-//!         Writes to --out the patch that makes the README what `fill`
+//!     tool check --kind readme|task --out <file> (--page <page> --display <name> [--example <path>=<file>]...)...
+//!         The freshness check of documents that show files (include.zig),
+//!         one or more pages of the kind --kind names (`readme`: a package
+//!         README; `task`: a task page), each `--page` followed by its own
+//!         --display and --examples. Each --example is a file the page may
+//!         show, <path> as an include names it (relative to the page:
+//!         `examples/<name>.mojo` from a README, `example.py` from a task
+//!         page) and <file> where it is read. Passing, writes one line per
+//!         page to --out: how many files it shows, or `NO EXAMPLE` when it
+//!         shows none (exit 0); refused, prints each refusal of every page
+//!         on its own line and writes nothing (exit 1).
+//!     tool fill --kind readme|task --out <file> (--page <page> --display <name> [--example <path>=<file>]...)...
+//!         Writes to --out the patch that makes every page what `fill`
 //!         writes (each include's fence body rewritten from its file, nothing
 //!         else), as `git apply` takes it from the repository root (`a/` and
-//!         `b/` before <display>); empty when the README is fresh. Refused
-//!         (exit 1) only when an include cannot be filled: its file is not
-//!         listed, its fence is missing, not ```mojo, indented or not closed,
-//!         or the file may not be shown.
+//!         `b/` before each <display>); empty when every page is fresh.
+//!         Refused (exit 1) only when an include cannot be filled: its file is
+//!         not listed, its fence is missing, of another word, indented or not
+//!         closed, or the file may not be shown.
+//!     tool compare-output --expected <file> --display <name> --printed <file> --out <file>
+//!         The exact output compare (output.zig): when --printed (what an
+//!         example printed) is --expected byte for byte, writes one line to
+//!         --out (exit 0); otherwise prints `<display>:<line>: expected ...,
+//!         printed ...` and both texts, and writes nothing (exit 1). The
+//!         build runs it on a README example that has
+//!         `examples/<name>.expected_output.txt` (tools/build/mojo/readme.bzl).
 //!     tool migrate --readme <README.md> --display <name> --out-dir <dir>
 //!         Writes <dir>/README.md and <dir>/examples/example_<n>.mojo: the
 //!         README made source-first (migrate.zig). Refused (exit 1), writes
@@ -95,6 +105,7 @@ const tasks = @import("tasks.zig");
 const include = @import("include.zig");
 const migrate_mod = @import("migrate.zig");
 const expect_failure = @import("expect_failure.zig");
+const output = @import("output.zig");
 const unified_diff = @import("unified_diff");
 const Allocator = std.mem.Allocator;
 
@@ -103,8 +114,9 @@ const Allocator = std.mem.Allocator;
 pub const Outcome = struct { code: u8, stdout: []const u8 };
 
 const USAGE = "usage: tool generate --readme F --display NAME --package NAME --links allow|refuse --out-dir D --examples F [--includes allow|refuse]\n" ++
-    "       tool check --readme F --display NAME [--example PATH=F]... --out F\n" ++
-    "       tool fill --readme F --display NAME [--example PATH=F]... --out F\n" ++
+    "       tool check --kind readme|task --out F (--page F --display NAME [--example PATH=F]...)...\n" ++
+    "       tool fill --kind readme|task --out F (--page F --display NAME [--example PATH=F]...)...\n" ++
+    "       tool compare-output --expected F --display NAME --printed F --out F\n" ++
     "       tool migrate [--verify] --readme F --display NAME (--out-dir D | --migrated D --out F)\n" ++
     "       tool expect-failure --text TEXT --out F -- COMMAND...\n" ++
     "       tool map --package NAME --display NAME --report F\n" ++
@@ -436,20 +448,32 @@ fn tasksCheck(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outco
     return .{ .code = 0, .stdout = "" };
 }
 
-/// The flags of `check` and `fill`: the README, its name, the output, and
-/// each listed example (`--example <path>=<file>`, read here).
-const Shown = struct {
+/// One page of `check` and `fill`: its text, its name, and each file it
+/// may show (`--example <path>=<file>`, read here).
+const Page = struct {
     text: []const u8,
     display: []const u8,
-    out: []const u8,
     listed: []const include.Listed,
 };
 
-fn readShown(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) union(enum) { shown: Shown, failed: Outcome } {
-    var readme: ?[]const u8 = null;
-    var display: ?[]const u8 = null;
+/// The flags of `check` and `fill`: the kind, the output, and the pages,
+/// each `--page` starting one, its `--display` and `--example`s after it.
+const Pages = struct {
+    kind: *const include.Kind,
+    out: []const u8,
+    pages: []const Page,
+};
+
+const Group = struct {
+    page: []const u8,
+    display: ?[]const u8 = null,
+    listed: std.ArrayList(include.Listed) = .empty,
+};
+
+fn readPages(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) union(enum) { pages: Pages, failed: Outcome } {
+    var kind_name: ?[]const u8 = null;
     var out: ?[]const u8 = null;
-    var listed = std.ArrayList(include.Listed).empty;
+    var groups = std.ArrayList(Group).empty;
     var i: usize = 2;
     while (i < argv.len) {
         const a = argv[i];
@@ -466,34 +490,54 @@ fn readShown(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) union(
             i += 2;
         }
         if (value.len == 0) return .{ .failed = usage(alloc, fmt(alloc, "{s} has an empty value", .{name})) };
-        if (std.mem.eql(u8, name, "--example")) {
+        if (std.mem.eql(u8, name, "--page")) {
+            groups.append(alloc, .{ .page = value }) catch oom();
+            continue;
+        }
+        if (std.mem.eql(u8, name, "--display") or std.mem.eql(u8, name, "--example")) {
+            if (groups.items.len == 0) return .{ .failed = usage(alloc, fmt(alloc, "{s} before a --page: each page's --display and --example follow its --page", .{name})) };
+            const g = &groups.items[groups.items.len - 1];
+            if (std.mem.eql(u8, name, "--display")) {
+                if (g.display != null) return .{ .failed = usage(alloc, fmt(alloc, "--display given twice for --page {s}", .{g.page})) };
+                g.display = value;
+                continue;
+            }
             const eq = std.mem.indexOfScalar(u8, value, '=') orelse return .{ .failed = usage(alloc, fmt(alloc, "--example {s} is not PATH=FILE", .{value})) };
             const path = value[0..eq];
             const file = value[eq + 1 ..];
             if (path.len == 0 or file.len == 0) return .{ .failed = usage(alloc, fmt(alloc, "--example {s} is not PATH=FILE", .{value})) };
-            for (listed.items) |l| {
+            for (g.listed.items) |l| {
                 if (std.mem.eql(u8, l.path, path)) return .{ .failed = usage(alloc, fmt(alloc, "--example {s} given twice", .{path})) };
             }
             const data = dir.readFileAlloc(alloc, file, std.math.maxInt(usize)) catch |e| {
                 return .{ .failed = .{ .code = 2, .stdout = fmt(alloc, "readme-examples: cannot read {s}: {s}\n", .{ file, @errorName(e) }) } };
             };
-            listed.append(alloc, .{ .path = path, .data = data }) catch oom();
+            g.listed.append(alloc, .{ .path = path, .data = data }) catch oom();
             continue;
         }
-        const slot = if (std.mem.eql(u8, name, "--readme")) &readme else if (std.mem.eql(u8, name, "--display")) &display else if (std.mem.eql(u8, name, "--out")) &out else {
+        const slot = if (std.mem.eql(u8, name, "--kind")) &kind_name else if (std.mem.eql(u8, name, "--out")) &out else {
             return .{ .failed = usage(alloc, fmt(alloc, "unknown flag {s}", .{name})) };
         };
         if (slot.* != null) return .{ .failed = usage(alloc, fmt(alloc, "{s} given twice", .{name})) };
         slot.* = value;
     }
-    const readme_path = readme orelse return .{ .failed = usage(alloc, "--readme is required") };
-    const display_name = display orelse return .{ .failed = usage(alloc, "--display is required") };
+    const kn = kind_name orelse return .{ .failed = usage(alloc, "--kind is required") };
+    const kind = include.kindNamed(kn) orelse return .{ .failed = usage(alloc, fmt(alloc, "--kind is readme or task, not {s}", .{kn})) };
     const out_path = out orelse return .{ .failed = usage(alloc, "--out is required") };
-    const text = switch (readReadme(alloc, dir, readme_path)) {
-        .text => |x| x,
-        .failed => |o| return .{ .failed = o },
-    };
-    return .{ .shown = .{ .text = text, .display = display_name, .out = out_path, .listed = listed.items } };
+    if (groups.items.len == 0) return .{ .failed = usage(alloc, "--page is required") };
+    var pages = std.ArrayList(Page).empty;
+    for (groups.items, 0..) |g, k| {
+        const display = g.display orelse return .{ .failed = usage(alloc, fmt(alloc, "--page {s} has no --display", .{g.page})) };
+        for (groups.items[0..k]) |h| {
+            if (std.mem.eql(u8, h.display.?, display)) return .{ .failed = usage(alloc, fmt(alloc, "--display {s} names two pages", .{display})) };
+        }
+        const text = switch (readReadme(alloc, dir, g.page)) {
+            .text => |x| x,
+            .failed => |o| return .{ .failed = o },
+        };
+        pages.append(alloc, .{ .text = text, .display = display, .listed = g.listed.items }) catch oom();
+    }
+    return .{ .pages = .{ .kind = kind, .out = out_path, .pages = pages.items } };
 }
 
 fn refusedLines(alloc: Allocator, refusals: []const []const u8) Outcome {
@@ -502,34 +546,69 @@ fn refusedLines(alloc: Allocator, refusals: []const []const u8) Outcome {
 }
 
 fn checkCmd(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcome {
-    const s = switch (readShown(alloc, dir, argv)) {
-        .shown => |x| x,
+    const s = switch (readPages(alloc, dir, argv)) {
+        .pages => |x| x,
         .failed => |o| return o,
     };
-    const r = include.check(alloc, s.text, s.display, s.listed) catch oom();
-    if (r.refusals.len > 0) return refusedLines(alloc, r.refusals);
-    const line = if (r.shown == 0)
-        fmt(alloc, "NO EXAMPLE {s}: it lists no readme_examples and shows none, so nothing was compiled or run\n", .{s.display})
-    else
-        fmt(alloc, "{s}: {d} example(s), each fence its file byte for byte\n", .{ s.display, r.shown });
-    writeFile(dir, s.out, line) catch |e| {
+    var refusals = std.ArrayList([]const u8).empty;
+    var lines = std.ArrayList(u8).empty;
+    for (s.pages) |p| {
+        const r = include.check(alloc, s.kind, p.text, p.display, p.listed) catch oom();
+        refusals.appendSlice(alloc, r.refusals) catch oom();
+        if (r.shown == 0) {
+            lines.writer(alloc).print("NO EXAMPLE {s}: it lists no file it shows and shows none, so nothing was compiled or run\n", .{p.display}) catch oom();
+        } else {
+            lines.writer(alloc).print("{s}: {d} file(s) shown, each fence its file byte for byte\n", .{ p.display, r.shown }) catch oom();
+        }
+    }
+    if (refusals.items.len > 0) return refusedLines(alloc, refusals.items);
+    writeFile(dir, s.out, lines.items) catch |e| {
         return .{ .code = 2, .stdout = fmt(alloc, "readme-examples: cannot write {s}: {s}\n", .{ s.out, @errorName(e) }) };
     };
     return .{ .code = 0, .stdout = "" };
 }
 
 fn fillCmd(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcome {
-    const s = switch (readShown(alloc, dir, argv)) {
-        .shown => |x| x,
+    const s = switch (readPages(alloc, dir, argv)) {
+        .pages => |x| x,
         .failed => |o| return o,
     };
-    const r = include.check(alloc, s.text, s.display, s.listed) catch oom();
-    if (!r.fillable) return refusedLines(alloc, r.refusals);
-    const a_name = fmt(alloc, "a/{s}", .{s.display});
-    const b_name = fmt(alloc, "b/{s}", .{s.display});
-    const patch = (unified_diff.unifiedDiff(alloc, a_name, b_name, s.text, r.filled) catch oom()) orelse "";
-    writeFile(dir, s.out, patch) catch |e| {
+    var refusals = std.ArrayList([]const u8).empty;
+    var patch = std.ArrayList(u8).empty;
+    for (s.pages) |p| {
+        const r = include.check(alloc, s.kind, p.text, p.display, p.listed) catch oom();
+        if (!r.fillable) {
+            refusals.appendSlice(alloc, r.refusals) catch oom();
+            continue;
+        }
+        const a_name = fmt(alloc, "a/{s}", .{p.display});
+        const b_name = fmt(alloc, "b/{s}", .{p.display});
+        const one = (unified_diff.unifiedDiff(alloc, a_name, b_name, p.text, r.filled) catch oom()) orelse "";
+        patch.appendSlice(alloc, one) catch oom();
+    }
+    if (refusals.items.len > 0) return refusedLines(alloc, refusals.items);
+    writeFile(dir, s.out, patch.items) catch |e| {
         return .{ .code = 2, .stdout = fmt(alloc, "readme-examples: cannot write {s}: {s}\n", .{ s.out, @errorName(e) }) };
+    };
+    return .{ .code = 0, .stdout = "" };
+}
+
+fn compareOutputCmd(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcome {
+    const v = switch (flags(alloc, argv, &.{ "expected", "display", "printed", "out" })) {
+        .values => |v| v,
+        .refused => |o| return o,
+    };
+    const want = switch (readReadme(alloc, dir, v[0])) {
+        .text => |x| x,
+        .failed => |o| return o,
+    };
+    const got = switch (readReadme(alloc, dir, v[2])) {
+        .text => |x| x,
+        .failed => |o| return o,
+    };
+    if (output.compare(alloc, v[1], want, got) catch oom()) |why| return .{ .code = 1, .stdout = why };
+    writeFile(dir, v[3], fmt(alloc, "{s}: printed byte for byte\n", .{v[1]})) catch |e| {
+        return .{ .code = 2, .stdout = fmt(alloc, "readme-examples: cannot write {s}: {s}\n", .{ v[3], @errorName(e) }) };
     };
     return .{ .code = 0, .stdout = "" };
 }
@@ -641,8 +720,8 @@ fn expectFailureCmd(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8)
         return .{ .code = 2, .stdout = fmt(alloc, "readme-examples: cannot run {s}: {s}\n", .{ cmd[0], @errorName(e) }) };
     };
     const end = expect_failure.endOf(r.term);
-    const output = std.mem.concat(alloc, u8, &.{ r.stdout, r.stderr }) catch oom();
-    if (expect_failure.judge(alloc, end, output, v[0]) catch oom()) |why| {
+    const combined = std.mem.concat(alloc, u8, &.{ r.stdout, r.stderr }) catch oom();
+    if (expect_failure.judge(alloc, end, combined, v[0]) catch oom()) |why| {
         return .{ .code = 1, .stdout = fmt(alloc, "expect-failure: {s}\n", .{why}) };
     }
     writeFile(dir, v[1], fmt(alloc, "FAILED AS EXPECTED: {s}\n", .{v[0]})) catch |e| {
@@ -662,6 +741,7 @@ pub fn run(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcome 
     if (std.mem.eql(u8, argv[1], "tasks-check")) return tasksCheck(alloc, dir, argv);
     if (std.mem.eql(u8, argv[1], "check")) return checkCmd(alloc, dir, argv);
     if (std.mem.eql(u8, argv[1], "fill")) return fillCmd(alloc, dir, argv);
+    if (std.mem.eql(u8, argv[1], "compare-output")) return compareOutputCmd(alloc, dir, argv);
     if (std.mem.eql(u8, argv[1], "migrate")) return migrateCmd(alloc, dir, argv);
     if (std.mem.eql(u8, argv[1], "expect-failure")) return expectFailureCmd(alloc, dir, argv);
     return usage(alloc, fmt(alloc, "unknown subcommand {s}", .{argv[1]}));

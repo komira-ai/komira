@@ -11,8 +11,13 @@ markers that equal them byte for byte (tools/build/readme_examples/task_page.zig
 and every gap names its issues. A refusal names the catalogue
 `catalogue_display` and the task files under `display`, and fails the build.
 The output, `<name>.txt`, is the tool's report: `<directory> <status>` per task
-directory. What each example prints, or each probe fails with, is held by its wheel
-test, not here.
+directory. Its sub-targets are the two a package README's `[tests][readme]` has
+(tools/build/readme_examples/pages.bzl, the one implementation behind both):
+`[check]`, the tool's `check --kind task` over every page of `srcs` (the
+package's files; it is built with `name` too), and `[fill]`, the patch that
+rewrites every stale include block of every page from its file, which the author
+applies with `git apply`. What each example prints, or each probe fails with, is
+held by its wheel test, not here.
 
 `task_examples(name, files, tree, python, wheels, script)` declares those
 wheel tests: one `wheel_install_test` per task directory of `files` (the
@@ -32,6 +37,7 @@ load("@komira//python:install_test.bzl", "wheel_install_test")
 load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/readme_examples:pages.bzl", "page", "pages_check_and_fill")
 
 def _task_pages_check_impl(ctx):
     tree = ctx.attrs.tree[DefaultInfo].default_outputs[0]
@@ -53,15 +59,55 @@ def _task_pages_check_impl(ctx):
         ),
         category = "task_pages_check",
     )
-    return [DefaultInfo(default_output = out)]
+    shown = pages_check_and_fill(
+        ctx,
+        ctx.attrs._tool[RunInfo],
+        "task",
+        _pages(ctx.attrs.srcs, ctx.attrs.display),
+        ctx.label.name + "/check.passed",
+        ctx.label.name + "/fill.patch",
+        category = "task_pages_page",
+    )
+    return [DefaultInfo(
+        default_output = out,
+        other_outputs = [shown.check],
+        sub_targets = {
+            "check": [DefaultInfo(default_output = shown.check)],
+            "fill": [DefaultInfo(default_output = shown.fill)],
+        },
+    )]
+
+def _pages(srcs, display):
+    """The page of each task directory of `srcs` (sources at `<task>/<file>`
+    below the package) that holds a page.md, with every file of its
+    directory; a directory without one, or a deeper file, is tasks-check's
+    refusal."""
+    by_dir = {}
+    for f in srcs:
+        parts = f.short_path.split("/")
+        if len(parts) != 2:
+            continue
+        by_dir.setdefault(parts[0], {})[parts[1]] = f
+    pages = []
+    for d in sorted(by_dir.keys()):
+        files = by_dir[d]
+        if "page.md" not in files:
+            continue
+        pages.append(page(
+            files["page.md"],
+            "{}/{}/page.md".format(display, d),
+            [(name, files[name]) for name in sorted(files.keys())],
+        ))
+    return pages
 
 _task_pages_check = rule(
     impl = _task_pages_check_impl,
-    doc = "The catalogue of common tasks against one language's task directories (python/task_examples.bzl); the output is the report, and a refusal fails the build.",
+    doc = "The catalogue of common tasks against one language's task directories (python/task_examples.bzl); the output is the report, and a refusal fails the build. `[check]` and `[fill]` are the pages' freshness check and the patch that mends them, as a README's are.",
     attrs = {
         "catalogue": attrs.source(),
         "catalogue_display": attrs.string(),
         "display": attrs.string(),
+        "srcs": attrs.list(attrs.source()),
         "tree": attrs.dep(),
         "_tool": attrs.exec_dep(default = "komira//tools/build/readme_examples:tool", providers = [RunInfo]),
     },

@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const tasks = @import("tasks.zig");
+const include = @import("include.zig");
 const t = std.testing;
 
 const Arena = std.heap.ArenaAllocator;
@@ -265,11 +266,11 @@ fn expectAll(list: []const tasks.Task, want: []const []const u8) !void {
 test "each missing file is refused, and the page's include of it too" {
     try expectAll(&.{holding("1-read-csv-file", &.{ FILES[1], FILES[2] })}, &.{
         "d/1-read-csv-file: no example.py",
-        "d/1-read-csv-file/page.md:5: include example.py: the task directory has no such file",
+        "d/1-read-csv-file/page.md:5: include example.py: the task directory has no example.py",
     });
     try expectAll(&.{holding("1-read-csv-file", &.{ FILES[0], FILES[2] })}, &.{
         "d/1-read-csv-file: no expected_output.txt",
-        "d/1-read-csv-file/page.md:11: include expected_output.txt: the task directory has no such file",
+        "d/1-read-csv-file/page.md:11: include expected_output.txt: the task directory has no expected_output.txt",
     });
     try expectOnly(CATALOGUE, &.{holding("1-read-csv-file", &.{ FILES[0], FILES[1] })}, "d/1-read-csv-file: no page.md");
 }
@@ -313,7 +314,7 @@ test "every refusal is reported, and a refused check reports no directory" {
     const one = holding("1-read-csv-file", &.{ .{ .name = "example.py", .data = "x\n" }, FILES[1], FILES[2] });
     const r = try tasks.check(arena.allocator(), "d", "c.json", CATALOGUE, &.{ one, good("3-read-excel") });
     try t.expectEqual(@as(usize, 2), r.refusals.len);
-    try t.expectEqualStrings("d/1-read-csv-file/page.md:6: include example.py is stale (first difference at line 1 of example.py)", r.refusals[0]);
+    try t.expectEqualStrings("d/1-read-csv-file/page.md:7: include example.py is stale: this line is not line 1 of d/1-read-csv-file/example.py; " ++ include.TASK.fill_hint, r.refusals[0]);
     try t.expectEqualStrings("d/3-read-excel: rank 3 is a gap, which has no example", r.refusals[1]);
     try t.expectEqualStrings("", r.report);
 }

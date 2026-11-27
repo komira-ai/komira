@@ -26,11 +26,14 @@ filegroup(
 # The catalogue against the directories (python/task_examples.bzl): each
 # directory is a task that is not a gap, holds exactly its three files, and
 # its page shows example.py and expected_output.txt byte for byte; every gap
-# names its issues.
+# names its issues. `:pages[check]` is the same commands' freshness check of
+# the pages that a package README has, `:pages[fill]` the patch that mends a
+# stale page (git apply it from the repository root).
 task_pages_check(
     name = "pages",
     catalogue = "komira//docs/tasks:catalogue.json",
     catalogue_display = "docs/tasks/catalogue.json",
+    srcs = _FILES,
     tree = ":tree",
     display = "python/docs/tasks",
 )

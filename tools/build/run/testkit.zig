@@ -584,6 +584,12 @@ fn behave(a: std.mem.Allocator, name: []const u8, args: []const []const u8, env:
         }
         posix.exit(@intCast(num(arg(args, 3), 1)));
     }
+    if (std.mem.eql(u8, name, "streams")) {
+        // Two lines to stdout, one to stderr, then the status.
+        say("out 1\nout 2\n", .{});
+        sys.writeAll(2, "err 1\n");
+        posix.exit(@intCast(num(arg(args, 1), 0)));
+    }
     if (std.mem.eql(u8, name, "pid")) {
         appendPid(arg(args, 1) orelse posix.exit(99), sys.getpid());
         if (args.len < 3) posix.exit(99);

@@ -5,7 +5,7 @@
 //!   gate mojo --busybox B --runtime-lib DIR --label L --test ROOT/bin/NAME --marker M
 //!             [--mem-cap-mib N] [--deadline-s L --runner-timeout-s T]
 //!             [--hang-limit-s N]
-//!             [--limit-s N --limit-report coverage]
+//!             [--limit-s N --limit-report coverage] [--stdout FILE]
 //!             [--env NAME=VALUE | --lib-dir DIR]... [--arg VALUE]...
 //!
 //! `--lib-dir` names a directory of pinned shared libraries the test opens by their
@@ -15,6 +15,13 @@
 //! `/usr/local/lib:/usr/lib` when there is none), so a pinned file is found and an
 //! operating-system library is not shadowed. With none, the environment is what it
 //! always was.
+//!
+//! `--stdout FILE` (relative to the action's directory, like `--marker`) is created
+//! or truncated before the run and takes the test's stdout alone; the log, which
+//! the banner shows, then holds only its stderr. Without it both go to the log.
+//! On a red test the banner is followed by the last 200 lines of FILE under a
+//! `stdout` heading and a closing rule line; a coverage run past its limit shows
+//! them under `stdout (last 200 lines)`, before its own failure text.
 //!
 //! On exit 0 of the test: `PASS <label>\n` to the marker, nothing printed,
 //! exit 0. Otherwise the banner (`GATED TEST FAILED: <label> (exit <rc>)`,
@@ -50,6 +57,7 @@ pub const Args = struct {
     hang_limit_s: ?u64 = null,
     limit_s: ?u64 = null,
     limit_report: ?[]const u8 = null,
+    stdout_file: ?[]const u8 = null,
     env: std.ArrayList([]const u8) = undefined,
     lib_dirs: std.ArrayList([]const u8) = undefined,
     args: std.ArrayList([]const u8) = undefined,
@@ -66,8 +74,8 @@ pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
     a.lib_dirs = std.ArrayList([]const u8).empty;
     a.args = std.ArrayList([]const u8).empty;
     var i: usize = 0;
-    var have = [_]bool{false} ** 11;
-    const names = [_][]const u8{ "--busybox", "--runtime-lib", "--label", "--test", "--marker", "--mem-cap-mib", "--deadline-s", "--runner-timeout-s", "--limit-s", "--limit-report", "--hang-limit-s" };
+    var have = [_]bool{false} ** 12;
+    const names = [_][]const u8{ "--busybox", "--runtime-lib", "--label", "--test", "--marker", "--mem-cap-mib", "--deadline-s", "--runner-timeout-s", "--limit-s", "--limit-report", "--hang-limit-s", "--stdout" };
     while (i < argv.len) : (i += 2) {
         const flag = argv[i];
         if (std.mem.eql(u8, flag, "--env")) {
@@ -125,6 +133,7 @@ pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
                 util.err("hang_limit: REFUSING: the limit '{s}' is not a positive whole number of seconds\n", .{v});
                 return 2;
             },
+            11 => a.stdout_file = v,
             else => unreachable,
         }
     }
@@ -280,6 +289,13 @@ fn runParsed(alloc: std.mem.Allocator, a: *Args) !u8 {
     const env = try buildEnv(alloc, try inheritedEnv(alloc), run, lib, libs.items, cwd, a.env.items);
     const log = try std.fmt.allocPrint(alloc, "{s}/log", .{run});
     const log_fd = try util.createLog(log);
+    var stdout_fd = log_fd;
+    if (a.stdout_file) |p| {
+        stdout_fd = util.createLog(p) catch |e| {
+            util.err("gate_runner: cannot write the stdout file {s}: {s}\n", .{ p, @errorName(e) });
+            return 2;
+        };
+    }
 
     var limit: supervise.Limit = .none;
     if (a.deadline_s) |d| limit = .{ .deadline_ms = util.positiveStrict(d).? * 1000 };
@@ -290,12 +306,13 @@ fn runParsed(alloc: std.mem.Allocator, a: *Args) !u8 {
         .argv = (try util.zList(alloc, expanded.items)).ptr,
         .envp = (try util.zList(alloc, env)).ptr,
         .cwd = (try alloc.dupeZ(u8, cwd)).ptr,
-        .stdout_fd = log_fd,
+        .stdout_fd = stdout_fd,
         .stderr_fd = log_fd,
         .cap_kib = if (a.cap_mib) |c| c * 1024 else null,
         .limit = limit,
     });
     std.posix.close(log_fd);
+    if (a.stdout_file != null) std.posix.close(stdout_fd);
 
     if (outcome.signal != 0) return 128 +| outcome.signal;
     if (outcome.timer_failed) {
@@ -321,6 +338,7 @@ fn runParsed(alloc: std.mem.Allocator, a: *Args) !u8 {
         f.writeAll(line) catch return 2;
     } else {
         banner(a.label, rc, log);
+        stdoutSection(a, "stdout");
     }
     if (outcome.capped_kib) |k| {
         util.err("MEMORY CAP: killed {s} at {d} MiB resident, over its cap of {d} MiB\n", .{ a.label, k / 1024, a.cap_mib.? });
@@ -356,6 +374,14 @@ pub fn banner(label: []const u8, rc: u8, log: []const u8) void {
     util.err("{s}\n", .{util.rule});
 }
 
+/// The last 200 lines of the `--stdout` file under `heading`, then the rule; nothing without `--stdout`.
+fn stdoutSection(a: *const Args, heading: []const u8) void {
+    const p = a.stdout_file orelse return;
+    util.err("------------------------------------------------------------------ {s}\n", .{heading});
+    util.writeTail(2, p, 200);
+    util.err("{s}\n", .{util.rule});
+}
+
 fn red(label: []const u8, comptime fmt: []const u8, a: anytype) u8 {
     util.err("{s}\nCOVERAGE RUN FAILED: {s}\n" ++ fmt ++ "\n{s}\n", .{ util.rule, label } ++ a ++ .{util.rule});
     return 1;
@@ -374,6 +400,7 @@ fn coverageExpired(alloc: std.mem.Allocator, a: *Args, o: supervise.Outcome, log
     }
     util.err("------------------------------------------------------------------ output (last 200 lines)\n", .{});
     util.writeTail(2, log, 200);
+    stdoutSection(a, "stdout (last 200 lines)");
     return red(a.label, "The test left processes running or did not finish within {d} s under kcov, and every process of the run was killed: kcov waits for every process the test started, where the release gate waits for the test alone. A test must wait for (or kill) every child it starts.", .{a.limit_s.?});
 }
 
