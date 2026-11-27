@@ -22,7 +22,7 @@ filter `_keep = 1` and a projection back to the frame's columns. Over a sort tha
 assign that replaces no sort key, any filter) both go under the sort, as
 `with_columns` and `filter_` place a projection and a filter.
 
-The verbs, each of one column, and what it builds:
+The verbs, each of one column but the last, and what each builds:
 
 - `df.groupby(keys)["c"].transform(func)`, func one of "sum", "mean", "min",
   "max", "count": the aggregate over the row's group (its partition, no
@@ -45,6 +45,14 @@ The verbs, each of one column, and what it builds:
   itself, as float64, as pandas gives it; a missing value has a missing rank
   (`na_option="keep"`), or ranks after every value (`"bottom"`) or before
   every value (`"top"`).
+- `df.duplicated(subset, keep)`: `ROW_NUMBER() > 1` over the rows of each
+  value of the subset (keep "first" or "last"; the row numbered 1 is any one
+  of them, as a plan has no row order), or `COUNT(*) > 1` (keep=False), the
+  count reading a column of the literal 1 projected below the windows (`_one`,
+  underscores prepended as above). `df.drop_duplicates(subset, keep)` over
+  fewer than every column keeps the rows whose window is 1, with the plan of
+  polars' `unique(subset)`: the windows, a filter on the window's column and
+  a projection back to the frame's columns.
 
 Under `groupby(dropna=True)`, pandas' default, a row whose key is missing
 belongs to no group, and its value is missing.
@@ -52,6 +60,7 @@ belongs to no group, and its value is missing.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 from typing import TYPE_CHECKING
 
@@ -66,11 +75,13 @@ __all__ = [
     "Rolling",
     "Windows",
     "cumulative",
+    "duplicates",
     "filter_plan",
     "merged",
     "project_plan",
     "rank",
     "transform",
+    "unique_rows",
 ]
 
 # The windows a Series reads: (placeholder, WindowExpr) pairs, in the order
@@ -86,6 +97,9 @@ _NUMBERS = frozenset(
     {"int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float16", "float32", "float64"}
 )
 _CASE_NULLS = frozenset({"int64", "float64"})
+# The argument of a count window that counts every row of its partition, NULLs
+# and all: `_computed` reads it from a column of the literal 1.
+_EVERY_ROW = "__komira_every_row"
 
 
 # ---- the windows of a Series ---------------------------------------------------
@@ -111,15 +125,28 @@ def merged(*groups: Windows) -> Windows:
 
 def _computed(plan: _ops.Plan, windows: Windows) -> tuple[_ops.Plan, dict[str, _ops.Node]]:
     """The projection of `plan`'s columns and one column per window, and the
-    reference that replaces each placeholder."""
+    reference that replaces each placeholder. A count of every row (its
+    argument `_EVERY_ROW`) reads a column of the literal 1, `_one`, projected
+    below the windows."""
     taken = set(plan.columns)
-    subs: dict[str, _ops.Node] = {}
-    items: list[tuple[str, object]] = [(c, _ops.ColRef(c)) for c in plan.columns]
-    for i, (placeholder, win) in enumerate(windows):
-        name = f"_w{i}"
+
+    def free(name: str) -> str:
         while name in taken:
             name = "_" + name
         taken.add(name)
+        return name
+
+    if any(win.arg == _EVERY_ROW for _, win in windows):
+        one = free("_one")
+        plan = _ops.Project(plan, tuple((c, _ops.ColRef(c)) for c in plan.columns) + ((one, _ops.Lit(1)),))
+        windows = tuple(
+            (placeholder, dataclasses.replace(win, arg=one) if win.arg == _EVERY_ROW else win)
+            for placeholder, win in windows
+        )
+    subs: dict[str, _ops.Node] = {}
+    items: list[tuple[str, object]] = [(c, _ops.ColRef(c)) for c in plan.columns]
+    for i, (placeholder, win) in enumerate(windows):
+        name = free(f"_w{i}")
         subs[placeholder] = _ops.ColRef(name)
         items.append((name, win))
     return _ops.Project(plan, tuple(items)), subs
@@ -315,6 +342,35 @@ def rank(
         return ranked
 
     return _build(frame, (win,), value, keys, dropna)
+
+
+def duplicates(names: tuple[str, ...], keep: object) -> _Built:
+    """`df.duplicated(subset, keep)` over the columns `names`: true where the
+    row's window is over 1. For `keep` "first" or "last" the window is
+    ROW_NUMBER over the rows of each value of `names`, so every row of a value
+    is true but the one numbered 1; the number follows no row order, so that
+    row is any one of them, not the first or the last (a plan has no row
+    order). For `keep=False` it is the count of the value's rows, so every
+    row of a value more than one row has is true. A NULL is a value of its
+    own, as in pandas."""
+    if keep is False:
+        win = _ops.WindowExpr("count", _EVERY_ROW, partition_by=names)
+    else:
+        win = _ops.WindowExpr("row_number", None, partition_by=names, order_by=(_ops.SortKey(names[0]),))
+    placeholder = _placeholder(win)
+    return _Built(_ops.Compare("gt", _ops.ColRef(placeholder), _ops.Lit(1)), ((placeholder, win),))
+
+
+def unique_rows(plan: _ops.Plan, names: tuple[str, ...], keep: object) -> _ops.Plan:
+    """The rows of `plan` that `duplicates(names, keep)` holds false: one row
+    of each value of `names` (keep "first" or "last"), or the rows of the
+    values no other row has (keep=False). The plan is polars' `unique(subset)`
+    (komira/pl/_frame.py): the window projected over `plan`, the filter of the
+    window's 1, and the projection back to `plan`'s columns."""
+    built = duplicates(names, keep)
+    below, subs = _computed(plan, built.windows)
+    kept = _ops.Filter(below, _ops.Compare("eq", subs[built.windows[0][0]], _ops.Lit(1)))
+    return _ops.select(kept, plan.columns)
 
 
 class Rolling:
