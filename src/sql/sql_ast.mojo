@@ -159,6 +159,14 @@ comptime SUBQ_EXCEPT: UInt8 = 8
 # the union of its inputs), a branch as the two above are.
 comptime SUBQ_UNION: UInt8 = 9
 
+# `FROM <relation> PIVOT (...)` (10) and `FROM <relation> UNPIVOT (...)` (11):
+# a relation reshaped between long and wide form. Like `SUBQ_DERIVED` each binds
+# to a plan registered in the CTE scope under its relation key and pushes a
+# placeholder into `prebound`; the clause itself is the entry's `pivot`
+# (`sql_pivot_spec.PivotSpec`) and `sql_bind_pivot` lowers it.
+comptime SUBQ_PIVOT: UInt8 = 10
+comptime SUBQ_UNPIVOT: UInt8 = 11
+
 # The qualifier the parser gives the derived table it wraps a whole UNION ALL in
 # when the last branch carries ORDER BY / LIMIT / OFFSET (the clauses belong to
 # the union, so the parser rewrites it to `SELECT * FROM (<union>) <alias>
@@ -1282,6 +1290,7 @@ struct SqlExpr(Movable):
 # catalog table or `FROM x` can collide with it (the `CAST_DESUGAR_NAME` trick).
 comptime FROM_LESS_RELATION: String = "from-less select"
 
+from .sql_pivot_spec import PivotSpec
 from .sql_tvf_options import (
     TVF_NONE, TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO, TVF_ICEBERG,
     HIVE_PARTITIONING_AUTO, HIVE_PARTITIONING_ON, HIVE_PARTITIONING_OFF,
@@ -1539,6 +1548,9 @@ struct SubqueryDef(Movable):
       - SUBQ_UNION_ALL / SUBQ_UNION / SUBQ_INTERSECT / SUBQ_EXCEPT -> a branch
                             of a set-operation chain, bound by the chain's head
                             (`sql_bind_set_op`); it pushes a placeholder.
+      - SUBQ_PIVOT / SUBQ_UNPIVOT -> a reshaped relation, bound by
+                            `sql_bind_pivot` from the body and `pivot`, and
+                            registered under `derived_alias` as SUBQ_DERIVED is.
 
     The `Slab[SubqueryDef]` storage on `SelectStmt` is byte-backed (its inner
     `List[UInt8]` carries no direct `SubqueryDef` FIELD), which breaks the
@@ -1556,6 +1568,9 @@ struct SubqueryDef(Movable):
     # when non-empty its length MUST equal the body's output column count and the
     # binder positionally renames the derived relation's output columns to these.
     var col_names: List[String]
+    # SUBQ_PIVOT / SUBQ_UNPIVOT: the clause (its FOR / IN lists); empty for
+    # every other kind.
+    var pivot: PivotSpec
 
     def __init__(out self, var body: SelectStmt, kind: UInt8, in_lhs_col: String = String(""), derived_alias: String = String(""), in_lhs_qualifier: String = String("")):
         self.body = body^
@@ -1564,6 +1579,7 @@ struct SubqueryDef(Movable):
         self.in_lhs_qualifier = in_lhs_qualifier
         self.derived_alias = derived_alias
         self.col_names = List[String]()
+        self.pivot = PivotSpec()
 
     def __init__(out self, var body: SelectStmt, kind: UInt8, in_lhs_col: String, derived_alias: String, var col_names: List[String]):
         self.body = body^
@@ -1572,6 +1588,18 @@ struct SubqueryDef(Movable):
         self.in_lhs_qualifier = String("")
         self.derived_alias = derived_alias
         self.col_names = col_names^
+        self.pivot = PivotSpec()
+
+    def __init__(out self, var body: SelectStmt, kind: UInt8, derived_alias: String, var pivot: PivotSpec):
+        """A SUBQ_PIVOT / SUBQ_UNPIVOT entry: its body, its relation key and
+        its clause."""
+        self.body = body^
+        self.kind = kind
+        self.in_lhs_col = String("")
+        self.in_lhs_qualifier = String("")
+        self.derived_alias = derived_alias
+        self.col_names = List[String]()
+        self.pivot = pivot^
 
 
 struct JoinClause(Movable):

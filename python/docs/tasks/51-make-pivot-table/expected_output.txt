@@ -1,2 +1,3 @@
+[{'region': 'east', 'pen': Decimal('10'), 'ink': Decimal('5')}, {'region': 'north', 'pen': None, 'ink': Decimal('9')}, {'region': 'west', 'pen': Decimal('10'), 'ink': None}]
 [{'region': 'east', 'pen': Decimal('10'), 'ink': Decimal('5')}, {'region': 'north', 'pen': Decimal('0'), 'ink': Decimal('9')}, {'region': 'west', 'pen': Decimal('10'), 'ink': Decimal('0')}]
 [{'region': 'east', 'pen': 10, 'ink': 5}, {'region': 'north', 'pen': 0, 'ink': 9}, {'region': 'west', 'pen': 10, 'ink': 0}]

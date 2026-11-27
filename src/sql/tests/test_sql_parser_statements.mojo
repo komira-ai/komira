@@ -562,8 +562,10 @@ def test_limit_offset_fetch() raises:
 def test_unsupported_clause_words_are_named() raises:
     _refuses("SELECT * FROM t QUALIFY a = 1", "the QUALIFY clause")
     _refuses("SELECT * FROM t WINDOW w AS (ORDER BY a)", "a named WINDOW clause")
-    _refuses("SELECT * FROM t PIVOT (sum(a) FOR b IN (1))", "SQL not supported: PIVOT (reshaping")
-    _refuses("SELECT * FROM t UNPIVOT (a FOR b IN (c))", "SQL not supported: UNPIVOT (reshaping")
+    # PIVOT / UNPIVOT parse after a FROM relation (test_sql_pivot); after
+    # any other clause they are named.
+    _refuses("SELECT * FROM t WHERE a = 1 PIVOT (sum(a) FOR b IN (1))", "SQL not supported: PIVOT here")
+    _refuses("SELECT * FROM t GROUP BY a UNPIVOT (a FOR b IN (c))", "SQL not supported: UNPIVOT here")
     _refuses("SELECT * FROM t TABLESAMPLE 10", "TABLESAMPLE / USING SAMPLE")
     _refuses("SELECT * FROM t USING SAMPLE 10", "TABLESAMPLE / USING SAMPLE")
     _refuses("SELECT * FROM t WHERE s GLOB 'a*'", "the GLOB pattern operator")

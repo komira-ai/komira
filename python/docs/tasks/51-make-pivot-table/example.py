@@ -12,9 +12,17 @@ Path("sales.csv").write_text(
     "north,ink,9\n"
 )
 
-# SQL: one conditional sum per new column, one output row per region.
+# SQL PIVOT: one column per listed product, one output row per region.
 with komira.Session() as s:
     s.register_csv("sales", "sales.csv")
+    wide = s.sql(
+        "SELECT * FROM sales PIVOT (sum(amount) FOR product IN ('pen', 'ink'))"
+        " ORDER BY region"
+    )
+    print(wide.to_arrow().to_pylist())
+
+    # The same table with one conditional sum per new column; ELSE 0 turns
+    # a missing pair into 0.
     wide = s.sql(
         "SELECT region,"
         " sum(CASE WHEN product = 'pen' THEN amount ELSE 0 END) AS pen,"

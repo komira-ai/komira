@@ -9,9 +9,17 @@ Path("scores.csv").write_text(
     "Cy,1,2,3\n"
 )
 
-# SQL: one SELECT per column to melt, stacked with UNION ALL.
+# SQL UNPIVOT: one row per name and quarter; a NULL score is left out.
 with komira.Session() as s:
     s.register_csv("scores", "scores.csv")
+    long = s.sql(
+        "SELECT * FROM scores UNPIVOT (score FOR quarter IN (q1, q2, q3))"
+        " ORDER BY name, quarter"
+    )
+    print(long.to_arrow().to_pylist())
+
+    # The same rows by hand: one SELECT per column, stacked with UNION ALL,
+    # which keeps the NULL score.
     long = s.sql(
         "SELECT name, 'q1' AS quarter, q1 AS score FROM scores"
         " UNION ALL SELECT name, 'q2', q2 FROM scores"

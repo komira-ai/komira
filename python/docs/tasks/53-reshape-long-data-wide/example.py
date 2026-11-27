@@ -13,10 +13,18 @@ Path("scores.csv").write_text(
     "Cy,q2,2\n"
 )
 
-# SQL: one aggregate over CASE WHEN per new column, grouped by the row key.
-# A name with no row for a quarter gets NULL.
+# SQL PIVOT: one column per listed quarter, one row per name. A name with
+# no row for a quarter gets NULL.
 with komira.Session() as s:
     s.register_csv("scores", "scores.csv")
+    wide = s.sql(
+        "SELECT * FROM scores PIVOT (max(score) FOR quarter IN ('q1', 'q2', 'q3'))"
+        " ORDER BY name"
+    )
+    print(wide.to_arrow().to_pylist())
+
+    # The same table by hand: one aggregate over CASE WHEN per new column,
+    # grouped by the row key.
     wide = s.sql(
         "SELECT name,"
         " max(CASE WHEN quarter = 'q1' THEN score END) AS q1,"

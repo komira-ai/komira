@@ -39,6 +39,7 @@ from .sql_token import (
 )
 from .sql_fn_table import CAST_DESUGAR_NAME as _CAST_DESUGAR_NAME, TRY_CAST_DESUGAR_NAME as _TRY_CAST_DESUGAR_NAME
 from .sql_fn_table import POSITION_IN_DESUGAR_NAME as _POSITION_IN_DESUGAR_NAME
+from .sql_pivot_spec import PivotSpec
 from .sql_tvf_options import (
     TVF_PARQUET, TVF_CSV, TVF_JSON, TVF_AVRO, TVF_ICEBERG,
     hive_partitioning_value, _replacement_scan_kind, _file_stem,
@@ -51,6 +52,7 @@ from .sql_ast import (
     JK_CROSS, JK_LEFT, JK_RIGHT, JK_FULL, JK_SEMI, JK_ANTI,
     SUBQ_SCALAR, SUBQ_EXISTS, SUBQ_NOT_EXISTS, SUBQ_IN, SUBQ_NOT_IN, SUBQ_DERIVED,
     SUBQ_UNION_ALL, SUBQ_INTERSECT, SUBQ_EXCEPT, SUBQ_UNION, _UNION_RESULT_ALIAS,
+    SUBQ_PIVOT, SUBQ_UNPIVOT,
     STMT_QUERY, STMT_COPY, STMT_CREATE_TABLE_AS,
     SXOP_EQ, SXOP_NE, SXOP_LT, SXOP_LE, SXOP_GT, SXOP_GE,
     SXOP_AND, SXOP_OR, SXOP_ADD, SXOP_SUB, SXOP_MUL, SXOP_DIV, SXOP_IDIV, SXOP_MOD,
@@ -157,6 +159,7 @@ struct _Parser(Movable):
             var st = self._parse_create_table_as()
             self._finalize(st)
             return st^
+        self._refuse_pivot_statement()
         # else: a plain query (WITH... / SELECT...).
         var query = self._parse_query_body()
         var st = SqlStatement(STMT_QUERY, query^)
@@ -1025,9 +1028,15 @@ struct _Parser(Movable):
                 " specification inline in each OVER (...)."
             )
         if w == "pivot" or w == "unpivot":
+            # `_parse_table_ref` takes a PIVOT / UNPIVOT that follows a FROM
+            # relation; one that reaches here follows something else (a JOIN's
+            # ON, a WHERE, a GROUP BY).
+            var kw = String(w).upper()
             raise Error(
-                "SQL not supported: " + String(w).upper() + " (reshaping a"
-                " relation between long and wide form)."
+                "SQL not supported: " + kw + " here. It is served directly"
+                " after one FROM relation (`FROM t " + kw + " (...)`); to"
+                " reshape a join or a filtered relation, put it in a derived"
+                " table: `FROM (SELECT ...) " + kw + " (...)`."
             )
         if w == "tablesample" or (
             w == "using"
@@ -1045,6 +1054,15 @@ struct _Parser(Movable):
         self._refuse_unserved_operator_word()
 
     def _parse_table_ref(mut self) raises -> FromRelation:
+        """Parse one FROM relation (`_parse_table_ref_base`) and each
+        `PIVOT (...)` / `UNPIVOT (...)` clause that follows it, each reshaping
+        the relation before it (`_parse_pivot_clause`)."""
+        var rel = self._parse_table_ref_base()
+        while self._is_kw("pivot") or self._is_kw("unpivot"):
+            rel = self._parse_pivot_clause(rel^)
+        return rel^
+
+    def _parse_table_ref_base(mut self) raises -> FromRelation:
         """Parse one FROM relation: `ident [. ident] [AS ident]`, a
         `read_parquet('path')` table-valued function, OR a `(SELECT ...) alias`
         derived table. A schema qualifier (`s.t`) keeps the last component;
@@ -1542,6 +1560,151 @@ struct _Parser(Movable):
             self._expect(TK_RPAREN, "')' to close the derived-table column list")
         self.subqueries.append(SubqueryDef(body^, SUBQ_DERIVED, String(""), rel_name, col_names^))
         return FromRelation.named(rel_name, d_alias)
+
+    def _refuse_pivot_statement(self) raises:
+        """Refuse DuckDB's PIVOT / UNPIVOT STATEMENT (`PIVOT t ON c USING
+        agg(x)`, `UNPIVOT t ON c1, c2 INTO NAME n VALUE v`) by name. Its
+        output columns are read from the data (every distinct value of `c`),
+        so the plan's schema would depend on the rows; the SQL-standard clause
+        lists them."""
+        if self._is_kw("pivot") or self._is_kw("pivot_wider"):
+            raise Error(
+                "SQL not supported: the PIVOT statement (`PIVOT t ON c USING"
+                " agg(x)`), whose output columns are the values found in the"
+                " data. List the values with the PIVOT clause: `SELECT * FROM"
+                " t PIVOT (agg(x) FOR c IN ('v1', 'v2'))`."
+            )
+        if self._is_kw("unpivot") or self._is_kw("pivot_longer"):
+            raise Error(
+                "SQL not supported: the UNPIVOT statement (`UNPIVOT t ON c1,"
+                " c2 INTO NAME n VALUE v`). Write the UNPIVOT clause: `SELECT"
+                " * FROM t UNPIVOT (v FOR n IN (c1, c2))`."
+            )
+
+    def _parse_in_label(mut self) raises -> Optional[String]:
+        """An optional `AS name` after a PIVOT value or an UNPIVOT column: the
+        name an identifier or a string literal, as DuckDB takes either."""
+        if not self._is_kw("as"):
+            return None
+        self._advance()
+        if self._kind() != TK_IDENT and self._kind() != TK_STRING:
+            raise Error("SQL syntax error: expected a name after AS in an IN list")
+        var name = String(self.tokens[self.pos].text)
+        self._advance()
+        return name^
+
+    def _parse_pivot_clause(mut self, var rel: FromRelation) raises -> FromRelation:
+        """`rel PIVOT (agg(x) [AS a] FOR col IN (v [AS n], ...)) [[AS] alias]`
+        or `rel UNPIVOT [INCLUDE | EXCLUDE NULLS] (v FOR n IN (c [AS l], ...))
+        [[AS] alias]`, at the PIVOT / UNPIVOT keyword. Parked in the subquery
+        side-table as SUBQ_PIVOT / SUBQ_UNPIVOT (`sql_pivot_spec` says what each
+        part holds) under the relation key `<alias>#<subquery index>`, the key
+        a derived table gets; an unaliased one answers to `__unnamed_pivot`, as
+        in DuckDB. The forms DuckDB has beyond one aggregate, one FOR column
+        and one value column are refused by name."""
+        var unpivot = self._is_kw("unpivot")
+        var kw = String("UNPIVOT") if unpivot else String("PIVOT")
+        self._advance()
+        var spec = PivotSpec()
+        var body = SelectStmt()
+        body.from_tables.append(rel^)
+        if unpivot:
+            if self._is_kw("include") or self._is_kw("exclude"):
+                spec.include_nulls = self._is_kw("include")
+                self._advance()
+                self._expect_kw("nulls")
+            self._expect(TK_LPAREN, "'(' after UNPIVOT")
+            if self._kind() == TK_LPAREN:
+                raise Error(
+                    "SQL not supported: UNPIVOT into more than one value"
+                    " column (`UNPIVOT ((v1, v2) FOR ...)`). Unpivot each value"
+                    " column on its own."
+                )
+            if self._kind() != TK_IDENT:
+                raise Error("SQL syntax error: expected the UNPIVOT value column name")
+            spec.value_col = String(self.tokens[self.pos].text)
+            self._advance()
+            body.select_items.append(SelectItem(SqlExpr.star(), Optional[String](), True))
+        else:
+            self._expect(TK_LPAREN, "'(' after PIVOT")
+            var agg = self._parse_expr()
+            var agg_alias: Optional[String] = None
+            if self._is_kw("as"):
+                self._advance()
+                # `AS FOR`: the alias is missing, not named `for`.
+                if self._kind() != TK_IDENT or self._is_kw("for"):
+                    raise Error("SQL syntax error: expected alias after AS")
+                agg_alias = String(self.tokens[self.pos].text)
+                self._advance()
+            if self._kind() == TK_COMMA:
+                raise Error(
+                    "SQL not supported: PIVOT with more than one aggregate."
+                    " Pivot each aggregate on its own and join the results."
+                )
+            body.select_items.append(SelectItem(agg^, agg_alias^, False))
+        self._expect_kw("for")
+        if self._kind() != TK_IDENT and self._kind() != TK_LPAREN:
+            raise Error("SQL syntax error: expected a column name after FOR")
+        if self._kind() == TK_LPAREN:
+            raise Error(
+                "SQL not supported: " + kw + " FOR a list of columns. Name one"
+                " column after FOR."
+            )
+        spec.name_col = String(self.tokens[self.pos].text)
+        self._advance()
+        self._expect_kw("in")
+        self._expect(TK_LPAREN, "'(' to open the " + kw + " IN list")
+        if self._kind() == TK_RPAREN:
+            raise Error("SQL syntax error: the " + kw + " IN list is empty")
+        while True:
+            if unpivot:
+                if self._kind() != TK_IDENT:
+                    raise Error(
+                        "SQL not supported: an UNPIVOT IN list entry that is"
+                        " not a column name. List the columns to unpivot by"
+                        " name."
+                    )
+                spec.values.append(String(self.tokens[self.pos].text))
+                spec.value_is_string.append(False)
+            elif self._kind() == TK_STRING:
+                spec.values.append(String(self.tokens[self.pos].text))
+                spec.value_is_string.append(True)
+            elif self._kind() == TK_INT:
+                spec.values.append(String(self._small_int_tok("PIVOT IN value")))
+                spec.value_is_string.append(False)
+            else:
+                raise Error(
+                    "SQL not supported: a PIVOT IN list entry that is not a"
+                    " string or an unsigned integer literal. List the values"
+                    " to pivot as literals: `IN ('a', 'b')` or `IN (1, 2)`."
+                )
+            self._advance()
+            var label = self._parse_in_label()
+            if label:
+                spec.labels.append(label.value())
+            elif unpivot:
+                # The binder writes the relation's own spelling of the column.
+                spec.labels.append(String(""))
+            else:
+                spec.labels.append(spec.values[len(spec.values) - 1])
+            if self._kind() == TK_COMMA:
+                self._advance()
+                continue
+            break
+        self._expect(TK_RPAREN, "')' to close the " + kw + " IN list")
+        if self._kind() == TK_IDENT:
+            raise Error(
+                "SQL not supported: " + kw + " over more than one FOR column."
+                " Name one column after FOR."
+            )
+        self._expect(TK_RPAREN, "')' to close the " + kw + " clause")
+        var p_alias = self._parse_optional_alias()
+        if p_alias == "":
+            p_alias = String("__unnamed_pivot")
+        var rel_name = p_alias + "#" + String(len(self.subqueries))
+        var kind = SUBQ_UNPIVOT if unpivot else SUBQ_PIVOT
+        self.subqueries.append(SubqueryDef(body^, kind, rel_name, spec^))
+        return FromRelation.named(rel_name, p_alias)
 
     def _parse_using_list(mut self) raises -> List[String]:
         """Consume `( col [, col]* )` after USING and RETURN the column names.

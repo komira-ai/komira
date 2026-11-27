@@ -441,7 +441,6 @@
     "question": "How do I make a pivot table?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2399",
       "komira-ai/komira#2400"
     ]
   },
@@ -452,7 +451,6 @@
     "question": "How do I melt (unpivot) wide data to long?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2399",
       "komira-ai/komira#2400"
     ]
   },
@@ -463,7 +461,6 @@
     "question": "How do I reshape long data to wide?",
     "status": "partial",
     "issues": [
-      "komira-ai/komira#2399",
       "komira-ai/komira#2400"
     ]
   },

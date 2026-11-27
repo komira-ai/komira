@@ -1,6 +1,6 @@
 # How do I make a pivot table?
 
-Sum a column once per value of another column with `CASE WHEN`, grouped by the row key; komira has no `PIVOT` or `pivot_table` yet.
+In SQL, `PIVOT (sum(amount) FOR product IN ('pen', 'ink'))` makes one column per listed value and one row per value of the other columns; a `CASE WHEN` per column does the same by hand. komira has no pandas-shaped `pivot_table` yet.
 
 <!-- include example.py -->
 ```python
@@ -18,9 +18,17 @@ Path("sales.csv").write_text(
     "north,ink,9\n"
 )
 
-# SQL: one conditional sum per new column, one output row per region.
+# SQL PIVOT: one column per listed product, one output row per region.
 with komira.Session() as s:
     s.register_csv("sales", "sales.csv")
+    wide = s.sql(
+        "SELECT * FROM sales PIVOT (sum(amount) FOR product IN ('pen', 'ink'))"
+        " ORDER BY region"
+    )
+    print(wide.to_arrow().to_pylist())
+
+    # The same table with one conditional sum per new column; ELSE 0 turns
+    # a missing pair into 0.
     wide = s.sql(
         "SELECT region,"
         " sum(CASE WHEN product = 'pen' THEN amount ELSE 0 END) AS pen,"
@@ -46,17 +54,19 @@ Output:
 
 <!-- include expected_output.txt -->
 ```text
+[{'region': 'east', 'pen': Decimal('10'), 'ink': Decimal('5')}, {'region': 'north', 'pen': None, 'ink': Decimal('9')}, {'region': 'west', 'pen': Decimal('10'), 'ink': None}]
 [{'region': 'east', 'pen': Decimal('10'), 'ink': Decimal('5')}, {'region': 'north', 'pen': Decimal('0'), 'ink': Decimal('9')}, {'region': 'west', 'pen': Decimal('10'), 'ink': Decimal('0')}]
 [{'region': 'east', 'pen': 10, 'ink': 5}, {'region': 'north', 'pen': 0, 'ink': 9}, {'region': 'west', 'pen': 10, 'ink': 0}]
 ```
 
 ## Notes
 
-- Each `CASE WHEN product = '...'` builds one output column, so the column names are written out in the query; komira does not discover them from the data. A product not listed is left out of the wide table.
-- A pair that never occurs sums to 0 because of `ELSE 0`; use `CASE` without `ELSE` for NULL instead.
+- `PIVOT` groups by every column it does not name: here `region`, since `product` is the FOR column and `amount` is inside the aggregate. Select the columns you want in a derived table first (`FROM (SELECT ...) PIVOT (...)`) to group by fewer.
+- The new columns are the values listed after `IN`, named by them (`'pen' AS p` renames one); komira does not discover them from the data, so the statement form `PIVOT sales ON product USING sum(amount)` is refused. A product not listed adds no column, and its rows still form their group.
+- A pair that never occurs is NULL with `PIVOT` (`north` has no `pen`), and 0 with the `CASE WHEN ... ELSE 0` form; `count` gives 0 in both.
+- The value pivoted must be a BIGINT or a DOUBLE, or be counted: `PIVOT (max(name) ...)` over a text column is refused by name, since the empty cell would be a text NULL, which komira's plans cannot carry yet.
 - In SQL the sum of an integer column comes back as a `Decimal`; the polars-shaped frame returns integers.
-- komira has no SQL `PIVOT` yet: `probe_sql_pivot.py` beside this page tries it and must fail with the line in `probe_sql_pivot.error.txt`: komira-ai/komira#2399.
-- komira has no pandas-shaped `pivot_table` or `unstack` yet: `probe_pivot_table.py` must fail with the line in `probe_pivot_table.error.txt`: komira-ai/komira#2400. The day either runs, this page's check goes red, and the page and the catalogue status change with it.
+- komira has no pandas-shaped `pivot_table` or `unstack` yet: `probe_pivot_table.py` must fail with the line in `probe_pivot_table.error.txt`: komira-ai/komira#2400. The day it runs, this page's check goes red, and the page and the catalogue status change with it.
 
 ## Related
 

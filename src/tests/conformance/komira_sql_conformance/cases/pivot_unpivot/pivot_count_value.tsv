@@ -1,0 +1,6 @@
+region	pen	ink
+	1	0
+east	1	1
+north	0	1
+south	0	0
+west	2	0

@@ -1,0 +1,10 @@
+region	amount	pen	ink
+	2	1	0
+east		0	1
+east	10	1	0
+east	5	0	1
+north	6	0	0
+north	9	0	1
+south	4	0	0
+west	3	1	0
+west	7	1	0

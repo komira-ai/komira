@@ -230,6 +230,26 @@ of one name are refused, since the grouping names its columns, and so is a
 column named as one of the helper columns (`#set_side`, `#set_lo`, `#set_hi`),
 which only a file's column can be.
 
+`FROM t PIVOT (agg(x) [AS a] FOR c IN (v [AS n], ...))` and
+`FROM t UNPIVOT [INCLUDE | EXCLUDE NULLS] (v FOR n IN (c [AS l], ...))`
+(`sql.sql_bind_pivot`, the parsed clause in `sql.sql_pivot_spec`) are DuckDB's
+SQL-standard reshaping clauses, lowered onto nodes the engine already runs. A
+PIVOT is one aggregation grouped by every column of `t` that neither `c` nor
+the aggregate names, with one `agg(CASE WHEN c = v THEN x END)` per listed
+value, named by the value (`<value>_<a>` with an aggregate alias): a group with
+no row for a value has NULL there (count: 0), and a value the list leaves out
+adds no column. An UNPIVOT is a UNION ALL of one SELECT per listed column: the
+other columns in `t`'s order, the column's name (or its `AS` label) as `n` and
+its value as `v`, filtered on `IS NOT NULL` unless INCLUDE NULLS. Refused by
+name: a PIVOT value that is neither BIGINT nor DOUBLE (an empty cell is a NULL
+of the value's type, and the plan's typed NULLs are INT64 and FLOAT64; count is
+served over any type), an aggregate other than sum, count, min, max and avg,
+more than one aggregate or FOR column, an IN entry that is not a string or
+integer literal (PIVOT) or a column name (UNPIVOT), UNPIVOT columns of two
+types, two output columns of one name, a qualified column inside the aggregate,
+and the `PIVOT t ON c USING agg(x)` / `UNPIVOT t ON ...` statements, whose
+columns come from the data.
+
 `sql.sql_position` holds `SqlPosition`, a place in a text, and imports nothing,
 so `sdk_exec.engine_plan` carries one without the front end;
 `sql.sql_parse_text` says where a text stopped parsing. `tokenize(sql, starts)`
