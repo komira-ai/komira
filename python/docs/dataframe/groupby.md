@@ -32,6 +32,28 @@ stats = df[["value"]].median()            # one row, the column value
   reductions, not a missing one ([`fillna` and `dropna`](missing_values.md)
   (newer than 0.1.1623) do read it as missing).
 
+## Resample
+
+```python
+monthly = df.resample("MS", on="sold_on")["amount"].sum()
+print(monthly.columns)                    # ['sold_on', 'amount']
+```
+
+**`df.resample(rule, *, on, closed=None, label=None)`** gives a `GroupBy` by
+the bucket of the date or timestamp column `on`, which keeps the column's
+name and type; a komira frame has no time index, so `on` is required. The
+rules are pandas': `"D"` the day; `"W"` (`"W-SUN"`) the week from Monday to
+Sunday, labelled by its Sunday; `"MS"` the month, labelled by its first day;
+`"ME"` (`"M"`) the month, labelled by its last day. The buckets are the
+engine's `date_trunc`, so a week is DuckDB's `date_trunc('week', ...)`, which
+DuckDB names by its Monday and pandas by its Sunday. `closed` and `label` may
+name pandas' default and nothing else. As in pandas, a row with no date is in
+no bucket. Unlike pandas, a bucket with no rows has no row (komira does not
+fill gaps, komira-ai/komira#2343), and the answer has no row order: sorting
+by a date column is not built yet (komira-ai/komira#2408). Refused by name:
+another rule or a multiple (`"2D"`), `origin`, `offset`, `level`, a time
+zone, and the window verbs (`transform`, `cumsum`, `rank`) of a resample.
+
 Which reductions the engine computes today is on
 [its own page](aggregates_engine.md); [drop_duplicates](drop_duplicates.md)
 has one too. Back to [the DataFrame overview](overview.md).

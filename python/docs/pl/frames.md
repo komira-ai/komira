@@ -32,4 +32,5 @@ imports polars.
   tables' message for the names they hold.
 
 The expressions are on [their own page](expressions.md). Not built yet: the
-sinks, `from_arrow`, `shift`, `join_asof`, regular expressions and `.dt`.
+sinks, `from_arrow`, `shift`, `join_asof`, regular expressions, and in
+`.dt` everything but `truncate(every)`.

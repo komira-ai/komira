@@ -20,7 +20,9 @@ frame with a larger plan and runs nothing; a query runs only at the terminal
 - `groupby` gives a `GroupBy`, and `agg`, `sum`, `mean`, `median`, `std`,
   `var`, `min`, `max`, `count` and `nunique` reduce the whole frame to one
   row; each builds one aggregate node (komira/_groupby.py).
-  `drop_duplicates` builds a distinct over every column.
+  `drop_duplicates` builds a distinct over every column. `resample(rule,
+  on=column)` gives a `GroupBy` by the day, week or month of a date column
+  (komira/_resample.py).
 - `merge` joins two frames with one join node, and `df[df["k"].isin(o["k"])]`
   (`~` for its negation) is a semi (anti) join (komira/_merge.py).
 - A Series may read windows (`cumsum`, `rank`, `rolling`, a group's
@@ -60,7 +62,7 @@ from collections.abc import Callable
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
-from . import _display, _groupby, _merge, _ops, _refusals, _verbs, _windows, _write
+from . import _display, _groupby, _merge, _ops, _refusals, _resample, _verbs, _windows, _write
 from ._errors import UnsupportedOperation
 from ._groupby import GroupBy
 from ._missing import present
@@ -679,6 +681,27 @@ class DataFrame:
         sorts the answer by the keys, missing keys last; `dropna=True` leaves
         out the rows with a missing key, `dropna=False` keeps their group."""
         return GroupBy._new(self, by, as_index, sort, dropna)
+
+    def resample(
+        self,
+        rule: str,
+        *,
+        closed: str | None = None,
+        label: str | None = None,
+        on: str | None = None,
+        level: object = None,
+        origin: str = "start_day",
+        offset: object = None,
+    ) -> GroupBy:
+        """The rows bucketed by the date or timestamp column `on` into days
+        (`"D"`), weeks from Monday to Sunday labelled by their Sunday (`"W"`,
+        pandas' `W-SUN`), or months labelled by their first (`"MS"`) or last
+        (`"ME"`, `"M"`) day, as a `GroupBy` by the bucket, which keeps the
+        column's name (komira/_resample.py). A row with no date is left out;
+        a bucket with no rows has no row, and the answer has no row order."""
+        return _resample.resample(
+            self, rule, closed=closed, label=label, on=on, level=level, origin=origin, offset=offset
+        )
 
     def agg(self, arg: object = None, **named: object) -> DataFrame:
         """The frame reduced to one row: by named aggregates,

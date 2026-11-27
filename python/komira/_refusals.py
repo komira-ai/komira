@@ -93,7 +93,12 @@ GROUPBY = _rows(
         ("ngroups", "groups", "indices", "get_group"),
         ".{name} needs a query to run; aggregate with .size() and materialize()",
     ),
-    (("ohlc", "resample"), ".{name}() is not supported: komira has no time index"),
+    (("ohlc",), ".{name}() is not supported: komira has no time index"),
+    (
+        ("resample",),
+        "GroupBy.resample() is not supported yet: resample the frame with df.resample(rule, on=column), "
+        "which groups by the bucket alone",
+    ),
 )
 
 MODULE = _rows(

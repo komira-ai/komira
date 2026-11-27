@@ -30,11 +30,13 @@ protobuf, which the encoder imports when the first frame is made.
 from __future__ import annotations
 
 from . import _names
+from ._dt import ExprDateTimeNameSpace
 from ._expr import Expr, ExprStringNameSpace, col, len, lit, when
 from ._frame import LazyFrame, concat, scan_csv, scan_ndjson, scan_parquet
 
 __all__ = [
     "Expr",
+    "ExprDateTimeNameSpace",
     "ExprStringNameSpace",
     "LazyFrame",
     "col",

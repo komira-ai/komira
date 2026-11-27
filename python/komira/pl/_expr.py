@@ -619,6 +619,13 @@ class Expr:
         """The string functions of this expression."""
         return ExprStringNameSpace(self)
 
+    @property
+    def dt(self):
+        """The temporal functions of this expression (komira/pl/_dt.py)."""
+        from ._dt import ExprDateTimeNameSpace
+
+        return ExprDateTimeNameSpace(self)
+
 
 def _same(ref: Node) -> Node:
     return ref
