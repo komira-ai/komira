@@ -29,8 +29,9 @@ _LICENSE_SIZE = 1072
 # repository that uses komira as a cell, so it is named only when it exists.
 # `komira//src/iceberg_catalog:` loads the iceberg and avro extensions below
 # into a sql_oracle to read back the Iceberg tables that package writes, with
-# a reader that is not komira's.
-_USERS = ["komira//src/tests/...", "komira//src/bench_q6_phases:", "komira//src/sdk_exec:", "komira//src/tpch_answers:", "komira//src/iceberg_catalog:"] + ([
+# a reader that is not komira's. `komira//node:` writes the table of the SQL
+# conformance runner's fixture corpus as Parquet (node/tests/conformance).
+_USERS = ["komira//src/tests/...", "komira//src/bench_q6_phases:", "komira//src/sdk_exec:", "komira//src/tpch_answers:", "komira//src/iceberg_catalog:", "komira//node:"] + ([
     "tests//functional/sql_oracle:",
     "tests//negative/sql_oracle:",
 ] if read_root_config("cells", "tests") else [])

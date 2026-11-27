@@ -24,7 +24,7 @@ the format cannot carry rather than dropping it: an in-memory source, a
 Hive-partitioned or non-local Parquet scan, an undescribable user-defined
 function and the other shapes the codec's ledger lists. Every refusal is an
 error whose text starts with one of the exported `PLAN_WIRE_*` or
-`OPTIMIZED_UDF_*` names.
+`OPTIMIZED_UDF_*` or `OPTIMIZED_*` names.
 
 The decoder rebuilds every node through its `LogicalPlan` factory and refuses
 a message whose `output_schema` differs from the one the factory derives
@@ -223,4 +223,81 @@ none.read_set = Optional(List[String]())
 assert_false(Bool(udf_ref_from_bytes(udf_ref_to_bytes(every)).read_set))
 assert_true(Bool(udf_ref_from_bytes(udf_ref_to_bytes(none)).read_set))
 assert_true(udf_runtime_id_is_valid("example.org/go"))
+```
+
+## The optimizer's fields: RAW and OPTIMIZED
+
+A plan decodes in one of two contexts (docs/design/optimized_plan.md §5.2).
+RAW is the plan a SQL front end built, in an envelope; it holds no recorded
+optimizer decision. OPTIMIZED is the plan of an optimized plan's body, after a
+producer's optimizer ran. They differ in four fields, and each rule is in
+`plan_wire_optimized.mojo`:
+
+| Field | RAW | OPTIMIZED |
+|---|---|---|
+| `WireJoinNode.build_side` (field 9, `JoinBuildSide`) | encode refuses a recorded side and writes the unspecified value for UNSET; decode refuses any set value (`PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION`) | LEFT and RIGHT are written as 1 and 2 and restored; a join with no side is refused on encode and on decode (`OPTIMIZED_JOIN_BUILD_SIDE_MISSING`); a number the vocabulary does not declare is refused by it |
+| `estimated_groups` of an aggregate and a distinct | decode refuses it (`PLAN_WIRE_UNSUPPORTED_ESTIMATED_GROUPS`) | written and restored; a negative value is refused (`PLAN_WIRE_NEGATIVE_COUNT`) |
+| a scan's `row_count` | admitted | refused on decode, and refused on encode when the plan still holds one (`OPTIMIZED_FIELD_UNSUPPORTED`) |
+| a scan's table statistics | refused (`PLAN_WIRE_UNSUPPORTED_TABLE_STATS`) | refused (`OPTIMIZED_FIELD_UNSUPPORTED` on encode, the table-stats token on decode) |
+
+Statistics live only in the header's advice, outside the digest, and no host
+decision reads one from the plan, so a producer strips them before it
+serializes. Every join in the plan is checked, not only the root.
+`JoinData.adaptive_allowed`, `AggregateData.mode` and a non-bounded scan have
+no wire field yet and are refused in both contexts.
+
+`optimized_plan_to_wire` and `optimized_plan_from_wire` are the struct forms of
+`optimized_plan_to_bytes` and `optimized_plan_from_bytes`, with the same checks,
+for a codec that embeds the `WirePlan` in a larger message.
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from arrow.arrow_types import ArrowType
+from arrow.schema import Field, Schema, SchemaBuilder
+from plan_ir.logical_plan import LogicalPlan, JOIN_INNER, JOIN_ALGO_AUTO, JOIN_BUILD_SIDE_RIGHT, JOIN_BUILD_SIDE_UNSET
+from plan_ir.udf_ref import UdfRef
+from scan_source.parquet_source import ParquetSource
+from scan_source.source_variant import SourceVariant
+from plan_wire import optimized_plan_from_wire, optimized_plan_to_wire, plan_to_bytes
+from plan_wire import OPTIMIZED_JOIN_BUILD_SIDE_MISSING, PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION
+
+def key_schema(key: String) raises -> Schema:
+    var sb = SchemaBuilder()
+    sb.add_field(Field(key, ArrowType.INT64, False))
+    return sb.build()
+
+def table(name: String, key: String) raises -> LogicalPlan:
+    return LogicalPlan.scan_from_source(
+        SourceVariant(ParquetSource(name, key_schema(key))), key_schema(key)
+    )
+
+def join_on(build_side: UInt8) raises -> LogicalPlan:
+    var left_on: List[String] = ["a"]
+    var right_on: List[String] = ["b"]
+    return LogicalPlan.join(
+        table("l.parquet", "a"), table("r.parquet", "b"), left_on^, right_on^,
+        JOIN_INNER, JOIN_ALGO_AUTO, None, build_side,
+    )
+
+var udfs = List[UdfRef]()
+
+# OPTIMIZED: the recorded side crosses the wire.
+var wire = optimized_plan_to_wire(join_on(JOIN_BUILD_SIDE_RIGHT), udfs)
+assert_equal(wire.join[0].build_side.number(), 2)
+var back = optimized_plan_from_wire(wire, udfs)
+assert_equal(Int(back.join_data_ref().build_side), Int(JOIN_BUILD_SIDE_RIGHT))
+
+# OPTIMIZED refuses a join with no side; RAW refuses a join that has one.
+var missing = String("")
+try:
+    _ = optimized_plan_to_wire(join_on(JOIN_BUILD_SIDE_UNSET), udfs)
+except e:
+    missing = String(e)
+assert_true(missing.startswith(OPTIMIZED_JOIN_BUILD_SIDE_MISSING))
+var recorded = String("")
+try:
+    _ = plan_to_bytes(join_on(JOIN_BUILD_SIDE_RIGHT))
+except e:
+    recorded = String(e)
+assert_true(recorded.startswith(PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION))
 ```

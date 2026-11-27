@@ -1,0 +1,20 @@
+# proto-message: komira.plan.v1.DigestTrailer
+format_version: 1
+optimizer_contract_version: 1
+write_target {
+  path: "out/orders/"
+  format: WFMT_PARQUET
+  codec: WCOMP_ZSTD
+}
+udfs {
+  kind: SCALAR
+  code {
+    runtime: "komira/python"
+    entry: "f"
+  }
+}
+runtimes {
+  runtime: "komira/python"
+  runtime_abi: "cp312"
+}
+data_scopes: "orders"
