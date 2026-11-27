@@ -532,6 +532,7 @@ checks the annotations; the wheel rule's read-back check holds that `py.typed` i
 | the wheel tags of linux-arm64 and macos-arm64, the supported CPython range, `Requires-Dist` ranges, sdist, release member, PyPI stages | the wheel and release design |
 | the verbs of the two DataFrame surfaces, the refusal policy for verbs | the DataFrame surface design |
 | Python UDFs in worker processes | [udf_runtime_interface.md](udf_runtime_interface.md) and its Python design |
+| submitting a plan to a job manager: `JobManager`, `Session.submit`, `Run`, their exception classes, and the `run_id` attribute and codes they add to decision 9 (proposed, not built) | [submit_api.md](submit_api.md) |
 | sources, credentials and binding them (`Session.add_sql_binding`, and `sql(query, **sources)` for one statement), `https://` reads, `COPY ... TO` and its result | [credentials_and_writes.md](credentials_and_writes.md) |
 
 ## What must always hold?

@@ -380,7 +380,7 @@ session's thread, so it is not offered.
   [udf_runtime_interface.md](udf_runtime_interface.md), never in the engine's process or in an
   isolate. The plan door refuses an envelope with UDFs by name until then.
 - **Remote jobs.** These submit an `OptimizedPlan` to a job manager, after its codec exists
-  ([optimized_plan.md](optimized_plan.md)).
+  ([optimized_plan.md](optimized_plan.md)), by the protocol of [submit_api.md](submit_api.md).
 - **Also later:** object stores and credentials, bound as in every SDK
   (`s.addSqlBinding(name, source)`, and `s.sql(query, { orders_table })` for one statement,
   [credentials_and_writes.md](credentials_and_writes.md) decision 12); writes; progress; `explain()`
