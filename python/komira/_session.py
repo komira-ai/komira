@@ -31,7 +31,6 @@ from __future__ import annotations
 import contextlib
 import importlib
 import os
-import sys
 import threading
 import weakref
 from collections.abc import Callable, Iterator
@@ -182,8 +181,10 @@ class Session:
         again to see it), and a query on the name never reads `obj` again. So
         a `pyarrow.RecordBatchReader` is read to its end here, once, and its
         table answers every query, where DuckDB scans a registered reader once,
-        at the first query; giving the same reader to `register` again raises
-        `KomiraError`, since it has no rows left. A `Result` is read by this
+        at the first query. A `pyarrow.RecordBatchReader` once given to
+        `register`, whether or not that registration succeeded, raises
+        `KomiraError` when it is given again, since it may have no rows left;
+        another producer of a one-shot stream is not recognised. A `Result` is read by this
         call as by any of its terminals.
 
         Registering a name again replaces its table, of any kind (a file
@@ -204,8 +205,15 @@ class Session:
         type's Arrow format, as is a stream that fails while it is read. A frame the engine refuses to run
         raises its error from this call. A `name` that is not a non-empty `str`,
         or that holds a NUL byte or a lone surrogate, and an `obj` with neither
-        form, raise `TypeError` or `ValueError` before anything is read. Needs
-        libkomira ABI 1.9; an older one raises `KomiraError` and reads nothing.
+        form, raise `TypeError` or `ValueError` before anything is read; an
+        `__arrow_c_stream__` that returns no stream capsule raises `TypeError`
+        once it has been called. Needs libkomira ABI 1.9; an older one raises
+        `KomiraError` and reads nothing.
+
+        The session's lock is held while the library reads the stream, so the
+        producer's own code (a Python generator behind a reader, a pandas
+        export) runs under it: another thread's call on the session waits for
+        the read, and the producer calling this session raises `KomiraError`.
         """
         _check_name(name)
         _native._c_string("name", name)
@@ -505,10 +513,11 @@ _read_readers_lock = threading.Lock()
 def _claim_stream(source: object) -> None:
     """Records `source` when it is a `pyarrow.RecordBatchReader`, and refuses
     one `Session.register` was given before, whether that registration was
-    refused or not. pyarrow is not imported here: an object can only be its
-    reader once it has been."""
-    pyarrow = sys.modules.get("pyarrow")
-    if pyarrow is None or not isinstance(source, pyarrow.RecordBatchReader):
+    refused or not. Only pyarrow's reader is known to be read once; another
+    producer of a one-shot stream is not recognised here."""
+    import pyarrow
+
+    if not isinstance(source, pyarrow.RecordBatchReader):
         return
     with _read_readers_lock:
         if source in _read_readers:

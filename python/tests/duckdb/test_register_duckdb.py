@@ -11,32 +11,39 @@ CPython 3.13, the real libkomira).
 - the rows hold a NULL in every column, which every answer keeps as NULL; a
   table of no row keeps its column names and types and counts 0 rows;
 - a `pyarrow.RecordBatchReader` is read once, when it is registered: two
-  queries on its name answer the same rows, and giving the reader to
-  `register` again raises `KomiraError` with the exact message; a `Result`
-  registers, and registering it again raises the `Result`'s own read-once
-  error;
+  queries on its name answer the same rows; giving the reader to `register`
+  again, on this session or another, raises `KomiraError` with the exact
+  message, and so does a reader whose first registration was refused; a
+  `Result` registers, and registering it again raises the `Result`'s own
+  read-once error;
 - registering a name again replaces its table, as DuckDB's `register`
   replaces the view of the name: a second table under the same name, a name
   in another case, and a name `register_csv` took first;
-- a column type the engine does not hold is refused by name, and the name
-  keeps the table it had: a list column (`UnsupportedOperation`,
-  `TABLE_TYPE_UNSUPPORTED`, naming the column), the null type, a large list
-  and a run-end encoded column (`BindError`, `UnsupportedArrowCABIType`); a stream that fails while it is
-  read is refused with the producer's message, and registers nothing;
+- a column type the engine does not hold is refused by name with the exact
+  message, and the name keeps the table it had: a list column
+  (`UnsupportedOperation`, `TABLE_TYPE_UNSUPPORTED`, naming the column), the
+  null type, a large list and a run-end encoded column (`BindError`,
+  `UnsupportedArrowCABIType` naming the format);
+- a stream whose producer raises while it is read, and a producer that calls
+  the session while it is read (the session's lock is held then), are
+  refused as `BindError` with the engine's and pyarrow's words, and register
+  nothing;
 - every flat type reads back as the values it was given, NULL included, and
   as its own type, but for the large and view strings and binaries, which
-  read back as `string` and `binary` (bool, every int and uint width, float32
-  and float64, string, binary, date32 and date64, timestamps of every unit
-  and with a zone, decimal128 and decimal256, time32, time64, duration and a
-  dictionary of strings, which reads back decoded);
-- a reader of several batches cut from one table, whose columns start past
-  the start of their buffers, answers equal to DuckDB;
-- a frame whose plan the engine refuses raises the engine's error, and the
-  name keeps its table;
-- argument errors: a name that is not a non-empty `str`, a name with a NUL
-  byte, an object with neither a plan nor `__arrow_c_stream__`, an
-  `__arrow_c_stream__` that returns no capsule, and a closed session, each
-  raise before anything is read, and a reader refused so is not taken.
+  read back as `string` and `binary`, and a dictionary of large strings, as a
+  dictionary of `string`: bool, every int and uint width, float32 and
+  float64, the strings and binaries, date32 and date64, timestamps of every
+  unit and with a zone, decimal128 and decimal256, time32, time64, duration
+  and dictionaries; each once as a table and once as a reader of one-row
+  batches cut from it, whose columns start past the start of their buffers;
+- a reader of several batches cut from one table answers equal to DuckDB;
+- a frame whose file is gone when its plan runs raises the engine's exact
+  refusal, and the name keeps its table;
+- argument errors: a name that is not a `str`, an empty one, one with a NUL
+  byte or a lone surrogate, an object with neither a plan nor
+  `__arrow_c_stream__`, an `__arrow_c_stream__` that returns no capsule or
+  a capsule of another name, and a closed session, each raise with the exact
+  message, and a reader refused so is not taken.
 
 The test is of the `duckdb/` family (python/tests/BUCK): CPython 3.13 alone,
 the minor with a pinned DuckDB, on the real libkomira, with the generated plan
@@ -48,6 +55,7 @@ modules, duckdb, protobuf and pyarrow.
 rule passes, is not read).
 """
 
+import ctypes
 import datetime
 import decimal
 import math
@@ -187,6 +195,15 @@ def assert_queries_equal_duckdb(session, what):
         assert found is None, "{}, {}: {}\n{}".format(what, name, found, sql)
 
 
+def raised(call):
+    """The KomiraError `call` raises."""
+    try:
+        call()
+    except KomiraError as e:
+        return e
+    raise AssertionError("no KomiraError was raised")
+
+
 def refused(call, cls, message):
     """The error `call` raises, which must be of class `cls` exactly and say
     `message` exactly."""
@@ -301,15 +318,17 @@ def test_a_frame_the_engine_refuses_raises_and_registers_nothing(work):
     with komira.Session() as s:
         s.register("t", targets_table())
         frame = komira.read_parquet(path, session=s)
-        try:
-            s.register("t", frame[["price"]].median())
-        except KomiraError as e:
-            # The engine's refusal of the frame's plan, which names its step.
-            assert e.step is not None, repr(e)
-        else:
-            raise AssertionError("the engine answered a median; pick another refused frame")
-        got = s.sql("SELECT count(*) AS n FROM t").to_arrow().to_pylist()
-    assert got == [{"n": 3}], got
+        os.remove(path)
+        e = raised(lambda: s.register("t", frame))
+        got = (type(e).__name__, str(e).replace(path, "<path>"), e.code, e.step)
+        assert got == FRAME_REFUSED, got
+        rows = s.sql("SELECT count(*) AS n FROM t").to_arrow().to_pylist()
+    assert rows == [{"n": 3}], rows
+
+
+# The frame's file is gone when its plan runs: the engine's own refusal, at
+# the step that reads the footer.
+FRAME_REFUSED = ("KomiraError", "lower: parquet footer '<path>': no such file, or it cannot be read", None, "lower")
 
 
 # ---- read once ---------------------------------------------------------------------
@@ -332,6 +351,12 @@ def test_a_reader_is_read_once_when_it_is_registered(work):
         )
         refused(lambda: s.register("again", reader), KomiraError, message)
         refused(lambda: other.register("r", reader), KomiraError, message)
+        # A reader whose registration was refused is not given again either.
+        nested = pa.table({"v": pa.array([[1]], pa.list_(pa.int64()))})
+        nested_reader = pa.RecordBatchReader.from_batches(nested.schema, nested.to_batches())
+        e = raised(lambda: s.register("n", nested_reader))
+        assert type(e) is UnsupportedOperation, repr(e)
+        refused(lambda: s.register("n", nested_reader), KomiraError, message)
         # The refused registrations left the table of the name answering.
         assert s.sql("SELECT count(*) AS n FROM r").to_arrow().to_pylist() == [{"n": 8}]
 
@@ -380,6 +405,14 @@ def test_registering_a_name_again_replaces_its_table(work):
 # ---- refusals ----------------------------------------------------------------------------
 
 
+# The engine's import refuses these by their Arrow format string.
+OUTSIDE = {
+    "null": "UnsupportedArrowCABIType: the Null type ('n') is not in the supported drain subset",
+    "large_list": "UnsupportedArrowCABIType: Arrow C ABI format string '+L' is not recognized.",
+    "run_end_encoded": "UnsupportedArrowCABIType: Arrow C ABI format string '+r' is not recognized.",
+}
+
+
 def test_a_type_the_engine_does_not_hold_is_refused_by_name(work):
     import pyarrow as pa
 
@@ -397,15 +430,36 @@ def test_a_type_the_engine_does_not_hold_is_refused_by_name(work):
             ("large_list", pa.array([[1], None], pa.large_list(pa.int64()))),
             ("run_end_encoded", pa.RunEndEncodedArray.from_arrays(pa.array([2], pa.int32()), pa.array([7]))),
         )
+        wrong = []
         for label, column in outside:
-            try:
-                s.register("t", pa.table({"v": column}))
-            except BindError as e:
-                assert str(e).startswith("UnsupportedArrowCABIType: ") and e.step == "bind", (label, str(e))
-            else:
-                raise AssertionError("{} was registered".format(label))
+            e = raised(lambda: s.register("t", pa.table({"v": column})))
+            if (type(e), str(e), e.step) != (BindError, OUTSIDE[label], "bind"):
+                wrong.append((label, type(e).__name__, str(e), e.step))
+        assert not wrong, wrong
         got = s.sql("SELECT * FROM t").to_arrow().to_pylist()
     assert got == [{"x": 1}], got
+
+
+# The start of the refusal of a stream whose producer raised: the engine's
+# words, then pyarrow's, which go on with the producer's traceback.
+STREAM_FAILED = (
+    "from_arrow_c_stream: get_next failed (rc=22): Invalid: Unknown error: the producer stopped."
+    " Detail: Python exception: Traceback (most recent call last):\n"
+)
+REENTERED = (
+    "from_arrow_c_stream: get_next failed (rc=22): Invalid: Unknown error: a call on this session was made"
+    " while another call on it is running on the same thread (from a signal handler, a finalizer or a"
+    " progress callback): make it after that call returns. Detail: Python exception: Traceback (most recent"
+    " call last):\n"
+)
+
+
+def refused_starting(call, cls, start):
+    """The error `call` raises, which must be of class `cls` exactly, at the
+    bind step, and whose message starts with `start`."""
+    e = raised(call)
+    assert type(e) is cls and e.step == "bind" and str(e).startswith(start), (type(e).__name__, e.step, str(e))
+    return e
 
 
 def test_a_stream_that_fails_while_read_registers_nothing(work):
@@ -419,12 +473,24 @@ def test_a_stream_that_fails_while_read_registers_nothing(work):
 
     with komira.Session() as s:
         s.register("t", pa.table({"x": [9]}))
-        try:
-            s.register("t", pa.RecordBatchReader.from_batches(table.schema, batches()))
-        except BindError as e:
-            assert "the producer stopped" in str(e) and "get_next failed" in str(e), str(e)
-        else:
-            raise AssertionError("a failing stream was registered")
+        refused_starting(lambda: s.register("t", pa.RecordBatchReader.from_batches(table.schema, batches())), BindError, STREAM_FAILED)
+        got = s.sql("SELECT * FROM t").to_arrow().to_pylist()
+    assert got == [{"x": 9}], got
+
+
+def test_a_producer_that_calls_the_session_while_it_is_read_is_refused(work):
+    import pyarrow as pa
+
+    table = pa.table({"x": [1, 2]})
+    with komira.Session() as s:
+        s.register("t", pa.table({"x": [9]}))
+
+        def batches():
+            # The session's lock is held while the stream is read.
+            s.sql("SELECT 1")
+            yield table.to_batches()[0]
+
+        refused_starting(lambda: s.register("t", pa.RecordBatchReader.from_batches(table.schema, batches())), BindError, REENTERED)
         got = s.sql("SELECT * FROM t").to_arrow().to_pylist()
     assert got == [{"x": 9}], got
 
@@ -466,17 +532,22 @@ def flat_columns():
         ("time64[us]", pa.array([datetime.time(12, 30, 0, 5), None, datetime.time(0, 0)], pa.time64("us"))),
         ("duration[us]", pa.array([datetime.timedelta(seconds=3), None, datetime.timedelta(0)], pa.duration("us"))),
         ("dictionary<string>", pa.array(["a", None, "a"]).dictionary_encode()),
+        ("dictionary<large_string>", pa.array(["a", None, "a"], pa.large_string()).dictionary_encode()),
     ]
 
 
-def outcome(s, column):
+def outcome(s, column, sliced=False):
     """What `SELECT * FROM x` answers for the one-column table of `column`:
     ("same", answer type) when it reads back the values it was given,
     ("refused", text) when it is refused, else ("other", the values)."""
     import pyarrow as pa
 
+    table = pa.table({"v": column})
+    # `sliced`: a reader of one-row batches cut from the table, whose columns
+    # start past the start of their buffers.
+    source = pa.RecordBatchReader.from_batches(table.schema, table.to_batches(max_chunksize=1)) if sliced else table
     try:
-        s.register("x", pa.table({"v": column}))
+        s.register("x", source)
         got = s.sql("SELECT * FROM x").to_arrow()
     except KomiraError as e:
         return "refused", "{}: {}".format(type(e).__name__, e)
@@ -493,21 +564,39 @@ HELD_AS = {
     "string_view": "string",
     "large_binary": "binary",
     "binary_view": "binary",
+    "dictionary<large_string>": "dictionary<values=string, indices=int32, ordered=0>",
 }
 
 
 def test_every_flat_type_reads_back_its_values(work):
     with komira.Session() as s:
-        found = [(label, column, outcome(s, column)) for label, column in flat_columns()]
+        found = [
+            ("{}{}".format(label, " sliced" if sliced else ""), label, column, outcome(s, column, sliced))
+            for label, column in flat_columns()
+            for sliced in (False, True)
+        ]
     wrong = []
-    for label, column, (kind, detail) in found:
+    for case, label, column, (kind, detail) in found:
         want = HELD_AS.get(label, str(column.type))
         if (kind, detail) != ("same", want):
-            wrong.append("{}: {} ({}), expected same ({})".format(label, kind, detail, want))
+            wrong.append("{}: {} ({}), expected same ({})".format(case, kind, detail, want))
     assert not wrong, "\n".join(wrong)
 
 
 # ---- argument errors -------------------------------------------------------------------------
+
+
+_OTHER_NAME = ctypes.create_string_buffer(b"arrow_array")
+_new_capsule = ctypes.PyDLL(None).PyCapsule_New
+_new_capsule.restype = ctypes.py_object
+_new_capsule.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p]
+
+
+class _OtherCapsule:
+    """A producer whose capsule has another name than a stream's."""
+
+    def __arrow_c_stream__(self, requested_schema=None):
+        return _new_capsule(ctypes.addressof(_OTHER_NAME), _OTHER_NAME, None)
 
 
 class _NoCapsule:
@@ -541,6 +630,7 @@ def test_arguments_are_checked_before_anything_is_read(work):
         type_error(lambda: s.register(1, reader), "name must be a str, not int")
         value_error(lambda: s.register("", reader), "name is empty")
         value_error(lambda: s.register("a\0b", reader), "name holds a NUL byte")
+        value_error(lambda: s.register("a\udc80", reader), "name is not valid UTF-8")
         type_error(
             lambda: s.register("t", [1, 2]),
             "register takes a komira frame or an object with the Arrow PyCapsule stream interface "
@@ -549,6 +639,10 @@ def test_arguments_are_checked_before_anything_is_read(work):
         type_error(
             lambda: s.register("t", _NoCapsule()),
             "__arrow_c_stream__ returned str, not a PyCapsule named arrow_array_stream",
+        )
+        type_error(
+            lambda: s.register("t", _OtherCapsule()),
+            "__arrow_c_stream__ returned PyCapsule, not a PyCapsule named arrow_array_stream",
         )
     refused(lambda: s.register("t", reader), KomiraError, "the session is closed")
     # None of those took the reader: it still registers all of its rows.
@@ -573,6 +667,7 @@ TESTS = [
     test_registering_a_name_again_replaces_its_table,
     test_a_type_the_engine_does_not_hold_is_refused_by_name,
     test_a_stream_that_fails_while_read_registers_nothing,
+    test_a_producer_that_calls_the_session_while_it_is_read_is_refused,
     test_every_flat_type_reads_back_its_values,
     test_arguments_are_checked_before_anything_is_read,
 ]

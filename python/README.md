@@ -197,8 +197,8 @@ package, and each compares what it prints with that file, every line.
 
   - The rows are copied now, and every query reads the copy: a change to
     `obj` afterwards is not seen until it is registered again. A
-    `RecordBatchReader` is read now, once; giving it to `register` again
-    raises `KomiraError`.
+    `RecordBatchReader` is read now, once; giving it to `register` again,
+    whether or not the first registration succeeded, raises `KomiraError`.
   - Registering a name again replaces its table, of any kind and in any case.
   - A column of a nested type (list, struct, map) or a union raises
     `komira.UnsupportedOperation` (code `TABLE_TYPE_UNSUPPORTED`) naming the

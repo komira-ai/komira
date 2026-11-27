@@ -97,15 +97,14 @@ def stream_address(capsule: object) -> int:
     """The address of the `struct ArrowArrayStream` that `capsule`, what an
     `__arrow_c_stream__` returned, points at. Anything other than a capsule
     named "arrow_array_stream" is a `TypeError`."""
+    # A capsule never holds NULL (PyCapsule_New refuses it), so the call
+    # answers an address or raises.
     try:
-        address = _capsule_pointer(capsule, _NAME)
+        return _capsule_pointer(capsule, _NAME)
     except (TypeError, ValueError):
-        address = None
-    if not address:
         raise TypeError(
             "__arrow_c_stream__ returned {}, not a PyCapsule named arrow_array_stream".format(type(capsule).__name__)
-        )
-    return address
+        ) from None
 
 
 class _Given:
@@ -124,7 +123,6 @@ def engine_reader(source: object) -> pyarrow.RecordBatchReader:
     What `__arrow_c_stream__` returns is checked first (`stream_address`):
     anything but a stream capsule is a `TypeError`.
 
-
     - a large or view string column (`large_string`, `string_view`) is cast to
       `string`, and a large or view binary column to `binary`, the values
       unchanged: the engine holds strings with 32-bit offsets, and DuckDB
@@ -132,9 +130,11 @@ def engine_reader(source: object) -> pyarrow.RecordBatchReader:
       do not fit 32-bit offsets raises pyarrow's error while it is read;
     - a column of a batch that starts past the start of its buffers (a
       sliced table, `to_batches(max_chunksize=...)`) is copied to one that
-      starts at 0, which the engine's import reads.
+      starts at 0, which the engine's import reads;
+    - a dictionary of large or view strings or binaries becomes a
+      dictionary of `string` or `binary`.
 
-    Every other column is passed as it is, for the engine to take or refuse
+    A batch that needs none of this is passed as it is. Every other column is passed as it is, for the engine to take or refuse
     by name. The batches are read from `source` as the engine asks for them."""
     import pyarrow as pa
 
@@ -146,13 +146,16 @@ def engine_reader(source: object) -> pyarrow.RecordBatchReader:
     def batches() -> Iterator[pyarrow.RecordBatch]:
         for batch in reader:
             columns = []
+            changed = False
             for column, field in zip(batch.columns, schema):
                 if column.type != field.type:
                     column = column.cast(field.type)
+                    changed = True
                 if column.offset != 0:
                     column = pa.concat_arrays([column])
+                    changed = True
                 columns.append(column)
-            yield pa.RecordBatch.from_arrays(columns, schema=schema)
+            yield pa.RecordBatch.from_arrays(columns, schema=schema) if changed else batch
 
     return pa.RecordBatchReader.from_batches(schema, batches())
 
@@ -161,6 +164,8 @@ def _held_type(arrow_type: pyarrow.DataType) -> pyarrow.DataType:
     """The type `engine_reader` gives a column of `arrow_type`."""
     import pyarrow as pa
 
+    if pa.types.is_dictionary(arrow_type):
+        return pa.dictionary(arrow_type.index_type, _held_type(arrow_type.value_type), arrow_type.ordered)
     if pa.types.is_large_string(arrow_type) or pa.types.is_string_view(arrow_type):
         return pa.string()
     if pa.types.is_large_binary(arrow_type) or pa.types.is_binary_view(arrow_type):
