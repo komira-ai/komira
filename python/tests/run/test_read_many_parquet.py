@@ -21,9 +21,13 @@ runs through komira_plan_stream.
   a glob that matches nothing names the pattern (PARQUET_GLOB_NO_MATCH), as
   does a directory with no `.parquet` file; files whose schemas differ name
   both files (PARQUET_FILES_SCHEMA_MISMATCH);
+- `?`, `{a,b}` and `[...]` are glob characters too; a file that exists is read
+  as one file even when its name holds one (`part[1].parquet`, not
+  `part1.parquet`);
 - one file is read as before: through komira_parquet_schema, never
   komira_parquet_source, with the same one-path source, and its folders'
-  `key=value` names are not columns;
+  `key=value` names are not columns; a source that is not bytes is a
+  TypeError;
 - two komira.pl frames that read one path two ways are refused by join and
   concat, by name, rather than one frame's source standing in for the other's.
 
@@ -292,7 +296,7 @@ def test_two_frames_that_read_one_path_two_ways_are_refused():
         refused(
             lambda: keyed.join(plain, on="id"),
             komira.UnsupportedOperation,
-            f"join: the two frames read {d!r} in two ways (another hive_partitioning, or files that changed "
+            f"join: the two frames read {d!r} in two ways (other reader options, or files that changed "
             "between the reads): read it once, and take both frames from that one",
         )
         flat = os.path.join(d, "flat")
@@ -304,12 +308,38 @@ def test_two_frames_that_read_one_path_two_ways_are_refused():
         refused(
             lambda: kpl.concat([before, after]),
             komira.UnsupportedOperation,
-            f"concat: two frames read {pattern!r} in two ways (another hive_partitioning, or files that changed "
+            f"concat: two frames read {pattern!r} in two ways (other reader options, or files that changed "
             "between the reads): read it once, and take both frames from that one",
         )
         # One frame read once joins and concatenates with itself.
         assert len(rows(kpl.concat([after, after]))) == 8
         assert len(rows(keyed.join(keyed, on="id"))) == 3
+
+
+def test_the_other_glob_characters_and_a_file_named_with_one():
+    with work() as (s, d):
+        sales(d)
+        q = os.path.join(d, "sales_?a?.parquet")
+        assert [r["id"] for r in rows(komira.read_parquet(q, session=s))] == [1, 2, 4, 5]
+        braces = os.path.join(d, "sales_{jan,feb}.parquet")
+        assert [r["id"] for r in rows(kpl.scan_parquet(braces, session=s))] == [1, 2, 3]
+        brackets = os.path.join(d, "sales_[fm]*.parquet")
+        assert [r["id"] for r in rows(komira.read_parquet(brackets, session=s))] == [3, 4, 5]
+        # A file that exists is read as one file, whatever its name holds.
+        literal = write(os.path.join(d, "part[1].parquet"), [6])
+        write(os.path.join(d, "part1.parquet"), [7])
+        spy = Spy(s._native)
+        s._native = spy
+        assert [r["id"] for r in rows(komira.read_parquet(literal, session=s))] == [6]
+        assert [r["id"] for r in rows(kpl.scan_parquet(literal, session=s))] == [6]
+        assert spy.calls.count("parquet_source") == 0, spy.calls
+
+
+def test_a_source_is_bytes_of_the_library():
+    from komira import _plan
+
+    e = raised(lambda: _plan.parquet_files_source("paths"))
+    assert type(e) is TypeError and str(e) == "source must be bytes, not str", repr(e)
 
 
 TESTS = [
@@ -323,6 +353,8 @@ TESTS = [
     test_files_of_two_schemas_are_refused_naming_both,
     test_one_file_reads_as_before,
     test_two_frames_that_read_one_path_two_ways_are_refused,
+    test_the_other_glob_characters_and_a_file_named_with_one,
+    test_a_source_is_bytes_of_the_library,
 ]
 
 

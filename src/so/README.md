@@ -308,10 +308,10 @@ refused (-3, with a last error) before it is used.
 | `komira_register_json(ctx, name, path)` | the same for a newline-delimited JSON file, the scan `read_json` builds; the schema comes from the leading records | as `komira_register_csv` |
 | `komira_plan_render(ctx, plan, plan_len, out_buf, out_cap, out_len)` | decodes the serialized plan `plan[0..plan_len]` (a `WirePlanEnvelope`) and writes its text as authored, before any optimizer rule; the plan is not run | NULL `plan` or `out_len`: -2. `plan_len` above 64 MiB (`KOMIRA_MAX_INPUT_BYTES`): -5, checked before the plan is read or anything is allocated; exactly 64 MiB is accepted. Bytes that are not an admissible plan: -3 |
 
-The four calls with an `out_buf` follow the two-call protocol above. The
-binding and schema bytes are what a plan author splices into a scan leaf: the
+The five calls with an `out_buf` follow the two-call protocol above. The
+binding, schema and source bytes are what a plan author splices into a scan leaf: the
 fingerprint, kind id and snapshot fields come from the engine and are not
-computed by the caller. A NULL `ctx` is -1 for all seven.
+computed by the caller. A NULL `ctx` is -1 for all eight.
 
 `komira_register_csv` and `komira_register_json` refuse a taken name.
 `komira_register_parquet` replaces the table of a taken name (any kind, any
@@ -717,7 +717,7 @@ fresh session, give an empty code and step 0, and that a NULL context is -1 and
 step 0. One driver per
 new call writes its input file under `$TEST_TMPDIR` and checks a good input,
 NULL context (-1), a NULL input (-2 with a last error), a bad file or plan (-3
-with the message as the last error) and, for the four calls with an output, the
+with the message as the last error) and, for the five calls with an output, the
 two-call protocol; a good call after a refusal leaves no error.
 `gate_parquet_source` checks a glob over two files (both paths, the one that
 sorts first first) and a directory of `k=1/` and `k=2/` folders (more bytes

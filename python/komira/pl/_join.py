@@ -149,8 +149,8 @@ def join(left, other, on, how, left_on, right_on, suffix, validate, nulls_equal,
     for path, src in other._sources.items():
         if sources.setdefault(path, src) != src:
             raise UnsupportedOperation(
-                f"join: the two frames read {path!r} in two ways (another hive_partitioning, or "
-                "files that changed between the reads): read it once, and take both frames from that one"
+                f"join: the two frames read {path!r} in two ways (other reader options, or files that "
+                "changed between the reads): read it once, and take both frames from that one"
             )
 
     if how == "right":

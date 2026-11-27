@@ -457,7 +457,10 @@ _GLOB_CHARACTERS = frozenset("*?[{")
 def _names_many_files(path: str) -> bool:
     """Whether the absolute `path` is a glob or a directory, which the engine
     resolves into the files it names (`komira_parquet_source`), rather than
-    one file."""
+    one file. A file that exists is one file, even when its name holds a
+    glob character (`part[1].parquet`)."""
+    if os.path.isfile(path):
+        return False
     return not _GLOB_CHARACTERS.isdisjoint(path) or os.path.isdir(path)
 
 

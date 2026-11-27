@@ -75,10 +75,8 @@ def parquet_files_source(source: bytes) -> pb.WireScanSource:
 
 
 def scan_schema(source: pb.WireScanSource) -> pb.WireSchema:
-    """The columns a scan of `source` reads: a Parquet source's file columns
-    followed by its Hive partition columns, a binding's schema."""
-    if source.WhichOneof("payload") != "parquet":
-        return source.binding.schema
+    """The columns a scan of the Parquet source `source` reads: the files'
+    columns followed by its Hive partition columns."""
     if not source.parquet.partition_cols:
         return source.parquet.schema
     out = pb.WireSchema()
