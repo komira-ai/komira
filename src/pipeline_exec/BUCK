@@ -234,7 +234,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 #                                 last, ties in input order, four workers' partials,
 #                                 refusals by name, the pool's charge and return.
 # test_sort_keys                  float NaN/inf/zeros, the empty string, an unsorted
-#                                 dictionary, unsortable key types refused by name.
+#                                 dictionary, a DATE32 key with NULLs (sort and
+#                                 top-N, its type kept), unsortable key types
+#                                 refused by name.
 # test_sort_plan                  hand-built plans into SINK_SORT: a resident batch, a
 #                                 Parquet scan, a segment's output, no row, a pool
 #                                 too small.

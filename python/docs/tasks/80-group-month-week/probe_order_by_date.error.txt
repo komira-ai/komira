@@ -1,1 +1,0 @@
-KomiraError: execute: pipeline_exec: the sort sink of segment 1 sorts by 'month_start', of unsupported sort key type date32

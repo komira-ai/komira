@@ -10,7 +10,7 @@
 #     direction;
 #   * a DICTIONARY key is ordered by dictionary INDEX, not by value, which is
 #     wrong whenever a dictionary is not sorted;
-#   * it raises for a key type it does not order (DECIMAL, DATE, FLOAT32 ...).
+#   * it raises for a key type it does not order (DECIMAL, DATE64, FLOAT32 ...).
 #
 # So the sort hands the kernel a batch of its own making, the key batch, whose
 # columns carry internal names ("r0", "v0", "r1", ... and "row"; the key batch
@@ -69,6 +69,7 @@ def sort_key_supported(t: ArrowType) -> Bool:
     orders by value, and DICTIONARY (decoded first)."""
     return (
         t == ArrowType.INT32
+        or t == ArrowType.DATE32
         or t == ArrowType.INT64
         or t == ArrowType.FLOAT64
         or t == ArrowType.BOOL

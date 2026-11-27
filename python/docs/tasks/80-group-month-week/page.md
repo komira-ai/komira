@@ -1,6 +1,6 @@
 # How do I group by month or week?
 
-Cut the date down with `date_trunc('month', d)` or `date_trunc('week', d)` and `GROUP BY` that, sorting the periods in Python for now; on a pandas-shaped frame, add `.dt.year` and `.dt.month` as columns and group by them.
+Cut the date down with `date_trunc('month', d)` or `date_trunc('week', d)`, `GROUP BY` that and `ORDER BY` it; on a pandas-shaped frame, add `.dt.year` and `.dt.month` as columns and group by them.
 
 <!-- include example.py -->
 ```python
@@ -18,23 +18,22 @@ Path("orders.csv").write_text(
     "6,2024-02-29,30\n"
 )
 
-# SQL: date_trunc cuts a date down to the first day of its month or week.
-# ORDER BY a date column is not supported yet, so the rows are sorted in
-# Python.
+# SQL: date_trunc cuts a date down to the first day of its month or week,
+# and ORDER BY sorts the periods by date.
 with komira.Session() as s:
     s.register_csv("orders", "orders.csv")
     by_month = s.sql(
         "SELECT date_trunc('month', order_date) AS month_start, count(*) AS n"
-        " FROM orders GROUP BY 1"
+        " FROM orders GROUP BY 1 ORDER BY month_start"
     )
-    print(sorted(by_month.to_arrow().to_pylist(), key=lambda r: r["month_start"]))
+    print(by_month.to_arrow().to_pylist())
 
     # Weeks start on Monday.
     by_week = s.sql(
         "SELECT date_trunc('week', order_date) AS week_start, count(*) AS n"
-        " FROM orders GROUP BY 1"
+        " FROM orders GROUP BY 1 ORDER BY week_start"
     )
-    print(sorted(by_week.to_arrow().to_pylist(), key=lambda r: r["week_start"]))
+    print(by_week.to_arrow().to_pylist())
 
 # pandas-shaped: add the year and the month as columns, then group by them.
 df = komira.read_csv("orders.csv")
@@ -57,7 +56,7 @@ Output:
 - `date_trunc` also takes `year`, `quarter` and `day`, and the same unit's DuckDB aliases.
 - The pandas-shaped frame has no `.dt.week`, no `resample` and no `.dt.to_period`: group by `.dt.year` and `.dt.month` as above, or use SQL for weeks.
 - komira.pl (the polars-shaped door) has no `dt.truncate`; use SQL for a truncated date.
-- Rows come back in no promised order unless they are sorted. `ORDER BY` a date column is not supported yet: it fails when the query runs (komira-ai/komira#2408). `probe_order_by_date.py` beside this page sorts the months with `ORDER BY` and must fail with the line in `probe_order_by_date.error.txt`. The day it runs, this page's check goes red, and the page and the catalogue status change with it. Until then, sort the rows in Python as above. A pandas-shaped `groupby` sorts by its keys.
+- Rows come back in no promised order without `ORDER BY`. `ORDER BY` a date sorts by the day, earliest first, and puts NULLs last in both directions, as DuckDB does; write `NULLS FIRST` to put them first. `ORDER BY ... LIMIT n` keeps the first `n` periods. A pandas-shaped `groupby` sorts by its keys.
 
 ## Related
 

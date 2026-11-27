@@ -73,7 +73,8 @@ def sort_batch_by_keys(
     in O(K * N log N) time, the same order Arrow's `lexsort_to_indices`
     produces.
 
-    Supported key column types: INT32, INT64, FLOAT64, BOOL, DICTIONARY,
+    Supported key column types: INT32, DATE32, INT64 and the TIMESTAMP
+    units, FLOAT64, BOOL, DICTIONARY,
     numeric-dict, STRING/BINARY and the nested types. Raises on unsupported
     types so the error surfaces at the sort site instead of producing silently
     wrong output.
@@ -143,7 +144,13 @@ def sort_batch_by_keys(
         elif key_col.arrow_type == ArrowType.FLOAT64:
             var arr = key_col.as_primitive[DType.float64]()
             sort_idx = sort_indices_float64(arr, desc)
-        elif key_col.arrow_type == ArrowType.INT32:
+        elif (
+            key_col.arrow_type == ArrowType.INT32
+            # A DATE32 is a signed int32 count of days since the epoch, so day
+            # order is date order, a day before 1970 below zero. The gather
+            # below keeps the column's DATE32 type.
+            or key_col.arrow_type == ArrowType.DATE32
+        ):
             var arr = key_col.as_primitive[DType.int32]()
             sort_idx = sort_indices_int32(arr, desc)
         elif key_col.is_numeric_dict():
