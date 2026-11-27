@@ -112,6 +112,7 @@ a promise every surface makes that no plan node expresses.
 | `topn` | `PLAN_TOPN` | the first n rows of an order |
 | `topn_per_group` | `PLAN_PARTITION_TOPN` | the first k rows of an order within each group |
 | `limit` | `PLAN_LIMIT` | the first n rows, with an offset |
+| `unnest` | `PLAN_UNNEST` | one row per element of a list column, the other columns repeated |
 | `distinct` | `PLAN_DISTINCT` | drop duplicate rows, or rows duplicate on some columns |
 | `union` | `PLAN_UNION` | concatenate inputs of one schema (union all) |
 | `subquery` | `EXPR_CORRELATED_SUBQUERY` | a subquery inside an expression, correlated or not |
@@ -171,7 +172,7 @@ build fails on:
   `NOT_CAPABILITIES` row names, or that is declared in a form the lint
   cannot read.
 - **The floor**: fewer filled cells than `floor` (the root `BUCK`, today
-  31), so a change that empties a cell or loses its test fails. That the
+  32), so a change that empties a cell or loses its test fails. That the
   floor only rises is a **review rule**, not something the lint enforces: the
   change that fills cells raises it to the new count, and review refuses a
   change that lowers it. More filled cells than the floor is not a finding
@@ -217,15 +218,15 @@ own build (or `buck2 test`) is what runs it: the lint only analyses it.
 
 ## Census
 
-The census of 2026-11-26, written by hand from the ledger of that day and held
-by the lint: the pull request that filled the `sql` cells raised `floor` to
-31, so `./buck2 build //:surface_capability_matrix` fails with fewer filled
+The census of 2026-11-27, written by hand from the ledger of that day and held
+by the lint: the pull request that filled the `sql` cell of `unnest` raised
+`floor` to 32, so `./buck2 build //:surface_capability_matrix` fails with fewer filled
 cells. The lint's `[report]` and `[matrix]` are the source of truth, so
 rebuild them for today's numbers:
 `./buck2 build '//:surface_capability_matrix[report]' --show-full-output`.
 
-**Totals.** 6 surfaces x 52 capabilities = 312 cells;
-**31 filled (9.9%)**; 281 missing; floor 31. Every filled cell is a `sql`
+**Totals.** 6 surfaces x 53 capabilities = 318 cells;
+**32 filled (10.1%)**; 286 missing; floor 32. Every filled cell is a `sql`
 cell, named by its own `test_sql_<capability>` target of
 `src/tests/e2e/sql_e2e`. No `pandas_e2e` or `polars_e2e` package exists
 yet: a cell takes a test (a Python test is not one to the lint today), and
@@ -234,12 +235,12 @@ the Python closure check admits Python in those packages only by a ruling
 
 | Surface | Filled | Cells | % |
 |---|---:|---:|---:|
-| `pandas` | 0 | 52 | 0.0% |
-| `polars` | 0 | 52 | 0.0% |
-| `sql` | 31 | 52 | 59.6% |
-| `mojo_polars` | 0 | 52 | 0.0% |
-| `ts_polars` | 0 | 52 | 0.0% |
-| `excel` | 0 | 52 | 0.0% |
+| `pandas` | 0 | 53 | 0.0% |
+| `polars` | 0 | 53 | 0.0% |
+| `sql` | 32 | 53 | 60.4% |
+| `mojo_polars` | 0 | 53 | 0.0% |
+| `ts_polars` | 0 | 53 | 0.0% |
+| `excel` | 0 | 53 | 0.0% |
 
 Every cell, `yes` when filled and `-` when missing:
 
@@ -283,6 +284,7 @@ Every cell, `yes` when filled and `-` when missing:
 | `topn` | - | - | yes | - | - | - |
 | `topn_per_group` | - | - | - | - | - | - |
 | `limit` | - | - | yes | - | - | - |
+| `unnest` | - | - | yes | - | - | - |
 | `distinct` | - | - | yes | - | - | - |
 | `union` | - | - | yes | - | - | - |
 | `subquery` | - | - | yes | - | - | - |

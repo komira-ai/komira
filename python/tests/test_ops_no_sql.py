@@ -59,6 +59,7 @@ from komira._ops import (
     Substring,
     TopN,
     UdfCall,
+    Unnest,
     UdfSpec,
     Unary,
     Union,
@@ -173,6 +174,7 @@ PLAN_INSTANCES = [
     Union((LEFT, LEFT)),
     Write(LEFT, WriteTarget("out.parquet", "parquet")),
     MapBatches(LEFT, FRAME),
+    Unnest(LEFT, "a", True),
 ]
 
 SUPPORT_INSTANCES = [

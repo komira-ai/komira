@@ -140,7 +140,10 @@ def test_a_frame_sorted_by_another_column_stays_sorted_and_by_the_column_does_no
     p = pandas_frame().sort_values("id").explode("tags")
     assert p._plan == _ops.Sort(Unnest(_ops.Sort(SCAN, keys), "tags", True), keys)
     q = polars_frame().sort("id").explode("tags")
-    assert q._plan == p._plan and q._order == keys
+    # polars sorts nulls first by default, so its key is not pandas' key.
+    pl_keys = (SortKey("id", False, True),)
+    assert q._order == pl_keys, q._order
+    assert q._plan == _ops.Sort(Unnest(_ops.Sort(SCAN, pl_keys), "tags", True), pl_keys)
     by_list = pandas_frame().sort_values("tags").explode("tags")
     assert isinstance(by_list._plan, Unnest)
     by_list_pl = polars_frame().sort("tags").explode("tags")

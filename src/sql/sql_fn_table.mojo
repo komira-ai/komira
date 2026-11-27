@@ -799,10 +799,11 @@ comptime _R_TABLEFN: String = (
     "SQL not supported: this name is a DuckDB v1.5.3 MACRO whose body "
     "is a TABLE function — it calls `unnest(...)` (measured: "
     "`regexp_split_to_table` is `unnest(string_split_regex(text, "
-    "pattern))`). THE MISSING PRIMITIVE IS `unnest`: a scalar call here "
-    "binds to one output column of one row per input row, and unnest "
-    "produces MANY rows per input row, which is a plan node this engine "
-    "does not have and not an expression at all."
+    "pattern))`). A scalar call here binds to one output column of one "
+    "row per input row, and unnest produces MANY rows per input row, so "
+    "it is not an expression: this binder serves `unnest(list)` only as a "
+    "whole SELECT item, where it becomes an Unnest plan node. Write "
+    "`SELECT unnest(string_split_regex(text, pattern)) FROM ...` instead."
 )
 
 comptime _R_BITS: String = (

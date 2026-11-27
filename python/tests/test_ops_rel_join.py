@@ -30,6 +30,7 @@ from komira._ops import (
     TopN,
     UdfSpec,
     Union,
+    Unnest,
     Write,
     WriteTarget,
     walk_plan,
@@ -460,6 +461,7 @@ def test_plan_nodes_lists_every_relational_class_once():
         "Union",
         "Write",
         "MapBatches",
+        "Unnest",
     ], names
     for node in (
         people(),
@@ -474,6 +476,7 @@ def test_plan_nodes_lists_every_relational_class_once():
         Union((people(), people())),
         Write(people(), WriteTarget("o", "csv")),
         MapBatches(people(), FRAME_SPEC),
+        Unnest(people(), "id", True),
     ):
         assert isinstance(node, PLAN_NODES), type(node).__name__
         assert isinstance(node.columns, tuple), type(node).__name__
