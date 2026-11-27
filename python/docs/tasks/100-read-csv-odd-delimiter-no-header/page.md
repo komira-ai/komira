@@ -42,4 +42,4 @@ Output:
 - [How do I read a CSV file?](../1-read-csv-file/page.md) (rank 1, works)
 - How do I run SQL on a CSV or Parquet file (or a DataFrame)? (rank 37, partial; no page yet)
 - [How do I process a CSV that does not fit in memory?](../28-process-csv-larger-than-memory/page.md) (rank 28, partial)
-- How do I read many files matching a pattern into one table? (rank 19, partial; no page yet)
+- [How do I read many files matching a pattern into one table?](../19-read-many-files-matching-pattern-table/page.md) (rank 19, partial)

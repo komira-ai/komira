@@ -53,5 +53,5 @@ rows written: 3
 ## Related
 
 - [How do I read a CSV file?](../1-read-csv-file/page.md) (rank 1, works)
-- How do I write a table to a CSV file? (rank 11, partial; no page yet)
+- [How do I write a table to a CSV file?](../11-write-table-csv-file/page.md) (rank 11, partial)
 - How do I write a dataset partitioned by a column? (rank 97, gap; no page yet)

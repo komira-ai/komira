@@ -61,6 +61,6 @@ Output:
 ## Related
 
 - How do I select or drop columns? (rank 34, works; no page yet)
-- How do I rename columns? (rank 16, works; no page yet)
+- [How do I rename columns?](../16-rename-columns/page.md) (rank 16, works)
 - [How do I sort rows by one or more columns?](../8-sort-rows-by-columns/page.md) (rank 8, works)
 - How do I turn a table into a list of dicts? (rank 67, works)

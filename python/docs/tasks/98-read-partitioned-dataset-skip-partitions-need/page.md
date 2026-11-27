@@ -63,7 +63,7 @@ Output:
 
 ## Related
 
-- How do I read a Parquet file? (rank 15, works; no page yet)
-- How do I read many files matching a pattern into one table? (rank 19, partial; no page yet)
+- [How do I read a Parquet file?](../15-read-parquet-file/page.md) (rank 15, works)
+- [How do I read many files matching a pattern into one table?](../19-read-many-files-matching-pattern-table/page.md) (rank 19, partial)
 - How do I read Parquet or CSV files from S3? (rank 31, gap; no page yet)
 - How do I write a dataset partitioned by a column? (rank 97, gap; no page yet)
