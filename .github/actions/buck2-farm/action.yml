@@ -1,4 +1,5 @@
-# Runs one `./buck2` command (build, test or bxl) and fails the step unless the
+# Runs one buck2 command (build, test or bxl; `./buck2` unless the `buck2`
+# input names another program) and fails the step unless the
 # run was on the farm: buck2 must succeed, and `assert_remote`
 # (//tools/build/ci:assert_remote, which says what it accepts) must find no
 # local execution in the run's output.
@@ -43,6 +44,10 @@ inputs:
   assert-remote:
     description: Path of the built //tools/build/ci:assert_remote executable.
     required: true
+  buck2:
+    description: The buck2 program to run, as a path. Left out, `./buck2`, the checkout's pinned launcher; a repository that installs its own pinned buck2 passes that path.
+    required: false
+    default: ./buck2
 
 runs:
   using: composite
@@ -52,13 +57,14 @@ runs:
       env:
         ASSERT_REMOTE: ${{ inputs.assert-remote }}
         BUCK2_ARGS: ${{ inputs.args }}
+        BUCK2_PROGRAM: ${{ inputs.buck2 }}
         BUCK2_LOG: ${{ runner.temp }}/buck2-farm.log
         # The simple console: plain lines, and every few seconds
         # `Waiting on <target> -- <action>, and N other actions`, so the live
         # step log names what a stalled build waits on. It is what buck2 picks
         # without a terminal; set here so a runner's terminal never changes it.
         BUCK_CONSOLE: simple
-      run: '"$ASSERT_REMOTE" run --log "$BUCK2_LOG" --summary "$GITHUB_STEP_SUMMARY" --farm-config "$HOME/.buckconfig.d/farm.buckconfig" -- ./buck2 $BUCK2_ARGS'
+      run: '"$ASSERT_REMOTE" run --log "$BUCK2_LOG" --summary "$GITHUB_STEP_SUMMARY" --farm-config "$HOME/.buckconfig.d/farm.buckconfig" -- "$BUCK2_PROGRAM" $BUCK2_ARGS'
     - name: assert the run was remote
       shell: bash
       env:

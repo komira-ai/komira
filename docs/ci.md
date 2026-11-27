@@ -219,6 +219,9 @@ succeeded and no action ran locally. It is two lines, both the built tool
 ([`assert_remote.zig`](../tools/build/ci/assert_remote/assert_remote.zig)): the
 first, `assert_remote run`, runs buck2 with its output copied to the job log
 and to a file, and the second reads the file.
+The program is `./buck2` unless the action's `buck2` input names another, so
+a repository that installs its own pinned buck2 can run its farm builds
+through the same action, with the machine buckconfig farm-connect writes.
 
 When the connection between the runner and the farm is cut, buck2 fails every
 action in flight at once, each with its own `Error:` line holding

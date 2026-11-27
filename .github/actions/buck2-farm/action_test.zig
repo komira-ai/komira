@@ -76,6 +76,7 @@ const Step = struct {
     shell: []const u8 = "",
     run: []const u8 = "",
     env_args: []const u8 = "", // `args` of env BUCK2_ARGS, a `${{ inputs.args }}`
+    program: []const u8 = "", // BUCK2_PROGRAM, a `${{ inputs.buck2 }}`
     log: []const u8 = "", // BUCK2_LOG
     tool: []const u8 = "", // ASSERT_REMOTE
     console: []const u8 = "", // BUCK_CONSOLE
@@ -95,6 +96,7 @@ fn parseSteps(ar: std.mem.Allocator, text: []const u8) ![]Step {
         if (std.mem.startsWith(u8, trimmed, "shell: ")) s.shell = trimmed["shell: ".len..];
         if (std.mem.startsWith(u8, trimmed, "run: ")) s.run = unquote(trimmed["run: ".len..]);
         if (std.mem.startsWith(u8, trimmed, "BUCK2_ARGS: ")) s.env_args = trimmed["BUCK2_ARGS: ".len..];
+        if (std.mem.startsWith(u8, trimmed, "BUCK2_PROGRAM: ")) s.program = trimmed["BUCK2_PROGRAM: ".len..];
         if (std.mem.startsWith(u8, trimmed, "BUCK2_LOG: ")) s.log = trimmed["BUCK2_LOG: ".len..];
         if (std.mem.startsWith(u8, trimmed, "BUCK_CONSOLE: ")) s.console = trimmed["BUCK_CONSOLE: ".len..];
         if (std.mem.startsWith(u8, trimmed, "ASSERT_REMOTE: ")) s.tool = trimmed["ASSERT_REMOTE: ".len..];
@@ -123,7 +125,7 @@ test "the two steps are the tool running buck2 and the tool reading its log, eac
     // bash, never sh: a runner's bash is `bash -eo pipefail`, its sh is `sh -e`
     try t.expectEqualStrings("bash", steps[0].shell);
     try t.expectEqualStrings("bash", steps[1].shell);
-    try t.expectEqualStrings("\"$ASSERT_REMOTE\" run --log \"$BUCK2_LOG\" --summary \"$GITHUB_STEP_SUMMARY\" --farm-config \"$HOME/.buckconfig.d/farm.buckconfig\" -- ./buck2 $BUCK2_ARGS", steps[0].run);
+    try t.expectEqualStrings("\"$ASSERT_REMOTE\" run --log \"$BUCK2_LOG\" --summary \"$GITHUB_STEP_SUMMARY\" --farm-config \"$HOME/.buckconfig.d/farm.buckconfig\" -- \"$BUCK2_PROGRAM\" $BUCK2_ARGS", steps[0].run);
     try t.expectEqualStrings("\"$ASSERT_REMOTE\" \"$BUCK2_LOG\"", steps[1].run);
 }
 
@@ -134,6 +136,7 @@ test "the inputs reach the steps through env, and both steps name the same log a
     try t.expectEqualStrings("${{ inputs.args }}", steps[0].env_args);
     try t.expectEqualStrings("${{ inputs.assert-remote }}", steps[0].tool);
     try t.expectEqualStrings("${{ inputs.assert-remote }}", steps[1].tool);
+    try t.expectEqualStrings("${{ inputs.buck2 }}", steps[0].program);
     try t.expectEqualStrings("${{ runner.temp }}/buck2-farm.log", steps[0].log);
     try t.expectEqualStrings(steps[0].log, steps[1].log);
 }
@@ -327,6 +330,8 @@ pub const Setup = struct {
     log_dir_missing: bool = false,
     /// There is no `./buck2`.
     no_buck2: bool = false,
+    /// The `buck2` input, in place of its default `./buck2`; the stand-in is put there too.
+    program: ?[]const u8 = null,
     /// The farm the machine buckconfig names, and how the buckconfig is.
     farm: enum {
         /// A listening loopback port: it answers at once.
@@ -413,7 +418,8 @@ pub fn runCaseWith(ar: std.mem.Allocator, subcommand: []const u8, runs: []const 
     const dir = try std.fmt.allocPrint(ar, "{s}/case{d}", .{ w, case_no });
     try std.fs.cwd().makePath(dir);
     if (!setup.no_buck2) {
-        const buck2 = try std.fs.path.join(ar, &.{ dir, "buck2" });
+        const buck2 = try std.fs.path.join(ar, &.{ dir, setup.program orelse "buck2" });
+        if (std.fs.path.dirname(buck2)) |d| try std.fs.cwd().makePath(d);
         try std.fs.cwd().copyFile(try std.process.getEnvVarOwned(ar, "STAND_IN_BUCK2"), std.fs.cwd(), buck2, .{});
         var f = try std.fs.cwd().openFile(buck2, .{});
         try f.chmod(0o755);
@@ -445,6 +451,8 @@ pub fn runCaseWith(ar: std.mem.Allocator, subcommand: []const u8, runs: []const 
     var env = std.process.EnvMap.init(ar);
     try env.put("PATH", try std.process.getEnvVarOwned(ar, "PATH"));
     try env.put("BUCK2_ARGS", args.items);
+    // the input's default, as a runner fills it, unless the case names a program
+    try env.put("BUCK2_PROGRAM", setup.program orelse "./buck2");
     try env.put("BUCK2_LOG", try std.fs.path.join(ar, &.{ dir, if (setup.log_dir_missing) "missing/buck2-farm.log" else "buck2-farm.log" }));
     const summary = try std.fs.path.join(ar, &.{ dir, "summary.md" });
     if (setup.summary_is_dir) try std.fs.cwd().makePath(summary);
@@ -519,6 +527,19 @@ test "a build the farm ran passes both steps" {
 
 test "a bxl run the farm ran passes" {
     try expectPasses(&.{fixture("bxl_remote.log", 0)});
+}
+
+test "the buck2 the input names runs in place of ./buck2, so another repository can pass its own" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try runCaseWith(a, "build", &.{fixture("build_remote.log", 0)}, .{ .program = "pinned/bin/buck2" });
+    errdefer show(c);
+    try t.expectEqual(@as(u8, 2), c.step);
+    try t.expectEqual(@as(u8, 0), c.code);
+    try t.expectEqual(@as(usize, 1), c.runs);
+    // there is no ./buck2 in the case: the run was the named program's
+    try t.expect((try c.file(a, "buck2")) == null);
 }
 
 test "a fully cached run, which prints no summary, passes" {
