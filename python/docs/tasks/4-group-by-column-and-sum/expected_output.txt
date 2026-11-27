@@ -1,0 +1,4 @@
+[{'region': 'east', 'total': 165.75}, {'region': 'north', 'total': 200.0}, {'region': 'west', 'total': 230.5}]
+[{'region': 'east', 'amount': 165.75}, {'region': 'north', 'amount': 200.0}, {'region': 'west', 'amount': 230.5}]
+[{'region': 'east', 'total': 165.75}, {'region': 'north', 'total': 200.0}, {'region': 'west', 'total': 230.5}]
+[{'region': 'east', 'amount': 165.75}, {'region': 'north', 'amount': 200.0}, {'region': 'west', 'amount': 230.5}]

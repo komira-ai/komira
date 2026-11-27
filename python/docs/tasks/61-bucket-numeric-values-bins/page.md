@@ -68,6 +68,6 @@ Output:
 ## Related
 
 - How do I count the rows of a table? (rank 62, works)
-- How do I add a new column computed from other columns? (rank 3, works; no page yet)
+- [How do I add a new column computed from other columns?](../3-add-computed-column/page.md) (rank 3, works)
 - How do I detect outliers? (rank 56, partial; no page yet)
 - How do I convert a column to numbers, turning bad values into null? (rank 60, works; no page yet)

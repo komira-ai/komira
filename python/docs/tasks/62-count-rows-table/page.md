@@ -54,7 +54,7 @@ Output:
 
 ## Related
 
-- How do I look at the first rows, row count and columns of a dataset? (rank 5, works; no page yet)
-- How do I count how many times each value appears? (rank 9, works; no page yet)
+- [How do I look at the first rows, row count and columns of a dataset?](../5-look-at-first-rows-and-columns/page.md) (rank 5, works)
+- [How do I count how many times each value appears?](../9-count-each-value/page.md) (rank 9, works)
 - How do I count rows per group? (rank 35, works; no page yet)
 - How do I get the distinct values of a column? (rank 63, works)
