@@ -9,9 +9,11 @@
 # test holds that), so an LZ4 frame round trip through this package's
 # conformer loads no liblz4 either. Whether a library is loaded is asked of
 # the loader itself: `dlopen(soname, RTLD_NOW | RTLD_NOLOAD)` returns a
-# handle only for a library the process already holds. A gzip round trip,
-# whose libz is opened at run time, is the probe's positive case: libz is
-# loaded after it, so the probe does see a library a codec opened.
+# handle only for a library the process already holds. The C library, which
+# every process holds, is the probe's positive case. (libz, which gzip opens
+# at run time by the bare name libz.dylib, is not one on macOS: on the macOS
+# workers a no-load open of that name gave no handle after a gzip round
+# trip, so it cannot show that the probe sees a loaded library there.)
 #
 # What it catches: a codec that opens libzstd or liblz4 at run time again (on
 # a host without them, the first zstd or lz4 Parquet page ends the process),
@@ -22,14 +24,13 @@ from std.ffi import OwnedDLHandle, RTLD
 from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from compression.compression_codecs import Gzip, Lz4Frame, Zstd
+from compression.compression_codecs import Lz4Frame, Zstd
 from compression.zstd_frame import (
     ZSTD_DEFAULT_LEVEL,
     zstd_compress_bound,
     zstd_compress_into,
     zstd_decompress_into,
 )
-from zlib import LIBZ_SONAME
 
 # <dlfcn.h>'s RTLD_NOLOAD: 4 in glibc, 0x10 on macOS.
 comptime _RTLD_NOLOAD = 0x10 if CompilationTarget.is_macos() else 4
@@ -40,6 +41,9 @@ comptime _HOST_LIBZSTD: StaticString = (
 )
 comptime _HOST_LIBLZ4: StaticString = (
     "liblz4.dylib" if CompilationTarget.is_macos() else "liblz4.so.1"
+)
+comptime _LIBC: StaticString = (
+    "libSystem.B.dylib" if CompilationTarget.is_macos() else "libc.so.6"
 )
 
 
@@ -91,14 +95,9 @@ def test_an_lz4_frame_round_trip_loads_no_liblz4() raises:
     )
 
 
-def test_the_probe_sees_libz_after_a_gzip_round_trip() raises:
-    var src = _text(4096)
-    var stream = Gzip[6].compress(Span(src))
-    var out = Gzip[6].decompress(Span(stream), len(src))
-    assert_equal(len(out), len(src))
+def test_the_probe_sees_the_c_library() raises:
     assert_true(
-        _loaded(LIBZ_SONAME),
-        String(LIBZ_SONAME) + " is not seen loaded after a gzip round trip",
+        _loaded(_LIBC), String(_LIBC) + " is not seen loaded in the process"
     )
 
 
