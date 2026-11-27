@@ -456,6 +456,30 @@ wheel_install_test(
     files = {"--udf-host": "komira//python/tests:udf_host.py"},
 )
 
+# Object-store sources from the installed wheel on CPython 3.13
+# (tests/test_objectstore_installed.py): a Python caller binds Parquet objects
+# on the loopback stand-ins of S3 and Azure Blob (tests/objectstore_fakes.py:
+# HTTP servers on 127.0.0.1, port 0, in the test's own process, which verify
+# each request's SigV4 or Shared Key signature, or its SAS) with
+# `komira.files` and `Session.add_sql_binding`. One object and a glob of two
+# on each store answer SQL exactly as the same bytes bound from local files
+# do, and as pyarrow reads them, and no request carries a secret; a `gs://`
+# source is refused at bind by name, the library having no GCS store; a wrong
+# S3 secret, a wrong access key id, a wrong Shared Key and a SAS of another
+# signature are each refused at bind as the store's refusal, naming no
+# secret and binding nothing, and the credential sealed again with the right
+# value then reads.
+wheel_install_test(
+    name = "objectstore_installed_test",
+    python = "komira//third_party/python:cpython",
+    wheels = [":komira_wheel", _PYARROW_WHL[""], _PROTOBUF_WHL],
+    script = "komira//python/tests:test_objectstore_installed.py",
+    files = {
+        "--fakes": "komira//python/tests:objectstore_fakes.py",
+        "--readings": "komira//python/tests:fixtures/readings.parquet",
+    },
+)
+
 # The same test on installs that must fail, each with the line it fails with
 # (on CPython 3.13, beside its pyarrow unless the case says otherwise; `refuses_python_outside_requires_python`, after them, on
 # CPython 3.10). The first wheels below are the wheel with one thing wrong

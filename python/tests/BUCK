@@ -1103,9 +1103,12 @@ python_binding_test(
 # (the wheel alone, the wheel beside Modular's runtime, and the wheel after an
 # upgrade from the previous release), the test of a UDF from the installed
 # wheel with the host of the UDF runtime's C ABI it runs the runtime through
-# (test_udf_installed.py, udf_host.py), and the serialized plan the first renders
-# (the scan plan of src/so/tests/gate/gate_plan_render.mojo, as hex) and the
-# Parquet file whose aggregate it answers (fixtures/readings.parquet).
+# (test_udf_installed.py, udf_host.py), the test of object-store sources from
+# the installed wheel with the loopback stand-ins of S3 and Azure Blob it
+# serves them from (test_objectstore_installed.py, objectstore_fakes.py), and
+# the serialized plan the first renders (the scan plan of
+# src/so/tests/gate/gate_plan_render.mojo, as hex) and the Parquet file whose
+# aggregate it answers (fixtures/readings.parquet).
 [export_file(
     name = f,
     visibility = ["komira//python:"],
@@ -1114,6 +1117,8 @@ python_binding_test(
     "test_analysis_job.py",
     "test_tpch_installed.py",
     "test_udf_installed.py",
+    "test_objectstore_installed.py",
+    "objectstore_fakes.py",
     "tpch_compare.py",
     "udf_host.py",
     "test_beside_modular.py",
