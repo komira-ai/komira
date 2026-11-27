@@ -343,6 +343,14 @@ that hangs now costs about five minutes and a run again instead of its whole
 cannot be asked, the step says so in one line (`no watchdog on the connection to
 the farm: ...`, `watchdog stopped: ...`) and runs as it would without one.
 
+Behind the watchdog, every step of `pr / check` has a `timeout-minutes` of its
+own, so anything else that hangs ends at its step's bound, never at the job's
+330 minutes: 5 or 10 for a step that builds nothing, 30 for farm-connect and
+for a buck2 step whose longest run in 35 green checks took under a minute, 45
+for the three whose longest took 5 to 6 minutes, and build, test and the macOS
+build keep 150, 90 and 60 (`//:buck2_farm_cases` holds every step to a bound
+under the job's).
+
 #### What the step checks after buck2
 
 The tool step fails when a `Commands:` summary line says `local:` anything

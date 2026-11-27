@@ -19,6 +19,8 @@
 //! (`ASSERT_REMOTE`, an exec tool).
 //!
 //! What the cases catch, each a defect action.yml or the tool could have:
+//!  - a step of pr.yml's check without a `timeout-minutes` of its own under the
+//!    job's, which would leave a hang in it bounded only by the job;
 //!  - the step's shell is not `bash`, a run line with logic added (`|| true`,
 //!    a second command), a `${{ }}` in a run line (script injection), the
 //!    tool step dropped or its log differing from the first step's;
@@ -178,6 +180,40 @@ test "the pull request check bounds its build and test steps well under the job"
     // and the bounds, with the steps between them, end the job before its own limit
     try t.expect(build + tests < job);
     try t.expect(build * 2 <= job);
+}
+
+/// The steps of pr.yml's check (each from its `      - ` line to the next) that
+/// set no `timeout-minutes` of their own, or set one not under the job's.
+fn unboundedSteps(ar: std.mem.Allocator, text: []const u8, job: u32) ![]const []const u8 {
+    var out = std.ArrayList([]const u8).empty;
+    const start = std.mem.indexOf(u8, text, "\n    steps:\n") orelse return error.NoSteps;
+    var rest = text[start..];
+    while (std.mem.indexOf(u8, rest, "\n      - ")) |at| {
+        rest = rest[at + 1 ..];
+        const end = std.mem.indexOf(u8, rest[1..], "\n      - ") orelse rest.len - 1;
+        const step = rest[0 .. end + 1];
+        const nl = std.mem.indexOfScalar(u8, step, '\n') orelse step.len;
+        const m = try minutes(step, "        ");
+        if (m == null or m.? >= job) try out.append(ar, step[0..nl]);
+        rest = rest[1..];
+    }
+    return out.items;
+}
+
+test "every step of the pull request check has a bound of its own, under the job's" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try std.fs.cwd().readFileAlloc(ar, try std.fs.path.join(ar, &.{ try workDir(ar), "pr.yml" }), 1 << 20);
+    const job = (try minutes(text, "    ")) orelse return error.JobHasNoTimeout;
+    const unbounded = try unboundedSteps(ar, text, job);
+    for (unbounded) |l| std.debug.print("no bound of its own: {s}\n", .{l});
+    try t.expectEqual(@as(usize, 0), unbounded.len);
+    // the reading finds a step that sets none, and one whose bound is the job's
+    const without = try std.mem.replaceOwned(u8, ar, text, "      - name: the change\n        timeout-minutes: 10\n", "      - name: the change\n");
+    try t.expectEqualStrings("      - name: the change", (try unboundedSteps(ar, without, job))[0]);
+    const at_job = try std.mem.replaceOwned(u8, ar, text, "      - name: Stop buck2\n        timeout-minutes: 10\n", "      - name: Stop buck2\n        timeout-minutes: 330\n");
+    try t.expectEqualStrings("      - name: Stop buck2", (try unboundedSteps(ar, at_job, job))[0]);
 }
 
 test "no run line holds an expression" {
