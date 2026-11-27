@@ -12,7 +12,7 @@ install test of komira's npm packages (`//node:install_test`), offline.
 | `:node` | Node.js 24.21.0 (the 24 LTS line), the `linux-x64` release archive, reduced to `bin/node`, `include/node` and `LICENSE`; `:node[include]` is the Node-API headers |
 | `:native_libs` | `libgcc_s.so.1` and `libstdc++.so.6` (GCC 15.3), unpacked from the conda-forge packages the [platform table](../../tools/build/platforms/table.bzl) pins for the toolchains; every `node` action names their directory in `LD_LIBRARY_PATH` |
 | `:<package>` | one npm package unpacked, named without the scope's `@` and with `/` as `_` (`:apache-arrow`, `:esbuild_linux-x64`); its `deps` are the packages it imports at run time |
-| `:node_22`, `:node_26` | Node.js 22.23.5 and 26.13.1, the other LTS lines, reduced as `:node` is: the runtimes `//node:install_test` installs and runs the npm packages on, besides `:node` |
+| `:node_22`, `:node_26` | Node.js 22.23.5 and 26.13.1, the other LTS lines, reduced as `:node` is: the runtimes `//node:install_test` installs and runs the npm packages on, besides `:node`. Node 26's `node` also links `libatomic.so.1`, so its library directory is `:native_libs_atomic`: `:native_libs` and that library, from the same pinned libgcc package |
 | `:npm` | the npm CLI 11.20.0, the registry's tarball unpacked (its dependencies are bundled in it), whose `bin/npm-cli.js` the pinned node runs |
 | `:npm-<file>.tgz` | each npm package's tarball as downloaded, which `//node:install_test` hands npm; `@types/node` and `undici-types` have only these (npm installs them beside apache-arrow; no test imports them) |
 

@@ -93,11 +93,14 @@ test("the environment holds no Mojo toolchain, and its one library path is node'
   for (const dir of (process.env["PATH"] ?? "").split(path.delimiter)) {
     assert.doesNotMatch(dir, /mojo|modular/i, dir);
   }
-  // The pinned node links libstdc++ and libgcc_s, which a user's system has
-  // and the build workers do not: that directory, holding those two alone.
+  // The pinned node links libstdc++ and libgcc_s (Node 26 also libatomic),
+  // which a user's system has and the build workers do not: that directory,
+  // holding those GCC runtime libraries and nothing else.
   const libraryPath = (process.env["LD_LIBRARY_PATH"] ?? "").split(path.delimiter);
   assert.equal(libraryPath.length, 1, libraryPath.join(path.delimiter));
-  assert.deepEqual(readdirSync(libraryPath[0] as string).sort(), ["libgcc_s.so.1", "libstdc++.so.6"]);
+  const held = readdirSync(libraryPath[0] as string).sort();
+  assert.ok(held.includes("libgcc_s.so.1") && held.includes("libstdc++.so.6"), held.join(" "));
+  assert.deepEqual(held.filter((f) => !["libatomic.so.1", "libgcc_s.so.1", "libstdc++.so.6"].includes(f)), []);
 });
 
 test("libkomira, its addon and the Mojo runtime load from the installed platform package and from nowhere else", () => {

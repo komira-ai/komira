@@ -32,7 +32,8 @@ NODE = {
 # The other Node.js lines the installed npm packages are tested on
 # (//node:install_test): the 22 and 26 LTS lines, the newest release of each
 # in nodejs.org's release index (dist/index.json), linux-x64. Each is its own
-# target, named by `name`, visible only to that test.
+# target, named by `name`, visible only to that test; `native_libs` is the
+# directory of the libraries its `node` links beyond glibc (third_party/node/BUCK).
 NODE_LINES = [
     {
         "name": "node_22",
@@ -44,6 +45,7 @@ NODE_LINES = [
         "sha256": "c54118104acc524633b5abe106bbf44a53126ec8b4e5fa105cb92b5d7de8a1a1",
         "size": 56856114,
         "license": "MIT",
+        "native_libs": ":native_libs",
     },
     {
         "name": "node_26",
@@ -55,6 +57,9 @@ NODE_LINES = [
         "sha256": "518674de2b621728a5e4486f5fb3b7d2900bb3cc4aa97969edaa463db99f9778",
         "size": 62904977,
         "license": "MIT",
+        # Node 26's binary also links libatomic.so.1 (its NEEDED), which the
+        # build workers do not have.
+        "native_libs": ":native_libs_atomic",
     },
 ]
 

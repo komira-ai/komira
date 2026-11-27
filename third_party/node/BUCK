@@ -65,6 +65,20 @@ conda_libs(
     visibility = _NEGATIVE,
 )
 
+# The same, with libatomic.so.1 (from the same libgcc package), which Node 26's
+# `node` also links.
+conda_libs(
+    name = "native_libs_atomic",
+    exec_compatible_with = LINUX_X86_64,
+    libs = {
+        "lib/libatomic.so.1": ":" + pinned_kwargs("linux-x86_64", "libgcc")["name"],
+        "lib/libgcc_s.so.1": ":" + pinned_kwargs("linux-x86_64", "libgcc")["name"],
+        "lib/libstdc++.so.6": ":" + pinned_kwargs("linux-x86_64", "libstdcxx")["name"],
+    },
+    unpacker = "komira//tools/build/toolchains:conda_unpack",
+    visibility = _NEGATIVE,
+)
+
 # `:node`; its sub-target `:node[include]` is the Node-API headers.
 node_dist(
     name = NODE["name"],
@@ -87,7 +101,7 @@ node_dist(
 [node_dist(
     name = n["name"],
     archive = ":" + n["archive"],
-    native_libs = ":native_libs",
+    native_libs = n["native_libs"],
     top = n["top"],
     version = n["version"],
     visibility = _INSTALL_TEST + _NEGATIVE,
